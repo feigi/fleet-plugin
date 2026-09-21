@@ -1176,10 +1176,15 @@ function bindFailure(server, port) {
   });
 }
 
-// ~1s, and the whole reason this is a probe and not a lockfile: a launch
-// that cannot get an answer within a second must proceed, not wait. A holder
-// that accepts the connection and then says nothing is the case that pays
-// for this timer — nothing else in a socket read bounds it.
+// ~1s per attempt, and the whole reason this is a probe and not a lockfile:
+// a launch that cannot get an answer within a second must proceed, not
+// wait. A holder that accepts the connection and then says nothing is the
+// case that pays for this timer — nothing else in a socket read bounds it.
+// One silent window does not settle the question, though: a genuine
+// same-workspace holder can be blocked inside its own synchronous gather()
+// (gh/ledger.mjs calls) exactly when the probe arrives, and that looks
+// identical from outside to nobody being there at all. The probe retries
+// once before it will call a silent port foreign (#1660).
 const PROBE_TIMEOUT_MS = 1000;
 // 127.0.0.1 rather than `localhost`: no resolver in the path of a launch,
 // and no chance of asking a different address than the one every cockpit
@@ -1196,7 +1201,8 @@ const PROBE_BODY_CAP = 1024 * 1024;
  * Ask whoever holds `port` which workspace it is serving. Returns that
  * workspace, or null for every other outcome there is — a refused
  * connection, a non-200, a body that is not JSON, a payload with no usable
- * `workspace`, a body over the cap, or a holder that never answers.
+ * `workspace`, a body over the cap, or a holder that never answers across
+ * two attempts.
  *
  * Null is deliberately one value for all of them: the caller's question is
  * "is this my own cockpit", and every way of failing to prove that is the
@@ -1207,37 +1213,54 @@ const PROBE_BODY_CAP = 1024 * 1024;
  * serves a payload with no `workspace` at all, so it reads as foreign and a
  * launch steps over it rather than reusing it — once, until that process is
  * restarted.
+ *
+ * A bare timeout gets one retry (#1660) rather than folding straight into
+ * "foreign": nothing in a socket read distinguishes "nobody is there" from
+ * "busy", and a holder mid-gather() looks exactly like the first from out
+ * here. Only a second silent window calls it, and says so on stderr
+ * distinctly from a confirmed non-match — a shrug is not a verdict.
  */
 export function probeCockpitWorkspace(port, timeoutMs = PROBE_TIMEOUT_MS) {
   return new Promise((resolve) => {
-    let req = null, settled = false;
-    const timer = setTimeout(() => finish(null), timeoutMs);
-    function finish(workspace) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      // Destroy rather than let it drain: an unread body, or a holder still
-      // writing one, would otherwise keep this socket — and the launch —
-      // alive well past the answer.
-      req?.destroy();
-      resolve(workspace);
-    }
-    req = httpRequest({ host: PROBE_HOST, port, path: "/board.json", method: "GET" }, (res) => {
-      if (res.statusCode !== 200) { finish(null); return; }
-      let body = "";
-      res.setEncoding("utf8");
-      res.on("data", (d) => { body += d; if (body.length > PROBE_BODY_CAP) finish(null); });
-      res.on("end", () => {
-        let w;
-        try { w = JSON.parse(body)?.workspace; } catch { finish(null); return; }
-        // A non-string, or the empty string, is no identity: `=== ours`
-        // would be false for the first anyway, but an empty string could
-        // match an empty workspace and there must be no such thing.
-        finish(typeof w === "string" && w !== "" ? w : null);
+    let attempts = 0;
+    const probeOnce = () => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        settled = true;
+        req.destroy();
+        attempts += 1;
+        if (attempts < 2) { probeOnce(); return; }
+        console.error(`${NAME}: no answer from port ${port} within ${timeoutMs * 2}ms — cannot confirm it is this workspace's cockpit`);
+        resolve(null);
+      }, timeoutMs);
+      function finish(workspace) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        // Destroy rather than let it drain: an unread body, or a holder
+        // still writing one, would otherwise keep this socket — and the
+        // launch — alive well past the answer.
+        req.destroy();
+        resolve(workspace);
+      }
+      const req = httpRequest({ host: PROBE_HOST, port, path: "/board.json", method: "GET" }, (res) => {
+        if (res.statusCode !== 200) { finish(null); return; }
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (d) => { body += d; if (body.length > PROBE_BODY_CAP) finish(null); });
+        res.on("end", () => {
+          let w;
+          try { w = JSON.parse(body)?.workspace; } catch { finish(null); return; }
+          // A non-string, or the empty string, is no identity: `=== ours`
+          // would be false for the first anyway, but an empty string could
+          // match an empty workspace and there must be no such thing.
+          finish(typeof w === "string" && w !== "" ? w : null);
+        });
       });
-    });
-    req.on("error", () => finish(null));
-    req.end();
+      req.on("error", () => finish(null));
+      req.end();
+    };
+    probeOnce();
   });
 }
 
@@ -1279,13 +1302,6 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
   // they belonged to, exactly what resolveCockpitInstance() exists to rule
   // out (#1656 review).
   ledgerFile = ledgerFile || join(stateDir, "ledger.md");
-  // stateDir may not exist yet (e.g. no ledger.md written, fresh repo) — the
-  // "read"-only ledger path never creates it, so serve() must.
-  mkdirSync(stateDir, { recursive: true });
-  // Serve board.html straight from the script dir alongside the state file.
-  try { copyFileSync(join(SCRIPT_DIR, "board.html"), join(stateDir, "board.html")); }
-  catch (e) { die(`cannot stage board.html into ${stateDir}: ${e.message}`); }
-
   const tick = () => {
     try {
       const model = computeBoard(gather({ ledgerFile, prevFile: jsonPath, interval }));
@@ -1302,52 +1318,77 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
       renameSync(tmp, jsonPath);
     } catch (e) { console.error(`${NAME}: build tick failed: ${e.message}`); }
   };
-  let timer;
 
-  // #1585: a held port is three situations and this used to treat all three
-  // as one fatal one. THIS workspace's own cockpit is an asset — point the
-  // operator at it and exit 0, because the documented launch is backgrounded
-  // (`serve --open &`) and a non-zero exit there is read by nobody: today a
-  // second launch dies at exit 2 while the operator waits for a tab that
-  // never appears. A FOREIGN holder is an obstacle — step over it, inside
-  // the derived range. Only a range with no room left is an error, and it
-  // names every port it tried.
+  // #1660: a held port used to mean three different things this loop could
+  // only tell apart by binding first and probing whichever candidate
+  // happened to refuse — so a live cockpit that landed past a squatter
+  // which has since departed was invisible the moment that squatter's port
+  // freed (this process would just bind it directly), and a workspace with
+  // no identity established (the degrade arm) still scanned past a held
+  // port with nothing a handshake could ever match, reopening the
+  // dual-cockpit hazard #1656 closed.
   //
-  // cockpitPorts() collapses an explicit port to a single candidate, so the
-  // loop cannot scan past one the operator named. The handshake is refused
-  // separately, on `instance.derived`, rather than left as a consequence of
-  // that one-element list — a single candidate would otherwise still be
-  // probed, and an explicit port must never be reused either.
+  // Bind stays the FIRST thing tried per candidate: that is what lets two
+  // launches racing at start settle on one winner quickly, the winner's
+  // identity published (below) before it can block inside its own gather().
+  // But a successful bind is not the end of the story — once this process
+  // holds a candidate, the REST of the window still gets checked for a
+  // live cockpit that landed further along, exactly the shape a departed
+  // squatter leaves behind, and only when nothing there matches does this
+  // process keep what it bound. A held candidate is probed the same way,
+  // one at a time as the loop reaches it. Neither check runs at all when
+  // this workspace has no identity to match on: an explicit --port
+  // (`!instance.derived`) and the degrade arm (`!instance.workspace`)
+  // never had a handshake to reach in the first place, so a held port for
+  // either stays fatal, exactly as it was before #1585 existed.
   const candidates = cockpitPorts(instance);
+  const scannable = instance.derived && instance.workspace;
   let server = null;
-  for (const candidate of candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
     const attempt = createBoardServer(stateDir);
     const failure = await bindFailure(attempt, candidate);
-    if (!failure) { server = attempt; break; }
+    if (!failure) {
+      const rest = scannable ? candidates.slice(i + 1) : [];
+      const holders = await Promise.all(rest.map((p) => probeCockpitWorkspace(p)));
+      const matchAt = holders.indexOf(instance.workspace);
+      if (matchAt === -1) { server = attempt; break; }
+      attempt.close();
+      const url = `http://localhost:${rest[matchAt]}/`;
+      console.error(`${NAME}: cockpit already running for this workspace on ${url}`);
+      if (open) tryRun("open", [url]);
+      // Exit 0 — and explicitly, not by returning: a backgrounded launch
+      // reports nothing but its exit code, and a handle left behind by the
+      // probe would otherwise hang this process forever while it holds no
+      // port at all.
+      process.exit(0);
+    }
     // Only a port that is TAKEN is a candidate for any of the below. EACCES
     // on a privileged port, EADDRNOTAVAIL on an unusable address: those are
     // faults of their own, and scanning past them would bury each one under
     // an exhausted-range message at the end that names the wrong problem.
     if (failure.code !== "EADDRINUSE") die(failure.message);
-    if (!instance.derived) die(`port ${candidate} in use — pass --port <n>`);
+    if (!scannable) die(`port ${candidate} in use — pass --port <n>`);
     const holder = await probeCockpitWorkspace(candidate);
-    // `instance.workspace &&` is load-bearing on the degrade arm: with no
-    // workspace established there is no identity to match on, and two cwds
-    // that both failed the git probe are NOT one cockpit merely because both
-    // reported null.
-    if (instance.workspace && holder === instance.workspace) {
+    if (holder === instance.workspace) {
       const url = `http://localhost:${candidate}/`;
       console.error(`${NAME}: cockpit already running for this workspace on ${url}`);
       if (open) tryRun("open", [url]);
-      // Exit 0 — and explicitly, not by returning: a backgrounded launch
-      // reports nothing but its exit code, and a handle left behind by the
-      // probe or by a refused bind would otherwise hang this process forever
-      // while it holds no port at all.
       process.exit(0);
     }
     console.error(`${NAME}: port ${candidate} is held by something that is not this workspace's cockpit — trying the next port`);
   }
   if (!server) die(`no free port for this workspace — tried ${candidates.join(", ")}; pass --port <n> to choose one`);
+
+  // Only now — with a bind this process is actually keeping — does it need
+  // the state directory and board.html. Never for a launch either check
+  // above already turned into a no-op: this shares the state directory
+  // with whatever this workspace's live cockpit is doing, and touching it
+  // before reuse was settled is what #1660's review flagged in the reuse
+  // arm (mkdirSync/copyFileSync used to run before the candidate loop).
+  mkdirSync(stateDir, { recursive: true });
+  try { copyFileSync(join(SCRIPT_DIR, "board.html"), join(stateDir, "board.html")); }
+  catch (e) { die(`cannot stage board.html into ${stateDir}: ${e.message}`); }
 
   // A bind failure is handled above, one candidate at a time; this handler
   // owns everything a LISTENING server can still emit. Without it an 'error'
@@ -1371,8 +1412,23 @@ export async function serve({ ledgerFile, port, interval, open } = {}) {
   const bound = server.address().port;
   console.error(`${NAME}: cockpit on http://localhost:${bound}  (interval ${interval}s)`);
   if (open) tryRun("open", [`http://localhost:${bound}/`]);
+
+  // #1660: publish identity the instant this port is ours — before the
+  // first tick, which is the one that can be slow (gather() shells out to
+  // gh and ledger.mjs). A sibling launch races this one by sending its
+  // probe as soon as ITS bind attempt refuses, which can be well before
+  // this process's first gather() ever returns; the answer that probe needs
+  // has to already be on disk, not waiting on a compute this process has
+  // not started yet.
+  writeFileSync(`${jsonPath}.tmp`, JSON.stringify({ workspace: instance.workspace }));
+  renameSync(`${jsonPath}.tmp`, jsonPath);
+  // Yield once so a connection already arriving — that same sibling's probe
+  // — gets a chance to read the identity just written before this process
+  // blocks inside gather() for however long that takes.
+  await new Promise((resolve) => setImmediate(resolve));
+
   tick();
-  timer = setInterval(tick, interval * 1000);
+  const timer = setInterval(tick, interval * 1000);
 
   const stop = () => {
     clearInterval(timer);

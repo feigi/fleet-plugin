@@ -1368,6 +1368,13 @@ const serveOpts = () => ({
   timeout: 20000,
 });
 
+// #1660 review: the git-enabled reuse/scan CLI rows below (which need a
+// real `bin` with git shimmed and a real `repo` cwd, so serveOpts()'s
+// offline empty-PATH rig doesn't fit) repeated this option literal
+// verbatim across four call sites, differing only in the timeout.
+const serveSync = (repo, bin, args, timeout = 20000) =>
+  spawnSync(process.execPath, serveArgs(args), { cwd: repo, env: { ...process.env, PATH: bin }, encoding: "utf8", timeout });
+
 // A net server that accepts a connection and then says nothing — the holder
 // no HTTP status describes, and the only one the probe's timer alone can
 // end. Its sockets are tracked because a socket nobody ever reads from
@@ -1384,34 +1391,31 @@ function muteHolder() {
   return { server, close };
 }
 
-// #1585 replaced the row that stood here. It pinned the bind error's
-// "(default)" marker — a derived port in use printed `port 8123 (default) in
-// use` and exited 2 — and a derived port in use is no longer an error at
-// all, so that wording has no behaviour left to pin. What replaces it is the
-// behaviour that took its place on the same rig: this cwd is not a git
-// checkout, so its workspace is null and matches nothing, which makes the
-// holder on 8123 foreign by construction and the launch step over it.
+// #1660 review: the row that used to stand here pinned the opposite of what
+// #1656 closed. This cwd is not a git checkout, so its workspace is null,
+// and a null workspace can never be confirmed against a handshake no
+// matter what answers on the other end — there is no identity to scan for.
+// Stepping past a held port there re-admits the exact dual-cockpit hazard
+// #1656 fixed: two processes sharing one derived window and one state
+// directory, neither aware the other exists. A held derived port on the
+// degrade arm has to stay fatal, exactly as it was before #1585 introduced
+// scanning at all.
 //
-// 8123 just has to be held by SOMEONE — us, or whatever already had it. The
-// blocker is a bare net server, so it accepts the probe's connection and
-// then says nothing forever: this row therefore also carries the end-to-end
-// half of "a holder that never answers cannot hang the launch", since an
-// unbounded probe would leave the spawn below waiting on that socket and
-// this test waiting on the spawn.
-test("CLI: a derived port held by a foreign holder is stepped over, not fatal", async () => {
-  const blocker = muteHolder();
-  await new Promise((res) => { blocker.server.once("error", res); blocker.server.listen(8123, res); });
+// 8123 just has to be held by SOMEONE — us, or whatever already had it —
+// so the blocker is a bare net server.
+test("CLI: a derived port held by anything is fatal on the degrade arm — there is no identity to scan for", async () => {
+  const blocker = createServer();
+  await new Promise((res) => { blocker.once("error", res); blocker.listen(8123, res); });
   const nobin = mkdtempSync(join(tmpdir(), "board-nobin-"));
   const cwd = mkdtempSync(join(tmpdir(), "board-serve-"));
-  const launch = serveProcess(cwd, nobin, ["--interval", "3600"]);
   try {
-    const url = await withTimeout(launch.url, 20000, "the launch to step over 8123 and announce");
-    assert.notEqual(url, "http://localhost:8123", "the launch announced a port it could not bind");
-    const window = cockpitPorts({ port: 8123, derived: true });
-    assert.ok(window.includes(Number(url.split(":")[2])), `${url} is outside the bounded scan window ${window.join(", ")}`);
+    const r = serveSync(cwd, nobin, ["--interval", "3600"]);
+    assert.equal(r.status, 2, `a held derived port on the degrade arm must refuse, not scan past it: ${r.stderr}`);
+    assert.match(r.stderr, /port 8123 in use/, r.stderr);
+    assert.doesNotMatch(r.stderr, /cockpit on http/,
+      `a second server was started with no identity it could ever have matched on: ${r.stderr}`);
   } finally {
-    launch.p.kill("SIGKILL");
-    await blocker.close();
+    blocker.close(() => {});
     for (const d of [nobin, cwd]) rmSync(d, { recursive: true, force: true });
   }
 });
@@ -1973,6 +1977,26 @@ for (const [name, payload] of [
   });
 }
 
+// #1660 review: every foreign row above happens to be a 404, which a
+// mutation to `res.statusCode >= 400` would also reject — the guard must
+// require exactly 200, not merely "not a client/server error". A non-200
+// status carrying an otherwise-valid, matching workspace body is what tells
+// the two apart: the real guard has to refuse it on status alone, without
+// ever reading a body that would answer "yes" if it got that far.
+test("probeCockpitWorkspace: a non-200 status with an otherwise-valid matching body still reads as foreign", async () => {
+  const server = createServer((socket) => {
+    socket.once("data", () => {
+      const body = JSON.stringify({ tickets: [], workspace: "/w/mine" });
+      socket.end(`HTTP/1.1 301 Moved Permanently\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
+    });
+  });
+  const port = await new Promise((res) => server.listen(0, () => res(server.address().port)));
+  try {
+    assert.equal(await probeCockpitWorkspace(port), null,
+      "a non-200 status must be refused on the status alone, even carrying a real workspace body");
+  } finally { server.close(); }
+});
+
 // The case no HTTP status covers: a holder that accepts the connection and
 // then says nothing. Only the probe's own timer ends this, and the injected
 // timeout is what proves the timer is the thing that ended it — a probe that
@@ -2041,8 +2065,7 @@ test("CLI: a second launch for the same workspace reuses the live cockpit, opens
     assert.equal((await (await fetch(`${url}/board.json`)).json()).workspace, realpathSync(repo),
       "the board payload is what the handshake reads — a cockpit that does not name its workspace cannot be recognised");
 
-    const second = spawnSync(process.execPath, serveArgs(["--interval", "3600", "--open"]),
-      { cwd: repo, env: { ...process.env, PATH: bin }, encoding: "utf8", timeout: 20000 });
+    const second = serveSync(repo, bin, ["--interval", "3600", "--open"]);
     assert.equal(second.status, 0, `the reuse path must exit 0 — a backgrounded launch reports nothing else: ${second.stderr}`);
     assert.match(second.stderr, new RegExp(`already running for this workspace on ${url}/`), second.stderr);
     assert.doesNotMatch(second.stderr, /cockpit on http/, `a second server was started for one workspace: ${second.stderr}`);
@@ -2051,6 +2074,16 @@ test("CLI: a second launch for the same workspace reuses the live cockpit, opens
     // the same control the bare --open row above uses. It must point at the
     // EXISTING board, which is the only URL there is.
     assert.match(second.stderr, new RegExp(`open ${url}/ failed`), second.stderr);
+
+    // #1660 review: the `if (open)` guard around the reuse-match branch's
+    // tryRun("open", …) had no row exercising the FALSE case — a mutant
+    // that always attempted an open on reuse, regardless of the flag,
+    // passed every existing row and was only caught here.
+    const third = serveSync(repo, bin, ["--interval", "3600"]);
+    assert.equal(third.status, 0, `the reuse path must exit 0 regardless of --open: ${third.stderr}`);
+    assert.match(third.stderr, new RegExp(`already running for this workspace on ${url}/`), third.stderr);
+    assert.doesNotMatch(third.stderr, /open .* failed/,
+      `an open was attempted with --open omitted: ${third.stderr}`);
   } finally { first.p.kill("SIGKILL"); for (const d of [bin, repo]) rmSync(d, { recursive: true, force: true }); }
 });
 
@@ -2089,10 +2122,12 @@ test("CLI: a holder reporting a different workspace is not adopted — the launc
 // The blockers serve an empty directory, so each one 404s /board.json — one
 // of the foreign shapes no launch may adopt. They cannot actually answer
 // during the spawn below, though: spawnSync blocks this runner's event loop,
-// so every probe runs out its full timeout and the row costs ~8s (measured).
-// That is the bound doing its job rather than a hang, and it is why this row
-// is the only slow one here — the rows that need a holder to really answer
-// use serveProcess(), which leaves the loop free.
+// so every probe runs out its full timeout, retries once (#1660 — a timeout
+// alone does not prove foreign), and the row costs ~16s (measured, up from
+// ~8s pre-#1660: PORT_ATTEMPTS candidates times two attempts times
+// PROBE_TIMEOUT_MS). That is the bound doing its job rather than a hang,
+// and it is why this row is the only slow one here — the rows that need a
+// holder to really answer use serveProcess(), which leaves the loop free.
 test("CLI: an exhausted derived range exits non-zero and names the ports it tried", async () => {
   const bin = gitOnlyPath(), repo = gitRepo("board-ws-full-");
   const instance = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
@@ -2103,8 +2138,7 @@ test("CLI: an exhausted derived range exits non-zero and names the ports it trie
     // A port already held by something else is held either way — what this
     // row needs is the range full, not our own socket on every port in it.
     for (const p of ports) blockers.push((await holderOn(dir, p)).server);
-    const r = spawnSync(process.execPath, serveArgs(["--interval", "3600"]),
-      { cwd: repo, env: { ...process.env, PATH: bin }, encoding: "utf8", timeout: 30000 });
+    const r = serveSync(repo, bin, ["--interval", "3600"], 30000);
     assert.equal(r.status, 2, `an exhausted range must refuse, not hang and not succeed: ${r.stderr}`);
     for (const p of ports) assert.match(r.stderr, new RegExp(`\\b${p}\\b`), `the refusal does not name ${p}: ${r.stderr}`);
     assert.match(r.stderr, /--port/, "the refusal has to point at the way out of it");
@@ -2128,8 +2162,7 @@ test("CLI: an explicit port neither scans nor handshakes — a bind failure on i
   const dir = boardDir(JSON.stringify({ tickets: [], workspace: realpathSync(repo) }));
   const { server, port } = await holderOn(dir);
   try {
-    const r = spawnSync(process.execPath, serveArgs(["--interval", "3600", "--port", String(port)]),
-      { cwd: repo, env: { ...process.env, PATH: bin }, encoding: "utf8", timeout: 20000 });
+    const r = serveSync(repo, bin, ["--interval", "3600", "--port", String(port)]);
     assert.equal(r.status, 2, `a bind failure on a chosen port is a hard error: ${r.stderr}`);
     assert.match(r.stderr, new RegExp(`port ${port} in use`), r.stderr);
     assert.doesNotMatch(r.stderr, /already running/, "an explicit port was handshaked and reused");
