@@ -45,13 +45,17 @@
 // this. Re-anchor the phrase here when that happens, rather than dropping the
 // qualifier a second time.
 //
-// Reflow-safe by construction: `phrase()` joins the words on `\s+`, so
-// SKILL.md (hard-wrapped ~80 cols) and review-and-fix.md (one long line per
-// numbered step) take the identical regex, and a rewrap of either is a no-op.
-// The slice anchors go through `phrase()` for that same reason — a literal
-// `indexOf` anchor would break on a rewrap the clause itself survives, turning
-// a reflow into a red. Measured: each of the qualifier's six inter-word gaps
-// broken on its own, and all six broken at once, still match, and both
+// Reflow-safe by construction, against WHITESPACE reflow: `phrase()` joins
+// the words on `\s+`, so SKILL.md (hard-wrapped ~80 cols) and
+// review-and-fix.md (one long line per numbered step) take the identical
+// regex, and a rewrap of either is a no-op. The slice anchors go through
+// `phrase()` for that same reason — a literal `indexOf` anchor would break on
+// a rewrap the clause itself survives, turning a reflow into a red — but that
+// protection stops exactly where the pinned clauses' does too: see THE REFLOW
+// CEILING below and the paragraph after it, which together reach an anchor the
+// same way they reach CLAUSE and MECHANISM. Measured: each of the qualifier's
+// six inter-word gaps broken on its own, and all six broken at once, still
+// match, and both
 // containing paragraphs rewrapped across 60-400 cols stay green with Python
 // `textwrap`'s `break_on_hyphens` off — which is how a Markdown wrapper wraps.
 //
@@ -61,6 +65,22 @@
 // that, so ANY hyphenated token inside a pinned clause is vulnerable, not one
 // named token: CLAUSE carries `behind-count`, MECHANISM carries `behind-count`
 // and `rebase-check`.
+//
+// The same split reaches the slice ANCHOR, not only the clause it bounds —
+// `anchorAt` resolves an anchor through this same `phrase()`, so a hyphenated
+// anchor carries the identical vulnerability one level up. Both anchors this
+// file uses carry one: STEP_6 is `6. Diff-check green`, and the SKILL.md
+// anchor is `**The fix-applier pushes and exits`. The symptom differs from
+// CLAUSE and MECHANISM's, though: a split anchor does not fail the comparison
+// it bounds, it fails to resolve at all — provided the anchor is unique; a
+// second, unsplit copy elsewhere in the document would mask a split occurrence
+// and bind the slice to that copy instead, which neither anchor here has — so
+// `anchorAt` throws its own `slice anchor "…" moved` refusal before
+// `paragraph()` ever returns a slice to compare against anything. The suite
+// still reds — this is not a silent false green — but the message
+// misattributes the cause: a reader who hits `slice anchor "…" moved` goes
+// looking for an edit that moved the anchor, and there is none to find — the
+// anchor text is unchanged; a rewrap split it across the line break instead.
 //
 // The slice bound does not protect against this — a split lands inside the
 // slice as readily as outside it. Measured, review-and-fix.md rewrapped per
