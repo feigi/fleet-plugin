@@ -1833,10 +1833,10 @@ test("CLI: cliFixture removes its tmpdir when the test that made it ends (#569)"
 // answers ALREADY FILED at exit 1.
 //
 // Two rules, not one, and they answer different slots. The tail LENGTH rule is
-// `check`'s alone — #1161: `filed`, `row` and `ruled` are documented with a
-// bare multi-word tail, and the rule refused what those docs prescribe, so
-// they are pinned ACCEPTING that shape below. The id-slot prefix test is those
-// three's, and is where #584's own signature reaches them.
+// `check`'s alone (#1161 — refuseStrayInCheckTail()'s own comment in ledger.mjs
+// carries why), so the other three are pinned ACCEPTING that shape below. The
+// id-slot prefix test is those three's, and is where #584's own signature
+// reaches them.
 test("CLI: a stray flag in check's tail is refused, naming it (#584)", (t) => {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");
@@ -1895,14 +1895,10 @@ test("CLI: a stray flag alone, with no subject, is accepted as the degenerate su
   assert.equal(JSON.parse(r.stdout).subject, "--requre-file");
 });
 
-// #1161: the length rule above is `check`'s alone. `filed`, `row` and `ruled`
-// are documented with a bare multi-word tail — run-team/SKILL.md's ledger
-// section spells them `filed <issue> <subject>`, `row <ticket> <text>` and
-// `ruled <pr> <decision>`, as do this script's own usage strings for them —
-// and a subject carrying a `--` word is the ordinary shape of a finding title
-// in this repo, so reading the rule there refused exactly what those docs
-// prescribe. Measured: each of these exited 2 before the narrowing, where the
-// tree before #584 answered all three at exit 0.
+// #1161's acceptance side: the three subcommands the length rule is NOT read
+// on. Why it is `check`'s alone — which docs spell which convention, and the
+// measurement that settled it — is stated once on refuseStrayInCheckTail() in
+// ledger.mjs.
 //
 // The recorded TEXT is asserted, not only the exit code: accepting the call
 // and then dropping or mangling the `--` word would pass a status-only pin,

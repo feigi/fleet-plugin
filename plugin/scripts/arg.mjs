@@ -410,12 +410,12 @@ export function makeNumArg(die) {
 // tracker query, so `the --basee flag is unread` is queried as `unread basee
 // flag`.
 //
-// `check` alone because the length rule is only sound where the documented
-// convention IS one quoted argument, and `filed`, `row` and `ruled` are
-// documented with a bare multi-word tail — so on those three the gate refused
-// what their own docs prescribe, measured (#1161). What guards them instead is
-// ledger.mjs's refuseStrayInId(), a bare prefix test on the id slot ahead of
-// the tail, where a `--` token is never data.
+// `check` alone, on a documented-convention test that ledger.mjs states once
+// on refuseStrayInCheckTail() itself, with the docs and the measurement behind
+// it (#1161) — not restated here, and not restated at its call site either.
+// What guards the other three instead is ledger.mjs's refuseStrayInId(), a
+// bare prefix test on the id slot ahead of the tail, where a `--` token is
+// never data.
 //
 // It is the LENGTH gate that spares the legitimate case, not the prefix test
 // — that test is `startsWith("--")`, the same one this sweep uses. A prefix
