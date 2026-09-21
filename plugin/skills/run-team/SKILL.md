@@ -1168,9 +1168,10 @@ number, worktree abs path, branch, and each of these verbatim:
 > (`WT_1447`, never `WT`). **The kernel's cwd is the MAIN CHECKOUT, not your
 > worktree** — unlike `bash`, `eval` takes no `cwd` parameter at all — so a
 > relative path in a cell resolves into the tree every member reads its
-> instruments out of: measured, `work/scripts` in a member's cell resolved to
-> `/Users/chris/dev/fleet-plugin/work/scripts`, the shape of the stray `work/`
-> tree that turned up there, so pass absolute paths rooted at
+> instruments out of: measured, a bare `work/scripts` in a member's cell
+> resolved under the main checkout root, never under that member's own
+> worktree — the stray `work/` tree found there has exactly that shape — so
+> pass absolute paths rooted at
 > `<scratch>/impl-<N>/` or at your worktree, exactly as you already do for
 > `write`/`edit`. And **never call `eval` with `reset: true`**, which is
 > destructive to every other member sharing that backend session, not only to

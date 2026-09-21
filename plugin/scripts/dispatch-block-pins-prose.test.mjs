@@ -339,13 +339,16 @@ test("the eval-kernel block binds the sharing fact to all three of its rules, an
     /The kernel's cwd is the MAIN CHECKOUT, not your worktree.{0,60}?unlike `bash`, `eval` takes no `cwd` parameter at all/,
     "the eval-cwd hazard is no longer bound to the absence of a cwd parameter that would otherwise fix it",
   );
-  // The measured resolution, kept as a concrete path. This is the half of
-  // #1447 that WAS independently visible (the stray `work/` tree), so the
-  // evidence stays attached to the rule it justifies.
+  // The measured resolution, bound to the tree it landed in AND the tree it
+  // did not. This is the half of #1447 that WAS independently visible (the
+  // stray `work/` tree), so the evidence stays attached to the rule it
+  // justifies. Deliberately not a literal checkout path: `install-root-audit`
+  // rule (b) forbids one in prose under `plugin/skills/` (ADR 0003), and this
+  // block reaches members on machines where such a path is simply wrong.
   assert.match(
     b,
-    phrase("`work/scripts` in a member's cell resolved to `/Users/chris/dev/fleet-plugin/work/scripts`"),
-    "the measured relative-path resolution into the main checkout is gone from the block",
+    /a bare `work\/scripts` in a member's cell resolved under the main checkout root, never under that member's own worktree/,
+    "the measured relative-path resolution into the main checkout is gone, or no longer contrasts with the worktree it skipped",
   );
   // `reset` bound to its blast radius. A member reads `reset: true` as
   // house-keeping on its OWN kernel; the prohibition only makes sense with the
