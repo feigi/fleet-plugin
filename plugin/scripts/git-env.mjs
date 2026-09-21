@@ -1,4 +1,9 @@
-// Shared by every `.mjs` script under this directory that shells out to git.
+// Shared by every `.mjs` script under this directory that shells out to git —
+// two exports, one per half of the same spawn. `gitEnv()` builds the env the
+// git child is given; `workspaceDirFromGitCommonDir()` turns what the most
+// common of those children answers with, `rev-parse --git-common-dir`, into
+// the workspace directory a run's files live under. The first half is #1599's
+// reasoning, below; the second is #1658's, beside its own function.
 //
 // GIT_DIR and GIT_WORK_TREE outrank both the child's cwd and an explicit `-C`
 // argument — measured directly (#1599): a `git rev-parse`/`ls-files` call
@@ -29,6 +34,9 @@
 // would be churn with no behavioural change. `ambient-git-vars-mjs-prose.test.mjs`
 // carries both of them by name instead of by import.
 
+import { realpathSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+
 /**
  * `base` (defaulting to `process.env`) with GIT_DIR and GIT_WORK_TREE
  * removed, so a git child spawned with the result cannot be retargeted by
@@ -45,4 +53,72 @@ export function gitEnv(overrides = {}, base = process.env) {
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
   return env;
+}
+
+// Every fleet script that needs to know WHERE the run's files live asks git
+// the same question — `rev-parse --git-common-dir` — and then resolves the
+// answer the same way, because the answer is the same shape in all three:
+// the common dir is shared by every worktree of one repository (git answers
+// with the MAIN checkout's git dir from inside a linked worktree), so its
+// PARENT is the one workspace a run has, whichever worktree asked. That is
+// why a member running from `.worktrees/<n>-slug` and the controller running
+// from the checkout root agree about the run's single ledger, its single
+// heartbeat and its single board.
+//
+// Three callers hand-spelled that resolution, one apiece, before #1658:
+// `ledger.mjs`'s `defaultLedgerPath()`, `fleet-state.mjs`'s `statePath()` and
+// `board.mjs`'s `resolveCockpitInstance()` — and `fleet-state.mjs`'s own
+// comment had already written down the trigger ("if a third file ever needs
+// this, the resolution itself should move"), which #1656's addition tripped.
+// What is NOT shared is the part each caller owns: the filename it joins on
+// (`ledger.md`, `heartbeat.json`, `.fleet`), the wording of the warning it
+// degrades with, and what its own degraded answer is. Hence the seam: this
+// function answers the directory or `null`, and every caller composes the
+// rest around it.
+
+/**
+ * The workspace directory a `git rev-parse --git-common-dir` answer names —
+ * the directory HOLDING the common git dir — resolved against `cwd`, or
+ * `null` when the answer carries nothing usable.
+ *
+ * `null` is the signal every caller's degrade arm branches on, and the reason
+ * this returns it rather than a cwd-relative fallback of its own: what a
+ * degraded answer should be is the caller's to say (a cwd-relative filename
+ * for the ledger, an absolute cwd-anchored `.fleet` for the board), and so is
+ * the warning that must accompany it — a degrade nobody announces is the
+ * failure class all three of those warnings exist to close.
+ *
+ * `resolve(cwd, …)` rather than resolve()'s implicit `process.cwd()`: git
+ * answers this RELATIVE — a bare `.git` — when it runs from a checkout's top
+ * level, and the cwd that was relative to is an argument here, not ambient,
+ * so a caller that injects the answer (board.mjs, which takes it as a
+ * parameter so its worktree and resolution-failed cases stay plain test rows)
+ * can inject the cwd too. `cwd` defaults to `process.cwd()`, which is what
+ * the callers that spawn git themselves already resolved against.
+ *
+ * The `trim()` is what makes a newline-only answer the `null` case rather
+ * than a path; a trailing newline riding on a real answer would be discarded
+ * by `dirname()` anyway, together with the rest of the final segment.
+ *
+ * `canonicalise` is OPT-IN, and deliberately so (#1658). Only `board.mjs`
+ * takes it: a symlinked route to one workspace derives a SECOND port and a
+ * second state directory for a cockpit already being served (#1582), so the
+ * cockpit's key has to be the canonical form. `ledger.mjs` and
+ * `fleet-state.mjs` do not — both PRINT the path they resolve (the ledger in
+ * `check`'s JSON, both in their degrade warnings), and realpath would change
+ * that output without changing which file they reach, since the canonical and
+ * symlinked spellings of one path are one file. Left off, this function reads
+ * nothing: `canonicalise: true` is its only filesystem access.
+ *
+ * A path that does not resolve is not a failure when it is asked for: the
+ * caller gets a usable key back, just an uncanonicalised one. A workspace
+ * directory removed out from under a running cockpit must not turn resolution
+ * into a throw.
+ */
+export function workspaceDirFromGitCommonDir(gitCommonDir, cwd = process.cwd(), { canonicalise = false } = {}) {
+  const common = String(gitCommonDir ?? "").trim();
+  if (!common) return null;
+  const workspace = dirname(resolve(cwd, common));
+  if (!canonicalise) return workspace;
+  try { return realpathSync(workspace); } catch { return workspace; }
 }
