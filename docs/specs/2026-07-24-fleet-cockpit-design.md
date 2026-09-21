@@ -92,6 +92,22 @@ Three units with clean boundaries:
    boards at once. An unresolvable git dir degrades to a cwd-relative `.fleet/`
    and warns, in `defaultLedgerPath()`'s wording; it never dies.
 
+   **Launching twice is a no-op that succeeds** (#1585). A derived port that
+   is already held is not a failure by itself, so the launch asks the holder
+   who it is: it requests `/board.json` with a ~1s timeout and reads the
+   `workspace` the payload names. Ours → print that the cockpit is already
+   running, with its URL, honour `--open`, exit **0**, start nothing. Anyone
+   else — a different workspace, a non-200, a body that will not parse, no
+   answer at all — → foreign, step to the next port, bounded to a handful of
+   attempts inside the derived range. Only an exhausted range is an error,
+   and it names every port it tried. The exit code is the whole point: the
+   documented launch is backgrounded (`serve --open &`), so a non-zero exit
+   there reaches nobody and the operator just waits for a tab that never
+   appears. The identity rides the board payload rather than a lockfile
+   precisely so nothing can outlive the process that published it. An
+   **explicit** `--port` opts out of both halves: the operator named that
+   port, so a bind failure on it is a hard error and no handshake is made.
+
 ```
 ledger.md ─┐
 gh issues ─┼─▶ board.mjs build ─▶ computeBoard() ─▶ board.json ─▶ board.html
@@ -237,8 +253,10 @@ source, and it can never move a ticket.
 - `ci-state` errors on a PR → CI dot = **unknown, never red**. Never false-alarm.
 - `board.json` written atomically (temp + rename) → the page never reads a
   half-written file.
-- Serve port in use → clear error, suggest `--port`. Page cannot reach
-  `/board.json` → "cockpit server not running."
+- Derived port in use → handshake, then reuse (exit 0) or step past it; only
+  an exhausted range is an error, and it names the ports tried and suggests
+  `--port` (#1585). An explicit `--port` in use → that clear error, directly.
+  Page cannot reach `/board.json` → "cockpit server not running."
 
 ## Testing
 

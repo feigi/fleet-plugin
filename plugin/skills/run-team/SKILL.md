@@ -255,8 +255,10 @@ At start, and whenever the pool empties.
    `node ~/.fleet/bin/fleet-run board.mjs serve --open &` in the
    background. It is a read-only mirror of `.fleet/ledger.md` + `gh` — you never
    feed or update it, and it survives your own compaction. Skip on later
-   re-shortlists (a server is already running; a second one collides on the
-   port).
+   re-shortlists: there is already a server, and re-launching buys nothing.
+   Doing it anyway is harmless rather than a collision — a second launch for
+   this workspace finds the first over HTTP, prints its URL, opens it if
+   asked and exits 0 without starting anything (#1585).
 
    **Fold in every PR a prior run left open, before shortlisting.** A chore PR
    carrying that run's own metrics, or ticket work whose review was deferred —
