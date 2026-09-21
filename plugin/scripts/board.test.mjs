@@ -942,6 +942,33 @@ test("a torn line and an unreadable read on the SAME transcript each get their o
   assert.match(errs[0], new RegExp(`skipping ${escapedFile}: `), "the skip gate's line, not the torn-line gate's, and it must name the directory the file lives under, not just the basename");
 });
 
+// #1654: every test above this one holds the `skips` gate's KEY and its
+// MESSAGE on the same transcript, in the same directory, so a mutation that
+// keys `warnOnce("skips", ...)` on the bare basename (`f`) instead of the
+// full path (`file`) — leaving the message's `${file}` untouched — passes
+// every one of them: the message still names the right file, and nothing
+// above ever gives two DIFFERENT full paths the SAME basename. It is exactly
+// the shape a long-lived `serve` process hits in practice: findSubagentsDir()
+// re-resolves to a new session directory as fleet runs start and finish, and
+// two sessions whose agents both land on a generic transcript name (here
+// "agent-x.jsonl", same as every fixture above) are a basename collision
+// waiting to happen. Measured: with the key narrowed from `file` to `f`,
+// this is the only test in the file that fails — dir B's line never prints,
+// because dir A's identical-basename skip already claimed the (mutated) key.
+test("two session dirs whose transcripts share a basename each get their own skip line", () => {
+  const dirA = mkdtempSync(join(tmpdir(), "spend-collide-a-"));
+  const dirB = mkdtempSync(join(tmpdir(), "spend-collide-b-"));
+  mkdirSync(join(dirA, "agent-x.jsonl")); // directory where a file is expected -> EISDIR, unreadable
+  mkdirSync(join(dirB, "agent-x.jsonl")); // same basename, different session dir
+  const errs = withStderr(() => {
+    gatherSpend({ dir: dirA });
+    gatherSpend({ dir: dirB });
+  });
+  assert.equal(errs.length, 2, "expected one skip line per directory, got " + JSON.stringify(errs));
+  assert.equal(errs.filter((e) => e.includes(dirA)).length, 1, "dir A's own path must appear, got " + JSON.stringify(errs));
+  assert.equal(errs.filter((e) => e.includes(dirB)).length, 1, "dir B's own path must appear, got " + JSON.stringify(errs));
+});
+
 // The mutant every shape above survives: `turnById.clear()` in the per-line
 // catch, the plausible "reset state after a bad line" edit. Every tear above is
 // on a ONE-LINE turn, where clearing a map that is about to be re-keyed anyway
