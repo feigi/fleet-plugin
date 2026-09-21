@@ -1,4 +1,5 @@
-// The --spend-since trust boundary, driven through the real CLI.
+// The --spend-since and --spend-dir trust boundaries, driven through the real
+// CLI.
 //
 // Separate from board.test.mjs because these need a heavier rig than the
 // process-boundary tests already there. Before #1076, gather() reached the
@@ -130,6 +131,61 @@ test("no --spend-since at all is not an error — the panel is simply unscoped",
   const body = JSON.parse(r.stdout);
   assert.equal(body.spend.since, null);
   assert.equal(body.ledgerState, "unread");
+});
+
+// ── #1583: --spend-dir on the one-shot path ──────────────────────────────────
+//
+// `build` is one gather per process, so it takes the OVERRIDE without needing
+// the pin serve() carries — the same split --spend-since already has, and the
+// reason the read sits in gather()'s default rather than only in serve().
+//
+// This rig is what makes "overrode" observable: runBoard()'s $HOME always holds
+// a resolvable session at the encoded cwd, so the heuristic has a real answer
+// of its own and a flag that did nothing would still produce a panel.
+function namedDir(lines) {
+  const dir = mkdtempSync(join(tmpdir(), "since-named-"));
+  writeFileSync(join(dir, "agent-named.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  return dir;
+}
+
+test("build: --spend-dir reads the named directory instead of the session the heuristic picks", () => {
+  // Twice the fixture turn's numbers, so the assertion cannot pass on the
+  // heuristic's own transcript by coincidence.
+  const dir = namedDir([{ type: "assistant", message: { id: "msg_1", usage: { cache_creation_input_tokens: 2000, cache_read_input_tokens: 100, output_tokens: 2 }, content: [{ type: "text" }] } }]);
+  const r = runBoard(["--spend-dir", dir]);
+  assert.equal(r.status, 0, r.stderr);
+  const spend = JSON.parse(r.stdout).spend;
+  assert.equal(spend.ok, true, r.stderr);
+  assert.equal(spend.totals.cacheWrite, 2000, "the panel came from the heuristic's session, not the named one");
+  assert.equal(spend.top[0].label, "named");
+});
+
+test("build: with no --spend-dir the panel still comes from the heuristic, unchanged by this flag existing", () => {
+  // The other half of the same guard, and the one that catches the plausible
+  // wiring slip: a `spendDir` defaulted to `null` rather than left absent
+  // reads as "resolved, no session yet" and blanks this panel on every
+  // subcommand at once, with nothing on stderr to say so.
+  const r = runBoard([]);
+  assert.equal(r.status, 0, r.stderr);
+  const spend = JSON.parse(r.stdout).spend;
+  assert.equal(spend.ok, true, r.stderr);
+  assert.equal(spend.totals.cacheWrite, 1000);
+});
+
+test("build: --spend-dir naming a directory that does not exist yet is accepted, not refused", () => {
+  // The invocation this flag exists for, and the one an existence check at the
+  // guard would refuse: a session's `subagents/` directory is not created until
+  // that session's first agent spawns, and the cockpit launches in run-team
+  // phase 0, before it. The operator names the directory; it appears seconds
+  // later. Until then the panel hides — never zeroes, and never a refusal.
+  const r = runBoard(["--spend-dir", join(mkdtempSync(join(tmpdir(), "since-absent-")), "subagents")]);
+  assert.equal(r.status, 0, r.stderr);
+  const spend = JSON.parse(r.stdout).spend;
+  assert.equal(spend.ok, false, "an unreadable named directory must not report spend");
+  assert.equal(spend.totals, undefined, "and must not render a zeroed total in its place");
+  // The override really did override: the heuristic's session is still sitting
+  // there readable, and a fallback to it would have produced a panel.
+  assert.doesNotMatch(r.stdout, /"cacheWrite":1000/);
 });
 
 // #366: the SECOND --interval read site. gather()'s own argInterval() fallback
