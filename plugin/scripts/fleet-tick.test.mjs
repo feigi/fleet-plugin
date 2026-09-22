@@ -211,6 +211,174 @@ test("formatLines prints role, actual/target and the ACTION on one line each", (
 });
 
 // ---------------------------------------------------------------------------
+// The pool-derived liveness shape — #1587. The implementer row can take its
+// live counts from a dispatch pool's own status instead of from numbers the
+// controller recites, and the ROW says which of the two it used.
+//
+// All of it is the pure half: no pool, no kernel, no network. The shape is the
+// FLEET's own vocabulary (`live`/`queued`) and the caller maps its runtime's
+// status onto it at the boundary, so nothing here asserts pool internals,
+// worker identity or kernel lifetime, and an omp change to pool scheduling
+// cannot redden this suite.
+
+// The pool path's own call shape: the controller states no live counts at all,
+// because reciting them is the thing the pool replaced. `over` puts them back,
+// which is the disagreement case below.
+const poolState = (poolLiveness, over = {}) => {
+  const s = state();
+  delete s.implLive;
+  delete s.pool;
+  return { ...s, poolLiveness, ...over };
+};
+
+test("implementers: the pool path runs the SAME guard table, and the row says where its counts came from", () => {
+  // One row per situation the ticket names. What is pinned is that the pool
+  // reading enters the EXISTING table — the deficit, the backlog gate and the
+  // pool-0 branches are not re-derived for it — and that the ACTION is
+  // traceable to the number that produced it.
+  const cases = [
+    {
+      what: "pool state present: free capacity and queued items dispatch",
+      status: { live: 0, queued: 3 }, over: { supply: 57 },
+      action: "DISPATCH 2", actual: 0, provenance: "pool-derived",
+      detail: /^pool=3 supply=57 review-backlog=0 counts=pool-derived$/,
+    },
+    {
+      what: "pool state absent: nothing answered, so nothing is decided",
+      status: null, over: { supply: 57 },
+      action: "REFUSE", actual: "?", provenance: "unknown",
+      detail: /^pool=\? supply=57 review-backlog=0 counts=unknown — pool status absent:/,
+    },
+    {
+      what: "pool state unreadable: a count that is not a non-negative integer",
+      status: { live: "1", queued: 3 }, over: { supply: 57 },
+      action: "REFUSE", actual: "?", provenance: "unknown",
+      detail: /counts=unknown — pool status unreadable: live='1' /,
+    },
+    {
+      what: "pool state disagreeing with the stated flags: the pool decides, both print",
+      status: { live: 1, queued: 1 }, over: { implLive: 0, pool: 5 },
+      action: "DISPATCH 1", actual: 1, provenance: "pool-derived",
+      detail: /^pool=1 supply=0 review-backlog=0 counts=pool-derived stated-unused=live:0,pool:5$/,
+    },
+    {
+      what: "free capacity with an empty supply: a drained pool is not a dispatch",
+      status: { live: 0, queued: 0 }, over: { supply: 0 },
+      action: "SUGGEST /triage", actual: 0, provenance: "pool-derived",
+      detail: /^pool=0 supply=0 review-backlog=0 counts=pool-derived — no supply/,
+    },
+    {
+      what: "full cap with a non-empty supply: the pool's own live count holds the row",
+      status: { live: 2, queued: 4 }, over: { supply: 57 },
+      action: "AT CAP", actual: 2, provenance: "pool-derived",
+      detail: /^pool=4 supply=57 review-backlog=0 counts=pool-derived$/,
+    },
+  ];
+  for (const c of cases) {
+    const r = row(poolState(c.status, c.over), "implementers");
+    assert.equal(r.action, c.action, c.what);
+    assert.equal(r.actual, c.actual, c.what);
+    assert.equal(r.target, 2, c.what);
+    assert.equal(r.provenance, c.provenance, c.what);
+    assert.match(r.detail, c.detail, `${c.what} — got: ${r.detail}`);
+  }
+});
+
+test("implementers: a pool reading that did not arrive refuses, and can never be read as 0 live", () => {
+  // Both of #3's error directions meet on this row, and the dangerous one is
+  // the zero: a lost or reset kernel presenting as 0 live is a full cap's worth
+  // of free capacity, which is a DISPATCH off a pool nobody read. The key being
+  // PRESENT but empty is the shape that matters — a caller spreading whatever
+  // its status read returned must refuse here, never quietly fall back to the
+  // stated flags it may also have passed.
+  const cases = [
+    ["null", null, /pool status absent:/],
+    ["an explicit undefined", undefined, /pool status absent:/],
+    ["an empty status", {}, /unreadable: live=undefined, queued=undefined/],
+    ["a half-filled status", { live: 1 }, /unreadable: queued=undefined/],
+    ["a stringified count", { live: "1", queued: 1 }, /unreadable: live='1'/],
+    ["a negative count", { live: 0, queued: -1 }, /unreadable: queued=-1/],
+    ["a fractional count", { live: 1.5, queued: 0 }, /unreadable: live=1\.5/],
+    ["NaN", { live: NaN, queued: 0 }, /unreadable: live=NaN/],
+    ["a bare number", 3, /unreadable: live=undefined, queued=undefined/],
+  ];
+  for (const [what, status, why] of cases) {
+    const r = row(poolState(status, { supply: 57, implCap: 2 }), "implementers");
+    assert.equal(r.action, "REFUSE", what);
+    assert.equal(r.provenance, "unknown", what);
+    assert.match(r.detail, why, `${what} — got: ${r.detail}`);
+    // Never a zero-live reading. The row carries no number at all, so a
+    // consumer that skips the ACTION and does arithmetic gets NaN rather than
+    // a plausible count.
+    assert.equal(r.actual, "?", what);
+    assert.ok(Number.isNaN(Number(r.actual)), what);
+    assert.ok(Number.isNaN(r.target - r.actual), what);
+    // And it asks for nothing to be written: no dispatch of any size.
+    assert.doesNotMatch(r.action, /DISPATCH|RE-SHORTLIST/, what);
+    // It names what is missing well enough to act on, and says which way the
+    // silence must NOT be read.
+    assert.match(r.detail, /Unknown is not zero live/, what);
+  }
+});
+
+test("implementers: a refused pool reading does not blind the reviewer and merge-bot rows", () => {
+  // The pool feeds this one row. A lost kernel must not take the merge side
+  // with it: those numbers arrived by the route they always did, and a cascade
+  // stalled behind an unmerged PR is exactly when a blank tick costs most.
+  const rows = reconcile(poolState(null, { reviewsReady: 1, mergeQueue: 2 }));
+  assert.deepEqual(rows.map((r) => r.role), ["implementers", "reviewers", "merge-bot"]);
+  assert.equal(rows[1].action, "DISPATCH 1");
+  assert.equal(rows[1].detail, "reviews-ready=1 review-backlog=0");
+  assert.equal(rows[2].action, "DISPATCH merge-bot");
+  assert.equal(rows[2].detail, "merge-queue=2 held=0");
+});
+
+test("implementers: a pool reading that agrees with the stated flags says nothing extra", () => {
+  // `stated-unused=` is a DISAGREEMENT report, not a second copy of the
+  // numbers: printing it when the two agree would bury the one case it exists
+  // to make visible.
+  const r = row(poolState({ live: 1, queued: 3 }, { implLive: 1, pool: 3 }), "implementers");
+  assert.equal(r.detail, "pool=3 supply=0 review-backlog=0 counts=pool-derived");
+});
+
+test("every row states its provenance, on both paths", () => {
+  // Part of the row, not a comment. The two rows no pool feeds say so outright
+  // rather than leaving a reader to infer their source from a missing field.
+  assert.deepEqual(reconcile(state()).map((r) => [r.role, r.provenance]), [
+    ["implementers", "caller-stated"], ["reviewers", "caller-stated"], ["merge-bot", "caller-stated"],
+  ]);
+  assert.deepEqual(reconcile(poolState({ live: 1, queued: 0 })).map((r) => [r.role, r.provenance]), [
+    ["implementers", "pool-derived"], ["reviewers", "caller-stated"], ["merge-bot", "caller-stated"],
+  ]);
+});
+
+test("the caller-stated path prints byte-identical lines to the ones it printed before the pool shape", () => {
+  // Exact strings, because these lines are both the contract a reader already
+  // knows and the bytes the fold digest hashes. A provenance marker on this
+  // path would change every tick's output to say what it already said, and
+  // would un-fold one quiet night on the way through.
+  assert.deepEqual(
+    formatLines(reconcile(state({
+      implLive: 0, pool: 3, supply: 57, reviewBacklog: 1, reviewsReady: 1,
+      mergeQueue: 2, mergeHeld: 1, mergeIgnored: [999],
+    }))),
+    [
+      "implementers 0/2 → DISPATCH 2   (pool=3 supply=57 review-backlog=1)",
+      "reviewers    0/5 → DISPATCH 1   (reviews-ready=1 review-backlog=1)",
+      "merge-bot    0/1 → DISPATCH merge-bot   (merge-queue=2 held=1 ignored=999)",
+    ],
+  );
+  assert.deepEqual(
+    formatLines(reconcile(state())),
+    [
+      "implementers 0/2 → SUGGEST /triage   (pool=0 supply=0 review-backlog=0 — no supply — hold implementer slots idle)",
+      "reviewers    0/5 → IDLE OK   (reviews-ready=0 review-backlog=0)",
+      "merge-bot    0/1 → IDLE OK   (merge-queue=0 held=0)",
+    ],
+  );
+});
+
+// ---------------------------------------------------------------------------
 // The CLI half. What is pinned here is the CONTRACT #3 left open: live member
 // counts and the pool arrive as required args (no source in the repo can be
 // trusted for them), everything else the script reads for itself, and every
@@ -601,12 +769,13 @@ test("CLI: supply comes from candidates.mjs and drives the pool-0 branches", () 
 // streak and the fold digest, so these pin the contract fleet-heartbeat.mjs
 // reads rather than the heartbeat's own arithmetic (that is its test's job).
 
-test("actionable: only DISPATCH and RE-SHORTLIST name work the controller can do", () => {
+test("actionable: DISPATCH, RE-SHORTLIST and REFUSE name work the controller can do", () => {
   const row = (action) => [{ role: "implementers", actual: 0, target: 2, action, detail: "" }];
   assert.equal(actionable(row("DISPATCH 1")), true);
   assert.equal(actionable(row("DISPATCH merge-bot")), true);
   assert.equal(actionable(row("RE-SHORTLIST")), true);
   assert.equal(actionable(row("RE-SHORTLIST + SUGGEST /triage")), true);
+  assert.equal(actionable(row("REFUSE")), true);
   assert.equal(actionable(row("AT CAP")), false);
   assert.equal(actionable(row("IDLE OK")), false);
   assert.equal(actionable(row("HOLD")), false);
@@ -620,6 +789,17 @@ test("actionable: `SUGGEST /triage` alone is not work — nobody is there to ask
   // answer — the back-off would never engage in the one case it was added for.
   const rows = [{ role: "implementers", actual: 0, target: 2, action: "SUGGEST /triage", detail: "" }];
   assert.equal(actionable(rows), false);
+});
+
+test("actionable: a REFUSE is work — a blind row must never buy a longer interval", () => {
+  // The inverse call to the one above, and for the opposite reason: re-opening
+  // the pool, or falling back to the stated counts, is something the controller
+  // can do unattended. A refusal that backed off would stretch the beat while
+  // the implementer side went unobserved, tick after identical tick — #3's own
+  // stall, wearing the pool's name.
+  const rows = reconcile(poolState(null));
+  assert.equal(rows[0].action, "REFUSE");
+  assert.equal(actionable(rows), true);
 });
 
 test("actionable: one actionable row carries the whole tick", () => {

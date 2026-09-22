@@ -34,6 +34,15 @@
 //   gh     Merge queue and review backlog, from open PRs by label and by
 //          whether they close an issue.
 //   script Supply, from candidates.mjs.
+//   pool   OPTIONALLY, and for the implementer row only: a dispatch pool's own
+//          status, in place of the two numbers above. Same contract read the
+//          other way round — where the ledger cannot be read for a liveness,
+//          the pool that holds the members CAN be, so the controller stops
+//          reciting what the runtime already knows. It does not weaken the
+//          refusal above, it extends it: a pool that did not answer is
+//          UNKNOWN, never 0, because the zero it would otherwise read as is a
+//          full cap's worth of free capacity. Every row says which of the two
+//          sources its counts came from (#1587).
 //
 // The pure half below is `reconcile()`; main() does the I/O. Split so the guard
 // table is unit-testable without a network — fleet-tick.test.mjs.
@@ -46,11 +55,113 @@ export function reconcile(s) {
   return [implementers(s), reviewers(s), mergeBot(s)];
 }
 
+// Where a row's counts came from, as a value ON the row.
+//
+// The two sources can legitimately DISAGREE: a member the controller dispatched
+// outside the pool is live and invisible to the pool's own status, so "1 live"
+// from the pool and "2 live" from the controller can both be honest readings of
+// the same fleet. A row that prints an ACTION without saying which number
+// produced it is untraceable, and untraceable is how #3 stayed invisible for a
+// whole run.
+const STATED = "caller-stated";
+const POOL = "pool-derived";
+// Not a third source — the one value that means there are no counts, so
+// nothing downstream can mistake a refusal for a reading.
+const UNKNOWN = "unknown";
+
+// Both refusals end with this, because both fail in the same direction. An
+// absent reading and a garbled one would each present as 0 live with a full cap
+// free — a pool that never opened, closed on its drain, or went with its kernel
+// reading as a full cap's worth of free capacity — which is a DISPATCH of the
+// whole cap at a pool nobody read. That is the over-dispatch direction the
+// caller-stated flags' own refusal exists to block, and a pool that swapped a
+// forgotten flag for a lost kernel would have moved that failure, not fixed it.
+//
+// The printed half is the instruction only. The paragraph above is why, and a
+// row that lectures is a row read past: what the operator needs at 3am is the
+// missing input named, and the two ways out.
+const NOT_ZERO = " Unknown is not zero live: re-open the pool and re-run, or fall back to the"
+  + " caller-stated counts.";
+
+// The implementer row's liveness inputs, and their provenance.
+//
+// `poolLiveness` is optional, and its PRESENCE — never its truthiness — picks
+// the source. Key absent: the caller states the counts, which is today's path
+// and the only shape the hand-dispatch harness uses. Key present: the pool is
+// this row's source, and any stated counts are at most a cross-check printed
+// back beside the ACTION.
+//
+// So present-but-empty is a REFUSAL and never a quiet fall back to the stated
+// flags. Falling back is the tempting half — the numbers are right there, and
+// using them looks like resilience. It is the #3 failure with a helpful face:
+// those numbers are the controller's recollection, which is the exact thing
+// adopting a pool stops trusting, and the swap would leave a run whose
+// dispatches came from a source no line names.
+//
+// The shape is the fleet's own (`live`, `queued`), not any runtime's status
+// field names: the caller maps at the boundary, which is what keeps pool
+// internals out of this file and out of its tests.
+function liveness(s) {
+  if (!("poolLiveness" in s)) return { provenance: STATED, live: s.implLive, queued: s.pool };
+  const p = s.poolLiveness;
+  if (p === null || p === undefined) {
+    return { provenance: UNKNOWN, why: "pool status absent: nothing answered for live and queued." };
+  }
+  // Both counts checked, and every bad one named back. `Number.isInteger` and
+  // not `typeof === "number"`: NaN is a number, `cap - NaN` is NaN, and every
+  // comparison against NaN is false — so a reading that never arrived would
+  // slide past the deficit test and print AT CAP, which is #3's stall exactly.
+  // `p?.[k]` because a status that is not an object at all (a bare number, a
+  // string) is unreadable in the same way and by the same clause.
+  const show = (v) => (typeof v === "string" ? `'${v}'` : String(v));
+  const bad = ["live", "queued"].filter((k) => !Number.isInteger(p?.[k]) || p[k] < 0);
+  if (bad.length) {
+    return {
+      provenance: UNKNOWN,
+      why: `pool status unreadable: ${bad.map((k) => `${k}=${show(p?.[k])}`).join(", ")}`
+        + " — live and queued must each be a non-negative integer.",
+    };
+  }
+  return { provenance: POOL, live: p.live, queued: p.queued };
+}
+
 function implementers(s) {
-  const deficit = s.implCap - s.implLive;
-  const detail = `pool=${s.pool} supply=${s.supply} review-backlog=${s.reviewBacklog}`;
+  const l = liveness(s);
+  // The marker prints only when the counts did NOT come from the caller. Not a
+  // silent default: the stated path is what every line this script has ever
+  // printed already means, and those bytes are also what the fold digest
+  // hashes, so marking them would change every tick's output to say what it
+  // already said. What a reader needs is to tell an UNMARKED line — the
+  // contract they know — from one whose numbers came from somewhere else. The
+  // row states it either way, for a consumer that branches on the field.
+  const from = l.provenance === STATED ? "" : ` counts=${l.provenance}`;
+
+  if (l.provenance === UNKNOWN) {
+    return {
+      role: "implementers",
+      // `?`, never a number. A consumer that reads past the ACTION and does
+      // arithmetic gets NaN rather than a plausible count, so the one reading
+      // this row must never produce — a full cap's worth of free capacity — is
+      // not reachable even by ignoring everything the row says.
+      actual: "?", target: s.implCap, provenance: UNKNOWN, action: "REFUSE",
+      detail: `pool=? supply=${s.supply} review-backlog=${s.reviewBacklog}${from} — ${l.why}${NOT_ZERO}`,
+    };
+  }
+
+  const deficit = s.implCap - l.live;
+  // The caller's own numbers, when it stated them anyway and the pool
+  // disagrees. Printed back rather than dropped: the disagreement is
+  // legitimate — a member dispatched outside the pool is live and invisible to
+  // it — so the row that acted on one number names the other it did not use.
+  // Silent on agreement, because a second copy of the same figures would bury
+  // the one case this clause exists to make visible.
+  const unused = [["live", s.implLive, l.live], ["pool", s.pool, l.queued]]
+    .filter(([, stated, used]) => stated !== undefined && stated !== used)
+    .map(([name, stated]) => `${name}:${stated}`);
+  const detail = `pool=${l.queued} supply=${s.supply} review-backlog=${s.reviewBacklog}${from}`
+    + (unused.length ? ` stated-unused=${unused.join(",")}` : "");
   const row = (action, extra = "") => ({
-    role: "implementers", actual: s.implLive, target: s.implCap,
+    role: "implementers", actual: l.live, target: s.implCap, provenance: l.provenance,
     action, detail: extra ? `${detail} — ${extra}` : detail,
   });
 
@@ -64,7 +175,7 @@ function implementers(s) {
   // suggestion under a hold is noise the controller would act on.
   if (s.reviewBacklog >= 2) return row("HOLD", "a review-bound pipeline gains nothing from more PRs");
 
-  if (s.pool >= 1) return row(`DISPATCH ${Math.min(deficit, s.pool)}`);
+  if (l.queued >= 1) return row(`DISPATCH ${Math.min(deficit, l.queued)}`);
 
   // Pool 0. Supply is open `ready-for-agent`, so it is an UPPER bound — the
   // decided? check and the in-flight scan both run downstream of it and only
@@ -79,8 +190,12 @@ function implementers(s) {
 function reviewers(s) {
   const deficit = s.reviewerCap - s.reviewerLive;
   const detail = `reviews-ready=${s.reviewsReady} review-backlog=${s.reviewBacklog}`;
+  // Always caller-stated, and the row says so rather than leaving a reader to
+  // infer it from a field that is missing: no pool stages reviewers, so this
+  // row has exactly one source and no disagreement to report. Nothing extra is
+  // printed — the line is byte-for-byte the one it has always been.
   const row = (action, extra = "") => ({
-    role: "reviewers", actual: s.reviewerLive, target: s.reviewerCap,
+    role: "reviewers", actual: s.reviewerLive, target: s.reviewerCap, provenance: STATED,
     action, detail: extra ? `${detail} — ${extra}` : detail,
   });
   if (deficit <= 0) return row("AT CAP");
@@ -112,8 +227,10 @@ function mergeBot(s) {
   // on the tick that made it rather than after the cascade has stalled.
   const detail = `merge-queue=${s.mergeQueue} held=${s.mergeHeld}`
     + (s.mergeIgnored.length ? ` ignored=${s.mergeIgnored.join(",")}` : "");
+  // Caller-stated for the same reason as the reviewer row above: one source,
+  // nothing to disagree with, and nothing added to the printed line.
   const row = (action, extra = "") => ({
-    role: "merge-bot", actual: s.mergeBotLive, target: 1,
+    role: "merge-bot", actual: s.mergeBotLive, target: 1, provenance: STATED,
     action, detail: extra ? `${detail} — ${extra}` : detail,
   });
   if (s.mergeBotLive >= 1) return row("AT CAP");
@@ -146,15 +263,22 @@ export function formatLines(rows) {
 // to cure it. So identity decides whether to FOLD the output; only this
 // predicate decides whether to back off.
 //
-// DISPATCH and RE-SHORTLIST are the two actions naming work the controller can
-// do unattended. AT CAP, IDLE OK and HOLD are all "correctly doing nothing".
+// DISPATCH, RE-SHORTLIST and REFUSE are the actions naming work the controller
+// can do unattended. AT CAP, IDLE OK and HOLD are all "correctly doing
+// nothing".
 // `SUGGEST /triage` is deliberately NOT actionable: it asks a maintainer to
 // tick tickets, and on the unattended overnight run this heartbeat exists for
 // there is nobody to ask — treating it as work would pin the interval at the
 // base all night for a request no one can answer. It still PRINTS, because the
 // fold is keyed on the output changing, so the suggestion is seen once.
+//
+// REFUSE is the inverse call to that one, and for the opposite reason:
+// re-opening the pool, or falling back to the stated counts, is something the
+// controller can do on its own. It is also the row whose REPEAT must never buy
+// a longer interval — a blind implementer row backing off tick after identical
+// tick is #3's stall exactly, wearing the pool's name.
 export function actionable(rows) {
-  return rows.some((r) => /^(DISPATCH|RE-SHORTLIST)/.test(r.action));
+  return rows.some((r) => /^(DISPATCH|RE-SHORTLIST|REFUSE)/.test(r.action));
 }
 
 // --------------------------------------------------------------------------
