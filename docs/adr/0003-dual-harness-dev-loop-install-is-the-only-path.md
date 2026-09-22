@@ -98,6 +98,55 @@ step is manual and deliberate; the operator runs harness-native commands.
    `isUserSourceEnabled` gate with no exemption for omp's own registry
    (reported as `can1357/oh-my-pi#11362`). The provenance check asserts it and
    names the remedy; nothing writes the operator's global config silently.
+9. **`eval.workpool.freshAgents: true` is a second hard precondition on omp**,
+   and it is install-time operator work — no run ever sets it. (Added
+   2026-09-22 on #1589; points 1–8 are as ruled on #1294.) #1420 refills
+   implementer slots from an omp workpool, and a pool hands a queued item to a
+   *worker*: at this key's schema default of `false`, omp routes the item onto
+   an existing idle worker and extends that worker's transcript. That is a
+   **Wake** (CONTEXT.md § Coordination) — the one thing a refill may never be,
+   and silent when it happens, because nothing records that the previous
+   ticket's worktree paths and claim state came with the item. It is not a pool
+   argument: `workpool(agent, name, context, tools)` carries no such field, so
+   there is nothing to pass at call time and nothing to scope to one pool.
+   **It is session-wide**: the key governs *every* pool the session opens, not
+   only the fleet's, so an operator who turns it on has changed how any other
+   workpool in that session dispatches too. Two ways to set it, and only two:
+
+   - **Global** — `omp config set eval.workpool.freshAgents true`. This is the
+     global path and *only* the global path: `omp config set` and
+     `omp config reset` always write the main YAML under the active agent
+     directory (`~/.omp/agent/config.yml`; `omp config path` prints the
+     directory), and never write an arbitrary key to a project file. This
+     repo's own `.github/scripts/smoke-omp.sh` captures and restores
+     `enabledProviders` around a `config set` for exactly that reason.
+   - **Project-scoped** — hand-edit `<repo>/.omp/config.yml`. There is no
+     command for it: omp's one supported project write is a model-role
+     assignment under `modelRoleStorage: project`. Two properties bite here.
+     Project settings are discovered from the **process working directory's**
+     `.omp/`, and discovery never walks ancestors, so a session started inside
+     `.worktrees/<claim>/` does not see the repo root's file. And the project
+     layer outranks the global one, so a project `false` silently overrides a
+     global `true`. (A `--config` overlay is not a third path — per-process,
+     and measured in `smoke-omp.sh` failing to override an already-set global
+     value for `enabledProviders`.)
+
+   Verify by reading the **effective** value, never a file:
+   `omp config get eval.workpool.freshAgents --json`, run from the directory
+   the session will start in. Settings resolve through five layers — runtime
+   overrides, `--config` overlays, project settings, global settings, schema
+   defaults — so any one file answers a different question. Measured
+   2026-09-22 on omp 18.2.6: `omp config path` printed `~/.omp/agent`, and the
+   read above answered
+   `{"key":"eval.workpool.freshAgents","value":false,"type":"boolean"}` on a
+   machine that had never set it.
+
+   **No run-time instruction may tell a controller to write this, or any other,
+   configuration** — and none does. A fleet that ran `omp config set` to open
+   its own pool would be editing the operator's machine-wide file to dispatch
+   one wave, and changing every other pool in the session with it. Same
+   discipline as point 8: a precondition is the operator's to set and the
+   fleet's only to read.
 
 ## Rejected alternatives
 
@@ -136,6 +185,16 @@ step is manual and deliberate; the operator runs harness-native commands.
 
 - The operator's loop is: edit, install/update on each harness, restart the
   session. Nothing is automatic and nothing is silent.
+- Installing on omp is the plugin plus two settings, not the plugin alone:
+  `enabledProviders` (point 8) and `eval.workpool.freshAgents` (point 9). Both
+  are session-wide and the operator's to set once, and neither is written by
+  the fleet. Only `enabledProviders` is read and refused on by what the fleet
+  runs — the provenance check (`plugin/scripts/fleet-provenance`) asserts it
+  and refuses on drift. `eval.workpool.freshAgents` has no fleet-side runtime
+  check yet: point 9's `omp config get eval.workpool.freshAgents --json` is
+  for the operator to verify by hand, not something the fleet reads. CONTEXT.md
+  § Install calls the pair an **Install-time precondition** — set once by the
+  operator either way, enforced today only for the first.
 - Provenance is answered by `installPath` plus a content digest, never by a
   version string: omp's recorded version is permanently `0.0.0`, and Claude's
   update path leaves no `.git` in the new cache directory.

@@ -141,6 +141,15 @@ checkout, so pre-merge iteration never edits the tracked catalog. Distinct from 
 tracked catalog, which names the shipped branch and nothing else.
 _Avoid_: local marketplace, dev source
 
+**Install-time precondition**:
+A harness setting the fleet depends on, set once by the operator at install and never
+written by a run — a run that wrote one would be changing every other session on the
+machine to dispatch its own wave. Two exist, both on omp, both session-wide:
+`enabledProviders: ["claude-plugins"]` and `eval.workpool.freshAgents: true`. ADR 0003
+points 8 and 9 carry each one's required value, its global and project-scoped set
+paths, and the read that verifies it.
+_Avoid_: requirement, dependency, flag
+
 ### Coordination
 
 **Dispatch**:
