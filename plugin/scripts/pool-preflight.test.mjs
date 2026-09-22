@@ -23,7 +23,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, readdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,6 +60,18 @@ test("an effective false refuses and names the key", () => {
   assert.equal(v.ok, false);
   assert.equal(v.cause, "disabled");
   assert.ok(v.message.includes(SETTING), `refusal does not name the key: ${v.message}`);
+});
+
+test("a refusal's closing sentence names the key by its own exact wording", () => {
+  // Every row's own detail() already embeds SETTING somewhere (see the two
+  // tests above), so a bare `message.includes(SETTING)` check already passes
+  // on detail text alone and would not catch a regression in the shared
+  // closing sentence. Anchor on SET_THE_KEY's own wording instead.
+  const v = classify(effective(false));
+  assert.ok(
+    v.message.includes(`Set \`${SETTING}\` to true`),
+    `refusal is missing the exact closing instruction: ${v.message}`,
+  );
 });
 
 test("a reading that carries no value for the key refuses as absent, never as the default", () => {
@@ -101,6 +113,17 @@ test("every way the read can fail to answer refuses as unreadable", () => {
     assert.equal(v.cause, "unreadable", what);
     assert.ok(v.message.includes(SETTING), `${what}: refusal does not name the key: ${v.message}`);
   }
+});
+
+test("a killed read is reported as killed, not misread through the status row", () => {
+  // status and signal are both set on a killed process (status: null,
+  // signal: 'SIGKILL'). Row order is load-bearing: if the status row ran
+  // first it would still classify as unreadable (null !== 0), but would print
+  // the misleading 'exited null' instead of naming the signal that actually
+  // killed the read.
+  const v = classify(reading({ status: null, signal: "SIGKILL" }));
+  assert.equal(v.cause, "unreadable");
+  assert.match(v.message, /was killed by SIGKILL/);
 });
 
 test("a refused read carries the harness's own reason, not just this guard's", () => {
@@ -158,13 +181,13 @@ after(() => {
 // The run's cwd is a fresh empty directory that is read back afterwards: this
 // preflight must leave nothing behind, and a state file dropped there is the
 // shape of "writes nothing" quietly stopping being true.
-function runCli(args = [], { stdout = "", stderr = "", exit = "0", omp = true } = {}) {
+function runCli(args = [], { stdout = "", stderr = "", exit = "0", omp = true, script = SCRIPT } = {}) {
   const scratch = mkdtempSync(join(tmpdir(), "pool-preflight-run-"));
   const cwd = mkdtempSync(join(tmpdir(), "pool-preflight-cwd-"));
   const log = join(scratch, "omp.log");
   writeFileSync(log, "");
   try {
-    const r = spawnSync(process.execPath, [SCRIPT, ...args], {
+    const r = spawnSync(process.execPath, [script, ...args], {
       cwd,
       encoding: "utf8",
       // PATH is REPLACED rather than prefixed: a real `omp` further down the
@@ -236,5 +259,31 @@ test("CLI: an argument refuses before anything is read", () => {
     const r = runCli(argv, { stdout: payload(true) });
     assert.equal(r.status, 2, `${argv.join(" ")} should refuse`);
     assert.equal(r.log.trim(), "", `${argv.join(" ")}: the refusal must land before the harness is asked anything`);
+  }
+});
+
+test("CLI: invoking through a symlink still runs main(), not a silent no-op", () => {
+  // pathToFileURL(argv[1]) compared an UNRESOLVED argv[1] against
+  // import.meta.url, which node always resolves through symlinks. Any
+  // invocation path that traverses a symlink — including a bare /tmp path on
+  // macOS, itself a symlink to /private/tmp — made the two sides diverge, so
+  // main() silently never ran and the process exited 0 with empty
+  // stdout/stderr: the same exit code as an explicit PERMIT, i.e. a silent
+  // fail-open on a machine whose effective setting is false. Must fail at
+  // exit 0 before the realpathSync fix, exit 2 after it.
+  const scratch = mkdtempSync(join(tmpdir(), "pool-preflight-symlink-"));
+  const link = join(scratch, "pool-preflight-link.mjs");
+  symlinkSync(SCRIPT, link);
+  try {
+    const r = runCli([], { stdout: payload(false), script: link });
+    assert.equal(
+      r.status,
+      2,
+      `invocation through a symlink must still refuse (stdout=${JSON.stringify(r.stdout)} stderr=${JSON.stringify(r.stderr)})`,
+    );
+    assert.equal(r.stdout.trim(), "");
+    assert.match(r.stderr, /refusing to open a dispatch pool/);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 });

@@ -215,7 +215,8 @@ export function classify(reading) {
 // spawn anything, or the decision above stops being testable without a harness.
 
 import { spawnSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import { makeDie } from "./arg.mjs";
 
 const NAME = "pool-preflight";
@@ -246,4 +247,13 @@ function main() {
   console.log(`${NAME}: ${verdict.message}`);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) main();
+// Only run main() as a CLI, never when imported by a test. realpathSync
+// resolves both sides (relative argv, symlinks) so the equality is reliable
+// regardless of how node was invoked — an unresolved argv[1] compared against
+// import.meta.url (which node always resolves through symlinks) diverges for
+// any invocation path that traverses one, including a bare /tmp path on
+// macOS, and main() silently never runs: the same exit code as an explicit
+// PERMIT. See board.mjs's identical guard for the established pattern.
+const isCLI = process.argv[1] &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+if (isCLI) main();
