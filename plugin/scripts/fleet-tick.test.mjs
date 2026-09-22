@@ -273,6 +273,31 @@ test("implementers: the pool path runs the SAME guard table, and the row says wh
       action: "AT CAP", actual: 2, provenance: "pool-derived",
       detail: /^pool=4 supply=57 review-backlog=0 counts=pool-derived$/,
     },
+    {
+      what: "pool state disagreeing on the pool count alone: only that field prints",
+      status: { live: 1, queued: 1 }, over: { implLive: 1, pool: 9 },
+      action: "DISPATCH 1", actual: 1, provenance: "pool-derived",
+      // implLive AGREES with the pool's live count, so a bug that drops the
+      // whole stated-unused marker on partial disagreement (rather than
+      // reporting only the field that actually disagrees) would either print
+      // nothing here or wrongly add a `live:` entry.
+      detail: /^pool=1 supply=0 review-backlog=0 counts=pool-derived stated-unused=pool:9$/,
+    },
+    {
+      what: "pool state disagreeing on the live count alone: only that field prints",
+      status: { live: 1, queued: 1 }, over: { implLive: 0, pool: 1 },
+      action: "DISPATCH 1", actual: 1, provenance: "pool-derived",
+      // Mirror of the case above: pool AGREES, only implLive disagrees.
+      detail: /^pool=1 supply=0 review-backlog=0 counts=pool-derived stated-unused=live:0$/,
+    },
+    {
+      what: "pool path shares the caller-stated path's review-backlog HOLD gate",
+      status: { live: 0, queued: 3 }, over: { reviewBacklog: 2 },
+      action: "HOLD", actual: 0, provenance: "pool-derived",
+      // A mutant that bypasses HOLD specifically for pool-derived rows
+      // (`reviewBacklog >= 2 && provenance !== POOL`) leaves this red.
+      detail: /^pool=3 supply=0 review-backlog=2 counts=pool-derived — a review-bound pipeline gains nothing from more PRs$/,
+    },
   ];
   for (const c of cases) {
     const r = row(poolState(c.status, c.over), "implementers");
@@ -339,6 +364,36 @@ test("implementers: a pool reading that agrees with the stated flags says nothin
   // to make visible.
   const r = row(poolState({ live: 1, queued: 3 }, { implLive: 1, pool: 3 }), "implementers");
   assert.equal(r.detail, "pool=3 supply=0 review-backlog=0 counts=pool-derived");
+});
+
+test("implementers: pool-path dispatch never takes a stated-live count past the cap either", () => {
+  // #1692: the pool path computed its deficit from the pool's own live count
+  // ALONE, so a controller that ALSO states a higher live count — an
+  // out-of-pool member the pool cannot see, which the disagreement report
+  // above calls legitimate — got a full cap's worth dispatched ON TOP of
+  // that already-live member. Same invariant as "dispatch never takes live
+  // past the cap" above, run down the pool path instead: a pool reading
+  // present, pinned to a live count of 0 so any headroom the row grants can
+  // only have come from ignoring the stated count.
+  for (const implCap of [1, 2, 5]) {
+    for (const implLive of [0, 1, 2, 5]) {
+      const r = row(poolState({ live: 0, queued: 99 }, { implLive, implCap }), "implementers");
+      const n = Number((r.action.match(/^DISPATCH (\d+)$/) || [])[1] ?? 0);
+      assert.ok(n === 0 || implLive + n <= implCap, `cap ${implCap} live ${implLive} → ${r.action}`);
+    }
+  }
+});
+
+test("implementers: the exact #1692 reproduction no longer dispatches past cap", () => {
+  // Reproduced by the review: implLive 2 (stated) plus a fresh DISPATCH 2
+  // lands at 4 live against a cap of 2, because the pool's OWN live count (0)
+  // was the only one the deficit consulted. Pinned verbatim so a regression
+  // on this exact shape goes red here, not just in the general sweep above.
+  const r = row(state({ implLive: 2, pool: 3, implCap: 2, poolLiveness: { live: 0, queued: 3 } }), "implementers");
+  assert.notEqual(r.action, "DISPATCH 2");
+  const n = Number((r.action.match(/^DISPATCH (\d+)$/) || [])[1] ?? 0);
+  assert.ok(2 + n <= 2, `stated live 2 plus dispatch ${n} exceeds cap 2 — action was ${r.action}`);
+  assert.equal(r.action, "AT CAP");
 });
 
 test("every row states its provenance, on both paths", () => {

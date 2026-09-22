@@ -148,7 +148,20 @@ function implementers(s) {
     };
   }
 
-  const deficit = s.implCap - l.live;
+  // Pool live drives `actual`/`provenance` below, but the DEFICIT also takes
+  // the caller's stated count when it is higher and the pool is the row's
+  // source: a member dispatched outside the pool is live and invisible to it
+  // (see `unused` below), and computing the deficit off the pool's lower
+  // number alone dispatches this row's own cap's worth ON TOP of that
+  // already-live member — a full cap-exceeding DISPATCH, the exact #3 stall
+  // class this file exists to prevent. Reproduced at #1692:
+  // `{implLive:2, pool:3, implCap:2, poolLiveness:{live:0,queued:3}}` returned
+  // `DISPATCH 2` on top of a stated-live 2, both under cap 2. A no-op on the
+  // STATED path, where `l.live` already IS the stated count.
+  const impliedLive = l.provenance === POOL && Number.isInteger(s.implLive)
+    ? Math.max(l.live, s.implLive)
+    : l.live;
+  const deficit = s.implCap - impliedLive;
   // The caller's own numbers, when it stated them anyway and the pool
   // disagrees. Printed back rather than dropped: the disagreement is
   // legitimate — a member dispatched outside the pool is live and invisible to
