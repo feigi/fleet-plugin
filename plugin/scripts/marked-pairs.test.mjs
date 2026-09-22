@@ -350,7 +350,7 @@ test("real tree: no pair's line carries the other harness's dialect token", () =
   assert.deepEqual(offenders, []);
 });
 
-test("real tree: every same-rule pair is equal after stripping dialect tokens, or is a named exception on a filed issue (#1362)", () => {
+test("real tree: every same-rule pair is equal after stripping dialect tokens, or is a named exception on a filed issue", () => {
   const { pairs } = pairTree(REPO);
   const offenders = [];
   for (const p of pairs.filter((p) => classifyPair(p) === "same-rule")) {
@@ -382,7 +382,18 @@ test("real tree: KNOWN_EQUALITY_EXCEPTIONS is exactly the set of same-rule pairs
   const needExemption = sameRule.filter((p) => normalizeDialect(p.claude, p.file) !== normalizeDialect(p.omp, p.file));
 
   for (const ex of KNOWN_EQUALITY_EXCEPTIONS) {
-    assert.equal(ex.issue, 1362, `${ex.file}: every exception must cite the filed issue (#1362)`);
+    // The number, not ONE number. This read `assert.equal(ex.issue, 1362)`
+    // while #1362 was the only filing behind the list. #1590 is the second,
+    // and a pin on the first ticket's number would have forced its entry to
+    // cite a ticket it was not filed on — a citation that reads as provenance
+    // and is not one. What the list owes is that every entry NAMES a filed
+    // issue, which is what makes an exemption visible and bounded; the
+    // membership half below, which is the guard against a silent addition, is
+    // untouched by this and still pins the list's exact size and contents.
+    assert.ok(
+      Number.isInteger(ex.issue) && ex.issue > 0,
+      `${ex.file}: every exception must cite the issue it was filed on, got ${JSON.stringify(ex.issue)}`,
+    );
     const p = needExemption.find((p) => p.file === ex.file && p.claude === ex.claude && p.omp === ex.omp);
     assert.ok(p, `KNOWN_EQUALITY_EXCEPTIONS names ${ex.file}: ${JSON.stringify(ex.claude)}, which no real pair still needing exemption occupies — stale entry`);
   }
