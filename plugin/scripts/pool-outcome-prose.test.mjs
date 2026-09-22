@@ -90,6 +90,13 @@ test("run-team/SKILL.md: both new pool-outcome paragraphs sit inside the pool's 
   assert.match(section(), phrase("Refilling a freed pool worker never re-pushes the ticket that just left it"));
 });
 
+// #1591's first acceptance mechanism: a worker's own outcome is read off the
+// member itself, never off the pool's own (once-per-drain) settle — deleting
+// this sentence left every other test in this file green.
+test("run-team/SKILL.md: a worker's own outcome is read off the member, never off the pool", () => {
+  assert.match(outcomeParagraph(), phrase("a worker's own outcome is never read off the pool — read it off the member"));
+});
+
 // #1591's acceptance: "Completion detection for successful members is
 // unchanged." Re-pinned here, verbatim, byte-for-byte identical to #1590's own
 // pin in pool-dispatch-dialect-prose.test.mjs — this ticket's insertion sits
@@ -98,14 +105,17 @@ test("run-team/SKILL.md: completion detection for successful members is unchange
   assert.match(
     section(),
     /\*\*Completion\s+detection\s+is\s+unchanged\.\*\*\s+Members\s+report\s+as\s+they\s+do\s+today\s+and\s+the\s*\n?monitor\s+edges\s+stay[\s\S]{0,260}trade\s+a\s+dead\s*\n?refill\s+edge\s+for\s+a\s+dead\s+completion\s+edge/,
+    "the block no longer holds completion detection where it is, or no longer says why: routing consumption through the pool trades a dead refill edge for a dead completion edge",
   );
   assert.match(
     section(),
     /the\s+ledger\s+still\s+records\s+one\s+Dispatch\s+per\s+member,\s+so\s*\n?member-outcomes\s+scraping\s+and\s+tier\s+accounting\s+are\s+unaffected/,
+    "the block no longer keeps one ledger Dispatch per member, which is what member-outcomes scraping and tier accounting are derived from",
   );
   assert.match(
     section(),
     /A\s+pool-dispatched\s*\n?member's\s+transcript\s+must\s+be\s+reachable\s+exactly\s+as\s+a\s+hand-dispatched\s+one's\s+is/,
+    "the block no longer requires a pool-dispatched member's transcript to be reachable the way a hand-dispatched one's is, so the two populations could silently diverge",
   );
 });
 
@@ -120,7 +130,7 @@ test("run-team/SKILL.md: the pool-outcome paragraph is the very next paragraph a
   const anchor = "first pooled wave and report it if it is not.";
   const slice = between(section(), anchor, "**A pool item settling with nothing", "run-team/SKILL.md gap between completion-detection and pool-outcome paragraphs");
   const gap = slice.slice(anchor.length);
-  assert.equal(gap, "\n\n", `expected exactly one blank line between the two paragraphs, got ${JSON.stringify(gap)}`);
+  assert.ok(/^\n[ \t]*\n$/.test(gap), `expected exactly one blank line between the two paragraphs, got ${JSON.stringify(gap)}`);
 });
 
 // Settle (CONTEXT.md § Coordination) is three states on omp, and the pool
@@ -182,8 +192,10 @@ test("run-team/SKILL.md: a died item recovers exactly as the Member-killed row d
 // the collapse a future "simplification" would reach for, may appear anywhere
 // in the block this paragraph sits in.
 test("run-team/SKILL.md: no nearby text lets silence alone stand in for a bail or a confirmed death", () => {
-  assert.doesNotMatch(section(), /silence (?:is|means|counts as) (?:a |an )?(?:clean )?bail/i);
-  assert.doesNotMatch(section(), /(?:always|automatically) demote/i);
+  assert.doesNotMatch(section(), /silence\s+(?:is|means|counts\s+as)\s+(?:an?\s+)?(?:clean\s+)?bail/i);
+  assert.doesNotMatch(section(), /(?:always|automatically)\s+demote/i);
+  assert.doesNotMatch(section(), /\b(?:is|are)\s+demoted\b/i);
+  assert.doesNotMatch(section(), /\bdemoted\b[\s\S]{0,40}\blike\s+(?:any\s+)?other\s+bail\b/i);
 });
 
 // #1591's second acceptance, table-driven over the two scopes a demotion must
@@ -210,10 +222,32 @@ test("run-team/SKILL.md: the refill-safety paragraph ties the exclusion to the S
   assert.match(refillParagraph(), phrase("the same `candidates.mjs --require-label ready-for-agent` scan phase 0 already runs for a hand-dispatch pick"));
 });
 
+// #1591's second acceptance also requires the check to be PER-PUSH, not once
+// per wave — a stale-but-once-checked label is the same failure a demotion
+// exists to block. Both the timing clause and the sentence naming the
+// stale-shortlist failure it blocks went unpinned in an earlier draft of this
+// file: dropping either left every test here green.
+test("run-team/SKILL.md: the refill-safety paragraph's label check runs immediately before every push, blocking a stale-shortlist push", () => {
+  assert.match(refillParagraph(), phrase("immediately before every push"));
+  assert.match(refillParagraph(), phrase("A push that instead draws from a list built before the demotion landed is the failure this line blocks"));
+});
+
 // The phrase this paragraph borrows must be the REAL phase-0 invocation, not a
 // copy that has drifted from it — cross-checked against the file's own text
 // outside this block, the same way #1590's own dialect test cross-checks its
 // pair against the tree rather than trusting a local copy.
 test("run-team/SKILL.md: the borrowed candidates.mjs invocation matches phase 0's own, not a stale copy", () => {
-  assert.match(RUN_TEAM, /`~\/\.fleet\/bin\/fleet-run candidates\.mjs\s+--require-label ready-for-agent`/);
+  const borrowed = refillParagraph().match(/`candidates\.mjs\s+--require-label\s+ready-for-agent`/);
+  assert.ok(borrowed, "the refill-safety paragraph no longer quotes a `candidates.mjs --require-label ready-for-agent` invocation to cross-check against phase 0");
+  const phase0Scan = between(
+    RUN_TEAM,
+    "**Candidate scan**",
+    "2. Dependency scan",
+    "run-team/SKILL.md phase 0 candidate-scan step",
+  );
+  assert.match(
+    phase0Scan,
+    /`~\/\.fleet\/bin\/fleet-run\s+candidates\.mjs\s+--require-label\s+ready-for-agent`/,
+    "phase 0's own candidate-scan step no longer contains the exact `candidates.mjs --require-label ready-for-agent` invocation, closing backtick immediately after — the refill paragraph's borrowed phrase has drifted from it",
+  );
 });
