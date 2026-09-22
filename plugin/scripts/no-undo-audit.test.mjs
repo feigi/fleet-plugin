@@ -3409,13 +3409,41 @@ test("an unmatched `)` from a case arm does not swallow the statements after it"
     ["case x in x) a", " b", " esac", " c"],
   );
 });
-
-test("no stderr write in the script can abort the run under errexit (#1514)", () => {
-  const joined = readFileSync(SCRIPT, "utf8").replace(/\\\n\s*/g, " ").split("\n");
-  const writes = joined
+// Shared by the fd-2 write census below and its self-referential-emit
+// regression test: extracting this keeps both walking the exact same
+// filters instead of two copies drifting apart.
+function censusStderrWrites(lines) {
+  const writes = lines
     .filter((l) => !/^\s*#/.test(l))
     .flatMap(splitTopLevelStatements)
     .filter((s) => s.includes(">&2"));
+
+  // A `|| emit` tail only reads as guarded because `emit`'s OWN segment is
+  // checked separately, in this same pass — delegating to it is how a
+  // write that can't speak for itself borrows a guard that already lives
+  // elsewhere. `emit()`'s own definition can't borrow from itself that
+  // way: a `|| emit "lost"` fallback on emit's own write recurses into the
+  // same failing write instead of reaching a segment this pass has
+  // already cleared, and hangs rather than terminating (measured: exit
+  // 124, no termination). `delegates` is the exemption both filters below
+  // share, with that one carve-out.
+  const delegates = (s) =>
+    /^\s*\)?\s*\|\|\s*emit\b/.test(s.slice(s.lastIndexOf(">&2") + 3)) &&
+    !/^\s*emit\(\)/.test(s.trim());
+
+  const unguarded = writes.filter(
+    (s) => !/^\s*\)?\s*\|\|\s*:(\s|;|$)/.test(s.slice(s.lastIndexOf(">&2") + 3)) && !delegates(s),
+  );
+  const untrapped = writes.filter(
+    (s) => !/\(\s*trap\s+''\s+PIPE\s*;/.test(s) && !delegates(s),
+  );
+  return { writes, unguarded, untrapped };
+}
+
+
+test("no stderr write in the script can abort the run under errexit (#1514)", () => {
+  const joined = readFileSync(SCRIPT, "utf8").replace(/\\\n\s*/g, " ").split("\n");
+  const { writes, unguarded, untrapped } = censusStderrWrites(joined);
 
   // Without this the filter could silently match nothing — a regex typo, a
   // rename — and the assertion below would pass on an empty list, which is
@@ -3436,25 +3464,40 @@ test("no stderr write in the script can abort the run under errexit (#1514)", ()
   assert.equal(writes.length, 2,
     `render and emit are the only statements that may write to fd 2 directly; found ${writes.length}`);
 
-  const unguarded = writes.filter((s) => !/^\s*\)?\s*\|\|\s*(:(\s|;|$)|emit\b)/.test(s.slice(s.lastIndexOf(">&2") + 3)));
   assert.deepEqual(unguarded.map((s) => s.trim()), [],
     "each of these ends the script on its own write status under `set -e`, and 1 out of this script is REFUSED — append `|| :` or route the fallback through `emit`, which already does");
 
   // #1700 made `emit()`'s `( trap '' PIPE; … )` wrapper the ONLY SIGPIPE
-  // guard for all 36 `die` call sites — `die` now calls `emit` instead of
+  // guard for all 29 `die` call sites — `die` now calls `emit` instead of
   // carrying its own copy. #1685 moved `render`'s fallback write behind the
   // same call, so its trap now lives in `emit`'s OWN segment rather than
   // render's — the `unguarded` filter above already treats a `|| emit` tail
-  // as guarded for that reason, and this filter has to agree: a segment
-  // whose write reaches fd 2 only by calling `emit` carries no trap text of
-  // its own to find, and is not untrapped for it, because `emit`'s segment
-  // is checked separately, right here, in the same pass. `|| :` only
-  // swallows the *status* a killed write would leave behind, not the
-  // SIGPIPE that killed it, which is why a bare `|| :` tail (with no `emit`
-  // call) still has to show the trap substring in its own segment to pass.
-  const untrapped = writes.filter((s) => !/\(\s*trap\s+''\s+PIPE\s*;/.test(s) && !/^\s*\)?\s*\|\|\s*emit\b/.test(s.slice(s.lastIndexOf(">&2") + 3)));
+  // as guarded for that reason (unless the segment IS emit's own
+  // definition — see `censusStderrWrites`'s `delegates`), and this filter
+  // has to agree: a segment whose write reaches fd 2 only by delegating to
+  // `emit` carries no trap text of its own to find, and is not untrapped
+  // for it, because `emit`'s segment is checked separately, right here, in
+  // the same pass. `|| :` only swallows the *status* a killed write would
+  // leave behind, not the SIGPIPE that killed it, which is why a bare
+  // `|| :` tail (with no `emit` call) still has to show the trap substring
+  // in its own segment to pass.
   assert.deepEqual(untrapped.map((s) => s.trim()), [],
     "each of these can deliver SIGPIPE and kill the script instead of turning a dropped write into EPIPE — wrap it in `( trap '' PIPE; … )` or route it through `emit`, which already does");
+});
+
+// #1703 found that treating any `|| emit` tail as guarded let `emit` guard
+// ITSELF: a self-referential `|| emit "lost"` fallback on emit's own write
+// recurses into the same failing write instead of reaching a segment this
+// census clears elsewhere, and hangs rather than terminating (measured:
+// exit 124, no termination). `censusStderrWrites`'s `delegates` carve-out
+// is what keeps that shape out of the real script; this proves the
+// carve-out actually fires, not just that the real script currently lacks
+// the shape.
+test("a self-referential emit() fallback does not pass the fd-2 write census (#1703)", () => {
+  const selfReferential = ["emit() { ( trap '' PIPE; printf '%s\\n' \"$1\" >&2 ) || emit \"lost\"; }"];
+  const { unguarded } = censusStderrWrites(selfReferential);
+  assert.deepEqual(unguarded.map((s) => s.trim()), [selfReferential[0].replace(/;\s*}$/, "").trim()],
+    "emit() falling back to calling itself must still be flagged unguarded — it recurses into the same failing write and hangs instead of terminating");
 });
 
 /**
