@@ -643,7 +643,11 @@ test("every workflow file parses — no other reader in this repo would notice a
     registrable.length > 0,
     "no registrable workflow file found in workflows/ — this parse check verified nothing",
   );
-  for (const f of registrable)
+  for (const f of registrable) {
+    // Read outside the parse assertion below: a read failure (e.g. a dangling
+    // symlink) must not be reported as "does not parse" — the two are
+    // different faults with different remedies.
+    const source = readFileSync(join(WORKFLOWS, f), "utf8").replace(/^export /m, "");
     assert.doesNotThrow(
       () =>
         new AsyncFunction(
@@ -655,8 +659,9 @@ test("every workflow file parses — no other reader in this repo would notice a
           "phase",
           "log",
           "workflow",
-          readFileSync(join(WORKFLOWS, f), "utf8").replace(/^export /m, ""),
+          source,
         ),
       `workflows/${f} does not parse`,
     );
+  }
 });

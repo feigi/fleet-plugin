@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
@@ -166,10 +166,15 @@ test("discovery splits the tree the way the harness's loader does", () => {
       "README.md",
     ])
       writeFileSync(join(dir, rel), "export const meta = {};\n");
+    // The loader's own admission test is `isFile() || isSymbolicLink()` — a
+    // symlink to a flat `.js` file must register exactly like a real file, or
+    // this guard's symlink branch (workflow-files.mjs) is dead code with a
+    // comment for a test.
+    symlinkSync(join(dir, "review-pr.js"), join(dir, "linked.js"));
     const { registrable, unregistrable } = discoverWorkflowFiles(dir);
     assert.deepEqual(
       registrable,
-      ["merge-wave.js", "review-pr.js"],
+      ["linked.js", "merge-wave.js", "review-pr.js"],
       "the registrable set is not exactly the flat .js files the loader reaches",
     );
     assert.deepEqual(
@@ -190,8 +195,36 @@ test("discovery splits the tree the way the harness's loader does", () => {
       /extension/,
       "a near-miss extension's refusal does not name the extension",
     );
+    // The compound case: `nested/deep.mjs` is BOTH nested and wrong-extension.
+    // The source's own comment says the nested cause wins because it is the
+    // one that stays true even after the extension is fixed — pin that
+    // priority as a tested contract, not only a comment, since the ternary
+    // choosing between the two reasons has no other coverage.
+    assert.match(
+      unregistrable.find((u) => u.path === join("nested", "deep.mjs")).why,
+      /nested/,
+      "a file that is both nested and wrong-extension must report the nested cause first — moving it up a level without renaming it still leaves it dead, so the extension reason alone would send the reader to a fix that does not work",
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The readdir-failure branch (workflow-files.mjs) has its own design
+// rationale comment — report absence as an empty split rather than throw —
+// and no test exercised it: replacing the catch body with a throw left every
+// test in this file green.
+test("discovery over a missing workflows/ directory reports an empty split rather than throwing", () => {
+  const base = mkdtempSync(join(tmpdir(), "workflow-files-missing-"));
+  try {
+    const dir = join(base, "never-populated");
+    assert.deepEqual(
+      discoverWorkflowFiles(dir),
+      { registrable: [], unregistrable: [] },
+      "a missing workflows/ directory should report an empty split so the caller's floor assertion can refuse it, not throw",
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
   }
 });
 

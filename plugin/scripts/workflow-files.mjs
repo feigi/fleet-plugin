@@ -65,7 +65,7 @@ export const WORKFLOWS = join(import.meta.dirname, "..", "workflows");
 // Anything that reads as a script. A `.md` note or a stray `.DS_Store` beside a
 // workflow is not this guard's business; a file the author plainly meant as
 // code is.
-const SCRIPT = /\.(js|mjs|cjs|ts)$/;
+const SCRIPT = /\.(js|mjs|cjs|ts)$/i;
 
 // The one shape the loader takes: flat, `.js`.
 const REGISTRABLE = /\.js$/;
@@ -88,10 +88,16 @@ export function discoverWorkflowFiles(dir = WORKFLOWS) {
   let entries;
   try {
     entries = readdirSync(dir, { recursive: true, withFileTypes: true });
-  } catch {
-    // Report the absence as an empty set and let the caller refuse it. A throw
-    // here names the wrong thing: the caller's floor assertion says "this guard
-    // asserted over nothing", which is the sentence a reader needs.
+  } catch (e) {
+    // ENOENT — no workflows/ directory at all. Report the absence as an empty
+    // set and let the caller refuse it. A throw here names the wrong thing:
+    // the caller's floor assertion says "this guard asserted over nothing",
+    // which is the sentence a reader needs. Any OTHER readdir failure
+    // (EACCES, ENOTDIR, ...) is a real fault, not an absence, and must
+    // propagate — folding it into the same empty result makes a permissions
+    // or mount problem indistinguishable from a directory that was never
+    // there.
+    if (e.code !== "ENOENT") throw e;
     return { registrable: [], unregistrable: [] };
   }
   const registrable = [];
