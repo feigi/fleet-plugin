@@ -1245,6 +1245,44 @@ function workspaceHash(key) {
   return h >>> 0;
 }
 
+// The one spelling of "this value is a workspace identity", read by every
+// side of the cockpit handshake (#1661). The invariant is that null and the
+// empty string are never an identity to match on, and it used to be carried
+// by two independently-written guards — resolveCockpitInstance()'s
+// `workspace === null` below and probeCockpitWorkspace()'s
+// `typeof w === "string" && w !== ""` — correct only because both were
+// written consistently, not because anything stopped one from moving without
+// the other. What a drift buys is silent and cross-workspace: let the
+// construction side call the empty string an identity while the parsing side
+// still accepts it, and two cockpits in two different workspaces, neither
+// with an identity established, match each other's board and one reuses the
+// other — a hand-off nothing else in this file would refuse, since the
+// degrade arm's "no identity to match on" is the only thing keeping a held
+// port fatal there.
+//
+// A non-empty string, and nothing more: no trim(). A wholly-whitespace
+// answer to `--git-common-dir` is already refused one layer down, by
+// git-env.mjs's workspaceDirFromGitCommonDir(), so no identity reaching
+// either call site can be whitespace — the construction side gets that
+// function's return value and the parsing side gets a payload some process
+// wrote from it. A second whitespace rule here would be one more guard of
+// exactly the kind this predicate exists to stop writing.
+//
+// Not exported, for workspaceHash()'s reason above it: nothing outside this
+// file asks the question, and every widening of it is already pinned from
+// outside through the two call sites — mutation-verified for this extraction
+// (#1661), each mutant killed by a test that was already in board.test.mjs:
+// `v != null && v !== ""` by the probe's not-a-string row, `typeof v ===
+// "string"` by its empty-workspace row, a degrade arm publishing `""` by
+// resolveCockpitInstance's three degrade rows, and dropping it from
+// serve()'s `scannable` by the CLI's held-port-on-the-degrade-arm row. So no
+// test is added here: sharing the predicate is what makes the construction
+// side's rows constrain the parsing side and back, which is a STRONGER suite
+// than before, not one with a hole a new row could fill.
+function isWorkspaceId(v) {
+  return typeof v === "string" && v !== "";
+}
+
 /**
  * The cockpit's instance seam, and the only one. Given a cwd, the string
  * `git rev-parse --git-common-dir` answered with — INJECTED, never read in
@@ -1276,7 +1314,14 @@ export function resolveCockpitInstance({ cwd = process.cwd(), gitCommonDir, port
   // straight over the top of one the caller explicitly asked for.
   const forced = port != null;
   const workspace = workspaceDirFromGitCommonDir(gitCommonDir, cwd, { canonicalise: true });
-  if (workspace === null) {
+  // Asked as `!isWorkspaceId(...)` rather than `=== null`: the question this
+  // arm answers is "was an identity established", and what counts as one is
+  // the predicate above — the same one the probe parses with, so the two
+  // sides cannot answer it differently. The behaviour is today's exactly:
+  // workspaceDirFromGitCommonDir() answers null for every unusable
+  // `--git-common-dir` and dirname() cannot answer "". It is the SHAPE of
+  // the question that stops being written out twice.
+  if (!isWorkspaceId(workspace)) {
     // Degrade, never die: a non-git or otherwise unusual checkout still gets
     // a board. The wording is defaultLedgerPath()'s rather than a second
     // dialect for the same failure, trailing parenthetical included — that
@@ -1437,10 +1482,12 @@ export function probeCockpitWorkspace(port, timeoutMs = PROBE_TIMEOUT_MS) {
         res.on("end", () => {
           let w;
           try { w = JSON.parse(body)?.workspace; } catch { finish(null); return; }
-          // A non-string, or the empty string, is no identity: `=== ours`
-          // would be false for the first anyway, but an empty string could
-          // match an empty workspace and there must be no such thing.
-          finish(typeof w === "string" && w !== "" ? w : null);
+          // Exactly the construction side's rule, because it is literally
+          // the same predicate (#1661): a non-string, or the empty string,
+          // is no identity. `=== ours` would be false for the first anyway,
+          // but an empty string could match an empty workspace and there
+          // must be no such thing.
+          finish(isWorkspaceId(w) ? w : null);
         });
       });
       req.on("error", () => finish(null));
@@ -1553,11 +1600,11 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // process keep what it bound. A held candidate is probed the same way,
   // one at a time as the loop reaches it. Neither check runs at all when
   // this workspace has no identity to match on: an explicit --port
-  // (`!instance.derived`) and the degrade arm (`!instance.workspace`)
+  // (`!instance.derived`) and the degrade arm (no `isWorkspaceId` identity)
   // never had a handshake to reach in the first place, so a held port for
   // either stays fatal, exactly as it was before #1585 existed.
   const candidates = cockpitPorts(instance);
-  const scannable = instance.derived && instance.workspace;
+  const scannable = instance.derived && isWorkspaceId(instance.workspace);
   let server = null;
   for (let i = 0; i < candidates.length; i++) {
     const candidate = candidates[i];
