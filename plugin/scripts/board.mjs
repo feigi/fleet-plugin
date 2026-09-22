@@ -1364,8 +1364,10 @@ function gitCommonDir() {
 // of the scan: the worst case is ATTEMPTS × (a bind plus a probe), so a
 // workspace whose derived port sits in a crowded corner of the range still
 // fails in seconds rather than walking all 512. It also bounds how far a
-// cockpit can land from the stable URL its workspace derives — a board eight
-// ports from where it is bookmarked is still findable; one 400 away is not.
+// cockpit can land from the stable URL its workspace derives — a board a
+// handful of ports from where it is bookmarked is still findable by hand,
+// while one hundreds of ports away (where an unbounded scan could leave it)
+// typically is not.
 const PORT_ATTEMPTS = 8;
 
 /**
