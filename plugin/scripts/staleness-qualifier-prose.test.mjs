@@ -98,12 +98,73 @@
 // replace a width with a MECHANISM; state the property, and attach the
 // discipline and the document to any width kept. Loosening the token to admit
 // the split would let `behind- count` read as the qualifier.
+//
+// THE FOURTH PIN (#1218) — step 4's OWN instance of the same qualifier. Step 4
+// says "a `rebase-check` red or heavy jobs `skipped` **solely from a non-zero
+// behind-count** never clears by waiting", and until #1218 nothing pinned it:
+// measured, `solely` → `mostly` at step 4 with step 6 and SKILL.md untouched
+// left this suite at tests 3 / pass 3 / fail 0. Same load-bearing word, third
+// site — a `rebase-check` red has several causes and only the behind-count one
+// is benign, so weakening it there turns "this staleness is not a failure" into
+// "staleness is not a failure" and licenses waiting-out, or labelling past, a
+// genuine red.
+//
+// It is NOT sliced by `rule()`, and that is not a style choice. `paragraph()`
+// ends at the next blank line, and this document writes one long line per
+// numbered step with NO blank line between them — so the first blank line after
+// step 4 sits below step SIX. Measured: a blank-line slice anchored at step 4
+// returns 10043 bytes carrying steps 4, 5 and 6, against step 6's own 2138.
+// Step 6 only works with this bound because it is the LAST item before the
+// blank line. The over-slice is not theoretical here: `a `rebase-check` red or
+// heavy jobs `skipped`` occurs TWICE in this document — once opening step 4's
+// clause, once as step 6's MECHANISM — so a step-4 pin bounded by the blank
+// line is answerable by step 6's copy, exactly the "second copy of a clause
+// lying around" the SLICE SIZE note above names as this suite's own history.
+// `finisher-dispatch-premise-prose.test.mjs` reached the same conclusion for a
+// different span of this same step 4; this imports the `betweenPhrases` bound
+// it uses (`\n\d+\.\s`, the next ordered-list marker at column 0) rather than
+// hand-rolling a second copy — a local copy is the defect, not a style choice.
+//
+// Both bounds sit OUTSIDE the pinned clause by construction, as that sibling's
+// do: a mutant that rewrote a bound makes the slice THROW rather than the pin
+// redden, which is the harness losing its footing, not a pin discriminating.
+// Both are single-hit in this document:
+//   grep -cF "**Staleness is not a failure:**"       → 1
+//   grep -cF "below for what it looks like and why"  → 1
+//
+// Both are also DIGIT-FREE, and that is load-bearing rather than incidental —
+// it is the one thing measured here that the sibling's note does not already
+// cover. This bound reads `\n\d+\.\s` as "the next ordered-list item", which is
+// true of the document as authored and FALSE of a reflowed copy: a wrap point
+// landing before any `<digit>.` puts that digit at column 0, where the bound
+// cannot tell a wrapped continuation from a new list item and cuts the scope
+// there. Step 4's prose is full of them — it says "repeat from 3", "go to 6",
+// "straight to 6". Measured, the first anchors tried here were `fix a
+// **genuine** failure and repeat from 3` and `Stop watching and go to 6`: a
+// plain WHITESPACE-only rewrap at 80 cols (`break_on_hyphens=False`, the wrap
+// this file's header promises is a no-op) pushed `3.` to column 0, the bound
+// cut immediately after the start anchor, and the pin reddened with `slice end
+// anchor "…" moved` — a false red, wearing the exact misattributing message
+// THE REFLOW CEILING above warns a reader about. The anchors below span the
+// stretch of step 4 that contains no digit at all, so no wrap point inside this
+// slice can manufacture a list marker. Verified green under whitespace-only
+// rewraps at 60/72/80/100/140/200/400 cols.
+//
+// THE REFLOW CEILING above reaches this pin too, through its CLAUSE half only:
+// QUALIFIER carries three hyphenated tokens (`rebase-check`, `non-zero`,
+// `behind-count`), any one of which a hyphen-breaking wrapper splits out of the
+// match. Its two ANCHORS carry none — unlike STEP_6's `6. Diff-check green` and
+// SKILL.md's `**The fix-applier pushes and exits`, both of which do — so the
+// anchor half of that ceiling is closed here by the choice of anchor rather
+// than by luck, and a hyphen-breaking rewrap reds this pin through the clause
+// (a plain comparison failure) instead of through `slice anchor "…" moved`,
+// which is the message that misattributes the cause.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { paragraph, phrase } from "./prose-pin.mjs";
+import { betweenPhrases, paragraph, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const read = (p) => readFileSync(join(REPO, ...p.split("/")), "utf8");
@@ -148,5 +209,29 @@ test(`${REVIEW_AND_FIX} step 6 keeps the mechanism behind "a behind PR never rea
     rule(REVIEW_AND_FIX, STEP_6),
     phrase(MECHANISM),
     `${REVIEW_AND_FIX} step 6 no longer says "${MECHANISM}". Stripped of it the line asserts only the consequence — that a behind PR never reaches exit-0 green — and leaves the reader to reconstruct WHY from separated sentences elsewhere. #182 dropped this clause alongside the behind-count qualifier and #196 restored both. Restore it, or re-anchor MECHANISM in this file to the new wording. Unlike CLAUSE this has no twin: SKILL.md's copy of the same gate carries the consequence only.`,
+  );
+});
+
+// Step 4's own staleness sentence, bounded inside step 4's list item — see THE
+// FOURTH PIN in the header for why this is not `rule()`.
+const STEP_4_FROM = "**Staleness is not a failure:**";
+const STEP_4_TO = "below for what it looks like and why";
+const STEP_4_WHAT = `${REVIEW_AND_FIX} step 4 staleness qualifier`;
+
+const step4Staleness = (text = read(REVIEW_AND_FIX)) =>
+  betweenPhrases(text, STEP_4_FROM, STEP_4_TO, STEP_4_WHAT, { bound: /\n\d+\.\s/ });
+
+// The qualifier as ONE span, cause through consequence. Never the bare word:
+// `solely` occurs twice in this document, so a keyword pin would be answered by
+// step 6's own `**solely** off that count` — the same out-of-clause pass the
+// slice bound exists to deny, reached through the regex instead.
+const QUALIFIER =
+  "a `rebase-check` red or heavy jobs `skipped` **solely from a non-zero behind-count** never clears by waiting";
+
+test(`${REVIEW_AND_FIX} step 4 qualifies the never-clearing staleness as solely a non-zero behind-count`, () => {
+  assert.match(
+    step4Staleness(),
+    phrase(QUALIFIER),
+    `${STEP_4_WHAT}: step 4 no longer says "${QUALIFIER}". This is the sentence telling a standalone reviewer WHICH red to stop watching rather than fix: only the behind-count cause is benign, so dropping or weakening \`solely\` turns "this staleness is not a failure" into "staleness is not a failure" and licenses stopping the watch on a genuine red. That is #182/#196's drift at a third site (#1218), and step 6 and SKILL.md carrying their copies is exactly what makes a one-sided drop here silent. Restore the qualifier, or re-anchor QUALIFIER in this file to the new wording.`,
   );
 });
