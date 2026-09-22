@@ -113,17 +113,26 @@
 // ends at the next blank line, and this document writes one long line per
 // numbered step with NO blank line between them — so the first blank line after
 // step 4 sits below step SIX. Measured: a blank-line slice anchored at step 4
-// returns 10043 bytes carrying steps 4, 5 and 6, against step 6's own 2138.
+// returns 10125 bytes carrying steps 4, 5 and 6, against step 6's own 2158.
 // Step 6 only works with this bound because it is the LAST item before the
-// blank line. The over-slice is not theoretical here: `a `rebase-check` red or
-// heavy jobs `skipped`` occurs TWICE in this document — once opening step 4's
-// clause, once as step 6's MECHANISM — so a step-4 pin bounded by the blank
-// line is answerable by step 6's copy, exactly the "second copy of a clause
-// lying around" the SLICE SIZE note above names as this suite's own history.
+// blank line. The over-slice matters for a LOOSER pin, not for the one this
+// file ships: `a `rebase-check` red or heavy jobs `skipped`` — the QUALIFIER
+// clause's OPENING fragment — occurs TWICE in this document, once opening
+// step 4's clause and once as step 6's MECHANISM, so a bare-keyword or
+// opening-fragment-only pin bounded by the blank line would be answerable by
+// step 6's copy, exactly the "second copy of a clause lying around" the SLICE
+// SIZE note above names as this suite's own history. The full QUALIFIER span
+// pinned below is unique in the document today — a blank-line-bounded pin of
+// the whole span also correctly reds on the `solely` → `mostly` mutation — so
+// `betweenPhrases`'s tighter bound is margin against a future reword that
+// would shorten the pin toward that duplicated opening, not a fix for a
+// present false-green.
 // `finisher-dispatch-premise-prose.test.mjs` reached the same conclusion for a
-// different span of this same step 4; this imports the `betweenPhrases` bound
-// it uses (`\n\d+\.\s`, the next ordered-list marker at column 0) rather than
-// hand-rolling a second copy — a local copy is the defect, not a style choice.
+// different span of this same step 4; this imports the `betweenPhrases`
+// SLICER it uses, not a shared bound — `prose-pin.mjs` exports no bound
+// constant, so the ordered-list-marker regex (`\n\d+\.\s`, the next list item
+// at column 0) is hand-typed identically at both call sites rather than
+// defined once.
 //
 // Both bounds sit OUTSIDE the pinned clause by construction, as that sibling's
 // do: a mutant that rewrote a bound makes the slice THROW rather than the pin
