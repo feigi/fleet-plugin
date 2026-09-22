@@ -350,7 +350,7 @@ test("real tree: no pair's line carries the other harness's dialect token", () =
   assert.deepEqual(offenders, []);
 });
 
-test("real tree: every same-rule pair is equal after stripping dialect tokens, or is a named exception on a filed issue (#1362)", () => {
+test("real tree: every same-rule pair is equal after stripping dialect tokens, or is a named exception on a filed issue", () => {
   const { pairs } = pairTree(REPO);
   const offenders = [];
   for (const p of pairs.filter((p) => classifyPair(p) === "same-rule")) {
@@ -382,7 +382,18 @@ test("real tree: KNOWN_EQUALITY_EXCEPTIONS is exactly the set of same-rule pairs
   const needExemption = sameRule.filter((p) => normalizeDialect(p.claude, p.file) !== normalizeDialect(p.omp, p.file));
 
   for (const ex of KNOWN_EQUALITY_EXCEPTIONS) {
-    assert.equal(ex.issue, 1362, `${ex.file}: every exception must cite the filed issue (#1362)`);
+    // The list is filed on two tickets: #1362 (the first seven entries) and
+    // #1590 (the eighth). A pin on a single ticket number would force every
+    // entry to cite a ticket it was not filed on, so the citation guard is
+    // an enumerated allow-list of the issues this list has actually been
+    // filed on — a typo'd or never-filed issue number still fails (it is
+    // not in the list), and admitting a NEW ticket costs one deliberate
+    // number added here, the same visible-and-bounded property a single-
+    // value pin had.
+    assert.ok(
+      [1362, 1590].includes(ex.issue),
+      `${ex.file}: every exception must cite one of the issues this list was filed on, got ${JSON.stringify(ex.issue)}`,
+    );
     const p = needExemption.find((p) => p.file === ex.file && p.claude === ex.claude && p.omp === ex.omp);
     assert.ok(p, `KNOWN_EQUALITY_EXCEPTIONS names ${ex.file}: ${JSON.stringify(ex.claude)}, which no real pair still needing exemption occupies — stale entry`);
   }

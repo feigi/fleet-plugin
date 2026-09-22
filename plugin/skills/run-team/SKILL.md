@@ -1074,6 +1074,108 @@ unconditional re-fetch of an issue the controller already has open, on every
 dispatch and every refill — the fetch the prompt still carries is the backstop
 for a brief that turns out to be insufficient, not the default path.
 
+**Implementer slots are refilled to the cap from the staged pool, and a refill
+is a new member under a new name.** That much is true on both harnesses and is
+the whole of what either of them promises: the cap is the fleet's own
+accounting rather than anything the runtime enforces, a refill is a fresh
+member and never a wake of one that already ran, and no knob on this path works
+on one harness only. Where the refill comes FROM is what differs.
+
+CLAUDE: a freed slot is refilled by re-entering phase 1 then phase 2 and making one more `Agent` call under a name no member has held, so the refill is a level-check you run — on the edges Phase 3 already handles, and on the heartbeat — because nothing here holds a queue that could hand the freed slot its next ticket by itself.
+OMP: a freed slot is refilled by the staging wave's own dispatch pool, which hands a queued item to the freed worker with no completion event for you to observe — `eval`'s `workpool(agent, name, context, tools)`, opened once per wave, read for the level condition, and pushed to the number of items the tick says may be in flight.
+
+**Everything below is the pool's own discipline and therefore omp's alone.** The
+Claude side refills exactly as its line says and exactly as it does today, and
+nothing in this block touches the reviewer rows, the merge-bot rows, or either
+of their instructions: the blast radius is the implementer row.
+
+**Preflight before you open one, and refuse rather than open a pool you cannot
+trust.** `~/.fleet/bin/fleet-run pool-preflight.mjs` reads the *effective*
+`eval.workpool.freshAgents` and exits 2 unless it reads `true`; at the schema
+default of `false` a queued item lands on an idle worker and extends that
+worker's transcript, which is a wake — the one thing a refill may never be, and
+silent when it happens. A non-zero exit is not a thing to route around: dispatch
+that wave by hand, exactly as the Claude line above describes, and report the
+key. **Never set it yourself.** It is session-wide configuration governing every
+other pool in the session, so it is install-time operator work (ADR 0003 point
+9), never something a run writes in order to dispatch a wave.
+
+**One named pool per phase-0 staging wave, named after that wave.** A pool
+settles and closes on its first full drain, and a continuously refilled queue
+drains whenever supply momentarily empties — so the wave is the pool's natural
+lifetime, and the next staging opens a NEW named pool rather than pushing to a
+closed one.
+
+**The cap is fleet accounting; the pool's worker bound is not.** A pool is
+bounded by the live `task.maxConcurrency` — the ceiling reviewers, merge bots
+and snapshot agents already share — and knows nothing about the implementer cap.
+So the tick decides how many items may be in flight and you push to that number.
+This buys refill semantics and zero throughput; nothing here raises parallelism.
+
+**Read the implementer row's liveness out of the pool instead of reciting it.**
+`reconcile()` is exported and I/O-free, so the `eval` cell that owns the pool
+imports `fleet-tick.mjs` (`~/.fleet/bin/fleet-run --path fleet-tick.mjs` resolves
+it) and passes `poolLiveness: {live, queued}` — the fleet's own two names, mapped
+from the pool's status AT THAT BOUNDARY, which is why `fleet-tick` names no
+runtime field and no test of it asserts one. The row then prints
+`counts=pool-derived`, and a stated count that disagrees prints beside it as
+`stated-unused=` rather than silently replacing it. **Absent or unreadable pool
+status is a REFUSE row, never a zero** — a zero-live reading is a full cap's
+worth of dispatch off a pool nobody read, which is the over-dispatch direction
+the flags' own refusal exists to block. There is no flag for this and there is
+not meant to be: the CLI's counts are caller-stated by definition, so a flag
+carrying a number you read out of the pool would be a stated count wearing the
+pool's name.
+
+**The alternate-tier member is dispatched outside the pool, exactly as today,
+and still counts against the wave's cap.** A pool is homogeneous in its agent —
+it names one definition and nothing else about resolution — while the rule above
+is one implementer per staged wave at the *other* definition, so that one is
+dispatched directly. **No per-call tier or effort anywhere on this path**: tier
+stays the agent definition's own frontmatter (ADR 0005), and a member's Resolved
+tier stays readable from its transcript after a pool dispatch.
+
+**The item carries only what varies; the pool's context carries the rest.**
+Ticket number and distilled brief go on the item. The shared background — the
+snapshot rules, the claim and release procedure, the reporting contract, every
+verbatim block below — is stated once as the pool's context, so a refill does not
+re-send it. The unconditional issue re-fetch stays what the paragraph above makes
+it: the backstop for an insufficient brief, never the default path.
+
+**One claim per item, and the member that receives the item owns it.** Phase 1
+still makes the claim, serially in the main checkout — its rule is measured, and
+a pool would run that race N ways at once — so what the pool changes is *when*
+you claim, not *who* claims: **never stage a claim ahead of the push it belongs
+to.** A claim queued behind items nobody has received yet is a worktree, a branch
+and an `in-progress` label with no member behind them, released by the
+end-of-run sweep rather than by the member that does the work. Claim what you are
+about to push; push what you have just claimed.
+
+**Completion detection is unchanged.** Members report as they do today and the
+monitor edges stay. A pool's aggregate result auto-delivers once, on first full
+drain, and its internal batch jobs are consumed, so per-member completions never
+arrive as events — re-plumbing consumption through the pool would trade a dead
+refill edge for a dead completion edge. A settled result is still Consumed
+deliberately, and the ledger still records one Dispatch per member, so
+member-outcomes scraping and tier accounting are unaffected. A pool-dispatched
+member's transcript must be reachable exactly as a hand-dispatched one's is —
+`hub`, `history://`, and the same `subagents/` scrape — so check that on the
+first pooled wave and report it if it is not.
+
+**Waiting on the pool is the blocked-only path, and it is not a simplification to
+reach for.** `hub` `op:"wait"` on the pool name settles on the pool's DRAIN and
+not per item, so a controller parked there stops servicing the reviewer and merge
+sides — the stall this whole mechanism exists to remove, with the roles swapped.
+It is conditional on having nothing live to service at all; the ordinary path
+READS pool status on the event edges you already handle. A blanket "wait on the
+pool" is a defect.
+
+**A lost or reset kernel is a refusal and a re-stage, never an empty queue.** The
+pool lives in the `eval` kernel, which is process-local and disposed with its
+owner, so a vanished pool reads as a pool that cannot be read — refuse, re-stage
+the wave under a new pool name, and never let a pool nobody can read present as a
+drained one.
+
 One named member per ticket, up to cap, background. Each prompt carries ticket
 number, worktree abs path, branch, and each of these verbatim:
 

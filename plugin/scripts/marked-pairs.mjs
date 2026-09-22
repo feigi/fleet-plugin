@@ -39,10 +39,10 @@
 // ADJACENCY, measured against every real pair landed by #1341/#1344/#1361: a
 // Marked line's partner is the line immediately following it (line N, N+1)
 // after gutter-stripping — never separated by a blank line, never a
-// section-bounded search. Checked against all 13 real pairs currently in the
+// section-bounded search. Checked against all 14 real pairs currently in the
 // tree (five in `member-lifecycle.md`; six restated/original in
 // `run-team/SKILL.md`, including the one embedded inside a `>` blockquote at
-// SKILL.md's fix-applier prompt; one in `commands/review-and-fix.md`; one
+// SKILL.md's fix-applier prompt; two in `commands/review-and-fix.md`; one
 // bare-in-block-comment pair in `workflows/review-pr.js`) — every one is two
 // consecutive physical lines. `pairFile` below never looks past N+1 for a
 // partner, so a marker separated from its partner by so much as a blank
@@ -103,12 +103,13 @@
 // not closed by loosening the check: #1299's ruling text says a same-rule
 // pair's lines "differ only in the dialect tokens... normalised comparison
 // after stripping the tool names and agent-name conventions." Run against
-// the real tree (`marked-pairs.test.mjs`'s real-tree test), SEVEN same-rule
+// the real tree (`marked-pairs.test.mjs`'s real-tree test), EIGHT same-rule
 // pairs currently in the tree fail literal equality after this
 // normalization: Wake (`member-lifecycle.md`, restated `SKILL.md`),
 // Receipts, the worktree/claim-model cwd recipe (#1344), the review-path
-// default statement (`review-and-fix.md`, restated `SKILL.md`, #1361), and
-// `review-pr.js`'s `resumeFor` cross-reference (#1361). One pair
+// default statement (`review-and-fix.md`, restated `SKILL.md`, #1361),
+// `review-pr.js`'s `resumeFor` cross-reference (#1361), and the implementer
+// refill pair at phase 2's dispatch site (#1590). One pair
 // (`review-and-fix.md:8-9`, the `fleet-review-<key>` agent-name pair)
 // passes cleanly — the `fleet-ctl:` strip alone closes that gap, proving
 // normalization is not vacuous. The five does-not-apply pairs all pass
@@ -125,13 +126,16 @@
 // `marked-pairs.test.mjs`) confirms the mechanism does distinguish
 // inversion and token-swap from a benign reword; it is the specific bar of
 // "differ ONLY in dialect tokens" that every real same-rule pair still
-// misses, 7/7 as counted today (updated from 6/6 — #1361 landed three more
-// same-rule pairs restating the same review-path recipe, all added; two
-// pairs earlier counted here reclassified as does-not-apply, see
-// CLASSIFICATION above). Filed as #1362 rather than silently loosened or
+// misses, 8/8 as counted today (updated from 7/7 — #1590 landed the
+// implementer-refill pair, whose omp line carries a pool mechanism the
+// Claude line has no counterpart clause for; before it #1361 landed three
+// more same-rule pairs restating the same review-path recipe, all added,
+// and two pairs earlier counted here were reclassified as does-not-apply,
+// see CLASSIFICATION above). Filed rather than silently loosened or
 // silently rewriting reviewed, mutation-tested prose out from under its own
 // pins; the pairs are named as `KNOWN_EQUALITY_EXCEPTIONS` below, each
-// carrying that issue number, so the exception is visible and bounded
+// carrying the issue it was filed on — #1362 for the seven that predate it,
+// #1590 for the eighth — so the exception is visible and bounded
 // rather than absorbed into the check's normal-case tolerance — a NEW
 // same-rule pair that fails this bar is not grandfathered in by adding
 // itself to this list, and the list's own size is pinned by
@@ -146,7 +150,7 @@
 // lines equal (both sides' tokens map to the same placeholder regardless of
 // which line carries which), so equality cannot be the whole check — only
 // the foreign-token test reds on a swap, and it passes on every real pair
-// today (verified: none of the 13 real pairs names the other harness's tool
+// today (verified: none of the 14 real pairs names the other harness's tool
 // inside its own line).
 //
 // MUTATION PROCEDURE (#1299's four runs, one mutant applied to ONE copy at a
@@ -209,9 +213,10 @@ export const DOES_NOT_APPLY_RE = /does not apply|has no slot for/i;
 export const MD_DIRS = ["skills", "commands", "agents"];
 export const JS_DIRS = ["workflows"];
 
-// #1362 (filed by this ticket): every same-rule pair currently in the tree
-// that does not satisfy literal equality-after-normalization (7/7 as of
-// this writing). Keyed by `file` + BOTH lines' EXACT text — CONTENT, never
+// #1362/#1590: every same-rule pair currently in the tree that does not
+// satisfy literal equality-after-normalization (8/8 as of this writing —
+// #1362 filed the first seven, #1590 the eighth). Keyed by `file` + BOTH
+// lines' EXACT text — CONTENT, never
 // a line number. Review1363 measured why a line-number key fails: rebasing
 // this branch onto #1361 shifted two of the six original entries (SKILL.md
 // 2182→2187, 2472→2477 — #1361 inserts a pair earlier in the same file),
@@ -283,6 +288,13 @@ export const KNOWN_EQUALITY_EXCEPTIONS = [
     omp: "review-core.js's `resumeFor` reports the same crash population and says re-run — no cached `agent()` replay exists under eval (ADR 0004/0005, #1349 gap 1).",
     issue: 1362,
     why: "review-pr.js's resumeFor cross-reference (#1361): omp line names the actual ADR/gap citation, no Claude-side counterpart",
+  },
+  {
+    file: join("skills", "run-team", "SKILL.md"),
+    claude: "a freed slot is refilled by re-entering phase 1 then phase 2 and making one more `Agent` call under a name no member has held, so the refill is a level-check you run — on the edges Phase 3 already handles, and on the heartbeat — because nothing here holds a queue that could hand the freed slot its next ticket by itself.",
+    omp: "a freed slot is refilled by the staging wave's own dispatch pool, which hands a queued item to the freed worker with no completion event for you to observe — `eval`'s `workpool(agent, name, context, tools)`, opened once per wave, read for the level condition, and pushed to the number of items the tick says may be in flight.",
+    issue: 1590,
+    why: "Implementer-refill pair (#1590): the omp line's pool mechanism — queued item handed to a freed worker with no event — is the divergence itself, so it has no Claude-side counterpart clause to normalize against",
   },
 ];
 
