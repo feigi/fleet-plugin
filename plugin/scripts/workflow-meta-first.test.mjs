@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 import { between, phrase } from "./prose-pin.mjs";
+import { discoverWorkflowFiles, WORKFLOWS } from "./workflow-files.mjs";
 
 // #853. A workflow script whose body carries any statement BEFORE
 // `export const meta` was observed absent from the workflow registry — no
@@ -30,11 +32,15 @@ import { between, phrase } from "./prose-pin.mjs";
 // Files are DISCOVERED, never listed. A hardcoded list reproduces this
 // ticket's own failure mode one level up: the workflow nobody remembered to
 // add is silently uncovered, which reads exactly like a workflow that passes.
-// `review-pr-reads.test.mjs`'s parse test is hardcoded to the one filename, so
-// a second workflow arrives unparsed-checked; closing that is not this
-// ticket's and is named as left rather than done here.
-const REPO = join(import.meta.dirname, "..");
-const WORKFLOWS = join(REPO, "workflows");
+//
+// #1204 closed the narrower version of the same hole, one filter down: the
+// discovery here was a flat `readdirSync` filtered on `.endsWith(".js")`, so a
+// `workflows/x.mjs` or a `workflows/sub/x.js` was never inspected and this
+// guard stayed green over it. It now walks the tree and SPLITS it, in
+// workflow-files.mjs — which carries the measurement that made the split
+// possible, and which `review-pr-reads.test.mjs` shares rather than copies;
+// that file's parse check was hardcoded to the one filename until the same
+// ticket derived it from this set.
 const REVIEW_PR = readFileSync(join(WORKFLOWS, "review-pr.js"), "utf8");
 
 // The first NON-COMMENT statement, per the rule — a leading licence block or an
@@ -79,8 +85,8 @@ const firstStatement = (source) =>
 const META_FIRST = /^export\s+const\s+meta\b/;
 
 test("every workflow file's first non-comment statement is `export const meta`", () => {
-  const files = readdirSync(WORKFLOWS).filter((f) => f.endsWith(".js"));
-  // A FLOOR, not a count. `readdirSync` over an empty (or newly renamed)
+  const { registrable } = discoverWorkflowFiles();
+  // A FLOOR, not a count. Discovery over an empty (or newly renamed)
   // `workflows/` yields an empty list, the loop below then inspects nothing,
   // and the test goes green having asserted over no file — which is this
   // ticket's own silent-absence defect arriving through the guard written to
@@ -88,10 +94,10 @@ test("every workflow file's first non-comment statement is `export const meta`",
   // exists: it would have to be edited every time a workflow is added, and
   // that is the step nobody remembers.
   assert.ok(
-    files.length > 0,
-    "no .js files found in workflows/ — this guard is asserting over nothing and would pass vacuously",
+    registrable.length > 0,
+    "no registrable workflow file found in workflows/ — this guard is asserting over nothing and would pass vacuously",
   );
-  for (const f of files) {
+  for (const f of registrable) {
     // Two causes, two messages. An empty or comment-only file has NO statement
     // rather than the wrong one first, and reporting it as "a statement before
     // `export const meta`" sends the reader looking for a statement that isn't
@@ -106,6 +112,86 @@ test("every workflow file's first non-comment statement is `export const meta`",
         ? `workflows/${f} carries no statement at all — an empty or comment-only file never reaches \`export const meta\`, and the harness drops it from the registry silently`
         : `workflows/${f} has a statement before \`export const meta\` — the harness drops it from the registry silently, and nothing else in this repo would notice`,
     );
+  }
+});
+
+// The half the shape guard above cannot reach, and the one #1204 is about. A
+// file the loader never opens has no first statement to be wrong: widening the
+// discovery above to cover it would assert the meta-first rule on a file that
+// is dead whatever its first line says, which is a GREEN on a broken file —
+// the same silence one filter further out.
+//
+// So the widened discovery feeds two assertions, not one. This is the second:
+// anything under `workflows/` that reads as a script and is not flat `.js` is
+// refused outright, with the loader's own reason. Measured, not assumed — see
+// workflow-files.mjs for the probe that settled it against Claude Code 2.1.272.
+//
+// This is the only thing in the repo that would notice. `ci.yml`'s
+// `case plugin/workflows/*)` arm parse-checks a nested `.js` and passes it, and
+// a `.mjs` under `workflows/` falls to the `*.mjs` step's `node --check`, which
+// reds for the wrong reason entirely (top-level `return`) and sends the reader
+// to fix the body of a file whose only defect is its name.
+test("no file under workflows/ is a workflow the harness would never register", () => {
+  const { unregistrable } = discoverWorkflowFiles();
+  assert.deepEqual(
+    unregistrable,
+    [],
+    unregistrable
+      .map(({ path, why }) => `workflows/${path} is never loaded: ${why}`)
+      .join("; ") +
+      " — the harness drops it with no error and no warning, so nothing downstream can tell it from a workflow that ran",
+  );
+});
+
+// And the classifier's own half, on a tree that holds every shape at once.
+// Without this, the two assertions above are satisfied by a discovery that
+// returns `unregistrable: []` unconditionally — the repo's real `workflows/`
+// holds one flat `.js`, so a split that never splits anything is green on it,
+// green on both tests, and blind to exactly the file the ticket is about. The
+// fixture is the only place the negative shapes exist.
+test("discovery splits the tree the way the harness's loader does", () => {
+  const dir = mkdtempSync(join(tmpdir(), "workflow-files-"));
+  try {
+    mkdirSync(join(dir, "nested"));
+    for (const rel of [
+      "review-pr.js",
+      "merge-wave.js",
+      "nearmiss.mjs",
+      "nearmiss.cjs",
+      "nearmiss.ts",
+      join("nested", "deep.js"),
+      join("nested", "deep.mjs"),
+      // Not a script, not this guard's business: a note beside a workflow must
+      // not red, or the guard becomes the thing people delete.
+      "README.md",
+    ])
+      writeFileSync(join(dir, rel), "export const meta = {};\n");
+    const { registrable, unregistrable } = discoverWorkflowFiles(dir);
+    assert.deepEqual(
+      registrable,
+      ["merge-wave.js", "review-pr.js"],
+      "the registrable set is not exactly the flat .js files the loader reaches",
+    );
+    assert.deepEqual(
+      unregistrable.map((u) => u.path).sort(),
+      ["nearmiss.cjs", "nearmiss.mjs", "nearmiss.ts", join("nested", "deep.js"), join("nested", "deep.mjs")].sort(),
+      "a shape the loader drops is missing from the refusal set, or a file it loads landed there",
+    );
+    // The reason is load-bearing, not decoration: a nested file renamed to
+    // `.js` is still nested, and a reader told only "wrong extension" moves it
+    // to a name that changes nothing.
+    assert.match(
+      unregistrable.find((u) => u.path === join("nested", "deep.js")).why,
+      /nested/,
+      "a nested file's refusal does not say it is nested, so the fix it suggests would not work",
+    );
+    assert.match(
+      unregistrable.find((u) => u.path === "nearmiss.mjs").why,
+      /extension/,
+      "a near-miss extension's refusal does not name the extension",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

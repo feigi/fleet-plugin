@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 import { between } from "./prose-pin.mjs";
 import { lift } from "./lift.mjs";
+import { discoverWorkflowFiles, WORKFLOWS } from "./workflow-files.mjs";
 
 // `workflows/review-pr.js` runs a top-level `await pipeline(...)`, so importing
 // it executes the workflow. Both functions under test are lifted out of the
@@ -623,21 +624,39 @@ test("the no-diff log reports the raw fields, not a guard it did not measure", (
 // wraps the body) nor a script (`export const meta`). AsyncFunction is the one
 // parser that accepts both — and it COMPILES without executing, which matters
 // because importing this file runs the workflow.
-test("review-pr.js parses — no other reader in this repo would notice a syntax error", () => {
+//
+// DERIVED, not named. This check was written against `review-pr.js` alone, so
+// the second workflow to arrive would have been parsed by nothing here — the
+// hardcoded-filename half of #1204, the same failure mode as a hardcoded
+// discovery list one file over. The set comes from workflow-files.mjs, shared
+// with workflow-meta-first.test.mjs, so a workflow is covered on arrival rather
+// than when someone remembers this line. `ci.yml`'s `case plugin/workflows/*)`
+// arm runs the identical AsyncFunction compile in CI and is the reason that gap
+// was not a live hole; this is the copy the local suite runs, which is where a
+// member working in a worktree finds out.
+test("every workflow file parses — no other reader in this repo would notice a syntax error", () => {
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  assert.doesNotThrow(
-    () =>
-      new AsyncFunction(
-        "args",
-        "budget",
-        "agent",
-        "parallel",
-        "pipeline",
-        "phase",
-        "log",
-        "workflow",
-        SOURCE.replace(/^export /m, ""),
-      ),
-    "workflows/review-pr.js does not parse",
+  const { registrable } = discoverWorkflowFiles();
+  // The same floor the meta-first guard carries, for the same reason: an empty
+  // set compiles nothing and reports success.
+  assert.ok(
+    registrable.length > 0,
+    "no registrable workflow file found in workflows/ — this parse check verified nothing",
   );
+  for (const f of registrable)
+    assert.doesNotThrow(
+      () =>
+        new AsyncFunction(
+          "args",
+          "budget",
+          "agent",
+          "parallel",
+          "pipeline",
+          "phase",
+          "log",
+          "workflow",
+          readFileSync(join(WORKFLOWS, f), "utf8").replace(/^export /m, ""),
+        ),
+      `workflows/${f} does not parse`,
+    );
 });
