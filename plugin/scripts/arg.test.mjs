@@ -46,7 +46,7 @@ const ARG_MODULE = fileURLToPath(new URL("./arg.mjs", import.meta.url));
 // import arg.mjs: a discovered set silently SHRINKS when a consumer drops the
 // import, which is precisely the regression being pinned. A consumer added
 // later has to be added here deliberately.
-const CONSUMERS = ["board", "candidates", "ci-state", "diff-stats", "fleet-tick", "ledger", "pr-overlap"];
+const CONSUMERS = ["board", "candidates", "ci-state", "diff-stats", "fleet-tick", "ledger", "pool-preflight", "pr-overlap"];
 
 test("every fleet script wires die() to arg.mjs's makeDie under its own NAME — the #367 migration, pinned", () => {
   for (const name of CONSUMERS) {
