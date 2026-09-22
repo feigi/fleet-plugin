@@ -3427,6 +3427,20 @@ test("no stderr write in the script can abort the run under errexit (#1514)", ()
   const unguarded = writes.filter((s) => !/^\s*\)?\s*\|\|\s*:(\s|;|$)/.test(s.slice(s.lastIndexOf(">&2") + 3)));
   assert.deepEqual(unguarded.map((s) => s.trim()), [],
     "each of these ends the script on its own write status under `set -e`, and 1 out of this script is REFUSED — append `|| :`");
+
+  // #1700 made `emit()`'s `( trap '' PIPE; … )` wrapper the ONLY SIGPIPE
+  // guard for all 36 `die` call sites — `die` now calls `emit` instead of
+  // carrying its own copy. Nothing above pins that wrapper: the `|| :`
+  // check two lines up passes on a write that dropped the trap entirely,
+  // because `|| :` only swallows the *status* a killed write would leave
+  // behind, not the SIGPIPE that killed it. `render`'s segment carries its
+  // fallback write's trap in the same string as its primary write (the two
+  // share one segment, per the comment above), so requiring the substring
+  // rather than an anchored prefix covers both writes without re-deriving
+  // which half of the segment is the guarded one.
+  const untrapped = writes.filter((s) => !/\(\s*trap\s+''\s+PIPE\s*;/.test(s));
+  assert.deepEqual(untrapped.map((s) => s.trim()), [],
+    "each of these can deliver SIGPIPE and kill the script instead of turning a dropped write into EPIPE — wrap it in `( trap '' PIPE; … )`");
 });
 
 /**
