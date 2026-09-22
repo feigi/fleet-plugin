@@ -2295,8 +2295,8 @@ async function firstFreePort(ports) {
   throw new Error(`test setup: no free port among ${ports.join(", ")}`);
 }
 
-async function untilBoardJson(url, ms = 15000) {
-  const deadline = Date.now() + ms;
+async function untilBoardJson(url) {
+  const ms = 15000, deadline = Date.now() + ms;
   for (;;) {
     try { if ((await fetch(`${url}/board.json`)).ok) return; } catch { /* not up yet */ }
     if (Date.now() > deadline) throw new Error(`no readable board at ${url} after ${ms}ms`);
