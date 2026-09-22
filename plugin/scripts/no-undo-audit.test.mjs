@@ -3430,8 +3430,8 @@ test("no stderr write in the script can abort the run under errexit (#1514)", ()
 
   // #1700 made `emit()`'s `( trap '' PIPE; … )` wrapper the ONLY SIGPIPE
   // guard for all 36 `die` call sites — `die` now calls `emit` instead of
-  // carrying its own copy. Nothing above pins that wrapper: the `|| :`
-  // check two lines up passes on a write that dropped the trap entirely,
+  // carrying its own copy. Nothing above pins that wrapper: the `unguarded`
+  // filter's `|| :` check above passes on a write that dropped the trap entirely,
   // because `|| :` only swallows the *status* a killed write would leave
   // behind, not the SIGPIPE that killed it. `render`'s segment carries its
   // fallback write's trap in the same string as its primary write (the two
