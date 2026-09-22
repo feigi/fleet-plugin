@@ -1162,6 +1162,33 @@ member's transcript must be reachable exactly as a hand-dispatched one's is —
 `hub`, `history://`, and the same `subagents/` scrape — so check that on the
 first pooled wave and report it if it is not.
 
+**A pool item settling with nothing is not, by itself, a bail.** The pool
+settles once, on the whole pool's drain, never per item, so a worker's own
+outcome is never read off the pool — read it off the member, exactly as
+Completion detection above already does for a successful one. Settle (CONTEXT.md
+§ Coordination) is three states on omp — `completed`, `failed`, `cancelled` —
+and reading `failed`/`cancelled` the same as a `completed` turn that had nothing
+to report is the exact collapse this line blocks: a member that died never chose
+to bail, so demoting its ticket on its silence demotes a ticket its member never
+got the chance to judge. Confirm death first, exactly as the Member-killed row
+does (Failure handling, below) — its mtime discriminator, never silence alone,
+applies to a pool worker exactly as to a hand-dispatched member. **Only an
+explicit bail report — the member itself naming the cause — reaches Implementer
+bails before implementing** (phase 3, below); a died or merely-quiet member's
+silence never does. A confirmed-dead item recovers exactly as the Member-killed
+row says — new member, new name, the SAME ticket — never a demotion.
+
+**Refilling a freed pool worker never re-pushes the ticket that just left it.**
+Demote-by-cause (phase 3's Implementer-bails-before-implementing step) drops
+`ready-for-agent` before the freed worker takes its next item — check that label
+live, the same `candidates.mjs --require-label ready-for-agent` scan phase 0
+already runs for a hand-dispatch pick, immediately before every push, so a
+ticket demoted mid-wave is excluded from its own pool's remaining pushes and
+from every later pool's shortlist alike, for as long as the demotion stands. A
+push that instead draws from a list built before the demotion landed is the
+failure this line blocks — a ticket the fleet has already judged
+unimplementable, handed straight back to the next worker the pool refills.
+
 **Waiting on the pool is the blocked-only path, and it is not a simplification to
 reach for.** `hub` `op:"wait"` on the pool name settles on the pool's DRAIN and
 not per item, so a controller parked there stops servicing the reviewer and merge
