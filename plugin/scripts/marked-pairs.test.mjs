@@ -382,17 +382,17 @@ test("real tree: KNOWN_EQUALITY_EXCEPTIONS is exactly the set of same-rule pairs
   const needExemption = sameRule.filter((p) => normalizeDialect(p.claude, p.file) !== normalizeDialect(p.omp, p.file));
 
   for (const ex of KNOWN_EQUALITY_EXCEPTIONS) {
-    // The number, not ONE number. This read `assert.equal(ex.issue, 1362)`
-    // while #1362 was the only filing behind the list. #1590 is the second,
-    // and a pin on the first ticket's number would have forced its entry to
-    // cite a ticket it was not filed on — a citation that reads as provenance
-    // and is not one. What the list owes is that every entry NAMES a filed
-    // issue, which is what makes an exemption visible and bounded; the
-    // membership half below, which is the guard against a silent addition, is
-    // untouched by this and still pins the list's exact size and contents.
+    // The list is filed on two tickets: #1362 (the first seven entries) and
+    // #1590 (the eighth). A pin on a single ticket number would force every
+    // entry to cite a ticket it was not filed on, so the citation guard is
+    // an enumerated allow-list of the issues this list has actually been
+    // filed on — a typo'd or never-filed issue number still fails (it is
+    // not in the list), and admitting a NEW ticket costs one deliberate
+    // number added here, the same visible-and-bounded property a single-
+    // value pin had.
     assert.ok(
-      Number.isInteger(ex.issue) && ex.issue > 0,
-      `${ex.file}: every exception must cite the issue it was filed on, got ${JSON.stringify(ex.issue)}`,
+      [1362, 1590].includes(ex.issue),
+      `${ex.file}: every exception must cite one of the issues this list was filed on, got ${JSON.stringify(ex.issue)}`,
     );
     const p = needExemption.find((p) => p.file === ex.file && p.claude === ex.claude && p.omp === ex.omp);
     assert.ok(p, `KNOWN_EQUALITY_EXCEPTIONS names ${ex.file}: ${JSON.stringify(ex.claude)}, which no real pair still needing exemption occupies — stale entry`);

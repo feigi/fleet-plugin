@@ -39,10 +39,10 @@
 // ADJACENCY, measured against every real pair landed by #1341/#1344/#1361: a
 // Marked line's partner is the line immediately following it (line N, N+1)
 // after gutter-stripping — never separated by a blank line, never a
-// section-bounded search. Checked against all 13 real pairs currently in the
+// section-bounded search. Checked against all 14 real pairs currently in the
 // tree (five in `member-lifecycle.md`; six restated/original in
 // `run-team/SKILL.md`, including the one embedded inside a `>` blockquote at
-// SKILL.md's fix-applier prompt; one in `commands/review-and-fix.md`; one
+// SKILL.md's fix-applier prompt; two in `commands/review-and-fix.md`; one
 // bare-in-block-comment pair in `workflows/review-pr.js`) — every one is two
 // consecutive physical lines. `pairFile` below never looks past N+1 for a
 // partner, so a marker separated from its partner by so much as a blank
@@ -150,7 +150,7 @@
 // lines equal (both sides' tokens map to the same placeholder regardless of
 // which line carries which), so equality cannot be the whole check — only
 // the foreign-token test reds on a swap, and it passes on every real pair
-// today (verified: none of the 13 real pairs names the other harness's tool
+// today (verified: none of the 14 real pairs names the other harness's tool
 // inside its own line).
 //
 // MUTATION PROCEDURE (#1299's four runs, one mutant applied to ONE copy at a
@@ -213,9 +213,10 @@ export const DOES_NOT_APPLY_RE = /does not apply|has no slot for/i;
 export const MD_DIRS = ["skills", "commands", "agents"];
 export const JS_DIRS = ["workflows"];
 
-// #1362 (filed by this ticket): every same-rule pair currently in the tree
-// that does not satisfy literal equality-after-normalization (7/7 as of
-// this writing). Keyed by `file` + BOTH lines' EXACT text — CONTENT, never
+// #1362/#1590: every same-rule pair currently in the tree that does not
+// satisfy literal equality-after-normalization (8/8 as of this writing —
+// #1362 filed the first seven, #1590 the eighth). Keyed by `file` + BOTH
+// lines' EXACT text — CONTENT, never
 // a line number. Review1363 measured why a line-number key fails: rebasing
 // this branch onto #1361 shifted two of the six original entries (SKILL.md
 // 2182→2187, 2472→2477 — #1361 inserts a pair earlier in the same file),
