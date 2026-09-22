@@ -429,6 +429,14 @@ test("writeAll() returns false when the write is genuinely lost, not merely dela
   );
 });
 
+// Read out of arg.mjs rather than written down twice. The test below claims
+// its transfer crosses this cap; a cap that moved and a fixture that did not
+// must red there rather than pass quietly on a payload that no longer
+// reaches it.
+const MAX_EAGAIN_RETRIES = Number(
+  stripComments(readFileSync(ARG_MODULE, "utf8")).match(/^const MAX_EAGAIN_RETRIES = (\d+);/m)?.[1],
+);
+
 // #1549 regression: retries must reset on forward progress, or the cap bounds
 // CUMULATIVE EAGAINs across the whole transfer instead of a no-progress
 // stall. A reader that is merely slow — alive, busy, but still draining —
@@ -437,45 +445,134 @@ test("writeAll() returns false when the write is genuinely lost, not merely dela
 //
 // Reproduced with a real O_NONBLOCK pipe, not a mock: the child inherits the
 // write end (via `pass_fds`, not fd 2, so writeAll's own fd argument is
-// exercised directly), and the parent drains it in a thousand small,
-// deliberately spaced reads. Each read frees only a little room, so
-// writeSync's own call very often lands short and throws EAGAIN again right
-// behind it — enough EAGAINs across the whole transfer to blow #889's 200-
-// retry cap five times over — but the reader never stops moving, so no
-// single stall is ever more than a handful of retries deep. Measured against
-// the pre-fix shape (retries never reset): this same harness returns
-// `ok:false` after roughly 200 cumulative EAGAINs and only a fraction of the
-// payload lands, even though the reader kept draining the whole time.
-test("writeAll() delivers the full payload to a reader that is slow but keeps draining — progress must reset the retry count, not just extend it", (t) => {
+// exercised directly), and the parent drains it a page at a time, reading
+// ONLY from a pipe FIONREAD reports FULL. That pacing is what makes the
+// stall count a measurement rather than a hope (#1689): a full pipe the
+// writer still holds payload for is an EAGAIN it has already taken, so every
+// paced read is one CONFIRMED stall. The payload is sized off the pipe's own
+// measured capacity — capacity, plus a page for each stall wanted — so how
+// many stalls the transfer takes is arithmetic, not a property of how this
+// machine happened to schedule the two processes.
+//
+// STALLS is asserted past MAX_EAGAIN_RETRIES because that is what makes the
+// green mean anything. The first version of this test paced its reader with
+// 1ms sleeps and asserted only the delivered bytes; it did kill the mutant
+// (measured 10/10 on darwin), but the number of stalls it produced was an
+// accident of the machine and nothing looked at it — a bigger pipe, a faster
+// reader or a cheaper Atomics.wait could have dropped the transfer under the
+// cap and left it passing while pinning nothing. Below the cap, a retry
+// counter that resets and one that accumulates deliver the same payload.
+//
+// Nothing here starves the writer: the reader reads the instant FIONREAD
+// says full, with no sleep in between, and the worst gap between paced reads
+// is REPORTED rather than asserted — a green run already implies every stall
+// stayed under the cap, so the number's job is to separate "the reset is
+// gone" from "this machine starved the writer past the cap" when this reds.
+// Measured 3.1ms against a 200ms budget.
+//
+// The reader frees a PAGE per read, not a token 256 bytes, and that is
+// load-bearing on both platforms: a write of at most PIPE_BUF — 512 on
+// darwin, 4096 on Linux, per each one's limits.h — is ATOMIC, so a writer
+// holding a tail that small takes EAGAIN rather than a partial write
+// whenever the reader has freed less room than the tail needs. At 256-byte
+// reads the two deadlock at the end of the payload, measured on darwin at
+// exactly `payload - capacity - 256` bytes delivered, 8/8 runs — the writer
+// spending its whole cap on a reader that is itself waiting for a pipe that
+// can never fill again. A page always leaves room for an atomic tail.
+//
+// Measured against the pre-fix shape (`if (written > 0) retries = 0;`
+// deleted): ok:false at 184-190 confirmed stalls of the 300 this transfer
+// takes, around 63% of the payload delivered, 3/3 runs.
+test("writeAll() delivers the full payload across more confirmed EAGAIN stalls than MAX_EAGAIN_RETRIES — progress must RESET the retry count, not merely extend it", (t) => {
   if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
+  assert.ok(
+    Number.isFinite(MAX_EAGAIN_RETRIES),
+    "arg.mjs no longer declares `const MAX_EAGAIN_RETRIES = <digits>;` — this test cannot say what its transfer has to cross",
+  );
   const dir = mkdtempSync(join(tmpdir(), "arg-writeall-slowdrain-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
-  const payloadBytes = 256_000;
+  // Half again the cap: far enough past it that an accumulating counter
+  // cannot reach the end of the payload, near enough that the whole transfer
+  // — one 1ms Atomics.wait per stall — still runs in well under a second.
+  const stallTarget = MAX_EAGAIN_RETRIES + Math.ceil(MAX_EAGAIN_RETRIES / 2);
+  const chunkBytes = 4096;
   writeFileSync(join(dir, "run.mjs"), [
     'import { writeAll } from "./arg.mjs";',
-    "const fd = Number(process.argv[2]);",
-    `const ok = writeAll(fd, "z".repeat(${payloadBytes}));`,
+    "const [fd, bytes] = process.argv.slice(2).map(Number);",
+    'const ok = writeAll(fd, "z".repeat(bytes));',
     "process.stdout.write(JSON.stringify({ ok }));",
     "",
   ].join("\n"));
 
   const harness = [
-    "import fcntl, os, subprocess, sys, time",
+    "import array, fcntl, os, select, subprocess, sys, termios, time",
+    "chunk, wanted = int(sys.argv[1]), int(sys.argv[2])",
     "r, w = os.pipe()",
     "fcntl.fcntl(w, fcntl.F_SETFL, fcntl.fcntl(w, fcntl.F_GETFL) | os.O_NONBLOCK)",
-    "proc = subprocess.Popen(sys.argv[1:] + [str(w)], pass_fds=(w,), stdout=subprocess.PIPE)",
+    "# Calibrate what this pipe actually holds, then hand it back empty: a",
+    "# later FIONREAD reading that same number is the writer sitting on a",
+    "# pipe with nowhere to put its next byte. Measured 65536 on darwin,",
+    "# which is also Linux's default pipe capacity — but read rather than",
+    "# assumed, so a platform holding some other amount still buys the number",
+    "# of stalls this transfer asks for instead of timing out against a level",
+    "# its pipe never reaches.",
+    "capacity = 0",
+    "try:",
+    "    while True:",
+    "        capacity += os.write(w, b'x' * 4096)",
+    "except BlockingIOError:",
+    "    pass",
+    "left = capacity",
+    "while left:",
+    "    left -= len(os.read(r, left))",
+    "payload = capacity + chunk * wanted",
+    "proc = subprocess.Popen(sys.argv[3:] + [str(w), str(payload)], pass_fds=(w,), stdout=subprocess.PIPE)",
     "os.close(w)",
-    "data = b''",
-    "while True:",
-    "    try:",
-    "        chunk = os.read(r, 256)",
-    "    except OSError:",
+    "pending = array.array('i', [0])",
+    "got, stalls, worst_gap, last_read, done = 0, 0, 0.0, None, False",
+    "# 20s against a transfer measured at 0.5s. It bounds the one shape this",
+    "# harness cannot assert its way out of: a platform whose pipe never",
+    "# reports the calibrated level again, leaving the reader waiting for a",
+    "# fullness that cannot arrive. That exits DRAIN_TIMEOUT — loud, and not",
+    "# mistakable for a delivered payload.",
+    "deadline = time.time() + 20",
+    "while time.time() < deadline:",
+    "    paced = False",
+    "    if got + capacity < payload:",
+    "        # The writer still holds bytes that cannot fit, so a full pipe",
+    "        # here is an EAGAIN it has already taken. Read only from one.",
+    "        full = exited = False",
+    "        while time.time() < deadline:",
+    "            fcntl.ioctl(r, termios.FIONREAD, pending)",
+    "            if pending[0] >= capacity:",
+    "                full = True",
+    "                break",
+    "            if proc.poll() is not None:",
+    "                exited = True",
+    "                break",
+    "            time.sleep(0.001)",
+    "        if not full and not exited:",
+    "            break",
+    "        paced = full",
+    "        if paced:",
+    "            stalls += 1",
+    "    if not select.select([r], [], [], 1)[0]:",
+    "        continue",
+    "    piece = os.read(r, chunk)",
+    "    now = time.time()",
+    "    if paced and last_read is not None and now - last_read > worst_gap:",
+    "        worst_gap = now - last_read",
+    "    last_read = now",
+    "    if not piece:",
+    "        done = True",
     "        break",
-    "    if not chunk:",
-    "        break",
-    "    data += chunk",
-    "    time.sleep(0.001)",
+    "    got += len(piece)",
+    "if not done:",
+    "    proc.kill()",
+    "    proc.communicate()",
+    "    print('DRAIN_TIMEOUT')",
+    "    sys.exit(1)",
     "try:",
     "    out, _ = proc.communicate(timeout=30)",
     "except subprocess.TimeoutExpired:",
@@ -484,21 +581,39 @@ test("writeAll() delivers the full payload to a reader that is slow but keeps dr
     "    print('TIMEOUT')",
     "    sys.exit(1)",
     "print(out.decode())",
-    "print(f'BYTES_RECEIVED={len(data)}')",
+    "print(f'BYTES_RECEIVED={got} PAYLOAD={payload} STALLS={stalls} WORST_GAP_MS={worst_gap * 1000:.1f} CAPACITY={capacity}')",
   ].join("\n");
 
-  const r = spawnSync("python3", ["-c", harness, process.execPath, join(dir, "run.mjs")], { encoding: "utf8" });
-  assert.doesNotMatch(r.stdout, /TIMEOUT/, `writeAll hung against a reader that never stopped draining: ${r.stdout} ${r.stderr}`);
+  const r = spawnSync(
+    "python3",
+    ["-c", harness, String(chunkBytes), String(stallTarget), process.execPath, join(dir, "run.mjs")],
+    { encoding: "utf8" },
+  );
+  assert.doesNotMatch(
+    r.stdout,
+    /TIMEOUT/,
+    `the transfer never finished: either writeAll hung against a reader that never stopped draining, or (DRAIN_TIMEOUT) the harness never saw the pipe reach the level it calibrated, so it stopped freeing room. ${r.stdout} ${r.stderr}`,
+  );
+  const stalls = Number(r.stdout.match(/STALLS=(\d+)/)?.[1]);
+  const worstGapMs = Number(r.stdout.match(/WORST_GAP_MS=([\d.]+)/)?.[1]);
+  const received = Number(r.stdout.match(/BYTES_RECEIVED=(\d+)/)?.[1]);
+  const payloadBytes = Number(r.stdout.match(/PAYLOAD=(\d+)/)?.[1]);
   assert.match(
     r.stdout,
     /\{"ok":true\}/,
-    `writeAll reported a lost write against a reader that kept draining the whole time — an un-reset retry counter does this: ${r.stdout}`,
+    `writeAll reported a lost write against a reader that kept draining the whole time — an un-reset retry counter gives up around stall ${MAX_EAGAIN_RETRIES} of the ${stallTarget} this transfer takes, and this one got to ${stalls}. The worst gap between paced reads was ${worstGapMs}ms; past ${MAX_EAGAIN_RETRIES}ms that is this machine starving the writer for longer than the cap, not the reset going missing: ${r.stdout}`,
   );
-  const received = Number(r.stdout.match(/BYTES_RECEIVED=(\d+)/)?.[1]);
   assert.equal(
     received,
     payloadBytes,
     `the reader received ${received} of ${payloadBytes} bytes — writeAll gave up before the slow reader finished draining`,
+  );
+  // The green above says nothing unless the transfer really did cross the
+  // cap: under it, a counter that resets on progress and one that accumulates
+  // across the whole call deliver the very same payload.
+  assert.ok(
+    stalls > MAX_EAGAIN_RETRIES,
+    `the harness confirmed ${stalls} stalls against a cap of ${MAX_EAGAIN_RETRIES} — an accumulating retry counter survives a transfer that never crosses it, so this pins nothing: ${r.stdout}`,
   );
 });
 
