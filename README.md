@@ -73,6 +73,84 @@ wrong directory silently exits 0 with zero tests run:
 node --test plugin/scripts/*.test.mjs
 ```
 
+## How it works
+
+`/fleet-ctl:run-team` is a **controller** running in your own main thread —
+never a subagent — that drives three short-lived, fresh-context member roles
+over one repo's ticket queue. Standalone commands (`review-and-fix`,
+`run-merge-bot`, the `next-ticket` skill) are the same roles run one
+ticket/PR at a time, with no controller above them. Full design rationale:
+[`docs/specs/2026-07-22-run-team-agent-fleet-design.md`](docs/specs/2026-07-22-run-team-agent-fleet-design.md).
+
+**Controller loop** (phase 0 → 3, repeating until the queue drains):
+
+1. **Shortlist** — scan `ready-for-agent` issues, drop anything with an
+   unresolved dependency or already in flight (open PR, remote branch, or
+   local worktree), then a human approves the survivor pool. The fleet never
+   touches `ready-for-human` work — there's no channel back to a human
+   mid-run.
+2. **Claim + isolate** — serially, in the main checkout: label the issue
+   `in-progress`, `git worktree add` a dedicated tree per ticket.
+3. **Dispatch** — spawn up to N implementers in the background, one per
+   claimed ticket, each a brand-new agent (never a resumed one — that would
+   drag the previous ticket's context into this one).
+4. **Event loop** — react without blocking: an implementer's PR gets queued
+   for review; a free review slot picks up the next queued PR; a reviewer
+   that lands the `ready-to-merge` label triggers a merge-bot wave; the pool
+   emptying re-runs the shortlist.
+
+**Reviewer fan-out** — each reviewer cuts a read-only snapshot, sizes the PR,
+and dispatches the applicable subset of six specialist agents in parallel
+(`fleet-review-correctness`, `-comments`, `-silent-failure`, `-tests`,
+`-types`, `-simplify` — correctness always runs, the rest scale to what the
+diff actually touches). A verifier adversarially tries to refute every
+`critical`/`important` finding before it's trusted; `suggestion`-severity
+findings get no verifier by policy and are the reviewer's own job to check.
+Confirmed findings in scope get applied, pushed, and waited to CI-green
+before the PR is labelled `ready-to-merge`.
+
+**Merge bot** — one wave, at most one bot at a time: for each
+`ready-to-merge` PR in numeric order, hold if a lower-numbered open PR
+touches related work, otherwise rebase onto `main`, wait for CI green, merge.
+
+```mermaid
+flowchart TD
+    subgraph CTL["Controller — main thread, /fleet-ctl:run-team"]
+        P0["Phase 0: shortlist<br/>candidate scan, dependency scan,<br/>in-flight check, human approval"]
+        P1["Phase 1: claim + isolate<br/>label in-progress, git worktree add"]
+        P2["Phase 2: dispatch implementers<br/>(up to N, fresh context each)"]
+        P3{"Phase 3: event loop"}
+        P0 --> P1 --> P2 --> P3
+        P3 -->|"approved pool empty"| P0
+    end
+
+    P2 --> IMPL["Implementer<br/>size + implement ticket, push, gh pr create"]
+    IMPL -->|"reports PR + head SHA"| P3
+    P3 -->|"PR queued, review slot free"| REV
+
+    subgraph REVFAN["Reviewer — up to M, fresh context each"]
+        REV["Snapshot: diff-stats.mjs<br/>selects applicable specialist dimensions"]
+        SPEC["Specialists, parallel:<br/>correctness / comments / silent-failure<br/>tests / types / simplify"]
+        VERI["Verifier: refutes every<br/>critical / important finding"]
+        FIX["Apply in-scope fixes, push,<br/>wait CI green, label ready-to-merge"]
+        REV --> SPEC --> VERI --> FIX
+    end
+    FIX -->|"ready-to-merge label"| P3
+    P3 -->|"label seen"| MB["Merge-bot wave triggered"]
+
+    subgraph MERGEBOT["Merge bot — at most 1, one wave"]
+        HOLD["Hold rule: pr-overlap.mjs vs<br/>every lower-numbered open PR"]
+        REBASE["Rebase onto main"]
+        GREEN["Wait CI green (ci-state.mjs)"]
+        MERGE["Merge"]
+        WAIT["Hold behind #lower PR,<br/>watcher retries later"]
+        HOLD -->|"unrelated"| REBASE --> GREEN --> MERGE
+        HOLD -->|"related"| WAIT
+    end
+    MB --> HOLD
+    MERGE --> P3
+```
+
 ## Documentation
 
 - [`CONTEXT.md`](CONTEXT.md) — glossary: the vocabulary (claims, worktrees,
