@@ -2830,21 +2830,38 @@ const SITES_PER_MESSAGE = new Map([["cannot create a temporary file", 2]]);
  */
 function dieSites() {
   const src = readFileSync(SCRIPT, "utf8");
-  // Re-derived for #1571, which confined the write's own `>&2` inside
-  // `( trap '' PIPE; … )` so a genuine SIGPIPE on stderr cannot kill the
-  // process before `|| :` is ever consulted (#1514 guards a status; a
-  // signal has none for `|| :` to read). The premise this anchor protects —
-  // that `die` reaches `exit 2` — is unchanged by either fix.
+  // Re-derived for #1684, which replaced the hand-copy of `emit`'s body
+  // that stood here with a call to `emit` itself: the `|| :` of #1514 and
+  // the `( trap '' PIPE; … )` subshell of #1571 now live in one function
+  // body rather than two. The premise this anchor protects — that `die`
+  // formats one message and reaches `exit 2` — is unchanged by that fix, as
+  // it was by the two before it.
   assert.match(
     src,
-    /^die\(\) \{ \( trap '' PIPE; printf '%s: %s\\n' "\$NAME" "\$1" >&2 \) \|\| :; exit 2; \}$/m,
+    /^die\(\) \{ emit "\$NAME: \$1"; exit 2; \}$/m,
     "the census derives its cause set from one `die` that exits 2 — that definition has changed, so re-derive before trusting this file",
   );
-  const sites = src
-    .split("\n")
+  const lines = src.split("\n");
+  const sites = lines
     .filter((l) => !/^\s*#/.test(l))
     .flatMap((l) => [...l.matchAll(/(?:^|[;&|(\s])die "(.*)"/g)].map((m) => m[1]));
   assert.ok(sites.length > 1, `the scan found ${sites.length} die sites, so its spelling has drifted off the script`);
+
+  // `die` is defined ABOVE `emit` and, since #1684, CALLS it — and a shell
+  // resolves a function name at call time, not at definition time. So every
+  // `die` call site has to sit below `emit()`'s definition: one hoisted
+  // above it runs `emit` as an unknown command, `set -e` takes that 127,
+  // and the script answers an unanswerable question with a status outside
+  // its own 0/1/2 contract — on whichever branch reached it and nowhere
+  // else, which is why no fixture would find it. The ordering is the whole
+  // of what makes the forward reference safe, so it is asserted here rather
+  // than left to the paragraph beside the definition.
+  const emitDef = lines.findIndex((l) => /^emit\(\) \{/.test(l));
+  assert.ok(emitDef >= 0,
+    "`emit()` is no longer defined at the start of a line — `die` calls it, so this ordering check no longer knows what it is measuring");
+  const firstCall = lines.findIndex((l) => !/^\s*#/.test(l) && /(?:^|[;&|(\s])die "/.test(l));
+  assert.ok(firstCall > emitDef,
+    `the first \`die\` call sits at line ${firstCall + 1}, above \`emit\`'s definition at line ${emitDef + 1} — it would exit 127, not the 2 this script's contract promises`);
   for (const message of new Set(sites)) {
     assert.equal(
       sites.filter((m) => m === message).length,
@@ -3304,32 +3321,35 @@ test("a closed fd 2 reaches both renders and leaves the verdict intact (#1160, #
 // stderr WRITE, `die`'s included, free to abort the run on a closed fd 2.
 // #1514 (this PR) is what guards those, and centralizes them behind `die`,
 // `render`, and the new `emit` so there is one function body to check per
-// guard, not a dozen call sites to keep in sync.
+// guard, not a dozen call sites to keep in sync. #1684 went one further and
+// folded `die`'s own copy of that body into a call to `emit`, so the census
+// below counts two direct writers where it once counted three — `die` still
+// reaches fd 2, but no longer by a statement of its own.
 //
 // The rule is structural, so it is asserted structurally rather than
 // sampled: a diagnostic decides nothing, so every statement that writes to
 // fd 2 must end its `||` chain in the no-op. `render()`'s spans three lines
 // and ends in `|| :` on the last, so continuations are joined before the
-// check; `die`'s and `emit`'s each carry more (`; exit 2; }`, `; }`) after
-// the guard, on the SAME joined line, separated by `;` rather than `||` —
-// so a line is split on top-level `;` first and each resulting statement's
-// own tail is checked, not just the line's last `>&2`. Quote-aware: a `;`
+// check; `emit()`'s carries more (`; }`) after the guard, on the SAME joined
+// line, separated by `;` rather than `||` — so a line is split on top-level
+// `;` first and each resulting statement's own tail is checked, not just
+// the line's last `>&2`. Quote-aware: a `;`
 // inside a quoted argument (render's own fallback message carries one) is
 // not a statement separator. Unaware of that, a line carrying two
 // independent `>&2`-writing statements — `echo "a" >&2; echo "b" >&2 || :`
 // — would report the whole line compliant off the LAST write's guard alone,
 // leaving the first invisible.
 //
-// Paren-aware too, since #1571: each of the three writes now runs inside
-// `( trap '' PIPE; write )`, so the `;` between the trap and the write sits
-// INSIDE that subshell rather than between top-level statements. Splitting
-// on every unquoted `;` regardless of nesting would cut each site's one
-// segment into two, over-counting all three below and — worse — leaving one
-// half of each pair to be graded for a guard that was never its own to
-// carry. Depth only needs `(`/`)`, never `{`/`}`: no write in this script
-// sits inside a brace group that isn't also the enclosing function body,
-// which `splitTopLevelStatements` is never handed. The guard check's own
-// tail regex tolerates one optional `)` immediately after the write's
+// Paren-aware too, since #1571: each write that carries that guard runs
+// inside `( trap '' PIPE; write )`, so the `;` between the trap and the
+// write sits INSIDE that subshell rather than between top-level statements.
+// Splitting on every unquoted `;` regardless of nesting would cut each
+// site's one segment into two, over-counting both below and — worse —
+// leaving one half of each pair to be graded for a guard that was never its
+// own to carry. Depth only needs `(`/`)`, never `{`/`}`: no write in this
+// script sits inside a brace group that isn't also the enclosing function
+// body, which `splitTopLevelStatements` is never handed. The guard check's
+// own tail regex tolerates one optional `)` immediately after the write's
 // `>&2` for the same reason — the subshell's own close now sits between the
 // write and the `|| :` that guards it.
 function splitTopLevelStatements(line) {
@@ -3391,11 +3411,18 @@ test("no stderr write in the script can abort the run under errexit (#1514)", ()
   // Without this the filter could silently match nothing — a regex typo, a
   // rename — and the assertion below would pass on an empty list, which is
   // the shape a false green takes here. The count is exact, not a floor:
-  // `die`, `render`, and `emit` are the only three places in the script
-  // allowed to touch fd 2 directly, so it can only ever be 3 — any other
-  // number means a bare write appeared outside all of them, or one vanished.
-  assert.equal(writes.length, 3,
-    `die, render, and emit are the only statements that may write to fd 2 directly; found ${writes.length}`);
+  // `render` and `emit` are the only two places in the script allowed to
+  // touch fd 2 directly, so it can only ever be 2 — any other number means
+  // a bare write appeared outside both of them, or one vanished. It was 3
+  // until #1684 folded `die`'s own copy of `emit`'s body into a call: the
+  // segment that held `die`'s `>&2` is gone, and `render`'s and `emit`'s
+  // are what the filter still returns. Measured after that change rather
+  // than decremented on paper, because `render`'s two writes (the `sed`
+  // pipeline and its fallback) share ONE segment — a fix that removes one
+  // of them would not move this number at all, so arithmetic on the old
+  // count is not a safe way to arrive at the new one.
+  assert.equal(writes.length, 2,
+    `render and emit are the only statements that may write to fd 2 directly; found ${writes.length}`);
 
   const unguarded = writes.filter((s) => !/^\s*\)?\s*\|\|\s*:(\s|;|$)/.test(s.slice(s.lastIndexOf(">&2") + 3)));
   assert.deepEqual(unguarded.map((s) => s.trim()), [],

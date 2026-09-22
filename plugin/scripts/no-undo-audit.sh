@@ -97,15 +97,27 @@ unset GIT_DIR GIT_WORK_TREE
 
 NAME=no-undo-audit
 # `printf`, not `echo`: 11 of these messages interpolate `$wt`, a
-# caller-supplied path, and this is the one place they all route through.
+# caller-supplied path, and `emit` below is the one place they all route
+# through. Reached by a CALL, not by a second copy of `emit`'s body spelled
+# here, which is what this line used to be: hand-copied the guard was
+# correct and stayed correct, but #1571 then had to edit both copies to add
+# the SIGPIPE trap, and a call is the only form that cannot be missed that
+# way (#1684).
 #
-# `|| :` on the WRITE, not around the call: `die`'s whole job is to reach
-# exit 2, and `set -e` reads the printf's status before `exit` is ever
-# reached. With fd 2 closed that status is 1 — REFUSED on this script — so
-# every unanswerable question blamed the worktree instead of saying it could
-# not be answered (#1514, measured: a path that is not a worktree, `2>&-`,
-# exit 1 where the contract says 2).
-die() { ( trap '' PIPE; printf '%s: %s\n' "$NAME" "$1" >&2 ) || :; exit 2; }
+# What `die` needs from that guard is the header's rule below applied to the
+# one write whose statement MUST still reach an exit: `set -e` reads the
+# write's status before `exit` is ever reached, and with fd 2 closed that
+# status is 1 — REFUSED on this script — so every unanswerable question
+# blamed the worktree instead of saying it could not be answered (#1514,
+# measured: a path that is not a worktree, `2>&-`, exit 1 where the contract
+# says 2).
+#
+# `emit` is defined below, after `render`, and a shell resolves a function
+# name at CALL time: every `die` call site sits below that definition, so
+# the forward reference holds. One hoisted above it would exit 127 (`emit:
+# not found`) rather than the 2 this script's contract promises — `dieSites`
+# in the test file asserts the ordering rather than leaving it here.
+die() { emit "$NAME: $1"; exit 2; }
 
 # THE RULE FOR EVERY STDERR WRITE IN THIS SCRIPT, and why each one is
 # guarded. Exit 0 is safe, 1 is refused, 2 is unanswerable, and a caller
@@ -117,17 +129,18 @@ die() { ( trap '' PIPE; printf '%s: %s\n' "$NAME" "$1" >&2 ) || :; exit 2; }
 # the one tool whose job is to say whether a rebase would eat a commit.
 # Measured before the fix — clean tree, stdout open, `2>&-`: exit 1 (#1514).
 #
-# The guard is centralized, never hand-appended per site: `die` and `render`
-# carry it in a function body every caller inherits, and every other bare
-# diagnostic below calls `emit()` (defined after `render`), which does the
-# same — a future call site cannot add an unguarded `>&2` write without also
-# adding a new function to sidestep it. `|| :` is the third piece of
-# `render`'s guard, and it is what `emit()` carries on its own: these sites
-# have nothing to fall back TO, the line that could not be written IS the
-# message, so there is no second, shorter thing to say about it. `render`
-# needs its extra piece because a dropped LIST reads as an empty one — a
-# finding silently downgraded — while a dropped single line reads as nothing
-# at all, and the payload on stdout still carries every finding.
+# The guard is centralized, never hand-appended per site: `render` carries
+# it in a function body every caller inherits, and every other write to fd 2
+# — `die`'s own included, since #1684 — goes through `emit()` (defined after
+# `render`), which does the same. A future call site cannot add an unguarded
+# `>&2` write without also adding a new function to sidestep it, and there
+# are two guard bodies to keep in step rather than three. `|| :` is the third
+# piece of `render`'s guard, and it is what `emit()` carries on its own: these
+# sites have nothing to fall back TO, the line that could not be written IS
+# the message, so there is no second, shorter thing to say about it.
+# `render` needs its extra piece because a dropped LIST reads as an empty
+# one — a finding silently downgraded — while a dropped single line reads as
+# nothing at all, and the payload on stdout still carries every finding.
 #
 # The guard goes on the write itself, never on the surrounding statement:
 # most call sites sit in `if`/`elif` chains or in a function whose later
