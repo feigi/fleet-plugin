@@ -192,21 +192,24 @@ die() { emit "$NAME: $1"; exit 2; }
 # answer nothing and so must reach no exit at all.
 #
 # Three pieces, each covering what the others cannot. The first `||` keeps the
-# verdict out of the render's hands. Its message keeps the failure out of
-# silence — a bare `|| :` fixes the status and leaves a lost conflict list
-# indistinguishable from an empty one, which is the same silent-failure class
-# as the abort. The trailing `|| :` is for the render whose fallback ALSO
-# fails, stderr itself being gone: an unguarded `||` branch is one more command
-# whose status `set -e` reads, and it would abort for the reason this function
-# exists to remove.
+# verdict out of the render's hands. The second is a message that keeps the
+# failure out of silence — a bare `|| :` fixes the status and leaves a lost
+# conflict list indistinguishable from an empty one, which is the same
+# silent-failure class as the abort. The third is for the render whose
+# fallback ALSO fails, stderr itself being gone: an unguarded `||` branch is
+# one more command whose status `set -e` reads, and it would abort for the
+# reason this function exists to remove. The second and third pieces used to
+# be spelled out here, a hand copy of `emit`'s own body; now they are a CALL
+# to it (#1685), for the same reason `die` stopped carrying its own copy
+# (#1684) — a hand-copied guard is correct only until the next edit to the
+# original forgets to touch both.
 #
 # `$1` lands in sed's REPLACEMENT text, where `&` and `\` are metacharacters.
 # Every prefix passed below is a literal in this file and holds neither; a
 # caller-derived prefix would have to be escaped first.
 render() { # render <line-prefix> <text> <what-the-text-is>
   printf '%s\n' "$2" | sed "s/^/$1/" >&2 \
-    || ( trap '' PIPE; printf '%s: could not render %s to stderr; the payload and the exit status stand\n' "$NAME" "$3" >&2 ) \
-    || :
+    || emit "$NAME: could not render $3 to stderr; the payload and the exit status stand"
 }
 
 # Every plain diagnostic below writes one already-assembled line with no

@@ -3324,34 +3324,43 @@ test("a closed fd 2 reaches both renders and leaves the verdict intact (#1160, #
 // guard, not a dozen call sites to keep in sync. #1684 went one further and
 // folded `die`'s own copy of that body into a call to `emit`, so the census
 // below counts two direct writers where it once counted three — `die` still
-// reaches fd 2, but no longer by a statement of its own.
+// reaches fd 2, but no longer by a statement of its own. #1685 folded
+// `render`'s own copy the same way; the count stayed at two because
+// `render`'s pipeline write and its fallback already shared one segment
+// (see the comment on the count assertion below), so the fold removed a
+// duplicated guard, not a writer the census was counting separately.
 //
 // The rule is structural, so it is asserted structurally rather than
 // sampled: a diagnostic decides nothing, so every statement that writes to
-// fd 2 must end its `||` chain in the no-op. `render()`'s spans three lines
-// and ends in `|| :` on the last, so continuations are joined before the
-// check; `emit()`'s carries more (`; }`) after the guard, on the SAME joined
-// line, separated by `;` rather than `||` — so a line is split on top-level
-// `;` first and each resulting statement's own tail is checked, not just
-// the line's last `>&2`. Quote-aware: a `;`
-// inside a quoted argument (render's own fallback message carries one) is
-// not a statement separator. Unaware of that, a line carrying two
-// independent `>&2`-writing statements — `echo "a" >&2; echo "b" >&2 || :`
-// — would report the whole line compliant off the LAST write's guard alone,
-// leaving the first invisible.
+// fd 2 must end its `||` chain in the no-op, either directly (`|| :`) or by
+// calling a function whose own chain does (`|| emit …`, verified on
+// `emit`'s own segment in the same pass). `render()`'s body spans two lines
+// and ends in a call to `emit` on the second, so continuations are joined
+// before the check; `emit()`'s carries more (`; }`) after ITS OWN guard, on
+// the SAME joined line, separated by `;` rather than `||` — so a line is
+// split on top-level `;` first and each resulting statement's own tail is
+// checked, not just the line's last `>&2`. Quote-aware: a `;`
+// inside a quoted argument (render's fallback message, now `emit`'s own
+// argument, carries one) is not a statement separator. Unaware of that, a
+// line carrying two independent `>&2`-writing statements —
+// `echo "a" >&2; echo "b" >&2 || :` — would report the whole line compliant
+// off the LAST write's guard alone, leaving the first invisible.
 //
-// Paren-aware too, since #1571: each write that carries that guard runs
-// inside `( trap '' PIPE; write )`, so the `;` between the trap and the
-// write sits INSIDE that subshell rather than between top-level statements.
-// Splitting on every unquoted `;` regardless of nesting would cut each
-// site's one segment into two, over-counting both below and — worse —
-// leaving one half of each pair to be graded for a guard that was never its
-// own to carry. Depth only needs `(`/`)`, never `{`/`}`: no write in this
-// script sits inside a brace group that isn't also the enclosing function
-// body, which `splitTopLevelStatements` is never handed. The guard check's
-// own tail regex tolerates one optional `)` immediately after the write's
-// `>&2` for the same reason — the subshell's own close now sits between the
-// write and the `|| :` that guards it.
+// Paren-aware too, since #1571: `emit()`'s one write still runs inside
+// `( trap '' PIPE; write )`, so the `;` between the trap and the write sits
+// INSIDE that subshell rather than between top-level statements. Splitting
+// on every unquoted `;` regardless of nesting would cut that one segment
+// into two, over-counting below and — worse — leaving one half of the pair
+// to be graded for a guard that was never its own to carry. Depth only
+// needs `(`/`)`, never `{`/`}`: no write in this script sits inside a brace
+// group that isn't also the enclosing function body, which
+// `splitTopLevelStatements` is never handed. The guard check's own tail
+// regex still tolerates one optional `)` immediately after the write's
+// `>&2` for the same reason — `emit`'s subshell close sits between its
+// write and the `|| :` that guards it. `render`'s fallback carries no
+// subshell of its own to tolerate anymore, only a call to the function
+// that does; the tolerance stays because `emit`'s segment still needs it,
+// not because `render`'s does.
 function splitTopLevelStatements(line) {
   const segments = [];
   let cur = "";
@@ -3400,13 +3409,41 @@ test("an unmatched `)` from a case arm does not swallow the statements after it"
     ["case x in x) a", " b", " esac", " c"],
   );
 });
-
-test("no stderr write in the script can abort the run under errexit (#1514)", () => {
-  const joined = readFileSync(SCRIPT, "utf8").replace(/\\\n\s*/g, " ").split("\n");
-  const writes = joined
+// Shared by the fd-2 write census below and its self-referential-emit
+// regression test: extracting this keeps both walking the exact same
+// filters instead of two copies drifting apart.
+function censusStderrWrites(lines) {
+  const writes = lines
     .filter((l) => !/^\s*#/.test(l))
     .flatMap(splitTopLevelStatements)
     .filter((s) => s.includes(">&2"));
+
+  // A `|| emit` tail only reads as guarded because `emit`'s OWN segment is
+  // checked separately, in this same pass — delegating to it is how a
+  // write that can't speak for itself borrows a guard that already lives
+  // elsewhere. `emit()`'s own definition can't borrow from itself that
+  // way: a `|| emit "lost"` fallback on emit's own write recurses into the
+  // same failing write instead of reaching a segment this pass has
+  // already cleared, and hangs rather than terminating (measured: exit
+  // 124, no termination). `delegates` is the exemption both filters below
+  // share, with that one carve-out.
+  const delegates = (s) =>
+    /^\s*\)?\s*\|\|\s*emit\b/.test(s.slice(s.lastIndexOf(">&2") + 3)) &&
+    !/^\s*emit\(\)/.test(s.trim());
+
+  const unguarded = writes.filter(
+    (s) => !/^\s*\)?\s*\|\|\s*:(\s|;|$)/.test(s.slice(s.lastIndexOf(">&2") + 3)) && !delegates(s),
+  );
+  const untrapped = writes.filter(
+    (s) => !/\(\s*trap\s+''\s+PIPE\s*;/.test(s) && !delegates(s),
+  );
+  return { writes, unguarded, untrapped };
+}
+
+
+test("no stderr write in the script can abort the run under errexit (#1514)", () => {
+  const joined = readFileSync(SCRIPT, "utf8").replace(/\\\n\s*/g, " ").split("\n");
+  const { writes, unguarded, untrapped } = censusStderrWrites(joined);
 
   // Without this the filter could silently match nothing — a regex typo, a
   // rename — and the assertion below would pass on an empty list, which is
@@ -3416,31 +3453,51 @@ test("no stderr write in the script can abort the run under errexit (#1514)", ()
   // a bare write appeared outside both of them, or one vanished. It was 3
   // until #1684 folded `die`'s own copy of `emit`'s body into a call: the
   // segment that held `die`'s `>&2` is gone, and `render`'s and `emit`'s
-  // are what the filter still returns. Measured after that change rather
-  // than decremented on paper, because `render`'s two writes (the `sed`
-  // pipeline and its fallback) share ONE segment — a fix that removes one
-  // of them would not move this number at all, so arithmetic on the old
-  // count is not a safe way to arrive at the new one.
+  // are what the filter still returns. #1685 folded `render`'s own copy the
+  // same way and left the count where #1684 put it, for a different reason
+  // than `die`'s drop: `render`'s two writes (the `sed` pipeline and its
+  // fallback) always shared ONE segment, so routing the fallback through a
+  // call to `emit` removed a duplicated guard, not a segment — the filter
+  // still sees one `>&2` per site, same as before either fix. Measured
+  // against the tree, not decremented on paper: arithmetic on the old count
+  // is not a safe way to arrive at the new one.
   assert.equal(writes.length, 2,
     `render and emit are the only statements that may write to fd 2 directly; found ${writes.length}`);
 
-  const unguarded = writes.filter((s) => !/^\s*\)?\s*\|\|\s*:(\s|;|$)/.test(s.slice(s.lastIndexOf(">&2") + 3)));
   assert.deepEqual(unguarded.map((s) => s.trim()), [],
-    "each of these ends the script on its own write status under `set -e`, and 1 out of this script is REFUSED — append `|| :`");
+    "each of these ends the script on its own write status under `set -e`, and 1 out of this script is REFUSED — append `|| :` or route the fallback through `emit`, which already does");
 
   // #1700 made `emit()`'s `( trap '' PIPE; … )` wrapper the ONLY SIGPIPE
-  // guard for all 36 `die` call sites — `die` now calls `emit` instead of
-  // carrying its own copy. Nothing above pins that wrapper: the `unguarded`
-  // filter's `|| :` check above passes on a write that dropped the trap entirely,
-  // because `|| :` only swallows the *status* a killed write would leave
-  // behind, not the SIGPIPE that killed it. `render`'s segment carries its
-  // fallback write's trap in the same string as its primary write (the two
-  // share one segment, per the comment above), so requiring the substring
-  // rather than an anchored prefix covers both writes without re-deriving
-  // which half of the segment is the guarded one.
-  const untrapped = writes.filter((s) => !/\(\s*trap\s+''\s+PIPE\s*;/.test(s));
+  // guard for all 29 `die` call sites — `die` now calls `emit` instead of
+  // carrying its own copy. #1685 moved `render`'s fallback write behind the
+  // same call, so its trap now lives in `emit`'s OWN segment rather than
+  // render's — the `unguarded` filter above already treats a `|| emit` tail
+  // as guarded for that reason (unless the segment IS emit's own
+  // definition — see `censusStderrWrites`'s `delegates`), and this filter
+  // has to agree: a segment whose write reaches fd 2 only by delegating to
+  // `emit` carries no trap text of its own to find, and is not untrapped
+  // for it, because `emit`'s segment is checked separately, right here, in
+  // the same pass. `|| :` only swallows the *status* a killed write would
+  // leave behind, not the SIGPIPE that killed it, which is why a bare
+  // `|| :` tail (with no `emit` call) still has to show the trap substring
+  // in its own segment to pass.
   assert.deepEqual(untrapped.map((s) => s.trim()), [],
-    "each of these can deliver SIGPIPE and kill the script instead of turning a dropped write into EPIPE — wrap it in `( trap '' PIPE; … )`");
+    "each of these can deliver SIGPIPE and kill the script instead of turning a dropped write into EPIPE — wrap it in `( trap '' PIPE; … )` or route it through `emit`, which already does");
+});
+
+// #1703 found that treating any `|| emit` tail as guarded let `emit` guard
+// ITSELF: a self-referential `|| emit "lost"` fallback on emit's own write
+// recurses into the same failing write instead of reaching a segment this
+// census clears elsewhere, and hangs rather than terminating (measured:
+// exit 124, no termination). `censusStderrWrites`'s `delegates` carve-out
+// is what keeps that shape out of the real script; this proves the
+// carve-out actually fires, not just that the real script currently lacks
+// the shape.
+test("a self-referential emit() fallback does not pass the fd-2 write census (#1703)", () => {
+  const selfReferential = ["emit() { ( trap '' PIPE; printf '%s\\n' \"$1\" >&2 ) || emit \"lost\"; }"];
+  const { unguarded } = censusStderrWrites(selfReferential);
+  assert.deepEqual(unguarded.map((s) => s.trim()), [selfReferential[0].replace(/;\s*}$/, "").trim()],
+    "emit() falling back to calling itself must still be flagged unguarded — it recurses into the same failing write and hangs instead of terminating");
 });
 
 /**
