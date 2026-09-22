@@ -30,6 +30,24 @@
 // prose, the same instrument every other `*-prose.test.mjs` file in this
 // directory uses.
 //
+// SELF-CHECK (measured 2026-09-22 against an in-memory mutated copy of this
+// repo's own SKILL.md, never the real checkout — `writeFileSync` the mutant,
+// run this file, `writeFileSync` the original back). A presence-only check per
+// settle state — "does `cancelled` appear anywhere in the paragraph" — passed
+// even after stripping `cancelled` from the THREE-STATE ENUMERATION sentence,
+// because a second, legitimate `` `cancelled` `` occurs later in the same
+// paragraph (the failed/cancelled-vs-completed collapse sentence). That is why
+// the enumeration is ALSO pinned as one combined sentence below, and why the
+// collapse sentence is pinned by its own words rather than assumed to follow
+// from the three per-state presence checks. A rewrite deleting the collapse
+// sentence outright (while leaving every OUTCOME_SHAPES phrase untouched) also
+// passed every other test in an earlier draft of this file — closed by pinning
+// that sentence directly rather than trusting it to be implied. A control
+// mutation — a benign reword of the UNRELATED "Waiting on the pool" paragraph
+// two paragraphs below — left every test in this file green, which is the
+// property a prose pin exists to have: bound to its own clause, not to the
+// file's bytes.
+//
 // SCOPE. Both new paragraphs sit inside #1590's own `section()` — the block
 // scoped "the pool's own discipline and therefore omp's alone" — so this file
 // reuses that same bound rather than re-deriving a second one, and adds one
@@ -114,6 +132,19 @@ for (const state of SETTLE_STATES) {
     assert.match(outcomeParagraph(), new RegExp("`" + state + "`"));
   });
 }
+
+// Presence of each state ANYWHERE in the paragraph (above) is necessary but
+// not sufficient — see SELF-CHECK in this file's header. Pin the three-state
+// enumeration as one combined sentence, and pin the sentence that names
+// collapsing failed/cancelled into completed as the actual failure #1591
+// blocks, rather than trusting the per-state loop to imply either.
+test("run-team/SKILL.md: the pool-outcome paragraph enumerates all three omp settle states together, in one list", () => {
+  assert.match(outcomeParagraph(), phrase("Settle (CONTEXT.md § Coordination) is three states on omp — `completed`, `failed`, `cancelled` —"));
+});
+test("run-team/SKILL.md: the pool-outcome paragraph names the failed/cancelled-vs-completed collapse as the exact failure it blocks", () => {
+  assert.match(outcomeParagraph(), phrase("and reading `failed`/`cancelled` the same as a `completed` turn that had nothing"));
+  assert.match(outcomeParagraph(), phrase("is the exact collapse this line blocks"));
+});
 
 // #1591's core acceptance, table-driven: the paragraph must give each of the
 // three outcome shapes its OWN reading, distinct text a reader cannot satisfy
