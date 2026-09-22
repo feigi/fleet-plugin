@@ -187,9 +187,14 @@ step is manual and deliberate; the operator runs harness-native commands.
   session. Nothing is automatic and nothing is silent.
 - Installing on omp is the plugin plus two settings, not the plugin alone:
   `enabledProviders` (point 8) and `eval.workpool.freshAgents` (point 9). Both
-  are session-wide, both are the operator's to set once, and both are read and
-  refused on by what the fleet runs — never written by it. CONTEXT.md §
-  Install calls the pair an **Install-time precondition**.
+  are session-wide and the operator's to set once, and neither is written by
+  the fleet. Only `enabledProviders` is read and refused on by what the fleet
+  runs — the provenance check (`plugin/scripts/fleet-provenance`) asserts it
+  and refuses on drift. `eval.workpool.freshAgents` has no fleet-side runtime
+  check yet: point 9's `omp config get eval.workpool.freshAgents --json` is
+  for the operator to verify by hand, not something the fleet reads. CONTEXT.md
+  § Install calls the pair an **Install-time precondition** — set once by the
+  operator either way, enforced today only for the first.
 - Provenance is answered by `installPath` plus a content digest, never by a
   version string: omp's recorded version is permanently `0.0.0`, and Claude's
   update path leaves no `.git` in the new cache directory.
