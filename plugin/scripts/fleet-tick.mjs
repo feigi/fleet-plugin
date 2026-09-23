@@ -304,7 +304,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { makeDie, isDigits } from "./arg.mjs";
-import { statePath, readState, writeState } from "./fleet-state.mjs";
+import { statePath, readState, writeState, assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
 
 const NAME = "fleet-tick";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -312,6 +312,11 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 // nothing in the result says so, so it refuses — "no silent caps", same rule
 // candidates.mjs enforces on its own query.
 const PR_LIMIT = 200;
+// Claimed tickets read per stall report. Same "no silent caps" rule as
+// PR_LIMIT above, resolved the other way: the read below cannot REFUSE at the
+// cap, because refusing would suppress the one announcement a dead run leaves
+// behind. So it discloses instead — the line says the count is a floor.
+const CLAIMED_LIMIT = 200;
 
 // die() shared with the other fleet scripts (writeSync-based, pipe-safe —
 // see arg.mjs for the #176/#328/#363 rationale). This file parses its own
@@ -543,13 +548,21 @@ function prState(holds) {
 
 // Supply, from candidates.mjs — the same shortlist phase 0 uses, so the tick
 // and the maintainer count the same queue.
-function supply() {
+//
+// Split into a read and a refusal (#1597) because this number now has two
+// consumers with opposite failure policies. The RECONCILE must refuse an
+// unknown supply — a row that guesses it prints an ACTION nobody can take —
+// while the STALL REPORT must survive one, because a report suppressed by a
+// failed gh query is a dead run that stays silent, which is the whole defect.
+// One read, two callers, and every refusal below is worded exactly as it was
+// when only the reconcile could reach it.
+function readSupply() {
   const r = spawnSync(process.execPath, [join(SCRIPT_DIR, "candidates.mjs"),
     "--require-label", "ready-for-agent"], { encoding: "utf8" });
   // stdio defaults to pipe, so candidates' per-candidate stderr — up to
   // --limit lines of it — is captured and dropped rather than billed to the
   // controller's context. Only the failure paths below say anything.
-  if (r.error) die(`candidates.mjs did not run: ${r.error.code ?? r.error.message} — supply unknown`);
+  if (r.error) return { count: null, why: `candidates.mjs did not run: ${r.error.code ?? r.error.message} — supply unknown` };
   // Exit 1 is candidates' documented "query fine, queue empty" AND Node's own
   // code for a module-not-found, a syntax error or any uncaught throw — the
   // collision candidates.mjs names on its own side. So the payload decides and
@@ -560,7 +573,7 @@ function supply() {
   // it reports zero instead of refusing. The payload is checked on both: a
   // supply read whose stdout is not `[]` is not a supply of zero, whatever
   // code it carries.
-  if ((r.status === 1 || r.status === 3) && r.stdout.trim() === "[]") return 0;
+  if ((r.status === 1 || r.status === 3) && r.stdout.trim() === "[]") return { count: 0 };
   // The signal too: a candidates.mjs killed by an OOM kill leaves status null,
   // and "exited null" names nothing. Same clause the gh read above already has.
   //
@@ -575,25 +588,94 @@ function supply() {
   // context cannot arrive whole, and only ever on the way to exit 2.
   if (r.status !== 0) {
     const why = (r.stderr ?? "").trim().split("\n").slice(-5).join("\n");
-    die(`candidates.mjs ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`}`
-      + ` — supply unknown, and unknown is not zero${why ? `\n${why}` : ""}`);
+    return { count: null, why: `candidates.mjs ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`}`
+      + ` — supply unknown, and unknown is not zero${why ? `\n${why}` : ""}` };
   }
   let rows;
   try {
     rows = JSON.parse(r.stdout);
   } catch (e) {
-    die(`could not parse candidates.mjs output — supply unknown: ${e.message}`);
+    return { count: null, why: `could not parse candidates.mjs output — supply unknown: ${e.message}` };
   }
-  if (!Array.isArray(rows)) die("candidates.mjs did not return an array — supply unknown");
-  return rows.length;
+  if (!Array.isArray(rows)) return { count: null, why: "candidates.mjs did not return an array — supply unknown" };
+  return { count: rows.length };
+}
+
+// How many tickets a dead run stranded. `in-progress` is the claim label
+// claim-ticket.sh adds and candidates.mjs's query EXCLUDES — which is why a
+// stranded ticket is invisible to the next run's scans and to the
+// maintainer's both, and why this count is the actionable half of the report.
+// Neither the label nor that exclusion is touched here; this reads them.
+//
+// null for unknown, never 0: a failed query reporting "0 claimed" says the
+// dead run stranded nothing, which is the one wrong answer that makes the
+// report worth ignoring. `--jq length` rather than a parse of the rows, since
+// nothing here needs the rows — only how many there are.
+function claimed() {
+  const r = spawnSync("gh", ["issue", "list", "--label", "in-progress", "--state", "open",
+    "--limit", String(CLAIMED_LIMIT), "--json", "number", "--jq", "length"], { encoding: "utf8" });
+  if (r.error || r.status !== 0) {
+    // Disclosed, not dropped: readSupply() (above) already says why a failed
+    // query reads as unknown rather than silent; this sibling read must say
+    // the same, or a real gh failure (auth expiry, rate limit, a network
+    // outage) is indistinguishable from the deliberately-undiagnosed case —
+    // no trace in stderr, no trace in the exit code, nothing an operator
+    // hunting a stall report could act on.
+    const why = r.error
+      ? `gh did not run: ${r.error.code ?? r.error.message}`
+      : `gh ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`}`;
+    const tail = (r.stderr ?? "").trim().split("\n").slice(-5).join("\n");
+    console.error(`${NAME}: ${why} — claimed ticket count unknown${tail ? `\n${tail}` : ""}`);
+    return null;
+  }
+  const n = Number(r.stdout.trim());
+  if (!Number.isInteger(n) || n < 0) return null;
+  // Disclosed, never silently floored: at exactly the cap the list may be
+  // truncated and nothing in the answer says so, so the report says so
+  // itself. A string here rather than a number because that is what the
+  // reader must not mistake for an exact count.
+  return n === CLAIMED_LIMIT ? `${n}+` : n;
 }
 
 function main() {
   const { mergeHolds, fold, state: path, ...c } = counts();
+
+  // The PRIOR run's liveness, before this tick reads anything else — #1597.
+  //
+  // The cockpit is the better surface for this and the weaker guarantee:
+  // whether a backgrounded cockpit outlives the session that spawned it is
+  // unmeasured and harness-dependent, so a run that died overnight may have
+  // taken its only renderer with it. This is the reader that needs nothing to
+  // have survived — the mark is on disk and the next run starts by reading it.
+  //
+  // Ahead of prState() and the reconcile deliberately, because both of those
+  // REFUSE on a failed read (exit 2) and a stall announced after them is a
+  // stall a gh outage can silence. The state read is its own, not the one the
+  // streak write below takes: that one has to be the freshest possible
+  // snapshot or this tick reverts whatever the heartbeat wrote while these
+  // network reads were in flight. A corrupt state file therefore announces
+  // itself twice per tick, once per read — both are real observations of a
+  // real fault, and this file's policy on a degraded read is loud.
+  const priorState = readState(path, NAME);
+  const verdict = assessBeat({ beat: priorState.beat, ticked: priorState.ticked, now: Date.now() });
+  // One supply read, shared, and taken lazily so a healthy tick keeps today's
+  // order exactly: prState() first, candidates.mjs second. Only a stall pulls
+  // it forward, which is the one case where announcing outranks ordering.
+  let supplyRead = null;
+  const readSupplyOnce = () => (supplyRead ??= readSupply());
+  if (isStalled(verdict)) {
+    // The report is a complete statement on its own — unlike half a
+    // reconcile, which is the thing the invariant below exists to prevent —
+    // so it prints before the reads rather than waiting behind them.
+    console.log(stallReport(verdict, { claimed: claimed(), supply: readSupplyOnce().count }));
+  }
+
   // Both reads happen before anything prints: a partial tick is worse than no
   // tick, because half a reconcile still reads like a reconcile.
   const { mergeQueue, mergeHeld, mergeIgnored, reviewBacklog } = prState(mergeHolds);
-  const rows = reconcile({ ...c, mergeQueue, mergeHeld, mergeIgnored, reviewBacklog, supply: supply() });
+  const { count: supplyCount, why: supplyWhy } = readSupplyOnce();
+  if (supplyCount === null) die(supplyWhy);
+  const rows = reconcile({ ...c, mergeQueue, mergeHeld, mergeIgnored, reviewBacklog, supply: supplyCount });
   const lines = formatLines(rows);
 
   // The back-off streak and the fold digest, written on EVERY tick including
@@ -607,7 +689,13 @@ function main() {
   const prev = readState(path, NAME);
   const digest = createHash("sha256").update(lines.join("\n")).digest("hex");
   const acts = actionable(rows);
-  writeState(path, NAME, prev, { quiet: acts ? 0 : prev.quiet + 1, digest });
+  // `ticked`, fleet-tick's own liveness key (#1597 follow-up): written on
+  // every invocation, edge or heartbeat-triggered alike, unconditionally —
+  // this tick running IS the occurrence, no reconcile outcome gates it. A
+  // busy wave that never refreshes `beat` (heartbeat only arms when the
+  // queue drains) still refreshes THIS on every completion, which is what
+  // keeps assessBeat from reading that wave as a dead run.
+  writeState(path, NAME, prev, { quiet: acts ? 0 : prev.quiet + 1, digest, ticked: { at: Date.now() } });
 
   // Fold only when BOTH hold: nothing to act on, and nothing new to say. Either
   // one alone still prints in full — an unchanged `DISPATCH 1` is work going

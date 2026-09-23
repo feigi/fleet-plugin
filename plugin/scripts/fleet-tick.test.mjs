@@ -457,21 +457,36 @@ const SIBLING_MODULES = ["arg.mjs", "fleet-state.mjs", "git-env.mjs"].map(
   (m) => [m, fileURLToPath(new URL(`./${m}`, import.meta.url))],
 );
 
-// Answers both reads the tick makes: `gh pr list` for backlog/merge-queue, and
-// the `gh issue list --jq …` that candidates.mjs makes on its behalf. The issue
-// branch execs the real jq with the expression gh was handed, so candidates.mjs
-// runs for real underneath rather than being mocked away — supply is the one
-// number this script does not compute itself.
+// Answers all three reads the tick makes: `gh pr list` for backlog/merge-queue,
+// the `gh issue list --jq …` that candidates.mjs makes on its behalf, and
+// #1597's `gh issue list --label in-progress` for the stall report's claimed
+// count. The issue branch execs the real jq with the expression gh was handed,
+// so candidates.mjs runs for real underneath rather than being mocked away —
+// supply is the one number this script does not compute itself.
+//
+// The claim read is split off by LABEL rather than by flag order: it is a
+// different population from the ready-for-agent shortlist (claimed tickets are
+// exactly the ones candidates.mjs excludes), so answering it from the same
+// fixture would make every stall case report the pool back as its own
+// stranded count.
 const GH_STUB = `#!/bin/sh
 case "$1 $2" in
   "pr list") [ -n "$PR_FAIL" ] && { echo "boom" >&2; exit 1; }; cat "$FIXTURE_PRS" ;;
   "issue list")
     [ -n "$ISSUE_FAIL" ] && { echo "boom" >&2; exit 1; }
     expr=""
+    claimed=""
     while [ $# -gt 0 ]; do
-      case "$1" in --jq) shift; expr="$1" ;; esac
+      case "$1" in
+        --jq) shift; expr="$1" ;;
+        in-progress) claimed=1 ;;
+      esac
       shift
     done
+    if [ -n "$claimed" ]; then
+      [ -n "$CLAIMED_FAIL" ] && { echo "boom" >&2; exit 1; }
+      exec jq -c "$expr" "$FIXTURE_CLAIMED"
+    fi
     exec jq -c "$expr" "$FIXTURE_ISSUES" ;;
   *) echo "unexpected gh $*" >&2; exit 1 ;;
 esac
@@ -487,7 +502,7 @@ const issue = (number) => ({
   number, title: `t${number}`, labels: [{ name: "ready-for-agent" }], body: "",
 });
 
-function runCli(args, { prs = [], issues = [], env: extraEnv = {}, candidates, cwd, defaultState = false } = {}) {
+function runCli(args, { prs = [], issues = [], claimed = [], env: extraEnv = {}, candidates, cwd, defaultState = false } = {}) {
   // realpath, because on macOS tmpdir() is /var -> /private/var: a script COPY
   // placed under the unresolved path never runs its own main(), since
   // import.meta.url resolves the symlink and process.argv[1] does not. It exits
@@ -498,8 +513,14 @@ function runCli(args, { prs = [], issues = [], env: extraEnv = {}, candidates, c
   chmodSync(gh, 0o755);
   const prFixture = join(dir, "prs.json");
   const issueFixture = join(dir, "issues.json");
+  // #1597: the tickets a dead run stranded, carrying the claim label. Its own
+  // fixture and defaulted EMPTY, so every case that does not name one still
+  // answers the claim query with a real, readable zero rather than a gh
+  // refusal that would print `unknown` into a line nobody asked for.
+  const claimedFixture = join(dir, "claimed.json");
   writeFileSync(prFixture, JSON.stringify(prs));
   writeFileSync(issueFixture, JSON.stringify(issues));
+  writeFileSync(claimedFixture, JSON.stringify(claimed));
   // Every case gets its own state file unless it names one. The tick writes the
   // back-off streak on every successful run, and its default path resolves
   // against the git common dir — so without this the suite would write the
@@ -511,7 +532,7 @@ function runCli(args, { prs = [], issues = [], env: extraEnv = {}, candidates, c
   // throwaway git repository, which is what the common dir then resolves to.
   const stateArg = args.includes("--state") || defaultState
     ? [] : ["--state", join(dir, "heartbeat.json")];
-  // supply() resolves candidates.mjs beside fleet-tick.mjs, so a stub sibling
+  // readSupply() resolves candidates.mjs beside fleet-tick.mjs, so a stub sibling
   // means running a copy of the script out of the stub dir — and every module
   // the script imports has to ride along or the copy fails to resolve it at
   // startup: an uncaught MODULE_NOT_FOUND, exit 1, exactly the collision this
@@ -527,7 +548,7 @@ function runCli(args, { prs = [], issues = [], env: extraEnv = {}, candidates, c
     cwd, encoding: "utf8",
     env: {
       ...process.env, PATH: `${dir}:${process.env.PATH}`,
-      FIXTURE_PRS: prFixture, FIXTURE_ISSUES: issueFixture, ...extraEnv,
+      FIXTURE_PRS: prFixture, FIXTURE_ISSUES: issueFixture, FIXTURE_CLAIMED: claimedFixture, ...extraEnv,
     },
   });
   rmSync(dir, { recursive: true, force: true });
@@ -1009,4 +1030,170 @@ test("CLI: with no --state, and with an empty one, the tick resolves the run's s
   assert.doesNotMatch(second.stderr, /WARNING/);
   assert.equal(JSON.parse(readFileSync(state, "utf8")).quiet, 2);
   rmSync(repo, { recursive: true, force: true });
+});
+
+// --------------------------------------------------------------------------
+// The prior run's liveness — #1597. fleet-tick is the reader that needs
+// nothing to have survived the session: the cockpit is the better surface and
+// the weaker guarantee, so this is what announces a run that died overnight
+// when no cockpit outlived it.
+
+// A mark `ms` in the past, promising `interval` seconds between beats.
+const beat = (ms, interval, stopped = "") =>
+  JSON.stringify({ quiet: 0, elapsed: 0, digest: "", beat: { at: Date.now() - ms, interval, stopped } });
+
+const IDLE = ["--implementers", "2", "--reviewers", "0", "--merge-bots", "0", "--pool", "0",
+  "--reviews-ready", "0", "--merge-holds", "none"];
+
+test("CLI: a stale prior beat is reported, and reported FIRST", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stall-")));
+  const path = join(dir, "heartbeat.json");
+  // 90 minutes of silence against a 20-minute promise: dead by any reading.
+  writeFileSync(path, beat(90 * 60_000, 1200));
+  const r = runCli([...IDLE, "--state", path], {
+    prs: [], issues: [issue(9)], claimed: [{ number: 41 }, { number: 42 }, { number: 43 }],
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const lines = r.stdout.trim().split("\n");
+  // FIRST, ahead of every reconcile row. A stall printed under three rows of
+  // "IDLE OK" is a stall a controller scrolls past, and the rows are what a
+  // reader is trained to act on.
+  assert.match(lines[0], /^heartbeat STALLED/);
+  assert.match(lines[1], /^implementers/);
+  // What is stranded, which is the actionable half: the claimed tickets keep
+  // the label the candidate scan excludes, so nothing else in the run will
+  // ever mention them again.
+  assert.match(lines[0], /3 ticket\(s\) claimed and in flight/);
+  assert.match(lines[0], /pool supply 1/);
+  assert.match(lines[0], /stopped without a recorded reason/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("CLI: a beat within the interval it promised is not reported at all", () => {
+  // The cry-wolf case, and the reason the mark carries an interval. Twenty
+  // minutes of silence is a HEALTHY quiet night at the back-off ceiling; a
+  // tick that called it dead would fire on every wake of every quiet run and
+  // train the controller to ignore the one line that matters.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-quiet-")));
+  const path = join(dir, "heartbeat.json");
+  writeFileSync(path, beat(20 * 60_000, 1200));
+  const quiet = runCli([...IDLE, "--state", path], { prs: [], issues: [] });
+  assert.equal(quiet.status, 0, quiet.stderr);
+  assert.doesNotMatch(quiet.stdout, /STALLED/);
+
+  // The same silence against the BASE interval is overdue. One fixture, two
+  // recorded promises, opposite verdicts — which is what "judged against the
+  // recorded interval, not a hard-coded threshold" means in practice.
+  writeFileSync(path, beat(20 * 60_000, 300));
+  assert.match(runCli([...IDLE, "--state", path], { prs: [], issues: [] }).stdout, /STALLED/);
+
+  // And a run that never beat says nothing: a fresh run legitimately has no
+  // mark, and a first tick that announced one would be pure noise.
+  writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "" }));
+  assert.doesNotMatch(runCli([...IDLE, "--state", path], { prs: [], issues: [] }).stdout, /STALLED/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("CLI: a deliberate stop is reported with its reason", () => {
+  // The one verdict that knows its own cause. Reported at ten minutes against
+  // a five-minute interval — not yet stale by the grace rule — because a stop
+  // that had to wait two intervals to be believed is a stop reported after
+  // the only window anyone could act in.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stopped-")));
+  const path = join(dir, "heartbeat.json");
+  writeFileSync(path, beat(6 * 60_000, 300, "context ceiling reached"));
+  const r = runCli([...IDLE, "--state", path], { prs: [], issues: [] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /stopped deliberately — recorded reason: context ceiling reached/);
+  assert.doesNotMatch(r.stdout, /without a recorded reason/,
+    "a stop that named its cause must not be reported as an abrupt death");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("CLI: the stall is announced even when the reconcile then refuses", () => {
+  // "Before doing anything else" is the acceptance criterion, and this is the
+  // case that makes it more than word order: prState() and the supply read
+  // both exit 2 on a failed read, so a report printed after them is a report a
+  // gh outage silences — on exactly the morning after a run died, which is when
+  // the fleet is least likely to be in good shape.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stall-refuse-")));
+  const path = join(dir, "heartbeat.json");
+  writeFileSync(path, beat(90 * 60_000, 1200));
+  const r = runCli([...IDLE, "--state", path], {
+    prs: [], issues: [], claimed: [{ number: 41 }], env: { PR_FAIL: "1" },
+  });
+  assert.equal(r.status, 2, "the reconcile still refuses a read it could not make");
+  assert.match(r.stderr, /gh pr list failed/);
+  assert.match(r.stdout, /heartbeat STALLED/, "the announcement must survive the refusal that follows it");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("CLI: an unreadable claim count is `unknown`, never zero", () => {
+  // Unknown is not zero, the same refusal this file's NOT_ZERO wording makes
+  // about an unread pool. "0 claimed" off a failed query says the dead run
+  // stranded nothing — the single answer that makes the whole report safe to
+  // ignore, and the one it must never give by accident.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stall-unknown-")));
+  const path = join(dir, "heartbeat.json");
+  writeFileSync(path, beat(90 * 60_000, 1200));
+  const r = runCli([...IDLE, "--state", path], {
+    prs: [], issues: [], claimed: [{ number: 41 }], env: { CLAIMED_FAIL: "1" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /unknown ticket\(s\) claimed and in flight/);
+  // The failure itself must reach stderr, not just the "unknown" verdict:
+  // a real gh outage (auth expiry, rate limit) is otherwise indistinguishable
+  // from the deliberately-undiagnosed case, with no trace anywhere an
+  // operator would look.
+  assert.match(r.stderr, /claimed ticket count unknown/);
+  assert.match(r.stderr, /boom/, "the stub's own gh stderr must ride along, not be dropped");
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("CLI: a busy, fully-staffed fleet is not reported STALLED just because the queue never drained", () => {
+  // #1597 follow-up. `beat` only refreshes when the queue drains ("beat when
+  // there is nothing to do"), so a fully-staffed fleet that has been busy for
+  // eleven minutes straight never touches it — the recorded interval stays
+  // base (300s, from whenever `quiet` was last reset) and the mark itself
+  // ages straight past its own grace window even though the run is actively
+  // dispatching at capacity. fleet-tick's OWN ticks are the other liveness
+  // signal for exactly this case: a tick two minutes ago (this same script,
+  // on a prior completion edge) is what tells the busy wave from a dead one.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-busy-not-stalled-")));
+  const path = join(dir, "heartbeat.json");
+  writeFileSync(path, JSON.stringify({
+    quiet: 0, elapsed: 0, digest: "",
+    beat: { at: Date.now() - 11 * 60_000, interval: 300, stopped: "" },
+    ticked: { at: Date.now() - 2 * 60_000 },
+  }));
+  const busy = ["--implementers", "2", "--reviewers", "1", "--merge-bots", "1", "--pool", "3",
+    "--reviews-ready", "1", "--merge-holds", "none"];
+  const r = runCli([...busy, "--state", path], { prs: [], issues: [issue(9)], claimed: [{ number: 41 }] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /STALLED/, "a live busy wave must not read as a dead run");
+  assert.match(r.stdout, /^implementers.*AT CAP/m);
+});
+
+test("CLI: the streak write carries the heartbeat's mark instead of erasing it", () => {
+  // One writer per key is only true if the other writers preserve it. This
+  // tick patches `quiet` and `digest` on every run — every five minutes on a
+  // busy one — so a write that dropped `beat` would delete the mark almost as
+  // fast as the heartbeat could take it, and an absent mark is indis-
+  // tinguishable from a run that never beat: every reader would go silent on
+  // exactly the run that died.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-mark-carry-")));
+  const path = join(dir, "heartbeat.json");
+  const mark = { at: Date.now() - 60_000, interval: 300, stopped: "" };
+  writeFileSync(path, JSON.stringify({ quiet: 3, elapsed: 7, digest: "old", beat: mark }));
+  const r = runCli([...IDLE, "--state", path], { prs: [], issues: [] });
+  assert.equal(r.status, 0, r.stderr);
+  const after = JSON.parse(readFileSync(path, "utf8"));
+  assert.deepEqual(after.beat, mark, "fleet-tick must not write the heartbeat's key");
+  assert.equal(after.quiet, 4, "and must still write its own");
+  // Its own liveness key, #1597 follow-up: written on every invocation,
+  // edge or heartbeat-triggered alike, so a busy wave has evidence of its
+  // own even while `beat` sits untouched.
+  assert.ok(after.ticked && typeof after.ticked.at === "number", "fleet-tick must write its own ticked mark");
+  assert.ok(after.ticked.at >= Date.now() - 5000, "the ticked mark must be from THIS invocation");
+  rmSync(dir, { recursive: true, force: true });
 });

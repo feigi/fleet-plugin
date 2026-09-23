@@ -1633,6 +1633,33 @@ affordable; an edge tick is read by a controller that just acted and needs the
 rows. An unchanged `DISPATCH` is never folded — unclaimed work always prints in
 full, because folding it would hide the stall behind this ticket's own remedy.
 
+**When you stop on purpose, say why — one command, and it is the last thing
+you owe the next run.** The beat leaves a dated mark on every hold, so a run
+that dies abruptly (a crashed harness, a closed terminal, an OOM kill) is
+detected by its mark going stale. A run that stops KNOWINGLY can do better
+than being detected, and nothing else can write the reason afterwards:
+
+```bash
+~/.fleet/bin/fleet-run fleet-heartbeat.mjs --stop "budget exhausted"
+```
+
+It holds nothing and returns at once. Use it when the budget goes, when you
+can see the context ceiling coming, or when you drain the run deliberately.
+Skipping it is not fatal — the next reader still reports the stop, it just
+reports that the beat stopped *without a recorded reason*, which is all it can
+honestly say about a death that named nothing.
+
+**A `heartbeat STALLED` line is the PREVIOUS run, never this one.** `fleet-tick`
+prints it before its own rows when the mark it finds is overdue against the
+interval that mark recorded, and the cockpit shows the same line while it is
+up. It names when the beat was last seen, how overdue that is, how many
+tickets are still claimed and in flight, and whether the pool still has supply
+— because the claimed ones keep the `in-progress` label, the candidate scan
+EXCLUDES that label, and those tickets are therefore invisible to your own
+shortlist and to the maintainer's. Read the line, decide what to do about the
+stranded tickets, and carry on; nothing in the fleet releases, relabels or
+reaps them for you, and nothing restarts the run that stranded them.
+
 **Own the CI waits.** Members are turn-based and cannot hold across a ten-minute
 run — they rebase, push, stop. Arm a second persistent Monitor over open PRs'
 latest runs, keyed `<run-id>:<attempt>:<conclusion>` so each terminal state fires once, and

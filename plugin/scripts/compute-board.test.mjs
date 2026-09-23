@@ -272,3 +272,113 @@ test("computeBoard: ledgerState defaults to read when gather() reports none", ()
   const inp = baseInputs(); // ledger has no `state` key
   assert.equal(computeBoard(inp).ledgerState, "read");
 });
+
+// --------------------------------------------------------------------------
+// The liveness surface — #1597. `beat` is telemetry beside `spend`, under the
+// same rule: it can only ever POPULATE or OMIT `liveness`, never move a
+// ticket. The cockpit is one renderer of the heartbeat's mark, never the
+// thing that holds it.
+
+// `now` in baseInputs is 1000ms past the epoch, which is a fine clock for
+// dwell but useless for an age in minutes — so the liveness cases move it
+// somewhere a 20-minute-old mark can exist behind it.
+const NOW = 2_000_000_000_000;
+const livenessInputs = (beat) => ({ ...baseInputs(), now: NOW, beat });
+
+test("computeBoard: a stalled beat populates `liveness` with what is stranded", () => {
+  const b = computeBoard(livenessInputs({ at: NOW - 90 * 60_000, interval: 1200, stopped: "" }));
+  assert.equal(b.liveness.kind, "stale");
+  // Counted off THIS model rather than re-queried: a ticket past POOL and
+  // short of MERGED is one the ledger placed and nothing landed — the same
+  // population the claim label marks, reached from the ledger the cockpit
+  // already read. #324 (REVIEW) and #340 (IMPLEMENTING); #332 merged, #341 is
+  // still pool.
+  assert.equal(b.liveness.claimed, 2);
+  assert.equal(b.liveness.supply, b.queue.pool);
+  // The rendered line rides the payload because board.html is served as one
+  // self-contained file and cannot import the rule. A second wording on the
+  // page is a second answer to "is this run dead".
+  assert.match(b.liveness.text, /heartbeat STALLED/);
+  assert.match(b.liveness.text, /2 ticket\(s\) claimed and in flight/);
+  assert.match(b.liveness.text, /70m past the 20m interval it promised/);
+});
+
+test("computeBoard: a failed ledger or pool read reports `unknown`, never a false zero", () => {
+  // #1597 follow-up. `claimed`/`supply` derive from `ledger.rows`/`issues`,
+  // which both collapse to the SAME empty array on a genuinely-drained read
+  // and on a failed one (gather()'s tryRun/tryParse fallback) — the exact
+  // collapse `ledgerState` exists to undo elsewhere on this same board. A
+  // stall banner that quietly prints "0 claimed, pool supply 0" off a read
+  // that never happened is the one report an operator has no reason to
+  // distrust, and it also outranks and hides the ledger-read-failed banner
+  // that would have explained the zeros.
+  const stale = { at: NOW - 90 * 60_000, interval: 1200, stopped: "" };
+
+  // Ledger read failed — the ticket-derived half must go unknown, and the
+  // pool half, which never depended on the ledger, must stay a real count.
+  const noLedger = computeBoard({
+    ...livenessInputs(stale), ledger: { rows: [], filed: [], ruled: [], state: "unread" },
+  });
+  assert.equal(noLedger.liveness.claimed, null);
+  assert.equal(noLedger.liveness.supply, noLedger.queue.pool);
+  assert.match(noLedger.liveness.text, /unknown ticket\(s\) claimed and in flight/);
+
+  // Pool read failed — the reverse split.
+  const noPool = computeBoard({ ...livenessInputs(stale), poolOk: false });
+  assert.equal(noPool.liveness.claimed, 2);
+  assert.equal(noPool.liveness.supply, null);
+  assert.match(noPool.liveness.text, /pool supply unknown/);
+
+  // Both failed at once.
+  const both = computeBoard({
+    ...livenessInputs(stale), ledger: { rows: [], filed: [], ruled: [], state: "unparsed" }, poolOk: false,
+  });
+  assert.equal(both.liveness.claimed, null);
+  assert.equal(both.liveness.supply, null);
+
+  // A read that genuinely succeeded and came back empty is still a real 0,
+  // never smuggled into `unknown` by an over-broad guard.
+  const emptyOk = computeBoard({
+    ...livenessInputs(stale), ledger: { rows: [], filed: [], ruled: [], state: "read" },
+  });
+  assert.equal(emptyOk.liveness.claimed, 0);
+});
+
+test("computeBoard: a healthy or absent beat omits the surface rather than rendering an empty one", () => {
+  // Null, not an `{ ok: true }`-shaped nothing: the page hides the banner on
+  // null, and a banner that fires on every healthy tick is a banner the
+  // operator learns to read past — which would cost exactly the one night it
+  // was built for.
+  assert.equal(computeBoard(livenessInputs({ at: NOW - 60_000, interval: 300, stopped: "" })).liveness, null);
+  assert.equal(computeBoard(livenessInputs(null)).liveness, null);
+  // And a caller that passes no `beat` at all — every hand-built test driver,
+  // and any board.json written before this key existed — gets the same null
+  // rather than a crash or an undefined key.
+  const inp = baseInputs();
+  delete inp.beat;
+  assert.equal(computeBoard(inp).liveness, null);
+});
+
+test("computeBoard: a deliberate stop reaches the page with its reason", () => {
+  const b = computeBoard(livenessInputs({ at: NOW - 60_000, interval: 300, stopped: "budget exhausted" }));
+  assert.equal(b.liveness.kind, "stopped");
+  assert.match(b.liveness.text, /recorded reason: budget exhausted/);
+});
+
+test("computeBoard: a liveness input can never change a ticket's stage", () => {
+  // The constraint the ticket states in its own words, and the one a
+  // populate/omit assertion alone would not catch: a stall must not flag,
+  // re-column, re-dwell or promote anything. The dead controller is the
+  // reason nobody is moving the tickets; it is not itself a ticket movement.
+  const quiet = computeBoard(livenessInputs(null));
+  for (const beat of [
+    { at: NOW - 90 * 60_000, interval: 1200, stopped: "" },
+    { at: NOW - 60_000, interval: 300, stopped: "budget exhausted" },
+    { at: NOW - 60_000, interval: 300, stopped: "" },
+  ]) {
+    const b = computeBoard(livenessInputs(beat));
+    assert.deepEqual(b.tickets, quiet.tickets, "a liveness input moved a ticket");
+    assert.deepEqual(b.attention, quiet.attention, "a liveness input raised an attention row");
+    assert.deepEqual(b.queue, quiet.queue, "a liveness input changed the queue counts");
+  }
+});

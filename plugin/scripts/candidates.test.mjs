@@ -659,7 +659,7 @@ test("a dependency heading that armed no section is named on stderr, and an arme
   assert.match(stderr, /^ {4}#3 \[ready-for-agent\] ticket 3 {2}deps:12$/m);
   // Exit status and payload unchanged. The heading text reaches this process as
   // a jq field (the body never does), so the assertion that matters is that the
-  // field is stripped before stdout: phase 0 and fleet-tick's supply() read the
+  // field is stripped before stdout: phase 0 and fleet-tick's readSupply() read the
   // same four keys they read before — `spec` is the reduction's other
   // stderr-only field, and `dropSpecs` has already destructured that one out.
   assert.equal(status, 0);

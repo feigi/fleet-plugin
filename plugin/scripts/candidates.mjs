@@ -37,7 +37,7 @@ const NAME = "candidates";
 // model each run (next-ticket/SKILL.md, run-team/SKILL.md), which is why a
 // malformed invocation is more plausible here than the shared guard's shape
 // alone suggests — a model retypes the flags every time. The third,
-// fleet-tick.mjs's supply(), spawns it with hardcoded args that cannot drift.
+// fleet-tick.mjs's readSupply(), spawns it with hardcoded args that cannot drift.
 const die = makeDie(NAME);
 const arg = makeArg(die);
 const has = makeHas(die);

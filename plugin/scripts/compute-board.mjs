@@ -2,6 +2,16 @@
 // dwell/staleness is deterministic and unit-testable. board.mjs does the gh/
 // ledger I/O and calls computeBoard(); every stage-derivation and flag decision
 // lives here and is exercised by compute-board.test.mjs (`node --test`).
+//
+// #1597: the ONE import this module takes, and it is a pure one —
+// fleet-state.mjs owns the heartbeat's `beat` key, and the rule for reading
+// that key travels with it rather than being copied here. That module's own
+// I/O (its path probe, its file read) is never called from this file; only
+// assessBeat/isStalled/stallReport are, all of which are functions of their
+// arguments. Importing the rule is what keeps the cockpit's stall wording and
+// fleet-tick's identical — two spellings of "this run is dead" would be two
+// answers the operator has to reconcile at 3am.
+import { assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
 
 // A ledger row is freeform, controller-authored text. Two real examples:
 //   #332 impl-332 → PR#344 → MERGED 73b356de
@@ -97,6 +107,40 @@ function severity(flags) {
 function splitNumbered(line) {
   const m = line.match(/^#(\d+)\s+(.*)$/);
   return m ? { issue: Number(m[1]), subject: m[2] } : { issue: null, subject: line };
+}
+
+// The stall surface, or null when there is nothing to say. #1597.
+//
+// The two facts the report needs beyond the mark itself — what is claimed and
+// whether the pool still has supply — are read off THIS model rather than
+// re-queried, which is the whole reason this lives here and not in gather().
+// A ticket in flight is one the ledger placed past POOL and short of MERGED:
+// a row exists for it, so it was claimed, and it has not landed, so the claim
+// is still outstanding. That is the same population the `in-progress` label
+// marks, arrived at from the ledger instead of from a label query the cockpit
+// has no reason to run.
+//
+// `ledgerOk`/`poolOk` gate `claimed`/`supply` at `null`, never a computed
+// zero, the moment either input did not actually read — the same "unknown is
+// not zero" contract fleet-state.mjs's stallReport() states in its own words
+// and fleet-tick.mjs's CLI side already honours. `tickets`/`pool` derive
+// straight from `ledger.rows`/`issues`, which reduce to the empty array on
+// either a genuinely empty read AND a failed one alike (gather()'s tryRun/
+// tryParse fallback) — so without this gate, a `gh`/ledger outage prints the
+// exact same "0 claimed, pool supply 0" a healthy drained run would, which is
+// the one report an operator has no reason to distrust and every reason to.
+//
+// The verdict carries `text` — the rendered line — because board.html is
+// served as one self-contained file with no imports: a page that formatted
+// this itself would be a second wording of the same verdict, free to drift
+// from fleet-tick's the moment either is edited. The page renders; the rule
+// and its words stay here.
+function stall(beat, ticked, tickets, pool, { ledgerOk, poolOk }, now) {
+  const verdict = assessBeat({ beat, ticked, now });
+  if (!isStalled(verdict)) return null;
+  const claimed = ledgerOk ? tickets.filter((t) => t.column !== "POOL" && t.column !== "MERGED").length : null;
+  const supply = poolOk ? pool : null;
+  return { ...verdict, claimed, supply, text: stallReport(verdict, { claimed, supply }) };
 }
 
 export function computeBoard(inputs) {
@@ -196,6 +240,31 @@ export function computeBoard(inputs) {
     // which would read as "this run was free", and shows the error, which is
     // a bug the operator has to act on.
     spend: inputs.spend ?? null,
+    // #1597. Telemetry beside `spend`, and under the same rule: a liveness
+    // input can only ever POPULATE or OMIT this field, and nothing above it
+    // reads `inputs.beat` — no column, no flag, no dwell clock, no attention
+    // row. A dead controller does not move a ticket; it means nobody is
+    // moving the tickets, which is a different statement and belongs in a
+    // different field.
+    //
+    // Null for "nothing to report", which covers both a run that has never
+    // beaten and one that is beating normally — the page hides the banner on
+    // either, because a banner that fires on every healthy tick is a banner
+    // the operator learns to read past.
+    // `beat`/`ticked` pass through bare, unlike `spend` two fields up: that
+    // coalesce is load-bearing because the value is serialised into
+    // board.json as-is, while these two are only ever fed to assessBeat(),
+    // which already treats `undefined` and `null` identically — a `?? null`
+    // here would cost a line to say nothing stall() does not already do.
+    //
+    // `ledgerOk`/`poolOk` default to true absent a signal, matching
+    // `ledgerState`'s own `?? "read"` default just above: every caller that
+    // builds inputs by hand (every test in this suite) means a read that
+    // succeeded, and only gather() — which now sets both — can say otherwise.
+    liveness: stall(inputs.beat, inputs.ticked, tickets, pool, {
+      ledgerOk: (ledger.state ?? "read") === "read",
+      poolOk: inputs.poolOk ?? true,
+    }, now),
     attention,
   };
 }

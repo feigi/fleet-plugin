@@ -36,6 +36,14 @@ import { classifyRole, computeSpend, attributeTools, mergeTools } from "./comput
 import { encodeClaudeProjectDir as encodeProjectDir, foldClaudeTranscript, claudeRoleSignals } from "./member-record.mjs";
 import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+// #1597: the heartbeat's liveness mark, read here and never written. The
+// cockpit is a READER of that key — the heartbeat is its only writer — and it
+// reaches the file through the module that owns the filename rather than
+// spelling `heartbeat.json` a second time. The PATH still comes from this
+// file's own resolveCockpitInstance(), not from statePath(): that probe is
+// already run once per launch here, with the `canonicalise` opt-in only this
+// caller takes (#1582), and a second probe could answer differently.
+import { readState, stateFileIn } from "./fleet-state.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createServer, request as httpRequest } from "node:http";
@@ -903,7 +911,7 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
 // say whether an operator named it. Whether --spend-dir was given is a fact
 // about argv, unrelated to which of gatherSpend's three shapes the pin
 // currently holds.
-export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null, spendDir = argSpendDir(), spendDirExplicit = argSpendDir() != null }) {
+export function gather({ ledgerFile, prevFile, stateFile = null, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null, spendDir = argSpendDir(), spendDirExplicit = argSpendDir() != null }) {
   // The one read that must not crash the gather: a corrupt/partial board.json
   // (the fallback safety net itself) is ignored, not fatal. That holds for a
   // SHAPE fault as much as a parse fault (#1192) — the guard below rejects the
@@ -994,7 +1002,16 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval,
   // chain — so this row genuinely needs a guaranteed string: an issue found
   // but unable to describe itself reads as its number rather than literal
   // `undefined` on the operator's page (#786).
-  const issues = ghRows(issuesJson, "gh issue list").map((i) => ({
+  //
+  // Parsed by hand here rather than through `ghRows` (#1597 follow-up): this
+  // read is the pool's ONLY source, and compute-board.mjs's stall() needs to
+  // tell a genuinely empty pool from a `gh` outage the same way it already
+  // tells an empty ledger from an unread one — `ghRows`'s own `[]` fallback
+  // collapses both to the identical shape before a caller here could split
+  // them back apart.
+  const issuesParsed = tryParse(issuesJson, null, "gh issue list");
+  const poolOk = issuesParsed !== null;
+  const issues = withNumber(poolOk ? issuesParsed : [], "gh issue list").map((i) => ({
     number: i.number,
     title: typeof i.title === "string" ? i.title : `#${i.number}`,
     labels: labelsOf(i),
@@ -1044,7 +1061,27 @@ export function gather({ ledgerFile, prevFile, scriptDir = SCRIPT_DIR, interval,
   // runs, only in where the check itself is written.
   const sinceMs = argSpendSince();
   const spend = gatherSpend({ dir: spendDir, sinceMs, explicit: spendDirExplicit });
-  return { ledger, issues, prs, ci, prev, repo, repoUrl, workspace, port, spend, now: Date.now(), interval: interval ?? argInterval() ?? 15 };
+  // #1597: the heartbeat's mark, raw. readState() never throws — an absent
+  // file is the ordinary state of a run whose heartbeat has not beaten yet,
+  // and an unreadable or corrupt one announces itself on stderr and degrades
+  // to no mark, which computeBoard() renders as no panel rather than as a
+  // death it cannot substantiate. So no try/catch here and no `tryRun` shape:
+  // the degrade lives in the module that owns the file.
+  //
+  // `null` when no caller named a state file, and DISTINCT from a file that
+  // is simply absent: both omit the surface today, but only the second is a
+  // reading. Defaulted rather than resolved here for gather()'s own reason —
+  // every caller in this file passes the instance's answer, and a second
+  // resolution could name a different workspace's beat.
+  // `ticked` rides beside `beat`, same file same read, and under the same
+  // "no try/catch, no tryRun shape" rule just above — fleet-tick.mjs's own
+  // liveness key (#1597 follow-up), for the busy-wave case `beat` alone
+  // cannot see (fleet-state.mjs's assessBeat has the rule).
+  const priorState = stateFile ? readState(stateFile, NAME) : null;
+  const beat = priorState?.beat ?? null;
+  const ticked = priorState?.ticked ?? null;
+  return { ledger, issues, prs, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, poolOk,
+    now: Date.now(), interval: interval ?? argInterval() ?? 15 };
 }
 
 async function main() {
@@ -1185,6 +1222,14 @@ async function main() {
     const instance = resolveCockpitInstance({ cwd: process.cwd(), gitCommonDir: gitCommonDir() });
     const model = computeBoard(gather({
       ledgerFile: ledgerFile || ".fleet/ledger.md", prevFile,
+      // #1597: the heartbeat's file, from the SAME instance the identity
+      // fields below come from — not the cwd-relative literal the ledger
+      // default keeps. That literal is `build`'s own back-compatibility (see
+      // the note above); the mark has no existing `build` behaviour to
+      // preserve, so it starts out resolved, and a snapshot printed from a
+      // worktree names the run's real beat instead of a file that is not
+      // there.
+      stateFile: stateFileIn(instance.stateDir),
       workspace: instance.workspace, port: instance.port,
     }));
     console.log(JSON.stringify(model, null, 2));
@@ -1571,6 +1616,12 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
       // at all and only the served copy carried one.
       const model = computeBoard(gather({
         ledgerFile, prevFile: jsonPath, interval,
+        // #1597: beside the ledger and out of the same state directory, so
+        // the board, the ledger and the heartbeat cannot disagree about which
+        // run they belong to — the invariant resolveCockpitInstance() exists
+        // for. Re-derived per tick rather than closed over, exactly like
+        // `ledgerFile`: it is a pure join on a directory settled at bind time.
+        stateFile: stateFileIn(stateDir),
         workspace: instance.workspace, port: served,
         // The pinned transcript directory, not a fresh lookup: every tick after
         // the first gets the SAME answer, which is what stops the panel
