@@ -166,6 +166,4 @@ flowchart TD
 
 ## License
 
-Apache-2.0 — see [`LICENSE`](LICENSE). The review specialist prompts are
-adapted from Anthropic's Apache-2.0 `pr-review-toolkit`; see
-[`NOTICE`](NOTICE).
+Apache-2.0 — see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
