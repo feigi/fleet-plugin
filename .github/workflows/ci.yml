@@ -33,8 +33,8 @@ jobs:
   # — `rebase-check-refresh.yml` and `rerun-rebase-check.sh` re-ran this job
   # by a `select(.name == "rebase-check")` lookup and were deleted with
   # #164, because the stale green they existed to flip can no longer reach a
-  # merge — but that is not the same as unconstrained: two mechanisms that
-  # only look like a workflow still read it:
+  # merge — but that is not the same as unconstrained: mechanisms that only
+  # look like a workflow still read it:
   #   - the `main` ruleset requires a status-check context spelled
   #     `rebase-check` (`.github/rulesets/main.json` is the checked-in spec; ADR
   #     0007 records the same requirement). A required context is matched against
