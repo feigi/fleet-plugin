@@ -12,9 +12,8 @@ the suite also runs clean on newer Node.
 Supported platforms: macOS, Linux, and Windows via WSL. Native Windows is not
 supported ([ADR 0009](docs/adr/0009-supported-platforms-are-macos-linux-wsl.md)).
 
-This repo is private: Claude Code clones it over SSH (needs a key with repo
-access); omp clones the marketplace shorthand over HTTPS (needs a configured
-git credential helper, e.g. `gh auth setup-git`).
+Claude Code clones the marketplace over SSH; omp clones the marketplace
+shorthand over HTTPS.
 
 **Claude Code**
 
@@ -164,3 +163,9 @@ flowchart TD
   cockpit, the reviewer's read rules, and member-outcomes instrumentation.
 - [`docs/agents/`](docs/agents) — how the engineering skills consume this
   repo's domain docs, plus the triage-label and issue-tracker mappings.
+
+## License
+
+Apache-2.0 — see [`LICENSE`](LICENSE). The review specialist prompts are
+adapted from Anthropic's Apache-2.0 `pr-review-toolkit`; see
+[`NOTICE`](NOTICE).
