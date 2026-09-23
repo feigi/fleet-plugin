@@ -214,7 +214,9 @@ test("the edit/read block binds the session-root mechanism to the discipline tha
   // interpretation step every one of the four got wrong.
   assert.match(
     b,
-    phrase("prefix every `edit` and `read` path with `<abs-path>`, never `plugin/scripts/foo.mjs` on its own"),
+    phrase(
+      "prefix every `edit` and `read` path with an absolute path — the worktree `<abs-path>` for repo files, `<scratch>/impl-<N>/` for scratch — never a bare relative one, and never `plugin/scripts/foo.mjs` on its own",
+    ),
     "the absolute-path rule no longer shows the bare relative path it excludes, so it states a preference rather than a prohibition",
   );
   assert.match(
