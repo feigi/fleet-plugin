@@ -582,3 +582,73 @@ test("CLI: --repo defaults to the script's own plugin/ root, so a real fleet-imp
   // ENOENT on agents/fleet-implementer.agent.md instead.
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
+
+// ---------------------------------------------------------------------------
+// #1669: tier-check bound only makeDie/makeArg, so a stray or misspelled flag
+// was silently ignored and the run computed a real verdict against the
+// DEFAULT ledger/repo instead of refusing. makeSweep closes that gap.
+// ---------------------------------------------------------------------------
+
+// No agent/transcript/batch-content fixtures here: sweep() dies on the
+// stray flag immediately after the arg() reads, before main() ever opens
+// --batch's own file (verified by mutation — deleting this file's fixture
+// writes changes no assertion's outcome), so writing them would be dead
+// setup that never runs.
+test("CLI: an unknown flag outside the roster refuses by name, not a computed verdict", () => {
+  const d = dir();
+  const r = runCli(["--batch", "batch.json", "--repo", d, "--zz-no-such-flag"], d);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /unknown flag --zz-no-such-flag/);
+});
+
+// The ticket's own repro: a misspelled --ledgerr used to fall through to
+// arg()'s `||`/`??` default and compute a real 0/1 verdict against the
+// DEFAULT ledger, never naming the typo.
+test("CLI: a misspelled --ledgerr refuses instead of computing a verdict against the default ledger", () => {
+  const d = dir();
+  const r = runCli(["--batch", "batch.json", "--repo", d, "--ledgerr", "/tmp/should-not-be-read.tsv"], d);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /unknown flag --ledgerr/);
+});
+
+// The false-positive class the sweep addition risks: a roster flag present
+// but missing its value must still answer arg()'s own "needs a value"
+// message, never sweep()'s generic stray complaint — arg()'s per-flag
+// guards run (and can refuse) before sweep() is ever reached.
+test("CLI: a roster flag missing its value answers its own value-guard message, never sweep's stray complaint", () => {
+  const d = dir();
+  writeFileSync(join(d, "batch.json"), JSON.stringify([{ member: "impl-1", agentFile: "x.md", harness: "claude" }]));
+  const r = runCli(["--batch", "batch.json", "--ledger"], d);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /--ledger needs a value/);
+  assert.ok(!r.stderr.includes("unknown flag"), r.stderr);
+});
+
+// Same false-positive class, with a genuine stray riding immediately after
+// the valueless roster flag: arg()'s own guard still answers first, so the
+// stray token never even reaches sweep().
+test("CLI: a stray flag riding after a valueless roster flag never pre-empts that flag's own value-guard message", () => {
+  const d = dir();
+  writeFileSync(join(d, "batch.json"), JSON.stringify([{ member: "impl-1", agentFile: "x.md", harness: "claude" }]));
+  const r = runCli(["--batch", "batch.json", "--ledger", "--zz-no-such-flag"], d);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /--ledger needs a value/);
+  assert.ok(!r.stderr.includes("unknown flag"), r.stderr);
+});
+
+// Review finding #1 (survived, confirmed): sweep() alone only refuses
+// `--`-prefixed tokens, so the ticket's stated harm was only half closed --
+// a single-dash misspelling (`-ledger`) rode through in silence the same
+// way `--ledgerr` used to. Binding stray() alongside sweep(), the same
+// makeSweep+makeStray pairing every sibling CLI (ci-state, diff-stats,
+// board, pr-overlap) already uses, closes the other half.
+test("CLI: a single-dash misspelling (`-ledger`) refuses as a stray, not a computed verdict", () => {
+  const d = dir();
+  writeFileSync(join(d, "fleet-implementer.agent.md"), claudeAgentMd("opus", "xhigh", "xhigh"));
+  writeFileSync(join(d, "claude-impl.jsonl"), claudeTranscript("claude-opus-5", "xhigh"));
+  const batch = [{ member: "impl-1", agentFile: "fleet-implementer.agent.md", harness: "claude", transcript: "claude-impl.jsonl" }];
+  writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
+  const r = runCli(["--batch", "batch.json", "--repo", d, "-ledger", "/tmp/should-not-be-read.tsv"], d);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /unexpected argument '-ledger'/);
+});

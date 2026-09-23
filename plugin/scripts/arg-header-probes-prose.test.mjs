@@ -40,13 +40,6 @@
 // here demands a paragraph per row; the roster is the grep's output, and the
 // paragraphs are pinned only through the commands they carry.
 //
-// One row falls outside the mechanism in the other direction, and is pinned as
-// the exception it is rather than hidden by a weaker assertion: `tier-check.mjs`
-// neither delegates nor holds an unknown-flag refusal, so the grep over-reports
-// it (#1669). Naming it is not the filename-listing #1227 rules out — the
-// expected SET is still derived — it is a counted, cited exception whose whole
-// job is to red when #1669 lands or when a second such row appears.
-//
 // `workflows/review-pr.js` is the site this grep cannot see at all, by the
 // header's own argument, and its copy of the digits rule is already executed by
 // `shared-refusal.test.mjs`. Left there rather than re-pinned here.
@@ -293,6 +286,7 @@ const GUARD_FIRST_FIXTURE = {
   "scripts/diff-stats.mjs": ["--pr", "1"],
   "scripts/pr-overlap.mjs": ["--a", "1", "--b", "1"],
   "scripts/staleness.mjs": ["--path", "1", "--gone", "1"],
+  "scripts/tier-check.mjs": ["--batch", "1"],
 };
 
 test("no script the roster grep removes holds an unknown-flag refusal of its own", () => {
@@ -352,12 +346,23 @@ test("no script the roster grep removes holds an unknown-flag refusal of its own
   }
 });
 
-test("exactly one row the roster grep returns has no unknown-flag refusal at all", () => {
+// Review finding #3: deleting the exception test that named tier-check.mjs
+// as the roster's one silent row (rather than re-pointing it) removed the
+// suite's only detector of a NEW silent roster row — a future script that
+// imports arg.mjs, is left out of both delegators (no makeSweep) and this
+// file's own per-script prose, and never refuses an unknown flag at all.
+// The "every script the roster grep returns refuses ... not sweep()'s"
+// test above does not catch that shape: a script's own unrelated
+// required-arg guard (a missing --thing, say) already exits 2 in wording
+// that is not sweep()'s, satisfying that assertion without the stray flag
+// ever being named or answered. Re-pointed at the now-empty set instead of
+// deleted, so it keeps failing the moment a roster row goes silent again.
+test("no roster row is silent: every row the roster grep returns names the stray flag it was probed with", () => {
   const silent = scriptsOf(sh(ROSTER_GREP).stdout).filter((file) => !probeStray(file).out.includes(STRAY));
   assert.deepEqual(
     silent,
-    ["scripts/tier-check.mjs"],
-    "the set of roster rows that never name a stray flag changed. tier-check.mjs is the one the header's grep over-reports (#1669); if that is fixed, delete this test rather than re-point it — the assertion above already covers every row. If a NEW row appears here, a script gained an arg.mjs import without gaining a refusal, which is #365's fail-open reached from a third side",
+    [],
+    "a roster row exists that never names a stray flag it was probed with — a script gained an arg.mjs import without gaining a real unknown-flag refusal of its own, the #365 fail-open reached from a third side",
   );
 });
 
