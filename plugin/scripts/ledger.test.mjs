@@ -1977,6 +1977,28 @@ test("CLI: a stray flag in the id slot ahead of the tail is refused, naming it (
   assert.equal(existsSync(file), false, "no refusal may write a ledger");
 });
 
+// #1678: the double-dash-only prefix test above left a single-dash id
+// silently accepted as the row/issue/PR key — nothing refused it and nothing
+// reported it, and the slip is an ordinary one: dropping one dash from this
+// CLI's own `--require-file` produces exactly this shape, which is why the
+// refused value below is that realistic one-dash-short misspelling rather
+// than an abstract single letter.
+test("CLI: a single-dash argument in the id slot is refused too, naming it (#1678)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  for (const [cmd, expected] of [
+    ["filed", /unknown flag -require-file — expected an issue number/],
+    ["row", /unknown flag -require-file — expected a ticket number/],
+    ["ruled", /unknown flag -require-file — expected a PR number/],
+  ]) {
+    const r = cli(["--file", file, cmd, "-require-file", "999", "widget guard missing"]);
+    assert.equal(r.status, 2, `${cmd}: got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, expected, `${cmd}: must name the stray and the slot it displaced`);
+    assert.equal(r.stdout, "", `${cmd}: a refusal must not also emit a payload`);
+  }
+  assert.equal(existsSync(file), false, "no refusal may write a ledger");
+});
+
 // The id guard's own false-positive class: an id argument is still accepted
 // with or without its `#`, and the legitimate-subject pins still hold, so the bare
 // prefix test on that slot cannot be what refuses a legitimate call.
