@@ -678,14 +678,21 @@ you worked, or a ref this clone cannot resolve, and neither gets better with
 more waiting.
 
 `review-pr.js` refuses a snapshot whose head is not the branch ref's, so the
-workflow review path is backstopped — except when the `ls-remote` read came back
-empty, which skips the compare rather than refusing on it. Its run log names that
-case: `branch ref (absent): head check SKIPPED`. A worktree you hand to an agent
-directly is not backstopped at all. Verify here anyway. **That backstop now
-compares against the same ref this bullet does** — #1513 moved its operand off
-`headRefOid` for the reason above, in the Claude workflow and its omp-side twin
-alike — so it is a second chance to notice a stale snapshot on the one path it
-covers, never a reason to skip the ref compare here.
+workflow review path is backstopped — except when the operand comes back
+empty, which skips the compare rather than refusing on it. A same-repo PR
+still reads `refs/heads/<branch>` first and falls back to
+`refs/pull/<number>/head` only when that comes back empty; a cross-repo PR (a
+fork) skips the branch-ref read entirely and goes straight to the pull ref,
+because a fork's branch NAME can collide with an unrelated branch the base
+repo already carries under that name (#1616) — so a fork PR now gets this
+operand populated in the ordinary case, and the skip is rare rather than the
+norm for forks. Its run log names the skip: `head ref (absent): head check
+SKIPPED`. A worktree you hand to an agent directly is not backstopped at all.
+Verify here anyway. **That backstop now compares against the same ref this
+bullet does** — #1513 moved its operand off `headRefOid` for the reason
+above, in the Claude workflow and its omp-side twin alike — so it is a second
+chance to notice a stale snapshot on the one path it covers, never a reason
+to skip the ref compare here.
 
 ## Phase 2 — dispatch implementers
 

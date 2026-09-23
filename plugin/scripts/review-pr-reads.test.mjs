@@ -93,10 +93,13 @@ test("usableDiff judges against the branch ref, not the lagging PR object", () =
   );
 });
 
-// The inversion this guard is most likely to get wrong. The `ls-remote` read can
-// fail on its own — and a fork PR has no `refs/heads/<branch>` on `origin` at
-// all — so dropping a good diff over a MISSING cross-check lets absent input
-// narrow coverage: the `=== true` guards in `selectDimensions`, inverted.
+// The inversion this guard is most likely to get wrong. The ref read can still
+// come back empty on its own — an unreachable `origin`, or a read that failed —
+// so dropping a good diff over a MISSING cross-check lets absent input narrow
+// coverage: the `=== true` guards in `selectDimensions`, inverted. A fork PR is
+// no longer one of those empties (#1616): its branch resolves nowhere on
+// `origin`, but the snapshot block falls back to `refs/pull/<number>/head`, so
+// a fork now arrives here carrying an operand rather than none.
 test("usableDiff accepts when refHead is absent or matching", () => {
   assert.equal(
     usableDiff({ runRoot: ROOT, head: "aaa", diffPath: "/s/pr.diff", diffLines: 40 }),
@@ -270,7 +273,7 @@ test("readRules names a rejected diff rather than denying a file that exists", (
   // `ls-remote` answered and `gh pr view` did not.
   assert.match(
     out,
-    /describes\s+the\s+PR's\s+branch\s+at\s+bbb/,
+    /describes\s+the\s+PR's\s+head\s+at\s+bbb/,
     "the rejection reason is not carried, only the rejection",
   );
   // And the file list inherits the defect the diff was rejected FOR: it comes
@@ -388,12 +391,35 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
   assert.match(
     snapshot,
     /branch=\$\(gh pr view \$\{pr\} --json headRefName -q \.headRefName\)/,
-    "no branch-name read — `refs/heads/$branch` then names no ref and every refHead read comes back empty",
+    "no branch-name read — `refs/heads/$branch` then names no ref, and every PR falls through to the PR-ref read instead of reporting the branch ref #1513 chose",
+  );
+  // #1616 made this pair ORDERED rather than a single line, so all three facts
+  // are pinned: the branch read captures into `$ref` (uncaptured, the fallback
+  // below can never see that it succeeded), the fallback is GUARDED on that
+  // capture being empty, and the branch read comes FIRST. Order is not
+  // decoration — reversed, every same-repo PR pays a second network read and
+  // reports an operand read from a different ref than #1513 chose, which no
+  // "both lines present" pin would notice.
+  const branchRead = /ref=\$\(git -C \$\{worktree\} ls-remote origin "refs\/heads\/\$branch" \| cut -f1\)/;
+  const prRefRead = /\[ -n "\$ref" \] \|\| ref=\$\(git -C \$\{worktree\} ls-remote origin "refs\/pull\/\$\{pr\}\/head" \| cut -f1\)/;
+  assert.match(
+    snapshot,
+    branchRead,
+    "no captured branch-ref read — the head compare is back on the PR object's lagging headRefOid (#1513), or the fallback can no longer tell whether this read answered",
   );
   assert.match(
     snapshot,
-    /git -C \$\{worktree\} ls-remote origin "refs\/heads\/\$branch" \| cut -f1/,
-    "no ref read — the head compare is back on the PR object's lagging headRefOid (#1513)",
+    prRefRead,
+    "no guarded PR-ref fallback — a fork PR's branch resolves nowhere on `origin`, so refHead goes permanently absent and the wrong-commit backstop cannot fire for any fork (#1616)",
+  );
+  assert.ok(
+    snapshot.search(branchRead) < snapshot.search(prRefRead),
+    "the PR-ref read no longer comes SECOND — a same-repo PR must not pay a second network read, and must keep reporting the branch ref #1513 made the operand (#1616)",
+  );
+  assert.match(
+    snapshot,
+    /^\s*echo "\$ref"$/m,
+    "the resolved ref is never printed — both reads run and the agent has no line to report `refHead` from",
   );
   assert.match(snapshot, /wc -l < "?\$RUN"?\/pr\.diff/, "no line count — a 0-byte diff would pass as usable");
   // Scoped to the `properties` object, not the whole schema. Declaring a field
@@ -461,16 +487,19 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
       "diffPath is not both bound to a value and gated on the exit code — the agent must infer the path from the redirect target",
     ],
     [
-      `${B}refHead${B}\\s+=\\s+the\\s+sha\\s+the\\s+'ls-remote'\\s+line\\s+printed`,
-      "refHead's value is not bound to the ls-remote read — the command runs and nothing tells the agent to report what it printed (#1513)",
+      `${B}refHead${B}\\s+=\\s+the\\s+sha\\s+the\\s+'echo\\s+"\\$ref"'\\s+line\\s+printed`,
+      "refHead's value is not bound to the ref read — the commands run and nothing tells the agent to report what they printed (#1513)",
     ],
     [
       // An empty string reported as `refHead` is FALSY, so the compare skips on
       // it exactly as it does on an absent field — but the run log's `??` does
       // not catch it, so the skip prints as a blank instead of naming itself.
-      // A failed or fork-PR ref read has to come back as no field at all.
-      `Omit\\s+${B}refHead${B}\\s+when\\s+'ls-remote'\\s+exited\\s+non-zero\\s+or\\s+printed\\s+nothing`,
-      "a failed or empty ref read is not told to omit the field — the head check then skips without saying so",
+      // Since #1616 `refHead` can also be OMITTED because the branch-ref read
+      // never ran at all — a cross-repo PR skips it outright — so "every read
+      // this PR was entitled to" is what covers both a same-repo PR whose two
+      // reads both came back empty and a cross-repo PR whose one read did.
+      `Omit\\s+${B}refHead${B}\\s+when\\s+every\\s+read\\s+this\\s+PR\\s+was\\s+entitled\\s+to\\s+came\\s+back\\s+empty`,
+      "a PR is not told to omit refHead when every read it was entitled to came back empty — the head check then skips without saying so",
     ],
     [`${B}prHead${B}\\s+=\\s+the\\s+headRefOid`, "prHead's value is not bound to the headRefOid"],
     [`${B}diffLines${B}\\s+=\\s+the\\s+wc\\s+-l\\s+count`, "diffLines' value is not bound to the wc -l count"],
