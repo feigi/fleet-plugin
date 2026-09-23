@@ -16,6 +16,15 @@ harness's tools without the other's is harness-bound, which is a defect rather t
 a variant.
 _Avoid_: host, platform, client, runtime
 
+### Platform
+
+**Platform**:
+The operating system the fleet's scripts run on — macOS, Linux, or Windows via WSL.
+Native Windows is not a platform (ADR 0009). Independent of **Harness**: every
+platform runs both harnesses. An artefact that works on only some platforms is a
+defect, with the same standing as a harness-bound one.
+_Avoid_: OS, host, environment
+
 ### Claim lifecycle
 
 **Claim**:

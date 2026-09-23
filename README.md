@@ -9,6 +9,9 @@ ticket pipeline they share. Ships as the Claude Code / omp plugin
 Pinned dev/CI Node version: `26.5.0` (see `.nvmrc`) — not an enforced floor;
 the suite also runs clean on newer Node.
 
+Supported platforms: macOS, Linux, and Windows via WSL. Native Windows is not
+supported ([ADR 0009](docs/adr/0009-supported-platforms-are-macos-linux-wsl.md)).
+
 This repo is private: Claude Code clones it over SSH (needs a key with repo
 access); omp clones the marketplace shorthand over HTTPS (needs a configured
 git credential helper, e.g. `gh auth setup-git`).
