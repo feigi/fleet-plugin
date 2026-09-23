@@ -1,0 +1,10 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "enabledManagers": ["nvm"],
+  "dependencyDashboard": false,
+  "schedule": ["* 0-4 1 * *"],
+  "automerge": true,
+  "platformAutomerge": true,
+  "rebaseWhen": "behind-base-branch"
+}
