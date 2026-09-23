@@ -280,9 +280,14 @@ test("a mark written by the real heartbeat reaches the real board (#1597)", () =
   assert.ok(model.liveness, "the board found no mark — the two scripts disagree about the state file's path");
   assert.equal(model.liveness.kind, "stopped");
   assert.match(model.liveness.text, /recorded reason: budget exhausted/);
-  // The gh stub fails every read, so there are no tickets and no pool — and
-  // the report says so honestly rather than omitting the counts it could not
-  // find anything for.
-  assert.equal(model.liveness.claimed, 0);
-  assert.match(model.liveness.text, /pool supply 0/);
+  // The gh stub fails every read and there is no ledger file at all — both
+  // inputs `claimed`/`supply` derive from never actually read, so the report
+  // must say `unknown`, not smuggle a false "0" past a failure that never
+  // happened to land on a real empty state (#1732 follow-up: the old
+  // behaviour here silently reported "0 claimed, pool supply 0" off exactly
+  // this failure, indistinguishable from a genuinely empty, healthy read).
+  assert.equal(model.liveness.claimed, null);
+  assert.equal(model.liveness.supply, null);
+  assert.match(model.liveness.text, /unknown ticket\(s\) claimed and in flight/);
+  assert.match(model.liveness.text, /pool supply unknown/);
 });

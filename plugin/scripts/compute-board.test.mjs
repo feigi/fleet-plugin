@@ -303,6 +303,47 @@ test("computeBoard: a stalled beat populates `liveness` with what is stranded", 
   assert.match(b.liveness.text, /70m past the 20m interval it promised/);
 });
 
+test("computeBoard: a failed ledger or pool read reports `unknown`, never a false zero", () => {
+  // #1597 follow-up. `claimed`/`supply` derive from `ledger.rows`/`issues`,
+  // which both collapse to the SAME empty array on a genuinely-drained read
+  // and on a failed one (gather()'s tryRun/tryParse fallback) — the exact
+  // collapse `ledgerState` exists to undo elsewhere on this same board. A
+  // stall banner that quietly prints "0 claimed, pool supply 0" off a read
+  // that never happened is the one report an operator has no reason to
+  // distrust, and it also outranks and hides the ledger-read-failed banner
+  // that would have explained the zeros.
+  const stale = { at: NOW - 90 * 60_000, interval: 1200, stopped: "" };
+
+  // Ledger read failed — the ticket-derived half must go unknown, and the
+  // pool half, which never depended on the ledger, must stay a real count.
+  const noLedger = computeBoard({
+    ...livenessInputs(stale), ledger: { rows: [], filed: [], ruled: [], state: "unread" },
+  });
+  assert.equal(noLedger.liveness.claimed, null);
+  assert.equal(noLedger.liveness.supply, noLedger.queue.pool);
+  assert.match(noLedger.liveness.text, /unknown ticket\(s\) claimed and in flight/);
+
+  // Pool read failed — the reverse split.
+  const noPool = computeBoard({ ...livenessInputs(stale), poolOk: false });
+  assert.equal(noPool.liveness.claimed, 2);
+  assert.equal(noPool.liveness.supply, null);
+  assert.match(noPool.liveness.text, /pool supply unknown/);
+
+  // Both failed at once.
+  const both = computeBoard({
+    ...livenessInputs(stale), ledger: { rows: [], filed: [], ruled: [], state: "unparsed" }, poolOk: false,
+  });
+  assert.equal(both.liveness.claimed, null);
+  assert.equal(both.liveness.supply, null);
+
+  // A read that genuinely succeeded and came back empty is still a real 0,
+  // never smuggled into `unknown` by an over-broad guard.
+  const emptyOk = computeBoard({
+    ...livenessInputs(stale), ledger: { rows: [], filed: [], ruled: [], state: "read" },
+  });
+  assert.equal(emptyOk.liveness.claimed, 0);
+});
+
 test("computeBoard: a healthy or absent beat omits the surface rather than rendering an empty one", () => {
   // Null, not an `{ ok: true }`-shaped nothing: the page hides the banner on
   // null, and a banner that fires on every healthy tick is a banner the

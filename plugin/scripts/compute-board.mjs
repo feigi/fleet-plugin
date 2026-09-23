@@ -120,16 +120,27 @@ function splitNumbered(line) {
 // marks, arrived at from the ledger instead of from a label query the cockpit
 // has no reason to run.
 //
+// `ledgerOk`/`poolOk` gate `claimed`/`supply` at `null`, never a computed
+// zero, the moment either input did not actually read — the same "unknown is
+// not zero" contract fleet-state.mjs's stallReport() states in its own words
+// and fleet-tick.mjs's CLI side already honours. `tickets`/`pool` derive
+// straight from `ledger.rows`/`issues`, which reduce to the empty array on
+// either a genuinely empty read AND a failed one alike (gather()'s tryRun/
+// tryParse fallback) — so without this gate, a `gh`/ledger outage prints the
+// exact same "0 claimed, pool supply 0" a healthy drained run would, which is
+// the one report an operator has no reason to distrust and every reason to.
+//
 // The verdict carries `text` — the rendered line — because board.html is
 // served as one self-contained file with no imports: a page that formatted
 // this itself would be a second wording of the same verdict, free to drift
 // from fleet-tick's the moment either is edited. The page renders; the rule
 // and its words stay here.
-function stall(beat, tickets, pool, now) {
-  const verdict = assessBeat({ beat, now });
+function stall(beat, ticked, tickets, pool, { ledgerOk, poolOk }, now) {
+  const verdict = assessBeat({ beat, ticked, now });
   if (!isStalled(verdict)) return null;
-  const claimed = tickets.filter((t) => t.column !== "POOL" && t.column !== "MERGED").length;
-  return { ...verdict, claimed, supply: pool, text: stallReport(verdict, { claimed, supply: pool }) };
+  const claimed = ledgerOk ? tickets.filter((t) => t.column !== "POOL" && t.column !== "MERGED").length : null;
+  const supply = poolOk ? pool : null;
+  return { ...verdict, claimed, supply, text: stallReport(verdict, { claimed, supply }) };
 }
 
 export function computeBoard(inputs) {
@@ -240,7 +251,20 @@ export function computeBoard(inputs) {
     // beaten and one that is beating normally — the page hides the banner on
     // either, because a banner that fires on every healthy tick is a banner
     // the operator learns to read past.
-    liveness: stall(inputs.beat ?? null, tickets, pool, now),
+    // `beat`/`ticked` pass through bare, unlike `spend` two fields up: that
+    // coalesce is load-bearing because the value is serialised into
+    // board.json as-is, while these two are only ever fed to assessBeat(),
+    // which already treats `undefined` and `null` identically — a `?? null`
+    // here would cost a line to say nothing stall() does not already do.
+    //
+    // `ledgerOk`/`poolOk` default to true absent a signal, matching
+    // `ledgerState`'s own `?? "read"` default just above: every caller that
+    // builds inputs by hand (every test in this suite) means a read that
+    // succeeded, and only gather() — which now sets both — can say otherwise.
+    liveness: stall(inputs.beat, inputs.ticked, tickets, pool, {
+      ledgerOk: (ledger.state ?? "read") === "read",
+      poolOk: inputs.poolOk ?? true,
+    }, now),
     attention,
   };
 }

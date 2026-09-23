@@ -1002,7 +1002,16 @@ export function gather({ ledgerFile, prevFile, stateFile = null, scriptDir = SCR
   // chain — so this row genuinely needs a guaranteed string: an issue found
   // but unable to describe itself reads as its number rather than literal
   // `undefined` on the operator's page (#786).
-  const issues = ghRows(issuesJson, "gh issue list").map((i) => ({
+  //
+  // Parsed by hand here rather than through `ghRows` (#1597 follow-up): this
+  // read is the pool's ONLY source, and compute-board.mjs's stall() needs to
+  // tell a genuinely empty pool from a `gh` outage the same way it already
+  // tells an empty ledger from an unread one — `ghRows`'s own `[]` fallback
+  // collapses both to the identical shape before a caller here could split
+  // them back apart.
+  const issuesParsed = tryParse(issuesJson, null, "gh issue list");
+  const poolOk = issuesParsed !== null;
+  const issues = withNumber(poolOk ? issuesParsed : [], "gh issue list").map((i) => ({
     number: i.number,
     title: typeof i.title === "string" ? i.title : `#${i.number}`,
     labels: labelsOf(i),
@@ -1064,8 +1073,15 @@ export function gather({ ledgerFile, prevFile, stateFile = null, scriptDir = SCR
   // reading. Defaulted rather than resolved here for gather()'s own reason —
   // every caller in this file passes the instance's answer, and a second
   // resolution could name a different workspace's beat.
-  const beat = stateFile ? readState(stateFile, NAME).beat : null;
-  return { ledger, issues, prs, ci, prev, repo, repoUrl, workspace, port, spend, beat, now: Date.now(), interval: interval ?? argInterval() ?? 15 };
+  // `ticked` rides beside `beat`, same file same read, and under the same
+  // "no try/catch, no tryRun shape" rule just above — fleet-tick.mjs's own
+  // liveness key (#1597 follow-up), for the busy-wave case `beat` alone
+  // cannot see (fleet-state.mjs's assessBeat has the rule).
+  const priorState = stateFile ? readState(stateFile, NAME) : null;
+  const beat = priorState?.beat ?? null;
+  const ticked = priorState?.ticked ?? null;
+  return { ledger, issues, prs, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, poolOk,
+    now: Date.now(), interval: interval ?? argInterval() ?? 15 };
 }
 
 async function main() {
