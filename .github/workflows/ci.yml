@@ -33,6 +33,30 @@ jobs:
   # `rebase-check-refresh.yml` and `rerun-rebase-check.sh` re-ran this job by a
   # `select(.name == "rebase-check")` lookup and were deleted with #164, because
   # the stale green they existed to flip can no longer reach a merge.
+  # No *workflow*, that is — which is not the same as unconstrained. This job's
+  # name is still read, by mechanisms that only look like one:
+  #   - the `main` ruleset requires a status-check context spelled
+  #     `rebase-check` (`.github/rulesets/main.json` is the checked-in spec; ADR
+  #     0007 records the same requirement). A required context is matched against
+  #     the name the API reports for the job — the same string the deleted
+  #     `select(.name == "rebase-check")` lookup keyed on.
+  #   - `plugin/scripts/ci-state.mjs`'s `expectedJobs()` derives the set of jobs
+  #     a run must contain from the `jobs:` block of the CI workflow it resolves
+  #     — this file, in this repo — taking each job's YAML KEY, then looks for
+  #     those strings among the job names the API reports.
+  # A YAML key and an API-reported display name are different things holding the
+  # same string, and they hold it only while no job in this file sets an explicit
+  # `name:`. So adding one — here, or on any job, however tempting as a way to
+  # make a load-bearing name explicit — breaks both readers at once, in opposite
+  # registers. `expectedJobs()` spots the override and refuses to derive at all
+  # rather than compare strings it can no longer trust: loud, and no PR gets a
+  # CI-state answer until the `name:` is removed. The ruleset fails quieter and
+  # worse — the job would publish its context under the new name, so nothing
+  # called `rebase-check` reports, and a required context that never arrives
+  # strands the PR instead of failing it. That is the same hazard ADR 0007 kept
+  # `auto-label-bots` out of the required set for: a required check that skips
+  # strands the PR forever. The other half of this note sits at that refusal in
+  # ci-state.mjs.
   rebase-check:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

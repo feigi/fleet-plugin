@@ -459,6 +459,15 @@ function expectedJobs(file) {
   // Fail closed on the assumption this derivation rests on. If a job sets a
   // display name, ids no longer equal the names `gh run view` reports, and every
   // comparison below would silently compare the wrong strings.
+  //
+  // The reader most likely to add that `name:` is standing in the workflow, not
+  // here, so the same constraint is written at that end too: the NOTE heading
+  // the `rebase-check:` job in this repo's `.github/workflows/ci.yml`. It names
+  // this derivation as a live reader of that job's name, alongside the `main`
+  // ruleset, which requires a status-check context by the name the API reports
+  // — and records that a YAML job key and an API-reported display name coincide
+  // only while no job sets an explicit `name:`. Whoever trips the
+  // `sawNameOverride` refusal here is standing at one end of that contract.
   if (sawNameOverride) {
     die(`${file} sets a job-level 'name:' — job ids no longer match reported job names, derivation invalid`);
   }
