@@ -184,19 +184,19 @@ function withUnset(path) {
 const renderWithUnset = (path, worktree) => new Function("worktree", "return `" + withUnset(path) + "`")(worktree);
 
 /**
- * The two ref reads and the line that prints their answer, lifted from one
- * harness's snapshot prompt (#1616). `$branch` is the shell's, minted by the
- * `gh pr view --json headRefName` line just above them — supplied by `readRef`
- * below, because `gh` cannot run against a fixture and the branch NAME is the
- * only thing these lines take from it.
+ * The ref-selection lines and the line that prints their answer, lifted from
+ * one harness's snapshot prompt (#1616). `$branch` and `$crossRepo` are the
+ * shell's, minted by the `gh pr view` lines just above them — supplied by
+ * `readRef` below, because `gh` cannot run against a fixture and those two
+ * values are the only things these lines take from it.
  */
 function refLines(path) {
   const code = stripComments(readFileSync(path, "utf8"));
-  const from = code.search(/^ *ref=\$\(git -C \$\{worktree\} ls-remote origin "refs\/heads\/\$branch"/m);
+  const from = code.search(/^ *ref=""$/m);
   const to = code.search(/^ *echo "\$ref"$/m);
   assert.ok(
     from !== -1 && to > from,
-    `${path} no longer captures the branch ref into $ref and echoes the result — the reads were reshaped past what this test lifts; update it or restore them`,
+    `${path} no longer selects the ref by crossRepo and echoes the result — the reads were reshaped past what this test lifts; update it or restore them`,
   );
   return code.slice(from, code.indexOf("\n", to));
 }
@@ -265,12 +265,13 @@ function tracingGit(t) {
   };
 }
 
-/** Runs the rendered ref reads with `$branch` supplied and the tracing git first on PATH. */
-function readRef(t, script, bin, branch = BRANCH) {
-  const r = spawnSync("sh", ["-c", [`branch=${JSON.stringify(branch)}`, script].join("\n")], {
-    env: { ...ENV, PATH: `${bin}:${process.env.PATH}` },
-    encoding: "utf8",
-  });
+/** Runs the rendered ref reads with `$branch` and `$crossRepo` supplied and the tracing git first on PATH. */
+function readRef(script, bin, branch = BRANCH, crossRepo = "false") {
+  const r = spawnSync(
+    "sh",
+    ["-c", [`branch=${JSON.stringify(branch)}`, `crossRepo=${JSON.stringify(crossRepo)}`, script].join("\n")],
+    { env: { ...ENV, PATH: `${bin}:${process.env.PATH}` }, encoding: "utf8" },
+  );
   return { out: (r.stdout ?? "").trim(), err: r.stderr ?? "", status: r.status };
 }
 
@@ -545,17 +546,23 @@ for (const [name, path] of SOURCES) {
 
   // #1616. The ref-head operand, measured where it is PRODUCED rather than
   // where it is consumed — the two guards that compare against it were never
-  // the defect, and this ticket changed neither. Four shapes, because the class
-  // is not the fork/same-repo binary it reads as: a PR whose branch ref
-  // resolves, a PR whose branch ref resolves nowhere (every fork, every time),
-  // a PR where neither ref answers, and an origin that cannot be reached at
-  // all. The last two are the accept-on-absent path this ticket deliberately
-  // left alone, pinned here so "the fallback fires" cannot quietly become
-  // "something is always reported".
+  // the defect, and this ticket changed neither. Six shapes, because the
+  // class is neither the fork/same-repo binary it first reads as, nor the
+  // resolves/resolves-nowhere binary the original fallback assumed: a
+  // same-repo PR, whose branch ref resolves; a cross-repo PR whose branch
+  // NAME collides with an unrelated branch `origin` already carries (this
+  // fix's own target — the old empty-triggered fallback let that collision
+  // silently answer with the wrong repository's commit); a cross-repo PR
+  // whose branch simply resolves nowhere, the ordinary case; a same-repo PR
+  // whose branch ref resolves nowhere (a branch since deleted on `origin`,
+  // unrelated to crossRepo); a PR where neither ref answers; and an origin
+  // that cannot be reached at all. The last two are the accept-on-absent path
+  // this ticket deliberately left alone, pinned here so "the fallback fires"
+  // cannot quietly become "something is always reported".
   test(`${name}: a PR whose branch ref resolves reports it, and never reads the PR ref`, (t) => {
     const { worktree, branchSha, pullSha } = remoteFixture(t);
     const bin = tracingGit(t);
-    const r = readRef(t, renderRefs(path, worktree, PR), bin.dir);
+    const r = readRef(renderRefs(path, worktree, PR), bin.dir);
 
     assert.equal(r.status, 0, `the reads exited non-zero against a healthy origin: ${r.err}`);
     assert.equal(
@@ -563,7 +570,6 @@ for (const [name, path] of SOURCES) {
       branchSha,
       "a same-repo PR no longer reports the branch ref — #1513 chose that operand and the fallback was not allowed to move it",
     );
-    assert.notEqual(r.out, pullSha, "the operand came from the PR ref — the fallback fired on a PR whose branch ref answered");
     const reads = bin.reads();
     assert.equal(
       reads.length,
@@ -573,20 +579,71 @@ for (const [name, path] of SOURCES) {
     assert.match(reads[0], /refs\/heads\//, `the one read was not the branch ref: ${reads[0]}`);
   });
 
-  // The gap the ticket exists to close. Before this, `refs/heads/<branch>` was
-  // the only read, it resolves nowhere on `origin` for a fork, and so the
-  // operand was absent for every fork PR that has ever been reviewed — which
-  // made the wrong-commit refusal structurally unreachable for the whole class.
-  test(`${name}: a PR whose branch ref resolves nowhere falls back to the PR's own ref on the base repo`, (t) => {
+  // #1616's actual defect, reproduced directly: `isCrossRepository` was never
+  // read, so a fork PR whose branch happens to share a NAME with something
+  // `origin` can already resolve — a real base-repo branch, not a
+  // hypothetical — silently answered with THAT commit instead of the fork's
+  // own head. GitHub does not require a fork's branch name to be unique
+  // against the base repository, so this fixture (the SAME one the accept
+  // test above uses — `refs/heads/<branch>` on `origin` carrying an unrelated
+  // commit, plus the base repo's own copy of the fork's real head under
+  // `refs/pull/<pr>/head`) is exactly what a colliding fork PR looks like on
+  // the base repo's remote, not a contrived edge case.
+  test(`${name}: a cross-repo PR whose branch collides with a base-repo branch reports the PR's own head, never the collision`, (t) => {
+    const { worktree, branchSha, pullSha } = remoteFixture(t);
+    const bin = tracingGit(t);
+    const r = readRef(renderRefs(path, worktree, PR), bin.dir, BRANCH, "true");
+
+    assert.equal(r.status, 0, `the reads exited non-zero against a colliding origin: ${r.err}`);
+    assert.notEqual(
+      r.out,
+      branchSha,
+      "a cross-repo PR reported the base repo's same-named branch instead of its own head — the collision this ticket exists to close",
+    );
+    assert.equal(r.out, pullSha, "a cross-repo PR did not report its own head from refs/pull/<pr>/head");
+    const reads = bin.reads();
+    assert.equal(
+      reads.length,
+      1,
+      `a cross-repo PR paid ${reads.length} ref reads instead of 1 — the branch-ref read must not run at all once the PR is cross-repo, colliding name or not: ${reads.join(" | ")}`,
+    );
+    assert.match(reads[0], new RegExp(`refs/pull/${PR}/head`), `the one read was not the PR's own ref on the base repo: ${reads[0]}`);
+  });
+
+  // The ordinary fork, no collision: `refs/heads/<branch>` does not exist on
+  // `origin` at all. `isCrossRepository` gates on the repository relationship,
+  // not on whether a collision happens to be present, so this case must also
+  // skip the branch-ref read entirely rather than attempt-then-fall-back.
+  test(`${name}: a cross-repo PR with no colliding branch skips the branch-ref read entirely`, (t) => {
     const { worktree, pullSha } = remoteFixture(t, { branchRef: false });
     const bin = tracingGit(t);
-    const r = readRef(t, renderRefs(path, worktree, PR), bin.dir);
+    const r = readRef(renderRefs(path, worktree, PR), bin.dir, BRANCH, "true");
+
+    assert.equal(r.status, 0, `the reads exited non-zero against a fork-shaped origin: ${r.err}`);
+    assert.equal(r.out, pullSha, "a cross-repo PR did not report its own head from refs/pull/<pr>/head");
+    const reads = bin.reads();
+    assert.equal(
+      reads.length,
+      1,
+      `a cross-repo PR paid ${reads.length} ref reads instead of 1 — the branch-ref read must not even be attempted once the PR is cross-repo: ${reads.join(" | ")}`,
+    );
+    assert.match(reads[0], new RegExp(`refs/pull/${PR}/head`), `the one read was not the PR's own ref on the base repo: ${reads[0]}`);
+  });
+
+  // The residual empty-triggered fallback, unrelated to crossRepo: a
+  // same-repo PR (`isCrossRepository` false) whose branch was deleted on
+  // `origin` after the PR opened. This is the shape the ORIGINAL #1616 fix
+  // covered and this ticket's own fix must not have narrowed.
+  test(`${name}: a same-repo PR whose branch ref resolves nowhere falls back to the PR's own ref on the base repo`, (t) => {
+    const { worktree, pullSha } = remoteFixture(t, { branchRef: false });
+    const bin = tracingGit(t);
+    const r = readRef(renderRefs(path, worktree, PR), bin.dir);
 
     assert.equal(r.status, 0, `the reads exited non-zero against a fork-shaped origin: ${r.err}`);
     assert.equal(
       r.out,
       pullSha,
-      "a fork-shaped PR still reports no ref head — the operand stays permanently absent and the wrong-commit backstop cannot fire for any fork",
+      "a same-repo PR whose branch ref resolves nowhere still reports no ref head — the operand stays permanently absent and the wrong-commit backstop cannot fire",
     );
     const reads = bin.reads();
     assert.equal(reads.length, 2, `expected the branch read and then the PR-ref read, got: ${reads.join(" | ")}`);
@@ -596,7 +653,7 @@ for (const [name, path] of SOURCES) {
 
   test(`${name}: neither ref resolving reports nothing, and does not fail the cut`, (t) => {
     const { worktree } = remoteFixture(t, { branchRef: false, pullRef: false });
-    const r = readRef(t, renderRefs(path, worktree, PR), tracingGit(t).dir);
+    const r = readRef(renderRefs(path, worktree, PR), tracingGit(t).dir);
 
     assert.equal(r.out, "", `a PR neither ref names reported something as its ref head: ${r.out}`);
     assert.equal(r.status, 0, `the reads exited non-zero with both refs absent: ${r.err}`);
@@ -610,7 +667,7 @@ for (const [name, path] of SOURCES) {
     const worktree = scratch(t, "snapshot-refs-wt-");
     git(worktree, "init", "-q");
     git(worktree, "remote", "add", "origin", join(worktree, "no-such-remote.git"));
-    const r = readRef(t, renderRefs(path, worktree, PR), tracingGit(t).dir);
+    const r = readRef(renderRefs(path, worktree, PR), tracingGit(t).dir);
 
     assert.equal(r.out, "", `a failed read put a value in the operand: ${r.out}`);
     assert.equal(

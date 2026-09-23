@@ -207,8 +207,8 @@ const DEFAULT_DIMENSIONS = [
 // from the PR's head (ac110b5 vs 482e523, observed), which hands a specialist a
 // diff describing a tree it is not reading.
 //
-// The operand is `refHead` — `git ls-remote origin refs/heads/<branch> | cut
-// -f1`, the branch ref itself — and NEVER `prHead`, the PR object's
+// The operand is `refHead` — the branch ref itself, or (since #1616) the base
+// repo's own copy of the PR's head when the PR is cross-repo — and NEVER
 // `headRefOid`. That field LAGS a ref move: measured twice in one run on
 // 2026-09-01, `gh pr update-branch --rebase` returned `rc=0` and `headRefOid`
 // sat on the pre-rebase sha for ~2 min in one wave and ~84s in the next (see
@@ -351,7 +351,7 @@ change you are reviewing, and the snapshot around it is context.`
           rejected
             ? `A diff was captured at ${rejected} and REJECTED — ${
                 skew
-                  ? `it describes the PR's branch at ${snap.refHead}, not this snapshot`
+                  ? `it describes the PR's head at ${snap.refHead}, not this snapshot`
                   : snap.diffLines === 0
                     ? "it is empty"
                     : "its line count was never reported, so nothing measured whether it holds the PR's whole change or nothing at all"
@@ -960,30 +960,40 @@ Then capture the PR's diff for the specialists, plus the three facts the caller
 needs to judge whether it is usable:
 
     gh pr diff ${pr} > "$RUN"/pr.diff
+    crossRepo=$(gh pr view ${pr} --json isCrossRepository -q .isCrossRepository)
     branch=$(gh pr view ${pr} --json headRefName -q .headRefName)
-    ref=$(git -C ${worktree} ls-remote origin "refs/heads/$branch" | cut -f1)
+    ref=""
+    [ "$crossRepo" = "true" ] || ref=$(git -C ${worktree} ls-remote origin "refs/heads/$branch" | cut -f1)
     [ -n "$ref" ] || ref=$(git -C ${worktree} ls-remote origin "refs/pull/${pr}/head" | cut -f1)
     echo "$ref"
     gh pr view ${pr} --json headRefOid -q .headRefOid
     wc -l < "$RUN"/pr.diff
 
 The ref read above is the one the caller compares this snapshot against, and it
-reads the branch REF rather than the PR object because \`headRefOid\` lags a
-ref move: a rebase that has already landed leaves that field on the pre-rebase
-sha for minutes (\`run-merge-bot.md\`'s step 1 measured ~2 min and ~84s), so a
-compare against it refuses the diff of a snapshot that is correct. Both reads go
+reads refHead rather than the PR object because \`headRefOid\` lags a ref move:
+a rebase that has already landed leaves that field on the pre-rebase sha for
+minutes (\`run-merge-bot.md\`'s step 1 measured ~2 min and ~84s), so a compare
+against it refuses the diff of a snapshot that is correct. Both reads go
 back — their disagreement is the PR-object desync a controller adjudicates, and
 it is a fact to report rather than one to resolve here.
 
-The ORDER of the two ref reads is load-bearing. The branch ref is read FIRST,
-and 'refs/pull/${pr}/head' only when that read came back empty, so a PR whose
-branch ref resolves pays a single network read and reports the same branch ref
-it always has — the operand #1513 chose stays primary. The fallback is what
-reaches a fork PR, whose branch lives on the contributor's own remote and so
-never resolves against 'origin': the base repository carries its own copy of
-every PR's head under 'refs/pull/<number>/head', fork-sourced or not, so the
-compare the caller already runs applies to forks instead of skipping them for
-good.
+WHICH read runs is decided by \`isCrossRepository\`, not by whether the first
+read comes back empty. A same-repo PR's branch cannot collide with anything
+else on 'origin', so its branch ref is read and is the operand — a single
+network read, the operand #1513 chose, unchanged from before. A cross-repo PR
+(a fork) skips the branch-ref read entirely and goes straight to
+'refs/pull/${pr}/head' instead: a fork's branch NAME is not guaranteed unique
+against the base repository, and 'refs/heads/<branch>' resolving there to an
+unrelated same-named branch is a false MATCH under an empty-only fallback, not
+merely a missed one — the collision this fix closes (#1616). The base
+repository carries 'refs/pull/<number>/head' for every PR's head, fork-sourced
+or not, so the compare the caller already runs still applies to forks —
+reached by the repository relationship, not by an accident of naming.
+
+The fallback to 'refs/pull/${pr}/head' ALSO still fires for a same-repo PR
+whose branch ref came back empty (a branch since deleted on 'origin', or a
+read that failed) — that case was never about a collision, and this fix leaves
+it exactly as it was.
 
 Report \`diffPath\` = the SNAPSHOT_RUN_ROOT value with '/pr.diff' appended, ONLY
 if 'gh pr diff' exited 0 — note it writes an empty file on failure, so a file
@@ -991,13 +1001,13 @@ existing is not success. The caller rebuilds that path from \`runRoot\` rather
 than reading yours, so what this field decides is whether the capture succeeded
 at all: omitting it on failure is what matters, not its exact spelling. Report
 \`refHead\` = the sha the 'echo "$ref"' line printed, \`prHead\` = the
-headRefOid and \`diffLines\` = the wc -l count. Omit \`refHead\` when BOTH ref
-reads exited non-zero or printed nothing — an empty read is neither a match nor
-a mismatch (an unreachable origin, or a read that failed; a fork PR reaches the
-'refs/pull' fallback above rather than ending here), so report no field rather
-than an empty string. Do not judge whether the diff is usable, and do not
-withhold one field because another failed: report what you got and let the
-caller decide.
+headRefOid and \`diffLines\` = the wc -l count. Omit \`refHead\` when every read
+this PR was entitled to came back empty, failed, or was skipped — an absent
+value is neither a match nor a mismatch (an unreachable origin, a read that
+failed, or a cross-repo PR whose only read is the 'refs/pull' one), so report
+no field rather than an empty string. Do not judge whether the diff is usable,
+and do not withhold one field because another failed: report what you got and
+let the caller decide.
 
 Then derive this repository's own test command — reusing the SAME inference
 claim-ticket.sh runs at claim time, refusal included, so nothing here
@@ -1230,7 +1240,7 @@ function snapshotMissing(snap, runRootPrefix) {
   if (snap.pathVerified !== true)
     return `the snapshot at ${snap.path} was not verified to exist — refusing to hand a possibly-missing tree to every specialist`;
   if (snap.refHead && !snap.refHead.startsWith(snap.head) && !snap.head.startsWith(snap.refHead))
-    return `the tree at ${snap.path} is at ${snap.head}, and the PR's branch ref is at ${snap.refHead} — refusing to review a commit that is not the PR`;
+    return `the tree at ${snap.path} is at ${snap.head}, and the PR's head is at ${snap.refHead} — refusing to review a commit that is not the PR`;
   return null;
 }
 
@@ -1330,7 +1340,7 @@ if (missingReason) throw new Error(`review-pr: ${missingReason}`);
 // TRUTHINESS, so an EMPTY `refHead` — `ls-remote` exiting 0 with no matching
 // ref, which the prompt asks the agent to omit rather than report, but cannot
 // enforce — skips the compare exactly as an absent one does. Under `??` that
-// run printed `branch ref  — PR head …` and the skip went unnamed, which is the
+// run printed `head ref  — PR head …` and the skip went unnamed, which is the
 // same "a read that failed and a read that found nothing are indistinguishable"
 // defect the diff-decision log's own comment records for `diffLines`.
 //
@@ -1341,7 +1351,7 @@ if (missingReason) throw new Error(`review-pr: ${missingReason}`);
 // a fact this log records first; the no-diff diagnostic below repeats it when
 // the diff is rejected, but nothing downstream compares the two values to
 // detect the desync itself.
-log(`snapshot ${snap.head} at ${snap.path} — branch ref ${snap.refHead || "(absent): head check SKIPPED"} — PR head ${snap.prHead ?? "(absent)"}`);
+log(`snapshot ${snap.head} at ${snap.path} — head ref ${snap.refHead || "(absent): head check SKIPPED"} — PR head ${snap.prHead ?? "(absent)"}`);
 
 // The measurement environment, beside the tree it measures. Logged rather than
 // left to the payload alone so a run log read on its own still says which

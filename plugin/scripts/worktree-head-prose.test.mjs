@@ -264,13 +264,13 @@ test("phase 1 keeps the workflow backstop from reading as full coverage", () => 
 // and a controller then hunts a run log for a line it will never find. Compared
 // against the source, so either side moving reds.
 test("phase 1's quoted run-log marker is the one review-pr.js actually prints", () => {
-  assert.match(slice(), phrase("branch ref (absent): head check SKIPPED"));
+  assert.match(slice(), phrase("head ref (absent): head check SKIPPED"));
   const line = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8")
     .split("\n")
     .find((l) => l.startsWith("log(`snapshot "));
   assert.ok(line, "review-pr.js's snapshot run-log line is gone — the marker this paragraph quotes is printed nowhere");
   assert.ok(
-    line.includes("branch ref ") && line.includes("(absent): head check SKIPPED"),
+    line.includes("head ref ") && line.includes("(absent): head check SKIPPED"),
     `phase 1 quotes a run-log marker review-pr.js no longer prints:\n  ${line}`,
   );
 });

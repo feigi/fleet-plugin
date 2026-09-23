@@ -273,7 +273,7 @@ test("readRules names a rejected diff rather than denying a file that exists", (
   // `ls-remote` answered and `gh pr view` did not.
   assert.match(
     out,
-    /describes\s+the\s+PR's\s+branch\s+at\s+bbb/,
+    /describes\s+the\s+PR's\s+head\s+at\s+bbb/,
     "the rejection reason is not carried, only the rejection",
   );
   // And the file list inherits the defect the diff was rejected FOR: it comes
@@ -418,7 +418,7 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
   );
   assert.match(
     snapshot,
-    /echo "\$ref"/,
+    /^\s*echo "\$ref"$/m,
     "the resolved ref is never printed — both reads run and the agent has no line to report `refHead` from",
   );
   assert.match(snapshot, /wc -l < "?\$RUN"?\/pr\.diff/, "no line count — a 0-byte diff would pass as usable");
@@ -494,11 +494,12 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
       // An empty string reported as `refHead` is FALSY, so the compare skips on
       // it exactly as it does on an absent field — but the run log's `??` does
       // not catch it, so the skip prints as a blank instead of naming itself.
-      // A ref read that came back empty on BOTH refs has to report no field at
-      // all. BOTH is the word that matters since #1616: an empty branch ref is
-      // now the fallback's trigger, not the end of the read.
-      `Omit\\s+${B}refHead${B}\\s+when\\s+BOTH\\s+ref\\s+reads\\s+exited\\s+non-zero\\s+or\\s+printed\\s+nothing`,
-      "a ref read that came back empty on both refs is not told to omit the field — the head check then skips without saying so",
+      // Since #1616 `refHead` can also be OMITTED because the branch-ref read
+      // never ran at all — a cross-repo PR skips it outright — so "every read
+      // this PR was entitled to" is what covers both a same-repo PR whose two
+      // reads both came back empty and a cross-repo PR whose one read did.
+      `Omit\\s+${B}refHead${B}\\s+when\\s+every\\s+read\\s+this\\s+PR\\s+was\\s+entitled\\s+to\\s+came\\s+back\\s+empty`,
+      "a PR is not told to omit refHead when every read it was entitled to came back empty — the head check then skips without saying so",
     ],
     [`${B}prHead${B}\\s+=\\s+the\\s+headRefOid`, "prHead's value is not bound to the headRefOid"],
     [`${B}diffLines${B}\\s+=\\s+the\\s+wc\\s+-l\\s+count`, "diffLines' value is not bound to the wc -l count"],

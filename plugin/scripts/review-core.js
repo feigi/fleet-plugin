@@ -255,7 +255,7 @@ change you are reviewing, and the snapshot around it is context.`
           rejected
             ? `A diff was captured at ${rejected} and REJECTED — ${
                 skew
-                  ? `it describes the PR's branch at ${snap.refHead}, not this snapshot`
+                  ? `it describes the PR's head at ${snap.refHead}, not this snapshot`
                   : snap.diffLines === 0
                     ? "it is empty"
                     : "its line count was never reported, so nothing measured whether it holds the PR's whole change or nothing at all"
@@ -379,7 +379,7 @@ export function snapshotMissing(snap, runRootPrefix) {
   if (snap.pathVerified !== true)
     return `the snapshot at ${snap.path} was not verified to exist — refusing to hand a possibly-missing tree to every specialist`;
   if (snap.refHead && !snap.refHead.startsWith(snap.head) && !snap.head.startsWith(snap.refHead))
-    return `the tree at ${snap.path} is at ${snap.head}, and the PR's branch ref is at ${snap.refHead} — refusing to review a commit that is not the PR`;
+    return `the tree at ${snap.path} is at ${snap.head}, and the PR's head is at ${snap.refHead} — refusing to review a commit that is not the PR`;
   return null;
 }
 
@@ -636,8 +636,10 @@ Then capture the PR's diff for the specialists, plus the three facts the caller
 needs to judge whether it is usable:
 
     gh pr diff ${pr} > "$RUN"/pr.diff
+    crossRepo=$(gh pr view ${pr} --json isCrossRepository -q .isCrossRepository)
     branch=$(gh pr view ${pr} --json headRefName -q .headRefName)
-    ref=$(git -C ${worktree} ls-remote origin "refs/heads/$branch" | cut -f1)
+    ref=""
+    [ "$crossRepo" = "true" ] || ref=$(git -C ${worktree} ls-remote origin "refs/heads/$branch" | cut -f1)
     [ -n "$ref" ] || ref=$(git -C ${worktree} ls-remote origin "refs/pull/${pr}/head" | cut -f1)
     echo "$ref"
     gh pr view ${pr} --json headRefOid -q .headRefOid
@@ -645,15 +647,20 @@ needs to judge whether it is usable:
 
 Report \`diffPath\` = the SNAPSHOT_RUN_ROOT value with '/pr.diff' appended, ONLY
 if 'gh pr diff' exited 0. Report \`refHead\` = the sha the 'echo "$ref"' line
-printed, \`prHead\` = the headRefOid and \`diffLines\` = the wc -l count. The
-branch ref is read FIRST and 'refs/pull/${pr}/head' — the base repo's own copy
-of the PR head — ONLY when that first read came back empty, so a PR whose
-branch ref resolves never reaches the second read and its operand is the same
-branch ref it has always been. The fallback is what covers a fork PR, whose
-branch lives on the contributor's remote and so never resolves on 'origin'.
-Omit \`refHead\` when BOTH reads failed or printed nothing: an empty read is
-neither a match nor a mismatch. Do not judge whether the diff is usable, and do
-not withhold one field because another failed: report what you got and let the
+printed, \`prHead\` = the headRefOid and \`diffLines\` = the wc -l count. Which
+read answers is chosen by \`isCrossRepository\`, not by whether the first read
+comes back empty. A same-repo PR's branch cannot collide with anything else on
+'origin', so its branch ref is read and is the operand — one network read, same
+as before. A cross-repo PR (a fork) skips the branch-ref read entirely and goes
+straight to 'refs/pull/${pr}/head' — the base repo's own copy of the PR head —
+because a fork's branch NAME is not guaranteed unique against the base
+repository, and a same-named hit on 'origin' would silently answer for the
+wrong repository rather than for the fork (#1616). The fallback to
+'refs/pull/${pr}/head' also still fires for a same-repo PR whose branch ref
+came back empty, unchanged from before. Omit \`refHead\` when every read this
+PR was entitled to came back empty or was skipped: an absent value is neither
+a match nor a mismatch. Do not judge whether the diff is usable, and do not
+withhold one field because another failed: report what you got and let the
 caller decide.
 
 Then derive this repository's own test command — FLEET_HARNESS is set
@@ -691,7 +698,7 @@ a false repoVerified.`,
   const missingReason = snapshotMissing(snap, runRootPrefix);
   if (missingReason) throw new Error(`review-pr: ${missingReason}`);
 
-  log(`snapshot ${snap.head} at ${snap.path} — branch ref ${snap.refHead || "(absent): head check SKIPPED"} — PR head ${snap.prHead ?? "(absent)"}`);
+  log(`snapshot ${snap.head} at ${snap.path} — head ref ${snap.refHead || "(absent): head check SKIPPED"} — PR head ${snap.prHead ?? "(absent)"}`);
   log(environmentNote(snap));
 
   const testCmd = resolveTestCmd(A.testCmd, snap);

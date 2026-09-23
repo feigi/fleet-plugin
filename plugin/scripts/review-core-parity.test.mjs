@@ -395,3 +395,22 @@ test("#878: runReview refuses a non-numeric args.pr before dispatching any agent
   await assert.rejects(() => core.runReview(host, { pr: 42, worktree: "/tmp/wt" }));
   assert.equal(dispatched, 1, "a numeric pr was refused before the snapshot dispatch it must reach");
 });
+
+// #1616 fix-review finding 3: `refHead`'s omission rule is PROSE, not one of
+// the byte-identical function bodies above — review-core.js's own header
+// (top of this file) says its copy legitimately omits review-pr.js's
+// historical rationale, so the two paragraphs are not expected to be
+// byte-identical text. But the RULE both must state — omit `refHead` only
+// when every read this PR was entitled to came back empty, failed, or was
+// skipped, and treat that as neither a match nor a mismatch — is not
+// optional, and nothing above pins it: deleting the rule from
+// review-core.js's prompt text left every other test in this repo green.
+const CORE_SOURCE = readFileSync(join(REPO, "scripts", "review-core.js"), "utf8");
+const REFHEAD_OMISSION_RULE =
+  /Omit[\s\S]{0,10}refHead[\s\S]{0,10}when\s+every\s+read\s+this\s+PR\s+was\s+entitled\s+to\s+came\s+back\s+empty[\s\S]{0,250}neither\s+a\s+match\s+nor\s+a\s+mismatch/;
+test("the refHead-omission rule agrees on both harness copies", () => {
+  const prSnapshot = between(CODE, "const snap = await agent(", "if (!snap", "review-pr.js's snapshot dispatch");
+  const coreSnapshot = between(CORE_SOURCE, "const snap = await agent(", "if (snap) {", "review-core.js's snapshot dispatch");
+  assert.match(prSnapshot, REFHEAD_OMISSION_RULE, "review-pr.js no longer states the refHead-omission rule this way");
+  assert.match(coreSnapshot, REFHEAD_OMISSION_RULE, "review-core.js no longer states the refHead-omission rule this way");
+});
