@@ -143,13 +143,19 @@ function run(issues, args = ["--require-label", "ready-for-agent"], unfiltered =
   }
   const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", env });
   // Read the engine recording BEFORE the temp dir goes. This is the only
-  // evidence of which binary actually applied the expression (#383); it stays
-  // "" when the STUB never ran, which is itself a failure the gated tests
-  // report rather than skipping past.
+  // evidence of which binary actually applied the expression (#383); it
+  // stays "" when the STUB never ran (ENOENT), which is itself a failure the
+  // gated tests report rather than skipping past. Only ENOENT is expected
+  // here — any OTHER fs error (EACCES, EMFILE/ENFILE, ENOTDIR, EISDIR…)
+  // means the STUB (and the engine it invoked) may well have run fine and
+  // the log path itself is what's broken; swallowing it too would have
+  // `assertRanGojq` misreport a real I/O failure as "never reached gojq".
   let engine = "";
   try {
     engine = readFileSync(engineLog, "utf8").trim();
-  } catch {}
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
   rmSync(dir, { recursive: true, force: true });
   return { ...r, rows: r.stdout.trim() ? JSON.parse(r.stdout) : [], engine };
 }
@@ -348,9 +354,37 @@ test("several references on one inline label line are all found, not just the fi
   assert.deepEqual(rows[0].d, [12, 13]);
 });
 
+test("a chained ref separated by FORM FEED or a bare CR is still collected, not silently dropped (#383)", () => {
+  // The inline label/ref separator class must match candidates.mjs's
+  // end-of-heading-line class ([\t\f\r \p{Zs}]) for the same reasons: \f is
+  // stripped by GFM and \r keeps CRLF bodies working. A narrower class here
+  // than there SILENTLY DROPS the ref after the odd separator — the worse
+  // direction, since a reader still sees `Blocked by #12,\f#13` as two
+  // dependencies and GitHub still autolinks both.
+  const { rows } = run([
+    ticket(1, "Blocked by #12,\f#13\n"),
+    ticket(2, "Blocked by #12,\r#13\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.d), [[12, 13], [12, 13]]);
+});
+
 test("a heading section ends at the NEXT heading, blocking or not — a ref past it is not swept in", () => {
   const { rows } = run([ticket(9, "## Blocked by\n\n- #12\n\n## Notes\n\nsee #999 for context\n")]);
   assert.deepEqual(rows[0].d, [12]);
+});
+
+test("a bare marker-only heading (no title text) still closes a blocking section, on both LF and CRLF bodies (#383)", () => {
+  // GFM still renders a bare `##` as a real (empty) `<h2>` — the toggle that
+  // decides whether a line starts a NEW heading must see it too, or the
+  // still-open `## Blocked by` section wrongly keeps collecting refs past
+  // it. Over-collection, the direction #383's own gate ruling did not cover:
+  // a bare `[ \t]` marker class matches only a TITLED heading, so this one
+  // was invisible to the toggle and the section never closed.
+  const { rows } = run([
+    ticket(1, "## Blocked by\n\n- #12\n\n##\n\n- #13\n"),
+    ticket(2, "## Blocked by\r\n\r\n- #12\r\n\r\n##\r\n\r\n- #13\r\n"),
+  ]);
+  assert.deepEqual(rows.map((r) => r.d), [[12], [12]]);
 });
 
 test("d holds plain issue numbers, not matched phrase strings", () => {
@@ -714,8 +748,15 @@ test("a dependency heading that armed no section is named on stderr, and an arme
 // too, and resolving to it would run the fixtures on Oniguruma under a name
 // claiming RE2 — the silent degrade this whole check exists to refuse. gojq
 // prints `gojq 0.12.19 (rev: …)`, jq prints `jq-1.7.1-apple`.
+// Single source of truth for "is this gojq" — isGojq (which engine ran the
+// --version probe) and assertRanGojq (which engine the STUB recorded) each
+// own their own site under #383, and only sharing this pattern by
+// construction keeps them from silently desyncing if gojq's version-string
+// format ever changes: a future edit to one site would otherwise quietly
+// reopen the exact "gated test proved nothing" failure mode #383 is fixing.
+const GOJQ_VERSION_RE = /^gojq /;
 const isGojq = (bin) =>
-  /^gojq /.test(spawnSync(bin, ["--version"], { encoding: "utf8" }).stdout ?? "");
+  GOJQ_VERSION_RE.test(spawnSync(bin, ["--version"], { encoding: "utf8" }).stdout ?? "");
 
 function findGojq() {
   const named = process.env.GOJQ_BIN;
@@ -752,9 +793,53 @@ const SKIP_WITHOUT_GOJQ = { skip: GOJQ ? false : "no gojq on PATH — go install
 const assertRanGojq = (r) =>
   assert.match(
     r.engine,
-    /^gojq /,
+    GOJQ_VERSION_RE,
     `the STUB recorded ${JSON.stringify(r.engine)} — this gated test never reached gojq`,
   );
+
+// The pre-#383 program, verbatim (from the commit #383's own diff replaced),
+// kept here ONLY so the discriminating test below can run it through
+// JQ_OVERRIDE and prove what it actually did on system jq — the engine the
+// three gojq-only fixtures below #908 cannot reach, because RE2 was already
+// ASCII-only at every one of these positions before #383 too, so gojq never
+// had the bug being fixed. Never used to run the real query; the current JQ
+// constant in candidates.mjs is the only one this script ever ships with.
+const OLD_JQ =
+  'def armed: test("(?i)^#{1,6}\\\\s+\\\\**((?:depends on|blocked by|requires)\\\\b|dependenc(?:y|ies)\\\\**:?\\\\**\\\\s*$)");\n' +
+  '\n' +
+  'def depmiss:\n' +
+  '  [ split("\\n")[]\n' +
+  '    | select(test("(?i)^#{1,6}\\\\s.*(dependenc|blocked by|depends on|requires)") and (armed | not))\n' +
+  '    | rtrimstr("\\r")\n' +
+  '  ];\n' +
+  '\n' +
+  'def depnums:\n' +
+  '  (reduce (split("\\n"))[] as $line (\n' +
+  '      {insec: false, nums: []};\n' +
+  '      ($line | armed) as $bh\n' +
+  '      | ($line | test("^#{1,6}\\\\s")) as $any\n' +
+  '      | (if $any then $bh else .insec end) as $nextsec\n' +
+  '      | ($line | test("^\\\\s*([-*+]|[0-9]+[.)])\\\\s")) as $item\n' +
+  '      | {\n' +
+  '          insec: $nextsec,\n' +
+  '          nums: (\n' +
+  '            .nums\n' +
+  '            + (if $nextsec and $item then [$line | scan("#\\\\d+")] else [] end)\n' +
+  '            + [ $line\n' +
+  '                | scan("(?i)(?:depends on|blocked by|requires|after)[\\\\s*]*:?[\\\\s*]*(#\\\\d+(?:[\\\\s*]*(?:,|and)?[\\\\s*]*#\\\\d+)*)")\n' +
+  '                | .[0]\n' +
+  '                | scan("#\\\\d+")\n' +
+  '              ]\n' +
+  '          )\n' +
+  '        }\n' +
+  '    )).nums\n' +
+  '  | map(ltrimstr("#") | tonumber)\n' +
+  '  | unique;\n' +
+  '\n' +
+  '[.[] | {n:.number,t:.title,l:[.labels[].name],\n' +
+  ' spec:((.body//"")|test("(?m)^#{2,6}[ \\\\t]+User Stories\\\\s*$")),\n' +
+  ' d:((.body//"")|depnums),\n' +
+  ' dh:((.body//"")|depmiss)}]\n';
 
 test(
   "dependency forms hold under gojq, the engine gh actually applies — not only system jq",
@@ -865,6 +950,64 @@ test(
     assert.deepEqual(deps("## Dependencies\u00a0\n\n1. #12\n"), [12]);
   },
 );
+
+// Findings 5-7 (review of #1746): the U+00A0/Arabic-Indic-digit/VERTICAL-TAB
+// fixtures inside the three gojq-gated tests above and below are ALL
+// gojq-only assertions, but RE2 was already ASCII-only at every one of these
+// three positions before #383 too — so pre- and post-#383 agree under gojq
+// on every one of them, and none of those gated assertions actually exercise
+// the jq-vs-gojq divergence its own comment describes. That divergence is
+// real, but only reachable on system jq (Oniguruma), which the gojq-gated
+// tests structurally cannot run. This test reaches it directly, under plain
+// system jq — no `JQ_BIN` override, no `SKIP_WITHOUT_GOJQ` guard — running
+// OLD_JQ (pre-#383) through the STUB's `JQ_OVERRIDE` escape hatch to prove
+// each old class actually MISBEHAVED here, paired with the current script
+// (unmodified, no override) proving #383's narrower classes actually fixed
+// it — on the one engine where the fix was ever needed.
+test("system jq: the three class-position fixes actually changed behaviour on the engine that has the bug (#383)", () => {
+  // #1's after-marker toggle position, on the heading and on the list item's
+  // own marker gap: Oniguruma's old `\s` matched U+00A0, so `##<NBSP>Blocked
+  // by` and a bulleted `-<NBSP>#12` both wrongly armed/collected under jq.
+  const oldHeadingGap = run([ticket(1, "##\u00a0Blocked by\n\n- #12\n")], undefined, null, { JQ_OVERRIDE: OLD_JQ });
+  assert.deepEqual(oldHeadingGap.rows[0].d, [12], oldHeadingGap.stderr);
+  const oldListGap = run([ticket(2, "## Blocked by\n\n-\u00a0#12\n")], undefined, null, { JQ_OVERRIDE: OLD_JQ });
+  assert.deepEqual(oldListGap.rows[0].d, [12], oldListGap.stderr);
+  // #383's narrower `[ \t]` fixes both, on the same engine.
+  const newHeadingGap = run([ticket(1, "##\u00a0Blocked by\n\n- #12\n")]);
+  assert.deepEqual(newHeadingGap.rows[0].d, []);
+  const newListGap = run([ticket(2, "## Blocked by\n\n-\u00a0#12\n")]);
+  assert.deepEqual(newListGap.rows[0].d, []);
+
+  // #2: Oniguruma's old `\d` matched Arabic-Indic digits, so `tonumber`
+  // crashed jq itself (exit 5), which candidates.mjs's own gh-call guard
+  // turns into a hard refusal rather than a silent per-ticket miss.
+  const oldDigits = run([ticket(3, "Blocked by: #\u0661\u0662\n")], undefined, null, { JQ_OVERRIDE: OLD_JQ });
+  assert.equal(oldDigits.status, 2, oldDigits.stderr);
+  assert.match(oldDigits.stderr, /gh issue list failed/);
+  // #383's `[0-9]` no longer matches them, so the same fixture no longer
+  // crashes the real CLI invocation — the actual bug #6 describes.
+  const newDigits = run([ticket(3, "Blocked by: #\u0661\u0662\n")]);
+  assert.equal(newDigits.status, 0, newDigits.stderr);
+  assert.deepEqual(newDigits.rows[0].d, []);
+
+  // #3: Oniguruma's old `\s*$` trailing class matched VERTICAL TAB, so a
+  // `## User Stories<VT>` heading was wrongly to-spec and dropSpecs silently
+  // discarded the ticket. #999 keeps the queue non-empty either way, so #1's
+  // presence in rows is the verdict.
+  const oldVt = run(
+    [ticket(4, "## User Stories\u000b\n\nx\n"), ticket(999, "## What to build\n\nx\n")],
+    undefined,
+    null,
+    { JQ_OVERRIDE: OLD_JQ },
+  );
+  assert.equal(oldVt.status, 0, oldVt.stderr);
+  assert.ok(!oldVt.rows.some((r) => r.n === 4), "old class must have dropped #4 as a false spec");
+  // #383's class excludes VT on purpose (GFM renders it as U+FFFD, not
+  // blank), so the same heading is no longer to-spec and #4 survives.
+  const newVt = run([ticket(4, "## User Stories\u000b\n\nx\n"), ticket(999, "## What to build\n\nx\n")]);
+  assert.equal(newVt.status, 0, newVt.stderr);
+  assert.ok(newVt.rows.some((r) => r.n === 4), "the fixed class must not drop #4");
+});
 
 // #1032's diagnostic, on the engine that actually runs it. The test above
 // exercises `depmiss` under system jq only, and a `def` gojq parses differently

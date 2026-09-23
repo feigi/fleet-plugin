@@ -254,10 +254,23 @@ const EXCLUDE =
 // reader sees. So two positions on the same line legitimately differ:
 //
 //   after a heading's `#` marker — `[ \t]`
-//       `armed`, `depmiss`, and `depnums`' any-heading toggle. GFM opens a
+//       `armed` and `depmiss`, both of which only ever match a heading that
+//       HAS title text after the marker (a keyword like "blocked by" or
+//       "dependencies"), so a marker with nothing after it already fails on
+//       content grounds and never needs a wider class here. GFM opens a
 //       heading on a space or a tab ONLY: `##<U+00A0>x` and `##<FF>x` both
 //       render as paragraphs. This narrows ASCII too — `\f` used to open a
 //       heading here and deliberately no longer does.
+//   after a heading's `#` marker, any-heading toggle — `([ \t]|\r?$)`
+//       `depnums`' per-line toggle, which decides whether a line STARTS a new
+//       heading at all (armed or not) so an open blocking section resets.
+//       Unlike `armed`/`depmiss` above, this one also has to recognize a
+//       BARE marker-only heading — no title text follows, so `[ \t]` alone
+//       never matches it, and the old open section wrongly kept collecting
+//       refs past it (#383 over-collection). GFM still renders a bare `##`
+//       as a real (empty) `<h2>`, so it must still close the section: `$`
+//       admits end-of-line, `\r?` admits the same position just before a
+//       CRLF line's trailing `\r` (the one `split("\n")` leaves behind).
 //   list-item indent and marker gap — `[ \t]*` … `[ \t]`
 //       Same GFM rule one level down: `-<U+00A0>#12` and `-<FF>#12` render as
 //       paragraphs, so neither is a bullet and neither declares a blocker.
@@ -267,10 +280,15 @@ const EXCLUDE =
 //       an `<h2>`, so it is still that heading. `\f` is stripped by GFM; `\r`
 //       keeps CRLF bodies working; VERTICAL TAB stays EXCLUDED, because GFM
 //       renders it as U+FFFD and a replacement character is not blank.
-//   inline label/ref separators — `[\t \p{Zs}*]*`
+//   inline label/ref separators — `[\t\f\r \p{Zs}*]*`
 //       `Blocked by:<U+00A0>#12` renders as `Blocked by: #12` and GitHub
 //       autolinks the ref, so a reader sees a blocker — and an admission gate
-//       must not be the one thing that misses it.
+//       must not be the one thing that misses it. Matches the end-of-heading
+//       -line class above for the same reasons and the same characters:
+//       `\f` is stripped by GFM, `\r` keeps CRLF bodies working. Missing
+//       either one here silently drops a chained ref (`Blocked by
+//       #12,\f#13` losing `#13`) — the opposite, worse direction from the
+//       over-collection above: an admission gate must never MISS a blocker.
 //   every digit run — `[0-9]`
 //       Arabic-Indic digits are not refs anyone is trying to support, and this
 //       is the position where divergence could take the whole run down rather
@@ -304,7 +322,7 @@ const JQ =
   '  (reduce (split("\\n"))[] as $line (\n' +
   '      {insec: false, nums: []};\n' +
   '      ($line | armed) as $bh\n' +
-  '      | ($line | test("^#{1,6}[ \\\\t]")) as $any\n' +
+  '      | ($line | test("^#{1,6}([ \\\\t]|\\\\r?$)")) as $any\n' +
   '      | (if $any then $bh else .insec end) as $nextsec\n' +
   '      | ($line | test("^[ \\\\t]*([-*+]|[0-9]+[.)])[ \\\\t]")) as $item\n' +
   '      | {\n' +
@@ -313,7 +331,7 @@ const JQ =
   '            .nums\n' +
   '            + (if $nextsec and $item then [$line | scan("#[0-9]+")] else [] end)\n' +
   '            + [ $line\n' +
-  '                | scan("(?i)(?:depends on|blocked by|requires|after)[\\\\t \\\\p{Zs}*]*:?[\\\\t \\\\p{Zs}*]*(#[0-9]+(?:[\\\\t \\\\p{Zs}*]*(?:,|and)?[\\\\t \\\\p{Zs}*]*#[0-9]+)*)")\n' +
+  '                | scan("(?i)(?:depends on|blocked by|requires|after)[\\\\t\\\\f\\\\r \\\\p{Zs}*]*:?[\\\\t\\\\f\\\\r \\\\p{Zs}*]*(#[0-9]+(?:[\\\\t\\\\f\\\\r \\\\p{Zs}*]*(?:,|and)?[\\\\t\\\\f\\\\r \\\\p{Zs}*]*#[0-9]+)*)")\n' +
   '                | .[0]\n' +
   '                | scan("#[0-9]+")\n' +
   '              ]\n' +
