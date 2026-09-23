@@ -135,6 +135,44 @@ test("the header names WHICH diff `minted_false_claim` scores, and settles the c
   );
 });
 
+test("the header rules `minted_false_claim` by REFERENT, not by surface, and names the tiebreak", () => {
+  // #1457: #1029 settled submitted-vs-merged and left the surface axis
+  // implicit. Rulings inferred it two incompatible ways — some rows scored a
+  // PR-body-only claim `yes`, one scored a PR-body-only claim `no` citing "the
+  // column's diff-scoped definition", a phrase the header never stated. The
+  // ruling is referent-scoped: a claim scores on ANY surface the implementer
+  // wrote it on when it is about the change being submitted, and is out of
+  // scope when it is about code the change does not touch, regardless of
+  // surface. A pin that only asserted inclusion of PR/commit bodies would stay
+  // green under the narrower "diff-scoped" reading too (every diff-carried
+  // claim's surface is trivially the diff); the exclusion clause is what makes
+  // this pin red on either kind of drop or inversion.
+  const def = stripHashGutter(between(HEADER, "minted_false_claim", "# sizing", "the header"));
+  assert.match(
+    def,
+    phrase("a diff comment, a doc, a test name, a PR body, a commit body"),
+    "the header no longer lists a PR body and a commit body among the surfaces a claim can be written on",
+  );
+  assert.match(
+    def,
+    phrase("A PR body and a commit body are IN SCOPE on the same terms as a diff comment"),
+    "the header no longer states that a PR/commit body claim scores on the same terms as a diff comment",
+  );
+  assert.match(
+    def,
+    phrase("A claim about code the change does not touch is OUT of scope even when the implementer wrote it"),
+    "the header no longer excludes a claim about code the change does not touch, regardless of who wrote it or where",
+  );
+  assert.match(
+    def,
+    phrase(
+      "Tiebreak: would reading the change itself — its diff, its evidence, " +
+        "its behaviour — falsify this claim? If yes, it scores.",
+    ),
+    "the header no longer states the referent tiebreak: would reading the change falsify this claim",
+  );
+});
+
 test("SKILL.md's guard still delegates the column meanings to this header", () => {
   // #472's finding in one line: the guard PROMISES this header carries the
   // meanings. If that sentence is ever replaced by an inline column list, the
