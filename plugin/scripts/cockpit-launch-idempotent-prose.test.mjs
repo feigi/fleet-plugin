@@ -33,15 +33,22 @@
 // cross-reference is untouched by either wording either way.
 //
 // PR #1664's own review amended the doctrine before merge: the idempotence
-// claim is conditioned on the running cockpit ANSWERING the handshake — one
-// blocked inside its own synchronous gather() reads as foreign and gets
-// duplicated, reproduced by two independent refuters; `--open` fires on the
-// reuse arm too, so a re-shortlist reopens the board tab, reproduced
-// directly; and the "own port" claim is softened — a derived-port collision
-// (#1657) lands the second workspace on the next free port in its scan
-// range, not its own derived one, though it still gets its own board. The
-// tests below that name PR #1664 pin these amendments; the two existing
-// tests they sit beside were tightened rather than replaced.
+// claim is conditioned on the running cockpit ANSWERING the handshake;
+// `--open` fires on the reuse arm too, so a re-shortlist reopens the board
+// tab, reproduced directly; and the "own port" claim is softened — a
+// derived-port collision (#1657) lands the second workspace on the next free
+// port in its scan range, not its own derived one, though it still gets its
+// own board. The tests below that name PR #1664 pin these amendments; the
+// two existing tests they sit beside were tightened rather than replaced.
+//
+// #1713 then removed one of those amendments at the source rather than in
+// the prose: the cockpit's tick no longer blocks its own HTTP server, so the
+// caveat that a holder "blocked inside its own synchronous gather()" reads
+// as foreign and gets duplicated is no longer true of any build this runbook
+// describes. The paragraph stating it is deleted, and the test that pinned
+// it is replaced below by one holding the deletion — a caveat that is false
+// is worse than absent here, because it tells the controller to avoid the
+// relaunch phase 0 now runs on every pass.
 //
 // Zero deps: `node --test plugin/scripts/cockpit-launch-idempotent-prose.test.mjs`.
 
@@ -73,10 +80,13 @@ test("phase 0 states the cockpit launch is idempotent per workspace, conditioned
   // launch is harmless"), a stated design property ("idempotent"), scoped to
   // the unit #39's multi-instance cockpit cares about ("per workspace").
   assert.match(step, phrase("The launch is idempotent per workspace"));
-  // PR #1664 review (finding 1): unconditional idempotence is false — a
-  // cockpit blocked inside its own synchronous gather() does not answer the
-  // handshake in time, so the doctrine states the condition rather than
-  // leaving it implicit.
+  // PR #1664 review (finding 1): unconditional idempotence overclaims — the
+  // reuse path exists only as far as the held port ANSWERS, so the doctrine
+  // states the condition rather than leaving it implicit. #1713 removed the
+  // one cause that made the condition bite in ordinary operation (a tick
+  // blocking its own server), which is why the caveat that followed this
+  // sentence is gone; the condition itself still holds — a cockpit stopped
+  // or wedged for any other reason answers nothing either.
   assert.match(step, phrase("when the running cockpit answers the identity"));
   // The mechanism the doctrine rests on, named rather than left implicit: an
   // already-served workspace's launch finds the running server and exits 0
@@ -85,17 +95,25 @@ test("phase 0 states the cockpit launch is idempotent per workspace, conditioned
   assert.match(step, phrase("exits 0 without starting a second one"));
 });
 
-test("phase 0 states a cockpit blocked in gather() reads as foreign and gets duplicated", () => {
+test("the superseded mid-gather() duplication caveat is gone, not left beside the fixed behaviour", () => {
   const step = LAUNCH_STEP();
-  // PR #1664 review (finding 1), reproduced by two independent refuters:
-  // SIGSTOP-ing the holder mid-gather() makes a relaunch treat it as
-  // foreign and bind the next free port, starting a second server that
-  // shares this workspace's OWN `.fleet` state directory with the first —
-  // not a different workspace's, which would be the harmless #1585 case.
-  assert.match(step, phrase("does not answer inside the probe window and reads"));
-  assert.match(step, phrase("as foreign instead"));
-  assert.match(step, phrase("starts a second server sharing this workspace's"));
-  assert.match(step, phrase("`.fleet` state directory"));
+  // Verbatim phrases from the caveat #1713 made false. The cockpit answers
+  // HTTP throughout a tick now (gather()'s child reads are asynchronous), so
+  // a relaunch landing mid-tick is recognised and reused like any other —
+  // the plain no-op the sentence above already promises. Pinned as an
+  // ABSENCE for the same reason the skip-on-re-shortlist row below is: the
+  // plugin's prefer-moving rule means a superseded sentence is deleted, and
+  // a revert that restores it — in full, or pasted back beside the fixed
+  // doctrine — would send the controller round a hazard that no longer
+  // exists. cockpit-tick-nonblocking.test.mjs holds the behaviour itself.
+  for (const gone of [
+    "does not answer inside the probe window and reads",
+    "starts a second server sharing this workspace's",
+    "relaunching mid-gather is not the free no-op",
+  ]) {
+    assert.doesNotMatch(step, phrase(gone),
+      `phase 0 warns about a mid-gather() duplicate again; #1713 made the cockpit answer throughout its tick, so the warning is false: ${gone}`);
+  }
 });
 
 test("phase 0 states --open fires on every relaunch, reopening the board tab each pass", () => {

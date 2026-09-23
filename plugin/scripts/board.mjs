@@ -30,7 +30,7 @@
 // <path>` is how an operator names the right one: it overrides the
 // heuristic outright.
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync, writeSync } from "node:fs";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
 import { encodeClaudeProjectDir as encodeProjectDir, foldClaudeTranscript, claudeRoleSignals } from "./member-record.mjs";
@@ -199,8 +199,8 @@ function argSpendDir() {
   return arg("spend-dir") ?? undefined;
 }
 
-// Node's default stdout cap is 1 MiB and execFileSync THROWS (ENOBUFS) past it
-// rather than truncating (#807). Here that throw is indistinguishable from an
+// Node's default stdout cap is 1 MiB and a capped child read FAILS past it
+// rather than truncating (#807). Here that failure is indistinguishable from an
 // unreachable tool: the read degrades to the caller's empty default and the
 // cockpit is served a BLANK board at HTTP 200 with only a stderr line — the
 // #246 symptom, which #803 moved up from the pipe buffer rather than removed.
@@ -214,11 +214,53 @@ function argSpendDir() {
 // tryRun discards — so a fix applied only here would leave that one uncapped.
 const READ_OPTS = { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 };
 
+// #1713: every child read in this file is ASYNCHRONOUS, and that is
+// load-bearing rather than stylistic. serve() ticks on a timer inside the same
+// process that answers HTTP, so a SYNCHRONOUS read holds the event loop for as
+// long as the child runs — measured at 4.72–4.91s for one board — and during
+// that window this cockpit answers nothing at all. A relaunch's identity probe
+// (PROBE_TIMEOUT_MS, one retry, ~2s in total) landing inside it therefore got
+// no answer, read the port as foreign, and started a SECOND cockpit on this
+// workspace's state directory: the duplicate #1585/#1660 exist to prevent,
+// reached through timing rather than through a missing handshake. The browser
+// page stalled for the same reason and the same duration, every tick.
+//
+// One thing execFileSync did that this has to keep doing by hand: given no
+// `stdio` of its own it re-emits the child's captured stderr onto this
+// process's stderr (node's own `process.stderr.write(ret.stderr)`) BEFORE it
+// throws. That single oversized write is the subject of board-cli.test.mjs's
+// #807/#363 flood row, so it is spelled out below — and on both arms, because
+// the sync one wrote whether or not it went on to throw.
+//
+// This never throws; a failure is REPORTED in the record, in the field names
+// execFileSync's throw used — `status` for an exit code, `signal` for a kill,
+// `code` for a libuv/node fault. That translation is the whole reason this is
+// not a bare `promisify(execFile)`: the async error carries the EXIT CODE in
+// `err.code` (measured: `3`, a number), where the sync one carried `ENOENT` /
+// `ENOBUFS` there and the exit code in `status`, and runCiState() below reads
+// all three to tell those causes apart.
+function execRead(cmd, args) {
+  return new Promise((resolve) => {
+    execFile(cmd, args, READ_OPTS, (err, stdout, stderr) => {
+      if (stderr) process.stderr.write(stderr);
+      resolve(err
+        ? {
+          stdout, error: err,
+          status: typeof err.code === "number" ? err.code : null,
+          code: typeof err.code === "string" ? err.code : null,
+          signal: err.signal ?? null,
+        }
+        : { stdout, error: null, status: 0, code: null, signal: null });
+    });
+  });
+}
+
 // Every external read is wrapped: a failure returns null and the caller keeps a
 // last-known value. Partial board beats a crashed loop or a false alarm.
-function tryRun(cmd, args) {
-  try { return execFileSync(cmd, args, READ_OPTS); }
-  catch (e) { console.error(`${NAME}: ${cmd} ${args.join(" ")} failed: ${e.message}`); return null; }
+async function tryRun(cmd, args) {
+  const r = await execRead(cmd, args);
+  if (r.error) { console.error(`${NAME}: ${cmd} ${args.join(" ")} failed: ${r.error.message}`); return null; }
+  return r.stdout;
 }
 
 // Parse tool stdout defensively: a tool can exit 0 yet print malformed or
@@ -344,29 +386,34 @@ function labelsOf(row) {
 // truncation starts refusing it and resurrects a red for a PR with no run
 // behind it. Wholeness is the only question asked here; SHAPE stays mapCi's,
 // which is total over every payload that parses.
-function runCiState(scriptDir, pr) {
-  let out;
-  try {
-    out = execFileSync("node", [join(scriptDir, "ci-state.mjs"), "--pr", String(pr), "--quiet"], READ_OPTS);
-  } catch (e) {
-    const errOut = e.stdout ? e.stdout.toString() : "";
-    if (e.status === 2 || !errOut.trim()) {
-      console.error(`${NAME}: ci-state --pr ${pr} failed: ${e.message}`);
+async function runCiState(scriptDir, pr) {
+  const r = await execRead("node", [join(scriptDir, "ci-state.mjs"), "--pr", String(pr), "--quiet"]);
+  const out = r.stdout;
+  if (r.error) {
+    // `r.stdout` and not `error.stdout`: what the child managed to write before
+    // it died is the salvage this whole block exists for, and execRead's record
+    // carries it on every arm — including a spawn failure, where it is "".
+    if (r.status === 2 || !out.trim()) {
+      console.error(`${NAME}: ci-state --pr ${pr} failed: ${r.error.message}`);
       return null;
     }
     // Its own line, not the one above: "failed" reads as "the child never
     // answered", and an operator looking at a carried-forward CI value needs to
     // know a payload DID arrive and was thrown away, and why.
     //
-    // `how` reads e.code first — the three-way ci-state.mjs already uses at its
-    // own child reads — because one cause of this shape is OURS: overrunning
-    // READ_OPTS.maxBuffer is enforced by node killing the child, and that
-    // arrives as signal SIGTERM carrying code ENOBUFS (measured). A
-    // signal-first `how` renders it "killed by SIGTERM", billing a cap this
-    // file sets to an outside killer and sending the operator after an OOM kill
+    // `how` reads the libuv/node `code` first — the three-way ci-state.mjs
+    // already uses at its own child reads — because one cause of this shape is
+    // OURS: overrunning READ_OPTS.maxBuffer is enforced by node killing the
+    // child, and that arrives as code ERR_CHILD_PROCESS_STDIO_MAXBUFFER
+    // (measured; the synchronous read this replaced reported the same cap as
+    // signal SIGTERM carrying code ENOBUFS). A signal-first `how` renders a cap
+    // this file sets as an outside kill, sending the operator after an OOM kill
     // or a stray `kill -TERM`. The signal arm stays ahead of the exit arm
     // behind it: `status` is null on a real signal kill, where "exit null"
-    // would name nothing to act on.
+    // would name nothing to act on. execRead splits the async error's one
+    // `code` field back into these three, so all three arms still read as they
+    // did — measured: an exit 3 gives `status` 3 and no `code`, a SIGKILL gives
+    // `signal` and neither, an unreachable binary gives `code` ENOENT.
     //
     // Through the warn-once gate, keyed on the PR exactly as mapCi's
     // `ci-parse` gate is and for the same reason: serve() re-gathers on a
@@ -381,23 +428,23 @@ function runCiState(scriptDir, pr) {
     // failure on another arm for the rest of the run — measured: driving the
     // same PR through this arm then the exit-0 guard below printed only the
     // first tick's warning until the channels were split.
-    try { JSON.parse(errOut); }
+    try { JSON.parse(out); }
     catch (pe) {
-      const how = e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`);
+      const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
       warnOnce("ci-salvage-nonzero", pr, `ci-state --pr ${pr} (${how}) left a payload that will not parse (${pe.message}); carrying the previous CI value forward rather than reading this as a verdict`);
       return null;
     }
-    return errOut;
+    return out;
   }
   // #1593: exit 0 was never covered by any of the checks above — they only run
-  // once execFileSync throws, and a child that exits 0 does not throw. So the
-  // same write cut mid-JSON that the catch block above salvages at exit 1 rode
-  // straight through here and into mapCi at exit 0, where an unparseable
-  // string maps to "unknown" and gather()'s carry-forward — which only a null
-  // return reaches — was skipped, discarding the PR's last-known CI value
-  // exactly as #262 did before the exit-2 case was fixed. Same parse check,
-  // same null return as the catch block above — but its OWN channel,
-  // `ci-salvage-exit0`, not the catch block's `ci-salvage-nonzero`: a
+  // once the child read reports a failure, and a child that exits 0 reports
+  // none. So the same write cut mid-JSON that the failure block above salvages
+  // at exit 1 rode straight through here and into mapCi at exit 0, where an
+  // unparseable string maps to "unknown" and gather()'s carry-forward — which
+  // only a null return reaches — was skipped, discarding the PR's last-known
+  // CI value exactly as #262 did before the exit-2 case was fixed. Same parse
+  // check, same null return as the failure block above — but its OWN channel,
+  // `ci-salvage-exit0`, not that block's `ci-salvage-nonzero`: a
   // zero-exit child does not get a looser contract than a non-zero one, and
   // the two arms are structurally different failures that must not silence
   // each other (see the channel-split comment above).
@@ -911,7 +958,11 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
 // say whether an operator named it. Whether --spend-dir was given is a fact
 // about argv, unrelated to which of gatherSpend's three shapes the pin
 // currently holds.
-export function gather({ ledgerFile, prevFile, stateFile = null, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null, spendDir = argSpendDir(), spendDirExplicit = argSpendDir() != null }) {
+// #1713: async, because every child read below is. The event loop this frees
+// belongs to serve()'s HTTP server, which shares this process — see execRead's
+// note above for what the synchronous version cost. `build` awaits it and is
+// otherwise unchanged: one gather per process, nothing else waiting on it.
+export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null, spendDir = argSpendDir(), spendDirExplicit = argSpendDir() != null }) {
   // The one read that must not crash the gather: a corrupt/partial board.json
   // (the fallback safety net itself) is ignored, not fatal. That holds for a
   // SHAPE fault as much as a parse fault (#1192) — the guard below rejects the
@@ -977,7 +1028,7 @@ export function gather({ ledgerFile, prevFile, stateFile = null, scriptDir = SCR
   // was unusable, and anything else is the ledger. `tryParse`'s fallback is
   // null rather than the empty shape for exactly that reason — the empty shape
   // is a real answer and must not double as the failure.
-  const ledgerJson = tryRun("node", [join(scriptDir, "ledger.mjs"), "--file", ledgerFile, "--require-file", "read"]);
+  const ledgerJson = await tryRun("node", [join(scriptDir, "ledger.mjs"), "--file", ledgerFile, "--require-file", "read"]);
   // "read" means ledgerJson parsed as JSON, not that it conforms to the
   // {rows,filed,ruled} shape — tryParse only checks syntax, so a
   // syntactically-valid-but-wrong-shape payload from ledger.mjs would still
@@ -993,7 +1044,7 @@ export function gather({ ledgerFile, prevFile, stateFile = null, scriptDir = SCR
     ? { ...parsedLedger, state: "read" }
     : { rows: [], filed: [], ruled: [], state: ledgerJson == null ? "unread" : "unparsed" };
 
-  const issuesJson = tryRun("gh", ["issue", "list", "--label", "ready-for-agent",
+  const issuesJson = await tryRun("gh", ["issue", "list", "--label", "ready-for-agent",
     "--state", "open", "--limit", "100", "--json", "number,title,labels"]);
   // title: falls back to the same `#<number>` placeholder titleFor() already
   // uses for an issue it cannot find at all (compute-board.mjs). An unrowed
@@ -1017,7 +1068,7 @@ export function gather({ ledgerFile, prevFile, stateFile = null, scriptDir = SCR
     labels: labelsOf(i),
   }));
 
-  const prsJson = tryRun("gh", ["pr", "list", "--state", "open", "--limit", "100",
+  const prsJson = await tryRun("gh", ["pr", "list", "--state", "open", "--limit", "100",
     "--json", "number,state,labels,title"]);
   // No default for `title` or `state` here, unlike the issue row above — raw
   // passthrough, deliberately. `title`: compute-board.mjs's titleFor() already
@@ -1039,15 +1090,23 @@ export function gather({ ledgerFile, prevFile, stateFile = null, scriptDir = SCR
   // CI per open PR. On failure, carry the previous board's value for that PR.
   const prevCi = new Map((prev?.tickets || []).filter((t) => t.pr != null).map((t) => [t.pr, t.ci]));
   const ci = {};
+  // Awaited one at a time rather than raced with Promise.all, and that is a
+  // decision rather than an oversight: this loop spawns one `node
+  // ci-state.mjs` per open PR and each of those hits the GitHub API, so a fan
+  // of 40 at once is a rate-limit and a load spike where a queue of 40 is
+  // neither. Nothing here waits on the loop any more — the server answers
+  // throughout it (#1713) — so the only thing concurrency would buy is a
+  // shorter tick, against an interval measured in seconds. The warn-once
+  // lines below also stay in PR order this way.
   for (const p of prs) {
-    const out = runCiState(scriptDir, p.number);
+    const out = await runCiState(scriptDir, p.number);
     ci[p.number] = out === null ? (prevCi.get(p.number) ?? "unknown") : mapCi(out, p.number);
   }
 
   // Repo identity + web URL for PR links — the url carries the host, so links
   // resolve on GitHub Enterprise, not just github.com. From the fleet's cwd, so
   // the board stays repo-agnostic. On failure, carry the previous board's values.
-  const repoJson = tryRun("gh", ["repo", "view", "--json", "nameWithOwner,url"]);
+  const repoJson = await tryRun("gh", ["repo", "view", "--json", "nameWithOwner,url"]);
   let repo = prev?.repo ?? null;
   let repoUrl = prev?.repoUrl ?? null;
   if (repoJson) {
@@ -1220,7 +1279,7 @@ async function main() {
     // onto the workspace does not reach it, and changing it would change what
     // an existing `build` reads.
     const instance = resolveCockpitInstance({ cwd: process.cwd(), gitCommonDir: gitCommonDir() });
-    const model = computeBoard(gather({
+    const model = computeBoard(await gather({
       ledgerFile: ledgerFile || ".fleet/ledger.md", prevFile,
       // #1597: the heartbeat's file, from the SAME instance the identity
       // fields below come from — not the cwd-relative literal the ledger
@@ -1458,11 +1517,20 @@ function bindFailure(server, port) {
 // a launch that cannot get an answer within a second must proceed, not
 // wait. A holder that accepts the connection and then says nothing is the
 // case that pays for this timer — nothing else in a socket read bounds it.
-// One silent window does not settle the question, though: a genuine
-// same-workspace holder can be blocked inside its own synchronous gather()
-// (gh/ledger.mjs calls) exactly when the probe arrives, and that looks
-// identical from outside to nobody being there at all. The probe retries
-// once before it will call a silent port foreign (#1660).
+// One silent window does not settle the question, though: nothing in a socket
+// read tells a port nobody holds from one whose holder was busy for that
+// second, and a box under load, a process still between its bind and its
+// identity write, or a dropped SYN all produce the second shape. The probe
+// retries once before it will call a silent port foreign (#1660).
+//
+// Until #1713 the commonest producer of that shape was this cockpit itself —
+// a same-workspace holder blocked inside its own synchronous gather() when
+// the probe arrived, for the 4.72–4.91s a board took to build, which no
+// number of retries at this timeout would have covered. That one is gone at
+// the source: the tick's reads are asynchronous and the server answers
+// throughout (cockpit-tick-nonblocking.test.mjs). Raising this timeout was
+// ruled out as the fix for it — it would have to clear a gather(), which
+// charges every launch past a stranger-held port that much per candidate.
 const PROBE_TIMEOUT_MS = 1000;
 // 127.0.0.1 rather than `localhost`: no resolver in the path of a launch,
 // and no chance of asking a different address than the one every cockpit
@@ -1494,9 +1562,9 @@ const PROBE_BODY_CAP = 1024 * 1024;
  *
  * A bare timeout gets one retry (#1660) rather than folding straight into
  * "foreign": nothing in a socket read distinguishes "nobody is there" from
- * "busy", and a holder mid-gather() looks exactly like the first from out
- * here. Only a second silent window calls it, and says so on stderr
- * distinctly from a confirmed non-match — a shrug is not a verdict.
+ * "busy for that second", and a loaded box produces the second shape. Only a
+ * second silent window calls it, and says so on stderr distinctly from a
+ * confirmed non-match — a shrug is not a verdict.
  */
 export function probeCockpitWorkspace(port, timeoutMs = PROBE_TIMEOUT_MS) {
   return new Promise((resolve) => {
@@ -1600,7 +1668,31 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // `port: 0` no browser could ever reach. A parameter makes that
   // unreachable rather than merely unlikely — there is no earlier value in
   // scope for it to pick up.
-  const tick = (served) => {
+  // One tick at a time, and the flag is load-bearing rather than defensive.
+  // Before #1713 the timer's callback was synchronous, so node could not start
+  // a second tick while the first was still inside gather() — it just fired
+  // late. An async tick has no such floor: a gather that outruns `interval`
+  // (a `gh` outage riding out its own timeouts, an operator's `--interval 1`)
+  // would let the timer stack ticks on top of each other, and each of those
+  // reads `prevFile` at its start and renames over it at its end. Two in
+  // flight means double the `gh` and `ci-state.mjs` children — the very load
+  // that made the tick slow — and, worse, a LATER-started tick can finish
+  // first and be overwritten by the older one's payload, walking every
+  // ticket's dwell clock and carried-forward CI value backwards.
+  //
+  // SKIPPED, not queued: a tick recomputes the whole board from scratch, so
+  // the one that would have been queued has nothing in it the next one does
+  // not redo. Announced once per process through the same warn-once gate
+  // every other repeating condition in this file uses — a board falling
+  // behind its interval is worth saying, and worth saying only once.
+  let ticking = false;
+  const tick = async (served) => {
+    if (ticking) {
+      warnOnce("tick-overlap", String(interval),
+        `a board tick is still running after ${interval}s; skipping this one — the board will be older than its interval until the reads it is waiting on return`);
+      return;
+    }
+    ticking = true;
     try {
       // #1585: the identity a second launch's handshake reads off this
       // cockpit. It rides the board payload deliberately, rather than a
@@ -1614,7 +1706,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
       // assignment that used to sit below this line wrote a field the pure
       // model did not declare, so `build` printed a board with no identity
       // at all and only the served copy carried one.
-      const model = computeBoard(gather({
+      const model = computeBoard(await gather({
         ledgerFile, prevFile: jsonPath, interval,
         // #1597: beside the ledger and out of the same state directory, so
         // the board, the ledger and the heartbeat cannot disagree about which
@@ -1632,6 +1724,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
       writeFileSync(tmp, JSON.stringify(model));   // atomic: write tmp, rename over target
       renameSync(tmp, jsonPath);
     } catch (e) { console.error(`${NAME}: build tick failed: ${e.message}`); }
+    finally { ticking = false; }
   };
 
   // #1660: a held port used to mean three different things this loop could
@@ -1671,7 +1764,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
       attempt.close();
       const url = `http://localhost:${rest[matchAt]}/`;
       console.error(`${NAME}: cockpit already running for this workspace on ${url}`);
-      if (open) tryRun("open", [url]);
+      if (open) await tryRun("open", [url]);
       // Exit 0 — and explicitly, not by returning: a backgrounded launch
       // reports nothing but its exit code, and a handle left behind by the
       // probe would otherwise hang this process forever while it holds no
@@ -1688,7 +1781,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
     if (holder === instance.workspace) {
       const url = `http://localhost:${candidate}/`;
       console.error(`${NAME}: cockpit already running for this workspace on ${url}`);
-      if (open) tryRun("open", [url]);
+      if (open) await tryRun("open", [url]);
       process.exit(0);
     }
     console.error(`${NAME}: port ${candidate} is held by something that is not this workspace's cockpit — trying the next port`);
@@ -1726,7 +1819,6 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // review). address() is only populated once listening, hence only here.
   const bound = server.address().port;
   console.error(`${NAME}: cockpit on http://localhost:${bound}  (interval ${interval}s)`);
-  if (open) tryRun("open", [`http://localhost:${bound}/`]);
 
   // #1660: publish identity the instant this port is ours — before the
   // first tick, which is the one that can be slow (gather() shells out to
@@ -1742,11 +1834,28 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // only `workspace`.
   writeFileSync(`${jsonPath}.tmp`, JSON.stringify({ workspace: instance.workspace, port: bound }));
   renameSync(`${jsonPath}.tmp`, jsonPath);
-  // Yield once so a connection already arriving — that same sibling's probe
-  // — gets a chance to read the identity just written before this process
-  // blocks inside gather() for however long that takes.
+  // Yield once so a connection already arriving — that same sibling's probe —
+  // gets a chance to read the identity just written before this process starts
+  // the first tick. The tick no longer blocks the loop (#1713), but gather()
+  // still opens with a synchronous prev-board read before its first await, and
+  // a turn of the loop costs nothing.
   await new Promise((resolve) => setImmediate(resolve));
 
+  // --open only once the identity is on disk, and awaited rather than fired
+  // and forgotten. `open` is a child process like any other — it takes a
+  // moment to reach the browser, and on a machine without it a failed spawn —
+  // so running it BEFORE the write above put a child squarely inside the
+  // window #1660 exists to keep empty, where a racing launch's probe finds no
+  // payload and reads this port as foreign. Since #1713 it no longer blocks
+  // the server either way: the await leaves the loop free, so this cockpit
+  // answers the probe while its own browser is still starting.
+  if (open) await tryRun("open", [`http://localhost:${bound}/`]);
+
+  // Deliberately not awaited: the first tick is the slow one, and everything
+  // below it — the timer, and the two signal handlers that are the only way
+  // this process is ever asked to stop — must be in place before it returns,
+  // not after. Nothing here rejects; tick() catches its own faults and the
+  // `ticking` flag it sets is cleared in a finally.
   tick(bound);
   const timer = setInterval(() => tick(bound), interval * 1000);
 

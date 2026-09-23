@@ -220,12 +220,15 @@ test("build: a valid --interval survives the guard and reaches the payload", () 
 //
 // Same reason this file exists at all (see header): the --spend-since guard
 // fires only AFTER gather()'s gh reads, and tryRun() (board.mjs) runs each
-// one through `execFileSync`, passing no `stdio` option. That CAPTURES the
-// child's stderr rather than inheriting it, and re-emits it through
-// board.mjs's OWN process.stderr — the child never touches an inherited
-// fd 2. So the write that has to clear the pipe before die() can land is
-// board.mjs's own, and on a pipe that is an async stream write: whatever is
-// still queued when process.exit() runs is discarded.
+// one through execRead's async `execFile`, passing no `stdio` option. That
+// CAPTURES the child's stderr rather than inheriting it, and re-emits it
+// through board.mjs's OWN process.stderr — the child never touches an
+// inherited fd 2. So the write that has to clear the pipe before die() can
+// land is board.mjs's own, and on a pipe that is an async stream write:
+// whatever is still queued when process.exit() runs is discarded. Going
+// through execFile rather than execFileSync does not change this: the read
+// side moved from sync to async, but the re-emitting write itself was always
+// `process.stderr.write`, a non-blocking pipe write either way.
 //
 // Measured, both shapes, each parent flooding 200,000 B and then exiting,
 // read by a spawn() reader identical to runBoardFlooded's — tryRun's
@@ -484,7 +487,8 @@ test("build: a ledger read past node's default stdout cap arrives whole, not as 
 // The fault driven here is the gap gather()'s own comment names and accepts:
 // `tryParse` checks the ledger read is JSON, never that it is the
 // `{rows,filed,ruled}` shape, because ledger.mjs is this repo's own tested
-// producer of it. That read is `execFileSync("node", [ledger.mjs, ...])`, so a
+// producer of it. That read is `tryRun("node", [ledger.mjs, ...])`, backed by
+// async `execFile` (see execRead in board.mjs), so a
 // `node` earlier on PATH is the entire fixture, and a wrong-typed `rows`
 // reaches compute-board.mjs's `(ledger.rows || []).map` with nothing between
 // the TypeError and main()'s catch.

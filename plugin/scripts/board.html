@@ -292,7 +292,15 @@ function render(m) {
     (m.filed || []).map((f) => "#" + f.issue).join(" "));
   foot.append(filed);
   // freshness
-  document.getElementById("age").textContent = "updated " + mins(m.generatedAt) + "m ago";
+  // #1713: exactly one payload reaches this page without a `generatedAt` —
+  // #1660's identity stub, written at bind time so a racing launch's probe has
+  // something to read. The page can now SEE it, because the cockpit answers
+  // HTTP while its first tick is still computing where it used to answer
+  // nothing at all until the tick was done. Only computeBoard() sets the
+  // field, so its absence means "no board built yet", not "a board of unknown
+  // age" — and `mins(undefined)` is NaN, which rendered as "updated NaNm ago".
+  const built = typeof m.generatedAt === "number";
+  document.getElementById("age").textContent = built ? "updated " + mins(m.generatedAt) + "m ago" : "building…";
   const banner = document.getElementById("stale-banner");
   const ledgerMsg = ledgerBanner(m.ledgerState);
   const stallMsg = livenessBanner(m.liveness);
@@ -300,7 +308,7 @@ function render(m) {
   // element is reused across ticks, so a `dead` class left behind by an
   // earlier render paints the next tick's ledger or stale message red. One
   // assignment per arm is what makes that unreachable rather than unlikely.
-  if (Date.now() - m.generatedAt > interval * 1000 * 2) {
+  if (built && Date.now() - m.generatedAt > interval * 1000 * 2) {
     banner.style.display = "block";
     banner.className = "";
     banner.textContent = "⚠ data stale — server/controller stopped?";

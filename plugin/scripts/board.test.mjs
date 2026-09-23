@@ -187,7 +187,7 @@ function gatherCi({ ciStateBody, prevCi, prs = [42], ticks = 1 }) {
   // again per tick, which is the only place a warn-once gate is observable.
   const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
     let r;
-    for (let i = 0; i < ${ticks}; i++) r = gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
+    for (let i = 0; i < ${ticks}; i++) r = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
                        prevFile: ${JSON.stringify(join(cwd, "prev.json"))},
                        scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
     console.log(JSON.stringify(r.ci));`;
@@ -429,7 +429,7 @@ function gatherRows({ issuesJson, prsJson }) {
     `#!/bin/sh\ncase "$1 $2" in\n"issue list") echo '${issuesJson}' ;;\n"pr list") echo '${prsJson}' ;;\n*) exit 1 ;;\nesac\n`);
   chmodSync(join(bin, "gh"), 0o755);
   const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
-    const r = gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
+    const r = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
                        prevFile: null, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
     console.log(JSON.stringify({ issues: r.issues, prs: r.prs }));`;
   const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
@@ -2096,6 +2096,29 @@ function serveProcess(cwd, bin, args = ["--port", "0", "--interval", "3600"]) {
   return { p, url };
 }
 
+// #1713: the cockpit now answers HTTP while its first tick is still
+// computing, so the first payload on this wire is #1660's identity stub —
+// `{workspace, port}`, no `tickets` — and only the tick behind it is a board.
+// Before the tick ran asynchronously this process could not answer at all
+// until it had finished, which is the only reason a bare fetch here used to
+// land on a built board. `generatedAt` is the discriminant because only
+// computeBoard() produces it; board-identity.test.mjs polls on the same field
+// for the same reason.
+async function untilBuiltBoard(url) {
+  const ms = 20000, deadline = Date.now() + ms;
+  for (;;) {
+    try {
+      const res = await fetch(`${url}/board.json`);
+      if (res.ok) {
+        const body = await res.json();
+        if (typeof body.generatedAt === "number") return body;
+      } else { await res.arrayBuffer(); }
+    } catch { /* not up yet */ }
+    if (Date.now() > deadline) throw new Error(`no built board at ${url} after ${ms}ms`);
+    await new Promise((res) => setTimeout(res, 50));
+  }
+}
+
 // The end-to-end claim, and the one no pure row can make: two workspaces
 // served AT ONCE are two live boards, each writing only its own state
 // directory — and the one started from a linked worktree writes its MAIN
@@ -2145,9 +2168,8 @@ test("CLI: two workspaces serve two live boards at once, each writing only its o
     const [urlA, urlB] = await withTimeout(Promise.all([a.url, b.url]), 20000, "both cockpits to announce");
 
     for (const [label, url] of [["worktree-of-A", urlA], ["B", urlB]]) {
-      const res = await fetch(`${url}/board.json`);
-      assert.equal(res.status, 200, `${label}'s board is not live on ${url}`);
-      assert.ok(Array.isArray((await res.json()).tickets), `${label} served something that is not a board`);
+      const board = await untilBuiltBoard(url);
+      assert.ok(Array.isArray(board.tickets), `${label} served something that is not a board`);
     }
     assert.notEqual(urlA, urlB, "two concurrent boards cannot share one URL");
 

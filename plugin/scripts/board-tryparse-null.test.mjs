@@ -65,7 +65,7 @@ function gatherWith({ issuesJson = "[]", prsJson = "[]", ledgerBody = null } = {
   chmodSync(join(bin, "gh"), 0o755);
 
   const driver = `const { gather } = await import(${JSON.stringify(BOARD)});
-    const r = gather({ ledgerFile: ${JSON.stringify(join(cwd, "ledger.md"))},
+    const r = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "ledger.md"))},
                        prevFile: null, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
     console.log(JSON.stringify({ issues: r.issues, prs: r.prs, ledger: r.ledger }));`;
   const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
