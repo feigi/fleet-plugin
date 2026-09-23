@@ -193,6 +193,24 @@ Claude result is lost, an unconsumed omp result auto-delivers or is still
 readable in a later `hub jobs`/`wait` snapshot.
 _Avoid_: return value, retrieve
 
+**Liveness mark**:
+The RUN's liveness, not a member's — `beat` in the heartbeat's shared state
+file, written only by `fleet-heartbeat` and carrying when the beat was last
+seen, the interval in effect at that moment, and a deliberate stop's reason
+when `--stop` recorded one. Deliberately not spelled "liveness" bare: that
+word already names a member's process axis under Settle above, and the two
+are different subjects — one member can be idle while the run beats, and the
+run can be dead while a member's process still exists.
+_Avoid_: liveness (bare), heartbeat state, pulse
+
+**Stall report**:
+What a reader says about a stale or stopped Liveness mark — when the beat was
+last seen, how overdue it is against the interval that mark recorded, how many
+tickets are still claimed and in flight, and whether the pool still has
+supply. Detection only: naming a stall neither releases the stranded claims
+nor restarts anything.
+_Avoid_: dead-run warning, stale banner
+
 ### Dialect
 
 **Marked line**:

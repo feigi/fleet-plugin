@@ -99,7 +99,11 @@ Measured before ruling:
    `GIT_WORK_TREE` scrubbed from that resolution, since an ambient one answers
    for another repository and re-opens the per-environment split the common dir
    closes: `fleet-tick` owns `quiet` and `digest`, `fleet-heartbeat` owns
-   `elapsed`. A key both wrote would need a lock neither is positioned to hold.
+   `elapsed` and — since #1597 — `beat`, the dated liveness mark carrying the
+   interval that was in effect when it was written, plus a deliberate stop's
+   reason when one was recorded. A key both wrote would need a lock neither is
+   positioned to hold, which is why the stop reason is written through
+   `fleet-heartbeat --stop <why>` and never from the tick side.
    The heartbeat re-reads the file after its hold rather than writing the
    snapshot it opened with: a hold is minutes long, `fleet-tick` runs on edges
    that owe it nothing, and patching a stale snapshot back would revert the
@@ -120,6 +124,25 @@ is the one place where an out-of-band mechanism may have to be reconsidered —
 only something outside the session can restart a dead one. This ADR rules
 against out-of-band scheduling for the *live-run* heartbeat; it does not
 pre-judge that question.
+
+#1597 shipped the **detection** half of that stage and disturbed nothing here:
+the beat now leaves a dated mark, and two readers — `fleet-tick` at the next
+run's start, and the cockpit on every tick — report a stopped run instead of
+leaving it silent. Neither spawns, wakes, schedules nor restarts anything, so
+the ruling above is untouched: rendering a dead run's state to a human is not
+waking an idle live agent, which is what the measurement behind this ADR was
+about. Only the **restart** layer re-opens that question, and it is filed
+separately (#1724) as a human call.
+
+The mark is judged against the interval it RECORDS rather than any constant,
+because the interval is not one — the back-off stretches it toward the ceiling,
+so a fixed threshold would either call a quiet night dead or miss a death on a
+busy one. Failure directions match the rest of this file: half a mark is no
+mark, an unreadable one is no mark, and no mark is reported as nothing rather
+than as a death — the cry-wolf direction is the one a liveness reader must not
+fail in. A failed mark write is announced and survived like every other write
+here; a mark that killed the beat it measures would be this ADR's own defect
+wearing a new hat.
 
 Degraded reads all fail toward beating **more** often, never less: a missing or
 corrupt state file restarts at the base interval and says so, and only a

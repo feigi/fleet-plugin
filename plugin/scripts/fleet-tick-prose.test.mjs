@@ -208,3 +208,36 @@ test("the heartbeat block forbids stopping on an idle queue", () => {
   // terminates the run at 01:00 and misses every ticket triaged after it.
   assert.match(heartbeatBlock(), /does not stop on idleness/);
 });
+
+test("the heartbeat block gives the command for a deliberate stop", () => {
+  // #1597. Nothing else can write the reason afterwards — the mark has one
+  // writer and that writer is this script — so a controller that never reads
+  // the flag leaves every deliberate stop indistinguishable from a crash, and
+  // the next run reports "no recorded reason" for a death that named itself.
+  // The literal invocation, not just the idea: a reader who knows a stop
+  // "should be recorded" and not how has the same nothing.
+  const s = heartbeatBlock();
+  assert.match(s, /--stop "budget exhausted"/);
+  assert.match(s, /holds nothing and returns at once/);
+  // And that skipping it is survivable, because a controller told only that
+  // it is required will burn a turn on it while the budget it is out of runs
+  // down. The honest cost is one degraded field, not a lost run.
+  assert.match(s, /Skipping it is not fatal/);
+});
+
+test("the heartbeat block says a stall line is the PREVIOUS run and names what is stranded", () => {
+  // Both halves are load-bearing and neither is obvious. Read as this run's
+  // own state, the line is a controller reporting itself dead — the shape
+  // that gets a healthy run abandoned. And a stall whose stranded tickets go
+  // unmentioned is read as an obituary rather than as work: those tickets
+  // keep the claim label the candidate scan excludes, so nothing else in the
+  // run will ever surface them again.
+  const s = heartbeatBlock();
+  assert.match(s, /is the PREVIOUS run, never this one/);
+  assert.match(s, /in-progress/);
+  assert.match(s, /EXCLUDES that label/);
+  // Detection only — the ruling this ticket's whole scope rests on. Prose
+  // that left this open invites a controller to invent a restart, which is
+  // the question ADR 0008 ruled on and #1724 owns.
+  assert.match(s, /nothing restarts the run that stranded them/);
+});

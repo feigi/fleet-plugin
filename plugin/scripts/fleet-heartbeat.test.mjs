@@ -32,6 +32,13 @@ function run(args, { state } = {}) {
   return { ...r, state: after };
 }
 
+// The whole-file assertions below predate #1597's liveness mark, and that key
+// carries a clock. Dropping it here keeps each of them pinning what it was
+// written to pin — the patch/replace shape of the file — without either
+// pinning a timestamp no test can know or loosening into a field-by-field
+// check that a new stray key would pass straight through.
+const withoutMark = ({ beat, ...rest }) => rest;
+
 test("interval: doubles per quiet tick and then stops at the ceiling", () => {
   const p = { base: 300, ceiling: 1200, multiplier: 2 };
   assert.equal(interval({ ...p, quiet: 0 }), 300);
@@ -146,7 +153,12 @@ test("CLI: a state file with a junk field keeps the fields that parsed, and a fo
   // rides along untouched. Patch, never replace, is what lets two scripts share
   // one file without a lock, and a key this script does not know about is
   // exactly the case that rule exists for (#1597's stage-2 keys land here).
-  assert.deepEqual(r.state, { note: "not ours", quiet: 4, elapsed: 1, digest: "abc123" });
+  // #1597 added a fourth key, and it carries a clock — so it is lifted out
+  // here and asserted on its own shape rather than pinned to a timestamp a
+  // test cannot know. The mark's own behaviour has its own cases at the foot
+  // of this file; what this one still owes is the whole-file shape around it.
+  assert.deepEqual(withoutMark(r.state), { note: "not ours", quiet: 4, elapsed: 1, digest: "abc123" });
+  assert.equal(r.state.beat.stopped, "");
 });
 
 test("CLI: the value it writes back is the SANITIZED one, not the junk it read", () => {
@@ -166,7 +178,7 @@ test("CLI: the value it writes back is the SANITIZED one, not the junk it read",
   // A junk streak reads as 0, which is the base interval — the fail-open
   // direction, more level checks rather than fewer.
   assert.match(r.stdout, /94s of 100s remain \(quiet=0\)/);
-  assert.deepEqual(r.state, { note: "not ours", quiet: 0, elapsed: 6, digest: "abc123" });
+  assert.deepEqual(withoutMark(r.state), { note: "not ours", quiet: 0, elapsed: 6, digest: "abc123" });
 });
 
 test("CLI: a JSON array state file is announced and beats at the base interval", () => {
@@ -181,7 +193,7 @@ test("CLI: a JSON array state file is announced and beats at the base interval",
   // Replaced by a real object, not patched as one: an array `rest` spread into
   // the write would persist `{"0":1,"1":2,"2":3,…}` and the next read would
   // announce the same fault forever.
-  assert.deepEqual(r.state, { quiet: 0, elapsed: 0, digest: "" });
+  assert.deepEqual(withoutMark(r.state), { quiet: 0, elapsed: 0, digest: "" });
 });
 
 test("CLI: a state file it cannot READ is announced, never silently discarded", (t) => {
@@ -317,4 +329,122 @@ test("CLI: an ambient GIT_DIR cannot relocate the run's one state file", () => {
     "the state file followed an ambient GIT_DIR into another repository");
   rmSync(dir, { recursive: true, force: true });
   rmSync(other, { recursive: true, force: true });
+});
+
+
+// --------------------------------------------------------------------------
+// The liveness mark — #1597. This script is the ONLY writer of `beat`, so
+// everything below is about what it leaves on disk for two readers it never
+// talks to: fleet-tick at the next run's start, and the cockpit every tick.
+
+test("CLI: every beat marks the time and the interval that was in effect", () => {
+  // The interval travels WITH the time because it is not a constant — the
+  // back-off stretches it toward the ceiling — so a reader comparing an age
+  // against a fixed threshold cries wolf on a quiet night or misses a death
+  // on a busy one. `quiet: 4` here makes the recorded interval the BACKED-OFF
+  // one (2 × 2⁴ = 32, under the 64s ceiling), not the base: a mark that
+  // recorded --base would be recording a promise this beat did not make.
+  const before = Date.now();
+  const r = run(["--base", "2", "--ceiling", "64", "--hold", "1"],
+    { state: JSON.stringify({ quiet: 4, elapsed: 0, digest: "abc" }) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.state.beat.interval, 32, "the mark must carry the interval in effect, not the base");
+  assert.ok(r.state.beat.at >= before && r.state.beat.at <= Date.now(), "the mark must be dated by this beat");
+  assert.equal(r.state.beat.stopped, "", "an ordinary beat records no stop reason");
+  // And fleet-tick's keys still survive the write that added it — the mark is
+  // a fourth key under the same one-writer rule, not a rewrite of the file.
+  assert.equal(r.state.quiet, 4);
+  assert.equal(r.state.digest, "abc");
+});
+
+test("CLI: --stop records the reason without holding or touching the back-off", () => {
+  // A deliberate stop is not a beat: nothing is held, `elapsed` is left where
+  // it was, and the invocation returns immediately. `--base 600` would be a
+  // ten-minute interval if this path held at all, so the wall clock below is
+  // the assertion that it does not.
+  const started = Date.now();
+  const r = run(["--base", "600", "--ceiling", "1200", "--stop", "budget exhausted"],
+    { state: JSON.stringify({ quiet: 1, elapsed: 7, digest: "abc" }) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(Date.now() - started < 30_000, "--stop must not hold");
+  assert.equal(r.state.beat.stopped, "budget exhausted");
+  assert.equal(r.state.elapsed, 7, "a stop is not a beat and must not spend the interval");
+  assert.equal(r.state.quiet, 1);
+  assert.match(r.stdout, /stop recorded \(budget exhausted\)/);
+  // The line says who will report it, because a controller that stops without
+  // knowing anything reads it has to wait for the next run to find out.
+  assert.match(r.stdout, /the next run's start and the cockpit will report it/);
+});
+
+test("CLI: a beat after a stop clears the reason rather than carrying it forward", () => {
+  // A run that recorded a stop and then kept beating did not stop. A reason
+  // surviving into a live beat has every reader announcing a death that
+  // already un-happened — and since a recorded stop outranks staleness, that
+  // announcement would never age out on its own.
+  const r = run(["--base", "2", "--ceiling", "4", "--hold", "1"], {
+    state: JSON.stringify({ quiet: 0, elapsed: 0, digest: "",
+      beat: { at: 1_700_000_000_000, interval: 300, stopped: "budget exhausted" } }),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.state.beat.stopped, "");
+  assert.ok(r.state.beat.at > 1_700_000_000_000, "the mark must be re-dated by the live beat");
+});
+
+test("CLI: --stop refuses an empty reason", () => {
+  // `--stop ""` is the shape an unset shell variable produces, and recording
+  // it would be the abrupt-death case wearing a deliberate stop's clothes: a
+  // reader would report a recorded reason and then print nothing for it.
+  const r = run(["--stop", ""]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--stop must carry the reason the run is stopping/);
+  assert.equal(r.state, null, "a refused stop writes nothing at all");
+});
+
+test("CLI: a mark that cannot be written is announced and the heartbeat keeps beating", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root writes every directory");
+  // The acceptance criterion this ticket states in its own words: a liveness
+  // mark that killed the beat it measures would be #357's defect wearing a new
+  // hat. So the write is made to FAIL — an unwritable state directory, the
+  // same fixture the elapsed-write case above uses — and what is pinned is
+  // that the process survives it, says so, and still prints the line that
+  // keeps the controller's turn alive.
+  const dir = mkdtempSync(join(tmpdir(), "fleet-heartbeat-mark-unwritable-"));
+  chmodSync(dir, 0o555);
+  try {
+    const r = spawnSync(process.execPath,
+      [SCRIPT, "--base", "3", "--ceiling", "8", "--hold", "1", "--state", join(dir, "heartbeat.json")],
+      { encoding: "utf8" });
+    assert.equal(r.status, 0, "a failed mark write must never be fatal");
+    assert.match(r.stderr, /WARNING could not write/, "a failed mark write is announced, never silent");
+    assert.match(r.stdout, /run fleet-tick/, "the beat goes on: the controller is still told what to do next");
+    assert.equal(existsSync(join(dir, "heartbeat.json")), false);
+
+    // The same policy on the stop path, which has no next beat to keep going:
+    // it announces on stdout as well, because writeState's stderr warning
+    // names the file and not the consequence — that the next reader will see
+    // a beat which stopped with no reason recorded.
+    const s = spawnSync(process.execPath,
+      [SCRIPT, "--stop", "budget exhausted", "--state", join(dir, "heartbeat.json")],
+      { encoding: "utf8" });
+    assert.equal(s.status, 0);
+    assert.match(s.stdout, /WARNING stop NOT recorded/);
+    assert.match(s.stdout, /the next reader will see a beat that stopped with no reason/);
+  } finally {
+    chmodSync(dir, 0o755);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: an unreadable mark degrades to no mark and does not stop the beat", () => {
+  // A corrupt `beat` must not be a corrupt heartbeat. readState repairs the
+  // key to absent, which every reader renders as "nothing to report" — loud
+  // in the safe direction, since the alternative is a live run announced as
+  // dead off a field nobody can parse.
+  const r = run(["--base", "2", "--ceiling", "4", "--hold", "1"],
+    { state: JSON.stringify({ quiet: 0, elapsed: 0, digest: "", beat: "yesterday" }) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /interval elapsed|remain/);
+  // Replaced by this beat's own mark, never left as the junk it read.
+  assert.equal(typeof r.state.beat, "object");
+  assert.equal(r.state.beat.stopped, "");
 });

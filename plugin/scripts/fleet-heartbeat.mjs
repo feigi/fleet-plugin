@@ -98,14 +98,25 @@ const OPTIONS = {
   // run-merge-bot.md:195 measures as shorter than a 5-6 minute CI cycle. Raise
   // it only together with the tool call's own timeout.
   hold: { type: "string", default: "240" },
+  // The deliberate stop, #1597. No default and no boolean spelling: the flag
+  // IS the reason, and a `--stop` that recorded an empty string would be the
+  // abrupt-death case wearing a deliberate stop's clothes — a reader would
+  // report a recorded reason and then print nothing for it.
+  //
+  // It lives on THIS script rather than on fleet-tick because the mark is one
+  // key with one writer (fleet-state.mjs's ownership rule), and the reason is
+  // part of the mark: a stop written from the tick side would be two scripts
+  // writing `beat` and would need the lock that file exists to avoid.
+  stop: { type: "string" },
   state: { type: "string" },
 };
 
 // State path, read and write all come from fleet-state.mjs, which owns the key
-// ownership rule this script depends on: it writes `elapsed` and nothing else,
-// so fleet-tick's `quiet` and `digest` survive every hold. main() re-reads the
-// file after its hold to keep that true across the hold itself, and treats a
-// write that did not land as a fire rather than as progress.
+// ownership rule this script depends on: it writes `elapsed` and `beat` and
+// nothing else, so fleet-tick's `quiet` and `digest` survive every hold.
+// main() re-reads the file after its hold to keep that true across the hold
+// itself, and treats a write that did not land as a fire rather than as
+// progress.
 
 // A blocking sleep, not a poll loop. Atomics.wait on a SharedArrayBuffer parks
 // the thread; `while (Date.now() < end) {}` would burn a core for the whole
@@ -143,13 +154,57 @@ function args() {
   // runs backwards — min() would clamp every interval to the ceiling and the
   // base would never be honoured. Refuse rather than silently reinterpret.
   if (ceiling < base) die(`--ceiling (${ceiling}) is below --base (${base}) — the back-off would run backwards`);
-  return { base, ceiling, multiplier, hold, state: values.state || statePath(NAME) };
+  // `--stop` is read BELOW the int guards, so a malformed `--base` still
+  // refuses on the stop path: a stop is the last thing this script does for a
+  // run and it is not an excuse to stop validating.
+  //
+  // `values.stop` is `undefined` when the flag is absent and `""` when it was
+  // given empty — the shape an unset shell variable produces — and only the
+  // first is "not stopping". Same distinction every other flag in this file
+  // draws, for the same reason.
+  if (values.stop !== undefined && values.stop.trim() === "") {
+    die("--stop must carry the reason the run is stopping, e.g. --stop 'budget exhausted'");
+  }
+  return { base, ceiling, multiplier, hold, stop: values.stop, state: values.state || statePath(NAME) };
+}
+
+// The mark, #1597: when this beat was seen and the interval that was in effect
+// when it was. Built here rather than inline at each write so the two writes
+// below cannot disagree about the shape of a key only this script owns.
+//
+// The interval travels WITH the time because a reader comparing an age
+// against a fixed threshold either cries wolf on a quiet night at the ceiling
+// or misses a death during a busy one at the base. It is the target interval
+// and not the hold: the hold is this harness's blocking budget, an
+// implementation detail of how one interval gets served, while the interval
+// is the beat the run actually promised.
+function mark(target, stopped) {
+  return { at: Date.now(), interval: target, stopped };
 }
 
 function main() {
-  const { base, ceiling, multiplier, hold, state: path } = args();
+  const { base, ceiling, multiplier, hold, stop, state: path } = args();
   const state = readState(path, NAME);
   const target = interval({ quiet: state.quiet, base, ceiling, multiplier });
+
+  if (stop !== undefined) {
+    // No hold, and `elapsed` untouched: this invocation is not a beat, it is
+    // the run saying why there will not be another one. Leaving the partial
+    // interval where it is costs nothing — the next run reads a stopped mark
+    // and knows the streak behind it is a dead run's.
+    const persisted = writeState(path, NAME, state, { beat: mark(target, stop.trim()) });
+    // Announced on stdout as well as through writeState's own stderr warning,
+    // and still exit 0. An unrecorded stop is a real degradation — the next
+    // run will report a beat that stopped without a reason, which is the
+    // abrupt-death wording for a death that named itself — but it is not
+    // grounds to fail the command: the controller is stopping either way and
+    // a non-zero exit here only adds noise to a run that is already ending.
+    console.log(persisted
+      ? `heartbeat: stop recorded (${stop.trim()}) — the next run's start and the cockpit will report it`
+      : `heartbeat: WARNING stop NOT recorded (${stop.trim()}) — the next reader will see a beat that stopped with no reason`);
+    return;
+  }
+
   const held = heldThisCall({ elapsed: state.elapsed, target, hold });
 
   block(held);
@@ -159,22 +214,41 @@ function main() {
   // snapshot back reverts them: a busy wave that reset `quiet` to 0 would find
   // the long interval re-armed the moment the hold ended, and a reverted
   // `digest` reads as "the output changed" on the next tick, un-folding the
-  // quiet night the digest exists to fold. `elapsed` is still the only key
+  // quiet night the digest exists to fold. `elapsed` is still one of the keys
   // this script writes; it is now read fresh rather than remembered across a
   // hold long enough for the file to have moved underneath it.
   const now = readState(path, NAME);
   const elapsed = now.elapsed + held;
   const reached = elapsed >= target;
   // Reset on fire, so the next interval starts from zero rather than from a
-  // total that has already elapsed. Only `elapsed` is written — fleet-tick owns
-  // `quiet` and `digest`, and fleet-state.mjs's patch write preserves them.
-  const persisted = writeState(path, NAME, now, { elapsed: reached ? 0 : elapsed });
+  // total that has already elapsed. Only `elapsed` and `beat` are written —
+  // fleet-tick owns `quiet` and `digest`, and fleet-state.mjs's patch write
+  // preserves them.
+  //
+  // The mark rides the SAME write as `elapsed`, deliberately, rather than
+  // taking one of its own. One write per invocation means a mark can never
+  // land while the progress it was taken beside did not, and the two can
+  // never disagree about which invocation they came from. It also keeps the
+  // failure story single: the warning below covers both keys at once.
+  //
+  // `stopped: ""` on every ordinary beat, never carried forward: a run that
+  // recorded a stop and then kept beating is a run that did not stop, and a
+  // stale reason surviving into a live beat would have the next reader
+  // announcing a death that already un-happened.
+  const persisted = writeState(path, NAME, now, { elapsed: reached ? 0 : elapsed, beat: mark(target, "") });
   // A failed write is itself a fire. With nothing persisting the remainder,
   // every invocation reads the same elapsed total, holds the same seconds and
   // prints the same remainder: the interval can never complete, so fleet-tick
   // is never run at all — #357's own defect, reached through a line that reads
   // like a working heartbeat. Beating too often is the harmless direction;
   // never beating is the one this script exists to prevent.
+  //
+  // The mark fails the same way and on purpose: writeState has already said
+  // so on stderr, this process keeps beating, and a reader that never sees a
+  // mark reports a stall it cannot explain — loud and wrong in the safe
+  // direction — rather than this script dying to protect its own telemetry.
+  // A liveness mark that killed the beat it measures would be #357's defect
+  // wearing a new hat.
   const done = reached || !persisted;
 
   // One line either way, and never zero lines. Silence is the failure mode this

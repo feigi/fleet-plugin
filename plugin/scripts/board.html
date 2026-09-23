@@ -14,6 +14,9 @@
   header h1 { font-size:15px; margin:0; font-weight:600; }
   #age { color:var(--dim); font-size:12px; margin-left:auto; }
   #stale-banner { display:none; background:var(--amber); color:#000; padding:6px 16px; font-weight:600; }
+  /* A stopped RUN, not stale data: red, because the fleet is not working and
+     its claimed tickets are stranded behind a label the next run's scan skips. */
+  #stale-banner.dead { background:var(--red); color:#fff; }
   #attention { padding:8px 16px; border-bottom:1px solid var(--line); background:#2d1618; }
   #attention:empty { display:none; }
   .att { display:inline-block; margin:2px 10px 2px 0; }
@@ -292,13 +295,48 @@ function render(m) {
   document.getElementById("age").textContent = "updated " + mins(m.generatedAt) + "m ago";
   const banner = document.getElementById("stale-banner");
   const ledgerMsg = ledgerBanner(m.ledgerState);
+  const stallMsg = livenessBanner(m.liveness);
+  // className reset on EVERY arm, never only on the arm that sets it: this
+  // element is reused across ticks, so a `dead` class left behind by an
+  // earlier render paints the next tick's ledger or stale message red. One
+  // assignment per arm is what makes that unreachable rather than unlikely.
   if (Date.now() - m.generatedAt > interval * 1000 * 2) {
     banner.style.display = "block";
+    banner.className = "";
     banner.textContent = "⚠ data stale — server/controller stopped?";
+  } else if (stallMsg) {
+    banner.style.display = "block";
+    banner.className = "dead";
+    banner.textContent = stallMsg;
   } else if (ledgerMsg) {
     banner.style.display = "block";
+    banner.className = "";
     banner.textContent = ledgerMsg;
-  } else banner.style.display = "none";
+  } else { banner.style.display = "none"; banner.className = ""; }
+}
+
+// The heartbeat's mark, rendered — #1597. A dead run's tickets keep the label
+// that marks them in flight, and the candidate scan EXCLUDES that label, so a
+// run that stopped silently costs the night AND strands its tickets out of
+// sight of the next run's scans. This is the surface that says so while the
+// cockpit is still up; fleet-tick's start says it when nothing survived.
+//
+// The words are NOT composed here. `text` is computed by compute-board.mjs
+// through fleet-state.mjs's stallReport(), the same function fleet-tick
+// prints, so the two surfaces cannot describe one dead run differently. This
+// function owns exactly one decision — whether there is a banner at all —
+// and a payload with no `text` yields no banner rather than an empty one: a
+// board.json written before this field existed still renders, it just does
+// not claim a verdict it does not carry.
+//
+// Ranked BELOW "data stale" at the call site above, deliberately. A board
+// that stopped updating cannot be trusted to say anything current about the
+// beat — its liveness field is as old as the rest of it — and announcing a
+// death off a frozen page is the cry-wolf direction. Above the ledger
+// messages, which report a degraded read of one input; this reports that
+// nobody is working the board at all.
+function livenessBanner(l) {
+  return l && l.text ? "⚠ " + l.text : null;
 }
 
 // Three ledger states, three renderings (#816). `read` refuses an absent ledger
