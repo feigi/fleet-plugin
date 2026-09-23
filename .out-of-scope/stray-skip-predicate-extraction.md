@@ -85,17 +85,19 @@ landed first. PR #1281 added the regression test in the same change that fixed
 the bug, and the issue acknowledges it while still asking for the refactor. The
 protection being requested is the protection already in the tree.
 
-**The rationale is denser than a function name.** `inflight.sh:613-638` carries
-twenty-six lines of comment on this one conditional: why emptiness and not a
+**The rationale is denser than a function name.** `inflight.sh:718-739` carries
+twenty-two lines of comment on this one conditional: why emptiness and not a
 missing `gitdir` (git drops a `gitdir`-less entry, so keying the skip there waves
 a corrupt entry through as "not git's" and the ticket reads free while its
 checkout is on disk — measured `rc 0, taken=false`); why `ls`'s status and not
 its output (0o000 unsearchable and 0o111 searchable-but-unreadable both print
-exactly what an empty stray prints); why no `-x` test (it covers only the 000
-half, and a failed `ls` settles both). A predicate named `is_droppable_stray`
+exactly what an empty stray prints). A predicate named `is_droppable_stray`
 carries none of that. Extraction moves the prose away from the loop it
-constrains, and the name would restate the *weakest* part of it — the three
-measured wrong answers are what the block is for.
+constrains, and the name would restate the *weakest* part of it — the two
+measured wrong answers are what the block is for. (`release-ticket.sh`'s copy of
+this comment once carried a third rationale, why no `-x` test — #1607 removed
+it there as redundant with the `ls`-status point, and it never existed in
+`inflight.sh` to begin with.)
 
 **Refactor-only, by the filer's own account.** The finding was raised in review of
 PR #1281 as finding 3, labeled by the specialist "Optional, not required for this
