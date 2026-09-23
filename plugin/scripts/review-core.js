@@ -736,13 +736,14 @@ a false repoVerified.`,
   //
   // The Claude-harness twin of these two dispatches — review-pr.js's own
   // hardcoded Review/Verify `agent()` calls, not importable from here per
-  // this file's own header rationale — does NOT carry this rule. That is a
-  // deliberate scope cut for this ticket, not an oversight: mirroring the
-  // rule word-for-word into a substantially differently-structured 1804-line
-  // file, plus a prose-pin test file the size of
-  // review-core-cwd-isolation.test.mjs, is its own unit of work. Tracked in
-  // #1673 — read that before assuming review-pr.js's specialists already
-  // audit their inherited cwd, because right now they do not.
+  // this file's own header rationale — now carries the same three parts
+  // word-for-word (#1673). Its refuter states the cwd clause as its own
+  // sentence rather than as this one's trailing "and your shell does not
+  // start there" clause, because review-pr-refuter-scratch.test.mjs pins
+  // that prompt's scratch-ban run as one unbroken clause and a splice into
+  // it reds there; every load-bearing word is the same. Both copies are
+  // pinned against each other by review-pr-cwd-isolation.test.mjs, so an
+  // edit here that skips review-pr.js reds rather than drifting silently.
   phase("Review");
   const reviewed = await pipeline(
     dimensions,
