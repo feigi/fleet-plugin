@@ -159,15 +159,16 @@ function serveProcess(cwd, bin) {
 // payload on the wire can still be that stub. Poll for a real tick rather than
 // racing it — `generatedAt` is the field only computeBoard() produces.
 async function builtBoard(port) {
-  for (let i = 0; i < 100; i++) {
+  const ms = 20000, deadline = Date.now() + ms;
+  for (;;) {
     const res = await fetch(`http://localhost:${port}/board.json`);
     if (res.status === 200) {
       const body = await res.json();
       if (typeof body.generatedAt === "number") return body;
     } else { await res.arrayBuffer(); }
+    if (Date.now() > deadline) throw new Error(`no built board on port ${port} after ${ms}ms`);
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error(`no built board on port ${port}`);
 }
 
 // The end-to-end claim the whole ticket is for: two cockpits up at once are
