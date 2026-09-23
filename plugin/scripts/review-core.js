@@ -637,16 +637,23 @@ needs to judge whether it is usable:
 
     gh pr diff ${pr} > "$RUN"/pr.diff
     branch=$(gh pr view ${pr} --json headRefName -q .headRefName)
-    git -C ${worktree} ls-remote origin "refs/heads/$branch" | cut -f1
+    ref=$(git -C ${worktree} ls-remote origin "refs/heads/$branch" | cut -f1)
+    [ -n "$ref" ] || ref=$(git -C ${worktree} ls-remote origin "refs/pull/${pr}/head" | cut -f1)
+    echo "$ref"
     gh pr view ${pr} --json headRefOid -q .headRefOid
     wc -l < "$RUN"/pr.diff
 
 Report \`diffPath\` = the SNAPSHOT_RUN_ROOT value with '/pr.diff' appended, ONLY
-if 'gh pr diff' exited 0. Report \`refHead\` = the sha the 'ls-remote' line
-printed, \`prHead\` = the headRefOid and \`diffLines\` = the wc -l count. Omit
-\`refHead\` when 'ls-remote' failed or printed nothing: an empty read is neither
-a match nor a mismatch. Do not judge whether the diff is usable, and do not
-withhold one field because another failed: report what you got and let the
+if 'gh pr diff' exited 0. Report \`refHead\` = the sha the 'echo "$ref"' line
+printed, \`prHead\` = the headRefOid and \`diffLines\` = the wc -l count. The
+branch ref is read FIRST and 'refs/pull/${pr}/head' — the base repo's own copy
+of the PR head — ONLY when that first read came back empty, so a PR whose
+branch ref resolves never reaches the second read and its operand is the same
+branch ref it has always been. The fallback is what covers a fork PR, whose
+branch lives on the contributor's remote and so never resolves on 'origin'.
+Omit \`refHead\` when BOTH reads failed or printed nothing: an empty read is
+neither a match nor a mismatch. Do not judge whether the diff is usable, and do
+not withhold one field because another failed: report what you got and let the
 caller decide.
 
 Then derive this repository's own test command — FLEET_HARNESS is set

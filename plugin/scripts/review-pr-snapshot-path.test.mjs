@@ -188,14 +188,22 @@ test("a lagging PR object does not cancel the review of a tree that matches the 
 });
 
 // The ACCEPT half, and the one this guard is most likely to get wrong. An
-// ABSENT `refHead` is not a mismatch: the `ls-remote` read can fail on its own,
-// and a fork PR has no `refs/heads/<branch>` on `origin` at all, so turning
-// missing input into a refusal would let a network blip — or a fork — cancel a
-// runnable review. That is the inversion `usableDiff`'s own comment records for
-// the diff, now with a whole review behind it instead of a diff, and the rule
-// `run-team/SKILL.md`'s phase-1 compare states as "an empty read is neither
-// equal nor a mismatch". Absent and mismatching are different cases and stay
-// different.
+// ABSENT `refHead` is not a mismatch: the ref read can still come back empty on
+// its own — an unreachable `origin`, or a read that failed — so turning missing
+// input into a refusal would let a network blip cancel a runnable review. That
+// is the inversion `usableDiff`'s own comment records for the diff, now with a
+// whole review behind it instead of a diff, and the rule `run-team/SKILL.md`'s
+// phase-1 compare states as "an empty read is neither equal nor a mismatch".
+// Absent and mismatching are different cases and stay different.
+//
+// A fork PR is NOT one of the absent cases any more (#1616), and it used to be
+// the whole class this refusal could never fire on: a fork's branch resolves
+// nowhere on `origin`, so the operand was permanently absent and a fork
+// snapshotted at the wrong commit was admitted in silence. The snapshot block
+// falls back to `refs/pull/<number>/head`, which the base repository carries
+// for fork-sourced and same-repo PRs alike, so a fork now reaches this compare
+// carrying its real head. What the fixture below pins is unchanged by that: a
+// snapshot with no ref head AT ALL still proceeds.
 //
 // The EMPTY read reaches the same verdict here whatever the guard does — `""`
 // is a prefix of every sha — so it is pinned where it is actually decidable:

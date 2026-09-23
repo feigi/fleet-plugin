@@ -226,10 +226,16 @@ const DEFAULT_DIMENSIONS = [
 // — an abbreviated but matching sha would compare unequal under `!==` and drop
 // a perfectly good diff.
 //
-// A MISSING refHead is deliberately not disqualifying: the `ls-remote` read can
-// fail, and a fork PR has no `refs/heads/<branch>` on `origin` at all, so an
-// empty read is neither a match nor a mismatch — the rule `run-team/SKILL.md`'s
-// phase-1 compare and `run-merge-bot.md`'s `[ -n "$pre" ]` both follow.
+// A MISSING refHead is deliberately not disqualifying: the ref read can still
+// come back empty on its own — an unreachable `origin`, or a read that failed —
+// so an empty read is neither a match nor a mismatch, the rule
+// `run-team/SKILL.md`'s phase-1 compare and `run-merge-bot.md`'s
+// `[ -n "$pre" ]` both follow. A fork PR is no longer one of those cases
+// (#1616). Its branch resolves nowhere on `origin`, which used to leave this
+// operand permanently absent for every fork — so the snapshot block reads
+// `refs/pull/<number>/head` when the branch ref comes back empty, and the base
+// repository carries that ref for fork-sourced and same-repo PRs alike. This
+// guard now receives a value for forks where it received nothing.
 // Dropping a good diff over an absent cross-check would let missing input narrow
 // coverage — the inversion the `=== true` guards in `selectDimensions` exist to
 // prevent. `diffLines` is the deliberate EXCEPTION: absent and 0 are treated
@@ -955,28 +961,41 @@ needs to judge whether it is usable:
 
     gh pr diff ${pr} > "$RUN"/pr.diff
     branch=$(gh pr view ${pr} --json headRefName -q .headRefName)
-    git -C ${worktree} ls-remote origin "refs/heads/$branch" | cut -f1
+    ref=$(git -C ${worktree} ls-remote origin "refs/heads/$branch" | cut -f1)
+    [ -n "$ref" ] || ref=$(git -C ${worktree} ls-remote origin "refs/pull/${pr}/head" | cut -f1)
+    echo "$ref"
     gh pr view ${pr} --json headRefOid -q .headRefOid
     wc -l < "$RUN"/pr.diff
 
-The 'ls-remote' line is the one the caller compares this snapshot against, and
-it reads the branch REF rather than the PR object because \`headRefOid\` lags a
+The ref read above is the one the caller compares this snapshot against, and it
+reads the branch REF rather than the PR object because \`headRefOid\` lags a
 ref move: a rebase that has already landed leaves that field on the pre-rebase
 sha for minutes (\`run-merge-bot.md\`'s step 1 measured ~2 min and ~84s), so a
 compare against it refuses the diff of a snapshot that is correct. Both reads go
 back — their disagreement is the PR-object desync a controller adjudicates, and
 it is a fact to report rather than one to resolve here.
 
+The ORDER of the two ref reads is load-bearing. The branch ref is read FIRST,
+and 'refs/pull/${pr}/head' only when that read came back empty, so a PR whose
+branch ref resolves pays a single network read and reports the same branch ref
+it always has — the operand #1513 chose stays primary. The fallback is what
+reaches a fork PR, whose branch lives on the contributor's own remote and so
+never resolves against 'origin': the base repository carries its own copy of
+every PR's head under 'refs/pull/<number>/head', fork-sourced or not, so the
+compare the caller already runs applies to forks instead of skipping them for
+good.
+
 Report \`diffPath\` = the SNAPSHOT_RUN_ROOT value with '/pr.diff' appended, ONLY
 if 'gh pr diff' exited 0 — note it writes an empty file on failure, so a file
 existing is not success. The caller rebuilds that path from \`runRoot\` rather
 than reading yours, so what this field decides is whether the capture succeeded
 at all: omitting it on failure is what matters, not its exact spelling. Report
-\`refHead\` = the sha the 'ls-remote' line printed, \`prHead\` = the headRefOid
-and \`diffLines\` = the wc -l count. Omit \`refHead\` when 'ls-remote' exited
-non-zero or printed nothing — an empty read is neither a match nor a mismatch
-(a fork PR has no 'refs/heads/<branch>' on origin at all), so report no field
-rather than an empty string. Do not judge whether the diff is usable, and do not
+\`refHead\` = the sha the 'echo "$ref"' line printed, \`prHead\` = the
+headRefOid and \`diffLines\` = the wc -l count. Omit \`refHead\` when BOTH ref
+reads exited non-zero or printed nothing — an empty read is neither a match nor
+a mismatch (an unreachable origin, or a read that failed; a fork PR reaches the
+'refs/pull' fallback above rather than ending here), so report no field rather
+than an empty string. Do not judge whether the diff is usable, and do not
 withhold one field because another failed: report what you got and let the
 caller decide.
 
@@ -1167,10 +1186,14 @@ a false repoVerified. Do not modify ${worktree}.`,
 // for any caller that reaches it.
 //
 // A MISSING `refHead` is deliberately still not disqualifying, for the reason
-// `usableDiff`'s own comment gives — the `ls-remote` read can fail, and a fork
-// PR has no `refs/heads/<branch>` on `origin` at all — and the stakes here are
-// higher, since absent input would now cancel a whole runnable review instead
-// of narrowing one. Absent and mismatching are different cases.
+// `usableDiff`'s own comment gives — an unreachable `origin`, or a read that
+// failed, still leaves nothing to compare — and the stakes here are higher,
+// since absent input would now cancel a whole runnable review instead of
+// narrowing one. Absent and mismatching are different cases. A fork PR is no
+// longer one of the absent ones (#1616): this refusal was structurally
+// unreachable for every fork while the operand came from a single
+// `refs/heads/<branch>` read against `origin`, and the block's fallback to
+// `refs/pull/<number>/head` is what put a fork's real head in front of it.
 // The prefix tolerance is load-bearing for the same reason: `head` is relayed
 // by an agent asked for "the HEAD sha" and may be abbreviated, and under a raw
 // `!==` an abbreviated MATCH would refuse the review outright.
