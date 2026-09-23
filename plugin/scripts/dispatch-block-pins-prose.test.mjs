@@ -115,7 +115,8 @@ const flatten = (s) =>
 // appended after it outside the slice entirely.
 const block = (from, to, what) => flatten(between(region(), from, to, what));
 
-const worktreeBlock = () => block("You are ALREADY in worktree", "Read the issue with", "phase 2's worktree block");
+const worktreeBlock = () => block("You are ALREADY in worktree", "**`edit` and `read` resolve", "phase 2's worktree block");
+const editReadBlock = () => block("**`edit` and `read` resolve", "Read the issue with", "phase 2's edit/read session-root block");
 const issueReadBlock = () => block("Read the issue with", "**Re-derive the ticket", "phase 2's issue-read block");
 const rederiveBlock = () => block("**Re-derive the ticket", "Commit incrementally", "phase 2's re-derive block");
 const commitBlock = () => block("Commit incrementally", "**Every scratch file", "phase 2's commit-incrementally block");
@@ -147,6 +148,79 @@ test("the worktree block forbids a second worktree and carries the check that se
     b,
     phrase("Skip the using-git-worktrees skill's Step 1"),
     "the block no longer names which step of using-git-worktrees the member skips",
+  );
+});
+
+// #1727. The block above settles where the member's SHELL is, and that is the
+// whole reason this one exists: `edit`/`read` resolve their own paths against
+// the session root, so a member can pass every `rev-parse` check the worktree
+// block prescribes and still write into the main checkout. Four members did,
+// in one run, after the eval-kernel block below had already stated the
+// absolute-path rule — which is why the rule is carried here as its own block
+// with its own evidence rather than as a clause inside that one.
+test("the edit/read block binds the session-root mechanism to the discipline that does NOT cover it, and to the check that catches a leak", () => {
+  const b = editReadBlock();
+  // The resolution fact bound to BOTH trees it is not. "Use absolute paths"
+  // alone is advice a member already believes it is following; what makes it
+  // actionable is naming the root it actually resolves against and the two
+  // roots a member wrongly assumes.
+  assert.match(
+    b,
+    phrase(
+      "`edit` and `read` resolve a bare relative path against the SESSION ROOT — the controller's own main checkout — not against your worktree and not against your `bash` cwd",
+    ),
+    "the session-root resolution fact no longer names the two roots it is NOT — the worktree and the bash cwd — so the rule reads as advice a careful member already believes it follows",
+  );
+  // The missing `cwd` parameter bound to the consequence that makes it matter.
+  // A member that knows only "these tools take no cwd" concludes nothing; the
+  // load-bearing half is that correct `bash` scoping therefore protects it from
+  // nothing here, which is exactly what the four measured members assumed.
+  assert.match(
+    b,
+    /take no `cwd` parameter.{0,140}?still leaks through `edit`\/`read` alone/,
+    "the absent cwd parameter is no longer bound to the leak it permits despite correct bash scoping",
+  );
+  // The evidence bound to its detection split. A count alone reads as a
+  // hypothetical; "two self-caught, two caught by the controller" is what says
+  // no fleet mechanism sees this, which is the reason the rule has to reach the
+  // member as text.
+  assert.match(
+    b,
+    phrase(
+      "two members self-caught their own stray edit, and the controller caught the other two independently on a routine `git status` of the main checkout",
+    ),
+    "the #1727 evidence no longer carries its detection split, so nothing in the block says every occurrence was caught by hand rather than by a gate",
+  );
+  // The misdiagnosis, bound to both readings that produce it. This pair is why
+  // the hazard survived two prior members: each observation is individually
+  // correct, and a member holding only one of them concludes the tool is
+  // broken. Pinned with the retraction so the block cannot decay into
+  // documenting a tool bug.
+  assert.match(
+    b,
+    phrase(
+      "`git diff` in your worktree shows nothing — correct, nothing changed there — while `read` shows your new content — correct, it is reading the main checkout",
+    ),
+    "the two-trees-two-honest-answers symptom is gone, or no longer shows both halves — which is the pair that reads as a tool bug when only one is held",
+  );
+  assert.match(
+    b,
+    /filed `report_issue` against the tools; both entries were retracted/,
+    "the block no longer records that this symptom was twice misfiled as a tool bug and retracted, so a member meeting it is free to file the third",
+  );
+  // The rule bound to the shape it excludes, and the check bound to its pass
+  // condition. `git status --porcelain` without "empty is the only clean
+  // answer" is a command whose output a member has to interpret, which is the
+  // interpretation step every one of the four got wrong.
+  assert.match(
+    b,
+    phrase("prefix every `edit` and `read` path with `<abs-path>`, never `plugin/scripts/foo.mjs` on its own"),
+    "the absolute-path rule no longer shows the bare relative path it excludes, so it states a preference rather than a prohibition",
+  );
+  assert.match(
+    b,
+    phrase("run `git -C <main-checkout> status --porcelain` — empty is the only clean answer"),
+    "the main-checkout status check is gone, or no longer states what a clean answer looks like",
   );
 });
 
