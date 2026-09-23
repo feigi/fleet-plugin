@@ -1961,20 +1961,24 @@ test("CLI: a stray flag in check's tail is refused from a later position too (#5
 // find. Each subcommand loses something different to that — `filed` its
 // duplicate-filing answer, `row` its rewrite-in-place key, `ruled` its
 // decision record — so each is driven here on its own.
-test("CLI: a stray flag in the id slot ahead of the tail is refused, naming it (#584)", (t) => {
+function assertStrayIdSlotRefused(t, strayFlag) {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");
   for (const [cmd, expected] of [
-    ["filed", /unknown flag --requre-file — expected an issue number/],
-    ["row", /unknown flag --requre-file — expected a ticket number/],
-    ["ruled", /unknown flag --requre-file — expected a PR number/],
+    ["filed", new RegExp(`unknown flag ${strayFlag} — expected an issue number`)],
+    ["row", new RegExp(`unknown flag ${strayFlag} — expected a ticket number`)],
+    ["ruled", new RegExp(`unknown flag ${strayFlag} — expected a PR number`)],
   ]) {
-    const r = cli(["--file", file, cmd, "--requre-file", "999", "widget guard missing"]);
+    const r = cli(["--file", file, cmd, strayFlag, "999", "widget guard missing"]);
     assert.equal(r.status, 2, `${cmd}: got exit ${r.status}\n${r.stderr}`);
     assert.match(r.stderr, expected, `${cmd}: must name the stray and the slot it displaced`);
     assert.equal(r.stdout, "", `${cmd}: a refusal must not also emit a payload`);
   }
   assert.equal(existsSync(file), false, "no refusal may write a ledger");
+}
+
+test("CLI: a stray flag in the id slot ahead of the tail is refused, naming it (#584)", (t) => {
+  assertStrayIdSlotRefused(t, "--requre-file");
 });
 
 // #1678: the double-dash-only prefix test above left a single-dash id
@@ -1984,19 +1988,7 @@ test("CLI: a stray flag in the id slot ahead of the tail is refused, naming it (
 // refused value below is that realistic one-dash-short misspelling rather
 // than an abstract single letter.
 test("CLI: a single-dash argument in the id slot is refused too, naming it (#1678)", (t) => {
-  const { dir, cli } = cliFixture(t);
-  const file = join(dir, "ledger.md");
-  for (const [cmd, expected] of [
-    ["filed", /unknown flag -require-file — expected an issue number/],
-    ["row", /unknown flag -require-file — expected a ticket number/],
-    ["ruled", /unknown flag -require-file — expected a PR number/],
-  ]) {
-    const r = cli(["--file", file, cmd, "-require-file", "999", "widget guard missing"]);
-    assert.equal(r.status, 2, `${cmd}: got exit ${r.status}\n${r.stderr}`);
-    assert.match(r.stderr, expected, `${cmd}: must name the stray and the slot it displaced`);
-    assert.equal(r.stdout, "", `${cmd}: a refusal must not also emit a payload`);
-  }
-  assert.equal(existsSync(file), false, "no refusal may write a ledger");
+  assertStrayIdSlotRefused(t, "-require-file");
 });
 
 // The id guard's own false-positive class: an id argument is still accepted

@@ -309,10 +309,12 @@ function refuseStrayInCheckTail(tail) {
 // id is bare digits, optionally `#`-prefixed, and never carries a leading
 // dash at all — single or double — so this slot refuses ANY leading dash,
 // not only a double one (#1678). The free-text tail cannot take that same
-// test: a subject can legitimately open with a dash-leading word, single or
-// double — exactly what `--flag-like subject text` above and check's own
-// dash-leading-subject pin exist to keep working — so only the id slot,
-// which has no free text in it, can take the bare prefix test at all.
+// test: a subject can legitimately open with a double-dash-leading word —
+// exactly what `--flag-like subject text` above and check's own
+// dash-leading-subject pin exist to keep working. A single-dash-leading
+// subject is merely unexercised, not a documented case — nothing pins it
+// either way. So only the id slot can take the bare prefix test at all,
+// for the same no-free-text reason given above.
 function refuseStrayInId(value, what) {
   if (value.startsWith("-")) die(`unknown flag ${value} — expected ${what}`);
 }

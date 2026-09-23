@@ -418,8 +418,14 @@ export function makeNumArg(die) {
 // never data.
 //
 // It is the LENGTH gate that spares the legitimate case, not the prefix test
-// — that test is `startsWith("--")`, the same one this sweep uses. A prefix
-// test with no length gate was measured refusing the legitimate subject.
+// — refuseStrayInId()'s id-slot prefix test is now `startsWith("-")` (#1678),
+// no longer the same one this sweep uses (`startsWith("--")`). The id slot
+// can take the stricter single-dash test because no free text ever lives
+// there — a legitimate id is bare digits, optionally `#`-prefixed. This
+// sweep can't: it scans invocations whose free-text positionals can
+// legitimately open with a single dash, the same reason `check`'s tail
+// above can't either. A prefix test with no length gate was measured
+// refusing the legitimate subject.
 //
 // #584 does not make this file's cost disappear; it buys a smaller version of
 // the same cost. An unquoted subject carrying a `--` word is a working
