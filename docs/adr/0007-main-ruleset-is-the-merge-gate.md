@@ -71,7 +71,7 @@ unless the live object matches. Every field below is a choice, not a default:
 |---|---|---|
 | `required_status_checks` | `rebase-check`, `check`, `validate-release-label`, `validate-claude`, `smoke-omp`, `npm-name-gate`, `install-and-smoke` | Every context a PR head publishes except `auto-label-bots`. The test is whether a context can *skip*, because a required check that skips strands the PR forever — and `auto-label-bots` is exactly that: `if:`-gated on dependabot/renovate (`release-label.yml:39-41`), so it skips on human PRs and must stay **unrequired**. Nothing else qualifies: the only job-level `if:` in `ci.yml` is `rebase-check`'s `github.event_name == 'pull_request'`, satisfied on every PR, and `validate-release-label` runs `if: always()` (`release-label.yml:68-70`). `check` is the suite, kept unsplit. `validate-claude`, `smoke-omp`, `npm-name-gate` and `install-and-smoke` are separate jobs on purpose (#1314, #1347, #1294) with their own real failure modes, not vestigial steps — the `# Blocking, every PR` comment on the `validate-claude` job in `ci.yml` already calls it that, which only a required context makes true. `validate-release-label` is required because `release.yml` already assumes it |
 | `strict_required_status_checks_policy` | `true` | Closes the stale-green hole at the merge button, where it cannot go stale. Free today because `merge-bot` is capped at 1: the bot is the only merger, so the candidate it just rebased is always at `main`'s tip. See guard 1 — this is the field that forecloses parallel merge-bots |
-| `allowed_merge_methods` | `["merge"]` | **Forced by code.** `prove-merge.sh:166` dies `has no second parent — not a merge commit` and exits 2; its three-leg proof (`:8-9`) requires the merge commit's second parent to *be* the rebased head. `run-merge-bot.md:246`: *"`--merge` (no-ff) is load-bearing, not stylistic."* Exit 2 means "could not evaluate", not "false", so a squash or fast-forward leaves the bot with no proof at all |
+| `allowed_merge_methods` | `["merge"]` | **Forced by code.** `prove-merge.sh:166` dies `has no second parent — not a merge commit` and exits 2; its three-leg proof (`:8-9`) requires the merge commit's second parent to *be* the rebased head. `run-merge-bot.md` already says: *"`--merge` (no-ff) is load-bearing, not stylistic."* Exit 2 means "could not evaluate", not "false", so a squash or fast-forward leaves the bot with no proof at all |
 | linear history | **not enabled** | Mutually exclusive with the row above: it forbids merge commits, and merge-only guarantees one per merge. Enabling both rejects every merge |
 | `required_approving_review_count` | `0` | 33 merges/day is not a human-review throughput. Review is `review-pr.js`'s six dimensions, which is not GitHub-approval-shaped |
 | `required_review_thread_resolution` | `true` | The realistic operator intervention: costs nothing when nobody comments, hard-stops the merge when someone does. Chosen instead of raising the approval floor |
@@ -100,8 +100,7 @@ It was considered and rejected; the fleet's own `merge-bot` is the queue of reco
 (`ready-to-merge` label, `target: 1`, FIFO by PR number via the merge bot's
 `held-behind-#<lower>` hold rule — `run-merge-bot.md:34`, which consults
 `pr-overlap.mjs` for the overlap signal but owns the rule and the label itself —
-and *"Each PR rebases exactly once, when it becomes the candidate"*,
-`run-team/SKILL.md:2693`). Three blockers:
+and `run-team/SKILL.md`'s *"Each PR rebases exactly once, when it becomes the candidate"*). Three blockers:
 
 1. Required checks **must** report on the `merge_group` event or the merge fails
    for want of a report. No workflow in this repo has a `merge_group` trigger.
