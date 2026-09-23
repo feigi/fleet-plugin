@@ -293,6 +293,7 @@ const GUARD_FIRST_FIXTURE = {
   "scripts/diff-stats.mjs": ["--pr", "1"],
   "scripts/pr-overlap.mjs": ["--a", "1", "--b", "1"],
   "scripts/staleness.mjs": ["--path", "1", "--gone", "1"],
+  "scripts/tier-check.mjs": ["--batch", "1"],
 };
 
 test("no script the roster grep removes holds an unknown-flag refusal of its own", () => {
@@ -350,15 +351,6 @@ test("no script the roster grep removes holds an unknown-flag refusal of its own
       `${file} binds makeSweep, so the roster grep removes it, yet — once its own required-arg guard is satisfied — it refuses ${STRAY} outside sweep()'s wording: it is a second edit site the header's grep hides`,
     );
   }
-});
-
-test("exactly one row the roster grep returns has no unknown-flag refusal at all", () => {
-  const silent = scriptsOf(sh(ROSTER_GREP).stdout).filter((file) => !probeStray(file).out.includes(STRAY));
-  assert.deepEqual(
-    silent,
-    ["scripts/tier-check.mjs"],
-    "the set of roster rows that never name a stray flag changed. tier-check.mjs is the one the header's grep over-reports (#1669); if that is fixed, delete this test rather than re-point it — the assertion above already covers every row. If a NEW row appears here, a script gained an arg.mjs import without gaining a refusal, which is #365's fail-open reached from a third side",
-  );
 });
 
 test("candidates.mjs refuses --limit under arg()'s generated wording", () => {

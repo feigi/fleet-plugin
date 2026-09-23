@@ -47,7 +47,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { makeDie, makeArg } from "./arg.mjs";
+import { makeDie, makeArg, makeSweep } from "./arg.mjs";
 import { foldClaudeTranscript, foldOmpTranscript, parseMemberName, readMembers } from "./member-record.mjs";
 
 const NAME = "tier-check";
@@ -208,6 +208,7 @@ export function appendedLedgerText(existingText, mismatchNote) {
 
 const die = makeDie(NAME);
 const arg = makeArg(die);
+const sweep = makeSweep(die);
 
 function resolvePath(repoRoot, p) {
   return isAbsolute(p) ? p : join(repoRoot, p);
@@ -278,6 +279,18 @@ function main() {
   const ledgerFile = arg("ledger");
   const repoArg = arg("repo");
   const repoRoot = repoArg ?? join(SCRIPT_DIR, "..");
+
+  // #1669: this file bound only makeDie/makeArg, so a stray or misspelled
+  // flag (`--ledgerr`) was silently ignored and the run computed a real
+  // verdict against the DEFAULT ledger — the fail-open harm arg.mjs exists
+  // to prevent. Below the arg() reads and the --batch usage guard above,
+  // per arg.mjs's makeSweep ordering contract, so a roster flag given with
+  // no value (or --batch omitted entirely) still answers its own
+  // needs-a-value/usage message rather than a generic stray complaint.
+  // Above the batch file's own JSON/array checks below, so a stray riding
+  // along with a well-formed --batch is refused by name instead of being
+  // silently absorbed into a batch-content error.
+  sweep(["batch", "ledger", "repo"]);
 
   let entries;
   try {
