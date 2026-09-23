@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { readState, writeState, assessBeat, isStalled, stallReport, BEAT_GRACE } from "./fleet-state.mjs";
+import { readState, writeState, assessBeat, isStalled, stallReport, BEAT_GRACE, DEFAULT_CEILING_S } from "./fleet-state.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./fleet-state.mjs", import.meta.url));
 
@@ -152,6 +152,32 @@ test("writeState: a non-owner's patch carries the mark instead of erasing it", (
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("writeState: `ticked` survives a heartbeat write the same way `beat` survives a tick write", () => {
+  // The mirror of the test above, other direction: fleet-heartbeat patches
+  // elapsed/beat on every hold, so a write that dropped `ticked` would erase
+  // fleet-tick's own liveness key the first time a heartbeat lands after a
+  // busy wave — silently reopening the #1597 follow-up this key exists to
+  // close.
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-ticked-carry-"));
+  const path = join(dir, "heartbeat.json");
+  const ticked = { at: 1_700_000_500_000 };
+  writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", ticked }));
+  const prev = readState(path, "fleet-state-test");
+  assert.deepEqual(prev.ticked, ticked, "readState did not parse a well-formed ticked mark");
+  const beat = { at: 1_700_000_000_000, interval: 300, stopped: "" };
+  assert.equal(writeState(path, "fleet-state-test", prev, { elapsed: 5, beat }), true);
+  const after = readState(path, "fleet-state-test");
+  assert.deepEqual(after.ticked, ticked, "fleet-heartbeat's mark write erased fleet-tick's ticked key");
+  assert.deepEqual(after.beat, beat);
+
+  // A junk `ticked` degrades to absent, never to a false zero: `at: 0` is a
+  // decades-old occurrence, not "no occurrence", and would falsely rescue a
+  // stale beat forever.
+  writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", ticked: { at: "soon" } }));
+  assert.equal(readState(path, "fleet-state-test").ticked, null);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("assessBeat: staleness is judged against the RECORDED interval, not a constant", () => {
   // The whole reason the mark carries an interval. A quiet night backs off to
   // the ceiling, so the same twenty-minute silence is a healthy beat at
@@ -179,6 +205,34 @@ test("assessBeat: staleness is judged against the RECORDED interval, not a const
   const ahead = assessBeat({ beat: { at: now + 60_000, interval: 300, stopped: "" }, now });
   assert.equal(ahead.ageMs, 0);
   assert.equal(ahead.overdueMs, 0);
+});
+
+test("assessBeat: a busy run's own `ticked` covers for a `beat` the wave never let refresh", () => {
+  // #1597 follow-up. `beat` only refreshes when the queue drains ("beat when
+  // there is nothing to do") — a fully-staffed fleet that has been busy for
+  // eleven straight minutes never touches it, so the recorded interval stays
+  // whatever it was when the wave started (base, if it started right after a
+  // dispatch) and the OLD mark ages straight past its own grace window. A
+  // reconcile tick fires on every completion during that same wave, though,
+  // and now leaves its own mark behind — that is the evidence this asserts.
+  const now = 2_000_000_000_000;
+  const beat = { at: now - 11 * 60 * 1000, interval: 300, stopped: "" };
+  assert.equal(assessBeat({ beat, now }).kind, "stale",
+    "no ticked evidence at all is exactly the #1597 bug — still correctly overdue");
+  assert.equal(assessBeat({ beat, ticked: { at: now - 2 * 60 * 1000 }, now }).kind, "beating",
+    "a tick two minutes ago is a busy run working, not a dead one");
+
+  // The reverse never happens: a stale `ticked` cannot rescue a genuinely
+  // dead run, and a healthy `beat` needs no help from `ticked` at all.
+  assert.equal(assessBeat({ beat, ticked: { at: now - 3 * DEFAULT_CEILING_S * 1000 }, now }).kind, "stale");
+  const healthyBeat = { at: now - 60 * 1000, interval: 300, stopped: "" };
+  assert.equal(assessBeat({ beat: healthyBeat, now }).kind, "beating");
+
+  // `stopped` still outranks everything, ticked included: a run that named
+  // its own death is not un-dead because fleet-tick happened to fire once on
+  // the way out.
+  const stopped = { at: now - 11 * 60 * 1000, interval: 300, stopped: "budget" };
+  assert.equal(assessBeat({ beat: stopped, ticked: { at: now - 1000 }, now }).kind, "stopped");
 });
 
 test("assessBeat: a recorded stop is reported whatever its age, and outranks staleness", () => {

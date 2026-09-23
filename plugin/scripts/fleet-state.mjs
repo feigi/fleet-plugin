@@ -19,6 +19,15 @@
 //            heartbeat and by nothing else — fleet-tick READS it at the start
 //            of a run and the cockpit READS it every tick, and a key two
 //            scripts wrote would need the lock this file exists to avoid.
+//   ticked   fleet-tick only. When fleet-tick itself last ran, no interval
+//            attached — fleet-tick fires on live edges, not a schedule, so it
+//            has no promise to be judged against the way `beat` does. Exists
+//            because `beat` is only written when the queue drains ("beat when
+//            there is nothing to do" — SKILL.md); a busy wave can run for
+//            longer than `beat`'s own grace window while fleet-tick itself
+//            keeps firing on every completion, and without this key that
+//            healthy busy run reads as a dead one the moment the OLD beat
+//            ages past the interval it recorded before the wave started.
 //
 // One writer per key. A key both scripts wrote would need locking to be
 // correct, and neither script is in a position to hold one.
@@ -104,7 +113,7 @@ export function readState(path, name) {
   // to judge and nothing to report. A zeroed mark would date the beat to the
   // epoch and read as decades overdue on a run that has simply not started
   // one — the cry-wolf direction this key must never fail in.
-  const fresh = { quiet: 0, elapsed: 0, digest: "", beat: null, rest: {} };
+  const fresh = { quiet: 0, elapsed: 0, digest: "", beat: null, ticked: null, rest: {} };
   let raw;
   try {
     raw = readFileSync(path, "utf8");
@@ -150,20 +159,35 @@ export function readState(path, name) {
   // nobody wrote. Both fields must be positive integers or the mark is absent
   // — never "stale", which is the wolf, and never "beating", which is the
   // silence. `stopped` is the exception: a mark with a junk reason is still a
-  // mark, and it degrades to "no reason recorded", which is exactly what
-  // assessBeat() says about an abrupt death anyway.
+  // mark — dropping the whole mark over one corrupt field would blind
+  // readers to `at`/`interval`, which ARE still trustworthy. A junk reason
+  // degrades to `""`, the same value an ordinary beat carries; assessBeat()
+  // only reads it as "no reason recorded" once the mark ALSO goes stale by
+  // age — until then it is judged on freshness alone, same as any other
+  // beat. A hand-edited or corrupted `stopped` is therefore not announced as
+  // a stop AT ALL while the mark is still fresh; it is announced, correctly,
+  // once the silence itself earns a verdict.
   const mark = (v) => {
     if (!v || typeof v !== "object" || Array.isArray(v)) return null;
     const at = num(v.at), interval = num(v.interval);
     if (at === 0 || interval === 0) return null;
     return { at, interval, stopped: typeof v.stopped === "string" ? v.stopped : "" };
   };
-  const { quiet, elapsed, digest, beat, ...rest } = parsed;
+  // `ticked` carries no interval — fleet-tick has no promise to fail, only an
+  // occurrence — so it is a mark of one field, valid or absent, same "never
+  // zero" rule as `mark` above for the same cry-wolf reason.
+  const tick = (v) => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    const at = num(v.at);
+    return at === 0 ? null : { at };
+  };
+  const { quiet, elapsed, digest, beat, ticked, ...rest } = parsed;
   return {
     quiet: num(quiet),
     elapsed: num(elapsed),
     digest: typeof digest === "string" ? digest : "",
     beat: mark(beat),
+    ticked: tick(ticked),
     rest,
   };
 }
@@ -194,6 +218,10 @@ export function writeState(path, name, prev, patch) {
     // failure the ownership rule exists to prevent and which no reader could
     // tell from a run that never beat.
     ...(prev.beat ? { beat: prev.beat } : {}),
+    // Same reason, same shape: fleet-heartbeat patches `elapsed`/`beat` on
+    // every hold and would otherwise erase fleet-tick's `ticked` the first
+    // time a heartbeat lands after a busy wave.
+    ...(prev.ticked ? { ticked: prev.ticked } : {}),
     ...patch,
   };
   try {
@@ -238,6 +266,16 @@ export function writeState(path, name, prev, patch) {
 // reading two "stale" verdicts on one page should not have to learn two rules.
 export const BEAT_GRACE = 2;
 
+// fleet-heartbeat.mjs's own --ceiling default (1200s = 20 minutes), mirrored
+// here rather than the other way round: this module is the one both scripts
+// and both READERS already import, and a magic "1200" typed twice is exactly
+// the drift the module header's "never a copy of it" rule exists to close.
+// It doubles as the freshness window for `ticked` below: fleet-tick's own
+// invocations carry no promised interval, so they are judged against the
+// worst-case gap this design ever tolerates when only the heartbeat is
+// beating, times the same grace multiplier as `beat`.
+export const DEFAULT_CEILING_S = 1200;
+
 // What the mark says, as a value. `now` is a parameter so every caller's
 // verdict is deterministic and testable — the same reason compute-board.mjs
 // takes one.
@@ -246,14 +284,20 @@ export const BEAT_GRACE = 2;
 //             stall: there is no beat to have stopped, and reporting one here
 //             would fire on every first tick and train the reader to ignore
 //             the line.
-//   beating   seen within the interval it promised, plus grace.
+//   beating   seen within the interval it promised, plus grace — OR a recent
+//             `ticked` covers for it. `beat` is only refreshed when the queue
+//             drains (SKILL.md: "beat when there is nothing to do"), so a
+//             busy wave that outlasts `beat`'s own grace window is not a dead
+//             run; fleet-tick's own edge-triggered invocations are the other
+//             liveness signal for exactly that case (#1597 follow-up).
 //   stopped   a reason was recorded. Reported whatever the age, because a
 //             recorded stop IS the end of the run and waiting for it to go
 //             stale first would sit on the one report that knows its cause.
-//   stale     overdue with no reason recorded. The abrupt death: a crashed
-//             harness, a closed terminal, an OOM kill. Readers say exactly
-//             that rather than naming a cause they cannot know.
-export function assessBeat({ beat, now }) {
+//   stale     overdue with no reason recorded AND no recent tick either. The
+//             abrupt death: a crashed harness, a closed terminal, an OOM
+//             kill. Readers say exactly that rather than naming a cause they
+//             cannot know.
+export function assessBeat({ beat, ticked, now }) {
   if (!beat) return { kind: "none" };
   // Clamped at zero rather than left signed: a mark from the future is a
   // clock that moved, not a beat that is minus-five-minutes overdue, and a
@@ -262,7 +306,15 @@ export function assessBeat({ beat, now }) {
   const intervalMs = beat.interval * 1000;
   const seen = { at: beat.at, ageMs, intervalMs, overdueMs: Math.max(0, ageMs - intervalMs) };
   if (beat.stopped) return { ...seen, kind: "stopped", reason: beat.stopped };
-  return { ...seen, kind: ageMs > intervalMs * BEAT_GRACE ? "stale" : "beating", reason: null };
+  const beatOverdue = ageMs > intervalMs * BEAT_GRACE;
+  // Absent `ticked` — every caller before #1597's follow-up, and any state
+  // file fleet-tick has not yet written to — reads as infinitely old, which
+  // is `beat` alone deciding it exactly as before. A present one only ever
+  // shortens the window to "beating"; it can never manufacture a stale verdict
+  // `beat` alone would not have reached.
+  const tickedAgeMs = ticked ? Math.max(0, now - ticked.at) : Infinity;
+  const tickedFresh = tickedAgeMs <= DEFAULT_CEILING_S * 1000 * BEAT_GRACE;
+  return { ...seen, kind: beatOverdue && !tickedFresh ? "stale" : "beating", reason: null };
 }
 
 // Whether this verdict is something to report. Exported because both readers

@@ -532,7 +532,7 @@ function runCli(args, { prs = [], issues = [], claimed = [], env: extraEnv = {},
   // throwaway git repository, which is what the common dir then resolves to.
   const stateArg = args.includes("--state") || defaultState
     ? [] : ["--state", join(dir, "heartbeat.json")];
-  // supply() resolves candidates.mjs beside fleet-tick.mjs, so a stub sibling
+  // readSupply() resolves candidates.mjs beside fleet-tick.mjs, so a stub sibling
   // means running a copy of the script out of the stub dir — and every module
   // the script imports has to ride along or the copy fails to resolve it at
   // startup: an uncaught MODULE_NOT_FOUND, exit 1, exactly the collision this
@@ -1112,9 +1112,9 @@ test("CLI: a deliberate stop is reported with its reason", () => {
 
 test("CLI: the stall is announced even when the reconcile then refuses", () => {
   // "Before doing anything else" is the acceptance criterion, and this is the
-  // case that makes it more than word order: prState() and supply() both exit
-  // 2 on a failed read, so a report printed after them is a report a gh
-  // outage silences — on exactly the morning after a run died, which is when
+  // case that makes it more than word order: prState() and the supply read
+  // both exit 2 on a failed read, so a report printed after them is a report a
+  // gh outage silences — on exactly the morning after a run died, which is when
   // the fleet is least likely to be in good shape.
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stall-refuse-")));
   const path = join(dir, "heartbeat.json");
@@ -1141,7 +1141,37 @@ test("CLI: an unreadable claim count is `unknown`, never zero", () => {
   });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /unknown ticket\(s\) claimed and in flight/);
+  // The failure itself must reach stderr, not just the "unknown" verdict:
+  // a real gh outage (auth expiry, rate limit) is otherwise indistinguishable
+  // from the deliberately-undiagnosed case, with no trace anywhere an
+  // operator would look.
+  assert.match(r.stderr, /claimed ticket count unknown/);
+  assert.match(r.stderr, /boom/, "the stub's own gh stderr must ride along, not be dropped");
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("CLI: a busy, fully-staffed fleet is not reported STALLED just because the queue never drained", () => {
+  // #1597 follow-up. `beat` only refreshes when the queue drains ("beat when
+  // there is nothing to do"), so a fully-staffed fleet that has been busy for
+  // eleven minutes straight never touches it — the recorded interval stays
+  // base (300s, from whenever `quiet` was last reset) and the mark itself
+  // ages straight past its own grace window even though the run is actively
+  // dispatching at capacity. fleet-tick's OWN ticks are the other liveness
+  // signal for exactly this case: a tick two minutes ago (this same script,
+  // on a prior completion edge) is what tells the busy wave from a dead one.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-busy-not-stalled-")));
+  const path = join(dir, "heartbeat.json");
+  writeFileSync(path, JSON.stringify({
+    quiet: 0, elapsed: 0, digest: "",
+    beat: { at: Date.now() - 11 * 60_000, interval: 300, stopped: "" },
+    ticked: { at: Date.now() - 2 * 60_000 },
+  }));
+  const busy = ["--implementers", "2", "--reviewers", "1", "--merge-bots", "1", "--pool", "3",
+    "--reviews-ready", "1", "--merge-holds", "none"];
+  const r = runCli([...busy, "--state", path], { prs: [], issues: [issue(9)], claimed: [{ number: 41 }] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /STALLED/, "a live busy wave must not read as a dead run");
+  assert.match(r.stdout, /^implementers.*AT CAP/m);
 });
 
 test("CLI: the streak write carries the heartbeat's mark instead of erasing it", () => {
@@ -1160,5 +1190,10 @@ test("CLI: the streak write carries the heartbeat's mark instead of erasing it",
   const after = JSON.parse(readFileSync(path, "utf8"));
   assert.deepEqual(after.beat, mark, "fleet-tick must not write the heartbeat's key");
   assert.equal(after.quiet, 4, "and must still write its own");
+  // Its own liveness key, #1597 follow-up: written on every invocation,
+  // edge or heartbeat-triggered alike, so a busy wave has evidence of its
+  // own even while `beat` sits untouched.
+  assert.ok(after.ticked && typeof after.ticked.at === "number", "fleet-tick must write its own ticked mark");
+  assert.ok(after.ticked.at >= Date.now() - 5000, "the ticked mark must be from THIS invocation");
   rmSync(dir, { recursive: true, force: true });
 });

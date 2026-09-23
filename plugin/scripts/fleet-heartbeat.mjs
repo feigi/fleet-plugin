@@ -81,7 +81,7 @@ export function heldThisCall({ elapsed, target, hold }) {
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { makeDie, isDigits } from "./arg.mjs";
-import { statePath, readState, writeState } from "./fleet-state.mjs";
+import { statePath, readState, writeState, DEFAULT_CEILING_S } from "./fleet-state.mjs";
 
 const NAME = "fleet-heartbeat";
 const die = makeDie(NAME);
@@ -91,7 +91,11 @@ const die = makeDie(NAME);
 // caller-supplied value does; a hand-passed default goes round it.
 const OPTIONS = {
   base: { type: "string", default: "300" },
-  ceiling: { type: "string", default: "1200" },
+  // Single source of truth in fleet-state.mjs — assessBeat's own fallback
+  // freshness window for a busy run's `ticked` mark is this same number
+  // (#1597 follow-up), and a duplicated "1200" here is the drift the module
+  // header's "never a copy of it" rule exists to close.
+  ceiling: { type: "string", default: String(DEFAULT_CEILING_S) },
   multiplier: { type: "string", default: "2" },
   // Per-invocation blocking budget, under both harnesses' defaults. 240s leaves
   // headroom below omp's 300s deadline and below the Claude Code timeout that
@@ -165,7 +169,7 @@ function args() {
   if (values.stop !== undefined && values.stop.trim() === "") {
     die("--stop must carry the reason the run is stopping, e.g. --stop 'budget exhausted'");
   }
-  return { base, ceiling, multiplier, hold, stop: values.stop, state: values.state || statePath(NAME) };
+  return { base, ceiling, multiplier, hold, stop: values.stop?.trim(), state: values.state || statePath(NAME) };
 }
 
 // The mark, #1597: when this beat was seen and the interval that was in effect
@@ -192,7 +196,7 @@ function main() {
     // the run saying why there will not be another one. Leaving the partial
     // interval where it is costs nothing — the next run reads a stopped mark
     // and knows the streak behind it is a dead run's.
-    const persisted = writeState(path, NAME, state, { beat: mark(target, stop.trim()) });
+    const persisted = writeState(path, NAME, state, { beat: mark(target, stop) });
     // Announced on stdout as well as through writeState's own stderr warning,
     // and still exit 0. An unrecorded stop is a real degradation — the next
     // run will report a beat that stopped without a reason, which is the
@@ -200,8 +204,8 @@ function main() {
     // grounds to fail the command: the controller is stopping either way and
     // a non-zero exit here only adds noise to a run that is already ending.
     console.log(persisted
-      ? `heartbeat: stop recorded (${stop.trim()}) — the next run's start and the cockpit will report it`
-      : `heartbeat: WARNING stop NOT recorded (${stop.trim()}) — the next reader will see a beat that stopped with no reason`);
+      ? `heartbeat: stop recorded (${stop}) — the next run's start and the cockpit will report it`
+      : `heartbeat: WARNING stop NOT recorded (${stop}) — the next reader will see a beat that stopped with no reason`);
     return;
   }
 

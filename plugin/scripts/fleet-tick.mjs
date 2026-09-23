@@ -614,7 +614,20 @@ function readSupply() {
 function claimed() {
   const r = spawnSync("gh", ["issue", "list", "--label", "in-progress", "--state", "open",
     "--limit", String(CLAIMED_LIMIT), "--json", "number", "--jq", "length"], { encoding: "utf8" });
-  if (r.error || r.status !== 0) return null;
+  if (r.error || r.status !== 0) {
+    // Disclosed, not dropped: readSupply() (above) already says why a failed
+    // query reads as unknown rather than silent; this sibling read must say
+    // the same, or a real gh failure (auth expiry, rate limit, a network
+    // outage) is indistinguishable from the deliberately-undiagnosed case —
+    // no trace in stderr, no trace in the exit code, nothing an operator
+    // hunting a stall report could act on.
+    const why = r.error
+      ? `gh did not run: ${r.error.code ?? r.error.message}`
+      : `gh ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`}`;
+    const tail = (r.stderr ?? "").trim().split("\n").slice(-5).join("\n");
+    console.error(`${NAME}: ${why} — claimed ticket count unknown${tail ? `\n${tail}` : ""}`);
+    return null;
+  }
   const n = Number(r.stdout.trim());
   if (!Number.isInteger(n) || n < 0) return null;
   // Disclosed, never silently floored: at exactly the cap the list may be
@@ -622,12 +635,6 @@ function claimed() {
   // itself. A string here rather than a number because that is what the
   // reader must not mistake for an exact count.
   return n === CLAIMED_LIMIT ? `${n}+` : n;
-}
-
-function supply() {
-  const { count, why } = readSupply();
-  if (count === null) die(why);
-  return count;
 }
 
 function main() {
@@ -649,7 +656,8 @@ function main() {
   // network reads were in flight. A corrupt state file therefore announces
   // itself twice per tick, once per read — both are real observations of a
   // real fault, and this file's policy on a degraded read is loud.
-  const verdict = assessBeat({ beat: readState(path, NAME).beat, now: Date.now() });
+  const priorState = readState(path, NAME);
+  const verdict = assessBeat({ beat: priorState.beat, ticked: priorState.ticked, now: Date.now() });
   // One supply read, shared, and taken lazily so a healthy tick keeps today's
   // order exactly: prState() first, candidates.mjs second. Only a stall pulls
   // it forward, which is the one case where announcing outranks ordering.
@@ -681,7 +689,13 @@ function main() {
   const prev = readState(path, NAME);
   const digest = createHash("sha256").update(lines.join("\n")).digest("hex");
   const acts = actionable(rows);
-  writeState(path, NAME, prev, { quiet: acts ? 0 : prev.quiet + 1, digest });
+  // `ticked`, fleet-tick's own liveness key (#1597 follow-up): written on
+  // every invocation, edge or heartbeat-triggered alike, unconditionally —
+  // this tick running IS the occurrence, no reconcile outcome gates it. A
+  // busy wave that never refreshes `beat` (heartbeat only arms when the
+  // queue drains) still refreshes THIS on every completion, which is what
+  // keeps assessBeat from reading that wave as a dead run.
+  writeState(path, NAME, prev, { quiet: acts ? 0 : prev.quiet + 1, digest, ticked: { at: Date.now() } });
 
   // Fold only when BOTH hold: nothing to act on, and nothing new to say. Either
   // one alone still prints in full — an unchanged `DISPATCH 1` is work going
