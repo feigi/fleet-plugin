@@ -354,9 +354,7 @@ count_registry() {
     # uncommitted work still on disk (measured: exit 0, `released:true`,
     # `blockers:[]`, branch deleted, in-progress label dropped, checkout
     # standing). Could not read it, so we cannot tell → count it and let the
-    # mismatch below fire. No `-x` test: it answers a narrower question than the
-    # status does — it covers only the 000 half — and a failed `ls` already
-    # settles both.
+    # mismatch below fire.
     if contents=$(ls -A "$entry" 2>/dev/null) && [ -z "$contents" ]; then continue; fi
     registered=$((registered + 1))
   done
