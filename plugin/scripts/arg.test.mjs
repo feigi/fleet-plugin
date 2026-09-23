@@ -194,14 +194,21 @@ test("die() exits 2 within a bound even when stderr is a saturated pipe whose re
 });
 
 // How large a first write must be to come back SHORT from the fd a spawnSync
-// child sees as stderr. That fd is a pipe on darwin (one 64 KiB buffer) but a
-// Unix SOCKET on Linux (fstat: isSocket()), whose send buffer starts at
-// net.core.wmem_default and grows past it — measured 2026-09-23, node:26 on
-// Linux, 200 trials per size: a 200,000-byte first write went through WHOLE
-// in 5/200, which is what reddened main's CI (run 35787021808), while 1 MiB
-// never did, its largest first write 584,704 bytes. 2 MiB clears that with
-// room, and stays under the 8 MiB maxBuffer both tests spawn with.
+// child sees as stderr. That fd is a Unix SOCKET on both platforms (fstat:
+// isSocket()); what differs is the send buffer's size. darwin's is fixed at
+// 64 KiB, while Linux's starts at net.core.wmem_default and grows past it —
+// measured 2026-09-23, node:26 on Linux, 200 trials per size: a
+// 200,000-byte first write went through WHOLE in 5/200, which is what
+// reddened main's CI (https://github.com/feigi/fleet-plugin/actions/runs/35787021808),
+// while 1 MiB never did, its largest first write 584,704 bytes. 2 MiB clears
+// that with room, and stays under the 8 MiB maxBuffer both tests spawn with.
 const SHORT_WRITE_BYTES = 2 * 1024 * 1024;
+// The empirically-measured ceiling above, independent of SHORT_WRITE_BYTES:
+// a fixture guard compared against SHORT_WRITE_BYTES itself is a tautology
+// (it's built FROM that constant, so it can never be false); this is the
+// real floor a fixture must clear to still outgrow a Linux socket's send
+// buffer.
+const LINUX_SOCKBUF_MAX_FIRST_WRITE = 584_704;
 
 // ── #1548: die()'s writeSync loop delivers the FULL message, EXECUTED ────
 //
@@ -284,7 +291,7 @@ test("die() resumes from a genuine short write and delivers the full message, no
   // fixture for it — the trap ci-state.test.mjs documents above its own
   // stderr-completeness pin.
   assert.ok(
-    expected.length >= SHORT_WRITE_BYTES,
+    expected.length > LINUX_SOCKBUF_MAX_FIRST_WRITE,
     `fixture no longer outgrows a Linux socket's send buffer (${expected.length} bytes), so this test would pass without proving anything`,
   );
   const { payloadBytes, firstWriteBytes } = JSON.parse(readFileSync(firstWrite, "utf8"));
@@ -387,7 +394,7 @@ test("writeAll() returns true and delivers every byte across a genuine short wri
   const r = spawnSync(process.execPath, [join(dir, "run.mjs")], { encoding: null, maxBuffer: 8 * 1024 * 1024 });
   assert.equal(r.status, 0, `the probe itself failed: ${r.stderr?.subarray(0, 400)}`);
   assert.ok(
-    expected.length >= SHORT_WRITE_BYTES,
+    expected.length > LINUX_SOCKBUF_MAX_FIRST_WRITE,
     `fixture no longer outgrows a Linux socket's send buffer (${expected.length} bytes), so this test would pass without proving anything`,
   );
   const { payloadBytes, firstWriteBytes, ok } = JSON.parse(readFileSync(result, "utf8"));
