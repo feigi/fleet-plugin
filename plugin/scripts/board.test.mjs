@@ -688,8 +688,15 @@ test("no session at launch is not an answer to pin — the first one to write on
   const first = join(proj, "sess-first", "subagents");
   mkdirSync(first, { recursive: true });
   // Written after the pin already exists — this run's own first activity,
-  // not a stale fixture mtime from before launch.
+  // not a stale fixture mtime from before launch. The mtime is SET, not left
+  // to the write: Linux stamps it from the kernel's coarse clock, so a file
+  // written right after spendDirPin() read Date.now() can carry an mtime
+  // BEFORE that launchMs and never latch — measured 2026-09-23 in node:26 on
+  // Linux, 2378/5000 writes stamped earlier than a Date.now() taken just
+  // before them (the flake in CI runs 35834153934 and 35834344502).
+  // utimesSync from a later Date.now() cannot land below launchMs.
   writeFileSync(join(first, "agent-a.jsonl"), "");
+  utimesSync(join(first, "agent-a.jsonl"), new Date(), new Date());
   assert.equal(pin(), first, "the first real answer, once it postdates launch, latches");
 
   const second = join(proj, "sess-second", "subagents");
