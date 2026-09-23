@@ -45,17 +45,23 @@ jobs:
   #     — this file, in this repo — taking each job's YAML KEY, then looks for
   #     those strings among the job names the API reports.
   # A YAML key and an API-reported display name are different things holding the
-  # same string, and they hold it only while no job in this file sets an explicit
-  # `name:`. So adding one — here, or on any job, however tempting as a way to
-  # make a load-bearing name explicit — breaks both readers at once, in opposite
-  # registers. `expectedJobs()` spots the override and refuses to derive at all
-  # rather than compare strings it can no longer trust: loud, and no PR gets a
-  # CI-state answer until the `name:` is removed. The ruleset fails quieter and
-  # worse — the job would publish its context under the new name, so nothing
-  # called `rebase-check` reports, and a required context that never arrives
-  # strands the PR instead of failing it. That is the same hazard ADR 0007 kept
-  # `auto-label-bots` out of the required set for: a required check that skips
-  # strands the PR forever. The other half of this note sits at that refusal in
+  # same string, and they coincide only while every job's reported name is its
+  # own key: unset by an explicit `name:`, and also unset by a `strategy.matrix`
+  # block, which GitHub appends matrix values to the reported name even when no
+  # `name:` is set. Adding either — here, or on any job, however tempting as a
+  # way to make a load-bearing name explicit — breaks both readers, in opposite
+  # registers. `expectedJobs()` only guards the canonical `    name:` spelling
+  # (unquoted key, no space before the colon): that spelling makes it refuse to
+  # derive at all rather than compare strings it can no longer trust — loud,
+  # and no PR gets a CI-state answer until the `name:` is removed. A
+  # `strategy.matrix` block, or `name:` spelled `name :` or `"name":`, is
+  # YAML-legal, sets the same job-level name, and slips past that guard
+  # silently. The ruleset fails quieter and worse regardless of spelling — the
+  # job publishes its context under the new name, so nothing called
+  # `rebase-check` reports, and a required context that never arrives strands
+  # the PR instead of failing it: the same hazard ADR 0007's
+  # `required_status_checks` row kept `auto-label-bots` out of the required set
+  # for. The other half of this note sits at the `sawNameOverride` refusal in
   # ci-state.mjs.
   rebase-check:
     if: github.event_name == 'pull_request'
