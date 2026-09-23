@@ -125,9 +125,10 @@ const listed = (...entries) => entries.map(([id, name, source_type]) => ({ id, n
  * malformed cases). `list` is the listing's first page and `list2` its second,
  * which only a paginating caller ever sees. `reads` are the successive answers
  * to the by-id GET; `readFails` names the 1-based read that should fail
- * instead. `path` overrides PATH for the missing-tool cases.
+ * instead. `args` are options placed before the spec path. `path` overrides
+ * PATH for the missing-tool cases.
  */
-function run(t, { spec: specObj, list = listed([42, "main", "Repository"]), list2, reads = [], readFails = [], repoFails = false, putFails = false, listFails = false, specPath, path } = {}) {
+function run(t, { spec: specObj, list = listed([42, "main", "Repository"]), list2, reads = [], readFails = [], repoFails = false, putFails = false, listFails = false, specPath, args = [], path } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "apply-ruleset-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const fix = join(dir, "fix");
@@ -152,7 +153,7 @@ function run(t, { spec: specObj, list = listed([42, "main", "Repository"]), list
   const log = join(dir, "gh.log");
   writeFileSync(log, "");
 
-  const r = spawnSync(BASH, [SCRIPT, specPath ?? specFile], {
+  const r = spawnSync(BASH, [SCRIPT, ...args, specPath ?? specFile], {
     cwd: dir,
     encoding: "utf8",
     env: { PATH: path ?? `${bin}:${process.env.PATH}`, HOME: dir, GH_FIX: fix, GH_LOG: log },
@@ -338,6 +339,44 @@ test("a missing jq is refused by name", (t) => {
   const r = run(t, { spec: spec(), path: pathWith(t, ["gh"]) });
   assert.equal(r.status, 2);
   assert.match(r.out, /jq is not on PATH/);
+});
+
+// ---- --check: the same comparison, asked by something that cannot write ----
+//
+// #1710. The four contexts ADR 0007 selected sat in the spec and not in the
+// live gate for five days, because nothing reads the gate unless a person
+// decides to. What makes the flag worth its branch is the third status: an
+// unattended caller holds no admin, and a read it was never allowed to make
+// must not reach it as "the gate has drifted".
+
+test("--check reports a difference and writes nothing", (t) => {
+  const want = spec();
+  const r = run(t, { args: ["--check"], spec: want, reads: [served({ ...want, enforcement: "disabled" })] });
+  assert.equal(r.status, 3, r.out);
+  assert.deepEqual(r.puts, [], "--check must never write");
+  assert.match(r.out, /does NOT match/);
+  assert.match(r.out, /disabled/, "the diff itself has to reach the caller, not just the verdict");
+});
+
+test("--check on a gate that matches its spec is an ordinary success", (t) => {
+  const want = spec();
+  const r = run(t, { args: ["--check"], spec: want, reads: [served(want)] });
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(r.puts, [], "--check must never write");
+});
+
+test("--check cannot read the gate at all is not reported as drift", (t) => {
+  const want = spec();
+  const r = run(t, { args: ["--check"], spec: want, readFails: [1] });
+  assert.equal(r.status, 2, "a caller without admin reads this, and 3 would claim a difference nobody saw");
+  assert.match(r.out, /cannot read/);
+});
+
+test("an unknown option is refused rather than read as a spec path", (t) => {
+  const r = run(t, { args: ["--dry-run"], spec: spec(), reads: [served(spec())] });
+  assert.equal(r.status, 2, r.out);
+  assert.match(r.out, /unknown option --dry-run/);
+  assert.deepEqual(r.calls, [], "refused before it reaches the API");
 });
 
 // ---- the shipped spec ----------------------------------------------------

@@ -12,13 +12,33 @@
 # reviewable; the readback below makes the applied state provable.
 #
 # Idempotent on purpose: re-running it is the cheapest way to answer "is the
-# live gate still what we agreed?", which is a question that recurs.
+# live gate still what we agreed?", which is a question that recurs. `--check`
+# is that question asked by something that cannot answer the follow-up: it
+# compares and reports, never writes, and is what an unattended caller runs
+# when it is about to depend on the gate but holds no mandate to change it
+# (#1710).
 set -euo pipefail
 
 NAME=apply-ruleset
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
-SPEC=${1:-.github/rulesets/main.json}
+# `--check` reports and writes nothing. Three exit statuses, and the third is
+# the reason the flag exists rather than a `diff` an operator assembles by
+# hand: 0 the live gate matches the spec, 3 it does not, 2 the question could
+# not be answered at all — no spec, no `gh`, a listing or read that failed.
+# Reading a ruleset needs repository admin, so 2 is the status a caller without
+# it gets, and collapsing it into 3 would report drift where there is only a
+# missing credential.
+CHECK=
+SPEC=
+for arg in "$@"; do
+  case $arg in
+    --check) CHECK=1 ;;
+    -*) die "unknown option $arg — the only option is --check" ;;
+    *) [ -z "$SPEC" ] || die "more than one spec path given: $SPEC and $arg"; SPEC=$arg ;;
+  esac
+done
+SPEC=${SPEC:-.github/rulesets/main.json}
 [ -f "$SPEC" ] || die "no ruleset spec at $SPEC"
 command -v gh >/dev/null 2>&1 || die "gh is not on PATH"
 command -v jq >/dev/null 2>&1 || die "jq is not on PATH"
@@ -70,6 +90,19 @@ live=$(printf '%s' "$live" | norm) \
 if [ "$want" = "$live" ]; then
   printf '%s: %s ruleset %s already matches %s — nothing to apply\n' "$NAME" "$REPO" "$ID" "$SPEC"
   exit 0
+fi
+
+if [ -n "$CHECK" ]; then
+  # Drift is a normal steady state between reconciliations, not a corruption:
+  # a merged change to the spec IS the gate diverging until someone with admin
+  # runs this script without --check. So the diff goes out in full — a caller
+  # that only learns "they differ" has to re-derive the one thing it needs,
+  # which is whether the live gate is weaker than the agreed one or merely
+  # older.
+  printf '%s: %s ruleset %s does NOT match %s:\n' "$NAME" "$REPO" "$ID" "$SPEC" >&2
+  diff <(printf '%s\n' "$want") <(printf '%s\n' "$live") >&2 || true
+  printf '%s: drift — re-run without --check, as a repository admin, to reconcile\n' "$NAME" >&2
+  exit 3
 fi
 
 printf '%s: applying %s to %s ruleset %s\n' "$NAME" "$SPEC" "$REPO" "$ID" >&2

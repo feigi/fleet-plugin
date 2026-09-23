@@ -162,6 +162,21 @@ whose failure condition a PR head could have been checked against first.
 - The gate's intended state is reviewable in the tree and provable against the
   live repo by one command. A UI edit that silently fails to save — which happened
   twice while this was being settled — is now detectable rather than believed.
+- **Detectable is not detected.** Measured 2026-09-18 (#1710): the spec above
+  named seven required contexts and the live ruleset enforced three — the four
+  added when this ADR was ratified reached the tree and never reached GitHub,
+  because merging the spec is not applying it and nothing read the gate unless
+  a person chose to. **86 PRs merged through the narrower gate** over the 4d22h
+  between the spec's merge and the reconcile, with no symptom anywhere. That is
+  the measurement: the gap is neither rare nor self-announcing. Reconciled
+  2026-09-23. The remedy is `apply-ruleset.sh --check`, which performs the same
+  comparison, writes nothing, and exits 3 on a difference — run at `run-team`
+  phase 0, where a controller is about to spend a run depending on the gate. It
+  is deliberately NOT a required context: main's ratified spec is the only thing
+  the live gate may legitimately match, so a PR-time check demanding
+  live-equals-spec would red the very PR proposing a new context and refuse the
+  merge that would make it legitimate — this document's own skip test, reached
+  from the other side.
 - `main` cannot be pushed to directly by anyone. Mid-run tooling fixes go through
   a PR, carry a release label, and face the same required checks the table above
   lists.

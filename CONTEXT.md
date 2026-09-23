@@ -92,6 +92,10 @@ strict currency — and never the CI that feeds it: CI produces signals, the gat
 consumes them. Governed by ADR 0007, declared in `.github/rulesets/main.json`,
 and applied only by `.github/scripts/apply-ruleset.sh`, which proves the write by
 re-reading it. A claim about the gate sourced from anywhere else is unverified.
+The spec is the **declared** gate and the live ruleset the **enforced** one, and
+they diverge from the moment a spec change merges until someone with repository
+admin applies it (#1710) — so a claim about what merging requires is a claim
+about the declared gate unless `apply-ruleset.sh --check` has just exited 0.
 _Avoid_: branch protection, protection rule, CI gate
 
 **Currency**:
