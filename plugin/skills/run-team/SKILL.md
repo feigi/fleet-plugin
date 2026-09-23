@@ -1222,6 +1222,48 @@ number, worktree abs path, branch, and each of these verbatim:
 > another worktree. Verify with `git rev-parse --git-dir` and
 > `git rev-parse --git-common-dir`. Skip the using-git-worktrees skill's Step 1.
 
+> **`edit` and `read` resolve a bare relative path against the SESSION ROOT —
+> the controller's own main checkout — not against your worktree and not
+> against your `bash` cwd. Give them the absolute worktree path on every
+> call.** They take no `cwd` parameter, so shell discipline does not reach
+> them: a member whose every command is correctly scoped with `cd` or `git -C`
+> still leaks through `edit`/`read` alone, and the rev-parse check above
+> settles only where your SHELL is. Your worktree is the `<abs-path>` you were
+> handed; the main checkout is the parent of `git rev-parse
+> --path-format=absolute --git-common-dir`, which you derive yourself — nothing
+> substitutes it for you.
+>
+> Measured on #1727, four occurrences in one run, none of them caught by any
+> fleet mechanism: two members self-caught their own stray edit, and the
+> controller caught the other two independently on a routine `git status` of
+> the main checkout — one of those was eight program-line edits across two
+> calls, into a file the fleet reads as an instrument. Only one of the four was
+> a mutation-probe copy; the other three were ordinary first edits, so this is
+> not a harness hazard the scratch rule below already covers. It is every
+> `edit` and `read` you make.
+>
+> **The pair of symptoms reads as a TOOL BUG and is not one.** `git diff` in
+> your worktree shows nothing — correct, nothing changed there — while `read`
+> shows your new content — correct, it is reading the main checkout. Two
+> members read that pair as a silent edit no-op or a stale read cache and filed
+> `report_issue` against the tools; both entries were retracted. Two trees, two
+> honest answers, and the path was the defect.
+>
+> So: prefix every `edit` and `read` path with an absolute path — the
+> worktree `<abs-path>` for repo files, `<scratch>/impl-<N>/` for scratch —
+> never a bare relative one, and never `plugin/scripts/foo.mjs` on its own.
+> When a diff and a read disagree, and after any edit you are unsure of, run
+> `git -C <main-checkout> status --porcelain` — empty is the only clean
+> answer. Before you recover anything, run `git -C <main-checkout> diff --
+> <path>` and read it: if that diff is ENTIRELY your own stray content, copy
+> the last-committed version back over it with `cp` — `git -C
+> <main-checkout> show HEAD:<path> > <path>` — never `git restore --
+> <path>` and never a bare `git restore .` there, either of which silently
+> discards a sibling's or the controller's own uncommitted work sitting at
+> that exact path too, and the porcelain check above would then report
+> their destroyed work as clean. If the diff shows content you did not
+> write, stop: reconcile it by hand instead of reverting the file.
+
 > Here is the ticket's distilled brief, already read once in phase 0 step 4 —
 > title, plus whichever of the `## Agent Brief` comment or the issue body
 > carries the ticket's actual brief, and its `Out of scope`, pasted verbatim:
@@ -1311,7 +1353,11 @@ number, worktree abs path, branch, and each of these verbatim:
 > in a member's cell resolved under the main checkout root, never under that
 > member's own worktree — the stray `work/` tree found there has exactly that
 > shape — so pass absolute paths rooted at `<scratch>/impl-<N>/` or at your
-> worktree, exactly as you already do for `write`/`edit`. And **never call
+> worktree, the same discipline the `edit`/`read` block above spells out.
+> Treat that as one rule stated twice, never as a habit already in place:
+> #1727 records four members who broke it with `edit` alone in one run, which
+> is why that block carries its own evidence instead of leaning on this one.
+> And **never call
 > `eval` with `reset: true`**, which is destructive to every other member
 > sharing that backend session, not only to your own state.
 >
@@ -2077,6 +2123,29 @@ all.
 > push destination below, given to you because a detached worktree cannot supply
 > it. Do NOT create another worktree. The review is done and these findings are
 > its output — do not re-review, do not dispatch specialists.
+>
+> **`edit` and `read` resolve a bare relative path against the SESSION ROOT —
+> the controller's own main checkout — not against that worktree and not
+> against your `bash` cwd, which they share no `cwd` parameter with. Give them
+> the absolute worktree path on every call, mutation-probe copies included.**
+> Measured on #1727, four occurrences in one run, and the one that reached a
+> report was a fix-applier's: its mutation probe rewrote a file in the main
+> checkout, and it reported success and a clean diff, because its own
+> worktree's `git diff` WAS clean — correctly, nothing had changed there. That
+> pair — a clean worktree diff beside a `read` showing your new content — is
+> the signature, and it is not a tool bug: two members filed `report_issue`
+> against `edit`/`read` for it and both entries were retracted. On seeing it,
+> or after any edit you are unsure of, run `git -C <main-checkout> status
+> --porcelain`, the main checkout being the parent of `git rev-parse
+> --path-format=absolute --git-common-dir`; empty is the only clean answer.
+> Before you recover anything, run `git -C <main-checkout> diff -- <path>`
+> and read it: if that diff is ENTIRELY your own stray content, copy the
+> last-committed version back over it with `cp` — `git -C <main-checkout>
+> show HEAD:<path> > <path>` — never `git restore -- <path>` and never a
+> bare `git restore .` there, either of which silently discards a
+> sibling's or the controller's own uncommitted work sitting at that exact
+> path too. If the diff shows content you did not write, stop: reconcile
+> it by hand instead of reverting the file.
 >
 > Read `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` and run **steps 2, 3
 > and 5 only**: split apply-now/defer, commit, push, file every deferral as its
