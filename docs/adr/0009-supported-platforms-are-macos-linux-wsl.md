@@ -1,6 +1,6 @@
 # 0009 — Supported platforms are macOS, Linux and WSL; native Windows is not
 
-**Status:** Accepted. Ruled 2026-09-22 while closing #39, against the audit below.
+**Status:** Accepted. Ruled 2026-09-23 while closing #39, against the audit below.
 
 ## Context
 
@@ -35,8 +35,8 @@ Audited before ruling:
    standing a harness-bound artefact has under **Harness**. `--open` is the one known
    instance (#1714).
 3. **CI stays Linux-only.** macOS differs from Linux in one call to a program no
-   test executes; a macOS runner would roughly double CI time for no coverage. Add
-   `macos-latest` when a second macOS/Linux divergence appears.
+   test executes, so a macOS runner would add a second full suite run for no
+   coverage. Add `macos-latest` when a second macOS/Linux divergence appears.
 
 ## Consequences
 
