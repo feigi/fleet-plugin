@@ -1853,7 +1853,7 @@ not dispatched until it returns, so the reviewer cap reads five free slots for
 the whole 20-40 minutes the review runs. Queued PRs wait. A queue is not a reason
 to start a second.
 
-It returns `{pr, head, snapshot, testEnvironment, dimensionsRun, dimensionsUnrun, survived, refuted, unverified, resume}`.
+It returns `{pr, head, snapshot, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, survived, refuted, unverified, resume}`.
 **`testEnvironment` says what every dimension's `test_run` is evidence about**,
 and it is present on a healthy run as well as a degraded one, so there is
 nothing to notice by its absence. The snapshot is `git archive`d and then
@@ -1893,6 +1893,16 @@ The rule this replaces — treat any dimension with nothing in
 `survived`/`refuted`/`unverified` as unrun — was the workaround for having no
 such field, and it over-refuses in the direction that costs work: a dimension
 that ran clean has nothing in those three either (#137, #138).
+
+**`cwdAudit` is the specialist's own inherited-checkout audit, one entry per
+dispatched dimension: `{dimension, state, line}`, `state` one of**
+`clean`/`dirty`/`unrepo`/`missing`. The prompt asks every specialist to run
+`git status --porcelain -uall` against the directory it inherited before
+returning and fold the result into a `CWD-AUDIT:` line — a convention, not
+schema, so a specialist that never emits it or misspells it still validates
+clean. This field is the runtime backstop that reads for the line regardless:
+`missing` is exactly as loud as `dirty`, and both name a checkout you should
+treat as a live scratch write until you have checked it (#1433/#1673).
 
 **A throw or an empty return is a failure event, not a clean review.** It throws
 on missing `args.pr`/`args.worktree` and on a snapshot agent that returned no
