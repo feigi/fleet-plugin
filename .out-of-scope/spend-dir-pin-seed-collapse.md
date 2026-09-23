@@ -34,9 +34,11 @@ heuristic: seeding `pinned` makes the closure return on its first line, leaving
 the `typeof answer !== "string"` and `newestTranscriptMs` checks unreached —
 which is correct, because they guard only the heuristic. All five tests that
 drive `spendDirPin` directly pass under the collapsed form unmodified, as does
-the whole of `plugin/scripts/board.test.mjs` — including the live-`serve` row
-that is the only one able to fail on the pin being dropped between resolution
-and tick.
+the whole of `plugin/scripts/board.test.mjs` — including both live-`serve`
+rows: the `--spend-dir` row (`board.test.mjs:1737`), the only one able to fail
+on the explicit value being dropped between resolution and tick, and the
+wrote-first-on-its-watch row (`board.test.mjs:795`), the only one able to fail
+on the latch being rebuilt per tick.
 
 So this is not a refusal on feasibility. It is the same refusal on churn that
 [arg-factory-collapse.md](arg-factory-collapse.md),
