@@ -1501,6 +1501,22 @@ function unrunCrashed(reviewed, dimensions) {
   return reviewed.flatMap((r, i) => (r ? [] : unrunEntries(null, dimensions[i]?.key ?? `slot ${i}`)));
 }
 
+// #1433 gap mirrored into this harness (#1673): the CWD-AUDIT line the Review
+// dispatch above asks a specialist to fold into `scope_searched` is a
+// convention, not schema — FINDINGS_SCHEMA accepts any string there, so a
+// specialist that satisfies the schema while never emitting the line, or
+// misspelling it, produces a fully valid, undetected payload. This is the
+// runtime backstop: it extracts the line the prompt's own wording requires
+// (`CWD-AUDIT: clean|dirty|unrepo <path> …`) and reports the line's absence
+// exactly as loudly as its presence, so the returned payload below carries it
+// instead of the fact dead-ending inside `scope_searched`.
+const CWD_AUDIT_LINE = /CWD-AUDIT:\s*(clean|dirty|unrepo)\b.*/;
+
+function cwdAuditFrom(text) {
+  const m = typeof text === "string" ? text.match(CWD_AUDIT_LINE) : null;
+  return m ? { state: m[1], line: m[0].trim() } : { state: "missing", line: null };
+}
+
 // The band a finding lands in, and — the whole of #591 — how many refuters were
 // DISPATCHED to put it there. Two callers below produce `unverified` and they
 // produced byte-identical objects: the `suggestion` band, budgeted 0 refuters by
@@ -1590,6 +1606,15 @@ function resumeFor(unverified) {
 // `refuted` / `unverified` reads.
 const dimensionsUnrun = [];
 
+// #1433/#1673. Per-dimension record of the specialist's own CWD-AUDIT line
+// (see `cwdAuditFrom` above) — `{dimension, state, line}`, `state` one of
+// "clean"/"dirty"/"unrepo"/"missing". Populated for every dispatched review
+// that returned at all (a crashed dispatch has nothing to audit, and is
+// already named in `dimensionsUnrun` via `unrunCrashed` below), so a dirty
+// checkout, or an omitted audit, reaches the payload instead of dead-ending
+// inside `scope_searched`.
+const cwdAudit = [];
+
 const reviewed = await pipeline(
   dimensions,
   (d) =>
@@ -1677,6 +1702,7 @@ to name.`,
     // which reads a dead reviewer as a clean one, and a recording tucked behind
     // it would classify every dimension except the one that failed.
     dimensionsUnrun.push(...unrunEntries(review, d.key));
+    cwdAudit.push({ dimension: d.key, ...cwdAuditFrom(review && review.scope_searched) });
     return parallel(
       // `fi` keys the refuter scratch path, and is bound for nothing else. The
       // fan-out under a dimension nests two axes — the dimension's findings
@@ -1834,6 +1860,10 @@ return {
   testEnvironment: environmentNote(snap),
   dimensionsRun: dimensions.map((d) => d.key),
   dimensionsUnrun,
+  // #1433/#1673. `cwdAuditFrom`'s per-dimension read of the specialist's own
+  // CWD-AUDIT line — the fact a dirty or unrepo'd inherited checkout is
+  // otherwise reported into `scope_searched` and read by nothing.
+  cwdAudit,
   survived: survived.sort(bySeverity),
   refuted,
   unverified: unverified.sort(bySeverity),
