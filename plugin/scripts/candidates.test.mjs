@@ -8,12 +8,23 @@
 // execs by default, not the gojq gh embeds and applies in its own process.
 // Both predicates are under test that way; the ENGINE itself is under test
 // only where a real gojq binary is reachable (`findGojq()` below) — the
-// dependency scan since #331, the spec predicate since #204. `\s` and `\d`
-// are Unicode-aware in jq's Oniguruma and ASCII-only in Go's RE2, so on some
-// inputs — a `## User Stories` heading padded with trailing U+00A0, a
-// dependency ref separated from its label by U+00A0 — the two engines
-// disagree, and gojq's answer is production's: gh applies gojq, not jq, so
-// dropSpecs is the only line of defence against what gojq actually decides.
+// dependency scan since #331, the spec predicate since #204. `\s`, `\d` and
+// `\b` are Unicode-aware in jq's Oniguruma and ASCII-only in Go's RE2, so the
+// same body used to reduce differently depending on which engine ran it, and
+// gojq's answer is the one that reaches production: gh applies gojq, not jq,
+// so dropSpecs is the only line of defence against what gojq actually
+// decides. #383 closed that divergence by spelling an explicit class at every
+// position, each chosen from what GFM renders — so the class after a
+// heading's `#` marker is deliberately NARROWER than the class at the end of
+// that same heading's line. The expression now contains no `\s`, `\d` or
+// `\b`, and all 24 measured fixtures agree on both engines.
+//
+// That agreement is also what removed the old proof of which engine ran.
+// Until #383 the gated tests identified their engine by one fixture the two
+// answered differently — a trailing U+00A0 that made a heading a spec under
+// jq and not under gojq. Those rows are ruled now and agree, so the proof is
+// direct instead: the STUB records the `--version` of the binary it executed
+// and every gated test asserts that recording is gojq (`assertRanGojq`).
 // A pattern gojq rejects outright at least exits non-zero; a class that
 // merely matches differently would leave this suite green on jq alone, which
 // is what the gated gojq tests below exist to catch. Stubbing gh to return
@@ -36,6 +47,19 @@ const ARG_MODULE = fileURLToPath(new URL("./arg.mjs", import.meta.url));
 const STUB = `#!/bin/sh
 # Stand-in for \`gh issue list … --jq <expr>\`. Applies the expression gh was
 # given to the fixture, so the expression is under test rather than assumed.
+#
+# ONE plumb point for which binary applies it, and it records itself. The
+# gated gojq tests below can no longer tell the engines apart by their
+# ANSWERS: #383 ruled every divergent position and all 24 fixtures now agree
+# on both engines, which is the point of the ticket and also what blinded the
+# old proof. So the engine names itself here, by the same --version test
+# isGojq applies, and those tests assert the recording. Resolved ONCE and
+# reused for the version line and both apply paths below, so the recording
+# can never describe a different binary from the one that reduced the
+# fixture. Delete this plumb and every gated test reds, because the recording
+# then reads jq- and not gojq.
+JQ_RAN="\${JQ_BIN:-jq}"
+[ -n "$ENGINE_LOG" ] && "$JQ_RAN" --version > "$ENGINE_LOG" 2>&1
 expr=""
 search=""
 while [ $# -gt 0 ]; do
@@ -97,10 +121,10 @@ esac
 if [ -n "$LABEL_EXPECT" ] && [ "$label" != "$LABEL_EXPECT" ]; then
   # An empty array, not a missing one: the real query would have SUCCEEDED
   # and matched nothing, which is the whole confusion #175 is about.
-  echo '[]' | "\${JQ_BIN:-jq}" -c "$expr"
+  echo '[]' | "$JQ_RAN" -c "$expr"
   exit
 fi
-exec "\${JQ_BIN:-jq}" -c "$expr" "$fixture"
+exec "$JQ_RAN" -c "$expr" "$fixture"
 `;
 
 function run(issues, args = ["--require-label", "ready-for-agent"], unfiltered = null, extraEnv = {}) {
@@ -110,15 +134,24 @@ function run(issues, args = ["--require-label", "ready-for-agent"], unfiltered =
   const gh = join(dir, "gh");
   writeFileSync(gh, STUB);
   chmodSync(gh, 0o755);
-  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, FIXTURE: fixture, ...extraEnv };
+  const engineLog = join(dir, "engine-version");
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, FIXTURE: fixture, ENGINE_LOG: engineLog, ...extraEnv };
   if (unfiltered) {
     const second = join(dir, "unfiltered.json");
     writeFileSync(second, JSON.stringify(unfiltered));
     env.FIXTURE_UNFILTERED = second;
   }
   const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", env });
+  // Read the engine recording BEFORE the temp dir goes. This is the only
+  // evidence of which binary actually applied the expression (#383); it stays
+  // "" when the STUB never ran, which is itself a failure the gated tests
+  // report rather than skipping past.
+  let engine = "";
+  try {
+    engine = readFileSync(engineLog, "utf8").trim();
+  } catch {}
   rmSync(dir, { recursive: true, force: true });
-  return { ...r, rows: r.stdout.trim() ? JSON.parse(r.stdout) : [] };
+  return { ...r, rows: r.stdout.trim() ? JSON.parse(r.stdout) : [], engine };
 }
 
 // For the failure shapes the fixture stub cannot reach — it always `exec`s jq,
@@ -702,6 +735,27 @@ function findGojq() {
 const GOJQ = findGojq();
 const SKIP_WITHOUT_GOJQ = { skip: GOJQ ? false : "no gojq on PATH — go install github.com/itchyny/gojq/cmd/gojq@v0.12.19 to run this check" };
 
+// What proves a gated test REACHED gojq (#383). Until these rulings the proof
+// was indirect: one fixture per test that the two engines ANSWERED
+// differently — a U+00A0 that reduced to [12] under Oniguruma and [] under
+// RE2. The rulings removed every such row on purpose, so all 24 fixtures now
+// agree on both engines, and no assertion about OUTPUT can say which engine
+// produced it any more. The STUB therefore records the --version of the
+// binary it executed and this reads that recording, applying the very test
+// isGojq does. A strengthening of the harness, not a thinning of it
+// (.out-of-scope/gojq-parity-harness.md): the old discriminator proved the
+// engine only as a side effect of one disagreeing row, so it went blind the
+// moment that row was ruled, and it proved nothing about the OTHER assertions
+// in its own test — this proves it directly, for every gated assertion, and
+// keeps proving it however the fixtures are ruled later. Mutation-checked:
+// delete the STUB's JQ_RAN plumb and every gated test reds here.
+const assertRanGojq = (r) =>
+  assert.match(
+    r.engine,
+    /^gojq /,
+    `the STUB recorded ${JSON.stringify(r.engine)} — this gated test never reached gojq`,
+  );
+
 test(
   "dependency forms hold under gojq, the engine gh actually applies — not only system jq",
   SKIP_WITHOUT_GOJQ,
@@ -714,6 +768,9 @@ test(
     const deps = (body) => {
       const r = run([ticket(9, body)], undefined, null, extraEnv);
       assert.equal(r.status, 0, r.stderr);
+      // Every form, not just one row: the proof is per-application, so no
+      // assertion below can pass having silently run on system jq.
+      assertRanGojq(r);
       return r.rows[0].d;
     };
     assert.deepEqual(deps("## Blocked by\n\n- #12\n- #13\n"), [12, 13]);
@@ -758,18 +815,54 @@ test(
     assert.deepEqual(deps("**Blocked** by #12\n"), []);
     assert.deepEqual(deps("**Depends** on #5\n"), []);
     assert.deepEqual(deps("**Blocked by** #12\n"), [12]);
-    // The discriminator, and the only assertion here system jq cannot satisfy:
-    // `\s` is Unicode-aware in Oniguruma and ASCII-only in RE2, so a U+00A0
-    // between label and ref reduces to [12] under jq and [] under gojq. Without
-    // it every assertion above passes on either engine — deleting the STUB's
-    // `JQ_BIN` plumb would leave this test green having never reached gojq.
-    // Keep the `\u00a0` escape: a literal NBSP does not survive being copied.
-    assert.deepEqual(deps("Blocked by:\u00a0#12\n"), []);
-    // #439 widened that separator to `[\s*]*` but kept `\s` rather than an
-    // explicit ASCII class (#383 owns that question), so the bolded form
-    // inherits the same split: [12] under Oniguruma, [] under RE2. Keep the
-    // `\u00a0` escape here too — a literal NBSP does not survive being copied.
-    assert.deepEqual(deps("Blocked by:\u00a0**#12**\n"), []);
+    // #383's inline-separator ruling: `[\t \p{Zs}*]*`, so a U+00A0 between
+    // label and ref IS a separator and the ref IS a blocker. GFM renders
+    // `Blocked by:<NBSP>#12` as `Blocked by: #12` and autolinks the ref, so a
+    // reader sees a dependency — and an admission gate must not be the one
+    // thing that misses it. This row asserted [] until the ruling: gojq's
+    // answer, adopted because it was production's and never because anyone
+    // ruled it correct. Both engines now say [12]. Keep the `\u00a0` escape:
+    // a literal NBSP does not survive being copied.
+    assert.deepEqual(deps("Blocked by:\u00a0#12\n"), [12]);
+    // The same ruling through #439's widened separator, which now spells the
+    // class instead of inheriting `\s`, so the bolded form agrees with the
+    // bare one rather than inheriting a split.
+    assert.deepEqual(deps("Blocked by:\u00a0**#12**\n"), [12]);
+    // The separator BETWEEN refs takes that class too, so a chain does not
+    // stop at the first ref when a NBSP follows the comma — gojq collected
+    // [12] alone here.
+    assert.deepEqual(deps("Blocked by #12,\u00a0#13\n"), [12, 13]);
+    // `\d` → `[0-9]` (#383). Arabic-Indic digits are not refs anyone is trying
+    // to support, and this is the one position where the divergence could take
+    // the whole RUN down rather than change a row: under Oniguruma `\d` matched
+    // these, the scan collected the ref, and `tonumber` then made the program
+    // exit 5 — one ticket body took down the entire candidate listing. Exit 0
+    // is half of what this pins, and `deps` asserts that before it returns.
+    assert.deepEqual(deps("Blocked by: #\u0661\u0662\n"), []);
+    // The after-marker ruling is the NARROWER `[ \t]`, not the separator class
+    // above: GFM opens a heading on a space or a tab only, so this line is a
+    // PARAGRAPH, arms no section, and its bullet declares nothing. Two
+    // positions on one construct taking two different classes is exactly what
+    // ruling them per position buys.
+    assert.deepEqual(deps("##\u00a0Blocked by\n\n- #12\n"), []);
+    // The same class one level down, on the list item's own marker gap.
+    assert.deepEqual(deps("## Blocked by\n\n-\u00a0#12\n"), []);
+    // An ASCII NARROWING, and deliberate: `\f` was whitespace to `\s` on BOTH
+    // engines, so both used to collect [12] here. GFM renders `-<FF>#12` as a
+    // paragraph, so it is not a bullet and declares nothing.
+    assert.deepEqual(deps("## Blocked by\n\n-\f#12\n"), []);
+    // The same narrowing after the heading marker: `##<FF>Blocked by` is a
+    // paragraph, so it arms nothing and the bullet below is never read.
+    assert.deepEqual(deps("##\fBlocked by\n\n- #12\n"), []);
+    // `\b` → `(?:[^\p{L}\p{M}\p{N}_]|$)`, Unicode-aware where RE2's `\b` is
+    // ASCII. A letter continuing the word means a DIFFERENT word, so this
+    // heading does not arm — gojq armed it and collected [12].
+    assert.deepEqual(deps("## Blocked by\u00e9\n\n- #12\n"), []);
+    // End-of-heading-line ruling `[\t\f\r \p{Zs}]*`: the noun form must be the
+    // WHOLE heading, and U+00A0 padding does not stop it being that heading —
+    // GFM still renders an `<h2>`. gojq refused this and reported it as a near
+    // miss instead of collecting the blocker.
+    assert.deepEqual(deps("## Dependencies\u00a0\n\n1. #12\n"), [12]);
   },
 );
 
@@ -785,7 +878,7 @@ test(
   "the near-miss diagnostic fires under gojq too — the engine gh actually applies (#1032)",
   SKIP_WITHOUT_GOJQ,
   () => {
-    const { status, stderr } = run(
+    const r = run(
       [
         ticket(1, "## Dependencies (blocking)\n\n- #300\n"),
         ticket(2, "## Dependencies\n\n- #12\n"),
@@ -794,7 +887,9 @@ test(
       null,
       { JQ_BIN: GOJQ },
     );
+    const { status, stderr } = r;
     assert.equal(status, 0, stderr);
+    assertRanGojq(r);
     const lines = missLines(stderr);
     assert.deepEqual(lines.map((l) => l.match(/#(\d+)/)[1]), ["1"], stderr);
     assert.ok(lines[0].includes("'## Dependencies (blocking)'"), lines[0]);
@@ -805,18 +900,19 @@ test(
 // gojq is what gh applies, so gojq is where a leak would actually happen.
 // The first three fixtures are plain ASCII (`#`, `[ \t]`, `\r`), so none of
 // them is expected to diverge between engines; they exist to confirm that,
-// not because a divergence was found — space, tab and `\r` are all `\s` in
-// both engines. The predicate's trailing `\s*` is #65's own doing: b4739c8
-// widened it back from `[ \t]*` so a CRLF line's `\r` still reaches the
-// anchor, which is the only reason the third fixture matches at all — narrow
-// that class and the CRLF assertion is what reds. It is also the one
-// position that CAN diverge: `\s` is Unicode-aware in Oniguruma and
-// `[\t\n\f\r ]` in RE2 — not every ASCII whitespace, a vertical tab
-// diverges too — so a heading padded with trailing U+00A0 is a spec under jq
-// and not under gojq, and in production that spec leaks as a claimable
-// ticket rather than being dropped. #204 adds that case below as the
-// discriminator, closing for THIS predicate the gap #331 already closed for
-// the dependency scan's — see this file's header.
+// not because a divergence was found. The predicate's trailing class still
+// contains `\r` for #65's reason: b4739c8 widened it back from `[ \t]*` so a
+// CRLF line's `\r` still reaches the anchor, which is the only reason the
+// third fixture matches at all — drop `\r` from that class and the CRLF
+// assertion is what reds. #383 then spelled the class out as
+// `[\t\f\r \p{Zs}]*` instead of leaving it `\s*`, because `\s` was the one
+// part of this predicate whose meaning changed with the engine (Oniguruma
+// Unicode-aware, RE2 `[\t\n\f\r ]` — not even every ASCII whitespace, since
+// a vertical tab diverged too). The rows at the end pin each edge of that
+// ruling: `\p{Zs}` padding is still a spec, a VERTICAL TAB is not, and a
+// U+00A0 after the `#` marker is not a heading at all. Which engine actually
+// ran is no longer inferred from a disagreement — `assertRanGojq` reads the
+// STUB's recording; see this file's header.
 test(
   "the spec predicate holds under gojq — depth widened, split heading not spanned, CRLF caught",
   SKIP_WITHOUT_GOJQ,
@@ -833,23 +929,35 @@ test(
         extraEnv,
       );
       assert.equal(r.status, 0, r.stderr);
+      assertRanGojq(r);
       return !r.rows.some((row) => row.n === 9);
     };
     assert.equal(isDroppedAsSpec("### User Stories\n\nnested one level deeper\n"), true);
     assert.equal(isDroppedAsSpec("##\nUser Stories\n\nsplit across lines\n"), false);
     assert.equal(isDroppedAsSpec("## User Stories\r\n\r\n1. As a user…\r\n"), true);
-    // The discriminator, and the only assertion here system jq cannot
-    // satisfy: `\s` is Unicode-aware in Oniguruma and ASCII-only in RE2, so a
-    // trailing U+00A0 after the heading text reduces to spec:true under jq
-    // and spec:false under gojq. Without it every assertion above passes on
-    // either engine — deleting the STUB's `JQ_BIN` plumb would leave this
-    // test green having never reached gojq. `false` is gojq's answer, i.e.
-    // production's — NOT a ruling that a heading padded with U+00A0 should
-    // read as a ticket rather than a spec; #383 owns that question and may
-    // flip it. Keep the `\u00a0` escape: a literal NBSP does not survive
-    // being copied, and has already produced a false refutation of a correct
-    // finding in this repo (#200).
-    assert.equal(isDroppedAsSpec("## User Stories\u00a0\n\nx\n"), false);
+    // #383's end-of-heading-line ruling: `[\t\f\r \p{Zs}]*` before the anchor.
+    // `## User Stories` padded with U+00A0 still renders a real `<h2>` on
+    // GitHub, so it is still a to-spec spec and is still dropped. This row
+    // asserted `false` until the ruling — gojq's answer, i.e. production's,
+    // adopted because it was production's and never because anyone ruled it
+    // correct; under it the spec shipped as a claimable ticket, the under-fire
+    // direction an admission gate must never take. Both engines now say true.
+    // Keep the `\u00a0` escape: a literal NBSP does not survive being copied,
+    // and has already produced a false refutation of a correct finding in this
+    // repo (#200).
+    assert.equal(isDroppedAsSpec("## User Stories\u00a0\n\nx\n"), true);
+    // Any `\p{Zs}`, not NBSP alone: every Unicode space separator renders as a
+    // blank, so the rule is "looks like a space" rather than a list of code
+    // points anyone has met so far.
+    assert.equal(isDroppedAsSpec("## User Stories\u2003\n\nx\n"), true);
+    // VERTICAL TAB is excluded ON PURPOSE, and it is why the class is not
+    // simply "whitespace": GFM renders U+000B as U+FFFD, so a reader sees a
+    // replacement character sitting in the heading, not padding. Not a spec.
+    assert.equal(isDroppedAsSpec("## User Stories\u000b\n\nx\n"), false);
+    // The after-marker position takes the narrower `[ \t]`: GFM opens a
+    // heading on a space or a tab only, so this is a paragraph and not a
+    // heading at all. Same line, two positions, two classes.
+    assert.equal(isDroppedAsSpec("##\u00a0User Stories\n\nx\n"), false);
   },
 );
 

@@ -135,10 +135,11 @@ const EXCLUDE =
 // string, because RE2 (gojq's engine — gh applies `--jq` with gojq, not the
 // system jq this file's own tests stub; see #63) has no lookahead, so
 // "capture every ref up to the next heading" cannot be expressed as a single
-// pattern. A heading line (`^#{1,6}\s`) toggles a running "inside a blocking
-// section" flag on when its text DECLARES one: any of the verb phrases, which
-// end at a word boundary and tolerate trailing text because a heading opening
-// with one is declaring a blocker whatever follows it; or the noun form
+// pattern. A heading line (`^#{1,6}[ \t]`) toggles a running "inside a
+// blocking section" flag on when its text DECLARES one: any of the verb
+// phrases, which end at a non-word character and tolerate trailing text
+// because a heading opening with one is declaring a blocker whatever follows
+// it; or the noun form
 // `Dependencies`/`Dependency`, which must be the WHOLE heading, a trailing
 // `:` aside. The noun form cannot be given the verb forms' tolerance:
 // `## Dependency injection` is an ordinary section title in a code repo, and
@@ -193,14 +194,16 @@ const EXCLUDE =
 // it. Verified against real gojq (`go install
 // github.com/itchyny/gojq/cmd/gojq@v0.12.19`) on every form in
 // candidates.test.mjs's dependency-forms fixtures, not only the system jq the
-// STUB there execs. The engines agree wherever the input is ASCII; they split
-// where a U+00A0 sits between label and ref, bolded or not, which reduces to
-// `[12]` under Oniguruma and `[]` under RE2, because
-// `\s` is Unicode-aware in the first and ASCII-only in the second (see #204).
-// gojq is what gh applies, so `[]` is the production answer — and those rows
-// are the only thing letting the gojq test tell the two engines apart. The
-// widened separator keeps `\s` rather than spelling an ASCII class, so it
-// inherits that split rather than pre-empting #383, which owns the question.
+// STUB there execs. The engines now agree on every one of those forms,
+// including the ones that used to split. The separator is `[\t \p{Zs}*]*`
+// and not `[\s*]*`, so `Blocked by:<U+00A0>#12` collects `[12]` under BOTH
+// engines where it used to collect `[12]` under Oniguruma and `[]` under RE2
+// — #383 ruled the ref a real blocker, because GFM renders that line as
+// `Blocked by: #12` and autolinks the ref, so a reader sees a dependency and
+// an admission gate must not miss one. Since no fixture splits any more, the
+// gated tests can no longer identify their engine by disagreement: the STUB
+// records which binary it executed and they assert that recording is gojq.
+// The per-position rulings are set out above the JQ declaration below.
 //
 // `depmiss` is the diagnostic half (#1032), and it is deliberately LOOSER
 // than the gate: any heading MENTIONING the concept that the gate did not
@@ -230,16 +233,70 @@ const EXCLUDE =
 // query it rides on. The trim is `rtrimstr("\r")` — literal, not `\s+$` —
 // because the only whitespace that would disturb the line this prints is the
 // CR of a CRLF body (what GitHub's web textarea writes), and a regex there
-// would buy cosmetics at the price of one more engine-divergent `\s`
-// position (#383). `dh` never reaches stdout: the payload is stripped of it
+// would buy cosmetics at the price of one more regex position to rule on and
+// keep portable (#383). `dh` never reaches stdout: the payload is stripped of it
 // at the `JSON.stringify` below, because this is a stderr signal and #1032
 // rules a payload field out of scope.
+// ENGINE-PORTABLE CLASSES (#383). The program below contains no `\\s`, `\\d` or
+// `\\b`: every position spells an explicit class. It has to, because the suite
+// applies this expression with system jq (Oniguruma, all three Unicode-aware)
+// while gh applies it with its embedded gojq (Go RE2, where `\\s` is
+// `[\\t\\n\\f\\r ]`, `\\d` is `[0-9]` and `\\b` is ASCII). The same body reduced
+// differently depending on who ran it, and gojq's answer is the one that
+// reaches production. No library upgrade closes it: gh 2.100.0 embeds gojq
+// v0.12.19, which is the latest release, Go's `\\s` is ASCII by design, jq
+// 1.8.x still uses Oniguruma, and no inline flag (`(?S)`, `(?a)`, `(?u)`,
+// `(?D)`) is accepted by both engines.
+//
+// The class is chosen PER POSITION, not once for the file. The governing rule
+// is that each position follows GitHub's GFM rendering (measured with
+// `gh api /markdown`); where no markdown rule applies, it follows what a
+// reader sees. So two positions on the same line legitimately differ:
+//
+//   after a heading's `#` marker — `[ \t]`
+//       `armed`, `depmiss`, and `depnums`' any-heading toggle. GFM opens a
+//       heading on a space or a tab ONLY: `##<U+00A0>x` and `##<FF>x` both
+//       render as paragraphs. This narrows ASCII too — `\f` used to open a
+//       heading here and deliberately no longer does.
+//   list-item indent and marker gap — `[ \t]*` … `[ \t]`
+//       Same GFM rule one level down: `-<U+00A0>#12` and `-<FF>#12` render as
+//       paragraphs, so neither is a bullet and neither declares a blocker.
+//   end of a heading line — `[\t\f\r \p{Zs}]*` before the anchor
+//       `armed`'s `dependenc(?:y|ies)` arm and the `spec` predicate. Padding a
+//       real heading with U+00A0, EM SPACE or IDEOGRAPHIC SPACE still renders
+//       an `<h2>`, so it is still that heading. `\f` is stripped by GFM; `\r`
+//       keeps CRLF bodies working; VERTICAL TAB stays EXCLUDED, because GFM
+//       renders it as U+FFFD and a replacement character is not blank.
+//   inline label/ref separators — `[\t \p{Zs}*]*`
+//       `Blocked by:<U+00A0>#12` renders as `Blocked by: #12` and GitHub
+//       autolinks the ref, so a reader sees a blocker — and an admission gate
+//       must not be the one thing that misses it.
+//   every digit run — `[0-9]`
+//       Arabic-Indic digits are not refs anyone is trying to support, and this
+//       is the position where divergence could take the whole run down rather
+//       than change one row: under Oniguruma `\d` collected `#` + U+0661 U+0662,
+//       `tonumber` rejected it, and the program exited 5 — so a single ticket
+//       body took down the entire candidate listing.
+//   word boundary after a blocking phrase — `(?:[^\p{L}\p{M}\p{N}_]|` + anchor
+//       Unicode-aware, unlike RE2's ASCII `\b`: a letter, combining mark or
+//       digit that CONTINUES the word means a different word, so a heading
+//       reading `## Blocked by` + U+00E9 does not arm. Consuming one character
+//       rather than matching zero-width is safe — nothing follows this arm.
+//
+// Wherever any non-ASCII whitespace counts at all, it is `\p{Zs}` and nothing
+// wider: every Unicode space separator renders as a blank, so the rule is
+// "looks like a space", and both engines agree on `\p{Zs}`. Mind the double
+// escaping below — jq's `\\p{Zs}` is `\\\\p{Zs}` in this JS source string.
+//
+// Measured over 24 fixtures on jq-1.7.1-apple and gojq 0.12.19: zero splits.
+// candidates.test.mjs pins the rows that used to split, on both engines, and
+// proves which engine each gated test actually reached.
 const JQ =
-  'def armed: test("(?i)^#{1,6}\\\\s+\\\\**((?:depends on|blocked by|requires)\\\\b|dependenc(?:y|ies)\\\\**:?\\\\**\\\\s*$)");\n' +
+  'def armed: test("(?i)^#{1,6}[ \\\\t]+\\\\**((?:depends on|blocked by|requires)(?:[^\\\\p{L}\\\\p{M}\\\\p{N}_]|$)|dependenc(?:y|ies)\\\\**:?\\\\**[\\\\t\\\\f\\\\r \\\\p{Zs}]*$)");\n' +
   '\n' +
   'def depmiss:\n' +
   '  [ split("\\n")[]\n' +
-  '    | select(test("(?i)^#{1,6}\\\\s.*(dependenc|blocked by|depends on|requires)") and (armed | not))\n' +
+  '    | select(test("(?i)^#{1,6}[ \\\\t].*(dependenc|blocked by|depends on|requires)") and (armed | not))\n' +
   '    | rtrimstr("\\r")\n' +
   '  ];\n' +
   '\n' +
@@ -247,18 +304,18 @@ const JQ =
   '  (reduce (split("\\n"))[] as $line (\n' +
   '      {insec: false, nums: []};\n' +
   '      ($line | armed) as $bh\n' +
-  '      | ($line | test("^#{1,6}\\\\s")) as $any\n' +
+  '      | ($line | test("^#{1,6}[ \\\\t]")) as $any\n' +
   '      | (if $any then $bh else .insec end) as $nextsec\n' +
-  '      | ($line | test("^\\\\s*([-*+]|[0-9]+[.)])\\\\s")) as $item\n' +
+  '      | ($line | test("^[ \\\\t]*([-*+]|[0-9]+[.)])[ \\\\t]")) as $item\n' +
   '      | {\n' +
   '          insec: $nextsec,\n' +
   '          nums: (\n' +
   '            .nums\n' +
-  '            + (if $nextsec and $item then [$line | scan("#\\\\d+")] else [] end)\n' +
+  '            + (if $nextsec and $item then [$line | scan("#[0-9]+")] else [] end)\n' +
   '            + [ $line\n' +
-  '                | scan("(?i)(?:depends on|blocked by|requires|after)[\\\\s*]*:?[\\\\s*]*(#\\\\d+(?:[\\\\s*]*(?:,|and)?[\\\\s*]*#\\\\d+)*)")\n' +
+  '                | scan("(?i)(?:depends on|blocked by|requires|after)[\\\\t \\\\p{Zs}*]*:?[\\\\t \\\\p{Zs}*]*(#[0-9]+(?:[\\\\t \\\\p{Zs}*]*(?:,|and)?[\\\\t \\\\p{Zs}*]*#[0-9]+)*)")\n' +
   '                | .[0]\n' +
-  '                | scan("#\\\\d+")\n' +
+  '                | scan("#[0-9]+")\n' +
   '              ]\n' +
   '          )\n' +
   '        }\n' +
@@ -267,7 +324,7 @@ const JQ =
   '  | unique;\n' +
   '\n' +
   '[.[] | {n:.number,t:.title,l:[.labels[].name],\n' +
-  ' spec:((.body//"")|test("(?m)^#{2,6}[ \\\\t]+User Stories\\\\s*$")),\n' +
+  ' spec:((.body//"")|test("(?m)^#{2,6}[ \\\\t]+User Stories[\\\\t\\\\f\\\\r \\\\p{Zs}]*$")),\n' +
   ' d:((.body//"")|depnums),\n' +
   ' dh:((.body//"")|depmiss)}]\n';
 
@@ -410,21 +467,30 @@ function refuseIfCapped(rows, description) {
 // tagged). The separator between marker and text is `[ \t]+` — horizontal
 // whitespace only, not `\s+` — so a heading can never span a line break: a
 // body whose line is exactly `##` with `User Stories` starting the next
-// line no longer reads as the same heading. The TRAILING class stays `\s*`:
-// `$` under `(?m)` already anchors the line end, so `\s*` there can only ever
-// eat whitespace before an anchor and can never make a line that is NOT the
-// signature read as one — while narrowing it to `[ \t]*` drops the `\r` of a
-// CRLF body, which is what GitHub's web textarea writes, and leaks that spec
-// silently. That class is also the predicate's one engine-divergent position:
-// the depth, the separator and the literal text are all explicit ASCII, so
-// `\s` is the only part whose meaning changes with the engine — Oniguruma
-// reads it Unicode-aware, RE2 as `[\t\n\f\r ]`. A heading padded with U+00A0
-// — or any whitespace outside that set, ASCII vertical tab included — is a
-// spec under the system jq the suite execs and NOT one under the gojq gh
-// applies, so in production dropSpecs never fires and the spec ships as a
-// claimable ticket: the same split the dependency scan above carries, failing
-// the same direction. Pinned against real gojq in candidates.test.mjs; making
-// the class explicit is #383's call, not this comment's.
+// line no longer reads as the same heading. That is also #383's ruling for
+// this position, on GFM's own rule: only a space or a tab opens a heading, so
+// `##<U+00A0>User Stories` renders as a PARAGRAPH and is not a spec at all.
+//
+// The TRAILING class is `[\t\f\r \p{Zs}]*`, and it is a DIFFERENT class from
+// the one after the marker — ruling the two positions separately is the whole
+// point. The `$` under `(?m)` already anchors the line end, so the run there
+// can only ever eat whitespace before an anchor and can never make a line that
+// is NOT the signature read as one, while narrowing it to `[ \t]*` would drop
+// the `\r` of a CRLF body — what GitHub's web textarea writes — and leak that
+// spec silently. It is spelled out rather than left as `\s*` because `\s` is
+// the one construct here whose meaning changes with the engine (Oniguruma
+// reads it Unicode-aware, RE2 as `[\t\n\f\r ]`), and #383 ruled the position
+// by what GFM renders: `## User Stories` padded with U+00A0, EM SPACE or
+// IDEOGRAPHIC SPACE are all real `<h2>`s, so all three are still to-spec specs
+// and all three are dropped. `\p{Zs}` is exactly "renders as a blank" and both
+// engines agree on it; `\f` is in the class because GFM strips it; `\r` is
+// what keeps CRLF working. ASCII VERTICAL TAB is deliberately OUT: GFM renders
+// it as U+FFFD, so `## User Stories<VT>` is not blank-padded to a reader and
+// is not dropped. Before the ruling this position diverged — a U+00A0-padded
+// heading was a spec under the system jq the suite execs and NOT one under the
+// gojq gh applies, so in production dropSpecs never fired and the spec shipped
+// as a claimable ticket. Pinned against real gojq in candidates.test.mjs,
+// which now also pins which engine it reached.
 //
 // This is the ONLY line of defence — nothing downstream catches a spec. A
 // leaked one is decided and needs no human hands, so it passes both of phase
