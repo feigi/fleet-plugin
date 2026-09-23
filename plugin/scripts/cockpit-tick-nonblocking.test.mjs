@@ -134,9 +134,8 @@ async function until(what, ms, pred) {
 
 const boardJson = async (port) => {
   const res = await fetch(`http://localhost:${port}/board.json`);
-  const body = res.ok ? await res.json() : null;
-  if (!res.ok) await res.arrayBuffer().catch(() => {});
-  return body;
+  if (!res.ok) { await res.arrayBuffer().catch(() => {}); return null; }
+  return res.json();
 };
 
 // The whole ticket, end to end, in the order the defect happened: a cockpit is

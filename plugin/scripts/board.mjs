@@ -393,8 +393,7 @@ async function runCiState(scriptDir, pr) {
     // `r.stdout` and not `error.stdout`: what the child managed to write before
     // it died is the salvage this whole block exists for, and execRead's record
     // carries it on every arm — including a spawn failure, where it is "".
-    const errOut = out ? out.toString() : "";
-    if (r.status === 2 || !errOut.trim()) {
+    if (r.status === 2 || !out.trim()) {
       console.error(`${NAME}: ci-state --pr ${pr} failed: ${r.error.message}`);
       return null;
     }
@@ -429,13 +428,13 @@ async function runCiState(scriptDir, pr) {
     // failure on another arm for the rest of the run — measured: driving the
     // same PR through this arm then the exit-0 guard below printed only the
     // first tick's warning until the channels were split.
-    try { JSON.parse(errOut); }
+    try { JSON.parse(out); }
     catch (pe) {
       const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
       warnOnce("ci-salvage-nonzero", pr, `ci-state --pr ${pr} (${how}) left a payload that will not parse (${pe.message}); carrying the previous CI value forward rather than reading this as a verdict`);
       return null;
     }
-    return errOut;
+    return out;
   }
   // #1593: exit 0 was never covered by any of the checks above — they only run
   // once the child read reports a failure, and a child that exits 0 reports
