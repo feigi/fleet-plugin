@@ -74,7 +74,7 @@ function gathered(prevBody) {
   writeFileSync(prevFile, prevBody);
 
   const driver = `const { gather } = await import(${JSON.stringify(BOARD)});
-    const r = gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
+    const r = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
                        prevFile: ${JSON.stringify(prevFile)},
                        scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
     console.log(JSON.stringify({ ci: r.ci, prev: r.prev }));`;

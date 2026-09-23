@@ -48,7 +48,7 @@ function gatherLedger({ ledgerBody = null, scriptDir = REAL_SCRIPTS } = {}) {
   if (ledgerBody !== null) writeFileSync(ledgerFile, ledgerBody);
 
   const driver = `const { gather } = await import(${JSON.stringify(BOARD)});
-    const r = gather({ ledgerFile: ${JSON.stringify(ledgerFile)},
+    const r = await gather({ ledgerFile: ${JSON.stringify(ledgerFile)},
                        scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
     console.log(JSON.stringify(r.ledger));`;
   const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
