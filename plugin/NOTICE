@@ -1,0 +1,18 @@
+fleet-ctl
+Copyright 2026 Christian Ziegler
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+Third-party attribution:
+
+The review specialist prompts below are adapted from Anthropic's
+pr-review-toolkit plugin (github.com/anthropics/claude-plugins-official),
+licensed under the Apache License, Version 2.0. Each file's header comment
+names its source agent and the changes made.
+
+  plugin/agents/fleet-review-correctness.agent.md    <- code-reviewer
+  plugin/agents/fleet-review-comments.agent.md       <- comment-analyzer
+  plugin/agents/fleet-review-silent-failure.agent.md <- silent-failure-hunter
+  plugin/agents/fleet-review-tests.agent.md          <- pr-test-analyzer
+  plugin/agents/fleet-review-types.agent.md          <- type-design-analyzer
+  plugin/agents/fleet-review-simplify.agent.md       <- code-simplifier
