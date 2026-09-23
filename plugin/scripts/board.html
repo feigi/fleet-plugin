@@ -325,9 +325,12 @@ function render(m) {
 // through fleet-state.mjs's stallReport(), the same function fleet-tick
 // prints, so the two surfaces cannot describe one dead run differently. This
 // function owns exactly one decision — whether there is a banner at all —
-// and a payload with no `text` yields no banner rather than an empty one: a
-// board.json written before this field existed still renders, it just does
-// not claim a verdict it does not carry.
+// and a payload with no `text` yields no banner rather than an empty one.
+// The `l` check alone already covers a board.json written before this field
+// existed (`liveness` is simply absent there, `undefined`, caught by `l &&`)
+// — what the SECOND guard defends against is a hand-edited or partially
+// written board.json carrying a truthy `liveness` object with no `text` of
+// its own: `⚠ undefined` is worse than no banner at all.
 //
 // Ranked BELOW "data stale" at the call site above, deliberately. A board
 // that stopped updating cannot be trusted to say anything current about the
