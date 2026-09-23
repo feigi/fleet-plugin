@@ -589,12 +589,13 @@ test("CLI: --repo defaults to the script's own plugin/ root, so a real fleet-imp
 // DEFAULT ledger/repo instead of refusing. makeSweep closes that gap.
 // ---------------------------------------------------------------------------
 
+// No agent/transcript/batch-content fixtures here: sweep() dies on the
+// stray flag immediately after the arg() reads, before main() ever opens
+// --batch's own file (verified by mutation — deleting this file's fixture
+// writes changes no assertion's outcome), so writing them would be dead
+// setup that never runs.
 test("CLI: an unknown flag outside the roster refuses by name, not a computed verdict", () => {
   const d = dir();
-  writeFileSync(join(d, "fleet-implementer.agent.md"), claudeAgentMd("opus", "xhigh", "xhigh"));
-  writeFileSync(join(d, "claude-impl.jsonl"), claudeTranscript("claude-opus-5", "xhigh"));
-  const batch = [{ member: "impl-1", agentFile: "fleet-implementer.agent.md", harness: "claude", transcript: "claude-impl.jsonl" }];
-  writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
   const r = runCli(["--batch", "batch.json", "--repo", d, "--zz-no-such-flag"], d);
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, /unknown flag --zz-no-such-flag/);
@@ -637,4 +638,21 @@ test("CLI: a stray flag riding after a valueless roster flag never pre-empts tha
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, /--ledger needs a value/);
   assert.ok(!r.stderr.includes("unknown flag"), r.stderr);
+});
+
+// Review finding #1 (survived, confirmed): sweep() alone only refuses
+// `--`-prefixed tokens, so the ticket's stated harm was only half closed --
+// a single-dash misspelling (`-ledger`) rode through in silence the same
+// way `--ledgerr` used to. Binding stray() alongside sweep(), the same
+// makeSweep+makeStray pairing every sibling CLI (ci-state, diff-stats,
+// board, pr-overlap) already uses, closes the other half.
+test("CLI: a single-dash misspelling (`-ledger`) refuses as a stray, not a computed verdict", () => {
+  const d = dir();
+  writeFileSync(join(d, "fleet-implementer.agent.md"), claudeAgentMd("opus", "xhigh", "xhigh"));
+  writeFileSync(join(d, "claude-impl.jsonl"), claudeTranscript("claude-opus-5", "xhigh"));
+  const batch = [{ member: "impl-1", agentFile: "fleet-implementer.agent.md", harness: "claude", transcript: "claude-impl.jsonl" }];
+  writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
+  const r = runCli(["--batch", "batch.json", "--repo", d, "-ledger", "/tmp/should-not-be-read.tsv"], d);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /unexpected argument '-ledger'/);
 });

@@ -47,7 +47,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { makeDie, makeArg, makeSweep } from "./arg.mjs";
+import { makeDie, makeArg, makeSweep, makeStray } from "./arg.mjs";
 import { foldClaudeTranscript, foldOmpTranscript, parseMemberName, readMembers } from "./member-record.mjs";
 
 const NAME = "tier-check";
@@ -209,6 +209,7 @@ export function appendedLedgerText(existingText, mismatchNote) {
 const die = makeDie(NAME);
 const arg = makeArg(die);
 const sweep = makeSweep(die);
+const stray = makeStray(die);
 
 function resolvePath(repoRoot, p) {
   return isAbsolute(p) ? p : join(repoRoot, p);
@@ -291,6 +292,11 @@ function main() {
   // along with a well-formed --batch is refused by name instead of being
   // silently absorbed into a batch-content error.
   sweep(["batch", "ledger", "repo"]);
+  // #463: sweep() only refuses a `--`-prefixed token; a bare or single-dash
+  // one (`-ledger`, the single-dash cousin of the ticket's own `--ledgerr`)
+  // rode along in silence the same way. This file takes no positional, so
+  // any leftover token is a stray.
+  stray(["batch", "ledger", "repo"]);
 
   let entries;
   try {
