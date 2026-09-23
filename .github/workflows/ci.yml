@@ -29,12 +29,12 @@ jobs:
   # go stale the way a check result can. This job stays required for the half a
   # ruleset cannot express, the no-merge-commits assertion below, and for the
   # actionable `git rebase origin/main` line a bare merge-button refusal does
-  # not print. The job name is no longer load-bearing for any other workflow:
-  # `rebase-check-refresh.yml` and `rerun-rebase-check.sh` re-ran this job by a
-  # `select(.name == "rebase-check")` lookup and were deleted with #164, because
-  # the stale green they existed to flip can no longer reach a merge.
-  # No *workflow*, that is — which is not the same as unconstrained. This job's
-  # name is still read, by mechanisms that only look like one:
+  # not print. This job's name is no longer load-bearing for any *workflow*
+  # — `rebase-check-refresh.yml` and `rerun-rebase-check.sh` re-ran this job
+  # by a `select(.name == "rebase-check")` lookup and were deleted with
+  # #164, because the stale green they existed to flip can no longer reach a
+  # merge — but that is not the same as unconstrained: mechanisms that only
+  # look like a workflow still read it:
   #   - the `main` ruleset requires a status-check context spelled
   #     `rebase-check` (`.github/rulesets/main.json` is the checked-in spec; ADR
   #     0007 records the same requirement). A required context is matched against
