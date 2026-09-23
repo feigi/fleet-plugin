@@ -456,9 +456,24 @@ function expectedJobs(file) {
     if (m) ids.push(m[1]);
     if (/^ {4}name:/.test(line)) sawNameOverride = true;
   }
-  // Fail closed on the assumption this derivation rests on. If a job sets a
-  // display name, ids no longer equal the names `gh run view` reports, and every
-  // comparison below would silently compare the wrong strings.
+  // Fail closed on the assumption this derivation rests on. If a job's
+  // reported name diverges from its YAML key, ids no longer equal the names
+  // `gh run view` reports, and every comparison below would silently compare
+  // the wrong strings.
+  //
+  // The reader most likely to cause that divergence is standing in the
+  // workflow, not here, so the same constraint is written at that end too:
+  // the NOTE heading the `rebase-check:` job in this repo's
+  // `.github/workflows/ci.yml`. It names this derivation as a live reader of
+  // that job's name, alongside the `main` ruleset, which requires a
+  // status-check context by the name the API reports — and records that a
+  // YAML job key and an API-reported display name coincide only while every
+  // job's reported name is its own key. This guard only catches one of the
+  // ways that can break: the canonical `    name:` spelling. A
+  // `strategy.matrix` block, or `name:` written as `name :` or `"name":`, sets
+  // (or changes) the reported name just as validly and slips past unnoticed —
+  // `sawNameOverride` stays false, and this function returns a verdict built
+  // on an id the API no longer reports under.
   if (sawNameOverride) {
     die(`${file} sets a job-level 'name:' — job ids no longer match reported job names, derivation invalid`);
   }

@@ -81,9 +81,10 @@ unless the live object matches. Every field below is a choice, not a default:
 
 `rebase-check` stays required even though `strict: true` subsumes its merge-base
 assertion, for two reasons: it also asserts **no merge commits in `base..HEAD`**
-(`ci.yml:67-71`), which no ruleset field expresses, and it prints the actionable
-`git fetch origin && git rebase origin/$BASE_REF` line that a bare merge-button
-refusal does not.
+(the `MERGE_COMMITS=$(git rev-list --merges --count ...)` check in the
+`rebase-check` job of `ci.yml`), which no ruleset field expresses, and it
+prints the actionable `git fetch origin && git rebase origin/$BASE_REF` line
+that a bare merge-button refusal does not.
 
 `rebase-check-refresh.yml`, `.github/scripts/rerun-rebase-check.sh`, and
 `rerun-rebase-check.test.mjs` are **deleted**. Their sole purpose was flipping a
