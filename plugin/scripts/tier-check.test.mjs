@@ -606,10 +606,6 @@ test("CLI: an unknown flag outside the roster refuses by name, not a computed ve
 // DEFAULT ledger, never naming the typo.
 test("CLI: a misspelled --ledgerr refuses instead of computing a verdict against the default ledger", () => {
   const d = dir();
-  writeFileSync(join(d, "fleet-implementer.agent.md"), claudeAgentMd("opus", "xhigh", "xhigh"));
-  writeFileSync(join(d, "claude-impl.jsonl"), claudeTranscript("claude-opus-5", "xhigh"));
-  const batch = [{ member: "impl-1", agentFile: "fleet-implementer.agent.md", harness: "claude", transcript: "claude-impl.jsonl" }];
-  writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
   const r = runCli(["--batch", "batch.json", "--repo", d, "--ledgerr", "/tmp/should-not-be-read.tsv"], d);
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, /unknown flag --ledgerr/);
