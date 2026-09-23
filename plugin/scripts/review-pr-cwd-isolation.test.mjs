@@ -92,8 +92,17 @@ const specialist = { claude: specialistOf(CLAUDE), omp: specialistOf(OMP) };
 const refuter = { claude: refuterOf(CLAUDE), omp: refuterOf(OMP) };
 
 const both = (prompts) => [
-  ["workflows/review-pr.js (Claude)", prompts.claude],
-  ["scripts/review-core.js (omp)", prompts.omp],
+  [`${CLAUDE} (Claude)`, prompts.claude],
+  [`${OMP} (omp)`, prompts.omp],
+];
+
+// The plain `[dispatch, prompts]` pairing, reused by every loop below that
+// needs no third per-dispatch value — the loops that DO need one (the
+// lead-in text, the schema name) keep their own three-tuple list rather than
+// bolting a third element onto this shared shape.
+const DISPATCHES = [
+  ["specialist", specialist],
+  ["refuter", refuter],
 ];
 
 // --- Part 1: the inherited cwd is named, as a tree not to write to ---------
@@ -137,8 +146,8 @@ test("both harnesses' refuter prompts name the cwd they inherit, in the same wor
 test("each refuter's cwd clause hangs off that harness's own scratch sentence, not on nothing", () => {
   assert.match(
     refuter.claude,
-    phrase(`Your shell does not start there: ${REFUTER_CWD}`),
-    "workflows/review-pr.js's refuter no longer opens the cwd clause as its own sentence — it sits one sentence after the scratch-path rule that review-pr-refuter-scratch.test.mjs pins as an unbroken clause, and 'there' names nothing once that neighbour goes",
+    phrase(`for a \`/tmp\` scratch dir on macOS. Your shell does not start there: ${REFUTER_CWD}`),
+    "workflows/review-pr.js's refuter no longer opens the cwd clause directly after the toplevel-assertion sentence review-pr-refuter-scratch.test.mjs pins — a rewording or a splice between them leaves the cwd clause hanging off nothing, the same defect the omp-side pin below catches for its own preceding sentence",
   );
   assert.match(
     refuter.omp,
@@ -154,10 +163,7 @@ test("each refuter's cwd clause hangs off that harness's own scratch sentence, n
 // only a printed path settles.
 const PWD_FIRST = phrase("Run `pwd` as your FIRST command and keep the path it prints; that directory is a no-run zone from then on");
 
-for (const [dispatch, prompts] of [
-  ["specialist", specialist],
-  ["refuter", refuter],
-]) {
+for (const [dispatch, prompts] of DISPATCHES) {
   test(`both harnesses' ${dispatch} prompts require \`pwd\` first and call that directory a no-run zone`, () => {
     for (const [name, prompt] of both(prompts)) {
       assert.match(
@@ -188,8 +194,8 @@ for (const [dispatch, prompts] of [
 const AUDIT_COMMAND = " `git -C <that path> status --porcelain -uall` — the explicit untracked mode, never bare `--porcelain`, which a `status.showUntrackedFiles=no` config silences into a false clean.";
 
 // Each dispatch's own lead-in — identical across harnesses, different between
-// the two dispatches, because the refuter's own `pwd` sentence sits two lines
-// above it and the specialist's does not.
+// the two dispatches, because the refuter's lead-in follows its own `pwd`
+// sentence directly and the specialist's does not.
 for (const [dispatch, prompts, leadIn] of [
   ["specialist", specialist, "Then audit the directory that first `pwd` printed, before you return:"],
   ["refuter", refuter, "Then audit that directory before you return:"],
@@ -249,9 +255,14 @@ for (const [dispatch, prompts, schemaName] of [
       Object.hasOwn(schema.properties, named[1]),
       `workflows/review-pr.js's ${dispatch} prompt asks for the audit in \`${named[1]}\`, which ${schemaName} does not declare — \`additionalProperties: false\` drops it in validation and the prompt still reads correct`,
     );
+    const namedOmp = prompts.omp.match(REPORT_FIELD);
+    assert.ok(
+      namedOmp,
+      `scripts/review-core.js's ${dispatch} prompt no longer names a report field for the CWD-AUDIT line — an audit the agent has nowhere to put is an audit the caller never sees (#1673)`,
+    );
     assert.equal(
       named[1],
-      prompts.omp.match(REPORT_FIELD)[1],
+      namedOmp[1],
       `the two harnesses' ${dispatch} prompts now report the audit into DIFFERENT fields — a controller reading one harness's payload finds nothing in the other's (#1673)`,
     );
   });
@@ -261,10 +272,7 @@ for (const [dispatch, prompts, schemaName] of [
 // it. A state a prompt cannot spell is a state it will not report — and
 // "clean" is the one that matters most, since an audit reported only when it
 // finds something is indistinguishable from one never run.
-for (const [dispatch, prompts] of [
-  ["specialist", specialist],
-  ["refuter", refuter],
-]) {
+for (const [dispatch, prompts] of DISPATCHES) {
   test(`both harnesses' ${dispatch} prompts spell every state of the CWD-AUDIT line, and require it on a clean run`, () => {
     for (const [name, prompt] of both(prompts)) {
       for (const state of ["clean", "dirty", "unrepo"]) {
@@ -277,7 +285,7 @@ for (const [dispatch, prompts] of [
       assert.match(
         prompt,
         phrase("every run, clean or not"),
-        `${name}'s ${dispatch} prompt no longer demands the audit on a clean run — an omitted line reads exactly like a check never run, which is how "four files dirty" was found by chance rather than by a report (#1673)`,
+        `${name}'s ${dispatch} prompt no longer demands the audit on a clean run — an omitted line reads exactly like a check never run, which is how "four files dirty" was found by chance rather than by a report (#1433/#1673)`,
       );
     }
   });
@@ -287,10 +295,7 @@ for (const [dispatch, prompts] of [
 // finds half the reports. Checked per prompt: a capture group around a fixed
 // literal can only ever capture that same literal, so comparing one prompt's
 // capture against another's could never fail as long as both matched at all.
-for (const [dispatch, prompts] of [
-  ["specialist", specialist],
-  ["refuter", refuter],
-]) {
+for (const [dispatch, prompts] of DISPATCHES) {
   test(`both harnesses' ${dispatch} prompts name the CWD-AUDIT marker as a code span`, () => {
     for (const [name, prompt] of both(prompts)) {
       assert.match(
