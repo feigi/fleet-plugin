@@ -305,11 +305,18 @@ function refuseStrayInCheckTail(tail) {
 // `issue`/`ticket`/`pr`, and the tail left behind carries no `--` element to
 // find. Nor could that helper be read over the whole of `rest` instead —
 // that refuses `filed <issue> "--flag-like subject"` too, a two-element
-// tail with a `--` element, pinned here as must-keep-working. An id is
-// never legitimately `--`-prefixed, so this slot takes the bare prefix
-// test a free-text tail cannot have.
+// tail with a `--` element, pinned here as must-keep-working. A legitimate
+// id is bare digits, optionally `#`-prefixed, and never carries a leading
+// dash at all — single or double — so this slot refuses ANY leading dash,
+// not only a double one (#1678). The free-text tail cannot take that same
+// test: a subject can legitimately open with a double-dash-leading word —
+// exactly what `--flag-like subject text` above and check's own
+// dash-leading-subject pin exist to keep working. A single-dash-leading
+// subject is merely unexercised, not a documented case — nothing pins it
+// either way. So only the id slot can take the bare prefix test at all,
+// for the same no-free-text reason given above.
 function refuseStrayInId(value, what) {
-  if (value.startsWith("--")) die(`unknown flag ${value} — expected ${what}`);
+  if (value.startsWith("-")) die(`unknown flag ${value} — expected ${what}`);
 }
 
 // Set by load(), the only function that reads the file, so `ledger.ok` can
