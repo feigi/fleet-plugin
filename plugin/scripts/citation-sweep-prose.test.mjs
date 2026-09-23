@@ -200,6 +200,15 @@ const FILES = [
     stale: [/board\.mjs:153/],
     live: ["encodeProjectDir"],
   },
+  // #1725 fixed this ADR's `ci.yml:269` citation by hand, replacing it with
+  // the `# Blocking, every PR` comment anchor. Ban the general `\d+` form,
+  // not just the one drifted value: a ban on `:269` alone lets `:270` right
+  // back in.
+  {
+    path: ["..", "docs", "adr", "0007-main-ruleset-is-the-merge-gate.md"],
+    stale: [/ci\.yml:\d+/],
+    live: ["# Blocking, every PR"],
+  },
 ];
 
 for (const { path, stale, live } of FILES) {
