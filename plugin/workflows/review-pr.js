@@ -1601,6 +1601,16 @@ file named below, if one is given.
 Never read or write ${worktree} — other agents are using it.
 Run any mutation or probe work inside your own copy of the snapshot.
 
+Your shell starts in NEITHER of those directories, and what it does start in is
+a tree you must not write to: this dispatch carries no working directory of its
+own, so you begin wherever the controller's own review cell is standing — its
+checkout, the tree it reads instruments.sh, ci-state.mjs and every gate decision
+out of. A relative path in any command lands THERE, not in the snapshot and not
+in your scratch dir. Run \`pwd\` as your FIRST command and keep the path it
+prints; that directory is a no-run zone from then on, and every command after it
+chains its own \`cd\` into the snapshot or into your scratch dir, both named
+above as absolute paths.
+
 ${readRules(usableDiff(snap), stats, snap)}
 
 Tests: from the snapshot's root, run exactly this — copy it verbatim:
@@ -1634,7 +1644,20 @@ resolved forms (\`realpath\`), since \`--show-toplevel\` can report
 \`/private/tmp/…\` for a \`/tmp\` scratch dir on macOS.
 
 Report only what you RAN. A claim you reasoned to but did not execute belongs in
-'suggestion', not 'critical'. State your search scope for every negative claim.`,
+'suggestion', not 'critical'. State your search scope for every negative claim.
+
+Then audit the directory that first \`pwd\` printed, before you return:
+\`git -C <that path> status --porcelain -uall\` — the explicit untracked mode,
+never bare \`--porcelain\`, which a \`status.showUntrackedFiles=no\` config
+silences into a false clean. Report the result in \`scope_searched\` as one line
+beginning \`CWD-AUDIT:\` — \`CWD-AUDIT: clean <path>\` when it printed nothing,
+\`CWD-AUDIT: dirty <path> — <what it printed>\` when it printed anything,
+\`CWD-AUDIT: unrepo <path>\` when git answered \`fatal: not a git repository\` —
+every run, clean or not: a clean tree is the result this check exists to
+produce, and an omitted line reads exactly like a check never run. Three PRs
+reviewed from one cell left four files modified in that checkout with nothing in
+any payload saying so (#1433), so a path you cannot account for is still yours
+to name.`,
       {
         label: `review:${d.key}`,
         phase: "Review",
@@ -1731,7 +1754,23 @@ Chain the directory change into the command, \`cd "$D" && git …\`, never
 checkout — and bracket a fixture's own git with \`git rev-parse --show-toplevel\`:
 before \`git init\` it must NOT resolve to the repository, and a fresh scratch
 dir's \`fatal: not a git repository\` (exit 128) is the pass, not a failure;
-before any \`git commit\` it must resolve to your scratch path — compare resolved forms (\`realpath\`), since \`--show-toplevel\` can report \`/private/tmp/…\` for a \`/tmp\` scratch dir on macOS.`,
+before any \`git commit\` it must resolve to your scratch path — compare resolved forms (\`realpath\`), since \`--show-toplevel\` can report \`/private/tmp/…\` for a \`/tmp\` scratch dir on macOS.
+Your shell does not start there: this dispatch carries no working directory of
+its own, so you begin wherever the controller's own review cell is standing —
+its checkout, the tree it reads every gate decision out of — and a relative
+path in any command lands THERE. Run \`pwd\` as your FIRST command and keep
+the path it prints; that directory is a no-run zone from then on, and the
+snapshot and your scratch dir are both named above as absolute paths.
+Then audit that directory before you return: \`git -C <that path> status
+--porcelain -uall\` — the explicit untracked mode, never bare \`--porcelain\`,
+which a \`status.showUntrackedFiles=no\` config silences into a false clean.
+Report it in \`reason\` as one line beginning \`CWD-AUDIT:\` —
+\`CWD-AUDIT: clean <path>\` when it printed nothing, \`CWD-AUDIT: dirty <path> —
+<what it printed>\` when it printed anything, \`CWD-AUDIT: unrepo <path>\` when
+git answered \`fatal: not a git repository\` — every run, clean or not: an
+omitted line reads exactly like a check never run, and applying a mutation is
+how three reviews from one cell left four files modified in that checkout
+(#1433).`,
               { label: `verify:${d.key}`, phase: "Verify", agentType: "fleet-ctl:fleet-review-verifier", schema: VERDICT_SCHEMA },
             ),
           ),
