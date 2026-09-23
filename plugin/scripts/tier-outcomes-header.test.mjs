@@ -125,8 +125,8 @@ test("the header names WHICH diff `minted_false_claim` scores, and settles the c
   const def = stripHashGutter(between(HEADER, "minted_false_claim", "# sizing", "the header"));
   assert.match(
     def,
-    phrase("the diff AS SUBMITTED added a factual claim"),
-    "the header no longer says `minted_false_claim` scores the diff AS SUBMITTED",
+    phrase("the work AS SUBMITTED asserted a factual claim"),
+    "the header no longer says `minted_false_claim` scores the work AS SUBMITTED",
   );
   assert.match(
     def,
