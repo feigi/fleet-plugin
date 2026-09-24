@@ -24,15 +24,25 @@ die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
 # `--check` reports and writes nothing. Three exit statuses, and the third is
 # the reason the flag exists rather than a `diff` an operator assembles by
-# hand: 0 the live gate matches the spec, 3 it does not, 2 the question could
-# not be answered at all — no spec, no `gh`, a listing or read that failed.
-# Reading a ruleset needs repository admin, so 2 is the status a caller without
-# it gets, and collapsing it into 3 would report drift where there is only a
-# missing credential.
+# hand: 0 the live gate matches the spec, 3 it does not — including the gate
+# having been deleted or renamed since the spec was written — 2 the question
+# could not be answered at all: no spec, no `gh`, a listing or read that
+# failed outright.
+# GitHub lets any caller with read access GET a ruleset (200), but silently
+# omits `bypass_actors` from the body unless the caller holds repository
+# admin. That omission is a missing credential, not drift, so it is caught
+# before the comparison and reported as 2 — never compared as `null` against
+# the spec's `[]`, which would misreport a permissions gap as drift.
 CHECK=
 SPEC=
+end_opts=
 for arg in "$@"; do
+  if [ -n "$end_opts" ]; then
+    [ -z "$SPEC" ] || die "more than one spec path given: $SPEC and $arg"; SPEC=$arg
+    continue
+  fi
   case $arg in
+    --) end_opts=1 ;;
     --check) CHECK=1 ;;
     -*) die "unknown option $arg — the only option is --check" ;;
     *) [ -z "$SPEC" ] || die "more than one spec path given: $SPEC and $arg"; SPEC=$arg ;;
@@ -64,7 +74,14 @@ RULESETS=$(gh api --paginate "repos/$REPO/rulesets") \
 ID=$(printf '%s' "$RULESETS" | jq -r --arg n "$RULESET_NAME" \
   '.[] | select(.name == $n and .source_type == "Repository") | .id') \
   || die "could not read the ruleset listing for $REPO — see error above"
-[ -n "$ID" ] || die "$REPO has no repository-level ruleset named '$RULESET_NAME'"
+if [ -z "$ID" ]; then
+  if [ -n "$CHECK" ]; then
+    printf '%s: %s has no repository-level ruleset named %s — the gate is gone:\n' "$NAME" "$REPO" "$RULESET_NAME" >&2
+    printf '%s: drift — re-run without --check, as a repository admin, to reconcile\n' "$NAME" >&2
+    exit 3
+  fi
+  die "$REPO has no repository-level ruleset named '$RULESET_NAME'"
+fi
 # Command substitution strips the trailing newline, so N ids carry N-1 of them.
 case $ID in
   *$'\n'*) die "$REPO has more than one ruleset named '$RULESET_NAME' — resolve by hand" ;;
@@ -81,9 +98,26 @@ norm() {
           rules: (.rules | if type == "array" then sort_by(.type) else . end)}' "$@"
 }
 
+# `diff` exits 0 (identical, unreached here — callers only reach this after a
+# mismatch) or 1 (differ) in the ordinary case; anything higher is `diff`
+# itself failing (a process-substitution pipe error, an out-of-descriptors
+# runner), which `|| true` would otherwise make indistinguishable from an
+# ordinary reported difference.
+show_diff() {
+  if diff <(printf '%s\n' "$1") <(printf '%s\n' "$2") >&2; then
+    rc=0
+  else
+    rc=$?
+  fi
+  [ "$rc" -le 1 ] || die "diff itself failed comparing $SPEC's projection to the live ruleset (exit $rc) — see error above"
+}
+
 want=$(norm "$SPEC") || die "$SPEC is not a ruleset this script can compare — see error above"
 live=$(gh api "repos/$REPO/rulesets/$ID") \
   || die "cannot read $REPO ruleset $ID — see error above"
+if [ -n "$CHECK" ] && ! printf '%s' "$live" | jq -e 'has("bypass_actors")' >/dev/null; then
+  die "cannot see bypass_actors on $REPO ruleset $ID without repository admin — re-run as an admin to check for real drift"
+fi
 live=$(printf '%s' "$live" | norm) \
   || die "$REPO ruleset $ID did not read back as JSON — see error above"
 
@@ -100,7 +134,7 @@ if [ -n "$CHECK" ]; then
   # which is whether the live gate is weaker than the agreed one or merely
   # older.
   printf '%s: %s ruleset %s does NOT match %s:\n' "$NAME" "$REPO" "$ID" "$SPEC" >&2
-  diff <(printf '%s\n' "$want") <(printf '%s\n' "$live") >&2 || true
+  show_diff "$want" "$live"
   printf '%s: drift — re-run without --check, as a repository admin, to reconcile\n' "$NAME" >&2
   exit 3
 fi
@@ -117,7 +151,7 @@ after=$(printf '%s' "$after" | norm) \
   || die "the PUT was accepted but $REPO ruleset $ID did not read back as JSON — the live gate is UNVERIFIED"
 if [ "$after" != "$want" ]; then
   printf '%s: the live ruleset still differs from %s after the write:\n' "$NAME" "$SPEC" >&2
-  diff <(printf '%s\n' "$want") <(printf '%s\n' "$after") >&2 || true
+  show_diff "$want" "$after"
   die "refusing to report success"
 fi
 

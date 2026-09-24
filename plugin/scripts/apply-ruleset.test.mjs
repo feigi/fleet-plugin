@@ -343,11 +343,12 @@ test("a missing jq is refused by name", (t) => {
 
 // ---- --check: the same comparison, asked by something that cannot write ----
 //
-// #1710. The four contexts ADR 0007 selected sat in the spec and not in the
-// live gate for five days, because nothing reads the gate unless a person
-// decides to. What makes the flag worth its branch is the third status: an
-// unattended caller holds no admin, and a read it was never allowed to make
-// must not reach it as "the gate has drifted".
+// #1710. The five contexts ADR 0007 added sat in the spec and not in the
+// live gate for the 4d22h between ratification and reconcile, because
+// nothing reads the gate unless a person decides to. What makes the flag
+// worth its branch is the third status: an unattended caller holds no
+// admin, and a read it was never allowed to make must not reach it as "the
+// gate has drifted".
 
 test("--check reports a difference and writes nothing", (t) => {
   const want = spec();
@@ -365,11 +366,34 @@ test("--check on a gate that matches its spec is an ordinary success", (t) => {
   assert.deepEqual(r.puts, [], "--check must never write");
 });
 
+test("--check on a listing with no matching repository-level ruleset is drift, not unanswerable", (t) => {
+  // The worst drift there is — the gate itself is gone — must not collapse
+  // into the same status a caller without a credential gets: 3, not 2.
+  const want = spec();
+  const r = run(t, { args: ["--check"], spec: want, list: listed([7777777, "main", "Organization"]) });
+  assert.equal(r.status, 3, "a deleted or renamed gate is drift, not merely unanswerable");
+  assert.match(r.out, /has no repository-level ruleset named/);
+  assert.deepEqual(r.puts, [], "--check must never write");
+});
+
 test("--check cannot read the gate at all is not reported as drift", (t) => {
   const want = spec();
   const r = run(t, { args: ["--check"], spec: want, readFails: [1] });
-  assert.equal(r.status, 2, "a caller without admin reads this, and 3 would claim a difference nobody saw");
+  assert.equal(r.status, 2, "a read that fails outright must not be reported as though a diff was seen");
   assert.match(r.out, /cannot read/);
+});
+
+test("--check without admin visibility into bypass_actors is not reported as drift", (t) => {
+  // GitHub answers a non-admin's GET with 200 and the `bypass_actors` key
+  // simply absent, never with a failed read. norm() would otherwise turn
+  // that absence into JSON `null` and compare it against the spec's `[]` as
+  // though it were a real difference (#1710's actual failure mode).
+  const want = spec();
+  const { bypass_actors, ...withheld } = served(want);
+  const r = run(t, { args: ["--check"], spec: want, reads: [withheld] });
+  assert.equal(r.status, 2, "a 200 that withholds bypass_actors is a missing credential, not a null-vs-[] diff");
+  assert.match(r.out, /bypass_actors/);
+  assert.doesNotMatch(r.out, /does NOT match/, "must never be compared as drift");
 });
 
 test("an unknown option is refused rather than read as a spec path", (t) => {
@@ -377,6 +401,13 @@ test("an unknown option is refused rather than read as a spec path", (t) => {
   assert.equal(r.status, 2, r.out);
   assert.match(r.out, /unknown option --dry-run/);
   assert.deepEqual(r.calls, [], "refused before it reaches the API");
+});
+
+test("-- ends option parsing rather than being read as an unknown option", (t) => {
+  const want = spec();
+  const r = run(t, { args: ["--"], spec: want, reads: [served(want)] });
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /already matches/);
 });
 
 // ---- the shipped spec ----------------------------------------------------

@@ -163,7 +163,7 @@ whose failure condition a PR head could have been checked against first.
   live repo by one command. A UI edit that silently fails to save — which happened
   twice while this was being settled — is now detectable rather than believed.
 - **Detectable is not detected.** Measured 2026-09-18 (#1710): the spec above
-  named seven required contexts and the live ruleset enforced three — the four
+  named seven required contexts and the live ruleset enforced two — the five
   added when this ADR was ratified reached the tree and never reached GitHub,
   because merging the spec is not applying it and nothing read the gate unless
   a person chose to. **86 PRs merged through the narrower gate** over the 4d22h
