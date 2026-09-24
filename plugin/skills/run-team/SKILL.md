@@ -251,6 +251,29 @@ At start, and whenever the pool empties.
    codes mean. Pinning before that fast-forward would instead pin the
    superseded text and certify it for the rest of the run.
 
+   **Check the merge gate against its spec, once the fast-forward has put the
+   ratified spec in front of you.** Where the workspace checks a ruleset spec
+   in, `.github/scripts/apply-ruleset.sh --check` compares it to the live gate
+   without writing anything (no spec checked in → nothing to run, skip it).
+   Three statuses and they are not interchangeable: **0** the gate is what the
+   tree says it is; **3** it is not — including the gate having been deleted
+   or renamed — and the diff it prints says how; **2** the question could not
+   be answered at all: no spec, no `gh`, a listing or read that failed
+   outright, or a read that succeeded but withheld `bypass_actors` because
+   the session lacks repository admin.
+
+   **3 does not stop the run and is not yours to fix** — reconciling is a
+   write to the gate protecting this repo, so it needs the maintainer.
+   Surface the diff and carry on. What it changes is what you may then claim:
+   every statement this run makes about which checks must pass before a merge
+   is sourced from the spec plus ADR 0007 and is true of the live gate only
+   while this check is green, so a 3 means saying "the gate requires X"
+   without naming the drift is a false claim, and a 2 means you never learned
+   either way. Measured 2026-09-18 (#1710): five contexts ADR 0007 had
+   selected were required by the spec and by nothing live, and the gap sat
+   there unnoticed because the only thing that ever read the live gate was a
+   person choosing to.
+
    **Launch the cockpit.** On every phase-0 pass, not just the first:
    `node ~/.fleet/bin/fleet-run board.mjs serve --open &` in the
    background. It is a read-only mirror of `.fleet/ledger.md` + `gh` — you never
