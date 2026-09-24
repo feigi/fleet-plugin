@@ -10,8 +10,12 @@
 # ../claude-workflow-offturn.md for why this run was inconclusive here):
 #
 #   cd /Users/chris/dev/fleet-plugin
-#   claude -p --dangerously-skip-permissions --permission-mode bypassPermissions \
-#     --strict-mcp-config < docs/research/probes/claude-workflow-offturn-probe.txt
+#   grep -v '^#' docs/research/probes/claude-workflow-offturn-probe.txt |
+#     claude -p --dangerously-skip-permissions --permission-mode bypassPermissions \
+#       --strict-mcp-config
+#
+# The grep strips this '#' header, so the expected answer stated below never
+# reaches the model and cannot prime it. Piping the file whole would.
 #
 # Expected clean output: three lines matching the format at the bottom, each
 # stating whether ToolSearch found a callable Workflow tool for that
