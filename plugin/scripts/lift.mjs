@@ -51,3 +51,19 @@ export function lift(code, name, signature) {
   assert.ok(m, `review-pr.js no longer declares ${name}(${signature}) at top level — update this test`);
   return new Function(`${m[0]}\nreturn ${name};`)();
 }
+
+// The same lift for a second top-level shape review-pr.js's tests read: a
+// `const NAME = { ... };` object literal (FINDINGS_SCHEMA, VERDICT_SCHEMA),
+// which lift()'s `function name(signature)` pattern cannot match. Everything
+// the header above says about why the text is copied rather than imported,
+// and about `code` being the caller's already-stripped text, applies here
+// unchanged. The two `^` anchors are what make "top level" mean anything: an
+// indented `const` is not matched, and the literal ends at the first
+// column-0 `};`, not at a nested one. The hoisting ceiling above does not
+// carry over — a second top-level `const NAME` is a SyntaxError in the file
+// itself, not a copy that silently wins at runtime.
+export function liftConst(code, name) {
+  const m = code.match(new RegExp(`^const ${RegExp.escape(name)} = \\{[\\s\\S]*?^\\};$`, "m"));
+  assert.ok(m, `review-pr.js no longer declares a top-level \`const ${name} = { ... };\` object literal — update this test`);
+  return new Function(`${m[0]}\nreturn ${name};`)();
+}

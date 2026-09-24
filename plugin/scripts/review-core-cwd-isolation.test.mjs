@@ -51,6 +51,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { phrase } from "./prose-pin.mjs";
 import { promptRenderer } from "./prompt-renderer.mjs";
+import { AUDIT_COMMAND, AUDIT_STATES, CWD_AUDIT_MARKER, EVERY_RUN, PWD_FIRST, REFUTER_CWD, REPORT_FIELD, SPECIALIST_CWD, auditLine } from "./cwd-isolation-pins.mjs";
 import { FINDINGS_SCHEMA, VERDICT_SCHEMA, cwdAuditFrom, runReview } from "./review-core.js";
 
 const FILE = "scripts/review-core.js";
@@ -88,24 +89,14 @@ const snapshot = promptRenderer({
 
 // --- Part 1: the inherited cwd is named, as a tree not to write to ---------
 // ONE contiguous span per prompt, never two assertions and never a `.{0,N}`
-// gap: the three clauses have to arrive together or the rule is not the rule.
-// "carries no working directory of its own" alone is a fact with no
-// instruction; naming the controller's checkout alone reads as context; and
-// "a relative path lands THERE" is the only clause that says what to do
-// differently. Mutation-tested on each prompt: deleting any one of the three
-// clauses, and splicing an exception between them ("…lands THERE, unless the
-// command is read-only"), both red these.
-const SPECIALIST_CWD = phrase(
-  "this dispatch carries no working directory of its own, so you begin wherever the controller's own review cell is standing — its checkout, the tree it reads instruments.sh, ci-state.mjs and every gate decision out of. A relative path in any command lands THERE, not in the snapshot and not in your scratch dir.",
-);
-const REFUTER_CWD = phrase(
-  "your shell does not start there: this dispatch carries no working directory of its own, so you begin wherever the controller's own review cell is standing — its checkout, the tree it reads every gate decision out of — and a relative path in any command lands THERE.",
-);
-
+// gap — cwd-isolation-pins.mjs holds both spans and why their three clauses
+// have to arrive together. Mutation-tested on each prompt: deleting any one of
+// the three clauses, and splicing an exception between them ("…lands THERE,
+// unless the command is read-only"), both red these.
 test("the rendered specialist prompt names the cwd it inherits and says a relative path lands there", () => {
   assert.match(
     specialist,
-    SPECIALIST_CWD,
+    phrase(SPECIALIST_CWD),
     "review-core.js's specialist prompt no longer names the directory it is dispatched INTO — a specialist that does not know its cwd is the controller's checkout has no reason to leave it, " +
       "which is how three reviews left four files modified there (#1433)",
   );
@@ -114,19 +105,15 @@ test("the rendered specialist prompt names the cwd it inherits and says a relati
 test("the rendered refuter prompt names the cwd it inherits and says a relative path lands there", () => {
   assert.match(
     refuter,
-    REFUTER_CWD,
+    phrase(`your shell does not start there: ${REFUTER_CWD}`),
     "review-core.js's refuter prompt no longer names the directory it is dispatched INTO — a refuter applying a mutation is the likeliest writer of the four files #1433 measured",
   );
 });
 
 // --- Part 2: `pwd` first, and the inherited directory is a no-run zone -----
-// Both halves in one span. `pwd` with no consequence attached is a print
-// statement, and "a no-run zone" naming no directory is unenforceable — the
-// failure the sibling pins record is an agent that BELIEVED it was somewhere
-// else, which only a printed path settles. Mutation-tested: demoting FIRST to
-// "early" or dropping the no-run clause reds these.
-const PWD_FIRST = phrase("Run `pwd` as your FIRST command and keep the path it prints; that directory is a no-run zone from then on");
-
+// Both halves in one span (PWD_FIRST, cwd-isolation-pins.mjs says why).
+// Mutation-tested: demoting FIRST to "early" or dropping the no-run clause
+// reds these.
 for (const [name, prompt] of [
   ["specialist", specialist],
   ["refuter", refuter],
@@ -141,22 +128,15 @@ for (const [name, prompt] of [
 }
 
 // --- Part 3: the positive self-check, into a field the schema carries ------
-// The audit command and the report contract are separate spans because they
-// fail separately: a bare `--porcelain` is a silently WRONG audit (a
-// `status.showUntrackedFiles=no` config makes it print nothing on a tree
-// holding new files, which reads as clean), while a missing report contract is
-// an audit nobody can read. Each span is contiguous for the splice reason
-// above; mutation-tested: dropping `-uall`, dropping the
-// `showUntrackedFiles=no` reason, and replacing "every run, clean or not"
-// with "when it printed anything" each red one of these.
-const AUDIT_COMMAND = phrase(
-  "`git -C <that path> status --porcelain -uall` — the explicit untracked mode, never bare `--porcelain`, which a `status.showUntrackedFiles=no` config silences into a false clean.",
-);
-
+// The audit command and the report contract are separate spans, each
+// contiguous, for the reasons cwd-isolation-pins.mjs gives. Mutation-tested:
+// dropping `-uall`, dropping the `showUntrackedFiles=no` reason, and replacing
+// "every run, clean or not" with "when it printed anything" each red one of
+// these.
 test("the rendered specialist prompt audits the directory it started in, with the explicit untracked mode", () => {
   assert.match(
     specialist,
-    AUDIT_COMMAND,
+    phrase(AUDIT_COMMAND),
     "review-core.js's specialist prompt dropped the stray-write audit, or asks for bare `--porcelain` — which a `status.showUntrackedFiles=no` config silences into a false clean, the same false-clean class worktree-audit.sh's own `-uall` exists to deny (#1433)",
   );
 });
@@ -164,7 +144,7 @@ test("the rendered specialist prompt audits the directory it started in, with th
 test("the rendered refuter prompt audits the directory it started in, with the explicit untracked mode", () => {
   assert.match(
     refuter,
-    AUDIT_COMMAND,
+    phrase(AUDIT_COMMAND),
     "review-core.js's refuter prompt dropped the stray-write audit, or asks for bare `--porcelain` (#1433)",
   );
 });
@@ -173,17 +153,9 @@ test("the rendered refuter prompt audits the directory it started in, with the e
 // field each prompt names has to be one its SCHEMA declares. Both schemas are
 // `additionalProperties: false`, so a rule pointing at any other name is inert
 // — the agent's audit is dropped in validation and the prompt still reads
-// correct. The field name is EXTRACTED from the rendered prompt rather than
-// transcribed here, so the pin fails in either direction: the prompt renaming
-// the field, or the schema losing it. Gaps are `\s+`, never literal spaces —
-// this prose is hard-wrapped at ~78 columns, so every one of them may be a
-// newline (measured: a literal-space version of this regex matched nothing).
-// The two prompts phrase this two different ways ("Report the result in" /
-// "Report it in") — one alternation between them, not two independent
-// optionals, which would also admit the dead combination neither prompt
-// writes ("Report the result it in").
-const REPORT_FIELD = /Report\s+(?:the\s+result|it)\s+in\s+`(\w+)`\s+as\s+one\s+line\s+beginning\s+`CWD-AUDIT:`/;
-
+// correct. The field name is EXTRACTED from the rendered prompt by
+// REPORT_FIELD's capture group rather than transcribed here, so the pin fails
+// in either direction: the prompt renaming the field, or the schema losing it.
 for (const [name, prompt, schema, schemaName] of [
   ["specialist", specialist, FINDINGS_SCHEMA, "FINDINGS_SCHEMA"],
   ["refuter", refuter, VERDICT_SCHEMA, "VERDICT_SCHEMA"],
@@ -209,28 +181,27 @@ for (const [name, prompt, schema, schemaName] of [
     // what stops a `fatal: not a git repository` — the honest answer whenever
     // the inherited cwd is not a checkout — being read as a reason to report
     // nothing at all.
-    for (const state of ["clean", "dirty", "unrepo"]) {
+    for (const state of AUDIT_STATES) {
       assert.match(
         prompt,
-        phrase(`\`CWD-AUDIT: ${state} <path>`),
+        auditLine(state),
         `review-core.js's ${name} prompt no longer spells the \`${state}\` form of the audit line — the state it cannot spell is the state it will not report (#1433)`,
       );
     }
     assert.match(
       prompt,
-      phrase("every run, clean or not"),
+      EVERY_RUN,
       `review-core.js's ${name} prompt no longer demands the audit line on a CLEAN run — an audit reported only when it finds something is indistinguishable from one never run, which is exactly how #1433's four files went unrecorded`,
     );
   });
 }
 
-// One marker, spelled once, or a controller grepping a review's payload for it
-// finds half the reports. Checked against each prompt individually — a
-// capture group around a fixed literal with no alternation inside it can
-// only ever capture that same literal, so comparing `inSpecialist[1]` against
-// `inRefuter[1]` (the prior shape of this test) could never fail as long as
-// both prompts matched at all; the `assert.ok` above already covers that.
-const CWD_AUDIT_MARKER = /`CWD-AUDIT:`/;
+// Checked against each prompt individually (CWD_AUDIT_MARKER,
+// cwd-isolation-pins.mjs) — a capture group around a fixed literal with no
+// alternation inside it can only ever capture that same literal, so comparing
+// `inSpecialist[1]` against `inRefuter[1]` (the prior shape of this test)
+// could never fail as long as both prompts matched at all; the `assert.ok`
+// above already covers that.
 for (const [name, prompt] of [
   ["specialist", specialist],
   ["refuter", refuter],

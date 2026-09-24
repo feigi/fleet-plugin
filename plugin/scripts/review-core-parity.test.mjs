@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 import { between } from "./prose-pin.mjs";
-import { lift } from "./lift.mjs";
+import { lift, liftConst } from "./lift.mjs";
 import * as core from "./review-core.js";
 
 // The pin for the shape #1349 chose (review-core.js's own header explains
@@ -296,8 +296,8 @@ test("the snapshot and verifier dispatches follow the same fleet-ctl: namespacin
 
 // FINDINGS_SCHEMA/VERDICT_SCHEMA: structurally identical (comments aside).
 test("FINDINGS_SCHEMA and VERDICT_SCHEMA are structurally identical between the two copies", () => {
-  const prFindings = new Function(`${CODE.match(/^const FINDINGS_SCHEMA = \{[\s\S]*?^\};$/m)[0]}\nreturn FINDINGS_SCHEMA;`)();
-  const prVerdict = new Function(`${CODE.match(/^const VERDICT_SCHEMA = \{[\s\S]*?^\};$/m)[0]}\nreturn VERDICT_SCHEMA;`)();
+  const prFindings = liftConst(CODE, "FINDINGS_SCHEMA");
+  const prVerdict = liftConst(CODE, "VERDICT_SCHEMA");
   assert.deepEqual(core.FINDINGS_SCHEMA, prFindings);
   assert.deepEqual(core.VERDICT_SCHEMA, prVerdict);
 });
