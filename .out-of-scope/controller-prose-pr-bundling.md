@@ -9,7 +9,8 @@ these PRs either.
 What *is* a rule, and stays one: **data rows and rule-doc prose never share a
 PR.** That half of the question was settled by #944 / PR #1434, and it lives in
 `plugin/skills/run-team/SKILL.md` (the "Data rows and rule-doc prose never share a
-PR" paragraph in phase 3's close-out) and is pinned by
+PR" paragraph in phase 2's tier-guard step, beside the `chore/run-artifacts-<date>`
+close-out PR rule) and is pinned by
 `plugin/scripts/run-artifact-pr-prose.test.mjs`. Nothing here loosens it.
 
 ## Why this is out of scope
