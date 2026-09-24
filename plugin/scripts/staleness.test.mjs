@@ -616,10 +616,13 @@ test("verdict() falls through to the could-not-check downgrade within a bound wh
 const ARG_STRLEN_MAX = 131_072;
 
 // How much room the short-write fixture below leaves in the pipe before the
-// child's first write. Small and arbitrary on purpose: what makes that write
-// come back SHORT is this window, not the payload outgrowing some capacity,
-// which is the whole of why the fixture no longer has to be sized against a
-// ceiling it cannot reach (#1578).
+// child's first write. Small on purpose: what makes that write come back
+// SHORT is this window, not the payload outgrowing some capacity, which is
+// the whole of why the fixture no longer has to be sized against a ceiling
+// it cannot reach (#1578). Not arbitrary, though (#1688): Linux gives pipe
+// space back one whole slot — one page — at a time, so there the window has
+// to be a whole number of pages. 4096 is one page on this repo's CI kernel
+// (ubuntu-latest, x86_64); the harness measures that rather than assuming it.
 const WRITE_WINDOW_BYTES = 4096;
 
 // ── #1548: verdict()'s writeSync loop delivers the FULL payload, EXECUTED ─
@@ -652,10 +655,30 @@ const WRITE_WINDOW_BYTES = 4096;
 // to capacity up front and exactly WRITE_WINDOW_BYTES freed back, and nothing
 // reads it again until that window is gone. A reader that is not draining is
 // one the kernel cannot keep handing slots to, so the first write stops at
-// the window and returns short BY CONSTRUCTION — on every platform, at a size
-// the payload no longer has to beat. That decouples the needle from the write
-// ceiling entirely, which is what leaves it free to sit far under
-// ARG_STRLEN_MAX instead of straining against it.
+// the window and returns short by construction, at a size the payload no
+// longer has to beat. That decouples the needle from the write ceiling
+// entirely, which is what leaves it free to sit far under ARG_STRLEN_MAX
+// instead of straining against it.
+//
+// "By construction" holds only where the kernel hands a freed window back
+// to a writer as one write, and that is not every platform (#1688).
+// darwin's pipe is byte-granular: measured on this arm64 machine, any window
+// tried — 1000, 2048, 4096, 6000, 16384 — came back as exactly that many
+// bytes. Linux frees pipe space a page-sized slot at a time, so the window
+// must be a whole number of pages. Measured on a 4 KiB-page aarch64 Linux
+// kernel (docker, node 26.5.0): windows of 4096 and 8192 came back exact,
+// 6000 came back as 4096, and 2048 — under one page — came back EAGAIN.
+// 2048 on that kernel is what 4096 is on a 16 KiB- or 64 KiB-page one (some
+// arm64 and ppc64 builds), and run through this test before the probe below
+// existed it redded against a correct build after a 10s wait, blaming the
+// build: "verdict()'s first write never filled the 2048-byte window ... the
+// retry loop was never entered". The page size is not a usable proxy for
+// that — this darwin machine reports 16384 for SC_PAGESIZE and still takes a
+// 4096-byte window exactly — so the harness measures the premise itself: a
+// probe write into the freed window must land exactly WRITE_WINDOW_BYTES, or
+// it refuses with WINDOW_NOT_ONE_WRITE and the numbers it saw, before the
+// child ever runs. Measured, that same 2048 run now reports
+// `WINDOW_NOT_ONE_WRITE probe=0 window=2048 page=4096` instead.
 //
 // Measured both ways through this harness (darwin, pipe capacity 65536,
 // window 4096): the shipped build delivers 40278 bytes of valid JSON, and
@@ -728,9 +751,27 @@ test("verdict() resumes from a genuine short write and delivers the full payload
     "if pad <= window:",
     "    print(f'PAD_TOO_SMALL pad={pad} window={window}')",
     "    sys.exit(1)",
-    "freed = 0",
-    "while freed < window:",
-    "    freed += len(os.read(r, window - freed))",
+    "def free_window():",
+    "    freed = 0",
+    "    while freed < window:",
+    "        freed += len(os.read(r, window - freed))",
+    "free_window()",
+    "# Probe the premise before trusting it: a write bigger than the window",
+    "# must land exactly `window` bytes. A kernel that frees pipe space a",
+    "# page-sized slot at a time answers 0 (EAGAIN) to a window under a page,",
+    "# and short of `window` to one that is not a whole number of pages.",
+    "probe = 0",
+    "try:",
+    "    probe = os.write(w, b'x' * (window * 2))",
+    "except BlockingIOError:",
+    "    pass",
+    "if probe != window:",
+    "    page = os.sysconf('SC_PAGESIZE')",
+    "    print(f'WINDOW_NOT_ONE_WRITE probe={probe} window={window} page={page}')",
+    "    sys.exit(1)",
+    "# The probe closed the window with more pad; free it again. What sits",
+    "# ahead of the child's output is still `pad - window` bytes of pad.",
+    "free_window()",
     "proc = subprocess.Popen(sys.argv[3:], stdout=w, stderr=subprocess.PIPE)",
     "os.close(w)",
     "# Wait for the child's first write to close that window again WITHOUT",
@@ -792,8 +833,9 @@ test("verdict() resumes from a genuine short write and delivers the full payload
     { cwd: w, env: ENV, encoding: "utf8" },
   );
   // The harness refuses rather than hanging when its own premises fail — a
-  // pipe too small to hold the window, a child that never finishes writing —
-  // so its exit code is checked before any number it reported is believed.
+  // pipe too small to hold the window, a kernel that does not hand the freed
+  // window back as one write, a child that never finishes writing — so its
+  // exit code is checked before any number it reported is believed.
   assert.equal(r.status, 0, `the short-write harness did not complete: stdout=${r.stdout} stderr=${r.stderr}`);
   const report = /^EXIT=(\d+) PAD=(\d+) CONSUMED=(\d+) PAYLOAD=(\d+)$/m.exec(r.stdout);
   assert.ok(report, `the harness printed no report line: stdout=${r.stdout} stderr=${r.stderr}`);
