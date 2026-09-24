@@ -129,10 +129,14 @@ function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prVi
   const roStdout = readOnlyStdout ? openSync("/dev/null", "r") : null;
   let r;
   try {
+    // maxBuffer: spawnSync's default 1 MiB kills the child mid-write once its
+    // output passes it, and the pipe-survival fixtures below write past it on
+    // purpose.
     r = spawnSync(process.execPath, [SCRIPT, ...(pr === null ? [] : ["--pr", pr]), ...args], {
       cwd: join(repoDir, cwd),
       encoding: "utf8",
       env,
+      maxBuffer: 8 * 1024 * 1024,
       ...(roStdout === null ? {} : { stdio: ["ignore", roStdout, "pipe"] }),
     });
   } finally {
@@ -1271,21 +1275,73 @@ test("--pr omitted still answers with the usage line, not the numeric complaint"
 // with writeSync for this reason; these tests hold the verdict payload to the
 // same standard.
 //
-// The mode under test is a PIPE specifically. spawnSync's default stdio is one
-// (measured: the same payload reaches a file fd whole and a pipe cut), which is
-// why these can reuse run() — a harness that captured stdout to a file would
-// pass whether or not the script was ever fixed.
-const PIPE_BUFFER_BYTES = 65536;
+// The mode under test is a stream the parent drains as the child writes, which
+// a file is not: the same payload reaches a file fd whole and is cut on
+// spawnSync's default stdio (measured), which is why these can reuse run() — a
+// harness that captured stdout to a file would pass whether or not the script
+// was ever fixed. That default stdio is not a FIFO but a Unix-domain SOCKET, on
+// darwin and Linux alike (#1730, fstat: isSocket() on fds 1 and 2). It starts
+// out blocking, and Node puts it in O_NONBLOCK once it opens a stream on it
+// (Linux /proc/self/fdinfo): console.log does that to fd 1, and fd 2 has been
+// through it by the time the verdict line is written, quiet or verbose.
+//
+// How far past "one buffer" a fixture has to reach is what that socket takes
+// in ONE non-blocking write, and that is not 64 KiB everywhere. Measured for
+// #1730 on 2026-09-24 with #1722's harness — a spawnSync child opens the fd's
+// stream, then makes one writeSync of N bytes — 200 trials per N per fd, Linux
+// being node:26-slim under Docker:
+//
+//   darwin  65,536 bytes, every time.
+//   Linux   N up to 146,176 went through whole every time, on both fds. Past
+//           it the first write took exactly 146,176 at the minimum and the
+//           median of every N tried, up to 2 MiB — yet it also took the WHOLE
+//           N some of the time, at every N: fd 2 took all of 146,177 38/200,
+//           all of 200,000 4/200, all of 1 MiB 1/200.
+//
+// So Linux has a floor and no ceiling. The parent drains the socket while the
+// write is still in the kernel, and a write that races a quick enough reader
+// goes through whole at any size. #1722's 584,704 was the largest first write
+// in its sample, not a bound.
+//
+// These tests used to size themselves past 65,536 alone, and on Linux that
+// proved nothing. Against the regressions two of them exist to catch — the
+// payload back on console.log + process.exit, the stderr line back on one bare
+// writeSync — the 131,323-byte payload and 131,165-byte line they built went
+// out whole 200/200 times, so on Linux both passed the very defect they are
+// named for while their `> 65536` guards held. The green payload, 317,606
+// bytes, caught it 198/200.
+//
+// What the guards compare against is that floor: a payload at or under it goes
+// out in one write on Linux however the script writes it, so the test cannot
+// fail there, and it covers darwin's 65,536 too. It is measured rather than
+// derived from the fixture sizes below — a guard against the constant a fixture
+// is built from can never fail (arg.test.mjs, #1722) — which is what lets it
+// catch the fixture itself: the pre-#1730 one fails it, on darwin as well.
+const LINUX_FIRST_WRITE_BYTES = 146_176;
+
+// The fixture size is the other half, chosen from how often each regression
+// still got through at each size on Linux — not from the floor, and not on
+// "bigger is safer", which the runs refuted. Interleaved, 200 runs per size
+// per regression: the bare writeSync got the stderr line through whole 15
+// times at 2 MiB, against 0–1 from 292,352 to 1 MiB, with short first writes
+// at 2 MiB as large as 2,046,464; console.log got the payload through twice at
+// 292,352 and never from 584,704 up. 1 MiB is where both were lowest. A single
+// write is still unbounded — the race above — so on Linux these tests catch a
+// regression with high probability, not certainty; darwin, whose first write
+// is always 65,536, catches it every time.
+const SHORT_WRITE_BYTES = 1024 * 1024;
+
+const jobId = (i) => `generated-job-${String(i).padStart(6, "0")}-padding-padding`;
 
 // Derived rather than written as a literal number of jobs: the property that
-// matters is "past one buffer", and a hardcoded count silently stops clearing
-// the cliff the moment the id shape or the payload's other fields change. The
+// matters is "past SHORT_WRITE_BYTES", and a hardcoded count silently stops
+// clearing it the moment the id shape or the payload's other fields change. The
 // ids are shaped the way expectedJobs() derives them, and carry no job-level
 // `name:`, which that derivation refuses.
-function jobsClearingPipeBuffer() {
+function jobsClearingShortWrite() {
   const ids = [];
-  for (let joined = 0; joined <= PIPE_BUFFER_BYTES * 2; ) {
-    const id = `generated-job-${String(ids.length).padStart(6, "0")}-padding-padding`;
+  for (let joined = 0; joined <= SHORT_WRITE_BYTES; ) {
+    const id = jobId(ids.length);
     ids.push(id);
     joined += id.length + ", ".length; // how the absent-jobs reason joins them
   }
@@ -1295,21 +1351,41 @@ function jobsClearingPipeBuffer() {
 const workflowWithJobs = (ids) =>
   `name: CI\non: [pull_request]\njobs:\n${ids.map((id) => `  ${id}:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n`).join("")}`;
 
+const succeededJob = (name) => ({ name, status: "completed", conclusion: "success" });
+
 const runViewAllSucceeded = (ids) =>
   JSON.stringify({
-    jobs: ids.map((name) => ({ name, status: "completed", conclusion: "success" })),
+    jobs: ids.map(succeededJob),
     attempt: 1,
     status: "completed",
     conclusion: "success",
     headSha: PR_HEAD,
   });
 
+// The green fixture cannot follow the other two to SHORT_WRITE_BYTES. Its jobs
+// arrive through `gh run view`, which ci-state.mjs reads with execFileSync's
+// default 1 MiB maxBuffer — one job past it and the read dies ENOBUFS, and the
+// script exits 2 with no verdict at all (measured: 11,397 jobs). So it carries
+// as many jobs as one run-view reply holds, and since the payload echoes the
+// same jobs back, that lands it at 1 MiB as well, by a different road.
+const GH_READ_BYTES = 1024 * 1024;
+function jobsFillingOneGhRead() {
+  const ids = [];
+  // One comma counted per job, one more than the reply carries: errs under.
+  for (let bytes = runViewAllSucceeded([]).length; ; ) {
+    const id = jobId(ids.length);
+    bytes += JSON.stringify(succeededJob(id)).length + ",".length;
+    if (bytes > GH_READ_BYTES) return ids;
+    ids.push(id);
+  }
+}
+
 // --quiet is the mode the controller's CI Monitor polls in, and it drops `jobs`
 // and `missing` — so this also pins that the payload still outgrows the buffer
 // on the hot path, through `reasons` alone, where the absent-job reason names
 // every job it could not find.
 test("a not-green verdict payload larger than one pipe buffer reaches the caller whole", () => {
-  const ids = jobsClearingPipeBuffer();
+  const ids = jobsClearingShortWrite();
   const r = run(["--quiet"], {
     repoFiles: { ".github/workflows/ci.yml": workflowWithJobs(ids) },
     tolerateUnparsedStdout: true,
@@ -1321,8 +1397,8 @@ test("a not-green verdict payload larger than one pipe buffer reaches the caller
     assert.fail(`verdict payload did not survive the pipe: ${r.stdout.length} bytes, ${e.message}`);
   }
   assert.ok(
-    r.stdout.length > PIPE_BUFFER_BYTES,
-    `fixture no longer outgrows the pipe buffer (${r.stdout.length} bytes), so this test would pass without proving anything`,
+    r.stdout.length > LINUX_FIRST_WRITE_BYTES,
+    `fixture no longer outgrows one write on Linux (${r.stdout.length} bytes, floor ${LINUX_FIRST_WRITE_BYTES}), so on Linux this test would pass without proving anything`,
   );
   assert.equal(payload.verdict, "not-green");
   assert.equal(r.status, 1, r.stderr);
@@ -1336,7 +1412,7 @@ test("a not-green verdict payload larger than one pipe buffer reaches the caller
 // fixed. Green is also the only verdict that can carry a large payload without
 // `reasons`, so this is what exercises the write with `jobs` doing the growing.
 test("a green verdict payload larger than one pipe buffer still exits 0, gate not inverted", () => {
-  const ids = jobsClearingPipeBuffer();
+  const ids = jobsFillingOneGhRead();
   const r = run([], {
     repoFiles: { ".github/workflows/ci.yml": workflowWithJobs(ids) },
     runView: runViewAllSucceeded(ids),
@@ -1349,8 +1425,8 @@ test("a green verdict payload larger than one pipe buffer still exits 0, gate no
     assert.fail(`verdict payload did not survive the pipe: ${r.stdout.length} bytes, ${e.message}`);
   }
   assert.ok(
-    r.stdout.length > PIPE_BUFFER_BYTES,
-    `fixture no longer outgrows the pipe buffer (${r.stdout.length} bytes), so this test would pass without proving anything`,
+    r.stdout.length > LINUX_FIRST_WRITE_BYTES,
+    `fixture no longer outgrows one write on Linux (${r.stdout.length} bytes, floor ${LINUX_FIRST_WRITE_BYTES}), so on Linux this test would pass without proving anything`,
   );
   assert.equal(payload.verdict, "green");
   assert.equal(r.status, 0, r.stderr);
@@ -1396,8 +1472,9 @@ test("the verdict write keeps the green exit code when it throws — the guard e
   assert.equal(r.status, 0, `exit ${r.status}: the verdict write threw and took the green verdict with it`);
 });
 
-// The verdict SUMMARY goes to fd 2, and fd 2 is the fd vlog's console.error has
-// already initialised a stream for — which is what puts it in O_NONBLOCK. A
+// The verdict SUMMARY goes to fd 2, and fd 2 already has a Node stream open on
+// it by then — vlog's console.error, or under --quiet the git stderr
+// execFileSync forwards — which is what puts it in O_NONBLOCK. A
 // non-blocking write to a full pipe SHORT-WRITES: it returns the count it
 // managed and throws nothing, so the catch above never fires and nothing is
 // logged. Measured against this same fixture before the write loop consumed that
@@ -1407,11 +1484,12 @@ test("the verdict write keeps the green exit code when it throws — the guard e
 //
 // Completeness is asserted by CONTENT, before the size guard rather than after.
 // The absent-job reason ends with the last id it joined, so a cut line simply
-// does not end with it; a truncated line is also exactly one buffer long, which
-// would fail a `> PIPE_BUFFER_BYTES` guard and blame the fixture for a defect in
-// the script. Ordered this way each failure names its own cause.
+// does not end with it; a truncated line is also one first write long — 65,535
+// bytes on darwin, most often 146,175 on Linux (measured, #1730) — which would
+// fail the size guard and blame the fixture for a defect in the script. Ordered
+// this way each failure names its own cause.
 test("the verdict line on stderr survives past one pipe buffer, its reasons whole", () => {
-  const ids = jobsClearingPipeBuffer();
+  const ids = jobsClearingShortWrite();
   const r = run(["--quiet"], {
     repoFiles: { ".github/workflows/ci.yml": workflowWithJobs(ids) },
     tolerateUnparsedStdout: true,
@@ -1423,8 +1501,8 @@ test("the verdict line on stderr survives past one pipe buffer, its reasons whol
     `verdict line cut mid-reason at ${Buffer.byteLength(line)} bytes: it does not reach the last job it names`,
   );
   assert.ok(
-    Buffer.byteLength(line) > PIPE_BUFFER_BYTES,
-    `fixture no longer outgrows the pipe buffer on stderr (${Buffer.byteLength(line)} bytes), so this test would pass without proving anything`,
+    Buffer.byteLength(line) > LINUX_FIRST_WRITE_BYTES,
+    `fixture no longer outgrows one write on Linux on stderr (${Buffer.byteLength(line)} bytes, floor ${LINUX_FIRST_WRITE_BYTES}), so on Linux this test would pass without proving anything`,
   );
   assert.equal(r.status, 1, "the exit code must survive the write it follows");
 });
