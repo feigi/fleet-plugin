@@ -78,8 +78,11 @@ Three units with clean boundaries:
 3. **`board.mjs serve`** — the long-running process. Loop: `build` →
    **atomic-write** `.fleet/board.json` (temp + rename, as `ledger.mjs` does) →
    serve `.fleet/` over a zero-dep node `http` server → sleep `--interval`. Opens
-   the browser once (`--open`). Plus **`board.html`**, self-contained (inline CSS
-   + vanilla JS, no CDN, no build), polling `/board.json`.
+   the browser once (`--open`), from the launch that binds the port and starts
+   the server only (#1714): `open` on macOS; elsewhere `xdg-open`, falling back
+   to `wslview` (WSL) when `xdg-open` is not on PATH. With neither, it warns on
+   stderr with the URL and keeps serving. Plus **`board.html`**, self-contained
+   (inline CSS + vanilla JS, no CDN, no build), polling `/board.json`.
 
    Which `.fleet/` and which port are **derived from the workspace** (#1582),
    not from the cwd: the workspace is the directory holding the shared git dir
@@ -96,7 +99,8 @@ Three units with clean boundaries:
    is already held is not a failure by itself, so the launch asks the holder
    who it is: it requests `/board.json` with a ~1s timeout and reads the
    `workspace` the payload names. Ours → print that the cockpit is already
-   running, with its URL, honour `--open`, exit **0**, start nothing. Anyone
+   running, with its URL, exit **0**, start nothing, open nothing even under
+   `--open` (#1714) — the launch that started it already had its chance. Anyone
    else — a different workspace, a non-200, a body that will not parse, no
    answer at all — → foreign, step to the next port, bounded to a handful of
    attempts inside the derived range. Only an exhausted range is an error,

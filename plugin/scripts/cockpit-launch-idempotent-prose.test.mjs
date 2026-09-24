@@ -50,6 +50,13 @@
 // is worse than absent here, because it tells the controller to avoid the
 // relaunch phase 0 now runs on every pass.
 //
+// #1714 removed another of those amendments the same way: the reuse arm no
+// longer opens anything, `--open` or not — only the launch that binds a port
+// and starts the server opens a tab — so a re-shortlist no longer reopens
+// the board tab. The sentence saying it did is rewritten in the runbook, and
+// the test that pinned it is deleted; board.test.mjs holds the behaviour,
+// with stub launchers recording what each launch opened.
+//
 // Zero deps: `node --test plugin/scripts/cockpit-launch-idempotent-prose.test.mjs`.
 
 import { test } from "node:test";
@@ -114,17 +121,6 @@ test("the superseded mid-gather() duplication caveat is gone, not left beside th
     assert.doesNotMatch(step, phrase(gone),
       `phase 0 warns about a mid-gather() duplicate again; #1713 made the cockpit answer throughout its tick, so the warning is false: ${gone}`);
   }
-});
-
-test("phase 0 states --open fires on every relaunch, reopening the board tab each pass", () => {
-  const step = LAUNCH_STEP();
-  // PR #1664 review (finding 2), reproduced: `serve --open` run twice
-  // against the same workspace calls `open()` on BOTH runs, including the
-  // reuse arm — so moving the launch to every phase-0 pass means a
-  // re-shortlist reopens the browser tab, not just the first pass. The
-  // doctrine says so rather than leaving the operator to discover it.
-  assert.match(step, phrase("`--open` fires on every one of those launches too"));
-  assert.match(step, phrase("a re-shortlist reopens the board tab"));
 });
 
 test("phase 0 states a second workspace's launch derives its own port, falling back when it is held", () => {

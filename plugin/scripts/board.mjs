@@ -263,6 +263,29 @@ async function tryRun(cmd, args) {
   return r.stdout;
 }
 
+// #1714: `serve --open`'s browser launcher, one per supported platform (ADR
+// 0009). macOS ships `open`. Linux has no single program, but `xdg-open` is
+// the freedesktop one every mainstream desktop provides; WSL usually lacks it
+// and has `wslview` (wslu) instead, which hands the URL to the Windows default
+// browser. Only a launcher that is NOT ON PATH passes the URL down the list:
+// one that ran and failed is the right program meeting a real fault, and the
+// next one would not fix that.
+//
+// Never throws and never exits. A tab that did not open is a warning naming
+// the URL — the cockpit is up and serving either way, and the operator can
+// open it by hand — so a missing launcher changes nothing about the exit code.
+async function openBrowser(url) {
+  const tried = [];
+  for (const cmd of process.platform === "darwin" ? ["open"] : ["xdg-open", "wslview"]) {
+    const r = await execRead(cmd, [url]);
+    if (!r.error) return;
+    if (r.code === "ENOENT") { tried.push(`${cmd} not found`); continue; }
+    tried.push(r.status != null ? `${cmd} exited ${r.status}` : `${cmd} failed: ${r.error.message.split("\n")[0]}`);
+    break;
+  }
+  console.error(`${NAME}: WARNING --open could not open a browser (${tried.join(", ")}) — the cockpit is on ${url}`);
+}
+
 // Parse tool stdout defensively: a tool can exit 0 yet print malformed or
 // warning-prefixed stdout. Treat that like a failed read (fall back to the
 // caller's empty default), never let it crash the tick.
@@ -1764,7 +1787,13 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
       attempt.close();
       const url = `http://localhost:${rest[matchAt]}/`;
       console.error(`${NAME}: cockpit already running for this workspace on ${url}`);
-      if (open) await tryRun("open", [url]);
+      // Nothing is opened here, --open or not (#1714). This cockpit was
+      // already running when this launch arrived, so its tab was the business
+      // of the launch that started it; run-team's phase 0 relaunches on every
+      // re-shortlist, and opening here stacked one more tab for the same
+      // board each pass. Only a launch that binds a port and starts the
+      // server opens one, below.
+      //
       // Exit 0 — and explicitly, not by returning: a backgrounded launch
       // reports nothing but its exit code, and a handle left behind by the
       // probe would otherwise hang this process forever while it holds no
@@ -1781,7 +1810,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
     if (holder === instance.workspace) {
       const url = `http://localhost:${candidate}/`;
       console.error(`${NAME}: cockpit already running for this workspace on ${url}`);
-      if (open) await tryRun("open", [url]);
+      // Already running, so nothing opens — the same rule as the arm above.
       process.exit(0);
     }
     console.error(`${NAME}: port ${candidate} is held by something that is not this workspace's cockpit — trying the next port`);
@@ -1841,16 +1870,6 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // a turn of the loop costs nothing.
   await new Promise((resolve) => setImmediate(resolve));
 
-  // --open only once the identity is on disk, and awaited rather than fired
-  // and forgotten. `open` is a child process like any other — it takes a
-  // moment to reach the browser, and on a machine without it a failed spawn —
-  // so running it BEFORE the write above put a child squarely inside the
-  // window #1660 exists to keep empty, where a racing launch's probe finds no
-  // payload and reads this port as foreign. Since #1713 it no longer blocks
-  // the server either way: the await leaves the loop free, so this cockpit
-  // answers the probe while its own browser is still starting.
-  if (open) await tryRun("open", [`http://localhost:${bound}/`]);
-
   // Deliberately not awaited: the first tick is the slow one, and everything
   // below it — the timer, and the two signal handlers that are the only way
   // this process is ever asked to stop — must be in place before it returns,
@@ -1867,6 +1886,18 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
+
+  // --open, from this launch alone: it is the one that bound a port and
+  // started a server, and the reuse arms above open nothing (#1714). Only
+  // once the identity is on disk — a launcher running BEFORE that write put a
+  // child squarely inside the window #1660 exists to keep empty, where a
+  // racing launch's probe finds no payload and reads this port as foreign —
+  // and only after the tick, the timer and both signal handlers are in
+  // place: `xdg-open` can run the browser it starts in the foreground and
+  // return only when that browser exits, so a launcher awaited any earlier
+  // could hold the first tick back for the whole session. openBrowser()
+  // never throws; a launcher that is missing or fails is one warning line.
+  if (open) await openBrowser(`http://localhost:${bound}/`);
   await new Promise(() => {}); // run until signalled
 }
 
