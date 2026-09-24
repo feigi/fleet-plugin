@@ -3,7 +3,7 @@
 // dir and asserts it serves board.json and the page.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, chmodSync, rmSync, readFileSync, existsSync, symlinkSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, statSync, chmodSync, rmSync, readFileSync, existsSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
@@ -704,6 +704,68 @@ test("no session at launch is not an answer to pin — the first one to write on
   writeFileSync(join(second, "agent-b.jsonl"), "");
   utimesSync(join(second, "agent-b.jsonl"), new Date(Date.now() + 50000), new Date(Date.now() + 50000));
   assert.equal(pin(), first, "and holds against a newer session exactly as a launch-time pin does");
+});
+
+test("a transcript stamped a few ms before launchMs is followed, never latched — the pin latches on the first write at or after launchMs itself", (t) => {
+  // #1729: every test above stamps mtimes far from launchMs — 100s before it,
+  // or from a Date.now() taken after it (#1722) — so nothing pinned what
+  // spendDirPin() does a few milliseconds either side of it. The window is
+  // real: a transcript written just ahead of this server's launch lands
+  // there, and so can one written just AFTER it, because Linux stamps mtimes
+  // from the kernel's coarse clock (#1722 measured writes reading back
+  // earlier than a Date.now() taken before them). The rule is a strict
+  // `newest < launchMs` with no skew allowance: such a session is still
+  // ANSWERED — the panel renders it that tick — but not cached, so it is
+  // followed tick by tick and latches on its first write stamped at or
+  // after launchMs, which a live session's next append provides.
+  //
+  // launchMs is one Date.now() read inside spendDirPin(), so the clock is
+  // mocked for that read alone: launchMs becomes a known constant and every
+  // stamp below is an exact offset from it, with no wall clock anywhere. The
+  // stamp AT launchMs must read back as exactly launchMs — one that landed a
+  // fraction above it would let a `<=` mutant through — so that is asserted
+  // rather than trusted. Node 26 round-trips millisecond stamps exactly on
+  // APFS and Linux overlayfs alike (measured, #1729); a whole second is a
+  // free hedge, leaving no fractional part for a seconds conversion to lose.
+  const launchMs = Date.UTC(2026, 0, 1);
+  const stamp = (f, ms) => utimesSync(f, new Date(ms), new Date(ms));
+  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const proj = join(home, ".claude", "projects", "-x");
+  const mine = join(proj, "sess-a", "subagents");
+  const theirs = join(proj, "sess-b", "subagents");
+  mkdirSync(mine, { recursive: true });
+  mkdirSync(theirs, { recursive: true });
+  const mineLog = join(mine, "agent-a.jsonl");
+  const theirsLog = join(theirs, "agent-b.jsonl");
+  writeFileSync(mineLog, "");
+  writeFileSync(theirsLog, "");
+  stamp(mineLog, launchMs - 5);
+  stamp(theirsLog, launchMs - 60000);
+
+  const clock = t.mock.method(Date, "now", () => launchMs);
+  const pin = spendDirPin(undefined, home, "/x");
+  clock.mock.restore();
+
+  assert.equal(pin(), mine, "5 ms before launch is still this tick's answer — the panel renders it");
+
+  // A second session overtakes it while still 1 ms short of launchMs. A pin
+  // that had latched `mine` would ignore this; one that only followed it
+  // re-picks, and re-picking at 1 ms is the proof there is no skew allowance
+  // either — any tolerance of 1 ms or more would latch `theirs` right here.
+  stamp(theirsLog, launchMs - 1);
+  assert.equal(pin(), theirs, "and was never cached: a session 1 ms before launch takes the answer over");
+
+  // `mine` appends again, stamped exactly ON launchMs: "at or after" is the
+  // latch condition, so this is the write that latches. It is also the
+  // heuristic's newest, so this tick alone cannot tell latched from
+  // followed — the next assertion is what does.
+  stamp(mineLog, launchMs);
+  assert.equal(statSync(mineLog).mtimeMs, launchMs, "the stamp sits exactly on launchMs — `<` vs `<=` is untested otherwise");
+  assert.equal(pin(), mine, "the write at launchMs makes it the answer again");
+
+  stamp(theirsLog, launchMs + 50000);
+  assert.equal(pin(), mine, "and holds against a newer session, which only a latch at launchMs itself explains");
+  assert.equal(findSubagentsDir(home, "/x"), theirs, "the fixture really did flip — this test proves nothing otherwise");
 });
 
 test("an unresolvable transcript tree is never pinned — one stderr line across ticks either way, panel hidden and never zeroed", () => {
