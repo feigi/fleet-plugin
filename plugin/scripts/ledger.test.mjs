@@ -1981,6 +1981,32 @@ test("CLI: this script's own flag spelled with one dash is refused in check's ta
   assert.equal(r.stdout, "", "a refusal must not also emit a payload");
 });
 
+// The name clause matches only a tail element's FIRST whitespace-split word
+// (ahead of any `=value`), not the whole element — the half of the
+// extraction ledger.mjs's own comment above OWN_FLAGS explains and nothing
+// before this test drove: every case above either hands the flag name its
+// own argv element or dilutes it with `=value` alone, both of which a
+// whole-element match (`a.split("=")[0]`, no leading whitespace split) would
+// also catch. The shape that whitespace split alone catches is a quoted
+// multi-word tail element — one argv token carrying a space, as a shell
+// would deliver `check "-require-file widget" guard missing` — where the
+// flag name leads the element. Reconstructed whole, "-require-file widget"
+// is not itself in OWN_FLAGS; only splitting on whitespace first exposes
+// "-require-file" as its first word.
+test("CLI: this script's own flag name leading a quoted multi-word tail element is refused (#1744)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#123 widget guard missing"]));
+  const r = cli(["--file", file, "check", "-require-file widget", "guard", "missing"]);
+  assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
+  assert.match(
+    r.stderr,
+    /unknown flag -require-file widget in subject/,
+    "the refusal must name the whole stray element",
+  );
+  assert.equal(r.stdout, "", "a refusal must not also emit a payload");
+});
+
 // The same slip on the rule's other inputs: the OTHER flag this script reads,
 // a later tail position (a guard reading only `tail[0]` passes the pin above),
 // and the `=value` spelling, which hasEqualsForm() refuses only with two
