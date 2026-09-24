@@ -2015,6 +2015,16 @@ test("CLI: a subject opening with a one-dash flag name is accepted unchanged, gi
   const r = cli(["--file", file, "check", subject]);
   assert.equal(r.status, 0, `got exit ${r.status}\n${r.stderr}`);
   assert.equal(JSON.parse(r.stdout).subject, subject, "the payload's subject field must carry it unchanged");
+  // The multi-word subject above never reaches the name clause either way —
+  // it is a ONE-element tail regardless of ordering, so that alone does not
+  // pin the gate running first. This second call closes that: its sole tail
+  // token IS an own-flag name outright, with nothing diluting the match, so
+  // a name clause read ahead of the length gate would refuse it here where
+  // the correct order accepts it — the one-dash counterpart of the #584
+  // pin at line 1889, which proves the same shape for a two-dash flag.
+  const bare = cli(["--file", file, "check", "-require-file"]);
+  assert.equal(bare.status, 0, `got exit ${bare.status}\n${bare.stderr}`);
+  assert.equal(JSON.parse(bare.stdout).subject, "-require-file", "the payload's subject field must carry it unchanged");
 });
 
 // Why the clause is a NAME test and not a prefix or shape one: single-dash

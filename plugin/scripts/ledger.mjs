@@ -164,9 +164,21 @@ const argv = process.argv.slice(2);
 // has(), in this reader's own wording (#362) — and since #567 that parity is
 // the shared hasEqualsForm() predicate itself rather than a claim about two
 // expressions that were free to drift apart.
+// Flag names lived here AND in OWN_FLAGS below with no shared source — a
+// future flag added to the indexOf() calls without a matching OWN_FLAGS
+// entry would parse normally but never be refused in a `check` subject
+// (measured: added `--another-file` the same way, `check -another-file …`
+// silently accepted at exit 0). One name each, declared once, reused by
+// the indexOf() calls and OWN_FLAGS below. Not by the hasEqualsForm() calls
+// right below, which keep their own literal text on purpose —
+// shared-refusal.test.mjs pins that pair's source verbatim against arg.mjs's
+// rule (#567), so interpolating them here would fail that pin without
+// fixing anything it exists to catch.
+const FILE_FLAG_NAME = "file";
+const REQUIRE_FILE_FLAG_NAME = "require-file";
 if (hasEqualsForm("file", argv)) die("--file needs a space-separated value, not --file=");
 if (hasEqualsForm("require-file", argv)) die("--require-file is a boolean flag, not --require-file=");
-const fileIdx = argv.indexOf("--file");
+const fileIdx = argv.indexOf(`--${FILE_FLAG_NAME}`);
 const file = fileIdx === -1 ? defaultLedgerPath() : argv[fileIdx + 1];
 // #362: `--file` took whatever token followed it, so `--file --require-file`
 // made the FLAG the path and the splice below then ate it — `--require-file`,
@@ -195,7 +207,7 @@ const file = fileIdx === -1 ? defaultLedgerPath() : argv[fileIdx + 1];
 if (fileIdx !== -1 && file && isFlagLike(file)) die("--file needs a path");
 if (fileIdx !== -1) argv.splice(fileIdx, 2);
 if (!file) die("--file given with no path");
-const requireFileIdx = argv.indexOf("--require-file");
+const requireFileIdx = argv.indexOf(`--${REQUIRE_FILE_FLAG_NAME}`);
 const requireFile = requireFileIdx !== -1;
 if (requireFileIdx !== -1) argv.splice(requireFileIdx, 1);
 
@@ -313,10 +325,20 @@ function unescapeText(s) {
 // Reaching either takes a shape or distance rule rather than a name, and
 // `-f` is exactly the other-tool short flag above; both still fold into the
 // subject.
-const OWN_FLAGS = ["--file", "--require-file"];
+const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`];
+// The one-dash name clause below matches only a's FIRST whitespace-split
+// word (ahead of any `=value`), not the whole element: a quoted multi-word
+// tail element (`check "-require-file widget" guard missing`, one argv
+// element) reconstructs to "--require-file widget" under a whole-token
+// match, which is not in OWN_FLAGS, so it fell through to exit 0 — the same
+// verdict flip #1744 exists to refuse, just via a quoted shape rather than a
+// bare token. Splitting first mirrors the `--` clause above it, which
+// already matches on startsWith rather than requiring the whole element.
 function refuseStrayInCheckTail(tail) {
   if (tail.length <= 1) return;
-  const stray = tail.find((a) => a.startsWith("--") || OWN_FLAGS.includes(`-${a.split("=")[0]}`));
+  const stray = tail.find(
+    (a) => a.startsWith("--") || OWN_FLAGS.includes(`-${a.split(/\s/)[0].split("=")[0]}`),
+  );
   if (stray) die(`unknown flag ${stray} in subject — quote the subject as one argument`);
 }
 
