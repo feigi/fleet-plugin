@@ -1,0 +1,38 @@
+# Probe attempted for issue #1770 (Claude Code Workflow off-turn research).
+#
+# Intent: verify live, per fleet-dispatched subagent_type, whether ToolSearch
+# finds a callable `Workflow` tool — reproducing (and extending to
+# fleet-ctl:fleet-implementer / fleet-ctl:fleet-review-comments) the 2026-07-30
+# measurement recorded in memory t5L-VS7h-UUb60-zWsLkb for general-purpose.
+#
+# Usage (from a clean environment without personal ~/.claude memory/hook wiring
+# clobbering the nested session's final answer — see the Caveats section in
+# ../claude-workflow-offturn.md for why this run was inconclusive here):
+#
+#   cd /Users/chris/dev/fleet-plugin
+#   grep -v '^#' docs/research/probes/claude-workflow-offturn-probe.txt |
+#     claude -p --dangerously-skip-permissions --permission-mode bypassPermissions \
+#       --strict-mcp-config
+#
+# The grep strips this '#' header, so the expected answer stated below never
+# reaches the model and cannot prime it. Piping the file whole would.
+#
+# Expected clean output: three lines matching the format at the bottom, each
+# stating whether ToolSearch found a callable Workflow tool for that
+# subagent_type. Per the docs cited in claude-workflow-offturn.md, all three
+# should report "no" (Workflow is unconditionally removed from every
+# non-fork subagent), but this file exists so the check can be re-run for real
+# once the hook/MCP confound is out of the way.
+
+This is a diagnostic probe, not a real task. Do the following three steps in order, one at a time, and do NOT call the Workflow tool yourself at any point.
+
+Step 1: Dispatch a subagent via the Task/Agent tool with subagent_type "general-purpose". Its prompt should be exactly: "Run ToolSearch to look for a tool named Workflow. Then try calling ToolSearch('select:Workflow'). Report verbatim what each call returns, and state plainly whether you have a callable Workflow tool available to you right now."
+
+Step 2: Dispatch a subagent via the Task/Agent tool with subagent_type "fleet-ctl:fleet-implementer". Give it the exact same prompt as step 1.
+
+Step 3: Dispatch a subagent via the Task/Agent tool with subagent_type "fleet-ctl:fleet-review-comments". Give it the exact same prompt as step 1.
+
+After all three subagents report back, print a final summary in this exact format (one line per subagent type):
+general-purpose: <yes/no and verbatim finding>
+fleet-ctl:fleet-implementer: <yes/no and verbatim finding>
+fleet-ctl:fleet-review-comments: <yes/no and verbatim finding>
