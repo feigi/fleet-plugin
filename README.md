@@ -6,8 +6,9 @@ ticket pipeline they share. Ships as the Claude Code / omp plugin
 
 ## Installation
 
-Pinned dev/CI Node version: `26.5.0` (see `.nvmrc`) — not an enforced floor;
-the suite also runs clean on newer Node.
+Shipped scripts run under your own `node`. `.nvmrc` pins the dev/CI runtime
+the suite is verified against, not a floor
+([ADR 0010](docs/adr/0010-the-node-pin-stays-exact-and-a-bot-moves-it.md)).
 
 Supported platforms: macOS, Linux, and Windows via WSL. Native Windows is not
 supported ([ADR 0009](docs/adr/0009-supported-platforms-are-macos-linux-wsl.md)).
