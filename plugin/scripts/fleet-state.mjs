@@ -327,9 +327,46 @@ export function isStalled(verdict) {
 
 // Whole minutes, floored, because the numbers here are tens of minutes to
 // hours and a seconds-precise age in a stall line is false precision: the
-// mark is written once per hold, so its resolution is minutes anyway.
+// mark is written once per hold, so its resolution is minutes anyway. That
+// holds for production (--base 300, --ceiling 1200 — SKILL.md's only
+// documented values) but not for every value the CLI guard actually accepts:
+// fleet-heartbeat.mjs's own guard refuses `--ceiling < --base` the same way
+// this file refuses other invalid shapes, and mirroring that refusal onto
+// sub-60s `--base`/`--ceiling` was the first fix tried for #1735 — until
+// fleet-heartbeat.test.mjs turned out to lean on 2s/3s/8s/9s/64s intervals
+// throughout, deliberately, to keep its real `Atomics.wait` holds fast. A
+// CLI-level refusal would force that whole suite onto minute-plus real
+// holds for no behavioural gain, so the fix lives here instead: a value
+// under a minute is still a real value, not an invalid one, and flooring it
+// to "0m" is what read as a division-by-zero defect, not the sub-minute
+// input itself.
+//
+// #1735 only moved the floor for values UNDER 60s. A 60-119s value still
+// fell on the whole-minutes branch, so a 90-119s interval floors to "1m"
+// while its own overdue remainder (usually still under 60s) prints in
+// seconds — the line's three numbers stop reconciling the moment any of
+// them lands in that band: age=100s, interval=90s reads "1m ago ... 10s
+// past the 1m interval", and 1m minus 1m is 0, not 10s. The bug was never
+// the floor itself, it was flooring each of the three numbers to its OWN
+// unit independently — three independent floors of one piece of exact
+// arithmetic (overdueMs = ageMs - intervalMs, held exactly by assessBeat)
+// do not have to agree with each other once any one of them crosses a unit
+// boundary the others did not. Reporting the full `Xm Ys` breakdown, and
+// dropping whichever half is zero, fixes that: the same seconds total
+// feeds every one of the three numbers, so minutes-times-60-plus-seconds
+// inverts back to the exact millisecond figure every time, which is what
+// makes it impossible for the three to imply two different remainders for
+// the one subtraction that ties them together. It also happens to leave
+// every value that is an exact multiple of a minute — the production case
+// above, and every value already pinned byte-for-byte — rendering exactly
+// as it did before, because the seconds half is zero and gets dropped.
 function mins(ms) {
-  return `${Math.floor(ms / 60000)}m`;
+  const totalSeconds = Math.floor(ms / 1000);
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  if (m === 0) return `${s}s`;
+  if (s === 0) return `${m}m`;
+  return `${m}m${s}s`;
 }
 
 // The report. Returns null for anything isStalled() rejects, so a caller that
