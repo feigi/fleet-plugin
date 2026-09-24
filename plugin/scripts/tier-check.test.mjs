@@ -729,19 +729,12 @@ test("CLI: a misspelled --ledgerr refuses instead of computing a verdict against
 // The false-positive class the sweep addition risks: a roster flag present
 // but missing its value must still answer arg()'s own "needs a value"
 // message, never sweep()'s generic stray complaint — arg()'s per-flag
-// guards run (and can refuse) before sweep() is ever reached.
-test("CLI: a roster flag missing its value answers its own value-guard message, never sweep's stray complaint", () => {
-  const d = dir();
-  writeFileSync(join(d, "batch.json"), JSON.stringify([{ member: "impl-1", agentFile: "x.md", harness: "claude" }]));
-  const r = runCli(["--batch", "batch.json", "--ledger"], d);
-  assert.equal(r.status, 2, r.stdout + r.stderr);
-  assert.match(r.stderr, /--ledger needs a value/);
-  assert.ok(!r.stderr.includes("unknown flag"), r.stderr);
-});
-
-// Same false-positive class, with a genuine stray riding immediately after
-// the valueless roster flag: arg()'s own guard still answers first, so the
-// stray token never even reaches sweep().
+// guards run (and can refuse) before sweep() is ever reached. The stray
+// riding after the valueless flag is what makes that ordering observable:
+// with no stray in argv, sweep() has nothing to complain about and the
+// "unknown flag" assertion holds under either ordering (#1711 — a stray-less
+// twin of this test stayed green with sweep() hoisted to main()'s first
+// statement, so it was deleted rather than kept as a second guard).
 test("CLI: a stray flag riding after a valueless roster flag never pre-empts that flag's own value-guard message", () => {
   const d = dir();
   writeFileSync(join(d, "batch.json"), JSON.stringify([{ member: "impl-1", agentFile: "x.md", harness: "claude" }]));
