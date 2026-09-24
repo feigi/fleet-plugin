@@ -278,8 +278,7 @@ function main() {
   const batchPath = arg("batch");
   if (!batchPath) die("usage: tier-check.mjs --batch <path-to-json> [--ledger <path>] [--repo <path>]");
   const ledgerFile = arg("ledger");
-  const repoArg = arg("repo");
-  const repoRoot = repoArg ?? join(SCRIPT_DIR, "..");
+  const repoRoot = arg("repo") ?? join(SCRIPT_DIR, "..");
 
   // #1669: this file bound only makeDie/makeArg, so a stray or misspelled
   // flag (`--ledgerr`) was silently ignored and the run computed a real
