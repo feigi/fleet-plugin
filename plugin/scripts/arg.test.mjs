@@ -203,10 +203,10 @@ test("die() exits 2 within a bound even when stderr is a saturated pipe whose re
 // while 1 MiB never did, its largest first write 584,704 bytes. 2 MiB clears
 // that with room, and stays under the 8 MiB maxBuffer both tests spawn with.
 const SHORT_WRITE_BYTES = 2 * 1024 * 1024;
-// The empirically-measured ceiling above, independent of SHORT_WRITE_BYTES:
-// a fixture guard compared against SHORT_WRITE_BYTES itself is a tautology
-// (it's built FROM that constant, so it can never be false); this is the
-// real floor a fixture must clear to still outgrow a Linux socket's send
+// The empirically-measured ceiling above, independent of SHORT_WRITE_BYTES
+// (#1722): a fixture guard compared against SHORT_WRITE_BYTES itself is a
+// tautology (it's built FROM that constant, so it can never be false); this is
+// the real floor a fixture must clear to still outgrow a Linux socket's send
 // buffer.
 const LINUX_SOCKBUF_MAX_FIRST_WRITE = 584_704;
 

@@ -72,7 +72,7 @@ const RUN_VIEW = JSON.stringify({
 // gh responses default to the green fixtures above; pass `null` to make that gh
 // subcommand fail (exit 1) if reached, so an unexpected call surfaces as a
 // crash rather than silently serving the wrong fixture.
-function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "", tolerateUnparsedStdout = false, readOnlyStdout = false, git = true, origin = null, repoView = null, spawnEnv = {} } = {}) {
+function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "", tolerateUnparsedStdout = false, readOnlyStdout = false, nonBlockingStdout = false, git = true, origin = null, repoView = null, spawnEnv = {} } = {}) {
   const repoDir = mkdtempSync(join(tmpdir(), "ci-state-repo-"));
   // Discovery resolves `.github/workflows` off `git rev-parse --show-toplevel`,
   // never the cwd, so a fixture that reaches discovery has to be a real repo.
@@ -127,12 +127,18 @@ function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prVi
   // passes that fd instead. spawnSync then reports no stdout for the child at
   // all, so the eager parse below has nothing to read and skips.
   const roStdout = readOnlyStdout ? openSync("/dev/null", "r") : null;
+  // nonBlockingStdout: the child's fd 1 starts out blocking and the script
+  // never opens a stream on it, so its writes there wait for the reader and
+  // cannot raise EAGAIN. This preloads a module whose whole body touches
+  // process.stdout, which opens that stream and puts fd 1 in O_NONBLOCK, the
+  // same as one console.log anywhere in the script would.
+  const preload = nonBlockingStdout ? ["--import", "data:text/javascript,process.stdout"] : [];
   let r;
   try {
     // maxBuffer: spawnSync's default 1 MiB kills the child mid-write once its
     // output passes it, and the pipe-survival fixtures below write past it on
     // purpose.
-    r = spawnSync(process.execPath, [SCRIPT, ...(pr === null ? [] : ["--pr", pr]), ...args], {
+    r = spawnSync(process.execPath, [...preload, SCRIPT, ...(pr === null ? [] : ["--pr", pr]), ...args], {
       cwd: join(repoDir, cwd),
       encoding: "utf8",
       env,
@@ -1314,9 +1320,10 @@ test("--pr omitted still answers with the usage line, not the numeric complaint"
 // What the guards compare against is that floor: a payload at or under it goes
 // out in one write on Linux however the script writes it, so the test cannot
 // fail there, and it covers darwin's 65,536 too. It is measured rather than
-// derived from the fixture sizes below — a guard against the constant a fixture
-// is built from can never fail (arg.test.mjs, #1722) — which is what lets it
-// catch the fixture itself: the pre-#1730 one fails it, on darwin as well.
+// derived from the fixture sizes below, which is what lets it catch the
+// fixture itself: the pre-#1730 one fails it, on darwin as well. A guard
+// against the constant a fixture is built from can never fail, and
+// arg.test.mjs's was exactly that until #1722.
 const LINUX_FIRST_WRITE_BYTES = 146_176;
 
 // The fixture size is the other half, chosen from how often each regression
@@ -1381,10 +1388,10 @@ function jobsFillingOneGhRead() {
 }
 
 // --quiet is the mode the controller's CI Monitor polls in, and it drops `jobs`
-// and `missing` — so this also pins that the payload still outgrows the buffer
+// and `missing` — so this also pins that the payload still outgrows one write
 // on the hot path, through `reasons` alone, where the absent-job reason names
 // every job it could not find.
-test("a not-green verdict payload larger than one pipe buffer reaches the caller whole", () => {
+test("a not-green verdict payload too large for one non-blocking write reaches the caller whole", () => {
   const ids = jobsClearingShortWrite();
   const r = run(["--quiet"], {
     repoFiles: { ".github/workflows/ci.yml": workflowWithJobs(ids) },
@@ -1411,11 +1418,31 @@ test("a not-green verdict payload larger than one pipe buffer reaches the caller
 // would then be reported as failing CI, which is worse than the truncation being
 // fixed. Green is also the only verdict that can carry a large payload without
 // `reasons`, so this is what exercises the write with `jobs` doing the growing.
-test("a green verdict payload larger than one pipe buffer still exits 0, gate not inverted", () => {
+//
+// That throw needs fd 1 non-blocking, and on run()'s default stdio it never
+// is. The script opens no stream on fd 1, so the payload write blocks until
+// the reader has taken all of it and cannot raise EAGAIN (measured: 1 MiB in
+// one writeSync, 0/100 EAGAIN on darwin and on Linux). A Node caller passing
+// its own non-blocking stdout through changes nothing: the child still took
+// the whole MiB in one write, 20/20 on both. So without nonBlockingStdout,
+// deleting writeAll()'s EAGAIN catch left this test green every time, 20/20 on
+// darwin and 50/50 on Linux, while the other two --quiet tests here, the
+// not-green payload above and the stderr line below, went red through the
+// verdict line on fd 2.
+//
+// nonBlockingStdout opens the stream, and then this payload write meets EAGAIN
+// on its own. With the catch deleted it throws there: red 20/20 on darwin,
+// where the sampled runs exited 1 with the payload cut at 65,536 bytes. On
+// Linux fd 1 is non-blocking at that write too (fdinfo, 30/30), but the 1 MiB
+// usually goes out whole anyway, the no-ceiling race above, so this test caught
+// the same mutant only 19/150 times there. On Linux the two fd 2 tests are what
+// catch it, 50/50 each.
+test("a green verdict payload too large for one non-blocking write still exits 0, gate not inverted", () => {
   const ids = jobsFillingOneGhRead();
   const r = run([], {
     repoFiles: { ".github/workflows/ci.yml": workflowWithJobs(ids) },
     runView: runViewAllSucceeded(ids),
+    nonBlockingStdout: true,
     tolerateUnparsedStdout: true,
   });
   let payload;
@@ -1488,7 +1515,7 @@ test("the verdict write keeps the green exit code when it throws — the guard e
 // bytes on darwin, most often 146,175 on Linux (measured, #1730) — which would
 // fail the size guard and blame the fixture for a defect in the script. Ordered
 // this way each failure names its own cause.
-test("the verdict line on stderr survives past one pipe buffer, its reasons whole", () => {
+test("the verdict line on stderr, too large for one non-blocking write, survives with its reasons whole", () => {
   const ids = jobsClearingShortWrite();
   const r = run(["--quiet"], {
     repoFiles: { ".github/workflows/ci.yml": workflowWithJobs(ids) },
