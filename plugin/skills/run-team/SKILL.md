@@ -280,13 +280,13 @@ At start, and whenever the pool empties.
    feed or update it, and it survives your own compaction. The launch is
    idempotent per workspace when the running cockpit answers the identity
    handshake: an already-served workspace's launch finds the running server
-   over HTTP, prints its URL, opens it if asked, and exits 0 without starting
-   a second one (#1585) — nothing to skip.
-   `--open` fires on every one of those launches too, so a re-shortlist
-   reopens the board tab, not just the first pass. A second fleet on another
-   workspace collides with none of that: its own launch derives that
-   workspace's own port and binds it when free, or scans to the next free
-   port in its range when the derived one is already held by something
+   over HTTP, prints its URL, and exits 0 without starting a second one
+   (#1585) — nothing to skip. It opens nothing either: `--open` opens a tab
+   only from the launch that binds a port and starts the server (#1714), so a
+   re-shortlist leaves the board tab you already have alone. A second fleet
+   on another workspace collides with none of that: its own launch derives
+   that workspace's own port and binds it when free, or scans to the next
+   free port in its range when the derived one is already held by something
    else — either way it gets its own board, just not always on the port its
    hash predicts.
 

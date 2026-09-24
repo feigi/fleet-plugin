@@ -182,8 +182,8 @@ const COVERED_MJS = {
   // checkout and writes board.json there, at exit 0 and in silence.
   // Measured in board.test.mjs, "an ambient GIT_DIR cannot move the cockpit
   // into another repository's workspace". The file's other children (gh,
-  // `node ci-state.mjs`, `open`) go through `tryRun`, which names no git and
-  // is not a git-invoking primitive.
+  // `node ci-state.mjs`, `--open`'s browser launcher) go through `tryRun` or
+  // `openBrowser`, which name no git and are not git-invoking primitives.
   "board.mjs": 1,
 };
 

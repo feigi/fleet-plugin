@@ -1733,8 +1733,8 @@ test("CLI: serve accepts --port 0 (ephemeral bind), announces the port it actual
   // …and the ABSENT half of #364's has() control rides this spawn rather than
   // paying for a second one byte-identical to it: no --open was passed, so
   // nothing may try to open. The --open test below carries the present half,
-  // and explains why a failed tryRun("open", …) surfaces on stderr at all.
-  assert.doesNotMatch(r.stderr, /open http:\/\/localhost:\d+\/ failed/, r.stderr);
+  // and explains why a launcher that could not run surfaces on stderr at all.
+  assert.doesNotMatch(r.stderr, /could not open a browser/, r.stderr);
 });
 
 // #1679: every other argv-read option `serve` takes has both an in-process
@@ -1819,14 +1819,16 @@ test("CLI: serve refuses --open=true behind other flags, not only as the first a
 });
 
 // The control: the new `=` guard must not touch the bare spelling. Observable
-// effect is tryRun("open", …) firing — PATH is stripped to an empty dir
-// (serveOpts), so the attempt itself fails ENOENT and shows up on stderr
-// rather than actually opening a browser. The other half of the control —
-// absence still reading as absent — is asserted on the --port 0 test above,
-// whose spawn is byte-identical to the one this would otherwise repeat.
+// effect is the browser launcher firing — PATH is stripped to an empty dir
+// (serveOpts), so every launcher this platform would try is missing and the
+// warning naming the URL shows up on stderr rather than a browser opening.
+// #1714's rows further down put stub launchers on PATH to see which one ran.
+// The other half of the control — absence still reading as absent — is
+// asserted on the --port 0 test above, whose spawn is byte-identical to the
+// one this would otherwise repeat.
 test("CLI: serve --open (bare) still reads as present, not swallowed by the `=` guard", () => {
   const opened = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600", "--open"]), { ...serveOpts(), timeout: 2000 });
-  assert.match(opened.stderr, /open http:\/\/localhost:\d+\/ failed/, opened.stderr);
+  assert.match(opened.stderr, /could not open a browser .*http:\/\/localhost:\d+\//, opened.stderr);
 });
 
 // #463: sweep() only ever refuses a `--`-prefixed token, so a bare stray
@@ -2333,6 +2335,29 @@ async function untilBoardJson(url) {
   }
 }
 
+// #1714: stub browser launchers. Each appends its own name and argv to one
+// log and exits with the code it was given, so a row reads which launcher
+// ran, at what URL and how many times — and no real browser is ever reached.
+// Written into gitOnlyPath()'s directory, so git still resolves beside them.
+const ALL_LAUNCHERS = { open: 0, "xdg-open": 0, wslview: 0 };
+function launcherBin(launchers) {
+  const bin = gitOnlyPath();
+  const log = join(bin, "launched.log");
+  for (const [name, code] of Object.entries(launchers)) {
+    writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $*" >> '${log}'\nexit ${code}\n`);
+    chmodSync(join(bin, name), 0o755);
+  }
+  return { bin, launched: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []) };
+}
+
+async function untilLaunched(rig, count) {
+  const deadline = Date.now() + 20000;
+  while (rig.launched().length < count) {
+    if (Date.now() > deadline) throw new Error(`no launcher ran within 20000ms: ${JSON.stringify(rig.launched())}`);
+    await new Promise((res) => setTimeout(res, 50));
+  }
+}
+
 // The reuse path end to end, and the claim no unit row can make: a second
 // launch against a LIVE cockpit for the same workspace starts no server,
 // says where the board already is, and exits 0. The exit code is the whole
@@ -2345,11 +2370,17 @@ async function untilBoardJson(url) {
 // not land, so a scan that skipped the derived port entirely — or probed
 // before it tried to bind — would pass all of them and move every
 // bookmarked URL by one.
-test("CLI: a second launch for the same workspace reuses the live cockpit, opens it, and exits 0", async () => {
-  const bin = gitOnlyPath(), repo = gitRepo("board-ws-reuse-");
+//
+// #1714: both launches pass --open, the way run-team's phase 0 relaunches on
+// every re-shortlist, with every launcher stubbed on PATH. The first bound
+// the port, so it opens exactly one tab; the second found that cockpit
+// already running (the held-port arm), so it opens none — before #1714 it
+// opened the existing board again, one more tab per pass.
+test("CLI: a second launch for the same workspace reuses the live cockpit, opens nothing, and exits 0", async () => {
+  const rig = launcherBin(ALL_LAUNCHERS), repo = gitRepo("board-ws-reuse-");
   const instance = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
   const expected = await firstFreePort(cockpitPorts(instance));
-  const first = serveProcess(repo, bin, ["--interval", "3600"]);
+  const first = serveProcess(repo, rig.bin, ["--interval", "3600", "--open"]);
   try {
     const url = await withTimeout(first.url, 20000, "the first cockpit to announce");
     assert.equal(url, `http://localhost:${expected}`,
@@ -2358,28 +2389,98 @@ test("CLI: a second launch for the same workspace reuses the live cockpit, opens
     await untilBoardJson(url);
     assert.equal((await (await fetch(`${url}/board.json`)).json()).workspace, realpathSync(repo),
       "the board payload is what the handshake reads — a cockpit that does not name its workspace cannot be recognised");
+    await untilLaunched(rig, 1);
 
-    const second = serveSync(repo, bin, ["--interval", "3600", "--open"]);
+    const second = serveSync(repo, rig.bin, ["--interval", "3600", "--open"]);
     assert.equal(second.status, 0, `the reuse path must exit 0 — a backgrounded launch reports nothing else: ${second.stderr}`);
     assert.match(second.stderr, new RegExp(`already running for this workspace on ${url}/`), second.stderr);
     assert.doesNotMatch(second.stderr, /cockpit on http/, `a second server was started for one workspace: ${second.stderr}`);
-    // --open honoured on the reuse path: PATH carries git and nothing else,
-    // so the attempt fails ENOENT on stderr instead of opening a browser —
-    // the same control the bare --open row above uses. It must point at the
-    // EXISTING board, which is the only URL there is.
-    assert.match(second.stderr, new RegExp(`open ${url}/ failed`), second.stderr);
-
-    // #1660 review: the `if (open)` guard around the reuse-match branch's
-    // tryRun("open", …) had no row exercising the FALSE case — a mutant
-    // that always attempted an open on reuse, regardless of the flag,
-    // passed every existing row and was only caught here.
-    const third = serveSync(repo, bin, ["--interval", "3600"]);
-    assert.equal(third.status, 0, `the reuse path must exit 0 regardless of --open: ${third.stderr}`);
-    assert.match(third.stderr, new RegExp(`already running for this workspace on ${url}/`), third.stderr);
-    assert.doesNotMatch(third.stderr, /open .* failed/,
-      `an open was attempted with --open omitted: ${third.stderr}`);
-  } finally { first.p.kill("SIGKILL"); for (const d of [bin, repo]) rmSync(d, { recursive: true, force: true }); }
+    // Read only once the second launch has exited, so anything it launched
+    // is already in the log: still the first launch's one line, at its URL.
+    const launched = rig.launched();
+    assert.equal(launched.length, 1, `the launch that bound opens one tab and the reuse opens none: ${JSON.stringify(launched)}`);
+    assert.ok(launched[0].endsWith(` ${url}/`), `the one tab is not the served board: ${launched[0]}`);
+    assert.doesNotMatch(second.stderr, /could not open a browser/, second.stderr);
+  } finally { first.p.kill("SIGKILL"); for (const d of [rig.bin, repo]) rmSync(d, { recursive: true, force: true }); }
 });
+
+// #1714: the reuse arm the row above cannot reach. That one's cockpit holds
+// the derived port, so the second launch's bind fails and it handshakes the
+// holder; here the derived port is FREE and this workspace's cockpit sits
+// one candidate further along — the shape a departed squatter leaves — so
+// the launch binds first and finds the match in its post-bind scan. That arm
+// had its own copy of the open, and has to open nothing just the same. The
+// stand-in cockpit answers from THIS process, so the launch is spawned
+// asynchronously: a spawnSync would block the loop it answers on, and the
+// probe would read it as silent rather than as this workspace's.
+test("CLI: a launch whose post-bind scan finds this workspace's cockpit further along opens nothing", async () => {
+  const rig = launcherBin(ALL_LAUNCHERS), repo = gitRepo("board-ws-scan-reuse-");
+  const instance = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
+  const ports = cockpitPorts(instance);
+  const free = await firstFreePort(ports);
+  const further = await firstFreePort(ports.slice(ports.indexOf(free) + 1));
+  const dir = boardDir(JSON.stringify({ tickets: [], workspace: instance.workspace }));
+  const { server, port } = await holderOn(dir, further);
+  const p = spawn(process.execPath, serveArgs(["--interval", "3600", "--open"]),
+    { cwd: repo, env: { ...process.env, PATH: rig.bin }, stdio: ["ignore", "ignore", "pipe"] });
+  let stderr = "";
+  p.stderr.setEncoding("utf8");
+  p.stderr.on("data", (d) => { stderr += d; });
+  try {
+    assert.equal(port, further, "test setup: the stand-in cockpit must hold the later candidate");
+    const status = await withTimeout(new Promise((res) => p.on("close", res)), 20000, "the launch to exit");
+    assert.equal(status, 0, `the reuse path must exit 0: ${stderr}`);
+    assert.match(stderr, new RegExp(`already running for this workspace on http://localhost:${further}/`), stderr);
+    assert.doesNotMatch(stderr, /cockpit on http/, stderr);
+    assert.deepEqual(rig.launched(), [], "a launch that found this workspace's cockpit already running opened a tab for it");
+  } finally {
+    p.kill("SIGKILL");
+    server.close(() => {});
+    for (const d of [rig.bin, repo, dir]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// #1714: which launcher a launch that bound its port runs, per platform (ADR
+// 0009) — `open` on macOS; elsewhere `xdg-open`, then `wslview` (WSL) only
+// when `xdg-open` is not on PATH at all, since one that ran and failed is the
+// right program meeting a real fault. process.platform is forced in the
+// child through a preload, so every platform's order is exercised on
+// whichever one runs the suite, and each row's PATH also carries a launcher
+// the forced platform must NOT reach for. A launch with no working launcher
+// warns with the URL and keeps serving: it is still up when the timeout
+// kills it and exits 0 on that SIGTERM, exactly like one whose launcher
+// worked — the status a missing `open` produced before #1714.
+const serveOn = (platform, cwd, bin) => spawnSync(process.execPath, [
+  "--import", `data:text/javascript,${encodeURIComponent(`Object.defineProperty(process, "platform", { value: ${JSON.stringify(platform)} });`)}`,
+  ...serveArgs(["--port", "0", "--interval", "3600", "--open"]),
+], { cwd, env: { ...process.env, PATH: bin }, encoding: "utf8", timeout: 2000 });
+
+for (const [platform, launchers, ran, warns] of [
+  ["darwin", ALL_LAUNCHERS, ["open"], false],
+  ["linux", ALL_LAUNCHERS, ["xdg-open"], false],
+  ["linux", { open: 0, wslview: 0 }, ["wslview"], false],
+  ["linux", { "xdg-open": 3, wslview: 0 }, ["xdg-open"], true],
+  ["linux", { open: 0 }, [], true],
+  ["darwin", { "xdg-open": 0, wslview: 0 }, [], true],
+]) {
+  const onPath = Object.entries(launchers).map(([n, c]) => (c ? `${n} (exit ${c})` : n)).join(", ");
+  test(`CLI: a fresh --open launch on ${platform} with ${onPath} on PATH runs ${ran.join(" ") || "no launcher"}${warns ? " and warns with the URL" : ""}`, () => {
+    const rig = launcherBin(launchers), cwd = mkdtempSync(join(tmpdir(), "board-open-"));
+    try {
+      const r = serveOn(platform, cwd, rig.bin);
+      const url = r.stderr.match(/cockpit on (http:\/\/localhost:\d+)/)?.[1];
+      assert.ok(url, `no cockpit line: ${r.stderr}`);
+      assert.deepEqual(rig.launched(), ran.map((cmd) => `${cmd} ${url}/`), r.stderr);
+      if (warns) {
+        assert.match(r.stderr, new RegExp(`WARNING --open could not open a browser \\(.*\\) — the cockpit is on ${url}/`), r.stderr);
+      } else {
+        assert.doesNotMatch(r.stderr, /could not open a browser/, r.stderr);
+      }
+      assert.equal(r.error?.code, "ETIMEDOUT", `the cockpit stopped serving instead of running until signalled: ${r.stderr}`);
+      assert.equal(r.status, 0, r.stderr);
+    } finally { for (const d of [rig.bin, cwd]) rmSync(d, { recursive: true, force: true }); }
+  });
+}
 
 // The false-match half. This holder answers, parses, and serves a real board
 // payload on the exact port this workspace derives — nothing but the
