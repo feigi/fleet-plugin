@@ -54,7 +54,7 @@ script's own docstring and Caveats below).
 | 1 | Fleet `cache_creation` / merged PR | **1,078,459** (total 80,884,397) | 75 | Σ `tokens_cache_create` over every dispatched member in the session with `role != memory`, ÷ n |
 | 2 | Controller `cache_creation` / merged PR | **133,720** (total 10,029,018) | 75 | Σ `usage.cacheWrite` over the session's own top-level assistant turns (the controller kernel, never a subagent file), ÷ n |
 | 3 | Implementer-slot idle ratio | **0.906** (90.6%) | — | see below |
-| 4 | Review start latency (PR opened → review dispatched) | median **20.1 min**, p90 **2586.4 min** (~43.1 h) | 86 PRs | see below |
+| 4 | Review start latency (PR opened → review dispatched) | median **8.8 min**, p90 **39.1 min** (max 425.3 min) | 75 | see below |
 
 Fleet spend is ~8.1× controller spend for this session (81M vs 10M
 `cache_creation` tokens) — consistent with `compute-spend.mjs`'s own framing
@@ -88,22 +88,46 @@ is exactly the shape of inefficiency the wayfinder map's destination
 
 ### Signal 4 detail — review start latency
 
-"Review dispatched" is a proxy: the earliest `session_init` dispatch
-timestamp, among this session's `specialist`/`reviewer`/`finisher`-role
-members, whose task text names a given PR — either via the
-`.fleet/scratch/pr<N>` path `review-eval.mjs` writes for the snapshot step
-(review-core.js's first specialist), or a bare `PR #<N>`. That is compared
-against the PR's own `createdAt` from `gh pr list --json createdAt`. 86 PRs
-matched (a slightly larger set than the 75 directly-merge-attributed PRs
-above, because a couple of PRs this session reviewed were merged by a
-neighboring short-lived session, or the match is on a PR still awaiting
-merge at the time of a later data point — see Caveats). All 86 had
-non-negative latency (dispatch after creation, as expected).
+"Review dispatched" is the ticket's "workflow start": the earliest
+`session_init` timestamp among review-core.js's own dispatches for a PR — its
+`snapshot[-k]` member (label `snapshot`, the first agent the review workflow
+dispatches) and its `review<dimension>[-k]` specialists (label
+`review:<dimension>`), plus a hand-dispatched `review-pr-<n>` reviewer had
+this session used that fallback (it did not). Each dispatch is keyed on the
+PR it is *about*, read off the prompt's own PR interpolation: the snapshot
+prompt's `gh pr diff <N> > "$RUN"/pr.diff` line, and the specialist prompt's
+opening `Review PR #<N> (branch <branch>) for:`. That timestamp is compared
+against the PR's own `createdAt` from `gh pr list --json createdAt`.
 
-The wide median-to-p90 spread (20 minutes vs 43 hours) is direct evidence of
-the staging behaviour the wayfinder map exists to retire: most PRs get
-reviewed almost immediately, but a meaningful tail waits for a
-maintainer-chosen staging batch to be assembled before their review starts.
+The match keys on those prompt lines, not on a scratch path: review-core.js's
+run root is `<scratch>/pr<N>`, where `<scratch>` is a caller argument
+defaulting to `/tmp/review-pr-<N>`, so the path varies with whatever the
+caller passed. Nor does it filter on the member-outcomes `role` column:
+`compute-spend.mjs`'s `reviewer` role is a review-side *spend* bucket that
+books `fix-pr-<n>` appliers by design and, through its description fallback,
+`impl<N>` ticket implementers too.
+
+Every one of the 75 merged PRs has a review dispatch in this session, and the
+scan finds no reviewed PR outside them. All 75 latencies are non-negative.
+
+An earlier revision of this note matched any `PR #<N>` anywhere in a
+specialist/reviewer/finisher-role task and reported median 20.1 min, p90
+2586.4 min over 86 PRs. Its 11 extra PRs (#1082, #1209, #1232, #1310, #1380,
+#1409, #1413, #1502, #1530, #1559, #1581) were long-merged PRs that dispatches
+about *other* PRs merely cited — every snapshot prompt quotes "PR #1409's
+first review pass" as boilerplate — and they were exactly that set's 11
+largest values.
+
+Most reviews launch within minutes: 32 of 75 within 5 min, 60 within 30 min,
+71 within 60 min. 32 of the 75 were launched within 5 s of another PR's
+launch — the controller started those reviews in batches.
+
+A second reading, the **first specialist fan-out** (the review actually
+running), gives median 16.5 min, p90 246.8 min, max 547.7 min. Its long tail
+comes from the 23 PRs whose first launch stopped at the snapshot and never
+fanned out; each reached specialists only on a later relaunch (a second
+snapshot for the same PR). A guard comparing before/after on this signal has
+to pin which of the two events it means.
 
 ## What could NOT be derived, or is degraded
 
@@ -112,10 +136,11 @@ maintainer-chosen staging batch to be assembled before their review starts.
   most recent `claude`-harness activity in that file is a single session
   dated 2026-09-15 with essentially no rows. There is no recent Claude Code
   `/run-team` run of comparable scale (≥20 merged PRs) to baseline against —
-  the dual-harness guard in standing decision 9 can only be measured on omp
-  today. **Missing field to close this gap: nothing structural** — the data
-  would exist the next time a Claude Code `/run-team` run merges ≥20 PRs; it
-  is a scheduling gap, not an instrumentation one.
+  the before/after guard in standing decision 9 of the wayfinder map (#1768),
+  a map whose notes make dual-harness (Claude Code + omp) permanent, can only
+  be measured on omp today. **Missing field to close this gap: nothing
+  structural** — the data would exist the next time a Claude Code `/run-team`
+  run merges ≥20 PRs; it is a scheduling gap, not an instrumentation one.
 - **n=75 is a lower bound built from name evidence, not a ledger.**
   `.fleet/ledger.md` (the live ledger) and every archived
   `.fleet/ledger.*.md` have **no rows at all** for PRs #1600–#1705 — the
@@ -131,8 +156,11 @@ maintainer-chosen staging batch to be assembled before their review starts.
   (`merge-bot-1`…`merge-bot-12`, `merge-bot-w3`…`merge-bot-w8`, `wave1`–
   `wave3`) list several PR numbers each as "considered in this pass," not
   necessarily "merged in this pass," so a name-based reconstruction can
-  under- or slightly over-count by a handful of PRs at the margin. **Missing
-  field: a durable, timestamped per-PR-per-pass merge record** (something
+  under- or slightly over-count by a handful of PRs at the margin. Signal 4's
+  review-dispatch scan, a third route, finds exactly the same 75 merged PRs —
+  none extra, none missing — though it too cannot see a PR this session
+  merged without reviewing. **Missing field: a durable, timestamped
+  per-PR-per-pass merge record** (something
   `merge-gate.sh`/the merge bot's own report could emit) would remove this
   reconstruction step entirely; today it is implicit in the bot's transcript
   prose only.
@@ -146,14 +174,6 @@ maintainer-chosen staging batch to be assembled before their review starts.
   could already be positioned to emit, given its existing heartbeat) would
   let a future measurement bound idle ratio to genuinely-active loop time
   only.
-- **Review start latency's PR set (86) is not exactly the merged-PR set (75)
-  used for signals 1–2.** The `.fleet/scratch/pr<N>` / `PR #<N>` text match
-  is per-PR, not per-session-attribution, so it also catches a few PRs whose
-  review this session dispatched but whose final merge (or ledger
-  attribution) belongs to a neighboring session in the same window. I did
-  not attempt to force the two sets to match, since latency is a legitimate
-  per-PR measurement independent of which session's spend total it should be
-  pooled into.
 
 ## Reproduction
 

@@ -31,10 +31,12 @@ write-up):
     own transcript for its first/last timestamp (its live interval), sweep
     those intervals against the declared cap from each `/run-team <impl>
     <reviewers>` invocation, piecewise by invocation.
-  - Signal 4 (review start latency): earliest session_init dispatch,
-    across this session's specialist/reviewer/finisher members, whose task
-    text names a given PR (via its `.fleet/scratch/pr<N>` path or a bare
-    `PR #<N>`), minus that PR's `createdAt` from `gh pr list`.
+  - Signal 4 (review start latency): earliest session_init dispatch of
+    review-core.js's own `snapshot[-k]` / `review<dimension>[-k]` members (or
+    a hand-dispatched `review-pr-<n>`) whose task is ABOUT a given PR - the
+    snapshot prompt's `gh pr diff <N>` line, the specialist prompt's opening
+    `Review PR #<N> (branch ...)` - minus that PR's `createdAt` from
+    `gh pr list`. A PR number the task text merely cites never counts.
 """
 import json, re, subprocess, statistics
 from pathlib import Path
@@ -154,7 +156,7 @@ def main():
     verified_merged = sorted(n for n in candidates if n in merged_by_num)
     n = len(verified_merged)
     print(f"n = {n} verified merged PRs (candidates not merged: "
-          f"{sorted(c for c in candidates if c not in merged_by_num)})")
+          f"{sorted(c for c in candidates if c not in merged_by_num)}): {verified_merged}")
 
     # --- Signal 2: controller cache_creation per merged PR ---
     controller_cache_create = 0
@@ -199,53 +201,121 @@ def main():
     idle_ratio = num / den
 
     # --- Signal 4: review start latency ---
-    pr_first_dispatch = {}
-    scratch_re = re.compile(r"scratch/pr(\d+)")
-    prref_re = re.compile(r"\bPR #?(\d{4})\b")
-    for r in rows:
-        if r["role"] not in ("specialist", "reviewer", "finisher"):
-            continue
-        p = SESSION_DIR / f"{r['member']}.jsonl"
-        found = [p] if p.exists() else list(SESSION_DIR.glob(f"**/{r['member']}.jsonl"))
-        if not found:
-            continue
-        try:
-            with open(found[0], encoding="utf-8", errors="replace") as fh:
-                for line in fh:
-                    try:
-                        d = json.loads(line)
-                    except Exception:
-                        continue
-                    if d.get("type") == "session_init":
-                        t, ts = d.get("task", ""), d.get("timestamp")
-                        nums = {int(x) for x in scratch_re.findall(t)} | {int(x) for x in prref_re.findall(t)}
-                        for pr_n in nums & set(merged_by_num):
-                            if ts and (pr_n not in pr_first_dispatch or ts < pr_first_dispatch[pr_n]):
-                                pr_first_dispatch[pr_n] = ts
-                        break
-        except Exception:
-            continue
+    # "Review dispatched" = the earliest dispatch review-core.js makes for a
+    # PR, keyed on the PR that dispatch is ABOUT - never on a PR its task text
+    # merely cites. Every snapshot prompt, for one, quotes "PR #1409's first
+    # review pass" as boilerplate. Only review-core.js's own dispatches count,
+    # selected by the names omp gave them: `snapshot[-k]` (label "snapshot",
+    # the first thing review-core.js dispatches) and `review<dimension>[-k]`
+    # (label "review:<dimension>", one per specialist), plus a hand-dispatched
+    # `review-pr-<n>` reviewer if a session used that fallback. The member-
+    # outcomes `role` column is NOT the filter: compute-spend.mjs's "reviewer"
+    # role is a review-side SPEND bucket that books `fix-pr-<n>` appliers by
+    # design, and via its description fallback books `impl<N>` ticket
+    # implementers there too.
+    snapshot_name = re.compile(r"^snapshot(?:-\d+)?$")
+    specialist_name = re.compile(
+        r"^review(?:correctness|silent-failure|tests|comments|types|simplify)(?:-\d+)?$")
+    review_pr_name = re.compile(r"^review-pr-(\d+)$")
+    # The subject, read off each prompt's own PR interpolation: the snapshot
+    # prompt's `gh pr diff ${pr} > "$RUN"/pr.diff` line, and the specialist
+    # prompt's opening `Review PR #${pr} (branch ${branch}) for: `.
+    snapshot_subject = re.compile(r"^\s*gh pr diff (\d+) >", re.M)
+    specialist_subject = re.compile(r"^Review PR #(\d+) \(branch ", re.M)
 
-    latencies = []
-    for pr_n, dispatch_ts in pr_first_dispatch.items():
-        created = merged_by_num[pr_n]["createdAt"]
-        lat = (parse_ts(dispatch_ts) - parse_ts(created)).total_seconds()
-        if lat >= 0:
-            latencies.append(lat)
-    latencies.sort()
+    def dispatch_task(member):
+        p = SESSION_DIR / f"{member}.jsonl"
+        found = [p] if p.exists() else list(SESSION_DIR.glob(f"**/{member}.jsonl"))
+        if not found:
+            return None, None
+        with open(found[0], encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                if d.get("type") == "session_init":
+                    return d.get("task", ""), d.get("timestamp")
+        return None, None
+
+    snapshots, specialists = {}, {}  # pr -> sorted dispatch timestamps
+    for r in rows:
+        member = r["member"]
+        m = review_pr_name.match(member)
+        if m:
+            kind, subject_re = specialists, None
+        elif snapshot_name.match(member):
+            kind, subject_re = snapshots, snapshot_subject
+        elif specialist_name.match(member):
+            kind, subject_re = specialists, specialist_subject
+        else:
+            continue
+        task, ts = dispatch_task(member)
+        if task is None or not ts:
+            continue
+        if subject_re is None:
+            subjects = {int(m.group(1))}
+        else:
+            subjects = {int(x) for x in subject_re.findall(task)}
+        if len(subjects) != 1:
+            raise SystemExit(f"{member}: expected one subject PR in its task, found {sorted(subjects)}")
+        kind.setdefault(subjects.pop(), []).append(ts)
+    for d in (snapshots, specialists):
+        for tss in d.values():
+            tss.sort()
+
+    reviewed = set(snapshots) | set(specialists)
+    reviewed_merged = sorted(reviewed & set(merged_by_num))
+    print(f"review-dispatch subject PRs: {len(reviewed)}, merged: {len(reviewed_merged)}; "
+          f"not merged: {sorted(reviewed - set(merged_by_num))}; "
+          f"merged but not in the n set: {sorted(set(reviewed_merged) - set(verified_merged))}; "
+          f"in the n set with no review dispatch: {sorted(set(verified_merged) - reviewed)}")
+
+    def latencies_from(first_ts):
+        lats, negative = [], []
+        for pr_n, ts in first_ts.items():
+            lat = (parse_ts(ts) - parse_ts(merged_by_num[pr_n]["createdAt"])).total_seconds()
+            (lats if lat >= 0 else negative).append(lat)
+        if negative:
+            print(f"  WARNING: {len(negative)} dispatch(es) precede their PR's createdAt; excluded")
+        return sorted(lats)
+
+    # Primary: the review's first launch - its earliest snapshot or specialist.
+    first_launch = {n: min(snapshots.get(n, []) + specialists.get(n, [])) for n in reviewed_merged}
+    latencies = latencies_from(first_launch)
+    # Variant: the first specialist fan-out, i.e. the review actually running.
+    first_fanout = {n: specialists[n][0] for n in reviewed_merged if n in specialists}
+    fanout_latencies = latencies_from(first_fanout)
+    # A launch whose snapshot never fanned out: a later snapshot for the same
+    # PR precedes that PR's first specialist.
+    relaunched = [n for n in first_fanout
+                  if any(first_launch[n] < t <= first_fanout[n] for t in snapshots.get(n, []))]
+    # Reviews launched together: first launches within 5 s of another PR's.
+    launch_times = sorted(parse_ts(t) for t in first_launch.values())
+    batched = sum(1 for i, t in enumerate(launch_times)
+                  if (i > 0 and (t - launch_times[i - 1]).total_seconds() <= 5)
+                  or (i + 1 < len(launch_times) and (launch_times[i + 1] - t).total_seconds() <= 5))
 
     def pct(data, p):
         k = (len(data) - 1) * p
         f, c = int(k), min(int(k) + 1, len(data) - 1)
         return data[f] + (data[c] - data[f]) * (k - f)
 
+    def describe(lats):
+        return (f"median {statistics.median(lats)/60:.1f} min, p90 {pct(lats, 0.9)/60:.1f} min, "
+                f"max {lats[-1]/60:.1f} min  (n={len(lats)})")
+
     print("\n=== RESULTS ===")
     print(f"n merged PRs               : {n}")
     print(f"1. fleet cache_creation/PR : {fleet_total / n:,.0f}  (total {fleet_total:,})")
     print(f"2. controller cache_creation/PR : {controller_cache_create / n:,.0f}  (total {controller_cache_create:,})")
     print(f"3. implementer idle ratio  : {idle_ratio:.3f}")
-    print(f"4. review start latency    : median {statistics.median(latencies)/60:.1f} min, "
-          f"p90 {pct(latencies, 0.9)/60:.1f} min  (n={len(latencies)})")
+    print(f"4. review start latency    : {describe(latencies)}")
+    print(f"   within 5 / 30 / 60 min  : {sum(l <= 300 for l in latencies)} / "
+          f"{sum(l <= 1800 for l in latencies)} / {sum(l <= 3600 for l in latencies)}")
+    print(f"   launched in a batch     : {batched} PRs (first launch within 5 s of another PR's)")
+    print(f"   variant, first fan-out  : {describe(fanout_latencies)}")
+    print(f"   first launch never fanned out, relaunched: {len(relaunched)} PRs {sorted(relaunched)}")
 
 
 if __name__ == "__main__":
