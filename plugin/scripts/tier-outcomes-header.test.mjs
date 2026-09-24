@@ -52,6 +52,10 @@ const COLUMNS = [
 // copies of one slice is how two of them end up bounded differently.
 const rulingStep = () => between(RUN_TEAM, "**Guard: accumulate per PR", "**Then record the run's member facts", "phase 3's ruling step");
 
+// Same reason as `rulingStep` above: one definition of the `minted_false_claim`
+// slice, so two hand-rolled copies do not drift to different bounds.
+const mfcDef = () => stripHashGutter(between(HEADER, "minted_false_claim", "# sizing", "the header"));
+
 test("the header's column line names every column, in order", () => {
   // Drift here is silent and total: the header's own awk one-liners and every
   // recount in SKILL.md index by position, so a column inserted anywhere but
@@ -122,7 +126,7 @@ test("the header names WHICH diff `minted_false_claim` scores, and settles the c
   // Sliced to the definition itself, so a stray "as submitted" elsewhere in the
   // header cannot buy the pass with this one gutted. `stripHashGutter` because
   // `\s+` does not span the `#` a wrapped comment line begins with.
-  const def = stripHashGutter(between(HEADER, "minted_false_claim", "# sizing", "the header"));
+  const def = mfcDef();
   assert.match(
     def,
     phrase("the work AS SUBMITTED asserted a factual claim"),
@@ -147,7 +151,7 @@ test("the header rules `minted_false_claim` by REFERENT, not by surface, and nam
   // green under the narrower "diff-scoped" reading too (every diff-carried
   // claim's surface is trivially the diff); the exclusion clause is what makes
   // this pin red on either kind of drop or inversion.
-  const def = stripHashGutter(between(HEADER, "minted_false_claim", "# sizing", "the header"));
+  const def = mfcDef();
   assert.match(
     def,
     phrase("a diff comment, a doc, a test name, a PR body, a commit body"),
