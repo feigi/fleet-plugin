@@ -284,3 +284,24 @@ test("stallReport: names the four facts, and says `unknown` rather than guessing
   assert.equal(stallReport(assessBeat({ beat: { at: now, interval: 300, stopped: "" }, now }), { claimed: 1, supply: 1 }), null);
   assert.equal(stallReport(assessBeat({ beat: null, now }), { claimed: 1, supply: 1 }), null);
 });
+
+test("stallReport: a sub-60s interval renders as seconds, not a floored 0m", () => {
+  // #1735: mins() floors to whole minutes, and the CLI guard for --base/
+  // --ceiling only requires >= 1 (fleet-heartbeat.test.mjs relies on that —
+  // its CLI cases use 2s/3s/8s intervals throughout to keep real
+  // Atomics.wait holds fast), so a sub-minute mark is a real, reachable
+  // shape here, not an input this module gets to refuse. Flooring it to
+  // "0m" read as a division-by-zero defect rather than the true value.
+  const now = 2_000_000_000_000;
+  const at = now - 45_000;
+  const verdict = assessBeat({ beat: { at, interval: 30, stopped: "smoke test" }, now });
+  const line = stallReport(verdict, { claimed: 0, supply: 0 });
+  assert.match(line, /45s ago/);
+  assert.match(line, /15s past the 30s interval it promised/);
+  assert.doesNotMatch(line, /\b0m\b/);
+
+  // The boundary itself: exactly 60s reports as "1m", never "60s" — mins()
+  // has exactly one branch point and this pins which side 60000ms falls on.
+  const boundary = assessBeat({ beat: { at: now - 60_000, interval: 30, stopped: "smoke test" }, now });
+  assert.match(stallReport(boundary, { claimed: 0, supply: 0 }), /1m ago/);
+});

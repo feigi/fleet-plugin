@@ -327,8 +327,21 @@ export function isStalled(verdict) {
 
 // Whole minutes, floored, because the numbers here are tens of minutes to
 // hours and a seconds-precise age in a stall line is false precision: the
-// mark is written once per hold, so its resolution is minutes anyway.
+// mark is written once per hold, so its resolution is minutes anyway. That
+// holds for production (--base 300, --ceiling 1200 — SKILL.md's only
+// documented values) but not for every value the CLI guard actually accepts:
+// fleet-heartbeat.mjs's own guard refuses `--ceiling < --base` the same way
+// this file refuses other invalid shapes, and mirroring that refusal onto
+// sub-60s `--base`/`--ceiling` was the first fix tried for #1735 — until
+// fleet-heartbeat.test.mjs turned out to lean on 2s/3s/8s/9s/64s intervals
+// throughout, deliberately, to keep its real `Atomics.wait` holds fast. A
+// CLI-level refusal would force that whole suite onto minute-plus real
+// holds for no behavioural gain, so the fix lives here instead: a value
+// under a minute is still a real value, not an invalid one, and flooring it
+// to "0m" is what read as a division-by-zero defect, not the sub-minute
+// input itself.
 function mins(ms) {
+  if (ms < 60000) return `${Math.floor(ms / 1000)}s`;
   return `${Math.floor(ms / 60000)}m`;
 }
 
