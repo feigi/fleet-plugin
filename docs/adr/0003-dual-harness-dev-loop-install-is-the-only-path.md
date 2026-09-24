@@ -1,6 +1,6 @@
 # 0003 — Installation is the only path: the dual-harness dev loop
 
-**Status:** Accepted. Ruled 2026-09-09 on #1294, against the measurements below.
+**Status:** Accepted. Ruled 2026-09-09 on #1294, against the measurements below. Amended by ADR 0012: point 9's `eval.workpool.freshAgents` precondition is retired with the omp workpool; points 1–8 stand.
 
 ## Context
 

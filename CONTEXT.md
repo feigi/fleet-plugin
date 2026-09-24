@@ -38,7 +38,7 @@ deleted, the label dropped.
 _Avoid_: unclaim, close, clean up
 
 **Reap**:
-Deleting branches whose upstream is gone, and their worktrees, after a merge wave.
+Deleting branches whose upstream is gone, and their worktrees, after each merge pass.
 Distinct from Release: a reap follows a merged PR, a release follows a claim that never
 became one.
 _Avoid_: prune, cleanup
@@ -157,7 +157,7 @@ _Avoid_: local marketplace, dev source
 **Install-time precondition**:
 A harness setting the fleet depends on, set once by the operator at install and never
 written by a run — a run that wrote one would be changing every other session on the
-machine to dispatch its own wave. Three exist, all on omp, all session-wide:
+machine to dispatch its own members. Three exist, all on omp, all session-wide:
 `enabledProviders: ["claude-plugins"]`, `eval.workpool.freshAgents: true`, and
 `task.agentModelOverrides` carrying the fleet's Tier routes (ADR 0011). ADR 0003
 points 8 and 9 carry each of the first two's required value, its global and
@@ -216,6 +216,35 @@ tickets are still claimed and in flight, and whether the pool still has
 supply. Detection only: naming a stall neither releases the stranded claims
 nor restarts anything.
 _Avoid_: dead-run warning, stale banner
+
+### Loop
+
+**Shortlist**:
+The ordered list of tickets the controller may admit — every open `ready-for-agent`
+ticket that survives the cheap filters, oldest first, built in one scan and refreshed
+at a low-water mark rather than on empty. Selection is batched here; admission never
+is.
+_Avoid_: queue, pool, staging, backlog, wave
+
+**Pull**:
+Admitting one ticket into one free implementer slot the moment it frees: the Shortlist
+head is read, judged, claimed and dispatched — or relabelled by cause, or excluded, and
+the next entry tried. The only unit of supply; there is no batch admission and no human
+decision per admission.
+_Avoid_: refill, stage, batch, wave
+
+**Exclusion**:
+A ticket the controller has ruled inadmissible for now, recorded with its premise — the
+open PR it collides with or the open issue it sequences after — and skipped until that
+premise closes, when it re-enters the Shortlist in its own order.
+_Avoid_: demotion, deferral, skip, hold
+
+**Pass**:
+One merge bot's lifetime: dispatched on the first `ready-to-merge` label, it merges
+every labelled PR one at a time, re-evaluating after each, waits a short grace for late
+labels, reports once and exits. A label seen after the exit starts a new Pass under a
+fresh name.
+_Avoid_: wave, batch, cycle, round
 
 ### Dialect
 
