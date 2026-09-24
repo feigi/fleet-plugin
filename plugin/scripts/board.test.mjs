@@ -2082,8 +2082,8 @@ const withTimeout = (pr, ms, what) => Promise.race([
   new Promise((_, rej) => setTimeout(() => rej(new Error(`timed out waiting for ${what}`)), ms).unref()),
 ]);
 
-function serveProcess(cwd, bin, args = ["--port", "0", "--interval", "3600"]) {
-  const p = spawn(process.execPath, serveArgs(args),
+function serveProcess(cwd, bin, args = ["--port", "0", "--interval", "3600"], node = []) {
+  const p = spawn(process.execPath, [...node, ...serveArgs(args)],
     { cwd, env: { ...process.env, PATH: bin }, stdio: ["ignore", "ignore", "pipe"] });
   p.stderr.setEncoding("utf8");
   let buf = "";
@@ -2095,7 +2095,7 @@ function serveProcess(cwd, bin, args = ["--port", "0", "--interval", "3600"]) {
     });
     p.on("exit", (code) => rej(new Error(`serve exited (${code}) before announcing: ${buf}`)));
   });
-  return { p, url };
+  return { p, url, stderr: () => buf };
 }
 
 // #1713: the cockpit now answers HTTP while its first tick is still
@@ -2447,13 +2447,33 @@ test("CLI: a launch whose post-bind scan finds this workspace's cockpit further 
 // child through a preload, so every platform's order is exercised on
 // whichever one runs the suite, and each row's PATH also carries a launcher
 // the forced platform must NOT reach for. A launch with no working launcher
-// warns with the URL and keeps serving: it is still up when the timeout
-// kills it and exits 0 on that SIGTERM, exactly like one whose launcher
+// warns with the URL and keeps serving: it still answers after warning and
+// exits 0 on the SIGTERM that ends it, exactly like one whose launcher
 // worked — the status a missing `open` produced before #1714.
-const serveOn = (platform, cwd, bin) => spawnSync(process.execPath, [
+//
+// Each row waits on --open's own outcome, not on a clock: read at a fixed
+// deadline (the 2s spawnSync timeout this used to be), a launch slowed by a
+// loaded machine had not reached its launcher yet and failed a row the code
+// passes. openBrowser() warns only once it is done with the launcher list, so
+// a warning row is complete the moment that line lands. A launcher that
+// worked announces nothing, so a row expecting one waits for its log line and
+// then LAUNCHER_SETTLE_MS more: a wrong second launcher, or a warning after
+// all, would follow the one that worked within a turn of the loop, and this
+// is the time it gets to show up. That wait can only miss a fault, never
+// invent one.
+const LAUNCHER_SETTLE_MS = 1000;
+const WARNED = /could not open a browser.*\n/;
+const serveOn = (platform, cwd, bin) => serveProcess(cwd, bin, ["--port", "0", "--interval", "3600", "--open"], [
   "--import", `data:text/javascript,${encodeURIComponent(`Object.defineProperty(process, "platform", { value: ${JSON.stringify(platform)} });`)}`,
-  ...serveArgs(["--port", "0", "--interval", "3600", "--open"]),
-], { cwd, env: { ...process.env, PATH: bin }, encoding: "utf8", timeout: 2000 });
+]);
+
+async function untilWarned(launch) {
+  const deadline = Date.now() + 20000;
+  while (!WARNED.test(launch.stderr())) {
+    if (Date.now() > deadline) throw new Error(`no --open warning within 20000ms: ${launch.stderr()}`);
+    await new Promise((res) => setTimeout(res, 50));
+  }
+}
 
 for (const [platform, launchers, ran, warns] of [
   ["darwin", ALL_LAUNCHERS, ["open"], false],
@@ -2464,21 +2484,29 @@ for (const [platform, launchers, ran, warns] of [
   ["darwin", { "xdg-open": 0, wslview: 0 }, [], true],
 ]) {
   const onPath = Object.entries(launchers).map(([n, c]) => (c ? `${n} (exit ${c})` : n)).join(", ");
-  test(`CLI: a fresh --open launch on ${platform} with ${onPath} on PATH runs ${ran.join(" ") || "no launcher"}${warns ? " and warns with the URL" : ""}`, () => {
+  test(`CLI: a fresh --open launch on ${platform} with ${onPath} on PATH runs ${ran.join(" ") || "no launcher"}${warns ? " and warns with the URL" : ""}`, async () => {
     const rig = launcherBin(launchers), cwd = mkdtempSync(join(tmpdir(), "board-open-"));
+    const launch = serveOn(platform, cwd, rig.bin);
+    const exited = new Promise((res) => launch.p.on("exit", (code, signal) => res({ code, signal })));
     try {
-      const r = serveOn(platform, cwd, rig.bin);
-      const url = r.stderr.match(/cockpit on (http:\/\/localhost:\d+)/)?.[1];
-      assert.ok(url, `no cockpit line: ${r.stderr}`);
-      assert.deepEqual(rig.launched(), ran.map((cmd) => `${cmd} ${url}/`), r.stderr);
+      const url = await withTimeout(launch.url, 20000, "the cockpit to announce");
       if (warns) {
-        assert.match(r.stderr, new RegExp(`WARNING --open could not open a browser \\(.*\\) — the cockpit is on ${url}/`), r.stderr);
+        await untilWarned(launch);
+        assert.match(launch.stderr(), new RegExp(`WARNING --open could not open a browser \\(.*\\) — the cockpit is on ${url}/`), launch.stderr());
       } else {
-        assert.doesNotMatch(r.stderr, /could not open a browser/, r.stderr);
+        await untilLaunched(rig, ran.length);
+        await new Promise((res) => setTimeout(res, LAUNCHER_SETTLE_MS));
+        assert.doesNotMatch(launch.stderr(), /could not open a browser/, launch.stderr());
       }
-      assert.equal(r.error?.code, "ETIMEDOUT", `the cockpit stopped serving instead of running until signalled: ${r.stderr}`);
-      assert.equal(r.status, 0, r.stderr);
-    } finally { for (const d of [rig.bin, cwd]) rmSync(d, { recursive: true, force: true }); }
+      assert.deepEqual(rig.launched(), ran.map((cmd) => `${cmd} ${url}/`), launch.stderr());
+      const serving = await fetch(`${url}/board.json`).then((res) => res.ok, () => false);
+      assert.ok(serving, `the cockpit stopped serving instead of running until signalled: ${launch.stderr()}`);
+      launch.p.kill("SIGTERM");
+      assert.deepEqual(await withTimeout(exited, 20000, "the cockpit to exit on SIGTERM"), { code: 0, signal: null }, launch.stderr());
+    } finally {
+      launch.p.kill("SIGKILL");
+      for (const d of [rig.bin, cwd]) rmSync(d, { recursive: true, force: true });
+    }
   });
 }
 
