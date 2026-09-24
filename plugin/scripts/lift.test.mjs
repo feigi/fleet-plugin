@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { lift } from "./lift.mjs";
+import { lift, liftConst } from "./lift.mjs";
 
 // The ACCEPT path (#533's own suite only ever fed lift() functions it must
 // find — nothing pinned that a genuine match is actually extracted AND
@@ -123,4 +123,46 @@ function pick(n) {
 `;
   const pick = lift(code, "pick", "n");
   assert.equal(pick(1), "real", "lift() must return the first (real) declaration, not the last (shadow) one");
+});
+
+// liftConst(), the `const NAME = { ... };` counterpart, for the reason the
+// refusal and anchor pins above give: its callers only ever hand it a schema
+// review-pr.js really declares at top level, so nothing else reaches its
+// refusal or tests either `^` anchor.
+test("liftConst extracts and evaluates a top-level object literal, ending at a column-0 `};`, not a nested one", () => {
+  const code = `
+const SCHEMA = {
+  type: "object",
+  make() {
+    const inner = { n: 1 };
+    return inner;
+  },
+};
+`;
+  const schema = liftConst(code, "SCHEMA");
+  assert.equal(schema.type, "object");
+  assert.deepEqual(schema.make(), { n: 1 }, "the lift must not stop at the nested literal's `};`");
+});
+
+// PRESENT is a genuine top-level literal, so a pattern that stopped anchoring
+// on `name` would match it and die on an opaque ReferenceError instead of the
+// named refusal.
+test("liftConst refuses an absent name, and a const nested inside another declaration, naming the const", () => {
+  const code = `
+const outer = () => {
+  const SCHEMA = {
+    type: "object",
+  };
+  return SCHEMA;
+};
+const PRESENT = {
+  type: "object",
+};
+`;
+  for (const name of ["OTHER", "SCHEMA"]) {
+    assert.throws(
+      () => liftConst(code, name),
+      new RegExp(`review-pr\\.js no longer declares a top-level \`const ${name} = \\{ \\.\\.\\. \\};\` object literal — update this test`),
+    );
+  }
 });
