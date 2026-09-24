@@ -24,11 +24,19 @@
 //      already holds the exact path (tests, or a caller with no session
 //      root handy).
 //
-// Compare is by FAMILY on the model (`opus` <-> `claude-opus-5`, `sonnet` <->
-// `claude-sonnet-5`, `haiku` <-> `claude-haiku-4-5`) and EXACT on the level
-// (`effort`/`thinking-level` verbatim). Real spellings on both harnesses
-// carry more than the bare family name — omp's `resolvedModel`/
-// `resolvedModelIdentity` are ALWAYS provider-prefixed
+// Compare differs by harness, EXACT on the level either way
+// (`effort`/`thinking-level` verbatim). On Claude, compare is by FAMILY on
+// the model (`opus` <-> `claude-opus-5`, `sonnet` <-> `claude-sonnet-5`,
+// `haiku` <-> `claude-haiku-4-5`) — the bare alias IS the model, so any
+// generation in the family is a legitimate resolution. On omp the alias is a
+// fleet tier name, not a vendor model (ADR 0011): the declared alias routes
+// through a role (`opus`->`slow`, `sonnet`->`task`, `haiku`->`smol`,
+// tier-roles.mjs's `OMP_ROLE_FOR_MODEL`) and the resolved identity is
+// compared against THAT role's own `modelRoles.<role>` target
+// (`expectedOmpModel`) — never against the alias's model family, which would
+// let an unrelated role resolving to a same-family model pass by accident.
+// Real spellings on both harnesses carry more than the bare family name —
+// omp's `resolvedModel`/`resolvedModelIdentity` are ALWAYS provider-prefixed
 // (`anthropic/claude-opus-5`, `anthropic/claude-opus-5:high` — 906/906
 // measured, zero bare) and Claude's own transcript spells a context-window
 // variant (`claude-opus-5[1m]`) or a dated generation
@@ -49,6 +57,7 @@ import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { makeDie, makeArg, makeSweep, makeStray } from "./arg.mjs";
 import { foldClaudeTranscript, foldOmpTranscript, parseMemberName, readMembers } from "./member-record.mjs";
+import { parseFrontmatter, expectedOmpModel, modelsEqual, readOmpConfigValue } from "./tier-roles.mjs";
 
 const NAME = "tier-check";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -58,18 +67,6 @@ const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
 // pure core — unit-tested directly (tier-check.test.mjs), no filesystem or
 // process access below this line until main()
 // ---------------------------------------------------------------------------
-
-// Frontmatter reader duplicated in SHAPE from implementer-model-tier.test.mjs's
-// `frontmatterOf`/`field`, not shared: that file pins the declaration's own
-// prose-adjacent contract (no `tools:`, bare alias) off test-local anchors;
-// this reads the same five keys for a runtime comparison, a different
-// consumer with a different failure mode (exit 1, not a red test). Two
-// two-line regexes are not worth a third module importing from a test file.
-export function parseFrontmatter(agentFileText) {
-  const fm = String(agentFileText ?? "").split("---")[1] ?? "";
-  const field = (key) => new RegExp(`^${key}:\\s*(\\S+)$`, "m").exec(fm)?.[1] ?? null;
-  return { model: field("model"), effort: field("effort"), thinkingLevel: field("thinking-level") };
-}
 
 // The declared PAIR a given harness's dispatch is judged against — `effort`
 // on Claude, `thinking-level` on omp, never both at once: a member dispatched
@@ -151,36 +148,61 @@ export function resolvedPairFromRecord(record, harness) {
   return { model: record.model, level: record.thinking ?? "-" };
 }
 
-// The comparison itself, shared by both resolution paths below. `ok`
-// requires BOTH a recognised, matching family AND an exact level match — an
-// unrecognised declared model (familyOf -> null) can never read `ok`,
+// The comparison itself, shared by both resolution paths below. On Claude,
+// `ok` requires BOTH a recognised, matching family AND an exact level match
+// — an unrecognised declared model (familyOf -> null) can never read `ok`,
 // because `null === null` would let two different unrecognised spellings
-// pass as though they agreed on something.
-function compare(member, declared, resolved) {
+// pass as though they agreed on something. On omp the alias is a tier name
+// (ADR 0011): `ok` requires the role it names to resolve to a model
+// (`expected.model !== null`), that resolved model to match what the
+// dispatched member actually ran under, and an exact level match — the
+// SAME refusal-on-unrecognised shape, now keyed on the role rather than the
+// family.
+function compare(member, declared, resolved, harness, modelRoles) {
+  if (harness === "omp") {
+    const expected = expectedOmpModel(declared.model, modelRoles);
+    const ok = expected.model !== null && modelsEqual(expected.model, resolved.model) && declared.level === resolved.level;
+    return { member, ok, declared, resolved, expected };
+  }
   const declaredFamily = familyOf(declared.model);
   const ok = declaredFamily !== null && declaredFamily === familyOf(resolved.model) && declared.level === resolved.level;
   return { member, ok, declared, resolved };
 }
 
-// One member, declared vs a transcript/job-record resolution.
+// One member, declared vs a transcript/job-record resolution. `modelRoles`
+// is required on omp, ignored (may be omitted) on Claude, which has no role
+// concept at all.
 export function evaluateMember(entry) {
   const declared = declaredPairFor(entry.frontmatter, entry.harness);
   const resolved = resolveActual(entry);
-  return { ...compare(entry.member, declared, resolved), viaJobRecord: resolved.viaJobRecord };
+  return { ...compare(entry.member, declared, resolved, entry.harness, entry.modelRoles), viaJobRecord: resolved.viaJobRecord };
 }
 
 // One member, declared vs a member-record.mjs record already resolved via
 // `--session`. `viaJobRecord` is always false here — reaching a record at
 // all means a transcript was read to build it.
-export function evaluateMemberFromRecord({ member, harness, frontmatter, record }) {
+export function evaluateMemberFromRecord({ member, harness, frontmatter, record, modelRoles }) {
   const declared = declaredPairFor(frontmatter, harness);
   const resolved = resolvedPairFromRecord(record, harness);
-  return { ...compare(member, declared, resolved), viaJobRecord: false };
+  return { ...compare(member, declared, resolved, harness, modelRoles), viaJobRecord: false };
 }
 
 // The one-line failure shape the ticket's contract spells verbatim.
 export function formatMismatch({ member, declared, resolved }) {
   return `${member}: declared ${declared.model}/${declared.level} resolved ${resolved.model}/${resolved.level}`;
+}
+
+// omp-only follow-up line: which role the declared alias routed through and
+// what that role currently targets — the context `formatMismatch`'s
+// harness-neutral pair alone cannot carry, since a mismatch there could be a
+// stale `modelRoles.<role>` just as easily as a wrong dispatch. stderr only,
+// never appended to the ledger row (`appendedLedgerText`'s idempotency keys
+// on `formatMismatch`'s exact line).
+export function formatOmpExpectation(r) {
+  const target = r.expected.role
+    ? `@${r.expected.role} = ${r.expected.model ?? `(modelRoles.${r.expected.role} unset)`}`
+    : "no role — not one of opus/sonnet/haiku";
+  return `    ${r.member}: omp routes ${r.declared.model} through ${target}`;
 }
 
 // ledger.mjs has no per-member field — member-record.mjs's own header says so
@@ -276,7 +298,7 @@ function writeLedgerRow(ledgerFile, ticket, text) {
 
 function main() {
   const batchPath = arg("batch");
-  if (!batchPath) die("usage: tier-check.mjs --batch <path-to-json> [--ledger <path>] [--repo <path>]");
+  if (!batchPath) die("usage: tier-check.mjs --batch <path-to-json> [--ledger <path>] [--repo <path>] [--model-roles <path>]");
   const ledgerFile = arg("ledger");
   const repoRoot = arg("repo") ?? join(SCRIPT_DIR, "..");
 
@@ -290,12 +312,12 @@ function main() {
   // Above the batch file's own JSON/array checks below, so a stray riding
   // along with a well-formed --batch is refused by name instead of being
   // silently absorbed into a batch-content error.
-  sweep(["batch", "ledger", "repo"]);
+  sweep(["batch", "ledger", "repo", "model-roles"]);
   // #463: sweep() only refuses a `--`-prefixed token; a bare or single-dash
   // one (`-ledger`, the single-dash cousin of the ticket's own `--ledgerr`)
   // rode along in silence the same way. This file takes no positional, so
   // any leftover token is a stray.
-  stray(["batch", "ledger", "repo"]);
+  stray(["batch", "ledger", "repo", "model-roles"]);
 
   let entries;
   try {
@@ -305,6 +327,23 @@ function main() {
   }
   if (!Array.isArray(entries) || entries.length === 0) {
     die(`--batch ${batchPath} must be a JSON array of at least one member entry`);
+  }
+
+  // Read once per invocation, before the map: every omp entry in the SAME
+  // batch is judged against the SAME operator config, never a per-entry
+  // re-read. `null` when the batch carries no omp entry at all, so a
+  // Claude-only batch never touches `omp config get`.
+  const modelRolesPath = arg("model-roles");
+  let modelRoles = null;
+  if (entries.some((e) => e?.harness === "omp")) {
+    try {
+      modelRoles = modelRolesPath ? JSON.parse(readFileSync(modelRolesPath, "utf8")) : readOmpConfigValue("modelRoles");
+    } catch (e) {
+      die(e.message);
+    }
+    if (typeof modelRoles !== "object" || modelRoles === null || Array.isArray(modelRoles)) {
+      die(`${modelRolesPath ? `--model-roles ${modelRolesPath}` : "omp config get modelRoles --json"} must be a JSON object`);
+    }
   }
 
   const results = entries.map((raw) => {
@@ -333,12 +372,13 @@ function main() {
     }
 
     if (viaSession?.record) {
-      return evaluateMemberFromRecord({ member: raw.member, harness: raw.harness, frontmatter, record: viaSession.record });
+      return evaluateMemberFromRecord({ member: raw.member, harness: raw.harness, frontmatter, record: viaSession.record, modelRoles });
     }
     return evaluateMember({
       member: raw.member, harness: raw.harness, frontmatter,
       transcriptText: viaSession?.transcriptText ?? transcriptText,
       resolvedModel: raw.resolvedModel, resolvedThinkingLevel: raw.resolvedThinkingLevel,
+      modelRoles,
     });
   });
 
@@ -346,6 +386,7 @@ function main() {
   for (const r of mismatches) {
     const line = formatMismatch(r);
     console.error(line);
+    if (r.expected) console.error(formatOmpExpectation(r));
     const { ticket } = parseMemberName(r.member);
     if (!ticket) {
       console.error(`    ${r.member}: no ticket derivable from the member name — tier-mismatch pair not written to the ledger`);

@@ -7,10 +7,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  parseFrontmatter, declaredPairFor, familyOf,
+  declaredPairFor, familyOf,
   resolveActual, evaluateMember, resolvedPairFromRecord, evaluateMemberFromRecord,
-  formatMismatch, appendedLedgerText,
+  formatMismatch, formatOmpExpectation, appendedLedgerText,
 } from "./tier-check.mjs";
+import { parseFrontmatter } from "./tier-roles.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./tier-check.mjs", import.meta.url));
 const LEDGER_SCRIPT = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
@@ -93,8 +94,25 @@ function dir() {
   return mkdtempSync(join(tmpdir(), "tier-check-"));
 }
 
-function runCli(argv, cwd) {
-  return spawnSync(process.execPath, [SCRIPT, ...argv], { cwd, encoding: "utf8" });
+// The measured real `modelRoles` shape (ADR 0011) used by every omp fixture
+// below that needs a role to resolve through: `slow`->opus, `task`->sonnet,
+// `smol`->haiku, each carrying its own baked level suffix the way a real
+// install does.
+const MODEL_ROLES = {
+  default: "anthropic/claude-sonnet-5:high",
+  slow: "anthropic/claude-opus-5:high",
+  task: "anthropic/claude-sonnet-5:high",
+  smol: "anthropic/claude-haiku-4-5:auto",
+};
+
+function modelRolesFile(d) {
+  const p = join(d, "model-roles.json");
+  writeFileSync(p, JSON.stringify(MODEL_ROLES));
+  return p;
+}
+
+function runCli(argv, cwd, extra = []) {
+  return spawnSync(process.execPath, [SCRIPT, ...argv, ...extra], { cwd, encoding: "utf8" });
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +230,7 @@ test("evaluateMember: a still-running omp member (no assistant turn) at its decl
     member: "StillRunning", harness: "omp",
     frontmatter: parseFrontmatter(claudeAgentMd("opus", "xhigh", "xhigh")),
     transcriptText: ompTranscript("anthropic/claude-opus-5", "xhigh", { withTurn: false }),
+    modelRoles: MODEL_ROLES,
   });
   assert.equal(r.ok, true, JSON.stringify(r));
 });
@@ -261,6 +280,7 @@ test("AC1: fleet-implementer (opus/xhigh) at declared tier on both harnesses -> 
     member: "AgentWordPair", harness: "omp",
     frontmatter: parseFrontmatter(claudeAgentMd("opus", "xhigh", "xhigh")),
     transcriptText: ompTranscript("anthropic/claude-opus-5", "xhigh"),
+    modelRoles: MODEL_ROLES,
   });
   assert.equal(omp.ok, true, JSON.stringify(omp));
 });
@@ -277,6 +297,7 @@ test("AC1: fleet-implementer-alt (sonnet/xhigh) at declared tier on both harness
     member: "AnotherWordPair", harness: "omp",
     frontmatter: parseFrontmatter(claudeAgentMd("sonnet", "xhigh", "xhigh")),
     transcriptText: ompTranscript("anthropic/claude-sonnet-5", "xhigh"),
+    modelRoles: MODEL_ROLES,
   });
   assert.equal(omp.ok, true, JSON.stringify(omp));
 });
@@ -296,7 +317,7 @@ test("AC1 end-to-end via the CLI: a batch of both agents on both harnesses, ever
     { member: "OmpWordPairTwo", agentFile: "fleet-implementer-alt.agent.md", harness: "omp", transcript: "omp-impl-alt.jsonl" },
   ];
   writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
-  const r = runCli(["--batch", "batch.json", "--repo", d], d);
+  const r = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", modelRolesFile(d)]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
@@ -309,6 +330,7 @@ test("AC2: omp resolved thinkingLevel `high` against declared `xhigh` -> mismatc
     member: "MeasuredRealCase", harness: "omp",
     frontmatter: parseFrontmatter(claudeAgentMd("opus", "xhigh", "xhigh")),
     transcriptText: ompTranscript("anthropic/claude-opus-5", "high"),
+    modelRoles: MODEL_ROLES,
   });
   assert.equal(r.ok, false);
   assert.deepEqual(r.declared, { model: "opus", level: "xhigh" });
@@ -322,7 +344,7 @@ test("AC2 end-to-end via the CLI: the same case exits 1 and prints the member an
   writeFileSync(join(d, "omp-impl.jsonl"), ompTranscript("anthropic/claude-opus-5", "high"));
   const batch = [{ member: "MeasuredRealCase", agentFile: "fleet-implementer.agent.md", harness: "omp", transcript: "omp-impl.jsonl" }];
   writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
-  const r = runCli(["--batch", "batch.json", "--repo", d], d);
+  const r = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", modelRolesFile(d)]);
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stderr, /MeasuredRealCase: declared opus\/xhigh resolved anthropic\/claude-opus-5\/high/);
 });
@@ -346,6 +368,7 @@ test("AC3: omp family mismatch (declared sonnet, resolved haiku) -> mismatch", (
     member: "OmpFamilyMismatch", harness: "omp",
     frontmatter: parseFrontmatter(claudeAgentMd("sonnet", "xhigh", "xhigh")),
     transcriptText: ompTranscript("anthropic/claude-haiku-4-5", "xhigh"),
+    modelRoles: MODEL_ROLES,
   });
   assert.equal(r.ok, false);
   assert.equal(formatMismatch(r), "OmpFamilyMismatch: declared sonnet/xhigh resolved anthropic/claude-haiku-4-5/xhigh");
@@ -383,7 +406,7 @@ test("AC4: omp job record present in a batch entry -> the CLI never opens (or ev
     resolvedModel: "anthropic/claude-opus-5", resolvedThinkingLevel: "xhigh",
   }];
   writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
-  const r = runCli(["--batch", "batch.json", "--repo", d], d);
+  const r = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", modelRolesFile(d)]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
@@ -395,7 +418,7 @@ test("AC4: omp job record absent -> the CLI opens the transcript file (and a mis
     transcript: "does-not-exist.jsonl",
   }];
   writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
-  const r = runCli(["--batch", "batch.json", "--repo", d], d);
+  const r = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", modelRolesFile(d)]);
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, /ENOENT|does-not-exist\.jsonl/);
 });
@@ -405,7 +428,7 @@ test("AC4b: omp job record PARTIAL (resolvedModel only, no transcript/session gi
   writeFileSync(join(d, "fleet-implementer.agent.md"), claudeAgentMd("opus", "xhigh", "xhigh"));
   const batch = [{ member: "PartialNoFallback", agentFile: "fleet-implementer.agent.md", harness: "omp", resolvedModel: "anthropic/claude-opus-5" }];
   writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
-  const r = runCli(["--batch", "batch.json", "--repo", d], d);
+  const r = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", modelRolesFile(d)]);
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, /no --transcript or --session given/);
 });
@@ -419,8 +442,83 @@ test("AC4c: omp job record PARTIAL (resolvedModel only) plus a transcript for th
     resolvedModel: "anthropic/claude-opus-5", transcript: "omp-impl.jsonl",
   }];
   writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
-  const r = runCli(["--batch", "batch.json", "--repo", d], d);
+  const r = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", modelRolesFile(d)]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
+// ---------------------------------------------------------------------------
+// ADR 0011 — on omp the declared alias routes through a role
+// (`OMP_ROLE_FOR_MODEL`), and compare is against THAT role's own
+// `modelRoles.<role>` target, never against the alias's model family.
+// ---------------------------------------------------------------------------
+
+test("omp: an explicit override suffix reaching a `modelRoles.slow` target at the SAME generation reads ok", () => {
+  const r = evaluateMember({
+    member: "impl-1", harness: "omp",
+    frontmatter: parseFrontmatter(claudeAgentMd("opus", "xhigh", "xhigh")),
+    resolvedModel: "anthropic/claude-opus-5-5:xhigh", resolvedThinkingLevel: "xhigh",
+    modelRoles: { slow: "anthropic/claude-opus-5-5:high" },
+  });
+  assert.equal(r.ok, true, JSON.stringify(r));
+});
+
+test("omp: the SAME declared/roles but resolved at an OLDER generation (same family, alias fallthrough) is NOT ok", () => {
+  const r = evaluateMember({
+    member: "impl-1", harness: "omp",
+    frontmatter: parseFrontmatter(claudeAgentMd("opus", "xhigh", "xhigh")),
+    resolvedModel: "anthropic/claude-opus-5", resolvedThinkingLevel: "xhigh",
+    modelRoles: { slow: "anthropic/claude-opus-5-5:high" },
+  });
+  assert.equal(r.ok, false, JSON.stringify(r));
+  assert.equal(formatMismatch(r), "impl-1: declared opus/xhigh resolved anthropic/claude-opus-5/xhigh");
+  assert.equal(formatOmpExpectation(r), "    impl-1: omp routes opus through @slow = anthropic/claude-opus-5-5");
+});
+
+test("omp: modelRoles.slow pointing at another role (`@plan`) resolves through the chain, even to a non-Anthropic model", () => {
+  const r = evaluateMember({
+    member: "impl-1", harness: "omp",
+    frontmatter: parseFrontmatter(claudeAgentMd("opus", "xhigh", "xhigh")),
+    resolvedModel: "openai/gpt-5.4", resolvedThinkingLevel: "xhigh",
+    modelRoles: { slow: "@plan", plan: "openai/gpt-5.4:high" },
+  });
+  assert.equal(r.ok, true, JSON.stringify(r));
+});
+
+test("omp: an unset modelRoles.<role> reads not ok, and the expectation line names the unset role", () => {
+  const r = evaluateMember({
+    member: "impl-1", harness: "omp",
+    frontmatter: parseFrontmatter(claudeAgentMd("opus", "xhigh", "xhigh")),
+    resolvedModel: "anthropic/claude-opus-5", resolvedThinkingLevel: "xhigh",
+    modelRoles: {},
+  });
+  assert.equal(r.ok, false, JSON.stringify(r));
+  assert.equal(formatOmpExpectation(r), "    impl-1: omp routes opus through @slow = (modelRoles.slow unset)");
+});
+
+test("CLI: an omp batch entry with no --model-roles and no `omp` on PATH refuses naming the config read", () => {
+  const d = dir();
+  writeFileSync(join(d, "fleet-implementer.agent.md"), claudeAgentMd("opus", "xhigh", "xhigh"));
+  writeFileSync(join(d, "omp-impl.jsonl"), ompTranscript("anthropic/claude-opus-5", "xhigh"));
+  const batch = [{ member: "NoPathOmp", agentFile: "fleet-implementer.agent.md", harness: "omp", transcript: "omp-impl.jsonl" }];
+  writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
+  const emptyPath = mkdtempSync(join(tmpdir(), "tier-check-empty-path-"));
+  const r = spawnSync(process.execPath, [SCRIPT, "--batch", "batch.json", "--repo", d], {
+    cwd: d, encoding: "utf8", env: { ...process.env, PATH: emptyPath },
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /omp config get modelRoles --json failed/);
+});
+
+test("CLI: --model-roles pointing at a JSON array refuses", () => {
+  const d = dir();
+  writeFileSync(join(d, "fleet-implementer.agent.md"), claudeAgentMd("opus", "xhigh", "xhigh"));
+  writeFileSync(join(d, "omp-impl.jsonl"), ompTranscript("anthropic/claude-opus-5", "xhigh"));
+  const batch = [{ member: "ArrModelRoles", agentFile: "fleet-implementer.agent.md", harness: "omp", transcript: "omp-impl.jsonl" }];
+  writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
+  const arrPath = join(d, "model-roles.json");
+  writeFileSync(arrPath, JSON.stringify(["not", "an", "object"]));
+  const r = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", arrPath]);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
 });
 
 // ---------------------------------------------------------------------------
@@ -470,7 +568,7 @@ test("--session (omp): resolves via the flat <session>/<member>.jsonl file, bypa
   writeFileSync(join(d, "fleet-implementer.agent.md"), claudeAgentMd("opus", "xhigh", "xhigh"));
   const batch = [{ member: "OmpSessionMember", agentFile: "fleet-implementer.agent.md", harness: "omp", session: sessionDir }];
   writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
-  const r = runCli(["--batch", "batch.json", "--repo", d], d);
+  const r = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", modelRolesFile(d)]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
@@ -480,7 +578,7 @@ test("--session (omp): no <member>.jsonl under the session root refuses by name"
   writeFileSync(join(d, "fleet-implementer.agent.md"), claudeAgentMd("opus", "xhigh", "xhigh"));
   const batch = [{ member: "NoSuchMember", agentFile: "fleet-implementer.agent.md", harness: "omp", session: sessionDir }];
   writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
-  const r = runCli(["--batch", "batch.json", "--repo", d], d);
+  const r = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", modelRolesFile(d)]);
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, /no NoSuchMember\.jsonl found under --session/);
 });
@@ -544,7 +642,7 @@ test("ledger append: a mismatch on a member with no derivable ticket (an omp Age
   const batch = [{ member: "SomeWordPair", agentFile: "fleet-implementer.agent.md", harness: "omp", transcript: "omp-impl.jsonl" }];
   writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
 
-  const r = runCli(["--batch", "batch.json", "--repo", d, "--ledger", ledgerFile], d);
+  const r = runCli(["--batch", "batch.json", "--repo", d, "--ledger", ledgerFile], d, ["--model-roles", modelRolesFile(d)]);
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.equal(existsSync(ledgerFile), false, "a ledger file materialised for a member with no derivable ticket");
 });

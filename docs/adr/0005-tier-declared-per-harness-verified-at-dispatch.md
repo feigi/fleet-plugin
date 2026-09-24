@@ -1,6 +1,6 @@
 # 0005 — Tier is declared per harness in the definition and verified at dispatch
 
-**Status:** Accepted. Ruled 2026-09-09 on #1298, #1302, #1303, #1314, against the measurements below.
+**Status:** Accepted. Ruled 2026-09-09 on #1298, #1302, #1303, #1314, against the measurements below. Amended by ADR 0011: on omp the bare alias is a fleet tier name routed through a role, not a vendor model selector.
 
 ## Context
 

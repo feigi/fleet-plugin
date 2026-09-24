@@ -760,6 +760,16 @@ harness's own dispatch already returns.
 tracks the newest generation; a pinned id rots into a superseded one that is
 weaker AND more expensive, because pricing falls with each generation.
 
+**On omp the alias is the fleet's tier name, not a vendor model.** `opus`,
+`sonnet` and `haiku` route through the operator's `task.agentModelOverrides`
+entry for the definition — `@slow:<level>`, `@task:<level>`, `@smol:<level>`,
+derived from the definition by `tier-roles.mjs` and never hand-written — and
+the tier check judges an omp member against the role's own target
+(`modelRoles.<role>`), never against the alias's model family (ADR 0011).
+
+CLAUDE: the routing precheck does not apply — the bare alias in the `Agent` dispatch's definition is the model, and nothing routes it.
+OMP: before the run's first dispatch run `~/.fleet/bin/fleet-run tier-roles.mjs --check`; exit 1 names every `task.agentModelOverrides` entry that is missing, stale or wrong and every unset `modelRoles.<role>`, prints the exact `omp config set` remedy, and **stops the run** before any member is dispatched — the fleet reads that config and never writes it (ADR 0003).
+
 **One implementer per staged wave goes at the alternate tier — one per phase-0
 staging batch, never one per refill.** Dispatch it exactly as the others but
 with `subagent_type: "fleet-ctl:fleet-implementer-alt"`. Pick the ticket
@@ -2386,7 +2396,13 @@ infer, see the five-condition note in the fix-applier block above) — or
 has returned and its fix-applier, if one was dispatched, has sent its report,
 which the CI-completes edge above states in full** — dispatch a
 **finisher** — a fresh small agent, not the fix-applier resumed. **Dispatch it
-with `model: "haiku"`.** Its four duties are a checklist — audit the
+by its own definition and omit `model` on the call** — the tier (`haiku`)
+lives in `agents/fleet-finisher.agent.md`, on both harnesses:
+
+CLAUDE: `fleet-ctl:fleet-finisher`.
+OMP: `fleet-finisher`.
+
+Its four duties are a checklist — audit the
 worktree, confirm every deferral has a tracker home and re-run the acceptance
 mutation, apply one release label, report — and the
 merge gate downstream still catches whatever it gets wrong, the same argument
@@ -2787,7 +2803,13 @@ Per wave, named `merge-bot-<wave#>`, never two at once. Tell it to read
 `$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md`, run **one** pass, then
 `SendMessage` you what it merged and what it held, then exit — and say that
 you dispatched it, which is what makes it skip its own watcher step. **Dispatch
-it with `model: "haiku"`** — rebase, wait for green, check the
+it by its own definition and omit `model` on the call** — the tier (`haiku`)
+lives in `agents/fleet-merge-bot.agent.md`, on both harnesses:
+
+CLAUDE: `fleet-ctl:fleet-merge-bot`.
+OMP: `fleet-merge-bot`.
+
+Rebase, wait for green, check the
 label, merge is checklist work, and a bad merge still needs the label and the
 per-job CI state to have been read correctly, which is exactly what a wrong
 merge later surfaces and a human resolves; `no-undo-audit.sh` is the
