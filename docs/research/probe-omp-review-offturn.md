@@ -1,8 +1,10 @@
 # Probes run for `docs/research/omp-review-offturn.md`
 
-All cells below were run, verbatim, in this research agent's own persistent
-`eval` (JS/Bun) kernel, from cwd `/Users/chris/dev/fleet-plugin`. Timestamps
-are `Date.now()` epoch-ms from the live run.
+Probes A1, A2 and B were run, verbatim, in the original research agent's own
+persistent `eval` (JS/Bun) kernel, from cwd `/Users/chris/dev/fleet-plugin`.
+Probes A2r and A3 were added during PR #1785's review, run in the fix-applier
+agent's own kernel (a `fleet-implementer`-type subagent, omp 18.3.0, same cwd).
+Timestamps are `Date.now()` epoch-ms from the live run.
 
 ## Probe A1 — plain promise across a cell boundary
 
@@ -119,12 +121,177 @@ display(globalThis.__probe2);
 { "stage": "awaiting-wait()" }
 ```
 
-**Result: the outer promise never settles. The hang begins at `await
-h.wait()` — the underlying `agent()` job completes and auto-delivers a
-notice, but the specific `.wait()` promise created in the already-returned
-cell is never resolved, orphaning everything after it (including
-`phase()`/`log()`, and, by direct analogy, every later pipeline stage in
-`review-core.js`'s snapshot→specialists→refuters chain).**
+**Result: the outer promise never settles, and nothing after the stall point
+runs (including `phase()`/`log()`). This probe does NOT locate that stall
+point.** `agent()` was called without `await`, so `h` is a `PendingHandle`
+(Probe A2r shows its `id` is `null`), not a registered `AgentHandle`. The
+`"awaiting-wait()"` stage was set synchronously right after that call, and
+`await h.wait()` on a `PendingHandle` has to wait for the registration
+host-bridge reply (it has no `id` to wait on until then) before the wait
+bridge. So the stage covers both bridges, and the host-side job completing
+(the notice above) says nothing about which reply the kernel lost. Probes A2r
+and A3 separate the two.
+
+## Probe A2r: A2 re-run with the registration and wait stages timed separately
+
+Same shape as A2, but the `agent()` return value is inspected and then
+`await`ed as its own stage before `.wait()`. This is also
+`review-eval.mjs`'s real `ompAgent` shape (`await agent(...)` then `await
+handle.wait()`, review-eval.mjs:85-87).
+
+Cell 1:
+
+```js
+globalThis.__p = { stage: "not-started", t0: Date.now() };
+async function runLikeReviewStaged() {
+  const p = globalThis.__p;
+  p.stage = "calling-agent()";
+  const pending = agent("Reply with exactly the single word PONG and nothing else.", { agent: "sonic", label: "probeA2r" });
+  p.agentReturn = {
+    ctor: pending?.constructor?.name,
+    isThenable: typeof pending?.then === "function",
+    syncId: pending?.id ?? null,
+    hasWait: typeof pending?.wait === "function",
+  };
+  p.stage = "awaiting-registration";
+  const h = await pending;
+  p.registeredAt = Date.now();
+  p.handleId = h?.id ?? null;
+  p.handleCtor = h?.constructor?.name;
+  p.stage = "awaiting-wait()";
+  const result = await h.wait();
+  p.waitReturnedAt = Date.now();
+  p.stage = "wait()-returned";
+  p.result = typeof result === "string" ? result.slice(0, 200) : result;
+  phase("probe A2r done");
+  log("probe A2r phase/log after cell return");
+  p.stage = "phase-log-called";
+  return result;
+}
+globalThis.__pPromise = runLikeReviewStaged().catch((e) => {
+  globalThis.__p.stage = "rejected";
+  globalThis.__p.error = String((e && e.stack) || e);
+});
+display(globalThis.__p);
+"cell-returned-immediately";
+```
+→
+```json
+{ "stage": "awaiting-registration", "t0": 1790258156607,
+  "agentReturn": { "ctor": "PendingHandle", "isThenable": true, "syncId": null, "hasWait": true } }
+```
+
+Cell 2 (immediately after): `stage` `"awaiting-registration"`,
+`elapsedMs` 2812. After `bash sleep 25`, Cell 3: unchanged, `elapsedMs`
+31591. After `bash sleep 20`, Cell 4 attached a fresh `.then()` to
+`__pPromise` and waited 3s in-cell (as in A2's Cell 5):
+```json
+{ "attached": 1790258214227, "settled": false }
+{ "stage": "awaiting-registration", "elapsedMs": 60621 }
+```
+A final re-check at `elapsedMs` 228707 was still `"awaiting-registration"`,
+late `.then()` still `settled: false`.
+
+The same `agent()` call, `await`ed inside one live cell, shows what the
+registration bridge replies here:
+```js
+globalThis.__c = { stage: "calling-agent()", t0: Date.now() };
+try {
+  const h = await agent("Reply with exactly the single word PONG and nothing else.", { agent: "sonic", label: "probeA2c" });
+  const c = globalThis.__c;
+  c.registeredAt = Date.now();
+  c.handleId = h.id;
+  c.handleCtor = h?.constructor?.name;
+  c.statusAtRegistration = typeof h.status === "function" ? await h.status() : h.status;
+  c.stage = "awaiting-wait()";
+  globalThis.__cHandle = h;
+  globalThis.__cPromise = h.wait().then(
+    (r) => { c.stage = "wait()-returned"; c.waitReturnedAt = Date.now(); c.result = typeof r === "string" ? r.slice(0, 200) : r; phase("probe A2c done"); log("probe A2c phase/log after cell return"); c.stage = "phase-log-called"; },
+    (e) => { c.stage = "wait()-rejected"; c.error = String((e && e.stack) || e); },
+  );
+} catch (e) {
+  globalThis.__c.stage = "agent()-threw-in-cell";
+  globalThis.__c.error = String((e && e.stack) || e);
+}
+display(globalThis.__c);
+"cell-returned";
+```
+→ `"stage": "agent()-threw-in-cell"`, `"error": "ToolError: Cannot spawn
+'sonic'. Allowed: none (spawns disabled for this agent) ..."`. This agent
+type's spawn policy refuses the spawn at preflight.
+
+**Result: the registration bridge's reply, a preflight rejection that a live
+cell receives before it returns, never reached the promise orphaned by the returned
+cell.** `runLikeReviewStaged()` neither advanced nor rejected (its `.catch`
+would have set `stage: "rejected"`). The chain stalled at `await agent(...)`,
+before `.wait()` was ever called. Limit: no job was spawned in this session,
+so this run shows a lost *rejection* reply. It does not show a successful
+registration being lost.
+
+## Probe A3: the wait bridge alone (registration completed in-cell)
+
+`agent()` spawns are refused for this agent type (above), so the wait bridge
+was isolated with the `completion()` prelude helper, which has the same
+handle shape (a `PendingHandle` that resolves to a handle with `.wait()`).
+Registration is `await`ed inside the cell, so only the `.wait()` reply
+crosses the cell boundary.
+
+Cell 1:
+
+```js
+globalThis.__w = { stage: "calling-completion()", t0: Date.now() };
+try {
+  const pending = completion("Reply with exactly the single word PONG and nothing else.", { model: "smol" });
+  globalThis.__w.completionReturn = { ctor: pending?.constructor?.name, isThenable: typeof pending?.then === "function", syncId: pending?.id ?? null };
+  const ch = await pending; // registration bridge resolved INSIDE this cell
+  const w = globalThis.__w;
+  w.registeredAt = Date.now();
+  w.handleCtor = ch?.constructor?.name;
+  w.handleId = ch?.id ?? null;
+  w.stage = "awaiting-wait()";
+  globalThis.__wPromise = ch.wait().then(
+    (r) => { w.stage = "wait()-returned"; w.waitReturnedAt = Date.now(); w.result = typeof r === "string" ? r.slice(0, 200) : r; },
+    (e) => { w.stage = "wait()-rejected"; w.waitReturnedAt = Date.now(); w.error = String((e && e.stack) || e); },
+  );
+} catch (e) {
+  globalThis.__w.stage = "threw-in-cell";
+  globalThis.__w.error = String((e && e.stack) || e);
+}
+display(globalThis.__w);
+"cell-returned";
+```
+→
+```json
+{ "stage": "awaiting-wait()", "t0": 1790258248234,
+  "completionReturn": { "ctor": "PendingHandle", "isThenable": true, "syncId": null },
+  "registeredAt": 1790258248272, "handleCtor": "CompletionHandle", "handleId": "cmp-158c3a929402495d" }
+```
+
+After `bash sleep 20`, Cell 2: `stage` still `"awaiting-wait()"`,
+`elapsedMs` 23992.
+
+Control cell, the identical call fully `await`ed in one live cell:
+```js
+const t0 = Date.now();
+const ch = await completion("Reply with exactly the single word PONG and nothing else.", { model: "smol" });
+const tReg = Date.now();
+const r = await ch.wait();
+display({ registerMs: tReg - t0, waitMs: Date.now() - tReg, result: typeof r === "string" ? r.slice(0, 200) : r, orphanState: globalThis.__w.stage });
+```
+→ `{ "registerMs": 34, "waitMs": 581, "result": "PONG", "orphanState": "awaiting-wait()" }`
+
+A final re-check at `elapsedMs` 137080 was still `"awaiting-wait()"`.
+
+**Result: the wait bridge also stalls on its own.** A `.wait()` issued before
+the cell returned, on a handle registered in that cell, never settled, while
+the same call settled in 581ms inside a live cell. Live-cell bridge traffic
+afterwards (the control) did not deliver it either.
+
+**Combined reading of A2r + A3:** a host-bridge reply that arrives after its
+originating cell has returned is never delivered to the kernel-side promise.
+Both the `agent()`/`completion()` registration bridge and the `.wait()`
+bridge were observed to stall this way. A plain JS promise with no bridge
+(A1) is unaffected.
 
 ## Probe B — task-dispatched member capabilities (self-observation)
 
@@ -157,3 +324,10 @@ subagent of `Main`, dispatched with `eval`, `bash`, `task`, and other tools
 available — directly demonstrating that a `task`-dispatched member on omp has
 `eval`, can call `agent()` (Probe A2's spawn), and can load
 `review-eval.mjs` through the Resolver exactly as the controller does.
+
+`agent()` depends on the member's agent type. Probe A2r's in-cell
+call from a `fleet-implementer`-type member was refused at preflight
+(`Cannot spawn 'sonic'. Allowed: none (spawns disabled for this agent)`). No
+`plugin/agents/*.agent.md` declares `spawns:`. A `review-pr-<n>` member
+therefore needs an agent type whose spawn policy allows the `fleet-review-*`
+agents.
