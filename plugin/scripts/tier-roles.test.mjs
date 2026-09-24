@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  ompOverrideFor, expectedOverrides, stripLevel, resolveRole,
+  OMP_ROLE_FOR_MODEL, ompOverrideFor, expectedOverrides, stripLevel, resolveRole,
   modelsEqual, formatYaml, checkOverrides,
 } from "./tier-roles.mjs";
 
@@ -131,10 +131,12 @@ const MODEL_ROLES = {
   smol: "anthropic/claude-haiku-4-5:auto",
 };
 
-test("checkOverrides: a clean config has no violations or notices", () => {
-  const { violations, notices } = checkOverrides({ expected: EXPECTED, actual: EXPECTED, modelRoles: MODEL_ROLES, agentsDir: "agents" });
+test("checkOverrides: a clean config has no violations or notices, and nothing to set", () => {
+  const { violations, notices, overridesRemedy, unresolvedRoles } = checkOverrides({ expected: EXPECTED, actual: EXPECTED, modelRoles: MODEL_ROLES, agentsDir: "agents" });
   assert.deepEqual(violations, []);
   assert.deepEqual(notices, []);
+  assert.equal(overridesRemedy, null);
+  assert.deepEqual(unresolvedRoles, []);
 });
 
 test("checkOverrides: missing keys violate, naming each and that it is absent", () => {
@@ -163,12 +165,56 @@ test("checkOverrides: a non-fleet- key in actual is the operator's own and is ig
   assert.deepEqual(violations, []);
 });
 
-test("checkOverrides: an unset role a used definition needs violates naming the role", () => {
-  const { violations } = checkOverrides({ expected: EXPECTED, actual: EXPECTED, modelRoles: { task: MODEL_ROLES.task }, agentsDir: "agents" });
+// The modelRoles-only case: every override is already right, so an overrides
+// remedy would be a no-op `omp config set` — `overridesRemedy` is `null` and
+// the unresolved roles are what the operator is pointed at instead.
+test("checkOverrides: an unset role a used definition needs violates naming the role, with no overrides remedy", () => {
+  const { violations, overridesRemedy, unresolvedRoles } = checkOverrides({ expected: EXPECTED, actual: EXPECTED, modelRoles: { task: MODEL_ROLES.task }, agentsDir: "agents" });
   assert.deepEqual(violations, [
     `modelRoles.slow: unset — @slow would fall through to the parent's model`,
     `modelRoles.smol: unset — @smol would fall through to the parent's model`,
   ]);
+  assert.equal(overridesRemedy, null);
+  assert.deepEqual(unresolvedRoles, ["slow", "smol"]);
+});
+
+// EXPECTED routes through `slow` and `smol` only: `task` being unset is
+// nothing any definition here would fall through on, so it must not stop a run.
+test("checkOverrides: an unset role no expected override routes through is not a violation", () => {
+  const { violations, unresolvedRoles } = checkOverrides({
+    expected: EXPECTED, actual: EXPECTED,
+    modelRoles: { slow: MODEL_ROLES.slow, smol: MODEL_ROLES.smol }, agentsDir: "agents",
+  });
+  assert.deepEqual(violations, []);
+  assert.deepEqual(unresolvedRoles, []);
+});
+
+// Iterates the tier map itself, so a role added to OMP_ROLE_FOR_MODEL is held
+// to the same unset check without anyone remembering to list it anywhere else.
+test("checkOverrides: every role the tier map routes to is checked for unset", () => {
+  for (const role of Object.values(OMP_ROLE_FOR_MODEL)) {
+    const expected = { "fleet-x": `@${role}:high` };
+    const { violations } = checkOverrides({ expected, actual: expected, modelRoles: {}, agentsDir: "agents" });
+    assert.deepEqual(violations, [`modelRoles.${role}: unset — @${role} would fall through to the parent's model`], role);
+  }
+});
+
+test("checkOverrides: a role set to an @-alias chain that never reaches a model says so, not that it is unset", () => {
+  const roles = { ...MODEL_ROLES, slow: "@plan", plan: "@slow" };
+  const { violations, unresolvedRoles } = checkOverrides({ expected: EXPECTED, actual: EXPECTED, modelRoles: roles, agentsDir: "agents" });
+  assert.deepEqual(violations, [
+    `modelRoles.slow: "@plan" never reaches a model — its @-alias chain hits an unset role, cycles, or runs past 8 hops`,
+  ]);
+  assert.deepEqual(unresolvedRoles, ["slow"]);
+});
+
+// `omp config set` on a record key REPLACES the record, so the remedy is the
+// whole value to set: the operator's own entries verbatim, every expected
+// entry laid over, and the stale fleet- entry (the violation) dropped.
+test("checkOverrides: the overrides remedy keeps the operator's own entries, fixes the fleet's, and drops a stale one", () => {
+  const actual = { "fleet-a": "@task:xhigh", "fleet-gone": "@slow:low", "my-own-thing": "@task:low" };
+  const { overridesRemedy } = checkOverrides({ expected: EXPECTED, actual, modelRoles: MODEL_ROLES, agentsDir: "agents" });
+  assert.deepEqual(overridesRemedy, { "my-own-thing": "@task:low", "fleet-a": "@slow:xhigh", "fleet-b": "@smol:low" });
 });
 
 test("checkOverrides: slow and task both resolving to the same model is a notice, not a violation", () => {
@@ -223,12 +269,12 @@ test("CLI: --check against a correct config exits 0 with one line per agent", ()
   assert.match(r.stdout, /tier-roles: fleet-a → @slow:xhigh = anthropic\/claude-opus-5/);
 });
 
-test("CLI: --check with one key missing exits 1, names it, and prints a remedy whose JSON matches expectedOverrides", () => {
+test("CLI: --check with one key missing exits 1, names it, and prints a remedy that sets every expected override and keeps the operator's own", () => {
   const d = dir();
   writeFileSync(join(d, "a.agent.md"), agentMd({ name: "fleet-a", model: "opus", thinkingLevel: "xhigh" }));
   writeFileSync(join(d, "b.agent.md"), agentMd({ name: "fleet-b", model: "haiku", thinkingLevel: "low" }));
   const overridesFile = join(d, "overrides.json");
-  writeFileSync(overridesFile, JSON.stringify({ "fleet-a": "@slow:xhigh" }));
+  writeFileSync(overridesFile, JSON.stringify({ "fleet-a": "@slow:xhigh", "my-own-thing": "@task:low" }));
   const modelRolesFile = join(d, "model-roles.json");
   writeFileSync(modelRolesFile, JSON.stringify(MODEL_ROLES));
   const r = runCli(["--check", "--agents", d, "--overrides", overridesFile, "--model-roles", modelRolesFile]);
@@ -236,7 +282,40 @@ test("CLI: --check with one key missing exits 1, names it, and prints a remedy w
   assert.match(r.stderr, /fleet-b: expected "@smol:low", got absent/);
   const remedyMatch = /remedy: omp config set task\.agentModelOverrides '(.+)'/.exec(r.stderr);
   assert.ok(remedyMatch, r.stderr);
-  assert.deepEqual(JSON.parse(remedyMatch[1]), expectedOverrides(d));
+  // `omp config set` replaces the record with exactly this value, so it IS
+  // the post-remedy state: the non-fleet key must be in it.
+  assert.deepEqual(JSON.parse(remedyMatch[1]), { "my-own-thing": "@task:low", ...expectedOverrides(d) });
+  assert.doesNotMatch(r.stderr, /modelRoles/);
+});
+
+test("CLI: --check with only a modelRoles role unset prints no overrides command, and points at modelRoles", () => {
+  const d = dir();
+  writeFileSync(join(d, "a.agent.md"), agentMd({ name: "fleet-a", model: "opus", thinkingLevel: "xhigh" }));
+  const overridesFile = join(d, "overrides.json");
+  writeFileSync(overridesFile, JSON.stringify({ "fleet-a": "@slow:xhigh" }));
+  const modelRolesFile = join(d, "model-roles.json");
+  writeFileSync(modelRolesFile, JSON.stringify({ task: MODEL_ROLES.task }));
+  const r = runCli(["--check", "--agents", d, "--overrides", overridesFile, "--model-roles", modelRolesFile]);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stderr, /omp config set task\.agentModelOverrides/);
+  assert.match(r.stderr, /task\.agentModelOverrides already matches every definition/);
+  assert.match(r.stderr, /remedy: give modelRoles\.slow a model this install has/);
+});
+
+test("CLI: --json --merge prints the expected overrides laid over the operator's own, dropping a stale fleet- entry", () => {
+  const d = dir();
+  writeFileSync(join(d, "a.agent.md"), agentMd({ name: "fleet-a", model: "opus", thinkingLevel: "xhigh" }));
+  const overridesFile = join(d, "overrides.json");
+  writeFileSync(overridesFile, JSON.stringify({ "fleet-gone": "@slow:low", "my-own-thing": "@task:low" }));
+  const r = runCli(["--json", "--merge", "--agents", d, "--overrides", overridesFile]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), { "my-own-thing": "@task:low", "fleet-a": "@slow:xhigh" });
+});
+
+test("CLI: --merge without --json refuses", () => {
+  const r = runCli(["--merge"]);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /--merge only shapes --json's object/);
 });
 
 test("CLI: --json together with --check refuses", () => {

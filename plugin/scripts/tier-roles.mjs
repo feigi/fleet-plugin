@@ -137,17 +137,31 @@ export function formatYaml(overrides) {
 // into a record is `Unknown setting` on this box, so a record-valued key is
 // always read whole. Never writes.
 export function readOmpConfigValue(key) {
+  let out;
   try {
-    const out = execFileSync("omp", ["config", "get", key, "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-    return JSON.parse(out).value;
+    out = execFileSync("omp", ["config", "get", key, "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   } catch (e) {
     throw new Error(`omp config get ${key} --json failed: ${e.stderr || e.message}`);
+  }
+  try {
+    return JSON.parse(out).value;
+  } catch (e) {
+    throw new Error(`omp config get ${key} --json exited 0 but printed non-JSON: ${e.message}`);
   }
 }
 
 // The role names in the order a violation/notice about them should print —
-// matches the map's own declaration order (slow, task, smol).
-const ROLE_ORDER = ["slow", "task", "smol"];
+// derived from the map itself (slow, task, smol), never a second hand-kept
+// list: a role added to `OMP_ROLE_FOR_MODEL` and missing here would drop out
+// of `checkOverrides`'s unset-role loop in silence.
+const ROLE_ORDER = Object.values(OMP_ROLE_FOR_MODEL);
+
+// Every fleet definition's `name:` carries this prefix — enforced in CI by
+// frontmatter-allowlist.json's agents `name` pattern (`^fleet-[^:]*$`,
+// #1303). It is the only way to tell a fleet-owned
+// `task.agentModelOverrides` entry whose definition is GONE (stale, the
+// fleet's to drop) from the operator's own entry (never the fleet's to touch).
+const FLEET_NAME_PREFIX = "fleet-";
 
 // The role an `expectedOverrides` value routes through, parsed back off the
 // override string (`@slow:xhigh` -> `slow`) rather than re-deriving it from
@@ -158,31 +172,58 @@ function roleOf(override) {
   return /^@([a-z]+):/.exec(override)?.[1] ?? null;
 }
 
+// The whole `task.agentModelOverrides` value an `omp config set` must carry to
+// fix the fleet's entries WITHOUT deleting the operator's own: `omp config
+// set` on a record key REPLACES the record (measured, omp 18.3.0), so a
+// fleet-only object would silently wipe every non-fleet override. The
+// operator's own entries are kept verbatim, every expected entry is laid
+// over them, and a stale `fleet-` entry (no definition left) is dropped —
+// it is exactly the violation `checkOverrides` names.
+function mergedOverrides({ expected, actual }) {
+  const own = Object.fromEntries(
+    Object.entries(actual ?? {}).filter(([name]) => !name.startsWith(FLEET_NAME_PREFIX)),
+  );
+  return { ...own, ...expected };
+}
+
 // The operator's `task.agentModelOverrides`/`modelRoles` against what the
 // fleet's own definitions need. `violations` stop a run (ADR 0011); `notices`
 // never do — they flag a hazard (the alt-tier pairing controlling nothing)
 // that is legal configuration, just probably not what the operator meant.
+// The two remedies are separate because the two configs are: `overridesRemedy`
+// is the merged `task.agentModelOverrides` value to set, or `null` when every
+// override is already right (setting it again would change nothing);
+// `unresolvedRoles` names each used role whose `modelRoles` entry reaches no
+// model — a fix only the operator can choose a model for.
 export function checkOverrides({ expected, actual, modelRoles, agentsDir }) {
   const violations = [];
   const notices = [];
+  let overridesWrong = false;
 
   for (const name of Object.keys(expected)) {
     if (actual?.[name] !== expected[name]) {
+      overridesWrong = true;
       const got = actual?.[name] === undefined ? "absent" : JSON.stringify(actual[name]);
       violations.push(`${name}: expected "${expected[name]}", got ${got}`);
     }
   }
 
   for (const name of Object.keys(actual ?? {})) {
-    if (name.startsWith("fleet-") && !(name in expected)) {
+    if (name.startsWith(FLEET_NAME_PREFIX) && !(name in expected)) {
+      overridesWrong = true;
       violations.push(`${name}: stale override ${JSON.stringify(actual[name])} — no such definition under ${agentsDir}`);
     }
   }
 
   const usedRoles = new Set(Object.values(expected).map(roleOf).filter(Boolean));
+  const unresolvedRoles = [];
   for (const role of ROLE_ORDER) {
     if (usedRoles.has(role) && resolveRole(role, modelRoles) === null) {
-      violations.push(`modelRoles.${role}: unset — @${role} would fall through to the parent's model`);
+      unresolvedRoles.push(role);
+      const raw = modelRoles?.[role];
+      violations.push(typeof raw === "string" && raw !== ""
+        ? `modelRoles.${role}: ${JSON.stringify(raw)} never reaches a model — its @-alias chain hits an unset role, cycles, or runs past 8 hops`
+        : `modelRoles.${role}: unset — @${role} would fall through to the parent's model`);
     }
   }
 
@@ -192,7 +233,14 @@ export function checkOverrides({ expected, actual, modelRoles, agentsDir }) {
     notices.push(`modelRoles.slow and modelRoles.task both resolve to ${slowModel} — the per-wave alternate-tier pairing controls nothing`);
   }
 
-  return { violations, notices };
+  const overridesRemedy = overridesWrong ? mergedOverrides({ expected, actual }) : null;
+  return { violations, notices, overridesRemedy, unresolvedRoles };
+}
+
+// POSIX single-quoting for a printed command line: the merged remedy now
+// carries the operator's own override values, which this file never chose.
+function shellQuote(s) {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 // ---------------------------------------------------------------------------
@@ -220,14 +268,21 @@ function loadJsonObject(path, configKey, flagName) {
 }
 
 function main() {
-  sweep(["json", "check", "agents", "overrides", "model-roles"]);
+  sweep(["json", "merge", "check", "agents", "overrides", "model-roles"]);
   stray(["agents", "overrides", "model-roles"]);
 
   const agentsDir = arg("agents") ?? join(SCRIPT_DIR, "..", "agents");
   const json = has("json");
+  const merge = has("merge");
   const check = has("check");
 
   if (json && check) die("--json prints the block; it has no meaning with --check");
+  // `--merge` exists for one consumer, README's `omp config set
+  // task.agentModelOverrides "$(… --json --merge)"`: that set REPLACES the
+  // whole record, so the printed object must already carry the operator's
+  // own entries. The YAML block is pasted under the key by hand, which
+  // merges by construction.
+  if (merge && !json) die("--merge only shapes --json's object for `omp config set`; it has no meaning without --json");
 
   let expected;
   try {
@@ -238,7 +293,10 @@ function main() {
 
   if (!check) {
     if (json) {
-      console.log(JSON.stringify(expected));
+      const out = merge
+        ? mergedOverrides({ expected, actual: loadJsonObject(arg("overrides"), "task.agentModelOverrides", "overrides") })
+        : expected;
+      console.log(JSON.stringify(out));
     } else {
       process.stdout.write(formatYaml(expected));
     }
@@ -250,7 +308,7 @@ function main() {
   const actual = loadJsonObject(overridesPath, "task.agentModelOverrides", "overrides");
   const modelRoles = loadJsonObject(modelRolesPath, "modelRoles", "model-roles");
 
-  const { violations, notices } = checkOverrides({ expected, actual, modelRoles, agentsDir });
+  const { violations, notices, overridesRemedy, unresolvedRoles } = checkOverrides({ expected, actual, modelRoles, agentsDir });
 
   if (violations.length === 0) {
     for (const name of Object.keys(expected).sort()) {
@@ -262,7 +320,15 @@ function main() {
   }
 
   for (const v of violations) console.error(`tier-roles: ${v}`);
-  console.error(`tier-roles: remedy: omp config set task.agentModelOverrides '${JSON.stringify(expected)}'`);
+  if (overridesRemedy) {
+    console.error(`tier-roles: remedy: omp config set task.agentModelOverrides ${shellQuote(JSON.stringify(overridesRemedy))}`);
+  } else {
+    console.error("tier-roles: task.agentModelOverrides already matches every definition — nothing to set there");
+  }
+  if (unresolvedRoles.length) {
+    const roles = unresolvedRoles.map((r) => `modelRoles.${r}`).join(", ");
+    console.error(`tier-roles: remedy: give ${roles} a model this install has — \`omp config set modelRoles\` REPLACES the whole record, so start from \`omp config get modelRoles --json\` and keep every role already there`);
+  }
   for (const n of notices) console.error(`tier-roles: notice: ${n}`);
   process.exit(1);
 }

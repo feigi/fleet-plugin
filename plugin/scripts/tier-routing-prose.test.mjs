@@ -71,8 +71,11 @@ test("SKILL.md's merge-bot name pair: CLAUDE namespaces `fleet-ctl:fleet-merge-b
   assert.match(region, /agents\/fleet-merge-bot\.agent\.md/);
 });
 
+// Any spelling of the per-call arg, not only the double-quoted one: a
+// single-quoted, backticked, or quoted-key (`"model": "haiku"`) override is
+// the same dropped argument.
 test("SKILL.md carries no per-call model: \"haiku\" override anywhere — the finisher and merge bot route by their own definitions", () => {
-  assert.doesNotMatch(RUN_TEAM, /model: "haiku"/);
+  assert.doesNotMatch(RUN_TEAM, /model["'`]?\s*:\s*["'`]haiku["'`]/i);
 });
 
 // The definitions the two pairs above point at. Same five-key/no-tools shape

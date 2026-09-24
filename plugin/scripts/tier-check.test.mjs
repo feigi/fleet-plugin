@@ -176,6 +176,23 @@ test("appendedLedgerText is idempotent on the identical note but still appends a
   assert.equal(appendedLedgerText("impl-42 · class=routine · note", "different note"), "impl-42 · class=routine · note · different note");
 });
 
+// The idempotency guard keys on the note being the row's TRAILING ` · `-joined
+// segment, not on the note appearing anywhere: an earlier segment carrying the
+// same text (a pair that was since fixed, then re-broken) or a longer segment
+// merely ending in it (a different member whose name ends in this one's) is
+// not this run's note, and the new one still appends.
+test("appendedLedgerText's idempotency is anchored to the trailing ` · ` segment, never a substring match", () => {
+  assert.equal(
+    appendedLedgerText("impl-42 · note · class=routine", "note"),
+    "impl-42 · note · class=routine · note",
+  );
+  const note = "Impl-1: declared opus/xhigh resolved anthropic/claude-opus-5/high";
+  assert.equal(
+    appendedLedgerText(`impl-42 · Fix${note}`, note),
+    `impl-42 · Fix${note} · ${note}`,
+  );
+});
+
 test("formatMismatch is the ticket's exact line shape", () => {
   const line = formatMismatch({
     member: "impl-9",

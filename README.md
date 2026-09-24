@@ -36,7 +36,7 @@ omp config set enabledProviders '["claude-plugins"]'   # merge in any providers 
 omp config set eval.workpool.freshAgents true
 omp plugin marketplace add feigi/fleet-plugin --scope=user
 omp plugin install fleet-ctl@fleet-plugin --scope=user
-omp config set task.agentModelOverrides "$(~/.fleet/bin/fleet-run tier-roles.mjs --json)"   # the fleet's tier→role routes; re-run after every plugin update
+omp config set task.agentModelOverrides "$(~/.fleet/bin/fleet-run tier-roles.mjs --json --merge)"   # set REPLACES the whole record: --merge keeps your own non-fleet overrides; re-run after every plugin update
 ~/.fleet/bin/fleet-run tier-roles.mjs --check
 ```
 

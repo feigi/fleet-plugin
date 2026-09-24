@@ -36,6 +36,10 @@ Measured 2026-09-24, omp 18.3.0, on this box:
   every write in this port is the operator's, at install time (ADR 0003
   points 8–9 already establish that discipline for the other two
   install-time preconditions).
+- `omp config set task.agentModelOverrides '<json>'` REPLACES the whole
+  record, never merges into it: a set of `{"mine":…}` followed by a set of
+  `{"fleet-a":…}` reads back as `{"fleet-a":…}` alone. An empty value is
+  refused (`Invalid record JSON`) without writing.
 
 ## Decision
 
@@ -69,17 +73,22 @@ Measured 2026-09-24, omp 18.3.0, on this box:
    (`~/.fleet/bin/fleet-run tier-roles.mjs --check`), run once before a run's
    first dispatch, names every missing, stale, or wrong
    `task.agentModelOverrides` entry and every unset `modelRoles.<role>` a used
-   definition needs, prints the exact `omp config set` remedy, and stops the
-   run. Claude has no such step — the routing precheck does not apply, because
-   nothing routes the alias there.
+   definition needs, and stops the run. It prints the exact `omp config set
+   task.agentModelOverrides` remedy only when an override is wrong, and that
+   remedy is MERGED — the operator's own non-fleet entries kept, the fleet's
+   laid over them — because `omp config set` on a record key replaces the
+   whole record (measured, omp 18.3.0). An unset role gets a pointer to
+   `modelRoles` instead: the overrides are already right there, and only the
+   operator can choose the model. Claude has no such step — the routing
+   precheck does not apply, because nothing routes the alias there.
 7. **The finisher and merge bot get their own fleet-owned definitions**
    (`agents/fleet-finisher.agent.md`, `agents/fleet-merge-bot.agent.md`),
    dispatched by definition with `model` omitted on the call, exactly like
-   every other fleet member (ADR 0005 point 5) — replacing today's per-call
-   `model: "haiku"`, which omp's `agent()`/`task()` argument schema deletes
-   before dispatch (ADR 0005's own rejected-alternatives note on this),
-   leaving those two dispatches running at the session's default tier on omp
-   with no declared intent at all.
+   every other fleet member (ADR 0005's Decision point 5, not this ADR's) —
+   replacing today's per-call `model: "haiku"`, which omp's
+   `agent()`/`task()` argument schema deletes before dispatch (ADR 0005's
+   rejected-alternatives note on this), leaving those two dispatches running
+   at the session's default tier on omp with no declared intent at all.
 
 ## Rejected alternatives
 

@@ -768,7 +768,7 @@ the tier check judges an omp member against the role's own target
 (`modelRoles.<role>`), never against the alias's model family (ADR 0011).
 
 CLAUDE: the routing precheck does not apply — the bare alias in the `Agent` dispatch's definition is the model, and nothing routes it.
-OMP: before the run's first dispatch run `~/.fleet/bin/fleet-run tier-roles.mjs --check`; exit 1 names every `task.agentModelOverrides` entry that is missing, stale or wrong and every unset `modelRoles.<role>`, prints the exact `omp config set` remedy, and **stops the run** before any member is dispatched — the fleet reads that config and never writes it (ADR 0003).
+OMP: before the run's first dispatch run `~/.fleet/bin/fleet-run tier-roles.mjs --check`; exit 1 names every `task.agentModelOverrides` entry that is missing, stale or wrong and every unset `modelRoles.<role>`, prints the exact `omp config set task.agentModelOverrides` remedy only when an override is wrong (merged, so the operator's own non-fleet entries survive a set that replaces the whole record), names each unset role to give a model rather than a no-op overrides command, and **stops the run** before any member is dispatched — the fleet reads that config and never writes it (ADR 0003).
 
 **One implementer per staged wave goes at the alternate tier — one per phase-0
 staging batch, never one per refill.** Dispatch it exactly as the others but
