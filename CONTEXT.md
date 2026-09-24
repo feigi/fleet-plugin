@@ -157,10 +157,12 @@ _Avoid_: local marketplace, dev source
 **Install-time precondition**:
 A harness setting the fleet depends on, set once by the operator at install and never
 written by a run — a run that wrote one would be changing every other session on the
-machine to dispatch its own wave. Two exist, both on omp, both session-wide:
-`enabledProviders: ["claude-plugins"]` and `eval.workpool.freshAgents: true`. ADR 0003
-points 8 and 9 carry each one's required value, its global and project-scoped set
-paths, and the read that verifies it.
+machine to dispatch its own wave. Three exist, all on omp, all session-wide:
+`enabledProviders: ["claude-plugins"]`, `eval.workpool.freshAgents: true`, and
+`task.agentModelOverrides` carrying the fleet's Tier routes (ADR 0011). ADR 0003
+points 8 and 9 carry each of the first two's required value, its global and
+project-scoped set paths, and the read that verifies it; `tier-roles.mjs --check`
+is the read that verifies the third.
 _Avoid_: requirement, dependency, flag
 
 ### Coordination
@@ -259,10 +261,11 @@ _Avoid_: translation, duplicate
 ### Tier
 
 **Declared tier**:
-The agent file's own frontmatter, harness-keyed: `model` as a bare alias,
-`effort` for Claude, `thinking-level` for omp. What the file says,
-version-controlled, and the only intent this port records — no dispatch-time
-ledger entry duplicates it.
+The agent file's own frontmatter, harness-keyed: `model` as a bare alias (a
+vendor alias on Claude, a Tier route's tier name on omp), `effort` for
+Claude, `thinking-level` for omp. What the file says, version-controlled,
+and the only intent this port records — no dispatch-time ledger entry
+duplicates it.
 _Avoid_: recorded intent, dispatch-time intent
 
 **Resolved tier**:
@@ -272,3 +275,11 @@ What the harness wrote about the member after dispatch: Claude's transcript
 absent when resolution came from an agent's own frontmatter rather than a
 `modelRoles` alias.
 _Avoid_: effective tier, actual model
+
+**Tier route**:
+What turns a Declared tier's alias into a model on omp — the operator's
+`task.agentModelOverrides` entry for that definition, `@<role>:<level>`,
+derived from the definition and never hand-written, so `opus`/`sonnet`/
+`haiku` name the `slow`/`task`/`smol` roles rather than a vendor model.
+Claude has no route: the alias is the model.
+_Avoid_: mapping, override, translation

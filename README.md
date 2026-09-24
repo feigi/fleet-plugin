@@ -25,9 +25,10 @@ shorthand over HTTPS.
 
 **omp**
 
-Two settings are session-wide, install-time preconditions on omp (ADR 0003
-points 8–9) — plugin agents are invisible without the first, and
-`run-team`'s implementer dispatch pool can't open without the second:
+Three settings are session-wide, install-time preconditions on omp (ADR 0003
+points 8–9, ADR 0011) — plugin agents are invisible without the first,
+`run-team`'s implementer dispatch pool can't open without the second, and the
+fleet's `opus`/`sonnet`/`haiku` tiers resolve to nothing without the third:
 
 ```
 omp config get enabledProviders          # inspect first: the next line REPLACES the whole list
@@ -35,7 +36,13 @@ omp config set enabledProviders '["claude-plugins"]'   # merge in any providers 
 omp config set eval.workpool.freshAgents true
 omp plugin marketplace add feigi/fleet-plugin --scope=user
 omp plugin install fleet-ctl@fleet-plugin --scope=user
+omp config set task.agentModelOverrides "$(~/.fleet/bin/fleet-run tier-roles.mjs --json --merge)"   # set REPLACES the whole record: --merge keeps your own non-fleet overrides; re-run after every plugin update
+~/.fleet/bin/fleet-run tier-roles.mjs --check
 ```
+
+On omp, `model: opus|sonnet|haiku` in a fleet agent definition is a tier name
+routed to `modelRoles.slow|task|smol` (ADR 0011), never a vendor model
+directly — set those roles to whatever models this install has before a run.
 
 The qualified id (`fleet-ctl@fleet-plugin`) is canonical on both harnesses —
 an unqualified `fleet-ctl` install is not guaranteed to resolve to this
