@@ -4,6 +4,9 @@
 
 ## Context
 
+`plugin/skills/run-team/SKILL.md` line numbers below are as read at ruling
+time (2026-09-24) and drift with every merge; re-grep before editing.
+
 - Today's staging "wave" is the phase-0 multi-select batch: the maintainer
   ticks what to stage, how many, what order, what collides (SKILL.md
   L577–586).
@@ -96,13 +99,13 @@
    `fleet-implementer-alt.agent.md`; the per-Pull prompt carries only what
    varies: ticket number, distilled brief, worktree abs path, branch, and
    `<scratch>/impl-<N>/`. Implementer liveness input to the tick is
-   caller-stated from the ledger on both harnesses: live implementers are
-   `impl-<N>` rows with a dispatch and no outcome; `read proc://` is
+   ledger-derived on both harnesses: live implementers are `impl-<N>` rows
+   with a dispatch and no outcome; `read proc://` is
    reserved for the Member-killed confirmation on omp, not the tick.
    Detail: spec § 2.
 5. **Every wake ends in one `fleet-tick.mjs` run — record, tick, act, beat
    (#1778).** The six caller-stated flags
-   (`--implementers --reviewers --merge-bots --pool --reviews-cap
+   (`--implementers --reviewers --merge-bots --pool --reviews-ready
    --merge-holds`) are deleted. The tick derives live members, holds, pool
    and supply from `.fleet/ledger.md` (`<member>` live, `<member>=<outcome>`
    settled, via `ledger.mjs dispatch|settle|drain`) and
@@ -201,7 +204,7 @@ decision and carries the same guard.
 - **A subagent invoking `Workflow`** — unconditionally "no" by tool design
   (#1770).
 - **Caller-stated tick counts** — the six flags
-  (`--implementers --reviewers --merge-bots --pool --reviews-cap
+  (`--implementers --reviewers --merge-bots --pool --reviews-ready
   --merge-holds`) are deleted; the tick derives every count itself (#1778
   §1).
 - **Pooling the review fan-out** — ruled out on #1420; adjacent, not this

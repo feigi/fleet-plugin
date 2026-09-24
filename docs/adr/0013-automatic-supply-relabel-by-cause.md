@@ -4,6 +4,9 @@
 
 ## Context
 
+`plugin/skills/run-team/SKILL.md` line numbers below are as read at ruling
+time (2026-09-24) and drift with every merge; re-grep before editing.
+
 - The invariant, quoted verbatim from the 2026-07-22 spec: *"the controller
   runs `next-ticket` steps 1–4 exactly once, in the main thread, and gates
   on the maintainer there. Implementers never run ticket selection at all —
@@ -14,8 +17,8 @@
   many, what order, what collides" (SKILL.md § phase 0); "Never put two
   sequenced tickets in one wave" (SKILL.md); reclassifying an unclaimed
   ticket is forbidden ("an unclaimed ticket is not yours to reclassify",
-  SKILL.md L1527–1528), with phase 0's multi-select carrying the sole
-  exception (SKILL.md L1500–1501).
+  SKILL.md L1537), with phase 0's multi-select carrying the sole
+  exception (SKILL.md L1510–1511).
 - The 2026-09-21 precedent: the maintainer hand-relabelled 13 forked
   tickets `ready-for-human` outside the fleet's own reclassify prohibition
   — re-examined and re-ruled at #1775's Q5, against the maintainer, in
@@ -69,8 +72,8 @@ ordering are batched (one scan); admission is never batched.
    shortlist in its oldest-first slot and its row is rewritten to
    `impl-<N> …` when pulled. This makes "re-check the deferred list after
    every merge" mechanical.
-4. **Relabel by cause at Pull.** Reverses SKILL.md L1527–1528 ("an
-   unclaimed ticket is not yours to reclassify") and retires L1500–1501's
+4. **Relabel by cause at Pull.** Reverses SKILL.md L1537 ("an
+   unclaimed ticket is not yours to reclassify") and retires L1510–1511's
    "Phase 0's multi-select" permission exception. Three causes, two labels:
 
    | Cause at Pull | Label |

@@ -52,10 +52,10 @@ Per Pull the controller emits "~1 KB of prompt instead of ~15.5 KB on
 Claude (status quo today) and instead of one 14.5 KB pool context per
 staging on omp — so guard signal 2 (controller `cache_creation`/PR) does
 not rise on either harness from retiring the pool" (#1777). #1773's own
-sizing note for the spec: reviewer slots in use ≈ ⌈(T_review +
-0.94·T_fix)/T_impl⌉ (medians since 2026-08-07: T_impl 19.3 min, T_fix
-21.0 min, T_review ~18 min; 0.94 fix-appliers per review) — so at the
-default "4" are already busy; idle slots cost nothing.
+sizing note for the spec: reviewer slots in use ≈ I·(T_review +
+0.94·T_fix)/T_impl ≈ 1.95·I (medians since 2026-08-07: T_impl 19.3 min,
+T_fix 21.0 min, T_review ~18 min; 0.94 fix-appliers per review) — so at
+the default ~4 of 6 are already busy; idle slots cost nothing.
 
 ## Vocabulary
 
@@ -91,16 +91,16 @@ OMP: one more `task` call, `agent: fleet-implementer` (`fleet-implementer-alt` o
 Not `eval`'s `agent()`: a kernel-resident handle keeps the lost-kernel rule alive and needs a `wait`; `task` jobs are process-level and their reports auto-deliver individually.
 
 Why the pool loses under Pull:
-- The pool's only refill virtue — handing a queued item to a freed worker without a controller turn (SKILL.md L1111) — is exactly what Pull forbids (admission per slot, never batched). Push-per-Pull carries zero queue depth.
+- The pool's only refill virtue — handing a queued item to a freed worker without a controller turn (SKILL.md L1121) — is exactly what Pull forbids (admission per slot, never batched). Push-per-Pull carries zero queue depth.
 - A Pull pushes *after* a slot frees. Whenever the finishing implementer was the only live one (at cap 2: any time the other slot was idle — empty shortlist, refresh, run tail), the pool has already closed → every Pull would need a closed-check, a monotonic `impl-pool-<n>`, and a fresh preflight, for nothing.
-- Per-item completion never arrives from a pool (L1180–1183); `task` delivers each member's report natively.
-- Alt-tier is dispatched outside the pool (L1156) → `pool.status()` is blind to one implementer in five.
+- Per-item completion never arrives from a pool (L1190–1193); `task` delivers each member's report natively.
+- Alt-tier is dispatched outside the pool (L1166) → `pool.status()` is blind to one implementer in five.
 - One same-rule Pair: the two marked lines differ only in tool name. The `#1590` entry in `marked-pairs.mjs` `KNOWN_EQUALITY_EXCEPTIONS` (L294–297) is deleted, not kept.
 - `eval.workpool.freshAgents` stops being a precondition: `task` children start blank by construction.
 
 **2. The shared implementer background moves into the agent definition.**
 
-The invariant verbatim blocks (SKILL.md L1235–1470 today: unattended-member, `edit`/`read` absolute-path (#1727), re-derive claims, `gh issue view` backstop, commit incrementally, no `git stash`, shared `eval` kernel (#1447)) — 14,503 bytes over 203 quoted lines — become the **body of `plugin/agents/fleet-implementer.agent.md`**, byte-identical in `fleet-implementer-alt.agent.md` (a new test pins the two bodies equal; frontmatter differs only in tier). The per-Pull prompt carries only what varies: ticket number, distilled brief, worktree abs path, branch, `<scratch>/impl-<N>/` — i.e. the three blocks with placeholders (`You are ALREADY in worktree…`, `Here is the ticket's distilled brief…`, `Every scratch file goes under…`).
+The invariant verbatim blocks (SKILL.md L1245–1480 today: unattended-member, `edit`/`read` absolute-path (#1727), re-derive claims, `gh issue view` backstop, commit incrementally, no `git stash`, shared `eval` kernel (#1447)) — 14,503 bytes over 203 quoted lines — become the **body of `plugin/agents/fleet-implementer.agent.md`**, byte-identical in `fleet-implementer-alt.agent.md` (a new test pins the two bodies equal; frontmatter differs only in tier). The per-Pull prompt carries only what varies: ticket number, distilled brief, worktree abs path, branch, `<scratch>/impl-<N>/` — i.e. the three blocks with placeholders (`You are ALREADY in worktree…`, `Here is the ticket's distilled brief…`, `Every scratch file goes under…`).
 
 Measured: omp injects the agent body as the `§ Role` section of the member's system prompt (probe `body-probe-1`, agent `fleet-review-snapshot`: `session_init.systemPrompt` contains the body verbatim; the member quoted it back). Claude Code agent bodies are system prompts by definition. Same rule, both harnesses; the prose pins on those blocks retarget from SKILL.md to the agent file.
 
@@ -114,10 +114,10 @@ Cost: per Pull the controller emits ~1 KB of prompt instead of ~15.5 KB on Claud
 
 - `task.maxConcurrency`: implementers queue at the ceiling like reviews (#1771); no fleet-side handling.
 - Names: `impl-<N>` unchanged; no pool name, no counter. Hyphenated `task` names measured working (`impl-probe-9999` listed by `read proc://`, result delivered individually).
-- Claim-then-dispatch: phase 1 claims serially in the main checkout, immediately followed by the one dispatch — L1171–1178 survives as "claim what you are about to dispatch; dispatch what you have just claimed".
-- #1591 outcome classification survives verbatim, keyed to the member's own job status (`completed`/`failed`/`cancelled` now arrive per member); L1191–1205 reworded per member, "confirm death first" unchanged.
-- Lost-kernel rule (L1226–1230) retired.
-- Alt-tier: same primitive, `fleet-implementer-alt`, every 5th Pull per #1775; L1156–1162 deleted except "no per-call tier or effort anywhere on this path" (ADR 0005), which stays.
+- Claim-then-dispatch: phase 1 claims serially in the main checkout, immediately followed by the one dispatch — L1181–1188 survives as "claim what you are about to dispatch; dispatch what you have just claimed".
+- #1591 outcome classification survives verbatim, keyed to the member's own job status (`completed`/`failed`/`cancelled` now arrive per member); L1201–1215 reworded per member, "confirm death first" unchanged.
+- Lost-kernel rule (L1236–1240) retired.
+- Alt-tier: same primitive, `fleet-implementer-alt`, every 5th Pull per #1775; L1166–1172 deleted except "no per-call tier or effort anywhere on this path" (ADR 0005), which stays.
 
 ### Change surface
 
@@ -148,55 +148,62 @@ Fallback on both (unavailable, or failed after one retry — §5): the hand-disp
 ### 2. Result delivery
 
 - One artefact on both harnesses: `<scratch>/review-<pr>.json` holding the bare result object.
-- CLAUDE: on the task-notification, the controller runs `jq '.result' <output-file>` (`shell` lives under session-scoped `/private/tmp/claude-501/...`).
-- OMP: the `review-pr-<n>` member writes it; its report is the member report ("the report is a SendMessage" rule unchanged).
-- `review-core.js` (and its Claude twin in `review-pr.js`) reorder the returned object so the **digest** comes first and survives Claude's "8 KB inline `<result>`" truncation: pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, counts{survived, refuted, unverified, crashed}, then `snapshot`, `survived`, `refuted`, `unverified`. (Today `resume` is last — L935 — and falls past the cut on large results.)
-- The controller reads the digest only and dispatches the fix-applier prompt out.
+  CLAUDE: on the task-notification, the controller runs `jq '.result' <output-file> > <scratch>/review-<pr>.json` (shell only; the `<output-file>` lives under session-scoped `/private/tmp/claude-501/…`).
+  OMP: the `review-pr-<n>` member writes it; its report is the member report ("the report is a SendMessage" rule unchanged).
+- `review-core.js` (and its Claude twin in `review-pr.js`) reorder the returned object so the **digest** comes first and survives Claude's ~8 KB inline `<result>` truncation: `pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts{survived, refuted, unverified, crashed}`, then `snapshot, survived, refuted, unverified`. (Today `resume` is last — L935 — and falls past the cut on large results.)
+- The controller reads the digest only. Findings never enter its context; measured cost avoided ≈ 7–15k tokens per review in (26–61 KB results) plus up to ~10k chars per fix-applier prompt out.
 
 ### 3. Cap accounting
 
-- The reviewer cap counts **live units**: a running review (Workflow in flight, or `review-pr-<n>` member) = 1; each `fix-pr-<n>` = 1; finisher and CI wait = 0. A PR holds at most one slot on either role — not remembered.
-- **Defaults: 2 implementers, 6 reviewers. No hard caps on either role — defaults only.** Merge bot stays 1 (ADR 0007, out of scope). Sizing note for the spec: reviewer slots in use ≈ ⌈(T_review + 0.94·T_fix)/T_impl⌉ (medians since 2026-08-07: T_impl 19.3 min, T_fix 21.0 min, T_review ~18 min; 0.94 fix-appliers per review) — so at the default "4" are already busy; idle slots cost nothing. Re-derive from the map's guard after ≥20 merged PRs.
-- CLAUDE: at most **1** review in flight (Workflow-verified on a live run at 16 and state on runs — unmeasured, default 32) shared with every `agent()`; at the ceiling work is queued, not refused (#1771) — a wall-time cost, not a failure.
-- OMP: all review units count against one session semaphore (`task.maxConcurrency`, default 32) shared with every `agent()`; at the ceiling work is queued, not refused (#1771).
+- The reviewer cap counts **live units**: a running review (Workflow in flight, or `review-pr-<n>` member) = 1; each `fix-pr-<n>` = 1; finisher and CI wait = 0. A PR holds at most one slot at a time.
+- In-flight reviews are derived from the ledger (§7), not remembered.
+- **Defaults: 2 implementers, 6 reviewers. No hard caps on either role — defaults only.** Merge bot stays 1 (ADR 0007, out of scope). Sizing note for the spec: reviewer slots in use ≈ I·(T_review + 0.94·T_fix)/T_impl ≈ 1.95·I (medians since 2026-08-07: T_impl 19.3 min, T_fix 21.0 min, T_review ~18 min; 0.94 fix-appliers per review) — so at the default ~4 of 6 are busy; idle slots cost nothing. Re-derive from the map's guard after ≥20 merged PRs.
+- CLAUDE: at most **1** review in flight until two concurrent workflows are verified on a live run (docs cap agents per workflow run at 16 and state no per-session limit on runs — unmeasured). The other slots still serve fix-appliers.
+- OMP: all review units count against one session semaphore (`task.maxConcurrency`, default 32) shared with every `agent()`; at the ceiling work is queued, not refused (#1771) — a wall-time cost, not a failure.
 
 ### 4. Fix-applier and finisher hand-off
 
 - The **controller** dispatches `fix-pr-<pr#>` on the result edge, prompt carrying PR#, worktree abs path, branch, `testCmd`, and the **path** `<scratch>/review-<pr>.json` with `jq` extraction recipes — not the findings.
-- The fix-applier owns every per-PR ruling formerly the controller's: both mutual-exclusion scans (before applying; as its own re-derive), suggested-fix quotes/deleted-text re-derivation, `testEnvironment`/`cwdAudit` reading before acting on `test_run`.
+- The fix-applier owns every per-PR ruling formerly the controller's: both mutual-exclusion scans (before applying; as its own refuters report), suggested-fix-quotes-deleted-text + re-derive, `refuted=false` ≠ apply, sibling-site extension needs per-site measurement, `testEnvironment`/`cwdAudit` reading before acting on `test_run`.
 - Digest `counts.survived == 0` and nothing to file → controller dispatches the finisher directly (edge unchanged).
-- CLAUDE: reports of refuters the fix-applier spawns still surface to the controller; the controller neither scans nor relays them. The fix-applier retrieves them itself (`tail -1 <output-file> | jq ...`, already only in its prompt at L2278) and asks the controller by name only if the file yields nothing.
+- CLAUDE: reports of refuters the fix-applier spawns still surface to the controller; the controller neither scans nor relays them. The fix-applier retrieves them itself (`tail -1 <output-file> | jq …`, already in its prompt at L2278) and asks the controller by name only if the file yields nothing.
 - Finisher dispatch gate unchanged (CI green or `no-ci`, fix-applier report received, controller outbox empty).
 
 ### 5. Failure handling
 
-Rule: **whoever holds the review call retries once; a second failure → the fallback reviewer.** Failure = throw, empty return, or notification `status` != completed.
-CLAUDE: the controller relaunches `Workflow()` once, still failing → fallback `review-pr-<pr#>` (background).
-OMP: the `review-pr-<n>` member catches, re-calls `runReviewOnOmp()` once, then reports "failed" with both errors; the controller dispatches the fallback as `review-pr-<n>-b`. A killed member follows the Failure-handling table (fresh name, inherited state stated).
+Rule: **whoever holds the review call retries once; a second failure → the fallback reviewer.** Failure = throw, empty return, or notification `status` ≠ completed.
+CLAUDE: the controller relaunches `Workflow` once; still failing → fallback `review-pr-<pr#>` (background).
+OMP: the `review-pr-<n>` member catches, re-calls `runReviewOnOmp` once, then reports `failed` with both errors; the controller dispatches the fallback as `review-pr-<pr#>-b`. A killed member follows the Failure-handling table (fresh name, inherited state stated).
 
 ### 6. Crash repair inside the run
 
-**`review-core.js` (and `review-pr.js`) re-dispatch each crashed specialist once and each crashed refuter pair once** before assembling the result. Residue lands in `dimensionsUnrun` / `unverified` as today; the fix-applier names it unrun/deferred in its report and re-runs nothing.
-- `resume` now means "crashed again after the in-run retry". CLAUDE: the controller may relaunch with `Workflow({scriptPath, resumeFromRunId})` (cached replay) as a second line. OMP: no replay exists (measured: TurnRecovery auto-retry `retry.maxRetries=10` fires only on transient errors while a turn is live; Agent Hub's `Alt+R`/`app.retry` is TUI-only, not acted on; `AsyncJobManager` has no retry verb). `resume` is reported, not acted on.
+- `review-core.js` (and `review-pr.js`) re-dispatch **each crashed specialist once and each crashed refuter pair once** before assembling the result. Residue lands in `dimensionsUnrun` / `unverified` as today; the fix-applier names it unrun/deferred in its report and re-runs nothing.
+- `resume` now means "crashed again after the in-run retry".
+  CLAUDE: the controller may relaunch with `Workflow({scriptPath, resumeFromRunId})` (cached replay) as a second line.
+  OMP: no replay exists (measured: TurnRecovery auto-retry `retry.maxRetries=10` fires only on transient errors while a turn is live; F5/Alt+R `app.retry` is TUI-only on the focused session; Agent Hub revive needs `aborted`, not `failed`; `AsyncJobManager` has no retry verb). `resume` is reported, not acted on.
 
 ### 7. Ledger
 
 - At launch the controller appends to the PR's row: `review=wf:<runId>` (Claude) | `review=member:review-pr-<n>` (omp) | `review=fallback:review-pr-<n>[-b]`.
-- On the result: `reviewed=<head>:<survived>/<refuted>/<unverified>` and no `review=` → feeds `--reviewers`/caps (keep ≥ 1); `reviewed=` fields if the row schema is validated.
-- In-flight reviews = rows with `review=` and no `reviewed=` → live fix-appliers (G6 consumes this). The fix-applier's report lists refutations it reversed; the controller neither scans nor relays them.
+- On the result: `reviewed=<head>:<survived>/<refuted>/<unverified>`.
+- In-flight reviews = rows with `review=` and no `reviewed=` → feeds `--reviewers` with live fix-appliers (G6 consumes this).
+- The fix-applier's report lists refutations it reversed; the controller copies them to the `ruled` line.
 
 ### 8. Retired
 
-- SKILL.md "One review workflow at a time" (L1946–1953); "Only you can run it … no reason to use `eval` themselves on omp" (L1908–1919) rewritten per §1; controller-side mutual-exclusion scan, suggested-fix scan and "verbatim means every one" relay (L2018–2119) move into the fix-applier prompt.
-- "Reviews are the bottleneck … one at a time" and the 2/3 default derivation (L3073–3097); L3/L11 "up to 5 / cap 5". Map fog item "Porting `selectDimensions` sizing … into a reviewer member prompt" — moot: Claude keeps `Workflow` as primary.
+- SKILL.md "One review workflow at a time" (L1946–1953); "Only you can run it … no reason to run `eval` themselves on omp" (L1908–1919) rewritten per §1; controller-side mutual-exclusion scan, suggested-fix scan and "verbatim means every one" relay (L2018–2119) move into the fix-applier prompt.
+- "Reviews are the bottleneck … one at a time" and the 2/3 default derivation (L3073–3097); L3/L11 "up to 5 / cap 5".
+- Map fog item "Porting `selectDimensions` sizing … into a reviewer member prompt" — moot: Claude keeps `Workflow` as primary.
 
 ### Change surface
 
-- `plugin/scripts/review-core.js` (and its twin copy `plugin/workflows/review-pr.js`): result key order; in-run retry of crashed specialists/refuter pairs (pinned by `review-pr-cwd-isolation.test.mjs` and the `resumeFor` wording).
+- `plugin/scripts/review-core.js`: result key order; in-run retry of crashed specialists/refuter pairs; `resumeFor` wording ("after the in-run retry").
+- `plugin/workflows/review-pr.js`: same two changes in its twin copy (pinned by `review-pr-cwd-isolation.test.mjs` and the resume-wording pin).
 - `plugin/agents/fleet-review-runner.agent.md`: new.
-- `plugin/skills/run-team/SKILL.md` § Reviewers, fallback §, phase-3 "Review slot free, PR queued" edge (now fires per free slot).
-- `plugin/commands/review-and-fix.md`: fix-applier prompt reads the result file and owns per-PR rulings.
+- `plugin/skills/run-team/SKILL.md`: § Reviewers, fallback §, phase-3 "Review slot free, PR queued" edge (now fires per free slot), fix-applier prompt, L3/L11/L3073–3097.
+- `plugin/commands/review-and-fix.md`: fix-applier role reads the result file and owns per-PR rulings.
 - `plugin/scripts/fleet-tick.mjs` L435–437: drop the `> 5` bound on `--implementers`/`--reviewers`/caps (keep ≥ 1); G6 owns `reconcile()`.
+- `plugin/scripts/ledger.mjs`: `review=` / `reviewed=` fields if the row schema is validated.
 
 ## 4. Merge
 
@@ -233,6 +240,9 @@ of `ledger.mjs dispatch`.
    If the tick says `DISPATCH merge-bot` because a label landed in the last moment, dispatch `merge-bot-<n+1>` straight away.
 8. **Holds.** `--merge-holds` is derived from the ledger: rows carrying `held-behind:#M` whose `#M` is neither MERGED nor CLOSED. This is the same lift rule as #1775's `behind-pr` Exclusion. A hold is dropped once its premise PR closes.
 9. **Re-dispatch.** A label that arrives after the exit report dispatches a fresh `merge-bot-<n>` immediately. There is no minimum queue depth, and the "At 6+ open PRs batch a wave" rule (SKILL.md L2879) is retired. Detection costs nothing extra: the finisher's duty-4 report already wakes the controller, and the persistent label Monitor plus every tick's queue read catch hand-applied labels.
+10. **Brief.** The brief always travels with the dispatch, never as a follow-up (SKILL.md L2798). Its contents are deferred to #1776.
+11. **Top-level `/run-merge-bot` is unchanged.** It keeps its permanent 60s Monitor ("Then stay armed"). Grace applies only when a controller dispatched the bot.
+12. **Stuck bot.** No new rule. A bot that never reports is a silent member: the existing "Member silent or truncated" row, plus #1772's liveness checks, cover it.
 
 ### Prose pins to rewrite
 
@@ -271,10 +281,10 @@ of `ledger.mjs dispatch`.
 
 **Controller prose (`plugin/skills/run-team/SKILL.md`)**
 - L72: naming list.
-- L1533–1544: the two trigger bullets "→ merge-bot wave" become "→ dispatch `merge-bot-<n>`". **Delete L1535–1542.** "Merge-bot wave reports done" becomes "Merge-bot pass reports done → record holds, reap, then reconcile".
-- L1618: edge name.
-- L1649–1653: `--merge-holds` source → ledger rows (Merge §8).
-- L2552: "costs a wave" → "costs a pass".
+- L1543–1544: the two trigger bullets "→ merge-bot wave" become "→ dispatch `merge-bot-<n>`". **Delete L1546–1552.** "Merge-bot wave reports done" becomes "Merge-bot pass reports done → record holds, reap, then reconcile".
+- L1628: edge name.
+- L1659: `--merge-holds` source → ledger rows (Merge §8).
+- L2568: "costs a wave" → "costs a pass".
 - L2786: "Per pass, named `merge-bot-<n>` (`ledger.mjs dispatched`)".
 - L2879–2880: retire "At 6+ open PRs batch a wave rather than merging singles". Keep "behind-count … expired on arrival".
 - L2882: "intra-pass re-checks".
@@ -337,16 +347,18 @@ exist, and nothing on the merge path writes `jq` any more.
 (a finding about the tree, the tooling, or the API — never about the PR).
 Same three-way contract as `inflight.sh`, `prove-merge.sh`, `staleness.mjs`.
 
-| condition | reason | exit |
+| condition | exit | `reason` |
 |---|---|---|
-| every check holds | 0 | – |
-| `reviewDecision` == CHANGES_REQUESTED | 1 | `changes-requested` |
+| every check holds | 0 | — |
 | `ready-to-merge` absent | 1 | `label-pulled` |
-| `ci-state` exit 1 (`not-green`): head mismatch, `status` != completed, missing/failed jobs) | 1 | `ci:<first entry of ci.reasons>` |
+| `reviewDecision == CHANGES_REQUESTED` | 1 | `changes-requested` |
+| `headRefOid ∉ {pre, post}` | 1 | `head-moved-after-label` |
+| `ci-state` exit 1 (`not-green`: head mismatch, `status != completed`, missing/failed jobs) | 1 | `ci:<first entry of ci.reasons>` |
 | `behind > 0` | 1 | `behind:<n>` |
-| `ci-state` exit 2 — `rate-limited`, no payload, `{}`, zero bytes, unparseable | 2 | `rate-limited` |
+| `ci-state` exit 2 — `rate-limited`, no payload, `{}`, zero bytes, unparseable | 2 | `rate-limited` / `ci-unreadable` |
 | `behind === null` | 2 | `behind-unknown` |
 | `instruments.sh` exit 1 | 2 | `instrument-set-changed` |
+| `instruments.sh` exit 2 | 2 | `instruments-unanswerable` |
 | `gh pr view` fails or misparses | 2 | `pr-unreadable` |
 
 Checks run in the table's order and the first failure is the `reason`; the
@@ -622,13 +634,14 @@ guard's trigger is gone.
 
 | Wake | Record, then tick |
 |---|---|
-| Implementer report | `verify-sha`: settle impl-N=PR#M or =bailed (relabel per #1775 §4) |
+| Implementer report | `verify-sha`; `settle impl-N=PR#M` or `=bailed` (relabel per #1775 §4) |
 | Workflow notification / `review-pr-n` report | write `<scratch>/review-<pr>.json`; `reviewed=<head>:s/r/u` |
-| Fix-applier report | settle fix-pr-M=…; copy reversed refutations to `ruled` |
-| Finisher report | settle finisher-pr-M=labelled |
+| Fix-applier report | `settle fix-pr-M=…`; copy reversed refutations to `ruled` |
+| Finisher report | `settle finisher-pr-M=labelled` |
 | Label seen (persistent Monitor) | nothing to record |
 | CI run terminal | `ci=<run>:<attempt>:<conclusion>` on the row; finisher gate (prose, §4) |
-| Merge-bot pass report | `held-behind:#M` rows; release claims; settle merge-bot-n=done |
+| Merge-bot pass report | `held-behind:#M` rows; `settle merge-bot-n=done`; `reap.sh --apply` |
+| Drain | `ledger.mjs drain`; release claims; `settle impl-N=released` |
 | Heartbeat | nothing to record |
 
 Then `fleet-tick.mjs`, act on every printed line, arm the beat. Edges
@@ -785,8 +798,8 @@ plugin/agents/fleet-implementer-alt.agent.md CONTEXT.md` — re-run at
 | `plugin/skills/run-team/references/reaping.md` | 31 | Above walk finds branch's worktree by `branch refs/heads/<name>` line `git work… | §4 Merge | "after every wave" → "after each merge pass" |
 | `plugin/skills/run-team/references/member-lifecycle.md` | 7 | Name makes it team member; membership carries `Agent` tool. Omit it → member lo… | §4 Merge | wording: merge wave → merge pass |
 | `plugin/agents/fleet-implementer-alt.agent.md` | 3 | description: A /fleet-ctl:run-team implementer dispatched at the ALTERNATE tier… | §2 Implementer dispatch | "one per wave" → "every 5th Pull" (ADR 0013 §6) |
-| `CONTEXT.md` | 41 | Deleting branches whose upstream is gone, and their worktrees, after a merge wa… | CONTEXT.md (Step 4) | done in this PR — "after each merge pass" |
-| `CONTEXT.md` | 160 | machine to dispatch its own wave. Three exist, all on omp, all session-wide: | CONTEXT.md (Step 4) | done in this PR — "dispatch its own members" |
+| `CONTEXT.md` | 41 | Deleting branches whose upstream is gone, and their worktrees, after a merge wa… | done in this PR (#1795) | done in this PR — "after each merge pass" |
+| `CONTEXT.md` | 160 | machine to dispatch its own wave. Three exist, all on omp, all session-wide: | done in this PR (#1795) | done in this PR — "dispatch its own members" |
 
 ### 8.2 Pins and files per section
 
@@ -861,20 +874,42 @@ it.
 
 ## Not yet specified (for the map)
 
-- #1774: the cockpit's reading of `excluded ·` ledger rows and `=`-tokens
-  is undecided — render as ticket cards, or ignore.
-- #1774: `merge-bot-<n>`'s counter has no per-ticket row to count; #1774
-  resolves this by counting the ledger's `## Dispatched` list instead
-  (spec § 4 item 2).
+- #1774: **Non-merge "wave" uses** stay out of that ticket's scope. These
+  are staging wave, pool dispatch, busy-wave heartbeat, within-run pair,
+  tier-check and implementer-model-tier, in `fleet-state.mjs`,
+  `fleet-heartbeat.mjs`, `fleet-tick.mjs` L684–697,
+  `pool-dispatch-dialect-prose.test.mjs`, `within-run-pair-prose.test.mjs`,
+  `tier-check.mjs` L7/40, and `CONTEXT.md` L160. Owners: #1775, #1778, or a
+  #1779 sweep.
+- #1774: **The verb.** "waves it through" / "waves the mutant through",
+  used in several test comments, matches `\bwaves\b`. A no-`wave` gate
+  should either rephrase these or exempt the verb.
+- #1774: **`merge-wave.js`.** This fixture filename (`workflow-files.mjs`
+  L62, `workflow-meta-first.test.mjs` L158/177) quotes the layout tree of
+  the dated 2026-07-23 spec. Rename the fixture, or keep it as a
+  quotation.
 - #1775: `board.mjs`/`compute-board.mjs` will render an `excluded ·` row as
   a ticket card; decide whether the cockpit shows exclusions or filters
   the prefix.
-- #1776: the labelled-head timeline read (`run-merge-bot.md` L51–68) is
-  the one hand-run read this cutover leaves in the brief — a probe first;
-  the timeline event shape a `gh pr update-branch --rebase` lands as
-  (`head_ref_force_pushed` after `post`?) is unmeasured, and `headRefOid ∈
-  {pre, post, post'}` cannot substitute — a head that moved before the bot
-  started is already `pre`.
+- #1775: `merge-bot-<n>` counter has no per-ticket row to count; #1774
+  resolves this by counting the ledger's `## Dispatched` list instead
+  (spec § 4 item 2).
+- #1776: fold the labelled-head timeline read (`run-merge-bot.md` L51–68)
+  into `merge-gate` (`--post` exempting the bot's own rebase). Needs a
+  probe first: the timeline event shape a `gh pr update-branch --rebase`
+  lands as (`head_ref_force_pushed` with `after == post`?) is unmeasured,
+  and `headRefOid ∈ {pre, post}` cannot substitute — a head that moved
+  before the bot started is already `pre`.
+- #1776 (Caveats): `merge-gate` output field `instruments` carries the
+  digest `instruments.sh` prints; whether the controller wants it in
+  `ci.json` at all is a T-a implementer's call — dropping it changes no
+  exit.
+- #1777 (Caveats): `read proc://` at fleet-scale row counts untested (R4
+  caveat carries over); not load-bearing for spec § 2 since the tick no
+  longer reads it.
+- #1777 (Caveats): Claude-side system-prompt injection of the agent body
+  not re-probed this session (it is the documented mechanism and every
+  fleet review specialist already relies on it).
 - #1778: `board.mjs`/cockpit reading the new `=`-tokens and `## Dispatched`
   — render settled vs live members, or ignore.
 - #1778: whether `fleet-tick`'s per-tick `shortlist.mjs` run should be
