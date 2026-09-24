@@ -5,8 +5,9 @@
 ## Context
 
 `.nvmrc` holds an exact version and is the single source of truth for the target
-runtime: `ci.yml` reads it at three `node-version-file` sites (lines 126, 314,
-396) and nothing else in the repo reads its contents. #335 pinned it to `26.5.0`
+runtime: `ci.yml` reads it at three `node-version-file` sites (the `check`,
+`validate-claude`, and `install-and-smoke` jobs) and nothing else in the repo
+reads its contents. #335 pinned it to `26.5.0`
 and deliberately deferred the question this ADR answers; #354 re-opened it.
 
 The standing proposal was to replace the exact pin with a partial spec (`26`) so
@@ -60,12 +61,15 @@ Measured 2026-09-23, before ruling:
   `wayfinder:*` set. Renovate's default Dependency Dashboard issue carries no
   labels, so it would enter the candidate pool on any unfiltered run — including
   the `--allow-fallback` retry at `candidates.mjs:473-476`.
-- **The shipped floor is far below the pin.** The lowest version the shipped
-  plugin needs is **20.0.0** (`util.parseArgs`, stable in 20.0.0, used by
-  `arg.mjs`, `candidates.mjs`, `fleet-tick.mjs`, `fleet-heartbeat.mjs`,
-  `staleness.mjs`). The two files using `import.meta.dirname` —
-  `prompt-renderer.mjs`, `workflow-files.mjs` — are imported only by `*.test.mjs`
-  and bind the dev environment, not a user's.
+- **A precise consumer floor is out of scope here.** Shipped scripts run under
+  the user's own node via `#!/usr/bin/env node`; auditing every runtime API
+  surface they touch to derive an accurate minimum is not attempted in this
+  ADR. `util.parseArgs` (stable since Node 20.0.0) is used by `candidates.mjs`,
+  `fleet-tick.mjs`, `fleet-heartbeat.mjs` — `arg.mjs` and `staleness.mjs` only
+  reference it in comments contrasting their own hand-rolled parsing against
+  it. The two files using `import.meta.dirname` — `prompt-renderer.mjs`,
+  `workflow-files.mjs` — are imported only by `*.test.mjs` and bind the dev
+  environment, not a user's.
 
 ## Decision
 
@@ -97,10 +101,11 @@ Measured 2026-09-23, before ruling:
    the overdue bump, and is the end-to-end proof that app, checks, label,
    automerge and release all work. A hand edit proves nothing and leaves the
    pipeline untested.
-8. **The consumer floor is Node ≥ 20 and is stated separately.** `.nvmrc` carries
-   no compatibility meaning: shipped scripts run under the user's own node via
-   `#!/usr/bin/env node`, and nothing declares a floor (no `package.json`,
-   nothing in `plugin/.claude-plugin/plugin.json`).
+8. **No consumer floor is stated.** `.nvmrc` carries no compatibility meaning:
+   shipped scripts run under the user's own node via `#!/usr/bin/env node`, and
+   nothing declares a floor (no `package.json`, nothing in
+   `plugin/.claude-plugin/plugin.json`). Deriving and publishing an accurate
+   floor is out of scope for this ADR.
 
 ## Consequences
 
