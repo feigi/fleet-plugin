@@ -1903,27 +1903,33 @@ test("CLI: a stray flag alone, with no subject, is accepted as the degenerate su
 // The recorded TEXT is asserted, not only the exit code: accepting the call
 // and then dropping or mangling the `--` word would pass a status-only pin,
 // and that record is what a later `check` and a replacement controller read.
-// A file per subcommand, so a failure names which one lost the text.
-test("CLI: filed/row/ruled accept an unquoted multi-word subject carrying a '--' word (#1161)", (t) => {
+// A file per subcommand and word, so a failure names which one lost the text.
+//
+// #1744's one-dash name clause lives inside the same guard, so it is `check`'s
+// alone on the same reasoning: its stray, `-require-file`, is driven through
+// here too, as the word the other three must keep as data.
+test("CLI: filed/row/ruled accept an unquoted multi-word subject carrying a '--' or one-dash flag word (#1161, #1744)", (t) => {
   const { dir, cli } = cliFixture(t);
-  for (const [cmd, id, field] of [
-    ["filed", "999", "subject"],
-    ["row", "42", "line"],
-    ["ruled", "77", "decision"],
-  ]) {
-    const file = join(dir, `${cmd}.md`);
-    const r = cli(["--file", file, cmd, id, "the", "--basee", "flag", "is", "unread"]);
-    assert.equal(r.status, 0, `${cmd}: got exit ${r.status}\n${r.stderr}`);
-    assert.match(
-      JSON.parse(r.stdout)[field],
-      /the --basee flag is unread$/,
-      `${cmd}: the tail must reach the payload with its '--' word intact`,
-    );
-    assert.match(
-      readFileSync(file, "utf8"),
-      /^- #\d+ the --basee flag is unread$/m,
-      `${cmd}: and the ledger on disk`,
-    );
+  for (const word of ["--basee", "-require-file"]) {
+    for (const [cmd, id, field] of [
+      ["filed", "999", "subject"],
+      ["row", "42", "line"],
+      ["ruled", "77", "decision"],
+    ]) {
+      const file = join(dir, `${cmd}${word}.md`);
+      const r = cli(["--file", file, cmd, id, "the", word, "flag", "is", "unread"]);
+      assert.equal(r.status, 0, `${cmd} ${word}: got exit ${r.status}\n${r.stderr}`);
+      assert.match(
+        JSON.parse(r.stdout)[field],
+        new RegExp(`the ${word} flag is unread$`),
+        `${cmd} ${word}: the tail must reach the payload with its flag-like word intact`,
+      );
+      assert.match(
+        readFileSync(file, "utf8"),
+        new RegExp(`^- #\\d+ the ${word} flag is unread$`, "m"),
+        `${cmd} ${word}: and the ledger on disk`,
+      );
+    }
   }
 });
 
@@ -1954,6 +1960,77 @@ test("CLI: a stray flag in check's tail is refused from a later position too (#5
   assert.match(r.stderr, /unknown flag --typo-flag/, "the refusal must name the stray");
   assert.equal(r.stdout, "", "a refusal must not also emit a payload");
   assert.equal(existsSync(file), false, "the refusal must not write a ledger");
+});
+
+// #1744: the `--` clause above left this script's own flag, one dash short,
+// folding into the subject — `check -require-file widget guard missing`
+// scored "-require-file widget guard missing" against the ledger and answered
+// exit 0 where the correctly-spelled call answers ALREADY FILED at exit 1.
+// Both calls are driven, so the pin shows the two parting ways on purpose:
+// the flag spelled right is read, the flag one dash short is refused by name.
+test("CLI: this script's own flag spelled with one dash is refused in check's tail, naming it (#1744)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#123 widget guard missing"]));
+  const right = cli(["--file", file, "check", "--require-file", "widget", "guard", "missing"]);
+  assert.equal(right.status, 1, `the correctly-spelled call: got exit ${right.status}\n${right.stderr}`);
+  assert.match(right.stderr, /ALREADY FILED/);
+  const r = cli(["--file", file, "check", "-require-file", "widget", "guard", "missing"]);
+  assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
+  assert.match(r.stderr, /unknown flag -require-file in subject/, "the refusal must name the stray");
+  assert.equal(r.stdout, "", "a refusal must not also emit a payload");
+});
+
+// The same slip on the rule's other inputs: the OTHER flag this script reads,
+// a later tail position (a guard reading only `tail[0]` passes the pin above),
+// and the `=value` spelling, which hasEqualsForm() refuses only with two
+// dashes. `-file` is the costlier slip of the two: outside this fixture no
+// `--file` is given, so the path joins the subject AND the default ledger is
+// the one checked.
+test("CLI: a one-dash spelling of either flag is refused anywhere in check's tail, =value too (#1744)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#123 widget guard missing"]));
+  for (const [stray, tail] of [
+    ["-file", ["-file", "other.md", "widget guard missing"]],
+    ["-require-file", ["widget", "guard", "missing", "-require-file"]],
+    ["-require-file=true", ["-require-file=true", "widget guard missing"]],
+  ]) {
+    const r = cli(["--file", file, "check", ...tail]);
+    assert.equal(r.status, 2, `${tail.join(" ")}: got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`unknown flag ${stray} in subject`), `${tail.join(" ")}: must name the stray`);
+    assert.equal(r.stdout, "", `${tail.join(" ")}: a refusal must not also emit a payload`);
+  }
+});
+
+// The length gate fronts the name clause too: the same text given as the ONE
+// argument check's convention prescribes is a subject, not a stray — the
+// one-dash counterpart of the `--`-leading pin above. A name clause read
+// ahead of the gate fails this.
+test("CLI: a subject opening with a one-dash flag name is accepted unchanged, given as one argument (#1744)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText([]));
+  const subject = "-require-file typo folds into the subject";
+  const r = cli(["--file", file, "check", subject]);
+  assert.equal(r.status, 0, `got exit ${r.status}\n${r.stderr}`);
+  assert.equal(JSON.parse(r.stdout).subject, subject, "the payload's subject field must carry it unchanged");
+});
+
+// Why the clause is a NAME test and not a prefix or shape one: single-dash
+// words are ordinary free text in this repo's subjects — another tool's short
+// flag, a lone `-` standing in for a dash, a negative number — and an
+// unquoted subject carrying them must be scored as that subject, not refused.
+// Seeded, so the exit 1 proves every word reached the match intact.
+// `startsWith("-")` fails this on all three words; `/^-[A-Za-z]/` on `-q`.
+test("CLI: an unquoted subject carrying single-dash words that are not this script's flags is still accepted (#1744)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  const subject = "reap.sh grep -q misreads - exit -1 as clean";
+  writeFileSync(file, ledgerText([`#1419 ${subject}`]));
+  const r = cli(["--file", file, "check", ...subject.split(" ")]);
+  assert.equal(r.status, 1, `got exit ${r.status}\n${r.stderr}`);
+  assert.match(r.stderr, /ALREADY FILED/);
 });
 
 // The tail guard cannot reach the slot ahead of it: a stray flag one token

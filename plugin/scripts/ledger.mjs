@@ -292,9 +292,31 @@ function unescapeText(s) {
 // is a one-element tail, so it is still taken as the subject and answered at
 // exit 0. Harmless because it then searches for a string nothing matches, and
 // ledger.test.mjs's degenerate-subject case pins it so it stays deliberate.
+//
+// #1744: one dash short is the same slip, and the `--` test let it through —
+// `check -require-file widget guard missing` scored "-require-file widget
+// guard missing" and answered exit 0 where the correctly-spelled call answers
+// ALREADY FILED at exit 1. That test cannot simply lose a dash: single-dash
+// words are ordinary free text in this repo's subjects — another tool's short
+// flag (`grep -q`, `git branch -D`), a lone `-` standing in for a dash, a
+// negative number. Measured when this was written, 23 of the repo's 1068
+// issue titles carry one as a whitespace-split word, 20 of them letter-led,
+// so neither the prefix nor a `-<letter>` shape tells the slip apart. A NAME
+// does, the way arg.mjs's stray() tells a stray from a value (#463): a
+// single-dash word is refused only when one more dash, ahead of any `=value`,
+// makes it a flag this script reads — OWN_FLAGS, the two spliced out of argv
+// above. None of those titles carries one. It sits behind the same length
+// gate, so a one-argument subject is still accepted whatever it opens with.
+//
+// Left open, deliberately: a second slip on top of the missing dash
+// (`-requre-file`), and a short form this script never defined (`-f`).
+// Reaching either takes a shape or distance rule rather than a name, and
+// `-f` is exactly the other-tool short flag above; both still fold into the
+// subject.
+const OWN_FLAGS = ["--file", "--require-file"];
 function refuseStrayInCheckTail(tail) {
   if (tail.length <= 1) return;
-  const stray = tail.find((a) => a.startsWith("--"));
+  const stray = tail.find((a) => a.startsWith("--") || OWN_FLAGS.includes(`-${a.split("=")[0]}`));
   if (stray) die(`unknown flag ${stray} in subject — quote the subject as one argument`);
 }
 
@@ -311,10 +333,11 @@ function refuseStrayInCheckTail(tail) {
 // not only a double one (#1678). The free-text tail cannot take that same
 // test: a subject can legitimately open with a double-dash-leading word —
 // exactly what `--flag-like subject text` above and check's own
-// dash-leading-subject pin exist to keep working. A single-dash-leading
-// subject is merely unexercised, not a documented case — nothing pins it
-// either way. So only the id slot can take the bare prefix test at all,
-// for the same no-free-text reason given above.
+// dash-leading-subject pin exist to keep working. A single-dash-leading word
+// is ordinary subject text too, which is why check's tail refuses one only
+// by name (#1744, on refuseStrayInCheckTail() above). So only the id slot
+// can take the bare prefix test at all, for the same no-free-text reason
+// given above.
 function refuseStrayInId(value, what) {
   if (value.startsWith("-")) die(`unknown flag ${value} — expected ${what}`);
 }
