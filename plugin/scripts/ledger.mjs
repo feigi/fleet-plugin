@@ -164,9 +164,21 @@ const argv = process.argv.slice(2);
 // has(), in this reader's own wording (#362) — and since #567 that parity is
 // the shared hasEqualsForm() predicate itself rather than a claim about two
 // expressions that were free to drift apart.
+// Flag names lived here AND in OWN_FLAGS below with no shared source — a
+// future flag added to the indexOf() calls without a matching OWN_FLAGS
+// entry would parse normally but never be refused in a `check` subject
+// (measured: added `--another-file` the same way, `check -another-file …`
+// silently accepted at exit 0). One name each, declared once, reused by
+// the indexOf() calls and OWN_FLAGS below. Not by the hasEqualsForm() calls
+// right below, which keep their own literal text on purpose —
+// shared-refusal.test.mjs pins that pair's source verbatim against arg.mjs's
+// rule (#567), so interpolating them here would fail that pin without
+// fixing anything it exists to catch.
+const FILE_FLAG_NAME = "file";
+const REQUIRE_FILE_FLAG_NAME = "require-file";
 if (hasEqualsForm("file", argv)) die("--file needs a space-separated value, not --file=");
 if (hasEqualsForm("require-file", argv)) die("--require-file is a boolean flag, not --require-file=");
-const fileIdx = argv.indexOf("--file");
+const fileIdx = argv.indexOf(`--${FILE_FLAG_NAME}`);
 const file = fileIdx === -1 ? defaultLedgerPath() : argv[fileIdx + 1];
 // #362: `--file` took whatever token followed it, so `--file --require-file`
 // made the FLAG the path and the splice below then ate it — `--require-file`,
@@ -195,7 +207,7 @@ const file = fileIdx === -1 ? defaultLedgerPath() : argv[fileIdx + 1];
 if (fileIdx !== -1 && file && isFlagLike(file)) die("--file needs a path");
 if (fileIdx !== -1) argv.splice(fileIdx, 2);
 if (!file) die("--file given with no path");
-const requireFileIdx = argv.indexOf("--require-file");
+const requireFileIdx = argv.indexOf(`--${REQUIRE_FILE_FLAG_NAME}`);
 const requireFile = requireFileIdx !== -1;
 if (requireFileIdx !== -1) argv.splice(requireFileIdx, 1);
 
@@ -292,9 +304,41 @@ function unescapeText(s) {
 // is a one-element tail, so it is still taken as the subject and answered at
 // exit 0. Harmless because it then searches for a string nothing matches, and
 // ledger.test.mjs's degenerate-subject case pins it so it stays deliberate.
+//
+// #1744: one dash short is the same slip, and the `--` test let it through —
+// `check -require-file widget guard missing` scored "-require-file widget
+// guard missing" and answered exit 0 where the correctly-spelled call answers
+// ALREADY FILED at exit 1. That test cannot simply lose a dash: single-dash
+// words are ordinary free text in this repo's subjects — another tool's short
+// flag (`grep -q`, `git branch -D`), a lone `-` standing in for a dash, a
+// negative number. Measured when this was written, 23 of the repo's 1068
+// issue titles carry one as a whitespace-split word, 20 of them letter-led,
+// so neither the prefix nor a `-<letter>` shape tells the slip apart. A NAME
+// does, the way arg.mjs's stray() tells a stray from a value (#463): a
+// single-dash word is refused only when one more dash, ahead of any `=value`,
+// makes it a flag this script reads — OWN_FLAGS, the two spliced out of argv
+// above. None of those titles carries one. It sits behind the same length
+// gate, so a one-argument subject is still accepted whatever it opens with.
+//
+// Left open, deliberately: a second slip on top of the missing dash
+// (`-requre-file`), and a short form this script never defined (`-f`).
+// Reaching either takes a shape or distance rule rather than a name, and
+// `-f` is exactly the other-tool short flag above; both still fold into the
+// subject.
+const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`];
+// The one-dash name clause below matches only a's FIRST whitespace-split
+// word (ahead of any `=value`), not the whole element: a quoted multi-word
+// tail element (`check "-require-file widget" guard missing`, one argv
+// element) reconstructs to "--require-file widget" under a whole-token
+// match, which is not in OWN_FLAGS, so it fell through to exit 0 — the same
+// verdict flip #1744 exists to refuse, just via a quoted shape rather than a
+// bare token. Splitting first mirrors the `--` clause above it, which
+// already matches on startsWith rather than requiring the whole element.
 function refuseStrayInCheckTail(tail) {
   if (tail.length <= 1) return;
-  const stray = tail.find((a) => a.startsWith("--"));
+  const stray = tail.find(
+    (a) => a.startsWith("--") || OWN_FLAGS.includes(`-${a.split(/\s/)[0].split("=")[0]}`),
+  );
   if (stray) die(`unknown flag ${stray} in subject — quote the subject as one argument`);
 }
 
@@ -311,10 +355,11 @@ function refuseStrayInCheckTail(tail) {
 // not only a double one (#1678). The free-text tail cannot take that same
 // test: a subject can legitimately open with a double-dash-leading word —
 // exactly what `--flag-like subject text` above and check's own
-// dash-leading-subject pin exist to keep working. A single-dash-leading
-// subject is merely unexercised, not a documented case — nothing pins it
-// either way. So only the id slot can take the bare prefix test at all,
-// for the same no-free-text reason given above.
+// dash-leading-subject pin exist to keep working. A single-dash-leading word
+// is ordinary subject text too, which is why check's tail refuses one only
+// by name (#1744, on refuseStrayInCheckTail() above). So only the id slot
+// can take the bare prefix test at all, for the same no-free-text reason
+// given above.
 function refuseStrayInId(value, what) {
   if (value.startsWith("-")) die(`unknown flag ${value} — expected ${what}`);
 }

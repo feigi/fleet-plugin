@@ -410,6 +410,13 @@ export function makeNumArg(die) {
 // tracker query, so `the --basee flag is unread` is queried as `unread basee
 // flag`.
 //
+// #1744 widened refuseStrayInCheckTail() again, past `--`-prefixed tokens: it
+// also refuses a bare ONE-dash spelling of ledger.mjs's own flag names
+// (`-require-file` for `--require-file`), matched by name rather than
+// prefix, still only when the tail carries something besides it. ledger.mjs
+// states that reasoning and its narrowed scope once, on
+// refuseStrayInCheckTail() itself; not restated here.
+//
 // `check` alone, on a documented-convention test that ledger.mjs states once
 // on refuseStrayInCheckTail() itself, with the docs and the measurement behind
 // it (#1161) — not restated here, and not restated at its call site either.
