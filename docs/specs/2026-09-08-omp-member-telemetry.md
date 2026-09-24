@@ -19,7 +19,7 @@ Source: `omp://session.md` ("On-Disk Layout"), confirmed against real files.
 ~/.omp/agent/sessions/<encoded-cwd>/<timestamp>_<sessionId>/<AgentId>.json    # structured-output sidecar (when the caller passed outputSchema)
 ```
 
-`<encoded-cwd>` encoding (`omp://session.md` "On-Disk Layout"; **not** the same scheme Claude Code uses): `-<relative>` for directories under `$HOME`, `-tmp-<relative>` under the temp root, `--<encoded-absolute>--` otherwise, path separators and other non-alphanumerics replaced with `-`. `board.mjs:268-269`'s `encodeProjectDir` (blanket `[^a-zA-Z0-9]` → `-`) is close for the home-relative case but wrong for the `/tmp` and absolute-path branches; a port needs the three-way branch, not a reused single regex.
+`<encoded-cwd>` encoding (`omp://session.md` "On-Disk Layout", implemented in `pi-coding-agent/src/session/session-paths.ts:44-52,71-97`; **not** the same scheme Claude Code uses): computed from the canonicalized (symlink-resolved) cwd as `-<relative>` for directories under `$HOME` (path relative to home), `-tmp-<relative>` under the temp root (`os.tmpdir()` — `/var/folders/…/T` on macOS, not `/tmp`), `--<absolute>--` otherwise, with **only** path separators and `:` replaced by `-` — dots, underscores and other characters survive (real dir on this box: `-dev-fleet-plugin-.worktrees-1160-no-undo-audit-stderr-abort`). `board.mjs:268-269`'s `encodeProjectDir` (blanket `[^a-zA-Z0-9]` → `-` over the full absolute path) is wrong for the home-relative case, the one fleet actually hits: it keeps the home prefix the real scheme strips and rewrites dots, so for this repo it yields `-Users-chris-dev-fleet-plugin` where omp's real dir is `-dev-fleet-plugin`, and `-Users-chris-dev-fleet-plugin--worktrees-…` where omp's is `-dev-fleet-plugin-.worktrees-…`. It only coincidentally agrees on the temp branch, and then only when the temp root is literally `/tmp` (e.g. Linux with `TMPDIR` unset) and the relative path has no dots or other non-alphanumerics (`/tmp/foo` → `-tmp-foo` both ways). The absolute branch is wrong too (`/opt/x` → `-opt-x` vs omp's `--opt-x--`; on this box a `/tmp` cwd canonicalizes to `/private/tmp/…`, lands outside `os.tmpdir()`, and is stored as `--private-tmp-fleet-dispatch-test--`). A port needs the three-way branch, not a reused single regex.
 
 The artifacts directory is the session file path with the trailing `.jsonl` stripped — verified in source, not just doc:
 
@@ -150,7 +150,7 @@ None of these are available to `board.mjs`/`member-outcomes.mjs`'s actual execut
 | `tokensOut` / output | max `output_tokens` across a turn's lines, summed across turns (streaming-snapshot caveat) (`member-outcomes.mjs:88-89,118`) | `message.usage.output`, one final value per turn — no streaming-snapshot caveat (persisted post-completion) | **Direct equivalent, simpler** |
 | `maxCtx` (context window estimate) | `input_tokens + cacheRead + cacheWrite`, maxed across turns (`board.mjs:427`) | `usage.input + usage.cacheRead + usage.cacheWrite`, same formula | **Direct equivalent** |
 | Dollar cost | *(none — not read by either script today)* | `usage.cost.{input,output,cacheRead,cacheWrite,total}`, computed by omp itself per turn | **NEW, strict upgrade** — caveat: `0`/unpriced for subscription-only models with no public rate card |
-| `wallS` (span) | `lastTs - firstTs` over transcript-line timestamps (`member-outcomes.mjs:96,104,127`) | same, over `message` entry timestamps | **Direct equivalent** |
+| `wallS` (span) | `lastTs - firstTs` over the entry-level `d.timestamp` on every transcript line — an ISO-8601 **string**, hence `Date.parse` (`member-outcomes.mjs:96,104,127`) | either the entry-level `timestamp` (also an ISO-8601 string, on every entry — `Date.parse` ports unchanged) or `message.timestamp` on `message` entries (a **numeric** epoch-ms — subtract directly; what the §6 PoC uses) | **Equivalent, but the two omp fields are not interchangeable** — `Date.parse` on the numeric `message.timestamp` is `NaN`, and they are different instants (measured on an assistant entry: `message.timestamp` is when the turn started, the entry `timestamp` when it was persisted, ~9 s later), so pick one and never mix them |
 | `turns` | count of distinct `message.id` groups (`member-outcomes.mjs:97,111-117,132`) | count of `message`-type, `role:"assistant"` entries directly (each *is* one turn already) | **Direct equivalent, no grouping needed** |
 | `role` classification input: `meta.agentType`/`description`/`customAgentType` | `.meta.json` sidecar beside the transcript, `customAgentType` **conditional** on a *named* `subagent_type` dispatch (measured 22/241 present) | `session_init.agent` on the child's own `.jsonl` — the dispatched agent type name (e.g. `scout`, `fleet-implementer`), **unconditionally present** on every subagent, no separate sidecar file | **Direct equivalent, stronger** (no conditional-presence trap, no second file to open) |
 | `description` (short label) | `.meta.json`'s `description` | *(none)* — `session_init.task` carries the **full** task prompt text, not a short label; the UI's one-line label is generated on the fly by a tiny model and not persisted | **NO EQUIVALENT** for a short label; full text available instead |
@@ -160,107 +160,119 @@ None of these are available to `board.mjs`/`member-outcomes.mjs`'s actual execut
 
 ## 6. Worked example
 
-Ran against a real, currently-live omp session on this box — the wayfinder session that dispatched this very ticket (`~/.omp/agent/sessions/-dev-fleet-plugin/2026-09-08T13-13-27-300Z_01a08126-ee04-7095-a695-14e3249f1127`). No omp process was involved; this is a plain Node script reading files off disk, structurally equivalent to `member-outcomes.mjs`'s own posture.
+Run against a real omp session on this box — the wayfinder session that dispatched this very ticket (`~/.omp/agent/sessions/-dev-fleet-plugin/2026-09-08T13-13-27-300Z_01a08126-ee04-7095-a695-14e3249f1127`). No omp process was involved; this is a plain Node script reading files off disk, structurally equivalent to `member-outcomes.mjs`'s own posture.
 
 ```js
 // /tmp/omp-member-outcomes-poc.mjs
 import { readFileSync, readdirSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 
 const sessionFile = process.argv[2]; // path to the ROOT session .jsonl
 const artifactsDir = sessionFile.slice(0, -".jsonl".length);
 
 function readChild(path) {
   const text = readFileSync(path, "utf8");
-  let agent = null, modelRole = null, resolvedModel = null, task = null;
-  let cacheWrite = 0, cacheRead = 0, out = 0, input = 0, costTotal = 0;
-  let turns = 0, firstTs = null, lastTs = null, lastModel = null;
+  let agent = null, modelRole = null, resolvedModel = null, lastModel = null;
+  let input = 0, out = 0, cacheRead = 0, cacheWrite = 0, cost = 0;
+  let auxCalls = 0, auxCost = 0;
+  // message.timestamp is numeric epoch ms, NOT the entry-level ISO string
+  // member-outcomes.mjs Date.parse()s — never mix the two (see mapping table).
+  let turns = 0, firstTs = null, lastTs = null;
   for (const raw of text.split("\n")) {
     if (!raw.trim()) continue;
     let d;
     try { d = JSON.parse(raw); } catch { continue; }
     if (d.type === "session_init") {
       agent = d.agent; modelRole = d.modelRole; resolvedModel = d.resolvedModel;
-      task = (d.task || "").slice(0, 60);
-    }
-    if (d.type === "message") {
+    } else if (d.type === "message") {
       const m = d.message;
       if (m?.timestamp) { firstTs ??= m.timestamp; lastTs = m.timestamp; }
       if (m?.role === "assistant" && m.usage) {
         turns++;
         lastModel = m.model;
-        cacheWrite += m.usage.cacheWrite || 0;
-        cacheRead += m.usage.cacheRead || 0;
-        out += m.usage.output || 0;
         input += m.usage.input || 0;
-        costTotal += m.usage.cost?.total || 0;
+        out += m.usage.output || 0;
+        cacheRead += m.usage.cacheRead || 0;
+        cacheWrite += m.usage.cacheWrite || 0;
+        cost += m.usage.cost?.total || 0;
       }
+    } else if (d.type === "model_usage") {
+      // auxiliary calls (auto-thinking classifier etc.): billed, but not turns (§2)
+      auxCalls++;
+      auxCost += d.usage?.cost?.total || 0;
     }
   }
-  return { agent, modelRole, resolvedModel, lastModel, turns, input, out,
-    cacheRead, cacheWrite, costTotal,
-    wallS: firstTs && lastTs ? Math.round((lastTs - firstTs) / 1000) : 0 };
+  const wallS = firstTs && lastTs ? Math.round((lastTs - firstTs) / 1000) : 0;
+  return { agent, modelRole, resolvedModel, lastModel, turns, wallS,
+    input, out, cacheRead, cacheWrite, cost, auxCalls, auxCost };
 }
 
-for (const f of readdirSync(artifactsDir).filter(f => f.endsWith(".jsonl"))) {
-  console.log(f, readChild(join(artifactsDir, f)));
+const usd = (n) => `$${n.toFixed(6)}`;
+for (const f of readdirSync(artifactsDir).filter((f) => f.endsWith(".jsonl")).sort()) {
+  const r = readChild(join(artifactsDir, f));
+  console.log(`--- ${f}  agent=${r.agent} modelRole=${r.modelRole} selector=${r.resolvedModel} lastModel=${r.lastModel}`);
+  console.log(`  turns=${r.turns} wallS=${r.wallS} input=${r.input} out=${r.out} cacheRead=${r.cacheRead} cacheWrite=${r.cacheWrite}`);
+  console.log(`  cost: turns=${usd(r.cost)} + model_usage=${usd(r.auxCost)} (calls=${r.auxCalls}) = ${usd(r.cost + r.auxCost)}`);
 }
 ```
 
-Real output (`node /tmp/omp-member-outcomes-poc.mjs ~/.omp/agent/sessions/-dev-fleet-plugin/2026-09-08T13-13-27-300Z_01a08126-ee04-7095-a695-14e3249f1127.jsonl`):
+Output, pasted verbatim from running exactly the script above (`node /tmp/omp-member-outcomes-poc.mjs ~/.omp/agent/sessions/-dev-fleet-plugin/2026-09-08T13-13-27-300Z_01a08126-ee04-7095-a695-14e3249f1127.jsonl`) on 2026-09-24, during PR #1784's review. The session has grown since this research was first written — 17 children rather than 7, and children that were still live or later resumed then (`ResearchEvalHost`, `ResearchTelemetry`, `SaveAgentDialectDrift`) have since moved on — so these figures supersede the first run's. The four children that had already finished by then (`FleetSurfaceInventory`, `OmpExtensionModel`, `SaveDualHarnessDecision`, `SaveOmpPluginInterop`) reproduce the original turn/token/cost figures exactly:
 
 ```
---- FleetSurfaceInventory.jsonl ---
-  agent=scout  modelRole=smol  resolvedModel(configured selector)=anthropic/claude-haiku-4-5:auto
-  effective model (last turn)=claude-haiku-4-5
-  turns=10  wallS=122
-  tokens: input=82 out=8173 cacheRead=370189 cacheWrite=75924
-  cost total (USD, omp-computed): $0.172871
-
---- OmpExtensionModel.jsonl ---
-  agent=scout  modelRole=smol  resolvedModel(configured selector)=anthropic/claude-haiku-4-5:auto
-  effective model (last turn)=claude-haiku-4-5
-  turns=9  wallS=186
-  tokens: input=74 out=13891 cacheRead=376719 cacheWrite=86646
-  cost total (USD, omp-computed): $0.215508
-
---- ResearchEvalHost.jsonl ---
-  agent=task  modelRole=task  resolvedModel(configured selector)=anthropic/claude-sonnet-5:high
-  effective model (last turn)=claude-sonnet-5
-  turns=45  wallS=552
-  tokens: input=90 out=30299 cacheRead=4623862 cacheWrite=140930
-  cost total (USD, omp-computed): $1.580267
-
---- ResearchTelemetry.jsonl ---   (this subagent's own live session, still running)
-  agent=task  modelRole=task  resolvedModel(configured selector)=anthropic/claude-sonnet-5:high
-  effective model (last turn)=claude-sonnet-5
-  turns=66  wallS=473
-  tokens: input=132 out=39895 cacheRead=8628289 cacheWrite=207400
-  cost total (USD, omp-computed): $2.643372
-
---- SaveAgentDialectDrift.jsonl ---
-  agent=memory-proxy  modelRole=smol  resolvedModel(configured selector)=anthropic/claude-haiku-4-5:auto
-  effective model (last turn)=claude-haiku-4-5
-  turns=5  wallS=46
-  tokens: input=46 out=4721 cacheRead=94003 cacheWrite=36015
-  cost total (USD, omp-computed): $0.078070
-
---- SaveDualHarnessDecision.jsonl ---
-  agent=memory-proxy  modelRole=smol  resolvedModel(configured selector)=anthropic/claude-haiku-4-5:auto
-  effective model (last turn)=claude-haiku-4-5
-  turns=7  wallS=74
-  tokens: input=64 out=5326 cacheRead=210690 cacheWrite=38268
-  cost total (USD, omp-computed): $0.095598
-
---- SaveOmpPluginInterop.jsonl ---
-  agent=memory-proxy  modelRole=smol  resolvedModel(configured selector)=anthropic/claude-haiku-4-5:auto
-  effective model (last turn)=claude-haiku-4-5
-  turns=4  wallS=59
-  tokens: input=36 out=4918 cacheRead=66808 cacheWrite=25468
-  cost total (USD, omp-computed): $0.063142
+--- FleetSurfaceInventory.jsonl  agent=scout modelRole=smol selector=anthropic/claude-haiku-4-5:auto lastModel=claude-haiku-4-5
+  turns=10 wallS=122 input=82 out=8173 cacheRead=370189 cacheWrite=75924
+  cost: turns=$0.172871 + model_usage=$0.001501 (calls=1) = $0.174372
+--- MapUpdate.jsonl  agent=task modelRole=task selector=anthropic/claude-sonnet-5:high lastModel=claude-sonnet-5
+  turns=14 wallS=71 input=28 out=5024 cacheRead=543877 cacheWrite=29572
+  cost: turns=$0.233001 + model_usage=$0.000000 (calls=0) = $0.233001
+--- Memory1.jsonl  agent=task modelRole=task selector=anthropic/claude-sonnet-5:high lastModel=claude-sonnet-5
+  turns=2 wallS=20 input=4 out=1657 cacheRead=31319 cacheWrite=34333
+  cost: turns=$0.108674 + model_usage=$0.000000 (calls=0) = $0.108674
+--- Memory2.jsonl  agent=task modelRole=task selector=anthropic/claude-sonnet-5:high lastModel=claude-sonnet-5
+  turns=3 wallS=37 input=6 out=2959 cacheRead=82059 cacheWrite=24843
+  cost: turns=$0.108121 + model_usage=$0.000000 (calls=0) = $0.108121
+--- Memory3.jsonl  agent=task modelRole=task selector=anthropic/claude-sonnet-5:high lastModel=claude-sonnet-5
+  turns=5 wallS=48 input=10 out=3439 cacheRead=135094 cacheWrite=41680
+  cost: turns=$0.165629 + model_usage=$0.000000 (calls=0) = $0.165629
+--- Memory4.jsonl  agent=task modelRole=task selector=anthropic/claude-sonnet-5:high lastModel=claude-sonnet-5
+  turns=5 wallS=28 input=10 out=2275 cacheRead=134338 cacheWrite=37795
+  cost: turns=$0.144125 + model_usage=$0.000000 (calls=0) = $0.144125
+--- Memory5.jsonl  agent=task modelRole=task selector=anthropic/claude-sonnet-5:high lastModel=claude-sonnet-5
+  turns=2 wallS=16 input=4 out=1198 cacheRead=31335 cacheWrite=33056
+  cost: turns=$0.100895 + model_usage=$0.000000 (calls=0) = $0.100895
+--- OmpCopyExcludes.jsonl  agent=scout modelRole=smol selector=anthropic/claude-haiku-4-5:auto lastModel=claude-haiku-4-5
+  turns=13 wallS=142 input=106 out=6969 cacheRead=559390 cacheWrite=64063
+  cost: turns=$0.170969 + model_usage=$0.000779 (calls=1) = $0.171748
+--- OmpExtensionModel.jsonl  agent=scout modelRole=smol selector=anthropic/claude-haiku-4-5:auto lastModel=claude-haiku-4-5
+  turns=9 wallS=186 input=74 out=13891 cacheRead=376719 cacheWrite=86646
+  cost: turns=$0.215508 + model_usage=$0.000000 (calls=1) = $0.215508
+--- OmpManifestCI.jsonl  agent=scout modelRole=smol selector=anthropic/claude-haiku-4-5:auto lastModel=claude-haiku-4-5
+  turns=21 wallS=123 input=180 out=10815 cacheRead=875403 cacheWrite=54095
+  cost: turns=$0.209414 + model_usage=$0.001487 (calls=1) = $0.210901
+--- ResearchEvalHost.jsonl  agent=task modelRole=task selector=anthropic/claude-sonnet-5:high lastModel=claude-sonnet-5
+  turns=53 wallS=765 input=106 out=48471 cacheRead=5998671 cacheWrite=164785
+  cost: turns=$2.096619 + model_usage=$0.000000 (calls=0) = $2.096619
+--- ResearchTelemetry.jsonl  agent=task modelRole=task selector=anthropic/claude-sonnet-5:high lastModel=claude-sonnet-5
+  turns=72 wallS=715 input=144 out=54498 cacheRead=9957938 cacheWrite=232408
+  cost: turns=$3.117876 + model_usage=$0.000000 (calls=0) = $3.117876
+--- SaveAgentDialectDrift.jsonl  agent=memory-proxy modelRole=smol selector=anthropic/claude-haiku-4-5:auto lastModel=claude-haiku-4-5
+  turns=8 wallS=1266 input=72 out=7156 cacheRead=180996 cacheWrite=69483
+  cost: turns=$0.140805 + model_usage=$0.000821 (calls=1) = $0.141626
+--- SaveDualHarnessDecision.jsonl  agent=memory-proxy modelRole=smol selector=anthropic/claude-haiku-4-5:auto lastModel=claude-haiku-4-5
+  turns=7 wallS=74 input=64 out=5326 cacheRead=210690 cacheWrite=38268
+  cost: turns=$0.095598 + model_usage=$0.000825 (calls=1) = $0.096423
+--- SaveEvalAgentSemantics.jsonl  agent=memory-proxy modelRole=smol selector=anthropic/claude-haiku-4-5:auto lastModel=claude-haiku-4-5
+  turns=7 wallS=78 input=68 out=4850 cacheRead=175178 cacheWrite=21860
+  cost: turns=$0.069161 + model_usage=$0.000823 (calls=1) = $0.069984
+--- SaveOmpPluginInterop.jsonl  agent=memory-proxy modelRole=smol selector=anthropic/claude-haiku-4-5:auto lastModel=claude-haiku-4-5
+  turns=4 wallS=59 input=36 out=4918 cacheRead=66808 cacheWrite=25468
+  cost: turns=$0.063142 + model_usage=$0.000804 (calls=1) = $0.063946
+--- SaveOmpTelemetry.jsonl  agent=memory-proxy modelRole=smol selector=anthropic/claude-haiku-4-5:auto lastModel=claude-haiku-4-5
+  turns=7 wallS=84 input=60 out=5312 cacheRead=178769 cacheWrite=22105
+  cost: turns=$0.072128 + model_usage=$0.000826 (calls=1) = $0.072954
 ```
 
-Every field a fleet dashboard needs — member identity, dispatched agent type, model, tokens, real dollar cost, wall time — comes out of a single 40-line script with zero external dependencies. The one field missing across all seven is a concrete effort/thinking level: every non-`task` agent here shows the literal string `auto`, which is the ceiling of what's recoverable for them (§3).
+Every field a fleet dashboard needs — member identity, dispatched agent type, model, tokens, real dollar cost (including the `model_usage` auxiliary spend §2 says a port must add on top of the turns), wall time — comes out of a single ~50-line script with zero external dependencies. The one field missing across all seventeen is a concrete effort/thinking level: every non-`task` agent here shows the literal string `auto`, which is the ceiling of what's recoverable for them (§3).
 
 ## Bonus finding: `@oh-my-pi/omp-stats` is a primary source in its own right
 
