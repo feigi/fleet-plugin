@@ -1,6 +1,6 @@
 # 0008 — A turn-based fleet holds its own turn; nothing external wakes it
 
-**Status:** Accepted. Ruled 2026-09-18 on #357 (item 2 of #3), against the measurements below.
+**Status:** Accepted. Ruled 2026-09-18 on #357 (item 2 of #3), against the measurements below. Amended by ADR 0012: §1 reads "records, then ticks" — the ledger now records dispatch and settlement, so the tick derives its counts and the controller states none; §2–§8 unchanged.
 
 ## Context
 

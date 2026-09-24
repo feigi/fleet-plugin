@@ -1,7 +1,7 @@
 # 0007 — `main`'s ruleset is the merge gate, ratified field by field
 
 **Status:** Accepted. Ruled 2026-09-18, on the measurements below. Supersedes the
-premises of #164, all three of which were stale when it was picked up.
+premises of #164, all three of which were stale when it was picked up. Amended by ADR 0012: guard 1's trigger reads "a single pass in which the last PR waits more than 3 h"; threshold unchanged.
 
 ## Context
 

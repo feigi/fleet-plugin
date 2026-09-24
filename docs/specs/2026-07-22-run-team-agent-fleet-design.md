@@ -38,6 +38,14 @@ Status: implemented
 > `next-ticket`/fleet divergence the step describes, and the fleet does not pass
 > it. See `docs/specs/2026-07-23-fleet-plugin-design.md`.
 
+> **Superseded in part.** The slot-based loop (2026-09-24) retires phase 0's
+> multi-select and the invariant *"exactly one human decision per wave, zero
+> unilateral grabs"* below, the phase-3 edge list, and every merge-bot "wave":
+> supply is automatic (ADR 0013); reviews run off the controller's turn, the
+> merge bot is dispatched on the first `ready-to-merge` label and every wake
+> ends in one `fleet-tick.mjs` run (ADR 0012). The text below is left as
+> written. See `docs/specs/2026-09-24-slot-based-fleet-loop-design.md`.
+
 Artifact: `~/.claude/skills/fleet/skills/run-team/SKILL.md` (repo `feigi/claude-config`)
 
 ## Problem
