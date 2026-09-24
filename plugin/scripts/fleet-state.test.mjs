@@ -305,3 +305,69 @@ test("stallReport: a sub-60s interval renders as seconds, not a floored 0m", () 
   const boundary = assessBeat({ beat: { at: now - 60_000, interval: 30, stopped: "smoke test" }, now });
   assert.match(stallReport(boundary, { claimed: 0, supply: 0 }), /1m ago/);
 });
+
+test("stallReport: a 60-119s band value does not silently break the trio's arithmetic (#1797)", () => {
+  // #1735 only moved the floor for values UNDER 60s. mins() still floored
+  // every value >= 60s to whole minutes independently of the other two, so
+  // an interval landing in 60-119s (a real, CLI-reachable shape — see the
+  // comment above mins()) floored to "1m" or "2m" while its own overdue
+  // remainder kept printing in seconds, and the three displayed numbers
+  // stopped agreeing with each other. These are the exact reviewer repros.
+  const now = 2_000_000_000_000;
+  const line = (ageS, intervalS) =>
+    stallReport(
+      assessBeat({ beat: { at: now - ageS * 1000, interval: intervalS, stopped: "smoke test" }, now }),
+      { claimed: 0, supply: 0 },
+    );
+
+  // interval=90s, age=100s: overdue=10s. Old output read "1m ago ... 10s
+  // past the 1m interval" — 1m minus 1m is 0, not 10s.
+  assert.match(line(100, 90), /\(1m40s ago, 10s past the 1m30s interval it promised\)/);
+
+  // interval=90s, age=200s: overdue=110s. Old output read "3m ago ... 1m
+  // past the 1m interval" — 3m minus 1m is 2m, not 1m.
+  assert.match(line(200, 90), /\(3m20s ago, 1m50s past the 1m30s interval it promised\)/);
+
+  // interval=120s, age=150s: overdue=30s. Old output happened to print "2m
+  // ago ... 30s past the 2m interval" only because 120s floors to an exact
+  // "2m" with nothing dropped — fragile, not a fix, and now stated to full
+  // precision like every other case in this band.
+  assert.match(line(150, 120), /\(2m30s ago, 30s past the 2m interval it promised\)/);
+});
+
+test("stallReport: age always reconciles to overdue+interval, across every unit boundary the CLI can produce", () => {
+  // Property check standing in for the two hand-picked repros above: for a
+  // spread of intervals that straddle every unit boundary mins() has (under
+  // 60s, the 60-119s band, and clean multi-minute values), and a spread of
+  // deltas layered on top so age also straddles those same boundaries, the
+  // three numbers stallReport prints must parse back to millisecond figures
+  // that satisfy overdue + interval === age — never merely "doesn't crash".
+  const now = 2_000_000_000_000;
+  const parseDur = (s) => {
+    const m = /^(?:(\d+)m)?(?:(\d+)s)?$/.exec(s);
+    assert.ok(m, `unparseable duration: ${s}`);
+    return ((m[1] ? Number(m[1]) : 0) * 60 + (m[2] ? Number(m[2]) : 0)) * 1000;
+  };
+  const lineShape = /\((\S+) ago, (\S+) past the (\S+) interval it promised\)/;
+
+  const intervals = [30, 60, 90, 100, 119, 120, 150, 300];
+  const deltas = [1, 15, 29, 30, 31, 59, 60, 61, 89, 90, 91, 119, 120, 121, 200, 599, 3600];
+  for (const intervalS of intervals) {
+    for (const delta of deltas) {
+      const ageS = intervalS + delta;
+      const verdict = assessBeat({ beat: { at: now - ageS * 1000, interval: intervalS, stopped: "smoke test" }, now });
+      const line = stallReport(verdict, { claimed: 0, supply: 0 });
+      const m = lineShape.exec(line);
+      assert.ok(m, `line did not match expected shape: ${line}`);
+      const [, ageStr, overdueStr, intervalStr] = m;
+      const ageMs = parseDur(ageStr);
+      const overdueMs = parseDur(overdueStr);
+      const intervalMs = parseDur(intervalStr);
+      assert.equal(
+        overdueMs + intervalMs,
+        ageMs,
+        `interval=${intervalS}s age=${ageS}s: "${overdueStr}" + "${intervalStr}" != "${ageStr}" (line: ${line})`,
+      );
+    }
+  }
+});
