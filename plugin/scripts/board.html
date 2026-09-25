@@ -297,8 +297,8 @@ function render(m) {
   // (#1848). A column scrolls on its own (#1759) and a scroll offset lives on
   // the element, so a tick that threw the columns away and built new ones
   // jumped every column back to the top within one poll. Keeping the node
-  // keeps its scroll — and a momentum scroll still in flight — with nothing
-  // to save or restore.
+  // keeps its scroll — and a scroll still in flight — with nothing to save
+  // or restore.
   const board = document.getElementById("board");
   for (const name of COLUMNS) {
     let col = colNodes.get(name);
