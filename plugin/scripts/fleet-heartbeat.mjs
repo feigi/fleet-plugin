@@ -20,20 +20,20 @@
 //   inside one blocking command and re-issuing it.
 //
 //   So the heartbeat is not a Monitor, not a cron entry and not a paragraph of
-//   prose. A cron entry could not run the reconcile even if it fired:
-//   fleet-tick refuses without six controller-stated counts that nothing in the
-//   repo records. An external scheduler can only WAKE the controller, which is
-//   the one thing the measurement above says it cannot be trusted to do.
+//   prose. A cron entry that ran the reconcile would print its rows to nobody:
+//   the tick reads the run for itself (#1803), but only the controller can act
+//   on what it prints. An external scheduler can only WAKE the controller,
+//   which is the one thing the measurement above says it cannot be trusted to
+//   do.
 //
-// WHY IT TAKES NO CONTROLLER STATE — every flag below has a default, unlike
-// fleet-tick's six. That asymmetry is the design, not an omission: a monitor
+// WHY IT TAKES NO CONTROLLER STATE — every flag below has a default. A monitor
 // event is a wake-up, never a verdict (SKILL.md's Monitor rules), so this
-// script never reads or reports fleet state. Counts captured before a
-// twenty-minute hold and fed to a tick firing after it are a stale verdict, and
-// a stale verdict is how a reconcile prints an ACTION nobody can take. The
-// controller restates its counts at wake time and runs fleet-tick itself. It
-// also makes a late hold harmless: if a member reports at minute two and the
-// controller acts, the hold that fires afterwards is a free extra tick.
+// script never reads or reports fleet state: counts captured before a
+// twenty-minute hold and printed after it are a stale verdict, and a stale
+// verdict is how a reconcile prints an ACTION nobody can take. The controller
+// runs fleet-tick itself at wake time, which reads the run as it stands then.
+// It also makes a late hold harmless: if a member reports at minute two and
+// the controller acts, the hold that fires afterwards is a free extra tick.
 //
 // The pure half is interval() and heldThisCall(); main() does the I/O.
 
@@ -266,7 +266,7 @@ function main() {
   // fresh streak printed beside a target computed from the old one would be two
   // numbers that do not explain each other.
   console.log(done
-    ? `heartbeat: held ${held}s, ${target}s interval elapsed (quiet=${state.quiet}) → restate your live counts and run fleet-tick`
+    ? `heartbeat: held ${held}s, ${target}s interval elapsed (quiet=${state.quiet}) → run fleet-tick`
     : `heartbeat: held ${held}s, ${target - elapsed}s of ${target}s remain (quiet=${state.quiet}) → re-issue this command now, do not end your turn`);
 }
 

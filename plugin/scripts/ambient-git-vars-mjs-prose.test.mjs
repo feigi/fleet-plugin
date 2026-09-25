@@ -209,6 +209,17 @@ const COVERED_MJS = {
   // children (`node candidates.mjs`, `node ledger.mjs`, `sh inflight.sh`)
   // name no git.
   "shortlist.mjs": 2,
+  // TWO, the same pair shortlist.mjs carries (#1803). `shortlistPath()`'s
+  // `--git-common-dir` probe names the `.fleet/shortlist.json` the tick PULLs
+  // from; an ambient GIT_DIR would read another repository's shortlist and
+  // name its tickets. Measured in fleet-tick.test.mjs, "an ambient GIT_DIR
+  // naming another repository cannot move the shortlist read".
+  // `liftedPremise()`'s `gh issue view` asks whether a `behind-issue:#M`
+  // premise has closed, and gh's remote resolution follows GIT_DIR too;
+  // measured in fleet-tick.test.mjs, "an inherited GIT_DIR cannot retarget
+  // the behind-issue premise probe". Its other children (`gh pr list`,
+  // `node ledger.mjs`, `node shortlist.mjs`) are not git-invoking primitives.
+  "fleet-tick.mjs": 2,
 };
 
 // The two-name-only exemption list #1599's second design question answers

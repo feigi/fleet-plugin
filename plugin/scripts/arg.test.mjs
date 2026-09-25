@@ -46,7 +46,7 @@ const ARG_MODULE = fileURLToPath(new URL("./arg.mjs", import.meta.url));
 // import arg.mjs: a discovered set silently SHRINKS when a consumer drops the
 // import, which is precisely the regression being pinned. A consumer added
 // later has to be added here deliberately.
-const CONSUMERS = ["board", "candidates", "ci-state", "diff-stats", "fleet-tick", "ledger", "pool-preflight", "pr-overlap"];
+const CONSUMERS = ["board", "candidates", "ci-state", "diff-stats", "fleet-tick", "ledger", "pr-overlap"];
 
 test("every fleet script wires die() to arg.mjs's makeDie under its own NAME — the #367 migration, pinned", () => {
   for (const name of CONSUMERS) {
@@ -643,16 +643,15 @@ test("writeAll() delivers the full payload across more confirmed EAGAIN stalls t
 // search call) instead of forwarding it, so fd 2 is never the fd under
 // pressure; board LOGS a failed gh and returns null (board.mjs's `tryRun`) rather than refusing, so
 // it has no exit 2 to invert in the first place. fleet-tick is here because it
-// does forward and does refuse (fleet-tick.mjs's `prState`) — measured at 65,613 B
-// forwarded and exit 2 — it only needs a wordier argv to reach gh, which is a
-// reason to spell the argv out, not a reason to leave the path ungated.
+// does forward and does refuse (fleet-tick.mjs's `openPrs`) — measured at 65,613 B
+// forwarded and exit 2 — and since #1803 it reaches gh with no argv at all,
+// the gh read being the first thing it does that can refuse.
 // A consumer added later belongs here deliberately.
 const GH_FLOOD = [
   { script: "ci-state", argv: ["--pr", "42"] },
   { script: "diff-stats", argv: ["--pr", "42"] },
   { script: "pr-overlap", argv: ["--a", "5", "--b", "6"] },
-  { script: "fleet-tick", argv: ["--implementers", "1", "--reviewers", "1", "--merge-bots", "1", "--pool", "1",
-    "--reviews-ready", "0", "--merge-holds", "none"] },
+  { script: "fleet-tick", argv: [] },
 ];
 
 // A `gh` that writes exactly `bytes` to stderr and then fails, so the script

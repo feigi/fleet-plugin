@@ -160,7 +160,7 @@ function scan() {
   const out = (r.stdout ?? "").trim();
   // Exit 1 (an empty queue) and exit 3 (every row a to-spec spec) are both the
   // empty answer. Exit 1 is also Node's own code for a crash, so the payload
-  // decides, the way fleet-tick.mjs's readSupply() reads the same script.
+  // decides.
   if ((r.status === 1 || r.status === 3) && out === "[]") return [];
   if (r.status !== 0) {
     die(`candidates.mjs ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`} — the scan did not answer, so there is no shortlist to write`);
