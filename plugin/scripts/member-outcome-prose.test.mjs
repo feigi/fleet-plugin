@@ -103,10 +103,23 @@ test("run-team/SKILL.md: a dead member recovers exactly as the Member-killed row
 });
 
 // The contradiction this paragraph exists to block: reading silence itself —
-// with no confirmation step — as grounds to demote.
+// with no confirmation step — as grounds to demote. Phrase-agnostic by design
+// (inherited narrow idiom-only regex previously missed a colon-phrased
+// restatement of the same forbidden meaning, e.g. "Silence alone: treat it as
+// a bail." — caught live against the pinned paragraph): any short clause that
+// co-locates "silence" with "bail" is blocked outright, and any clause that
+// equates "silence" with a demotion via a copula/colon/"treat as" construction
+// is blocked too — while the paragraph's own legitimate "so demoting its
+// ticket on its silence demotes a ticket" (describing the collapse the line
+// BLOCKS, not endorsing it) must keep passing, which is why the demote guard
+// requires an equivalence construction rather than bare proximity.
 test("run-team/SKILL.md: no text in the outcome paragraph lets silence alone stand in for a bail or a confirmed death", () => {
   const p = outcomeParagraph();
-  assert.doesNotMatch(p, /silence\s+(?:is|means|counts\s+as)\s+(?:an?\s+)?(?:clean\s+)?bail/i);
+  assert.doesNotMatch(p, /\bsilence\b[^.]{0,30}\bbail\b/i);
+  assert.doesNotMatch(
+    p,
+    /\bsilence\b(?:\s+alone)?\s*[:,]?\s*(?:is|means|counts\s+as|equates?\s+to|treat(?:s|ed)?(?:\s+it)?\s+as|reads?\s+as)\s+(?:an?\s+)?(?:clean\s+)?(?:grounds?\s+(?:for|to)\s+)?demot\w*/i,
+  );
   assert.doesNotMatch(p, /(?:always|automatically)\s+demote/i);
   assert.doesNotMatch(p, /\b(?:is|are)\s+demoted\b/i);
 });
