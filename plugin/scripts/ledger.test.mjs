@@ -2069,6 +2069,103 @@ test("CLI: an unquoted subject carrying single-dash words that are not this scri
   assert.match(r.stderr, /ALREADY FILED/);
 });
 
+// #1766: the extraction above still matched only a's FIRST whitespace-split
+// word, taken exact-case. A case-variant spelling of either own-flag name
+// never lower-cases to anything the OWN_FLAGS.includes() check recognizes,
+// so it fell through to exit 0 the same way the exact spelling did before
+// #1744 — confirmed by direct probe against the shipped script.
+test("CLI: a case-variant spelling of this script's own flag name is refused in check's tail (#1766)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#123 widget guard missing"]));
+  for (const stray of ["-REQUIRE-FILE", "-Require-File", "-FILE"]) {
+    const r = cli(["--file", file, "check", stray, "widget", "guard", "missing"]);
+    assert.equal(r.status, 2, `${stray}: got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`unknown flag ${stray} in subject`), `${stray}: must name the stray`);
+    assert.equal(r.stdout, "", `${stray}: a refusal must not also emit a payload`);
+  }
+});
+
+// #1766: whitespace ahead of the dash lands in `a.split(/\s/)[0]` too — the
+// leading space becomes an empty first word, not `-require-file`, so the
+// OWN_FLAGS.includes() check on that empty word never matches and the real
+// word one index over is never reached — confirmed by direct probe.
+test("CLI: leading whitespace ahead of this script's own flag name still lets the clause refuse it (#1766)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#123 widget guard missing"]));
+  const stray = "  -require-file";
+  const r = cli(["--file", file, "check", stray, "widget", "guard", "missing"]);
+  assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
+  assert.match(
+    r.stderr,
+    new RegExp(`unknown flag ${stray} in subject`),
+    "the refusal must name the whole stray element, leading whitespace included",
+  );
+  assert.equal(r.stdout, "", "a refusal must not also emit a payload");
+});
+
+// #1766: U+00A0 (no-break space) is matched by `\s` in a JS split, same as
+// plain space — but ahead of the dash it hits the identical empty-first-word
+// loss the plain-whitespace case above does, so it is pinned as its own case
+// rather than assumed covered by that fix alone — confirmed by direct probe.
+test("CLI: a leading no-break space (U+00A0) ahead of this script's own flag name still lets the clause refuse it (#1766)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#123 widget guard missing"]));
+  const stray = "\u00A0-require-file";
+  const r = cli(["--file", file, "check", stray, "widget", "guard", "missing"]);
+  assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
+  assert.match(
+    r.stderr,
+    new RegExp(`unknown flag ${stray} in subject`),
+    "the refusal must name the whole stray element, the no-break space included",
+  );
+  assert.equal(r.stdout, "", "a refusal must not also emit a payload");
+});
+
+// #1766: the quoted-multi-word pin above (#1744/#1762) only closed the flag
+// name LEADING such an element — that fix still reads only the element's
+// first whitespace-split word, so the mirror shape, the flag name trailing
+// instead, is invisible to it just as the bare exact-case miss was —
+// confirmed by direct probe.
+test("CLI: this script's own flag name trailing a quoted multi-word tail element is refused (#1766)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#123 widget guard missing"]));
+  const r = cli(["--file", file, "check", "widget -require-file", "guard", "missing"]);
+  assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
+  assert.match(
+    r.stderr,
+    /unknown flag widget -require-file in subject/,
+    "the refusal must name the whole stray element",
+  );
+  assert.equal(r.stdout, "", "a refusal must not also emit a payload");
+});
+
+// #1766 follow-up (review): the four pins above each exercise one axis in
+// isolation — case, leading whitespace, leading U+00A0, or trailing
+// position — so a narrower fix that special-cased only word[0]/word[-1], or
+// only handled one axis at a time, could still pass all four. This combines
+// two axes (case AND leading whitespace together) and lands the flag word
+// in the MIDDLE of a three-word quoted element, neither leading nor
+// trailing it, to pin that the per-word scan really does check every word,
+// not just the ends.
+test("CLI: a case-variant flag combined with leading whitespace, and a flag word in the middle of a longer quoted element, are both refused (#1766)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#123 widget guard missing"]));
+
+  const mixed = "  -REQUIRE-FILE";
+  const r1 = cli(["--file", file, "check", mixed, "widget", "guard", "missing"]);
+  assert.equal(r1.status, 2, `got exit ${r1.status}\n${r1.stderr}`);
+  assert.match(r1.stderr, new RegExp(`unknown flag ${mixed} in subject`), "case + leading whitespace together must still be refused");
+
+  const r2 = cli(["--file", file, "check", "widget -require-file extra", "guard", "missing"]);
+  assert.equal(r2.status, 2, `got exit ${r2.status}\n${r2.stderr}`);
+  assert.match(r2.stderr, /unknown flag widget -require-file extra in subject/, "a flag word in the middle of a 3-word element must still be refused");
+});
+
 // The tail guard cannot reach the slot ahead of it: a stray flag one token
 // earlier becomes the id, and the tail behind it holds no `--` element to
 // find. Each subcommand loses something different to that — `filed` its
