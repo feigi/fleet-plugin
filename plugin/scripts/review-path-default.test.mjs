@@ -712,11 +712,11 @@ test("the member-naming rule still names the fix-applier", () => {
 });
 
 test("the per-PR member is the fix-applier, in the Report example and through the board parser", () => {
-  // `compute-board.mjs` is the machine consumer. Its `reviewer` regex was
-  // widened to accept `fix-pr-<n>` because matching only the older
-  // `review-pr-<n>` left every default-path row with `reviewer: null` — the
-  // implementer on the card and the PR counted as review backlog forever.
-  // Nothing kept the documented examples on the widened side of that.
+  // `compute-board.mjs` is the machine consumer. It reads member tokens
+  // through ledger-grammar.mjs (#1820), where `fix-pr-<n>` is a member and a
+  // bare `review-pr-<n>` is not — a PR row's card names its latest live
+  // member, and a row naming no reviewer counts as review backlog. Nothing
+  // else keeps the documented examples on the side the parser reads.
   //
   // Sliced to the Report section, not matched file-wide. Measured: with BOTH
   // table rows reverted to `review-pr-<M>`, a file-wide /fix-pr-<M>/ still
@@ -740,11 +740,13 @@ test("the per-PR member is the fix-applier, in the Report example and through th
 
   // The ledger rows are the ones a machine actually reads, so pin them by
   // RUNNING the parser over the doc's own example rather than re-asserting its
-  // regex here. Red in both directions: revert the example to `review-pr-346`
-  // and the extracted name is the fallback's; narrow the regex back to
-  // `review-pr` only and nothing is extracted at all.
+  // grammar here. A PR row's card shows its latest live member (#1820). Red in
+  // both directions: revert the example to a fallback runner and the extracted
+  // name is the fallback's; stop reading `fix-pr-<M>` as a member and nothing
+  // is extracted at all.
   const ledger = section(RUN_TEAM, "One line per ticket, rewritten in place", "\nPlus two append-only lists", "run-team ledger example");
-  const reviewers = ledger.split("\n").filter((l) => /^#\d+\s/.test(l)).map((l) => parseRow(l)?.reviewer).filter(Boolean);
+  const reviewers = ledger.split("\n").filter((l) => /^#\d+\s/.test(l)).map((l) => parseRow(l))
+    .filter((p) => p?.pr != null).map((p) => p.agent).filter(Boolean);
   assert.ok(reviewers.length, "no ledger example row names a per-PR member that `compute-board.mjs` can extract");
   assert.deepEqual(
     reviewers.filter((r) => !r.startsWith("fix-pr-")),

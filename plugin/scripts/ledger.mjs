@@ -1195,10 +1195,10 @@ function rowKey(r) {
   return r.split(/\s/)[0];
 }
 
-// A row's PR is its first `PR#<n>` mention, compute-board.mjs parseRow()'s own
-// reading, so the row a PR-bound member lands on is the card the cockpit shows
-// that PR on. It finds both the `→ PR#346` arrow and the implementer's settled
-// `impl-324=PR#346` token.
+// A row's PR is its first `PR#<n>` mention: the `→ PR#346` arrow or the
+// implementer's settled `impl-324=PR#346` token, which name the same PR.
+// compute-board.mjs parseRow() reads the settled token (#1820), so the row a
+// PR-bound member lands on is the card the cockpit shows that PR on.
 function rowPr(r) {
   const m = /\bPR\s*#(\d+)\b/.exec(r);
   return m ? Number(m[1]) : null;
