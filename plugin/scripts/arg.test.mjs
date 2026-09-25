@@ -195,20 +195,53 @@ test("die() exits 2 within a bound even when stderr is a saturated pipe whose re
 
 // How large a first write must be to come back SHORT from the fd a spawnSync
 // child sees as stderr. That fd is a Unix SOCKET on both platforms (fstat:
-// isSocket()); what differs is the send buffer's size. darwin's is fixed at
-// 64 KiB, while Linux's starts at net.core.wmem_default and grows past it —
-// measured 2026-09-23, node:26 on Linux, 200 trials per size: a
-// 200,000-byte first write went through WHOLE in 5/200, which is what
-// reddened main's CI (https://github.com/feigi/fleet-plugin/actions/runs/35787021808),
-// while 1 MiB never did, its largest first write 584,704 bytes. 2 MiB clears
-// that with room, and stays under the 8 MiB maxBuffer both tests spawn with.
+// isSocket()), and what one non-blocking write to it takes differs. darwin's
+// is 65,536 bytes, every time. Linux has a floor and no ceiling: a write at or
+// under 146,176 bytes went through whole in every trial, and past it one
+// usually takes exactly 146,176 — but the parent drains the socket while the
+// write is still in the kernel, so a write that races a quick enough reader
+// goes through WHOLE at any size (measured for #1730; ci-state.test.mjs
+// carries the table).
+// #1722 sized this fixture against 584,704, the largest first write in its
+// own sample, and that was never a bound: on CI a 2 MiB first write has gone
+// through whole, on main among other branches
+// (https://github.com/feigi/fleet-plugin/actions/runs/36019414829).
+// So no size makes one spawn's short write certain, and this one is not what
+// the tests rely on for it — SHORT_WRITE_ATTEMPTS is. 2 MiB stays because it
+// is the size CI's whole-write rate was measured at, and it stays under the
+// 8 MiB maxBuffer the probes spawn with.
 const SHORT_WRITE_BYTES = 2 * 1024 * 1024;
-// The empirically-measured ceiling above, independent of SHORT_WRITE_BYTES
-// (#1722): a fixture guard compared against SHORT_WRITE_BYTES itself is a
-// tautology (it's built FROM that constant, so it can never be false); this is
-// the real floor a fixture must clear to still outgrow a Linux socket's send
-// buffer.
-const LINUX_SOCKBUF_MAX_FIRST_WRITE = 584_704;
+// What the fixture guards compare against: the floor above, measured and
+// independent of SHORT_WRITE_BYTES (#1722) — a guard compared against the
+// constant a fixture is built from can never be false. A payload at or under
+// it goes out in one write on Linux however it is written, so a probe that
+// small could never short-write there at all. Same name and number as
+// ci-state.test.mjs's own constant, which carries the measurement.
+const LINUX_FIRST_WRITE_BYTES = 146_176;
+// How many spawns a probe gets to see its first write come back short. A whole
+// first write on Linux is the race above, not a defect, so the probe is run
+// again rather than failed on it. The cap is what keeps the short-write
+// assertion able to fail: an fd that no longer short-writes at all — a Node
+// release that initialises streams blocking, say — goes through whole on
+// every spawn, and the test still reds, after this many.
+const SHORT_WRITE_ATTEMPTS = 10;
+
+// Spawns a #1548 probe until the first write it recorded came back short, at
+// most SHORT_WRITE_ATTEMPTS times, and returns that last spawn and its record.
+// Only a whole first write is retried: anything else — a short write, EAGAIN,
+// a failed write, a probe that died before recording — is the test's own to
+// judge, so it stops there too. The record is removed before each spawn so a
+// probe that dies cannot be judged on the previous spawn's numbers.
+function spawnUntilShortWrite(runScript, recordPath) {
+  for (let attempts = 1; ; attempts++) {
+    rmSync(recordPath, { force: true });
+    const r = spawnSync(process.execPath, [runScript], { encoding: null, maxBuffer: 8 * 1024 * 1024 });
+    const record = existsSync(recordPath) ? JSON.parse(readFileSync(recordPath, "utf8")) : undefined;
+    if (!record || record.firstWriteBytes !== record.payloadBytes || attempts === SHORT_WRITE_ATTEMPTS) {
+      return { r, record, attempts };
+    }
+  }
+}
 
 // ── #1548: die()'s writeSync loop delivers the FULL message, EXECUTED ────
 //
@@ -224,13 +257,15 @@ const LINUX_SOCKBUF_MAX_FIRST_WRITE = 584_704;
 // block's shape, and a short write from that single call would silently
 // truncate the message with nothing here to catch it.
 //
-// Forced deterministically, no fcntl or python3 needed: `console.error("")`
-// lazily initialises Node's own stream object for fd 2, and that
-// initialisation is what puts a pipe fd into O_NONBLOCK — the exact
-// mechanism ci-state.mjs's own vlog relies on (ci-state.mjs, "Initialising a
-// stream for an fd ... puts that fd in O_NONBLOCK"). Once fd 2 is
-// non-blocking, a single writeSync of a buffer larger than one pipe buffer
-// SHORT-WRITES rather than blocking until spawnSync's reader drains it.
+// fd 2's non-blocking state is forced deterministically, no fcntl or python3
+// needed: `console.error("")` lazily initialises Node's own stream object for
+// fd 2, and that initialisation is what puts a pipe fd into O_NONBLOCK — the
+// exact mechanism ci-state.mjs's own vlog relies on (ci-state.mjs,
+// "Initialising a stream for an fd ... puts that fd in O_NONBLOCK"). Once fd 2
+// is non-blocking, a single writeSync of a buffer larger than one pipe buffer
+// SHORT-WRITES rather than blocking until spawnSync's reader drains it —
+// always on darwin, and on Linux on all but the spawns that lose the race
+// SHORT_WRITE_ATTEMPTS exists for.
 //
 // Neither half of that precondition shows up in the delivered bytes, so both
 // are ASSERTED here rather than assumed. A fixture that stopped outgrowing
@@ -239,8 +274,9 @@ const LINUX_SOCKBUF_MAX_FIRST_WRITE = 584_704;
 // would each retire this pin silently — measured against that last shape,
 // one write took the whole payload and the collapsed-loop mutant passed. So
 // the fixture records what its own first write returned and the test asserts
-// it came back SHORT, the same standard ci-state.test.mjs holds its pipe
-// fixtures to when it asserts they still outgrow the buffer.
+// it came back SHORT on one of its spawns, the same standard
+// ci-state.test.mjs holds its pipe fixtures to when it asserts they still
+// outgrow the buffer.
 //
 // die()'s own catch swallows the message but never the exit code, so exit 2
 // is not what discriminates the loop from a bare call — both reach it. What
@@ -283,7 +319,7 @@ test("die() resumes from a genuine short write and delivers the full message, no
     "",
   ].join("\n"));
 
-  const r = spawnSync(process.execPath, [join(dir, "run.mjs")], { encoding: null, maxBuffer: 8 * 1024 * 1024 });
+  const { r, record, attempts } = spawnUntilShortWrite(join(dir, "run.mjs"), firstWrite);
   assert.equal(r.status, 2, `die() must still exit 2: stderr had ${r.stderr?.length} bytes`);
   // Guarded on the size of the write die() has to make, not on the bytes that
   // arrived: a truncated delivery is itself about one buffer long, so a guard
@@ -291,13 +327,13 @@ test("die() resumes from a genuine short write and delivers the full message, no
   // fixture for it — the trap ci-state.test.mjs documents above its own
   // stderr-completeness pin.
   assert.ok(
-    expected.length > LINUX_SOCKBUF_MAX_FIRST_WRITE,
-    `fixture no longer outgrows a Linux socket's send buffer (${expected.length} bytes), so this test would pass without proving anything`,
+    expected.length > LINUX_FIRST_WRITE_BYTES,
+    `fixture no longer outgrows one write on Linux (${expected.length} bytes, floor ${LINUX_FIRST_WRITE_BYTES}), so this test would pass without proving anything`,
   );
-  const { payloadBytes, firstWriteBytes } = JSON.parse(readFileSync(firstWrite, "utf8"));
+  const { payloadBytes, firstWriteBytes } = record;
   assert.ok(
     firstWriteBytes >= 0 && firstWriteBytes < payloadBytes,
-    `fd 2 took all ${payloadBytes} bytes in one write, so nothing short-wrote and a collapsed loop would pass this test too (first write returned ${firstWriteBytes})`,
+    `fd 2 took all ${payloadBytes} bytes in one write on each of ${attempts} spawns, so nothing short-wrote and a collapsed loop would pass this test too (last first write returned ${firstWriteBytes})`,
   );
   // Reverting the loop to one bare writeSync leaves die()'s own write stopped
   // at its first short write (measured: one pipe buffer's worth arrived in
@@ -364,9 +400,10 @@ test("writeAll()'s loop consumes writeSync's return value, resets its EAGAIN ret
 // this suite says so: every other test here asserts the BYTES arrive, which a
 // loop returning a wrong `false` would still satisfy.
 //
-// Same deterministic fixture as the die() short-write test above — console.error
-// puts fd 2 in O_NONBLOCK, and the first write's own return value is recorded
-// to prove the fd really did short-write rather than take everything at once.
+// Same fixture as the die() short-write test above — console.error puts fd 2
+// in O_NONBLOCK, and the first write's own return value is recorded to prove
+// the fd really did short-write rather than take everything at once, retried
+// the same way when a spawn loses the race.
 test("writeAll() returns true and delivers every byte across a genuine short write — the case it must never refuse", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "arg-writeall-short-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -391,16 +428,16 @@ test("writeAll() returns true and delivers every byte across a genuine short wri
     "",
   ].join("\n"));
 
-  const r = spawnSync(process.execPath, [join(dir, "run.mjs")], { encoding: null, maxBuffer: 8 * 1024 * 1024 });
+  const { r, record, attempts } = spawnUntilShortWrite(join(dir, "run.mjs"), result);
   assert.equal(r.status, 0, `the probe itself failed: ${r.stderr?.subarray(0, 400)}`);
   assert.ok(
-    expected.length > LINUX_SOCKBUF_MAX_FIRST_WRITE,
-    `fixture no longer outgrows a Linux socket's send buffer (${expected.length} bytes), so this test would pass without proving anything`,
+    expected.length > LINUX_FIRST_WRITE_BYTES,
+    `fixture no longer outgrows one write on Linux (${expected.length} bytes, floor ${LINUX_FIRST_WRITE_BYTES}), so this test would pass without proving anything`,
   );
-  const { payloadBytes, firstWriteBytes, ok } = JSON.parse(readFileSync(result, "utf8"));
+  const { payloadBytes, firstWriteBytes, ok } = record;
   assert.ok(
     firstWriteBytes >= 0 && firstWriteBytes < payloadBytes,
-    `fd 2 took all ${payloadBytes} bytes in one write, so nothing short-wrote and this proves nothing about resuming (first write returned ${firstWriteBytes})`,
+    `fd 2 took all ${payloadBytes} bytes in one write on each of ${attempts} spawns, so nothing short-wrote and this proves nothing about resuming (last first write returned ${firstWriteBytes})`,
   );
   assert.equal(
     ok,
