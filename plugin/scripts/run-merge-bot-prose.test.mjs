@@ -904,8 +904,42 @@ test("step 3 waits on an unfinished run instead of skipping the PR, and only the
   // on the first reading.
   assert.match(
     step3(),
-    phrase("Exit 1 with a `ci:…` `reason` and `ci.status` not `completed` → the run has not finished: wait on `ci.runId` (step 2), then run it again. Any other exit 1 → skip the PR"),
+    phrase("Exit 1 with a `ci:…` `reason`, `ci.runId` set and `ci.status` not `completed` → the run has started but not finished: wait on `ci.runId` (step 2), then run it again."),
     "step 3 no longer separates the not-yet-finished run from a real refusal",
+  );
+});
+
+// #1817. Right after `gh pr update-branch --rebase`, GitHub has not yet
+// registered a run for the rebased head: `ci.runId` and `ci.status` both read
+// `null`, which the arm above's "`ci.status` not `completed`" condition also
+// matches — collapsed together, a bot reading this prose is sent to wait on
+// `ci.runId` (step 2) with a `null` id, i.e. `gh run watch null` / `gh run
+// view null`. This pins the no-run case as its own arm, never routed through
+// step 2's blocking wait.
+test("step 3 waits and re-gates on a null ci.runId instead of routing it into step 2's wait", () => {
+  const s = step3();
+  assert.match(
+    s,
+    phrase("Exit 1 with `ci.runId` **null** (`reason` starts `no CI run whose headSha equals`) → GitHub has not yet registered a run for this head at all"),
+    "step 3 no longer carves the no-run-yet case out of the unfinished-run wait",
+  );
+  assert.match(
+    s,
+    phrase("never route this into step 2's `gh run watch`/`gh run view <run-id>` with a null id"),
+    "step 3 no longer warns against waiting on step 2's blocking call with a null run id",
+  );
+  assert.match(
+    s,
+    phrase("Wait 15s and run the gate again instead, capped at 20 attempts (~5 minutes); no run within that cap → skip the PR and report `<reason>-#<pr>`"),
+    "step 3 no longer bounds the no-run-yet wait, or no longer reports when the cap is exhausted",
+  );
+});
+
+test("step 3 still skips a real refusal that is neither the unfinished-run wait nor the no-run-yet wait", () => {
+  assert.match(
+    step3(),
+    phrase("the same as any other exit 1. Any other exit 1 → skip the PR"),
+    "step 3 no longer distinguishes the two waits above from every other exit 1",
   );
 });
 
