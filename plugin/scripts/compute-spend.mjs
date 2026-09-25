@@ -101,6 +101,13 @@ export function classifyRole(signals) {
   // a dimension added tomorrow must not silently fall back to prose, while the
   // implementer definitions are closed at two by the alternate-tier pairing that
   // depends on exactly those two names existing.
+  //
+  // One definition under that prefix is NOT fan-out: `fleet-review-runner`
+  // (#1802) is the member that HOLDS an omp review — dispatched as
+  // `review-pr-<n>`, the reviewer the name branch below would book — so it is
+  // matched EXACTLY, ahead of the prefix. Its own fan-out arrives at depth ≥ 1
+  // and is booked "specialist" by the depth check above.
+  if (/(^|:)fleet-review-runner$/.test(def)) return "reviewer";
   if (/(^|:)fleet-review-/.test(def)) return "specialist";
   if (/(^|:)fleet-implementer(-alt)?$/.test(def)) return "implementer";
 

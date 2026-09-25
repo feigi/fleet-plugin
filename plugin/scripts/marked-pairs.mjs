@@ -285,7 +285,7 @@ export const KNOWN_EQUALITY_EXCEPTIONS = [
   {
     file: join("workflows", "review-pr.js"),
     claude: "point the reader at `Workflow({scriptPath, resumeFromRunId})` — this file's own resumability contract, unchanged by the port.",
-    omp: "review-core.js's `resumeFor` reports the same crash population and says re-run — no cached `agent()` replay exists under eval (ADR 0004/0005, #1349 gap 1).",
+    omp: "review-core.js's `resumeFor` names the same crash population to be reported, not acted on — no cached `agent()` replay exists under eval (ADR 0004/0005, #1349 gap 1).",
     issue: 1362,
     why: "review-pr.js's resumeFor cross-reference (#1361): omp line names the actual ADR/gap citation, no Claude-side counterpart",
   },

@@ -1962,7 +1962,7 @@ not dispatched until it returns, so the reviewer cap reads five free slots for
 the whole 20-40 minutes the review runs. Queued PRs wait. A queue is not a reason
 to start a second.
 
-It returns `{pr, head, snapshot, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, survived, refuted, unverified, resume}`.
+It returns `{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts, snapshot, survived, refuted, unverified}`.
 **`testEnvironment` says what every dimension's `test_run` is evidence about**,
 and it is present on a healthy run as well as a degraded one, so there is
 nothing to notice by its absence. The snapshot is `git archive`d and then

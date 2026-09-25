@@ -77,7 +77,7 @@ test("SKILL.md's review-invocation pair: same rule as review-and-fix.md's, resta
 // still applies unmodified: the block comment's interior is plain text once
 // isolated, and the marker grammar (`^\s*(CLAUDE|OMP): `) does not care that
 // `/*`/`*/` wrap it.
-test("review-pr.js's resumeFor documentary pair: CLAUDE names Workflow/resumeFromRunId, OMP names re-run, neither borrows the other's claim", () => {
+test("review-pr.js's resumeFor documentary pair: CLAUDE names Workflow/resumeFromRunId, OMP names reported-not-acted-on, neither borrows the other's claim", () => {
   const text = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
   const region = between(
     text,
@@ -91,7 +91,7 @@ test("review-pr.js's resumeFor documentary pair: CLAUDE names Workflow/resumeFro
   assert.match(claude, phrase("Workflow({scriptPath, resumeFromRunId})"));
   assert.doesNotMatch(claude, /re-run|review-core\.js/i, "the CLAUDE line must not also carry omp's re-run claim");
 
-  assert.match(omp, phrase("says re-run"));
+  assert.match(omp, phrase("to be reported, not acted on"));
   assert.doesNotMatch(omp, /resumeFromRunId|Workflow\(/, "the OMP line must not also carry Claude's resumeFromRunId claim");
 });
 

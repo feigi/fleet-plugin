@@ -1588,6 +1588,27 @@ function verdictFor(dispatched, votes) {
   return { verdict, votes: live, refutersDispatched: dispatched };
 }
 
+// #1802. One in-run re-dispatch for a crashed dispatch — the specialist call
+// and the refuter PAIR below are the two units it wraps — before the result is
+// assembled, so a crash that a second attempt would have cleared never reaches
+// `dimensionsUnrun` / `unverified` at all. `crashed(value)` says whether a
+// settled first attempt counts as a crash; a THROWN first attempt is handed to
+// it as `null`, since `agent()` nulls on exhaustion here and a throw is no
+// less a crash. The second answer is final, thrown or not, so the existing
+// crash handling downstream still sees it.
+//
+// PURE and top-level for the reason `verdictFor` above is — a lifted copy is
+// run against review-core.js's through the same fixtures
+// (review-core-parity.test.mjs), and both review bodies are executed against
+// one scripted host (review-in-run-retry.test.mjs). Not `async`, because
+// `lift()` matches a plain `function` declaration.
+function retryCrashed(dispatch, crashed) {
+  const again = (first) => (crashed(first) ? dispatch() : first);
+  return Promise.resolve()
+    .then(() => dispatch())
+    .then(again, () => again(null));
+}
+
 // The two populations of `unverified`, told apart by the field above rather
 // than by severity: refuters dispatched with nothing left standing is a crash,
 // none dispatched is the `suggestion` band's policy skip. And the response that
@@ -1596,7 +1617,10 @@ function verdictFor(dispatched, votes) {
 // resumable, so the findings nobody looked at can still be looked at. Saying so
 // only in the apply rule puts it a file away from the payload that carries the
 // crash. Null when nothing crashed, so the field is an instruction to act
-// rather than boilerplate a reader learns to skip.
+// rather than boilerplate a reader learns to skip. Since #1802 every crashed
+// pair has already had one in-run re-dispatch (`retryCrashed` above), so a
+// non-null `resume` means crashed AGAIN after it, and the relaunch is the
+// second line, not the first.
 //
 // PURE and top-level for the reason `verdictFor` above is, and for one more:
 // the file's top-level `await` leaves it unimportable, so a test can only reach
@@ -1612,14 +1636,14 @@ function verdictFor(dispatched, votes) {
 // without leaving this file.
 /*
 CLAUDE: point the reader at `Workflow({scriptPath, resumeFromRunId})` — this file's own resumability contract, unchanged by the port.
-OMP: review-core.js's `resumeFor` reports the same crash population and says re-run — no cached `agent()` replay exists under eval (ADR 0004/0005, #1349 gap 1).
+OMP: review-core.js's `resumeFor` names the same crash population to be reported, not acted on — no cached `agent()` replay exists under eval (ADR 0004/0005, #1349 gap 1).
 */
 function resumeFor(unverified) {
   const crashed = unverified.filter((f) => f.refutersDispatched > 0);
   return {
     crashed,
     resume: crashed.length
-      ? "Findings in `unverified` with `refutersDispatched` above zero and no surviving vote had every refuter die — nothing looked at them. Resume before deferring them: relaunch with `Workflow({scriptPath, resumeFromRunId})`, passing the runId this run's tool result reports. The unchanged prefix of agent() calls replays from cache and only the calls that died run live."
+      ? "Findings in `unverified` with `refutersDispatched` above zero and no surviving vote had every refuter die, and die again on the in-run retry — nothing looked at them. Resume before deferring them: relaunch with `Workflow({scriptPath, resumeFromRunId})`, passing the runId this run's tool result reports. The unchanged prefix of agent() calls replays from cache and only the calls that died run live."
       : null,
   };
 }
@@ -1650,9 +1674,15 @@ const cwdAudit = [];
 
 const reviewed = await pipeline(
   dimensions,
+  // #1802: a crashed specialist (null or thrown) is re-dispatched once, via
+  // `retryCrashed`, before `unrunCrashed` below can name it. A specialist that
+  // RETURNED is never re-run here — a returned review that ran no suite is
+  // `unrunEntries`' case in the next stage, not a crash.
   (d) =>
-    agent(
-      `Review PR #${pr} (branch ${branch}) for: ${d.prompt}
+    retryCrashed(
+      () =>
+        agent(
+          `Review PR #${pr} (branch ${branch}) for: ${d.prompt}
 
 READ ONLY FROM THE SNAPSHOT: ${snap.path} (HEAD ${snap.head}) — plus the diff
 file named below, if one is given.
@@ -1716,12 +1746,14 @@ produce, and an omitted line reads exactly like a check never run. Three PRs
 reviewed from one cell left four files modified in that checkout with nothing in
 any payload saying so (#1433), so a path you cannot account for is still yours
 to name.`,
-      {
-        label: `review:${d.key}`,
-        phase: "Review",
-        agentType: d.agentType,
-        schema: FINDINGS_SCHEMA,
-      },
+          {
+            label: `review:${d.key}`,
+            phase: "Review",
+            agentType: d.agentType,
+            schema: FINDINGS_SCHEMA,
+          },
+        ),
+      (review) => !review,
     ),
 
   // Adversarial verification. Each finding faces N independent refuters biased
@@ -1753,10 +1785,15 @@ to name.`,
         // `unverified` is therefore "nothing looked yet", never "not worth
         // looking at".
         if (n === 0) return Promise.resolve({ ...f, dimension: d.key, ...verdictFor(0, []) });
-        return parallel(
-          Array.from({ length: n }, (_, i) => () =>
-            agent(
-              `Try to REFUTE this finding from PR #${pr}. Default to refuted=true if uncertain.
+        // #1802: a pair whose EVERY vote died (or whose dispatch threw) is
+        // re-dispatched once, as a pair, before `verdictFor` reads it. One live
+        // vote means the pair did not crash, and it is ruled on that vote.
+        return retryCrashed(
+          () =>
+            parallel(
+              Array.from({ length: n }, (_, i) => () =>
+                agent(
+                  `Try to REFUTE this finding from PR #${pr}. Default to refuted=true if uncertain.
 
   claim:    ${f.claim}
   where:    ${f.file || "?"}:${f.line || "?"}
@@ -1830,15 +1867,32 @@ git answered \`fatal: not a git repository\` — every run, clean or not: an
 omitted line reads exactly like a check never run, and applying a mutation is
 how three reviews from one cell left four files modified in that checkout
 (#1433).`,
-              { label: `verify:${d.key}`, phase: "Verify", agentType: "fleet-ctl:fleet-review-verifier", schema: VERDICT_SCHEMA },
+                  { label: `verify:${d.key}`, phase: "Verify", agentType: "fleet-ctl:fleet-review-verifier", schema: VERDICT_SCHEMA },
+                ),
+              ),
             ),
-          ),
-        ).then((votes) => {
-          // `n`, not `live.length`: the dispatch is what a crash is invisible
-          // without. A finding that reaches here with every vote lost is in the
-          // same band as the 0-refuter branch above and must not read like it.
-          return { ...f, dimension: d.key, ...verdictFor(n, votes) };
-        });
+          (votes) => !(votes && votes.some(Boolean)),
+        ).then(
+          (votes) => {
+            // `n`, not `live.length`: the dispatch is what a crash is invisible
+            // without. A finding that reaches here with every vote lost is in the
+            // same band as the 0-refuter branch above and must not read like it.
+            return { ...f, dimension: d.key, ...verdictFor(n, votes) };
+          },
+          // #1813: a rejection here means retryCrashed's OWN final attempt
+          // rejected — both dispatches of this finding's refuter pair crashed,
+          // not just returned no votes. Left unhandled, that rejection
+          // propagates into the shared `parallel()` above (a bare Promise.all),
+          // which rejects the WHOLE dimension and is caught by the coarser
+          // per-dimension `catch` inside `pipeline()` — discarding every OTHER
+          // finding in this dimension too, including ones whose refuters fully
+          // succeeded. Folding it into the same shape a live-but-empty vote
+          // array already produces (`verdictFor(n, [])`) keeps this finding's
+          // crash local: it still flows into `unverified`, `resumeFor`'s
+          // `crashed` bucket and `counts.crashed`, instead of erasing its
+          // dimension-mates.
+          () => ({ ...f, dimension: d.key, ...verdictFor(n, []) }),
+        );
       }),
     );
   },
@@ -1881,10 +1935,19 @@ const bySeverity = (a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3);
 // different questions. Subtracting the unrun ones from `dimensionsRun` would
 // make a crashed dimension indistinguishable from one the size tier never
 // dispatched — this ticket set's own defect, moved one field over.
+//
+// ORDER IS THE CONTRACT (#1802). The digest — `pr` through `counts` — leads and
+// the bulky finding arrays trail, because the Workflow's inline `<result>` is
+// cut at ~8 KB and the controller acts on the digest alone: `resume` used to
+// be the LAST key and fell past the cut on a large review. Same order as
+// review-core.js's `DIGEST_KEYS`, which review-in-run-retry.test.mjs holds both
+// bodies to by running them.
 return {
   pr,
   head: snap.head,
-  snapshot: snap.path,
+  // The recovery, named where the reader who has to act meets it — built by
+  // `resumeFor` above, alongside the crash population it is the response to.
+  resume,
   // #1056. Present in BOTH regimes, not only the degraded one: a reader of
   // this payload can never be left unable to tell an environment artifact from
   // a regression, and saying so when nothing is wrong costs one line. A field
@@ -1897,10 +1960,9 @@ return {
   // CWD-AUDIT line — the fact a dirty or unrepo'd inherited checkout is
   // otherwise reported into `scope_searched` and read by nothing.
   cwdAudit,
+  counts: { survived: survived.length, refuted: refuted.length, unverified: unverified.length, crashed: crashed.length },
+  snapshot: snap.path,
   survived: survived.sort(bySeverity),
   refuted,
   unverified: unverified.sort(bySeverity),
-  // The recovery, named where the reader who has to act meets it — built by
-  // `resumeFor` above, alongside the crash population it is the response to.
-  resume,
 };
