@@ -122,6 +122,11 @@ Measured 2026-09-23, before ruling:
   it deserves its own drift measurement.
 - Closing a bump PR unmerged is remembered — Renovate will not re-raise that
   version. That is the deliberate-refusal escape hatch; there is no other.
-- If the app is ever uninstalled, the pin silently stops moving and the repo is
-  back to the measured 43-day behaviour with no signal. The bot's absence is not
-  observable from inside the tree.
+- If the app is ever uninstalled, the pin stops moving and the repo is back to
+  the measured 43-day behaviour. As ruled, that had no signal: the bot's absence
+  was not observable from inside the tree. #1755 closed that:
+  `.github/workflows/pin-drift.yml` runs weekly and goes red once `.nvmrc` has
+  not landed a move on `main` for more than 35 days, judged from `git log`
+  alone so it keeps reporting with the app gone. A deliberately refused bump
+  trips it too if nothing newer lands inside the bound — the pin did not move,
+  and that is the thing it reports.

@@ -1,0 +1,52 @@
+name: Pin Drift
+
+# Reports a stalled `.nvmrc` pin (#1755) — the gap ADR 0010's last Consequence
+# names: if the Renovate app is uninstalled, suspended, or its hosted schedule
+# silently breaks, the pin stops moving and nothing says so.
+#
+# The judgement comes from this repo's own git history
+# (.github/scripts/pin-drift.sh), never from the integration: a check that
+# asked the app would go quiet at exactly the moment the app is gone. This job
+# needs no Renovate token, API, dashboard or app — only the tree.
+#
+# The report is this run going red. A failed scheduled run notifies the user
+# who last changed the cron line below, and shows in the Actions tab with the
+# ::error:: annotation and a step summary. It deliberately does NOT open an
+# issue: an unlabelled bot-authored issue enters the fleet's candidate pool,
+# the same reason ADR 0010 turned the dependency dashboard off.
+#
+# Cadence: weekly. The drift bound is 35 days (the script's header argues it),
+# so a healthy repo — bumped on the 1st of each month — is green on every run
+# and says nothing, while a stalled one goes red on every run from day 36 until
+# the pin moves, and is first caught by day 42 at worst: short of the 43-day
+# stall ADR 0010 measured. Off the hour — 07:23 UTC against Renovate's
+# 00:00–04:59 UTC window — so it never races Renovate's own window, whatever
+# day of the month the Monday run lands on (day-of-week and day-of-month are
+# independent cron fields: a Monday can and periodically does fall on the 1st).
+#
+# GitHub disables scheduled workflows in a public repository after 60 days
+# with no commits. That cannot swallow the report: the last pin move is itself
+# a commit, so the 60-day clock starts no earlier than the stall does, and the
+# stall is reported by day 42 — while the schedule is still live.
+on:
+  schedule:
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pin-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Full history: a shallow clone would date the pin to the checkout itself
+      # and read every stall as fresh. The script refuses one (exit 2), so a
+      # lost fetch-depth turns this red rather than silently green.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the node pin has moved within the drift bound
+        run: .github/scripts/pin-drift.sh
