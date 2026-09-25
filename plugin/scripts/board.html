@@ -90,7 +90,6 @@
 const COLUMNS = ["POOL", "IMPLEMENTING", "REVIEW", "READY", "MERGED"];
 let interval = 15;
 let repoUrl = null; // full repo URL from the model (carries the host) — PR links, GHE-safe
-const colNodes = new Map(); // column name → its .col, built on the first render (see render)
 
 // The instance's name, for the tab strip and the header (#1584). Two cockpits
 // are two WORKSPACES, and until this the pair rendered one constant twice —
@@ -298,16 +297,28 @@ function render(m) {
   // the element, so a tick that threw the columns away and built new ones
   // jumped every column back to the top within one poll. Keeping the node
   // keeps its scroll — and a scroll still in flight — with nothing to save
-  // or restore.
+  // or restore. #board's own children ARE the column cache: nothing else
+  // ever appends to or clears #board, so board.children[i] is always
+  // COLUMNS[i]'s node and no separate Map is needed to remember it (#1857
+  // review — a Map here could only ever agree with board.children or go
+  // silently stale against it, never disagree usefully). Every column's
+  // contents are built before any of them reach the DOM, so a ticket that
+  // makes card() throw partway through leaves EVERY column on the previous
+  // tick together — never some columns on the new tick and others frozen on
+  // the old one, a mixed-tick board that could look like a normal render
+  // (#1857 review; poll()'s own catch below still banners the failure).
   const board = document.getElementById("board");
-  for (const name of COLUMNS) {
-    let col = colNodes.get(name);
-    if (!col) { col = el("div", "col"); colNodes.set(name, col); board.append(col); }
+  const next = COLUMNS.map((name) => {
     const inCol = (m.tickets || []).filter((t) => t.column === name);
     const h = el("h2", null, name + " ");
     h.append(el("span", null, String(inCol.length)));
-    col.replaceChildren(h, ...inCol.map(card));
-  }
+    return [h, ...inCol.map(card)];
+  });
+  COLUMNS.forEach((name, i) => {
+    let col = board.children[i];
+    if (!col) board.append(col = el("div", "col"));
+    col.replaceChildren(...next[i]);
+  });
   renderSpend(m.spend);
   // footer
   const q = m.queue || {};
