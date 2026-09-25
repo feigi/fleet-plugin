@@ -122,13 +122,34 @@ prev board.json (dwell tracking)
 
 ## Stage model — one column per ticket, all derived from `ledger + gh`
 
+(amended by #1820: the table below reads the Pull-era ledger — member tokens
+through `ledger-grammar.mjs`, Exclusion rows, MERGED from `gh`, and the
+`review=`/`reviewed=` pair.)
+
 | Column | Derivation (durable, no controller push) |
 |---|---|
-| **POOL** | open `ready-for-agent` issue with **no** ledger row |
-| **IMPLEMENTING** | ledger row has an `impl-N` agent and **no** PR# yet |
-| **REVIEW** | ledger row has a PR#, PR open, not `ready-to-merge`. Badge "queued — no reviewer" when the row has no `review-pr-M` |
+| **POOL** | open `ready-for-agent` issue with **no** ledger row, or whose row's last `impl` token settled `=released`/`=bailed` (no card at all once the issue leaves `ready-for-agent`). An Exclusion row (`#N excluded · behind-pr:#M` / `behind-issue:#M`) is a POOL card with an `excluded:#M` badge (`excluded:<branch>` when `#M` is a branch name): supply, never `stale`, never in `attention`, never in the stall report's `claimed` |
+| **IMPLEMENTING** | the row's **last** `impl` token (retry suffix included) is live `impl-N`, or settled `=killed`/`=tier-mismatch` — the latter two carry that outcome as a flag in `attention` |
+| **REVIEW** | the last `impl` token is `=PR#M`, PR open (or closed unmerged), not `ready-to-merge`. Counts toward `reviewBacklog` (surfaced in the page footer as `review-backlog N`) when the row has neither `review=` nor `reviewed=` and no live `fix-pr-M`/`finisher-pr-M` |
 | **READY** | PR carries the `ready-to-merge` label |
-| **MERGED** | ledger row contains `MERGED <sha>` |
+| **MERGED** | ledger row contains `MERGED <sha>`, or — the token being written by no rule — `gh` reports the row's PR merged (one `gh pr list --state merged` read per build, consulted for row PRs absent from the open list). The token wins when present |
+
+The card's `agent` is the latest live member on the row: an unsettled
+`ledger-grammar.mjs` member token, or the runner a `review=member:<name>` /
+`review=fallback:<name>` names until it is settled `=failed` or a later
+`reviewed=` records its result. `review=wf:<runId>` is a Workflow and names
+nobody. The `→ PR#M` arrow is human-readable only; `compute-board.mjs`'s
+`parseRow()` ignores it and reads only the settled `impl` token's outcome.
+`fleet-tick.mjs`'s `PR_MENTION` is a blind `PR#<n>` text scan that in
+practice also lands on the impl token's embedded value, because that
+precedes the arrow in every row this run writes — but nothing enforces that
+order, so the arrow is never a value either reader may rely on. The
+uppercase `KILLED`/`BLOCKED`/`SHA-OFF-BRANCH` cause tokens (Enrichment tier,
+below) still apply.
+
+**`## Dispatched` is deliberately not rendered** (amended by #1820). Its job is
+the `merge-bot-<n>` counter, and the row tokens already show every member's
+liveness; `computeBoard()` reads only `rows`, `filed` and `ruled`.
 
 POOL reflects the whole `ready-for-agent` queue (supply), not only this run's
 approved-but-undispatched pool — approval lives in controller context and is not
@@ -188,17 +209,17 @@ source, and it can never move a ticket.
     {
       "issue": 332,
       "title": "…",
-      "column": "MERGED",            // POOL|IMPLEMENTING|REVIEW|READY|MERGED
-      "agent": "impl-332",           // or review-pr-346, null in POOL
+      "column": "MERGED",            // POOL|IMPLEMENTING|REVIEW|READY|MERGED (amended by #1820: an Exclusion is POOL; a released/bailed row is POOL or no card)
+      "agent": null,                 // latest live member on the row — impl-N, fix-pr-M, finisher-pr-M, or a review=member:/fallback: runner; null when none is live (amended by #1820)
       "pr": 344,
       "ci": "green",                 // green|red|unknown|null  (null = no PR)
       "sinceEnteredStage": 1690…,    // epoch ms, for dwell / stale
-      "flags": ["stale"],            // [] normal; red-ci|held-behind:#N|stale|killed|blocked|sha-off-branch
+      "flags": ["stale"],            // [] normal; red-ci|held-behind:#N|stale|killed|tier-mismatch|blocked|sha-off-branch; POOL badge excluded:#M (never in attention) (amended by #1820)
       "ruling": "6-applies"          // from ledger `ruled`, on PR cards only
     }
   ],
   "filed": [{ "issue": 351, "subject": "…" }],
-  "attention": [ /* the subset of tickets with a non-empty flags, most-severe first */ ],
+  "attention": [ /* the subset of tickets with a flag other than an excluded: badge, most-severe first (amended by #1820) */ ],
 
   // Side-car telemetry, read from ~/.claude/projects, never from ledger or gh.
   // Tri-state, discriminated by the explicit `ok` TAG and by nothing else:
