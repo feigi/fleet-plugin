@@ -350,13 +350,32 @@ test("deriveRun: drain and tier mismatches come off the file", () => {
   assert.deepEqual(r.tierMismatch, ["impl-7"], "#8's replacement is the fix");
 });
 
-test("deriveRun: excluded rows claim their ticket and carry their premises", () => {
-  const r = run({ rows: ["#50 excluded · behind-pr:#44", "#51 excluded · behind-issue:#9 behind-pr:feat/x"] });
+test("deriveRun: tier mismatch holds while the LATEST replacement is also tier-mismatch", () => {
+  const r = run({
+    rows: ["#8 impl-8=tier-mismatch · impl-8-b=tier-mismatch"],
+    dispatched: ["impl-8=tier-mismatch", "impl-8-b=tier-mismatch"],
+  });
+  assert.deepEqual(r.tierMismatch, ["impl-8-b"], "a replacement that is ALSO tier-mismatch keeps the row held");
+});
+
+test("deriveRun: excluded rows claim their ticket while their premise still holds, and carry their premises", () => {
+  const r = run({ rows: ["#50 excluded · behind-pr:#44", "#51 excluded · behind-issue:#9 behind-pr:feat/x"] }, [pr(44)]);
   assert.ok(r.claimed.has(50) && r.claimed.has(51));
   assert.deepEqual(r.excluded, [
     { n: 50, premises: [{ kind: "pr", target: "44" }] },
     { n: 51, premises: [{ kind: "issue", target: "9" }, { kind: "pr", target: "feat/x" }] },
   ]);
+});
+
+test("deriveRun: a behind-pr premise no longer open lifts the claim, but the row is still reported excluded", () => {
+  const r = run({ rows: ["#50 excluded · behind-pr:#44"] }, []);
+  assert.equal(r.claimed.has(50), false, "#44 is not in the open list — the premise has lifted");
+  assert.deepEqual(r.excluded, [{ n: 50, premises: [{ kind: "pr", target: "44" }] }]);
+});
+
+test("deriveRun: one still-open premise among several keeps the claim, even if another has lifted", () => {
+  const r = run({ rows: ["#50 excluded · behind-pr:#44 behind-pr:#45"] }, [pr(45)]);
+  assert.ok(r.claimed.has(50), "#45 is still open — #44 alone lifting is not enough");
 });
 
 test("deriveRun: the row text it does not own is accepted as it stands", () => {
@@ -382,14 +401,35 @@ test("deriveRun: a token it cannot read refuses by naming it, never counts it li
 });
 
 test("unclaimed: shortlist entries with no impl- or excluded row, in the file's order", () => {
-  const r = run({ rows: ["#2 impl-2", "#4 excluded · behind-pr:#1", "#5 impl-5=bailed"] });
+  const r = run({ rows: ["#2 impl-2", "#4 excluded · behind-pr:#1", "#5 impl-5=bailed"] }, [pr(1)]);
   assert.deepEqual(unclaimed([1, 2, 3, 4, 5, 6].map((n) => ({ n, t: `t${n}` })), r), [1, 3, 6]);
+});
+
+test("unclaimed: a lifted behind-pr exclusion no longer claims its ticket, once it reaches the heads", () => {
+  const r = run({ rows: ["#4 excluded · behind-pr:#1"] }, []);
+  assert.deepEqual(unclaimed([1, 2, 3, 4].map((n) => ({ n, t: `t${n}` })), r), [1, 2, 3, 4]);
+});
+
+test("unclaimed: a behind-issue exclusion still claims its ticket while absent from entries", () => {
+  const r = run({ rows: ["#9 excluded · behind-issue:#5"] });
+  assert.deepEqual(unclaimed([1, 2, 3].map((n) => ({ n, t: `t${n}` })), r), [1, 2, 3]);
+});
+
+test("unclaimed: a behind-issue exclusion's ticket reappearing in entries is admitted — the ledger row is stale, the scan is not", () => {
+  const r = run({ rows: ["#9 excluded · behind-issue:#5"] });
+  assert.deepEqual(unclaimed([1, 9].map((n) => ({ n, t: `t${n}` })), r), [1, 9]);
+});
+
+test("unclaimed: a still-open behind-pr exclusion blocks its ticket even if it appears in entries", () => {
+  const r = run({ rows: ["#9 excluded · behind-pr:#44"] }, [pr(44)]);
+  assert.deepEqual(unclaimed([1, 9].map((n) => ({ n, t: `t${n}` })), r), [1]);
 });
 
 test("parseShortlist: shortlist.mjs's payload reads; anything else is unparsable, never a refusal", () => {
   assert.deepEqual(parseShortlist('{"scanned":3,"shortlist":[{"n":7,"t":"a"}]}'),
     { status: "ok", scanned: 3, entries: [{ n: 7, t: "a" }] });
-  for (const bad of ["", "{", "[]", '{"shortlist":[]}', '{"scanned":1,"shortlist":{}}', '{"scanned":1,"shortlist":[{"n":"7","t":"a"}]}']) {
+  for (const bad of ["", "{", "[]", '{"shortlist":[]}', '{"scanned":1,"shortlist":{}}', '{"scanned":1,"shortlist":[{"n":"7","t":"a"}]}',
+    '{"scanned":1,"shortlist":[{"n":0,"t":"a"}]}', '{"scanned":1,"shortlist":[{"n":-1,"t":"a"}]}']) {
     assert.deepEqual(parseShortlist(bad), { status: "unparsable", scanned: null, entries: [] }, bad);
   }
 });
@@ -432,6 +472,7 @@ case "$1 $2" in
   "pr list") [ -n "$PR_FAIL" ] && { echo "boom" >&2; exit 1; }; cat "$FIXTURE_PRS" ;;
   "issue view")
     echo "$3" >> "$ISSUE_VIEW_LOG"
+    [ -n "$ISSUE_VIEW_FAIL" ] && { echo "gh: issue view failed" >&2; exit 1; }
     # Real gh answers for the repository an inherited GIT_DIR or GH_REPO names;
     # this one answers CLOSED for every issue there, so a probe that forgot to
     # scrub them lifts an exclusion the case's own repository still holds.
@@ -473,7 +514,7 @@ const shortlistText = (ns, scanned = ns.length) => JSON.stringify({ scanned, sho
 
 function runCli(args = [], {
   prs = [], ledger, shortlist, refresh = shortlistText([]), refreshFail = false,
-  issueStates = {}, claimed = [], env: extraEnv = {}, defaultState = false, keep = false,
+  issueStates = {}, claimed = [], env: extraEnv = {}, defaultState = false, keep = false, beforeRun = () => {},
 } = {}) {
   // realpath, because on macOS tmpdir() is /var -> /private/var: a script COPY
   // under the unresolved path never runs its own main(), since import.meta.url
@@ -493,6 +534,7 @@ function runCli(args = [], {
   const fx = (name, content) => { const p = join(dir, name); writeFileSync(p, content); return p; };
   if (ledger !== undefined) writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText(ledger));
   if (shortlist !== undefined) writeFileSync(join(repo, ".fleet", "shortlist.json"), shortlist);
+  beforeRun(repo);
   const refreshLog = fx("refresh.log", "");
   const issueViewLog = fx("issue-view.log", "");
   // Every case gets its own state file unless it names one: the default path
@@ -556,6 +598,17 @@ test("CLI: an unparsable shortlist is depth 0 plus a refresh, never a refusal", 
   assert.equal(r.refreshed, 1);
   assert.match(r.stdout, /^implementers 0\/2 → SUGGEST \/triage, hold idle {3}\(unclaimed=0 supply=0 unreviewed=0 shortlist=unparsable\)/m);
   assert.match(r.stdout, /REFRESHED shortlist: 0 entries; 0 lifted {3}\(shortlist unparsable; unchanged\)/);
+});
+
+test("CLI: a permission-denied shortlist reads as unreadable, not unparsable — the fault is the filesystem's, not the JSON's", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([1]), refresh: shortlistText([]),
+    beforeRun: (repo) => chmodSync(join(repo, ".fleet", "shortlist.json"), 0o000),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 1, "unreadable, like unparsable, is a refresh trigger — never a refusal");
+  assert.match(r.stdout, /shortlist=unreadable/, "EACCES must not be mislabeled as malformed JSON");
+  assert.doesNotMatch(r.stdout, /shortlist=unparsable/);
 });
 
 test("CLI: a failed refresh prints REFRESH FAILED and every other row, at exit 0", () => {
@@ -648,6 +701,20 @@ test("CLI: merge-bot liveness and holds come off the ledger", () => {
   assert.match(lifted.stdout, /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=1 held=0\)/m);
 });
 
+test("CLI: a merge hold accepts both the held-behind:#M and held-behind-#M spellings", () => {
+  const colon = runCli([], {
+    ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · held-behind:#38"], dispatched: ["merge-bot-1=done"] },
+    shortlist: shortlistText([]), prs: [pr(38), pr(40, ["ready-to-merge"])],
+  });
+  assert.match(colon.stdout, /^merge-bot {4}0\/1 → HOLD {3}\(merge-queue=1 held=1/m);
+  const hyphen = runCli([], {
+    ledger: { rows: ["#11 impl-11=PR#41 → PR#41 · held-behind-#38"], dispatched: ["merge-bot-1=done"] },
+    shortlist: shortlistText([]), prs: [pr(38), pr(41, ["ready-to-merge"])],
+  });
+  assert.match(hyphen.stdout, /^merge-bot {4}0\/1 → HOLD {3}\(merge-queue=1 held=1/m,
+    "run-merge-bot.md's own documented report format (#38) must be recognized too");
+});
+
 test("CLI: a ledger token outside the grammar refuses the tick, printing no row", () => {
   const r = runCli([], { ledger: { rows: ["#9 impl-9=merged"] }, shortlist: shortlistText([]) });
   assert.equal(r.status, 2);
@@ -692,6 +759,40 @@ test("CLI: a lifted exclusion premise triggers a refresh even with the shortlist
   });
   assert.equal(reflected.refreshed, 0);
   assert.deepEqual(reflected.issueViews, [], "no probe for a premise the file already reflects");
+});
+
+test("CLI: a lifted behind-pr exclusion names its ticket in the PULL row, with no refresh needed", () => {
+  const r = runCli(["--implementer-cap", "1"], {
+    shortlist: shortlistText([50]), ledger: { rows: ["#50 excluded · behind-pr:#44"] }, prs: [],
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 0, "the open-PR list already proves #44 is gone — no refresh needed to know it");
+  assert.match(r.stdout, /^implementers 0\/1 → PULL #50 /m);
+});
+
+test("CLI: a behind-issue exclusion already reflected in the current file names its ticket in the PULL row", () => {
+  // The confirmed live bug (#1803 review): a prior tick already refreshed and
+  // printed "lifted", so the file has #50 back — but the ledger's `excluded`
+  // row is untouched until a Pull rewrites it. This tick gets no refresh
+  // trigger at all (the file already carries #50), so the fix has to live in
+  // how a claim from that stale row is read, not in another gh call.
+  const r = runCli(["--implementer-cap", "3"], {
+    shortlist: shortlistText([1, 2, 50]), ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "CLOSED" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 0, "already reflected — no refresh needed to admit it");
+  assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 #50 /m);
+});
+
+test("CLI: a failed gh issue view probe is disclosed, not silently swallowed", () => {
+  const full = { shortlist: shortlistText([1, 2, 3]), refresh: shortlistText([1, 2, 3, 50]) };
+  const r = runCli([], {
+    ...full, ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "CLOSED" },
+    env: { ISSUE_VIEW_FAIL: "1" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 0, "a failed probe cannot confirm the lift — the exclusion stands");
+  assert.match(r.stderr, /fleet-tick: gh issue view 9 exited 1: gh: issue view failed — behind-issue:#9 premise unconfirmed, exclusion stands/);
 });
 
 test("CLI: the six caller-stated flags are gone — each refuses as unknown", () => {

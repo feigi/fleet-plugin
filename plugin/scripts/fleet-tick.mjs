@@ -29,10 +29,11 @@
 //             all come off it. A missing ledger is a fresh run: zero rows.
 //   shortlist `.fleet/shortlist.json`, shortlist.mjs's output, resolved against
 //             the git common dir as ledger.mjs resolves the ledger. Its
-//             entries minus every ticket with an `impl-` or `excluded` row are
-//             the heads a PULL names; its `scanned` is the supply. Missing or
-//             unparsable is depth 0 and a refresh, never a refusal: the depth
-//             only ever bounds PULLs downward.
+//             entries minus every ticket with an `impl-` row, or an `excluded`
+//             row whose premise still holds, are the heads a PULL names; its
+//             `scanned` is the supply. Missing or unparsable is depth 0 and a
+//             refresh, never a refusal: the depth only ever bounds PULLs
+//             downward.
 //   gh        The open PRs, by label and by whether they close an issue — the
 //             merge queue, and which PRs are owed a review.
 //
@@ -192,7 +193,7 @@ const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
 // is `reviewed=<head>:<survived>/<refuted>/<unverified>`.
 const REVIEW = /^review=(?:wf|member|fallback):[^=\s]+(=failed)?$/;
 const REVIEWED = /^reviewed=[0-9a-f]{7,40}:(\d+)\/(\d+)\/(\d+)$/i;
-const HELD = /^held-behind:#?(\d+)$/;
+const HELD = /^held-behind[:-]#?(\d+)$/;
 
 export function deriveRun({ rows, dispatched, drain }, prs) {
   // One entry per member name across `## Dispatched` and every row. A member
@@ -211,6 +212,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     note(t, `## Dispatched entry '${e}'`);
   }
 
+  const open = new Set(prs.map((p) => p.number));
   const claimed = new Set();
   const excluded = [];
   const byPr = new Map();
@@ -223,7 +225,11 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
       const t = parseToken(tok);
       if (t) {
         note(t, where);
-        if (t.family === "fix-pr") st.fixSince = true;
+        // A settled `failed`/`killed` fix-applier leaves survivors unfixed and
+        // no successor dispatched — the PR stays fix-due for a `-b`
+        // replacement. Only a live attempt, or one that actually landed
+        // (`applied:`/`no-op`), clears it.
+        if (t.family === "fix-pr" && (t.outcome === null || t.outcome === "no-op" || /^applied:/.test(t.outcome))) st.fixSince = true;
         continue;
       }
       if (tok.startsWith("review=")) {
@@ -242,8 +248,18 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     }
     const ex = EXCLUDED_ROW.exec(text);
     if (ex && keyNum !== null) {
-      claimed.add(keyNum);
-      excluded.push({ n: keyNum, premises: [...ex[1].matchAll(PREMISE)].map(([, kind, target]) => ({ kind, target })) });
+      const premises = [...ex[1].matchAll(PREMISE)].map(([, kind, target]) => ({ kind, target }));
+      // ADR 0013 §48: an `excluded` row claims its ticket only while its
+      // premise still holds. Lifted here only when EVERY premise is a
+      // verifiable, now-closed `behind-pr:#M` — the same rule a
+      // `held-behind` merge hold uses — since a mixed or `behind-issue`
+      // premise needs a live gh probe this pure half cannot make;
+      // unclaimed() covers that case once the refreshed shortlist re-admits
+      // the ticket.
+      const prLifted = premises.length > 0
+        && premises.every(({ kind, target }) => kind === "pr" && /^\d+$/.test(target) && !open.has(Number(target)));
+      if (!prLifted) claimed.add(keyNum);
+      excluded.push({ n: keyNum, premises });
     }
     const m = PR_MENTION.exec(text);
     const pr = m ? Number(m[1]) : keyNum;
@@ -255,12 +271,12 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   const impls = all.filter((m) => m.family === "impl");
   for (const m of impls) claimed.add(m.number);
   // A mismatch is fixed by dispatching a replacement (`impl-N-b`) at the right
-  // tier; until one exists for that ticket, the row holds.
+  // tier; until the LATEST member for that ticket settles at a different
+  // outcome, the row holds — a replacement that is ALSO tier-mismatch keeps
+  // holding, it does not clear the row.
   const tierMismatch = impls
-    .filter((m) => m.outcome === "tier-mismatch" && !impls.some((o) => o.number === m.number && o.name !== m.name))
+    .filter((m, i) => m.outcome === "tier-mismatch" && !impls.some((o, j) => j > i && o.number === m.number))
     .map((m) => m.name);
-
-  const open = new Set(prs.map((p) => p.number));
   const isQueued = (p) => p.labels.some((l) => l && l.name === "ready-to-merge");
   const queued = prs.filter(isQueued);
   const asc = (a, b) => a - b;
@@ -293,9 +309,18 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
 }
 
 // The shortlist entries no `impl-` or `excluded` row has claimed, in the
-// file's own oldest-first order.
+// file's own oldest-first order. A `behind-pr:#M` exclusion is trusted from
+// `run.claimed` alone — `open` is read fresh every tick, so there is nothing
+// stale to defer to. An exclusion deriveRun cannot verify purely (a
+// `behind-issue` or branch-named premise) is different: its row is rewritten
+// only when a Pull dispatches the ticket (shortlist.mjs's own header, §3),
+// never on its own, so once shortlist.mjs's live probe has re-admitted the
+// ticket to these entries, that stale row no longer blocks it.
 export function unclaimed(entries, run) {
-  return entries.map((e) => e.n).filter((n) => !run.claimed.has(n));
+  const unverifiable = new Set(run.excluded
+    .filter((e) => e.premises.every(({ kind, target }) => kind !== "pr" || !/^\d+$/.test(target)))
+    .map((e) => e.n));
+  return entries.map((e) => e.n).filter((n) => !run.claimed.has(n) || unverifiable.has(n));
 }
 
 // shortlist.mjs's payload, `{scanned, shortlist: [{n, t}]}`, or unparsable.
@@ -486,7 +511,11 @@ function readShortlist(path) {
   try {
     text = readFileSync(path, "utf8");
   } catch (e) {
-    return e.code === "ENOENT" ? { status: "missing", scanned: null, entries: [] } : { status: "unparsable", scanned: null, entries: [] };
+    if (e.code === "ENOENT") return { status: "missing", scanned: null, entries: [] };
+    // Distinct from `unparsable`: that label's only other producer is
+    // genuinely malformed JSON, and a permissions/filesystem fault reported
+    // as a JSON-content fault sends the operator chasing the wrong repair.
+    return { status: "unreadable", scanned: null, entries: [], code: e.code ?? null, message: e.message };
   }
   return parseShortlist(text);
 }
@@ -509,9 +538,17 @@ function liftedPremise(excluded, entries, prs) {
         // Scrubbed as shortlist.mjs's probeState() is: gh's remote resolution
         // follows GIT_DIR/GIT_WORK_TREE, and GH_REPO outranks both.
         const r = spawnSync("gh", ["issue", "view", target, "--json", "state"], { encoding: "utf8", env: gitEnv({ GH_REPO: "" }) });
+        if (r.error || r.status !== 0) {
+          // Disclosed, not dropped: every other gh call in this file either
+          // dies or logs its failure — a bare empty catch here would be the
+          // one silent exception in a file whose whole design goal is "no
+          // silent stall".
+          console.error(`${NAME}: ${failure(r, `gh issue view ${target}`)} — behind-issue:#${target} premise unconfirmed, exclusion stands`);
+          continue;
+        }
         let st = null;
         try { st = JSON.parse(r.stdout).state; } catch { /* unanswered: the exclusion stands */ }
-        if (r.status === 0 && (st === "CLOSED" || st === "MERGED")) return `behind-issue:#${target} ${st}`;
+        if (st === "CLOSED" || st === "MERGED") return `behind-issue:#${target} ${st}`;
       }
     }
   }
