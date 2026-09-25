@@ -41,6 +41,21 @@ test("phase 2 dispatches the alternate-tier implementer on every 5th Pull", () =
   );
 });
 
+// The RATE pin above catches "every 5th Pull" going missing or reworded to a
+// different fraction, but not the MECHANISM that fraction is measured
+// against. Confirmed live: a contradicting cadence ("row 2, 4, 6 …") stays
+// green through every existing run-team prose test, because nothing reads
+// the concrete row-count claim — only the "every 5th Pull" phrase two
+// sentences above it.
+test("phase 2 counts the alternate tier by ledger row 5, 10, 15 …, not by any other cadence", () => {
+  const slice = dispatch();
+  assert.match(
+    slice,
+    /the Pull that creates row 5, 10, 15 …/,
+    "phase 2 no longer names row 5, 10, 15 … as the concrete alternate-tier cadence",
+  );
+});
+
 test("phase 2 does not tell the alternate member it is a control", () => {
   // A member that knows it is being measured is not measuring the same thing.
   assert.match(
