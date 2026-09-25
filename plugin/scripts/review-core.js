@@ -824,7 +824,7 @@ out of. A relative path in any command lands THERE, not in the snapshot and not
 in your scratch dir. Run \`pwd\` as your FIRST command and keep the path it
 prints; that directory is a no-run zone from then on, and every command after it
 chains its own \`cd\` into the snapshot or into your scratch dir, both named
-above as absolute paths.
+in this prompt as absolute paths.
 
 ${readRules(usableDiff(snap), stats, snap)}
 
