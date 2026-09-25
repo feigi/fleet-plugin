@@ -8,11 +8,12 @@
 // append-only, because their whole purpose is to outlive the reasoning that
 // produced them.
 //
-// `dispatch`, `settle` and `drain` (#1799) are what a reader derives liveness
-// from, so nothing about a member's liveness is hand-typed row text: `dispatch`
-// writes a member's live token onto its row and appends it to `## Dispatched`,
-// `settle` rewrites that token to `<member>=<outcome>` in both places, and
-// `drain` writes the one marker that stops supply. The token grammar is
+// `dispatch`, `settle` and `drain` (#1799) exist so a reader can derive every
+// liveness count from this file alone, rather than from row text a controller
+// typed by hand: `dispatch` writes a member's live token onto its row and
+// appends it to `## Dispatched`, `settle` rewrites that token to
+// `<member>=<outcome>` in both places, and `drain` writes the one marker that
+// stops supply. The token grammar is
 // ledger-grammar.mjs's. `## Dispatched` gains an entry per dispatch and never
 // loses or reorders one — settling annotates an entry in place — which is what
 // lets `merge-bot-<n>` be counted from it.
