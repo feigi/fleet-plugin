@@ -97,6 +97,34 @@ test("an empty return is a failure too, and is retried", async () => {
   assert.match(out.errors[0], /empty/);
 });
 
+// #1813: a truthy, object-shaped result missing `.counts` (e.g. a `run`
+// callback that resolves to the finding buckets without the wrapper) must not
+// reach the `mkdir`/`writeFile` below before the shape is checked — otherwise
+// the destructure of `result.counts` on the next line throws OUTSIDE this
+// function's own retry try/catch, and the half-written file it already put on
+// disk is left there for a fix-applier to mistake for a completed review.
+test("a result missing .counts is a failure too, retried, and leaves no half-written file", async () => {
+  const dir = scratch();
+  const malformed = { pr: 7, head: "abc123", survived: [], refuted: [], unverified: [] };
+  const { run, calls } = scriptedRun([malformed, RESULT]);
+  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run);
+  assert.equal(calls.length, 2, "the malformed attempt was retried, not thrown past");
+  assert.equal(out.status, "completed");
+  assert.match(out.errors[0], /empty/);
+  assert.deepEqual(JSON.parse(readFileSync(out.path, "utf8")), RESULT, "only the second, well-formed result was ever written");
+});
+
+test("two malformed results in a row report failed and write no file", async () => {
+  const dir = scratch();
+  const malformed = { pr: 7, head: "abc123", survived: [], refuted: [], unverified: [] };
+  const { run, calls } = scriptedRun([malformed, malformed]);
+  const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run);
+  assert.equal(calls.length, 2);
+  assert.equal(out.status, "failed");
+  assert.equal(out.fallback, "review-pr-7-b");
+  assert.equal(existsSync(join(dir, "review-7.json")), false, "a malformed result left a partial file behind");
+});
+
 test("a second failure reports failed with BOTH errors, names the -b fallback, and writes no file", async () => {
   const dir = scratch();
   const { run, calls } = scriptedRun([new Error("first: spend limit"), null]);

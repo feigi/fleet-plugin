@@ -947,7 +947,23 @@ how three reviews from one cell left four files modified in that checkout
                 ),
               ),
             (votes) => !(votes && votes.some(Boolean)),
-          ).then((votes) => ({ ...f, dimension: d.key, ...verdictFor(n, votes) }));
+          ).then(
+            (votes) => ({ ...f, dimension: d.key, ...verdictFor(n, votes) }),
+            // #1813: a rejection here means retryCrashed's OWN final attempt
+            // rejected — both dispatches of this finding's refuter pair
+            // crashed, not just returned no votes. Left unhandled, that
+            // rejection propagates into the shared `parallel()` above (a bare
+            // Promise.all), which rejects the WHOLE dimension and is caught by
+            // the coarser per-dimension `catch` in `pipeline()` — discarding
+            // every OTHER finding in this dimension too, including ones whose
+            // refuters fully succeeded. Folding it into the same shape a
+            // live-but-empty vote array already produces (`verdictFor(n, [])`
+            // — verdict "unverified", refutersDispatched: n) keeps this
+            // finding's crash local: it still flows into `unverified`,
+            // `resumeFor`'s `crashed` bucket and `counts.crashed` exactly like
+            // a partial-vote crash does, instead of erasing its dimension-mates.
+            () => ({ ...f, dimension: d.key, ...verdictFor(n, []) }),
+          );
         }),
       );
     },

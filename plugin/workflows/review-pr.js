@@ -1872,12 +1872,27 @@ how three reviews from one cell left four files modified in that checkout
               ),
             ),
           (votes) => !(votes && votes.some(Boolean)),
-        ).then((votes) => {
-          // `n`, not `live.length`: the dispatch is what a crash is invisible
-          // without. A finding that reaches here with every vote lost is in the
-          // same band as the 0-refuter branch above and must not read like it.
-          return { ...f, dimension: d.key, ...verdictFor(n, votes) };
-        });
+        ).then(
+          (votes) => {
+            // `n`, not `live.length`: the dispatch is what a crash is invisible
+            // without. A finding that reaches here with every vote lost is in the
+            // same band as the 0-refuter branch above and must not read like it.
+            return { ...f, dimension: d.key, ...verdictFor(n, votes) };
+          },
+          // #1813: a rejection here means retryCrashed's OWN final attempt
+          // rejected — both dispatches of this finding's refuter pair crashed,
+          // not just returned no votes. Left unhandled, that rejection
+          // propagates into the shared `parallel()` above (a bare Promise.all),
+          // which rejects the WHOLE dimension and is caught by the coarser
+          // per-dimension `catch` inside `pipeline()` — discarding every OTHER
+          // finding in this dimension too, including ones whose refuters fully
+          // succeeded. Folding it into the same shape a live-but-empty vote
+          // array already produces (`verdictFor(n, [])`) keeps this finding's
+          // crash local: it still flows into `unverified`, `resumeFor`'s
+          // `crashed` bucket and `counts.crashed`, instead of erasing its
+          // dimension-mates.
+          () => ({ ...f, dimension: d.key, ...verdictFor(n, []) }),
+        );
       }),
     );
   },

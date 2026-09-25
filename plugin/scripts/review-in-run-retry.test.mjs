@@ -167,6 +167,52 @@ for (const [name, run] of COPIES) {
     assert.match(result.resume, /in-run retry/, "resume no longer says the crash survived the in-run retry");
   });
 
+  // #1813: a REJECTED dispatch (not a resolved `null`) is the shape every
+  // real `parallel()`/`agent()` failure actually takes on omp — see
+  // `retryCrashed`'s own doc comment: "that second answer is final, THROWN or
+  // not". Before this fix, a finding whose refuter pair rejected on both
+  // `retryCrashed` attempts propagated that rejection into the shared,
+  // findings-level `parallel()` (a bare `Promise.all`), which discarded every
+  // OTHER finding under the same dimension — including ones whose refuters
+  // fully succeeded — and reported the whole dimension `dimensionsUnrun`
+  // with the misleading "the reviewer returned nothing" reason, even though
+  // the specialist's review DID come back with real findings.
+  test(`${name}: a finding whose refuter pair rejects on both retry attempts does not erase its dimension-mates' verdicts`, async () => {
+    const crashing = finding("critical");
+    const surviving = finding("important");
+    const calls = { crashing: 0, surviving: 0 };
+    const host = {
+      agent: async (prompt, opts) => {
+        if (opts.label === "snapshot") return structuredClone(SNAP);
+        if (opts.label === "review:correctness") return structuredClone(review([crashing, surviving]));
+        if (opts.label === "verify:correctness") {
+          if (prompt.includes(crashing.claim)) {
+            calls.crashing++;
+            throw new Error(`refuter crash ${calls.crashing}`);
+          }
+          if (prompt.includes(surviving.claim)) {
+            calls.surviving++;
+            return structuredClone(vote(false));
+          }
+          throw new Error("scriptedHost: unexpected verify prompt");
+        }
+        throw new Error(`scriptedHost: unexpected dispatch ${opts.label}`);
+      },
+      phase: () => {},
+      log: () => {},
+    };
+    const result = await run(host, ARGS);
+    assert.equal(calls.crashing, 4, "the crashing pair is dispatched twice per attempt, across both retryCrashed attempts");
+    assert.equal(calls.surviving, 2, "the surviving pair's own refuters are undisturbed by the other finding's crash");
+    assert.equal(result.survived.length, 1, "a fully-verified sibling finding must not be erased by another finding's crash");
+    assert.equal(result.survived[0].claim, surviving.claim);
+    assert.equal(result.unverified.length, 1, "the crashed finding is reported unverified, not silently dropped");
+    assert.equal(result.unverified[0].claim, crashing.claim);
+    assert.equal(result.unverified[0].refutersDispatched, 2);
+    assert.deepEqual(result.dimensionsUnrun, [], "the dimension itself ran and returned real findings — it must not read as unrun");
+    assert.deepEqual(result.counts, { survived: 1, refuted: 0, unverified: 1, crashed: 1 });
+  });
+
   test(`${name}: a pair with one live vote did not crash — it is ruled on that vote, not re-dispatched`, async () => {
     const { host, calls } = scriptedHost({
       snapshot: [SNAP],

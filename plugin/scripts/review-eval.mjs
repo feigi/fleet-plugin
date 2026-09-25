@@ -167,7 +167,16 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
       errors.push(`attempt ${attempt}: ${e?.message ?? String(e)}`);
       continue;
     }
-    if (!result || typeof result !== "object") {
+    // #1813: `result.counts` is read below to build the digest and the ledger
+    // token, but that read happens AFTER `mkdir`/`writeFile` have already put
+    // the file on disk — so a `run` that resolves to a truthy, object-shaped
+    // result missing `.counts` would otherwise throw on the destructure below
+    // OUTSIDE this function's own retry try/catch (which wraps only the
+    // `run(args)` call), leaving a half-written `review-<pr>.json` on disk
+    // that a fix-applier reading it would mistake for a completed review that
+    // never actually finished. Treated the same as an empty return: retried,
+    // then reported `failed`, and no file is written for it.
+    if (!result || typeof result !== "object" || !result.counts || typeof result.counts !== "object") {
       errors.push(`attempt ${attempt}: empty return (${String(result)})`);
       continue;
     }
