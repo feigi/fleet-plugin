@@ -163,10 +163,17 @@ whose failure condition a PR head could have been checked against first.
   live repo by one command. A UI edit that silently fails to save — which happened
   twice while this was being settled — is now detectable rather than believed.
 - **Detectable is not detected.** Measured 2026-09-18 (#1710): the spec above
-  named seven required contexts and the live ruleset enforced two — the five
+  named seven required contexts and the live ruleset enforced three — the four
   added when this ADR was ratified reached the tree and never reached GitHub,
   because merging the spec is not applying it and nothing read the gate unless
-  a person chose to. **86 PRs merged through the narrower gate** over the 4d22h
+  a person chose to. The ruleset version in force across the window below is
+  50126119, written 2026-09-18T07:48:21Z; `gh api
+  repos/feigi/fleet-plugin/rulesets/20119969/history/50126119 --jq
+  '.state.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context'`
+  prints `rebase-check`, `check`, `validate-release-label`, the three `git show
+  2fac235:.github/rulesets/main.json` names. `5fffb2e`, the second commit of the
+  ratifying #1574, added `validate-claude`, `smoke-omp`, `npm-name-gate` and
+  `install-and-smoke`. **86 PRs merged through the narrower gate** over the 4d22h
   between the spec's merge and the reconcile, with no symptom anywhere. The
   window runs from #1574's `mergedAt`, 2026-09-18T10:41:45Z, to the ruleset's
   `updated_at` at the reconcile, 2026-09-23T09:08:27Z (readback on #1710); the
