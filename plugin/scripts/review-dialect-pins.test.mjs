@@ -51,23 +51,31 @@ test("review-and-fix.md's hand-dispatch name-spelling pair: CLAUDE namespaces, O
   assert.doesNotMatch(omp, /fleet-ctl:/, "the OMP line must not also carry Claude's fleet-ctl: namespace");
 });
 
-test("SKILL.md's review-invocation pair: same rule as review-and-fix.md's, restated once", () => {
+test("SKILL.md's review-dispatch pair: CLAUDE launches the Workflow off-turn, OMP dispatches a review-pr runner member, neither borrows the other's verb", () => {
   const text = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
   const region = between(
     text,
-    "**You run the review yourself, once per PR. That is the default path.**",
-    "Only you can run it",
-    "SKILL.md review-invocation pair",
+    "**Dispatch the review, never wait on it, and act when its result lands. That is the default path.**",
+    "**It is the only path on which",
+    "SKILL.md review-dispatch pair",
   );
-  const claude = markedLine(region, "CLAUDE", "SKILL.md review-invocation CLAUDE line");
-  const omp = markedLine(region, "OMP", "SKILL.md review-invocation OMP line");
+  const claude = markedLine(region, "CLAUDE", "SKILL.md review-dispatch CLAUDE line");
+  const omp = markedLine(region, "OMP", "SKILL.md review-dispatch OMP line");
 
+  // Spec 2026-09-24 § 3 §1: the Workflow returns at once and the controller
+  // carries on; the ledger token is what the tick counts it by.
   assert.match(claude, phrase("Workflow({name: \"fleet-ctl:review-pr\""));
-  assert.doesNotMatch(claude, /\beval\b|review-eval\.mjs|runReviewOnOmp/, "the CLAUDE line must not also carry omp's eval verb");
+  assert.match(claude, phrase("async_launched"));
+  assert.match(claude, phrase("review=wf:<runId>"));
+  assert.doesNotMatch(claude, /\beval\b|review-eval\.mjs|runReviewOnOmp|\btask\b/, "the CLAUDE line must not also carry omp's eval or task verb");
 
-  assert.match(omp, phrase("eval` loading `scripts/review-eval.mjs` through the Resolver"));
+  // On omp the controller never runs the review in its own kernel: an
+  // unawaited controller-kernel promise hangs (#1771), so a runner member does.
+  assert.match(omp, phrase("`review-pr-<pr#>`"));
+  assert.match(omp, phrase("`fleet-review-runner`"));
   assert.match(omp, /--path review-eval\.mjs/);
   assert.match(omp, /runReviewOnOmp/);
+  assert.match(omp, phrase("review=member:review-pr-<pr#>"));
   assert.doesNotMatch(omp, /\bWorkflow\(/, "the OMP line must not also carry Claude's Workflow verb");
 });
 

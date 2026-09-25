@@ -1,6 +1,6 @@
 ---
 name: run-team
-description: Run an agent fleet — up to 5 implementers, up to 5 reviewers, one merge bot — over the ready-for-agent queue. Invoke-only; the fleet writes to a live repo and must never start unasked.
+description: Run an agent fleet — implementers, reviewers (default 2 and 6), one merge bot — over the ready-for-agent queue. Invoke-only; the fleet writes to a live repo and must never start unasked.
 argument-hint: "[implementers] [reviewers]"
 disable-model-invocation: true
 ---
@@ -8,7 +8,8 @@ disable-model-invocation: true
 Run `next-ticket`, `review-and-fix`, `run-merge-bot` as one fleet. You are the
 **controller**, in the main thread, never a member.
 
-`$ARGUMENTS` = `[implementers] [reviewers]`, both optional, default 5, cap 5.
+`$ARGUMENTS` = `[implementers] [reviewers]`, both optional, default 2 and 6, no
+hard cap — they become the tick's `--implementer-cap` and `--reviewer-cap`.
 Merge bot is at most one, not configurable.
 
 Rationale: `~/.claude/docs/specs/2026-07-22-run-team-agent-fleet-design.md`. The
@@ -1332,18 +1333,46 @@ send the specific next action, never "what is your status".
 See references/member-lifecycle.md.
 
 **Do not ask permission to run the loop.** Dispatching a reviewer, spawning a
-merge bot, refilling a slot, re-verifying a SHA, filing a follow-up — all proceed
+merge bot, Pulling a ticket, re-verifying a SHA, filing a follow-up — all proceed
 unconfirmed. Invoking the command was the opt-in. One exception: **a judgement the
 evidence cannot settle**.
+
+**Rule: record, tick, act, beat.** Every wake — a member report, a review
+notification, a label, a CI run reaching a terminal state, a heartbeat — ends in
+one `fleet-tick.mjs` invocation, and you do what it prints. There are no hand-run
+refill or dispatch edges left. Record first, because the tick reads the run off
+`.fleet/ledger.md` and nothing else of yours: a wake you have not written down is
+one it cannot see, and it names the same dispatch again. Every record goes
+through `ledger.mjs` (**Run ledger**) — `settle` for a member's outcome, `row`
+for a token on a ticket's line — never a hand edit.
+
+| Wake | Record, then tick |
+|---|---|
+| Implementer report | `verify-sha.sh`; `ledger.mjs settle impl-<N>=PR#<M>`, or `=bailed` and relabel by cause (**Implementer bails before implementing**, below) |
+| Review workflow notification / `review-pr-<n>` report | write `<scratch>/review-<pr>.json`; `reviewed=<head>:<survived>/<refuted>/<unverified>` on the PR's row (**Reviewers**) |
+| Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; copy the refutations it reversed to `ruled` |
+| Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled` |
+| Label seen (persistent Monitor) | nothing to record |
+| CI run terminal | `ci=<run-id>:<attempt>:<conclusion>` on the row; then the finisher gate (below) |
+| Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `reap.sh --apply` |
+| Drain | `ledger.mjs drain "<reason>"`; release the claims (below); `settle impl-<N>=released` |
+| Heartbeat | nothing to record |
+
+Then run the tick, act on every line it prints, and arm the beat. What a wake
+owes beyond its row:
 
 - **Nothing to do right now** → **do not end your turn.** Arm the heartbeat
   below. A turn that ends on a drained queue is #3's stall itself: nothing
   external will wake you, and the level-check you are one command away from
-  never runs. Listed first because it is the only event with no trigger —
-  every other row below arrives; this one is the absence of one.
-- **Implementer completes** → verify the SHA is reachable on the expected branch →
-  enqueue for review → refill the slot (phase 1, then 2) with a new agent.
-- **Implementer bails before implementing** → demote by cause:
+  never runs. Listed first because it is the only wake with no trigger —
+  every other row above arrives; this one is the absence of one.
+- **Implementer report** → verify the SHA is reachable on the expected branch,
+  settle the member, then run the tick. The PR is owed a review from here on:
+  the tick names it as `DISPATCH review PR#<M>` once a reviewer slot is free,
+  and it names the next shortlist head for the slot the implementer left. Pull
+  nothing the tick did not name.
+- **Implementer bails before implementing** → settle `impl-<N>=bailed`, then
+  demote by cause:
 
   | Cause | Label |
   |---|---|
@@ -1354,9 +1383,10 @@ evidence cannot settle**.
   `gh issue edit <N> --remove-label ready-for-agent --remove-label in-progress
   --add-label <label>`, comment the cause, release the worktree and branch with
   `release-ticket.sh` (below — `reap.sh` declines a claim that never became a
-  PR), refill with a *different* ticket. `needs-triage` routes back to
-  `/triage`, which can return it as `ready-for-agent`; `ready-for-human` for
-  hands or a fork; `needs-triage` for a brief that names no *what*.
+  PR), then run the tick: the head it names next is a *different* ticket.
+  `needs-triage` routes back to `/triage`, which can return it as
+  `ready-for-agent`; `ready-for-human` for hands or a fork; `needs-triage` for a
+  brief that names no *what*.
 
   **Dropping `in-progress` is the load-bearing half** — phase 1 applied it and
   `candidates.mjs` excludes it, so leaving it makes the ticket invisible to your
@@ -1364,24 +1394,32 @@ evidence cannot settle**.
   relabel an unclaimed ticket at the Pull (phase 1), where there is no
   `in-progress` to drop — the causes and labels are one table, applied at
   whichever point the ticket fails them.
-- **Review slot free, PR queued** → run the review workflow yourself, then
-  dispatch a fix-applier for what survives (below). Nothing survived and nothing
-  to file → skip the fix-applier and dispatch the **finisher** directly: no
-  member will touch that PR, so no push is coming and nothing will wake you.
-- **Reviewer labels a PR** → merge-bot wave.
-- **Monitor: `ready-to-merge` appears** → merge-bot wave. Catches hand-added labels.
-  **But the finisher that applied the label may still be live on that worktree,
-  and the wave's first act on a behind PR is a rebase** — which is destructive to
-  a worktree someone is in, the same hazard the reaping rule names. The label
-  lands at duty 3 and the finisher's report is duty 4, so the gap is the normal
-  case, not a rarity — the duty order produces it, not luck. Wait for that
-  report before dispatching the bot. Waiting is nearly free — a PR already
-  labelled is not blocking anything, and its behind-count is expired on arrival
-  either way.
-- **Merge-bot wave reports done** → reap merged branches and worktrees (below),
-  then run the reconcile (below).
-- **The run ends, or the maintainer says drain** → release every claim that never
-  became a PR (below). Nothing else in the loop fires for those.
+- **A review result lands** → see the result file written (by you or by the
+  runner — **Reviewers** says which, per harness) and record `reviewed=` off its
+  digest, then run the tick: a PR with survivors prints as
+  `DISPATCH fix-pr PR#<M>`. Nothing survived and nothing to file → skip the
+  fix-applier and dispatch the **finisher** directly: no member will touch that
+  PR, so no push is coming and nothing will wake you. A review that failed is
+  not a result — **Reviewers** says who retries it and what takes over.
+- **Monitor: `ready-to-merge` appears** → nothing to record; run the tick, and
+  on `DISPATCH merge-bot` dispatch the next `merge-bot-<n>` (**Merge bot**).
+  Catches hand-added labels as well as a finisher's own. The bot does not wait
+  for that finisher's report (ADR 0012 Decision 2): its rebase is server-side,
+  `gh pr update-branch --rebase`, so nothing on the finisher's worktree has to
+  happen first.
+- **Merge-bot pass reports done** → write each `held-behind-#<lower>` it reports
+  into that ticket's row as `held-behind:#<lower>` — the verdict moves no label
+  and leaves nothing in the repo, so the row is the only place the tick can read
+  it from — settle `merge-bot-<n>=done`, reap merged branches and worktrees with
+  `reap.sh --apply` (below) — always, even when the pass merged nothing — and
+  then run the tick. A label that landed at the last moment reads `DISPATCH
+  merge-bot` again: dispatch the next bot straight away.
+- **The run ends, or the maintainer says drain** → `ledger.mjs drain
+  "<reason>"` first, then release every claim that never became a PR (below)
+  and settle each `impl-<N>=released`. Nothing else in the loop fires for those
+  claims. The marker is on disk, so the tick holds the implementer row at
+  `HOLD (draining)` from then on — for a replacement controller too — and keeps
+  the review, fix-applier and merge rows firing until the open PRs merge.
 - **Monitor: CI run completes** → bind it (`ci-state.mjs --pr <N>`) and **record
   it as `ci=<run-id>:<attempt>:<conclusion>`, not just "CI green"** — in the
   ticket's ledger row, which outlives your context. `row` **replaces the whole
@@ -1395,12 +1433,12 @@ evidence cannot settle**.
   diff-validating suites, not the `rebase-check` currency gate) in `failure`
   → a finisher CANDIDATE (gated below), a `check`
   **failure** → a fixer. A `check`-green board whose heavy jobs are merely
-  `skipped` (behind-count staleness, the normal wave case) still labels — do NOT
+  `skipped` (behind-count staleness, the normal case after a merge) still labels — do NOT
   gate on `ci-state --quiet` exit 0, which a behind PR never reaches. **This
   edge fires for every CI run the PR produces, and the implementer's own
   firing comes first for every PR** — `ci.yml` triggers on `pull_request`, so
   opening the PR at the end of `next-ticket` step 7 starts a run within seconds,
-  while the review workflow returns 20-40 minutes later. That first firing is
+  while the review returns 20-40 minutes later. That first firing is
   the ordinary case for every PR, not a rarity, and no review has run at all
   when it arrives. **Green is therefore not the gate: dispatch a finisher only
   once the PR's review has returned AND its fix-applier, if one was dispatched,
@@ -1418,7 +1456,7 @@ evidence cannot settle**.
   (below); a final report is not proof it stopped. A PR that needs nothing fixed
   reaches a finisher through the **fix-applier reports `no-op`** bullet below,
   never by waiting for a second CI event this head will never produce.
-  Then run the reconcile (below).
+  Then run the tick.
 - **A fix-applier reports `no-op`, or a SHA you have already bound** → dispatch
   the finisher **now**, against the existing head. No push means no new run, and
   the Monitor above is edge-keyed on `<run-id>:<attempt>:<conclusion>` — that
@@ -1427,7 +1465,7 @@ evidence cannot settle**.
   `suggestion` is the band a clean diff produces, and every out-of-scope or
   refuted one is filed as an issue rather than committed. An edge-only label path
   therefore strands exactly the PRs with nothing wrong with them. **Reconcile, do
-  not wait for an event** governs here too, not only implementer refill. **This
+  not wait for an event** governs here too, not only the implementer row. **This
   bullet and the one above are a pair, and on a clean PR this one carries the
   whole route to a finisher**: a `no-op` report satisfies the gate above by
   itself — the review has returned, because a fix-applier exists only after it
@@ -1445,60 +1483,74 @@ evidence cannot settle**.
   reviewer's verified suite run; **without it, do not label** — report that this
   repo has no CI configured and no declaration, and stop. Absence never reads as
   pass. See `review-and-fix.md` step 6.
-- **Pool empty** → phase 0 again, subject to queue depth. Run phase 2's tier
-  guard here, on the floor phase 2 defines over the accumulated
-  `docs/metrics/tier-outcomes.tsv` and on no gate of this event's own: a second
-  threshold stated here is a second definition, free to drift from the one that
-  governs, and a throttle would need state nothing on disk records — a schema
-  change with its own ticket. Nothing else in the loop owns it.
 
-**Run the reconcile on the merge-side edges.** Both edges marked above —
-**merge-bot wave reports done** and **Monitor: CI run completes** — end with one
-invocation of the executable reconcile, and you act on what it prints:
+**Every wake ends in the tick.** One invocation, and you act on what it prints:
 
 ```
-~/.fleet/bin/fleet-run fleet-tick.mjs \
-  --implementers <live> --reviewers <live> --merge-bots <live> --pool <n> \
-  --reviews-ready <n> --merge-holds <pr,pr|none> \
-  [--implementer-cap 2] [--reviewer-cap 5]
+~/.fleet/bin/fleet-run fleet-tick.mjs [--implementer-cap <n>] [--reviewer-cap <n>] [--max-reviews <n>]
 ```
 
-It prints `actual/target` and an explicit ACTION for implementers, reviewers and
-the merge bot, with the whole Queue depth guard table below applied in code. The
-live counts and the pool are yours to state and it **refuses rather than
-defaulting them**: nothing in the repo records liveness — a ledger row is a
-dispatch, and that token outlives the member's death, its bail and the merge —
-so a default would turn a forgotten flag into either a dispatch past the cap or
-a permanent hold, silently. Merge queue, review backlog and supply it reads
-itself.
+It reads the run itself, and nobody states a count. Live implementers, live
+review units (in-flight `review=` tokens plus unsettled `fix-pr-` ones), the
+merge bot, merge holds, tier mismatches and the drain marker come off
+`.fleet/ledger.md`; the unclaimed heads and the supply come off
+`.fleet/shortlist.json`, which it refreshes itself when the unclaimed count is
+below the implementer cap, when the file is missing or empty, or when an
+Exclusion's premise has lifted; the open PRs come off `gh`. A ledger token it
+cannot read, it refuses rather than guessing — a member counted live or gone on
+a guess is the over- or under-dispatch it exists to prevent — so correct that
+row with `ledger.mjs row` and tick again. The caps default to 2 implementers
+and 6 reviewers, and neither is a hard bound: pass `--implementer-cap` and
+`--reviewer-cap` on every tick when `$ARGUMENTS` set them, and never otherwise.
 
-**`--reviews-ready` and `--merge-holds` are yours on the same terms**, because a
-label says a PR is signed off or awaiting a review — never that anything can be
-handed out. Both refuse an absent value the way the counts above do.
+It prints `actual/target` and a named ACTION per role, with the whole **Queue
+depth** guard table applied in code. Act on each line as it reads:
 
-- **`--reviews-ready <n>`** — reviews whose findings you HAVE, with no
-  fix-applier on them yet. A reviewer slot holds a fix-applier and a fix-applier
-  applies findings, so a review still running counts 0 here, and on the default
-  path you run them one at a time. The backlog is **not** this number: it counts
-  PRs whose review has not started, which is nothing a member can be dispatched
-  against, and the row will no longer dispatch off it (#590). On the
-  hand-dispatched fallback path below, where the reviewer member does the review
-  itself, this is the PRs one can be given.
-- **`--merge-holds <pr,pr|none>`** — the PRs your last merge-bot pass reported
-  `held-behind-#<lower>`. That verdict moves no label and leaves nothing in the
-  repo, so the queue read here is blind to it, and a bot dispatched against a
-  queue whose every candidate is held spends a member re-deriving a verdict you
-  already have — which is exactly the state a stalled cascade sits in. `none` is
-  a statement, not a blank: an empty value is refused, since that is the shape an
-  unset shell variable arrives as.
+- `PULL #<N> …` — one Pull per named ticket, in the order printed: phase 1's
+  read, then phase 2's dispatch. A ticket that fails the read is relabelled or
+  excluded (phase 1), and the next tick names the next head.
+- `REFRESHED shortlist: <n> entries; <k> lifted` — the tick refreshed the
+  shortlist itself, and its `PULL` row already reads the result. `REFRESH
+  FAILED` is yours: `shortlist.mjs` could not run, and the implementer row is
+  blind until it can.
+- `SUGGEST /triage, hold idle` — nothing is admissible after the refresh.
+  Suggest, never run (**Queue depth**).
+- `DISPATCH fix-pr PR#<M> …` — a fix-applier per PR (**Reviewers**). Printed
+  ahead of reviews on purpose: finishing what is started beats starting more.
+- `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn
+  (**Reviewers**).
+- `DISPATCH merge-bot` — the next `merge-bot-<n>` (**Merge bot**).
+- `HOLD (…)` — the row is held and says why: draining, a tier mismatch, a
+  saturated review side, `--max-reviews` in flight, or every queued merge
+  candidate held behind a lower PR. The tier mismatch is the one that is yours
+  to clear — dispatch the replacement at the right tier (phase 2).
+- `AT CAP`, `IDLE OK` — nothing to do on that row.
 
-Why these two edges: a merge cascade is a firehose of merges, CI greens and
+**Tier guards under Pull.** An alt Pull — the Pull phase 2 routes to the
+alternate tier — is where the tier floor is read. Run phase 2's tier guard
+before choosing the alternate tier, on the floor phase 2 defines over the
+accumulated `docs/metrics/tier-outcomes.tsv` and on no gate of this Pull's own:
+a second threshold stated here is a second definition, free to drift from
+the one that governs, and a throttle would need state nothing on disk records
+— a schema change with its own ticket. A floor breach — the guard firing —
+dispatches that Pull at the default tier instead, with no `tier=alt` in its
+row; say why in your report. The per-dispatch `tier-check.mjs --batch` stays
+phase 2's own step, and a mismatch it finds is the
+`HOLD (tier mismatch impl-<N>)` above. Nothing else in the loop owns it.
+
+**`--max-reviews <n>`** bounds how many reviews are in flight at once, inside
+the reviewer cap. It defaults to the reviewer cap, and the reviewer slots it
+leaves still serve fix-appliers. It is a Marked-line Pair:
+CLAUDE: `~/.fleet/bin/fleet-run fleet-tick.mjs --max-reviews 1` — at most one review Workflow in flight until two concurrent ones are measured on a live run; lifting the bound then is a change to this one line.
+OMP: `~/.fleet/bin/fleet-run fleet-tick.mjs` — the one-review bound does not apply: every review unit already counts against the session's single `task.maxConcurrency` semaphore, which queues at its ceiling rather than refusing (#1771), so reviews run up to the reviewer cap.
+
+**Why every wake.** A merge cascade is a firehose of merges, CI greens and
 rebases that holds your attention on the merge side while the implementer side
-drains to 0 and stays there — 0 implementers emit no completion event, so the
-refill edge is dead. Piggybacking the level-check onto events you are already
-handling is what makes that drain visible. **Both are still edges, so neither
-covers a fully drained queue**: no members and no open PRs is no event at all,
-and the reconcile goes unrun. That state is the heartbeat's (#357).
+drains to 0 and stays there — 0 implementers emit no completion event, so a
+refill that waited for one would never fire. A tick on every wake you are
+already handling is what makes that drain visible. **Every wake is still an
+edge, so none covers a fully drained queue**: no members and no open PRs is no
+event at all, and the tick goes unrun. That state is the heartbeat's (#357).
 
 **Beat when there is nothing to do, and never end your turn on a drained
 queue.** You cannot be woken. A backgrounded Monitor does not wake an idle
@@ -1515,9 +1567,9 @@ exactly the way that gate does:
 
 It blocks, then prints one line. Which line it is, is the whole protocol:
 
-- `… interval elapsed → restate your live counts and run fleet-tick` — the
-  level-check is due. Run the reconcile above **with `--fold-unchanged`** and
-  act on what it prints. Then arm the beat again.
+- `… interval elapsed (quiet=<n>) → run fleet-tick` — the level-check is due.
+  Run the tick above **with `--fold-unchanged`** and act on what it prints.
+  Then arm the beat again.
 - `… Ns of Ms remain → re-issue this command now, do not end your turn` — no
   harness lets one command block for a whole interval (omp backgrounds one at
   60s; a Claude Code shell timeout is shorter than a CI cycle, which is why the
@@ -1531,17 +1583,18 @@ correction ticket a reviewer files — and that arrival emits no event either, s
 the ceiling is your worst-case latency for noticing it. Do not raise it past 30
 minutes.
 
-**The beat does not stop on idleness.** An empty pool and an empty supply are
+**The beat does not stop on idleness.** An empty shortlist and an empty supply are
 not a reason to end the run; they are the state a newly triaged ticket arrives
 into. The run ends when you drain it, when the budget goes, or when this
 context does — not because there was briefly nothing to do.
 
-**`--fold-unchanged` belongs to the heartbeat alone**, never to the two edges
-above. It prints one line instead of three when a tick asks for nothing AND says
+**`--fold-unchanged` belongs to the heartbeat alone**, never to any other wake.
+It prints one line instead of the rows when a tick asks for nothing AND says
 exactly what the last one said, which is what makes an unattended night
-affordable; an edge tick is read by a controller that just acted and needs the
-rows. An unchanged `DISPATCH` is never folded — unclaimed work always prints in
-full, because folding it would hide the stall behind this ticket's own remedy.
+affordable; a tick on any other wake is read by a controller that just acted and
+needs the rows. An unchanged `PULL` or `DISPATCH` is never folded — unclaimed work
+always prints in full, because folding it would hide the stall behind this
+ticket's own remedy.
 
 **When you stop on purpose, say why — one command, and it is the last thing
 you owe the next run.** The beat leaves a dated mark on every hold, so a run
@@ -1563,7 +1616,7 @@ honestly say about a death that named nothing.
 prints it before its own rows when the mark it finds is overdue against the
 interval that mark recorded, and the cockpit shows the same line while it is
 up. It names when the beat was last seen, how overdue that is, how many
-tickets are still claimed and in flight, and whether the pool still has supply
+tickets are still claimed and in flight, and how much supply the last read found
 — because the claimed ones keep the `in-progress` label, the candidate scan
 EXCLUDES that label, and those tickets are therefore invisible to your own
 shortlist and to the maintainer's. Read the line, decide what to do about the
@@ -1738,23 +1791,29 @@ report recovery, never the exit code alone.
 
 ### Reviewers
 
-**You run the review yourself, once per PR. That is the default path.**
+**Dispatch the review, never wait on it, and act when its result lands. That is the default path.**
+The tick names every PR owed one — `DISPATCH review PR#<M>`, oldest first —
+and each gets one review, once per PR:
 
-CLAUDE: `Workflow({name: "fleet-ctl:review-pr", args: {pr, branch, worktree, testCmd, scratch}})`.
-OMP: `eval` loading `scripts/review-eval.mjs` through the Resolver (`FLEET_HARNESS=omp fleet-run --path review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})`.
+CLAUDE: `Workflow({name: "fleet-ctl:review-pr", args: {pr, branch, worktree, testCmd, scratch}})` — it returns `async_launched` in about 1.5 s with a `Run ID`, and you carry on; record `review=wf:<runId>` on the PR's row.
+OMP: a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the same five args — it loads `review-eval.mjs` through the Resolver (`FLEET_HARNESS=omp ~/.fleet/bin/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file and reports; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call.
 
-Only you can run it — members have no `Workflow` tool on Claude and no reason
-to run `eval` themselves on omp (verified 2026-07-30 for the
-`general-purpose` subagent on Claude; tool availability is per-agent-type, so
-recheck after a harness change rather than treating it as permanent) — and it
-is the only path on which `selectDimensions` sizes the fan-out to the diff
-and the verify budget follows severity. Hand-dispatched, neither executes at
-all: sizing falls back to a reviewer's own judgement and nothing budgets the
-adversarial pass. It cuts one immutable snapshot, verifies every
-critical/important finding adversarially, and has `agent()` return **into
-the script**, so no report can go undelivered and you relay nothing — the
-delivery failure that cost one fleet five reports on one PR and four on
-another.
+Write the `review=` token with `ledger.mjs row`, which **replaces the whole
+line**, so carry every other field. The tick counts in-flight reviews off the
+ledger and nowhere else, so a review you launched and never recorded is one it
+names again.
+
+**It is the only path on which `selectDimensions` sizes the fan-out to the
+diff and the verify budget follows severity.** Hand-dispatched (the fallback
+below), neither executes at all: sizing falls back to a reviewer's own
+judgement and nothing budgets the adversarial pass. It cuts one immutable
+snapshot, verifies every critical/important finding adversarially,
+re-dispatches each crashed specialist and each crashed refuter pair once before
+it assembles the result, and has `agent()` return **into the script**, so no
+report can go undelivered and you relay nothing — the delivery failure that
+cost one fleet five reports on one PR and four on another. None of it runs on
+your turn: a review takes 20-40 minutes, and a controller that held its turn
+for each one, one at a time, was what left implementer slots empty (map #1768).
 
 **Know the trim before you rely on it — it is wider than `docsOnly` suggests.**
 `diff-stats.mjs` calls a PR docs-only only when it touches **no** src, tests *or*
@@ -1781,16 +1840,34 @@ one-file rewrite trims too. An unknown profile widens to the full six, the safe
 direction, so a trim is never something to count on in advance — and a full six
 is never something to assume.
 
-**One review workflow at a time.** The workflow is not a member — count the
-**fix-applier** against the reviewer cap, never the workflow — but that
-accounting leaves the workflow itself ungated, and the cap bounds *members*, not
-the agents members and workflows spawn. Its own fan-out is 1 snapshot + up to 6
-specialists + 2 refuters per critical/important finding, and the fix-applier is
-not dispatched until it returns, so the reviewer cap reads five free slots for
-the whole 20-40 minutes the review runs. Queued PRs wait. A queue is not a reason
-to start a second.
+**The reviewer cap counts live review units.** A review in flight — a review
+Workflow still running, or a `review-pr-<pr#>` member — is one; each
+`fix-pr-<pr#>` is one; a finisher and a CI wait are zero; and a PR holds at most
+one slot at a time. In-flight reviews are derived, never remembered: a row with
+`review=` and no `reviewed=` is one, which is why the token goes on before
+anything else. The defaults are 2 implementers and 6 reviewers, and neither is
+a hard cap. The cap bounds units, not the agents a review fans out to — 1
+snapshot + up to 6 specialists + 2 refuters per critical/important finding — and
+how many reviews may be in flight at once, inside it, is `--max-reviews`, whose
+Marked-line Pair is under **Every wake ends in the tick** in Phase 3. The slots a
+review does not hold still serve fix-appliers.
 
-It returns `{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts, snapshot, survived, refuted, unverified}`.
+It returns `{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts, snapshot, survived, refuted, unverified}` —
+the **digest** first, so it survives the ~8 KB cut of an inline result, then
+the snapshot and the findings — and it lands as one artefact on both harnesses,
+`<scratch>/review-<pr>.json`, holding that bare object:
+CLAUDE: on the Workflow's notification, write it yourself — `jq '.result' <output-file> > <scratch>/review-<pr>.json` — in the shell only: the `<output-file>` lives under the session-scoped `/private/tmp/claude-501/…`, and reading it into your context is the cost the file exists to avoid.
+OMP: the `review-pr-<pr#>` runner writes it and reports the digest and the path, so writing it yourself does not apply.
+
+**You read the digest; the findings are the fix-applier's.**
+`jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/review-<pr>.json`
+is the whole of your read, and it is what you record: `reviewed=<head>:<survived>/<refuted>/<unverified>`,
+off `head` and `counts`, on the PR's row. Findings never enter your context —
+a result runs 26-61 KB, 7-15k tokens that used to land in yours and then again,
+up to ~10k characters, in every fix-applier prompt you wrote. The fix-applier
+reads every one off the file and makes every ruling on them
+(`review-and-fix.md`'s **The review result file**). What the digest tells you:
+
 **`testEnvironment` says what every dimension's `test_run` is evidence about**,
 and it is present on a healthy run as well as a degraded one, so there is
 nothing to notice by its absence. The snapshot is `git archive`d and then
@@ -1798,33 +1875,35 @@ nothing to notice by its absence. The snapshot is `git archive`d and then
 tree hash against the reviewed commit's (#1056): verified, a suite run in the
 snapshot collects and runs what a checkout does, and a red is a fact about the
 tree. UNVERIFIED, it is not — tests that ask git what ships decline or fail for
-the environment, and this field carries which line of the cut failed. Read it
-before you act on any `test_run` count, and before you rule a dimension unrun
-over a red suite.
+the environment, and this field carries which line of the cut failed. The
+fix-applier reads it before acting on any `test_run` count; you read it so a
+degraded review never passes for a clean one.
 `unverified` is *not* "checked and cleared" — a `suggestion` skips the pass by
-policy, and a finding whose refuters all crashed lands there too. Hand those over
-with the rest; never rule on them yourself. **`refutersDispatched`, carried on
-every finding, is what tells those two apart** — zero is the policy skip, above
-zero with no surviving vote is the crash — so read the population off that field
-rather than off severity, which records only how much a finding would matter if
-true. `resume` is non-null exactly when that crash population is non-empty, and
-it names the relaunch that replays this run's unchanged prefix from cache and
-re-runs only the calls that died. **Resume beats handing a crash-heavy review
-on**: a deferred crash is a finding nobody ever looked at, and you are the seat
-that can still make something look. `refuted` comes back deliberately as
-well — a refutation is itself a claim, and one has been reversed on new evidence —
-so record it in the ledger's `ruled` line and hand it over only when you reverse
-it. **A 1-1 split is not a verdict** — read the votes, not the band. Three tied
-refutations were reversed and re-examined in one run; all three findings survived.
+policy, and a finding whose refuters all crashed lands there too. Both go to the
+fix-applier with the rest, in the file; never rule on them yourself.
+**`refutersDispatched`, carried on every finding, is what tells those two
+apart** — zero is the policy skip, above zero with no surviving vote is the
+crash — so the population is read off that field rather than off severity,
+which records only how much a finding would matter if true. `resume` is
+non-null exactly when a specialist or a refuter pair crashed again after the
+review's own in-run retry, and **resume beats handing a crash-heavy review
+on**: a deferred crash is a finding nobody ever looked at.
+CLAUDE: you are the seat that can still make something look — relaunch with `Workflow({scriptPath, resumeFromRunId})`, which replays this run's unchanged prefix from cache and re-runs only the calls that died.
+OMP: no replay exists for a review that ran in a runner's own kernel, so a relaunch does not apply — `resume` is reported, not acted on, and the fix-applier defers what it names.
+`refuted` comes back deliberately as well — a refutation is itself a claim, and
+one has been reversed on new evidence. The fix-applier may reverse one; its
+report lists every refutation it reversed, and you copy those to the ledger's
+`ruled` line.
 
 **`dimensionsRun` is the dispatch; `dimensionsUnrun` is what names a gap.** A
 specialist that dies, and one that never executed the suite, both contribute zero
 findings while the key stays in `dimensionsRun` — so read the two together. A key
 in `dimensionsRun` and NOT in `dimensionsUnrun` ran a suite; every
 `dimensionsUnrun` entry is `{dimension, reason}` naming which failure it was.
-Re-run those, or name them unrun in the report — an absence of findings is not
-coverage. Same rule the fallback below states for a killed specialist, for the
-same reason.
+The review already re-dispatched each crashed specialist once, so what
+`dimensionsUnrun` still names is residue: the fix-applier names it unrun in its
+report and re-runs nothing — an absence of findings is not coverage. Same rule
+the fallback below states for a killed specialist, for the same reason.
 
 The rule this replaces — treat any dimension with nothing in
 `survived`/`refuted`/`unverified` as unrun — was the workaround for having no
@@ -1841,75 +1920,34 @@ clean. This field is the runtime backstop that reads for the line regardless:
 `missing` is exactly as loud as `dirty`, and both name a checkout you should
 treat as a live scratch write until you have checked it (#1433/#1673).
 
-**A throw or an empty return is a failure event, not a clean review.** It throws
-on missing `args.pr`/`args.worktree` and on a snapshot agent that returned no
-tree, and it surfaces to you mid-loop, where "react, never block" makes it easy to
-log and carry on — leaving a PR that *reads* as reviewed and is not. Being no
-member, it has no row in **Failure handling**. Retry once; still failing →
-hand-dispatch the fallback reviewer below and record in the ledger which path ran.
+**A throw, an empty return, or a notification whose status is not `completed`
+is a failure event, not a clean review.** The review throws on missing
+`args.pr`/`args.worktree` and on a snapshot agent that returned no tree, and a
+failure surfaces mid-loop, where "react, never block" makes it easy to log and
+carry on — leaving a PR that *reads* as reviewed and is not. **Retry once, then
+fall back — and whoever holds the review call is who retries:**
+CLAUDE: you hold the `Workflow` call, so relaunch it once yourself; still failing → hand-dispatch the fallback reviewer below as `review-pr-<pr#>`.
+OMP: your own relaunch does not apply — the `review-pr-<pr#>` runner already retried once inside its cell and reports `failed` with both errors; hand-dispatch the fallback reviewer below as `review-pr-<pr#>-b`, the name that report gives.
+Either way, settle the dead review by appending `=failed` to its `review=`
+token, then append `review=fallback:review-pr-<pr#>[-b]` after it, both in one
+`ledger.mjs row` rewrite — the tick takes the last `review=` token on a row as
+the one in flight, so that order is what keeps the fallback counted against the
+cap. A runner member that is killed rather than failed follows **Failure
+handling** (fresh name, inherited state stated).
 
-**Then dispatch a fix-applier** — one named member per PR, `fix-pr-<pr#>`, never
-the PR's implementer. Its prompt carries the PR number, the worktree abs path,
-the PR's branch, the same `testCmd` you passed the workflow, and the returned
-`survived` / `unverified` findings verbatim, plus:
-
-**Verbatim means every one, not the ones you rank.** On the workflow path you are
-the *only* copy a member can reach — `agent()` returned the findings into the
-script, and the specialists' own transcripts, which do exist on disk, are not
-addressable by a member: nothing it is handed names one. Relaying a selection
-strands the rest: two fix-appliers in one run were sent 5 of 7 and 7 of 13, each
-asked for paths nothing had given it, and each reported findings as
-looked-at-by-nobody that were simply never sent. Paste all of them, and add no
-adjective — ranking an unverified `suggestion` by how sharp it reads is how a
-controller lends its own weight to a finding no refuter has touched yet. Twice
-in that run the ranked one was refuted outright.
-
-**Scan the findings against each other for MUTUAL EXCLUSION, and rule before the
-conflicting change reaches the tree.** Refuters are blind to their siblings, so
-two can approve changes that cannot both land — one preserving a comment block
-another's change deletes, one keeping a binding another collapses. Only you hold
-every ruling, so only you can see the pair. Two runs have produced it: PR #332,
-and PR #404 where a refuter proved a variable collapse behavior-equivalent over
-844 cases while its own blast-radius scan named the two comment blocks a
-*different* refuter had just established as guarding distinct pinned hazards.
-
-The scan's two inputs arrive at different times, so run it twice. **Before you
-dispatch anything**, group the findings by `file:line` and by whether one's fix
-undoes another's — that is in the findings' own text, which you hold for every
-band. **Then as each refuter report lands**, read its blast radius against what
-you have already ruled on: the workflow's own refuters return their votes with
-the findings, and a report from one the fix-applier spawned surfaces to you, so
-that half arrives mid-flight rather than before dispatch. The deadline is the
-tree, not the dispatch.
-
-**A conflicting pair goes to a SINGLE refuter, briefed with both claims.** That
-is what settled #332's — one refuter tested the two against each other and ruled
-*"B wins: A's premise is false"*, where two independent refuters would each have
-approved their own side, which is how the pair arises at all. **Defer only when
-no single refuter can settle it**, with the equivalence evidence recorded in the
-filed issue so the work is not redone; that was the right call in the #404 case,
-where the refuter had also falsified the finding's own rationale. Never let both
-reach the tree and hope the diff coheres.
-
-The same scan catches a quieter shape: a finding whose **suggested fix quotes text
-another applied finding deletes**. Measured on PR #405 — `survived[5]`'s pin was
-written as `/not inside a git repository/`, wording `survived[3]` removes as
-fabricated, so applying both **as written** would have produced a pin matching
-nothing. Not mutual exclusion, and it does not conflict at the diff level; it goes
-stale and passes for the wrong reason. **Re-deriving is the fix:** never copy a
-pin out of a finding, derive the assertion from the post-fix tree. Ordering is
-what makes that possible rather than a second remedy — apply the finding that
-changes the text before the one that asserts on it, and the tree you have to
-derive from exists.
-
-**A `refuted=false` verdict is not an instruction to apply.** It says the finding
-survived refutation, not that the change is worth making — those come apart
-exactly when the refuter confirms behavior-equivalence and simultaneously
-falsifies the finding's *reason*. In the #404 case the stated house-style premise
-was measurably false (six other non-test lines used the pattern it called
-un-idiomatic, and the finding's own grep hit a seventh it omitted) and the stated
-cost was understated. Behavior-neutral plus a false rationale is a defer, however
-clean the verdict reads.
+**Then dispatch a fix-applier** — on `DISPATCH fix-pr PR#<M>`, which the tick
+prints for a PR whose `reviewed=` counts survivors and that has had no
+fix-applier since — one named member per PR, `fix-pr-<pr#>`, never the PR's
+implementer, recorded with `ledger.mjs dispatch <pr#> fix-pr-<pr#>` before the
+call. Its prompt carries the PR number, the worktree abs path, the PR's branch,
+the same `testCmd` you passed the review, and the **path** `<scratch>/review-<pr>.json`
+— never the findings. The fix-applier owns every per-PR ruling you once made
+before dispatch: both mutual-exclusion scans, the suggested-fix re-derivation,
+`refuted=false` ≠ apply, per-site measurement for a sibling-site extension, and
+`testEnvironment`/`cwdAudit` before any `test_run`. It holds every finding and
+you hold none, so there is nothing for you to rank, relay or pre-rule — and a
+report from a refuter it spawns that surfaces to you is its to retrieve, never
+yours to scan or pass on.
 
 **A refutation resting on an injection nothing proved landed is not a refutation
 — it is a cell that never ran.** A mutation test and a finding reproduction are
@@ -1940,31 +1978,15 @@ The fix-applier prompt and every refuter brief carry the rule and the safe
 invocation form; the merge bot's gate-trap list is the wrong seat, because a bot
 reads gates and never injects a fault.
 
-**When YOU extend a finding to sibling sites, the extension needs its own
-per-site measurement — being right about the sites does not make you right about
-the remedy.** A verified finding covers the sites its refuters measured; a
-controller that widens it to every sibling spelling is making a *new* claim about
-each added site, and that claim is as unverified as any `suggested_fix`.
-Measured: on PR #764 a `survived` 2-0 finding was extended from one site to five
-— all five genuinely carried the false claim, so the extension was right — but
-the prescribed replacement reason ("the asserts below must stat through the
-restored path") was **false at one of the five**, whose case asserts a value
-`for-each-ref` answers without searching the chmodded directory. Only a per-site
-mutation separated them: deleting all five restores at once reddened **four**,
-not five. Writing the prescribed reason at the fifth would have minted a new
-false claim on the correction PR that existed to remove one. So hand the
-extension over as *sites to fix*, and require the fix-applier to measure each
-site's reason rather than copying a shared one.
-
 **Where `testCmd` comes from:** the repo's own test command, the one you hand
 specialists per **Give specialists a stack-free test command** above — in this
 repo `node --test plugin/scripts/*.test.mjs`. Pass the same string to the
-workflow, to the fix-applier, and to the finisher — whose duty-2 mutation gate
-runs it too — so every gate runs one command. Omit it from the
-workflow args and `review-pr.js` now DERIVES it from the repo under review
-(#142) instead of defaulting to a fixed string — refusing outright if it
-can't; the fix-applier has no such fallback, so substituting `<testCmd>` with
-nothing leaves it no gate at all.
+review, to the fix-applier, and to the finisher — whose duty-2 mutation gate
+runs it too — so every gate runs one command. Omit it from the review args and
+the review — `review-pr.js`, and `review-core.js` in a runner — now DERIVES it
+from the repo under review (#142) instead of defaulting to a fixed string —
+refusing outright if it can't; the fix-applier has no such fallback, so
+substituting `<testCmd>` with nothing leaves it no gate at all.
 
 **Where `<branch>` comes from:** the PR's head branch —
 `gh pr view <N> --json headRefName -q .headRefName`, or the same branch you cut
@@ -1978,8 +2000,8 @@ all.
 
 > You are ALREADY in worktree `<abs-path>`, whose PR branch is `<branch>` — the
 > push destination below, given to you because a detached worktree cannot supply
-> it. Do NOT create another worktree. The review is done and these findings are
-> its output — do not re-review, do not dispatch specialists.
+> it. Do NOT create another worktree. The review is done and its result is the
+> file below — do not re-review, do not dispatch specialists.
 >
 > **`edit` and `read` resolve a bare relative path against the SESSION ROOT —
 > the controller's own main checkout — not against that worktree and not
@@ -2010,6 +2032,16 @@ all.
 > review already ran — and steps 4 and 6: the controller owns the CI wait and
 > dispatches the finisher.
 >
+> **The review's result is `<scratch>/review-<pr>.json`** — the digest first
+> (`jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}'`),
+> then every finding (`jq '.survived'`, `jq '.unverified'`, `jq '.refuted'`).
+> Read it through `review-and-fix.md`'s **The review result file**, which holds
+> the rest of the recipes and every ruling on the findings: both
+> mutual-exclusion scans, the suggested-fix re-derivation, `refuted=false` ≠
+> apply, per-site measurement for a sibling-site extension, and `testEnvironment`
+> and `cwdAudit` before any `test_run`. Every one of those rulings is yours —
+> nobody upstream has made one, and the controller never reads the findings.
+>
 > **Every factual claim your diff restates needs a settling command run
 > against the tree first** — the issue body is a lead, never a citation.
 > **No positional references** (`the closing/second/last X`); name the thing
@@ -2026,10 +2058,10 @@ all.
 > died, and at `critical` that is every one of them. Severity records how much a
 > finding would matter if true, never whether anything looked. Say *in the
 > deferral* that its refuters crashed rather than that it went unchecked — the
-> run is resumable and I hold the tool that resumes it, so a deferral that names
-> the crash can still be re-verified. **A `suggestion` is also in `unverified`,
+> review re-dispatched each crash once already and reports what died again, so
+> a deferral that names the crash can still be re-verified. **A `suggestion` is also in `unverified`,
 > for a different reason — `refutersDispatched` of zero, the 0-refuter budget
-> the workflow gives that band by policy — and the rule below, not this one,
+> the review gives that band by policy — and the rule below, not this one,
 > covers it.**
 >
 > **A `suggestion` is budgeted 0 refuters, so it is unchecked until you check
@@ -2086,9 +2118,9 @@ all.
 > > macOS.
 >
 > Survives → apply it, with one hold: if its refuter reports a blast radius
-> touching lines another finding also changes, report that to the controller and
-> wait for a ruling before applying — only the controller holds every finding, so
-> only it can see that the two cannot both land. Refuted → defer and file it, and
+> touching lines another finding also changes, that is the mutual-exclusion
+> scan's second input — rule the pair before either change reaches the tree;
+> you hold every finding, so only you can see that the two cannot both land. Refuted → defer and file it, and
 > say the refutation in the issue body. **Apply only what survives — no report is not a survival.** A
 > refuter you never hear from leaves the finding exactly as unchecked as it
 > arrived, so it defers like a refuted one.
@@ -2105,10 +2137,10 @@ all.
 >
 > **Retrieve that report yourself; do not wait to be handed it — this covers the
 > refuters YOU dispatch, and only those.** The review's own specialists do leave
-> transcripts, but nothing gives you their address: the workflow had `agent()`
-> return their findings into the script, so what you are handed names no file, and
-> nothing on disk indexes a transcript by PR or dimension. Asking for their paths
-> gets you nothing; ask for the text. A report from a refuter you spawned is
+> transcripts, but nothing gives you their address: the review had `agent()`
+> return their findings into the script, so the result file holds their findings
+> and names no transcript, and nothing on disk indexes a transcript by PR or
+> dimension. Hunting their paths gets you nothing; read the file. A report from a refuter you spawned is
 > different — it surfaces to the controller rather than to you, and waiting for a
 > relay that never comes strands the finding. Its transcript is at the output file
 > named in your spawn result, and its report is the last record:
@@ -2230,6 +2262,7 @@ lives in `agents/fleet-finisher.agent.md`, on both harnesses:
 CLAUDE: `fleet-ctl:fleet-finisher`.
 OMP: `fleet-finisher`.
 
+Record it with `ledger.mjs dispatch <pr#> finisher-pr-<pr#>` before the call.
 Its four duties are a checklist — audit the
 worktree, confirm every deferral has a tracker home and re-run the acceptance
 mutation, apply one release label, report — and the
@@ -2563,18 +2596,27 @@ which suites red: that answers which ones **depend on its contents**, which is
 the question a coverage claim actually needs, and it returns a different set
 from any spelling of the grep.
 
-#### Fallback: hand-dispatched reviewer member (no `Workflow` tool)
+#### Fallback: hand-dispatched reviewer member
 
-Only where the workflow is unavailable **or has failed** — never a preference.
-"Unavailable" is `ToolSearch` not finding it; "failed" is the throw or empty
-return above, surviving one retry. A workflow that is present and throwing is not
-absent, and reading this line as absence-only leaves the likeliest failure with no
-sanctioned path at all. One named member per PR, `review-pr-<pr#>`, never its
-implementer. Give it the PR number and tell it to read
+Only where the review unit is unavailable **or has failed** — never a
+preference. "Unavailable" is the review unit not being there to dispatch at
+all; "failed" is the failure event above, surviving its one retry. A review that
+is present and failing is not absent, and reading this line as absence-only
+leaves the likeliest failure with no sanctioned path at all. One named member
+per PR — `review-pr-<pr#>`, or `review-pr-<pr#>-b` where a runner already held
+that name — never its implementer, recorded as
+`review=fallback:review-pr-<pr#>[-b]` on the PR's row. It runs off your turn
+like the review it replaces:
+CLAUDE: dispatch it with `run_in_background: true` on the `Agent` call.
+OMP: a `task` member already runs off your turn, so the background flag does not apply.
+Give it the PR number and tell it to read
 `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` — the resolved file
 path, not a slash invocation; command availability inside a member is not
 guaranteed the way skill availability is. It then does the fix-applier's job too:
-apply, defer, file, push, report, exit.
+apply, defer, file, push, report, exit. On its report, record
+`reviewed=<head>:0/<refuted>/<deferred>` against the head it pushed — it applied
+its own survivors, so the zero is what tells the tick no fix-applier is owed —
+and it reaches a finisher through the same gate as any other PR.
 
 **Authorize the fan-out explicitly.** State that the full specialist set IS the
 requested work — otherwise the reviewer inherits the standing "do not call the
@@ -2901,61 +2943,42 @@ where the controller itself runs from.
   candidate scan returned, before any filter. Only a Pull's full read judges
   decided?, so a shortlist of undecided tickets is supply that every Pull
   relabels away — and relabelling is what stops it being counted next scan.
-- **review backlog** — PRs verified and queued with no reviewer slot.
-  `fleet-tick.mjs` counts every open PR without `ready-to-merge` **that closes an
-  issue**, which is that plus the ones already under review or waiting on CI. The
-  wider read on that axis, because narrowing it needs per-PR review state that
-  lives in your head and not in the repo — so it holds the refill earlier than the definition above, never
-  later. The closing-issue test is what keeps it from
-  widening on the other axis: a chore PR you author yourself closes nothing and is
-  left unlabelled for the maintainer, so no member of the fleet will ever review
-  it, and counting it floors the backlog at a depth nothing in the run can drain
-  — the implementer gate then holds for the rest of the run against a queue of
-  nothing (#590). GitHub's own linked-issue set decides that, not a keyword regex
-  over the body; see `docs/agents/issue-tracker.md`. **That exemption is for
-  the chore PR THIS run authors, never one a PRIOR run left open** — step 0
-  folds those into this run's review queue, so count one when you reason about
-  backlog BY HAND. **The `fleet-tick.mjs` number still excludes it**: nothing
-  in its filter distinguishes an inherited chore PR from this run's own, since
-  a PR closing no issue fails the closing-issue test either way — folding one
-  in cannot reach the count. So the by-hand judgement and the script's output
-  differ here, and the script's own comment at `reviewBacklog` says why:
-  narrowing it needs per-PR review state that lives in the controller's head
-  and not in the repo.
+- **review backlog** — PRs owed a review. `fleet-tick.mjs` counts every
+  open PR without `ready-to-merge` **that closes an issue** and carries no `review=`
+  token on the ledger — one settled `=failed` is owed a review again — and it
+  prints them as `review-due=`. Exact, not a wider read: the ledger records
+  which PRs are under review or reviewed, so nothing about it is guesswork. The
+  closing-issue test is what keeps it from widening: a chore PR you author
+  yourself closes nothing and is left unlabelled for the maintainer, so no
+  member of the fleet will ever review it, and counting it floors the backlog at
+  a depth nothing in the run can drain — the implementer gate then holds for the
+  rest of the run against a queue of nothing (#590). GitHub's own linked-issue
+  set decides that, not a keyword regex over the body; see
+  `docs/agents/issue-tracker.md`. **That exemption is for the chore PR THIS run
+  authors, never one a PRIOR run left open** — step 0 folds those into this
+  run's review queue, so count one when you reason about backlog BY HAND. **The
+  `fleet-tick.mjs` number still excludes it**: nothing in its filter
+  distinguishes an inherited chore PR from this run's own, since a PR closing no
+  issue fails the closing-issue test either way — folding one in cannot reach
+  the count. So the by-hand judgement and the script's output differ here, and
+  such a PR's review is dispatched by hand.
 
-**Reviews are the bottleneck, not tickets.** Implementation runs 4-15 min; review
-runs 20-40, because each fans out up to six specialists. On the default path
-**you** run each review, one at a time, so reviews serialize on your own turn and
-the reviewer cap buys no review parallelism at all — those slots hold
-fix-appliers, which do the cheap half (apply, commit, push, file). Five
-implementers still saturate the pipeline within the hour and every later PR
-queues; the queue now forms ahead of the workflow rather than ahead of a slot.
+**Defaults: 2 implementers, 6 reviewers — no hard cap on either.** Reviewer
+slots in use ≈ I·(T_review + 0.94·T_fix)/T_impl ≈ 1.95·I (spec 2026-09-24 § 3
+§3, medians since 2026-08-07: T_impl 19.3 min, T_fix 21.0 min, T_review ~18
+min, 0.94 fix-appliers per review), so at the default about four of the six
+are busy, and an idle slot costs nothing. Re-derive it from the map's guard
+once 20 or more PRs have merged under it, never from one run's rows.
 
-**Re-derived against the full post-#211 population in
-`docs/metrics/member-outcomes.tsv`, not one wave.** A single `run_date` is not
-representative — `run_date=2026-08-10`, the first full wave after #210
-(merged 2026-08-05) and #211 (2026-08-06) landed, gave median implementer
-`wall_s` 428 against median fix-applier (`role=reviewer`) `wall_s` 1190, a
-~2.8x ratio, but pooling every row since is a clearly declining trend, not a
-stable one: since 2026-08-07 (the complete post-#211 population, n=289
-implementer / 302 reviewer) → 1.49x; since 2026-08-28 (n=107/109) → 1.22x;
-since 2026-09-01 (n=62/61) → 1.13x. All three sit at or below the 1.5x ratio
-that would support narrowing, the opposite of the single-wave read. Taking the
-full post-#211 population as the most representative window (largest sample,
-not an outlier wave, not overfit to a narrow recent slice): median implementer
-`wall_s` 905 against median fix-applier `wall_s` 1348.5, a 1.49x ratio — right
-at the 1.5x line, and the narrower, more recent windows above show it
-continuing to fall rather than reverting. That supports narrowing to **2
-implementers / 3 reviewers**. Absent instruction, default is now **2
-implementers / 3 reviewers**, and say why.
-
-**The refill gate is the *review* backlog — never the merge-queue depth.** Backlog
-≥ 2 → stop refilling implementer slots even with pool left; more PRs into a
-review-bound pipeline buys nothing. But a deep `ready-to-merge` queue is *not* that
-signal. Each PR rebases exactly once, when it becomes the candidate, so producing
-more PRs adds no rebases-per-PR — it changes only *when* a given PR is ready.
-(Deeper waves do cost: the last PR in one pays the largest rebase and the longest CI
-cycle. That is an argument for batching a wave, never for idling an implementer.)
+**The review-backlog gate is narrowed, and the merge-queue depth never gates.**
+More PRs into a review-bound pipeline buy nothing, but the pipeline is
+review-bound only when a PR is still owed its review after the tick's own
+dispatches AND no reviewer slot is left for it — `HOLD (review side
+saturated)`. A deep backlog with free slots is a `DISPATCH review` on the same
+tick, never a reason to idle an implementer. A deep `ready-to-merge` queue is
+*not* that signal at all: each PR rebases exactly once, when it becomes the
+candidate, so producing more PRs adds no rebases-per-PR — it changes only
+*when* a given PR is ready.
 
 **Reconcile, do not wait for an event.** "A slot is free and the shortlist is
 non-empty" is a *level* condition — re-derive the deficit on **every** tick,
@@ -2967,8 +2990,8 @@ and never Pull a ticket the shortlist does not hold.
 
 **Do not re-derive this by hand — `fleet-tick.mjs` computes it.** One invocation
 prints per-role `actual/target` and an explicit ACTION with the backlog gate
-above and every row of the table below already applied; the merge-side edges in
-Phase 3 name the flags. The deficit is then *computed, not remembered*, which is
+above and every row of the table below already applied; every wake in Phase 3
+ends in it. The deficit is then *computed, not remembered*, which is
 the whole point: a table you must remember to consult is one you will not
 consult under a merge-side event storm, and that is how implementers reached
 0/target with one approved ticket waiting and ~57 `ready-for-agent` in supply while nobody
@@ -2993,7 +3016,8 @@ A starved implementer queue never stalls the review or merge side.
 
 ## Invariants
 
-- ≤ 5 implementers, ≤ 5 reviewers, ≤ 1 merge bot. Bounds *members*, not live
+- Implementers and review units at their caps (default 2 and 6, no hard cap on
+  either), ≤ 1 merge bot. Caps bound *members* and review units, not live
   agents — members fan out and their children consume slots you never dispatched.
 - A grandchild surfaces as its own task-notification. An unrecognized task-id is
   not a member reporting done.
@@ -3100,7 +3124,7 @@ failures arrive as *wrong findings*, not errors:
   Members report a stalled run to the controller instead of pattern-killing it,
   and the controller re-checks any measurement taken in the window.
 
-  **Do not guess the victim — the blast radius is the machine, not the wave.**
+  **Do not guess the victim — the blast radius is the machine, not the Pull.**
   In that incident the controller reasoned from dispatch scope to "almost
   certainly `impl-<N>`" and told the maintainer so; the named member then proved
   it was not the victim (it had never invoked those files standalone, and its
@@ -3291,6 +3315,14 @@ tokens. `tier=alt` marks the every-5th-Pull member (phase 2), and `excluded ·
 behind-pr:#M | behind-issue:#M` is an Exclusion (phase 1) — a ticket row like
 any other, never a section of its own.
 
+A PR's review is not a member, so it carries its own pair of row tokens,
+written with `row` (**Reviewers**): `review=wf:<runId>` |
+`review=member:review-pr-<n>` | `review=fallback:review-pr-<n>[-b]` at launch,
+settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>`
+when the result lands. A row with `review=` and no `reviewed=` is a review in
+flight, and the tick counts it against the reviewer cap. `ci=<run-id>:<attempt>:<conclusion>`
+and `held-behind:#<lower>` are row tokens the same way (Phase 3).
+
 Plus two append-only lists:
 
 - **filed** (`ledger.mjs filed <issue> <subject>`, checked with `ledger.mjs check
@@ -3387,4 +3419,4 @@ Plus a queue-depth line: shortlist, supply, whether triage was suggested.
 - "`--force` the worktree removal, the PR merged anyway" → merged says nothing
   about uncommitted files, and the reviewer may still be in there.
 - "Reap once at the end of the run" → stale worktrees make phase 0 read merged
-  tickets as taken, so the starvation compounds every wave.
+  tickets as taken, so the starvation compounds with every Pull.

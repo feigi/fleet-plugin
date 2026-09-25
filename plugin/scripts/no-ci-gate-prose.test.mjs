@@ -78,7 +78,7 @@ function bullet(source, startAnchor, endAnchor, label) {
 const SITES = [
   [
     "run-team Phase 3 no-ci edge",
-    () => bullet(RUN_TEAM, '- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "- **Pool empty**", "run-team no-ci edge"),
+    () => bullet(RUN_TEAM, '- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**Every wake ends in the tick.**", "run-team no-ci edge"),
     /label off the reviewer's (own )?verified suite run/i,
     /without it, do not label/i,
   ],

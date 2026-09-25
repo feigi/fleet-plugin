@@ -204,19 +204,21 @@ for (const [name, getSeat] of SEATS) {
   });
 }
 
-// --- AC-1, AC-2 and AC-4, in the controller's own prose ----------------------
+// --- AC-1, AC-2 and AC-4, in the Reviewers section's own prose ----------------
 // This is the seat where the rule is JUSTIFIED rather than dictated, so it is
 // the seat AC-4 binds: the reproduction has to be here or the rule rests on
-// assertion.
+// assertion. Since the fix-applier took over every ruling on the findings
+// (spec 2026-09-24 § 3 §4), the reader it justifies the rule to is the one
+// admitting a refutation — the fix-applier, whose prompt carries the rule.
 const justification = () =>
   between(
     RUN_TEAM,
     "A refutation resting on an injection nothing proved landed is not a refutation",
-    "**When YOU extend a finding to sibling sites",
+    "**Where `testCmd` comes from:**",
     "run-team/SKILL.md Reviewers prose",
   );
 
-test("the controller admits a negative result only with its positive control", () => {
+test("a negative result is admitted only with its positive control", () => {
   assert.match(
     justification(),
     span(

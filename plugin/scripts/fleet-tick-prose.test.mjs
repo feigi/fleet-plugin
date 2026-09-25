@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between as section } from "./prose-pin.mjs";
+import { between as section, markedLine, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -21,63 +21,108 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 // satisfied by incidental prose elsewhere in it, and an unbounded slice runs to
 // EOF where the red-flag list restates half of this vocabulary — enough to keep
 // every assertion below green with the section deleted outright.
-// The reconcile instruction only, ending where the next standing instruction
-// begins. Widened to the whole Phase 3 loop it would be satisfied by the CI
-// bullets' own mentions of reconciling, which say nothing about the script.
-const reconcileBlock = () =>
-  section(RUN_TEAM, "**Run the reconcile on the merge-side edges.**", "**Own the CI waits.**", "run-team reconcile block");
+// The tick instruction only, ending where the next standing instruction
+// begins. Widened to the whole Phase 3 loop it would be satisfied by the wake
+// bullets' own mentions of the tick, which say nothing about the script.
+const tickBlock = () =>
+  section(RUN_TEAM, "**Every wake ends in the tick.**", "**Own the CI waits.**", "run-team tick block");
 
-test("the reconcile block names the script and the flags a caller must pass", () => {
-  const s = reconcileBlock();
+// The six counts a caller used to state (#1803 deleted them, spec 2026-09-24
+// § 6 §1). Any one of them back in the block is a controller told to supply a
+// number the tick now refuses as an unknown flag — exit 2 on every wake.
+const DELETED_FLAGS = ["--implementers", "--reviewers", "--merge-bots", "--pool", "--reviews-ready", "--merge-holds"];
+
+test("the tick block names the script and only the flags it still takes", () => {
+  const s = tickBlock();
   assert.match(s, /fleet-tick\.mjs/);
-  // Every required flag, individually. A block naming the script without them
-  // is unrunnable prose: the script refuses each missing one at exit 2.
-  for (const flag of ["--implementers", "--reviewers", "--merge-bots", "--pool",
-    "--reviews-ready", "--merge-holds"]) {
-    assert.ok(s.includes(flag), `reconcile block does not name ${flag}`);
+  // The three configuration flags that survived, individually: a cap passed
+  // from `$ARGUMENTS` and the review bound are the only things a caller says.
+  for (const flag of ["--implementer-cap", "--reviewer-cap", "--max-reviews"]) {
+    assert.ok(s.includes(flag), `tick block does not name ${flag}`);
+  }
+  // A lookahead after the name, so `--reviewer-cap` never reads as `--reviewers`
+  // and `--pool` never matches inside a longer word.
+  for (const flag of DELETED_FLAGS) {
+    assert.doesNotMatch(s, new RegExp(`${flag}(?![\\w-])`), `tick block still names ${flag}, which fleet-tick.mjs refuses since #1803`);
   }
 });
 
-test("the reconcile block says the live counts are the controller's to state", () => {
-  // Without this a reader hunts for a source the repo does not have, or worse
-  // invents one from the ledger — the guess whose over-count is the #3 stall.
-  assert.match(reconcileBlock(), /refuses rather than\s+defaulting them/);
-  assert.match(reconcileBlock(), /a ledger row is a\s+dispatch/);
+test("the tick block says the tick reads the run itself, and nobody states a count", () => {
+  // Inverted from the caller-stated era. A reader told the counts are theirs to
+  // state hunts for flags that no longer exist; one told nothing hand-edits a
+  // row to make the tick see what it wants. The ledger is the input, written
+  // through ledger.mjs, and a token the tick cannot read is a refusal.
+  const s = tickBlock();
+  assert.match(s, phrase("nobody states a count"));
+  assert.match(s, /`\.fleet\/ledger\.md`/);
+  assert.match(s, /`\.fleet\/shortlist\.json`/);
+  assert.match(s, phrase("refuses rather than guessing"));
+  assert.doesNotMatch(s, /refuses rather than\s+defaulting them/, "the block still says the live counts are the controller's to state");
 });
 
-test("the reconcile block says what the two row-suppressing inputs mean", () => {
-  // Naming the flags is not enough for these two: a caller who reads
-  // `--reviews-ready` as the backlog, or `--merge-holds` as optional, gets back
-  // exactly the non-actionable ACTIONs #590 was filed for. The obligation is
-  // that the block distinguishes them from the label reads the script makes
-  // for itself.
-  const s = reconcileBlock();
-  assert.match(s, /fix-applier\s+applies findings/);
-  assert.match(s, /The backlog is \*\*not\*\* this number/);
-  assert.match(s, /held-behind-#<lower>/);
-  assert.match(s, /moves no label/);
+// The Pair itself, bounded to its own paragraph: ADR 0004's marked-line shape,
+// read line by line rather than by a regex over the block.
+const maxReviewsPair = () =>
+  section(RUN_TEAM, "**`--max-reviews <n>`", "\n\n", "run-team --max-reviews Pair");
+
+test("--max-reviews is a Marked-line Pair: Claude bounds reviews at one, omp runs to the reviewer cap", () => {
+  const region = maxReviewsPair();
+  const claude = markedLine(region, "CLAUDE", "--max-reviews CLAUDE line");
+  const omp = markedLine(region, "OMP", "--max-reviews OMP line");
+  assert.match(claude, phrase("fleet-tick.mjs --max-reviews 1`"));
+  assert.match(omp, /fleet-tick\.mjs`/);
+  assert.doesNotMatch(omp, /--max-reviews/, "the omp line bounds reviews too — the default there is the reviewer cap");
+  // The lift condition is what keeps the Claude bound from reading permanent.
+  assert.match(region, phrase("two concurrent"));
 });
 
-test("the reconcile block admits the edges miss a drained queue, and says whose case that is", () => {
-  // A reader who takes the two edges for the whole cure stops looking for the
-  // drained-queue case they cannot reach. Before #357 that case was deferred and
-  // the block said so; now it has an owner, and the pointer is the part that
-  // must not rot — an admission with nowhere to go is how #3 lost item 2.
-  const s = reconcileBlock();
-  assert.match(s, /neither\s+covers a fully drained queue/);
+test("the record-before-tick table names every wake, each with what it records", () => {
+  // Spec 2026-09-24 § 6 §7. The table IS the edge list now: a wake missing from
+  // it is a wake that records nothing and so is invisible to the tick, which
+  // reads only the ledger. Row by row, each by its wake and its record.
+  const table = section(RUN_TEAM, "| Wake | Record, then tick |", "\n\n", "record-before-tick table");
+  const rows = table.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Wake"));
+  const WAKES = [
+    ["Implementer report", ["verify-sha.sh", "settle impl-<N>=PR#<M>", "=bailed"]],
+    ["Review workflow notification / `review-pr-<n>` report", ["<scratch>/review-<pr>.json", "reviewed=<head>:"]],
+    ["Fix-applier report", ["settle fix-pr-<M>=", "ruled"]],
+    ["Finisher report", ["settle finisher-pr-<M>=labelled"]],
+    ["Label seen (persistent Monitor)", ["nothing to record"]],
+    ["CI run terminal", ["ci=<run-id>:<attempt>:<conclusion>", "finisher gate"]],
+    ["Merge-bot pass report", ["held-behind:#<lower>", "settle merge-bot-<n>=done", "reap.sh --apply"]],
+    ["Drain", ["ledger.mjs drain", "settle impl-<N>=released"]],
+    ["Heartbeat", ["nothing to record"]],
+  ];
+  assert.equal(rows.length, WAKES.length, `the table has ${rows.length} wake rows, not the ${WAKES.length} the spec names`);
+  for (const [wake, records] of WAKES) {
+    const row = rows.find((r) => r.startsWith(`| ${wake} |`));
+    assert.ok(row, `the record-before-tick table has no "${wake}" row`);
+    for (const rec of records) assert.ok(row.includes(rec), `the "${wake}" row no longer records ${rec}`);
+  }
+  // What follows the table: the tick, every printed line acted on, the beat.
+  assert.match(section(RUN_TEAM, "| Heartbeat |", "\n- **", "after the table"), phrase("act on every line it prints, and arm the beat"));
+});
+
+test("the tick block admits no wake covers a drained queue, and says whose case that is", () => {
+  // A reader who takes the wakes for the whole cure stops looking for the
+  // drained-queue case they cannot reach. The pointer is the part that must not
+  // rot — an admission with nowhere to go is how #3 lost item 2.
+  const s = tickBlock();
+  assert.match(s, /none\s+covers a fully drained queue/);
   assert.match(s, /fleet-heartbeat\.mjs/);
 });
 
-// Both merge-side edges, each sliced to its own bullet — the shared vocabulary
+// Both merge-side wakes, each sliced to its own bullet — the shared vocabulary
 // makes a section-wide match worthless here.
-test("the merge-bot-wave-done edge invokes the reconcile", () => {
-  const bullet = section(RUN_TEAM, "- **Merge-bot wave reports done**", "\n- **The run ends", "merge-bot-done edge");
-  assert.match(bullet, /run the reconcile/);
+test("the merge-bot-pass-done wake records, reaps, then ticks", () => {
+  const bullet = section(RUN_TEAM, "- **Merge-bot pass reports done**", "\n- **The run ends", "merge-bot-done wake");
+  assert.match(bullet, /reap\.sh --apply/);
+  assert.match(bullet, /run the tick/);
 });
 
-test("the CI-terminal edge invokes the reconcile", () => {
-  const bullet = section(RUN_TEAM, "- **Monitor: CI run completes**", "\n- **A fix-applier reports", "CI-terminal edge");
-  assert.match(bullet, /run the reconcile/);
+test("the CI-terminal wake runs the tick", () => {
+  const bullet = section(RUN_TEAM, "- **Monitor: CI run completes**", "\n- **A fix-applier reports", "CI-terminal wake");
+  assert.match(bullet, /run the tick/);
 });
 
 // The queue-depth table's own slice, ending at the `/triage` note that follows
@@ -116,9 +161,15 @@ test("the queue-depth table's empty row suggests /triage and asks nobody to tick
 test("the review-backlog definition states what the script actually counts", () => {
   // The gate's input. Left as the narrow definition alone, a controller reading
   // a HOLD cannot tell an over-count from a real review-bound pipeline.
-  const def = section(RUN_TEAM, "- **review backlog**", "\n\n**Reviews are the bottleneck", "review-backlog definition");
+  const def = section(RUN_TEAM, "- **review backlog**", "\n\n**Defaults: 2 implementers, 6 reviewers", "review-backlog definition");
   assert.match(def, /open PR without `ready-to-merge`/);
-  assert.match(def, /earlier than the definition above, never\s+later/);
+  // The review state now lives on the ledger (spec 2026-09-24 § 3 §7), so the
+  // count is exact rather than a wider read held "earlier, never later": a PR
+  // with a `review=` token is under review or reviewed, and one settled
+  // `=failed` is owed a review again.
+  assert.match(def, /no\s+`review=`\s+token/);
+  assert.match(def, /`=failed`/);
+  assert.doesNotMatch(def, /lives in your head/, "the definition still says per-PR review state lives in the controller's head — the ledger records it");
   // Both halves of the closing-issue clause. The predicate alone is a rule a
   // reader can only obey; the reason is what stops the next narrowing pass
   // from dropping it as a stray filter, since a PR nothing will ever review
@@ -186,7 +237,7 @@ const heartbeatBlock = () =>
 test("the event loop tells the controller to arm the beat instead of ending its turn", () => {
   // The entry point. Every word of the block below is unreachable if the loop
   // never says to run it, which is exactly how item 2 of #3 went missing.
-  const bullet = section(RUN_TEAM, "- **Nothing to do right now**", "- **Implementer completes**",
+  const bullet = section(RUN_TEAM, "- **Nothing to do right now**", "- **Implementer report**",
     "nothing-to-do event");
   assert.match(bullet, /do not end your turn/);
 });

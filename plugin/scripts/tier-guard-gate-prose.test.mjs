@@ -1,16 +1,22 @@
-// #528. Phase 3's pool-empty event is the only place in the loop that dispatches
-// phase 2's tier guard, so whatever it says the gate is IS the gate. It used to
-// state one of its own — "once three or more `class=routine` PRs have been ruled
-// since the last check" — which failed twice over: it is a second threshold
-// beside phase 2's, free to drift from it, and it keys on a set nothing on disk
-// records. A grep for any last-check marker over `skills` and `docs` returned
-// only that sentence itself, and `docs/metrics/tier-outcomes.tsv` has no
-// check-state column, so no controller could evaluate it and no marker would
-// survive a compaction.
+// #528. Phase 3 is the only place in the loop that dispatches phase 2's tier
+// guard, so whatever it says the gate is IS the gate. It used to state one of
+// its own — "once three or more `class=routine` PRs have been ruled since the
+// last check" — which failed twice over: it is a second threshold beside phase
+// 2's, free to drift from it, and it keys on a set nothing on disk records. A
+// grep for any last-check marker over `skills` and `docs` returned only that
+// sentence itself, and `docs/metrics/tier-outcomes.tsv` has no check-state
+// column, so no controller could evaluate it and no marker would survive a
+// compaction.
 //
 // The same document already ruled against this shape one phase earlier: the
 // phase-2 guard rejects concluding inside one run and fires on the accumulated
 // file instead. This pins phase 3 to that same floor.
+//
+// WHERE THE GUARD RUNS (#1805, ADR 0005 as amended by ADR 0012). Its trigger
+// was the pool-empty event — "Pool empty → phase 0 again" — until the slot
+// loop retired both the pool and phase 0's re-entry. It now runs at every alt
+// Pull, before the alternate tier is chosen: the one dispatch the floor can
+// still change. Every pin below was moved with it, unchanged in what it bans.
 //
 // HOW THIS FILE WAS WRONG THE FIRST TIME (PR #1122 review, dimensions
 // `correctness` and `tests`, both reproduced by refuters). It pinned the duty as
@@ -51,15 +57,16 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 // Paragraph-tight, and bounded at both ends: widen this to the phase and the
 // tier-guard prose living elsewhere in phase 3 satisfies the pins on its own.
 // The start anchor is single-hit, so the slice cannot silently start elsewhere:
-//   grep -c -- '- \*\*Pool empty\*\*' skills/run-team/SKILL.md → 1
+//   grep -c -- '\*\*Tier guards under Pull\.\*\*' skills/run-team/SKILL.md → 1
+const START = "**Tier guards under Pull.**";
 const gate = (text = RUN_TEAM) =>
-  between(text, "- **Pool empty**", "**Run the reconcile on the merge-side edges.", "run-team phase 3 pool-empty event");
+  between(text, START, "**`--max-reviews <n>`", "run-team phase 3 tier guard under Pull");
 
 // The duty as a phrase, not as the words it is built from. `phrase` puts `\s+`
 // at every word gap, so a hard wrap landing anywhere inside it is fine, while
 // any rewriting of the claim — negation, rescoping, restatement — is not.
 const DUTY = phrase(
-  "Run phase 2's tier guard here, on the floor phase 2 defines over the accumulated `docs/metrics/tier-outcomes.tsv` and on no gate of this event's own",
+  "Run phase 2's tier guard before choosing the alternate tier, on the floor phase 2 defines over the accumulated `docs/metrics/tier-outcomes.tsv` and on no gate of this Pull's own",
 );
 // DUTY pins the imperative with its leading capital, so a mid-sentence "…do not
 // run phase 2's tier guard here" already fails it. This is the belt, for a
@@ -106,23 +113,23 @@ const PINS = {
 };
 const firing = (slice) => Object.keys(PINS).filter((name) => PINS[name](slice));
 
-test("the pool-empty event dispatches phase 2's tier guard against phase 2's floor", () => {
+test("every alt Pull runs phase 2's tier guard against phase 2's floor", () => {
   const slice = gate();
   // Positive control against a vacuous pin: a stale start anchor that matched an
   // empty slice would pass every doesNotMatch below while asserting nothing.
-  assert.ok(slice.length > "- **Pool empty**".length, "the pool-empty slice is no longer than its anchor — the extractor is broken, not the docs");
-  assert.match(slice, DUTY, "the pool-empty event no longer states, word for word, that it runs phase 2's tier guard on phase 2's accumulated floor and on no gate of its own — reworded on purpose? update DUTY. Do not delete it");
-  assert.doesNotMatch(slice, NEGATED, "the pool-empty event now says NOT to run the guard it is the only step that dispatches");
+  assert.ok(slice.length > START.length, "the tier-guard slice is no longer than its anchor — the extractor is broken, not the docs");
+  assert.match(slice, DUTY, "the alt Pull no longer states, word for word, that it runs phase 2's tier guard on phase 2's accumulated floor and on no gate of its own — reworded on purpose? update DUTY. Do not delete it");
+  assert.doesNotMatch(slice, NEGATED, "the alt Pull now says NOT to run the guard it is the only step that dispatches");
 });
 
-test("the pool-empty gate states no count of its own", () => {
+test("the alt-Pull gate states no count of its own", () => {
   // The drift direction: a second threshold here is a second definition, and
   // nothing makes the two move together.
-  assert.doesNotMatch(countable(gate()), OWN_COUNT, "the pool-empty gate has grown a count of its own beside phase 2's floor");
+  assert.doesNotMatch(countable(gate()), OWN_COUNT, "the alt-Pull gate has grown a count of its own beside phase 2's floor");
 });
 
-test("the pool-empty gate keys on nothing that has to be remembered between runs", () => {
-  assert.doesNotMatch(gate(), UNPERSISTED_SET, "the pool-empty gate names a set nothing on disk records");
+test("the alt-Pull gate keys on nothing that has to be remembered between runs", () => {
+  assert.doesNotMatch(gate(), UNPERSISTED_SET, "the alt-Pull gate names a set nothing on disk records");
 });
 
 // The refuse direction. Entry one is the sentence #528 actually removed; the
@@ -132,13 +139,13 @@ test("the pool-empty gate keys on nothing that has to be remembered between runs
 // does not bite is green — and this file's prose wraps, so every search here is
 // a wrap-tolerant `phrase` rather than the line breaks it has today.
 const append = (sentence) => (text) =>
-  text.replace("- **Pool empty**", `- **Pool empty** ${sentence}\n- **Pool empty**`);
+  text.replace(START, `${START} ${sentence}\n\n${START}`);
 // Built with `phrase`, not written out with the wraps the file happens to have
-// today: a fixture that hardcodes "\n  " applies nothing the moment someone
+// today: a fixture that hardcodes "\n" applies nothing the moment someone
 // reflows the paragraph, and its own notEqual guard then reddens a reflow the
 // accept test at the bottom promises is green.
-const PREDICATE_TAIL = phrase("on the floor phase 2 defines over the accumulated `docs/metrics/tier-outcomes.tsv` and on no gate of this event's own");
-const IMPERATIVE = phrase("Run phase 2's tier guard here");
+const PREDICATE_TAIL = phrase("on the floor phase 2 defines over the accumulated `docs/metrics/tier-outcomes.tsv` and on no gate of this Pull's own");
+const IMPERATIVE = phrase("Run phase 2's tier guard before choosing the alternate tier");
 
 const mutants = [
   ["the incremental gate #528 removed comes back", ["count", "unpersisted"],
@@ -146,7 +153,7 @@ const mutants = [
   ["phase 2's floor is restated here in a paraphrase", ["duty", "count"],
     (text) => text.replace(PREDICATE_TAIL, "on the floor over the accumulated `docs/metrics/tier-outcomes.tsv`: it holds at least three `class=routine` PRs spanning two distinct `run_date`s")],
   ["the duty is negated outright", ["duty", "negation"],
-    (text) => text.replace(IMPERATIVE, "Do NOT run phase 2's tier guard here")],
+    (text) => text.replace(IMPERATIVE, "Do NOT run phase 2's tier guard before choosing the alternate tier")],
   ["the floor is rescoped to the run in front of the controller", ["duty"],
     (text) => text.replace(PREDICATE_TAIL, "on the floor phase 2 defines over this run's rows only rather than the accumulated `docs/metrics/tier-outcomes.tsv` it was written for")],
   ["an incremental key comes back in fresh wording", ["unpersisted"],
@@ -158,22 +165,22 @@ const mutants = [
 for (const [what, expected, mutate] of mutants) {
   test(`the pins redden when ${what}`, () => {
     const mutated = mutate(RUN_TEAM);
-    assert.notEqual(mutated, RUN_TEAM, `the "${what}" fixture no longer matches the bullet and applied nothing — update the fixture, do not delete it`);
+    assert.notEqual(mutated, RUN_TEAM, `the "${what}" fixture no longer matches the paragraph and applied nothing — update the fixture, do not delete it`);
     assert.deepEqual(firing(gate(mutated)), expected, `the "${what}" fixture did not fire exactly the pins it is here to exercise`);
   });
 }
 
-test("reflowing the bullet and editing it elsewhere stays green", () => {
+test("reflowing the paragraph and editing it elsewhere stays green", () => {
   // The accept direction. A pin that reddens on any edit to the section has
   // discriminated nothing, and would be deleted by whoever next reflows this
   // paragraph. `between` returns raw text, so every pin above must tolerate a
-  // line break landing anywhere in the prose it reads — this flattens all of
-  // them at once — and `phase 1` must not read as a count.
-  const bullet = gate();
-  const benign = RUN_TEAM.replace(bullet, () =>
-    bullet
-      .replace(/\n {2}/g, " ")
+  // line break landing anywhere in the prose it reads — this joins every wrap
+  // inside it at once — and `phase 1` must not read as a count.
+  const para = gate();
+  const benign = RUN_TEAM.replace(para, () =>
+    para
+      .replace(/([^\n])\n(?=[^\n])/g, "$1 ")
       .replace("Nothing else in the loop owns it.", "Nothing else in the loop owns it. Re-enter phase 1 for each slot it opens."));
-  assert.notEqual(benign, RUN_TEAM, "the benign-edit fixture no longer matches the bullet — update it");
+  assert.notEqual(benign, RUN_TEAM, "the benign-edit fixture no longer matches the paragraph — update it");
   assert.deepEqual(firing(gate(benign)), [], "a reflow plus an unrelated edit reddened a pin — the pins are over-tight, not the docs wrong");
 });

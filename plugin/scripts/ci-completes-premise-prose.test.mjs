@@ -21,7 +21,7 @@
 //
 // The ACCEPT side is the half a new gate breaks: "the fix-applier has
 // reported" must not hold a PR that never got one. Two such PRs exist — the
-// **Review slot free** bullet's nothing-survived case, and the sibling
+// **A review result lands** bullet's nothing-survived case, and the sibling
 // **A fix-applier reports `no-op`** bullet, whose head's CI edge has already
 // fired and will never fire again. Both are pinned as input the gate must
 // accept.
@@ -60,7 +60,7 @@ const noOpEdge = () =>
 // below and the accept-side assertion passes off the very text it is meant to
 // be independent of.
 const reviewSlotEdge = () =>
-  between(RUN_TEAM, "- **Review slot free, PR queued**", "- **Reviewer labels a PR**", "run-team review-slot edge");
+  between(RUN_TEAM, "- **A review result lands**", "- **Monitor: `ready-to-merge` appears**", "run-team review-result wake");
 
 // The second site stating the same gate, in the narrative rather than the
 // loop. Its start anchor is the paragraph opener; its end anchor is the

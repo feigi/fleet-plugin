@@ -23,11 +23,11 @@
 //            attached — fleet-tick fires on live edges, not a schedule, so it
 //            has no promise to be judged against the way `beat` does. Exists
 //            because `beat` is only written when the queue drains ("beat when
-//            there is nothing to do" — SKILL.md); a busy wave can run for
+//            there is nothing to do" — SKILL.md); a busy stretch can run for
 //            longer than `beat`'s own grace window while fleet-tick itself
 //            keeps firing on every completion, and without this key that
 //            healthy busy run reads as a dead one the moment the OLD beat
-//            ages past the interval it recorded before the wave started.
+//            ages past the interval it recorded before the stretch started.
 //
 // One writer per key. A key both scripts wrote would need locking to be
 // correct, and neither script is in a position to hold one.
@@ -220,7 +220,7 @@ export function writeState(path, name, prev, patch) {
     ...(prev.beat ? { beat: prev.beat } : {}),
     // Same reason, same shape: fleet-heartbeat patches `elapsed`/`beat` on
     // every hold and would otherwise erase fleet-tick's `ticked` the first
-    // time a heartbeat lands after a busy wave.
+    // time a heartbeat lands after a busy stretch.
     ...(prev.ticked ? { ticked: prev.ticked } : {}),
     ...patch,
   };
@@ -287,7 +287,7 @@ export const DEFAULT_CEILING_S = 1200;
 //   beating   seen within the interval it promised, plus grace — OR a recent
 //             `ticked` covers for it. `beat` is only refreshed when the queue
 //             drains (SKILL.md: "beat when there is nothing to do"), so a
-//             busy wave that outlasts `beat`'s own grace window is not a dead
+//             busy stretch that outlasts `beat`'s own grace window is not a dead
 //             run; fleet-tick's own edge-triggered invocations are the other
 //             liveness signal for exactly that case (#1597 follow-up).
 //   stopped   a reason was recorded. Reported whatever the age, because a
