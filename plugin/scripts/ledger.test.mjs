@@ -2216,7 +2216,8 @@ test("read hands a pipe the whole ledger — a truncated payload must never read
   // a parsing consumer loses every key, the survivors included, because the
   // object is unterminated. Comparing the whole object also catches a key the
   // payload should not carry, which the per-key assertions let through.
-  assert.deepEqual(payload, { rows, filed, ruled });
+  // The fixture predates `## Dispatched` and `## Drain`, so both read empty.
+  assert.deepEqual(payload, { rows, filed, ruled, dispatched: [], drain: null });
 });
 
 // The same mechanism in the three siblings. Their payloads echo the free-text
@@ -2286,6 +2287,8 @@ test("an ordinary ledger still round-trips through a pipe, and an unknown subcom
     rows: ["#7 impl-7 · class=routine"],
     filed: ["#8 a short filed subject"],
     ruled: ["#9 MERGE · green"],
+    dispatched: [],
+    drain: null,
   });
 
   // Nothing in this suite spawned an unknown subcommand before, so the die()
@@ -2423,7 +2426,7 @@ test("check hands a pipe its whole not-filed payload, and still reaches the trac
 // same flag. `check` is the fourth and was already correct; the tests above
 // pin it, and hoisting the guard leaves its message and its exit code alone.
 
-const READ_EMPTY = { rows: [], filed: [], ruled: [] };
+const READ_EMPTY = { rows: [], filed: [], ruled: [], dispatched: [], drain: null };
 
 test("read --require-file refuses an absent ledger, naming the path, with no payload (#816)", (t) => {
   const { dir, cli } = cliFixture(t);

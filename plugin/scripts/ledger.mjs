@@ -7,12 +7,23 @@
 // Rows are rewritten in place, one per ticket. `filed` and `ruled` are
 // append-only, because their whole purpose is to outlive the reasoning that
 // produced them.
+//
+// `dispatch`, `settle` and `drain` (#1799) exist so a reader can derive every
+// liveness count from this file alone, rather than from row text a controller
+// typed by hand: `dispatch` writes a member's live token onto its row and
+// appends it to `## Dispatched`, `settle` rewrites that token to
+// `<member>=<outcome>` in both places, and `drain` writes the one marker that
+// stops supply. The token grammar is
+// ledger-grammar.mjs's. `## Dispatched` gains an entry per dispatch and never
+// loses or reorders one — settling annotates an entry in place — which is what
+// lets `merge-bot-<n>` be counted from it.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot } from "./ledger-grammar.mjs";
 
 const NAME = "ledger";
 
@@ -212,11 +223,13 @@ const requireFile = requireFileIdx !== -1;
 if (requireFileIdx !== -1) argv.splice(requireFileIdx, 1);
 
 const [cmd, ...rest] = argv;
-if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|filed|ruled|check|read [args]");
+if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|filed|ruled|check|read|dispatch|settle|drain [args]");
 
 const ROWS = "## Rows";
+const DISPATCHED = "## Dispatched";
 const FILED = "## Filed";
 const RULED = "## Ruled";
+const DRAIN = "## Drain";
 
 // What a section header looks like on disk, defined once because a second
 // copy drifts: the parser slices sections with it, and the readability flag
@@ -369,7 +382,7 @@ function refuseStrayInId(value, what) {
 let ledgerParsed = false;
 
 function load() {
-  if (!existsSync(file)) return { rows: [], filed: [], ruled: [] };
+  if (!existsSync(file)) return { rows: [], filed: [], ruled: [], dispatched: [], drain: null };
   let text;
   try {
     text = readFileSync(file, "utf8");
@@ -389,14 +402,35 @@ function load() {
   // Set here, past the read and the early return, so it can only be true of a
   // file this function actually opened and recognised as a ledger.
   ledgerParsed = headerRe(FILED).test(text);
-  return { rows: section(ROWS), filed: section(FILED), ruled: section(RULED) };
+  // A ledger written before #1799 has neither `## Dispatched` nor `## Drain`,
+  // which reads as nothing dispatched through `dispatch` and no drain — the
+  // truth about that file, not a default standing in for it.
+  const drainEntries = section(DRAIN);
+  // One marker per run: the `drain` command's own `created` guard refuses a
+  // second call rather than overwrite the standing reason. A second entry
+  // reaching this file some other way (hand edit, merge, an older writer) is
+  // the same invariant broken on disk, and narrowing to `[0]` here would
+  // drop it with no warning at all — the read-side half of that guard.
+  if (drainEntries.length > 1) {
+    die(`${file} has ${drainEntries.length} \`## Drain\` entries — one marker per run`);
+  }
+  return {
+    rows: section(ROWS), filed: section(FILED), ruled: section(RULED),
+    dispatched: section(DISPATCHED), drain: drainEntries[0] ?? null,
+  };
 }
 
+// `## Drain` is written only once there is a marker to hold: an empty section
+// under that name would read, to anyone scanning the file by eye, as a run
+// that is draining.
 function save(d) {
+  const list = (entries) => entries.map((r) => `- ${escapeText(r)}`).join("\n");
   const out =
-    `# Fleet run ledger\n\n${ROWS}\n\n` + d.rows.map((r) => `- ${escapeText(r)}`).join("\n") +
-    `\n\n${FILED}\n\n` + d.filed.map((r) => `- ${escapeText(r)}`).join("\n") +
-    `\n\n${RULED}\n\n` + d.ruled.map((r) => `- ${escapeText(r)}`).join("\n") + "\n";
+    `# Fleet run ledger\n\n${ROWS}\n\n` + list(d.rows) +
+    `\n\n${DISPATCHED}\n\n` + list(d.dispatched) +
+    `\n\n${FILED}\n\n` + list(d.filed) +
+    `\n\n${RULED}\n\n` + list(d.ruled) +
+    (d.drain === null ? "" : `\n\n${DRAIN}\n\n` + list([d.drain])) + "\n";
   try {
     mkdirSync(dirname(file), { recursive: true });
     // Write to a sibling temp file and rename over the target. rename is
@@ -515,8 +549,27 @@ if (cmd === "read") {
   console.log(JSON.stringify({ pr, decision, total: data.ruled.length }));
 } else if (cmd === "check") {
   runCheck();
+} else if (cmd === "dispatch") {
+  runDispatch();
+} else if (cmd === "settle") {
+  runSettle();
+} else if (cmd === "drain") {
+  // One marker per run. A second `drain` — a replacement controller that
+  // cannot tell whether its predecessor got this far — is answered with the
+  // standing marker at exit 0, not by overwriting the reason it records.
+  // Trimmed because load() trims every entry it reads back.
+  const reason = rest.join(" ").trim();
+  if (!reason) die('usage: ledger.mjs drain "<reason>"');
+  const created = data.drain === null;
+  if (created) {
+    data.drain = reason;
+    save(data);
+  } else {
+    console.error(`    already draining: ${data.drain}`);
+  }
+  console.log(JSON.stringify({ drain: data.drain, created }));
 } else {
-  die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check or read`);
+  die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check, read, dispatch, settle or drain`);
 }
 
 // `check` alone of the subcommands leaves its arm early: the already-filed
@@ -1108,4 +1161,208 @@ function runCheck() {
   // ~230 KB against a four-word argv arrived cut at exit 0, the "clean, safe
   // to file" signal.
   process.exitCode = verdict === "tracker-hit" ? 3 : 0;
+}
+
+// ── dispatch / settle (#1799) ────────────────────────────────────────────────
+//
+// Hoisted beside runCheck() for the same reason: each has several refusals
+// ahead of its one write, and the chain above stays the file's spine. Every
+// helper below is a function declaration, not a `const`, because the chain
+// calls into them before execution ever reaches this line.
+
+// A row's key is its first word, `#<ticket>` — the same lookup `row` rewrites by.
+function rowKey(r) {
+  return r.split(/\s/)[0];
+}
+
+// A row's PR is its first `PR#<n>` mention, compute-board.mjs parseRow()'s own
+// reading, so the row a PR-bound member lands on is the card the cockpit shows
+// that PR on. It finds both the `→ PR#346` arrow and the implementer's settled
+// `impl-324=PR#346` token.
+function rowPr(r) {
+  const m = /\bPR\s*#(\d+)\b/.exec(r);
+  return m ? Number(m[1]) : null;
+}
+
+// Whether a row carries the member's token — live only, settled only, or
+// either when `live` is not given.
+function carries(row, name, live) {
+  return memberTokens(row).some((t) => t.name === name && (live === undefined || (t.outcome === null) === live));
+}
+
+// The row a member's token belongs on: an implementer's is its ticket's row; a
+// PR-bound member's is the row whose PR is its PR, else one keyed by that PR's
+// own number (a PR this run's implementers did not open). -1 when there is
+// none yet. A merge bot works no ticket and never has one.
+function memberRowIndex(member) {
+  if (member.bound === null) return -1;
+  if (member.bound === "pr") {
+    const i = data.rows.findIndex((r) => rowPr(r) === member.number);
+    if (i !== -1) return i;
+  }
+  return data.rows.findIndex((r) => rowKey(r) === `#${member.number}`);
+}
+
+function unknownMember(name) {
+  return `unknown member '${name}' — expected impl-<N>, fix-pr-<M> or finisher-pr-<M> (a -b replacement suffix allowed), or merge-bot-<n>`;
+}
+
+// `## Dispatched` gains an entry per dispatch and never loses or reorders one
+// (this file's header comment states the invariant `settle` and `nextMergeBot`
+// both rely on). The exact-name lookups in runDispatch() and runSettle() below
+// used to key off `parseToken(e)?.name`, which reads a token this grammar
+// cannot parse the same as "no match" — silently treating a corrupted entry as
+// an absent member and letting a dispatch or settle proceed as though nothing
+// were there (measured: a malformed row let a duplicate dispatch through).
+// Refuse loudly, naming the entry, before either lookup runs.
+function refuseMalformedDispatched() {
+  const bad = data.dispatched.find((e) => parseToken(e) === null);
+  if (bad !== undefined) {
+    die(`## Dispatched has an entry '${bad}' this grammar cannot parse — fix the ledger by hand before dispatch or settle can trust it`);
+  }
+}
+
+function runDispatch() {
+  const usage = "usage: ledger.mjs dispatch <ticket|pr> <member>, or dispatch merge-bot";
+  if (rest.length === 0 || rest.length > 2) die(usage);
+  const [key, name] = rest.length === 2 ? rest : [null, rest[0]];
+  // The id-slot rule `row`/`filed`/`ruled` apply, on whichever slot leads.
+  refuseStrayInId(key ?? name, key === null ? "a member name" : "a ticket or PR number");
+  // Read ahead of every lookup below that trusts `## Dispatched` by name,
+  // including `nextMergeBot()`'s own read of it.
+  refuseMalformedDispatched();
+
+  // `merge-bot` bare is the merge-bot case of this command (spec § 4 item 2,
+  // which § 6 folds `dispatched` into): the ledger names the bot, 1 + the
+  // merge-bot entries already in `## Dispatched`, so the controller never
+  // counts. An explicit `merge-bot-<n>` is accepted only when it is that one.
+  const member = parseMember(name === "merge-bot" ? nextMergeBot(data.dispatched) : name);
+  if (!member) die(unknownMember(name));
+  if (member.bound === null) {
+    if (key !== null) die(`merge bots work no ticket or PR — ${usage}`);
+    const next = nextMergeBot(data.dispatched);
+    if (member.name !== next) die(`${member.name} is not next — the next merge bot this run is ${next}; \`dispatch merge-bot\` names it`);
+  } else if (key === null) {
+    die(`${member.name} works a ticket or PR — ${usage}`);
+  }
+  const keyNum = key === null ? null : key.replace(/^#/, "");
+  if (keyNum !== null && !isDigits(keyNum)) die(`'${key}' is not a ticket or PR number`);
+
+  // Draining stops supply and nothing else: fix-appliers, finishers and merge
+  // bots keep going until the open PRs are merged (spec § 6 §5). Read from
+  // the file, so a replacement controller that never saw the drain is held by
+  // it all the same.
+  if (member.family === "impl" && data.drain !== null) {
+    die(`the run is draining (${data.drain}) — no implementer dispatch; drain stops supply`);
+  }
+
+  // One token per member for the whole run. A settled token on a row counts
+  // too — a `row`-written record the ledger never saw dispatched.
+  const settledOnRow = data.rows.flatMap(memberTokens).find((t) => t.name === member.name && t.outcome !== null);
+  const prior =
+    data.dispatched.find((e) => parseToken(e).name === member.name) ??
+    (settledOnRow && `${settledOnRow.name}=${settledOnRow.outcome}`);
+  if (prior !== undefined) {
+    die(`${member.name} was already dispatched this run (${prior}) — a replacement takes a name of its own (a -b, -c … suffix)`);
+  }
+
+  // A replacement (`-b`, `-c` …) works the same ticket or PR as its
+  // predecessor: two live tokens for one family+number would double-count
+  // liveness ("live implementers = unsettled impl- tokens", spec § 6 §2).
+  // Checked across both places a token can be live — `## Dispatched` and a
+  // row `row` wrote directly — so the refusal holds regardless of which one
+  // last wrote it.
+  const liveSibling = [...data.dispatched.map(parseToken), ...data.rows.flatMap(memberTokens)]
+    .find((t) => t.family === member.family && t.number === member.number && t.name !== member.name && t.outcome === null);
+  if (liveSibling) {
+    die(`${liveSibling.name} is still live — \`settle ${liveSibling.name} killed\` (or its real outcome) before dispatching ${member.name}`);
+  }
+
+  let i = -1;
+  if (member.bound === "ticket") {
+    if (Number(keyNum) !== member.number) die(`${member.name} works ticket #${member.number}, not #${keyNum}`);
+    i = memberRowIndex(member);
+  } else if (member.bound === "pr") {
+    if (Number(keyNum) === member.number) {
+      i = memberRowIndex(member);
+    } else {
+      // `<ticket|pr>`: the ticket whose row carries this PR names it as well.
+      i = data.rows.findIndex((r) => rowKey(r) === `#${Number(keyNum)}`);
+      if (i === -1 || rowPr(data.rows[i]) !== member.number) {
+        die(`${member.name} works PR #${member.number}, and row #${keyNum} carries no PR#${member.number}`);
+      }
+    }
+  }
+
+  let line = null;
+  const created = member.bound !== null && i === -1;
+  if (created) {
+    line = `#${member.number} ${member.name}`;
+    data.rows.push(line);
+  } else if (i !== -1) {
+    // A row `row` already wrote the live token into (SKILL.md's phase 2
+    // does) keeps it as it is rather than gaining a second copy.
+    const row = data.rows[i];
+    line = carries(row, member.name, true) ? row : `${row} · ${member.name}`;
+    data.rows[i] = line;
+  }
+  data.dispatched.push(member.name);
+  save(data);
+  console.error(`    dispatched ${member.name}`);
+  console.log(JSON.stringify({
+    member: member.name, ticket: line === null ? null : rowKey(line), line, created, total: data.dispatched.length,
+  }));
+}
+
+function runSettle() {
+  const usage = "usage: ledger.mjs settle <member> <outcome>";
+  // `settle impl-412 PR#420`, or the one token it writes — `settle
+  // impl-412=PR#420` — which is how the spec's record-before-tick table
+  // spells every settlement.
+  if (!(rest.length === 2 || (rest.length === 1 && rest[0].includes("=")))) die(usage);
+  refuseStrayInId(rest[0], "a member name");
+  const parsed = parseToken(rest.length === 2 ? `${rest[0]}=${rest[1]}` : rest[0]);
+  if (!parsed) die(unknownMember(rest[0].split("=")[0]));
+  if (parsed.error) die(`${parsed.name}: ${parsed.error}`);
+  const { name, outcome } = parsed;
+  const token = `${name}=${outcome}`;
+  // Same guard as runDispatch(): a `## Dispatched` entry this grammar cannot
+  // parse must refuse the lookup below, not read as "not this member" and
+  // let settle proceed against a corrupted section.
+  refuseMalformedDispatched();
+
+  const di = data.dispatched.findIndex((e) => parseToken(e).name === name);
+  const entry = di === -1 ? null : parseToken(data.dispatched[di]);
+  const settled = [entry, ...data.rows.flatMap(memberTokens).filter((t) => t.name === name)]
+    .filter((t) => t !== null && t.outcome !== null);
+  const other = settled.find((t) => t.outcome !== outcome);
+  if (other) die(`${name} is already settled as ${other.outcome} — a settled member stays settled; a replacement takes a name of its own`);
+
+  const liveRows = data.rows.flatMap((r, i) => (carries(r, name, true) ? [i] : []));
+  const liveEntry = entry !== null && entry.outcome === null;
+  const payload = (i, changed) => ({
+    member: name, outcome, ticket: i === -1 ? null : rowKey(data.rows[i]), line: i === -1 ? null : data.rows[i], changed,
+  });
+  if (!liveEntry && liveRows.length === 0) {
+    if (settled.length === 0) die(`no live ${name} in the ledger — \`dispatch\` it first`);
+    // The same outcome again: already on record, so nothing is written.
+    console.log(JSON.stringify(payload(data.rows.findIndex((r) => carries(r, name)), false)));
+    return;
+  }
+
+  // A live token `row` wrote is settled like one `dispatch` wrote; `##
+  // Dispatched` only records what `dispatch` did.
+  if (liveEntry) data.dispatched[di] = token;
+  for (const i of liveRows) data.rows[i] = data.rows[i].split(/(\s+)/).map((w) => (w === name ? token : w)).join("");
+  let i = liveRows[0] ?? -1;
+  if (i === -1) {
+    // Dispatched, but a later whole-line `row` rewrote the row without its
+    // token: put the settled one back, so the row a human reads agrees with
+    // `## Dispatched`.
+    i = memberRowIndex(parsed);
+    if (i !== -1 && !carries(data.rows[i], name)) data.rows[i] = `${data.rows[i]} · ${token}`;
+  }
+  save(data);
+  console.error(`    settled ${token}`);
+  console.log(JSON.stringify(payload(i, true)));
 }
