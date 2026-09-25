@@ -309,6 +309,40 @@ const EXCLUDE =
 // Measured over 24 fixtures on jq-1.7.1-apple and gojq 0.12.19: zero splits.
 // candidates.test.mjs pins the rows that used to split, on both engines, and
 // proves which engine each gated test actually reached.
+//
+// NATIVE EDGES (#1741). `d` is the UNION of the body scan above and the
+// numbers on the issue's native "blocked by" edges, which ride the same
+// query as gh's `blockedBy` field — no extra round trip, the cost #58
+// deferred them on — merged and sorted by the final `unique`. Union, not
+// replacement: to-tickets still writes blockers only as body text, and a
+// hand-written body can name a blocker nobody wired as an edge, so dropping
+// the scan would silently un-block both. The edges close the opposite miss:
+// #593's body chains `**#531**` behind a parenthetical the scan cannot
+// cross, and only its native edge carries #531. `d` stays RAW — a closed
+// blocker's number is kept although the edge carries its state, exactly as
+// the scan keeps one, because the consumers (run-team / next-ticket step 2)
+// judge openness and a `d` whose two halves meant different things would
+// be worse than either. Only `blockedBy` counts: `parent`/`subIssues` are
+// hierarchy, not blocking, and are not fetched. A missing or null
+// `blockedBy` contributes nothing, so an issue with no edges reduces to
+// exactly the body scan's `d`. `d` is bare numbers, so an edge to ANOTHER
+// repository's issue would read as this repo's #N — measured 2026-09-25:
+// none exists here (0 of 65 edges).
+//
+// `blockers` refuses rather than truncating. gh fetches the edges as
+// `blockedBy(first:50)` (read off `GH_DEBUG=api` on gh 2.100.0) and GitHub
+// caps each relationship type at 50 per issue, so `nodes` arrives whole
+// today — measured 2026-09-25 across every issue in this repo, open and
+// closed: `totalCount` equals `nodes | length` on all 37 issues with edges,
+// the most on one being 7. If either constant moves, a longer list arrives
+// cut short and `d` drops blockers with nothing said: the silent cap
+// refuseIfCapped() refuses for the list as a whole, here for one row. So
+// `error()` fails the whole query instead — gh exits non-zero with the
+// message and query() dies at exit 2, "the query broke" — because a blocker
+// list is the one input an admission gate must never read short.
+// `blockedBy` is a gh 2.94.0 field. gh refuses a `--json` field it does not
+// know (`Unknown JSON field`, exit 1 — measured on 2.100.0 with a made-up
+// one), so an older gh dies at exit 2 here rather than running without edges.
 const JQ =
   'def armed: test("(?i)^#{1,6}[ \\\\t]+\\\\**((?:depends on|blocked by|requires)(?:[^\\\\p{L}\\\\p{M}\\\\p{N}_]|$)|dependenc(?:y|ies)\\\\**:?\\\\**[\\\\t\\\\f\\\\r \\\\p{Zs}]*$)");\n' +
   '\n' +
@@ -341,9 +375,16 @@ const JQ =
   '  | map(ltrimstr("#") | tonumber)\n' +
   '  | unique;\n' +
   '\n' +
+  'def blockers:\n' +
+  '  (.blockedBy.nodes // []) as $nodes\n' +
+  '  | if (.blockedBy.totalCount // 0) > ($nodes | length)\n' +
+  '    then error("#\\(.number): blockedBy lists \\($nodes | length) of \\(.blockedBy.totalCount) blockers, so d would miss the rest")\n' +
+  '    else [$nodes[].number]\n' +
+  '    end;\n' +
+  '\n' +
   '[.[] | {n:.number,t:.title,l:[.labels[].name],\n' +
   ' spec:((.body//"")|test("(?m)^#{2,6}[ \\\\t]+User Stories[\\\\t\\\\f\\\\r \\\\p{Zs}]*$")),\n' +
-  ' d:((.body//"")|depnums),\n' +
+  ' d:(((.body//"")|depnums) + blockers | unique),\n' +
   ' dh:((.body//"")|depmiss)}]\n';
 
 function query(label) {
@@ -376,7 +417,7 @@ function query(label) {
     "--state", "open",
     "--limit", String(limit),
     "--search", search,
-    "--json", "number,title,labels,body",
+    "--json", "number,title,labels,body,blockedBy",
     "--jq", JQ,
   ];
   console.error(`$ gh ${args.join(" ")}`);
@@ -571,11 +612,12 @@ if (rows.length === 0 && allowFallback && requireLabel) {
 // needs no extra field and no query semantics. Dependencies do not rank —
 // blocked tickets are dropped by the CONSUMER reading `d` (run-team step 2 /
 // next-ticket step 2), not here, and to-tickets publishes chains blockers-first
-// so lower numbers are the blockers anyway. `d` now covers every body form
+// so lower numbers are the blockers anyway. `d` covers every body form
 // to-tickets publishes — heading + list, bold/inline label, the original bare
-// phrasings — see #58. It still does not read GitHub's native sub-issue or
-// dependency links, which are not in the body at all; a chain wired only
-// through those reaches this sort with an empty `d` regardless.
+// phrasings — see #58, and GitHub's native blocked-by edges too (#1741), so
+// a chain wired only as edges reaches this sort with its blockers in `d`.
+// Native sub-issue links are still not read: parent/child is hierarchy, not
+// blocking, so a blocker recorded only as one reaches it with none.
 rows.sort((a, b) => a.n - b.n);
 
 for (const r of rows) {
