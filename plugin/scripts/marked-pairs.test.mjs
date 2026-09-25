@@ -382,16 +382,14 @@ test("real tree: KNOWN_EQUALITY_EXCEPTIONS is exactly the set of same-rule pairs
   const needExemption = sameRule.filter((p) => normalizeDialect(p.claude, p.file) !== normalizeDialect(p.omp, p.file));
 
   for (const ex of KNOWN_EQUALITY_EXCEPTIONS) {
-    // The list is filed on two tickets: #1362 (the first seven entries) and
-    // #1590 (the eighth). A pin on a single ticket number would force every
-    // entry to cite a ticket it was not filed on, so the citation guard is
-    // an enumerated allow-list of the issues this list has actually been
-    // filed on — a typo'd or never-filed issue number still fails (it is
-    // not in the list), and admitting a NEW ticket costs one deliberate
-    // number added here, the same visible-and-bounded property a single-
-    // value pin had.
+    // Every entry is filed on #1362 (#1590's eighth left with the pool it
+    // described, #1804). The citation guard stays an enumerated allow-list of
+    // the issues this list has actually been filed on — a typo'd or
+    // never-filed issue number still fails (it is not in the list), and
+    // admitting a NEW ticket costs one deliberate number added here, the
+    // same visible-and-bounded property a single-value pin had.
     assert.ok(
-      [1362, 1590].includes(ex.issue),
+      [1362].includes(ex.issue),
       `${ex.file}: every exception must cite one of the issues this list was filed on, got ${JSON.stringify(ex.issue)}`,
     );
     const p = needExemption.find((p) => p.file === ex.file && p.claude === ex.claude && p.omp === ex.omp);

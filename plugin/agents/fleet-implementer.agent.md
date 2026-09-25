@@ -57,7 +57,7 @@ that exact path too, and the porcelain check above would then report
 their destroyed work as clean. If the diff shows content you did not
 write, stop: reconcile it by hand instead of reverting the file.
 
-Here is the ticket's distilled brief, already read once in phase 0 step 4 —
+Here is the ticket's distilled brief, already read once at the Pull —
 title, plus whichever of the `## Agent Brief` comment or the issue body
 carries the ticket's actual brief, and its `Out of scope`, pasted verbatim:
 `<distilled brief>`. Skip the fetch below if this already answers what you
@@ -72,7 +72,7 @@ touching code**: with the repo in front of you, still undecided or needing
 human hands you do not have → bail, name the cause, do not implement.
 
 **Re-derive the ticket's claims against `origin/main` before implementing** —
-not the working tree, and not the ticket's line numbers, which drift. Phase 0
+not the working tree, and not the ticket's line numbers, which drift. The Pull
 runs a cheap version of this check, so what reaches you is what a `grep` could
 not settle; you have the tree, so you are the backstop. Already fixed → report
 that with the commit and do NOT invent work. An acceptance criterion the tree

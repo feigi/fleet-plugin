@@ -46,7 +46,7 @@ const RUN_TEAM = read("skills", "run-team", "SKILL.md");
 const NEXT_TICKET = read("skills", "next-ticket", "SKILL.md");
 
 const step = () =>
-  between(RUN_TEAM, "**In-flight check**", "**Read each survivor in full", "run-team/SKILL.md");
+  between(RUN_TEAM, "**In-flight check, again**", "**Read the ticket in full, once**", "run-team/SKILL.md phase 1 Pull step 2");
 
 test("the in-flight step names exit 2 and refuses to read it as free", () => {
   assert.match(step(), phrase("Exit 2 is not free"));

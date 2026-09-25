@@ -60,12 +60,12 @@ test("next-ticket scopes exit 3 to the final pass, so it agrees with the fallbac
 });
 
 // The same slice candidates.test.mjs bounds for the `--require-label` rule —
-// `1. **Candidate scan**` to the step after it. A match anywhere in phase 0 is
+// `1. **Build the Shortlist**` to the step after it. A match anywhere in phase 0 is
 // vacuous: phase 0 discusses `inflight.sh`'s exit 2 at length a few steps down,
 // so a file-wide search for "exit" finds another script's contract and reports
 // this one as documented.
 const scanStep = () =>
-  between(RUN_TEAM, "1. **Candidate scan**", "\n2. ", "run-team/SKILL.md");
+  between(RUN_TEAM, "1. **Build the Shortlist**", "\n2. ", "run-team/SKILL.md");
 
 test("phase 0 denies that exit 3 is the empty queue", () => {
   const s = scanStep();

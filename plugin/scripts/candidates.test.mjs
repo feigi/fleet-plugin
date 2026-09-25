@@ -252,7 +252,7 @@ test("a drop from the no-label run is tagged [unfiltered] — the one pass tag n
   // ternary always takes its `label:` arm and the `unfiltered` arm is
   // unpinned: rename it to anything and the whole suite stays green. Both
   // documented callers do pass the flag (next-ticket/SKILL.md's `## 1. Candidates`
-  // step, run-team/SKILL.md's **Candidate scan** step), so this arm is reachable only by a hand-run — but
+  // step, and shortlist.mjs, which run-team/SKILL.md's **Build the Shortlist** step runs), so this arm is reachable only by a hand-run — but
   // it is a supported invocation, and its tag is what tells a reader which
   // query dropped what. Two rows, not one: the spec supplies the drop line,
   // the ticket keeps the queue non-empty so this exits 0, not the empty-queue 1.
@@ -1799,8 +1799,8 @@ test("a multi-word label is quoted into the search term — unquoted, every word
 
 test("a single-word label still resolves to itself — quoting must not disturb the only label every caller passes", () => {
   // AC-3's other half, and the half a quoting fix can newly break: this term
-  // is what next-ticket/SKILL.md's `## 1. Candidates` step, run-team/SKILL.md's
-  // **Candidate scan** step and fleet-tick.mjs's `supply` all send, so a change that widened or narrowed it would
+  // is what next-ticket/SKILL.md's `## 1. Candidates` step, shortlist.mjs (run-team/SKILL.md's
+  // **Build the Shortlist** step) and fleet-tick.mjs's `supply` all send, so a change that widened or narrowed it would
   // empty the fleet's queue at exit 1 — #175's own defect, relocated. Measured
   // against the live repo 2026-08-17: `label:ready-for-agent` and
   // `label:"ready-for-agent"` return the same count, so the quoting is a no-op
@@ -1892,7 +1892,7 @@ test("run-team's phase 0 rule names the flag candidates.mjs accepts", () => {
   // `candidates.mjs` invocation in the same bullet already spells
   // `--require-label` correctly, so a positive match anywhere in phase 0 stays
   // green with the rule naming anything at all.
-  const step1 = between(RUN_TEAM, "1. **Candidate scan**", "\n2. ", "run-team/SKILL.md");
+  const step1 = between(RUN_TEAM, "1. **Build the Shortlist**", "\n2. ", "run-team/SKILL.md");
   // Leading backtick, so this can only be satisfied by the RULE: in the command
   // above it, `--require-label` is preceded by a line break, not a backtick.
   // The gap is loose enough that rewording around `mandatory` stays green and

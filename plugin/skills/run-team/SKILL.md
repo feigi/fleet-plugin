@@ -229,7 +229,10 @@ restate this block there.
 
 ## Phase 0 — shortlist
 
-At start, and whenever the pool empties.
+Once per run, at start. Supply is automatic after that (ADR 0013): the tick
+refreshes the Shortlist itself, and every admission is a **Pull** — one ticket
+into one free implementer slot, the moment it frees (phase 1). Nothing in this
+phase, or in any later one, asks the maintainer which tickets to take.
 
 0. **Once per run, before anything else.**
 
@@ -299,8 +302,8 @@ At start, and whenever the pool empties.
 
    **Fold in every PR a prior run left open, before shortlisting.** A chore PR
    carrying that run's own metrics, or ticket work whose review was deferred —
-   both are reviewable work no member otherwise picks up, because phase 0 scans
-   ISSUES and nothing looks at inherited PRs. Queue each for review exactly as
+   both are reviewable work no member otherwise picks up, because the Shortlist
+   holds ISSUES and nothing looks at inherited PRs. Queue each for review exactly as
    ticket work: same review workflow, same fix-applier, same finisher. Measured
    2026-09-03 — #1222 arrived this way and its review found a defect its own PR
    body called unreviewed, and #1237's review then caught two metrics rows the
@@ -309,22 +312,78 @@ At start, and whenever the pool empties.
    `fleet-tick`'s backlog forever (#590): unreviewable AND uncounted is the state
    that strands it.
 
-1. **Candidate scan** — `~/.fleet/bin/fleet-run candidates.mjs
-   --require-label ready-for-agent`. **`--require-label ready-for-agent` mandatory, no
-   fallback** — do NOT pass `--allow-fallback`. Empty means no work;
-   `ready-for-human` needs a human to brainstorm first and you have no channel to
-   one mid-flight.
+1. **Build the Shortlist** — `~/.fleet/bin/fleet-run shortlist.mjs`, then read
+   `.fleet/shortlist.json`. The script runs the cheap filters and nothing else
+   — no ticket body is read here, because a Pull reads one ticket in full at
+   the moment it admits it (ADR 0013 §1):
 
-   **Exit 3 is not that empty queue, and never a reason to widen the net.** It
-   says the labeled query returned rows and the to-spec filter took every one:
-   what is queued is to-tickets' input rather than claimable tickets, and a
-   member handed one implements an entire spec as a single ticket. Log it as
+   - **Candidate scan** — `candidates.mjs --require-label ready-for-agent`,
+     oldest-first, never re-ranked. Its row count is `scanned`, the supply.
+   - **Dependency scan**, `next-ticket` step 2, on each row's `d` array. Open
+     blocker → drop.
+   - **Live Exclusions** — a ticket whose ledger row reads `excluded ·
+     behind-pr:#M` or `excluded · behind-issue:#M` stays out while its premise
+     holds (phase 1, **Exclusion**).
+   - **In-flight check** — `inflight.sh <N>` per survivor. Exit 1 is taken, and
+     any other non-zero exit is a check that could not answer, which is never
+     free. Both drop the ticket, logged by number.
+
+   It writes the survivors, in order, to `.fleet/shortlist.json` —
+   `{scanned, shortlist: [{n, t}]}` — resolved against the git common dir
+   exactly as `ledger.mjs` resolves `.fleet/ledger.md`, so you, the tick and a
+   member in its own worktree all name one file. **Exit 0 is the file written,
+   an empty shortlist included** — the empty queue is an answer. **Exit 2 is a
+   refusal**: the scan, the ledger read or the write did not answer, and the
+   previous file stands untouched, because an empty file written then would
+   read as "no work". Never read 2 as empty.
+
+   Every probe fails CLOSED: an unreadable blocker counts as open, an
+   unreadable premise leaves its exclusion standing, an unanswered in-flight
+   check counts as taken. A ticket dropped wrongly waits one refresh; a ticket
+   admitted wrongly costs a Pull's full read at best and two members on one
+   ticket at worst.
+
+   **`--require-label ready-for-agent` mandatory, no fallback** — the script
+   fixes it, and you never run `candidates.mjs --allow-fallback` by hand to
+   widen the list: `ready-for-human` needs a human to brainstorm first and you
+   have no channel to one mid-flight.
+
+   `candidates.mjs`'s exit 3 reaches you as an empty shortlist with its to-spec
+   notice on stderr. **Exit 3 is not that empty queue, and never a reason to
+   widen the net.** It says the labeled query returned rows and the to-spec
+   filter took every one: what is queued is to-tickets' input rather than
+   claimable tickets, and a member handed one implements an entire spec as a
+   single ticket. Log it as
    specs awaiting to-tickets, not as no work — and still do not pass
    `--allow-fallback`, whose second pass is unfiltered and so reaches the
    `ready-for-human` and untriaged work you have no channel for.
-2. Dependency scan, `next-ticket` step 2, on the `d` array. Open blocker → drop.
-3. **In-flight check** — `~/.fleet/bin/fleet-run inflight.sh <N>` per
-   candidate; any hit = taken. It runs all three probes (PRs, remote heads, local
+2. **Refresh is the tick's from here on.** `fleet-tick.mjs` runs
+   `shortlist.mjs` itself when unclaimed entries fall below the implementer
+   cap, when the file is missing or empty, and when an `excluded` premise has
+   lifted, and prints `REFRESHED shortlist: <n> entries; <k> lifted`. Phase 0
+   runs it by hand once because a dead run's shortlist is stale by definition.
+
+**No multi-select, no maintainer tick.** Selection and ordering are batched —
+one scan, oldest first; admission never is. The invariant this replaces — one
+human decision per batch of admissions, zero unilateral grabs — is retired
+(ADR 0013): zero human decisions per admission, and every non-admission is a
+label or a premise the maintainer can read.
+
+## Phase 1 — Pull: judge, then claim or relabel
+
+Serial, main checkout, one Pull at a time. Never parallel, never inside a member —
+concurrent `worktree add` and label writes race.
+
+One free implementer slot is one Pull. The tick names the heads — `PULL #412
+#415`, one per free slot — and each Pull runs this sequence on its head,
+terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
+
+1. **Take the shortlist head** — the next `.fleet/shortlist.json` entry with no
+   `impl-` row and no `excluded` row whose premise still holds, which is the
+   ticket the tick's `PULL` row names.
+2. **In-flight check, again** — `~/.fleet/bin/fleet-run inflight.sh <N>`; any
+   hit = taken, drop it and take the next entry. The shortlist is as old as its
+   last refresh. It runs all three probes (PRs, remote heads, local
    worktrees + branches) so a partial one cannot read as free. The PR probe is
    two signals rather than a bare full-text match — GitHub's own closing-PR links
    plus branch-segment matching — and both drop `MERGED` and `CLOSED`, so a
@@ -333,7 +392,7 @@ At start, and whenever the pool empties.
    prints `?` and still counts as taken, merged or not.
 
    **Exit 2 is not free** — the question went unanswered, so treat it as taken
-   and say which candidate it was in the log. A probe that could not look is
+   and say which ticket it was in the log. A probe that could not look is
    recorded rather than aborting the run, so exit 2 from one prints the same
    JSON as 0 and 1 plus an `unknown[]` naming the probes that could not look:
    read `unknown`, never `taken` alone, because exit 2 says `"taken": false`,
@@ -349,11 +408,11 @@ At start, and whenever the pool empties.
    nothing else; work done directly against the shared checkout, by a
    human or another agent session, stakes no branch-shaped claim and trips
    none of them.
-4. **Read each survivor in full, once** — `gh issue view <N> --json title,body,comments
-   --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. One read
-   answers both questions. Record the ticket's real brief — the `## Agent
-   Brief` comment where one exists, otherwise the issue body, which is where
-   most tickets actually carry it (a controller probe found only 43/100 open
+3. **Read the ticket in full, once** — `gh issue view <N> --json title,body,comments,labels
+   --jq '.title, .body, ([.labels[].name]|join(",")), (.comments[]|.author.login + ": " + .body)'`.
+   One read answers every question the Pull asks. Record the ticket's real
+   brief — the `## Agent Brief` comment where one exists, otherwise the issue
+   body, which is where most tickets actually carry it (a controller probe found only 43/100 open
    `ready-for-agent` issues have a separate Agent Brief comment; the rest,
    this ticket included, carry the brief in the body) — plus its `Out of
    scope` sequencing wherever that section is found. Then judge **decided?**
@@ -425,7 +484,7 @@ At start, and whenever the pool empties.
    before citing it in the close, and treat empty output as an answer you did
    not get rather than a commit.
 
-   Measured, one wave: #132's one-line remedy had shipped in `e7b11e6` ten days
+   Measured, one run: #132's one-line remedy had shipped in `e7b11e6` ten days
    earlier and #134's AC-2 asked for an exit code a later design (#64)
    deliberately changed — neither commit carried a trailer back, so the tracker
    showed both as open work. #132 cost a full claim, worktree and implementer
@@ -452,9 +511,9 @@ At start, and whenever the pool empties.
    **`staleness.mjs` runs that check for you, and answers in THREE values.**
    `~/.fleet/bin/fleet-run staleness.mjs --path <path> --gone
    '<string>'`, or `--present '<string>'`, once per claim the ticket makes.
-   It goes here and not in the candidate scan because choosing WHICH string
+   It goes here and not in `shortlist.mjs` because choosing WHICH string
    settles a ticket needs the ticket read, which the step above already did —
-   so the cost lands on shortlisted candidates and never on the backlog.
+   so the cost lands on the pulled ticket and never on the backlog.
    `--gone` is a defect the fix must remove, the wording the ticket quotes as
    wrong; `--present` is what the fix must add, the assertion a pin ticket asks
    for. Give exactly one — the direction is not inferable from the string, and
@@ -464,14 +523,14 @@ At start, and whenever the pool empties.
    is one this backlog carries — needs the end-of-options separator: `--gone
    -- '<string>'`/`--present -- '<string>'`. Given bare, with no `--`
    immediately before it, the value guard still refuses it — `staleness:
-   --gone needs a value` — at exit 2, a could-not-check to offer and annotate,
+   --gone needs a value` — at exit 2, a could-not-check to admit and annotate,
    not an invocation to retry.
 
-   | Exit | Verdict | What it does to supply |
+   | Exit | Verdict | What it does at the Pull |
    |---|---|---|
-   | 0 | still reproduces | offer it |
-   | 1 | provably fixed | do not offer; close citing the payload's `commit` and `subject` |
-   | 2 | could not check | offer it, **and say the probe could not check** |
+   | 0 | still reproduces | admit it |
+   | 1 | provably fixed | do not admit; close citing the payload's `commit` and `subject` |
+   | 2 | could not check | admit it, **and say the probe could not check** |
 
    The third value is the one that has to survive. A probe that could not look
    answers exactly like a probe that looked and found nothing, so folding it
@@ -497,8 +556,8 @@ At start, and whenever the pool empties.
    oracle over the whole backlog is what #238 ruled out, and a reproduction run
    without a positive and a negative control misattributes causes rather than
    merely missing defects — the #230 check needed a purpose-built fixture plus
-   both. A ticket no single string settles is a `could not check`: offered,
-   annotated, never quietly dropped.
+   both. A ticket no single string settles is a `could not check`: admitted,
+   annotated in the dispatch prompt (phase 2), never quietly dropped.
 
    **Decided?** Would two competent implementers, reading only this ticket, build
    materially different things? "Material" by inventory, not feel:
@@ -509,8 +568,10 @@ At start, and whenever the pool empties.
    | new dependency, new seam | **undecided** |
    | naming, file layout, ordering, test arrangement | decided — ignore |
 
-   Any undecided item → not decided. Name it; that name is the exclusion line.
-   **Torn → surface, never guess** (step 6's `unsure` group). Opposite of
+   Any undecided item → not decided. Name it; that name is the relabel comment's
+   missing decision or open fork. **Torn → surface, never guess**: relabel it
+   `ready-for-human` as a fork naming the open decision — the label is how a
+   Pull surfaces it to the maintainer. Opposite of
    `sizing-a-ticket`'s *torn → take the heavier row*, deliberately — see that skill.
 
    **This is a consumption gate**, priced for the seat where implementer
@@ -545,53 +606,96 @@ At start, and whenever the pool empties.
    all. That reasoning is why the discipline survives the tiering that used to
    accompany it.
 
-   Record the class in step 6's annotation; phase 2 reads it for the
-   discipline, no longer for the tier.
-5. **Collision scan against open PRs** — a survivor is an *un-implemented issue*
-   with no diff, so infer its target files from the issue body (the paths it
-   names) and compare them against each open PR's `gh pr diff <PR> --name-only`,
-   and against the other survivors' inferred files. `pr-overlap.mjs` is **PR-vs-PR
-   only** — it runs `gh pr diff` on *both* args and errors on an issue number, so
-   use it the way the merge bot does (PR vs PR), never on a candidate issue here.
-   Step 3 catches a ticket already taken, not one that *edits a file an open PR
-   edits*. Overlap → admit one, defer the rest with the reason. The tracker cannot
-   express this, and it is what actually stalls a wave.
-6. Present survivors as a multi-select, **oldest first** (`candidates.mjs` already
-   sorted; do not re-rank). Three groups:
+   Record the class in the Pull's ledger row (step 7); phase 2 reads it for
+   the discipline, no longer for the tier.
+4. **Collision scan against open PRs and live branches** — the ticket is an
+   *un-implemented issue* with no diff, so infer its target files from the brief
+   (the paths it names) and compare them against each open PR's `gh pr diff <PR>
+   --name-only` **and** each live worktree's `git diff --name-only
+   origin/main...<branch>` (the branches `git worktree list` names) — a member
+   mid-work has a branch before it has a PR. `pr-overlap.mjs` is **PR-vs-PR
+   only** — it runs `gh pr diff` on *both* args and errors on an issue number,
+   so use it the way the merge bot does (PR vs PR), never on a ticket here.
+   Step 2 catches a ticket already taken, not one that *edits a file an open PR
+   edits*. Overlap → exclude it `behind-pr:#M`, next entry. The tracker cannot
+   express this, and it is what actually stalls a Pull's PR at merge.
+5. **Sequence check** — the brief's `Out of scope` names an open ticket this one
+   sequences after → exclude it `behind-issue:#M`, next entry. That lives in the
+   brief, is invisible to the dependency scan, and oldest-first order puts a
+   chain's members next to each other, where two consecutive numbers read as
+   two independent tickets.
+6. **Claim** — `~/.fleet/bin/fleet-run claim-ticket.sh <N> <slug> <type>
+   --apply` (below). Exit 2 → treat it as taken, next entry.
+7. **Row, then dispatch** — `ledger.mjs row <N> "impl-<N> · class=… [· tier=alt]"`,
+   then phase 2 at once: claim what you are about to dispatch;
+   dispatch what you have just claimed.
 
-   - **admitted** — decided;
-   - **unsure** — torn, each flagged with the open decision;
-   - **excluded** — undecided, each with the decision that is missing.
+**The Pull table** — every verdict a Pull can reach, and the one thing each
+does (ADR 0013 Decision 2 and 4):
 
-   Annotate every survivor with its class — `correction` or `routine` — so the
-   maintainer sees which tickets carry the correction-ticket discipline before
-   ticking them. Annotate any survivor whose liveness probe came back **could
-   not check** with that verdict and the reason its payload gave: this list is
-   where the third value has to land, and a survivor presented without it reads
-   as one the probe checked and found live. Annotate any survivor the
-   `Out of scope` read sequences after
-   another survivor in the same list. Without that, FIFO puts a chain's members
-   next to each other and two consecutive numbers read as two independent
-   tickets — which is exactly how both land in one wave.
+| At the Pull | Action |
+|---|---|
+| in-flight hit, or an in-flight check that could not answer | drop, next entry |
+| no longer labelled `ready-for-agent` | drop, next entry |
+| `staleness.mjs` exit 1 — provably fixed | close citing the commit, next entry |
+| brief names no *what* | relabel `needs-triage`, next entry |
+| genuine fork — options named, none ruled | relabel `ready-for-human`, next entry |
+| needs human hands — external access, manual testing, judgment during the work | relabel `ready-for-human`, next entry |
+| target files collide with an open PR or a live branch | exclude `behind-pr:#M`, next entry |
+| `Out of scope` sequences it after an open ticket | exclude `behind-issue:#M`, next entry |
+| `claim-ticket.sh` exit 2 | taken, next entry |
+| decided, live, free, claimed | row, then dispatch (phase 2) |
 
-   Maintainer ticks what to **stage this wave** — how many, what order, what
-   collides. Staging, never vetting: `ready-for-agent` already carries triage's
-   verdict that an agent may take the ticket, reached with the maintainer present.
-   Phase 0 does not re-litigate it, and an unticked ticket is deferred, not judged
-   unfit. **unsure** is the only group asking a judgment.
+**The shortlist runs out → run `shortlist.mjs` once and Pull again; still
+empty → hold the slot idle until the next refresh trigger.** Within a turn,
+Pull from the current list first and refresh second — a refresh never delays a
+dispatch.
 
-   Excluded, not dropped: phase 0 never relabels an unclaimed ticket, and an
-   unticked ticket keeps `ready-for-agent` and returns next wave.
+**A Pull never re-admits a ticket already relabelled.** The shortlist file can
+be older than a relabel — this run's own Pulls, or a demotion in phase 3 — so
+read the ticket's labels in step 3's full read (`--json
+title,body,comments,labels`) and drop it when `ready-for-agent` is gone. A Pull
+that trusted a list built before the relabel landed would hand a ticket the
+fleet has already judged unimplementable straight to the next member.
 
-Never put two sequenced tickets in one wave. That lives in the brief's `Out of
-scope`, is invisible to step 2, and bites hardest at five wide.
+**Relabel by cause.** An unclaimed ticket is yours to reclassify at the Pull —
+three causes, two labels: `ready-for-human` for hands or a fork;
+`needs-triage` for a brief that names no *what*.
+`gh issue edit <N> --remove-label ready-for-agent --add-label <label>` (no
+`in-progress` to drop — it was never claimed), preceded by exactly one comment:
 
-## Phase 1 — claim and isolate
+- `needs-triage`:
 
-Serial, main checkout, per ticket. Never parallel, never inside a member —
-concurrent `worktree add` and label writes race.
+  > *Relabelled by the fleet controller.* Pulled for implementation and
+  > returned: the brief does not decide what to build. Missing decision: <one
+  > line>. Returning to /triage; `ready-for-agent` restored once decided.
 
-`~/.fleet/bin/fleet-run claim-ticket.sh <N> <slug> <type> --apply` does
+- `ready-for-human` (fork):
+
+  > *Relabelled by the fleet controller.* Pulled for implementation and
+  > returned: the brief leaves a decision open. Open fork: <options, verbatim
+  > from the brief>.
+
+- `ready-for-human` (hands):
+
+  > *Relabelled by the fleet controller.* Pulled for implementation and
+  > returned: needs human hands — <external access | manual testing |
+  > judgment during the work>: <one line>.
+
+Neither label invokes anything: `/triage` is maintainer-run, and both labels
+only stop the ticket costing a read per scan. These comments are the only
+writes the fleet makes to a ticket it did not claim.
+
+**Exclusion is a ticket row with a premise.** `ledger.mjs row <N> "excluded ·
+behind-pr:#M"` or `ledger.mjs row <N> "excluded · behind-issue:#M"` — `#M` is
+the open PR, or the branch name until its PR exists, or the issue this ticket
+sequences after. No new ledger section. `shortlist.mjs` probes every premise at
+each refresh — MERGED or CLOSED lifts a `behind-pr`, CLOSED lifts a
+`behind-issue` — and a lifted ticket re-enters the shortlist in its own
+oldest-first slot; its row is rewritten to `impl-<N> …` when it is pulled,
+because `row` replaces the whole line.
+
+**Claiming.** `~/.fleet/bin/fleet-run claim-ticket.sh <N> <slug> <type> --apply` does
 the label, worktree, branch, frozen install, lockfile-clean assertion, and the
 isolation runner in one serial pass. Infer branch/worktree convention from
 `git worktree list` and `git branch -r` for the `<slug>`/`<type>` arguments.
@@ -670,7 +774,7 @@ So, when you re-create a worktree for an already-open PR:
 **Why the ref and not `headRefOid`: during the PR object's lag both operands go
 stale in the SAME direction, so that compare fails OPEN as readily as it fails
 closed.** The PR object spends the lag sitting on the PRE-rebase sha — cleared
-on re-poll attempt 24 (~2 min) in one wave and attempt 14 (~84s) in the next,
+on re-poll attempt 24 (~2 min) in one merge pass and attempt 14 (~84s) in the next,
 both after `gh pr update-branch --rebase` returned `rc=0`, measured in
 `run-merge-bot.md`'s step 1 — and that is the very commit a clone which has not
 fetched since the rebase still has `origin/<branch>` pointing at. So the false
@@ -713,7 +817,87 @@ above, in the Claude workflow and its omp-side twin alike — so it is a second
 chance to notice a stale snapshot on the one path it covers, never a reason
 to skip the ref compare here.
 
-## Phase 2 — dispatch implementers
+## Phase 2 — dispatch the Pull's implementer
+
+**A Pull is one claim followed by one dispatch of a new member under a name no
+member has held; nothing holds a queue.** That is true on both harnesses and is
+the whole of what either of them promises: the implementer cap is the fleet's
+own accounting rather than anything the runtime enforces, the member is fresh
+and never a wake of one that already ran, and no knob on this path works on one
+harness only. Admission is per slot and never batched, so there is nothing to
+hand a freed slot its next ticket but the next Pull.
+
+CLAUDE: a Pull dispatches its member with one more `Agent` call — definition `fleet-ctl:fleet-implementer`, or `fleet-ctl:fleet-implementer-alt` on every 5th Pull; name `impl-<N>`; in the background, so its report arrives on its own.
+OMP: a Pull dispatches its member with one more `task` call — definition `fleet-implementer`, or `fleet-implementer-alt` on every 5th Pull; name `impl-<N>`; in the background, so its report arrives on its own.
+
+**No workpool, and no kernel-resident handle.** A pool's only refill virtue —
+handing a queued item to a freed worker without a controller turn — is exactly
+what a Pull forbids, and its completions never arrive per member. `eval`'s
+`agent()` is not the omp call either: a kernel-resident handle dies with the
+kernel and needs a `wait`, while a `task` job is process-level and its report
+auto-delivers on its own, like every other member's.
+
+**No per-call tier or effort anywhere on this path**: tier stays the agent
+definition's own frontmatter (ADR 0005), whichever of the two definitions the
+Pull names, and a member's Resolved tier stays readable from its transcript.
+
+**Claim what you are about to dispatch; dispatch what you have just claimed.**
+Phase 1 makes the claim, serially in the main checkout — its rule is measured —
+and the dispatch follows it at once. A claim that runs ahead of its dispatch is
+a worktree, a branch and an `in-progress` label with no member behind them,
+released by the end-of-run sweep rather than by a member that did the work.
+
+**Record the dispatch before you make it.** `ledger.mjs row` wrote the row at
+the Pull's step 7; `~/.fleet/bin/fleet-run ledger.mjs dispatch <N> impl-<N>`
+then marks `impl-<N>` live on it and in `## Dispatched`, and the call follows.
+Live implementers are the `impl-` tokens with no `=<outcome>` — the tick reads
+that count off the ledger, and nobody states it. `dispatch` refuses once the
+run is draining: drain stops supply.
+
+**The prompt carries only what varies.** Everything shared — the
+unattended-member block, the `edit`/`read` absolute-path rule (#1727), the
+issue re-read and re-derive backstop, commit incrementally, no `git stash`, the
+shared `eval` kernel (#1447), enumerate-and-declare, sizing and the PR steps —
+is the body of `agents/fleet-implementer.agent.md`, byte-identical in
+`agents/fleet-implementer-alt.agent.md`, and each harness injects it as the
+member's system prompt. Never re-paste it. The prompt fills that body's
+placeholders — the ticket number, the worktree abs path and branch
+(`<abs-path>`, `<branch>`), the scratch path `<scratch>/impl-<N>/`, and the
+distilled brief (`<distilled brief>`): the title plus the `## Agent Brief`
+comment or the issue body, whichever carries the brief, and its `Out of
+scope`, pasted verbatim from the Pull's own read. Beyond those it carries only
+the lines **Rules that fail silently** above say every dispatch prompt
+carries — the report is a message, reports are not acknowledged, the suite
+runs in the foreground — the class's correction-ticket discipline when
+`class=correction`, and a `staleness.mjs` **could not check** verdict with its
+reason when the Pull got one, so the member's own re-derive step knows the
+controller's probe could not look.
+
+**The prompt pastes the Pull's own read of the ticket rather than telling the
+member to re-fetch it, and this still costs one `gh issue view` per ticket,
+never one per member.** The fresh-context design's isolation rationale — "every
+implementer re-reads its Agent Brief... from scratch"
+(`docs/specs/2026-07-22-run-team-agent-fleet-design.md:178-179`) — is about a member
+never inheriting another ticket's context, not about where the bytes come from.
+Pasting the Pull's own read into the prompt keeps that: the member still gets the
+brief verbatim and re-derives nothing from a sibling. What it drops is the
+unconditional re-fetch of an issue the controller already has open, on every
+dispatch — the fetch the agent body still carries is the backstop for a brief
+that turns out to be insufficient, not the default path.
+
+**A member settling with nothing is not, by itself, a bail.** Each member's
+outcome arrives as its own job status. Settle (CONTEXT.md § Coordination) is
+three states on omp — `completed`, `failed`, `cancelled` — and reading
+`failed`/`cancelled` the same as a `completed` turn that had nothing to report
+is the exact collapse this line blocks: a member that died never chose to bail,
+so demoting its ticket on its silence demotes a ticket its member never got the
+chance to judge. Confirm death first, exactly as the Member-killed row does
+(Failure handling, below) — its mtime discriminator, never silence alone.
+**Only an explicit bail report — the member itself naming the cause — reaches
+Implementer bails before implementing** (phase 3, below); a died or
+merely-quiet member's silence never does. A confirmed-dead member recovers
+exactly as the Member-killed row says — new member, new name, the SAME ticket —
+never a demotion.
 
 **Dispatch every implementer as `subagent_type: "fleet-ctl:fleet-implementer"`, and still
 omit `model` on the Agent call, whatever the class.** The tier now lives in that
@@ -725,16 +909,19 @@ that the tier it resolves to is now declared and pinned rather than inherited by
 accident. Keep `name: impl-<N>`: the name is what makes a member, and both the
 spend classifier and `member-outcomes.mjs` read it.
 
-**After dispatching the batch, run the tier check — a scripted step, never a
+**After every Pull's dispatch, run the tier check — a scripted step, never a
 prose reminder.** `~/.fleet/bin/fleet-run tier-check.mjs --batch <path-to-batch.json>`
 compares what each dispatched member's definition declared against what the
 harness actually resolved, and exits 1 naming every mismatched member as
-`member: declared <m>/<l> resolved <m>/<l>`. A non-zero exit **stops the
-wave**: dispatching the next batch on top of an unresolved tier mismatch
-multiplies whatever silently degraded, so fix the definition or the dispatch
-and re-run the check before continuing.
+`member: declared <m>/<l> resolved <m>/<l>`. A non-zero exit **holds the
+next Pull**: dispatching the next member on top of an unresolved tier mismatch
+multiplies whatever silently degraded, so `ledger.mjs settle impl-<N>
+tier-mismatch`, fix the definition or the dispatch, and re-run the check before
+continuing — the tick prints `HOLD (tier mismatch impl-<N>)` until a
+replacement is dispatched at the right tier.
 
-**The batch file is a JSON array, one entry per dispatched member:**
+**The batch file is a JSON array, one entry per dispatched member** — under
+Pull, a batch of one, the member just dispatched:
 `{member, agentFile, harness, ...}` plus exactly one of the three fields
 below, in the order the controller should prefer them:
 - `resolvedModel` **and** `resolvedThinkingLevel` together (omp only) — the
@@ -770,20 +957,19 @@ the tier check judges an omp member against the role's own target
 CLAUDE: the routing precheck does not apply — the bare alias in the `Agent` dispatch's definition is the model, and nothing routes it.
 OMP: before the run's first dispatch run `~/.fleet/bin/fleet-run tier-roles.mjs --check`; exit 1 names every `task.agentModelOverrides` entry that is missing, stale or wrong and every unset `modelRoles.<role>`, prints the exact `omp config set task.agentModelOverrides` remedy only when an override is wrong (merged, so the operator's own non-fleet entries survive a set that replaces the whole record), names each unset role to give a model rather than a no-op overrides command, and **stops the run** before any member is dispatched — the fleet reads that config and never writes it (ADR 0003).
 
-**One implementer per staged wave goes at the alternate tier — one per phase-0
-staging batch, never one per refill.** Dispatch it exactly as the others but
-with `subagent_type: "fleet-ctl:fleet-implementer-alt"`. Pick the ticket
-that is most ordinary — never the hardest, never the one whose ticket the rest
-of the run depends on — and do not tell the member it is a control: a member
-that knows it is being measured is not measuring the same thing.
+**Every 5th Pull by ledger count goes at the alternate tier.** Count the `impl-`
+rows in `.fleet/ledger.md` at Pull time; the Pull that creates row 5, 10, 15 …
+dispatches `subagent_type: "fleet-ctl:fleet-implementer-alt"` and records
+`tier=alt` in the row, and a replacement inherits the row's tier. The
+assignment rolls to the next Pull when the pulled ticket is `class=correction`
+or another open ticket sequences after it — a ticket the rest of the run
+depends on. Do not tell the member it is a control: a member that
+knows it is being measured is not measuring the same thing.
 
-**Count the rate against phase-0 staging, because "wave" is not a dispatch
-unit.** An ordinary refill re-enters phase 1 then 2 for a single slot and starts
-no new wave — the guard below says it outright, "refill is level-triggered, so
-there are no implementer waves" — so a rule counted per refill would put roughly
-half the fleet on the alternate tier. Phase 0 *does* re-run mid-run whenever the
-pool empties, and each of those stagings is a fresh wave that carries its own
-alternate-tier member.
+**Count the rate against the ledger, because a Pull is the dispatch unit.** One
+Pull is one member, so a rate counted per Pull is a rate counted per member —
+one implementer in five, however the Pulls fall across the run — and the
+ledger, not your memory, is what still holds the count after a compaction.
 
 **Do not label it anywhere — the dispatch record already carries it.** The
 pairing is a query over `docs/metrics/member-outcomes.tsv` (the exact awk sits
@@ -809,7 +995,7 @@ RUN different models, because a deliberate alt dispatch whose two arms resolve
 to the same model (a `modelRoles` override, measured on omp 2026-09-12)
 controls nothing.
 
-**Why one per wave and not a week of one tier followed by a week of the other:**
+**Why one in five within the run, not a week of one tier then a week of the other:**
 tier would then be confounded with calendar date and therefore with prompt
 evolution, which is exactly the state #864 documents and the reason the rows
 already on disk cannot answer the question they were collected for.
@@ -820,7 +1006,7 @@ the floor (8 `class=routine` PRs spanning 3 distinct `run_date`s) and the trigge
 (2 rows carrying `closed_own_ticket` `no` — PR #452, which regressed the exact
 defect its ticket existed to remove, and PR #466, which emitted invalid JSON in
 the very payload its three tickets existed to make truthful). Per the guard's own
-wording this reverts **`class=routine`**, never the rule wholesale: phase 0 still
+wording this reverts **`class=routine`**, never the rule wholesale: the Pull still
 records the class, it still governs the correction-ticket discipline, and it is
 still what a future control would be drawn from.
 
@@ -846,13 +1032,13 @@ maintainer-authorized deliberate control) and **#750** and **#751**
 (2026-08-21) — all three run against prompts of the same vintage as the `opus`
 rows, and **all three passed**, which is the direction opposite the raw split.
 Three is still not a result. **What replaces this argument going forward is the
-within-run pairing above**: one implementer per wave at the alternate tier makes
+within-run pairing above**: one implementer in five at the alternate tier makes
 tier orthogonal to date by construction, so the question stops depending on
 whichever rows history happened to leave. **Orthogonal to date, and to nothing
-else** — the alternate member is picked as the most ordinary ticket in its wave
-and never the hardest, while the top tier absorbs every remaining ticket
-including all of the hardest, so the pairing trades the calendar confound for a
-difficulty one that runs in a known direction. That is why the four covariates
+else** — the alternate member is whichever ticket the 5th Pull draws, rolling
+past every correction and every ticket another open one sequences after, while
+the top tier absorbs all of those, so the pairing trades the calendar confound
+for a difficulty one that runs in a known direction. That is why the four covariates
 exist: condition a pair comparison on `sizing`/`profile`/`loc`/`files` before
 reading it as a tier result, never on the raw split.
 
@@ -868,9 +1054,8 @@ that the cheaper tier is worse.
 every class dispatches the same way, so a lost class no longer misprices a
 member — but it still costs the **correction-ticket discipline**, which phase 2
 selects on the class and which is the half that caught real defects. Every path
-that loses it lands here — a compaction, a phase-3 refill re-entering phase 1
-then 2 without a fresh issue read, a killed member replaced from inherited
-state. Writing the gap down is what makes it visible; re-read the issue to
+that loses it lands here — a compaction, a Pull whose read did not survive
+one, a killed member replaced from inherited state. Writing the gap down is what makes it visible; re-read the issue to
 recover the class when a correction's discipline is worth one `gh issue view`.
 **Never infer the class from the tier** — that inference is what the revert
 removed, and a future control would break it again.
@@ -920,7 +1105,7 @@ didn't parse from one that succeeded (`unread`/`unparsed`/`read`, #816) —
 on the cockpit are not yet proof the pipeline is idle.
 
 **Guard: accumulate per PR, never conclude inside one run.** The unit is the PR —
-refill is level-triggered, so there are no implementer waves. **Append one row to
+supply is one Pull per free slot, so there are no implementer batches. **Append one row to
 `docs/metrics/tier-outcomes.tsv` when you rule each PR's review** (that file's
 header carries the column meanings). That append is the whole duty; the guard
 fires on the accumulated file, across runs, not on the run in front of you.
@@ -931,7 +1116,7 @@ tier comparison condition on the thing that swamps it. `sizing` is the
 run, read back off the PR body's `Sizing:` line (`gh pr view <pr> --json body`),
 which names the signal the verdict turned on beside the verdict itself;
 `profile`, `loc` and `files` all come from `diff-stats.mjs` over the merged
-diff. **Phase 0 does not size anything** — it shortlists, phase 1 claims, and
+diff. **Phase 0 does not size anything** — it shortlists, a Pull claims, and
 the sizing run happens inside the member after both, which is why the verdict
 has to travel in the PR body rather than being something you already hold.
 
@@ -1056,8 +1241,8 @@ awk -F'\t' '!/^#/ && $4=="routine" {t[$5]++; if($6=="no") f[$5]++} \
 
 **These rows are the historical corpus, and nothing appended to them fixes the
 confound.** What fixes it is the within-run pairing in the dispatch rule above:
-from now on every wave contributes a `sonnet` and an `opus` implementer run
-against the same prompts on the same day, so the comparison stops depending on
+from now on one implementer in every five runs at `sonnet` beside the `opus`
+ones, against the same prompts on the same day, so the comparison stops depending on
 which tier history happened to leave in which week. Read the pairs, not the
 whole-file split, once there are enough of them.
 
@@ -1067,7 +1252,7 @@ pre-committed rule being honoured, not a measurement. Restoring a cheap tier is
 still the maintainer's call and still a change to the dispatch rule — but the
 deliberate control it used to require is no longer something anyone has to
 authorize one ticket at a time: the alternate-tier dispatch above produces one
-per wave by construction. **Do not read the pairs early.** Report the count —
+in every five Pulls by construction. **Do not read the pairs early.** Report the count —
 the DELIBERATE count, from the query in `member-outcomes.tsv`'s header, which
 prints the pair count and its distinct `run_date`s and counts only sessions
 that ran both implementer definitions at different models — and stop until
@@ -1079,7 +1264,7 @@ session whose implementers merely differed, so it cleared this floor by an
 order of magnitude while the controlled comparison did not exist yet.
 
 The risk being priced is economic, not shipped bugs. Reviews run 3-5x *longer*
-than implementation (Red flags, below), so one extra fix-round costs a wave slot
+than implementation (Red flags, below), so one extra fix-round costs an implementer slot
 and eats the saving the cheaper implementer made. The revert needs a floor AND a
 trigger, and neither alone. **Floor:** the file holds at least
 three `class=routine` PRs spanning **two or more distinct `run_date`s**.
@@ -1097,370 +1282,9 @@ spend is not available: `.spend.top` labels agents by their Agent-call
 
 **Never read the guard's silence as a pass** — and never read a single run's rows
 as its verdict.
-
-**The dispatch prompt pastes phase 0's own read of the ticket rather than telling
-the member to re-fetch it, and this still costs one `gh issue view` per ticket,
-never one per member.** The fresh-context design's isolation rationale — "every
-implementer re-reads its Agent Brief... from scratch"
-(`docs/specs/2026-07-22-run-team-agent-fleet-design.md:178-179`) — is about a member
-never inheriting another ticket's context, not about where the bytes come from.
-Pasting phase 0's own read into the prompt keeps that: the member still gets the
-brief verbatim and re-derives nothing from a sibling. What it drops is the
-unconditional re-fetch of an issue the controller already has open, on every
-dispatch and every refill — the fetch the prompt still carries is the backstop
-for a brief that turns out to be insufficient, not the default path.
-
-**Implementer slots are refilled to the cap from the staged pool, and a refill
-is a new member under a new name.** That much is true on both harnesses and is
-the whole of what either of them promises: the cap is the fleet's own
-accounting rather than anything the runtime enforces, a refill is a fresh
-member and never a wake of one that already ran, and no knob on this path works
-on one harness only. Where the refill comes FROM is what differs.
-
-CLAUDE: a freed slot is refilled by re-entering phase 1 then phase 2 and making one more `Agent` call under a name no member has held, so the refill is a level-check you run — on the edges Phase 3 already handles, and on the heartbeat — because nothing here holds a queue that could hand the freed slot its next ticket by itself.
-OMP: a freed slot is refilled by the staging wave's own dispatch pool, which hands a queued item to the freed worker with no completion event for you to observe — `eval`'s `workpool(agent, name, context, tools)`, opened once per wave, read for the level condition, and pushed to the number of items the tick says may be in flight.
-
-**Everything below is the pool's own discipline and therefore omp's alone.** The
-Claude side refills exactly as its line says and exactly as it does today, and
-nothing in this block touches the reviewer rows, the merge-bot rows, or either
-of their instructions: the blast radius is the implementer row.
-
-**Preflight before you open one, and refuse rather than open a pool you cannot
-trust.** Read the *effective* `eval.workpool.freshAgents` yourself before
-opening the pool, and refuse unless it reads `true`. At the schema default of
-`false` a queued item lands on an idle worker and extends that worker's
-transcript, which is a wake — the one thing a refill may never be, and silent
-when it happens. (The dedicated preflight script this paragraph used to name
-was retired by #1803/#1799's shortlist/ledger cutover; #1804 folds this check
-back into the rewritten pool block.) Failing that check is not a thing to
-route around: dispatch that wave by hand, exactly as the Claude line above
-describes, and report the key. **Never set it yourself.** It is session-wide configuration governing every
-other pool in the session, so it is install-time operator work (ADR 0003 point
-9), never something a run writes in order to dispatch a wave.
-
-**One named pool per phase-0 staging wave, named after that wave.** A pool
-settles and closes on its first full drain, and a continuously refilled queue
-drains whenever supply momentarily empties — so the wave is the pool's natural
-lifetime, and the next staging opens a NEW named pool rather than pushing to a
-closed one.
-
-**The cap is fleet accounting; the pool's worker bound is not.** A pool is
-bounded by the live `task.maxConcurrency` — the ceiling reviewers, merge bots
-and snapshot agents already share — and knows nothing about the implementer cap.
-So the tick decides how many items may be in flight and you push to that number.
-This buys refill semantics and zero throughput; nothing here raises parallelism.
-
-**Read the implementer row's liveness out of the pool instead of reciting it.**
-`reconcile()` is exported and I/O-free, so the `eval` cell that owns the pool
-imports `fleet-tick.mjs` (`~/.fleet/bin/fleet-run --path fleet-tick.mjs` resolves
-it) and passes `poolLiveness: {live, queued}` — the fleet's own two names, mapped
-from the pool's status AT THAT BOUNDARY, which is why `fleet-tick` names no
-runtime field and no test of it asserts one. The row then prints
-`counts=pool-derived`, and a stated count that disagrees prints beside it as
-`stated-unused=` rather than silently replacing it. **Absent or unreadable pool
-status is a REFUSE row, never a zero** — a zero-live reading is a full cap's
-worth of dispatch off a pool nobody read, which is the over-dispatch direction
-the flags' own refusal exists to block. There is no flag for this and there is
-not meant to be: the CLI's counts are caller-stated by definition, so a flag
-carrying a number you read out of the pool would be a stated count wearing the
-pool's name.
-
-**The alternate-tier member is dispatched outside the pool, exactly as today,
-and still counts against the wave's cap.** A pool is homogeneous in its agent —
-it names one definition and nothing else about resolution — while the rule above
-is one implementer per staged wave at the *other* definition, so that one is
-dispatched directly. **No per-call tier or effort anywhere on this path**: tier
-stays the agent definition's own frontmatter (ADR 0005), and a member's Resolved
-tier stays readable from its transcript after a pool dispatch.
-
-**The item carries only what varies; the pool's context carries the rest.**
-Ticket number and distilled brief go on the item. The shared background — the
-snapshot rules, the claim and release procedure, the reporting contract, every
-verbatim block below — is stated once as the pool's context, so a refill does not
-re-send it. The unconditional issue re-fetch stays what the paragraph above makes
-it: the backstop for an insufficient brief, never the default path.
-
-**One claim per item, and the member that receives the item owns it.** Phase 1
-still makes the claim, serially in the main checkout — its rule is measured, and
-a pool would run that race N ways at once — so what the pool changes is *when*
-you claim, not *who* claims: **never stage a claim ahead of the push it belongs
-to.** A claim queued behind items nobody has received yet is a worktree, a branch
-and an `in-progress` label with no member behind them, released by the
-end-of-run sweep rather than by the member that does the work. Claim what you are
-about to push; push what you have just claimed.
-
-**Completion detection is unchanged.** Members report as they do today and the
-monitor edges stay. A pool's aggregate result auto-delivers once, on first full
-drain, and its internal batch jobs are consumed, so per-member completions never
-arrive as events — re-plumbing consumption through the pool would trade a dead
-refill edge for a dead completion edge. A settled result is still Consumed
-deliberately, and the ledger still records one Dispatch per member, so
-member-outcomes scraping and tier accounting are unaffected. A pool-dispatched
-member's transcript must be reachable exactly as a hand-dispatched one's is —
-`hub`, `history://`, and the same `subagents/` scrape — so check that on the
-first pooled wave and report it if it is not.
-
-**A pool item settling with nothing is not, by itself, a bail.** The pool
-settles once, on the whole pool's drain, never per item, so a worker's own
-outcome is never read off the pool — read it off the member, exactly as
-Completion detection above already does for a successful one. Settle (CONTEXT.md
-§ Coordination) is three states on omp — `completed`, `failed`, `cancelled` —
-and reading `failed`/`cancelled` the same as a `completed` turn that had nothing
-to report is the exact collapse this line blocks: a member that died never chose
-to bail, so demoting its ticket on its silence demotes a ticket its member never
-got the chance to judge. Confirm death first, exactly as the Member-killed row
-does (Failure handling, below) — its mtime discriminator, never silence alone,
-applies to a pool worker exactly as to a hand-dispatched member. **Only an
-explicit bail report — the member itself naming the cause — reaches Implementer
-bails before implementing** (phase 3, below); a died or merely-quiet member's
-silence never does. A confirmed-dead item recovers exactly as the Member-killed
-row says — new member, new name, the SAME ticket — never a demotion.
-
-**Refilling a freed pool worker never re-pushes the ticket that just left it.**
-Demote-by-cause (phase 3's Implementer-bails-before-implementing step) drops
-`ready-for-agent` before the freed worker takes its next item — check that label
-live, the same `candidates.mjs --require-label ready-for-agent` scan phase 0
-already runs for a hand-dispatch pick, immediately before every push, so a
-ticket demoted mid-wave is excluded from its own pool's remaining pushes and
-from every later pool's shortlist alike, for as long as the demotion stands. A
-push that instead draws from a list built before the demotion landed is the
-failure this line blocks — a ticket the fleet has already judged
-unimplementable, handed straight back to the next worker the pool refills.
-
-**Waiting on the pool is the blocked-only path, and it is not a simplification to
-reach for.** `hub` `op:"wait"` on the pool name settles on the pool's DRAIN and
-not per item, so a controller parked there stops servicing the reviewer and merge
-sides — the stall this whole mechanism exists to remove, with the roles swapped.
-It is conditional on having nothing live to service at all; the ordinary path
-READS pool status on the event edges you already handle. A blanket "wait on the
-pool" is a defect.
-
-**A lost or reset kernel is a refusal and a re-stage, never an empty queue.** The
-pool lives in the `eval` kernel, which is process-local and disposed with its
-owner, so a vanished pool reads as a pool that cannot be read — refuse, re-stage
-the wave under a new pool name, and never let a pool nobody can read present as a
-drained one.
-
-One named member per ticket, up to cap, background. Each prompt carries ticket
-number, worktree abs path, branch, and each of these verbatim:
-
-> **You are an unattended fleet member.** No maintainer is reachable, no user
-> will answer you, and no approval gate will ever clear for you. Report to the
-> controller and to nobody else. Where a skill offers a maintainer-present step
-> and an unattended one, yours is the unattended one.
-
-> You are ALREADY in worktree `<abs-path>` on branch `<branch>`. Do NOT create
-> another worktree. Verify with `git rev-parse --git-dir` and
-> `git rev-parse --git-common-dir`. Skip the using-git-worktrees skill's Step 1.
-
-> **`edit` and `read` resolve a bare relative path against the SESSION ROOT —
-> the controller's own main checkout — not against your worktree and not
-> against your `bash` cwd. Give them the absolute worktree path on every
-> call.** They take no `cwd` parameter, so shell discipline does not reach
-> them: a member whose every command is correctly scoped with `cd` or `git -C`
-> still leaks through `edit`/`read` alone, and the rev-parse check above
-> settles only where your SHELL is. Your worktree is the `<abs-path>` you were
-> handed; the main checkout is the parent of `git rev-parse
-> --path-format=absolute --git-common-dir`, which you derive yourself — nothing
-> substitutes it for you.
->
-> Measured on #1727, four occurrences in one run, none of them caught by any
-> fleet mechanism: two members self-caught their own stray edit, and the
-> controller caught the other two independently on a routine `git status` of
-> the main checkout — one of those was eight program-line edits across two
-> calls, into a file the fleet reads as an instrument. Only one of the four was
-> a mutation-probe copy; the other three were ordinary first edits, so this is
-> not a harness hazard the scratch rule below already covers. It is every
-> `edit` and `read` you make.
->
-> **The pair of symptoms reads as a TOOL BUG and is not one.** `git diff` in
-> your worktree shows nothing — correct, nothing changed there — while `read`
-> shows your new content — correct, it is reading the main checkout. Two
-> members read that pair as a silent edit no-op or a stale read cache and filed
-> `report_issue` against the tools; both entries were retracted. Two trees, two
-> honest answers, and the path was the defect.
->
-> So: prefix every `edit` and `read` path with an absolute path — the
-> worktree `<abs-path>` for repo files, `<scratch>/impl-<N>/` for scratch —
-> never a bare relative one, and never `plugin/scripts/foo.mjs` on its own.
-> When a diff and a read disagree, and after any edit you are unsure of, run
-> `git -C <main-checkout> status --porcelain` — empty is the only clean
-> answer. Before you recover anything, run `git -C <main-checkout> diff --
-> <path>` and read it: if that diff is ENTIRELY your own stray content, copy
-> the last-committed version back over it with `cp` — `git -C
-> <main-checkout> show HEAD:<path> > <path>` — never `git restore --
-> <path>` and never a bare `git restore .` there, either of which silently
-> discards a sibling's or the controller's own uncommitted work sitting at
-> that exact path too, and the porcelain check above would then report
-> their destroyed work as clean. If the diff shows content you did not
-> write, stop: reconcile it by hand instead of reverting the file.
-
-> Here is the ticket's distilled brief, already read once in phase 0 step 4 —
-> title, plus whichever of the `## Agent Brief` comment or the issue body
-> carries the ticket's actual brief, and its `Out of scope`, pasted verbatim:
-> `<distilled brief>`. Skip the fetch below if this already answers what you
-> need.
-
-> Read the issue with `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`.
-> Not bare `gh issue view <N> --comments` — non-interactively that prints only
-> the comments, and nothing at all when there are none, dropping the title and
-> body either way, exit 0, so the loss is silent. The `## Agent Brief` comment
-> is authoritative over the issue body. Read the issue **before
-> touching code**: with the repo in front of you, still undecided or needing
-> human hands you do not have → bail, name the cause, do not implement.
-
-> **Re-derive the ticket's claims against `origin/main` before implementing** —
-> not the working tree, and not the ticket's line numbers, which drift. Phase 0
-> runs a cheap version of this check, so what reaches you is what a `grep` could
-> not settle; you have the tree, so you are the backstop. Already fixed → report
-> that with the commit and do NOT invent work. An acceptance criterion the tree
-> now **contradicts** is a bail, not a thing to implement: say which, and stop.
-
-> Commit incrementally as you go. Do not accumulate a large uncommitted diff — if
-> you stop for any reason, uncommitted work is invisible to the controller and
-> effectively unrecoverable.
-
-> **Never `git stash` or `git stash pop` to shelve your own progress — take a
-> WIP commit instead: `git commit -m wip`, then amend it or
-> `git reset --soft HEAD^` once you have something real to commit.** The
-> stash stack is repo-global, not per-worktree or per-session — the same
-> `refs/stash` is shared by every worktree, the main checkout, and every
-> concurrent member. A bare pop takes whichever entry is on top, from any
-> worktree, and it is **silent** about it — rc 0, no error — exactly when the
-> tree receiving it is clean on the affected paths, which is the moment you
-> would assume it is safe; it refuses loudly only when that tree is already
-> dirty on them. A bare `git stash` (push) does **not** reach into a sibling
-> worktree's uncommitted work — that half is unfounded, it acts on your own
-> tree only — so the hazard is entirely on the pop side: yours can take a
-> sibling's entry, or a sibling's pop can take yours. Nothing partitions the
-> stack the way the scratch root below is partitioned — one `refs/stash` per
-> repository, with no per-member address for it — so this prohibition is the
-> whole of the protection, not a stopgap standing in for one.
-
-> **Every scratch file, fixture or mutation copy you create goes under
-> `<scratch>/impl-<N>/`, never into the scratch root by itself.** The scratchpad
-> root your own system prompt names is injected unprompted into every dispatched
-> member and is shared with every sibling running this session — `SKILL.md` does
-> not choose that root and cannot keep it from being handed to you, so writing to
-> it directly, not a subdir under it, is the defect. Derive your own path the
-> same way `claim-ticket.sh` already derives per-ticket ports from the issue
-> number (`postgres=16<N>`, `ollama=22<N>`): `<scratch>/impl-<N>/`, not a second
-> scheme, and `mkdir -p` it yourself the first time — nothing creates it for you.
-> The harm is a false measurement, not untidiness: a mutation harness writes a
-> broken copy of a file, measures against it, then restores from `.orig`, and
-> two members in one directory are one filename collision away from restoring a
-> sibling's `.orig` over their own file, or measuring a "clean baseline" that is
-> actually a sibling's mutant — silently, indistinguishable from a real result.
-> This is not the worktree isolation rule: `claim-ticket.sh` already gives you
-> your own worktree, and the scratch root sits deliberately outside every
-> worktree so a harness never dirties one — nothing partitions the scratch root
-> itself but this rule.
-
-> **The `eval` kernel is shared with every sibling member and with the
-> controller that dispatched you — namespace every binding you make in it, and
-> never hand it a relative path.** Measured on #1447, live, three ways in one
-> run: two sibling implementers dispatched in the same batch, and the
-> controller above them, reported the SAME Python kernel pid and the same
-> runner file, and each could read the others' top-level variables — a bare
-> `WT` bound by one member was read back out of another member's own kernel,
-> which is the exact collision an earlier member self-reported and could not
-> prove. `omp://tools/eval.md` is where the mechanism is written down:
-> retained kernels are keyed by `python:${sessionId}`, normalized cwd and
-> interpreter (`js:${sessionId}` for the JS VM), and "Parent and ordinary task
-> subagents may share an inherited eval executor id" — so no part of that key
-> separates two members of one run, because the session id is inherited from
-> the controller and the cwd is the same main checkout for all of you.
->
-> Three consequences. The bare-name collision and a kernel `reset` leave nothing
-> `git status` can surface at all; the relative-path hazard does only when the
-> cell writes rather than reads. **A bare top-level name is a shared global** a
-> sibling can overwrite between two of your own cells, so prefix what you bind
-> with your own member NAME, not its bare ticket number —
-> `WT_impl_1447`, never a bare `WT` and never a prefix a recovery member for
-> the same ticket (`impl-1447-b`) would also produce. **The kernel's cwd is
-> the MAIN CHECKOUT, not your worktree** — unlike `bash`, `eval` takes no
-> `cwd` parameter at all — so a relative path in a cell resolves into the tree
-> every member reads its instruments out of: measured, a bare `work/scripts`
-> in a member's cell resolved under the main checkout root, never under that
-> member's own worktree — the stray `work/` tree found there has exactly that
-> shape — so pass absolute paths rooted at `<scratch>/impl-<N>/` or at your
-> worktree, the same discipline the `edit`/`read` block above spells out.
-> Treat that as one rule stated twice, never as a habit already in place:
-> #1727 records four members who broke it with `edit` alone in one run, which
-> is why that block carries its own evidence instead of leaning on this one.
-> And **never call
-> `eval` with `reset: true`**, which is destructive to every other member
-> sharing that backend session, not only to your own state.
->
-> Using the kernel is not the defect, and this is not the `isolated` question
-> — the bare name, the relative path and the reset are. The harm is that the
-> collision fails in the looks-already-correct direction: you read a value
-> that is a sibling's rather than your own, and nothing anywhere reports it.
-
-> Your ticket names the cases it was written from. **Before implementing, enumerate
-> every member of that class — including any the ticket names only in passing — and
-> say which you cover and which you deliberately leave** — a guard on one path
-> has siblings, a predicate has other inputs, a check on a directory has
-> subdirectories. Fixing exactly the named cases is how a fix ships without
-> closing its own ticket.
->
-> Build that list from **the ticket's own prose first**, then from the mechanism.
-> A case the body names in passing is still a named case, and enumerating from
-> first principles is how you miss it. Then ask the other half: **what can this
-> change wrongly REFUSE?** A new guard's false-positive class is not its
-> false-negative class, and a suite that only feeds it valid input pins neither —
-> so leave one test behind that feeds it input it must ACCEPT.
->
-> **Both halves above are about the bug class. The third is about YOUR EDIT:
-> enumerate what your change newly does, not only what the code already did
-> wrong.** Moving, reordering or wrapping a statement has effects the ticket
-> never mentions — the last command of a script sets its exit status, a
-> relocated line changes what `set -e` covers, a hoisted guard changes what runs
-> first. **Ask which of the ticket's own acceptance criteria your restructuring
-> could newly violate, and test that path.** Measured: #265 required "no path in
-> the script exits 1", and the fix for it moved a guard to the file's end,
-> regressing the default dry run from exit 0 to exit 1 — the ticket's exact
-> defect, relocated onto the path nobody tested. The implementer had enumerated
-> every exit-1 path and declared two it was leaving; all of them were
-> pre-existing, and none was the one its own edit created.
->
-> **Then check the suite can even see the mode you changed.** That regression
-> shipped under 616 green tests because all eight call sites passed the same
-> flag, so the default mode had no test at all. A green suite is evidence only
-> about the paths it exercises.
-
-> Run `sizing-a-ticket` for the process path and proceed on **either row** —
-> heavy is never a bail reason, and that skill owns the fleet's heavy-row entry
-> point, whose condition you are. A brief that will not support a plan is the
-> undecided case: bail and name the cause, never a heavy row. Selection and
-> claiming are already done (`next-ticket` steps 1-5), so you start at
-> `next-ticket` **step 6**, which is that sizing run.
->
-> Then `next-ticket` **step 7**: rebase, re-run tests, push, `gh pr create` with
-> `Closes #N` in the body, then `gh pr edit --add-label` as its own command
-> carrying exactly one release label — `patch`/`minor`/`major`, the *label*, not
-> the branch *type*. **Never fold `--label` into the create**: a create that
-> outruns your tool timeout is backgrounded with the PR already open, its flags
-> unapplied and no exit status for you to react to, so the label goes missing
-> and every later gate still reads the PR as correctly opened. Separate, the
-> label write has its own exit status and fails loudly. **Put your step-6 sizing verdict in the PR
-> body on its own line, `Sizing: light` or `Sizing: heavy`, and name the signal
-> it turned on beside it** — `Sizing: heavy — >3 implementation files, arg.mjs
-> plus four consumers`. Your own words, one clause: never paste the skill's
-> output, because that format will change and this line has to outlive it. A
-> verdict with nothing beside it is indistinguishable from a guess, and is
-> recorded as one. The controller reads this line as a difficulty covariate when
-> it rules your review, and the PR body is the only place it survives your exit.
-> **Report to the controller the PR number, the head SHA, and WHEN you ran
-> `sizing-a-ticket` relative to opening the PR** — "ran sizing-a-ticket at step
-> 6, before `gh pr create`" if you kept that order, and say so plainly if you did
-> not, including if the `Sizing:` line was written before the run and corrected
-> after. Nothing in the PR body separates a measured verdict from one typed in
-> early; that clause is the only thing that does, and an unreported ordering
-> costs the covariate. Then exit. Never apply `ready-to-merge`, never merge.
-
-Each rule in the enumerate-and-declare block is load-bearing, for a different
-reason.
+Why the agent body carries what it does — read this before editing either agent
+file, and keep the two bodies byte-identical. Each rule in the body's
+enumerate-and-declare block is load-bearing, for a different reason.
 **Enumerate-and-declare** answers a signature measured four times in one run:
 each implementer fixed exactly the cases its ticket named and left an adjacent
 one of the same class broken — a CRLF body **broken by** the fix for depth and
@@ -1509,8 +1333,8 @@ See references/member-lifecycle.md.
 
 **Do not ask permission to run the loop.** Dispatching a reviewer, spawning a
 merge bot, refilling a slot, re-verifying a SHA, filing a follow-up — all proceed
-unconfirmed. Invoking the command was the opt-in. Two exceptions: **Phase 0's
-multi-select**, and **a judgement the evidence cannot settle**.
+unconfirmed. Invoking the command was the opt-in. One exception: **a judgement the
+evidence cannot settle**.
 
 - **Nothing to do right now** → **do not end your turn.** Arm the heartbeat
   below. A turn that ends on a drained queue is #3's stall itself: nothing
@@ -1524,20 +1348,22 @@ multi-select**, and **a judgement the evidence cannot settle**.
   | Cause | Label |
   |---|---|
   | brief does not decide *what* to build | `needs-triage` |
+  | genuine fork — options named, none ruled | `ready-for-human` |
   | needs human hands — external access, manual testing, judgment during the work | `ready-for-human` |
 
   `gh issue edit <N> --remove-label ready-for-agent --remove-label in-progress
   --add-label <label>`, comment the cause, release the worktree and branch with
   `release-ticket.sh` (below — `reap.sh` declines a claim that never became a
   PR), refill with a *different* ticket. `needs-triage` routes back to
-  `/triage`, which can return it as `ready-for-agent`; `ready-for-human` is the
-  dead end, so use it only for hands, never for vagueness.
+  `/triage`, which can return it as `ready-for-agent`; `ready-for-human` for
+  hands or a fork; `needs-triage` for a brief that names no *what*.
 
   **Dropping `in-progress` is the load-bearing half** — phase 1 applied it and
   `candidates.mjs` excludes it, so leaving it makes the ticket invisible to your
-  scans *and* the maintainer's. It does not loop; it disappears. Phase 0 excludes
-  without relabelling — an unclaimed ticket is not yours to reclassify, and it
-  surfaces its exclusions to the maintainer anyway.
+  scans *and* the maintainer's. It does not loop; it disappears. The same causes
+  relabel an unclaimed ticket at the Pull (phase 1), where there is no
+  `in-progress` to drop — the causes and labels are one table, applied at
+  whichever point the ticket fails them.
 - **Review slot free, PR queued** → run the review workflow yourself, then
   dispatch a fix-applier for what survives (below). Nothing survived and nothing
   to file → skip the fix-applier and dispatch the **finisher** directly: no
@@ -3069,9 +2895,12 @@ where the controller itself runs from.
 
 ## Queue depth
 
-- **pool** — approved, not yet dispatched
-- **supply** — open `ready-for-agent` surviving in-flight scan and the decided?
-  check. A queue of undecided tickets is zero supply.
+- **shortlist** — `.fleet/shortlist.json`'s entries with no `impl-` row and no
+  live `excluded` row: admissible, not yet pulled. The tick's `unclaimed=`.
+- **supply** — `scanned`, the open `ready-for-agent` tickets `shortlist.mjs`'s
+  candidate scan returned, before any filter. Only a Pull's full read judges
+  decided?, so a shortlist of undecided tickets is supply that every Pull
+  relabels away — and relabelling is what stops it being counted next scan.
 - **review backlog** — PRs verified and queued with no reviewer slot.
   `fleet-tick.mjs` counts every open PR without `ready-to-merge` **that closes an
   issue**, which is that plus the ones already under review or waiting on CI. The
@@ -3128,12 +2957,13 @@ more PRs adds no rebases-per-PR — it changes only *when* a given PR is ready.
 (Deeper waves do cost: the last PR in one pays the largest rebase and the longest CI
 cycle. That is an argument for batching a wave, never for idling an implementer.)
 
-**Reconcile, do not wait for an event.** "A slot is free and the pool is non-empty"
-is a *level* condition — re-derive the deficit on **every** tick, whatever woke you:
-a member finishing, a member bailing before implementing, a merge landing. An
-edge-triggered loop that only refills on completion stalls silently the moment the
-queue empties, because 0 implementers emit no completion event. With pool 0 the
-table below governs — re-shortlist and ask, do not dispatch un-ticked supply.
+**Reconcile, do not wait for an event.** "A slot is free and the shortlist is
+non-empty" is a *level* condition — re-derive the deficit on **every** tick,
+whatever woke you: a member finishing, a member bailing before implementing, a
+merge landing. An edge-triggered loop that only Pulls on completion stalls
+silently the moment the shortlist empties, because 0 implementers emit no
+completion event. With the shortlist empty the table below governs — refresh,
+and never Pull a ticket the shortlist does not hold.
 
 **Do not re-derive this by hand — `fleet-tick.mjs` computes it.** One invocation
 prints per-role `actual/target` and an explicit ACTION with the backlog gate
@@ -3141,19 +2971,21 @@ above and every row of the table below already applied; the merge-side edges in
 Phase 3 name the flags. The deficit is then *computed, not remembered*, which is
 the whole point: a table you must remember to consult is one you will not
 consult under a merge-side event storm, and that is how implementers reached
-0/target with pool 1 and ~57 `ready-for-agent` in supply while nobody noticed
-(#3). What follows stays here as the explanation of what the script decides —
+0/target with one approved ticket waiting and ~57 `ready-for-agent` in supply while nobody
+noticed (#3). What follows stays here as the explanation of what the script decides —
 never as a second, hand-run copy of it.
 
-| pool | supply | action |
-|---|---|---|
-| ≥ 1 | — | dispatch from pool, silent — *unless* review backlog ≥ 2 |
-| 0 | ≥ cap | re-shortlist, ask the maintainer to tick |
-| 0 | 0 < supply < cap | re-shortlist **and** suggest `/triage` |
-| 0 | 0 | suggest `/triage`, hold implementer slots idle |
+| shortlist (unclaimed) | implementer row prints |
+|---|---|
+| ≥ 1 | `PULL #N …`, one head per free slot — a Pull each (phase 1) |
+| below the cap, missing or empty | the tick refreshes first — `REFRESHED shortlist: n entries; k lifted` — and Pulls from what it found |
+| 0 after that refresh | `SUGGEST /triage, hold idle` |
 
-The backlog gate outranks all four rows: at backlog ≥ 2 the answer is hold, and
-re-shortlisting to enable a dispatch you are holding buys nothing.
+Three holds outrank every row: `HOLD (draining)` once `ledger.mjs drain` has
+recorded the drain, `HOLD (tier mismatch impl-<N>)` until a replacement is
+dispatched at the right tier, and `HOLD (review side saturated)` when a PR is
+still owed its review and no reviewer slot is left for it — refreshing to
+enable a Pull you are holding buys nothing.
 
 `/triage` is user-invoked only — suggest, never run. The suggestion is a report,
 not a blocking prompt. Counts come from cheap `gh issue list --search`, no bodies.
@@ -3191,7 +3023,7 @@ A starved implementer queue never stalls the review or merge side.
 <branch> <sha>` before enqueueing — a member can commit in a nested worktree,
 leaving the SHA on a stray branch while its report reads normally. Exit codes as
 `inflight.sh`: `# 0 reachable, 1 not reachable, 2 unanswerable`. Not reachable
-(exit 1) → flag, do not enqueue, do not return the ticket to the pool until the
+(exit 1) → flag, do not enqueue, do not return the ticket to the shortlist until the
 maintainer rules. **Exit 2 is not a verdict** — the question could not be
 answered, and every cause of it reaches you as one shape: no JSON on stdout at
 all, the cause on stderr alone. Read that stderr, fix what it names and re-run;
@@ -3362,7 +3194,7 @@ ADR 0007 records the gate and why it has no exemption.
 | Failure | Response |
 |---|---|
 | SHA not on expected branch | Flag, do not enqueue, report |
-| Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |
+| Implementer bails before implementing | → `needs-triage` if under-specified, `ready-for-human` if it needs human hands or leaves a fork open; drop `in-progress`, comment the cause, release the claim, refill (phase 3) |
 | Implementer blocked or ambiguous *mid-implementation* | Free the slot, leave `in-progress`, report — the row above is the pre-code bail, not this one |
 | `review-pr` workflow throws or returns no tree | Retry once, then hand-dispatch the fallback reviewer. Never enqueue the PR as reviewed — the workflow is not a member, so no other row here covers it |
 | Reviewer or fix-applier cannot reach green | Report, leave the PR unlabeled, free the slot |
@@ -3422,16 +3254,42 @@ decides whether a replacement redoes or destroys work.
 
 One git-ignored `.fleet/ledger.md`, updated at **every** state change via
 `~/.fleet/bin/fleet-run ledger.mjs` subcommands (`row`, `filed`, `ruled`,
-`check`, `read`). Your context is the least durable thing in the run: it compacts,
-and a controller that loses the pool, the dispatch map or the filed list redoes
-finished work. Two duplicate tickets shipped in one run from exactly that.
+`check`, `read`, `dispatch`, `settle`, `drain`). Your context is the least
+durable thing in the run: it compacts, and a controller that loses the dispatch
+map or the filed list redoes finished work. Two duplicate tickets shipped in one
+run from exactly that.
 
 One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`):
 
 ```
-#332 impl-332 → PR#344 → MERGED 73b356de
-#324 impl-324 → PR#346 · fix-pr-346 · ports=16324 · ruled:6-applies · held-behind:#313
+#332 impl-332=PR#344 → PR#344 → MERGED 73b356de
+#324 impl-324=PR#346 → PR#346 · fix-pr-346 · ports=16324 · ruled:6-applies · held-behind:#313
+#351 impl-351 · class=routine · tier=alt
+#358 excluded · behind-pr:#346
+#360 excluded · behind-issue:#351
 ```
+
+**A member's token is `<member>` while it is live and `<member>=<outcome>` once
+it settles** — the grammar is `ledger-grammar.mjs`'s, and the tick derives every
+live count from it, so nobody states one. Write neither by hand:
+
+- **`ledger.mjs dispatch <ticket|pr> <member>`** — before the dispatch call,
+  marks the member live on its row and appends it to `## Dispatched`. `dispatch
+  merge-bot` names the next bot itself. It refuses a name this run already
+  used (a replacement takes `-b`, `-c` …), a second live member on one ticket
+  or PR, and any implementer once the run is draining.
+- **`ledger.mjs settle <member> <outcome>`** — rewrites the token to
+  `<member>=<outcome>` in both places. Outcomes: `impl-N` = `PR#M | bailed |
+  released | killed | tier-mismatch`; `fix-pr-M` = `applied:<head> | no-op |
+  failed | killed`; `finisher-pr-M` = `labelled | failed | killed`;
+  `merge-bot-n` = `done | killed`. A settled member stays settled.
+- **`ledger.mjs drain "<reason>"`** — the one drain marker per run; supply
+  stops, the review and merge sides keep going.
+
+`→ PR#M` stays as the human-readable arrow; the tick reads only the `=`
+tokens. `tier=alt` marks the every-5th-Pull member (phase 2), and `excluded ·
+behind-pr:#M | behind-issue:#M` is an Exclusion (phase 1) — a ticket row like
+any other, never a section of its own.
 
 Plus two append-only lists:
 
@@ -3487,7 +3345,7 @@ One running table, updated as events land:
 #N  ticket   impl-<N>       -      -               -          -        blocked: SHA off-branch
 ```
 
-Plus a queue-depth line: pool, supply, whether triage was suggested.
+Plus a queue-depth line: shortlist, supply, whether triage was suggested.
 
 ## Red flags
 

@@ -19,7 +19,7 @@ test("SKILL.md's phase-2 routing pair: CLAUDE says the precheck does not apply, 
   const region = between(
     RUN_TEAM,
     "**On omp the alias is the fleet's tier name",
-    "**One implementer per staged wave",
+    "**Every 5th Pull by ledger count",
     "run-team phase-2 routing-precheck pair",
   );
   const claude = markedLine(region, "CLAUDE", "run-team phase-2 routing CLAUDE line");

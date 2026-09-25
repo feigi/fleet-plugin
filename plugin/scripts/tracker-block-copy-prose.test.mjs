@@ -1,5 +1,8 @@
 // #374. `docs/agents/issue-tracker.md` reproduces the implementer issue-read
-// block from `run-team/SKILL.md`, and the copy has fallen behind that block
+// block — since #1804 carried by the body of `agents/fleet-implementer.agent.md`
+// (spec 2026-09-24 § 2 Decision 2), which each harness injects as the member's
+// system prompt; before that, by a `>` quote block in `run-team/SKILL.md`'s
+// phase 2 — and the copy has fallen behind that block
 // twice: #79 found it carrying the command and its caveat but neither rule
 // saying which text wins, and #373 restored those two without the judgement
 // rule that had arrived beside them upstream in the meantime.
@@ -55,11 +58,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { paragraph, quoteBlock, unemphasized } from "./prose-pin.mjs";
+import { paragraph, unemphasized } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
-const SKILL = read("skills", "run-team", "SKILL.md");
+// The body alone — everything after the frontmatter's closing `---`. Named
+// SKILL for the history above: this was run-team/SKILL.md's phase 2 until #1804.
+const SKILL = read("agents", "fleet-implementer.agent.md").split("---").slice(2).join("---");
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const TRACKER = readFileSync(join(REPO_ROOT, "docs", "agents", "issue-tracker.md"), "utf8");
 
@@ -94,13 +99,14 @@ const TRACKER_END = /^#/;
 // SEPARATE run. Measured on this file's own fixtures: a `>`-joined growth
 // paragraph lands inside `quoteBlock`'s return, a blank-line-separated one does
 // not — and the blank-line shape is the one #374's review actually shipped, and
-// the one the anchor above catches. So `quoteBlock` is used below for the
-// FIXTURES, where a bound that is exactly one block is what is wanted, and the
-// slice keeps this broader bound, which is strictly wider than one quote run.
+// the one the anchor above catches. So a one-block bound (`quoteBlock` until
+// #1804, `paragraph` since the block became plain prose in the agent body) is
+// used below for the FIXTURES, where a bound that is exactly one block is what
+// is wanted, and the slice keeps this broader bound, which is strictly wider.
 //
 // The two anchors differ because the two files hold the block differently: in
-// the tracker it owns a `##` section, so the next heading ends it; in run-team
-// it is one blockquote rule among siblings, so the rule that follows it does.
+// the tracker it owns a `##` section, so the next heading ends it; in the
+// agent body (run-team until #1804) it is one blockquote rule among siblings, so the rule that follows it does.
 // Both are SEMANTIC, like the opener, and both are guarded below — an anchor
 // that goes stale reddens loudly rather than silently widening the slice.
 //
@@ -144,7 +150,7 @@ function block(text, what, end) {
   return slice.join("\n");
 }
 
-const source = (text = SKILL) => block(text, "run-team/SKILL.md", SKILL_END);
+const source = (text = SKILL) => block(text, "agents/fleet-implementer.agent.md", SKILL_END);
 const copy = (text = TRACKER) => block(text, "docs/agents/issue-tracker.md", TRACKER_END);
 
 // Each side's own raw bytes, for the fixtures below to mutate. Both throw,
@@ -152,8 +158,8 @@ const copy = (text = TRACKER) => block(text, "docs/agents/issue-tracker.md", TRA
 // staleness guard a hard-coded copy of the prose needed and could not have,
 // and unlike that copy, this one names the actual cause.
 //
-// `quoteBlock` bounds run-team's side at the block's own `>` run, so a fixture
-// built from it cannot run past the block's end onto the next block's marker.
+// `paragraph` bounds the agent body's side at the block's own blank line, so a
+// fixture built from it cannot run past the block's end onto the next block.
 // That is not hypothetical tidiness: a sibling rewrap fixture in
 // `dispatch-block-pins-prose.test.mjs` ran one line past its block, spliced two
 // blocks onto one line, and left its own staleness guard vacuous (#1003).
@@ -166,7 +172,9 @@ const copy = (text = TRACKER) => block(text, "docs/agents/issue-tracker.md", TRA
 // `block` itself shrugs off (#1004, measured: `**Read the issue**` reddened
 // both fixture-based tests below, not just this one, with a stale-anchor
 // message rather than the growth or reflow they are meant to catch).
-const skillBlock = () => quoteBlock(SKILL, OPENER, "run-team's issue-read block", { emphasisTolerant: true });
+// The agent body carries the block as plain prose, like the tracker, so its
+// bound is the paragraph too — no `>` run to bound it since #1804.
+const skillBlock = () => paragraph(SKILL, OPENER, "the implementer body's issue-read block", { emphasisTolerant: true });
 // The tracker's copy is plain prose in a `##` section, not a quote run, so its
 // bound is the paragraph — `prose-pin.mjs`'s single definition of that bound,
 // blank-line-terminated and anchored exactly once.
@@ -251,7 +259,7 @@ test("a rewrapped copy still matches", () => {
   // interpreted in the latter, and these fixtures are whole blocks of prose
   // nobody is auditing for `$`.
   const skill = skillBlock();
-  const narrowSkill = rewrap(skill, 46, "> ");
+  const narrowSkill = rewrap(skill, 46, "");
   assert.equal(flat(narrowSkill), flat(skill), "the source rewrap changed the block's words, not just its breaks — the fixture is corrupt, not the docs");
   assert.notEqual(narrowSkill, skill, "the source rewrap no longer changes run-team's wrapping — pick a width the file does not already use");
   assert.equal(copy(), source(SKILL.replace(skill, () => narrowSkill)));
@@ -269,7 +277,7 @@ test("upstream growth arriving as a new paragraph beside the block reddens", () 
   // Test 1 covers the sentence-sized case; this is the same drift one size up,
   // and under the paragraph-break slice it passed.
   const skill = skillBlock();
-  const grown = SKILL.replace(skill, () => `${skill}\n>\n> If the ticket names a linked PR, read that PR's diff too.`);
+  const grown = SKILL.replace(skill, () => `${skill}\n\nIf the ticket names a linked PR, read that PR's diff too.`);
   // Non-vacuity, and the assertion the hard-coded fixture used to stand in for:
   // the appended paragraph has to land INSIDE the source slice, or the
   // comparison below never sees the growth it is named for. Checked on the

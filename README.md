@@ -25,15 +25,13 @@ shorthand over HTTPS.
 
 **omp**
 
-Three settings are session-wide, install-time preconditions on omp (ADR 0003
-points 8–9, ADR 0011) — plugin agents are invisible without the first,
-`run-team`'s implementer dispatch pool can't open without the second, and the
-fleet's `opus`/`sonnet`/`haiku` tiers resolve to nothing without the third:
+Two settings are session-wide, install-time preconditions on omp (ADR 0003
+point 8, ADR 0011) — plugin agents are invisible without the first, and the
+fleet's `opus`/`sonnet`/`haiku` tiers resolve to nothing without the second:
 
 ```
 omp config get enabledProviders          # inspect first: the next line REPLACES the whole list
 omp config set enabledProviders '["claude-plugins"]'   # merge in any providers you already had enabled
-omp config set eval.workpool.freshAgents true
 omp plugin marketplace add feigi/fleet-plugin --scope=user
 omp plugin install fleet-ctl@fleet-plugin --scope=user
 omp config set task.agentModelOverrides "$(~/.fleet/bin/fleet-run tier-roles.mjs --json --merge)"   # set REPLACES the whole record: --merge keeps your own non-fleet overrides; re-run after every plugin update
@@ -94,20 +92,25 @@ ticket/PR at a time, with no controller above them. Full design rationale:
 
 **Controller loop** (phase 0 → 3, repeating until the queue drains):
 
-1. **Shortlist** — scan `ready-for-agent` issues, drop anything with an
-   unresolved dependency or already in flight (open PR, remote branch, or
-   local worktree), then a human approves the survivor pool. The fleet never
+1. **Shortlist** — `shortlist.mjs` scans `ready-for-agent` issues oldest
+   first and drops anything with an unresolved dependency, already in flight
+   (open PR, remote branch, or local worktree), or excluded behind an open PR
+   or issue. No human approves it: supply is automatic. The fleet never
    touches `ready-for-human` work — there's no channel back to a human
    mid-run.
-2. **Claim + isolate** — serially, in the main checkout: label the issue
-   `in-progress`, `git worktree add` a dedicated tree per ticket.
-3. **Dispatch** — spawn up to N implementers in the background, one per
-   claimed ticket, each a brand-new agent (never a resumed one — that would
-   drag the previous ticket's context into this one).
+2. **Pull** — each free implementer slot admits the shortlist's head the
+   moment it frees: one full read of the ticket, then either a relabel by
+   cause (`needs-triage`, `ready-for-human`), an exclusion behind the PR or
+   issue it collides with, or a claim — serially, in the main checkout: label
+   the issue `in-progress`, `git worktree add` a dedicated tree.
+3. **Dispatch** — each Pull dispatches one implementer in the background, a
+   brand-new agent (never a resumed one — that would drag the previous
+   ticket's context into this one); every 5th Pull runs at the alternate
+   tier.
 4. **Event loop** — react without blocking: an implementer's PR gets queued
    for review; a free review slot picks up the next queued PR; a reviewer
-   that lands the `ready-to-merge` label triggers a merge-bot wave; the pool
-   emptying re-runs the shortlist.
+   that lands the `ready-to-merge` label triggers a merge-bot wave; the tick
+   refreshes the shortlist as it runs low.
 
 **Reviewer fan-out** — each reviewer cuts a read-only snapshot, sizes the PR,
 and dispatches the applicable subset of six specialist agents in parallel
@@ -126,12 +129,13 @@ touches related work, otherwise rebase onto `main`, wait for CI green, merge.
 ```mermaid
 flowchart TD
     subgraph CTL["Controller — main thread, /fleet-ctl:run-team"]
-        P0["Phase 0: shortlist<br/>candidate scan, dependency scan,<br/>in-flight check, human approval"]
-        P1["Phase 1: claim + isolate<br/>label in-progress, git worktree add"]
-        P2["Phase 2: dispatch implementers<br/>(up to N, fresh context each)"]
+        P0["Phase 0: shortlist.mjs<br/>candidate scan, dependency scan,<br/>in-flight check, minus exclusions"]
+        P1["Phase 1: Pull<br/>read, judge, relabel or exclude or claim"]
+        P2["Phase 2: dispatch one implementer<br/>(fresh context, per Pull)"]
         P3{"Phase 3: event loop"}
         P0 --> P1 --> P2 --> P3
-        P3 -->|"approved pool empty"| P0
+        P3 -->|"slot free"| P1
+        P3 -->|"shortlist low: tick refreshes"| P0
     end
 
     P2 --> IMPL["Implementer<br/>size + implement ticket, push, gh pr create"]

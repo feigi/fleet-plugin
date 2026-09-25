@@ -46,7 +46,7 @@
 // asserts nothing — which is the one way to write this mechanism so that it
 // passes unconditionally.
 //
-// SCOPE. Every quote run in phase 2's verbatim region and in the Reviewers
+// SCOPE. Every block of the implementer agent body and every quote run in the Reviewers
 // section has a fixture, and the two coverage tests below are what keep that
 // true as blocks are added — a block this file does not name is a block a
 // carve-out can be appended to unseen. Prose that is NOT verbatim dispatch text
@@ -57,6 +57,18 @@
 // files are a separate question too — `docs/agents/issue-tracker.md` reproduces
 // the issue-read block, and `tracker-block-copy-prose.test.mjs` compares the two
 // (#374 owns that comparison's own fixture; nothing here touches it).
+//
+// WHERE THE IMPLEMENTER BLOCKS LIVE (#1804). They were a run of `>` quote
+// blocks in SKILL.md's phase 2 until spec 2026-09-24 § 2 Decision 2 moved them
+// into the body of `agents/fleet-implementer.agent.md` (byte-identical in the
+// `-alt` file, pinned by within-run-pair-prose.test.mjs), which each harness
+// injects as the member's system prompt; #1804 deleted the SKILL.md copy. The
+// body carries no `>` gutter, so a block there is delimited the only way the
+// body itself can say: it opens on its own opener's paragraph and runs to the
+// paragraph that opens the next fixtured block, or to the end of the body. That
+// makes the body's coverage STRONGER than a quote run's — any paragraph added
+// to it lands inside some fixtured block and reds that block's golden, and the
+// one place outside every block, ahead of the first opener, is pinned empty.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -66,21 +78,17 @@ import { between, phrase, quoteBlock, quoteBlocks } from "./prose-pin.mjs";
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
 
-const START = "and each of these verbatim:";
-const END = "Each rule in the enumerate-and-declare block";
+// The body alone — everything after the frontmatter's closing `---`.
+const AGENT_FILE = readFileSync(join(REPO, "agents", "fleet-implementer.agent.md"), "utf8");
+const BODY = AGENT_FILE.split("---").slice(2).join("---");
 
-// Both surfaces are sliced before any opener is looked for, for the reason
-// `quoteBlock`'s uniqueness assert would otherwise fire: "You are ALREADY in
-// worktree" opens BOTH phase 2's worktree block and the fix-applier prompt, so a
-// file-wide lookup would find two blocks and pin neither. `between` keeps its
-// start anchor, hence the `slice` — the region is what comes AFTER the intro
-// line, or that line's own words would read as part of the first block.
-//
-// Each takes the text to slice, defaulting to the real file, so the mutation
-// controls below can re-run the whole extraction against a modified copy instead
-// of asserting against a hand-built imitation of it.
-const region = (text = RUN_TEAM) =>
-  between(text, START, END, "phase 2's verbatim-blocks region").slice(START.length);
+// The Reviewers section is sliced before any opener is looked for, for the
+// reason `quoteBlock`'s uniqueness assert would otherwise fire. The body is its
+// own surface and needs no slice; `body` exists so both surfaces take the same
+// shape — each takes the text to slice, defaulting to the real file, so the
+// mutation controls below can re-run the whole extraction against a modified
+// copy instead of asserting against a hand-built imitation of it.
+const body = (text = BODY) => text;
 const reviewers = (text = RUN_TEAM) =>
   between(text, "### Reviewers", "#### Fallback: hand-dispatched reviewer", "run-team's Reviewers section");
 
@@ -143,6 +151,43 @@ const norm = (text) => {
     .join("\n\n");
 };
 
+// The body's blocks, by character span, so a block is always a true substring
+// of the text it came from — the mutation controls splice into the source by
+// `replace(raw, …)` and would silently miss on a rejoined copy.
+const paragraphSpans = (text) => {
+  const spans = [];
+  const sep = /\n[ \t]*\n/g;
+  let at = 0;
+  for (let m; (m = sep.exec(text)) !== null; at = m.index + m[0].length) spans.push([at, m.index]);
+  spans.push([at, text.length]);
+  return spans.filter(([a, b]) => text.slice(a, b).trim() !== "");
+};
+const opensOn = (text, [a, b], opener) =>
+  new RegExp(`^${phrase(opener).source}`).test(text.slice(a, b).split(/\s+/).join(" ").trim());
+const heads = (text, spans) => spans.flatMap((sp, i) => (REGION_BLOCKS.some((b) => opensOn(text, sp, b.opener)) ? [i] : []));
+
+// Loud in both failure directions, for `quoteBlock`'s reason: an extractor that
+// returns "" for a block it cannot find compares empty against empty, and a
+// deleted block passes.
+function bodyBlock(text, opener, what) {
+  const spans = paragraphSpans(text);
+  const at = spans.flatMap((sp, i) => (opensOn(text, sp, opener) ? [i] : []));
+  assert.notEqual(at.length, 0, `${what}: no paragraph of the implementer agent body opens on "${opener}" — the block was deleted or its opening words changed. Re-anchor or restore it; this throws rather than comparing a golden fixture against nothing`);
+  assert.equal(at.length, 1, `${what}: ${at.length} paragraphs of the implementer agent body open on "${opener}" — narrow the opener`);
+  const next = heads(text, spans).find((h) => h > at[0]);
+  return text.slice(spans[at[0]][0], spans[(next ?? spans.length) - 1][1]);
+}
+// Every block the body holds, split at every fixtured opener, plus whatever sits
+// ahead of the first one — text no fixture covers.
+function bodyBlocks(text) {
+  const spans = paragraphSpans(text);
+  const hs = heads(text, spans);
+  return {
+    lead: hs.length === 0 ? text.trim() : text.slice(0, spans[hs[0]][0]).trim(),
+    blocks: hs.map((h, k) => text.slice(spans[h][0], spans[(hs[k + 1] ?? spans.length) - 1][1])),
+  };
+}
+
 // The fixtures. One entry per quote run, in source order — the coverage tests
 // below hold both halves of that: one per run, and in that order.
 //
@@ -153,7 +198,7 @@ const norm = (text) => {
 // wrapping irrelevant on both sides.
 const REGION_BLOCKS = [
   {
-    what: "phase 2's unattended-member identity block",
+    what: "the implementer body's unattended-member identity block",
     opener: "**You are an unattended fleet member.**",
     golden: [
       "**You are an unattended fleet member.** No maintainer is reachable, no user",
@@ -163,7 +208,7 @@ const REGION_BLOCKS = [
     ],
   },
   {
-    what: "phase 2's worktree block",
+    what: "the implementer body's worktree block",
     opener: "You are ALREADY in worktree",
     golden: [
       "You are ALREADY in worktree `<abs-path>` on branch `<branch>`. Do NOT create",
@@ -172,7 +217,7 @@ const REGION_BLOCKS = [
     ],
   },
   {
-    what: "phase 2's edit/read session-root block",
+    what: "the implementer body's edit/read session-root block",
     opener: "**`edit` and `read` resolve",
     golden: [
       "**`edit` and `read` resolve a bare relative path against the SESSION ROOT —",
@@ -219,10 +264,10 @@ const REGION_BLOCKS = [
     ],
   },
   {
-    what: "phase 2's distilled-brief block",
+    what: "the implementer body's distilled-brief block",
     opener: "Here is the ticket's distilled brief",
     golden: [
-      "Here is the ticket's distilled brief, already read once in phase 0 step 4 —",
+      "Here is the ticket's distilled brief, already read once at the Pull —",
       "title, plus whichever of the `## Agent Brief` comment or the issue body",
       "carries the ticket's actual brief, and its `Out of scope`, pasted verbatim:",
       "`<distilled brief>`. Skip the fetch below if this already answers what you",
@@ -230,7 +275,7 @@ const REGION_BLOCKS = [
     ],
   },
   {
-    what: "phase 2's issue-read block",
+    what: "the implementer body's issue-read block",
     opener: "Read the issue with",
     golden: [
       "Read the issue with `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + \": \" + .body)'`.",
@@ -243,11 +288,11 @@ const REGION_BLOCKS = [
     ],
   },
   {
-    what: "phase 2's re-derive block",
+    what: "the implementer body's re-derive block",
     opener: "**Re-derive the ticket's claims",
     golden: [
       "**Re-derive the ticket's claims against `origin/main` before implementing** —",
-      "not the working tree, and not the ticket's line numbers, which drift. Phase 0",
+      "not the working tree, and not the ticket's line numbers, which drift. The Pull",
       "runs a cheap version of this check, so what reaches you is what a `grep` could",
       "not settle; you have the tree, so you are the backstop. Already fixed → report",
       "that with the commit and do NOT invent work. An acceptance criterion the tree",
@@ -255,7 +300,7 @@ const REGION_BLOCKS = [
     ],
   },
   {
-    what: "phase 2's commit-incrementally block",
+    what: "the implementer body's commit-incrementally block",
     opener: "Commit incrementally as you go",
     golden: [
       "Commit incrementally as you go. Do not accumulate a large uncommitted diff — if",
@@ -264,7 +309,7 @@ const REGION_BLOCKS = [
     ],
   },
   {
-    what: "phase 2's stash-prohibition block",
+    what: "the implementer body's stash-prohibition block",
     opener: "**Never `git stash` or `git stash pop` to shelve",
     golden: [
       "**Never `git stash` or `git stash pop` to shelve your own progress — take a",
@@ -286,7 +331,7 @@ const REGION_BLOCKS = [
     ],
   },
   {
-    what: "phase 2's scratch-discipline block",
+    what: "the implementer body's scratch-discipline block",
     opener: "**Every scratch file",
     golden: [
       "**Every scratch file, fixture or mutation copy you create goes under",
@@ -310,7 +355,7 @@ const REGION_BLOCKS = [
     ],
   },
   {
-    what: "phase 2's eval-kernel-discipline block",
+    what: "the implementer body's eval-kernel-discipline block",
     opener: "**The `eval` kernel is shared",
     golden: [
       "**The `eval` kernel is shared with every sibling member and with the",
@@ -356,7 +401,7 @@ const REGION_BLOCKS = [
     ],
   },
   {
-    what: "phase 2's enumerate-the-class block",
+    what: "the implementer body's enumerate-the-class block",
     opener: "Your ticket names the cases",
     golden: [
       "Your ticket names the cases it was written from. **Before implementing, enumerate",
@@ -393,7 +438,7 @@ const REGION_BLOCKS = [
     ],
   },
   {
-    what: "phase 2's sizing-and-PR block",
+    what: "the implementer body's sizing-and-PR block",
     opener: "Run `sizing-a-ticket`",
     golden: [
       "Run `sizing-a-ticket` for the process path and proceed on **either row** —",
@@ -751,20 +796,27 @@ const REVIEWER_BLOCKS = [
 ];
 
 const SURFACES = [
-  { label: "phase 2's implementer prompt", slice: region, blocks: REGION_BLOCKS, table: "REGION_BLOCKS" },
-  { label: "run-team's Reviewers section", slice: reviewers, blocks: REVIEWER_BLOCKS, table: "REVIEWER_BLOCKS" },
+  {
+    label: "the implementer agent body", file: "agents/fleet-implementer.agent.md", source: BODY, slice: body,
+    extract: bodyBlock, all: (text) => bodyBlocks(text).blocks, blocks: REGION_BLOCKS, table: "REGION_BLOCKS",
+  },
+  {
+    label: "run-team's Reviewers section", file: "skills/run-team/SKILL.md", source: RUN_TEAM, slice: reviewers,
+    extract: quoteBlock, all: quoteBlocks, blocks: REVIEWER_BLOCKS, table: "REVIEWER_BLOCKS",
+  },
 ];
-const ALL = SURFACES.flatMap(({ slice, blocks, table }) => blocks.map((b) => ({ ...b, slice, table })));
+const ALL = SURFACES.flatMap(({ file, source, slice, extract, blocks, table }) =>
+  blocks.map((b) => ({ ...b, file, source, slice, extract, table })));
 
 // Says the red is a re-blessing point, and where. A golden's failure message is
 // the whole difference between an editor updating the fixture on purpose and an
 // editor reading an equality failure as breakage and loosening the comparison.
-const reblessing = (what, table) =>
-  `${what} no longer matches its golden fixture. These blocks reach a member VERBATIM and are change-controlled, so this red is a re-blessing point, not necessarily a defect: if you edited the block on purpose, update the "${what}" entry in \`${table}\` in plugin/scripts/dispatch-block-golden-prose.test.mjs in the SAME change — copy the block out of skills/run-team/SKILL.md, with or without its "> " markers. A pure re-wrap cannot cause this; wrapping is normalized away on both sides. If you did NOT edit it, a sentence or clause was added to the block, which is what this fixture exists to catch.`;
+const reblessing = (what, table, file) =>
+  `${what} no longer matches its golden fixture. These blocks reach a member VERBATIM and are change-controlled, so this red is a re-blessing point, not necessarily a defect: if you edited the block on purpose, update the "${what}" entry in \`${table}\` in plugin/scripts/dispatch-block-golden-prose.test.mjs in the SAME change — copy the block out of plugin/${file}, with or without any "> " markers. A pure re-wrap cannot cause this; wrapping is normalized away on both sides. If you did NOT edit it, a sentence or clause was added to the block, which is what this fixture exists to catch.`;
 
-for (const { what, opener, golden, slice, table } of ALL) {
+for (const { what, opener, golden, slice, extract, table, file } of ALL) {
   test(`${what} matches its golden fixture`, () => {
-    assert.equal(norm(quoteBlock(slice(), opener, what)), norm(golden.join("\n")), reblessing(what, table));
+    assert.equal(norm(extract(slice(), opener, what)), norm(golden.join("\n")), reblessing(what, table, file));
   });
 }
 
@@ -778,29 +830,40 @@ for (const { what, opener, golden, slice, table } of ALL) {
 // Source-to-source, never against the fixtures: the equality tests above own
 // that comparison, and repeating it here would red twice for one edit while
 // saying nothing about coverage.
-for (const { label, slice, blocks, table } of SURFACES) {
+for (const { label, slice, extract, all, blocks, table } of SURFACES) {
   test(`every verbatim block in ${label} has a golden fixture, in source order`, () => {
     assert.deepEqual(
-      blocks.map((b) => quoteBlock(slice(), b.opener, b.what)),
-      quoteBlocks(slice()),
+      blocks.map((b) => extract(slice(), b.opener, b.what)),
+      all(slice()),
       `${label} holds a quote block \`${table}\` does not name, or its blocks were reordered. A block with no fixture is one a carve-out can be appended to with this whole file green — add it to \`${table}\`, in source order.`,
     );
   });
 }
 
-// The two coverage tests above are each bounded by their OWN surface's
-// anchors, not by the dispatch surface as a whole — a verbatim block added
-// past `region()`'s or `reviewers()`'s anchors but still inside `## Phase 2`
-// (or wherever a future dispatch surface lands) is invisible to both loops
-// above and to the whole prose suite. This test catches that shape: it counts
-// every quote run in the WHOLE file and asserts it equals the sum of the runs
-// inside the two named surfaces, so a quote run outside both reds here even
-// though no per-surface loop above ever saw it.
-test("run-team/SKILL.md has no verbatim block outside both fixtured surfaces", () => {
+// The body's one uncovered place: text ahead of its first fixtured opener
+// belongs to no block, so no golden sees a rule added there.
+test("the implementer agent body opens on its first fixtured block, with nothing ahead of it", () => {
+  assert.equal(
+    bodyBlocks(BODY).lead,
+    "",
+    "agents/fleet-implementer.agent.md carries text ahead of its first fixtured block — a rule added there reaches every member and no golden fixture sees it",
+  );
+});
+
+// The Reviewers coverage test above is bounded by its OWN surface's anchors —
+// a verbatim block added past `reviewers()`'s anchors (or wherever a future
+// dispatch surface lands in SKILL.md) is invisible to it and to the whole prose
+// suite. This test catches that shape: it counts every quote run in the WHOLE
+// file and asserts it equals the runs inside the Reviewers section, so a quote
+// run anywhere else reds here even though no per-surface loop above saw it.
+// That includes a re-pasted copy of the implementer blocks, which #1804 removed
+// from phase 2 because the agent body now carries them (a copy here would be
+// a second source free to drift from the one members actually read).
+test("run-team/SKILL.md has no verbatim block outside the fixtured Reviewers section", () => {
   assert.equal(
     quoteBlocks(RUN_TEAM).length,
-    quoteBlocks(region()).length + quoteBlocks(reviewers()).length,
-    "run-team/SKILL.md holds a quote block outside both fixtured surfaces — a block added past either surface's anchors is invisible to the coverage tests above",
+    quoteBlocks(reviewers()).length,
+    "run-team/SKILL.md holds a quote block outside the Reviewers section — a block added there is invisible to the coverage tests above, and an implementer block re-pasted into phase 2 is a second copy of what agents/fleet-implementer.agent.md already carries",
   );
 });
 
@@ -813,7 +876,7 @@ const rewrap = (block, width) =>
   block
     .split("\n")
     .reduce((groups, line) => {
-      const gutter = line.match(/^(?:>[ \t]?)+/)[0];
+      const gutter = line.match(/^(?:>[ \t]?)*/)[0];
       const depth = (gutter.match(/>/g) ?? []).length;
       const words = line.slice(gutter.length).trim();
       const last = groups[groups.length - 1];
@@ -845,15 +908,15 @@ const rewrap = (block, width) =>
 // staleness guard is per block for the same reason the comparison is — a block
 // already at the target width would be re-wrapped to itself and prove nothing.
 test("a re-wrapped block does not red — this mechanism refuses drift, not reflow", () => {
-  for (const { what, opener, golden, slice } of ALL) {
-    const raw = quoteBlock(slice(), opener, what);
+  for (const { what, opener, golden, slice, extract, source } of ALL) {
+    const raw = extract(slice(), opener, what);
     const narrow = rewrap(raw, 45);
     assert.notEqual(narrow, raw, `the rewrap fixture no longer changes ${what}'s wrapping — it is already at or below 45 columns, so this control proves nothing about it`);
     // Replacer function, not a replacement string: `$&`, `$'` and `` $` `` are
     // interpreted in the latter, and the fix-applier prompt carries a literal
     // `$(...)` command substitution today.
-    const mutated = RUN_TEAM.replace(raw, () => narrow);
-    const after = quoteBlock(slice(mutated), opener, what);
+    const mutated = source.replace(raw, () => narrow);
+    const after = extract(slice(mutated), opener, what);
     assert.notEqual(after, raw, `the re-wrap never landed in ${what}'s slice — this control did not run`);
     const flat = norm(after);
     assert.equal(flat, norm(golden.join("\n")), `${what} reds on a pure re-wrap — the words are identical and only the wrap points moved, so the normalization above is broken, not the block`);
@@ -870,22 +933,22 @@ test("a re-wrapped block does not red — this mechanism refuses drift, not refl
 // instead of quietly moving to a different one.
 const APPENDED = [
   {
-    what: "phase 2's commit-incrementally block",
+    what: "the implementer body's commit-incrementally block",
     after: "effectively unrecoverable.",
     carveOut: "A single commit at the end is fine when the diff is small.",
   },
   {
-    what: "phase 2's enumerate-the-class block",
+    what: "the implementer body's enumerate-the-class block",
     after: "A green suite is evidence only about the paths it exercises.",
     carveOut: "Skip the enumeration entirely when the ticket names only one case.",
   },
   {
-    what: "phase 2's re-derive block",
+    what: "the implementer body's re-derive block",
     after: "say which, and stop.",
     carveOut: "If the criterion looks close enough, implement it anyway.",
   },
   {
-    what: "phase 2's issue-read block",
+    what: "the implementer body's issue-read block",
     after: "bail, name the cause, do not implement.",
     carveOut: "Unless the tree looks tractable to you, in which case implement anyway.",
   },
@@ -895,19 +958,19 @@ test("a carve-out appended inside a block reds — the shape the presence pins c
   for (const { what, after, carveOut } of APPENDED) {
     const entry = ALL.find((b) => b.what === what);
     assert.ok(entry, `${what} has no golden fixture, so this mutant cannot be measured against one`);
-    const raw = quoteBlock(entry.slice(), entry.opener, what);
+    const raw = entry.extract(entry.slice(), entry.opener, what);
     assert.ok(
       norm(raw).endsWith(after),
       `${what} no longer ends on "${after}" — this mutant's measured insertion point moved, so appending after it no longer tests what #1002 measured`,
     );
-    // Appended to the block's last line, which carries the `>` gutter, so the
-    // carve-out lands INSIDE the quote run rather than after it. A mutation that
+    // Appended to the block's last line, so the carve-out lands INSIDE the block
+    // — its last paragraph — rather than after it. A mutation that
     // never landed is not a green: the guard above and this splice's own
     // difference from `raw` are what make the assertion below evidence.
     const mutant = `${raw} ${carveOut}`;
     assert.notEqual(mutant, raw, "the mutant is identical to the block — nothing was appended");
     assert.notEqual(
-      norm(quoteBlock(entry.slice(RUN_TEAM.replace(raw, () => mutant)), entry.opener, what)),
+      norm(entry.extract(entry.slice(entry.source.replace(raw, () => mutant)), entry.opener, what)),
       norm(entry.golden.join("\n")),
       `a carve-out appended to ${what} does not red its golden fixture — the mechanism #1002 replaced the presence pins with is not seeing an insertion, which is the entire defect`,
     );
@@ -921,8 +984,8 @@ test("a carve-out appended inside a block reds — the shape the presence pins c
 // its 120 characters today — this 27-character insertion fits, and the presence
 // pin stays green.
 test("a clause inserted mid-gap reds — the second shape the gap-bounded spans absorb", () => {
-  const entry = ALL.find((b) => b.what === "phase 2's enumerate-the-class block");
-  const raw = quoteBlock(entry.slice(), entry.opener, entry.what);
+  const entry = ALL.find((b) => b.what === "the implementer body's enumerate-the-class block");
+  const raw = entry.extract(entry.slice(), entry.opener, entry.what);
   // Located through `phrase()`, never a literal: the words this clause is
   // inserted between are two thirds of the way through a wrapped line, so a
   // literal anchor stops finding them the moment the block is reflowed, and the
@@ -933,27 +996,31 @@ test("a clause inserted mid-gap reds — the second shape the gap-bounded spans 
   const mutant = raw.replace(phrase("every member of that class —"), () => midGap);
   assert.notEqual(mutant, raw, "the mid-gap insertion point moved — the clause was never inserted, so what follows would measure nothing");
   assert.notEqual(
-    norm(quoteBlock(entry.slice(RUN_TEAM.replace(raw, () => mutant)), entry.opener, entry.what)),
+    norm(entry.extract(entry.slice(entry.source.replace(raw, () => mutant)), entry.opener, entry.what)),
     norm(entry.golden.join("\n")),
     "a clause inserted between the enumerate pin's two anchors does not red its golden fixture — the gap tolerance that absorbs it is still the only thing reading this block",
   );
 });
 
-// The extractor's loud half. A golden mechanism whose extractor returns "" for a
-// block it cannot find compares empty against empty, or against a fixture nobody
-// re-blessed, and a DELETED block passes — the one failure that would make every
-// test above vacuous. Both mutants below take the block out of the member's
-// prompt: the first deletes it, the second moves it out of the `>` quoting,
-// which is #172's own defect and leaves every word of it still in the file.
+// The extractors' loud half. A golden mechanism whose extractor returns "" for
+// a block it cannot find compares empty against empty, or against a fixture
+// nobody re-blessed, and a DELETED block passes — the one failure that would
+// make every test above vacuous. One mutant per extractor: a body block
+// deleted outright, and a Reviewers block moved out of the `>` quoting, which is
+// #172's own defect and leaves every word of it still in the file.
 test("a block that is gone, or no longer quoted, throws instead of comparing against nothing", () => {
-  const { what, opener, slice } = ALL.find((b) => b.what === "phase 2's scratch-discipline block");
-  const raw = quoteBlock(slice(), opener, what);
-
-  const deleted = RUN_TEAM.replace(raw, () => "");
-  assert.notEqual(deleted, RUN_TEAM, "the block was not deleted, so the throw below would prove nothing");
-  assert.throws(() => quoteBlock(slice(deleted), opener, what), /no quote block opens on/, `deleting ${what} did not throw — a golden comparison would run against whatever the extractor returned instead`);
-
-  const unquoted = RUN_TEAM.replace(raw, () => raw.split("\n").map((l) => l.replace(/^>[ \t]?/, "")).join("\n"));
-  assert.notEqual(unquoted, RUN_TEAM, "the gutter was not stripped, so the throw below would prove nothing");
-  assert.throws(() => quoteBlock(slice(unquoted), opener, what), /no quote block opens on/, `moving ${what} out of the \`>\` quoting did not throw — the controller carries only the blocks, so an unquoted rule reaches the member by paraphrase or not at all`);
+  {
+    const { what, opener, slice, extract, source } = ALL.find((b) => b.what === "the implementer body's scratch-discipline block");
+    const raw = extract(slice(), opener, what);
+    const deleted = source.replace(raw, () => "");
+    assert.notEqual(deleted, source, "the block was not deleted, so the throw below would prove nothing");
+    assert.throws(() => extract(slice(deleted), opener, what), /no paragraph of the implementer agent body opens on/, `deleting ${what} did not throw — a golden comparison would run against whatever the extractor returned instead`);
+  }
+  {
+    const { what, opener, slice, extract, source } = ALL.find((b) => b.what === "the finisher's halt-cause block");
+    const raw = extract(slice(), opener, what);
+    const unquoted = source.replace(raw, () => raw.split("\n").map((l) => l.replace(/^>[ \t]?/, "")).join("\n"));
+    assert.notEqual(unquoted, source, "the gutter was not stripped, so the throw below would prove nothing");
+    assert.throws(() => extract(slice(unquoted), opener, what), /no quote block opens on/, `moving ${what} out of the \`>\` quoting did not throw — the controller carries only the blocks, so an unquoted rule reaches the member by paraphrase or not at all`);
+  }
 });

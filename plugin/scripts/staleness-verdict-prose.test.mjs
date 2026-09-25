@@ -72,7 +72,9 @@ const text = readFileSync(join(import.meta.dirname, "..", ...SKILL.split("/")), 
 
 const USAGE = "**`staleness.mjs` runs that check";
 const TABLE = "| Exit | Verdict |";
-const SURVIVORS = "Annotate every survivor with its class";
+// Phase 0's multi-select, where this annotation used to land, is retired
+// (ADR 0013); the dispatch prompt is where the third value lands now (#1804).
+const SURVIVORS = "**The prompt carries only what varies.**";
 
 // The flag itself, not just the glosses around it: `--path` sits inside this
 // same paragraph and was asserted by nothing, so the doc could drift to a flag
@@ -86,22 +88,22 @@ const DIRECTIONS =
 const EXACTLY_ONE =
   "Give exactly one — the direction is not inferable from the string, and the wrong one answers the opposite verdict with full confidence";
 const ANNOTATE =
-  "Annotate any survivor whose liveness probe came back **could not check** with that verdict and the reason its payload gave";
+  "a `staleness.mjs` **could not check** verdict with its reason when the Pull got one";
 
-// Each row binds a verdict to what it does to SUPPLY, which is the whole
+// Each row binds a verdict to what it does at the Pull, which is the whole
 // content of the table — a verdict name alone prescribes nothing. Pinned per
 // row rather than as one blob so a first failure cannot mask the others.
 const VERDICT_ROWS = [
-  ["0", "| 0 | still reproduces | offer it |"],
-  ["1", "| 1 | provably fixed | do not offer; close citing the payload's `commit` and `subject` |"],
-  ["2", "| 2 | could not check | offer it, **and say the probe could not check** |"],
+  ["0", "| 0 | still reproduces | admit it |"],
+  ["1", "| 1 | provably fixed | do not admit; close citing the payload's `commit` and `subject` |"],
+  ["2", "| 2 | could not check | admit it, **and say the probe could not check** |"],
 ];
 
 test(`${SKILL} keeps the invocation on the flag \`staleness.mjs\` actually accepts`, () => {
   assert.match(
     paragraph(text, USAGE, SKILL),
     phrase(INVOCATION),
-    `${SKILL} no longer spells the invocation "${INVOCATION}". A reader who copies a flag the script does not accept gets \`staleness: --path <path> is required\` at exit 2 — a could-not-check indistinguishable from a real one, which the table below then says to offer and annotate. Restore it, or re-anchor INVOCATION in this file to the new wording.`,
+    `${SKILL} no longer spells the invocation "${INVOCATION}". A reader who copies a flag the script does not accept gets \`staleness: --path <path> is required\` at exit 2 — a could-not-check indistinguishable from a real one, which the table below then says to admit and annotate. Restore it, or re-anchor INVOCATION in this file to the new wording.`,
   );
 });
 
@@ -122,7 +124,7 @@ test(`${SKILL} keeps the probe to exactly one direction per invocation`, () => {
 });
 
 for (const [code, row] of VERDICT_ROWS) {
-  test(`${SKILL} keeps exit ${code}'s verdict bound to what it does to supply`, () => {
+  test(`${SKILL} keeps exit ${code}'s verdict bound to what it does at the Pull`, () => {
     assert.match(
       paragraph(text, TABLE, SKILL),
       phrase(row),
@@ -131,10 +133,10 @@ for (const [code, row] of VERDICT_ROWS) {
   });
 }
 
-test(`${SKILL} makes a \`could not check\` survivor arrive annotated as one`, () => {
+test(`${SKILL} makes a \`could not check\` ticket reach its member annotated as one`, () => {
   assert.match(
     paragraph(text, SURVIVORS, SKILL),
     phrase(ANNOTATE),
-    `${SKILL} no longer says "${ANNOTATE}". The survivor list is where the third value has to land — a probe that could not look answers exactly like one that looked and found nothing, so a survivor presented without the verdict reads as one the probe checked and found live, which is the collapse into a neighbour that the third value exists to prevent. Restore it, or re-anchor ANNOTATE in this file to the new wording.`,
+    `${SKILL} no longer says "${ANNOTATE}". The dispatch prompt is where the third value has to land — a probe that could not look answers exactly like one that looked and found nothing, so a ticket dispatched without the verdict reads to its member as one the probe checked and found live, which is the collapse into a neighbour that the third value exists to prevent. Restore it, or re-anchor ANNOTATE in this file to the new wording.`,
   );
 });

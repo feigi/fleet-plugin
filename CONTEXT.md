@@ -157,12 +157,11 @@ _Avoid_: local marketplace, dev source
 **Install-time precondition**:
 A harness setting the fleet depends on, set once by the operator at install and never
 written by a run — a run that wrote one would be changing every other session on the
-machine to dispatch its own members. Three exist, all on omp, all session-wide:
-`enabledProviders: ["claude-plugins"]`, `eval.workpool.freshAgents: true`, and
-`task.agentModelOverrides` carrying the fleet's Tier routes (ADR 0011). ADR 0003
-points 8 and 9 carry each of the first two's required value, its global and
-project-scoped set paths, and the read that verifies it; `tier-roles.mjs --check`
-is the read that verifies the third.
+machine to dispatch its own members. Two exist, both on omp, both session-wide:
+`enabledProviders: ["claude-plugins"]`, and `task.agentModelOverrides` carrying
+the fleet's Tier routes (ADR 0011). ADR 0003 point 8 carries the first's required
+value, its global and project-scoped set paths, and the read that verifies it;
+`tier-roles.mjs --check` is the read that verifies the second.
 _Avoid_: requirement, dependency, flag
 
 ### Coordination

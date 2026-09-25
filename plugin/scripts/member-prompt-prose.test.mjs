@@ -55,40 +55,26 @@ const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
 const SIZING = readFileSync(join(REPO, "skills", "sizing-a-ticket", "SKILL.md"), "utf8");
 
-const START = "and each of these verbatim:";
-const END = "Each rule in the enumerate-and-declare block";
-
-const WHAT = "run-team/SKILL.md phase 2's member-prompt region";
-
-// Inlined rather than importing prose-pin.mjs's between(): between() keeps the
-// start anchor, and this slice needs it stripped — not a drop-in. The anchors
-// go through `anchorAt`, which matches them via `phrase()` and asserts each
-// occurs exactly once, so a rewrapped anchor line still binds and a second copy
-// still throws. END is searched in the remainder, which is also what keeps it
-// after START.
-function memberBlocks() {
-  const region = RUN_TEAM.slice(anchorAt(RUN_TEAM, START, WHAT));
-  // `anchorAt` matched this same pattern at the region's first byte, so the
-  // match is at index 0 and its length is the intro's width as wrapped today.
-  const [intro] = phrase(START).exec(region);
-  return region.slice(intro.length, anchorAt(region, END, WHAT));
-}
-
+// #1804: the member-facing text is the BODY of the implementer agent
+// definition (spec 2026-09-24 § 2 Decision 2), which each harness injects as
+// the member's system prompt — the verbatim carrier the `>` blocks in phase 2
+// used to be. Byte-identical in the `-alt` file (within-run-pair-prose.test.mjs
+// pins that), so one file stands for both.
+const AGENT_FILE = readFileSync(join(REPO, "agents", "fleet-implementer.agent.md"), "utf8");
+const memberBlocks = () => AGENT_FILE.split("---").slice(2).join("---");
 const memberProse = () => stripQuoteGutter(memberBlocks());
+const phase2 = () => RUN_TEAM.slice(anchorAt(RUN_TEAM, "## Phase 2", "run-team phase 2"), anchorAt(RUN_TEAM, "## Phase 3", "run-team phase 3"));
 
-test("every member-facing rule sits inside a quote block, where the controller carries it verbatim", () => {
-  const lines = memberBlocks().split("\n").filter((l) => l.trim() !== "");
-  assert.ok(lines.length > 0, "the member prompt region is empty");
-
-  // The whole defect in one assertion. An unquoted line here reaches the member
-  // only if the controller retypes it, and a controller that drops it emits no
-  // error — the member simply runs without the rule.
-  const stray = lines.filter((l) => !l.startsWith(">"));
-  assert.deepEqual(
-    stray,
-    [],
-    "member-prompt text sits outside the `>` blocks — the controller carries only the blocks, so this reaches the member by paraphrase or not at all",
-  );
+test("every member-facing rule sits in the agent body the harness injects, not in the controller's phase 2", () => {
+  assert.ok(memberBlocks().trim().length > 0, "the implementer agent body is empty — the member receives no rules at all");
+  // The location defect, restated for the new carrier. A rule the controller
+  // reads in phase 2 reaches the member only if the controller retypes it,
+  // and a controller that drops it emits no error. A copy left there as well
+  // is the other half: two sources free to drift, one of which no member reads.
+  for (const opener of ["**You are an unattended fleet member.**", "Run `sizing-a-ticket`", "`next-ticket` **step 7**"]) {
+    assert.match(memberProse(), phrase(opener), `the implementer agent body no longer carries "${opener}"`);
+    assert.doesNotMatch(phase2(), phrase(opener), `run-team/SKILL.md's phase 2 carries "${opener}" again — the member reads the agent body, so this copy is either dead or a second source to drift`);
+  }
 });
 
 test("the member is told it is unattended, in text it receives verbatim", () => {

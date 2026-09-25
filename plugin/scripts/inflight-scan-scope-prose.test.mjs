@@ -38,7 +38,7 @@ const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
 
 const step = () =>
-  between(RUN_TEAM, "**In-flight check**", "**Read each survivor in full", "run-team/SKILL.md");
+  between(RUN_TEAM, "**In-flight check, again**", "**Read the ticket in full, once**", "run-team/SKILL.md phase 1 Pull step 2");
 
 test("the in-flight step names the four branch-shaped claims the scan's probes look for", () => {
   assert.match(
