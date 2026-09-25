@@ -19,8 +19,10 @@ name: Pin Drift
 # so a healthy repo — bumped on the 1st of each month — is green on every run
 # and says nothing, while a stalled one goes red on every run from day 36 until
 # the pin moves, and is first caught by day 42 at worst: short of the 43-day
-# stall ADR 0010 measured. Off the hour, and not on the 1st, so it never races
-# Renovate's own window.
+# stall ADR 0010 measured. Off the hour — 07:23 UTC against Renovate's
+# 00:00–04:59 UTC window — so it never races Renovate's own window, whatever
+# day of the month the Monday run lands on (day-of-week and day-of-month are
+# independent cron fields: a Monday can and periodically does fall on the 1st).
 #
 # GitHub disables scheduled workflows in a public repository after 60 days
 # with no commits. That cannot swallow the report: the last pin move is itself

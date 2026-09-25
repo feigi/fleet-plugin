@@ -33,10 +33,10 @@
 # too — correctly: the pin did not move, and a human glancing at that is the
 # whole ask.
 #
-# Every way of failing to READ the history is exit 2, never exit 0. A shallow
-# clone is the dangerous one: its boundary commit shows every file as added,
-# so `git log -- .nvmrc` would date the pin to the checkout itself and report
-# a perfectly fresh pin for any stall at all.
+# Every way of failing to READ the history is exit 2, never exit 0 or a bare
+# abort. A shallow clone is the dangerous one: its boundary commit shows every
+# file as added, so `git log -- .nvmrc` would date the pin to the checkout
+# itself and report a perfectly fresh pin for any stall at all.
 set -euo pipefail
 
 MAX_DAYS=35
@@ -47,8 +47,11 @@ cannot() {
   exit 2
 }
 
-# `set -e` does not abort on `VAR=$(cmd)` when cmd fails — split substitution
-# from assignment and check the exit code explicitly.
+# Every `VAR=$(cmd)` below already aborts under `set -e` on its own if cmd
+# fails — that part needs no help. The explicit `if ! VAR=$(cmd); then`
+# exists so the abort routes through `cannot` and names what was
+# unanswerable, instead of leaving a bare, unlabelled `set -e` exit for
+# whoever reads the run.
 root=""
 if ! root=$(git rev-parse --show-toplevel); then
   cannot "not inside a git work tree"
@@ -62,30 +65,41 @@ if [ "$shallow" != "false" ]; then
   cannot "shallow clone — the history of $PIN is truncated, so its last move cannot be dated (check out with fetch-depth: 0)"
 fi
 
-if ! git -C "$root" cat-file -e "HEAD:$PIN" 2>/dev/null; then
-  cannot "$PIN is not tracked at HEAD"
+# Capture stderr instead of discarding it: a genuinely untracked $PIN and a
+# corrupt/unresolvable HEAD both fail this check, and the message should say
+# which one actually happened rather than guessing "not tracked" for both.
+tracked_err=""
+if ! tracked_err=$(git -C "$root" cat-file -e "HEAD:$PIN" 2>&1); then
+  cannot "$PIN is not resolvable at HEAD: $tracked_err"
 fi
 
 last=""
-if ! last=$(git -C "$root" log --first-parent -1 --format='%H %ct' HEAD -- "$PIN"); then
+if ! last=$(git -C "$root" log --first-parent -1 --format='%h %ct %cI' HEAD -- "$PIN"); then
   cannot "git log of $PIN failed"
 fi
 if [ -z "$last" ]; then
   cannot "no commit on HEAD's first-parent history touches $PIN"
 fi
 
-sha=${last%% *}
-moved=${last#* }
+short=""
+moved=""
+moved_iso=""
+read -r short moved moved_iso <<<"$last"
 now=$(date +%s)
 age=$(( now - moved ))
 age_days=$(( age / 86400 ))
-pin=$(head -n1 "$root/$PIN")
-short=$(git -C "$root" rev-parse --short "$sha")
-moved_iso=$(git -C "$root" log -1 --format=%cI "$sha")
+# Read the pin from HEAD, not the working tree: the checks above establish
+# what HEAD holds, and a script whose whole point is to judge from git
+# history should not switch to the disk for the one value it prints. It also
+# means a failed/partial checkout that leaves $PIN off disk gets diagnosed
+# here instead of surfacing a raw `head` error with no annotation.
+if ! pin=$(git -C "$root" show "HEAD:$PIN" | head -n1); then
+  cannot "could not read $PIN at HEAD"
+fi
 
 if [ "$age" -gt $(( MAX_DAYS * 86400 )) ]; then
   verdict="stalled"
-  msg="$PIN has held $pin for $age_days days (last moved in $short, $moved_iso) — longer than the $MAX_DAYS-day drift bound. The bot that moves it (ADR 0010) has likely stopped: check the Renovate app is installed and not suspended, and whether a bump PR is sitting red or was closed."
+  msg="$PIN has held $pin for over $age_days days (last moved in $short, $moved_iso) — longer than the $MAX_DAYS-day drift bound. The bot that moves it (ADR 0010) has likely stopped: check the Renovate app is installed and not suspended, and whether a bump PR is sitting red or was closed."
   echo "::error file=$PIN,title=Node pin stalled::$msg"
 else
   verdict="moving"
@@ -94,7 +108,7 @@ else
 fi
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-  printf '### Node pin: %s\n\n%s\n' "$verdict" "$msg" >>"$GITHUB_STEP_SUMMARY"
+  printf '### Node pin: %s\n\n%s\n' "$verdict" "$msg" >>"$GITHUB_STEP_SUMMARY" || echo "::warning::pin-drift.sh: could not write step summary" >&2
 fi
 
 if [ "$verdict" = "stalled" ]; then
