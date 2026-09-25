@@ -284,6 +284,7 @@ test("every script the roster grep returns refuses a stray flag in its own wordi
 const GUARD_FIRST_FIXTURE = {
   "scripts/ci-state.mjs": ["--pr", "1"],
   "scripts/diff-stats.mjs": ["--pr", "1"],
+  "scripts/merge-gate.mjs": ["--pr", "1", "--pre", "0".repeat(40)],
   "scripts/pr-overlap.mjs": ["--a", "1", "--b", "1"],
   "scripts/staleness.mjs": ["--path", "1", "--gone", "1"],
   "scripts/tier-check.mjs": ["--batch", "1"],
