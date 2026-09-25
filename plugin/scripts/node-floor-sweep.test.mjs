@@ -124,8 +124,13 @@ const API_FLOORS = [
   { name: "Promise.withResolvers()", pattern: /\bPromise\.withResolvers\(/, since: "22.0.0" },
   // Array.fromAsync — Node 22.0.0+.
   { name: "Array.fromAsync()", pattern: /\bArray\.fromAsync\(/, since: "22.0.0" },
-  // node:sqlite — introduced Node v22.5.0 (experimental).
-  { name: "node:sqlite", pattern: /from\s*["']node:sqlite["']/, since: "22.5.0" },
+  // node:sqlite — introduced Node v22.5.0 behind --experimental-sqlite;
+  // unflagged (still experimental) in Node v22.13.0 (nodejs/node#55890).
+  // "since" is the unflagged version, same rule this table's header states
+  // and Promise.withResolvers() above already follows: a shipped `import
+  // ... from "node:sqlite"` on 22.5.0-22.12.x still needs the flag and
+  // would throw ERR_UNKNOWN_BUILTIN_MODULE without it.
+  { name: "node:sqlite", pattern: /from\s*["']node:sqlite["']/, since: "22.13.0" },
 ];
 
 /** "MAJOR.MINOR.PATCH" -> [major, minor, patch], or throws. */
