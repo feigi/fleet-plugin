@@ -1,6 +1,6 @@
 // The ambient-working-tree precondition the sweep suites share, in one place.
 //
-// Three test files here derive their subject list by asking git what ships —
+// Four test files here derive their subject list by asking git what ships —
 // the repository root, then the tracked `*.sh` under it. That premise is
 // deliberate and unchanged: an untracked scratch script is not what ships, and
 // a fleet script that moves out of its directory must not fall out of a sweep

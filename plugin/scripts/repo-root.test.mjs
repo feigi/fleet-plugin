@@ -383,6 +383,9 @@ test("trackedMjsScripts: a repository that ships no *.mjs answers an empty list,
   const { dir } = repoTracking(t, ["a.test.mjs", "lib/b.test.mjs"]);
 
   assert.deepEqual(trackedMjsScripts(dir), [], "a repository with only test *.mjs tracked ships none");
+  assert.equal(skipWithoutRepo(dir, "the tests"), false,
+    "an empty match list inside a real repository is a broken glob or path join, "
+    + "and must reach the caller's guard as a FAILURE");
 });
 
 // #1339's measured shape, broadly: a foreign git repository (the operator's
