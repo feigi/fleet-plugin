@@ -347,10 +347,28 @@ const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`];
 // verdict flip #1744 exists to refuse, just via a quoted shape rather than a
 // bare token. Splitting first mirrors the `--` clause above it, which
 // already matches on startsWith rather than requiring the whole element.
+//
+// #1766: that first-word, exact-case split still missed four shapes of the
+// same name, each confirmed by direct probe against the shipped script: a
+// case-variant spelling (`-REQUIRE-FILE`), whitespace ahead of the dash —
+// including U+00A0, which `\s` already matches, but the FIRST-word split
+// still lost the real word to the empty token that whitespace leaves at
+// index 0 — and the flag name landing anywhere but first in a quoted
+// multi-word element (`"widget -require-file"`, the mirror of the shape
+// just above, where #1744's fix only checked the front). None of the four
+// changes the rule itself — still a NAME match against OWN_FLAGS, never a
+// prefix or shape test — only how a word is pulled out of the element:
+// every whitespace-split word, blanks dropped, lower-cased before the
+// OWN_FLAGS lookup.
 function refuseStrayInCheckTail(tail) {
   if (tail.length <= 1) return;
   const stray = tail.find(
-    (a) => a.startsWith("--") || OWN_FLAGS.includes(`-${a.split(/\s/)[0].split("=")[0]}`),
+    (a) =>
+      a.startsWith("--") ||
+      a
+        .split(/\s+/)
+        .filter((word) => word !== "")
+        .some((word) => OWN_FLAGS.includes(`-${word.split("=")[0].toLowerCase()}`)),
   );
   if (stray) die(`unknown flag ${stray} in subject — quote the subject as one argument`);
 }
