@@ -211,7 +211,7 @@ _Avoid_: liveness (bare), heartbeat state, pulse
 **Stall report**:
 What a reader says about a stale or stopped Liveness mark — when the beat was
 last seen, how overdue it is against the interval that mark recorded, how many
-tickets are still claimed and in flight, and whether the Shortlist still has
+tickets are still claimed and in flight, and whether the pool still has
 supply. Detection only: naming a stall neither releases the stranded claims
 nor restarts anything.
 _Avoid_: dead-run warning, stale banner
