@@ -101,11 +101,14 @@ Measured 2026-09-23, before ruling:
    the overdue bump, and is the end-to-end proof that app, checks, label,
    automerge and release all work. A hand edit proves nothing and leaves the
    pipeline untested.
-8. **No consumer floor is stated.** `.nvmrc` carries no compatibility meaning:
-   shipped scripts run under the user's own node via `#!/usr/bin/env node`, and
-   nothing declares a floor (no `package.json`, nothing in
-   `plugin/.claude-plugin/plugin.json`). Deriving and publishing an accurate
-   floor is out of scope for this ADR.
+8. **A consumer floor is now stated, elsewhere.** At measurement time here,
+   nothing declared one: `.nvmrc` carries no compatibility meaning, shipped
+   scripts run under the user's own node via `#!/usr/bin/env node`, and
+   neither `package.json` (absent) nor `plugin/.claude-plugin/plugin.json`
+   named a floor. Deriving and publishing an accurate floor was out of scope
+   for this ADR — #1754 did that work, in a root `package.json`'s
+   `engines.node`, swept against the shipped tree by
+   `node-floor-sweep.test.mjs`.
 
 ## Consequences
 

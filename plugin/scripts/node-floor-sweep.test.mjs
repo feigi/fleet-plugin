@@ -1,0 +1,299 @@
+// #1754. The minimum Node version this plugin's CONSUMERS need is a measured
+// fact in exactly one machine-readable place — the root `package.json`'s
+// `engines.node` — and this sweep is what keeps a shipped script from
+// outrunning it silently.
+//
+// Three ways to red, matching the ticket's own three failure modes:
+//   1. a shipped `.mjs` file reaches for an API above the declared floor
+//      ("every shipped .mjs file stays within the declared floor", below);
+//   2. the declaration is missing or carries anything load-bearing beyond
+//      the floor itself ("package.json declares the consumer floor...");
+//   3. README's stated floor and package.json's declaration disagree
+//      ("README's stated floor agrees with package.json's declaration").
+// Non-vacuity is asserted explicitly, same discipline every other sweep in
+// this directory uses (see repo-root.mjs's own header, `check-tracked.sh`):
+// an empty shipped-file list is a broken glob, not "nothing to check".
+//
+// THE DETECTION MECHANISM, and its limits, stated plainly because this is
+// the hardest call in the ticket:
+//
+// `API_FLOORS` below is a CURATED table — API name, a regex signature, and
+// the Node release that first shipped it (each verified against a Node
+// release note or blog post at authoring time, cited inline). There is no
+// general, load-bearing "what Node version does this syntax need" oracle
+// available without a new dependency, and the design guidance forbids one
+// (the root manifest "introduces no publish path and no dependency graph").
+// This is therefore a KNOWN-API scan, not a semantic analyzer: it catches
+// exactly the APIs enumerated below, reached for in exactly the textual
+// shape each pattern matches, and nothing else. A shipped file reaching for
+// some OTHER version-gated API not yet in this table is a false negative —
+// the same class of gap `printf-die-sweep.test.mjs`'s own header names for
+// its `\c`-escape fixtures, and the remedy is the same: extend the table the
+// day a real one is measured, not attempt to enumerate every Node API ever
+// added up front.
+//
+// Scanned through `stripComments()` (not raw source), reusing the shared
+// stripper the rest of this suite already trusts for exactly this class of
+// false positive: a comment that merely NAMES an API — this very file's own
+// header does, repeatedly — must not raise the floor a mutant would need to
+// actually regress. `.at(`, `Object.groupBy(` etc. below are still
+// heuristic textual matches, not parsed call sites: a local method that
+// happens to share a name (a custom `.with(`, most plausibly) would
+// false-positive. Accepted, not fixed here, for the same reason the false
+// negative above is accepted — a real parser is out of scope for this
+// ticket's root-manifest constraint, and every regex below is anchored
+// tightly enough that no shipped file trips it today (see the "stays within
+// the declared floor" test).
+//
+// KNOWN LIMIT shared with every `*-sweep.test.mjs` sibling in this
+// directory: needs an ambient `.git` to ask what ships. Absent one, the
+// integration tests below DECLINE with a reason rather than running; the
+// unit tests further down (pure functions, no repo needed) still run and
+// still police the mechanism itself.
+//
+// Zero deps: `node --test plugin/scripts/node-floor-sweep.test.mjs`.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { repoRoot, skipWithoutRepo, trackedMjsScripts } from "./repo-root.mjs";
+import { stripComments } from "./strip-comments.mjs";
+
+const DIR = fileURLToPath(new URL(".", import.meta.url));
+const ROOT = repoRoot(DIR);
+const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT, "the node-floor sweep");
+const MJS_FILES = ROOT === null ? [] : trackedMjsScripts(ROOT);
+
+// name: what a failure message calls it. pattern: non-global regex over
+// COMMENT-STRIPPED source. since: "MAJOR.MINOR.PATCH", the first Node
+// release that shipped it (stable, unflagged), each verified at authoring
+// time — see the header for which release note.
+const API_FLOORS = [
+  // Node v16.6.0 blog/changelog: "introduces the new Array.prototype.at
+  // method". Heuristic: any `.at(` call — see header's accepted false-
+  // positive note.
+  { name: "Array.prototype.at()", pattern: /\.at\(/, since: "16.6.0" },
+  // Node v16.9.0 blog/changelog: "Object.hasOwn is a static alias for
+  // Object.prototype.hasOwnProperty.call".
+  { name: "Object.hasOwn()", pattern: /\bObject\.hasOwn\(/, since: "16.9.0" },
+  // Node v17.0.0 added the global structuredClone().
+  { name: "structuredClone()", pattern: /\bstructuredClone\(/, since: "17.0.0" },
+  // node/#46718: "util,doc: mark parseArgs() as stable", landed in Node
+  // v20.0.0 (SEMVER-MAJOR). Matched at the import site, not the bare word,
+  // so a comment discussing the sibling module (arg.mjs does, at length)
+  // cannot trip it even unstripped.
+  {
+    name: "util.parseArgs()",
+    pattern: /import\s*\{[^}]*\bparseArgs\b[^}]*\}\s*from\s*["']node:util["']/,
+    since: "20.0.0",
+  },
+  // ES2023 array copy methods — Node 20+ per release notes; Node 18/19 ship
+  // only findLast/findLastIndex from the same proposal.
+  { name: "Array.prototype.toSorted()", pattern: /\.toSorted\(/, since: "20.0.0" },
+  { name: "Array.prototype.toReversed()", pattern: /\.toReversed\(/, since: "20.0.0" },
+  { name: "Array.prototype.toSpliced()", pattern: /\.toSpliced\(/, since: "20.0.0" },
+  { name: "Array.prototype.with()", pattern: /\.with\(/, since: "20.0.0" },
+  // node/#48740 (SEMVER-MINOR), Node v20.11.0: "esm: add import.meta.dirname
+  // and import.meta.filename".
+  {
+    name: "import.meta.dirname / import.meta.filename",
+    pattern: /\bimport\.meta\.(dirname|filename)\b/,
+    since: "20.11.0",
+  },
+  // util.styleText — introduced Node v20.12.0, stable Node v21.7.0/v22.13.0.
+  // Using the introduction version as the floor: it exists and is usable
+  // (with an experimental warning) from 20.12.0, and this table's job is
+  // "what version must a consumer run", not "warning-free".
+  { name: "util.styleText()", pattern: /\bstyleText\(/, since: "20.12.0" },
+  // Node v21.0.0 shipped Object.groupBy/Map.groupBy (array grouping).
+  { name: "Object.groupBy()", pattern: /\bObject\.groupBy\(/, since: "21.0.0" },
+  { name: "Map.groupBy()", pattern: /\bMap\.groupBy\(/, since: "21.0.0" },
+  // Promise.withResolvers — behind a flag in Node 21.7.0, enabled by default
+  // Node 22.0.0+.
+  { name: "Promise.withResolvers()", pattern: /\bPromise\.withResolvers\(/, since: "22.0.0" },
+  // Array.fromAsync — Node 22.0.0+.
+  { name: "Array.fromAsync()", pattern: /\bArray\.fromAsync\(/, since: "22.0.0" },
+  // node:sqlite — introduced Node v22.5.0 (experimental).
+  { name: "node:sqlite", pattern: /from\s*["']node:sqlite["']/, since: "22.5.0" },
+];
+
+/** "MAJOR.MINOR.PATCH" -> [major, minor, patch], or throws. */
+function parseVersion(v) {
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(v));
+  if (!m) throw new Error(`not a MAJOR.MINOR.PATCH version: ${JSON.stringify(v)}`);
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+/** <0 if a<b, 0 if equal, >0 if a>b — both [major, minor, patch]. */
+function compareVersions(a, b) {
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
+/**
+ * The declared floor, from `package.json`'s own text. Refuses anything the
+ * file carries beyond exactly `{"engines":{"node":">=X.Y.Z"}}` — the
+ * "nothing load-bearing beyond the floor itself" acceptance criterion,
+ * enforced here rather than left to a reviewer's eye.
+ */
+function parseDeclaredFloor(pkgJsonText) {
+  let pkg;
+  try {
+    pkg = JSON.parse(pkgJsonText);
+  } catch (e) {
+    throw new Error(`package.json is not valid JSON: ${e.message}`);
+  }
+  const topKeys = Object.keys(pkg);
+  if (topKeys.length !== 1 || topKeys[0] !== "engines") {
+    throw new Error(
+      `package.json must carry nothing load-bearing beyond "engines" — found keys: ${JSON.stringify(topKeys)}`,
+    );
+  }
+  const engineKeys = Object.keys(pkg.engines ?? {});
+  if (engineKeys.length !== 1 || engineKeys[0] !== "node") {
+    throw new Error(
+      `package.json's "engines" must carry nothing beyond "node" — found keys: ${JSON.stringify(engineKeys)}`,
+    );
+  }
+  const raw = pkg.engines.node;
+  const m = /^>=(\d+\.\d+\.\d+)$/.exec(String(raw));
+  if (!m) {
+    throw new Error(
+      `package.json's engines.node must read exactly ">=MAJOR.MINOR.PATCH", got ${JSON.stringify(raw)}`,
+    );
+  }
+  return { raw, version: parseVersion(m[1]) };
+}
+
+/**
+ * The floor README's `## Installation` section states, read the same way a
+ * human does: the first `>=MAJOR.MINOR.PATCH` token in that section.
+ */
+function parseReadmeFloor(readmeText) {
+  const section = /## Installation\n([\s\S]*?)(?=\n## )/.exec(readmeText);
+  if (!section) throw new Error("README has no \"## Installation\" section to read a floor from");
+  const m = />=(\d+\.\d+\.\d+)/.exec(section[1]);
+  if (!m) throw new Error("README's \"## Installation\" section states no \">=MAJOR.MINOR.PATCH\" floor");
+  return { raw: m[0], version: parseVersion(m[1]) };
+}
+
+/** Every `API_FLOORS` entry a comment-stripped source reaches above `floorVersion`. */
+function scanFileViolations(source, floorVersion) {
+  const stripped = stripComments(source);
+  const hits = [];
+  for (const api of API_FLOORS) {
+    if (api.pattern.test(stripped) && compareVersions(parseVersion(api.since), floorVersion) > 0) {
+      hits.push({ name: api.name, since: api.since });
+    }
+  }
+  return hits;
+}
+
+/** The non-vacuity guard every sweep in this directory applies to its own file list. */
+function assertNonVacuous(files, label) {
+  if (files.length === 0) {
+    throw new Error(`${label}: the shipped file list came back empty — a broken glob/git call, not "nothing to check"`);
+  }
+}
+
+test("the sweep sees the scripts it is supposed to police", { skip: SKIP_WITHOUT_REPO }, () => {
+  assert.ok(
+    MJS_FILES.length > 0,
+    `trackedMjsScripts(ROOT) returned zero shipped .mjs files — this is a broken glob/git call, and every check below would pass vacuously over an empty list`,
+  );
+});
+
+test("package.json declares the consumer floor, and nothing else load-bearing", { skip: SKIP_WITHOUT_REPO }, () => {
+  let text;
+  try {
+    text = readFileSync(join(ROOT, "package.json"), "utf8");
+  } catch {
+    assert.fail("no package.json at the repo root — the consumer floor must be declared there (#1754)");
+    return;
+  }
+  const declared = parseDeclaredFloor(text);
+  assert.match(declared.raw, /^>=\d+\.\d+\.\d+$/);
+});
+
+test("README's stated floor agrees with package.json's declaration", { skip: SKIP_WITHOUT_REPO }, () => {
+  const declared = parseDeclaredFloor(readFileSync(join(ROOT, "package.json"), "utf8"));
+  const stated = parseReadmeFloor(readFileSync(join(ROOT, "README.md"), "utf8"));
+  assert.deepEqual(
+    stated.version,
+    declared.version,
+    `README's Installation section states ${stated.raw} but package.json declares ${declared.raw} — `
+    + "correcting one without the other is exactly the drift this check exists to make impossible",
+  );
+});
+
+test("every shipped .mjs file stays within the declared floor", { skip: SKIP_WITHOUT_REPO }, () => {
+  const declared = parseDeclaredFloor(readFileSync(join(ROOT, "package.json"), "utf8"));
+  assertNonVacuous(MJS_FILES, "shipped .mjs set");
+  const violations = [];
+  for (const rel of MJS_FILES) {
+    const source = readFileSync(join(ROOT, rel), "utf8");
+    for (const hit of scanFileViolations(source, declared.version)) {
+      violations.push(`${rel}: uses ${hit.name} (Node >=${hit.since}) above the declared floor (${declared.raw})`);
+    }
+  }
+  assert.deepEqual(
+    violations,
+    [],
+    `shipped file(s) reach above the declared consumer floor — rewrite the call, or raise engines.node in package.json (and README to match):\n${violations.join("\n")}`,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The mechanism itself, unit-tested with no repo needed. Two directions
+// pinned on the scanner, because a suite that only feeds valid input pins
+// neither (same discipline printf-die-sweep.test.mjs's header states).
+// ---------------------------------------------------------------------------
+
+test("scanFileViolations reds a shipped file reaching above the floor", () => {
+  const src = 'import { parseArgs } from "node:util";\nconst last = () => import.meta.dirname;\n';
+  const names = scanFileViolations(src, parseVersion("16.0.0")).map((h) => h.name);
+  assert.ok(names.includes("util.parseArgs()"), `expected util.parseArgs() flagged, got: ${names.join(", ")}`);
+  assert.ok(
+    names.includes("import.meta.dirname / import.meta.filename"),
+    `expected import.meta.dirname flagged, got: ${names.join(", ")}`,
+  );
+});
+
+test("scanFileViolations stays green once the declared floor covers the same source", () => {
+  const src = 'import { parseArgs } from "node:util";\nconst last = () => import.meta.dirname;\n';
+  assert.deepEqual(scanFileViolations(src, parseVersion("20.11.0")), []);
+});
+
+test("scanFileViolations ignores an API merely NAMED in a comment", () => {
+  const src = "// import.meta.dirname is discussed in the sibling module\nconst x = 1;\n";
+  assert.deepEqual(scanFileViolations(src, parseVersion("16.0.0")), []);
+});
+
+test("parseDeclaredFloor refuses a missing engines.node declaration", () => {
+  assert.throws(() => parseDeclaredFloor("{}"), /engines/);
+});
+
+test("parseDeclaredFloor refuses anything load-bearing beyond the floor", () => {
+  assert.throws(
+    () => parseDeclaredFloor('{"engines":{"node":">=20.11.0"},"dependencies":{}}'),
+    /nothing load-bearing beyond "engines"/,
+  );
+  assert.throws(
+    () => parseDeclaredFloor('{"engines":{"node":">=20.11.0","npm":">=10"}}'),
+    /nothing beyond "node"/,
+  );
+});
+
+test("parseReadmeFloor and parseDeclaredFloor disagreement is caught", () => {
+  const declared = parseDeclaredFloor('{"engines":{"node":">=20.11.0"}}');
+  const stated = parseReadmeFloor("## Installation\n\nNeeds Node >=20.10.0.\n\n## Next\n");
+  assert.notDeepEqual(stated.version, declared.version);
+});
+
+test("assertNonVacuous refuses an empty shipped set", () => {
+  assert.throws(() => assertNonVacuous([], "shipped .mjs set"), /came back empty/);
+});
