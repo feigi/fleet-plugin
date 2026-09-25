@@ -23,7 +23,14 @@
 //      module './review-core.js' is a CommonJS module". `.mjs` is ESM on
 //      every Node this floor admits, and on Bun, with no manifest at all.
 //      Static specifiers only: an `import()` of a COMPUTED path is invisible
-//      to it, the same textual-scan limit the API table below states.
+//      to it, the same textual-scan limit the API table below states. A
+//      TRAILING `code; // note` on the same line as a real import is closed
+//      here too, quote-aware: `stripComments()`'s own known ceiling leaves
+//      that text standing, which is safe for the declaration pins it was
+//      built for (surviving text only ever ADDS a match there) but not for
+//      this scan, where it can COIN a fake `from "<rel>"` beside a real,
+//      correct import on the same line (measured: appending `// … from
+//      "./old.js"` after a genuine `.mjs` import falsely reds this check).
 // Non-vacuity is asserted explicitly, same discipline every other sweep in
 // this directory uses (see repo-root.mjs's own header, `check-tracked.sh`):
 // an empty shipped-file list is a broken glob, not "nothing to check".
@@ -227,10 +234,30 @@ function scanFileViolations(source, floorVersion) {
 // whose extension decides how the loader parses it.
 const RELATIVE_IMPORT = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(["'`])(\.{1,2}\/[^"'`$]*)\1/g;
 
+// Quote-aware so a literal `//` inside a specifier or string is left alone;
+// this only needs to find the FIRST unquoted `//` to truncate the rest of
+// the line, never a full tokenizer.
+function stripTrailingLineComment(line) {
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      if (c === "\\") i += 1;
+      else if (c === quote) quote = null;
+    } else if (c === '"' || c === "'" || c === "`") {
+      quote = c;
+    } else if (c === "/" && line[i + 1] === "/") {
+      return line.slice(0, i);
+    }
+  }
+  return line;
+}
+
 /** Every relative import specifier in a comment-stripped source that does not name a `.mjs` file. */
 function nonMjsRelativeImports(source) {
   const hits = [];
-  for (const m of stripComments(source).matchAll(RELATIVE_IMPORT)) {
+  const stripped = stripComments(source).split("\n").map(stripTrailingLineComment).join("\n");
+  for (const m of stripped.matchAll(RELATIVE_IMPORT)) {
     if (!m[2].endsWith(".mjs")) hits.push(m[2]);
   }
   return hits;
@@ -418,6 +445,14 @@ test("nonMjsRelativeImports accepts .mjs siblings, builtins, and a .js merely na
     '// import { digestOf } from "./review-core.js";  (the pre-#1763 spelling)',
     'const file = join(DIR, "./review-core.js");',
     "const dyn = await import(path);",
+  ].join("\n");
+  assert.deepEqual(nonMjsRelativeImports(src), []);
+});
+
+test("nonMjsRelativeImports does not coin a false hit from a trailing comment beside a real import", () => {
+  const src = [
+    'import { isDigits } from "./arg.mjs"; // note: this used to import from "./old-name.js"',
+    'const url = "https://example.com/old-name.js"; // a literal "//" inside a string is not a comment start',
   ].join("\n");
   assert.deepEqual(nonMjsRelativeImports(src), []);
 });

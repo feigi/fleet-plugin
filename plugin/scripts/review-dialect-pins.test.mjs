@@ -97,7 +97,7 @@ test("review-pr.js's resumeFor documentary pair: CLAUDE names Workflow/resumeFro
   const omp = markedLine(region, "OMP", "review-pr.js resumeFor OMP line");
 
   assert.match(claude, phrase("Workflow({scriptPath, resumeFromRunId})"));
-  assert.doesNotMatch(claude, /re-run|review-core\.js/i, "the CLAUDE line must not also carry omp's re-run claim");
+  assert.doesNotMatch(claude, /re-run|review-core\.m?js/i, "the CLAUDE line must not also carry omp's re-run claim");
 
   assert.match(omp, phrase("to be reported, not acted on"));
   assert.doesNotMatch(omp, /resumeFromRunId|Workflow\(/, "the OMP line must not also carry Claude's resumeFromRunId claim");
