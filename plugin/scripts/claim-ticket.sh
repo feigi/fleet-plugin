@@ -175,11 +175,12 @@ fi
 
 # Everything below is derived from $ref, the tree the runner reflects. The
 # claim path builds a fresh worktree FROM origin/main, so origin/main is the
-# only tree that exists to derive from — never $PWD, which can hold untracked
-# or gitignored files the worktree will never have (this repo's own
-# package.json is gitignored), or sit on a different commit entirely. Probing
-# $PWD there let the script announce "no lockfile" and then build a worktree
-# containing one.
+# only tree that exists to derive from — never $PWD, which can hold
+# untracked or gitignored files the worktree will never have, or a
+# package.json edited locally but never committed (#1754 made this repo's
+# own a real, tracked file — no longer a hypothetical), or sit on a
+# different commit entirely. Probing $PWD there let the script announce "no
+# lockfile" and then build a worktree containing one.
 #
 # `--write-runner` is the opposite case: $dest already lives inside a tree
 # that exists NOW (the main checkout, an existing worktree), so HEAD is what

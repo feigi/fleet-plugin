@@ -105,8 +105,17 @@ const API_FLOORS = [
   // util.styleText — introduced Node v20.12.0, stable Node v21.7.0/v22.13.0.
   // Using the introduction version as the floor: it exists and is usable
   // (with an experimental warning) from 20.12.0, and this table's job is
-  // "what version must a consumer run", not "warning-free".
-  { name: "util.styleText()", pattern: /\bstyleText\(/, since: "20.12.0" },
+  // "what version must a consumer run", not "warning-free". Matched at the
+  // import site, same discipline as util.parseArgs() above: 20.12.0 sits
+  // ABOVE this table's other unanchored bare-call patterns' `since` values,
+  // so a same-named local (a custom `styleText`) is the one heuristic entry
+  // that's actually live today, not merely theoretical — anchoring it is
+  // not optional.
+  {
+    name: "util.styleText()",
+    pattern: /import\s*\{[^}]*\bstyleText\b[^}]*\}\s*from\s*["']node:util["']/,
+    since: "20.12.0",
+  },
   // Node v21.0.0 shipped Object.groupBy/Map.groupBy (array grouping).
   { name: "Object.groupBy()", pattern: /\bObject\.groupBy\(/, since: "21.0.0" },
   { name: "Map.groupBy()", pattern: /\bMap\.groupBy\(/, since: "21.0.0" },
@@ -160,7 +169,7 @@ function parseDeclaredFloor(pkgJsonText) {
     );
   }
   const raw = pkg.engines.node;
-  const m = /^>=(\d+\.\d+\.\d+)$/.exec(String(raw));
+  const m = typeof raw === "string" ? /^>=(\d+\.\d+\.\d+)$/.exec(raw) : null;
   if (!m) {
     throw new Error(
       `package.json's engines.node must read exactly ">=MAJOR.MINOR.PATCH", got ${JSON.stringify(raw)}`,
@@ -176,7 +185,7 @@ function parseDeclaredFloor(pkgJsonText) {
 function parseReadmeFloor(readmeText) {
   const section = /## Installation\n([\s\S]*?)(?=\n## )/.exec(readmeText);
   if (!section) throw new Error("README has no \"## Installation\" section to read a floor from");
-  const m = />=(\d+\.\d+\.\d+)/.exec(section[1]);
+  const m = />=(\d+\.\d+\.\d+)(?:[-+][0-9A-Za-z.-]*)?/.exec(section[1]);
   if (!m) throw new Error("README's \"## Installation\" section states no \">=MAJOR.MINOR.PATCH\" floor");
   return { raw: m[0], version: parseVersion(m[1]) };
 }
@@ -193,13 +202,6 @@ function scanFileViolations(source, floorVersion) {
   return hits;
 }
 
-/** The non-vacuity guard every sweep in this directory applies to its own file list. */
-function assertNonVacuous(files, label) {
-  if (files.length === 0) {
-    throw new Error(`${label}: the shipped file list came back empty — a broken glob/git call, not "nothing to check"`);
-  }
-}
-
 test("the sweep sees the scripts it is supposed to police", { skip: SKIP_WITHOUT_REPO }, () => {
   assert.ok(
     MJS_FILES.length > 0,
@@ -211,9 +213,12 @@ test("package.json declares the consumer floor, and nothing else load-bearing", 
   let text;
   try {
     text = readFileSync(join(ROOT, "package.json"), "utf8");
-  } catch {
-    assert.fail("no package.json at the repo root — the consumer floor must be declared there (#1754)");
-    return;
+  } catch (e) {
+    assert.fail(
+      e.code === "ENOENT"
+        ? "no package.json at the repo root — the consumer floor must be declared there (#1754)"
+        : `could not read package.json at the repo root: ${e.message}`,
+    );
   }
   const declared = parseDeclaredFloor(text);
   assert.match(declared.raw, /^>=\d+\.\d+\.\d+$/);
@@ -222,9 +227,12 @@ test("package.json declares the consumer floor, and nothing else load-bearing", 
 test("README's stated floor agrees with package.json's declaration", { skip: SKIP_WITHOUT_REPO }, () => {
   const declared = parseDeclaredFloor(readFileSync(join(ROOT, "package.json"), "utf8"));
   const stated = parseReadmeFloor(readFileSync(join(ROOT, "README.md"), "utf8"));
-  assert.deepEqual(
-    stated.version,
-    declared.version,
+  // Compares the exact matched text, not just the numeric triple: a
+  // pre-release/build qualifier one side carries and the other doesn't is a
+  // real disagreement `.version`'s numeric coercion would otherwise erase.
+  assert.equal(
+    stated.raw,
+    declared.raw,
     `README's Installation section states ${stated.raw} but package.json declares ${declared.raw} — `
     + "correcting one without the other is exactly the drift this check exists to make impossible",
   );
@@ -232,7 +240,6 @@ test("README's stated floor agrees with package.json's declaration", { skip: SKI
 
 test("every shipped .mjs file stays within the declared floor", { skip: SKIP_WITHOUT_REPO }, () => {
   const declared = parseDeclaredFloor(readFileSync(join(ROOT, "package.json"), "utf8"));
-  assertNonVacuous(MJS_FILES, "shipped .mjs set");
   const violations = [];
   for (const rel of MJS_FILES) {
     const source = readFileSync(join(ROOT, rel), "utf8");
@@ -273,6 +280,14 @@ test("scanFileViolations ignores an API merely NAMED in a comment", () => {
   assert.deepEqual(scanFileViolations(src, parseVersion("16.0.0")), []);
 });
 
+test("scanFileViolations matches util.styleText() only at the import site, not a same-named local", () => {
+  const collision = 'function styleText(label) { return `[${label}]`; }\nexport const styled = styleText("x");\n';
+  assert.deepEqual(scanFileViolations(collision, parseVersion("16.0.0")), []);
+  const real = 'import { styleText } from "node:util";\nconsole.log(styleText("red", "x"));\n';
+  const names = scanFileViolations(real, parseVersion("16.0.0")).map((h) => h.name);
+  assert.ok(names.includes("util.styleText()"), `expected util.styleText() flagged, got: ${names.join(", ")}`);
+});
+
 test("parseDeclaredFloor refuses a missing engines.node declaration", () => {
   assert.throws(() => parseDeclaredFloor("{}"), /engines/);
 });
@@ -288,12 +303,46 @@ test("parseDeclaredFloor refuses anything load-bearing beyond the floor", () => 
   );
 });
 
+test("parseDeclaredFloor refuses a syntactically malformed but present engines.node", () => {
+  assert.throws(
+    () => parseDeclaredFloor('{"engines":{"node":"20.11.0"}}'),
+    /must read exactly ">=MAJOR\.MINOR\.PATCH"/,
+  );
+  assert.throws(
+    () => parseDeclaredFloor('{"engines":{"node":">=20.11"}}'),
+    /must read exactly ">=MAJOR\.MINOR\.PATCH"/,
+  );
+});
+
+test("parseDeclaredFloor refuses a non-string engines.node", () => {
+  assert.throws(
+    () => parseDeclaredFloor('{"engines":{"node":[">=20.11.0"]}}'),
+    /must read exactly ">=MAJOR\.MINOR\.PATCH"/,
+  );
+});
+
 test("parseReadmeFloor and parseDeclaredFloor disagreement is caught", () => {
   const declared = parseDeclaredFloor('{"engines":{"node":">=20.11.0"}}');
   const stated = parseReadmeFloor("## Installation\n\nNeeds Node >=20.10.0.\n\n## Next\n");
   assert.notDeepEqual(stated.version, declared.version);
 });
 
-test("assertNonVacuous refuses an empty shipped set", () => {
-  assert.throws(() => assertNonVacuous([], "shipped .mjs set"), /came back empty/);
+test("parseReadmeFloor and parseDeclaredFloor disagreement on a pre-release qualifier is caught", () => {
+  const declared = parseDeclaredFloor('{"engines":{"node":">=20.11.0"}}');
+  const stated = parseReadmeFloor("## Installation\n\nNeeds Node >=20.11.0-rc.1.\n\n## Next\n");
+  assert.notEqual(stated.raw, declared.raw);
+});
+
+test("parseReadmeFloor refuses a README with no \"## Installation\" section", () => {
+  assert.throws(
+    () => parseReadmeFloor("# Some README\n\nNo installation section here.\n\n## Next\n"),
+    /no "## Installation" section/,
+  );
+});
+
+test("parseReadmeFloor refuses an Installation section stating no floor", () => {
+  assert.throws(
+    () => parseReadmeFloor("## Installation\n\nJust run it.\n\n## Next\n"),
+    /states no ">=MAJOR\.MINOR\.PATCH"/,
+  );
 });
