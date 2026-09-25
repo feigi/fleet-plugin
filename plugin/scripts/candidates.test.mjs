@@ -62,10 +62,12 @@ JQ_RAN="\${JQ_BIN:-jq}"
 [ -n "$ENGINE_LOG" ] && "$JQ_RAN" --version > "$ENGINE_LOG" 2>&1
 expr=""
 search=""
+fields=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --jq) shift; expr="$1" ;;
     --search) shift; search="$1" ;;
+    --json) shift; fields="$1" ;;
   esac
   shift
 done
@@ -123,6 +125,17 @@ if [ -n "$LABEL_EXPECT" ] && [ "$label" != "$LABEL_EXPECT" ]; then
   # and matched nothing, which is the whole confusion #175 is about.
   echo '[]' | "$JQ_RAN" -c "$expr"
   exit
+fi
+# gh answers \`--json\` with EXACTLY the fields it names, never the whole issue,
+# so the fixture is cut down to them before the expression sees it. Uncut, the
+# stub would serve fields the query never asked for: drop \`blockedBy\` from
+# candidates.mjs's \`--json\` and real gh sends no edge at all, while every
+# native-edge fixture below would still reduce to its blockers (#1741). Cut by
+# the same binary that applies the expression, so a gated test stays gojq end
+# to end.
+if [ -n "$fields" ]; then
+  "$JQ_RAN" -c --arg fields "$fields" '($fields | split(",") | map({(.): true}) | add) as $keep | map(with_entries(select($keep[.key])))' "$fixture" > "$fixture.fields" || exit
+  fixture="$fixture.fields"
 fi
 exec "$JQ_RAN" -c "$expr" "$fixture"
 `;
@@ -735,6 +748,65 @@ test("a dependency heading that armed no section is named on stderr, and an arme
   assert.doesNotMatch(stdout, /dh/);
 });
 
+// #1741. `d` is the union of the body scan and the issue's native "blocked by"
+// edges. Fixtures carry `blockedBy` in the shape gh 2.100.0 emits —
+// `{nodes:[{number,state,…}], totalCount}` — and the STUB cuts every fixture
+// down to candidates.mjs's own `--json` list the way real gh does, so these
+// rows also pin that the query ASKS for the field: take `blockedBy` out of it
+// and no edge ever arrives. Every fixture before this block carries no
+// `blockedBy` at all, so each earlier `d` pin, unmodified, is also the pin
+// that an issue without edges still reduces to the body scan alone.
+const edges = (...nodes) => ({
+  nodes: nodes.map(([number, state]) => ({ number, state })),
+  totalCount: nodes.length,
+});
+const withEdges = (t, blockedBy) => ({ ...t, blockedBy });
+// #593's blocker line, verbatim from the live issue. Its first parenthetical
+// breaks the scan's ref chain, so the body alone yields [239] and never #531 —
+// the admission gap #1741 was filed on, left in place (the grammar is out of
+// scope), so the native edge is the only thing carrying #531.
+const BODY_593 =
+  "**Blocked by #239** (the new bar must exist before anything is re-labelled against it) and **#531** (the dedupe guard's ledger arm is empty, so an unknown share of the pile is duplicates — promoting duplicates is worse than filing them).\n";
+// A blocker list longer than the one page gh fetches (`blockedBy(first:50)`).
+const SHORT_50_OF_51 = {
+  nodes: Array.from({ length: 50 }, (_, i) => ({ number: 100 + i, state: "OPEN" })),
+  totalCount: 51,
+};
+
+test("#593's shape: the blocker the body scan misses reaches `d` through its native edge, and the shared one lands once (#1741)", () => {
+  // #592 is the same body with no edge: the scan's own answer, which is the
+  // gap. #593's edges arrive 531-first; `d` comes out sorted and deduplicated,
+  // so #239 — named by both the body and an edge — appears exactly once.
+  const { status, rows, stderr } = run([
+    ticket(592, BODY_593),
+    withEdges(ticket(593, BODY_593), edges([531, "OPEN"], [239, "CLOSED"])),
+  ]);
+  assert.equal(status, 0, stderr);
+  assert.deepEqual(rows.map((r) => r.d), [[239], [239, 531]]);
+});
+
+test("edges alone make `d` when the body names no blocker — a closed one kept, as the scan keeps one (#1741)", () => {
+  // `d` stays RAW: openness is the consumer's call (run-team / next-ticket
+  // step 2), so an edge's CLOSED state does not filter its number out here.
+  const { rows } = run([withEdges(ticket(9, "## What to build\n\nx\n"), edges([12, "OPEN"], [7, "CLOSED"]))]);
+  assert.deepEqual(rows[0].d, [7, 12]);
+});
+
+test("a blocker list gh cut short refuses at exit 2 — `d` never ships with blockers missing (#1741)", () => {
+  // Unreachable today (GitHub caps an issue at 50 edges per relationship, and
+  // gh fetches 50), which is exactly why it must be loud if either moves: a
+  // truncated list reads as a smaller one, and #12's 51st blocker would drop
+  // out of `d` with nothing said. The whole query refuses, like a capped
+  // list does, and the message names the issue and the shortfall.
+  const { status, stderr } = run([
+    ticket(11, "## What to build\n\nx\n"),
+    withEdges(ticket(12, "## What to build\n\nx\n"), SHORT_50_OF_51),
+  ]);
+  assert.equal(status, 2, stderr);
+  assert.match(stderr, /#12: blockedBy lists 50 of 51 blockers, so d would miss the rest/);
+  assert.match(stderr, /^candidates: gh issue list failed/m);
+});
+
 // The gap #63 named: the STUB above execs system jq (Oniguruma), but gh
 // applies `--jq` with its embedded gojq (RE2) — a different engine, and every
 // other test in this file accepts that gap rather than closing it. This one
@@ -1103,6 +1175,32 @@ test(
     assert.equal(isDroppedAsSpec("##\u00a0User Stories\n\nx\n"), false);
   },
 );
+
+// #1741's half of the program under the engine gh applies. `blockers` holds no
+// regex, so no class ruling is at stake — what gojq could still refuse or
+// read differently is the rest: `//` over a missing field, `error()` with an
+// interpolated message, and `unique` over the union. The STUB cuts each
+// fixture to the `--json` list with gojq too, so this runs gojq end to end.
+test("native edges reduce the same under gojq — union, dedupe, closed kept, and the short-list refusal (#1741)", SKIP_WITHOUT_GOJQ, () => {
+  const extraEnv = { JQ_BIN: GOJQ };
+  const r = run(
+    [
+      ticket(592, BODY_593),
+      withEdges(ticket(593, BODY_593), edges([531, "OPEN"], [239, "CLOSED"])),
+      withEdges(ticket(9, "## What to build\n\nx\n"), edges([12, "OPEN"], [7, "CLOSED"])),
+    ],
+    undefined,
+    null,
+    extraEnv,
+  );
+  assert.equal(r.status, 0, r.stderr);
+  assertRanGojq(r);
+  assert.deepEqual(r.rows.map((row) => row.d), [[7, 12], [239], [239, 531]]);
+  const short = run([withEdges(ticket(12, "## What to build\n\nx\n"), SHORT_50_OF_51)], undefined, null, extraEnv);
+  assert.equal(short.status, 2, short.stderr);
+  assertRanGojq(short);
+  assert.match(short.stderr, /#12: blockedBy lists 50 of 51 blockers, so d would miss the rest/);
+});
 
 test("the cap is checked before specs are dropped — filtering first hides truncation", () => {
   // The ordering candidates.mjs calls load-bearing. Swap the two and this is
