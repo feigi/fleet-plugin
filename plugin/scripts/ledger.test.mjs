@@ -2216,7 +2216,8 @@ test("read hands a pipe the whole ledger — a truncated payload must never read
   // a parsing consumer loses every key, the survivors included, because the
   // object is unterminated. Comparing the whole object also catches a key the
   // payload should not carry, which the per-key assertions let through.
-  assert.deepEqual(payload, { rows, filed, ruled });
+  // The fixture predates `## Dispatched` and `## Drain`, so both read empty.
+  assert.deepEqual(payload, { rows, filed, ruled, dispatched: [], drain: null });
 });
 
 // The same mechanism in the three siblings. Their payloads echo the free-text
