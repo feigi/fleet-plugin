@@ -331,26 +331,71 @@ test("SNAPSHOT_SCHEMA agrees on required fields and declared types between the t
 });
 
 // `resumeFor` is the ONE declared exception (review-core.js's own header
-// comment says so) — pin that the two Claude-branch messages AGREE on every
-// word except the resume verb itself, rather than pinning them identical.
-test("resumeFor's claude branch matches review-pr.js's own message, up to the resume verb", () => {
+// comment says so): its omp branch says something review-pr.js never can. The
+// Claude branch has no reason to differ, so it is pinned IDENTICAL — claim and
+// relaunch both — rather than merely agreeing up to the verb.
+test("resumeFor's claude branch is review-pr.js's own message, word for word", () => {
   const prFn = lift(CODE, "resumeFor", "unverified");
   const unverified = [{ refutersDispatched: 2 }];
   const prResult = prFn(unverified);
   const coreResult = core.resumeFor(unverified, "claude");
   assert.deepEqual(coreResult.crashed, prResult.crashed);
-  const prClaim = prResult.resume.split("Resume before deferring them: ")[0];
-  const coreClaim = coreResult.resume.split("Resume before deferring them: ")[0];
-  assert.equal(coreClaim, prClaim, "the shared claim clause diverged between the two copies");
+  assert.equal(coreResult.resume, prResult.resume, "the two copies' Claude resume messages diverged");
   assert.match(prResult.resume, /resumeFromRunId/);
-  assert.match(coreResult.resume, /resumeFromRunId/);
+  // #1802: a crash has already had its in-run re-dispatch by the time this
+  // message exists, and the message has to say so or a reader re-runs first.
+  assert.match(prResult.resume, /in-run retry/);
 });
 
-test("resumeFor's omp branch reports re-run, never resumeFromRunId", () => {
+test("resumeFor's omp branch reports the crash and does not act on it — never resumeFromRunId, never a re-run", () => {
   const unverified = [{ refutersDispatched: 2 }];
   const result = core.resumeFor(unverified, "omp");
-  assert.match(result.resume, /re-run/);
+  assert.match(result.resume, /in-run retry/);
+  assert.match(result.resume, /reported, not acted on/);
   assert.doesNotMatch(result.resume, /resumeFromRunId/);
+  assert.doesNotMatch(
+    result.resume,
+    /re-run the review/i,
+    "the omp message tells its reader to re-run the review — nothing replays on omp, and the in-run retry already spent this review's re-dispatch (#1802)",
+  );
+});
+
+// #1802. `retryCrashed` wraps both dispatch sites in both bodies; the two
+// declarations must answer every crash shape the same way. The last row is
+// the one no scenario in review-in-run-retry.test.mjs reaches: the SECOND
+// answer is final even when it throws, so the caller's own crash handling
+// (the pipeline's null slot) still sees it — a retry that swallowed it would
+// read a twice-crashed dimension as a clean one.
+test("retryCrashed agrees on both sides: one re-dispatch for a crash, none for a live answer, and the second answer is final", async () => {
+  const prFn = lift(CODE, "retryCrashed", "dispatch, crashed");
+  const isDead = (v) => !v;
+  const rows = [
+    ["a live first answer is never re-dispatched", [{ ok: 1 }], 1, { ok: 1 }],
+    ["a null first answer is re-dispatched once", [null, { ok: 2 }], 2, { ok: 2 }],
+    ["a thrown first answer is re-dispatched once", [new Error("spend limit"), { ok: 3 }], 2, { ok: 3 }],
+    ["a crash that repeats stops after the one re-dispatch", [null, null, { ok: 4 }], 2, null],
+  ];
+  for (const [name, fn] of [["review-core.js", core.retryCrashed], ["review-pr.js", prFn]]) {
+    for (const [what, seq, calls, out] of rows) {
+      let n = 0;
+      const dispatch = () => {
+        const answer = seq[n++];
+        if (answer instanceof Error) throw answer;
+        return Promise.resolve(answer);
+      };
+      assert.deepEqual(await fn(dispatch, isDead), out, `${name}: ${what}`);
+      assert.equal(n, calls, `${name}: ${what} — dispatched ${n} times`);
+    }
+    let n = 0;
+    await assert.rejects(
+      fn(() => {
+        n++;
+        throw new Error(`crash ${n}`);
+      }, isDead),
+      /crash 2/,
+      `${name}: a second thrown dispatch was swallowed instead of surfacing to the caller`,
+    );
+  }
 });
 
 // #878, and the one half of that guard this repo can EXECUTE. review-pr.js

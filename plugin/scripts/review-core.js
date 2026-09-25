@@ -474,24 +474,54 @@ export function verdictFor(dispatched, votes) {
   return { verdict, votes: live, refutersDispatched: dispatched };
 }
 
+// #1802. One in-run re-dispatch for a crashed dispatch, before the result is
+// assembled — the specialist call and the refuter PAIR are the two units it
+// wraps. `crashed(value)` says whether a settled first attempt counts as a
+// crash; a THROWN first attempt is handed to it as `null`, because a rejection
+// is a crash on either harness (Claude's `agent()` nulls on exhaustion, omp's
+// can reject before its handle exists). A crashed first attempt is dispatched
+// exactly once more and that second answer is final, thrown or not, so the
+// caller's existing crash handling still sees it. Not `async`: review-pr.js's
+// copy is lifted out of its source text by `^function name(`, and the parity
+// test runs both through the same fixtures.
+export function retryCrashed(dispatch, crashed) {
+  const again = (first) => (crashed(first) ? dispatch() : first);
+  return Promise.resolve()
+    .then(() => dispatch())
+    .then(again, () => again(null));
+}
+
 // The one function that is NOT byte-identical to review-pr.js's copy, and
-// deliberately so — Gap 1's ruling (re-run, no cache) is a HARNESS fact, not
-// a portable one. `harness` selects which half of the ruling applies:
-// "claude" reproduces review-pr.js's own hardcoded message so the two stay
-// substantively in sync (review-core-parity.test.mjs pins that they agree on
-// every word except the resume verb itself); "omp" reports re-run, because
-// nothing in eval/task memoizes a subagent dispatch by run id across
-// separate tool invocations (#1349 gap 1; #1296 Q5#1).
+// deliberately so — Gap 1's ruling (no cached replay on omp) is a HARNESS
+// fact, not a portable one. `harness` selects which half of the ruling
+// applies: "claude" returns review-pr.js's own hardcoded message, word for
+// word (review-core-parity.test.mjs pins them identical); "omp" says the crash
+// is reported and not acted on, because nothing in eval/task memoizes a
+// subagent dispatch by run id across separate tool invocations (#1349 gap 1;
+// #1296 Q5#1), and the one re-dispatch this run gets was already spent in-run
+// (#1802).
 export function resumeFor(unverified, harness) {
   const crashed = unverified.filter((f) => f.refutersDispatched > 0);
   if (!crashed.length) return { crashed, resume: null };
   const claim =
-    "Findings in `unverified` with `refutersDispatched` above zero and no surviving vote had every refuter die — nothing looked at them. Resume before deferring them: ";
+    "Findings in `unverified` with `refutersDispatched` above zero and no surviving vote had every refuter die, and die again on the in-run retry — nothing looked at them. ";
   const verb =
     harness === "claude"
-      ? "relaunch with `Workflow({scriptPath, resumeFromRunId})`, passing the runId this run's tool result reports. The unchanged prefix of agent() calls replays from cache and only the calls that died run live."
-      : "re-run the review. omp's eval has no cached-replay mechanism (ADR 0004/0005, #1349 gap 1) — every agent() dispatch on a fresh run is a live call, so the whole review runs again rather than only the crashed legs.";
+      ? "Resume before deferring them: relaunch with `Workflow({scriptPath, resumeFromRunId})`, passing the runId this run's tool result reports. The unchanged prefix of agent() calls replays from cache and only the calls that died run live."
+      : "Defer them as crashed — reported, not acted on: omp's eval has no cached-replay mechanism (ADR 0004/0005, #1349 gap 1), so a fresh review re-dispatches every agent() live rather than only the crashed legs, and the in-run retry was this review's one re-dispatch. Re-run nothing for them.";
   return { crashed, resume: claim + verb };
+}
+
+// #1802. The digest: every field a controller acts on, and nothing bulky. The
+// result object LEADS with exactly these keys, in this order (`runReview`'s
+// return below; review-pr.js's return in the same order), so Claude's ~8 KB
+// inline `<result>` cut lands in the finding arrays, never in the digest —
+// before this, `resume` was the last key and fell past the cut on a large
+// review. `snapshot`, `survived`, `refuted` and `unverified` follow it.
+export const DIGEST_KEYS = ["pr", "head", "resume", "testEnvironment", "dimensionsRun", "dimensionsUnrun", "cwdAudit", "counts"];
+
+export function digestOf(result) {
+  return Object.fromEntries(DIGEST_KEYS.map((k) => [k, result[k]]));
 }
 
 // --- Orchestration ----------------------------------------------------
@@ -761,9 +791,14 @@ a false repoVerified.`,
   phase("Review");
   const reviewed = await pipeline(
     dimensions,
+    // #1802: a crashed specialist (null or thrown) is re-dispatched once
+    // before it counts as unrun. A specialist that RETURNED is never re-run
+    // here, whatever its `test_run` says — that is `unrunEntries`' case.
     (d) =>
-      agent(
-        `Review PR #${pr} (branch ${branch}) for: ${d.prompt}
+      retryCrashed(
+        () =>
+          agent(
+            `Review PR #${pr} (branch ${branch}) for: ${d.prompt}
 
 READ ONLY FROM THE SNAPSHOT: ${snap.path} (HEAD ${snap.head}) — plus the diff
 file named below, if one is given.
@@ -818,7 +853,9 @@ produce, and an omitted line reads exactly like a check never run. Three PRs
 reviewed from one cell left four files modified in that checkout with nothing in
 any payload saying so (#1433), so a path you cannot account for is still yours
 to name.`,
-        { label: `review:${d.key}`, phase: "Review", agentType: d.agentType, schema: FINDINGS_SCHEMA },
+            { label: `review:${d.key}`, phase: "Review", agentType: d.agentType, schema: FINDINGS_SCHEMA },
+          ),
+        (review) => !review,
       ),
 
     (review, d) => {
@@ -829,10 +866,15 @@ to name.`,
         (review && review.findings ? review.findings : []).map((f, fi) => () => {
           const n = verifiersFor(f.severity);
           if (n === 0) return Promise.resolve({ ...f, dimension: d.key, ...verdictFor(0, []) });
-          return parallel(
-            Array.from({ length: n }, (_, i) => () =>
-              agent(
-                `Try to REFUTE this finding from PR #${pr}. Default to refuted=true if uncertain.
+          // #1802: a pair whose EVERY vote died (or whose dispatch threw) is
+          // re-dispatched once, as a pair, before `verdictFor` reads it — one
+          // live vote means the pair did not crash and is ruled on that vote.
+          return retryCrashed(
+            () =>
+              parallel(
+                Array.from({ length: n }, (_, i) => () =>
+                  agent(
+                    `Try to REFUTE this finding from PR #${pr}. Default to refuted=true if uncertain.
 
   claim:    ${f.claim}
   where:    ${f.file || "?"}:${f.line || "?"}
@@ -889,9 +931,11 @@ git answered \`fatal: not a git repository\` — every run, clean or not: an
 omitted line reads exactly like a check never run, and applying a mutation is
 how three reviews from one cell left four files modified in that checkout
 (#1433).`,
-                { label: `verify:${d.key}`, phase: "Verify", agentType: "fleet-review-verifier", schema: VERDICT_SCHEMA },
+                    { label: `verify:${d.key}`, phase: "Verify", agentType: "fleet-review-verifier", schema: VERDICT_SCHEMA },
+                  ),
+                ),
               ),
-            ),
+            (votes) => !(votes && votes.some(Boolean)),
           ).then((votes) => ({ ...f, dimension: d.key, ...verdictFor(n, votes) }));
         }),
       );
@@ -915,10 +959,14 @@ how three reviews from one cell left four files modified in that checkout
   const rank = { critical: 0, important: 1, suggestion: 2 };
   const bySeverity = (a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3);
 
+  // #1802. Digest first, in DIGEST_KEYS order, bulk last — see DIGEST_KEYS
+  // above for why the order is the contract.
   return {
     pr,
     head: snap.head,
-    snapshot: snap.path,
+    // The recovery, next to the fields a controller reads first; null unless
+    // a refuter pair crashed again after the in-run retry.
+    resume,
     // #1056. Always present, in both regimes: a reader of this payload can
     // never be left unable to tell an environment artifact from a regression,
     // and that costs nothing when there is nothing wrong to report.
@@ -929,9 +977,10 @@ how three reviews from one cell left four files modified in that checkout
     // CWD-AUDIT line — the fact a dirty or unrepo'd inherited checkout is
     // otherwise reported into `scope_searched` and read by nothing.
     cwdAudit,
+    counts: { survived: survived.length, refuted: refuted.length, unverified: unverified.length, crashed: crashed.length },
+    snapshot: snap.path,
     survived: survived.sort(bySeverity),
     refuted,
     unverified: unverified.sort(bySeverity),
-    resume,
   };
 }
