@@ -194,6 +194,21 @@ const COVERED_MJS = {
   // instrument set into another repository". Its other children (gh,
   // `node ci-state.mjs`, `sh instruments.sh`) name no git.
   "merge-gate.mjs": 1,
+  // TWO git-invoking primitives. `shortlistPath()`'s `--git-common-dir` probe —
+  // defaultLedgerPath()'s resolution for `.fleet/shortlist.json` (#1798) —
+  // carries the hazard of writing the run's shortlist into another
+  // repository's workspace; measured in shortlist.test.mjs, "an ambient
+  // GIT_DIR naming another repository cannot move the shortlist there".
+  // `probeState()`'s `gh … view` call carries the identical hazard one layer
+  // up — gh's own remote resolution follows GIT_DIR/GIT_WORK_TREE too
+  // (ledger.mjs's tracker-query probe measured this first, and GH_REPO
+  // besides) — so an ambient GIT_DIR could flip a blocker or
+  // exclusion-premise verdict while the shortlist file still lands in the
+  // right workspace; measured in shortlist.test.mjs, "an inherited GIT_DIR
+  // cannot retarget probeState's gh calls to another repository". Its other
+  // children (`node candidates.mjs`, `node ledger.mjs`, `sh inflight.sh`)
+  // name no git.
+  "shortlist.mjs": 2,
 };
 
 // The two-name-only exemption list #1599's second design question answers
