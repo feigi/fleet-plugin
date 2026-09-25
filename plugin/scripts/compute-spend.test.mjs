@@ -162,7 +162,6 @@ test("depth-0 fleet roles come off the controller's naming convention", () => {
   assert.equal(classifyRole({ spawnDepth: 0, description: "Implement ticket 556" }), "implementer");
   assert.equal(classifyRole({ spawnDepth: 0, description: "Review PR 564" }), "reviewer");
   assert.equal(classifyRole({ spawnDepth: 0, description: "Finish PR 563" }), "finisher");
-  assert.equal(classifyRole({ spawnDepth: 0, description: "Merge wave 7 — final" }), "merge-bot");
 
   assert.equal(classifyRole({ spawnDepth: 0, description: "something else entirely" }), "other");
 });
@@ -209,8 +208,9 @@ test("resolve-pr-<n> books review spend, off the real dispatched name (#1250)", 
   // hijack its classification away from its own name.
   assert.equal(classifyRole({ memberName: "finisher-pr-436", description: "Resolve PR conflicts left by review findings" }), "finisher");
   // It must not be swept into merge-bot: this member's number is a PR, never
-  // a wave, and merge-bot orchestrates a wave's PRs rather than resolving one.
-  assert.equal(classifyRole({ memberName: "merge-bot-8", description: "Merge wave 8" }), "merge-bot");
+  // a per-run dispatch counter, and merge-bot drains a pass's PRs rather than
+  // resolving one.
+  assert.equal(classifyRole({ memberName: "merge-bot-8", description: "Merge pass 8" }), "merge-bot");
 });
 
 test("finish-<n> member names classify as finisher — a historical spelling that must stay classifiable", () => {

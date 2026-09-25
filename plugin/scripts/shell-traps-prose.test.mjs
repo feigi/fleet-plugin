@@ -121,12 +121,15 @@ test("both consumer seats reach the section instead of restating it", () => {
     "phase 3's monitor paragraph no longer points at Shell traps — it either lost the pointer or grew its own copy of the mechanism",
   );
 
-  const brief = SKILL.slice(SKILL.indexOf("**Put every gate trap in the bot's brief"));
-  const briefList = brief.slice(0, brief.indexOf("\n\n", brief.indexOf("- **A `jq` exit outside 0 and 1")));
+  // The brief's one bullet since #1806 retired the gate traps into
+  // merge-gate.mjs: sliced to that paragraph alone.
+  const at = SKILL.indexOf("**Put the shell traps in the bot's brief");
+  assert.notEqual(at, -1, "the merge bot's shell-traps brief paragraph moved — re-anchor this test");
+  const briefPara = SKILL.slice(at, SKILL.indexOf("\n\n", at));
   assert.match(
-    briefList,
+    briefPara,
     /\bShell traps\b/,
-    "the merge bot's gate-trap list no longer points at Shell traps, so a dispatched bot never receives them",
+    "the merge bot's brief no longer points at Shell traps, so a dispatched bot never receives them",
   );
 });
 

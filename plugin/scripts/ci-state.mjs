@@ -68,17 +68,20 @@ const RATE_LIMITED = /rate limit|abuse detection/i;
 // The outage payload, on stdout at the unchanged exit 2 — where this arm
 // printed nothing at all. A caller reading only the exit code is unaffected;
 // one parsing stdout gets a named cause instead of the empty capture
-// run-team/SKILL.md calls "the safe direction, but still a false one".
+// `merge-gate.mjs` reads as `ci-unreadable` there: a probe that could not
+// look, never a reading about the PR (ADR 0012 Decision 3).
 //
 // It reports the refused query and nothing else. A quota refusal is a probe
 // that could not look, so every field this script would otherwise observe is
 // ABSENT rather than null. A null is a reading, and nothing here was read.
 //
-// Absence is what a direct reader needs: run-team/SKILL.md sends a merge bot to
-// "gate on the payload's own fields", and an absent `missing` refuses that gate
-// where an empty array would have told it nothing was missing. board.mjs is not
-// that reader — it takes exit 2 as a failed read whatever was printed on the
-// way out, and carries its previous CI value for the PR forward instead.
+// Absence is what a direct reader needs: `merge-gate.mjs` gates every merge
+// on this payload's own fields — `verdict`, `behind`, `missing`, the per-job
+// conclusions, and `prHead == runHeadSha` — and an absent `missing` refuses
+// that gate where an empty array would have told it nothing was missing.
+// board.mjs is not that reader — it takes exit 2 as a failed read whatever
+// was printed on the way out, and carries its previous CI value for the PR
+// forward instead.
 //
 // Every write this script makes on its way out goes through arg.mjs's
 // writeAll(), for die()'s reason in that file: on a pipe, console.log and

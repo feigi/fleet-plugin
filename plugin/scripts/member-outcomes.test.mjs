@@ -58,9 +58,9 @@ test("resolve-pr-<n> names a PR and no ticket (#1250)", () => {
   assert.deepEqual(parseMemberName("resolve-pr-1440-2"), { ticket: "", pr: "1440" });
 });
 
-test("merge-bot's number is a WAVE, so it is neither ticket nor pr", () => {
-  // merge-bot-12 is the twelfth wave, not PR 12. Booking it as a pr would join
-  // this row to an unrelated PR's verdict row.
+test("merge-bot's number is a per-run dispatch counter, never a PR, so it is neither ticket nor pr", () => {
+  // merge-bot-12 is the twelfth merge bot this run dispatched, not PR 12.
+  // Booking it as a pr would join this row to an unrelated PR's verdict row.
   assert.deepEqual(parseMemberName("merge-bot-12"), { ticket: "", pr: "" });
 });
 
@@ -249,7 +249,7 @@ function fixture(members) {
 test("one row per member, stamped with the session and its run date", () => {
   const dir = fixture([
     ["impl-580", assistant("claude-opus-5", "xhigh"), meta()],
-    ["merge-bot-12", assistant("claude-opus-5", "xhigh"), meta({ agentType: "merge-bot-12", name: "merge-bot-12", description: "merge bot wave 12" })],
+    ["merge-bot-12", assistant("claude-opus-5", "xhigh"), meta({ agentType: "merge-bot-12", name: "merge-bot-12", description: "merge bot pass 12" })],
   ]);
   const rows = rowsForSession(dir);
   assert.equal(rows.length, 2);
@@ -332,7 +332,7 @@ test("role comes from classifyRole and is not invented here", () => {
   const dir = fixture([
     ["impl-580", assistant("claude-opus-5", "xhigh"), meta()],
     ["mb", assistant("claude-opus-5", "xhigh"),
-      meta({ agentType: "merge-bot-3", name: "merge-bot-3", description: "merge wave 3" })],
+      meta({ agentType: "merge-bot-3", name: "merge-bot-3", description: "merge pass 3" })],
     ["spec", assistant("claude-opus-5", "xhigh"),
       meta({ agentType: "general-purpose", name: undefined, description: "Review PR 943 correctness", spawnDepth: 1 })],
   ]);

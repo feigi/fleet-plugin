@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph, phrase } from "./prose-pin.mjs";
+import { between, markedLine, paragraph, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const DOC = readFileSync(join(REPO, "commands", "run-merge-bot.md"), "utf8");
@@ -432,7 +432,7 @@ test("the fallback's head check states the mismatch as a corrupted verification,
 // Controls all stayed 56/56 green: the compare rule rewrapped at 80 columns,
 // the re-read paragraph at 70, the fail-open paragraph at 90 and the arm
 // discriminator at 75; the unpinned measurement sentence reworded with
-// different shas and a different git version; the unpinned "costing a wave"
+// different shas and a different git version; the unpinned "costing a pass"
 // tail and the unpinned re-read rationale reworded; the block's operand
 // comment reworded; and the out-of-scope `Worktree behind` arm's TRAILING
 // SENTENCE reworded, its bolded head left untouched — that is the mutant
@@ -878,298 +878,119 @@ test("the report vocabulary includes rebase-fallback", () => {
   assert.match(DOC, /^Report merged [^\n]*rebase-fallback-#X/m);
 });
 
-// #966. The merge bot's falsifiability proof writes synthetic `ci-state`
-// fixtures, and the doc said nothing about WHERE. The scratchpad root every
-// dispatched member is handed is ONE shared root, not a per-member one, and
-// the fixture names are identical across waves by design — measured
-// 2026-08-28, merge-bot-5 found a sibling's payloads for a different PR (a
-// different `prHead`) sitting in the root it was about to write. Benign that
-// time; the shape it was one filename away from is a GREEN fixture standing
-// in for a blocking one, which inverts the proof without changing a word of
-// the report the bot then files.
-//
-// Sliced to the new section. Unbounded, `scratch`, `mkdir`, `gate` and
-// `prHead` all recur through the per-PR sequence, the no-undo audit and the
-// watcher loop, so every assertion below would survive deletion of the
-// section itself.
-//
-// THE CEILING: presence pins on prose, same as every other slice in this
-// file. They prove the rules are stated where the bot reads them — before the
-// per-PR sequence, not after it. Nothing here runs a merge bot, creates a
-// directory, or drives a payload through a gate.
-//
-// MUTATION RECORD — scratch-copy method (`cp -R plugin/` to a tmp dir,
-// mutate the copy, `node --test` the copy, read counts, discard; one mutant
-// per copy, so the real checkout is never the subject). 17 semantic mutants,
-// 6 controls, all run against this file's 35 tests:
-//
-// Every semantic mutant reds EXACTLY ONE test, and the right one — the
-// requirement deleted; the green-but-behind shape dropped; `pr<N>` dropped
-// from the fixture path; the scratch-root prohibition deleted; the "never
-// `mkdir -p`" clause flipped to "with `mkdir -p`"; the per-PR rationale deleted;
-// the shared-root sentence deleted; the by-design name collision deleted;
-// the harm rewritten as clutter; `mkdir -p`'s half of the exit-code contrast
-// deleted; the occupied-namespace step deleted; set equality softened to
-// "should generally be"; the unconditional-refusal sentence deleted; the
-// live payload un-namespaced; the finding-id rationale deleted; and both
-// halves of the run-team paragraph, separately.
-//
-// Controls all stayed 35/35 green: the section rewrapped at 80 columns, the
-// run-team paragraph rewrapped at 70, every `**` stripped from the section,
-// and three unpinned sentences reworded. `phrase()` is what buys the
-// reflows; excluding markdown from the pinned spans is what buys the bold
-// strip — the pins refuse drift, not layout.
-//
-// Slice bound measured, not assumed: deleting the whole section reds 9 of
-// the 10 tests added here — the tenth reads run-team's SKILL.md, not this
-// doc, and correctly survives — so no assertion below is satisfiable from
-// elsewhere in `run-merge-bot.md`. Deleting that run-team paragraph reds
-// exactly the tenth.
-const gateProof = () =>
-  between(DOC, "## Prove the gate blocks, in a directory you own", "## Per-PR sequence", "run-merge-bot.md");
+// #1806 (spec 2026-09-24 § 5, ADR 0012 Decision 3). Step 3 is ONE script run
+// twice, and the merge rests on the second run: a conclusion can invert under
+// a fixed run id and a CI wait sits between the two readings. Sliced to step 3
+// alone — `merge-gate`, `exit 0` and `gh pr merge` all recur through step 4
+// and the report line, so an unbounded match survives the rule's deletion.
+// These replace the retired `gateProof()` block: that section's synthetic
+// fixtures and plain-`mkdir` claim moved into `merge-gate.test.mjs` as cases.
+const step3 = () =>
+  between(DOC, "3. **Gate the merge with `merge-gate.mjs`", "4. `gh pr merge <pr> --merge`", "run-merge-bot.md step 3");
 
-// One span, not two matches: the imperative and what discharges it. Pinned
-// separately, "prove it can go red" is satisfied by any nearby sentence
-// mentioning the gate, and the requirement degrades to a slogan with no
-// stated way to meet it.
-test("the proof is required before a green is trusted, and is discharged by driving each shape through the real gate", () => {
-  assert.match(
-    gateProof(),
-    phrase(
-      "prove it can go red before you trust a green: drive a synthetic `ci-state` payload of each shape below through the gate you actually run, and confirm each one blocks",
-    ),
-    "the proof requirement is no longer bound to driving each shape through the gate the bot actually runs",
-  );
-});
-
-// The set itself. A proof is only as strong as the shapes it drives, and each
-// of these fails a different way — two pass a subset gate vacuously, one
-// yields no output to compare at all, one is green on the wrong base, one is
-// not finished. Dropping any one leaves a hole no other shape covers.
-test("the section names every shape the gate has to refuse", () => {
-  const s = gateProof();
-  assert.match(s, phrase('`{"verdict":"rate-limited"}`'), "the rate-limited shape is gone from the proof set");
-  assert.match(s, phrase("`{}`"), "the empty-object shape is gone from the proof set");
-  assert.match(s, phrase("A zero-byte file"), "the zero-byte shape is gone from the proof set");
-  assert.match(s, phrase("`verdict: \"green\"` with `behind` greater than 0"), "the green-but-behind shape is gone from the proof set");
-  assert.match(s, phrase("A run still in progress"), "the in-progress shape is gone from the proof set");
-});
-
-// The path and the tool that claims it, in one span, with the scratch root
-// excluded in the middle of it. `mkdir -p` is the natural thing to type and
-// the one thing that cannot work here: it succeeds on a directory someone
-// else created and hands over its contents, which is precisely the adoption
-// this rule exists to refuse. An edit keeping the path and dropping either
-// prohibition must not pass.
-test("the fixture path is bound to the plain mkdir that claims it, and to not writing in the root", () => {
-  assert.match(
-    gateProof(),
-    phrase(
-      "Every fixture you write goes under `<scratch>/pr<N>/merge-bot-<wave#>/gate-proof/`, never into the scratch root by itself, and you create that leaf with plain `mkdir`, never `mkdir -p`",
-    ),
-    "the gate-proof fixture path is no longer bound to both the scratch-root prohibition and creating the leaf with plain `mkdir`",
-  );
-  // WHY the key is the PR and not the pass: a per-pass proof is one proof
-  // reused across merges it never covered. The path pinned above is the
-  // rule; this is the sentence that stops a later edit from re-keying it.
-  assert.match(
-    gateProof(),
-    phrase("`pr<N>` is the PR you are about to gate, so the proof is bound to the merge it licenses instead of being driven once for the pass"),
-    "the per-PR key is no longer tied to binding each proof to the merge it licenses",
-  );
-});
-
-// Why the rule exists at all, on both legs: the root is shared and injected
-// (not something the bot opted into), and the fixture NAMES are shared too,
-// which is what makes the collision systematic rather than bad luck. Drop the
-// second leg and a reader concludes a distinctive filename would do.
-test("the shared injected root and the identical fixture names are both named as the mechanism", () => {
-  const s = gateProof();
+test("step 3 runs the merge gate twice and merges only on the second exit 0", () => {
+  const s = step3();
+  assert.match(s, /~\/\.fleet\/bin\/fleet-run merge-gate\.mjs --pr <pr> --pre <pre> --post <post>/);
   assert.match(
     s,
-    phrase(
-      "The scratchpad root your own system prompt names is injected into every dispatched member and is shared with every sibling in the session; nothing partitions it but this rule",
-    ),
-    "the section no longer names the scratch root as injected and shared with every sibling",
+    phrase("**Run it again immediately before `gh pr merge`, and merge only on that second exit 0.**"),
+    "step 3 no longer re-runs the gate at the merge instant — a conclusion that inverted under the same run id, or a label pulled during the CI wait, merges on the first reading",
+  );
+});
+
+test("step 3 waits on an unfinished run instead of skipping the PR, and only then", () => {
+  // The one exit 1 that is not a skip. Collapsed into "any exit 1 → skip",
+  // every freshly rebased PR is skipped, because its run is always in flight
+  // on the first reading.
+  assert.match(
+    step3(),
+    phrase("Exit 1 with a `ci:…` `reason`, `ci.runId` set and `ci.status` not `completed` → the run has started but not finished: wait on `ci.runId` (step 2), then run it again."),
+    "step 3 no longer separates the not-yet-finished run from a real refusal",
+  );
+});
+
+// #1817. Right after `gh pr update-branch --rebase`, GitHub has not yet
+// registered a run for the rebased head: `ci.runId` and `ci.status` both read
+// `null`, which the arm above's "`ci.status` not `completed`" condition also
+// matches — collapsed together, a bot reading this prose is sent to wait on
+// `ci.runId` (step 2) with a `null` id, i.e. `gh run watch null` / `gh run
+// view null`. This pins the no-run case as its own arm, never routed through
+// step 2's blocking wait.
+test("step 3 waits and re-gates on a null ci.runId instead of routing it into step 2's wait", () => {
+  const s = step3();
+  assert.match(
+    s,
+    phrase("Exit 1 with `ci.runId` **null** (`reason` starts `no CI run whose headSha equals`) → GitHub has not yet registered a run for this head at all"),
+    "step 3 no longer carves the no-run-yet case out of the unfinished-run wait",
   );
   assert.match(
     s,
-    phrase("is the name every wave's bot reaches for, by design, so a collision here is systematic rather than unlucky"),
-    "the section no longer says the fixture names collide by design",
-  );
-});
-
-// The harm, stated as a false measurement rather than as untidiness — the
-// framing that gets a rule obeyed. One span through the report the bot files,
-// because the inverted proof and the confident report are the same fact: a
-// pin on the fixture half alone survives deletion of what it costs.
-test("the harm is a proof that silently did not happen, not a messy directory", () => {
-  assert.match(
-    gateProof(),
-    phrase(
-      "a sibling's GREEN fixture sitting under the name your loop expects to BLOCK makes that shape pass through, and you report the gate proven falsifiable with every shape blocked while the one that mattered was never measured",
-    ),
-    "the section no longer states the harm as an inverted proof reported as a passing one",
-  );
-});
-
-// Why plain `mkdir` is the check and not a style preference. Both exit codes
-// in one span: the refusal is only meaningful against what `-p` does instead,
-// and a reader who knows only half of it reaches for `-p` the first time a
-// path is missing.
-test("mkdir is stated as the check, against what mkdir -p does instead", () => {
-  assert.match(
-    gateProof(),
-    phrase(
-      "It exits 1 with `File exists` on a path that already exists, so a directory you did not create refuses you at the moment you claim it, while `mkdir -p` exits 0 and hands you its contents silently",
-    ),
-    "the section no longer contrasts `mkdir`'s fail-closed refusal with `mkdir -p`'s silent success",
-  );
-});
-
-// The refusal needs an exit, or a blocked bot invents one — and the invented
-// one is `-p`. Bound to the report, so the directory actually used is
-// recoverable afterwards.
-test("an occupied namespace has a stated next step that is not writing into it", () => {
-  assert.match(
-    gateProof(),
-    phrase(
-      "take `gate-proof-2` and say in your report which directory you used, rather than writing into theirs",
-    ),
-    "the occupied-namespace path no longer names a fresh directory and the report that records it",
-  );
-});
-
-// #966's second question, answered in the doc: the bot verifies the shapes it
-// drove are its own. One span through the verdict, because a check whose
-// failure has no stated consequence gets logged and walked past — "refuses
-// the proof rather than folding the extra in" is the whole of it.
-test("the shapes driven must equal the shapes written, and a mismatch refuses the proof", () => {
-  assert.match(
-    gateProof(),
-    phrase(
-      "the set of shapes you drove must be exactly the set you wrote — same count, same names — and a mismatch refuses the proof rather than folding the extra in",
-    ),
-    "the section no longer requires the driven set to equal the written set, or no longer refuses on a mismatch",
-  );
-  // The refusal is unconditional. Every payload inherited in the measured
-  // instance was block-shaped, so the tempting reading is that absorbing one
-  // is harmless — it is not, because a shape you did not write is a shape
-  // you did not measure, and "measured" is the claim being made.
-  assert.match(
-    gateProof(),
-    phrase("Refuse even when the intruder is block-shaped and appears to strengthen the proof"),
-    "the refusal is now conditional on the foreign fixture looking dangerous",
-  );
-});
-
-// The other half of the namespace: the live reading sits one level up from
-// the fixtures, under the same per-PR path, so a synthetic shape and a real
-// payload can never occupy one filename — and so the count check above,
-// which counts the whole directory, stays exact.
-test("the real ci-state reading is kept out of the fixture directory, under the same per-PR path", () => {
-  const s = gateProof();
-  assert.match(
-    s,
-    phrase(
-      "keep the `ci-state` payload you actually gate on one level up, at `<scratch>/pr<N>/merge-bot-<wave#>/ci.json`, so a synthetic shape can never be read back as a live reading and the count above stays exact",
-    ),
-    "the live ci-state payload is no longer kept out of the fixture directory under the same per-PR path",
-  );
-  // Why run-team's existing two-level rule does not already cover this. A
-  // reader who thinks it does deletes this section as a duplicate.
-  assert.match(
-    s,
-    phrase("gate fixtures have no finding id, which is exactly why that rule never reached them"),
-    "the section no longer says why run-team's `<scratch>/pr<N>/<finding>/` rule does not reach gate fixtures",
-  );
-});
-
-// #966 follow-up: the prose above only ever proved a fixture existed
-// somewhere in the document; the executable skeleton drives the actual gate
-// and had no assertion of its own. Pinning it directly against mutation:
-// flipping `mkdir` to `mkdir -p`, deleting the count-check lines, re-keying
-// the namespace to wave-only, or deleting the whole bash block must each
-// red at least one test below.
-test("the skeleton claims its namespace with a plain, non-clobbering mkdir", () => {
-  const s = gateProof();
-  assert.match(s, phrase('mkdir "$d" 2>/dev/null && break'), "the skeleton no longer claims the leaf with a plain, fail-closed mkdir");
-  assert.doesNotMatch(s, /mkdir -p "\$d"/, "the leaf mkdir now silently succeeds on a directory someone else already owns");
-});
-
-test("the skeleton retries the documented gate-proof-2 fallback and re-points $d at the namespace it actually claimed", () => {
-  const s = gateProof();
-  assert.match(s, phrase('for n in "" -2; do'), "the skeleton no longer retries the documented gate-proof-2 fallback on a collision");
-  assert.match(s, phrase('d="$base/gate-proof$n"'), "$d is no longer re-pointed at whichever namespace the retry loop actually claimed");
-  assert.match(s, phrase('[ -n "$d" ] || exit 1'), "an occupied primary and fallback no longer abort the skeleton instead of reading the wrong directory");
-});
-
-test("the skeleton's base path is keyed on both the PR and this pass's wave", () => {
-  assert.match(
-    gateProof(),
-    phrase("base=<scratch>/pr<N>/merge-bot-<wave#>"),
-    "the skeleton's base path no longer matches the documented per-PR, per-wave namespace",
-  );
-});
-
-test("the skeleton's wrote counter increments on a real line, not only inside a comment", () => {
-  assert.match(
-    gateProof(),
-    /^wrote=\$\(\(wrote\+1\)\)$/m,
-    "wrote is only incremented inside a comment, so a literal copy of the skeleton leaves it at 0 forever",
-  );
-});
-
-test("the skeleton floors the driven count at 5 and refuses on a name mismatch, not just a count mismatch", () => {
-  const s = gateProof();
-  assert.match(
-    s,
-    phrase('[ "$wrote" -eq 5 ] || { echo "PROOF VOID: $wrote shapes driven, need 5"; exit 1; }'),
-    "the skeleton no longer floors the driven count at exactly 5 shapes, or the floor no longer exits non-zero",
+    phrase("never route this into step 2's `gh run watch`/`gh run view <run-id>` with a null id"),
+    "step 3 no longer warns against waiting on step 2's blocking call with a null run id",
   );
   assert.match(
     s,
-    phrase('got=$(ls -1 "$d" | sort | tr'),
-    "the skeleton no longer compares the written fixture names, only their count",
-  );
-  assert.match(
-    s,
-    phrase('[ "$got" = "$names " ] || { echo "PROOF VOID: wrote {$got}, expected {$names }"; exit 1; }'),
-    "a name mismatch no longer exits non-zero, so a subset of the 5 named shapes would pass silently",
+    phrase("Wait 15s and run the gate again instead, capped at 20 attempts (~5 minutes); no run within that cap → skip the PR and report `<reason>-#<pr>`"),
+    "step 3 no longer bounds the no-run-yet wait, or no longer reports when the cap is exhausted",
   );
 });
 
-// Cross-file, and the only half the controller can act on: the runbook above
-// is what the BOT reads, so nothing in it reaches a controller reading a
-// finished report. Sliced to the gate cluster's tail — `scratch`, `shared`
-// and `directory` all recur through a 2000+ line file, and the question
-// belongs beside the other one the controller is told to ask, not in an
-// appendix.
-const dispatchAsk = () =>
-  between(
-    RUN_TEAM,
-    "So **gate on the payload's own fields**",
-    "**You own the watcher, not the bot.**",
-    "run-team/SKILL.md's Merge bot gate spec",
+test("step 3 still skips a real refusal that is neither the unfinished-run wait nor the no-run-yet wait", () => {
+  assert.match(
+    step3(),
+    phrase("the same as any other exit 1. Any other exit 1 → skip the PR"),
+    "step 3 no longer distinguishes the two waits above from every other exit 1",
   );
+});
 
-test("the controller is told to ask which directory the bot proved its gate in", () => {
-  const s = dispatchAsk();
+test("step 3 reads exit 2 as could-not-evaluate, never as a verdict about the PR", () => {
+  const s = step3();
+  assert.match(s, phrase("Exit 2 → stop on that PR and report `<reason>-#<pr>`: the gate could not evaluate"));
   assert.match(
     s,
-    phrase(
-      "The scratch root the harness injects is one directory shared by every member you dispatch, so a proof driven in the root itself can absorb a sibling's fixtures and still report every shape blocked",
-    ),
-    "the dispatch section no longer says a proof driven in the shared root can absorb a sibling's fixtures and still report clean",
+    phrase("Re-run once only for `rate-limited`"),
+    "step 3 no longer bounds the exit-2 retry to the one reason that clears by itself",
   );
-  // The question itself, bound to the answer that fails it — same shape as
-  // the fields question this sits beside ("a bot that cannot answer has not
-  // got one"), because an unanswerable question with no stated verdict is
-  // asked once and dropped.
+});
+
+test("step 3 keys the gate's reading on both the PR and the bot's own name", () => {
+  // `merge-bot-<n>` is 1 + the merge-bot entries in the ledger's
+  // `## Dispatched` list, so no two bots in one run share it; `pr<N>` binds
+  // the reading to the merge it licenses. Either key dropped puts two readings
+  // at one path.
+  assert.match(step3(), phrase("--out <scratch>/pr<N>/merge-bot-<n>/ci.json"));
+});
+
+// #1806 (spec § 4 items 4, 6, 11). The dispatched bot's pass ends in a grace
+// and ONE report; the top-level invocation keeps its Monitor. Sliced to the
+// grace section, which ends where **Then stay armed** begins.
+const grace = () => between(DOC, "## Grace, then one report", "## Then stay armed", "run-merge-bot.md grace section");
+
+test("a dispatched bot holds a 15-minute grace, polling every 60s, before its one report", () => {
+  const s = grace();
+  assert.match(s, phrase("**Only a bot a controller dispatched holds a grace**"));
+  assert.match(s, phrase("then waits **15 minutes** for late labels, then reports once"));
+  assert.match(s, phrase("Every 60s, poll `gh pr list --state open --label ready-to-merge --json number`"));
   assert.match(
     s,
-    phrase("what you own is the bot that cannot name its directory, the same way you own the one that cannot name its fields"),
-    "the dispatch section no longer treats a bot that cannot name its proof directory as the controller's finding",
+    phrase("**re-run selection from the top**, hold rule included, drain what it makes actionable, and restart the grace after that drain"),
+    "a label arriving in grace no longer re-enters selection with the hold rule, or no longer restarts the grace",
+  );
+  assert.match(s, phrase("**One report, at exit, and none before it**"));
+});
+
+test("the grace wait splits by harness: bounded Bash chunks on Claude, one eval cell on omp", () => {
+  const pair = between(DOC, "The wait itself splits by harness:", "**One report, at exit", "run-merge-bot.md grace wait pair");
+  assert.match(markedLine(pair, "CLAUDE", "grace wait"), phrase("foreground `Bash` calls of at most 4 minutes each"));
+  const omp = markedLine(pair, "OMP", "grace wait");
+  assert.match(omp, phrase("one Python `eval` cell"));
+  assert.match(omp, phrase("never `bash` plus `wait`"), "the omp line no longer forbids the bash+wait form that backgrounds past ~60s");
+});
+
+test("the top-level invocation still arms its Monitor, and a dispatched bot still skips it", () => {
+  assert.match(
+    DOC,
+    phrase("**Skip this whole section if a controller dispatched you** (`/fleet-ctl:run-team`, or any caller that says it owns the watcher) — hold the grace above instead."),
   );
 });
 

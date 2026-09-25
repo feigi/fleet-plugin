@@ -7,7 +7,7 @@
 // confirmed half of the mechanism — a GitHub label does not follow the branch.
 //
 // The ruled fix is that the merge bot re-derives the head, as a REQUIREMENT
-// rather than bot discretion. It already held in practice — the wave bots that
+// rather than bot discretion. It already held in practice — the merge bots that
 // merged #1090 and #1091 both re-derived every gate at the merge instant — but
 // it held because their dispatch prompts said so, which is precisely what this
 // file exists to stop being the only reason.
@@ -28,33 +28,18 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 // Bounded at both ends. Unbounded to EOF, `ready-to-merge`, `head` and
 // `finisher` each occur freely through the per-PR sequence and the watcher
 // loop, so every assertion below would survive deletion of the section itself.
-// The end anchor is the NEXT heading, which #966 moved: a gate-proof section
-// now sits between this one and `## Per-PR sequence`, and leaving the old
-// anchor in place would silently widen this slice across it — the fat slice
-// this bound exists to deny, not a cosmetic difference.
+// The end anchor is the NEXT heading — `## Per-PR sequence` again since #1806
+// retired the gate-proof section #966 had put between them.
 const labelledHead = () =>
-  between(DOC, "## The labelled head", "## Prove the gate blocks", "run-merge-bot.md");
+  between(DOC, "## The labelled head", "## Per-PR sequence", "run-merge-bot.md");
 
-// Step 3 is where the merge-instant re-check already lives (label, review
-// decision), so the head leg has to be IN it — not in a later paragraph a
-// reader reaches the merge without having read.
+// Step 3 is the merge gate, run twice, so the head leg has to be IN it — not
+// in a later paragraph a reader reaches the merge without having read.
 const step3 = () =>
-  between(DOC, "3. Green → re-check immediately before merging", "4. `gh pr merge <pr> --merge`", "run-merge-bot.md");
+  between(DOC, "3. **Gate the merge with `merge-gate.mjs`", "4. `gh pr merge <pr> --merge`", "run-merge-bot.md");
 
 test("the head re-derivation is stated as a requirement, not left to bot discretion", () => {
   assert.match(labelledHead(), phrase("re-deriving the head is a requirement here, not bot discretion"));
-});
-
-test("the labelled head slice stops before the gate-proof section, not at the stale Per-PR sequence heading", () => {
-  // #966: reverting the end anchor to the old `## Per-PR sequence` heading
-  // silently re-widens this slice across the whole gate-proof section in
-  // between, and every other test in this file would still pass — a token
-  // unique to that section is the only thing that reds a stale anchor.
-  assert.doesNotMatch(
-    labelledHead(),
-    /gate-proof/,
-    "labelledHead()'s end anchor has drifted back to a heading after the gate-proof section, widening this slice across it",
-  );
 });
 
 test("the labelled head names why no upstream guard covers this window", () => {
@@ -98,7 +83,7 @@ test("the read's ordering constraint rides in the same sentence as its reason", 
 // follows; nothing pinned the predicate between them. Measured on the commit
 // BEFORE this one: inverting `after` to `BEFORE` left this file 14/14 green,
 // and deleting the sentence outright left 36/36 green across both prose
-// suites. Inverted, the doc tells the bot to refuse the ordinary wave PR and
+// suites. Inverted, the doc tells the bot to refuse the ordinary PR and
 // to merge #180's shape — the head this ticket exists to stop.
 //
 // One contiguous span through `**Refuse:`, not two matches: N separate matches
@@ -126,7 +111,7 @@ test("the refusal names its token, leaves the label alone, and sends a fresh fin
 });
 
 // AC-4, the ACCEPT side. A bot that refuses whenever the labelled SHA is not
-// the current head must not refuse the ordinary wave PR. Pinned as one span
+// the current head must not refuse the ordinary PR. Pinned as one span
 // with its verdict, because a bare "this is the normal case" with the outcome
 // deleted is what leaves a reader guessing.
 test("the normal path — label applied, head unchanged — is stated as proceeding untouched", () => {
@@ -164,12 +149,12 @@ test("the gate declares what it does not cover, and which refusal is intended", 
 });
 
 test("step 3 re-derives the head at the merge instant, against pre or the rebase's post", () => {
+  // The gate compares the PR head against `--pre`/`--post`, so the operands
+  // have to be the labelled head and the bot's own rebase — any other source
+  // for `--pre` certifies whatever head the bot read last.
   const s = step3();
-  assert.match(s, phrase("Re-derive the head here too, not only the label"));
-  assert.match(
-    s,
-    phrase("must equal the `pre` you recorded at **The labelled head**, or the `post` your own step-1 rebase produced"),
-  );
+  assert.match(s, phrase("`--pre` is the head you recorded at **The labelled head**; `--post` is the head step 1's rebase produced"));
+  assert.match(s, phrase("**`head-moved-after-label`** — the PR head is neither `pre` nor `post`"));
 });
 
 test("step 3 says why no CI gate above it can see a push that landed during the wait", () => {
@@ -178,12 +163,12 @@ test("step 3 says why no CI gate above it can see a push that landed during the 
   // push plus its own green run clears step 2 outright. Without this sentence
   // the head comparison looks like a duplicate of the CI binding and gets cut.
   const s = step3();
-  assert.match(s, phrase("no CI gate above can see it"));
+  assert.match(s, phrase("Any third SHA is a push that landed while you waited on CI, and no CI check can see it"));
   assert.match(s, phrase("`r.headSha === prHead` filter"));
 });
 
 // #493 AC-3, and the reason it reaches into run-team: the merge bot's refusal
-// stops a bad merge but costs a wave. The cheap half is upstream — the
+// stops a bad merge but costs a pass. The cheap half is upstream — the
 // controller not dispatching a finisher into a window a member is about to
 // move. Sliced to the finisher-dispatch paragraph; `question`, `outbox` and
 // `dispatch` all recur through a 2000+ line file.

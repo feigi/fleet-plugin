@@ -63,7 +63,7 @@ const runMergeBot = () =>
 // asserted here, with the blank line that separates it included in the literal.
 const NEXT_PARAGRAPH = [
   ["review-and-fix", REVIEW_AND_FIX, "\n\n**A repo with no workflow files"],
-  ["run-merge-bot", RUN_MERGE_BOT, "\n\n   **Re-query at the moment you merge"],
+  ["run-merge-bot", RUN_MERGE_BOT, "\n\n   **Why twice: a conclusion can invert under a fixed run id.**"],
 ];
 
 test("each pinned paragraph is still followed by a blank line and the paragraph that opened after it", () => {

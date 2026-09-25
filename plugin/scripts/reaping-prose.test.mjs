@@ -126,7 +126,7 @@ test("run-team/SKILL.md: the by-hand fallback names worktree-audit.sh's no-argum
   const fallback = between(
     RUN_TEAM,
     "**That refusal is the",
-    "Run it over every pool ticket",
+    "Run it over every claimed ticket",
     "run-team/SKILL.md",
   );
   // ONE contiguous phrase: the no-argument half and the row-lookup half are

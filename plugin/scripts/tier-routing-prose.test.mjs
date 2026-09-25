@@ -57,7 +57,7 @@ test("SKILL.md's merge-bot name pair: CLAUDE namespaces `fleet-ctl:fleet-merge-b
   const region = between(
     RUN_TEAM,
     "### Merge bot",
-    "**Put every gate trap in the bot's brief",
+    "**Put the shell traps in the bot's brief",
     "run-team merge-bot name pair",
   );
   const claude = markedLine(region, "CLAUDE", "run-team merge-bot CLAUDE line");

@@ -70,7 +70,7 @@ you cannot confirm was received, re-check the artifacts it governed.
 **Name every member.** The name makes it a team member, and membership is what
 carries the `Agent` tool. Omit it → the member loses delegation with no error.
 Names follow the unit of work: `impl-<issue#>`, `fix-pr-<pr#>`,
-`review-pr-<pr#>`, `finisher-pr-<pr#>`, `merge-bot-<wave#>`. See
+`review-pr-<pr#>`, `finisher-pr-<pr#>`, `merge-bot-<n>`. See
 references/member-lifecycle.md.
 
 **Inverts one level down: members must name their children `undefined`.** A named
@@ -116,8 +116,8 @@ changed.
   only by you** — the finisher labels, and the merge bot merges on its own
   reading — and neither is dispatched to read this file, so neither can be
   reached by stating the rule here. Each carries its own copy: the finisher's
-  in the verbatim block at its duties below, the merge bot's in
-  `run-merge-bot.md`'s CI gate.
+  in the verbatim block at its duties below, the merge bot's inside
+  `merge-gate.mjs`, step 3 of `run-merge-bot.md`.
 - **Re-pin only after a change you made deliberately.** The mid-run tooling fix
   below is the one legitimate writer. Re-pinning to clear a refusal you cannot
   explain discards the check.
@@ -129,7 +129,7 @@ which you also read from that tree. Not the whole repo: `docs/metrics/` is
 appended by THIS run, so covering it would refuse on the run's own bookkeeping
 every time. It does not cover refs, deliberately: `claim-ticket.sh` creates a
 branch per ticket and `reap.sh` deletes them in the ref store every worktree
-shares, so ordinary work moves refs several times a wave and a per-gate
+shares, so ordinary work moves refs several times a run and a per-gate
 refusal on that is noise.
 
 **A member runs its test suite in the foreground and blocks on it.**
@@ -152,7 +152,7 @@ Monitor and Bash commands run under **zsh**, and the shell in this file is
 prescriptive — copied verbatim into a watcher or pasted into a bot's brief. So
 every trap here is a zsh-vs-bash difference that ships as a green-looking gate:
 correct in the shell you tested in, silently wrong in the one it runs in. Phase
-3's monitor paragraph and the **Merge bot**'s gate-trap list both point here
+3's monitor paragraph and the **Merge bot**'s brief both point here
 instead of restating any of it; the one deliberate copy is named at the end.
 
 **zsh word-splits an unquoted command substitution's result; it does NOT split
@@ -1766,7 +1766,7 @@ emits a fresh RECOVERED every tick thereafter — the per-tick volume the latch
 exists to prevent, wearing a latch's clothes again.
 
 **Judge `ci-state` on its payload, never its exit code** — the same rule as
-**gate on the payload's own fields**, applied to the watcher. `not-green` is an
+`merge-gate.mjs` applies on the merge path, applied to the watcher. `not-green` is an
 ordinary, frequent state that exits non-zero, so a watcher treating any non-zero
 exit as an outage misfires constantly on PRs that are merely in progress. Empty
 or unparseable output is the degraded case; parseable JSON reading
@@ -1975,7 +1975,7 @@ while `fix-pr-1153` nearly retired a real review finding as non-reproducing afte
 the same shape handed both trees a single argv word and drew `exit 2` from each,
 which is the signature of a correct refutation with nothing anomalous to notice.
 The fix-applier prompt and every refuter brief carry the rule and the safe
-invocation form; the merge bot's gate-trap list is the wrong seat, because a bot
+invocation form; the merge bot's brief is the wrong seat, because a bot
 reads gates and never injects a fault.
 
 **Where `testCmd` comes from:** the repo's own test command, the one you hand
@@ -2426,7 +2426,7 @@ label has been observed holding until after an abort message arrived. Then
 dispatch a **fresh** finisher against the new head; the first audit does not
 transfer, since it verified a different tree. The merge bot refuses that head on
 its own (`run-merge-bot.md`, **The labelled head**), so this is not the only
-guard — but its refusal costs a wave and leaves the label lying, which is yours
+guard — but its refusal costs a pass and leaves the label lying, which is yours
 to clear either way.
 
 A halt at step 1 reads identical from a bare SHA mismatch whatever caused it,
@@ -2669,10 +2669,16 @@ there.
 
 ### Merge bot
 
-Per wave, named `merge-bot-<wave#>`, never two at once. Tell it to read
-`$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md`, run **one** pass, then
-`SendMessage` you what it merged and what it held, then exit — and say that
-you dispatched it, which is what makes it skip its own watcher step. **Dispatch
+Per pass, named `merge-bot-<n>`, never two at once. `ledger.mjs dispatch
+merge-bot` names it before the dispatch call — `n` is 1 + the `merge-bot-`
+entries already in the ledger's `## Dispatched` list, so it restarts at 1 every
+run, a replacement for a dead bot takes the next `n`, and nobody counts. Dispatch
+it on the tick's `DISPATCH merge-bot`: the first `ready-to-merge` label is
+enough, and it never waits for the finisher's report. Tell it to read
+`$(~/.fleet/bin/fleet-run --root)/commands/run-merge-bot.md` and run **one**
+pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace
+for late labels, then report once and exit — and say that you dispatched it,
+which is what makes it hold that grace instead of arming its own watcher. **Dispatch
 it by its own definition and omit `model` on the call** — the tier (`haiku`)
 lives in `agents/fleet-merge-bot.agent.md`, on both harnesses:
 
@@ -2687,75 +2693,23 @@ deterministic, script-driven backstop run before every push specifically to
 catch a wrongly-resolved conflict, so the tier buys nothing that backstop
 doesn't already cover.
 
-**Put every gate trap in the bot's brief, not in a follow-up message.** A bot
+**Put the shell traps in the bot's brief, not in a follow-up message.** A bot
 already looping cannot be corrected — the loop consumes the turns a correction
-would land in. Each is measured, and they fail in different directions:
+would land in. **Every entry in Shell traps, verbatim** — that section is where
+they are stated once, and this is the seat that has to paste them: the bot
+reads an exit code off `gh pr update-branch`, `merge-gate.mjs` and
+`prove-merge.sh`, which is the `PIPESTATUS` and read-only-`status` pair, and its
+grace poll captures `gh pr list` output and loops over it, which is the
+assigned-variable trap. The brief always travels with the dispatch.
 
-- **`ci-state --quiet` is unsatisfiable-FALSE.** It drops `jobs` and `missing`,
-  so a gate reading per-job state from it can never be satisfied. One bot polled
-  ~2000 REST calls over 15 minutes on a PR that was green throughout, and had to
-  be killed. It does not look like a bug; it looks like patience.
-- **Shell traps go in the brief too, verbatim** — every entry in that section,
-  which is where they are stated once, and this is the seat that has to paste
-  them: the bot's own watcher step captures `gh pr list` output and loops over
-  it, which is the assigned-variable trap, and its merge gate reads an exit code,
-  which is the `PIPESTATUS` and read-only-`status` pair. That step lives in
-  `run-merge-bot.md`'s **Then stay armed**, which a dispatched bot skips — so the
-  loop trap reaches it through this brief or not at all.
-- **A `jq` exit outside 0 and 1 is not a verdict.** `jq -e` exits 0 when its
-  last output was truthy and 1 when it was false or null — the outcomes that
-  invite reading the code as a boolean. Every other exit means the gate never
-  compared a field at all: measured on jq-1.7.1-apple, **3** the program did not
-  compile (a full-width `｜` typed where `|` was meant, which is how the gate
-  merging #1172 hit it), **2** a usage error, **4** the program yielded no output
-  (an empty payload has no field to compare), **5** the input did not parse or
-  the program raised. That table is for the boolean comparison this spec
-  prescribes. A *filtering* gate — `jq -e 'select(.verdict=="pass")'` — is
-  outside it: such a gate answers by emitting or withholding its input, so on a
-  payload that says `fail` it exits **4** where the boolean form exits 1, and
-  that 4 is a genuine refusal by a gate that did look. Read an exit against the
-  shape of the gate that produced it. Each boolean reading of a non-0/1 exit is
-  wrong, in a different direction: `[ $rc -eq 0 ]` blocks a mergeable PR on a
-  typo, `[ $rc -ne 1 ]` merges on a gate that never parsed. Same rule as
-  `inflight.sh`, `verify-sha.sh` and `staleness.mjs` exit 2 — could-not-look is
-  a third answer carried beside pass and fail, never folded into either. Scope
-  the response to what the exit can change: 5, and 4 while the payload may still
-  be filling, can clear on a re-read, so re-run the gate once and report if the
-  same exit repeats; 3 and 2 are properties of the program and the invocation,
-  so a second run returns them by construction — report and stop without
-  re-running.
-
-So **gate on the payload's own fields** — `verdict`, `behind`, `missing`, the
-per-job conclusions, and `prHead == runHeadSha` — read with `jq` from an
-**unpiped** `ci-state` with stdout redirected and stderr dropped. Never fold
-`2>&1` into the payload: `ci-state` traces every `gh` call to stderr and it
-breaks the parse. Ask the bot **which fields its gate actually read**; a bot that
-cannot answer has not got one. Prefer ONE blocking `gh run watch` to a poll loop
-(three waves measured 20-377 core each, against ~2000 for the poll loop) and treat its return as permission to look, never as
-the verdict.
-
-**An empty payload reads as a block, not a pass** — the safe direction, but still
-a false one. A bot that ran `ci-state` from outside the repo got `fatal: not a
-git repository`, an empty payload, and a gate that refused a mergeable PR.
-
-**A `rate-limited` payload is not a reading — read `verdict` before anything
-else.** An exhausted GitHub quota makes `ci-state` name its cause rather than
-refuse in silence: `verdict: "rate-limited"` on stdout at the unchanged exit 2,
-with every field it never got to observe ABSENT. Gate on the fields above as a
-conjunction and that blocks, because `verdict` is not `green`. Gate on a SUBSET
-and it passes vacuously — absence is not self-blocking in `jq`, so
-`.prHead == .runHeadSha` is `null == null` and `(.missing | length) == 0` is
-`0 == 0`, each exiting 0 on a payload that read no CI at all (measured). A quota
-refusal clears on its own, so the response is to re-probe shortly — not to block
-the PR, and not to send it back for work it does not need.
-
-**Ask which directory it proved the gate in, too.** The scratch root the harness
-injects is one directory shared by every member you dispatch, so a proof driven in
-the root itself can absorb a sibling's fixtures and still report every shape
-blocked — measured 2026-08-28 (#966), a bot found payloads for a different PR
-already sitting where it was about to write. `run-merge-bot.md` carries the per-PR
-namespace and the count check that refuses one; what you own is the bot that cannot
-name its directory, the same way you own the one that cannot name its fields.
+**Its merge gate is one script, run twice.** Step 3 of `run-merge-bot.md` is
+`merge-gate.mjs --pr <n> --pre <sha> [--post <sha>]`: read-only, it runs the
+instrument re-check, the label and review-decision read and a run-bound
+`ci-state`, and answers their conjunction — exit 0 mergeable, 1 blocked (the
+bot reports `<reason>-#<pr>`), 2 could not evaluate. The bot runs it once
+before any CI wait and again immediately before `gh pr merge`, and merges only
+on that second exit 0. Nothing but the gate reads `ci-state` on the merge path,
+so a bot's report names the gate's `reason`, never a field it read by hand.
 
 **You own the watcher, not the bot.** A dying member takes a watcher down with it
 and the queue stops silently. Arm one yourself, `persistent: true`, seeded before
@@ -2768,19 +2722,21 @@ See references/ci-and-staleness.md.
 
 **One rebase per PR, at merge time.** The bot establishes currency once, when the
 PR is the merge candidate; requiring it earlier costs a full CI cycle per sibling
-merge. At 6+ open PRs batch a wave rather than merging singles. Any behind-count
-you hand a bot is expired on arrival; say so. See references/ci-and-staleness.md.
+merge. Any behind-count you hand a bot is expired on arrival; say so. See
+references/ci-and-staleness.md.
 
-`run-merge-bot.md` carries the mechanics — intra-wave re-checks, run-binding, the
+`run-merge-bot.md` carries the mechanics — intra-pass re-checks, run-binding, the
 ancestry proof, post-rebase red triage. Do not restate them here.
 
-### Reap after every wave
+### Reap after each merge pass
 
 A merge deletes the remote branch and leaves the local branch `[gone]` with its
-worktree — and its `node_modules` — still on disk. Reap after **each** wave, not
-once at the end: a stale worktree still answers `git worktree list`, so phase 0's
-in-flight probe reads an already-merged ticket as taken and the queue quietly
-shrinks. See references/reaping.md.
+worktree — and its `node_modules` — still on disk. Reap after **each** merge pass,
+not once at the end: a stale worktree still answers `git worktree list`, so the
+in-flight probe (`inflight.sh`, run by the Shortlist and by every Pull) reads an
+already-merged ticket as taken and the queue quietly shrinks. The trigger is the
+bot's one exit report, and it reaps every time — a pass that merged nothing
+included (phase 3, **Merge-bot pass reports done**). See references/reaping.md.
 
 `~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition
 inside the same invocation as the delete — `for-each-ref` for `[gone]`, `git
@@ -2790,7 +2746,7 @@ in the same step. See references/reaping.md.
 
 **It sweeps detached worktrees too — the shape a `[gone]` walk structurally
 cannot see.** Bounded to `.worktrees/`, so a checkout of yours outside it is
-reported, never removed. Read `worktreesRemoved` alongside `reaped`: a wave that
+reported, never removed. Read `worktreesRemoved` alongside `reaped`: a pass that
 reaps branches and removes no worktrees is a finding, not a quiet success.
 See references/reaping.md.
 
@@ -2807,13 +2763,13 @@ See references/reaping.md.
 
 ### Release the claims that never became PRs — at end of run, and on drain
 
-Phase 1 is serial and runs ahead of dispatch, so a ticket can be legitimately
-claimed and then never sent: a collision surfaces after the claim, the maintainer
-says drain, the pool is re-prioritised. The claim still holds the `in-progress`
+Phase 1 is serial and claims ahead of dispatch, so a ticket can be legitimately
+claimed and then never sent: a collision surfaces after the claim, or the
+maintainer says drain. The claim still holds the `in-progress`
 label, a worktree and a branch, and **`reap.sh` will not take them** — the branch
 is not `[gone]` and has no unique commits, so it is correctly not reapable. Reaping
-fires per merge wave and nothing fires at end of run, so the claim survives it and
-phase 0's in-flight probe reads a free ticket as taken next run. Same silent queue
+fires after each merge pass and nothing fires at end of run, so the claim survives
+it and the in-flight probe reads a free ticket as taken next run. Same silent queue
 shrink as a stale merged worktree, from the opposite end.
 
 `~/.fleet/bin/fleet-run release-ticket.sh <N> <slug> <type> --apply` is the
@@ -2839,7 +2795,7 @@ finding, never an obstacle**: a claim carrying commits or a pushed branch is not
 auto-released, ever — run `worktree-audit.sh` (it audits every worktree; find
 this claim's row in the output) and decide by hand.
 
-Run it over every pool ticket with no PR when the run ends or the maintainer
+Run it over every claimed ticket with no PR when the run ends or the maintainer
 drains, and on the spot for a claim abandoned mid-run (a bail before
 implementing, a collision found after the claim). Update the released tickets'
 ledger rows in the same step. See references/reaping.md.
@@ -2854,7 +2810,7 @@ per-harness `SKILL.md`, no shell wrapping the shared claim.
 **Claim, release and reap are unchanged on omp.** `claim-ticket.sh`,
 `release-ticket.sh`, `reap.sh` and `inflight.sh` are git-native and operate on
 the single shared ref store every worktree and the main checkout read and
-write directly (**Phase 1**, **Reap after every wave**, **Release the claims
+write directly (**Phase 1**, **Reap after each merge pass**, **Release the claims
 that never became PRs** above); nothing in omp's `task` model touches that
 store, so none of the four scripts carries a dialect branch.
 
@@ -3226,7 +3182,7 @@ ADR 0007 records the gate and why it has no exemption.
 | Merge bot finds the worktree ahead of the PR head **on the local-rebase fallback** | `worktree-diverged-#<pr>`, PR stays queued. Read the stray commit; push-or-discard is yours, and the maintainer's if the evidence cannot settle it |
 | Merge bot finds the head moved after `ready-to-merge` was applied | `head-moved-after-label-#<pr>`, PR stays queued, label untouched. Dispatch a **fresh** finisher against the new head — the first audit verified a different tree |
 | Merge bot cannot resolve a rebase safely | Stop that PR, report, continue |
-| Merge bot's own instrument re-check refuses (exit 1 or exit 2) | Report `instrument-set-changed-#<pr>` with what it printed, PR stays queued, label untouched. Do not re-read the gate |
+| Merge bot's gate refuses on its instrument re-check (`instrument-set-changed` or `instruments-unanswerable`, exit 2) | Report `<reason>-#<pr>` with what it printed, PR stays queued, label untouched. Do not re-run the gate |
 | Member silent or truncated | Send to ping or resume — same unit of work; see the state machine below |
 | Member idle with work outstanding | Read the PR first, *then* ping. Idle ≠ done |
 | Member **killed** (spend limit, API error, crash) | Confirm it is dead first — a frozen transcript does not establish that; see below — then new member, new name, prompt carries inherited state |
