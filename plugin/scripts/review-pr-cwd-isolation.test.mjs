@@ -54,7 +54,7 @@ import assert from "node:assert/strict";
 import { phrase } from "./prose-pin.mjs";
 import { promptRenderer, workflowCode } from "./prompt-renderer.mjs";
 import { liftConst } from "./lift.mjs";
-import { AUDIT_COMMAND, AUDIT_STATES, CWD_AUDIT_MARKER, EVERY_RUN, PWD_FIRST, REFUTER_CWD, REPORT_FIELD, SPECIALIST_CWD, auditLine } from "./cwd-isolation-pins.mjs";
+import { AUDIT_COMMAND, AUDIT_STATES, CWD_AUDIT_MARKER, EVERY_RUN, PWD_FIRST, REFUTER_CWD, REPORT_FIELD, SCRATCH_NAMED_REFUTER, SCRATCH_NAMED_SPECIALIST, SPECIALIST_CWD, auditLine } from "./cwd-isolation-pins.mjs";
 
 const CLAUDE = "workflows/review-pr.js";
 const OMP = "scripts/review-core.js";
@@ -159,6 +159,29 @@ for (const [dispatch, prompts] of DISPATCHES) {
         prompt,
         PWD_FIRST,
         `${name}'s ${dispatch} prompt no longer fixes which directory it inherited before anything else — the audit below has no path to name, and every later rule that says "that directory" names nothing (#1673)`,
+      );
+    }
+  });
+}
+
+// --- Part 2.5 (#1721): where the snapshot/scratch dir are named, per dispatch
+// Each dispatch's own claim (SCRATCH_NAMED_SPECIALIST / SCRATCH_NAMED_REFUTER,
+// cwd-isolation-pins.mjs says why the two differ), asserted against BOTH
+// harnesses so a reword in either one, or a drift between them, reds. This is
+// the regression pin #1721 left out: reverting review-pr.js's specialist
+// prompt back to "above" while leaving review-core.js on "in this prompt"
+// passed the entire suite otherwise, because nothing previously pinned past
+// PWD_FIRST's "no-run zone from then on" on either dispatch.
+for (const [dispatch, prompts, span] of [
+  ["specialist", specialist, SCRATCH_NAMED_SPECIALIST],
+  ["refuter", refuter, SCRATCH_NAMED_REFUTER],
+]) {
+  test(`both harnesses' ${dispatch} prompts state, in the same words, where the snapshot and scratch dir are named as absolute paths`, () => {
+    for (const [name, prompt] of both(prompts)) {
+      assert.match(
+        prompt,
+        span,
+        `${name}'s ${dispatch} prompt no longer makes this claim, or worded it differently from its sibling harness (#1721) — the specialist prompt's claim must stay location-neutral because its scratch dir is named several paragraphs LATER, not above`,
       );
     }
   });
