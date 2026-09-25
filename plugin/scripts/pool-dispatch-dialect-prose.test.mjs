@@ -228,14 +228,14 @@ test("run-team/SKILL.md: the refill pair's equality gap is a named exception fil
 test("run-team/SKILL.md: the pool is preflighted and refused, and the setting is never written by the run", () => {
   assert.match(
     section(),
-    /`~\/\.fleet\/bin\/fleet-run\s+pool-preflight\.mjs`\s+reads\s+the\s+\*effective\*\s+`eval\.workpool\.freshAgents`\s+and\s+exits\s+2\s+unless\s+it\s+reads\s+`true`/,
-    "the preflight, its EFFECTIVE read, and its refusing exit are no longer stated — a pool opened without them turns every refill into a silent wake",
+    /Read\s+the\s+\*effective\*\s+`eval\.workpool\.freshAgents`\s+yourself\s+before\s+opening\s+the\s+pool,\s+and\s+refuse\s+unless\s+it\s+reads\s+`true`/,
+    "the preflight, its EFFECTIVE read, and its refusing condition are no longer stated — a pool opened without them turns every refill into a silent wake",
   );
   // The refusal's consequence, bound to the refusal: a stated guard with no
   // stated fallback is the one a controller routes around.
   assert.match(
     section(),
-    /A\s+non-zero\s+exit\s+is\s+not\s+a\s+thing\s+to\s+route\s+around:\s+dispatch\s+that\s+wave\s+by\s+hand/,
+    /Failing\s+that\s+check\s+is\s+not\s+a\s+thing\s+to\s+route\s+around:\s+dispatch\s+that\s+wave\s+by\s+hand/,
     "the refusal no longer names what to do instead (dispatch the wave by hand), so it reads as an obstacle rather than a verdict",
   );
   assert.match(

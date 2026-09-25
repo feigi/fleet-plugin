@@ -1126,13 +1126,15 @@ nothing in this block touches the reviewer rows, the merge-bot rows, or either
 of their instructions: the blast radius is the implementer row.
 
 **Preflight before you open one, and refuse rather than open a pool you cannot
-trust.** `~/.fleet/bin/fleet-run pool-preflight.mjs` reads the *effective*
-`eval.workpool.freshAgents` and exits 2 unless it reads `true`; at the schema
-default of `false` a queued item lands on an idle worker and extends that
-worker's transcript, which is a wake — the one thing a refill may never be, and
-silent when it happens. A non-zero exit is not a thing to route around: dispatch
-that wave by hand, exactly as the Claude line above describes, and report the
-key. **Never set it yourself.** It is session-wide configuration governing every
+trust.** Read the *effective* `eval.workpool.freshAgents` yourself before
+opening the pool, and refuse unless it reads `true`. At the schema default of
+`false` a queued item lands on an idle worker and extends that worker's
+transcript, which is a wake — the one thing a refill may never be, and silent
+when it happens. (The dedicated preflight script this paragraph used to name
+was retired by #1803/#1799's shortlist/ledger cutover; #1804 folds this check
+back into the rewritten pool block.) Failing that check is not a thing to
+route around: dispatch that wave by hand, exactly as the Claude line above
+describes, and report the key. **Never set it yourself.** It is session-wide configuration governing every
 other pool in the session, so it is install-time operator work (ADR 0003 point
 9), never something a run writes in order to dispatch a wave.
 
