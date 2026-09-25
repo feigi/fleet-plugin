@@ -273,12 +273,13 @@ test("the page's own <title> and header are the constant boardTitle falls back t
 // A DOM this page's own script can write to, without a browser: render() is
 // lifted out of board.html's source (the same seam boardTitle above uses)
 // and run against a document stub just capable enough to hold the writes —
-// nothing here reads the stub back except title and the one element this
-// test cares about, so append/innerHTML/style are all swallowed no-ops.
+// children are kept (so a test can read back what a column holds), and
+// style is swallowed.
 class FakeNode {
   constructor() { this.children = []; this.style = {}; }
   set innerHTML(_) { this.children = []; }
   append(...nodes) { this.children.push(...nodes); }
+  replaceChildren(...nodes) { this.children = nodes; }
 }
 function fakeDocument() {
   const byId = new Map();
@@ -330,6 +331,35 @@ test("render rewrites the title and header on every tick, reverting when repo di
   assert.equal(document.title, "fleet cockpit",
     "a repo that stops resolving must clear the tab title on the very next render, not leave the prior tick's name showing");
   assert.equal(document.getElementById("heading").textContent, "🛰 fleet cockpit");
+});
+
+// #1848: each column scrolls on its own (#1759), and a scroll offset lives on
+// the element — so a tick that throws the columns away and builds new ones
+// resets every column to the top within one poll. The columns must be the
+// SAME nodes tick after tick, while what they hold is the new tick's alone:
+// a column that kept its node by appending onto last tick's cards would show
+// every ticket twice and a stale count.
+test("render keeps each column's node across ticks and rewrites only what it holds", () => {
+  const { document, render } = renderHarness();
+  const board = document.getElementById("board");
+  render({ ...baseModel(), tickets: [
+    { issue: 1, column: "POOL" }, { issue: 2, column: "POOL" }, { issue: 3, column: "REVIEW" },
+  ] });
+  const before = [...board.children];
+  assert.equal(before.length, 5);
+
+  render({ ...baseModel(), tickets: [{ issue: 4, column: "POOL" }] });
+  assert.equal(board.children.length, 5, "a tick must not add a second set of columns");
+  board.children.forEach((col, i) => assert.equal(col, before[i],
+    "a column rebuilt as a new node loses its scroll position on every poll"));
+
+  const [pool, , review] = board.children;
+  const count = (col) => col.children[0].children[0].textContent;
+  const issues = (col) => col.children.slice(1).map((c) => c.children[0].children[0].textContent);
+  assert.equal(count(pool), "1");
+  assert.deepEqual(issues(pool), ["#4"], "a column must hold this tick's cards, not last tick's as well");
+  assert.equal(count(review), "0");
+  assert.deepEqual(issues(review), []);
 });
 
 // #1584 adds a second reader of the model's repo IDENTITY (`acme/one`) beside

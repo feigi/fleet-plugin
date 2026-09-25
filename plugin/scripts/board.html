@@ -90,6 +90,7 @@
 const COLUMNS = ["POOL", "IMPLEMENTING", "REVIEW", "READY", "MERGED"];
 let interval = 15;
 let repoUrl = null; // full repo URL from the model (carries the host) — PR links, GHE-safe
+const colNodes = new Map(); // column name → its .col, built on the first render (see render)
 
 // The instance's name, for the tab strip and the header (#1584). Two cockpits
 // are two WORKSPACES, and until this the pair rendered one constant twice —
@@ -292,17 +293,20 @@ function render(m) {
     span.append(el("span", "flag", (t.flags || []).join(" ")));
     att.append(span);
   }
-  // columns
+  // columns — each built once and kept, its contents rewritten every tick
+  // (#1848). A column scrolls on its own (#1759) and a scroll offset lives on
+  // the element, so a tick that threw the columns away and built new ones
+  // jumped every column back to the top within one poll. Keeping the node
+  // keeps its scroll — and a momentum scroll still in flight — with nothing
+  // to save or restore.
   const board = document.getElementById("board");
-  board.innerHTML = "";
   for (const name of COLUMNS) {
+    let col = colNodes.get(name);
+    if (!col) { col = el("div", "col"); colNodes.set(name, col); board.append(col); }
     const inCol = (m.tickets || []).filter((t) => t.column === name);
-    const col = el("div", "col");
     const h = el("h2", null, name + " ");
     h.append(el("span", null, String(inCol.length)));
-    col.append(h);
-    for (const t of inCol) col.append(card(t));
-    board.append(col);
+    col.replaceChildren(h, ...inCol.map(card));
   }
   renderSpend(m.spend);
   // footer
