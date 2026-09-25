@@ -167,8 +167,13 @@ whose failure condition a PR head could have been checked against first.
   added when this ADR was ratified reached the tree and never reached GitHub,
   because merging the spec is not applying it and nothing read the gate unless
   a person chose to. **86 PRs merged through the narrower gate** over the 4d22h
-  between the spec's merge and the reconcile, with no symptom anywhere. That is
-  the measurement: the gap is neither rare nor self-announcing. Reconciled
+  between the spec's merge and the reconcile, with no symptom anywhere. The
+  window runs from #1574's `mergedAt`, 2026-09-18T10:41:45Z, to the ruleset's
+  `updated_at` at the reconcile, 2026-09-23T09:08:27Z (readback on #1710); the
+  count includes #1574 itself, so 85 merged after it. Reproduce with
+  `gh pr list --state merged --limit 1000 --search
+  'merged:2026-09-18T10:41:45Z..2026-09-23T09:08:27Z' --json number --jq length`.
+  That is the measurement: the gap is neither rare nor self-announcing. Reconciled
   2026-09-23. The remedy is `apply-ruleset.sh --check`, which performs the same
   comparison, writes nothing, and exits 3 on a difference — run at `run-team`
   phase 0, where a controller is about to spend a run depending on the gate. It
