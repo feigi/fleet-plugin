@@ -275,6 +275,22 @@ test("the omp review fan-out classifies off its agent DEFINITION — depth canno
   assert.equal(classifyRole({ spawnDepth: 0, memberName: "fleet-ctl:fleet-review-tests", description: "whatever" }), "other");
 });
 
+test("the omp review RUNNER is the reviewer member, not a fan-out specialist, though its definition shares the prefix", () => {
+  // #1802. `fleet-review-runner` is the definition the controller dispatches
+  // as `review-pr-<n>` — the member that HOLDS a review, at depth 0, whose
+  // own fan-out is the specialists. The `fleet-review-` prefix the branch
+  // above books as "specialist" would swallow it on the definition alone,
+  // before the `review-pr-` name ever got read.
+  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-review-runner", memberName: "review-pr-1353", description: "whatever" }), "reviewer");
+  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-ctl:fleet-review-runner", description: "whatever" }), "reviewer");
+  // Exact, not a second prefix: every dimension definition still books as the
+  // fan-out it is, including one whose key merely starts with `runner`.
+  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-review-runner-probe", description: "whatever" }), "specialist");
+  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-review-correctness", memberName: "review-pr-1353", description: "whatever" }), "specialist");
+  // Depth still wins: whatever runs UNDER a runner is its fan-out.
+  assert.equal(classifyRole({ spawnDepth: 1, agentDefinition: "fleet-review-runner", description: "whatever" }), "specialist");
+});
+
 test("a definition name in the dispatch PROSE is not a dispatch — the fleet branches read `def` alone", () => {
   // The false-positive half. Every fleet member's own prompt says what it is, so
   // these names appear in description text constantly; matching the

@@ -78,15 +78,19 @@ test("SKILL.md carries no per-call model: \"haiku\" override anywhere — the fi
   assert.doesNotMatch(RUN_TEAM, /model["'`]?\s*:\s*["'`]haiku["'`]/i);
 });
 
-// The definitions the two pairs above point at. Same five-key/no-tools shape
+// The definitions the two pairs above point at, plus the omp review runner
+// (#1802, spec 2026-09-24 § 3 §1: `model: haiku`, `effort: low`,
+// `thinking-level: low`, no `tools:`). Same five-key/no-tools shape
 // implementer-model-tier.test.mjs pins for the two implementer definitions —
-// a `tools:` list would drop the `Agent` tool, and #1298's ruling fixes the
-// same five required keys for every fleet agent file.
+// a `tools:` list would drop a tool the member cannot work without (`Agent`
+// for the finisher and merge bot, `eval` for the runner, whose whole job is
+// one eval cell), and #1298's ruling fixes the same five required keys for
+// every fleet agent file.
 const frontmatterOf = (name) =>
   readFileSync(join(REPO, "agents", `${name}.agent.md`), "utf8").split("---")[1] ?? "";
 
-test("fleet-finisher and fleet-merge-bot both declare haiku/low/low, all five required keys, and no tools:", () => {
-  for (const name of ["fleet-finisher", "fleet-merge-bot"]) {
+test("fleet-finisher, fleet-merge-bot and fleet-review-runner declare haiku/low/low, all five required keys, and no tools:", () => {
+  for (const name of ["fleet-finisher", "fleet-merge-bot", "fleet-review-runner"]) {
     const fm = frontmatterOf(name);
     assert.match(fm, /^model:\s*haiku$/m, `${name}.agent.md does not declare model: haiku`);
     assert.match(fm, /^effort:\s*low$/m, `${name}.agent.md does not declare effort: low`);
@@ -94,6 +98,6 @@ test("fleet-finisher and fleet-merge-bot both declare haiku/low/low, all five re
     for (const key of ["name", "description", "model", "effort", "thinking-level"]) {
       assert.match(fm, new RegExp(`^${key}:\\s*\\S`, "m"), `${name}.agent.md declares no ${key}`);
     }
-    assert.doesNotMatch(fm, /^tools:/m, `${name}.agent.md lists tools — a list would drop the Agent tool`);
+    assert.doesNotMatch(fm, /^tools:/m, `${name}.agent.md lists tools — a list would drop a tool the member needs`);
   }
 });

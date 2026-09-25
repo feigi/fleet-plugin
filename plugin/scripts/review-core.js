@@ -524,6 +524,17 @@ export function digestOf(result) {
   return Object.fromEntries(DIGEST_KEYS.map((k) => [k, result[k]]));
 }
 
+// #1802. The digits refusal review-eval.mjs's `runReviewToFile` runs before
+// its first attempt, so a dispatch mistake is refused once instead of being
+// retried and sent to the fallback reviewer. It lives here, not there, because
+// review-eval.mjs is a library and arg.mjs's `scripts/*.mjs` importers are its
+// CLI roster, each one probed to refuse a stray flag
+// (arg-header-probes-prose.test.mjs); this module already consumes the digits
+// rule on the review path. Null when `pr` is a PR number.
+export function runnerPrRefusal(pr) {
+  return isDigits(pr) ? null : `args.pr must be a PR number, got ${JSON.stringify(pr)}`;
+}
+
 // --- Orchestration ----------------------------------------------------
 // review-pr.js's own top-level script body, as a callable function. `host`
 // supplies `agent(prompt, opts)` (must resolve to PARSED DATA — a rejection

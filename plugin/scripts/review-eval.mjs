@@ -1,10 +1,16 @@
 // review-eval.mjs — the omp shim for the PR review port (#1349, per #1303's
-// ruling on #1296). The controller loads THIS file (never review-core.js or
-// review-pr.js directly) through the Resolver, from an `eval` cell:
+// ruling on #1296). It is loaded (never review-core.js or review-pr.js
+// directly) through the Resolver, from an `eval` cell:
 //
 //   const path = (await Bun.$`FLEET_HARNESS=omp ~/.fleet/bin/fleet-run --path review-eval.mjs`.text()).trim();
 //   const { runReviewOnOmp } = await import(path);
 //   const result = await runReviewOnOmp({ pr, branch, worktree, testCmd, scratch });
+//
+// Since #1802 the cell that does this is the `review-pr-<pr#>` member's own —
+// agents/fleet-review-runner.agent.md, off the controller's turn — and it calls
+// `runReviewToFile` (bottom of this file), which wraps `runReviewOnOmp` with the
+// one retry and writes the result file. A controller holding its own turn can
+// still call `runReviewOnOmp` exactly as above.
 //
 // This file `import`s review-core.js (a same-directory sibling, both ship
 // together under the same Install root) with a RELATIVE specifier, so the
@@ -20,7 +26,9 @@
 // runReview's own snapshot/verifier dispatch, unmodified — omp's `agent()`
 // resolves a bare frontmatter `name:` exactly, which is already what those
 // strings are.
-import { runReview } from "./review-core.js";
+import { mkdir, writeFile } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
+import { digestOf, runReview, runnerPrRefusal } from "./review-core.js";
 
 // eval's `agent()` returns a HANDLE, not data (#1296 Q2): `agent(prompt,
 // opts)` resolves near-instantly to an `AgentHandle` with `.wait()`, and only
@@ -124,4 +132,58 @@ function parallel(fns) {
 // would ask the controller's cell to thread through globals it already has.
 export async function runReviewOnOmp(args) {
   return runReview({ agent: ompAgent, phase, log, pipeline, parallel, harness: "omp" }, args);
+}
+
+// #1802 (spec 2026-09-24-slot-based-fleet-loop-design.md § 3 §1, §2, §5, §7).
+// The whole of the omp review runner's job, so the agent's own cell is three
+// lines and this contract can be run (review-runner.test.mjs): the full result
+// object goes to `<scratch>/review-<pr>.json` — the one artefact both harnesses
+// hand the fix-applier — and only the digest comes back, because the digest is
+// all the controller reads and a 26–61 KB result is what the file exists to
+// keep out of its context.
+//
+// Failure is a throw or an empty return. The holder of the review call retries
+// once; a second failure returns `failed` with both errors and the fallback
+// reviewer's name (`review-pr-<pr>-b`), and writes no file, so nothing reads a
+// half-review as a review. A dispatch mistake — a pr that is not a PR number, a
+// scratch that is not absolute (eval's cwd is the MAIN CHECKOUT, so a relative
+// one would put the file there) — throws before any run: it is not a review
+// failure, and retrying or falling back would only repeat it. `run` is the seam
+// the test injects; nothing else passes it.
+export async function runReviewToFile(args, run = runReviewOnOmp) {
+  const pr = args?.pr;
+  const scratch = args?.scratch;
+  const prRefusal = runnerPrRefusal(pr);
+  if (prRefusal) throw new Error(`review-runner: ${prRefusal}`);
+  if (typeof scratch !== "string" || !isAbsolute(scratch)) {
+    throw new Error(`review-runner: args.scratch must be an absolute path, got ${JSON.stringify(scratch)}`);
+  }
+  const errors = [];
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let result;
+    try {
+      result = await run(args);
+    } catch (e) {
+      errors.push(`attempt ${attempt}: ${e?.message ?? String(e)}`);
+      continue;
+    }
+    if (!result || typeof result !== "object") {
+      errors.push(`attempt ${attempt}: empty return (${String(result)})`);
+      continue;
+    }
+    const path = join(scratch, `review-${pr}.json`);
+    await mkdir(scratch, { recursive: true });
+    await writeFile(path, `${JSON.stringify(result, null, 2)}\n`);
+    const { survived, refuted, unverified } = result.counts;
+    return {
+      status: "completed",
+      path,
+      // Spec § 3 §7's result token, ready for `ledger.mjs row`.
+      ledger: `reviewed=${result.head}:${survived}/${refuted}/${unverified}`,
+      attempts: attempt,
+      errors,
+      digest: digestOf(result),
+    };
+  }
+  return { status: "failed", errors, fallback: `review-pr-${pr}-b` };
 }
