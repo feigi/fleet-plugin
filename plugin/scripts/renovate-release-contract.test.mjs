@@ -52,10 +52,18 @@
 // this repo has no package.json and no YAML dependency, the same trade
 // ci-state.mjs makes; whole-line `#` comments are blanked first so a comment
 // cannot satisfy a pattern. A packageRule is treated as applying to every
-// update type it names regardless of any other matcher on it — conservative:
-// an extra matcher can only make this test stricter than Renovate, never
-// laxer. And the ordering of Renovate's label write against the fallback job
-// on the `opened` event is runtime behaviour no file here records.
+// update type it names regardless of any other matcher on it. That is
+// one-sided, not simply conservative: an extra matcher on a rule that ADDS
+// `automerge:false`/labels can make Renovate apply the safety settings to
+// FEWER packages than this test assumes — narrow the major rule away from
+// the real dependency it must cover and nothing here reds, while real
+// Renovate falls through to the unattended top-level automerge for it; this
+// repo's actual major rule matches on update type alone, which is what
+// keeps that gap closed, not this test. An extra matcher on a rule that
+// only LOOSENS settings is the direction that stays merely stricter than
+// Renovate. And the ordering of Renovate's label write against the
+// fallback job on the `opened` event is runtime behaviour no file here
+// records.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -78,8 +86,8 @@ const code = (text) =>
 
 // The `select(. == "a" or . == "b")` jq filter both workflows use to decide
 // which labels are release labels.
-function releaseLabelFilter(text, file, problems) {
-  const hits = [...code(text).matchAll(/select\(((?:\s*\.\s*==\s*"[^"]*"\s*(?:or)?)+)\s*\)/g)];
+function releaseLabelFilter(src, file, problems) {
+  const hits = [...src.matchAll(/select\(((?:\s*\.\s*==\s*"[^"]*"\s*(?:or)?)+)\s*\)/g)];
   if (hits.length !== 1) {
     problems.push(
       `${file}: expected exactly one \`select(. == "…" or …)\` release-label filter, found ${hits.length} — cannot tell which labels it treats as release labels`,
@@ -90,8 +98,8 @@ function releaseLabelFilter(text, file, problems) {
 }
 
 function readGate(text, problems) {
-  const counted = releaseLabelFilter(text, GATE, problems);
   const src = code(text);
+  const counted = releaseLabelFilter(src, GATE, problems);
   const guard = src.match(/grep\s+-qE\s+'\^\(([^)]*)\)\$'/);
   if (!guard) {
     problems.push(
@@ -112,9 +120,10 @@ function readGate(text, problems) {
 }
 
 function readRelease(text, problems) {
-  const labels = releaseLabelFilter(text, RELEASE, problems);
+  const src = code(text);
+  const labels = releaseLabelFilter(src, RELEASE, problems);
   const bumps = new Map();
-  for (const m of code(text).matchAll(/([^\s()|;]+)\)\s*(MAJOR|MINOR|PATCH)=\$\(\(\s*\2\s*\+\s*1\s*\)\)/g)) {
+  for (const m of src.matchAll(/([^\s()|;]+)\)\s*(MAJOR|MINOR|PATCH)=\$\(\(\s*\2\s*\+\s*1\s*\)\)/g)) {
     bumps.set(m[1], m[2]);
   }
   if (labels) {
@@ -145,8 +154,7 @@ function resolveBot(cfg, type) {
   };
   if (cfg[type]) apply(cfg[type]);
   for (const rule of cfg.packageRules ?? []) {
-    const types = rule.matchUpdateTypes === undefined ? null : [].concat(rule.matchUpdateTypes);
-    if (types === null || types.includes(type)) apply(rule);
+    if (rule.matchUpdateTypes === undefined || [].concat(rule.matchUpdateTypes).includes(type)) apply(rule);
   }
   return { labels: [...new Set([...labels, ...added])], automerge: automerge === true };
 }
@@ -157,6 +165,32 @@ function emittableTypes(cfg) {
   return rollback ? [...types, "rollback"] : types;
 }
 
+// A JSON-valid renovate.json can still have the wrong SHAPE at exactly the
+// spots resolveBot/emittableTypes read without a type check — an update-type
+// override or a packageRules entry that is not a plain object, or
+// packageRules itself not an array — and both throw a raw TypeError instead
+// of a problem naming which file disagreed, breaking this test's own
+// contract (the ticket's AC: "failure message names the file... and what the
+// disagreement was"). Checked once, up front, so every downstream read can
+// assume the shape it needs.
+function isPlainObject(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+function botShapeProblem(cfg) {
+  if (cfg.packageRules !== undefined && !Array.isArray(cfg.packageRules)) {
+    return `${BOT}: \`packageRules\` must be an array, got ${typeof cfg.packageRules}`;
+  }
+  for (const rule of cfg.packageRules ?? []) {
+    if (!isPlainObject(rule)) return `${BOT}: a \`packageRules\` entry must be an object, got ${JSON.stringify(rule)}`;
+  }
+  for (const type of [...Object.keys(SEGMENT_OF), "rollback"]) {
+    if (cfg[type] !== undefined && !isPlainObject(cfg[type])) {
+      return `${BOT}: top-level \`${type}\` override must be an object, got ${JSON.stringify(cfg[type])}`;
+    }
+  }
+  return null;
+}
+
 function contractProblems({ bot, gate, release }) {
   const problems = [];
   let cfg;
@@ -165,13 +199,26 @@ function contractProblems({ bot, gate, release }) {
   } catch (err) {
     return [`${BOT}: not valid JSON (${err.message})`];
   }
+  const shapeProblem = botShapeProblem(cfg);
+  if (shapeProblem) return [shapeProblem];
+
+  // The one check #1752 exists to guarantee — a major update must never
+  // automerge — needs only `cfg` and `resolveBot`, so it runs before, and
+  // independently of, the gate/release parsing below: a cosmetic mismatch in
+  // either workflow (e.g. a quoting style neither readGate nor readRelease
+  // recognises) must not mask a live major-automerge regression behind an
+  // unrelated "cannot tell which labels…" problem.
+  if (resolveBot(cfg, "major").automerge) {
+    problems.push(
+      `${BOT}: \`major\` updates are automerged — a major must wait for a human, so the rule for \`major\` needs \`"automerge": false\``,
+    );
+  }
+
   const g = readGate(gate, problems);
   const r = readRelease(release, problems);
   if (!g.counted || !g.guard || !g.fallback || !r.labels) return problems;
 
-  const gateOnly = [...g.counted].filter((l) => !r.labels.has(l));
-  const releaseOnly = [...r.labels].filter((l) => !g.counted.has(l));
-  if (gateOnly.length || releaseOnly.length) {
+  if (g.counted.size !== r.labels.size || [...g.counted].some((l) => !r.labels.has(l))) {
     problems.push(
       `${GATE} vs ${RELEASE}: the gate counts [${[...g.counted]}] as release labels but release.yml reads [${[...r.labels]}] — a label only one side knows either passes the gate and mints nothing, or mints from a PR the gate refused`,
     );
@@ -185,26 +232,29 @@ function contractProblems({ bot, gate, release }) {
 
   for (const type of emittableTypes(cfg)) {
     const { labels, automerge } = resolveBot(cfg, type);
-    const release = labels.filter((l) => g.counted.has(l));
-    const segments = release.map((l) => r.bumps.get(l));
-    if (automerge && (type === "major" || segments.includes("MAJOR"))) {
+    const releaseLabels = labels.filter((l) => g.counted.has(l));
+    const segments = releaseLabels.map((l) => r.bumps.get(l));
+    // `major` itself is covered unconditionally above, before g/r even
+    // parse; here we only catch OTHER types whose resolved label maps to a
+    // MAJOR segment (a minor/patch rule mislabelled onto `major`).
+    if (automerge && type !== "major" && segments.includes("MAJOR")) {
       problems.push(
         `${BOT}: \`${type}\` updates are automerged while carrying a major change — a major must wait for a human, so the rule for \`${type}\` needs \`"automerge": false\``,
       );
     }
-    if (release.length === 0) {
+    if (releaseLabels.length === 0) {
       problems.push(
         `${BOT}: \`${type}\` updates get no release label from the bot config (resolved labels: [${labels}]) — ${GATE}'s bot fallback then stamps them \`${g.fallback}\` whatever their size`,
       );
       continue;
     }
-    if (release.length > 1) {
+    if (releaseLabels.length > 1) {
       problems.push(
-        `${BOT}: \`${type}\` updates resolve to ${release.length} release labels [${release}] — ${GATE} refuses more than one, so the PR can never merge`,
+        `${BOT}: \`${type}\` updates resolve to ${releaseLabels.length} release labels [${releaseLabels}] — ${GATE} refuses more than one, so the PR can never merge`,
       );
       continue;
     }
-    const [label] = release;
+    const [label] = releaseLabels;
     if (!g.guard.has(label)) {
       problems.push(
         `${GATE} vs ${BOT}: the bot fallback's guard does not recognise \`${label}\`, which the bot sets on \`${type}\` updates — the fallback adds \`${g.fallback}\` on top and the PR carries two release labels`,
@@ -307,11 +357,9 @@ test("rewording the schedule or renaming the labels in all three files stays gre
 
   const rename = (text) => text.replace(/\b(patch|minor|major)\b/g, "semver:$1");
   assertClean({
-    bot: JSON.stringify(
-      Object.assign(JSON.parse(REAL.bot), {
-        packageRules: JSON.parse(REAL.bot).packageRules.map((r) => ({ ...r, labels: r.labels.map((l) => `semver:${l}`) })),
-      }),
-    ),
+    ...withBot((cfg) => {
+      for (const r of cfg.packageRules) r.labels = r.labels.map((l) => `semver:${l}`);
+    }),
     gate: rename(REAL.gate),
     release: rename(REAL.release),
   });
@@ -320,7 +368,6 @@ test("rewording the schedule or renaming the labels in all three files stays gre
 test("the same contract expressed through addLabels and update-type objects stays green", () => {
   assertClean(
     withBot((cfg) => {
-      delete cfg.packageRules;
       cfg.labels = ["dependencies"];
       cfg.major = { automerge: false, addLabels: ["major"] };
       cfg.packageRules = [
