@@ -304,11 +304,9 @@ test("the shared rules accept what they must — the false-positive half", () =>
 // and nothing here).
 //
 // Anchored exactly, so a DIFFERENT rule that happens to use the digit class
-// is not caught: fleet-tick.mjs's `--merge-holds` list is `/^#?\d+(\s*,\s*#?
-// \d+)*$/`, which answers a question about a comma-separated list rather than
-// about one integer, and candidates.mjs's `Number.isInteger(limit) && limit >=
-// 1` is a bounded positive-integer rule over a DEFAULTED value — neither is a
-// copy of this one, and #878 left both where they are.
+// is not caught: candidates.mjs's `Number.isInteger(limit) && limit >= 1` is
+// a bounded positive-integer rule over a DEFAULTED value — not a copy of this
+// one, and #878 left it where it is.
 //
 // Composed, never written contiguously, so this file's own source cannot
 // satisfy the check it performs — the same reason

@@ -133,7 +133,7 @@ export function formatYaml(overrides) {
 
 // `omp config get <key> --json` reads the MERGED effective value (built-in
 // defaults, global config, project settings, `--config` overlays, runtime
-// overrides — pool-preflight.mjs's own header) — `modelRoles.slow` dotted
+// overrides — measured for the retired pool-preflight.mjs, #1588) — `modelRoles.slow` dotted
 // into a record is `Unknown setting` on this box, so a record-valued key is
 // always read whole. Never writes.
 export function readOmpConfigValue(key) {

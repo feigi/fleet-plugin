@@ -289,6 +289,7 @@ export const KNOWN_EQUALITY_EXCEPTIONS = [
     issue: 1362,
     why: "review-pr.js's resumeFor cross-reference (#1361): omp line names the actual ADR/gap citation, no Claude-side counterpart",
   },
+  // Removed by #1804, which rewrites this SKILL.md pair into the direct-dispatch Pair (spec 2026-09-24 § 2); #1803 retired the pool's scripts but may not touch that prose.
   {
     file: join("skills", "run-team", "SKILL.md"),
     claude: "a freed slot is refilled by re-entering phase 1 then phase 2 and making one more `Agent` call under a name no member has held, so the refill is a level-check you run — on the edges Phase 3 already handles, and on the heartbeat — because nothing here holds a queue that could hand the freed slot its next ticket by itself.",
