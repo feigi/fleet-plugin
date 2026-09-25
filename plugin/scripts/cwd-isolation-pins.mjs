@@ -2,7 +2,7 @@ import { phrase } from "./prose-pin.mjs";
 
 // The inherited-cwd rule's pinned spans (#1433, #1673), spelled once.
 // review-core-cwd-isolation.test.mjs pins the rule into the omp harness's
-// prompts (scripts/review-core.js); review-pr-cwd-isolation.test.mjs pins the
+// prompts (scripts/review-core.mjs); review-pr-cwd-isolation.test.mjs pins the
 // Claude harness's copy (workflows/review-pr.js) word-for-word against the
 // omp one. Both files assert the same spans, so each span lives here and
 // neither file carries a transcription of it: a second copy of prose

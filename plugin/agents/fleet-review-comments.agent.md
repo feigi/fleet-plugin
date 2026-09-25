@@ -1,6 +1,6 @@
 ---
 name: fleet-review-comments
-description: Dispatched by review-pr.js/review-core.js's Review phase for the "comments" dimension. Never invoked directly.
+description: Dispatched by review-pr.js/review-core.mjs's Review phase for the "comments" dimension. Never invoked directly.
 model: sonnet
 effort: medium
 thinking-level: medium

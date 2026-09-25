@@ -1,4 +1,4 @@
-// #1673. #1433 put the inherited-cwd rule into review-core.js's two dispatch
+// #1673. #1433 put the inherited-cwd rule into review-core.mjs's two dispatch
 // prompts and left the Claude harness's twin — workflows/review-pr.js's own
 // hardcoded Review/Verify `agent()` calls — carrying none of it. The measured
 // defect is review-core-cwd-isolation.test.mjs's to state: three PRs reviewed
@@ -10,7 +10,7 @@
 // prompt prose on both (review-eval.mjs's header holds that determination) —
 // so the harness that was never told is the harness that never reports.
 //
-// WHY A SECOND FILE RATHER THAN A BRANCH IN THE FIRST. review-core.js is an
+// WHY A SECOND FILE RATHER THAN A BRANCH IN THE FIRST. review-core.mjs is an
 // ordinary module and review-pr.js cannot be imported at all (the Workflow
 // sandbox forbids `import` — see prose-pin.mjs's own note), so the two are
 // reached differently: the omp copy's pins go on to run `runReview` against a
@@ -22,7 +22,7 @@
 // green.
 //
 // THE ONE TOKEN THAT LEGITIMATELY DIFFERS, and why it is not smuggled into a
-// loose regex. review-core.js's refuter states the cwd clause as the tail of
+// loose regex. review-core.mjs's refuter states the cwd clause as the tail of
 // its scratch sentence ("…goes there and nowhere else, and your shell does not
 // start there: …"). review-pr.js cannot: its scratch sentence is followed by a
 // sibling-collision sentence and a write-ban that
@@ -57,7 +57,7 @@ import { liftConst } from "./lift.mjs";
 import { AUDIT_COMMAND, AUDIT_STATES, CWD_AUDIT_MARKER, EVERY_RUN, PWD_FIRST, REFUTER_CWD, REPORT_FIELD, SCRATCH_NAMED_REFUTER, SCRATCH_NAMED_SPECIALIST, SPECIALIST_CWD, auditLine } from "./cwd-isolation-pins.mjs";
 
 const CLAUDE = "workflows/review-pr.js";
-const OMP = "scripts/review-core.js";
+const OMP = "scripts/review-core.mjs";
 const SNAP = { path: "/scr/run-1/snapshot-abc1234", head: "abc1234", runRoot: "/scr/run-1" };
 
 // `readRules`/`usableDiff`/`environmentNote` are stubs for the sibling pins'
@@ -146,7 +146,7 @@ test("each refuter's cwd clause hangs off that harness's own scratch sentence, n
   assert.match(
     refuter.omp,
     phrase(`goes there and nowhere else, and your shell does not start there: ${REFUTER_CWD}`),
-    "scripts/review-core.js's refuter no longer carries the cwd clause on the tail of its scratch sentence — the shape review-pr.js deliberately does NOT copy, so this is the pin that keeps that difference a known one rather than drift",
+    "scripts/review-core.mjs's refuter no longer carries the cwd clause on the tail of its scratch sentence — the shape review-pr.js deliberately does NOT copy, so this is the pin that keeps that difference a known one rather than drift",
   );
 });
 
@@ -169,7 +169,7 @@ for (const [dispatch, prompts] of DISPATCHES) {
 // cwd-isolation-pins.mjs says why the two differ), asserted against BOTH
 // harnesses so a reword in either one, or a drift between them, reds. This is
 // the regression pin #1721 left out: reverting review-pr.js's specialist
-// prompt back to "above" while leaving review-core.js on "in this prompt"
+// prompt back to "above" while leaving review-core.mjs on "in this prompt"
 // passed the entire suite otherwise, because nothing previously pinned past
 // PWD_FIRST's "no-run zone from then on" on either dispatch.
 for (const [dispatch, prompts, span] of [
@@ -254,7 +254,7 @@ for (const [dispatch, prompts, schemaName] of [
     const namedOmp = prompts.omp.match(REPORT_FIELD);
     assert.ok(
       namedOmp,
-      `scripts/review-core.js's ${dispatch} prompt no longer names a report field for the CWD-AUDIT line — an audit the agent has nowhere to put is an audit the caller never sees (#1673)`,
+      `scripts/review-core.mjs's ${dispatch} prompt no longer names a report field for the CWD-AUDIT line — an audit the agent has nowhere to put is an audit the caller never sees (#1673)`,
     );
     assert.equal(
       named[1],

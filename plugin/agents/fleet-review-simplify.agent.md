@@ -1,6 +1,6 @@
 ---
 name: fleet-review-simplify
-description: Dispatched by review-pr.js/review-core.js's Review phase for the "simplify" dimension. Report-only — never edits a file. Never invoked directly.
+description: Dispatched by review-pr.js/review-core.mjs's Review phase for the "simplify" dimension. Report-only — never edits a file. Never invoked directly.
 model: opus
 effort: high
 thinking-level: high

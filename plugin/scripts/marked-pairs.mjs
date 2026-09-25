@@ -11,7 +11,7 @@
 // three directories #1297/#1299's ruling calls "the prose tree" (ADR 0004's
 // ~23 dispatch sites all live under these). `.js` under `workflows/` is ALSO
 // in scope, for comment-form pairs: a Workflow script cannot `import`
-// (measured, cited in `review-core.js`'s own header — the sandbox forbids
+// (measured, cited in `review-core.mjs`'s own header — the sandbox forbids
 // it), so a marked pair that needs to exist inside `review-pr.js` cannot be
 // prose at all, only a comment cross-reference. #1361 landed the first one:
 // `resumeFor`'s `CLAUDE:`/`OMP:` lines sit as two BARE lines (no `//` gutter
@@ -286,7 +286,7 @@ export const KNOWN_EQUALITY_EXCEPTIONS = [
   {
     file: join("workflows", "review-pr.js"),
     claude: "point the reader at `Workflow({scriptPath, resumeFromRunId})` — this file's own resumability contract, unchanged by the port.",
-    omp: "review-core.js's `resumeFor` names the same crash population to be reported, not acted on — no cached `agent()` replay exists under eval (ADR 0004/0005, #1349 gap 1).",
+    omp: "review-core.mjs's `resumeFor` names the same crash population to be reported, not acted on — no cached `agent()` replay exists under eval (ADR 0004/0005, #1349 gap 1).",
     issue: 1362,
     why: "review-pr.js's resumeFor cross-reference (#1361): omp line names the actual ADR/gap citation, no Claude-side counterpart",
   },

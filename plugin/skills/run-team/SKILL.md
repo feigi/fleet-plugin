@@ -1983,7 +1983,7 @@ specialists per **Give specialists a stack-free test command** above — in this
 repo `node --test plugin/scripts/*.test.mjs`. Pass the same string to the
 review, to the fix-applier, and to the finisher — whose duty-2 mutation gate
 runs it too — so every gate runs one command. Omit it from the review args and
-the review — `review-pr.js`, and `review-core.js` in a runner — now DERIVES it
+the review — `review-pr.js`, and `review-core.mjs` in a runner — now DERIVES it
 from the repo under review (#142) instead of defaulting to a fixed string —
 refusing outright if it can't; the fix-applier has no such fallback, so
 substituting `<testCmd>` with nothing leaves it no gate at all.

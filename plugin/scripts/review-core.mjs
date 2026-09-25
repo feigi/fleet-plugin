@@ -1,4 +1,4 @@
-// review-core.js — the host-independent half of the PR review port (#1349,
+// review-core.mjs — the host-independent half of the PR review port (#1349,
 // per #1303's ruling on #1296). Read that ruling before touching this file.
 //
 // WHY THIS FILE LIVES IN scripts/, NOT workflows/, AND IS NOT `import`ed BY
@@ -41,10 +41,10 @@
 // snapshotMissing are the same expression"), now applied at file scope
 // instead of expression scope. review-core-parity.test.mjs is the pin: it
 // runs each shared declaration from BOTH copies through the same fixtures
-// (review-core.js's imported normally; review-pr.js's lifted out of its
+// (review-core.mjs's imported normally; review-pr.js's lifted out of its
 // source text, the technique every other review-pr.js test file already
 // uses) and asserts identical OUTPUT — behavior parity, not text identity,
-// since review-core.js deliberately drops review-pr.js's historical
+// since review-core.mjs deliberately drops review-pr.js's historical
 // rationale comments (see this file's own "Pure functions" section header).
 // The one thing ALLOWED to differ in VALUE, not merely in comment, is the
 // `agentType` string on each `DEFAULT_DIMENSIONS` entry, bare here
@@ -71,6 +71,12 @@
 // sandbox reason above. That copy is not a copy of anything HERE, so
 // review-core-parity.test.mjs is not its pin; shared-refusal.test.mjs is,
 // running review-pr.js's lifted isDigits and arg.mjs's over the same values.
+//
+// `.mjs`, not `.js` (#1763): this file was `review-core.js` until then, and
+// nothing that ships declares a `type`, so Node below 20.19.0/22.7.0 —
+// inside the declared consumer floor — read it as CommonJS and
+// review-eval.mjs's import of it failed. node-floor-sweep.test.mjs keeps a
+// shipped `.mjs` from importing a relative module under any other extension.
 
 import { isDigits } from "./arg.mjs";
 

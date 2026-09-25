@@ -4,8 +4,8 @@
 // --show-toplevel`. PR #1530 (#1084) separately added them to
 // `workflows/review-pr.js`'s own SPECIALIST prompt
 // (review-pr-specialist-scratch.test.mjs pins that copy), and PR #1559
-// (#1550) mirrored them into `review-core.js`'s own SPECIALIST prompt
-// (review-core-specialist-scratch.test.mjs pins that copy). `review-core.js`
+// (#1550) mirrored them into `review-core.mjs`'s own SPECIALIST prompt
+// (review-core-specialist-scratch.test.mjs pins that copy). `review-core.mjs`
 // carries a THIRD copy of the same rules' target risk in its own REFUTER
 // prompt — "Verify against the snapshot ... by RUNNING
 // something — compile it, run the test, apply the mutation" orders exactly
@@ -23,7 +23,7 @@
 // INLINED, NOT SHARED, same as this file's specialist copy and for the same
 // reason: #496's brief rules the shared-source route out, and this is a
 // fourth distinct prompt block in this codebase (review-pr.js's specialist,
-// review-pr.js's refuter, review-core.js's specialist, and this one), not an
+// review-pr.js's refuter, review-core.mjs's specialist, and this one), not an
 // import target.
 //
 // WHY THIS PIN RENDERS RATHER THAN GREPS. The rules live inside a template
@@ -35,7 +35,7 @@
 // THE SLICE IS THE PIN. Both rules already exist in this same file's
 // SPECIALIST prompt (lines above this one), so a pin unbounded to the whole
 // file would pass on that copy alone — exactly the defect this ticket
-// reports, and exactly what "review-core.js's refuter prompt" must not be
+// reports, and exactly what "review-core.mjs's refuter prompt" must not be
 // allowed to mean here. The extraction is bounded by the refuter `agent()`
 // call's own template, opening at `Try to REFUTE this finding from PR #` and
 // closing at its own `label: \`verify:`, so the specialist prompt sits
@@ -54,7 +54,7 @@ import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 
 const REPO = join(import.meta.dirname, "..");
-const SOURCE = readFileSync(join(REPO, "scripts", "review-core.js"), "utf8");
+const SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
 
 // Extraction runs against CODE, not SOURCE: a block-commented `agent(...)`
 // call still contains the whole template, so extracting from raw source would
@@ -77,7 +77,7 @@ function refuterTemplate() {
   assert.notEqual(
     start,
     -1,
-    "review-core.js no longer builds a refuter prompt opening `Try to REFUTE this finding from PR #` — " +
+    "review-core.mjs no longer builds a refuter prompt opening `Try to REFUTE this finding from PR #` — " +
       "either it was renamed, or the whole verify fan-out is commented out. Update this test, or restore the prompt.",
   );
   const end = CODE.indexOf(TEMPLATE_END, start);
@@ -115,7 +115,7 @@ test("the rendered refuter prompt chains cd into the git command, never semicolo
   assert.match(
     render(),
     /cd\s+"\$D"\s+&&\s+git\s+…`,\s+never\s+`cd\s+"\$D";\s+git\s+…/s,
-    "review-core.js's refuter prompt carries no cd-chaining rule — a silently failed `cd` leaves the following `git` " +
+    "review-core.mjs's refuter prompt carries no cd-chaining rule — a silently failed `cd` leaves the following `git` " +
       "running in the checkout, which is what produced commit 020d6ea during the PR #488 fix-applier run (#1561)",
   );
 });
@@ -130,7 +130,7 @@ test("the rendered refuter prompt requires a toplevel assertion around git init/
   assert.match(
     render(),
     /`git\s+rev-parse\s+--show-toplevel`:\s+before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository,\s+and\s+a\s+fresh\s+scratch\s+dir's\s+`fatal:\s+not\s+a\s+git\s+repository`\s+\(exit\s+128\)\s+is\s+the\s+pass,\s+not\s+a\s+failure;\s+before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path\s+—\s+compare\s+resolved\s+forms\s+\(`realpath`\),\s+since\s+`--show-toplevel`\s+can\s+report\s+`\/private\/tmp\/…`\s+for\s+a\s+`\/tmp`\s+scratch\s+dir\s+on\s+macOS/s,
-    "review-core.js's refuter prompt carries no toplevel assertion around a fixture's own git init/commit, or dropped the " +
+    "review-core.mjs's refuter prompt carries no toplevel assertion around a fixture's own git init/commit, or dropped the " +
       "realpath remedy for macOS's /private vs /tmp symlink (#1561)",
   );
 });
@@ -143,7 +143,7 @@ test("the rendered refuter prompt still orders a real run against the snapshot",
   assert.match(
     render(),
     /Verify against the snapshot .* by RUNNING something/s,
-    "review-core.js's refuter prompt no longer orders a real run against the snapshot — adding the two directory-safety " +
+    "review-core.mjs's refuter prompt no longer orders a real run against the snapshot — adding the two directory-safety " +
       "rules must not displace the instruction they exist to make safe",
   );
 });

@@ -35,14 +35,14 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { environmentNote } from "./review-core.js";
+import { environmentNote } from "./review-core.mjs";
 import { between, phrase } from "./prose-pin.mjs";
 import { stripComments } from "./strip-comments.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const SOURCES = [
   ["workflows/review-pr.js", join(REPO, "workflows", "review-pr.js")],
-  ["scripts/review-core.js", join(REPO, "scripts", "review-core.js")],
+  ["scripts/review-core.mjs", join(REPO, "scripts", "review-core.mjs")],
 ];
 
 // Every git identity is scrubbed — both config files and all four `GIT_*` name
@@ -680,7 +680,7 @@ for (const [name, path] of SOURCES) {
 
 // One block, two harnesses. The fix that matters is the same four lines in both
 // copies, and a fix applied to one is exactly the shape this repo's own
-// "recurring pin defect" comment describes — with the omp path (review-core.js)
+// "recurring pin defect" comment describes — with the omp path (review-core.mjs)
 // the one every review in this session actually runs, so a Claude-only fix
 // would leave the live path broken while every pin over review-pr.js passed.
 //
@@ -718,7 +718,7 @@ test("both harnesses cut the snapshot with byte-identical shell", () => {
 // only passes that comparison untouched.
 test("both harnesses read the ref operand with byte-identical shell", () => {
   const [claude, omp] = SOURCES.map(([, path]) => refLines(path));
-  assert.equal(omp, claude, "the two copies of the ref reads have diverged — a fix landed on one harness only, and review-core.js is the path every review in this session actually runs");
+  assert.equal(omp, claude, "the two copies of the ref reads have diverged — a fix landed on one harness only, and review-core.mjs is the path every review in this session actually runs");
 });
 
 // `environmentNote`'s two regimes, read as a consumer reads them. The parity

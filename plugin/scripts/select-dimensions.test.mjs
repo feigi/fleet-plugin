@@ -311,7 +311,7 @@ test("a size-tier stats blob missing `kinds` and `hasTests` still keeps comments
 // only `key`/`prompt`/`agentType` now, and tier lives in each fleet-owned
 // `fleet-review-<key>` definition's own frontmatter instead — see
 // review-core-parity.test.mjs for the parity pin between review-pr.js's
-// namespaced copy and review-core.js's bare one. This replaces the retired
+// namespaced copy and review-core.mjs's bare one. This replaces the retired
 // "only the recoverable-miss dimensions carry a model downgrade" test, which
 // pinned a field that no longer exists.
 test("every dimension names a distinct fleet-owned agentType and carries no model field", () => {

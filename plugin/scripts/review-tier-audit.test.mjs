@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 
 // #1349 (per #1303's gap 3): no `agent()` call anywhere in the review port —
-// Claude's workflows/review-pr.js, the shared scripts/review-core.js, or the
+// Claude's workflows/review-pr.js, the shared scripts/review-core.mjs, or the
 // omp shim scripts/review-eval.mjs — may pass `model` or `effort` directly.
 // Measured on omp: `agent(prompt, {model, effort})` silently resolves to the
 // baseline model, zero effect, no error. Every dispatch instead names a
@@ -18,7 +18,7 @@ import { stripComments } from "./strip-comments.mjs";
 const REPO = join(import.meta.dirname, "..");
 const FILES = {
   "workflows/review-pr.js": readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8"),
-  "scripts/review-core.js": readFileSync(join(REPO, "scripts", "review-core.js"), "utf8"),
+  "scripts/review-core.mjs": readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8"),
   "scripts/review-eval.mjs": readFileSync(join(REPO, "scripts", "review-eval.mjs"), "utf8"),
 };
 

@@ -3,13 +3,34 @@
 // `engines.node` — and this sweep is what keeps a shipped script from
 // outrunning it silently.
 //
-// Three ways to red, matching the ticket's own three failure modes:
+// Four ways to red — the ticket's own three failure modes, plus #1763's:
 //   1. a shipped `.mjs` file reaches for an API above the declared floor
 //      ("every shipped .mjs file stays within the declared floor", below);
 //   2. the declaration is missing or carries anything load-bearing beyond
 //      the floor itself ("package.json declares the consumer floor...");
 //   3. README's stated floor and package.json's declaration disagree
-//      ("README's stated floor agrees with package.json's declaration").
+//      ("README's stated floor agrees with package.json's declaration");
+//   4. a shipped `.mjs` file imports a relative module that is not `.mjs`
+//      ("every relative import in a shipped .mjs file names a .mjs module").
+//      Not an API but a LOADER behaviour: nothing that ships sets a `type`
+//      field (the root package.json never reaches an installed plugin, whose
+//      root is `plugin/`, and carries only `engines` anyway — check 2), so a
+//      `.js` file is CommonJS to Node until syntax detection turned on by
+//      default (20.19.0 on the 20 line, 22.7.0 on 22). At the declared floor
+//      an `import`/`export` in one fails to load — measured for #1763 on
+//      review-eval.mjs's import of the old review-core.js under 20.11.0,
+//      20.18.3 and 22.6.0: "Named export 'digestOf' not found. The requested
+//      module './review-core.js' is a CommonJS module". `.mjs` is ESM on
+//      every Node this floor admits, and on Bun, with no manifest at all.
+//      Static specifiers only: an `import()` of a COMPUTED path is invisible
+//      to it, the same textual-scan limit the API table below states. A
+//      TRAILING `code; // note` on the same line as a real import is closed
+//      here too, quote-aware: `stripComments()`'s own known ceiling leaves
+//      that text standing, which is safe for the declaration pins it was
+//      built for (surviving text only ever ADDS a match there) but not for
+//      this scan, where it can COIN a fake `from "<rel>"` beside a real,
+//      correct import on the same line (measured: appending `// … from
+//      "./old.js"` after a genuine `.mjs` import falsely reds this check).
 // Non-vacuity is asserted explicitly, same discipline every other sweep in
 // this directory uses (see repo-root.mjs's own header, `check-tracked.sh`):
 // an empty shipped-file list is a broken glob, not "nothing to check".
@@ -207,6 +228,41 @@ function scanFileViolations(source, floorVersion) {
   return hits;
 }
 
+// A static `import … from "<rel>"`, a bare side-effect `import "<rel>"`, or an
+// `import("<rel>")` with a literal specifier, where <rel> starts `./`/`../`.
+// Bare and `node:` specifiers never match: only a relative path names a file
+// whose extension decides how the loader parses it.
+const RELATIVE_IMPORT = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(["'`])(\.{1,2}\/[^"'`$]*)\1/g;
+
+// Quote-aware so a literal `//` inside a specifier or string is left alone;
+// this only needs to find the FIRST unquoted `//` to truncate the rest of
+// the line, never a full tokenizer.
+function stripTrailingLineComment(line) {
+  let quote = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote) {
+      if (c === "\\") i += 1;
+      else if (c === quote) quote = null;
+    } else if (c === '"' || c === "'" || c === "`") {
+      quote = c;
+    } else if (c === "/" && line[i + 1] === "/") {
+      return line.slice(0, i);
+    }
+  }
+  return line;
+}
+
+/** Every relative import specifier in a comment-stripped source that does not name a `.mjs` file. */
+function nonMjsRelativeImports(source) {
+  const hits = [];
+  const stripped = stripComments(source).split("\n").map(stripTrailingLineComment).join("\n");
+  for (const m of stripped.matchAll(RELATIVE_IMPORT)) {
+    if (!m[2].endsWith(".mjs")) hits.push(m[2]);
+  }
+  return hits;
+}
+
 test("the sweep sees the scripts it is supposed to police", { skip: SKIP_WITHOUT_REPO }, () => {
   assert.ok(
     MJS_FILES.length > 0,
@@ -256,6 +312,22 @@ test("every shipped .mjs file stays within the declared floor", { skip: SKIP_WIT
     violations,
     [],
     `shipped file(s) reach above the declared consumer floor — rewrite the call, or raise engines.node in package.json (and README to match):\n${violations.join("\n")}`,
+  );
+});
+
+test("every relative import in a shipped .mjs file names a .mjs module", { skip: SKIP_WITHOUT_REPO }, () => {
+  const violations = [];
+  for (const rel of MJS_FILES) {
+    for (const spec of nonMjsRelativeImports(readFileSync(join(ROOT, rel), "utf8"))) {
+      violations.push(`${rel}: imports ${spec}`);
+    }
+  }
+  assert.deepEqual(
+    violations,
+    [],
+    "shipped file(s) import a relative module that is not .mjs — nothing that ships declares a \"type\", so Node "
+    + "below 20.19.0/22.7.0 (inside the declared floor) loads it as CommonJS and its import/export fails (#1763); "
+    + `rename it to .mjs:\n${violations.join("\n")}`,
   );
 });
 
@@ -350,4 +422,37 @@ test("parseReadmeFloor refuses an Installation section stating no floor", () => 
     () => parseReadmeFloor("## Installation\n\nJust run it.\n\n## Next\n"),
     /states no ">=MAJOR\.MINOR\.PATCH"/,
   );
+});
+
+test("nonMjsRelativeImports reds every import form that names a relative non-.mjs module", () => {
+  const src = [
+    'import { digestOf } from "./review-core.js";',
+    "import './side-effect.js';",
+    'const m = await import("../lib/dyn.js");',
+    "const t = await import(`./tpl.js`);",
+    'export { x } from "./re-export.cjs";',
+  ].join("\n");
+  assert.deepEqual(nonMjsRelativeImports(src), [
+    "./review-core.js", "./side-effect.js", "../lib/dyn.js", "./tpl.js", "./re-export.cjs",
+  ]);
+});
+
+test("nonMjsRelativeImports accepts .mjs siblings, builtins, and a .js merely named in a comment or string", () => {
+  const src = [
+    'import { isDigits } from "./arg.mjs";',
+    'import { readFileSync } from "node:fs";',
+    'const m = await import("../lib/deep.mjs");',
+    '// import { digestOf } from "./review-core.js";  (the pre-#1763 spelling)',
+    'const file = join(DIR, "./review-core.js");',
+    "const dyn = await import(path);",
+  ].join("\n");
+  assert.deepEqual(nonMjsRelativeImports(src), []);
+});
+
+test("nonMjsRelativeImports does not coin a false hit from a trailing comment beside a real import", () => {
+  const src = [
+    'import { isDigits } from "./arg.mjs"; // note: this used to import from "./old-name.js"',
+    'const url = "https://example.com/old-name.js"; // a literal "//" inside a string is not a comment start',
+  ].join("\n");
+  assert.deepEqual(nonMjsRelativeImports(src), []);
 });

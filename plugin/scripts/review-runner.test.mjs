@@ -21,7 +21,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runReviewToFile } from "./review-eval.mjs";
-import { DIGEST_KEYS } from "./review-core.js";
+import { DIGEST_KEYS } from "./review-core.mjs";
 
 const RESULT = {
   pr: 7,

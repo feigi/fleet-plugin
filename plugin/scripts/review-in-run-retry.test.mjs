@@ -1,6 +1,6 @@
 // #1802 (spec docs/specs/2026-09-24-slot-based-fleet-loop-design.md § 3 §2, §6).
 // Two changes to the review's own result, made in BOTH copies of the review
-// body — review-core.js (omp, imported) and workflows/review-pr.js (Claude,
+// body — review-core.mjs (omp, imported) and workflows/review-pr.js (Claude,
 // executed here as the function body the Workflow harness compiles it as):
 //
 //   1. Crash repair inside the run. Each crashed specialist is re-dispatched
@@ -25,7 +25,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { runReview, DIGEST_KEYS, digestOf } from "./review-core.js";
+import { runReview, DIGEST_KEYS, digestOf } from "./review-core.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const WORKFLOW = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8").replace(/^export /m, "");
@@ -56,7 +56,7 @@ async function pipeline(items, stage1, stage2) {
 const parallel = (fns) => Promise.all(fns.map((fn) => fn()));
 
 const COPIES = [
-  ["review-core.js", (host, args) => runReview({ ...host, pipeline, parallel }, args)],
+  ["review-core.mjs", (host, args) => runReview({ ...host, pipeline, parallel }, args)],
   ["review-pr.js", (host, args) => workflowBody(args, undefined, host.agent, parallel, pipeline, host.phase, host.log, undefined)],
 ];
 

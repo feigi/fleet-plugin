@@ -128,11 +128,15 @@ jobs:
       - name: Syntax-check scripts
         run: .github/scripts/check-tracked.sh '*.mjs' -n1 node --check
 
-      # The two tracked `.js` files need DIFFERENT invocations, not a wider glob:
+      # The two kinds of tracked `.js` file need DIFFERENT invocations, not a wider glob:
       #   - an ordinary CommonJS script, which `node --check` accepts as-is.
       #     hooks/statusline.js was the only one and left with the 2026-09-08
       #     config split, so the `*)` branch matches nothing today — it stays
-      #     for the next plain .js this repo grows.
+      #     for the next plain .js this repo grows. (plugin/scripts/review-core.js
+      #     matched it until #1763 renamed it to .mjs: it was ESM, which a `.js`
+      #     is only where Node's syntax detection is on by default — not at the
+      #     declared consumer floor. ESM belongs in `.mjs`; node-floor-sweep.test.mjs
+      #     reds on a shipped .mjs importing a relative module that is not.)
       #   - plugin/workflows/*.js (review-pr.js) is a Workflow-harness script: the
       #     harness reads `export const meta = …` off it without running it,
       #     then wraps the REST of the file's body in an async function it

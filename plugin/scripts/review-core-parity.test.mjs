@@ -5,19 +5,19 @@ import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 import { between } from "./prose-pin.mjs";
 import { lift, liftConst } from "./lift.mjs";
-import * as core from "./review-core.js";
+import * as core from "./review-core.mjs";
 
-// The pin for the shape #1349 chose (review-core.js's own header explains
-// WHY): review-core.js is the canonical, tested source of every host-
+// The pin for the shape #1349 chose (review-core.mjs's own header explains
+// WHY): review-core.mjs is the canonical, tested source of every host-
 // independent declaration; workflows/review-pr.js keeps a text-identical
 // COPY of every pure function's CODE (comments may legitimately differ —
-// review-core.js does not repeat review-pr.js's historical rationale prose,
+// review-core.mjs does not repeat review-pr.js's historical rationale prose,
 // to avoid a second copy of PROSE disconnecting the way a second copy of
 // CODE already does in this repo). Behavior parity is what actually matters,
 // so every function below is run through the SAME fixtures on both sides —
 // the review-pr.js copy lifted out of its source text (the Workflow sandbox
 // forbids `import`, so this is the same technique every other review-pr.js
-// test file uses), review-core.js's copy imported normally.
+// test file uses), review-core.mjs's copy imported normally.
 const REPO = join(import.meta.dirname, "..");
 const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 const CODE = stripComments(SOURCE);
@@ -231,10 +231,10 @@ test("resolveDimensions agrees on both sides", () => {
   // silently handed the run back to the size tier. This fixture used to hold
   // only `undefined`/`null` and valid arrays, so EITHER copy could carry that
   // regression alone and this parity pin stayed green — measured on a scratch
-  // tree with review-core.js's guard reverted to `!override`: every test in
+  // tree with review-core.mjs's guard reverted to `!override`: every test in
   // this file passed, and so did every test in select-dimensions.test.mjs,
   // which lifts its own falsy pin out of review-pr.js's SOURCE TEXT and so
-  // never runs review-core.js's copy at all.
+  // never runs review-core.mjs's copy at all.
   const falsyPresent = ["", 0, false, NaN];
   const modelOverride = [{ key: "x", prompt: "p", agentType: "a", model: "opus" }];
   const overrides = [
@@ -252,13 +252,13 @@ test("resolveDimensions agrees on both sides", () => {
       label(o),
     );
   // Agreement alone cannot see the two copies regressing TOGETHER, and
-  // review-core.js's copy has no other pin on this refusal. So assert the
+  // review-core.mjs's copy has no other pin on this refusal. So assert the
   // refusal itself, on each side, rather than only that the two agree.
   for (const o of falsyPresent) {
     assert.throws(
       () => core.resolveDimensions(o, core.DEFAULT_DIMENSIONS),
       /must be an array/,
-      `review-core.js accepted the falsy-but-present override ${label(o)}`,
+      `review-core.mjs accepted the falsy-but-present override ${label(o)}`,
     );
     assert.throws(() => prFn(o, prAll), /must be an array/, `review-pr.js accepted the falsy-but-present override ${label(o)}`);
   }
@@ -268,7 +268,7 @@ test("resolveDimensions agrees on both sides", () => {
 });
 
 // The DEFAULT_DIMENSIONS arrays: same keys, same prompts, same length — and
-// the ONE allowed difference between the two copies (see review-core.js's own
+// the ONE allowed difference between the two copies (see review-core.mjs's own
 // header) is the `agentType` string, namespaced on the Claude side.
 test("DEFAULT_DIMENSIONS agrees on key/prompt and differs from review-pr.js's copy ONLY by the fleet-ctl: namespace", () => {
   const prAll = new Function(
@@ -286,12 +286,12 @@ test("DEFAULT_DIMENSIONS agrees on key/prompt and differs from review-pr.js's co
 
 // The snapshot and verifier dispatches: review-pr.js's `agentType` literal is
 // the SAME namespacing rule applied to the two agentType strings
-// review-core.js's `runReview` hardcodes (not part of DEFAULT_DIMENSIONS).
+// review-core.mjs's `runReview` hardcodes (not part of DEFAULT_DIMENSIONS).
 test("the snapshot and verifier dispatches follow the same fleet-ctl: namespacing rule", () => {
   assert.match(SOURCE, /agentType:\s*"fleet-ctl:fleet-review-snapshot"/);
-  assert.match(readFileSync(join(REPO, "scripts", "review-core.js"), "utf8"), /agentType:\s*"fleet-review-snapshot"/);
+  assert.match(readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8"), /agentType:\s*"fleet-review-snapshot"/);
   assert.match(SOURCE, /agentType:\s*"fleet-ctl:fleet-review-verifier"/);
-  assert.match(readFileSync(join(REPO, "scripts", "review-core.js"), "utf8"), /agentType:\s*"fleet-review-verifier"/);
+  assert.match(readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8"), /agentType:\s*"fleet-review-verifier"/);
 });
 
 // FINDINGS_SCHEMA/VERDICT_SCHEMA: structurally identical (comments aside).
@@ -308,7 +308,7 @@ test("FINDINGS_SCHEMA and VERDICT_SCHEMA are structurally identical between the 
 // than its sibling with every other pin green. Compared as the schema's
 // substance — the `required` set and each property's declared type — rather
 // than as text, because review-pr.js's copy is inline in its `agent()` options
-// while review-core.js's is a module-scope const, so the two can never be
+// while review-core.mjs's is a module-scope const, so the two can never be
 // byte-identical and a text pin would have to be written loose enough to pass
 // on a real divergence.
 test("SNAPSHOT_SCHEMA agrees on required fields and declared types between the two copies", () => {
@@ -330,7 +330,7 @@ test("SNAPSHOT_SCHEMA agrees on required fields and declared types between the t
   );
 });
 
-// `resumeFor` is the ONE declared exception (review-core.js's own header
+// `resumeFor` is the ONE declared exception (review-core.mjs's own header
 // comment says so): its omp branch says something review-pr.js never can. The
 // Claude branch has no reason to differ, so it is pinned IDENTICAL — claim and
 // relaunch both — rather than merely agreeing up to the verb.
@@ -375,7 +375,7 @@ test("retryCrashed agrees on both sides: one re-dispatch for a crash, none for a
     ["a thrown first answer is re-dispatched once", [new Error("spend limit"), { ok: 3 }], 2, { ok: 3 }],
     ["a crash that repeats stops after the one re-dispatch", [null, null, { ok: 4 }], 2, null],
   ];
-  for (const [name, fn] of [["review-core.js", core.retryCrashed], ["review-pr.js", prFn]]) {
+  for (const [name, fn] of [["review-core.mjs", core.retryCrashed], ["review-pr.js", prFn]]) {
     for (const [what, seq, calls, out] of rows) {
       let n = 0;
       const dispatch = () => {
@@ -411,7 +411,7 @@ test("retryCrashed agrees on both sides: one re-dispatch for a crash, none for a
 
 // #878, and the one half of that guard this repo can EXECUTE. review-pr.js
 // cannot be imported, so its copy is pinned by source position
-// (shared-refusal.test.mjs); review-core.js is an ordinary module, so the
+// (shared-refusal.test.mjs); review-core.mjs is an ordinary module, so the
 // refusal itself can be run — and running it is what proves the ordering claim
 // both files make, which a position assertion only describes.
 //
@@ -453,20 +453,20 @@ test("#878: runReview refuses a non-numeric args.pr before dispatching any agent
 });
 
 // #1616 fix-review finding 3: `refHead`'s omission rule is PROSE, not one of
-// the byte-identical function bodies above — review-core.js's own header
+// the byte-identical function bodies above — review-core.mjs's own header
 // (top of this file) says its copy legitimately omits review-pr.js's
 // historical rationale, so the two paragraphs are not expected to be
 // byte-identical text. But the RULE both must state — omit `refHead` only
 // when every read this PR was entitled to came back empty, failed, or was
 // skipped, and treat that as neither a match nor a mismatch — is not
 // optional, and nothing above pins it: deleting the rule from
-// review-core.js's prompt text left every other test in this repo green.
-const CORE_SOURCE = readFileSync(join(REPO, "scripts", "review-core.js"), "utf8");
+// review-core.mjs's prompt text left every other test in this repo green.
+const CORE_SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
 const REFHEAD_OMISSION_RULE =
   /Omit[\s\S]{0,10}refHead[\s\S]{0,10}when\s+every\s+read\s+this\s+PR\s+was\s+entitled\s+to\s+came\s+back\s+empty[\s\S]{0,250}neither\s+a\s+match\s+nor\s+a\s+mismatch/;
 test("the refHead-omission rule agrees on both harness copies", () => {
   const prSnapshot = between(CODE, "const snap = await agent(", "if (!snap", "review-pr.js's snapshot dispatch");
-  const coreSnapshot = between(CORE_SOURCE, "const snap = await agent(", "if (snap) {", "review-core.js's snapshot dispatch");
+  const coreSnapshot = between(CORE_SOURCE, "const snap = await agent(", "if (snap) {", "review-core.mjs's snapshot dispatch");
   assert.match(prSnapshot, REFHEAD_OMISSION_RULE, "review-pr.js no longer states the refHead-omission rule this way");
-  assert.match(coreSnapshot, REFHEAD_OMISSION_RULE, "review-core.js no longer states the refHead-omission rule this way");
+  assert.match(coreSnapshot, REFHEAD_OMISSION_RULE, "review-core.mjs no longer states the refHead-omission rule this way");
 });

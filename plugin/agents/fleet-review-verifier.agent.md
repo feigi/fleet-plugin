@@ -1,6 +1,6 @@
 ---
 name: fleet-review-verifier
-description: Dispatched by review-pr.js/review-core.js's Verify phase to adversarially refute one finding. Never invoked directly.
+description: Dispatched by review-pr.js/review-core.mjs's Verify phase to adversarially refute one finding. Never invoked directly.
 model: sonnet
 effort: low
 thinking-level: low

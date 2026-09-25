@@ -43,12 +43,19 @@
 // Which scripts those are is readable off the `from "./arg.mjs"` grep this
 // header already recommends, provided you read the imported SYMBOL list and
 // not the filenames: a row binding makeSweep has delegated the unknown-flag
-// refusal, so `grep -n '^import .* from "./arg.mjs"'
+// refusal, so `grep -n '^import .*makeDie.* from "./arg.mjs"'
 // scripts/*.mjs | grep -v test | grep -v makeSweep` leaves the
 // rows that hold their own. Anchoring on `^import` is load-bearing for the
 // same reason it is on the die() grep: unanchored, this very comment matches
-// itself. Read that output for the roster — the scripts this header names
-// exemplify a way of qualifying, and were never the whole of it.
+// itself. Requiring makeDie is what keeps the rows to SCRIPTS: every script
+// importing this file refuses its command line through a die() bound from
+// here, and a module that binds none has no command line to refuse a flag on
+// — review-core.mjs, which imports isDigits alone and is itself imported by
+// review-eval.mjs, joined the `scripts/*.mjs` glob when #1763 renamed it from
+// `.js`. A future script that refuses WITHOUT makeDie falls out of this grep;
+// that is the price of the filter, named here rather than hidden. Read that output
+// for the roster — the scripts this header names exemplify a way of
+// qualifying, and were never the whole of it.
 //
 // fleet-tick.mjs is the one script still outside arg()/has(), and
 // deliberately: it parses its flags with node:util's parseArgs, so its
@@ -62,12 +69,12 @@
 //
 // workflows/review-pr.js is a second edit site this header's grep CANNOT
 // see, and #878 is where it became one. A Claude Code Workflow script cannot
-// perform an import at all (#538, review-core.js's header), so it consumes no
+// perform an import at all (#538, review-core.mjs's header), so it consumes no
 // symbol from here and no `from "./arg.mjs"` row will ever name it — while
 // its `pr` argument reaches `gh pr diff`, `gh pr view` and `diff-stats.mjs
 // --pr` all the same. Its copy of the digits rule is held in step by
 // shared-refusal.test.mjs, which runs it and isDigits() over the same values;
-// its host-independent twin review-core.js is an ordinary module and imports
+// its host-independent twin review-core.mjs is an ordinary module and imports
 // the real thing.
 //
 // candidates.mjs qualifies the other way, which the reach test cannot express:
@@ -293,7 +300,7 @@ export function makeHas(die) {
 // documented invocation is `--pr <N>`.
 //
 // RegExp.test coerces, which is load-bearing in both directions. It is what
-// lets review-core.js ask this about a workflow argument that arrives as the
+// lets review-core.mjs ask this about a workflow argument that arrives as the
 // number 42 rather than the string "42"; it is also why this can never be an
 // ABSENCE check, since `null` coerces to the string "null" and answers false.
 // Every caller reads absence first, on its own terms.
