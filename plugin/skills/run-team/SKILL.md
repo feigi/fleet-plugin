@@ -1404,8 +1404,9 @@ owes beyond its row:
 - **Monitor: `ready-to-merge` appears** → nothing to record; run the tick, and
   on `DISPATCH merge-bot` dispatch the next `merge-bot-<n>` (**Merge bot**).
   Catches hand-added labels as well as a finisher's own. The bot does not wait
-  for that finisher's report: its rebase is server-side (`gh pr update-branch
-  --rebase`), so it never touches the finisher's worktree.
+  for that finisher's report (ADR 0012 Decision 2): its rebase is server-side,
+  `gh pr update-branch --rebase`, so nothing on the finisher's worktree has to
+  happen first.
 - **Merge-bot pass reports done** → write each `held-behind-#<lower>` it reports
   into that ticket's row as `held-behind:#<lower>` — the verdict moves no label
   and leaves nothing in the repo, so the row is the only place the tick can read
