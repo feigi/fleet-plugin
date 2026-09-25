@@ -6,9 +6,9 @@
 // memory of what it dispatched.
 //
 // A module of its own, not a function inside ledger.mjs, because ledger.mjs is
-// a CLI that parses argv and exits on import — and the tick reads this same
-// grammar. A second copy of it there is two readings of which members are
-// live, free to drift apart.
+// a CLI that parses argv and exits on import — and `fleet-tick.mjs` is to read
+// this same grammar (#1803). A second copy of it there would be two readings
+// of which members are live, free to drift apart.
 //
 // Rows stay freeform text. Only a token whose name part is a member name is
 // claimed here; everything else a row carries (`class=routine`, `ports=`,
