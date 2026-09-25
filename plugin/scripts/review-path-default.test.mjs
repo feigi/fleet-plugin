@@ -217,10 +217,18 @@ test("the controller keeps the rules the workflow's return shape needs", () => {
     /"checked and cleared"/,
     "run-team no longer warns that `unverified` is not a passed verification",
   );
+  // #1773 §3: the reviewer cap counts live review UNITS — an in-flight review
+  // is one, each fix-applier is one — derived from the ledger. The retired
+  // "one review workflow at a time" left the review ungated by the cap.
   assert.match(
     dflt,
-    /One review workflow at a time/,
-    "run-team no longer caps concurrent review workflows — the reviewer cap counts the fix-applier, which is not dispatched until the workflow returns",
+    /The reviewer cap counts live review units/,
+    "run-team no longer says what the reviewer cap counts — an in-flight review is a unit, not a free slot",
+  );
+  assert.match(
+    dflt,
+    /`review=` and no `reviewed=`/,
+    "run-team no longer derives in-flight reviews from the ledger — a remembered count is the over-dispatch the tick exists to prevent",
   );
   assert.match(
     dflt,
@@ -234,7 +242,7 @@ test("relay and reconciliation live under the fallback, not in the Phase 3 event
   // This slice's only other assertion is a doesNotMatch, which a slice that has
   // degenerated to its own heading satisfies trivially. Prove it reached the
   // bullet list first.
-  assert.match(loop, /Review slot free, PR queued/, "the Phase 3 slice no longer contains the event loop");
+  assert.match(loop, /A review result lands/, "the Phase 3 slice no longer contains the event loop");
   assert.match(
     loop,
     /no-op/,
@@ -285,7 +293,7 @@ test("the Phase 3 finisher edges gate on a ruling the controller still owes", ()
     /never dispatch off it while you do/i,
     "the CI-completes edge lost the outstanding-ruling gate — it applies wherever a fix-applier pushed, which is one of the firings this edge takes (#1053)",
   );
-  const noCiEdge = flat(section(RUN_TEAM, '- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "- **Pool empty**", "run-team no-ci edge"));
+  const noCiEdge = flat(section(RUN_TEAM, '- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**Every wake ends in the tick.**", "run-team no-ci edge"));
   assert.match(
     noCiEdge,
     /never while you still owe it a ruling/i,
@@ -480,7 +488,7 @@ test("the fix commit is gated on a test run, in both files", () => {
   // a runner you picked": no error, both files individually coherent.
   assert.match(
     fixApplierLeadIn(),
-    /the same `testCmd` you\s+passed the workflow/,
+    /the same `testCmd` you\s+passed the review/,
     "the controller no longer carries testCmd into the fix-applier's prompt — `<testCmd>` reaches it unsubstituted",
   );
   assert.match(
@@ -557,30 +565,29 @@ test("the fix commit pushes by refspec, in both files, to a branch the prompt bi
   );
 });
 
-test("the fix-applier lead-in relays every finding, on a premise that is true", () => {
+test("the fix-applier lead-in hands over the result file's path, never the findings, on a premise that is true", () => {
   const leadIn = fixApplierLeadIn();
-  // The rule, not one phrasing of it — a faithful reword keeps at least one of
-  // these tied to relaying, deleting the paragraph keeps neither. Sliced to the
-  // LEAD-IN, never to the Reviewers section: section-wide, the prompt below
-  // supplies enough of this vocabulary that the pin survives the paragraph's
-  // deletion (the failure mode the two narrow slices above exist for).
+  // Spec 2026-09-24 § 3 §4: the controller reads the digest only, and the
+  // fix-applier reads every finding off the file. A lead-in that went back to
+  // relaying findings puts 26-61 KB of results back through the controller's
+  // context — and a relayed SELECTION strands the rest, the failure the retired
+  // "verbatim means every one" rule existed to prevent (5 of 7 and 7 of 13 sent
+  // in one run). The path is the whole of the handover.
   assert.match(
     leadIn,
-    /(every one, not the ones you rank|Paste all of them)/,
-    "the lead-in no longer tells the controller to relay every finding rather than a ranked selection",
+    phrase("the **path** `<scratch>/review-<pr>.json`"),
+    "the lead-in no longer hands the fix-applier the result file's path",
   );
-  // Its reason clause shipped FALSE on this branch, in a PR about not shipping
-  // false claims. The review specialists' transcripts DO exist on disk —
-  // measured at 101 `subagents/workflows/wf_*/agent-*.jsonl` in one session, 33
-  // of them the (since-retired, #1349) vendored specialist plugin's agents.
-  // What is true is that a member cannot address them: `review-pr.js` returns
-  // `{pr, head, snapshot, dimensionsRun,
-  // dimensionsUnrun, survived, refuted, unverified}` — no transcript path — and the `.meta.json` sidecars
-  // carry only agentType/model/spawnDepth, so nothing maps one back to a PR or
-  // a dimension. The rule rests on unaddressability, and a member sent hunting
-  // a file it was told does not exist stops at a different place than one told
-  // it cannot be named. Positive pins cannot catch a re-inserted falsehood;
-  // only the exclusion can.
+  assert.match(leadIn, phrase("never the findings"), "the lead-in no longer says the findings stay out of the prompt");
+  // Its reason clause once shipped FALSE on this branch, in a PR about not
+  // shipping false claims. The review specialists' transcripts DO exist on
+  // disk — measured at 101 `subagents/workflows/wf_*/agent-*.jsonl` in one
+  // session, 33 of them the (since-retired, #1349) vendored specialist
+  // plugin's agents. What is true is that a member cannot address them: the
+  // result carries no transcript path, and the `.meta.json` sidecars carry only
+  // agentType/model/spawnDepth, so nothing maps one back to a PR or a
+  // dimension. Positive pins cannot catch a re-inserted falsehood; only the
+  // exclusion can.
   assert.doesNotMatch(
     leadIn,
     /(nothing is on disk|left no transcript|no transcript you can read|paths that cannot exist|no output file)/i,
@@ -601,12 +608,14 @@ test("the fix-applier's self-retrieval is scoped to its own refuters, on a premi
     /this covers the[\s\S]{0,40}refuters YOU dispatch, and only those/,
     "the prompt no longer scopes self-retrieval to the refuters the fix-applier dispatched",
   );
-  // The other half: for the review's own specialists the member asks for the
-  // TEXT. Asking for a path cannot work — nothing it holds names one.
+  // The other half: for the review's own specialists the member reads the
+  // result file. Hunting a transcript path cannot work — nothing it holds
+  // names one — and asking the controller for the text cannot either, since
+  // the controller never reads the findings (spec 2026-09-24 § 3 §2).
   assert.match(
     prompt,
-    /ask for the text/i,
-    "the prompt no longer tells the fix-applier to ask for the finding text rather than a path",
+    /the result file holds their findings/i,
+    "the prompt no longer sends the fix-applier to the result file for the review specialists' findings",
   );
   // Same false premise as the lead-in pin above, in the copy the fix-applier
   // actually reads. `no output file` is excluded as a claim of absence only —

@@ -278,10 +278,10 @@ export const KNOWN_EQUALITY_EXCEPTIONS = [
   },
   {
     file: join("skills", "run-team", "SKILL.md"),
-    claude: '`Workflow({name: "fleet-ctl:review-pr", args: {pr, branch, worktree, testCmd, scratch}})`.',
-    omp: '`eval` loading `scripts/review-eval.mjs` through the Resolver (`FLEET_HARNESS=omp fleet-run --path review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})`.',
+    claude: "`Workflow({name: \"fleet-ctl:review-pr\", args: {pr, branch, worktree, testCmd, scratch}})` — it returns `async_launched` in about 1.5 s with a `Run ID`, and you carry on; record `review=wf:<runId>` on the PR's row.",
+    omp: "a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the same five args — it loads `review-eval.mjs` through the Resolver (`FLEET_HARNESS=omp ~/.fleet/bin/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file and reports; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call.",
     issue: 1362,
-    why: "Review-path-default pair (#1361), restated in SKILL.md",
+    why: "Review-dispatch pair (#1361, off-turn since #1805): the omp line's runner-member dispatch and Resolver recipe have no Claude-side counterpart clause — the Workflow is not a member",
   },
   {
     file: join("workflows", "review-pr.js"),

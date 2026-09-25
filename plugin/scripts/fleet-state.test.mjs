@@ -156,7 +156,7 @@ test("writeState: `ticked` survives a heartbeat write the same way `beat` surviv
   // The mirror of the test above, other direction: fleet-heartbeat patches
   // elapsed/beat on every hold, so a write that dropped `ticked` would erase
   // fleet-tick's own liveness key the first time a heartbeat lands after a
-  // busy wave — silently reopening the #1597 follow-up this key exists to
+  // busy stretch — silently reopening the #1597 follow-up this key exists to
   // close.
   const dir = mkdtempSync(join(tmpdir(), "fleet-state-ticked-carry-"));
   const path = join(dir, "heartbeat.json");
@@ -207,13 +207,13 @@ test("assessBeat: staleness is judged against the RECORDED interval, not a const
   assert.equal(ahead.overdueMs, 0);
 });
 
-test("assessBeat: a busy run's own `ticked` covers for a `beat` the wave never let refresh", () => {
+test("assessBeat: a busy run's own `ticked` covers for a `beat` the busy stretch never let refresh", () => {
   // #1597 follow-up. `beat` only refreshes when the queue drains ("beat when
   // there is nothing to do") — a fully-staffed fleet that has been busy for
   // eleven straight minutes never touches it, so the recorded interval stays
-  // whatever it was when the wave started (base, if it started right after a
+  // whatever it was when the stretch started (base, if it started right after a
   // dispatch) and the OLD mark ages straight past its own grace window. A
-  // reconcile tick fires on every completion during that same wave, though,
+  // reconcile tick fires on every completion during that same stretch, though,
   // and now leaves its own mark behind — that is the evidence this asserts.
   const now = 2_000_000_000_000;
   const beat = { at: now - 11 * 60 * 1000, interval: 300, stopped: "" };

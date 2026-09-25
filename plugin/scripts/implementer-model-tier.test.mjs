@@ -498,13 +498,20 @@ test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
 
 test("phase 3 owns the guard — otherwise nothing in the event loop ever runs it", () => {
   // The guard lives in phase 2, which is entered per-dispatch, BEFORE the PRs it
-  // wants to measure exist. Phase 3's event table is what the controller actually
-  // reacts to, so the guard needs a row there or it is unreachable by design.
-  const slice = section(RUN_TEAM, "- **Pool empty**", "**Own the CI waits.", "run-team phase 3 pool-empty event");
+  // wants to measure exist. Phase 3's tick is what the controller actually acts
+  // on, and the alt Pull it names is where the floor is read (ADR 0005 as
+  // amended by ADR 0012), so the guard needs its paragraph there or it is
+  // unreachable by design.
+  const slice = section(RUN_TEAM, "**Tier guards under Pull.**", "**Own the CI waits.", "run-team phase 3 tier guard under Pull");
+  assert.match(
+    slice,
+    /alt Pull/,
+    "phase 3's tier-guard paragraph no longer names the alt Pull as where it runs",
+  );
   assert.match(
     slice,
     /tier\s+guard/,
-    "no phase 3 event dispatches the tier guard — it is stated in phase 2 and never reached",
+    "no phase 3 step dispatches the tier guard — it is stated in phase 2 and never reached",
   );
 });
 

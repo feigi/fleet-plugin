@@ -48,8 +48,8 @@ plugin. Background: [`docs/adr/0006-rename-to-fleet-ctl.md`](docs/adr/0006-renam
 
 ## Quickstart
 
-Start a fleet run over the `ready-for-agent` queue — up to 5 implementers and
-up to 5 reviewers (both optional, default 5, capped at 5), plus one
+Start a fleet run over the `ready-for-agent` queue — implementers and reviewers
+(both optional, default 2 and 6, no hard cap), plus one
 non-configurable merge bot:
 
 ```

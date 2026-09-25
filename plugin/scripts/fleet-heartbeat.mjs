@@ -3,11 +3,12 @@
 // survives a fully drained queue.
 //
 // fleet-tick.mjs computes the deficit but only when something invokes it, and
-// the two shipped invocations are both merge-side EDGES. A drained fleet emits
-// no edges at all — no implementer completions, no merge activity — so nothing
-// calls the reconcile and the stall is silent again, which is the state #3 was
-// filed about. This script is the level-check that needs no event: it holds the
-// controller's turn for an interval and then tells it to run the reconcile.
+// every other invocation is a wake: a member report, a label, a CI run ending.
+// A drained fleet emits no wakes at all — no implementer completions, no merge
+// activity — so nothing calls the tick and the stall is silent again, which is
+// the state #3 was filed about. This script is the level-check that needs no
+// event: it holds the controller's turn for an interval and then tells it to
+// run the tick.
 //
 // WHY A HOLD AND NOT A WATCHER — the ruling, measured before it was made:
 //
@@ -215,7 +216,7 @@ function main() {
   // Re-read AFTER the hold, and patch THAT rather than the pre-hold snapshot.
   // fleet-tick can run while this call is blocked — up to --hold seconds, 240
   // by default — and it owns both keys this script must not touch. Writing the
-  // snapshot back reverts them: a busy wave that reset `quiet` to 0 would find
+  // snapshot back reverts them: a busy stretch that reset `quiet` to 0 would find
   // the long interval re-armed the moment the hold ended, and a reverted
   // `digest` reads as "the output changed" on the next tick, un-folding the
   // quiet night the digest exists to fold. `elapsed` is still one of the keys

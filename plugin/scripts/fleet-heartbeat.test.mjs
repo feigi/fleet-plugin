@@ -246,11 +246,11 @@ test("CLI: a state write that cannot land FIRES rather than holding the same rem
 });
 
 test("CLI: a fleet-tick that runs DURING the hold is not reverted when the hold ends", async () => {
-  // The hold is up to 240s by default, and fleet-tick runs on merge-side edges
+  // The hold is up to 240s by default, and fleet-tick runs on every other wake
   // that owe this script nothing — so the file it wrote at the end of a hold is
   // not the file it read at the start. Patching the pre-hold snapshot back
-  // reverts both of fleet-tick's keys: the streak it just reset on a busy wave
-  // is restored, re-arming the ceiling-length interval the wave had shortened,
+  // reverts both of fleet-tick's keys: the streak it just reset on a busy stretch
+  // is restored, re-arming the ceiling-length interval the stretch had shortened,
   // and the restored `digest` reads as "the output changed" on the next tick,
   // un-folding the quiet night the digest exists to fold.
   const dir = mkdtempSync(join(tmpdir(), "fleet-heartbeat-race-"));
