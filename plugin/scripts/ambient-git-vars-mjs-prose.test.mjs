@@ -186,6 +186,14 @@ const COVERED_MJS = {
   // `node ci-state.mjs`, `--open`'s browser launcher) go through `tryRun` or
   // `openBrowser`, which name no git and are not git-invoking primitives.
   "board.mjs": 1,
+  // ONE git-invoking primitive, `readInstruments()`'s `rev-parse
+  // --git-common-dir`, which names the checkout instruments.sh is sent to
+  // audit. An ambient GIT_DIR answers it for a DIFFERENT repository, so the
+  // gate would certify that tree's instrument set, at exit 0. Measured in
+  // merge-gate.test.mjs, "an ambient GIT_DIR cannot move the audited
+  // instrument set into another repository". Its other children (gh,
+  // `node ci-state.mjs`, `sh instruments.sh`) name no git.
+  "merge-gate.mjs": 1,
 };
 
 // The two-name-only exemption list #1599's second design question answers
