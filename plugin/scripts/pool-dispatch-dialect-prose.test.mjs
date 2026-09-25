@@ -36,7 +36,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, markedLine, phrase } from "./prose-pin.mjs";
+import { between, markedLine, paragraph, phrase } from "./prose-pin.mjs";
 import { pairTree, classifyPair, checkPair, foreignTokens, KNOWN_EQUALITY_EXCEPTIONS } from "./marked-pairs.mjs";
 
 const REPO = join(import.meta.dirname, "..");
@@ -206,4 +206,28 @@ test("run-team/SKILL.md: implementer liveness is the ledger's, written before th
     /Live\s+implementers\s+are\s+the\s+`impl-`\s+tokens\s+with\s+no\s+`=<outcome>`\s+—\s+the\s+tick\s+reads\s+that\s+count\s+off\s+the\s+ledger,\s+and\s+nobody\s+states\s+it/,
     "the block no longer derives live implementers from the ledger's unsettled tokens",
   );
+});
+
+// The OMP dispatch line's own doesNotMatch (above) only guards that ONE marked
+// line. Confirmed live: replacing the "No workpool, and no kernel-resident
+// handle" sentence itself with an instruction to open a workpool per Pull
+// leaves every run-team prose test green, because nothing scans the REST of
+// phase 2 for a reintroduced workpool call. Scoped to all of phase 2, with the
+// retirement sentence's own bare mention of the word stripped first, so the
+// guard cannot vacuously trip on the very sentence that retires the pattern.
+const phase2 = () => between(RUN_TEAM, "## Phase 2", "## Phase 3", "run-team/SKILL.md Phase 2");
+const phase2WithoutRetirementSentence = () => {
+  const body = phase2();
+  const retirement = paragraph(
+    body,
+    "No workpool, and no kernel-resident handle.",
+    "run-team/SKILL.md workpool retirement sentence",
+  );
+  return body.replace(retirement, "");
+};
+
+test("run-team/SKILL.md: no workpool instruction is reintroduced into phase 2 outside the retirement sentence", () => {
+  const rest = phase2WithoutRetirementSentence();
+  assert.doesNotMatch(rest, /workpool\(/i, "phase 2 opens a workpool outside the sentence that retires it");
+  assert.doesNotMatch(rest, /eval\.workpool\.freshAgents/i, "phase 2 calls eval.workpool.freshAgents outside the sentence that retires it");
 });
