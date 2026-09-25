@@ -257,7 +257,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
       // unclaimed() covers that case once the refreshed shortlist re-admits
       // the ticket.
       const prLifted = premises.length > 0
-        && premises.every(({ kind, target }) => kind === "pr" && /^\d+$/.test(target) && !open.has(Number(target)));
+        && premises.every(({ kind, target }) => kind === "pr" && isDigits(target) && !open.has(Number(target)));
       if (!prLifted) claimed.add(keyNum);
       excluded.push({ n: keyNum, premises });
     }
@@ -318,7 +318,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
 // ticket to these entries, that stale row no longer blocks it.
 export function unclaimed(entries, run) {
   const unverifiable = new Set(run.excluded
-    .filter((e) => e.premises.every(({ kind, target }) => kind !== "pr" || !/^\d+$/.test(target)))
+    .filter((e) => e.premises.every(({ kind, target }) => kind !== "pr" || !isDigits(target)))
     .map((e) => e.n));
   return entries.map((e) => e.n).filter((n) => !run.claimed.has(n) || unverifiable.has(n));
 }
