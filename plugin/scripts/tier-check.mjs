@@ -344,6 +344,12 @@ function main() {
     if (typeof modelRoles !== "object" || modelRoles === null || Array.isArray(modelRoles)) {
       die(`${modelRolesPath ? `--model-roles ${modelRolesPath}` : "omp config get modelRoles --json"} must be a JSON object`);
     }
+  } else if (modelRolesPath) {
+    // #1786: nothing on a batch with no omp entry reads --model-roles, so
+    // accepting it would absorb a caller's argument in silence — the #1669
+    // fail-open shape, refused the same way. Before the map, so no ledger
+    // row is written by a run that is going to refuse.
+    die(`--model-roles ${modelRolesPath} given, but no batch entry has harness omp — nothing would read it; drop the flag`);
   }
 
   const results = entries.map((raw) => {

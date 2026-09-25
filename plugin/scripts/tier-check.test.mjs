@@ -538,6 +538,63 @@ test("CLI: --model-roles pointing at a JSON array refuses", () => {
   assert.equal(r.status, 2, r.stdout + r.stderr);
 });
 
+// #1786: `--model-roles` is only consulted when an omp entry exists, so a
+// Claude-only batch used to accept it, never open it, and exit on the
+// verdict alone — a wrong path, or a caller who believed the file was being
+// validated, passed in silence. It is now refused the way #1669 refuses any
+// other argument the run would silently absorb: exit 2, naming the flag, and
+// BEFORE any ledger write. The flag not being opened at all is the point —
+// an existing, well-formed file is refused just the same as a missing one,
+// so this is not a path check.
+test("CLI: --model-roles on a Claude-only batch refuses naming the flag, whether or not the file exists", () => {
+  const d = dir();
+  writeFileSync(join(d, "fleet-implementer.agent.md"), claudeAgentMd("opus", "xhigh", "xhigh"));
+  writeFileSync(join(d, "claude-impl.jsonl"), claudeTranscript("claude-opus-5", "xhigh"));
+  const batch = [{ member: "impl-1", agentFile: "fleet-implementer.agent.md", harness: "claude", transcript: "claude-impl.jsonl" }];
+  writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
+  for (const path of ["/does/not/exist", modelRolesFile(d)]) {
+    const r = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", path]);
+    assert.equal(r.status, 2, `${path}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /--model-roles .* no batch entry has harness omp/);
+    assert.doesNotMatch(r.stderr, /ENOENT/);
+  }
+});
+
+test("CLI: --model-roles on a Claude-only mismatched batch refuses before the ledger is written", () => {
+  const d = dir();
+  execFileSync("git", ["init", "-q"], { cwd: d });
+  const ledgerFile = join(d, ".fleet", "ledger.md");
+  execFileSync(process.execPath, [LEDGER_SCRIPT, "--file", ledgerFile, "row", "78", "impl-78 · class=routine"], { cwd: d, encoding: "utf8" });
+  writeFileSync(join(d, "fleet-implementer.agent.md"), claudeAgentMd("opus", "xhigh", "xhigh"));
+  writeFileSync(join(d, "claude-impl.jsonl"), claudeTranscript("claude-sonnet-5", "xhigh"));
+  const batch = [{ member: "impl-78", agentFile: "fleet-implementer.agent.md", harness: "claude", transcript: "claude-impl.jsonl" }];
+  writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
+  const r = runCli(["--batch", "batch.json", "--repo", d, "--ledger", ledgerFile], d, ["--model-roles", modelRolesFile(d)]);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  const data = JSON.parse(execFileSync(process.execPath, [LEDGER_SCRIPT, "--file", ledgerFile, "read"], { encoding: "utf8" }));
+  const row = data.rows.find((row) => row.startsWith("#78"));
+  assert.doesNotMatch(row, /declared opus/, "the refusal came after the ledger append");
+});
+
+// The accept half: the refusal keys on "no omp entry", not on "any claude
+// entry" — a mixed batch still reads --model-roles for its omp members.
+test("CLI: --model-roles on a mixed Claude+omp batch is still accepted and read", () => {
+  const d = dir();
+  writeFileSync(join(d, "fleet-implementer.agent.md"), claudeAgentMd("opus", "xhigh", "xhigh"));
+  writeFileSync(join(d, "claude-impl.jsonl"), claudeTranscript("claude-opus-5", "xhigh"));
+  writeFileSync(join(d, "omp-impl.jsonl"), ompTranscript("anthropic/claude-opus-5", "xhigh"));
+  const batch = [
+    { member: "impl-1", agentFile: "fleet-implementer.agent.md", harness: "claude", transcript: "claude-impl.jsonl" },
+    { member: "MixedOmp", agentFile: "fleet-implementer.agent.md", harness: "omp", transcript: "omp-impl.jsonl" },
+  ];
+  writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
+  const r = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", modelRolesFile(d)]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const missing = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", "/does/not/exist"]);
+  assert.equal(missing.status, 2, missing.stdout + missing.stderr);
+  assert.match(missing.stderr, /ENOENT/);
+});
+
 // ---------------------------------------------------------------------------
 // --session lookup (review finding #4): the controller supplies a session
 // root it already knows instead of an exact transcript file.
