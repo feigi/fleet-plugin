@@ -179,9 +179,10 @@ function readCi() {
     (r.status === 1 && ci.verdict === "not-green" && Array.isArray(ci.reasons) && typeof ci.reasons[0] === "string");
   if (!agrees) return unusable();
   if (!Array.isArray(ci.reasons) || typeof ci.prHead !== "string" || ci.prHead === "") return unusable();
-  // Absent is not null: null is ci-state's reading "could not count", absent
-  // is a payload that never carried the field.
-  if (!Object.hasOwn(ci, "behind") || (ci.behind !== null && !(Number.isInteger(ci.behind) && ci.behind >= 0))) return unusable();
+  // Absent is not null: null is ci-state's reading "could not count", while
+  // an absent `behind` (undefined, failing the integer test) comes from a
+  // payload that never carried the field.
+  if (ci.behind !== null && !(Number.isInteger(ci.behind) && ci.behind >= 0)) return unusable();
   return { ci, usable: true, rateLimited: false, notGreen: r.status === 1 };
 }
 
