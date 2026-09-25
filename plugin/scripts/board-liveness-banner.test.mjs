@@ -2,10 +2,8 @@
 // from a run's liveness verdict, and the wiring that carries a mark written by
 // fleet-heartbeat.mjs through to the board board.mjs builds.
 //
-// The banner half is lifted out of board.html's source text and called as a
-// pure function, the same seam spend-view.test.mjs and
-// ledger-read-require-file.test.mjs already use. The wiring half drives the
-// real scripts out of process, in a throwaway repository.
+// The wiring half drives the real scripts out of process, in a throwaway
+// repository.
 //
 // A separate file rather than more of board.test.mjs, for the reason
 // ledger-read-require-file.test.mjs gives: the fleet runs several implementers
@@ -29,8 +27,7 @@ const HTML = readFileSync(new URL("./board.html", import.meta.url), "utf8");
 // Same lift technique and the same reason as ledgerBanner in
 // ledger-read-require-file.test.mjs: the page is one self-contained file and
 // its decisions are reachable only through their source text. The
-// declaration-count guard comes first: a second top-level declaration wins at
-// runtime by hoisting and the lift below would still read the first one.
+// declaration-count guard comes first for the same hoisting reason.
 
 test("board.html declares livenessBanner exactly once at top level", () => {
   assert.equal(HTML.match(/^function\s+livenessBanner\s*\(/gm)?.length, 1,
