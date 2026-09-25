@@ -140,6 +140,34 @@ const fixApplierPrompt = () =>
 const fixApplierLeadIn = () =>
   section(reviewersSection(), "**Then dispatch a fix-applier**", PROMPT_ANCHOR, "run-team fix-applier lead-in");
 
+// Review1816: both `doesNotMatch` guards below were closed enumerations of
+// specific historical bad-phrasings — a syntactically different restatement
+// of the SAME false claim (a transcript/output file does not exist at all,
+// rather than merely being unaddressed) slipped straight through. Measured
+// 2026-09-25: appending "though there is no file for you to personally
+// fetch" to either slice went undetected by the old enumerations. This
+// pattern instead matches the CLASS — a negated transcript/file/output/path
+// noun sharing a clause with an access verb (`fetch`/`read`), the `left no
+// <noun>` and `<noun> ... cannot exist` frames, and the two originals with no
+// paraphrase left to match (`nothing is on disk`, bare `no output file`) —
+// gated to one clause (`[^,.;]`) so it cannot reach across a comma into
+// unrelated prose. Verified both ways against the real slices below: all six
+// original phrasings plus the new mutation form match; the true sentence
+// each guard actually protects — "the result file holds their findings and
+// names no transcript, and nothing on disk indexes a transcript by PR or
+// dimension" — and two benign rewords of it (a synonym swap, a comma
+// reflowed to a period) all stay clear.
+const TRANSCRIPT_NONEXISTENCE_CLAIM = new RegExp(
+  [
+    String.raw`\bno\b[^,.;]{0,30}\b(?:transcript|output file|file|path)s?\b[^,.;]{0,40}\b(?:fetch|read)\b`,
+    String.raw`\bleft no (?:transcript|output file|file|path)s?\b`,
+    String.raw`\bnothing is on disk\b`,
+    String.raw`\b(?:transcript|output file|file|path)s?\b[^,.;]{0,40}\b(?:cannot|can't|does not|doesn't|do not|don't)\s+exist\b`,
+    String.raw`\bno output file\b`,
+  ].join("|"),
+  "i",
+);
+
 test("the Reviewers section names the workflow call as the default, ahead of the fallback", () => {
   const dflt = reviewersSection();
   // Loose on the example's punctuation — reordering the args object or wrapping
@@ -587,10 +615,13 @@ test("the fix-applier lead-in hands over the result file's path, never the findi
   // result carries no transcript path, and the `.meta.json` sidecars carry only
   // agentType/model/spawnDepth, so nothing maps one back to a PR or a
   // dimension. Positive pins cannot catch a re-inserted falsehood; only the
-  // exclusion can.
+  // exclusion can — and a closed list of exact historical phrasings is itself
+  // one, so `TRANSCRIPT_NONEXISTENCE_CLAIM` (defined above) matches the claim
+  // CLASS rather than its wording; see that constant's own comment for the
+  // mutation measurement.
   assert.doesNotMatch(
     leadIn,
-    /(nothing is on disk|left no transcript|no transcript you can read|paths that cannot exist|no output file)/i,
+    TRANSCRIPT_NONEXISTENCE_CLAIM,
     "the lead-in claims the specialists' transcripts do not exist — they do; they are merely not addressable by a member",
   );
 });
@@ -618,12 +649,14 @@ test("the fix-applier's self-retrieval is scoped to its own refuters, on a premi
     "the prompt no longer sends the fix-applier to the result file for the review specialists' findings",
   );
   // Same false premise as the lead-in pin above, in the copy the fix-applier
-  // actually reads. `no output file` is excluded as a claim of absence only —
-  // the prompt's own "the output file named in your spawn result" is a
-  // different string and stays green.
+  // actually reads, and the same shared exclusion for the same reason —
+  // `TRANSCRIPT_NONEXISTENCE_CLAIM` — never the bespoke `no output file`
+  // literal that let a reworded restatement through; the prompt's own "the
+  // output file named in your spawn result" is a different clause (positive,
+  // no negation sharing it) and stays green.
   assert.doesNotMatch(
     prompt,
-    /(left no transcript|no transcript you can read|no output file to fetch|nothing is on disk)/i,
+    TRANSCRIPT_NONEXISTENCE_CLAIM,
     "the prompt claims the review's specialists left no transcript — they do leave one; the member simply holds no path to it",
   );
 });

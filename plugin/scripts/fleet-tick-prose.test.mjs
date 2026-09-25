@@ -24,7 +24,7 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 // The tick instruction only, ending where the next standing instruction
 // begins. Widened to the whole Phase 3 loop it would be satisfied by the wake
 // bullets' own mentions of the tick, which say nothing about the script.
-const reconcileBlock = () =>
+const tickBlock = () =>
   section(RUN_TEAM, "**Every wake ends in the tick.**", "**Own the CI waits.**", "run-team tick block");
 
 // The six counts a caller used to state (#1803 deleted them, spec 2026-09-24
@@ -33,7 +33,7 @@ const reconcileBlock = () =>
 const DELETED_FLAGS = ["--implementers", "--reviewers", "--merge-bots", "--pool", "--reviews-ready", "--merge-holds"];
 
 test("the tick block names the script and only the flags it still takes", () => {
-  const s = reconcileBlock();
+  const s = tickBlock();
   assert.match(s, /fleet-tick\.mjs/);
   // The three configuration flags that survived, individually: a cap passed
   // from `$ARGUMENTS` and the review bound are the only things a caller says.
@@ -52,7 +52,7 @@ test("the tick block says the tick reads the run itself, and nobody states a cou
   // state hunts for flags that no longer exist; one told nothing hand-edits a
   // row to make the tick see what it wants. The ledger is the input, written
   // through ledger.mjs, and a token the tick cannot read is a refusal.
-  const s = reconcileBlock();
+  const s = tickBlock();
   assert.match(s, phrase("nobody states a count"));
   assert.match(s, /`\.fleet\/ledger\.md`/);
   assert.match(s, /`\.fleet\/shortlist\.json`/);
@@ -107,7 +107,7 @@ test("the tick block admits no wake covers a drained queue, and says whose case 
   // A reader who takes the wakes for the whole cure stops looking for the
   // drained-queue case they cannot reach. The pointer is the part that must not
   // rot — an admission with nowhere to go is how #3 lost item 2.
-  const s = reconcileBlock();
+  const s = tickBlock();
   assert.match(s, /none\s+covers a fully drained queue/);
   assert.match(s, /fleet-heartbeat\.mjs/);
 });
