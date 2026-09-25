@@ -194,6 +194,14 @@ const COVERED_MJS = {
   // instrument set into another repository". Its other children (gh,
   // `node ci-state.mjs`, `sh instruments.sh`) name no git.
   "merge-gate.mjs": 1,
+  // ONE git-invoking primitive, `shortlistPath()`'s `--git-common-dir` probe —
+  // defaultLedgerPath()'s resolution for `.fleet/shortlist.json` (#1798), so
+  // it carries the same hazard: an ambient GIT_DIR would write the run's
+  // shortlist into another repository's workspace. Measured in
+  // shortlist.test.mjs, "an ambient GIT_DIR naming another repository cannot
+  // move the shortlist there". Its other children (`node candidates.mjs`,
+  // `node ledger.mjs`, `gh`, `sh inflight.sh`) name no git.
+  "shortlist.mjs": 1,
 };
 
 // The two-name-only exemption list #1599's second design question answers
