@@ -260,8 +260,7 @@ function spawnUntilShortWrite(runScript, recordPath) {
 // fd 2's non-blocking state is forced deterministically, no fcntl or python3
 // needed: `console.error("")` lazily initialises Node's own stream object for
 // fd 2, and that initialisation is what puts a pipe fd into O_NONBLOCK — the
-// exact mechanism ci-state.mjs's own vlog relies on (ci-state.mjs,
-// "Initialising a stream for an fd ... puts that fd in O_NONBLOCK"). Once fd 2
+// exact mechanism ci-state.mjs's own vlog relies on. Once fd 2
 // is non-blocking, a single writeSync of a buffer larger than one pipe buffer
 // SHORT-WRITES rather than blocking until spawnSync's reader drains it —
 // always on darwin, and on Linux on all but the spawns that lose the race
