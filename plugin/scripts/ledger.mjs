@@ -1228,8 +1228,8 @@ function runDispatch() {
   const [key, name] = rest.length === 2 ? rest : [null, rest[0]];
   // The id-slot rule `row`/`filed`/`ruled` apply, on whichever slot leads.
   refuseStrayInId(key ?? name, key === null ? "a member name" : "a ticket or PR number");
-  // Read ahead of every lookup below that trusts `## Dispatched` by name —
-  // `nextMergeBot()` two lines down among them.
+  // Read ahead of every lookup below that trusts `## Dispatched` by name,
+  // including `nextMergeBot()`'s own read of it.
   refuseMalformedDispatched();
 
   // `merge-bot` bare is the merge-bot case of this command (spec § 4 item 2,
