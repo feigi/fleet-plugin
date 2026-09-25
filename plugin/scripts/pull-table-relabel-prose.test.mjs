@@ -15,7 +15,7 @@
 // THE SLICE ANCHOR IS WHAT ANCHORS. `pullTable()` bounds the table between its
 // own opening sentence and the paragraph that follows it, never the whole
 // document — a positive match over `RUN_TEAM` wholesale would be satisfiable
-// from the "Relabel by cause" paragraph a few lines below, which restates the
+// from the "Relabel by cause" paragraph, which restates the
 // same two labels in prose and would launder a table-row swap as a pass.
 //
 // MUTATION-TESTED. Swapping the label on the "brief names no *what*" row (the
