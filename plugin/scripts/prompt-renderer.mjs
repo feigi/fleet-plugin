@@ -13,7 +13,7 @@ import { stripComments } from "./strip-comments.mjs";
 // anchor-finding half to prose-pin.mjs's `between()`; the other two
 // reimplemented the same `indexOf`/`assert.notEqual` pair by hand. Only the
 // extraction MACHINERY moves here; the prompt RULE PROSE itself stays inline
-// in review-pr.js/review-core.js per #496's brief against a shared source for
+// in review-pr.js/review-core.mjs per #496's brief against a shared source for
 // the rules themselves.
 const REPO = join(import.meta.dirname, "..");
 

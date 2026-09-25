@@ -1,6 +1,6 @@
 ---
 name: fleet-review-silent-failure
-description: Dispatched by review-pr.js/review-core.js's Review phase for the "silent-failure" dimension. Never invoked directly.
+description: Dispatched by review-pr.js/review-core.mjs's Review phase for the "silent-failure" dimension. Never invoked directly.
 model: sonnet
 effort: high
 thinking-level: high

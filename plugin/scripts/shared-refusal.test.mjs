@@ -12,7 +12,7 @@
 //
 // #878 added a second rule on the same terms — the digits rule isDigits(),
 // whose out-of-reach consumers are fleet-tick.mjs (its own parseArgs),
-// review-core.js (a workflow argument, not argv) and workflows/review-pr.js,
+// review-core.mjs (a workflow argument, not argv) and workflows/review-pr.js,
 // which cannot `import` at all (#538) and so is the only file in the tree
 // that holds a real COPY rather than a call. Its wiring pin rides in test 1
 // below, beside #567's; two further tests sit at the bottom of this file —
@@ -120,7 +120,7 @@ test("every refusal that shares arg.mjs's rules calls a predicate instead of res
   assert.match(arg, /if \(!isDigits\(raw\)\) die\(`--\$\{name\} needs a number, got \$\{raw\}`\);/, "numArg() restates the digits rule instead of calling isDigits");
 
   // The two consumers that cannot route through numArg(): fleet-tick.mjs
-  // reads its flags with node:util's parseArgs, and review-core.js takes its
+  // reads its flags with node:util's parseArgs, and review-core.mjs takes its
   // `pr` as a workflow argument rather than from argv. Each keeps its own
   // wording — "must be a non-negative integer" and "must be a PR number" —
   // and neither may keep its own spelling of the rule.
@@ -128,9 +128,9 @@ test("every refusal that shares arg.mjs's rules calls a predicate instead of res
   assert.match(fleetTick, /^import \{[^}]*\bisDigits\b[^}]*\} from "\.\/arg\.mjs";/m, "fleet-tick.mjs no longer imports isDigits from arg.mjs");
   assert.match(fleetTick, /if \(!isDigits\(String\(raw\)\.trim\(\)\)\) die\(`--\$\{name\} must be a non-negative integer, got '\$\{raw\}'`\);/, "fleet-tick.mjs's integer guard drifted from arg.mjs's rule or lost its own wording");
 
-  const reviewCore = src("review-core.js");
-  assert.match(reviewCore, /^import \{[^}]*\bisDigits\b[^}]*\} from "\.\/arg\.mjs";/m, "review-core.js no longer imports isDigits from arg.mjs");
-  assert.match(reviewCore, /if \(!isDigits\(pr\)\) throw new Error\(/, "review-core.js's numeric-pr guard drifted from arg.mjs's rule");
+  const reviewCore = src("review-core.mjs");
+  assert.match(reviewCore, /^import \{[^}]*\bisDigits\b[^}]*\} from "\.\/arg\.mjs";/m, "review-core.mjs no longer imports isDigits from arg.mjs");
+  assert.match(reviewCore, /if \(!isDigits\(pr\)\) throw new Error\(/, "review-core.mjs's numeric-pr guard drifted from arg.mjs's rule");
 
   // workflows/review-pr.js holds the one COPY (#538: a Workflow body cannot
   // import), so what is pinned here is that the copy is CALLED and where.

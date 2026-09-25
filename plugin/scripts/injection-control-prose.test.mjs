@@ -40,7 +40,7 @@
 //      for the reason it gives: a rule added to one is the one that misses
 //      whichever path a caller takes.
 //   4/5. The refuter prompt TEMPLATE on each harness — workflows/review-pr.js
-//      (Claude) and scripts/review-core.js (omp). These carry the largest
+//      (Claude) and scripts/review-core.mjs (omp). These carry the largest
 //      refuter population by far: the workflow dispatches up to two per
 //      critical/important finding, where the hand-dispatch briefs cover one per
 //      in-scope `suggestion`. The ticket's Key interfaces say no script change
@@ -150,7 +150,7 @@ const SEATS = [
     () => between(REVIEW_AND_FIX, "Try to REFUTE this finding", "That last clause is the whole mechanism", "review-and-fix.md"),
   ],
   ["workflows/review-pr.js's rendered refuter prompt", () => renderTemplate("workflows", "review-pr.js")],
-  ["scripts/review-core.js's rendered refuter prompt", () => renderTemplate("scripts", "review-core.js")],
+  ["scripts/review-core.mjs's rendered refuter prompt", () => renderTemplate("scripts", "review-core.mjs")],
 ];
 
 // The free names each template interpolates, in the order `render` binds them —

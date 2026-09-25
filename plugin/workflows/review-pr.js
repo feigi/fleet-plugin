@@ -134,7 +134,7 @@ const VERDICT_SCHEMA = {
 // "Declared tier"). `agentType` here is the ONLY thing this file threads
 // through to the dispatch — the Claude-side copy (this file) spells it
 // `fleet-ctl:fleet-review-<key>` (the Task tool's `<plugin>:<agent>`
-// convention); review-core.js's host-neutral copy spells the same field bare
+// convention); review-core.mjs's host-neutral copy spells the same field bare
 // (`fleet-review-<key>`), which is already omp's native form. Both values
 // are carried in the same field name, `agentType`, so the two
 // DEFAULT_DIMENSIONS arrays differ ONLY in that one string per entry — see
@@ -550,10 +550,10 @@ if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are 
 // A COPY of arg.mjs's isDigits(), because a Workflow script cannot `import`
 // anything (#538): the body compiles inside the harness VM, where `import()` is
 // refused before the specifier is even resolved and `require` is undefined. Its
-// host-independent twin review-core.js imports the real one. The copy is held
+// host-independent twin review-core.mjs imports the real one. The copy is held
 // in step by shared-refusal.test.mjs, which lifts this declaration and runs it
 // against arg.mjs's over the same values — the same "duplicate, then pin the
-// duplicate" idiom review-core.js's header describes, applied to a rule that
+// duplicate" idiom review-core.mjs's header describes, applied to a rule that
 // lives in a third file.
 function isDigits(value) {
   return /^[0-9]+$/.test(value);
@@ -1014,7 +1014,7 @@ claim-ticket.sh runs at claim time, refusal included, so nothing here
 reinvents it. FLEET_HARNESS=claude is explicit because a box carrying both
 harnesses' registries for this plugin makes fleet-run's own ambiguity
 detection refuse without it (same defect measured on the omp side, PR
-#1409's first review pass — see review-core.js's copy of this prompt):
+#1409's first review pass — see review-core.mjs's copy of this prompt):
 
     FLEET_HARNESS=claude ~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} HEAD
 
@@ -1598,7 +1598,7 @@ function verdictFor(dispatched, votes) {
 // crash handling downstream still sees it.
 //
 // PURE and top-level for the reason `verdictFor` above is — a lifted copy is
-// run against review-core.js's through the same fixtures
+// run against review-core.mjs's through the same fixtures
 // (review-core-parity.test.mjs), and both review bodies are executed against
 // one scripted host (review-in-run-retry.test.mjs). Not `async`, because
 // `lift()` matches a plain `function` declaration.
@@ -1631,12 +1631,12 @@ function retryCrashed(dispatch, crashed) {
 // green.
 // Marked pair (CONTEXT.md § Dialect), documentary only — this file never
 // executes on omp, so nothing here branches on harness at runtime. Recorded
-// so a reader auditing review-core.js's `resumeFor(unverified, harness)`
+// so a reader auditing review-core.mjs's `resumeFor(unverified, harness)`
 // against this file's own hardcoded Claude message can find the omp half
 // without leaving this file.
 /*
 CLAUDE: point the reader at `Workflow({scriptPath, resumeFromRunId})` — this file's own resumability contract, unchanged by the port.
-OMP: review-core.js's `resumeFor` names the same crash population to be reported, not acted on — no cached `agent()` replay exists under eval (ADR 0004/0005, #1349 gap 1).
+OMP: review-core.mjs's `resumeFor` names the same crash population to be reported, not acted on — no cached `agent()` replay exists under eval (ADR 0004/0005, #1349 gap 1).
 */
 function resumeFor(unverified) {
   const crashed = unverified.filter((f) => f.refutersDispatched > 0);
@@ -1940,7 +1940,7 @@ const bySeverity = (a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3);
 // the bulky finding arrays trail, because the Workflow's inline `<result>` is
 // cut at ~8 KB and the controller acts on the digest alone: `resume` used to
 // be the LAST key and fell past the cut on a large review. Same order as
-// review-core.js's `DIGEST_KEYS`, which review-in-run-retry.test.mjs holds both
+// review-core.mjs's `DIGEST_KEYS`, which review-in-run-retry.test.mjs holds both
 // bodies to by running them.
 return {
   pr,

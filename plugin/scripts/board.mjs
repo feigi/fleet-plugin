@@ -90,7 +90,7 @@ const stray = makeStray(die);
 // predicate rejects: it answers "object" for `null` and for `[]` alike, and
 // those are exactly two of the three shapes turned away here, so a
 // `typeof`-only diagnostic distinguishes neither from a real object. That is
-// the same three-arm naming review-core.js's resolveDimensions keeps, for the
+// the same three-arm naming review-core.mjs's resolveDimensions keeps, for the
 // same reason.
 //
 // Not every payload-shape check in this file is one of these, and the others

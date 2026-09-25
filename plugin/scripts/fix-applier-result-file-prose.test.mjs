@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { between, phrase } from "./prose-pin.mjs";
-import { DIGEST_KEYS } from "./review-core.js";
+import { DIGEST_KEYS } from "./review-core.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const DOC = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");

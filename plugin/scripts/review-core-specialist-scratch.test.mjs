@@ -3,7 +3,7 @@
 // into the command, and bracket a fixture's own git with `git rev-parse
 // --show-toplevel` — mirroring what PR #1082 had already added to that same
 // file's REFUTER prompt (review-pr-refuter-scratch.test.mjs pins that copy).
-// scripts/review-core.js carries a second, host-neutral (omp) copy of the same
+// scripts/review-core.mjs carries a second, host-neutral (omp) copy of the same
 // specialist dispatch prompt and carried neither rule, while ordering the same
 // kind of work: "Run any mutation or probe work inside your own copy of the
 // snapshot."
@@ -21,7 +21,7 @@
 //
 // INLINED, NOT SHARED, same as workflows/review-pr.js's copy and for the same
 // reason: #496's brief rules the shared-source route out — "the drift hazard
-// is real and is its own ticket, not this one" — and review-core.js's own
+// is real and is its own ticket, not this one" — and review-core.mjs's own
 // harness is host-neutral (omp) rather than a Claude-hosted workflow script,
 // so it cannot import review-pr.js either. That drift hazard is exactly what
 // this pin exists to convert into a red: it failed to fire once already, which
@@ -59,7 +59,7 @@ import { stripComments } from "./strip-comments.mjs";
 import { between } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
-const SOURCE = readFileSync(join(REPO, "scripts", "review-core.js"), "utf8");
+const SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
 const CODE = stripComments(SOURCE);
 
 const TEMPLATE_START = "`Review PR #${pr} (branch ${branch}) for: ";
@@ -78,7 +78,7 @@ const SLICE = between(
   CODE,
   TEMPLATE_START,
   TEMPLATE_END,
-  "review-core.js's specialist prompt (opening `Review PR #${pr} (branch ${branch}) for: `, labelled `review:`)",
+  "review-core.mjs's specialist prompt (opening `Review PR #${pr} (branch ${branch}) for: `, labelled `review:`)",
 );
 
 const RENDER = new Function(...SCOPE, "return `" + SLICE.slice(1, SLICE.lastIndexOf("`")) + "`");
@@ -115,7 +115,7 @@ test("the rendered specialist prompt chains cd into the git command, never semic
   assert.match(
     render(),
     /cd\s+"\$D"\s+&&\s+git\s+…`,\s+never\s+`cd\s+"\$D";\s+git\s+…/s,
-    "review-core.js's specialist prompt carries no cd-chaining rule — a silently failed `cd` leaves the following `git` " +
+    "review-core.mjs's specialist prompt carries no cd-chaining rule — a silently failed `cd` leaves the following `git` " +
       "running in the checkout, which is what produced commit 020d6ea during the PR #488 fix-applier run (#1550)",
   );
 });
@@ -154,7 +154,7 @@ test("the rendered specialist prompt requires a toplevel assertion around git in
   assert.match(
     render(),
     /`git\s+rev-parse\s+--show-toplevel`:\s+before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository,\s+and\s+a\s+fresh\s+scratch\s+dir's\s+`fatal:\s+not\s+a\s+git\s+repository`\s+\(exit\s+128\)\s+is\s+the\s+pass,\s+not\s+a\s+failure;\s+before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path\s+—\s+compare\s+resolved\s+forms\s+\(`realpath`\),\s+since\s+`--show-toplevel`\s+can\s+report\s+`\/private\/tmp\/…`\s+for\s+a\s+`\/tmp`\s+scratch\s+dir\s+on\s+macOS/s,
-    "review-core.js's specialist prompt carries no toplevel assertion around a fixture's own git init/commit, or " +
+    "review-core.mjs's specialist prompt carries no toplevel assertion around a fixture's own git init/commit, or " +
       "dropped the realpath remedy for macOS's /private vs /tmp symlink — an agent that wrongly believes it is " +
       "already in its scratch copy runs `git init`/`git commit` against the repository, and a raw compare against " +
       "`--show-toplevel` reads a `/private/tmp` answer for a `/tmp` scratch dir as a mismatch on the clean path (#1550, #1570)",
@@ -179,13 +179,13 @@ test("the added rules still sit on a prompt that names a write area and orders w
   assert.match(
     prompt,
     /Run any mutation or probe work inside your own copy of the snapshot\./,
-    "review-core.js's specialist is no longer told to do mutation or probe work in a copy of its own — the two " +
+    "review-core.mjs's specialist is no longer told to do mutation or probe work in a copy of its own — the two " +
       "directory rules now guard work the prompt never scopes to a copy at all",
   );
   assert.match(
     prompt,
     /Scratch\s+files\s+go\s+in\s+\/scr\/run-1\/correctness\/\s+and\s+nowhere\s+else\.\s+Chain\s+the\s+directory\s+change\s+into\s+the\s+command/s,
-    "review-core.js's specialist prompt no longer names the scratch directory immediately before the cd rule — " +
+    "review-core.mjs's specialist prompt no longer names the scratch directory immediately before the cd rule — " +
       "either the write area is gone, leaving 'your scratch path' naming nothing, or a sentence between them carves " +
       "an exception into it",
   );

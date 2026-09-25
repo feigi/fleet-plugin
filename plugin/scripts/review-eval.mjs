@@ -1,5 +1,5 @@
 // review-eval.mjs — the omp shim for the PR review port (#1349, per #1303's
-// ruling on #1296). It is loaded (never review-core.js or review-pr.js
+// ruling on #1296). It is loaded (never review-core.mjs or review-pr.js
 // directly) through the Resolver, from an `eval` cell:
 //
 //   const path = (await Bun.$`FLEET_HARNESS=omp ~/.fleet/bin/fleet-run --path review-eval.mjs`.text()).trim();
@@ -12,34 +12,34 @@
 // one retry and writes the result file. A controller holding its own turn can
 // still call `runReviewOnOmp` exactly as above.
 //
-// This file `import`s review-core.js (a same-directory sibling, both ship
+// This file `import`s review-core.mjs (a same-directory sibling, both ship
 // together under the same Install root) with a RELATIVE specifier, so the
 // Resolver is only needed ONCE, to find this file itself — the relationship
 // between the two is an ordinary same-install sibling import, which eval's
 // Bun VM permits without restriction (#1296 Q6). Never resolve
-// review-core.js's own path through the Resolver a second time — that would
+// review-core.mjs's own path through the Resolver a second time — that would
 // be two doors where CONTEXT.md's Resolver entry says there is exactly one.
 //
 // No `model`/`effort` appears anywhere below (#1349 gap 3; audited by
 // review-tier-audit.test.mjs). Every dispatch names a bare fleet-owned
-// `agentType` from review-core.js's DEFAULT_DIMENSIONS or from
+// `agentType` from review-core.mjs's DEFAULT_DIMENSIONS or from
 // runReview's own snapshot/verifier dispatch, unmodified — omp's `agent()`
 // resolves a bare frontmatter `name:` exactly, which is already what those
 // strings are.
 import { mkdir, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import { digestOf, runReview, runnerPrRefusal } from "./review-core.js";
+import { digestOf, runReview, runnerPrRefusal } from "./review-core.mjs";
 
 // eval's `agent()` returns a HANDLE, not data (#1296 Q2): `agent(prompt,
 // opts)` resolves near-instantly to an `AgentHandle` with `.wait()`, and only
 // `.wait()` unwraps the schema-validated `structuredOutput.data`. This
-// wrapper is what makes review-core.js's `await host.agent(...)` read like
+// wrapper is what makes review-core.mjs's `await host.agent(...)` read like
 // Claude's synchronous, data-returning `agent()` — the ONE piece of
 // harness-specific glue `runReview` needs and cannot see.
 //
 // A crashed/rejected dispatch resolves to `null`, matching Claude's own
 // "agent() returns null on exhaustion" contract that every guard in
-// review-core.js (`if (snap) {...}`, `unrunCrashed`, `verdictFor`) is written
+// review-core.mjs (`if (snap) {...}`, `unrunCrashed`, `verdictFor`) is written
 // against. eval's DEFAULT `schemaMode` is "permissive": an exhausted
 // structured-output retry is ACCEPTED anyway, carrying `schemaOverridden:
 // true` on invalid data (#1296 Q2) rather than nulling out the way Claude
@@ -48,7 +48,7 @@ import { digestOf, runReview, runnerPrRefusal } from "./review-core.js";
 // treats a REJECTED `.wait()` as the crash signal (`agent()`'s only way to
 // fail loudly under omp) and maps it to `null` itself; it does not attempt to
 // distinguish an accepted-but-schema-overridden permissive result from a
-// clean one, because review-core.js never reads a distinguishing field for
+// clean one, because review-core.mjs never reads a distinguishing field for
 // that case either — a schema violation the host already retried three times
 // and gave up correcting is not this shim's contract to relitigate.
 //
@@ -82,7 +82,7 @@ import { digestOf, runReview, runnerPrRefusal } from "./review-core.js";
 //     broken tree, applied to the checkout. That is the reported defect with a
 //     commit attached.
 //
-// So the rule lives where it can be stated at all: review-core.js's snapshot,
+// So the rule lives where it can be stated at all: review-core.mjs's snapshot,
 // specialist and refuter prompts name the inherited cwd as a no-run zone, order
 // a `cd` into the run-root scratch path before any mutation, and require a
 // `CWD-AUDIT:` line back. This wrapper stays a pure handle adapter. Should
@@ -99,7 +99,7 @@ async function ompAgent(prompt, opts) {
 }
 
 // `pipeline()`/`parallel()` have no omp counterpart (#1296 Q3) — this is the
-// same hand-rolled pair review-core.js exports as its own default (see
+// same hand-rolled pair review-core.mjs exports as its own default (see
 // `defaultPipeline`/`defaultParallel` there), passed through explicitly here
 // rather than left to the default so a reader of THIS file, the one the
 // controller actually loads, can see the omp orchestration shape without

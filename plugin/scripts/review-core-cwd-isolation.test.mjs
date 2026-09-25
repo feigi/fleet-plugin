@@ -52,9 +52,9 @@ import assert from "node:assert/strict";
 import { phrase } from "./prose-pin.mjs";
 import { promptRenderer } from "./prompt-renderer.mjs";
 import { AUDIT_COMMAND, AUDIT_STATES, CWD_AUDIT_MARKER, EVERY_RUN, PWD_FIRST, REFUTER_CWD, REPORT_FIELD, SCRATCH_NAMED_REFUTER, SCRATCH_NAMED_SPECIALIST, SPECIALIST_CWD, auditLine } from "./cwd-isolation-pins.mjs";
-import { FINDINGS_SCHEMA, VERDICT_SCHEMA, cwdAuditFrom, runReview } from "./review-core.js";
+import { FINDINGS_SCHEMA, VERDICT_SCHEMA, cwdAuditFrom, runReview } from "./review-core.mjs";
 
-const FILE = "scripts/review-core.js";
+const FILE = "scripts/review-core.mjs";
 const SNAP = { path: "/scr/run-1/snapshot-abc1234", head: "abc1234", runRoot: "/scr/run-1" };
 
 // One specialist's, one refuter's and the snapshot agent's prompt. Every
@@ -68,7 +68,7 @@ const specialist = promptRenderer({
   start: "`Review PR #${pr} (branch ${branch}) for: ",
   end: "label: `review:",
   scope: ["pr", "branch", "d", "snap", "worktree", "stats", "testCmd", "readRules", "usableDiff", "environmentNote"],
-  what: "review-core.js's specialist prompt (opening `Review PR #${pr} (branch ${branch}) for: `, labelled `review:`)",
+  what: "review-core.mjs's specialist prompt (opening `Review PR #${pr} (branch ${branch}) for: `, labelled `review:`)",
 })(7, "feature/x", { key: "correctness", prompt: "does it do what it says" }, SNAP, "/repo/.worktrees/7-x", null, "node --test", () => "READ RULES", () => null, () => "TEST ENVIRONMENT");
 
 const refuter = promptRenderer({
@@ -76,7 +76,7 @@ const refuter = promptRenderer({
   start: "`Try to REFUTE this finding from PR #",
   end: "{ label: `verify:",
   scope: ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote"],
-  what: "review-core.js's refuter prompt (opening `Try to REFUTE this finding from PR #`, labelled `verify:`)",
+  what: "review-core.mjs's refuter prompt (opening `Try to REFUTE this finding from PR #`, labelled `verify:`)",
 })(7, { claim: "the guard fails open", file: "a.js", line: 12, evidence: "line 12 has no else" }, SNAP, null, { key: "correctness" }, 0, 0, () => "READ RULES", () => null, () => "TEST ENVIRONMENT");
 
 const snapshot = promptRenderer({
@@ -84,7 +84,7 @@ const snapshot = promptRenderer({
   start: "`In ${worktree}, cut an immutable review snapshot",
   end: '{ label: "snapshot"',
   scope: ["worktree", "scratch", "runRootParent", "runRootPrefix", "pr", "harness"],
-  what: 'review-core.js\'s snapshot prompt (opening `In ${worktree}, cut an immutable review snapshot`, labelled "snapshot")',
+  what: 'review-core.mjs\'s snapshot prompt (opening `In ${worktree}, cut an immutable review snapshot`, labelled "snapshot")',
 })("/repo/.worktrees/7-x", "/scr", "/scr/pr7", "/scr/pr7/run-", 7, "omp");
 
 // --- Part 1: the inherited cwd is named, as a tree not to write to ---------
@@ -97,7 +97,7 @@ test("the rendered specialist prompt names the cwd it inherits and says a relati
   assert.match(
     specialist,
     phrase(SPECIALIST_CWD),
-    "review-core.js's specialist prompt no longer names the directory it is dispatched INTO — a specialist that does not know its cwd is the controller's checkout has no reason to leave it, " +
+    "review-core.mjs's specialist prompt no longer names the directory it is dispatched INTO — a specialist that does not know its cwd is the controller's checkout has no reason to leave it, " +
       "which is how three reviews left four files modified there (#1433)",
   );
 });
@@ -106,7 +106,7 @@ test("the rendered refuter prompt names the cwd it inherits and says a relative 
   assert.match(
     refuter,
     phrase(`your shell does not start there: ${REFUTER_CWD}`),
-    "review-core.js's refuter prompt no longer names the directory it is dispatched INTO — a refuter applying a mutation is the likeliest writer of the four files #1433 measured",
+    "review-core.mjs's refuter prompt no longer names the directory it is dispatched INTO — a refuter applying a mutation is the likeliest writer of the four files #1433 measured",
   );
 });
 
@@ -122,7 +122,7 @@ for (const [name, prompt] of [
     assert.match(
       prompt,
       PWD_FIRST,
-      `review-core.js's ${name} prompt no longer fixes which directory it started in before running anything — the audit below then has no path to audit, and the cd rules guard a directory nothing identified (#1433)`,
+      `review-core.mjs's ${name} prompt no longer fixes which directory it started in before running anything — the audit below then has no path to audit, and the cd rules guard a directory nothing identified (#1433)`,
     );
   });
 }
@@ -142,7 +142,7 @@ for (const [name, prompt, span] of [
     assert.match(
       prompt,
       span,
-      `review-core.js's ${name} prompt no longer makes this claim, or worded it to match "above" when its scratch dir is actually named later (#1721)`,
+      `review-core.mjs's ${name} prompt no longer makes this claim, or worded it to match "above" when its scratch dir is actually named later (#1721)`,
     );
   });
 }
@@ -157,7 +157,7 @@ test("the rendered specialist prompt audits the directory it started in, with th
   assert.match(
     specialist,
     phrase(AUDIT_COMMAND),
-    "review-core.js's specialist prompt dropped the stray-write audit, or asks for bare `--porcelain` — which a `status.showUntrackedFiles=no` config silences into a false clean, the same false-clean class worktree-audit.sh's own `-uall` exists to deny (#1433)",
+    "review-core.mjs's specialist prompt dropped the stray-write audit, or asks for bare `--porcelain` — which a `status.showUntrackedFiles=no` config silences into a false clean, the same false-clean class worktree-audit.sh's own `-uall` exists to deny (#1433)",
   );
 });
 
@@ -165,7 +165,7 @@ test("the rendered refuter prompt audits the directory it started in, with the e
   assert.match(
     refuter,
     phrase(AUDIT_COMMAND),
-    "review-core.js's refuter prompt dropped the stray-write audit, or asks for bare `--porcelain` (#1433)",
+    "review-core.mjs's refuter prompt dropped the stray-write audit, or asks for bare `--porcelain` (#1433)",
   );
 });
 
@@ -184,12 +184,12 @@ for (const [name, prompt, schema, schemaName] of [
     const named = prompt.match(REPORT_FIELD);
     assert.ok(
       named,
-      `review-core.js's ${name} prompt no longer names a report field for the CWD-AUDIT line — an audit the agent has nowhere to put is an audit the caller never sees (#1433)`,
+      `review-core.mjs's ${name} prompt no longer names a report field for the CWD-AUDIT line — an audit the agent has nowhere to put is an audit the caller never sees (#1433)`,
     );
     assert.equal(schema.additionalProperties, false, `${schemaName} no longer refuses undeclared fields — this pin's premise (a wrongly-named field is DROPPED, not passed through) no longer holds; re-derive it`);
     assert.ok(
       Object.hasOwn(schema.properties, named[1]),
-      `review-core.js's ${name} prompt reports the audit in \`${named[1]}\`, which ${schemaName} does not declare — \`additionalProperties: false\` drops it, so the audit dies in validation with the prompt still reading correct`,
+      `review-core.mjs's ${name} prompt reports the audit in \`${named[1]}\`, which ${schemaName} does not declare — \`additionalProperties: false\` drops it, so the audit dies in validation with the prompt still reading correct`,
     );
     assert.ok(
       schema.required.includes(named[1]),
@@ -205,13 +205,13 @@ for (const [name, prompt, schema, schemaName] of [
       assert.match(
         prompt,
         auditLine(state),
-        `review-core.js's ${name} prompt no longer spells the \`${state}\` form of the audit line — the state it cannot spell is the state it will not report (#1433)`,
+        `review-core.mjs's ${name} prompt no longer spells the \`${state}\` form of the audit line — the state it cannot spell is the state it will not report (#1433)`,
       );
     }
     assert.match(
       prompt,
       EVERY_RUN,
-      `review-core.js's ${name} prompt no longer demands the audit line on a CLEAN run — an audit reported only when it finds something is indistinguishable from one never run, which is exactly how #1433's four files went unrecorded`,
+      `review-core.mjs's ${name} prompt no longer demands the audit line on a CLEAN run — an audit reported only when it finds something is indistinguishable from one never run, which is exactly how #1433's four files went unrecorded`,
     );
   });
 }
@@ -230,7 +230,7 @@ for (const [name, prompt] of [
     assert.match(
       prompt,
       CWD_AUDIT_MARKER,
-      `review-core.js's ${name} prompt no longer names the CWD-AUDIT marker as a code span — a reader cannot tell the literal from the prose around it`,
+      `review-core.mjs's ${name} prompt no longer names the CWD-AUDIT marker as a code span — a reader cannot tell the literal from the prose around it`,
     );
   });
 }
@@ -246,7 +246,7 @@ test("the rendered snapshot prompt says its own block is absolute by constructio
     phrase(
       "Every path in the block above is absolute or `-C`-anchored on purpose: this dispatch carries no working directory of its own either, so you start in the controller's own checkout, and a relative path — a `tar -x` with no `-C`, a bare `git` — reads or writes THERE",
     ),
-    "review-core.js's snapshot prompt no longer says why its paths are absolute — the agent that mints the scratch tree is the one dispatch with no scratch dir to cd into, so the rule it gets is the only one it can follow (#1433)",
+    "review-core.mjs's snapshot prompt no longer says why its paths are absolute — the agent that mints the scratch tree is the one dispatch with no scratch dir to cd into, so the rule it gets is the only one it can follow (#1433)",
   );
 });
 

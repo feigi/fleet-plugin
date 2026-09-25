@@ -86,7 +86,7 @@ const commands = quoted.filter((s) => /^(?:grep|node) /.test(s));
 const PROBES = [
   `grep -ln '^function die(' scripts/*.mjs`,
   `grep -n 'from "./arg.mjs"' scripts/*.mjs | grep -v test`,
-  `grep -n '^import .* from "./arg.mjs"' scripts/*.mjs | grep -v test | grep -v makeSweep`,
+  `grep -n '^import .*makeDie.* from "./arg.mjs"' scripts/*.mjs | grep -v test | grep -v makeSweep`,
   "node scripts/candidates.mjs --limit",
   "node scripts/candidates.mjs --bogus",
 ];
