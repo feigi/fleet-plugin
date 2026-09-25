@@ -112,6 +112,28 @@ test("the alternate definition differs from the default in MODEL ONLY", () => {
   );
 });
 
+test("the alternate definition's body is byte-identical to the default's (#1801)", () => {
+  // #1801 duplicated the shared implementer background into these two agent
+  // files' BODIES — SKILL.md's own per-dispatch prompt copy is untouched by
+  // this diff, so the text now exists in three places — on the premise that a
+  // member reads its own agent.md body as `§ Role` regardless of which prompt
+  // dispatched it (measured on #1777: omp injects the body verbatim, every
+  // occurrence). A body that drifts between the two agent files dispatches two
+  // differently-briefed implementers under one shared label, silently — the
+  // frontmatter-field pins above read one line each and cannot see a
+  // divergence anywhere else in the file. Exact string equality over the whole
+  // body is the tightest pin this claim admits: unlike a regex slice, a single
+  // added, dropped or reworded byte on either side fails it, and nothing
+  // benign can satisfy it by accident.
+  const body = (n) =>
+    readFileSync(join(REPO, "agents", `${n}.agent.md`), "utf8").split("---").slice(2).join("---") ?? "";
+  assert.equal(
+    body("fleet-implementer-alt"),
+    body("fleet-implementer"),
+    "the two implementer definitions' bodies have diverged — #1801's shared background must be pasted identically into both",
+  );
+});
+
 test("phase 2 binds the rate to phase-0 staging and excludes refills", () => {
   // The rate was expressed in a unit the guard below declares nonexistent for
   // implementers ("refill is level-triggered, so there are no implementer
