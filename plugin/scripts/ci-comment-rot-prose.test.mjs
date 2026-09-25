@@ -166,16 +166,22 @@ export function windowClaimFault(block) {
   if (!/\b(schedule|window)\b/i.test(block)) {
     return "the pin's comment no longer says the bot moves .nvmrc on a schedule — the pointer to how it moves is gone";
   }
-  const bounded = block
-    .split(/(?<=[.!?])\s+/)
-    .some(
-      (s) =>
-        /\b(schedule|window)\b/i.test(s) &&
-        /\b(open|opens|opened|opening|create|creates|created|creating|creation|raise|raises|raised|raising)\b/i.test(s) &&
-        /\b(PRs?|pull requests?)\b/i.test(s) &&
-        /\bmerg/i.test(s) &&
-        /\b(not|never|nothing|regardless|whenever)\b|n't\b/i.test(s),
-    );
+  const bounded = block.split(/(?<=[.!?])\s+/).some((s) => {
+    if (!/\b(schedule|window)\b/i.test(s)) return false;
+    if (!/\b(open|opens|opened|opening|create|creates|created|creating|creation|raise|raises|raised|raising)\b/i.test(s)) return false;
+    if (!/\b(PRs?|pull requests?)\b/i.test(s)) return false;
+    const mergeAt = s.search(/\bmerg/i);
+    if (mergeAt === -1) return false;
+    // Once the sentence turns to talk about merging, "window"/"schedule" must not
+    // be named again — that is the tell of a sentence that TIES the merge back to
+    // the window instead of denying the tie. Without this, "whenever"/"regardless"
+    // alone satisfied the negation check even in a sentence that asserts the exact
+    // misreading #1753 exists to rule out, e.g. "the PR merges whenever the window
+    // is open" (#1838 — reproduced by direct execution against this function).
+    if (/\b(schedule|window)\b/i.test(s.slice(mergeAt))) return false;
+    const NEGATION = /\b(not|never|nothing|regardless|whenever)\b|n't\b/i;
+    return NEGATION.test(s.slice(0, mergeAt)) || NEGATION.test(s.slice(mergeAt));
+  });
   return bounded
     ? null
     : "the pin's comment names the bot's schedule but no longer says, in one sentence, that its window bounds PR creation and not merge timing — #1753";
@@ -183,16 +189,30 @@ export function windowClaimFault(block) {
 
 // The contiguous comment run above the setup-node step whose comment cites ADR
 // 0010 — anchored on the step and the ADR it points at, never a line number.
-function pinOwnerComment() {
-  const lines = read("../../.github/workflows/ci.yml").split("\n");
+// Exported with an optional `lines` override (same idiom as windowClaimFault's
+// `block` param and citationFault's `citing`/`cited` params above) so the
+// ambiguity case below can feed it synthetic input the real ci.yml does not
+// contain; the production call site below takes no argument and reads the
+// real file. Asserts uniqueness rather than returning the first hit: a second
+// setup-node step whose comment also happens to cite "ADR 0010" would
+// otherwise let this silently validate the WRONG block while the real one
+// rots unchecked (#1838 — reproduced: reverting the real comment to its stale
+// pre-#1753 form while an earlier decoy step's comment cited "ADR 0010" left
+// every test in this file green).
+export function pinOwnerComment(lines = read("../../.github/workflows/ci.yml").split("\n")) {
+  const matches = [];
   for (let step = 0; step < lines.length; step++) {
     if (!/^\s*- uses: actions\/setup-node@/.test(lines[step])) continue;
     let i = step;
     while (i > 0 && /^\s*#/.test(lines[i - 1])) i--;
     const block = prose(lines.slice(i, step).join("\n"));
-    if (block.includes("ADR 0010")) return block;
+    if (block.includes("ADR 0010")) matches.push(block);
   }
-  return null;
+  assert.ok(
+    matches.length <= 1,
+    `ci.yml has ${matches.length} setup-node comment blocks citing "ADR 0010" — the pin can no longer tell which one owns it`,
+  );
+  return matches[0] ?? null;
 }
 
 test("the pin's comment says the bot's window bounds PR creation, not merge timing", () => {
@@ -219,4 +239,38 @@ test("a paraphrase of the window claim is accepted; the stale form and a merge p
   // The misreading stated outright — the trailing "Do not" must not rescue it.
   assert.match(windowClaimFault(`${lead} The bot opens its PR and merges it within that window. ${tail}`), /no longer says, in one sentence/);
   assert.match(windowClaimFault(`.nvmrc holds an EXACT version: see ADR 0010. ${tail}`), /no longer says the bot moves/);
+});
+
+test("windowClaimFault refuses a merge promise stated via 'whenever'/'regardless' alone (#1838)", () => {
+  // Both hit every earlier condition (schedule/window, an open-class verb, PR,
+  // merg, and a word from the negation class) and both assert the exact tie
+  // #1753 exists to deny — this is the defect a peer review found and this
+  // pins the fix.
+  assert.match(
+    windowClaimFault("The bot opens its PR in the window, and the PR merges whenever the window is open."),
+    /no longer says, in one sentence/,
+  );
+  assert.match(
+    windowClaimFault("The window opens the PR, and the PR merges within that window, regardless."),
+    /no longer says, in one sentence/,
+  );
+  // The committed paraphrase that legitimately uses "whenever" still passes —
+  // the fix keys off "window"/"schedule" reappearing after the merge word, not
+  // off "whenever" itself.
+  assert.equal(
+    windowClaimFault(
+      ".nvmrc holds an EXACT version, and Renovate moves it on a monthly schedule rather than a human noticing: see ADR 0010. The window only limits when Renovate raises the pull request; merging happens whenever the required checks go green. Do not hand-edit this to float.",
+    ),
+    null,
+  );
+});
+
+test("pinOwnerComment refuses to pick silently between two setup-node comments that both cite ADR 0010 (#1838)", () => {
+  const lines = [
+    "      # decoy: cites ADR 0010 but is not the real pin.",
+    "      - uses: actions/setup-node@v5",
+    "      # the real pin, citing ADR 0010 too.",
+    "      - uses: actions/setup-node@v5",
+  ];
+  assert.throws(() => pinOwnerComment(lines), /2 setup-node comment blocks citing "ADR 0010"/);
 });
