@@ -122,8 +122,9 @@ export function normalizeModel(raw) {
 // canonical name run-team now fixes (#326); the other three stay matched
 // because the runs that used them are already in the record.
 //
-// merge-bot-<n> is deliberately excluded: its number is a WAVE index, and
-// booking it as a pr would join the row to an unrelated PR's verdict. A
+// merge-bot-<n> is deliberately excluded: its number is a per-run dispatch
+// counter, never a PR, and booking it as a pr would join the row to an
+// unrelated PR's verdict. A
 // single trailing lowercase letter is a retry suffix (-b, -c and -d all
 // observed) and is stripped first, because a re-dispatched member works the
 // same unit. A trailing `-v<n>` (`-v2`, `-v10`, ...) is a DIFFERENT spelling

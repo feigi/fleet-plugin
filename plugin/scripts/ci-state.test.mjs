@@ -1022,10 +1022,10 @@ test("every flag ci-state.mjs accepts survives the unknown-flag sweep in one inv
 // be resolved and a revoked token were one undifferentiated cause. The correct
 // responses differ: a quota refusal recovers on its own and is worth re-probing
 // shortly, the others need someone to look, so the cause is named in the
-// PAYLOAD. That is where the fleet's gates read this script — `run-team`'s
-// SKILL.md directs a merge bot to gate on the payload's own fields and warns
-// that an empty payload, which is all this arm produced, "reads as a block, not
-// a pass — the safe direction, but still a false one".
+// PAYLOAD. That is where the fleet's gates read this script — `merge-gate.mjs`
+// gates every merge on the payload's own fields, and an empty payload, which is
+// all this arm produced, is `ci-unreadable` there: a probe that could not look,
+// never a reading about the PR.
 //
 // No test reached this arm before: every other exit-2 case here dies in
 // workflow discovery or in a shape check, never in the subprocess failure path.
@@ -1097,10 +1097,9 @@ test("a gh read failing for any other reason reports exactly as it did before: e
 // probe that could not look, so it reports no CI state at all. Emitting these
 // as nulls or empty arrays would let unobserved state read as observed: an
 // empty `missing` says "nothing is missing", which is a reading, where an
-// absent one refuses the `jq` gate run-team/SKILL.md sends a merge bot to write
-// over "the payload's own fields — `verdict`, `behind`, `missing`, the per-job
-// conclusions, and `prHead == runHeadSha`". That doc names the shape of the
-// risk itself: "An empty payload reads as a block, not a pass."
+// absent one is what `merge-gate.mjs`, which gates every merge on this
+// payload's own fields, reads as a probe that could not look rather than as
+// observed state.
 test("the outage payload reports no CI state it could not observe", () => {
   const r = ghFailure(RATE_LIMIT_STDERR);
   for (const field of ["status", "conclusion", "jobs", "missing", "runId"]) {

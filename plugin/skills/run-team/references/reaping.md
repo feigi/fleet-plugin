@@ -1,10 +1,10 @@
 # Reaping merged branches and worktrees
 
-Why reap runs after every wave, why `commit-commands:clean_gone` disqualified, why hand-rolled reap shaped this way (implemented by `reap.sh`), and why a claim that never became a PR needs a different script (`release-ticket.sh`). Assertions these justify live in SKILL.md's "Reap after every wave" and "Release the claims that never became PRs" sections; evidence here.
+Why reap runs after each merge pass, why `commit-commands:clean_gone` disqualified, why hand-rolled reap shaped this way (implemented by `reap.sh`), and why a claim that never became a PR needs a different script (`release-ticket.sh`). Assertions these justify live in SKILL.md's "Reap after each merge pass" and "Release the claims that never became PRs" sections; evidence here.
 
-## Reap after every wave, not once at the end
+## Reap after each merge pass, not once at the end
 
-Merge deletes remote branch, leaves local branch `[gone]` with worktree — and its `node_modules` — still on disk. Stale worktree still answers `git worktree list`, so phase 0's in-flight probe reads already-merged ticket as taken and queue quietly shrinks as run goes on.
+Merge deletes remote branch, leaves local branch `[gone]` with worktree — and its `node_modules` — still on disk. Stale worktree still answers `git worktree list`, so the in-flight probe (`inflight.sh`, run by the Shortlist and again by every Pull) reads already-merged ticket as taken and queue quietly shrinks as run goes on.
 
 ## Why `commit-commands:clean_gone` is disqualified
 
@@ -28,7 +28,7 @@ Every precondition recomputed **inside** same command as delete:
 
 ## Why a second sweep, over worktrees rather than branches
 
-Above walk finds branch's worktree by `branch refs/heads/<name>` line `git worktree list --porcelain` prints. Worktree at detached HEAD carries no such line — so it was not refused, it was **not considered**, which is why no-silent-caps rule did not fire either: branch reaped, no `would remove worktree` line, no `kept` entry, directory left on disk. Measured live during merge wave.
+Above walk finds branch's worktree by `branch refs/heads/<name>` line `git worktree list --porcelain` prints. Worktree at detached HEAD carries no such line — so it was not refused, it was **not considered**, which is why no-silent-caps rule did not fire either: branch reaped, no `would remove worktree` line, no `kept` entry, directory left on disk. Measured live during a merge pass.
 
 **Route not established — shape is.** Do not repeat that merge bot's server-side rebase detaches worktree: measured false. Bot reported `path=rebase` for #969/#970/#972, `reap.sh` dry run right after printed `would remove worktree` for all three — line only ATTACHED worktree reaches. `run-merge-bot.md` agrees: API rebased remote, not your checkout, left attached and merely stale. `release-ticket.sh` names one route it did measure, interrupted rebase. Cost of shape is what matters and is measured: stale worktree still answers `git worktree list`, in-flight probe reads it as live claim, already-merged ticket reads as taken, queue quietly shrinks.
 
@@ -46,7 +46,7 @@ So `reap.sh` enumerates worktrees git lists with **no `branch` line at all** and
 
 Undispatched claim = `in-progress` label + worktree + branch, no PR. `reap.sh` skips it, correctly: no merge happened, so no remote branch was ever deleted, so branch is not `[gone]` and the `for-each-ref` filter never selects it. Forced past that, `git cherry` is empty and `-D` unauthorized. Reap's evidence is "merged upstream"; this branch never went anywhere.
 
-So nothing in the run cleans it up. Next run, phase 0's probe 3 sees the worktree and the local branch → hit → free ticket reads as taken, silently. Same failure as a stale merged worktree, opposite end of the lifecycle. Normal, not exotic: phase 1 is serial and runs ahead of dispatch, so collision-after-claim, drain, and re-prioritisation all produce it.
+So nothing in the run cleans it up. Next run, the in-flight probe's local-worktree check sees the worktree and the local branch → hit → free ticket reads as taken, silently. Same failure as a stale merged worktree, opposite end of the lifecycle. Normal, not exotic: phase 1 claims ahead of dispatch, so collision-after-claim and drain both produce it.
 
 `release-ticket.sh` covers it. Four preconditions, recomputed inside same invocation as delete, same reason reap recomputes — but the dirty check is the conditional one: it opens only when the worktree directory is there to read, and where that directory is established absent it does not run at all, leaving the absence measurement itself as what stands in for it:
 

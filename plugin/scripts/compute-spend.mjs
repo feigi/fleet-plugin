@@ -151,11 +151,11 @@ function roleFromNamePatterns(hay) {
   // meta.json descriptions "Resolve conflict on PR 1232" and "Rebase and
   // resolve conflicts for PR #1310", the same rebase/conflict-resolver shape
   // `run-team/SKILL.md` calls "a rebase-resolver" sent into an open PR's
-  // worktree. It carries no ticket, no wave number and no new-work verb —
+  // worktree. It carries no ticket, no dispatch counter and no new-work verb —
   // only a PR number — so it is remediation on that PR's path to merge,
   // exactly the category `fix-pr-<n>`'s applier already occupies here. It is
-  // NOT `merge-bot`: that bucket's number is a WAVE, never a PR, and merge-bot
-  // orchestrates a wave's PRs rather than resolving one directly.
+  // NOT `merge-bot`: that bucket's number is a per-run dispatch counter, never
+  // a PR, and merge-bot drains a pass's PRs rather than resolving one directly.
   //
   // Only the NAME form `resolve-pr-` joins the alternation, deliberately
   // narrower than the `review pr`/`fix pr` prose forms beside it: the two
@@ -169,7 +169,7 @@ function roleFromNamePatterns(hay) {
   // words alone, with no real row to justify it.
   if (/review pr|review-pr-|fix pr|fix-pr-|resolve-pr-/.test(hay)) return "reviewer";
   if (/^finish-|finish pr|finisher/.test(hay)) return "finisher";
-  if (/merge wave|merge-bot/.test(hay)) return "merge-bot";
+  if (/merge-bot/.test(hay)) return "merge-bot";
   return null;
 }
 

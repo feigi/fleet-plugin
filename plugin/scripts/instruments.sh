@@ -81,7 +81,7 @@
 # left in the main checkout by something running this repo's own fixtures — a
 # ref write, which no hash of files can see. But `claim-ticket.sh` creates a
 # branch per ticket and `reap.sh` deletes them, in the ref store every worktree
-# shares, so a ref digest changes several times per wave as ORDINARY WORK. Per
+# shares, so a ref digest changes several times per pass as ORDINARY WORK. Per
 # gate that is noise, and noise is the one failure this check cannot afford.
 # Sweeping for unexpected refs is a drain-cadence question, not a gate one, and
 # it is not what #436's acceptance criteria ask for.

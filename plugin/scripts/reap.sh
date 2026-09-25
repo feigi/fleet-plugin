@@ -1118,14 +1118,14 @@ done
 # line was never refused — it was never considered, which is why the
 # no-silent-caps rule did not fire either: no `would remove worktree` line, no
 # `kept` entry, and the directory left on disk while its branch was reaped
-# (#381, measured live during a merge wave). A stale worktree still answers
+# (#381, measured live during a merge pass). A stale worktree still answers
 # `git worktree list` and inflight.sh reads one as a live claim, so an
 # already-merged ticket then reads as taken and the candidate queue shrinks
 # with nothing reporting it.
 #
 # What leaves a fleet worktree detached is NOT recorded here, deliberately. An
 # earlier draft of this comment blamed the merge bot's server-side rebase (#149)
-# and that mechanism is measured false: in a later wave the bot reported
+# and that mechanism is measured false: in a later pass the bot reported
 # `path=rebase` for #969, #970 and #972, and a `reap.sh` dry run immediately
 # after printed `would remove worktree` for all three — a line only an ATTACHED
 # worktree reaches. run-merge-bot.md says the same for that step: the API
@@ -1335,7 +1335,7 @@ else
       # every git command print `error: key does not contain a section: …` to
       # stderr AT EXIT 0, so `2>&1` returns that line glued in front of the git
       # dir, `[ -e "$gitdir/$op" ]` then matches nothing, and this very guard
-      # waves through a worktree holding an interrupted rebase — removed, state
+      # lets through a worktree holding an interrupted rebase — removed, state
       # and all. The same change on the status probe reads every clean worktree
       # as dirty forever.
       if ! gitdir=$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null); then

@@ -4,7 +4,7 @@ Why member name load-bearing, why every member single-use, how killed/idle/trunc
 
 ## The name is what carries the `Agent` tool
 
-Name makes it team member; membership carries `Agent` tool. Omit it → member loses delegation, no error, improvises something worse. `subagent_type` irrelevant — name is mechanism, not label. Names follow unit of work: `impl-<issue#>`, `fix-pr-<pr#>` (default path's applier), `review-pr-<pr#>` (hand-dispatch fallback's reviewer), `finisher-pr-<pr#>` (Phase 3's finisher), `merge-bot-<wave#>`.
+Name makes it team member; membership carries `Agent` tool. Omit it → member loses delegation, no error, improvises something worse. `subagent_type` irrelevant — name is mechanism, not label. Names follow unit of work: `impl-<issue#>`, `fix-pr-<pr#>` (default path's applier), `review-pr-<pr#>` (hand-dispatch fallback's reviewer), `finisher-pr-<pr#>` (Phase 3's finisher), `merge-bot-<n>` (one merge pass; `ledger.mjs dispatch merge-bot` numbers it from the ledger's `## Dispatched` list — a per-run counter, never a PR).
 
 ## Members cannot name their children
 

@@ -1,19 +1,19 @@
 // #286. The `no-ci` FINISHER GATE — the label rests on the reviewer's own
-// verified suite run, and without one nobody labels — is stated at four sites
+// verified suite run, and without one nobody labels — was stated at four sites
 // across three documents and pinned in none of them. What already exists pins a
 // different clause of the same bullet: review-path-default.test.mjs anchors the
 // Phase 3 no-ci edge's outstanding-ruling condition (`never while you still owe
 // it a ruling`). The gate itself was free to rot in any of the four.
 //
-// The four sites word it differently ON PURPOSE, so this pins the invariant each
-// one must keep rather than a shared sentence:
+// Three sites remain, and they word it differently ON PURPOSE, so this pins the
+// invariant each one must keep rather than a shared sentence:
 //   - run-team/SKILL.md Phase 3 edge — the CONTROLLER's dispatch condition.
 //   - run-team/SKILL.md finisher gate — the FINISHER's own two-facts verdict.
 //   - review-and-fix.md step 6 — the REVIEWER's attestation, off its own step 3.
-//   - run-merge-bot.md step 3 — the merge bot READING the label back out.
-// Only the first three can refuse to label, so only they carry the refusal half;
-// the merge bot never labels, and its invariant is that the label already stands
-// for a finisher having checked that run.
+// All three can refuse to label, so all three carry the refusal half. The
+// fourth, run-merge-bot.md step 3 reading the label back out, left the prose
+// with #1806: `merge-gate.mjs` passes `--declare-no-ci` on every call itself,
+// behind its own label check, so no bot-facing sentence states it any more.
 //
 // DELIBERATELY UNPINNED: references/ci-and-staleness.md. It states the SCRIPT
 // contract (`no-ci` alone exits 1, exit 0 comes only with `--declare-no-ci`, the
@@ -37,7 +37,6 @@ import { join } from "node:path";
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
 const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
-const RUN_MERGE_BOT = readFileSync(join(REPO, "commands", "run-merge-bot.md"), "utf8");
 
 // Reflow-safety: these documents hard-wrap, so a pinned phrase spans a newline
 // plus indent and an exact-adjacency regex reports a clause that is right there
@@ -94,17 +93,6 @@ const SITES = [
     /label off step 3's own green `testCmd` run/i,
     /run on record → do not label/i,
   ],
-  [
-    // No refusal half: the merge bot reads the label, it never adds one.
-    "run-merge-bot label read",
-    () => paragraphSaying(RUN_MERGE_BOT, "on a `ready-to-merge` PR is not a block", "run-merge-bot label read"),
-    // The gap is `[\s\S]*?`, not `[^.]*`: a period between the two anchors is a
-    // reflow, not a lost gate, and the paragraph is already flattened. Keep BOTH
-    // anchors — they are what makes this non-vacuous; dropping either one to a
-    // loose `/reviewer's .{0,30}run/` is satisfied by the surrounding prose alone.
-    /finisher only ever adds it[\s\S]*?after checking the reviewer's own green `testCmd` run/i,
-    null,
-  ],
 ];
 
 test("every no-ci site rests the label on the reviewer's own verified suite run", () => {
@@ -119,7 +107,6 @@ test("every no-ci site rests the label on the reviewer's own verified suite run"
 
 test("every no-ci site that can label carries the refusal when no such run exists", () => {
   for (const [label, slice, , refusal] of SITES) {
-    if (!refusal) continue;
     assert.match(
       slice(),
       refusal,

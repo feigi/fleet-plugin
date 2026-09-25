@@ -30,7 +30,7 @@ const SKILL = read("skills", "run-team", "SKILL.md");
 const LIFECYCLE = read("skills", "run-team", "references", "member-lifecycle.md");
 const SPEND = flat(read("scripts", "compute-spend.mjs"));
 
-const MEMBER_NAMES = ["impl-<issue#>", "fix-pr-<pr#>", "review-pr-<pr#>", "finisher-pr-<pr#>", "merge-bot-<wave#>"];
+const MEMBER_NAMES = ["impl-<issue#>", "fix-pr-<pr#>", "review-pr-<pr#>", "finisher-pr-<pr#>", "merge-bot-<n>"];
 
 // Sliced to the naming PARAGRAPH, never file-wide: run-team mentions the
 // finisher in its narrative dozens of times, and any of those hits would
@@ -82,7 +82,7 @@ test("every name compute-spend calls stable-because-run-team-fixes-it is one run
   for (const role of cited) {
     assert.match(
       list,
-      new RegExp("`" + role + "-<(?:issue|pr|wave)#>`"),
+      new RegExp("`" + role + "-<(?:issue#|pr#|n)>`"),
       `compute-spend.mjs claims run-team fixes \`${role}-<n>\`, but run-team's naming list never mentions it`,
     );
   }
@@ -108,9 +108,10 @@ test("classifyRole and parseMemberName accept the same finisher spellings", () =
   // five that reds when the classifier anchors to a trailing number, and the
   // only one that reds when the parser stops stripping that suffix.
   //
-  // `merge-bot-<n>` is deliberately absent: its number is a WAVE index, and the
-  // parser refusing to book it as a PR is correct disagreement, not drift. It is
-  // pinned where it belongs, in member-outcomes.test.mjs.
+  // `merge-bot-<n>` is deliberately absent: its number is a per-run dispatch
+  // counter, never a PR, and the parser refusing to book it as a PR is correct
+  // disagreement, not drift. It is pinned where it belongs, in
+  // member-outcomes.test.mjs.
   const NAMES = ["finisher-pr-945", "finish-pr-751", "finisher-933", "finish-315", "finisher-pr-958-b"];
 
   // Compared as ONE table rather than asserted inside the loop: the first

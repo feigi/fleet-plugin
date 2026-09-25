@@ -109,7 +109,7 @@ ticket/PR at a time, with no controller above them. Full design rationale:
    tier.
 4. **Event loop** — react without blocking: an implementer's PR gets queued
    for review; a free review slot picks up the next queued PR; a reviewer
-   that lands the `ready-to-merge` label triggers a merge-bot wave; the tick
+   that lands the `ready-to-merge` label dispatches a merge-bot pass; the tick
    refreshes the shortlist as it runs low.
 
 **Reviewer fan-out** — each reviewer cuts a read-only snapshot, sizes the PR,
@@ -122,9 +122,11 @@ findings get no verifier by policy and are the reviewer's own job to check.
 Confirmed findings in scope get applied, pushed, and waited to CI-green
 before the PR is labelled `ready-to-merge`.
 
-**Merge bot** — one wave, at most one bot at a time: for each
+**Merge bot** — one pass, at most one bot at a time: for each
 `ready-to-merge` PR in numeric order, hold if a lower-numbered open PR
-touches related work, otherwise rebase onto `main`, wait for CI green, merge.
+touches related work, otherwise rebase onto `main`, wait for CI green, merge
+only on `merge-gate.mjs`'s second exit 0; then a 15-minute grace for late
+labels and one report.
 
 ```mermaid
 flowchart TD
@@ -150,12 +152,12 @@ flowchart TD
         REV --> SPEC --> VERI --> FIX
     end
     FIX -->|"ready-to-merge label"| P3
-    P3 -->|"label seen"| MB["Merge-bot wave triggered"]
+    P3 -->|"label seen"| MB["Merge-bot pass dispatched"]
 
-    subgraph MERGEBOT["Merge bot — at most 1, one wave"]
+    subgraph MERGEBOT["Merge bot — at most 1, one pass"]
         HOLD["Hold rule: pr-overlap.mjs vs<br/>every lower-numbered open PR"]
         REBASE["Rebase onto main"]
-        GREEN["Wait CI green (ci-state.mjs)"]
+        GREEN["Wait CI green, merge-gate.mjs twice"]
         MERGE["Merge"]
         WAIT["Hold behind #lower PR,<br/>watcher retries later"]
         HOLD -->|"unrelated"| REBASE --> GREEN --> MERGE

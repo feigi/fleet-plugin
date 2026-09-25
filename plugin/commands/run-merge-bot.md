@@ -63,47 +63,9 @@ gh api "repos/{owner}/{repo}/issues/<pr>/timeline?per_page=100" --paginate \
 
 A `committed` or `head_ref_force_pushed` line after the last `labeled ready-to-merge` means the head moved after the audit. **Refuse: report `head-moved-after-label-#<pr>` and stop on that PR.** Leave the label where it is — you audited nothing and removing another member's verdict is not yours to do. What clears it is a **fresh** finisher against the new head; the first audit does not transfer, because it verified a different tree.
 
-**Nothing after that label line is the normal case, and it proceeds untouched** — label applied, head unchanged, merge goes ahead exactly as it did before this gate existed. Record the head before you rebase — `gh pr view <pr> --json headRefOid -q .headRefOid` — because step 3 compares against it at the merge instant and nothing later can reconstruct it. Where step 1 runs, that is its `pre`; on an already-current PR it is simply the head you merge.
+**Nothing after that label line is the normal case, and it proceeds untouched** — label applied, head unchanged, merge goes ahead exactly as it did before this gate existed. Record the head before you rebase — `gh pr view <pr> --json headRefOid -q .headRefOid` — because step 3 hands it to the merge gate as `--pre` and nothing later can reconstruct it. Where step 1 runs, that is its `pre`; on an already-current PR it is simply the head you merge.
 
 What this gate deliberately does not answer. It does not ask *who* audited — a hand-added `ready-to-merge` with no finisher behind it reads clean here, and the reviewer-only rule in `run-team/SKILL.md` is what owns that. And a head rebased after the label by an **earlier, abandoned pass of this command** refuses too: that tree is one no finisher audited either, so the halt is correct rather than a false positive.
-
-## Prove the gate blocks, in a directory you own
-
-Build the CI gate step 3 uses. **A gate nobody has seen refuse is a gate you are guessing about** — so prove it can go red before you trust a green: drive a synthetic `ci-state` payload of each shape below through the gate you actually run, and confirm each one blocks.
-
-- `{"verdict":"rate-limited"}`, with every field it never got to observe absent.
-- `{}` — the same absence, with nothing naming its cause.
-- A zero-byte file.
-- `verdict: "green"` with `behind` greater than 0. The behind-count is context for the caller, not part of `ci-state`'s own verdict, so nothing but your gate refuses it.
-- A run still in progress: `status` not `completed`, no conclusion yet.
-
-A gate reading a SUBSET of the fields passes the first two vacuously instead of refusing them — absence is not self-blocking in `jq`, so `.prHead == .runHeadSha` is `null == null` on both — and exits 4 on the third, having compared nothing at all. `run-team/SKILL.md`'s **Merge bot** section is where the rate-limited and empty-payload cases were measured; the last two shapes are why the gate reads `behind` and `status` at all. A shape that does not block is a finding: fix the gate and drive the whole set again, never just that shape.
-
-**Every fixture you write goes under `<scratch>/pr<N>/merge-bot-<wave#>/gate-proof/`, never into the scratch root by itself, and you create that leaf with plain `mkdir`, never `mkdir -p`.** `pr<N>` is the PR you are about to gate, so the proof is bound to the merge it licenses instead of being driven once for the pass; `merge-bot-<wave#>` is your own name, because a later wave can reach the same PR. The scratchpad root your own system prompt names is injected into every dispatched member and is shared with every sibling in the session; nothing partitions it but this rule. The fixture names do not partition it either — `05-green-with-skipped-job` is the name every wave's bot reaches for, by design, so a collision here is systematic rather than unlucky. Measured 2026-08-28 (#966): merge-bot-5, proving its gate, found payloads in the root it had not written, authored ~40 minutes earlier by a sibling working a different PR and identifiable by a different `prHead`. Nothing merged wrongly that time, and the failure it was one filename away from is silent: a sibling's GREEN fixture sitting under the name your loop expects to BLOCK makes that shape pass through, and you report the gate proven falsifiable with every shape blocked while the one that mattered was never measured — every merge in the wave then resting on a proof that did not happen. No wave number, because no controller dispatched you? You are the only bot in the session: `merge-bot-1`.
-
-`mkdir` is the verification at claim time, not a formality. It exits 1 with `File exists` on a path that already exists, so a directory you did not create refuses you at the moment you claim it, while `mkdir -p` exits 0 and hands you its contents silently. Occupied means a pass already ran under your name — take `gate-proof-2` and say in your report which directory you used, rather than writing into theirs.
-
-**Then close the loop before you report: the set of shapes you drove must be exactly the set you wrote — same count, same names — and a mismatch refuses the proof rather than folding the extra in.** One `ls` does it, and it is not defence in depth for its own sake: the names are systematic by design, so a mistyped namespace or a reused PR number reproduces the collision exactly, and nothing else in this system would catch it — your own report would still say the gate was proven. Refuse even when the intruder is block-shaped and appears to strengthen the proof: a shape you did not write is a shape you did not measure, and being measured is the whole of what the proof claims.
-
-```bash
-base=<scratch>/pr<N>/merge-bot-<wave#>
-mkdir -p "$base"
-for n in "" -2; do
-  d="$base/gate-proof$n"
-  mkdir "$d" 2>/dev/null && break    # refused -> occupied, try the next namespace
-  d=""
-done
-[ -n "$d" ] || exit 1    # both refused -> not your namespace
-wrote=0
-# per shape: write it into "$d" as one of empty, green-behind, in-progress, rate-limited, zero-byte; drive it through the gate; confirm it blocks
-wrote=$((wrote+1))
-names="empty green-behind in-progress rate-limited zero-byte"
-[ "$wrote" -eq 5 ] || { echo "PROOF VOID: $wrote shapes driven, need 5"; exit 1; }
-got=$(ls -1 "$d" | sort | tr '\n' ' ')
-[ "$got" = "$names " ] || { echo "PROOF VOID: wrote {$got}, expected {$names }"; exit 1; }
-```
-
-Real readings are not fixtures: keep the `ci-state` payload you actually gate on one level up, at `<scratch>/pr<N>/merge-bot-<wave#>/ci.json`, so a synthetic shape can never be read back as a live reading and the count above stays exact. This is not `run-team/SKILL.md`'s finding rule (`<scratch>/pr<N>/<finding>/`) restated — gate fixtures have no finding id, which is exactly why that rule never reached them; this is the same two-level shape keyed on what a merge bot does have.
 
 ## Per-PR sequence
 
@@ -139,7 +101,7 @@ For each labeled PR clearing the hold rule, lowest first:
    - Any other non-zero `rc`, **or** `post` still equal to `pre` once the cap runs out → the fallback below, not a retry.
    - **`post` empty once the cap runs out** → the ref read failed; this is never "the rebase landed". An empty `post` satisfies `post != pre` all by itself, so without this row a failed `ls-remote` is classified as success — the same hole `[ -n "$pre" ]` closes on the way in, and the loop's own `[ -n "$post" ]` is why an empty read cannot break out early. Take the fallback below, and report the ref as unreadable rather than as a head that never moved.
 
-   **`post != pre` with `pr_head` still on `pre` is not a desync until it SURVIVES a bounded re-poll.** The PR object lags the ref move, so a `headRefOid` read taken in the same instant as the rebase reproduces the desync signature exactly while nothing is wrong. Measured twice in one run on 2026-09-01: it cleared on re-poll attempt 24 (~2 min) in one wave and attempt 14 (~84s) in the next, both after `gh pr update-branch --rebase` returned `rc=0`. So re-poll `headRefOid` on the same bounded cap you already use for `ls-remote` before calling this, and report the desync only if `pr_head` is still on `pre` when that cap runs out. Reporting it on a single read costs a wave for a state that fixes itself, and it is the reading a bot gets when it does everything else right.
+   **`post != pre` with `pr_head` still on `pre` is not a desync until it SURVIVES a bounded re-poll.** The PR object lags the ref move, so a `headRefOid` read taken in the same instant as the rebase reproduces the desync signature exactly while nothing is wrong. Measured twice in one run on 2026-09-01: it cleared on re-poll attempt 24 (~2 min) in one pass and attempt 14 (~84s) in the next, both after `gh pr update-branch --rebase` returned `rc=0`. So re-poll `headRefOid` on the same bounded cap you already use for `ls-remote` before calling this, and report the desync only if `pr_head` is still on `pre` when that cap runs out. Reporting it on a single read costs a pass for a state that fixes itself, and it is the reading a bot gets when it does everything else right.
 
    **A desync that DOES survive the cap is the one state that needs a controller.** The rebase landed; GitHub's PR object did not follow. CI is bound to the stale head or absent entirely, so the merge gate cannot clear no matter how long you wait, and no merge-bot action fixes it — do not retry the rebase, and do not rebase locally, because the remote is already correct. Report it and stop.
 
@@ -165,7 +127,7 @@ For each labeled PR clearing the hold rule, lowest first:
 
    **Compare the worktree head against the branch REF, and never against `gh pr view <pr> --json headRefOid -q .headRefOid`** — the PR object's head is the field that desyncs from the branch, which is why step 1 polls `git ls-remote` rather than it. Never `git rev-parse origin/<branch>` either: that is this clone's cached copy of the ref, so a worktree sitting on a stale copy agrees with it by construction and every tree this check exists to catch passes. The `headRefOid` read stays, and stays demoted — a value disagreeing with the ref is the PR-object desync above, a fact for the report, never the operand this check turns on. **An empty ref read is neither equal nor a mismatch**: the read failed, or the head branch is not on `origin` at all (a fork PR), so report the ref as unreadable and stop, `blocked` — an empty string compares unequal to every sha, so without this clause a failed read renders as a diverged worktree, the same hole `[ -n "$pre" ]` closes on the way into the poll above.
 
-   **Why the ref and not `headRefOid`: during the PR object's lag both operands go stale in the SAME direction, so that compare fails OPEN as readily as it fails closed.** The false STOP is the visible half — the worktree holds the rebased head, the PR object still holds the pre-rebase sha, and a correct tree comes back `worktree-diverged-#<pr>`, costing a wave. The silent half is the one that ships: a worktree that has not fetched since the rebase sits on that same pre-rebase sha, so BOTH sides read it, the check reads **Equal**, and this fallback verifies a tree the remote no longer has while step 4 merges the head it does — a green measured against a tree no merge will take, which is the exact failure the STOP arm below exists to prevent, reached through the arm that passes. Measured at the sibling site (`run-team/SKILL.md` phase 1, #1168) in a scratch repo: a clone unfetched since the rebase resolved `origin/<branch>` to the pre-rebase commit with its subject unchanged, while `git ls-remote origin refs/heads/<branch>` read the true tip from that same clone. **Re-reading `headRefOid` on a settle window does not reach that half at all** — it fires only where the two disagree — which is why the operand changes here rather than the verdict gaining a window.
+   **Why the ref and not `headRefOid`: during the PR object's lag both operands go stale in the SAME direction, so that compare fails OPEN as readily as it fails closed.** The false STOP is the visible half — the worktree holds the rebased head, the PR object still holds the pre-rebase sha, and a correct tree comes back `worktree-diverged-#<pr>`, costing a pass. The silent half is the one that ships: a worktree that has not fetched since the rebase sits on that same pre-rebase sha, so BOTH sides read it, the check reads **Equal**, and this fallback verifies a tree the remote no longer has while step 4 merges the head it does — a green measured against a tree no merge will take, which is the exact failure the STOP arm below exists to prevent, reached through the arm that passes. Measured at the sibling site (`run-team/SKILL.md` phase 1, #1168) in a scratch repo: a clone unfetched since the rebase resolved `origin/<branch>` to the pre-rebase commit with its subject unchanged, while `git ls-remote origin refs/heads/<branch>` read the true tip from that same clone. **Re-reading `headRefOid` on a settle window does not reach that half at all** — it fires only where the two disagree — which is why the operand changes here rather than the verdict gaining a window.
 
    **Unequal → `git fetch origin` and read the ref once more, then decide on that second reading. Bounded at one re-read, never a third.** Neither operand is a cached value, so a stable second reading cannot flip the verdict; what the re-read is for is the ref MOVING while you verify, which is live here because one way into this fallback is a step-1 poll whose cap ran out with the ref unmoved, and that call is async — it can land a moment after you gave up on it. The two readings differ → the head is not settled and the audit behind the label verified a tree that is already gone, so **refuse: report `head-moved-after-label-#<pr>` and stop**, label untouched, the same verdict and the same remedy — a fresh finisher against the new head — the gate above reaches for a head that moved after the audit. Do not read a third time; that is the unbounded wait step 1 had to be written out of. The two readings agree → the mismatch is real and belongs to one of the two arms below. **`Equal` is not among the outcomes a surviving mismatch can reach**: a worktree that is not on the branch ref never passes this check, whatever the PR object says.
 
@@ -195,60 +157,39 @@ For each labeled PR clearing the hold rule, lowest first:
 
 2. Watch checks settle **on the rebased head**. A missing release label (`patch`/`minor`/`major`) fails `validate-release-label` — add the one matching; `release-label.yml` defines that job and exits 1 when the count of those three is zero. A stale `rebase-check` failure usually means step 1 has not landed. Where a repo chains jobs behind that check with `needs:`, they come back `skipped` rather than red and the currency check is the only thing to fix — check `ci.yml` for a `needs:` chain before assuming that: it declares none as of this reading, so no job is currently skipped behind `rebase-check`.
 
-   **Hold the wait inside one blocking command — you are turn-based and cannot "keep an eye on" a run.** If you push and then end your turn, your pass stops there and nothing resumes it: whatever wakes you is external and may never come. Observed repeatedly — a bot rebases, pushes, goes idle, and the queue silently stalls with the PR one command from merging. Block instead:
+   **Hold the wait inside one blocking call — you are turn-based and cannot "keep an eye on" a run.** If you push and then end your turn, your pass stops there and nothing resumes it: whatever wakes you is external and may never come. Observed repeatedly — a bot rebases, pushes, goes idle, and the queue silently stalls with the PR one command from merging. Block instead, on the run step 3's first gate reading names — its `ci.runId` — the wait split by harness:
 
-   ```bash
-   gh run watch <run-id> --exit-status    # returns only when the run reaches a terminal state
-   ```
+   CLAUDE: `gh run watch <run-id> --exit-status` returns only when the run reaches a terminal state; if it outlives your shell timeout, re-issue it — still one blocking call per turn, not an idle turn.
+   OMP: `gh run watch` does not apply — omp `bash` backgrounds any call past about 60s even with `timeout` set, so hold the wait in one Python `eval` cell that polls `gh run view <run-id> --json status,conclusion` through `subprocess.run` until `status` reads `completed`, its cell `timeout` well above the CI cycle.
 
-   Take `<run-id>` from the same `gh run list --json` row you took the head from. A CI cycle here runs ~5-6 minutes; if `gh run watch` outlives your shell timeout, re-issue it — that is still one blocking call per turn, not an idle turn. Never `sleep`-poll in a loop you exit early.
+   A CI cycle here runs ~5-6 minutes. Never `sleep`-poll in a loop you exit early.
 
-   **`gh run watch` returning is permission to look, not a verdict.** It tells you the run reached a terminal state, not which one — and that state can still change under you afterwards (step 3's re-query rule). Re-query `gh run view <run-id> --json jobs,attempt` for the decision.
+   **The wait returning is permission to look, not a verdict.** It tells you the run reached a terminal state, not which one — and that state can still change under you afterwards (step 3's second run exists for that). The decision is step 3's gate, run again, never the wait's own exit status.
 
    **You are the only place currency is proven, so never merge on a green from before your rebase.** The reviewer's green attests the diff was correct against *its* base — that claim does not expire and does not cover yours. Only a run on the rebased head shows it is still correct against current `main`.
 
    **Triage a post-rebase red by what the pre-rebase run did.** Green before, red after, with no change of your own between, means a sibling merge broke this PR semantically — a rebase applies cleanly and still breaks the build when someone renamed a symbol it uses. That is a **finding, not a chore**: report it and hand it back to the reviewer with the failing job. Red both before and after is also the reviewer's. You fix only the mechanical failures you caused: conflict resolution and the release label.
 
-3. Green → re-check immediately before merging (`gh pr view <pr> --json labels,reviewDecision`): the label must still be there (it can be pulled while CI runs) and `reviewDecision` must not be `CHANGES_REQUESTED`. Either fails → skip, say so, move on.
-
-   **Re-derive the head here too, not only the label.** `gh pr view <pr> --json headRefOid -q .headRefOid` must equal the `pre` you recorded at **The labelled head**, or the `post` your own step-1 rebase produced. **Any third SHA is a push that landed while you waited on CI, and no CI gate above can see it**: `ci-state.mjs` selects the run whose `headSha` equals the *current* PR head (`scripts/ci-state.mjs`, the `r.headSha === prHead` filter), so a member's push plus its own green run satisfies every check in step 2 while the audit behind the label belongs to a tree that is gone. Refuse it the same way — `head-moved-after-label-#<pr>`, label untouched, a fresh finisher against the new head.
-
-   **Bind the green to the *run*, not to check conclusions.** `gh pr checks` aggregates across runs and reports a `pass` inherited from a **cancelled** run on a superseded SHA — head-SHA binding misses it, since the head is right and only the conclusions belong elsewhere.
-
-   **Re-check the instrument set before you act on this gate's reading, the same way the controller re-checks before its own gates** (`run-team/SKILL.md`, **You read your instruments out of a tree every member can write to**). That rule is stated once, in the controller's file, and nothing dispatches a merge bot to read it — so this seat carries its own copy or runs the gate unchecked. Exit 0 is the only code that lets this gate proceed; exit 1 (the set changed) and exit 2 (the check could not answer) both refuse — report `instrument-set-changed-#<pr>` with what it printed, leave the label alone, and do **not** re-read the gate.
+3. **Gate the merge with `merge-gate.mjs`, run twice, and merge only on the second run's exit 0.**
 
    ```bash
-   ~/.fleet/bin/fleet-run instruments.sh --repo "$(dirname "$(env -u GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir)")"
+   ~/.fleet/bin/fleet-run merge-gate.mjs --pr <pr> --pre <pre> --post <post> \
+     --out <scratch>/pr<N>/merge-bot-<n>/ci.json; rc=$?
    ```
 
-   `--repo` is not optional at this seat, and the spelling is the load-bearing half. The baseline the run pinned lives in the audited checkout's gitignored `.fleet/`, which a worktree does not carry, so a bare invocation from one exits **2** on a missing baseline instead of comparing anything — a permanent refusal that reads exactly like a real one. `--git-common-dir` names the directory every worktree shares, the same resolution `ledger.mjs` uses to reach the run's one ledger, so this one spelling answers identically from the audited checkout and from any worktree under it. The `env -u GIT_DIR -u GIT_WORK_TREE` wrapper is not decoration: those two variables are read from the *caller's* environment before the substitution ever runs, so an ambient `GIT_DIR` left over from another repo silently points this gate at the wrong tree — `instruments.sh`'s own internal unset (its line 101) cannot reach back and fix a path its caller already resolved wrong.
+   `--pre` is the head you recorded at **The labelled head**; `--post` is the head step 1's rebase produced — omit it when no rebase ran, which is the same as passing `pre` twice. `pr<N>` is this PR and `merge-bot-<n>` is your own name, so the reading lands under a directory only you write, never in the scratch root by itself: that root is injected into every dispatched member and shared with every sibling. The gate is read-only — it runs the instrument re-check, `gh pr view <pr> --json labels,reviewDecision,headRefOid` and `ci-state.mjs --pr <pr>`, answers their conjunction, and never merges, labels, rebases or waits. Stdout is exactly one JSON line, `{pr, verdict, reason, head, pre, post, behind, instruments, ci}`; stderr is its children's diagnostics, so never fold `2>&1` into the line you read. Read `rc` straight off the call, as above — never through a pipe.
 
-   ```bash
-   ~/.fleet/bin/fleet-run ci-state.mjs --pr <pr>
-   ```
+   1. **Run it.** Exit 0 → go to 2. Exit 1 with a `ci:…` `reason` and `ci.status` not `completed` → the run has not finished: wait on `ci.runId` (step 2), then run it again. Any other exit 1 → skip the PR, report `<reason>-#<pr>` (`head-moved-after-label-#<pr>`, `label-pulled-#<pr>`, `changes-requested-#<pr>` …), leave the label where it is, and move on. Exit 2 → stop on that PR and report `<reason>-#<pr>`: the gate could not evaluate — a finding about the tree, the tooling or the API, never about the PR. Re-run once only for `rate-limited`, a quota refusal that clears by itself.
+   2. **Run it again immediately before `gh pr merge`, and merge only on that second exit 0.** Anything else takes the same arms as 1, and nothing merges.
 
-   No `--branch` flag — it derives the branch from the PR. It binds run head, `status`, and every expected job from one query, and reports non-green unless the run's head matches the PR head, `status` is **completed**, and every expected job is present and succeeded. That presence requirement is what catches the case above — a force-push cancels the run under you, its finished jobs go on reporting what they concluded, and whatever never ran is missing from the run entirely, which reads as `pending` in an aggregating checks summary, never here: `ci-state.mjs` names it in the reason `expected jobs absent from the run: …` and refuses green.
+   Each `reason` is a fact the gate now enforces, not a step you run:
 
-   **Re-query at the moment you merge — a conclusion can invert under a fixed run id.** A rerun rewrites the *existing* run rather than creating a new one, so a run id you read as `success` can later read `failure` with nothing pushed to the branch. Observed twice in one fleet run, on two PRs: a refresh workflow re-ran the currency check after `main` advanced and flipped the same id on the same SHA. This cuts both ways — a red you cached may since have gone green on re-run, and a green you cached may be red. Never carry a conclusion across a wait.
+   - **`head-moved-after-label`** — the PR head is neither `pre` nor `post`. **Any third SHA is a push that landed while you waited on CI, and no CI check can see it**: `ci-state.mjs` selects the run whose `headSha` equals the *current* PR head (`scripts/ci-state.mjs`, the `r.headSha === prHead` filter), so a member's push plus its own green run satisfies every CI check while the audit behind the label belongs to a tree that is gone. The remedy is a fresh finisher against the new head, label untouched.
+   - **`behind:<n>`** — you are the only place currency is proven, and a sibling merge since your rebase expires it (the staleness below).
+   - **`instrument-set-changed` / `instruments-unanswerable`** — the instrument re-check the controller runs before its own gates (`run-team/SKILL.md`, **You read your instruments out of a tree every member can write to**), taken at this seat because nothing dispatches a merge bot to read that rule. Report `<reason>-#<pr>` with what the gate printed, leave the label alone, and do **not** re-run the gate.
+   - **`ci:…`** — bound to the *run*, not to check conclusions. `gh pr checks` aggregates across runs and reports a `pass` inherited from a **cancelled** run on a superseded SHA; head-SHA binding alone misses it, since the head is right and only the conclusions belong elsewhere. `ci-state.mjs` binds run head, `status`, and every expected job from one query, and reports non-green unless the run's head matches the PR head, `status` is **completed**, and every expected job is present and succeeded. That presence requirement is what catches the case above — a force-push cancels the run under you, its finished jobs go on reporting what they concluded, and whatever never ran is missing from the run entirely, which reads as `pending` in an aggregating checks summary, never here: `ci-state.mjs` names it in the reason `expected jobs absent from the run: …` and refuses green.
 
-   Also: the newest run on a branch is frequently a label or policy workflow, not CI — `ci-state.mjs` filters by `--workflow CI` by default.
-
-   **`verdict: "no-ci"` on a `ready-to-merge` PR is not a block.** The label is
-   the record here: a finisher only ever adds it in a no-CI repo after checking
-   the reviewer's own green `testCmd` run (see `run-team/SKILL.md`'s finisher
-   gate). Pass `--declare-no-ci` here so the exit-0 gate reads correctly —
-   passing it is how you read that label's verdict out, never a second
-   confirmation of it, since the flag only echoes itself back. Without it you'd
-   read a legitimately labeled PR as stuck red forever, off a run that will
-   never exist.
-
-   **Re-check the instrument set once more, immediately before you merge.** The check above ran before `ci-state.mjs`, not before the write below — and CI waits (Watch checks settle) can put minutes between the two — so it does not cover the window this step is about to act in. The finisher's copy takes the same second check before it labels (`run-team/SKILL.md`, **Give the finisher the instrument re-check verbatim too**); this seat's analogous last write is the merge itself:
-
-   ```bash
-   ~/.fleet/bin/fleet-run instruments.sh --repo "$(dirname "$(env -u GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir)")"
-   ```
-
-   Same rule as above: exit 0 only. Exit 1 or 2 → report `instrument-set-changed-#<pr>`, leave the label alone, do not merge, and do not re-read the gate.
+   **Why twice: a conclusion can invert under a fixed run id.** A rerun rewrites the *existing* run rather than creating a new one, so a run id you read as `success` can later read `failure` with nothing pushed to the branch. Observed twice in one fleet run, on two PRs: a refresh workflow re-ran the currency check after `main` advanced and flipped the same id on the same SHA. And a CI wait puts minutes between the first reading and the merge — minutes in which the label can be pulled and the instrument set can change. Never carry a reading across a wait; the second run is the reading the merge rests on.
 
 4. `gh pr merge <pr> --merge` (no-ff). It can exit silently — confirm with `gh pr view <pr> --json state,mergedAt,mergeCommit` before claiming it merged. **Never `--delete-branch`**; GitHub removes the remote branch anyway.
 
@@ -260,7 +201,7 @@ For each labeled PR clearing the hold rule, lowest first:
    ~/.fleet/bin/fleet-run prove-merge.sh <pre-rebase-head> <rebased-head> <merge-commit>
    ```
 
-   **No rebase happened because the PR was already current? Pass the head twice.** That is the normal case in a wave, not an edge case, and `pre == post` selects a proof path built for it. Never invent a plausible-looking `pre` to make the arguments differ — a `pre` that never landed satisfies the pre-rebase leg by construction, and passing one is the single easiest way to turn a stale merge into `proved=true`.
+   **No rebase happened because the PR was already current? Pass the head twice.** That is the normal case in a pass, not an edge case, and `pre == post` selects a proof path built for it. Never invent a plausible-looking `pre` to make the arguments differ — a `pre` that never landed satisfies the pre-rebase leg by construction, and passing one is the single easiest way to turn a stale merge into `proved=true`.
 
    **Read `gates`, not the flat fields.** The payload's flat fields are observations, and one of them being true or false says nothing about the verdict on its own. `gates` is the verdict's own working: `proved` is true exactly when every value in it is true. Membership is per-invocation — on the rebase path it carries `preDidNotLand` (leg 1), on the no-rebase path it does not, because leg 1 is dropped there. That is why `preIsAncestor:true` sits next to `proved:true` on the no-rebase path and is **not** a contradiction: leg 1 wants it false, and leg 1 is not a gate on that path (#18). A sanity check written against `preIsAncestor === false` rejects correct merges; write it against `gates` instead.
 
@@ -278,13 +219,13 @@ For each labeled PR clearing the hold rule, lowest first:
 
    Then re-fetch and **re-evaluate the queue from scratch** — labels and numbers move while CI runs, and a merge newly unblocks or blocks others.
 
-**Staleness fires *within* a wave, and it compounds.** The first merge makes every other PR behind — including the second of this same pass, verified green minutes ago. Re-check `git rev-list --count origin/<branch>..origin/main` before **each** merge. Any behind-count handed to you at dispatch is already expired.
+**Staleness fires *within* a pass, and it compounds.** The first merge makes every other PR behind — including the second of this same pass, verified green minutes ago. The gate's `behind` re-reads currency before **each** merge, and refuses a behind head as `behind:<n>`; re-evaluation hands that PR back to step 1, which rebases it again. Any behind-count handed to you at dispatch is already expired.
 
-Measured over one three-merge wave: the next queue member went 0 → 2 → 7 → **10 behind** without ever changing, because each merge adds its own commits plus a merge commit. So the *last* PR in a wave pays the largest rebase and the longest CI cycle, and a PR rebased early pays again for every sibling that lands after it. This is the argument for batching a wave rather than merging singles — and for never rebasing a PR before it is the actual merge candidate.
+Measured over one three-merge pass: the next queue member went 0 → 2 → 7 → **10 behind** without ever changing, because each merge adds its own commits plus a merge commit. So the *last* PR in a pass pays the largest rebase and the longest CI cycle, and a PR rebased early pays again for every sibling that lands after it — so never rebase a PR before it is the actual merge candidate.
 
 **A PR whose heavy jobs have only ever `skipped` is getting its first real verification from your rebase.** Reviewers may legitimately have labelled on the checks that did run plus local evidence, saying so explicitly. When your post-rebase run finally executes those suites, treat a red there as a **genuine first result**, not a regression you caused — read the failing job before concluding, and do not hand it back as "the rebase broke it".
 
-Report merged / skipped-unlabeled / held-behind-#X / worktree-diverged-#X / head-moved-after-label-#X / label-drop-failed-#X / rebase-fallback-#X / instrument-set-changed-#X / blocked after the pass.
+Report merged / skipped-unlabeled / held-behind-#X / worktree-diverged-#X / head-moved-after-label-#X / label-drop-failed-#X / rebase-fallback-#X / instrument-set-changed-#X / `<reason>-#X` for any other gate refusal / blocked after the pass — a dispatched bot once, at exit, after its grace (**Grace, then one report**, below).
 
 ## No-undo audit (before every rebase)
 
@@ -310,10 +251,28 @@ Three dots, never two: a two-dot diff on a stale branch renders `main`'s gains a
 
 `<conflicting files>` is the audit's `conflicts[]`, not typed by hand — and `conflictsRewritten[]` sits next to it for exactly this step. A path is reported at the same index in both arrays; `true` there means the path held a control byte the audit could not give a JSON short form to and replaced with a space, so the string in `conflicts[]` is not the byte-for-byte name of anything on disk. Pasting it into the command above builds a pathspec that matches nothing — the diff comes back empty, and empty reads as "nothing to prove", the opposite of unproven. Skip the command for any path flagged `true` and inspect it by hand (`git status`, or `ls` the worktree) instead of by pathspec.
 
+## Grace, then one report
+
+**Only a bot a controller dispatched holds a grace** (`/fleet-ctl:run-team`, or any caller that says it owns the watcher); the top-level invocation arms its Monitor instead (**Then stay armed**). You were dispatched on the first `ready-to-merge` label, never after anyone's report, and a label landing minutes after your last merge is the common case — so the pass does not end the moment the queue empties. It drains, then waits **15 minutes** for late labels, then reports once:
+
+- Grace starts once no labelled PR is actionable — every one merged, skipped or held. Seed the labelled set then, the way **Then stay armed** seeds its Monitor, so a PR you already handled does not re-fire.
+- Every 60s, poll `gh pr list --state open --label ready-to-merge --json number`. A number not in the seed → **re-run selection from the top**, hold rule included, drain what it makes actionable, and restart the grace after that drain. A failed poll is no reading: keep the seed and poll again.
+- 15 minutes with no new label → report and exit.
+
+The wait itself splits by harness:
+
+CLAUDE: hold the grace in foreground `Bash` calls of at most 4 minutes each, polling every 60s inside each — about four per grace — so no turn outlives the 5-minute prompt-cache cliff.
+OMP: the 4-minute foreground `Bash` chunking does not apply — hold the whole grace in one Python `eval` cell that polls `gh` through `subprocess.run`, its cell `timeout` at 1000s or more; never `bash` plus `wait`: omp `bash` backgrounds any call past about 60s even with `timeout` set, and `wait` then returns "Skipped due to a queued background completion".
+
+**One report, at exit, and none before it** — every PR this pass touched, in the vocabulary above, a pass that merged nothing included. The controller reaps on that report and records each `held-behind-#<lower>` on the held ticket's row, so a report sent mid-pass is one it acts on too early.
+
+CLAUDE: `SendMessage` the report to the controller, then exit.
+OMP: a separate send does not apply — your `task` result is the report, delivered when you exit.
+
 ## Then stay armed
 
 **Skip this whole section if a controller dispatched you** (`/fleet-ctl:run-team`, or any
-caller that says it owns the watcher) — report your pass and exit instead. A
+caller that says it owns the watcher) — hold the grace above instead. A
 monitor armed by a member dies with that member and the queue stops silently, so
 the watcher belongs to whoever outlives the pass. Only arm one when you are the
 top-level invocation.

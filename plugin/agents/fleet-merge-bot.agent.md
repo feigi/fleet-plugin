@@ -1,6 +1,6 @@
 ---
 name: fleet-merge-bot
-description: A /fleet-ctl:run-team merge bot — dispatched by the controller once per wave as merge-bot-<wave#> to run ONE pass of run-merge-bot.md and report. Never invoked directly.
+description: A /fleet-ctl:run-team merge bot — dispatched by the controller on a ready-to-merge label as merge-bot-<n> to run ONE pass of run-merge-bot.md and report. Never invoked directly.
 model: haiku
 effort: low
 thinking-level: low
