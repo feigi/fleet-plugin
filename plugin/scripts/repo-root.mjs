@@ -1,6 +1,6 @@
 // The ambient-working-tree precondition the sweep suites share, in one place.
 //
-// Three test files here derive their subject list by asking git what ships —
+// Four test files here derive their subject list by asking git what ships —
 // the repository root, then the tracked `*.sh` under it. That premise is
 // deliberate and unchanged: an untracked scratch script is not what ships, and
 // a fleet script that moves out of its directory must not fall out of a sweep
@@ -84,10 +84,11 @@
 //                                  rejected root and the untracked path.
 //   the root answers, and it IS    a real failure — a broken glob or path join
 //   this plugin's own, but the     inside a tree that genuinely is this
-//   list of tracked scripts is     plugin's own. `trackedShellScripts` is
-//   empty                          therefore free to return an empty array and
-//                                  says nothing about skipping; each caller's
-//                                  own non-vacuity guard is what judges it. The
+//   list of tracked scripts is     plugin's own. `trackedShellScripts` and
+//   empty                          `trackedMjsScripts` are therefore free to
+//                                  return an empty array and say nothing about
+//                                  skipping; each caller's own non-vacuity
+//                                  guard is what judges it. The
 //                                  wrong-repository half of this used to live
 //                                  here too, before #1339 moved it up into the
 //                                  identity check above, where it can throw
@@ -185,7 +186,7 @@ export function ownPluginName() {
  * git ACTUALLY tracks.
  *
  * GIT_WORK_TREE scrubbed too, and NOT inert here despite being inert for
- * `trackedShellScripts`' relative glob below — `path` here is always
+ * `trackedFiles`' relative globs below — `path` here is always
  * `realpathSync`'d, i.e. absolute, and git resolves an absolute pathspec
  * against the WORK TREE. Measured: an ambient GIT_WORK_TREE naming a
  * different repository turns this call into `fatal: <path> is outside
@@ -330,35 +331,58 @@ export function skipWithoutRepo(root, subject) {
 }
 
 /**
- * Every tracked `*.sh` in the working tree at `root`, repo-relative.
+ * Every file tracked in the working tree at `root` that `pathspecs` match,
+ * repo-relative — the one discovery rule behind both exports below, so what
+ * `root` must be and which repository answers cannot drift apart between
+ * them (#1751). `caller` is the export's own name, for the refusal.
  *
  * `root` must be a real root — call it only where `repoRoot` answered. A `null`
  * root is rejected rather than absorbed into an empty list: `execFileSync`
  * reads `cwd: null` as "inherit the calling process's directory", so absorbing
- * it would answer some unrelated repository's scripts, or nothing, with nothing
+ * it would answer some unrelated repository's files, or nothing, with nothing
  * to say which. Deciding what an absent working tree means is the caller's, via
  * `skipWithoutRepo`.
  *
  * An empty result from a real root is a legitimate answer from a repository
- * that has no shell scripts, and the caller's non-vacuity guard is what judges
+ * that has nothing matching, and the caller's non-vacuity guard is what judges
  * it.
  *
  * GIT_DIR scrubbed (#1599, gitEnv()): measured, an ambient GIT_DIR silently
- * substitutes a DIFFERENT repository's tracked `*.sh` list for `root`'s own
- * — the caller's non-vacuity guard cannot see this, since the wrong list is
- * routinely non-empty. GIT_WORK_TREE is inert here (measured) for a reason
- * specific to THIS call rather than transferable from `isTrackedBy` above:
- * the pathspec here is the relative glob `*.sh`, never `realpathSync`'d, so
- * there is no absolute path for an ambient work tree to reject as outside
- * itself.
+ * substitutes a DIFFERENT repository's tracked list for `root`'s own — the
+ * caller's non-vacuity guard cannot see this, since the wrong list is
+ * routinely non-empty. GIT_WORK_TREE is inert here (measured, for `*.sh` and
+ * for `*.mjs` with its `:(exclude)` alike) for a reason specific to THIS call
+ * rather than transferable from `isTrackedBy` above: every pathspec here is a
+ * relative glob, never `realpathSync`'d, so there is no absolute path for an
+ * ambient work tree to reject as outside itself.
  */
-export function trackedShellScripts(root) {
+function trackedFiles(caller, root, pathspecs) {
   if (typeof root !== "string") {
     throw new TypeError(
-      `trackedShellScripts: root must come from repoRoot(), got ${String(root)} — `
+      `${caller}: root must come from repoRoot(), got ${String(root)} — `
       + "an absent working tree is a skip for the caller to make, not an empty list to iterate",
     );
   }
-  return execFileSync("git", ["ls-files", "*.sh"], { cwd: root, encoding: "utf8", env: gitEnv() })
+  return execFileSync("git", ["ls-files", ...pathspecs], { cwd: root, encoding: "utf8", env: gitEnv() })
     .split("\n").filter(Boolean);
+}
+
+/**
+ * Every tracked `*.sh` in the working tree at `root`, repo-relative. `root`,
+ * an empty answer and the ambient git variables all behave as `trackedFiles`
+ * says.
+ */
+export function trackedShellScripts(root) {
+  return trackedFiles("trackedShellScripts", root, ["*.sh"]);
+}
+
+/**
+ * Every tracked `*.mjs` this repository ships in the working tree at `root`,
+ * repo-relative: test files — `*.test.mjs`, the one naming this repository
+ * gives them — are not shipped, so they are not in the answer. `root`, an
+ * empty answer and the ambient git variables all behave as `trackedFiles`
+ * says.
+ */
+export function trackedMjsScripts(root) {
+  return trackedFiles("trackedMjsScripts", root, ["*.mjs", ":(exclude)*.test.mjs"]);
 }
