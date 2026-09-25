@@ -255,3 +255,42 @@ test("a ledger written before ## Dispatched existed reads as none dispatched and
   assert.equal(ok("dispatch", "merge-bot").member, "merge-bot-1");
   assert.deepEqual(read(), { ...legacy, dispatched: ["merge-bot-1"], drain: null });
 });
+
+// #1799 fix-applier follow-up: a `## Dispatched` entry this grammar cannot
+// parse used to read, via `parseToken(e)?.name`, as "not this member" —
+// silently treating a corrupted section as though the member it names were
+// free, in both dispatch's duplicate guard and settle's lookup.
+test("a `## Dispatched` entry this grammar cannot parse refuses dispatch and settle, naming it, rather than reading as absent", (t) => {
+  const body = "# Fleet run ledger\n\n## Rows\n\n## Dispatched\n\n- impl-412x\n\n## Filed\n\n## Ruled\n";
+  const { refused } = fixture(t, body);
+  refused(["dispatch", "412", "impl-412"], /## Dispatched has an entry 'impl-412x' this grammar cannot parse/);
+  refused(["settle", "impl-412", "PR#420"], /## Dispatched has an entry 'impl-412x' this grammar cannot parse/);
+});
+
+// A replacement's own name is never a duplicate of its predecessor's, so the
+// exact-name guard above lets it through — but the predecessor is still live,
+// and the spec counts liveness as "unsettled impl- tokens" per family+number,
+// not per exact name. Two live tokens for #412 would double-count it.
+test("dispatch refuses a replacement while its predecessor is still live, in ## Dispatched or on a row", (t) => {
+  const { ok, refused, read } = fixture(t);
+  ok("dispatch", "412", "impl-412");
+  refused(["dispatch", "412", "impl-412-b"], /impl-412 is still live — `settle impl-412 killed`/);
+  ok("settle", "impl-412", "killed");
+  // The predecessor is settled now: the replacement is no longer refused.
+  assert.equal(ok("dispatch", "412", "impl-412-b").line, "#412 impl-412=killed · impl-412-b");
+  assert.deepEqual(read().dispatched, ["impl-412=killed", "impl-412-b"]);
+
+  // The same refusal when the live token was `row`'s, never `dispatch`'s.
+  ok("row", "415", "impl-415");
+  refused(["dispatch", "415", "impl-415-b"], /impl-415 is still live — `settle impl-415 killed`/);
+});
+
+// `load()`'s one read path for every subcommand: the write side (`drain`'s
+// own `created` guard) already refuses a second marker, but a corrupted file
+// carrying two anyway used to have its second `## Drain` bullet silently
+// dropped by `section(DRAIN)[0] ?? null`, with no warning on either stream.
+test("a ledger carrying two `## Drain` entries refuses to load rather than silently keeping only the first", (t) => {
+  const body = "# Fleet run ledger\n\n## Rows\n\n## Dispatched\n\n## Filed\n\n## Ruled\n\n## Drain\n\n- first reason\n- second reason\n";
+  const { refused } = fixture(t, body);
+  refused(["read"], /has 2 `## Drain` entries — one marker per run/);
+});

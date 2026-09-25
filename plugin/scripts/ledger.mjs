@@ -405,9 +405,18 @@ function load() {
   // A ledger written before #1799 has neither `## Dispatched` nor `## Drain`,
   // which reads as nothing dispatched through `dispatch` and no drain — the
   // truth about that file, not a default standing in for it.
+  const drainEntries = section(DRAIN);
+  // One marker per run: the `drain` command's own `created` guard refuses a
+  // second call rather than overwrite the standing reason. A second entry
+  // reaching this file some other way (hand edit, merge, an older writer) is
+  // the same invariant broken on disk, and narrowing to `[0]` here would
+  // drop it with no warning at all — the read-side half of that guard.
+  if (drainEntries.length > 1) {
+    die(`${file} has ${drainEntries.length} \`## Drain\` entries — one marker per run`);
+  }
   return {
     rows: section(ROWS), filed: section(FILED), ruled: section(RULED),
-    dispatched: section(DISPATCHED), drain: section(DRAIN)[0] ?? null,
+    dispatched: section(DISPATCHED), drain: drainEntries[0] ?? null,
   };
 }
 
@@ -1198,12 +1207,30 @@ function unknownMember(name) {
   return `unknown member '${name}' — expected impl-<N>, fix-pr-<M> or finisher-pr-<M> (a -b replacement suffix allowed), or merge-bot-<n>`;
 }
 
+// `## Dispatched` gains an entry per dispatch and never loses or reorders one
+// (this file's header comment states the invariant `settle` and `nextMergeBot`
+// both rely on). The exact-name lookups in runDispatch() and runSettle() below
+// used to key off `parseToken(e)?.name`, which reads a token this grammar
+// cannot parse the same as "no match" — silently treating a corrupted entry as
+// an absent member and letting a dispatch or settle proceed as though nothing
+// were there (measured: a malformed row let a duplicate dispatch through).
+// Refuse loudly, naming the entry, before either lookup runs.
+function refuseMalformedDispatched() {
+  const bad = data.dispatched.find((e) => parseToken(e) === null);
+  if (bad !== undefined) {
+    die(`## Dispatched has an entry '${bad}' this grammar cannot parse — fix the ledger by hand before dispatch or settle can trust it`);
+  }
+}
+
 function runDispatch() {
   const usage = "usage: ledger.mjs dispatch <ticket|pr> <member>, or dispatch merge-bot";
   if (rest.length === 0 || rest.length > 2) die(usage);
   const [key, name] = rest.length === 2 ? rest : [null, rest[0]];
   // The id-slot rule `row`/`filed`/`ruled` apply, on whichever slot leads.
   refuseStrayInId(key ?? name, key === null ? "a member name" : "a ticket or PR number");
+  // Read ahead of every lookup below that trusts `## Dispatched` by name —
+  // `nextMergeBot()` two lines down among them.
+  refuseMalformedDispatched();
 
   // `merge-bot` bare is the merge-bot case of this command (spec § 4 item 2,
   // which § 6 folds `dispatched` into): the ledger names the bot, 1 + the
@@ -1233,10 +1260,22 @@ function runDispatch() {
   // too — a `row`-written record the ledger never saw dispatched.
   const settledOnRow = data.rows.flatMap(memberTokens).find((t) => t.name === member.name && t.outcome !== null);
   const prior =
-    data.dispatched.find((e) => parseToken(e)?.name === member.name) ??
+    data.dispatched.find((e) => parseToken(e).name === member.name) ??
     (settledOnRow && `${settledOnRow.name}=${settledOnRow.outcome}`);
   if (prior !== undefined) {
     die(`${member.name} was already dispatched this run (${prior}) — a replacement takes a name of its own (a -b, -c … suffix)`);
+  }
+
+  // A replacement (`-b`, `-c` …) works the same ticket or PR as its
+  // predecessor: two live tokens for one family+number would double-count
+  // liveness ("live implementers = unsettled impl- tokens", spec § 6 §2).
+  // Checked across both places a token can be live — `## Dispatched` and a
+  // row `row` wrote directly — so the refusal holds regardless of which one
+  // last wrote it.
+  const liveSibling = [...data.dispatched.map(parseToken), ...data.rows.flatMap(memberTokens)]
+    .find((t) => t.family === member.family && t.number === member.number && t.name !== member.name && t.outcome === null);
+  if (liveSibling) {
+    die(`${liveSibling.name} is still live — \`settle ${liveSibling.name} killed\` (or its real outcome) before dispatching ${member.name}`);
   }
 
   let i = -1;
@@ -1287,8 +1326,12 @@ function runSettle() {
   if (parsed.error) die(`${parsed.name}: ${parsed.error}`);
   const { name, outcome } = parsed;
   const token = `${name}=${outcome}`;
+  // Same guard as runDispatch(): a `## Dispatched` entry this grammar cannot
+  // parse must refuse the lookup below, not read as "not this member" and
+  // let settle proceed against a corrupted section.
+  refuseMalformedDispatched();
 
-  const di = data.dispatched.findIndex((e) => parseToken(e)?.name === name);
+  const di = data.dispatched.findIndex((e) => parseToken(e).name === name);
   const entry = di === -1 ? null : parseToken(data.dispatched[di]);
   const settled = [entry, ...data.rows.flatMap(memberTokens).filter((t) => t.name === name)]
     .filter((t) => t !== null && t.outcome !== null);

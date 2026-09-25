@@ -65,6 +65,11 @@ test("an outcome from another family's vocabulary, or none at all, is refused by
     ["fix-pr-346=applied", /expected applied:<head> \| no-op \| failed \| killed/],
     ["fix-pr-346=applied:", /not an outcome of fix-pr-M/],
     ["fix-pr-346=applied:not-a-sha", /not an outcome of fix-pr-M/],
+    // The hex-length bounds themselves (7 to 40 inclusive): one hex char
+    // short of and one over the accepted range, so a bound loosened by one
+    // either way is caught rather than passing on the interior cases alone.
+    ["fix-pr-346=applied:abc123", /not an outcome of fix-pr-M/],
+    ["fix-pr-346=applied:73b356de0123456789abcdef0123456789abcdef0", /not an outcome of fix-pr-M/],
     ["fix-pr-346=bailed", /not an outcome of fix-pr-M/],
     ["finisher-pr-346=done", /expected labelled \| failed \| killed/],
     ["merge-bot-2=labelled", /expected done \| killed/],
@@ -107,4 +112,8 @@ test("nextMergeBot counts every merge-bot entry, live or settled, and nothing el
   assert.equal(nextMergeBot([]), "merge-bot-1");
   assert.equal(nextMergeBot(["impl-412", "fix-pr-346=no-op", "finisher-pr-346"]), "merge-bot-1");
   assert.equal(nextMergeBot(["impl-412", "merge-bot-1=done", "fix-pr-346", "merge-bot-2=killed", "merge-bot-3"]), "merge-bot-4");
+  // A malformed entry is not a merge-bot entry, however much it starts like
+  // one: counting by prefix instead of by parseToken() inflated n past what
+  // ## Dispatched's real entries justify (measured: merge-bot-3, not -2).
+  assert.equal(nextMergeBot(["merge-bot-1=done", "merge-bot-2x-garbage"]), "merge-bot-2");
 });

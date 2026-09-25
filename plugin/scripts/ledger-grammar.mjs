@@ -73,5 +73,5 @@ export function memberTokens(text) {
  * `## Dispatched`, settled ones included. One ledger per run, so n restarts
  * at 1 with every run. */
 export function nextMergeBot(dispatched) {
-  return `merge-bot-${dispatched.filter((e) => e.startsWith("merge-bot-")).length + 1}`;
+  return `merge-bot-${dispatched.map(parseToken).filter((t) => t?.family === "merge-bot").length + 1}`;
 }
