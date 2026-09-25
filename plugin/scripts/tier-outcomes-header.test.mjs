@@ -281,9 +281,12 @@ test("the sizing verdict has a stated collection channel, and it is not phase 0"
 test("the dispatch brief tells the member to emit the Sizing line the ruling step reads", () => {
   // Both ends or neither: a ruling step that reads `Sizing:` off a PR body no
   // member was told to write is the same blank column with more words. Pinned
-  // apart from the reader above so dropping either end reds.
+  // apart from the reader above so dropping either end reds. The brief is the
+  // implementer agent body since #1804 (spec 2026-09-24 § 2 Decision 2) — the
+  // member's system prompt, where run-team's phase 2 used to paste it.
+  const brief = readFileSync(join(REPO, "plugin", "agents", "fleet-implementer.agent.md"), "utf8").split("---").slice(2).join("---");
   assert.match(
-    RUN_TEAM,
+    brief,
     /`Sizing: light` or `Sizing: heavy`/,
     "the dispatch brief no longer tells the member to put its sizing verdict in the PR body",
   );

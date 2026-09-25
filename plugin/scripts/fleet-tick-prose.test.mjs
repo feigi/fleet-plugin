@@ -92,18 +92,25 @@ test("the queue-depth table points at the executable reconcile", () => {
   assert.match(s, /computed, not remembered/);
 });
 
-test("the queue-depth table keeps the backlog gate above its four rows", () => {
-  // The one ordering the script encodes that the table cannot show: backlog >= 2
-  // short-circuits all four pool/supply rows. A table read as authoritative
-  // without it re-shortlists under a hold.
-  assert.match(queueDepthTable(), /backlog gate outranks all four rows/);
+test("the queue-depth table keeps the implementer row's three holds above its rows", () => {
+  // The one ordering the script encodes that the table cannot show: implementers()
+  // returns a HOLD for a drain, a tier mismatch or a saturated review side before
+  // it ever reaches a PULL. A table read as authoritative without them Pulls
+  // under a hold. All three, each by the ACTION string the tick prints.
+  const s = queueDepthTable();
+  assert.match(s, /Three\s+holds\s+outrank\s+every\s+row/);
+  for (const hold of ["`HOLD (draining)`", "`HOLD (tier mismatch impl-<N>)`", "`HOLD (review side saturated)`"]) {
+    assert.ok(s.includes(hold), `the queue-depth table no longer names ${hold} above its rows`);
+  }
 });
 
-test("the pool-0 rows do not overlap — supply 0 has exactly one row", () => {
-  // `| 0 | < cap |` next to `| 0 | 0 |` gave two different answers for supply 0,
-  // and the script has to pick one. Pinning the disjoint spelling keeps the
-  // table and the code from drifting back apart.
-  assert.match(queueDepthTable(), /\|\s*0\s*\|\s*0 < supply < cap\s*\|/);
+test("the queue-depth table's empty row suggests /triage and asks nobody to tick (#1804)", () => {
+  // Supply is automatic (ADR 0013): the old pool-0 rows asked the maintainer to
+  // tick a multi-select that no longer exists. Exactly one row answers an empty
+  // shortlist after the tick's own refresh, and it is the tick's own string.
+  const s = queueDepthTable();
+  assert.match(s, /\|\s*0 after that refresh\s*\|\s*`SUGGEST \/triage, hold idle`\s*\|/);
+  assert.doesNotMatch(s, /ask the maintainer to tick/, "the queue-depth table asks the maintainer to tick — phase 0's multi-select is retired (ADR 0013)");
 });
 
 test("the review-backlog definition states what the script actually counts", () => {
@@ -146,7 +153,7 @@ const foldInBlock = () =>
   section(
     RUN_TEAM,
     "**Fold in every PR a prior run left open, before shortlisting.**",
-    "1. **Candidate scan**",
+    "1. **Build the Shortlist**",
     "run-team step-0 fold-in block",
   );
 

@@ -28,10 +28,11 @@ const REVIEW_AND_FIX = read("commands", "review-and-fix.md");
 const step7 = () =>
   between(NEXT_TICKET, "## 7. When the superpowers path reports done", "## Red flags", "next-ticket/SKILL.md step 7");
 
-// The controller carries only the `>` blocks verbatim; the same slice
-// `member-prompt-prose.test.mjs` takes, for the same reason.
-const memberBlocks = () =>
-  between(RUN_TEAM, "and each of these verbatim:", "Each rule in the enumerate-and-declare block", "run-team phase 2");
+// The member reads the implementer agent body verbatim — its system prompt on
+// both harnesses since #1804 moved the blocks there out of run-team's phase 2
+// (spec 2026-09-24 § 2 Decision 2); the same slice `member-prompt-prose.test.mjs`
+// takes, for the same reason.
+const memberBlocks = () => read("agents", "fleet-implementer.agent.md").split("---").slice(2).join("---");
 
 const finisherLabelDuty = () =>
   between(RUN_TEAM, "Add `ready-to-merge`", "A halt at step 1 reads identical from a bare SHA mismatch", "run-team finisher duty 3");
@@ -82,11 +83,12 @@ test("next-ticket says why the label write stands alone, so it is not folded bac
   );
 });
 
-test("the split reaches the fleet member verbatim, inside the blocks the controller carries", () => {
+test("the split reaches the fleet member verbatim, inside the agent body it is dispatched with", () => {
   const blocks = memberBlocks();
 
-  // Location, not vocabulary: a member reads only these blocks. The instruction
-  // sitting in controller-facing prose reaches it by paraphrase or not at all.
+  // Location, not vocabulary: a member reads only its agent body and its prompt.
+  // The instruction sitting in controller-facing prose reaches it by paraphrase
+  // or not at all.
   assert.match(
     blocks,
     /gh pr edit --add-label/,

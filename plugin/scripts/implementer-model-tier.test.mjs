@@ -30,20 +30,23 @@ import { between as section } from "./prose-pin.mjs";
 // Slice by named anchors and fail loudly when one moves; slice SIZE is what
 // does the work. One slice per paragraph, never per phase: widen a slice to its
 // phase and a neighbouring paragraph satisfies the pin on its own. Measured on
-// phase 0 — delete step 4's `**correction-ticket discipline**` sentence and the
-// pin on that phrase below stays green regardless, on step 6's "which tickets
-// carry the correction-ticket discipline" alone.
+// the old phase 0 — delete step 4's `**correction-ticket discipline**` sentence
+// and the pin on that phrase below stayed green regardless, on step 6's "which
+// tickets carry the correction-ticket discipline" alone. #1804 retired step 6
+// (the multi-select) and moved step 4 into phase 1's Pull as its step 3; the
+// rule the measurement taught still holds, since phase 2's prompt paragraph
+// names the same discipline a few hundred lines on.
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
 
 // These three slices are paragraph-tight. A failure here means the text was
 // deleted OR relocated — check the rest of the file before assuming deletion.
 const step4 = () =>
-  section(RUN_TEAM, "4. **Read each survivor in full", "5. **Collision scan", "run-team phase 0 step 4");
+  section(RUN_TEAM, "3. **Read the ticket in full, once**", "4. **Collision scan", "run-team phase 1 Pull step 3 (was phase 0 step 4)");
 const dispatch = () =>
   section(RUN_TEAM, "**Dispatch every implementer", "**Guard: accumulate per PR", "run-team phase 2 dispatch rule");
 const guard = () =>
-  section(RUN_TEAM, "**Guard: accumulate per PR", "One named member per ticket", "run-team phase 2 tier guard");
+  section(RUN_TEAM, "**Guard: accumulate per PR", "Why the agent body carries what it does", "run-team phase 2 tier guard");
 
 test("phase 0 step 4 still earns its class judgement now that the class prices nothing", () => {
   const slice = step4();
@@ -106,19 +109,6 @@ test("phase 0 step 4 still earns its class judgement now that the class prices n
     slice,
     /measures no tier at\s+all/,
     "step 4 no longer says the cited reference measures no tier — the citation reads as evidence again",
-  );
-});
-
-// The slicing rationale at the top of this file is measured on step 6's copy of
-// this phrase. Nothing else pins that copy, so losing it would leave the
-// rationale asserting a reason the tree no longer carries — which is exactly how
-// the line count it replaced went stale. Fail here instead.
-test("phase 0 step 6 still carries the phrase the slicing rationale is measured on", () => {
-  const slice = section(RUN_TEAM, "6. Present survivors as a multi-select", "Never put two sequenced tickets", "run-team phase 0 step 6");
-  assert.match(
-    slice,
-    /which tickets carry the\s+\*{0,2}correction-ticket\*{0,2}\s+discipline/,
-    "step 6 dropped the phrase the slicing rationale cites — re-measure and update the comment at the top of this file",
   );
 });
 
@@ -375,7 +365,7 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
 // asking a controller to verify the tier is the thing that was measured not
 // to happen"), so this pins the actual invocation and the consequence, not
 // merely that tier-check is mentioned somewhere in the slice.
-test("phase 2 runs the tier check after the dispatch batch and stops the wave on a mismatch", () => {
+test("phase 2 runs the tier check after every Pull's dispatch and holds the next Pull on a mismatch", () => {
   const slice = dispatch();
   // The runnable invocation itself — named by NAME, not by a paraphrase a
   // reader could satisfy without ever running anything real.
@@ -392,13 +382,19 @@ test("phase 2 runs the tier check after the dispatch batch and stops the wave on
     /`member: declared <m>\/<l> resolved <m>\/<l>`/,
     "phase 2 no longer states the tier-check failure line's exact shape",
   );
-  // The consequence, bound adjacent to "stops the" so a rewrite that keeps
-  // the word "stops" elsewhere in the slice (e.g. "stops nothing by
-  // itself") does not satisfy this on its own.
+  // The consequence, bound adjacent to "holds the" so a rewrite that keeps
+  // the word "holds" elsewhere in the slice does not satisfy this on its own.
+  // Under Pull there is no wave to stop (ADR 0013): the mismatch holds the
+  // next Pull, and the tick's own HOLD row is what keeps it held.
   assert.match(
     slice,
-    /non-zero exit \*\*stops the\s+wave\*\*/,
-    "phase 2 no longer says a tier-check failure stops the wave",
+    /non-zero exit \*\*holds the\s+next Pull\*\*/,
+    "phase 2 no longer says a tier-check failure holds the next Pull",
+  );
+  assert.match(
+    slice,
+    /`ledger\.mjs settle impl-<N>\s+tier-mismatch`[\s\S]{0,200}`HOLD \(tier mismatch impl-<N>\)`/,
+    "phase 2 no longer records the mismatch on the ledger, or no longer names the tick's HOLD row that holds the next Pull on it",
   );
   // Normative, not advisory — the same hedge-word guard the tier guard test
   // below already applies to its own paragraph, applied here to this one.
@@ -412,15 +408,14 @@ test("phase 2 runs the tier check after the dispatch batch and stops the wave on
 test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
   const slice = guard();
 
-  // The unit. Implementers are refilled level-triggered, one slot at a time —
-  // "wave" everywhere else in this file means MERGE wave, so the original
-  // "compare this wave against the prior wave" named two sets nobody can
-  // enumerate.
+  // The unit. Supply is one Pull per free slot (ADR 0013), so no batch of
+  // implementers exists to compare — the original "compare this wave against
+  // the prior wave" named two sets nobody can enumerate.
   assert.match(slice, /unit is the PR/, "the guard's unit is no longer the PR");
   assert.match(
     slice,
-    /no implementer waves/,
-    "the guard no longer says why the wave is not a usable unit — it comes back otherwise",
+    /no implementer batches/,
+    "the guard no longer says why a batch is not a usable unit — it comes back otherwise",
   );
 
   // Runnable, not merely named. `compute-spend.mjs` is a pure module: no
@@ -478,11 +473,11 @@ test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
     "the guard no longer states a minimum sample, so one PR's findings can trigger a revert",
   );
   // Findings/fix-rounds are the counter-signal: reviews run 3-5x LONGER than
-  // implementation, so an extra fix-round costs a wave slot. A guard on spend
-  // alone measures the wrong side.
+  // implementation, so an extra fix-round costs an implementer slot. A guard on
+  // spend alone measures the wrong side.
   assert.match(
     slice,
-    /one extra fix-round costs a wave slot/,
+    /one extra fix-round costs an implementer slot/,
     "the guard measures spend without the fix-round cost that would eat the saving",
   );
   // The revert UNIT. `/revert/` alone stays green through "revert the rule",

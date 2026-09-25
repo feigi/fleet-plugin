@@ -97,6 +97,11 @@ import { between, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+// The implementer's copy lives in the implementer agent body since #1804 (spec
+// 2026-09-24 § 2 Decision 2): the body is what each harness injects as the
+// member's system prompt, and SKILL.md's phase 2 no longer re-pastes it. The
+// fix-applier's copy is still a quote block in SKILL.md's Reviewers section.
+const IMPLEMENTER_BODY = readFileSync(join(REPO, "agents", "fleet-implementer.agent.md"), "utf8").split("---").slice(2).join("---");
 
 // `>` gutter and `**` emphasis stripped, whitespace collapsed — mirrors
 // `dispatch-block-pins-prose.test.mjs`'s `flatten`, so a pin here survives the
@@ -122,10 +127,10 @@ const flatten = (s) =>
 const implementerStashBlock = () =>
   flatten(
     between(
-      RUN_TEAM,
+      IMPLEMENTER_BODY,
       "**Never `git stash` or `git stash pop` to shelve",
       "**Every scratch file",
-      "phase 2's stash-prohibition block",
+      "the implementer body's stash-prohibition block",
     ),
   );
 
@@ -261,8 +266,8 @@ test("the fix-applier's stash rule says nothing partitions the stack, so the pro
 // width, so a `between()` search for it against the SPLICED file broke across
 // the very line break the rewrap introduced. `narrow` already IS the
 // rewrapped block; there is nothing left to re-locate.
-function assertSurvivesRewrap(startAnchor, endAnchor, what, assertions) {
-  const raw = between(RUN_TEAM, startAnchor, endAnchor, what);
+function assertSurvivesRewrap(source, startAnchor, endAnchor, what, assertions) {
+  const raw = between(source, startAnchor, endAnchor, what);
   const body = raw.replace(/\n*>?\s*$/, "");
   const words = body.replace(/\n>\s?/g, " ").split(/\s+/).filter(Boolean);
   const lines = words.reduce((acc, w) => {
@@ -279,9 +284,10 @@ function assertSurvivesRewrap(startAnchor, endAnchor, what, assertions) {
 
 test("a rewrapped implementer stash block still matches every pin above — these pins refuse drift, not reflow", () => {
   assertSurvivesRewrap(
+    IMPLEMENTER_BODY,
     "**Never `git stash` or `git stash pop` to shelve",
     "**Every scratch file",
-    "phase 2's stash-prohibition block",
+    "the implementer body's stash-prohibition block",
     [
       phrase("Never `git stash` or `git stash pop` to shelve your own progress — take a WIP commit instead"),
       phrase("The stash stack is repo-global, not per-worktree or per-session"),
@@ -293,6 +299,7 @@ test("a rewrapped implementer stash block still matches every pin above — thes
 
 test("a rewrapped fix-applier stash block still matches every pin above — these pins refuse drift, not reflow", () => {
   assertSurvivesRewrap(
+    RUN_TEAM,
     "**Never `git stash` or `git stash pop` here either",
     "**Report LAST",
     "the fix-applier's stash-prohibition block",

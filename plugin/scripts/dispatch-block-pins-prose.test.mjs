@@ -58,6 +58,14 @@
 // red says the block changed; a red HERE says WHICH RULE was lost, which is the
 // more actionable half and the reason none of these pins was deleted when the
 // golden landed.
+//
+// WHERE THE BLOCKS LIVE (#1804). They used to be a run of `>` quote blocks in
+// run-team/SKILL.md's phase 2, pasted into every implementer prompt. Spec
+// 2026-09-24 § 2 Decision 2 moved them into the body of
+// `agents/fleet-implementer.agent.md` (byte-identical in the `-alt` file,
+// pinned by within-run-pair-prose.test.mjs), which each harness injects as the
+// member's system prompt, and #1804 deleted the SKILL.md copy. These pins
+// retargeted with them: same slices, same bounds, read off the agent body.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -65,20 +73,14 @@ import { join } from "node:path";
 import { between, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+// The body alone — everything after the frontmatter's closing `---` — so a
+// frontmatter field can never satisfy a pin meant for text the member reads.
+const AGENT_FILE = readFileSync(join(REPO, "agents", "fleet-implementer.agent.md"), "utf8");
+const BODY = AGENT_FILE.split("---").slice(2).join("---");
 
-const START = "and each of these verbatim:";
-const END = "Each rule in the enumerate-and-declare block";
-
-// Scoped to the member-prompt region first, for the reason `indexOf` demands
-// it: "You are ALREADY in worktree" also opens the fix-applier prompt further
-// down the file, and a file-wide anchor would silently pin that one instead.
-function region() {
-  const at = RUN_TEAM.indexOf(START);
-  assert.notEqual(at, -1, `phase 2's verbatim-blocks intro ('${START}') moved — update this test`);
-  const end = RUN_TEAM.indexOf(END, at);
-  assert.notEqual(end, -1, `the rationale anchor ('${END}') moved — update this test`);
-  return RUN_TEAM.slice(at + START.length, end);
+function region(text = BODY) {
+  assert.ok(text.trim().length > 0, "agents/fleet-implementer.agent.md has no body — the implementer background moved again; update this test");
+  return text;
 }
 
 // Quote markers and `**` emphasis are stripped and whitespace collapsed before
@@ -124,14 +126,13 @@ const scratchBlock = () => block("**Every scratch file", "**The `eval` kernel is
 const evalKernelBlock = () => block("**The `eval` kernel is shared", "Your ticket names the cases", "phase 2's eval-kernel-discipline block");
 const enumerateBlock = () => block("Your ticket names the cases", "Run `sizing-a-ticket`", "phase 2's enumerate-the-class block");
 
-// The LAST block in the region has no following block to bound it, so it takes
-// the region's own closing anchor instead — same two bounds as every slicer
-// above, one level up. `region()` has already consumed END, which is why this
-// one re-slices from START rather than calling it.
+// The LAST block in the body has no following block to bound it, so it runs to
+// the end of the body — which is also where the member's prompt ends, so
+// anything appended after it lands inside this slice rather than outside it.
 const sizingBlock = () => {
-  const at = RUN_TEAM.indexOf(START);
-  assert.notEqual(at, -1, `phase 2's verbatim-blocks intro ('${START}') moved — update this test`);
-  return flatten(between(RUN_TEAM.slice(at + START.length), "Run `sizing-a-ticket`", END, "phase 2's sizing-and-PR block"));
+  const at = region().indexOf("Run `sizing-a-ticket`");
+  assert.notEqual(at, -1, "the agent body's sizing-and-PR block ('Run `sizing-a-ticket`') moved — update this test");
+  return flatten(region().slice(at));
 };
 
 test("the worktree block forbids a second worktree and carries the check that settles it", () => {
@@ -573,12 +574,12 @@ test("a rewrapped block still matches — these pins refuse drift, not reflow", 
   // The ACCEPT side. Re-wrapping a paragraph is not drift, and a pin that
   // reddened on it would be deleted by the next person who reflowed this file.
   //
-  // What this test uniquely holds open, measured rather than assumed: deleting
-  // `flatten`'s gutter strip reds EVERY test in this file, not just this one —
-  // every block pin above already spans a `>`. So all of them hold the
-  // normalization open at TODAY'S wrap points, and this is the only test that
-  // exercises it at wrap points the file does not currently contain. A
-  // `flatten` that handled today's breaks by accident would survive every one.
+  // What this test uniquely holds open: every block pin above spans a line
+  // break, so all of them hold `flatten`'s line join open at TODAY'S wrap
+  // points, and this is the only test that exercises it at wrap points the file
+  // does not currently contain. A `flatten` that handled today's breaks by
+  // accident would survive every one. (Before #1804 the blocks carried a `>`
+  // gutter too, which `flatten` still strips for any pin that meets one.)
   //
   // Stated as a property, not a count, deliberately. This comment said "six"
   // and "the five of them" until the PR one block below it added a seventh and
@@ -590,21 +591,16 @@ test("a rewrapped block still matches — these pins refuse drift, not reflow", 
   // test on the fixture guard rather than on the pin — an accept control that
   // reddens on the edits it exists to accept is worse than none.
   const raw = between(region(), "Commit incrementally", "**Every scratch file", "phase 2's commit-incrementally block");
-  // Trimmed back to the BLOCK, not merely to the last non-space character.
-  // `between`'s `to` anchor is the next block's opening words, so `raw` runs
-  // past this block's last line through the blank line and onto the next
-  // block's `>` marker. Measured on the first draft, which trimmed `/\s+$/`:
-  // that leaves the `>` as the last character, the trailing empty word rejoins
-  // as a second space, and the splice merges the two blocks into one line —
-  // rewrapping the right words inside a blockquote that is no longer
-  // well-formed. It also made the staleness guard below VACUOUS, since the
-  // corrupted tail differed from `raw` no matter how the block was wrapped.
-  const body = raw.replace(/\n*>?\s*$/, "");
+  // Trimmed back to the BLOCK: `between`'s `to` anchor is the next block's
+  // opening words, so `raw` runs past this block's last line through the blank
+  // line that separates the two. The separator is re-appended explicitly below,
+  // so the next block still opens its own paragraph after the splice.
+  const body = raw.replace(/\s*$/, "");
   // Re-wrapped at a narrower width than the file uses, so every wrap point
   // lands somewhere different from today's. Wrapping at word boundaries, not
   // one word per line: an unconditional break would split the slice's own
   // opening anchor and red this test on the anchor rather than on the pin.
-  const words = body.replace(/\n>\s?/g, " ").split(/\s+/).filter(Boolean);
+  const words = body.split(/\s+/).filter(Boolean);
   const lines = words.reduce((acc, w) => {
     const last = acc[acc.length - 1];
     if (last && `${last} ${w}`.length <= 45) acc[acc.length - 1] = `${last} ${w}`;
@@ -614,12 +610,12 @@ test("a rewrapped block still matches — these pins refuse drift, not reflow", 
   // The separator re-appended explicitly, so the next block still opens its own
   // paragraph. With `body` bounded to the block this guard is load-bearing
   // again: it now reds when the source block is already at this width.
-  const narrow = lines.join("\n> ") + "\n\n> ";
+  const narrow = lines.join("\n") + "\n\n";
   assert.notEqual(narrow, raw, "the rewrap fixture no longer changes the block's wrapping — update it");
   // Replacer function, not a replacement string: `$&`, `$'` and `` $` `` are
   // interpreted in the latter. The commit block carries no `$` today, which is
   // exactly the kind of thing that stops being true without anyone noticing.
-  const flat = flatten(between(RUN_TEAM.replace(raw, () => narrow).slice(RUN_TEAM.indexOf(START)), "Commit incrementally", "**Every scratch file", "rewrapped commit block"));
+  const flat = flatten(between(region(BODY.replace(raw, () => narrow)), "Commit incrementally", "**Every scratch file", "rewrapped commit block"));
   assert.match(flat, phrase("Commit incrementally as you go. Do not accumulate a large uncommitted diff"));
   assert.match(flat, phrase("uncommitted work is invisible to the controller and effectively unrecoverable"));
 });
