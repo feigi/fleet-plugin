@@ -988,7 +988,9 @@ test("CLI: an unreadable claim count is `unknown`, never zero", () => {
 // `return n;` reds the 200 case ("…; 200 ticket(s) claimed and in flight…"
 // did not match /; 200\+ ticket/), and making it always return `${n}+` reds the
 // 199 case ("…; 199+ ticket(s) claimed and in flight…" did not match
-// /; 199 ticket/). The `; ` anchor is what makes the 199 regex refuse `199+`.
+// /; 199 ticket/). The literal `199 ticket(s)` adjacency — no `+` allowed
+// between the digits and the space — is what refuses `199+`; the `; ` prefix
+// only anchors the match to the claimed-count field.
 test("CLI: a claim count AT the query cap is disclosed as a floor (`200+`); one below it is exact", () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stall-cap-")));
   const path = join(dir, "heartbeat.json");
