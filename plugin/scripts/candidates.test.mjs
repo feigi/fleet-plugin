@@ -803,7 +803,7 @@ test("a blocker list gh cut short refuses at exit 2 — `d` never ships with blo
     withEdges(ticket(12, "## What to build\n\nx\n"), SHORT_50_OF_51),
   ]);
   assert.equal(status, 2, stderr);
-  assert.match(stderr, /#12: blockedBy lists 50 of 51 blockers/);
+  assert.match(stderr, /#12: blockedBy lists 50 of 51 blockers, so d would miss the rest/);
   assert.match(stderr, /^candidates: gh issue list failed/m);
 });
 
@@ -1199,7 +1199,7 @@ test("native edges reduce the same under gojq — union, dedupe, closed kept, an
   const short = run([withEdges(ticket(12, "## What to build\n\nx\n"), SHORT_50_OF_51)], undefined, null, extraEnv);
   assert.equal(short.status, 2, short.stderr);
   assertRanGojq(short);
-  assert.match(short.stderr, /#12: blockedBy lists 50 of 51 blockers/);
+  assert.match(short.stderr, /#12: blockedBy lists 50 of 51 blockers, so d would miss the rest/);
 });
 
 test("the cap is checked before specs are dropped — filtering first hides truncation", () => {
