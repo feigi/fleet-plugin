@@ -217,7 +217,14 @@ const premiseKey = ({ kind, target }) => `${kind} ${target}`;
 const premiseLabel = ({ kind, target }) => `behind-${kind}:#${target}`;
 
 async function probeState(kind, target) {
-  const r = await run("gh", [kind, "view", target, "--json", "state"], { timeout: GH_TIMEOUT_MS });
+  // gh's own remote resolution follows GIT_DIR/GIT_WORK_TREE exactly as git's
+  // does, and GH_REPO outranks even that (ledger.mjs's tracker-query probe,
+  // measured) — so this call needs the same scrub shortlistPath()'s git call
+  // gets, or an ambient one of the three silently answers for a different
+  // repository while `.fleet/shortlist.json` still lands in the right one.
+  const r = await run("gh", [kind, "view", target, "--json", "state"], {
+    timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }),
+  });
   if (r.status !== 0) return { error: describe(r) };
   let state;
   try {

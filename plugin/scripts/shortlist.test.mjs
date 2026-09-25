@@ -16,7 +16,13 @@
 //     unless the search carries `label:"ready-for-agent"` — so every case that
 //     expects rows back also proves the label was asked for. `issue view` and
 //     `pr view` answer `{"state": …}` from a per-case state table, and fail the
-//     way real gh does for a number or branch the table does not name.
+//     way real gh does for a number or branch the table does not name. It is
+//     NOT env-blind: `issue view`/`pr view` ask `git rev-parse --git-common-dir`
+//     of their own inherited env first, the way real gh's remote resolution
+//     follows an ambient GIT_DIR too (#1811 review), and answer from a SECOND
+//     table when that resolves to a decoy repository — so a probe call that
+//     forgot to scrub GIT_DIR/GIT_WORK_TREE answers for the wrong one here
+//     exactly as it would for the real gh.
 //   - inflight.sh is a stub, because the real one needs a remote, a PR list and
 //     python3 to say anything; its own suite is inflight.test.mjs. The stub
 //     keeps the real exit contract: 0 free, 1 taken, 2 could not answer.
@@ -56,7 +62,21 @@ case "$1 $2" in
       *) echo '[]' ;;
     esac ;;
   "issue view"|"pr view")
-    state=$(jq -r --arg k "$1" --arg id "$3" '.[$k][$id] // ""' "$FIXTURE_STATES")
+    # Real gh's own remote resolution follows an ambient GIT_DIR/GIT_WORK_TREE
+    # exactly as git's does (#1811 review) — so this stub asks git too, with
+    # the identical probe shortlistPath() uses, --git-common-dir (measured:
+    # unlike --show-toplevel, it DOES follow GIT_DIR alone, no GIT_WORK_TREE
+    # needed) — and answers from FIXTURE_OTHER_STATES instead of
+    # FIXTURE_STATES whenever that resolves to FIXTURE_OTHER_GITDIR, the way
+    # a genuinely unscrubbed gh call would silently answer for the wrong
+    # repository.
+    gitdir=$(git rev-parse --git-common-dir 2>/dev/null)
+    if [ -n "$FIXTURE_OTHER_GITDIR" ] && [ "$gitdir" = "$FIXTURE_OTHER_GITDIR" ]; then
+      states="$FIXTURE_OTHER_STATES"
+    else
+      states="$FIXTURE_STATES"
+    fi
+    state=$(jq -r --arg k "$1" --arg id "$3" '.[$k][$id] // ""' "$states")
     case "$state" in
       "") echo "GraphQL: Could not resolve to an issue or pull request with the number of $3." >&2; exit 1 ;;
       FAIL) echo "gh: HTTP 502 Bad Gateway" >&2; exit 1 ;;
@@ -153,10 +173,13 @@ const ok = (r) => assert.equal(r.status, 0, `exit ${r.status}\n${r.stderr}`);
 
 test("writes the oldest-first survivors and the scanned count to .fleet/shortlist.json", (t) => {
   const f = fixture(t);
-  const r = f.run({ issues: [issue(1720), issue(1701), issue(1710)] });
+  // #1730 is dropped (an unreadable blocker) so `scanned` and
+  // `shortlist.length` diverge — otherwise a `scanned: survivors.length` bug
+  // would still pass this test (#1811 review).
+  const r = f.run({ issues: [issue(1720), issue(1701), issue(1710), issue(1730, [99])] });
   ok(r);
   assert.deepEqual(f.written(), {
-    scanned: 3,
+    scanned: 4,
     shortlist: [{ n: 1701, t: "t1701" }, { n: 1710, t: "t1710" }, { n: 1720, t: "t1720" }],
   });
   // stdout is the same payload, plus where it was written.
@@ -182,6 +205,32 @@ test("an ambient GIT_DIR naming another repository cannot move the shortlist the
   ok(r);
   assert.deepEqual(numbers(f.written()), [1701]);
   assert.equal(existsSync(join(other, ".fleet")), false, "the shortlist followed GIT_DIR into another repository");
+});
+
+// Regression (#1811 review): probeState()'s own `gh … view` call must be
+// scrubbed exactly as shortlistPath()'s git call above is — gh's own remote
+// resolution follows an ambient GIT_DIR/GIT_WORK_TREE too (ledger.mjs's
+// tracker-query probe measured this first), so an unscrubbed probeState
+// could answer a blocker or exclusion-premise check from a DIFFERENT
+// repository while `.fleet/shortlist.json` still landed in the right one.
+test("an inherited GIT_DIR cannot retarget probeState's gh calls to another repository", (t) => {
+  const f = fixture(t);
+  const other = join(f.root, "other");
+  mkdirSync(other);
+  git(other, "init", "-q");
+  const otherStates = join(f.root, "other-states.json");
+  // In `other`, PR #60 reads MERGED — the opposite of `repo`'s OPEN — so a
+  // gh call retargeted there would wrongly lift #1702's exclusion.
+  writeFileSync(otherStates, JSON.stringify({ issue: {}, pr: { 60: "MERGED" } }));
+  f.row(1702, "excluded · behind-pr:#60");
+  const r = f.run({
+    issues: [issue(1701), issue(1702)],
+    states: { pr: { 60: "OPEN" } },
+    env: { GIT_DIR: join(other, ".git"), FIXTURE_OTHER_GITDIR: join(other, ".git"), FIXTURE_OTHER_STATES: otherStates },
+  });
+  ok(r);
+  assert.deepEqual(numbers(f.written()), [1701]);
+  assert.match(r.stderr, /#1702 dropped — excluded · behind-pr:#60, which is OPEN/);
 });
 
 test("dependency scan: an open blocker drops the ticket; a closed or merged one does not", (t) => {
