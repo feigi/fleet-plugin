@@ -115,7 +115,9 @@ jobs:
       # the suite is developed and run against. It holds an EXACT version, and
       # Renovate moves it on a monthly schedule rather than a human noticing:
       # see ADR 0010 for why the exact pin stayed and why a partial spec (`26`)
-      # was measured and rejected. Do not hand-edit this to float.
+      # was measured and rejected. That schedule's window bounds when the bot
+      # opens its PR, not when the PR merges: the merge waits on the required
+      # checks, whenever they finish. Do not hand-edit this to float.
       - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc

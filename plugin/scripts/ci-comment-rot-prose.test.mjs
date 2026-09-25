@@ -146,3 +146,77 @@ test("the vendored-tree sentence makes a structural claim, not a size claim", ()
     `the vendored-tree claim sizes the directory again, and the number is stale on arrival: "${span[0]}"`,
   );
 });
+
+// #1753. The comment above the setup-node step that owns `.nvmrc`'s explanation
+// says Renovate moves the pin on a schedule. Read alone, that schedule looks
+// like a promise about when the bump LANDS, and it never was one: the window
+// bounds when the bot opens its PR, and the merge waits on the required checks
+// whenever they finish. The comment now says so, and this keeps it saying so.
+//
+// Same rule as #348's pins above. It bans the stale FORM — a schedule named with
+// nothing saying what its window bounds (the text before #1753), or a sentence
+// tying the merge to the window without denying it — and accepts any paraphrase
+// that states the distinction in one sentence. It pins no count and no cron
+// string: the window's width and timing are renovate.json's to change, and the
+// hosted app's scheduling is not observable from this tree anyway. The ceiling:
+// the distinction has to sit inside ONE sentence, because a block-wide scan
+// would let an unrelated "Do not hand-edit" supply the negation for a sentence
+// that claims the opposite.
+export function windowClaimFault(block) {
+  if (!/\b(schedule|window)\b/i.test(block)) {
+    return "the pin's comment no longer says the bot moves .nvmrc on a schedule — the pointer to how it moves is gone";
+  }
+  const bounded = block
+    .split(/(?<=[.!?])\s+/)
+    .some(
+      (s) =>
+        /\b(schedule|window)\b/i.test(s) &&
+        /\b(open|opens|opened|opening|create|creates|created|creating|creation|raise|raises|raised|raising)\b/i.test(s) &&
+        /\b(PRs?|pull requests?)\b/i.test(s) &&
+        /\bmerg/i.test(s) &&
+        /\b(not|never|nothing|regardless|whenever)\b|n't\b/i.test(s),
+    );
+  return bounded
+    ? null
+    : "the pin's comment names the bot's schedule but no longer says, in one sentence, that its window bounds PR creation and not merge timing — #1753";
+}
+
+// The contiguous comment run above the setup-node step whose comment cites ADR
+// 0010 — anchored on the step and the ADR it points at, never a line number.
+function pinOwnerComment() {
+  const lines = read("../../.github/workflows/ci.yml").split("\n");
+  for (let step = 0; step < lines.length; step++) {
+    if (!/^\s*- uses: actions\/setup-node@/.test(lines[step])) continue;
+    let i = step;
+    while (i > 0 && /^\s*#/.test(lines[i - 1])) i--;
+    const block = prose(lines.slice(i, step).join("\n"));
+    if (block.includes("ADR 0010")) return block;
+  }
+  return null;
+}
+
+test("the pin's comment says the bot's window bounds PR creation, not merge timing", () => {
+  const block = pinOwnerComment();
+  assert.ok(block, "no setup-node step in ci.yml carries a comment pointing at ADR 0010 any more");
+  assert.equal(windowClaimFault(block), null);
+});
+
+test("a paraphrase of the window claim is accepted; the stale form and a merge promise are not", () => {
+  const lead = ".nvmrc holds an EXACT version, and Renovate moves it on a monthly schedule rather than a human noticing: see ADR 0010.";
+  const tail = "Do not hand-edit this to float.";
+
+  assert.equal(
+    windowClaimFault(`${lead} That schedule's window bounds when the bot opens its PR, not when the PR merges. ${tail}`),
+    null,
+  );
+  assert.equal(
+    windowClaimFault(`${lead} The window only limits when Renovate raises the pull request; merging happens whenever the required checks go green. ${tail}`),
+    null,
+  );
+
+  // The text as it stood before #1753: a schedule, and nothing on what it bounds.
+  assert.match(windowClaimFault(`${lead} ${tail}`), /no longer says, in one sentence/);
+  // The misreading stated outright — the trailing "Do not" must not rescue it.
+  assert.match(windowClaimFault(`${lead} The bot opens its PR and merges it within that window. ${tail}`), /no longer says, in one sentence/);
+  assert.match(windowClaimFault(`.nvmrc holds an EXACT version: see ADR 0010. ${tail}`), /no longer says the bot moves/);
+});
