@@ -354,6 +354,15 @@ test("green with behind null → 2 behind-unknown", (t) => {
   assertRow(r, 2, "unknown", "behind-unknown");
 });
 
+// An unusable payload that ALSO happens to carry a `behind: null` field must
+// still read as ci-unreadable, not behind-unknown: readCi()'s `validated` is
+// null whenever `usable` is false, so decide() cannot fall through to a
+// `behind` read on an unvalidated shape no matter which check runs first.
+test("an unusable payload that also carries behind:null → 2 ci-unreadable, never behind-unknown", (t) => {
+  const r = gate(t, { ciOut: ci({ verdict: "not-green", reasons: ["queued"], behind: null }), ciExit: 0 });
+  assertRow(r, 2, "unknown", "ci-unreadable");
+});
+
 test("instruments.sh exit 1 → 2 instrument-set-changed, the digest it printed carried", (t) => {
   const changed = "e".repeat(64);
   const r = gate(t, { instrOut: changed, instrExit: 1 });

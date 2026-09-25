@@ -162,6 +162,15 @@ function readPr() {
 // not-green — so an exit 1 with no not-green payload is not a CI verdict. An
 // exit 0 whose payload is `{}` or empty is the vacuous gate the merge bot's
 // hand-written `jq` checks used to pass. Both read as `ci-unreadable`.
+// The `validated` field is null whenever `usable` is false — mirroring
+// readPr()'s null-on-any-shape-violation pattern — so decide() below reads
+// off `validated`, not the raw (possibly malformed) `ci` payload, for every
+// check gated on usability. That makes decide()'s safety independent of
+// statement ORDER: a future edit that moved the `!usable` row below
+// `validated.behind === null` would crash on a null dereference instead of
+// silently answering `behind-unknown` for an unreadable payload. `ci` itself
+// is kept only for the output line's diagnostic echo (e.g. a rate-limited
+// payload's `ci.verdict`).
 function readCi() {
   const r = spawnSync(process.execPath, [join(SCRIPT_DIR, "ci-state.mjs"), "--pr", String(pr), "--declare-no-ci"], CHILD);
   let payload = null;
@@ -171,7 +180,7 @@ function readCi() {
     payload = null;
   }
   const ci = isObject(payload) ? payload : null;
-  const unusable = (rateLimited = false) => ({ ci, usable: false, rateLimited });
+  const unusable = (rateLimited = false) => ({ ci, validated: null, usable: false, rateLimited });
   if (r.error || r.signal || ci === null) return unusable();
   if (r.status === 2) return unusable(ci.verdict === "rate-limited");
   const agrees =
@@ -183,14 +192,14 @@ function readCi() {
   // an absent `behind` (undefined, failing the integer test) comes from a
   // payload that never carried the field.
   if (ci.behind !== null && !(Number.isInteger(ci.behind) && ci.behind >= 0)) return unusable();
-  return { ci, usable: true, rateLimited: false, notGreen: r.status === 1 };
+  return { ci, validated: ci, usable: true, rateLimited: false, notGreen: r.status === 1 };
 }
 
 // --- the conjunction ------------------------------------------------------
 function decide(instruments, prView, ciRead) {
   const blocked = (reason) => ({ verdict: "blocked", reason });
   const unknown = (reason) => ({ verdict: "unknown", reason });
-  const { ci, usable } = ciRead;
+  const { validated, usable } = ciRead;
   if (prView !== null) {
     if (!prView.labels.some((l) => l.name === "ready-to-merge")) return blocked("label-pulled");
     if (prView.reviewDecision === "CHANGES_REQUESTED") return blocked("changes-requested");
@@ -200,11 +209,11 @@ function decide(instruments, prView, ciRead) {
   // above, and binds its run to THAT read. A push in between would have its
   // own CI judged here while the label's audit belongs to the tree before it,
   // so the same row applies to ci-state's reading too.
-  if (usable && !heads.has(ci.prHead)) return blocked("head-moved-after-label");
-  if (usable && ciRead.notGreen) return blocked(`ci:${ci.reasons[0]}`);
-  if (usable && ci.behind > 0) return blocked(`behind:${ci.behind}`);
+  if (usable && !heads.has(validated.prHead)) return blocked("head-moved-after-label");
+  if (usable && ciRead.notGreen) return blocked(`ci:${validated.reasons[0]}`);
+  if (usable && validated.behind > 0) return blocked(`behind:${validated.behind}`);
   if (!usable) return unknown(ciRead.rateLimited ? "rate-limited" : "ci-unreadable");
-  if (ci.behind === null) return unknown("behind-unknown");
+  if (validated.behind === null) return unknown("behind-unknown");
   if (instruments.exit === 1) return unknown("instrument-set-changed");
   if (instruments.exit !== 0) return unknown("instruments-unanswerable");
   if (prView === null) return unknown("pr-unreadable");
