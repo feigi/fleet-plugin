@@ -3,7 +3,7 @@
 // ledger I/O and calls computeBoard(); every stage-derivation and flag decision
 // lives here and is exercised by compute-board.test.mjs (`node --test`).
 //
-// #1597: the ONE import this module takes, and it is a pure one —
+// #1597, #1820: the TWO imports this module takes, and both are pure ones.
 // fleet-state.mjs owns the heartbeat's `beat` key, and the rule for reading
 // that key travels with it rather than being copied here. That module's own
 // I/O (its path probe, its file read) is never called from this file; only
@@ -11,48 +11,119 @@
 // arguments. Importing the rule is what keeps the cockpit's stall wording and
 // fleet-tick's identical — two spellings of "this run is dead" would be two
 // answers the operator has to reconcile at 3am.
+// ledger-grammar.mjs owns the member grammar (`<member>` live,
+// `<member>=<outcome>` settled) and has no I/O at all; parseToken is read
+// from it for the same reason — one grammar, one reader, so the cockpit and
+// fleet-tick cannot disagree about which members are live.
 import { assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
+import { parseToken } from "./ledger-grammar.mjs";
 
 // A ledger row is freeform, controller-authored text. Two real examples:
-//   #332 impl-332 → PR#344 → MERGED 73b356de
-//   #324 impl-324 → PR#346 · fix-pr-346 · ruled:6-applies · held-behind:#313
-// Extract by token regex, never by position — the controller reorders and
-// appends tokens freely. Unknown text is ignored, never fatal.
+//   #332 impl-332=PR#344 → PR#344 → MERGED 73b356de
+//   #324 impl-324=PR#346 → PR#346 · fix-pr-346 · ruled:6-applies · held-behind:#313
+// Extract by token, never by position — the controller reorders and appends
+// tokens freely. Unknown text is ignored, never fatal.
 //
-// The per-PR member is `fix-pr-<n>` on the default review path and
-// `review-pr-<n>` on the hand-dispatch fallback, so `reviewer` must match both.
-// Matching only the older name left every default-path row with reviewer null,
-// which shows the implementer on the card and counts the PR as review backlog
-// forever.
+// Member tokens are ledger-grammar.mjs's (#1820). The row's LAST `impl`
+// token, retry suffix included, decides the card: live → IMPLEMENTING,
+// `=PR#M` → that PR decides, `=released`/`=bailed` → no card of the row's own
+// (the POOL loop shows the ticket if it is still `ready-for-agent`),
+// `=killed`/`=tier-mismatch` → IMPLEMENTING with that outcome as a flag. The
+// `→ PR#M` arrow is human-readable only and is not read, as the tick does not
+// read it either. A member settled anywhere on the row is settled — a bare
+// copy beside `<member>=<outcome>` is what a whole-line `row` rewrite leaves.
+//
+// A PR's review is not a member (#1773 §7): `review=wf:<runId>` is a Workflow
+// with nobody to name, while `review=member:<name>` and
+// `review=fallback:<name>` name a runner member, live until the token is
+// settled `=failed` or a later `reviewed=` records its result.
+//
+// `#N excluded · behind-pr:#M` / `behind-issue:#M` is an Exclusion — pool
+// supply, not a claim — spelled exactly as shortlist.mjs and fleet-tick.mjs
+// spell it. `#M` is an issue or PR number, or the branch name recorded before
+// that PR existed.
+const EXCLUDED_ROW = /^#[0-9]+[ \t]+excluded(?=[ \t]|$)([\s\S]*)$/;
+const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
+const REVIEW = /^review=(?:wf|member|fallback):([^=\s]+?)(=failed)?$/;
+
 export function parseRow(row) {
   const issueM = row.match(/^#(\d+)\b/);
   if (!issueM) return null;
-  const first = (re) => (row.match(re) || [null])[0];
-  const prM = row.match(/\bPR\s*#(\d+)\b/);
   const mergedM = row.match(/\bMERGED\s+([0-9a-f]{7,40})\b/i);
   const heldM = row.match(/\bheld-behind[:\s]+#?(\d+)\b/i);
   const causes = [];
   for (const t of ["KILLED", "BLOCKED", "SHA-OFF-BRANCH"]) {
     if (new RegExp(`\\b${t}\\b`).test(row)) causes.push(t.toLowerCase());
   }
+  const ex = EXCLUDED_ROW.exec(row);
+
+  // `live` holds member names in row order; `outcomes` every settled name's
+  // latest outcome. A malformed outcome is still a settle — never counted
+  // live — but it decides no card.
+  const live = [];
+  const outcomes = new Map();
+  const settled = new Set();
+  let lastImpl = null;
+  let review = false;
+  let reviewed = false;
+  let runners = [];
+  for (const tok of row.split(/\s+/).filter(Boolean)) {
+    const t = parseToken(tok);
+    if (t) {
+      if (t.outcome === null) live.push(t);
+      else settled.add(t.name);
+      if (t.outcome !== null && !t.error) outcomes.set(t.name, t.outcome);
+      if (t.family === "impl" && !t.error) lastImpl = t.name;
+      continue;
+    }
+    if (tok.startsWith("review=")) {
+      review = true;
+      const m = REVIEW.exec(tok);
+      if (m && !tok.startsWith("review=wf:")) {
+        if (m[2]) settled.add(m[1]);
+        else { live.push({ name: m[1], family: "review" }); runners.push(m[1]); }
+      }
+    } else if (tok.startsWith("reviewed=")) {
+      reviewed = true;
+      for (const r of runners) settled.add(r);
+      runners = [];
+    }
+  }
+  const alive = live.filter((t) => !settled.has(t.name));
+  const implOutcome = lastImpl ? (outcomes.get(lastImpl) ?? null) : null;
+  const prM = implOutcome && /^PR#(\d+)$/.exec(implOutcome);
   return {
     issue: Number(issueM[1]),
-    impl: first(/\bimpl-\d+[a-z-]*\b/),
-    reviewer: first(/\b(?:review|fix)-pr-\d+[a-z-]*\b/),
+    excluded: ex ? [...ex[1].matchAll(PREMISE)].map(([, kind, target]) => ({ kind, target })) : null,
+    impl: lastImpl,
+    implOutcome,
+    agent: alive.length ? alive[alive.length - 1].name : null,
     pr: prM ? Number(prM[1]) : null,
     merged: !!mergedM,
     sha: mergedM ? mergedM[1] : null,
     heldBehind: heldM ? Number(heldM[1]) : null,
     causes,
+    review,
+    reviewed,
+    underReview: review || alive.some((t) => t.family === "fix-pr" || t.family === "finisher-pr"),
   };
 }
 
-// A parsed row is IMPLEMENTING or later. MERGED is durable (ledger-only); READY
-// needs the live PR label; a PR with no ready-to-merge label is in REVIEW.
+// A parsed row's column, or null when the row claims no card of its own (a
+// released or bailed implementer: the ticket went back to the tracker, and the
+// POOL loop shows it if it is still `ready-for-agent`). An Exclusion is POOL.
+// MERGED is an explicit `MERGED <sha>` token or, failing one, `prState.merged`
+// — gh's answer for a row PR absent from the open list. READY needs the live
+// PR label; any other PR, closed-unmerged included, is in REVIEW.
 export function deriveColumn(parsed, prState) {
+  if (parsed.excluded) return "POOL";
   if (parsed.merged) return "MERGED";
-  if (parsed.pr && prState && prState.labels.includes("ready-to-merge")) return "READY";
-  if (parsed.pr) return "REVIEW";
+  if (parsed.pr != null) {
+    if (prState && prState.merged) return "MERGED";
+    if (prState && prState.labels.includes("ready-to-merge")) return "READY";
+    return "REVIEW";
+  }
+  if (parsed.implOutcome === "released" || parsed.implOutcome === "bailed") return null;
   return "IMPLEMENTING";
 }
 
@@ -64,17 +135,29 @@ export const STALE_MS = {
   READY: 15 * 60 * 1000,
 };
 
+// An Exclusion's badges are its premises, `excluded:#880` for a number and
+// `excluded:<branch>` for a branch name, and nothing else: it is supply, so no
+// dwell clock and no cause applies. isBadge() keeps them out of `attention`.
 export function deriveFlags(parsed, ctx) {
+  if (parsed.excluded) {
+    return parsed.excluded.length
+      ? parsed.excluded.map(({ target }) => `excluded:${/^\d+$/.test(target) ? "#" : ""}${target}`)
+      : ["excluded"];
+  }
   const flags = [];
   if (ctx.ci === "red") flags.push("red-ci");
   if (parsed.heldBehind != null) flags.push(`held-behind:#${parsed.heldBehind}`);
   for (const c of parsed.causes) flags.push(c); // killed | blocked | sha-off-branch
+  const o = parsed.implOutcome;
+  if ((o === "killed" || o === "tier-mismatch") && !flags.includes(o)) flags.push(o);
   const limit = STALE_MS[ctx.column];
   if (limit != null && ctx.sinceEnteredStage != null && ctx.now - ctx.sinceEnteredStage > limit) {
     flags.push("stale");
   }
   return flags;
 }
+
+const isBadge = (flag) => flag === "excluded" || flag.startsWith("excluded:");
 
 // Internal helpers — not exported; covered through computeBoard's tests.
 
@@ -94,7 +177,7 @@ function titleFor(issue, pr, issues) {
   return i ? i.title : `#${issue}`;
 }
 
-const FLAG_SEVERITY = { "red-ci": 5, killed: 4, blocked: 4, "sha-off-branch": 4, stale: 1 };
+const FLAG_SEVERITY = { "red-ci": 5, killed: 4, "tier-mismatch": 4, blocked: 4, "sha-off-branch": 4, stale: 1 };
 function severity(flags) {
   let s = 0;
   for (const f of flags) {
@@ -143,9 +226,13 @@ function stall(beat, ticked, tickets, pool, { ledgerOk, poolOk }, now) {
   return { ...verdict, claimed, supply, text: stallReport(verdict, { claimed, supply }) };
 }
 
+// `merged` (#1820) is gh's list of merged PR numbers, consulted only for a row
+// PR absent from the open list `prs`; absent means none known, and a PR in
+// neither list (closed unmerged, or a failed read) keeps REVIEW.
 export function computeBoard(inputs) {
   const { ledger, issues, prs, ci, prev, now } = inputs;
   const prByNum = new Map(prs.map((p) => [p.number, p]));
+  const mergedPrs = new Set(inputs.merged || []);
   const prevByIssue = new Map((prev?.tickets || []).map((t) => [t.issue, t]));
   const ruledByPr = new Map();
   for (const r of ledger.ruled || []) {
@@ -154,24 +241,25 @@ export function computeBoard(inputs) {
   }
 
   const parsed = (ledger.rows || []).map(parseRow).filter(Boolean);
-  const rowIssues = new Set(parsed.map((p) => p.issue));
+  const rowIssues = new Set();
   const tickets = [];
 
   for (const p of parsed) {
     const pr = p.pr != null ? prByNum.get(p.pr) : undefined;
     const prState = p.pr == null ? null
       : pr ? { open: pr.state === "OPEN", labels: pr.labels || [] }
-           : { open: false, labels: [] };
+           : { open: false, labels: [], merged: mergedPrs.has(p.pr) };
     const column = deriveColumn(p, prState);
+    if (column === null) continue; // released/bailed: the POOL loop below decides
+    rowIssues.add(p.issue);
     const sinceEnteredStage = stageEntry(prevByIssue.get(p.issue), column, now);
     const ciState = p.pr != null ? (ci[p.pr] ?? "unknown") : null;
     const flags = deriveFlags(p, { ci: ciState, column, sinceEnteredStage, now });
-    const inReview = column === "REVIEW" || column === "READY";
     tickets.push({
       issue: p.issue,
       title: titleFor(p.issue, pr, issues),
       column,
-      agent: inReview ? (p.reviewer || p.impl) : p.impl,
+      agent: p.agent,
       pr: p.pr,
       ci: ciState,
       sinceEnteredStage,
@@ -199,13 +287,16 @@ export function computeBoard(inputs) {
     });
   }
 
-  const attention = tickets.filter((t) => t.flags.length)
+  const attention = tickets.filter((t) => t.flags.some((f) => !isBadge(f)))
     .sort((a, b) => severity(b.flags) - severity(a.flags));
 
+  // Backlog is a PR nobody has reviewed and nobody is reviewing: no `review=`,
+  // no `reviewed=`, and no live fix-applier or finisher on the row.
   const parsedByIssue = new Map(parsed.map((p) => [p.issue, p]));
-  const reviewBacklog = tickets.filter(
-    (t) => t.column === "REVIEW" && !parsedByIssue.get(t.issue)?.reviewer,
-  ).length;
+  const reviewBacklog = tickets.filter((t) => {
+    const p = parsedByIssue.get(t.issue);
+    return t.column === "REVIEW" && !p.underReview && !p.reviewed;
+  }).length;
   const pool = tickets.filter((t) => t.column === "POOL").length;
 
   return {
