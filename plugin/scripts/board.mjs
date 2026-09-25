@@ -1342,15 +1342,18 @@ export function createBoardServer(dir) {
 // A cockpit instance is identified by its WORKSPACE — the directory holding
 // the shared git dir — not by the process's cwd and not by the machine. Two
 // workspaces therefore get two boards on two ports, both live and neither
-// aware of the other, and one workspace gets the SAME port on every run, so
-// the URL survives runs, reboots and node versions.
+// aware of the other, and one workspace derives the SAME port on every run,
+// so that URL survives runs, reboots and node versions.
 //
-// BASE is the port this file hardcoded before any of this existed, so the
-// single-workspace case keeps the familiar URL. SPAN is deliberately narrow:
-// the range an operator has to scan is what widening it costs, and a
-// collision between two DIFFERENT workspaces is out of this seam's scope —
-// nothing here reuses, hands off or falls back off a port already held, and
-// serve()'s pre-existing EADDRINUSE refusal still owns that case.
+// BASE is the port this file hardcoded before any of this existed;
+// resolveCockpitInstance()'s degrade arm, with no workspace to hash, still
+// defaults to it. SPAN = 512 was kept deliberately (ruling on #39/#1657): a
+// collision between two DIFFERENT workspaces is not priced into the width but
+// carried by serve()'s launch loop, which probes whoever holds the derived
+// port, reuses that cockpit when it is this workspace's own, and otherwise
+// scans on through cockpitPorts()'s PORT_ATTEMPTS candidates. The accepted
+// cost is launch order: whichever colliding workspace starts second binds a
+// port other than the one its hash derives.
 const PORT_BASE = 8123;
 const PORT_SPAN = 512;
 
