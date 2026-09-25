@@ -1,6 +1,6 @@
 # 0010 — The node pin stays exact, and a bot moves it
 
-**Status:** Accepted. Ruled 2026-09-23 on #354, against the measurements below.
+**Status:** Accepted. Ruled 2026-09-23 on #354, against the measurements below. Amended by #1752: point 3's automerge stays the default for minor and patch bumps only — a major waits for a human — and each bump carries its own release label from `renovate.json`'s `packageRules`, so `release-label.yml`'s blind `patch` fallback never labels a bot PR; `plugin/scripts/renovate-release-contract.test.mjs` pins that joint contract across the bot config and both release workflows. Points 1–8 otherwise stand.
 
 ## Context
 
