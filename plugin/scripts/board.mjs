@@ -1110,6 +1110,18 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
     labels: labelsOf(p),
   }));
 
+  // #1820: MERGED is gh's answer, not a ledger token — no rule writes `MERGED
+  // <sha>`, and the open list above drops a PR the moment it merges, so a
+  // merged row PR used to fall back to a stale REVIEW card. One read per build,
+  // degrading exactly like the open list's: a failed read is `[]`, which leaves
+  // every absent row PR in REVIEW, today's column. computeBoard() consults it
+  // only for a row PR absent from the open list. `state` is requested and
+  // checked, so an entry gh does not call MERGED never makes a card MERGED.
+  const mergedJson = await tryRun("gh", ["pr", "list", "--state", "merged", "--limit", "100",
+    "--json", "number,state"]);
+  const merged = ghRows(mergedJson, "gh pr list --state merged")
+    .filter((p) => p.state === "MERGED").map((p) => p.number);
+
   // CI per open PR. On failure, carry the previous board's value for that PR.
   const prevCi = new Map((prev?.tickets || []).filter((t) => t.pr != null).map((t) => [t.pr, t.ci]));
   const ci = {};
@@ -1162,7 +1174,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   const priorState = stateFile ? readState(stateFile, NAME) : null;
   const beat = priorState?.beat ?? null;
   const ticked = priorState?.ticked ?? null;
-  return { ledger, issues, prs, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, poolOk,
+  return { ledger, issues, prs, merged, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, poolOk,
     now: Date.now(), interval: interval ?? argInterval() ?? 15 };
 }
 

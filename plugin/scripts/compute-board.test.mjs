@@ -7,21 +7,21 @@ import assert from "node:assert/strict";
 import { parseRow, deriveColumn, deriveFlags, STALE_MS } from "./compute-board.mjs";
 
 test("parseRow: a merged row", () => {
-  const r = parseRow("#332 impl-332 → PR#344 → MERGED 73b356de");
+  const r = parseRow("#332 impl-332=PR#344 → PR#344 → MERGED 73b356de");
   assert.equal(r.issue, 332);
   assert.equal(r.impl, "impl-332");
   assert.equal(r.pr, 344);
   assert.equal(r.merged, true);
   assert.equal(r.sha, "73b356de");
-  assert.equal(r.reviewer, null);
+  assert.equal(r.agent, null, "impl-332 settled at PR#344 — nobody is live on this row");
   assert.equal(r.heldBehind, null);
 });
 
-test("parseRow: an in-review row with reviewer, ruling and held-behind", () => {
-  const r = parseRow("#324 impl-324 → PR #346 · review-pr-346-b · ports=16324 · ruled:6-applies · held-behind:#313");
+test("parseRow: an in-review row with a live review runner, ruling and held-behind", () => {
+  const r = parseRow("#324 impl-324=PR#346 → PR#346 · review=member:review-pr-346-b · ports=16324 · ruled:6-applies · held-behind:#313");
   assert.equal(r.issue, 324);
   assert.equal(r.impl, "impl-324");
-  assert.equal(r.reviewer, "review-pr-346-b");
+  assert.equal(r.agent, "review-pr-346-b");
   assert.equal(r.pr, 346);
   assert.equal(r.merged, false);
   assert.equal(r.heldBehind, 313);
@@ -44,17 +44,17 @@ test("parseRow: a non-ticket line returns null", () => {
 });
 
 test("deriveColumn: MERGED wins from the ledger alone", () => {
-  const p = parseRow("#332 impl-332 → PR#344 → MERGED 73b356de");
+  const p = parseRow("#332 impl-332=PR#344 → PR#344 → MERGED 73b356de");
   assert.equal(deriveColumn(p, { open: false, labels: [] }), "MERGED");
 });
 
 test("deriveColumn: READY when the PR carries ready-to-merge", () => {
-  const p = parseRow("#324 impl-324 → PR#346 · review-pr-346");
+  const p = parseRow("#324 impl-324=PR#346 → PR#346 · review=member:review-pr-346");
   assert.equal(deriveColumn(p, { open: true, labels: ["ready-to-merge"] }), "READY");
 });
 
 test("deriveColumn: REVIEW when a PR exists without the label", () => {
-  const p = parseRow("#324 impl-324 → PR#346 · review-pr-346");
+  const p = parseRow("#324 impl-324=PR#346 → PR#346 · review=member:review-pr-346");
   assert.equal(deriveColumn(p, { open: true, labels: [] }), "REVIEW");
 });
 
@@ -66,19 +66,19 @@ test("deriveColumn: IMPLEMENTING when there is no PR yet", () => {
 const MIN = 60 * 1000;
 
 test("deriveFlags: red CI flags red-ci", () => {
-  const p = parseRow("#324 impl-324 → PR#346");
+  const p = parseRow("#324 impl-324=PR#346 → PR#346");
   const f = deriveFlags(p, { ci: "red", column: "REVIEW", sinceEnteredStage: null, now: 0 });
   assert.ok(f.includes("red-ci"));
 });
 
 test("deriveFlags: unknown CI never flags red", () => {
-  const p = parseRow("#324 impl-324 → PR#346");
+  const p = parseRow("#324 impl-324=PR#346 → PR#346");
   const f = deriveFlags(p, { ci: "unknown", column: "REVIEW", sinceEnteredStage: null, now: 0 });
   assert.ok(!f.includes("red-ci"));
 });
 
 test("deriveFlags: held-behind carries the blocker number", () => {
-  const p = parseRow("#324 impl-324 → PR#346 · held-behind:#313");
+  const p = parseRow("#324 impl-324=PR#346 → PR#346 · held-behind:#313");
   const f = deriveFlags(p, { ci: "green", column: "REVIEW", sinceEnteredStage: null, now: 0 });
   assert.ok(f.includes("held-behind:#313"));
 });
@@ -108,8 +108,8 @@ import { computeBoard } from "./compute-board.mjs";
 const baseInputs = () => ({
   ledger: {
     rows: [
-      "#332 impl-332 → PR#344 → MERGED 73b356de",
-      "#324 impl-324 → PR#346 · review-pr-346 · held-behind:#313",
+      "#332 impl-332=PR#344 → PR#344 → MERGED 73b356de",
+      "#324 impl-324=PR#346 → PR#346 · review=member:review-pr-346 · held-behind:#313",
       "#340 impl-340",
     ],
     filed: ["#351 flaky retry marker in ci logs"],
@@ -183,7 +183,7 @@ test("computeBoard: a PR row with no state still lands in REVIEW", () => {
   const b = computeBoard({
     ...baseInputs(),
     prs: [{ number: 344, labels: [], title: "impl 332" }],
-    ledger: { rows: ["#332 impl-332 → PR#344"], filed: [], ruled: [] },
+    ledger: { rows: ["#332 impl-332=PR#344 → PR#344"], filed: [], ruled: [] },
   });
   assert.equal(b.tickets.find((t) => t.issue === 332).column, "REVIEW");
 });
@@ -214,7 +214,7 @@ test("computeBoard: dwell carries forward while the column is unchanged", () => 
 test("computeBoard: dwell resets when the column changes", () => {
   const first = computeBoard({ ...baseInputs(), now: 1000 });
   const moved = baseInputs();
-  moved.ledger.rows[2] = "#340 impl-340 → PR#360"; // now REVIEW
+  moved.ledger.rows[2] = "#340 impl-340=PR#360 → PR#360"; // now REVIEW
   moved.prs.push({ number: 360, state: "OPEN", labels: [], title: "impl 340" });
   const second = computeBoard({ ...moved, prev: first, now: 5000 });
   assert.equal(second.tickets.find((t) => t.issue === 340).sinceEnteredStage, 5000);
@@ -381,4 +381,213 @@ test("computeBoard: a liveness input can never change a ticket's stage", () => {
     assert.deepEqual(b.attention, quiet.attention, "a liveness input raised an attention row");
     assert.deepEqual(b.queue, quiet.queue, "a liveness input changed the queue counts");
   }
+});
+
+// --------------------------------------------------------------------------
+// #1820: the Pull-era ledger. The rows below are #1820's own reproduction
+// rows, verbatim, measured on main @ 9b147b2 as stale IMPLEMENTING/REVIEW
+// cards that all counted in the stall report's `claimed`. PRs 920, 931 and
+// 932 are open; 930 is not in the open list, and gh reports it merged.
+const REPRO_ROWS = [
+  "#901 excluded · behind-pr:#880",
+  "#902 excluded · behind-issue:#870",
+  "#903 impl-903=bailed",
+  "#904 impl-904=killed",
+  "#905 impl-905=PR#920 · fix-pr-920=failed",
+  "#906 impl-906",
+  "#907 impl-907=PR#930",
+  "#908 impl-908=PR#931 · review=wf:r123",
+  "#909 impl-909=PR#932 · review=member:review-pr-932",
+];
+const openPr = (number, labels = []) => ({ number, state: "OPEN", labels, title: `pr ${number}` });
+const HOUR = 60 * MIN;
+// A prior stage entry 1 h old for every row, in the column each row showed on
+// main — the measurement's setup, so every non-terminal card is past its
+// dwell threshold and any `stale` a card should not carry would show.
+const reproInputs = (over = {}) => {
+  const now = 10 * HOUR;
+  const rows = over.rows ?? REPRO_ROWS;
+  const was = (n) => ([905, 907, 908, 909].includes(n) ? "REVIEW" : "IMPLEMENTING");
+  return {
+    ...baseInputs(),
+    ledger: { rows, filed: [], ruled: [] },
+    issues: [],
+    prs: [openPr(920), openPr(931), openPr(932)],
+    merged: [930],
+    ci: {},
+    prev: { tickets: rows.map((r) => Number(r.slice(1).split(" ")[0])).map((issue) => ({ issue, column: was(issue), sinceEnteredStage: now - HOUR })) },
+    now,
+    ...over,
+  };
+};
+const card = (b, n) => b.tickets.find((t) => t.issue === n);
+
+test("#1820: an Exclusion is a POOL card with its premise as a badge — never stale, never in attention", () => {
+  const b = computeBoard(reproInputs());
+  for (const [n, badge] of [[901, "excluded:#880"], [902, "excluded:#870"]]) {
+    assert.equal(card(b, n).column, "POOL");
+    assert.deepEqual(card(b, n).flags, [badge]);
+    assert.equal(card(b, n).agent, null);
+    assert.ok(!b.attention.some((t) => t.issue === n), `#${n} is supply, not a stranded claim`);
+  }
+  assert.equal(b.queue.pool, 2, "both Exclusions count as pool supply");
+  assert.equal(b.queue.supply, 2);
+});
+
+test("#1820: a branch-named behind-pr premise is its own badge, not a number", () => {
+  // Live-ledger shape: the premise is the branch name recorded before its PR existed.
+  const b = computeBoard(reproInputs({ rows: ["#1716 excluded · behind-pr:implementer/1715-impl-1715", "#1717 excluded · behind-pr:#implementer/1690-slug"] }));
+  assert.deepEqual(card(b, 1716).flags, ["excluded:implementer/1715-impl-1715"]);
+  assert.deepEqual(card(b, 1717).flags, ["excluded:implementer/1690-slug"]);
+  assert.equal(card(b, 1716).column, "POOL");
+});
+
+test("#1820: `excluded` only as the row's first word makes an Exclusion", () => {
+  const b = computeBoard(reproInputs({ rows: ["#1705 impl-1705 · previously excluded · behind-pr:#60"] }));
+  assert.equal(card(b, 1705).column, "IMPLEMENTING");
+  assert.equal(card(b, 1705).agent, "impl-1705");
+  assert.ok(!card(b, 1705).flags.some((f) => f.startsWith("excluded")));
+});
+
+test("#1820: a released or bailed implementer is a POOL card while ready-for-agent, else no card", () => {
+  const gone = computeBoard(reproInputs());
+  assert.equal(card(gone, 903), undefined, "#903 bailed and left the ready-for-agent list — relabelled out by cause");
+  const rows = ["#903 impl-903=bailed", "#910 impl-910=released"];
+  const back = computeBoard(reproInputs({
+    rows,
+    issues: [{ number: 903, title: "t903", labels: ["ready-for-agent"] }, { number: 910, title: "t910", labels: ["ready-for-agent"] }],
+  }));
+  for (const n of [903, 910]) {
+    assert.equal(card(back, n).column, "POOL");
+    assert.deepEqual(card(back, n).flags, []);
+  }
+  assert.equal(back.tickets.length, 2, "one card per ticket, not a row card beside the pool card");
+});
+
+test("#1820: a killed or tier-mismatch implementer stays IMPLEMENTING, flagged in attention", () => {
+  const b = computeBoard(reproInputs({ rows: ["#904 impl-904=killed", "#911 impl-911=tier-mismatch"] }));
+  assert.equal(card(b, 904).column, "IMPLEMENTING");
+  assert.ok(card(b, 904).flags.includes("killed"));
+  assert.equal(card(b, 911).column, "IMPLEMENTING");
+  assert.ok(card(b, 911).flags.includes("tier-mismatch"));
+  assert.deepEqual(b.attention.map((t) => t.issue).sort(), [904, 911]);
+  assert.equal(card(b, 904).agent, null, "a settled member is not live");
+});
+
+test("#1820: the uppercase enrichment causes keep working, and KILLED beside =killed flags once", () => {
+  const b = computeBoard(reproInputs({ rows: ["#912 impl-912 BLOCKED", "#913 impl-913=PR#931 SHA-OFF-BRANCH", "#914 impl-914=killed KILLED"] }));
+  assert.ok(card(b, 912).flags.includes("blocked"));
+  assert.ok(card(b, 913).flags.includes("sha-off-branch"));
+  assert.equal(card(b, 914).flags.filter((f) => f === "killed").length, 1);
+});
+
+test("#1820: the row's LAST impl token decides, retry suffix included", () => {
+  const b = computeBoard(reproInputs({
+    rows: ["#915 impl-915=killed · impl-915-b", "#916 impl-916=bailed · impl-916-b=PR#931", "#917 impl-917=PR#920 · impl-917-b"],
+  }));
+  assert.equal(card(b, 915).column, "IMPLEMENTING");
+  assert.equal(card(b, 915).agent, "impl-915-b");
+  assert.ok(!card(b, 915).flags.includes("killed"), "the killed attempt was replaced");
+  assert.equal(card(b, 916).column, "REVIEW");
+  assert.equal(card(b, 916).pr, 931);
+  assert.equal(card(b, 917).column, "IMPLEMENTING", "a live retry after a settled PR is back at work");
+  assert.equal(card(b, 917).pr, null);
+});
+
+test("#1820: a live implementer is IMPLEMENTING, and still earns stale", () => {
+  const b = computeBoard(reproInputs());
+  assert.equal(card(b, 906).column, "IMPLEMENTING");
+  assert.equal(card(b, 906).agent, "impl-906");
+  assert.ok(card(b, 906).flags.includes("stale"));
+});
+
+test("#1820: MERGED comes from gh for a row PR absent from the open list", () => {
+  const b = computeBoard(reproInputs());
+  assert.equal(card(b, 907).column, "MERGED");
+  assert.deepEqual(card(b, 907).flags, [], "MERGED is terminal — never stale");
+});
+
+test("#1820: a closed-unmerged PR keeps today's REVIEW column", () => {
+  const b = computeBoard(reproInputs({ merged: [] }));
+  assert.equal(card(b, 907).column, "REVIEW");
+  // `merged` absent entirely — a hand-built caller — means none known.
+  const inp = reproInputs();
+  delete inp.merged;
+  assert.equal(card(computeBoard(inp), 907).column, "REVIEW");
+});
+
+test("#1820: an explicit MERGED token still wins, over the open list and gh alike", () => {
+  const b = computeBoard(reproInputs({
+    rows: ["#918 impl-918=PR#931 → PR#931 → MERGED 73b356de"],
+    prs: [openPr(931, ["ready-to-merge"])],
+    merged: [],
+  }));
+  assert.equal(card(b, 918).column, "MERGED");
+});
+
+test("#1820: the merged read is consulted only for PRs absent from the open list", () => {
+  const b = computeBoard(reproInputs({ rows: ["#919 impl-919=PR#931"], merged: [931] }));
+  assert.equal(card(b, 919).column, "REVIEW", "the open list is gh's fresher answer for an open PR");
+});
+
+test("#1820: review=wf/member, or a live fix-pr/finisher-pr, is under review; agent is the latest live member", () => {
+  const b = computeBoard(reproInputs());
+  assert.equal(card(b, 908).column, "REVIEW");
+  assert.equal(card(b, 908).agent, null, "a Workflow review names no member");
+  assert.equal(card(b, 909).agent, "review-pr-932");
+  assert.equal(card(b, 905).agent, null, "fix-pr-920 settled failed — nobody is live");
+  assert.equal(b.queue.reviewBacklog, 1, "only #905 has neither review= nor reviewed=");
+
+  const live = computeBoard(reproInputs({
+    rows: [
+      "#920 impl-920=PR#931 · fix-pr-931",
+      "#921 impl-921=PR#932 · review=member:review-pr-932 reviewed=abc1234:1/0/0 · finisher-pr-932",
+      "#922 impl-922=PR#920 · review=wf:r1=failed review=fallback:review-pr-920-b",
+      "#923 impl-923=PR#931 · review=member:review-pr-931 reviewed=abc1234:0/0/0",
+    ],
+  }));
+  assert.equal(card(live, 920).agent, "fix-pr-931");
+  assert.equal(card(live, 921).agent, "finisher-pr-932");
+  assert.equal(card(live, 922).agent, "review-pr-920-b");
+  assert.equal(card(live, 923).agent, null, "reviewed= settles the runner that produced it");
+  assert.equal(live.queue.reviewBacklog, 0);
+});
+
+test("#1820: live-ledger PR rows — settled finisher, fallback runner", () => {
+  const b = computeBoard(reproInputs({
+    rows: [
+      "#1715 impl-1715=PR#1824 · class=correction · reviewed=41901d4c:0/1/0 · finisher-pr-1824=labelled",
+      "#1721 impl-1721=PR#1825 · class=correction · review=fallback:review-pr-1825-b",
+      "#1755 impl-1755=PR#1830 · class=routine",
+    ],
+    prs: [openPr(1824, ["ready-to-merge"]), openPr(1825), openPr(1830)],
+  }));
+  assert.equal(card(b, 1715).column, "READY");
+  assert.equal(card(b, 1715).agent, null);
+  assert.equal(card(b, 1721).agent, "review-pr-1825-b");
+  assert.equal(b.queue.reviewBacklog, 1, "only #1755 is waiting on a reviewer");
+});
+
+test("#1820: the reproduction's stall report counts only the real claims", () => {
+  const b = computeBoard({ ...reproInputs(), beat: { at: 10 * HOUR - 90 * MIN, interval: 1200, stopped: "" } });
+  // #904 killed, #905/#908/#909 in review, #906 live — Exclusions, the bailed
+  // #903 and the merged #907 are nobody's outstanding claim.
+  assert.equal(b.liveness.claimed, 5);
+  assert.deepEqual(b.attention.map((t) => t.issue).sort(), [904, 905, 906, 908, 909]);
+});
+
+test("#1820: `## Dispatched` is not read — row tokens alone decide", () => {
+  const b = computeBoard(reproInputs({
+    rows: ["#906 impl-906"],
+    ledger: { rows: ["#906 impl-906"], dispatched: ["impl-906=bailed", "impl-950"], filed: [], ruled: [] },
+  }));
+  assert.equal(card(b, 906).column, "IMPLEMENTING");
+  assert.equal(card(b, 906).agent, "impl-906");
+  assert.equal(card(b, 950), undefined);
+});
+
+test("#1820: a malformed member outcome is never fatal and never counted live", () => {
+  const b = computeBoard(reproInputs({ rows: ["#924 impl-924=PR#931 · fix-pr-931=exploded"] }));
+  assert.equal(card(b, 924).column, "REVIEW");
+  assert.equal(card(b, 924).agent, null);
 });

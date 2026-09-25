@@ -420,18 +420,23 @@ process.exit(first ? 1 : 0);`;
 // only needs to complete without throwing, its verdict is not what these
 // tests pin. Out of process for the same reason as gatherCi: gather() reads
 // process.argv and would otherwise read the test runner's.
-function gatherRows({ issuesJson, prsJson }) {
+// `mergedJson` (#1820) answers the `gh pr list --state merged` read alone:
+// `null` makes that read fail; left undefined, it falls through to the open
+// list's `pr list` answer as every earlier caller's stub did.
+function gatherRows({ issuesJson, prsJson, mergedJson }) {
   const cwd = mkdtempSync(join(tmpdir(), "board-gather-rows-"));
   const bin = mkdtempSync(join(tmpdir(), "board-gather-rows-bin-"));
   const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-rows-scripts-"));
   writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
+  const merged = mergedJson === undefined ? ""
+    : `case "$1 $2 $3 $4" in\n"pr list --state merged") ${mergedJson === null ? "exit 1" : `echo '${mergedJson}'; exit 0`} ;;\nesac\n`;
   writeFileSync(join(bin, "gh"),
-    `#!/bin/sh\ncase "$1 $2" in\n"issue list") echo '${issuesJson}' ;;\n"pr list") echo '${prsJson}' ;;\n*) exit 1 ;;\nesac\n`);
+    `#!/bin/sh\n${merged}case "$1 $2" in\n"issue list") echo '${issuesJson}' ;;\n"pr list") echo '${prsJson}' ;;\n*) exit 1 ;;\nesac\n`);
   chmodSync(join(bin, "gh"), 0o755);
   const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
     const r = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
                        prevFile: null, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
-    console.log(JSON.stringify({ issues: r.issues, prs: r.prs }));`;
+    console.log(JSON.stringify({ issues: r.issues, prs: r.prs, merged: r.merged }));`;
   const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
     cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
   });
@@ -475,6 +480,30 @@ test("gather: a PR row with no number is dropped, loudly, not placed as undefine
   const r = gatherRows({ issuesJson: "[]", prsJson: JSON.stringify([{ title: "orphan pr", state: "OPEN" }]) });
   assert.deepEqual(r.prs, []);
   assert.match(r.stderr, /gh pr list: dropping row with no usable number/);
+});
+
+// #1820: MERGED is read from gh, not from a `MERGED <sha>` token no rule
+// writes. One read beside the open list, answering PR numbers only, and only
+// entries gh itself calls MERGED count.
+test("gather: the merged-PR read yields the numbers gh calls MERGED", () => {
+  const r = gatherRows({
+    issuesJson: "[]",
+    prsJson: JSON.stringify([{ number: 931, state: "OPEN", title: "t", labels: [] }]),
+    mergedJson: JSON.stringify([{ number: 930, state: "MERGED" }, { number: 929, state: "CLOSED" }, { number: 928 }]),
+  });
+  assert.deepEqual(r.merged, [930]);
+  assert.deepEqual(r.prs.map((p) => p.number), [931]);
+});
+
+test("gather: a failed merged-PR read degrades to none known, like the open list", () => {
+  const r = gatherRows({
+    issuesJson: "[]",
+    prsJson: JSON.stringify([{ number: 931, state: "OPEN", title: "t", labels: [] }]),
+    mergedJson: null,
+  });
+  assert.deepEqual(r.merged, []);
+  assert.deepEqual(r.prs.map((p) => p.number), [931], "the open list is untouched by the merged read failing");
+  assert.match(r.stderr, /gh pr list --state merged .*failed/);
 });
 
 // `state` and `title` used to default to a sentinel ("UNKNOWN" / `#<number>`)
