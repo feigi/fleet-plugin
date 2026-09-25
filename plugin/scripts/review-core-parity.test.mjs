@@ -387,10 +387,21 @@ test("retryCrashed agrees on both sides: one re-dispatch for a crash, none for a
       assert.equal(n, calls, `${name}: ${what} — dispatched ${n} times`);
     }
     let n = 0;
+    // #1813: an ASYNC rejection, not a sync throw — every real call site
+    // (`agent(...)`, `parallel(...)`) hands `dispatch` a function that
+    // returns an already-settled or eventually-rejecting PROMISE, never one
+    // that throws before a promise object exists. A sync throw here would
+    // still turn into a rejection through `retryCrashed`'s own outer
+    // `.then()` wrapping regardless of what `dispatch` itself does inside
+    // `again` — including a buggy `dispatch().catch(() => null)` there, since
+    // a sync throw never reaches that `.catch()` at all, it propagates past
+    // the call expression before `.catch` can attach. An async rejection DOES
+    // reach it, so this is the only fixture shape that can actually catch
+    // that mutation.
     await assert.rejects(
       fn(() => {
         n++;
-        throw new Error(`crash ${n}`);
+        return Promise.reject(new Error(`crash ${n}`));
       }, isDead),
       /crash 2/,
       `${name}: a second thrown dispatch was swallowed instead of surfacing to the caller`,
