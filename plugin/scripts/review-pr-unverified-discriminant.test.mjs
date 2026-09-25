@@ -114,10 +114,18 @@ test("both producers of the unverified band route through verdictFor", () => {
     "the policy-skip branch builds its own verdict again instead of routing through verdictFor (#591)",
   );
 
+  // #1813 (crash isolation) turned the single-argument `.then((votes) => {...})`
+  // into a two-argument `.then(onFulfilled, onRejected)`: a `retryCrashed`
+  // rejection (both dispatches of the refuter pair crashed) must still land
+  // in `unverified` through `verdictFor`, not propagate into the shared
+  // `Promise.all` and erase every OTHER finding in the dimension. Both
+  // branches are pinned in the SAME `.then(...)` call — a revert that keeps
+  // the rejected branch but drops the fulfilled one (or the reverse) fails
+  // this just as a revert to the old single-argument shape does.
   assert.match(
     CODE,
-    /\.then\(\(votes\) => \{\s*return \{ \.\.\.f, dimension: d\.key, \.\.\.verdictFor\(n, votes\) \};\s*\}\);/,
-    "the post-refuter branch builds its own verdict again instead of routing through verdictFor (#591)",
+    /\.then\(\s*\(votes\) => \{\s*return \{ \.\.\.f, dimension: d\.key, \.\.\.verdictFor\(n, votes\) \};\s*\},\s*\(\) => \(\{ \.\.\.f, dimension: d\.key, \.\.\.verdictFor\(n, \[\]\) \}\),\s*\);/,
+    "the post-refuter .then() no longer routes both the fulfilled and the crashed-refuter branch through verdictFor (#591, #1813)",
   );
   // The dispatched count is what the discriminant IS, so a call passing a
   // literal or a re-derived value would pin nothing. `n` is the value the
@@ -203,7 +211,7 @@ for (const [rel, from, to] of RULE_FILES) {
 // the apply rule. A field nobody is told to read is a field nobody reads.
 test("run-team's Reviewers section documents the discriminant and the resume path", () => {
   const doc = readFileSync(join(REPO, "skills/run-team/SKILL.md"), "utf8");
-  const shape = between(doc, "It returns `{pr, head, snapshot,", "**`dimensionsRun` is the dispatch", "run-team/SKILL.md");
+  const shape = between(doc, "It returns `{pr, head, resume, testEnvironment,", "**`dimensionsRun` is the dispatch", "run-team/SKILL.md");
   assert.match(shape, phrase("refutersDispatched"), "run-team/SKILL.md documents a return shape whose two unverified populations still read alike");
   assert.match(shape, phrase("resume"), "run-team/SKILL.md documents the crashed band without the recovery it has");
 });
