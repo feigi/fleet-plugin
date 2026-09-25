@@ -43,7 +43,7 @@ Three claims, none substituting for another: **run-binding** (this green belongs
 
 ```bash
 R=<scratch>/review-<pr>.json
-jq '{pr, head, resume, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' "$R"  # the digest
+jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' "$R"  # the digest
 jq -r '.testEnvironment' "$R"                                    # what every test_run is evidence about
 jq '.survived' "$R"                                              # apply candidates, every one
 jq '[.unverified[] | select(.refutersDispatched > 0)]' "$R"      # refuters crashed, twice: defer, naming the crash
