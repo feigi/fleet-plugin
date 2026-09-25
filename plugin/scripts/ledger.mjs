@@ -338,15 +338,18 @@ function unescapeText(s) {
 // Reaching either takes a shape or distance rule rather than a name, and
 // `-f` is exactly the other-tool short flag above; both still fold into the
 // subject.
-const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`];
-// The one-dash name clause below matches only a's FIRST whitespace-split
-// word (ahead of any `=value`), not the whole element: a quoted multi-word
-// tail element (`check "-require-file widget" guard missing`, one argv
-// element) reconstructs to "--require-file widget" under a whole-token
-// match, which is not in OWN_FLAGS, so it fell through to exit 0 — the same
-// verdict flip #1744 exists to refuse, just via a quoted shape rather than a
-// bare token. Splitting first mirrors the `--` clause above it, which
-// already matches on startsWith rather than requiring the whole element.
+const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`].map((f) => f.toLowerCase());
+// The one-dash name clause below, before #1766, matched only a's FIRST
+// whitespace-split word (ahead of any `=value`), not the whole element: a
+// quoted multi-word tail element (`check "-require-file widget" guard
+// missing`, one argv element) reconstructed to "--require-file widget"
+// under a whole-token match, which is not in OWN_FLAGS, so it fell through
+// to exit 0 — the same verdict flip #1744 exists to refuse, just via a
+// quoted shape rather than a bare token. Splitting first mirrored the `--`
+// clause above it, which already matches on startsWith rather than
+// requiring the whole element. #1766 below widened the split to check
+// EVERY word of the element, not only the first — see that paragraph for
+// why the first-word version stopped being enough.
 //
 // #1766: that first-word, exact-case split still missed four shapes of the
 // same name, each confirmed by direct probe against the shipped script: a
@@ -358,17 +361,16 @@ const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`];
 // just above, where #1744's fix only checked the front). None of the four
 // changes the rule itself — still a NAME match against OWN_FLAGS, never a
 // prefix or shape test — only how a word is pulled out of the element:
-// every whitespace-split word, blanks dropped, lower-cased before the
-// OWN_FLAGS lookup.
+// every whitespace-split word, lower-cased, before the OWN_FLAGS lookup —
+// OWN_FLAGS itself is lower-cased once at declaration above, so this clause
+// stays correct even if FILE_FLAG_NAME/REQUIRE_FILE_FLAG_NAME ever gain a
+// capital letter.
 function refuseStrayInCheckTail(tail) {
   if (tail.length <= 1) return;
   const stray = tail.find(
     (a) =>
       a.startsWith("--") ||
-      a
-        .split(/\s+/)
-        .filter((word) => word !== "")
-        .some((word) => OWN_FLAGS.includes(`-${word.split("=")[0].toLowerCase()}`)),
+      a.split(/\s+/).some((word) => OWN_FLAGS.includes(`-${word.split("=")[0].toLowerCase()}`)),
   );
   if (stray) die(`unknown flag ${stray} in subject — quote the subject as one argument`);
 }
