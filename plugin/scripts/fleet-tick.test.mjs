@@ -979,6 +979,36 @@ test("CLI: an unreadable claim count is `unknown`, never zero", () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+// The claimed-count query is capped at CLAIMED_LIMIT (200). At exactly the cap
+// the list may be truncated, so the report must say the count is a floor
+// (`200+`); one below the cap it is exact and must carry no `+`. The stub
+// answers `--jq length` over the fixture array, so the array's size is the
+// count the tick reads. #1760.
+// Mutation-checked both ways against claimed()'s truncation branch: making it
+// `return n;` reds the 200 case ("…; 200 ticket(s) claimed and in flight…"
+// did not match /; 200\+ ticket/), and making it always return `${n}+` reds the
+// 199 case ("…; 199+ ticket(s) claimed and in flight…" did not match
+// /; 199 ticket/). The literal `199 ticket(s)` adjacency — no `+` allowed
+// between the digits and the space — is what refuses `199+`; the `; ` prefix
+// only anchors the match to the claimed-count field.
+test("CLI: a claim count AT the query cap is disclosed as a floor (`200+`); one below it is exact", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stall-cap-")));
+  const path = join(dir, "heartbeat.json");
+  const stalled = (count) => {
+    // Re-staled every call: each run records its own tick in the state file.
+    writeFileSync(path, beat(90 * 60_000, 1200));
+    const claimed = Array.from({ length: count }, (_, i) => ({ number: i + 1 }));
+    const r = runCli(["--state", path], { ...IDLE, claimed });
+    assert.equal(r.status, 0, r.stderr);
+    const line = r.stdout.split("\n")[0];
+    assert.match(line, /^heartbeat STALLED/);
+    return line;
+  };
+  assert.match(stalled(200), /; 200\+ ticket\(s\) claimed and in flight/);
+  assert.match(stalled(199), /; 199 ticket\(s\) claimed and in flight/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("CLI: a beat within the interval it promised is not reported at all", () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-quiet-")));
   const path = join(dir, "heartbeat.json");
