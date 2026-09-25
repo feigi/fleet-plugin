@@ -33,6 +33,26 @@ export const REFUTER_CWD =
 // settles.
 export const PWD_FIRST = phrase("Run `pwd` as your FIRST command and keep the path it prints; that directory is a no-run zone from then on");
 
+// Part 2.5 (#1721): once PWD_FIRST fixes which directory the dispatch
+// inherited, each prompt goes on to claim where the snapshot and scratch dir
+// THEMSELVES are named as absolute paths — and the two dispatches word that
+// claim differently, because the fact differs between them. The specialist
+// prompt's scratch dir is only named several paragraphs LATER ("Scratch files
+// go in ${snap.runRoot}/${d.key}/"), so its own claim has to stay
+// location-neutral ("in this prompt") rather than "above" — "above" was false
+// there until #1721 fixed it. The refuter prompt's scratch dir IS named
+// earlier ("Scratch: ${snap.runRoot}/verify-${d.key}/..."), so "above" is
+// accurate there and is not a synonym for the specialist's span: rewording
+// either one to match the other would silently reintroduce #1721 in whichever
+// dispatch changed. Measured at PR #1825's review: reverting the specialist
+// prompt in ONE harness only, leaving the other on the fixed wording, left the
+// entire suite green — nothing previously pinned past PWD_FIRST's "no-run
+// zone from then on" on either dispatch.
+export const SCRATCH_NAMED_SPECIALIST = phrase(
+  "and every command after it chains its own `cd` into the snapshot or into your scratch dir, both named in this prompt as absolute paths.",
+);
+export const SCRATCH_NAMED_REFUTER = phrase("and the snapshot and your scratch dir are both named above as absolute paths.");
+
 // Part 3, the positive self-check. The audit command and the report contract
 // are separate spans because they fail separately: a bare `--porcelain` is a
 // silently WRONG audit (a `status.showUntrackedFiles=no` config makes it print

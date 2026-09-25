@@ -51,7 +51,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { phrase } from "./prose-pin.mjs";
 import { promptRenderer } from "./prompt-renderer.mjs";
-import { AUDIT_COMMAND, AUDIT_STATES, CWD_AUDIT_MARKER, EVERY_RUN, PWD_FIRST, REFUTER_CWD, REPORT_FIELD, SPECIALIST_CWD, auditLine } from "./cwd-isolation-pins.mjs";
+import { AUDIT_COMMAND, AUDIT_STATES, CWD_AUDIT_MARKER, EVERY_RUN, PWD_FIRST, REFUTER_CWD, REPORT_FIELD, SCRATCH_NAMED_REFUTER, SCRATCH_NAMED_SPECIALIST, SPECIALIST_CWD, auditLine } from "./cwd-isolation-pins.mjs";
 import { FINDINGS_SCHEMA, VERDICT_SCHEMA, cwdAuditFrom, runReview } from "./review-core.js";
 
 const FILE = "scripts/review-core.js";
@@ -123,6 +123,26 @@ for (const [name, prompt] of [
       prompt,
       PWD_FIRST,
       `review-core.js's ${name} prompt no longer fixes which directory it started in before running anything — the audit below then has no path to audit, and the cd rules guard a directory nothing identified (#1433)`,
+    );
+  });
+}
+
+// --- Part 2.5 (#1721): where the snapshot/scratch dir are named, per prompt
+// Each prompt's own claim (SCRATCH_NAMED_SPECIALIST / SCRATCH_NAMED_REFUTER,
+// cwd-isolation-pins.mjs says why the two differ). Regression pin: reverting
+// review-pr.js's specialist prompt back to "above" while leaving this file on
+// "in this prompt" passed the entire suite otherwise (measured at PR #1825's
+// review) — nothing previously pinned past PWD_FIRST's "no-run zone from then
+// on" on either prompt.
+for (const [name, prompt, span] of [
+  ["specialist", specialist, SCRATCH_NAMED_SPECIALIST],
+  ["refuter", refuter, SCRATCH_NAMED_REFUTER],
+]) {
+  test(`the rendered ${name} prompt states where the snapshot and scratch dir are named as absolute paths`, () => {
+    assert.match(
+      prompt,
+      span,
+      `review-core.js's ${name} prompt no longer makes this claim, or worded it to match "above" when its scratch dir is actually named later (#1721)`,
     );
   });
 }
