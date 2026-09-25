@@ -586,8 +586,22 @@ test("#1820: `## Dispatched` is not read — row tokens alone decide", () => {
   assert.equal(card(b, 950), undefined);
 });
 
-test("#1820: a malformed member outcome is never fatal and never counted live", () => {
+test("#1820: a malformed member outcome is never fatal and never counted live, and earns a `ledger-error` flag instead of rendering as a quiet, healthy row", () => {
   const b = computeBoard(reproInputs({ rows: ["#924 impl-924=PR#931 · fix-pr-931=exploded"] }));
   assert.equal(card(b, 924).column, "REVIEW");
   assert.equal(card(b, 924).agent, null);
+  assert.ok(card(b, 924).flags.includes("ledger-error"), "a malformed outcome must be visible, not indistinguishable from a healthy row");
+});
+
+test("#1820: a bare `review-pr-<n>` token (no `review=` prefix) names nobody — only ledger-grammar.mjs member families and `review=` tokens are read", () => {
+  const b = computeBoard(reproInputs({ rows: ["#960 impl-960=PR#931 review-pr-960"] }));
+  assert.equal(card(b, 960).agent, null, "review-pr-960 is neither a ledger-grammar.mjs member family nor a review= token");
+  assert.equal(card(b, 960).column, "REVIEW");
+  assert.equal(b.queue.reviewBacklog, 1, "no review=, no reviewed=, no live fix-pr/finisher-pr — the bare token does not exempt it");
+});
+
+test("#1820: a settled `review=...=failed` token with no redispatch still keeps a row out of reviewBacklog, per the ruling's literal 'neither review= nor reviewed=' wording", () => {
+  const b = computeBoard(reproInputs({ rows: ["#961 impl-961=PR#931 · review=member:review-pr-961=failed"] }));
+  assert.equal(card(b, 961).agent, null, "the reviewer settled failed; nobody is live");
+  assert.equal(b.queue.reviewBacklog, 0, "any review= token, settled or not, counts as 'has had a reviewer' per the current ruling's wording");
 });

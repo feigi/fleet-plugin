@@ -29,9 +29,14 @@ import { parseToken } from "./ledger-grammar.mjs";
 // `=PR#M` → that PR decides, `=released`/`=bailed` → no card of the row's own
 // (the POOL loop shows the ticket if it is still `ready-for-agent`),
 // `=killed`/`=tier-mismatch` → IMPLEMENTING with that outcome as a flag. The
-// `→ PR#M` arrow is human-readable only and is not read, as the tick does not
-// read it either. A member settled anywhere on the row is settled — a bare
-// copy beside `<member>=<outcome>` is what a whole-line `row` rewrite leaves.
+// `→ PR#M` arrow is human-readable only; parseRow ignores it and reads only
+// the settled impl token's outcome. fleet-tick.mjs's PR_MENTION is a blind
+// `PR#<n>` text scan that in practice also lands on the impl token's
+// embedded value, because that precedes the arrow in every row this run
+// writes — but nothing enforces that order, so the arrow is never a value
+// either reader may rely on. A member settled anywhere on the row is
+// settled — a bare copy beside `<member>=<outcome>` is what a whole-line
+// `row` rewrite leaves.
 //
 // A PR's review is not a member (#1773 §7): `review=wf:<runId>` is a Workflow
 // with nobody to name, while `review=member:<name>` and
@@ -59,7 +64,10 @@ export function parseRow(row) {
 
   // `live` holds member names in row order; `outcomes` every settled name's
   // latest outcome. A malformed outcome is still a settle — never counted
-  // live — but it decides no card.
+  // live, never decides a card — but it is not silently dropped either: it
+  // earns the row a `ledger-error` flag (deriveFlags below), the same
+  // "refuse rather than guess" contract ledger-grammar.mjs's own docstring
+  // states `.error` exists for.
   const live = [];
   const outcomes = new Map();
   const settled = new Set();
@@ -67,9 +75,11 @@ export function parseRow(row) {
   let review = false;
   let reviewed = false;
   let runners = [];
+  let malformed = false;
   for (const tok of row.split(/\s+/).filter(Boolean)) {
     const t = parseToken(tok);
     if (t) {
+      if (t.error) malformed = true;
       if (t.outcome === null) live.push(t);
       else settled.add(t.name);
       if (t.outcome !== null && !t.error) outcomes.set(t.name, t.outcome);
@@ -103,6 +113,7 @@ export function parseRow(row) {
     sha: mergedM ? mergedM[1] : null,
     heldBehind: heldM ? Number(heldM[1]) : null,
     causes,
+    malformed,
     review,
     reviewed,
     underReview: review || alive.some((t) => t.family === "fix-pr" || t.family === "finisher-pr"),
@@ -141,10 +152,11 @@ export const STALE_MS = {
 export function deriveFlags(parsed, ctx) {
   if (parsed.excluded) {
     return parsed.excluded.length
-      ? parsed.excluded.map(({ target }) => `excluded:${/^\d+$/.test(target) ? "#" : ""}${target}`)
+      ? parsed.excluded.map(({ target }) => `excluded:${target.length > 0 && !/[^0-9]/.test(target) ? "#" : ""}${target}`)
       : ["excluded"];
   }
   const flags = [];
+  if (parsed.malformed) flags.push("ledger-error");
   if (ctx.ci === "red") flags.push("red-ci");
   if (parsed.heldBehind != null) flags.push(`held-behind:#${parsed.heldBehind}`);
   for (const c of parsed.causes) flags.push(c); // killed | blocked | sha-off-branch
@@ -177,7 +189,7 @@ function titleFor(issue, pr, issues) {
   return i ? i.title : `#${issue}`;
 }
 
-const FLAG_SEVERITY = { "red-ci": 5, killed: 4, "tier-mismatch": 4, blocked: 4, "sha-off-branch": 4, stale: 1 };
+const FLAG_SEVERITY = { "red-ci": 5, "ledger-error": 5, killed: 4, "tier-mismatch": 4, blocked: 4, "sha-off-branch": 4, stale: 1 };
 function severity(flags) {
   let s = 0;
   for (const f of flags) {
