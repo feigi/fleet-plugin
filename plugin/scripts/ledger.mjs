@@ -1230,9 +1230,10 @@ function runDispatch() {
 
   // One token per member for the whole run. A settled token on a row counts
   // too — a `row`-written record the ledger never saw dispatched.
+  const settledOnRow = data.rows.flatMap(memberTokens).find((t) => t.name === member.name && t.outcome !== null);
   const prior =
     data.dispatched.find((e) => parseToken(e)?.name === member.name) ??
-    data.rows.flatMap(memberTokens).filter((t) => t.name === member.name && t.outcome !== null).map((t) => `${t.name}=${t.outcome}`)[0];
+    (settledOnRow && `${settledOnRow.name}=${settledOnRow.outcome}`);
   if (prior !== undefined) {
     die(`${member.name} was already dispatched this run (${prior}) — a replacement takes a name of its own (a -b, -c … suffix)`);
   }

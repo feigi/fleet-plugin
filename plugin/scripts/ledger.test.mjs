@@ -2286,6 +2286,8 @@ test("an ordinary ledger still round-trips through a pipe, and an unknown subcom
     rows: ["#7 impl-7 · class=routine"],
     filed: ["#8 a short filed subject"],
     ruled: ["#9 MERGE · green"],
+    dispatched: [],
+    drain: null,
   });
 
   // Nothing in this suite spawned an unknown subcommand before, so the die()
@@ -2423,7 +2425,7 @@ test("check hands a pipe its whole not-filed payload, and still reaches the trac
 // same flag. `check` is the fourth and was already correct; the tests above
 // pin it, and hoisting the guard leaves its message and its exit code alone.
 
-const READ_EMPTY = { rows: [], filed: [], ruled: [] };
+const READ_EMPTY = { rows: [], filed: [], ruled: [], dispatched: [], drain: null };
 
 test("read --require-file refuses an absent ledger, naming the path, with no payload (#816)", (t) => {
   const { dir, cli } = cliFixture(t);
