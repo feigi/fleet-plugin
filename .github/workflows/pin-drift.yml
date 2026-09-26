@@ -24,10 +24,12 @@ name: Pin Drift
 # day of the month the Monday run lands on (day-of-week and day-of-month are
 # independent cron fields: a Monday can and periodically does fall on the 1st).
 #
-# GitHub disables scheduled workflows in a public repository after 60 days
-# with no commits. That cannot swallow the report: the last pin move is itself
-# a commit, so the 60-day clock starts no earlier than the stall does, and the
-# stall is reported by day 42 — while the schedule is still live.
+# GitHub disables scheduled workflows in a public repository when "no
+# repository activity has occurred in 60 days" (GitHub Docs, Actions →
+# "Disabling and enabling a workflow"). That cannot swallow the report: the
+# last pin move is itself a commit, and a commit is repository activity, so
+# the 60-day clock starts no earlier than the stall does, and the stall is
+# reported by day 42 — while the schedule is still live.
 on:
   schedule:
     - cron: "23 7 * * 1"
