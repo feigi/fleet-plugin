@@ -2194,12 +2194,21 @@ test("CLI: this script's own flag name, two dashes, trailing a quoted multi-word
 // the OTHER flag, a flag word in the MIDDLE rather than at either end of a
 // longer quoted element, and the `=value` spelling — driven through the
 // two-dash form instead, so a fix that only special-cased the trailing word
-// or only the one flag name could not still pass this. A generic two-dash
-// word that is NOT one of this script's own flags is driven alongside them,
-// pinned staying accepted: the per-word clause is a NAME match against
-// OWN_FLAGS, never a "starts with two dashes" shape test — that shape test
-// is the outer clause's alone, and only over the whole element.
-test("CLI: a two-dash spelling of either flag is refused anywhere in a quoted tail element, =value and a non-own two-dash word too (#1850)", (t) => {
+// or only the one flag name could not still pass this. A case-variant
+// spelling and a case-variant combined with a leading NBSP (the #1766
+// axes, one dash count over) are driven too, since neither #1850 pin above
+// exercised case at all: a mutant that keeps the new branch's shape but
+// drops `.toLowerCase()` from just the as-spelled lookup passed every
+// existing test in the file (review finding, PR #1875). A generic two-dash
+// word that is NOT one of this script's own flags is driven alongside
+// them, pinned staying accepted — including one that extends an own flag
+// by suffix (`--files` over `--file`), since a mutant that swaps the NAME
+// match for a `startsWith` prefix match also passed every existing test
+// (same review finding): the per-word clause is a NAME match against
+// OWN_FLAGS, never a "starts with two dashes" shape test or a prefix test —
+// the shape test is the outer clause's alone, and only over the whole
+// element.
+test("CLI: a two-dash spelling of either flag is refused anywhere in a quoted tail element, =value, a case variant, NBSP-prefixed case variant, and non-own two-dash words (including one sharing an own flag's prefix) too (#1850)", (t) => {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");
   writeFileSync(file, ledgerText(["#123 widget guard missing"]));
@@ -2207,6 +2216,8 @@ test("CLI: a two-dash spelling of either flag is refused anywhere in a quoted ta
     ["widget --file", ["widget --file", "guard", "missing"]],
     ["widget --require-file extra", ["widget --require-file extra", "guard", "missing"]],
     ["widget --require-file=true", ["widget --require-file=true", "guard", "missing"]],
+    ["widget --REQUIRE-FILE", ["widget --REQUIRE-FILE", "guard", "missing"]],
+    ["widget\u00A0--Require-File", ["widget\u00A0--Require-File", "guard", "missing"]],
   ]) {
     const r = cli(["--file", file, "check", ...tail]);
     assert.equal(r.status, 2, `${tail.join(" ")}: got exit ${r.status}\n${r.stderr}`);
@@ -2215,15 +2226,17 @@ test("CLI: a two-dash spelling of either flag is refused anywhere in a quoted ta
   }
 
   const bareFile = join(dir, "bare.md");
-  const subject = "widget --basee guard missing";
-  writeFileSync(bareFile, ledgerText([`#1419 ${subject}`]));
-  const accepted = cli(["--file", bareFile, "check", "widget --basee", "guard", "missing"]);
-  assert.equal(accepted.status, 1, `got exit ${accepted.status}\n${accepted.stderr}`);
-  assert.match(
-    accepted.stderr,
-    /ALREADY FILED/,
-    "a two-dash word that is not this script's own flag must still be scored as subject text",
-  );
+  for (const nonOwn of ["widget --basee", "widget --files"]) {
+    const subject = `${nonOwn} guard missing`;
+    writeFileSync(bareFile, ledgerText([`#1419 ${subject}`]));
+    const accepted = cli(["--file", bareFile, "check", nonOwn, "guard", "missing"]);
+    assert.equal(accepted.status, 1, `${nonOwn}: got exit ${accepted.status}\n${accepted.stderr}`);
+    assert.match(
+      accepted.stderr,
+      /ALREADY FILED/,
+      `${nonOwn}: a two-dash word that is not this script's own flag must still be scored as subject text`,
+    );
+  }
 });
 
 // The tail guard cannot reach the slot ahead of it: a stray flag one token
