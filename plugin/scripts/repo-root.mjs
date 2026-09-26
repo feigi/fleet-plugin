@@ -335,16 +335,12 @@ export function skipWithoutRepo(root, subject) {
  * Whether the working tree holds a regular file at `path`, following a symlink
  * to whatever it names — a link to a file is one, a dangling link is not.
  * Nothing there at all (ENOENT) and a file standing where one of the path's
- * own directories should be (ENOTDIR) are both "no"; any other failure to look
- * throws.
+ * own directories should be (ENOTDIR) are both "no" — `throwIfNoEntry: false`
+ * answers `undefined` for exactly those two codes and no other; any other
+ * failure to look still throws.
  */
 function isRegularFile(path) {
-  try {
-    return statSync(path).isFile();
-  } catch (e) {
-    if (e.code === "ENOENT" || e.code === "ENOTDIR") return false;
-    throw e;
-  }
+  return statSync(path, { throwIfNoEntry: false })?.isFile() === true;
 }
 
 /**
@@ -397,7 +393,7 @@ function trackedFiles(caller, root, pathspecs) {
   // either — a real tracked file silently missing from every caller's
   // answer. `-z` never quotes; it is git's own NUL-terminated form for
   // "give me the exact bytes".
-  return execFileSync("git", ["ls-files", "-z", ...pathspecs], { cwd: root, encoding: "utf8", env: gitEnv() })
+  return execFileSync("git", ["ls-files", "-z", "--", ...pathspecs], { cwd: root, encoding: "utf8", env: gitEnv() })
     .split("\0").filter(Boolean)
     .filter((f) => isRegularFile(join(root, f)));
 }
