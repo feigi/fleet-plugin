@@ -1288,8 +1288,9 @@ test("jsonCountFault ignores a count-shaped aside whose own sentence never sizes
 // refuses them regardless of JSON_COUNT's boundary behavior — they prove the
 // two fixes stack, not that either fires alone (PR #1984 review). The last
 // three put "tracked" right after the count — where sizesTrackedSet reads it
-// as the count's own modifier (#1991) — so context cannot mask the result:
-// a boundary that lets the window run on flags them.
+// as the count's own modifier (#1991) — so the context test cannot be what
+// returns null: only a sentence end at `ones.)` / `ones."` (sentences() or
+// JSON_COUNT's own window) and the digit branch's hyphen anchor can.
 test("jsonCountFault treats a period-then-closer as a sentence end, and refuses a date fragment's last segment as a bare count (#1945)", () => {
   const jq = "`jq empty`, not `jq -e .`: it exits 1 on a file holding `null` or `false` — both valid JSON.";
   const lead = "Parses every file `git ls-files '*.json'` lists.";
