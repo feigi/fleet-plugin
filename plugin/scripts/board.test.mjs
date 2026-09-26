@@ -5,11 +5,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, statSync, chmodSync, rmSync, readFileSync, existsSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, spendDirPin, gatherSpend, faultText, resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "./board.mjs";
+import { encodeOmpProjectDir, readOmpMember } from "./member-record.mjs";
 import { stripComments } from "./strip-comments.mjs";
 import { gitEnv } from "./git-env.mjs";
 
@@ -656,6 +657,214 @@ test("one unreadable session directory loses the ranking instead of sinking the 
   writeFileSync(join(good, "agent-a.jsonl"), "");
 
   assert.equal(findSubagentsDir(home, "/x"), good);
+});
+
+// ── #1716: the omp tree ───────────────────────────────────────────────────────
+// Shaped like the real ~/.omp/agent/sessions/<encoded-cwd>/ (the same shape
+// member-record.test.mjs's real-tree fixture pins): each session's MAIN
+// transcript is a plain `<ISO>_<uuid>.jsonl` FILE sibling to its `<ISO>_<uuid>/`
+// DIRECTORY, which holds one `<AgentId>.jsonl` per member, plus a directory
+// per member that dispatched members of its own. Lines are the measured
+// shapes member-record.mjs's foldOmpTranscript comment records.
+const OMP_A = "2026-09-08T13-13-27-300Z_01a08126-ee04-7095-a695-14e3249f1127";
+const OMP_B = "2026-09-09T02-00-00-000Z_cafef00d-cafe-cafe-cafe-cafef00dcafe";
+
+function ompTranscript({ agent, task, model = "claude-opus-5", turns = [] } = {}) {
+  const lines = [
+    { type: "session", version: 3, id: "s1", timestamp: "2026-09-08T15:11:49.444Z", cwd: "/w" },
+    { type: "session_init", id: "i1", parentId: null, timestamp: "2026-09-08T15:11:49.495Z", task, agent, resolvedModelIdentity: `anthropic/${model}` },
+    ...turns.map((u, i) => ({
+      type: "message", id: `m${i}`, parentId: "i1", timestamp: "2026-09-08T15:12:00.000Z",
+      message: { role: "assistant", content: [{ type: "text", text: "ok" }], model, usage: { ...u, totalTokens: 0, cost: { total: 0.01 } } },
+    })),
+  ];
+  return lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
+}
+
+// A $HOME whose cwd sits under it, so the encoded project dir is the
+// home-relative form (`-dev-repo`) and needs no realpath of a cwd that does
+// not exist. encodeOmpProjectDir is the real encoder, not a hand-rolled path.
+function ompHome() {
+  const home = mkdtempSync(join(tmpdir(), "spend-omp-home-"));
+  const cwd = join(home, "dev", "repo");
+  const proj = join(home, ".omp", "agent", "sessions", encodeOmpProjectDir(cwd, { home }));
+  mkdirSync(proj, { recursive: true });
+  return { home, cwd, proj };
+}
+
+// One session: its member transcripts (a `/` in a name nests it, the way a
+// member's own members are laid out) stamped `mtime`, and its main-session
+// file beside the directory, stamped NOW so it is the newest transcript in
+// the whole tree — a lookup or a gather that reads it cannot pass.
+function ompSession(proj, name, members, mtime) {
+  const dir = join(proj, name);
+  mkdirSync(dir, { recursive: true });
+  for (const [agent, text] of Object.entries(members)) {
+    const file = join(dir, `${agent}.jsonl`);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, text);
+    if (mtime != null) utimesSync(file, new Date(mtime), new Date(mtime));
+  }
+  writeFileSync(join(proj, `${name}.jsonl`), ompTranscript({ turns: [{ input: 1, output: 1, cacheRead: 1, cacheWrite: 999_999 }] }));
+  return dir;
+}
+
+test("findSubagentsDir on omp picks this workspace's newest session DIRECTORY — never the main-session file beside it, never a stray dir", () => {
+  const { home, cwd, proj } = ompHome();
+  const older = ompSession(proj, OMP_A, { "impl-1": ompTranscript() }, 1000);
+  const newer = ompSession(proj, OMP_B, { "impl-2": ompTranscript() }, 9000);
+  // Not `<ISO>_<uuid>`, and holding the newest member-shaped transcript of all.
+  mkdirSync(join(proj, "notes"));
+  writeFileSync(join(proj, "notes", "x.jsonl"), "");
+  utimesSync(join(proj, "notes", "x.jsonl"), new Date(20000), new Date(20000));
+
+  // No ~/.claude tree at all: an omp-only machine resolves, it does not error.
+  assert.equal(findSubagentsDir(home, cwd), newer);
+  utimesSync(join(older, "impl-1.jsonl"), new Date(30000), new Date(30000));
+  assert.equal(findSubagentsDir(home, cwd), older, "the ranking reads member transcripts, so it follows them");
+});
+
+test("findSubagentsDir on omp follows a NESTED member's mtime, not just the session dir's top-level files", () => {
+  // #1867 review: a session whose only fresh activity is a member ONE LEVEL
+  // DOWN (its own further fan-out — a dispatcher blocked on its task tool
+  // while its specialists run) must still outrank a stale sibling session.
+  // Regression for a scan bounded to a session dir's direct children only.
+  const { home, cwd, proj } = ompHome();
+  const liveViaNested = ompSession(proj, OMP_A, { "impl-1": ompTranscript() }, 1000);
+  const staleSibling = ompSession(proj, OMP_B, { "impl-2": ompTranscript() }, 5000);
+  const nestedFile = join(liveViaNested, "review-pr-9", "Security.jsonl");
+  mkdirSync(dirname(nestedFile), { recursive: true });
+  writeFileSync(nestedFile, ompTranscript({ agent: "fleet-review-correctness" }));
+  utimesSync(nestedFile, new Date(90000), new Date(90000));
+
+  assert.equal(findSubagentsDir(home, cwd), liveViaNested,
+    "the nested member's fresher mtime must win the ranking, not lose to staleSibling's stale top-level file");
+});
+
+test("findSubagentsDir: an EACCES resolving the omp encoding (not ENOENT) surfaces as an error, even with a readable Claude tree beside it", () => {
+  // #1867 review: ompSessionDirs's catch around encodeOmpProjectDir must only
+  // swallow ENOENT ("this cwd doesn't exist" — the documented case). Any
+  // other error (EACCES on an ancestor, here) is a real fault and must
+  // propagate, never be silently relabelled as "no omp session" while a
+  // readable Claude tree quietly takes over with no signal anything crashed.
+  const home = mkdtempSync(join(tmpdir(), "spend-eacces-home-"));
+  const outer = mkdtempSync(join(tmpdir(), "spend-eacces-outer-"));
+  const blocked = join(outer, "blocked");
+  mkdirSync(blocked);
+  const cwd = join(blocked, "sub", "repo");
+  mkdirSync(cwd, { recursive: true });
+  const sub = join(home, ".claude", "projects", encodeProjectDir(cwd), "sess", "subagents");
+  mkdirSync(sub, { recursive: true });
+  writeFileSync(join(sub, "agent-a.jsonl"), "");
+  chmodSync(blocked, 0o000);
+  try {
+    const result = findSubagentsDir(home, cwd);
+    assert.notEqual(result, sub, "an omp-side EACCES must not be silently absorbed into a confident Claude-only answer");
+    assert.ok(result && typeof result === "object" && "error" in result, "it must surface as a lookup error, the same as any other real fault");
+  } finally {
+    chmodSync(blocked, 0o755);
+  }
+});
+
+test("both harnesses' trees are one ranking: whichever session wrote last wins", () => {
+  // One cwd used under both harnesses — this machine's own shape — holds both
+  // trees at once. Neither harness is preferred; the live one is the one writing.
+  const { home, cwd, proj } = ompHome();
+  const omp = ompSession(proj, OMP_A, { "impl-1": ompTranscript() }, 9000);
+  const claude = join(home, ".claude", "projects", encodeProjectDir(cwd), "sess", "subagents");
+  mkdirSync(claude, { recursive: true });
+  writeFileSync(join(claude, "agent-a.jsonl"), "");
+  utimesSync(join(claude, "agent-a.jsonl"), new Date(5000), new Date(5000));
+  assert.equal(findSubagentsDir(home, cwd), omp);
+  utimesSync(join(claude, "agent-a.jsonl"), new Date(20000), new Date(20000));
+  assert.equal(findSubagentsDir(home, cwd), claude);
+});
+
+test("with neither harness's tree present the lookup is an error that names both places it looked", () => {
+  const home = mkdtempSync(join(tmpdir(), "spend-omp-home-"));
+  const r = findSubagentsDir(home, join(home, "dev", "repo"));
+  assert.match(r.error, /\.claude[\\/]projects/);
+  assert.match(r.error, /\.omp[\\/]agent[\\/]sessions/, "an omp operator told only where Claude's tree should be is sent to the wrong place");
+});
+
+test("the pin's launchMs gate holds on an omp tree: a session predating launch is followed, the first to write on its watch latches", () => {
+  const { home, cwd, proj } = ompHome();
+  const mine = ompSession(proj, OMP_A, { "impl-1": ompTranscript() }, Date.now() - 100000);
+  const theirs = ompSession(proj, OMP_B, { "impl-2": ompTranscript() }, Date.now() - 200000);
+  const pin = spendDirPin(undefined, home, cwd);
+  assert.equal(pin(), mine, "before anything writes on this pin's watch, it answers from the heuristic's newest");
+  utimesSync(join(theirs, "impl-2.jsonl"), new Date(Date.now() + 1000), new Date(Date.now() + 1000));
+  assert.equal(pin(), theirs, "and re-picks — neither was trustworthy to cache yet");
+  utimesSync(join(mine, "impl-1.jsonl"), new Date(Date.now() + 50000), new Date(Date.now() + 50000));
+  assert.equal(pin(), theirs, "and holds, because theirs was first to write on this pin's watch");
+  assert.equal(findSubagentsDir(home, cwd), mine, "the fixture really did flip — this test proves nothing otherwise");
+});
+
+test("an omp session's per-member rows carry exactly readOmpMember's totals, model and role", () => {
+  const { proj } = ompHome();
+  const members = {
+    "impl-7": ompTranscript({ agent: "fleet-implementer", task: "Implement ticket 7", turns: [
+      { input: 3, output: 40, cacheRead: 500, cacheWrite: 7000 },
+      { input: 1, output: 60, cacheRead: 9000, cacheWrite: 1100 },
+    ] }),
+    "review-pr-9": ompTranscript({ task: "Review PR 9", model: "claude-sonnet-5", turns: [{ input: 2, output: 20, cacheRead: 300, cacheWrite: 4000 }] }),
+    // Nested one level: a member's own member, which readOmpMember books by depth.
+    "review-pr-9/Security": ompTranscript({ task: "Check security", model: "claude-haiku-4-5", turns: [{ input: 1, output: 5, cacheRead: 100, cacheWrite: 2500 }] }),
+    // Dispatched this second, no assistant turn yet — readOmpMember answers null.
+    Fresh: ompTranscript({ agent: "fleet-implementer", task: "Implement ticket 8" }),
+  };
+  const dir = ompSession(proj, OMP_A, members);
+  const expected = Object.entries(members)
+    .map(([agent, text]) => readOmpMember(text, join(dir, `${agent}.jsonl`), agent, agent.split("/").length - 1))
+    .filter(Boolean);
+  // One member per role, so each role bucket below IS one member's row.
+  assert.equal(new Set(expected.map((m) => m.role)).size, 3, `fixture: ${expected.map((m) => m.role)}`);
+
+  const s = gatherSpend({ dir });
+  assert.equal(s.ok, true);
+  assert.equal(s.skipped, 0);
+  const sum = (k) => expected.reduce((n, m) => n + m[k], 0);
+  // The main-session file beside the dir (999,999 cache-write) is not a member,
+  // and the turn-less one has spent nothing, so neither is in these.
+  assert.deepEqual(
+    { agents: s.totals.agents, cacheWrite: s.totals.cacheWrite, output: s.totals.output, cacheRead: s.totals.cacheRead },
+    { agents: 3, cacheWrite: sum("tokens_cache_create"), output: sum("tokens_out"), cacheRead: sum("tokens_cache_read") },
+  );
+  for (const m of expected) {
+    const row = s.top.find((r) => r.label === m.member);
+    assert.ok(row, `no row labelled ${m.member}: ${JSON.stringify(s.top)}`);
+    assert.deepEqual({ role: row.role, model: row.model, cacheWrite: row.cacheWrite },
+      { role: m.role, model: m.model, cacheWrite: m.tokens_cache_create }, m.member);
+    const bucket = s.roles.find((r) => r.role === m.role);
+    assert.deepEqual({ cacheWrite: bucket.cacheWrite, output: bucket.output, cacheRead: bucket.cacheRead },
+      { cacheWrite: m.tokens_cache_create, output: m.tokens_out, cacheRead: m.tokens_cache_read }, m.member);
+  }
+});
+
+test("an omp session reports its tool table as not measured — never an empty or zeroed one", () => {
+  const { proj } = ompHome();
+  const dir = ompSession(proj, OMP_A, { "impl-7": ompTranscript({ turns: [{ input: 1, output: 1, cacheRead: 1, cacheWrite: 1000 }] }) });
+  const s = gatherSpend({ dir });
+  assert.equal(s.ok, true);
+  assert.equal(s.tools, null);
+  assert.equal(s.attributedPct, null);
+  assert.equal(s.toolsUnavailable, "tool attribution not available on omp yet");
+});
+
+test("one bad transcript in an omp session is skipped and named, not a blackout of the members beside it", () => {
+  // readOmpSession lets a wrong-harness refusal propagate (a whole-tree scrape
+  // must refuse loudly); on the live panel that is one transcript's fault, so
+  // it lands in `skipped` exactly as a broken Claude transcript does.
+  const { proj } = ompHome();
+  const dir = ompSession(proj, OMP_A, { "impl-7": ompTranscript({ turns: [{ input: 1, output: 1, cacheRead: 1, cacheWrite: 1000 }] }) });
+  writeFileSync(join(dir, "Stray.jsonl"), JSON.stringify({ type: "assistant", sessionId: "x", message: { id: "m", usage: {} } }) + "\n");
+  let s;
+  const errs = withStderr(() => { s = gatherSpend({ dir }); });
+  assert.equal(s.ok, true);
+  assert.equal(s.totals.cacheWrite, 1000, "the good member still counts");
+  assert.equal(s.skipped, 1);
+  assert.equal(errs.length, 1);
+  assert.match(errs[0], /Stray\.jsonl/);
 });
 
 // ── #1583/#1679: the pin ──────────────────────────────────────────────────────

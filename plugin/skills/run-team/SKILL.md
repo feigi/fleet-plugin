@@ -294,12 +294,19 @@ phase, or in any later one, asks the maintainer which tickets to take.
    else — either way it gets its own board, just not always on the port its
    hash predicts.
 
-   The spend panel is pinned to whichever session first writes a transcript
-   on this cockpit's own watch (#1583/#1679) — it will not follow a workspace
-   that already had another session's transcripts sitting there at launch.
-   If the panel is reading someone else's numbers, relaunch with
-   `--spend-dir <path>` naming this run's own `~/.claude/projects/.../subagents`
-   directory to override the heuristic outright.
+   The spend panel reads whichever harness's transcript tree this workspace
+   has — Claude Code's under `~/.claude/projects` or omp's under
+   `~/.omp/agent/sessions`, both searched, newest transcript wins (#1716) —
+   and is pinned to whichever session first writes a transcript on this
+   cockpit's own watch (#1583/#1679): it will not follow a workspace that
+   already had another session's transcripts sitting there at launch. On omp
+   its tool column reads "tool attribution not available on omp yet"; the
+   role split and totals are real. If the panel is reading someone else's
+   numbers, relaunch with `--spend-dir <path>` naming this run's own session
+   directory to override the heuristic outright — on Claude Code
+   `~/.claude/projects/<encoded-cwd>/<session-uuid>/subagents`, on omp
+   `~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>` (the directory, never
+   the `.jsonl` file of the same name beside it).
 
    **Fold in every PR a prior run left open, before shortlisting.** A chore PR
    carrying that run's own metrics, or ticket work whose review was deferred —
@@ -1278,8 +1285,10 @@ that literal instead of merely asserted: a PR count alone is satisfied by a
 single run's rows, which is the state this file ships in. Without the floor a
 single noisy PR reverts a class; without a `no` count, "trending" names no
 threshold and whether the guard fires is undefined. Per-`impl-<N>`
-spend is not available: `.spend.top` labels agents by their Agent-call
-`description`, not their member name.
+spend is not available from `.spend.top` on either harness: on Claude Code it
+labels agents by their Agent-call `description`, not their member name, and on
+omp, where the label is the member name, it still holds only the eight
+largest spenders.
 
 **Never read the guard's silence as a pass** — and never read a single run's rows
 as its verdict.

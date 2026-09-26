@@ -701,34 +701,48 @@ export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
   };
 }
 
-// Walks one omp session directory into records. RECURSIVE for the same
-// reason as Claude's reader: a member can itself dispatch further members
-// (measured on disk — a research session's `Facts1303/` held seven more
-// `.jsonl` files one level down), and `agent` is the path-relative stem so
-// those nest instead of colliding. `spawnDepth` is read straight off that
-// path — one `/` per nesting level, the same signal Claude's own reviewer
-// fan-out relies on via `meta.spawnDepth` — and handed to readOmpMember as a
-// real fact about the walk, not a guess about the member.
+// One omp session directory's member transcripts, as the walk both readers of
+// that directory need it: readOmpSession below, and board.mjs's live spend
+// panel (#1716), which calls readOmpMember per file itself so it can keep
+// its own per-transcript skip tally. RECURSIVE for the same reason as
+// Claude's reader: a member can itself dispatch further members (measured on
+// disk — a research session's `Facts1303/` held seven more `.jsonl` files one
+// level down), and `agent` is the path-relative stem so those nest instead of
+// colliding. `spawnDepth` is read straight off that path — one `/` per
+// nesting level, the same signal Claude's own reviewer fan-out relies on via
+// `meta.spawnDepth` — and handed to readOmpMember as a real fact about the
+// walk, not a guess about the member.
+//
+// Throws when the directory itself cannot be listed; the caller decides what
+// that means.
+export function ompSessionTranscripts(sessionDir) {
+  return readdirSync(sessionDir, { recursive: true })
+    .filter((f) => f.endsWith(".jsonl"))
+    .map((f) => ({
+      file: join(sessionDir, f),
+      agent: f.replace(/\.jsonl$/, ""),
+      spawnDepth: (f.match(/[\\/]/g) ?? []).length,
+    }));
+}
+
+// Walks one omp session directory into records, via the walk above.
 //
 // Deliberately NOT wrapped in a blanket try/catch around readOmpMember: the
 // wrong-root refusal (assertNotClaudeShaped, inside foldOmpTranscript) must
 // propagate all the way out of readMembers, uncaught, per #1342's acceptance
-// criterion. Only the raw file read is given the ordinary per-member
-// tolerance.
+// criterion. Only the directory listing and the raw file read are given the
+// ordinary per-member tolerance.
 export function readOmpSession(sessionDir) {
-  let names;
-  try { names = readdirSync(sessionDir, { recursive: true }); }
+  let transcripts;
+  try { transcripts = ompSessionTranscripts(sessionDir); }
   catch { return []; }
   const session = basename(sessionDir);
   const rows = [];
-  for (const f of names.filter((x) => x.endsWith(".jsonl"))) {
-    const filePath = join(sessionDir, f);
+  for (const { file, agent, spawnDepth } of transcripts) {
     let text;
-    try { text = readFileSync(filePath, "utf8"); }
+    try { text = readFileSync(file, "utf8"); }
     catch { continue; }
-    const agent = f.replace(/\.jsonl$/, "");
-    const spawnDepth = (f.match(/[\\/]/g) ?? []).length;
-    const rec = readOmpMember(text, filePath, agent, spawnDepth); // may throw — see comment above
+    const rec = readOmpMember(text, file, agent, spawnDepth); // may throw — see comment above
     if (!rec) continue;
     rows.push({ ...rec, session, agent });
   }
