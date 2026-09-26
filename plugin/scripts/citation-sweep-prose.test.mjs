@@ -266,7 +266,8 @@ const FILES = [
   // #1874. Two more of the same, adjacent to #1756's. The Status line and a
   // Consequences bullet located the pin's owner comment in ci.yml as the
   // "first" `setup-node`, a position any `setup-node` step added above the
-  // `check` job's silently re-points; both now name the `check` job instead.
+  // `check` job's would silently re-point it to; both now name the `check`
+  // job instead.
   // One needle serves both sites, so it is the ban on the positional form, not
   // the needle, that reds either one reverting. And the evidence counted "8
   // releases" and a security release "since the pin" without saying from
@@ -310,7 +311,7 @@ const FILES = [
   // reverting on its own.
   {
     path: ["..", ".github", "scripts", "pin-drift.sh"],
-    stale: [/across\s+8\s+releases/],
+    stale: [/across(?:\s|#)+8(?:\s|#)+releases/],
     live: [],
   },
   // #1757. The glossary's Runtime heading names the two terms ADR 0010

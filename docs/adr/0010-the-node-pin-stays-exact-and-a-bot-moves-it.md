@@ -20,7 +20,7 @@ Measured 2026-09-23, before ruling:
   from #335 setting it on 2026-08-11 to this measurement, while Node shipped
   five 26.x releases (v26.8.0 through v26.10.0, the latest 26.x, dated
   2026-09-22). Three more past `26.5.0` — v26.5.1, v26.6.0 and v26.7.0 — were
-  already out when the pin was set, so it ended the 43 days 8 releases
+  already out when the pin was set, so it ended the 43 days with 8 releases
   behind. The cost #354 predicted is demonstrated, not argued: the one-file
   edit does not happen.
 - **The partial spec's premise is false for `nvm`.** `nvm use` with `26` selects
