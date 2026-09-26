@@ -129,7 +129,9 @@ token takes its PR the way `fleet-tick.mjs` does — see **The row's PR** below.
 Amendment 5a, #1842: a `review=` token marks review only while it is live — see
 **REVIEW** below. #1843: the row's latest `impl` token is its greatest retry
 suffix — no suffix, then `-b`, `-c`, … — wherever it sits in the row, so any
-ordering of the same tokens renders the same card.)
+ordering of one ticket's own impl tokens picks the same impl/outcome/PR (the
+card's `agent`, below, is unrelated and still the last *live* member by
+position).)
 
 | Column | Derivation (durable, no controller push) |
 |---|---|

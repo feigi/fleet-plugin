@@ -546,6 +546,24 @@ test("#1843: two distinct impl names at one retry suffix render one card in eith
   assert.deepEqual(cardFor("#5 impl-5=killed · impl-6", 5), cardFor("#5 impl-6 · impl-5=killed", 5));
 });
 
+// review-1912-b: laterAttempt's retry-vs-number precedence let a token from
+// a DIFFERENT ticket's impl-N lineage outrank this row's own impl token
+// whenever the foreign token carried a higher retry suffix, reintroducing
+// #1843's own bug class (a dead/unrelated token's outcome read instead of
+// this ticket's live one) by a different mechanism than row position. A
+// foreign impl number is not "a later attempt" of this ticket at all — retry
+// only orders attempts on ONE number — so it must never outrank this row's
+// own impl token, however great its retry suffix.
+test("review-1912-b: a foreign ticket's impl token never outranks this row's own impl token, however great its retry suffix", () => {
+  for (const row of ["#5 impl-5 impl-3-z=killed", "#5 impl-3-z=killed impl-5"]) {
+    assert.equal(parseRow(row).impl, "impl-5", row);
+    assert.equal(parseRow(row).implOutcome, null, row);
+    const { card: c } = cardFor(row, 5);
+    assert.equal(c.column, "IMPLEMENTING", row);
+    assert.deepEqual(c.flags, [], `${row}: ticket 5 is live, not killed — impl-3-z is ticket 3's token`);
+  }
+});
+
 test("#1820: a live implementer is IMPLEMENTING, and still earns stale", () => {
   const b = computeBoard(reproInputs());
   assert.equal(card(b, 906).column, "IMPLEMENTING");

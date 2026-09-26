@@ -79,19 +79,30 @@ const EXCLUDED_ROW = /^#[0-9]+[ \t]+excluded(?=[ \t]|$)([\s\S]*)$/;
 const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
 const REVIEW = /^review=(?:wf|member|fallback):([^=\s]+?)(=failed)?$/;
 
-// #1843: which of two well-formed impl tokens is the later attempt, read off
-// ledger-grammar.mjs's parsed `retry` — no suffix first, then by letter —
-// never off row position, so every ordering of one row's tokens renders one
-// card. The number decides only between two distinct names at one suffix,
-// which nothing writes, so the pick stays a function of the tokens alone.
-// Two copies of one name tie; its outcome is `outcomes`' latest settle.
-const laterAttempt = (a, b) => ((a.retry ?? "") !== (b.retry ?? "")
-  ? (a.retry ?? "") > (b.retry ?? "")
-  : a.number > b.number);
+// #1843: which of two well-formed impl tokens is the later attempt for THIS
+// row's ticket. A token whose number matches the row's own ticket always
+// outranks one that does not: a retry suffix only orders attempts on ONE
+// number (ledger-grammar.mjs's MEMBER regex comment — "Attempts on one
+// number order by it"), so comparing retry across a different ticket's
+// number is meaningless and must never let a foreign token's suffix beat
+// this ticket's own token (a dead-attempt-masks-a-live-implementer regression
+// by a different mechanism than the one this ticket fixes). Within one
+// ticket, read off ledger-grammar.mjs's parsed `retry` — no suffix first,
+// then by letter — never off row position, so every ordering of one row's
+// same-ticket impl tokens picks the same impl/outcome/pr. Between two
+// distinct foreign numbers (a shape nothing writes), the greater number
+// wins; two copies of one name tie, and its outcome is `outcomes`' latest
+// settle.
+const laterAttempt = (a, b, ticket) => {
+  const aOwn = a.number === ticket, bOwn = b.number === ticket;
+  if (aOwn !== bOwn) return aOwn;
+  return (a.retry ?? "") !== (b.retry ?? "") ? (a.retry ?? "") > (b.retry ?? "") : a.number > b.number;
+};
 
 export function parseRow(row) {
   const issueM = row.match(/^#(\d+)\b/);
   if (!issueM) return null;
+  const ticket = Number(issueM[1]);
   const mergedM = row.match(/\bMERGED\s+([0-9a-f]{7,40})\b/i);
   const heldM = row.match(/\bheld-behind[:\s]+#?(\d+)\b/i);
   const causes = [];
@@ -126,7 +137,7 @@ export function parseRow(row) {
       if (t.outcome !== null && !t.error) outcomes.set(t.name, t.outcome);
       if (t.family === "impl") {
         anyImpl = true;
-        if (!t.error && (!lastImpl || laterAttempt(t, lastImpl))) lastImpl = t;
+        if (!t.error && (!lastImpl || laterAttempt(t, lastImpl, ticket))) lastImpl = t;
       }
       if (t.bound === "pr") prMember = true;
       continue;
