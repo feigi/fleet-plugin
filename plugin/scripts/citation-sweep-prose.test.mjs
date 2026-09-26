@@ -214,12 +214,12 @@ const SENTENCE_END = String.raw`(?:[.!?][*_\x60)\]"'”’]*\s|\n(?=[ \t]*[-*+][
 // aside" and "for minors and patches", prose that names exactly the scope the
 // rows ask for. A word no reader sees: a link target, as in
 // `[notes](https://x.io/patch-notes)`, a reference label, an HTML comment.
-// Skipping those takes a second alternative in every tempered token this is
-// spliced into, for markup ADR 0010 has none of. And a non-ASCII letter
-// beside the word: "patché" scopes. `[\p{L}\p{N}]` would refuse it only under
-// the `u` flag, and each regex this is spliced into sets its own flags: built
-// without `u`, `\p` is a plain "p" and the class a few literal characters, so
-// "dispatched" scopes again, silently.
+// Refusing those takes one more lookbehind on `UPDATE_TYPE` itself, for
+// markup ADR 0010 has none of. And a non-ASCII letter
+// beside the word: "patché" scopes. `[\p{L}\p{N}]` would refuse it, but each
+// regex this is spliced into sets its own flags: built without `u`, `\p` is a
+// plain "p" and the class a few literal characters, so "dispatched" scopes
+// again, silently.
 const UPDATE_TYPE = String.raw`(?<![a-z\d])(?:minors?|majors?|patch(?:es)?)(?![a-z\d])`;
 const UNSCOPED_DRIFT_SENTENCE = new RegExp(
   String.raw`(?:^|${SENTENCE_END})(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*\bbounding\s+drift\b(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*(?:${SENTENCE_END}|$)`,
