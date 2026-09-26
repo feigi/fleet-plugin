@@ -887,6 +887,28 @@ test("#1820 amendment 5a: on the same ledger and PR list, the cockpit's backlog 
   assert.equal(b.queue.reviewBacklog, cases.filter(([, , owed]) => owed).length);
 });
 
+// #1926: a `review=` token outside the wf/member/fallback grammar is still
+// read as live (compute-board.mjs's note above REVIEW). fleet-tick.mjs
+// refuses such a ledger outright; the cockpit renders it instead, and reads
+// the review as in flight — `=failed` settles only an in-grammar token.
+test("#1926: a `review=` token outside the grammar reads as a live review that names nobody", () => {
+  const base = "#972 impl-972=PR#972";
+  assert.equal(parseRow(base).underReview, false, "control: the row's other tokens put it under no review");
+  for (const tok of [
+    "review=bogus:x",
+    "review=member",
+    "review=member:",
+    "review=",
+    "review=WF:r1",
+    "review=member:a=b",
+    "review=bogus:x=failed",
+  ]) {
+    const r = parseRow(`${base} · ${tok}`);
+    assert.equal(r.underReview, true, tok);
+    assert.equal(r.agent, null, `${tok}: no kind to name a runner by`);
+  }
+});
+
 // --------------------------------------------------------------------------
 // #1820 amendment 2a (#1839): a PR-bound row with no `impl` token — the shape
 // `ledger.mjs dispatch <pr> fix-pr-<pr>|finisher-pr-<pr>` appends for a PR
