@@ -43,7 +43,7 @@ function double(n) {
 });
 
 // `name` and `signature` are interpolated into a RegExp, so both go through
-// `RegExp.escape` — a metachar in either matches only itself. Unescaped, the
+// lift.mjs's `escapeRe` — a metachar in either matches only itself. Unescaped, the
 // `.` of a rest parameter stood in for any character: the pin
 // `pick(a, ...rest)` was satisfied by the declaration `pick(a, b, rest)`, so
 // the wrong-signature refusal above returned a function of a signature nobody
