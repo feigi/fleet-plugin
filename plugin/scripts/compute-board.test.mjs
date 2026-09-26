@@ -636,6 +636,7 @@ test("#1820 amendment 2a: with no PR#M mention, a PR-bound member or review toke
     assert.equal(parseRow(row).pr, 1237, row);
   }
   assert.equal(parseRow("#1300 PR#1301 · fix-pr-1301").pr, 1301);
+  assert.equal(parseRow("#1237: fix-pr-1237").pr, null, "colon-suffixed first word is not an exact `#N` key match");
 });
 
 test("#1820 amendment 2a: an Exclusion, and a row with no impl token and no PR-bound signal, keep no PR", () => {
@@ -666,7 +667,7 @@ const tickKeysTo = (row, n) => deriveRun({ rows: [`${row} held-behind:#1`], disp
   { number: 1, labels: [], closingIssuesReferences: [] },
 ]).mergeHeld === 1;
 
-test("#1820 amendment 2a: on the same row text, the cockpit's PR is fleet-tick.mjs's", () => {
+test("#1820 amendment 2a: on the same PR-signaled row text, the cockpit's PR is fleet-tick.mjs's", () => {
   const rows = [INHERITED, "#1237 fix-pr-1237", "#1237 finisher-pr-1237=labelled", "#1237 reviewed=abc1234:1/0/0", "#1300 PR#1301 · fix-pr-1301"];
   for (const row of rows) {
     const pr = parseRow(row).pr;

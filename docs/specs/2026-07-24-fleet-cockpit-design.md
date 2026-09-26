@@ -157,7 +157,10 @@ mention, a `fix-pr-M`/`finisher-pr-M` member, `review=` or `reviewed=`) it
 takes the tick's PR: its first `PR_MENTION`, else its row key when the row's
 first word is exactly `#N`. `compute-board.mjs` imports `PR_MENTION` from
 `fleet-tick.mjs` rather than restating it, so the two readers name the same PR
-for the same row text. That PR then decides the column exactly as a `=PR#M`
+for the same row text once it carries a signal; an unsignaled row (no
+mention, no PR-bound member, no `review=`/`reviewed=`) stays `pr: null` here
+while `fleet-tick.mjs`'s own row-key fallback still keys it to its ticket
+number for its own bookkeeping. That PR then decides the column exactly as a `=PR#M`
 outcome does: open → REVIEW (or READY), merged by `gh` or by a `MERGED <sha>`
 token → MERGED. A malformed `impl` token still counts as one — that row's key
 is a ticket — and an Exclusion row, or a row with no signal, takes no PR.

@@ -17,8 +17,12 @@
 // fleet-tick.mjs cannot disagree about which members are live.
 // fleet-tick.mjs owns a row's PR reading, PR_MENTION, and a row with no impl
 // token is read through it (#1820 amendment 2a, below) so both readers name
-// the same PR for the same text. The regex is all this file takes from it:
-// the tick's I/O and main() never run here, main() being guarded on argv[1].
+// the same PR for the same text, for a row that carries a PR-bound signal —
+// an unsignaled row (no mention, no PR-bound member, no review=/reviewed=)
+// still gets pr: null here while fleet-tick.mjs's own row-key fallback keys
+// it to its ticket number regardless; see the amendment note below. The
+// regex is all this file takes from it: the tick's I/O and main() never run
+// here, main() being guarded on argv[1].
 import { assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
 import { parseToken } from "./ledger-grammar.mjs";
 import { PR_MENTION } from "./fleet-tick.mjs";
@@ -124,10 +128,14 @@ export function parseRow(row) {
   const prM = implOutcome && /^PR#(\d+)$/.exec(implOutcome);
   let pr = prM ? Number(prM[1]) : null;
   // #1820 amendment 2a: a row with NO impl token — a malformed one still
-  // counts, since that row's key is a ticket — is keyed as fleet-tick.mjs
-  // keys it once it carries a PR-bound signal: its first PR_MENTION (itself a
-  // signal), else the row key when the first word is exactly `#N`. An
-  // Exclusion is supply and never takes a PR, whatever text it carries.
+  // counts, since that row's key is a ticket — is keyed, once THIS row
+  // carries a PR-bound signal, the way fleet-tick.mjs's PR_MENTION-then-
+  // row-key logic would: its first PR_MENTION (itself a signal), else the
+  // row key when the first word is exactly `#N`. fleet-tick.mjs's own
+  // row-key fallback (deriveRun) is NOT itself gated on a signal — this
+  // module's extra gate exists so an ordinary unclaimed ticket never
+  // borrows its own number as a phantom PR. An Exclusion is supply and
+  // never takes a PR, whatever text it carries.
   if (!anyImpl && !ex) {
     const mention = PR_MENTION.exec(row);
     if (mention) pr = Number(mention[1]);
