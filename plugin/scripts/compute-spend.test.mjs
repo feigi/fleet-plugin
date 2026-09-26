@@ -458,3 +458,25 @@ test("top is ranked by cache_creation and honours topN", () => {
   });
   assert.deepEqual(top.map((t) => t.label), ["b", "c"]);
 });
+
+// #1879: `model` rides along on a top row only where the harness reader
+// supplied one. Claude's readAgent row (board.mjs readClaudeSpend) carries no
+// `model` key at all — the `agent()` shape here — and its top row must not gain
+// one: neither `model: null`, a column the served payload would then carry on
+// every Claude row, nor `model: undefined`, which JSON drops but an own-key
+// check on the in-process object still sees. The omp-shaped row beside it keeps
+// this from passing on a builder that simply stopped emitting `model` at all.
+test("a top row carries `model` only when its agent supplied one — a Claude row gains no key (#1879)", () => {
+  const { top } = computeSpend({
+    agents: [
+      agent({ label: "claude-impl", role: "implementer", cacheWrite: 30 }),
+      agent({ label: "omp-impl", role: "implementer", model: "claude-opus-5", cacheWrite: 20 }),
+    ],
+  });
+  const [claude, omp] = top;
+  assert.equal(claude.label, "claude-impl");
+  assert.equal(Object.hasOwn(claude, "model"), false,
+    `a Claude top row must carry no \`model\` key at all, got ${JSON.stringify(Object.keys(claude))}`);
+  assert.equal(omp.label, "omp-impl");
+  assert.equal(omp.model, "claude-opus-5");
+});
