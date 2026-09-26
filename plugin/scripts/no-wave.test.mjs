@@ -23,12 +23,14 @@
 // NAME is matched too, because every path that cites such a file repeats the
 // word; it is reported without a line number.
 //
-// `git ls-files`, never a directory walk, for the reason
+// repo-root.mjs's `trackedPaths`, never a directory walk, for the reason
 // scripts-path-citation-sweep.test.mjs states: an untracked scratch file must
-// never become a false positive. `-z` and a scrubbed env for the reasons
-// repo-root.mjs's `trackedFiles` states: git C-quotes an unusual path in its
-// default form, and an ambient GIT_DIR silently answers for another
-// repository.
+// never become a false positive. It is the one discovery every sweep here
+// shares, for the reasons repo-root.mjs's `trackedFiles` states: `-z`, since
+// git C-quotes an unusual path in its default form; a scrubbed env, since an
+// ambient GIT_DIR silently answers for another repository; and no path the
+// working tree holds no file at, since reading one aborted the whole sweep
+// (#1910).
 //
 // KNOWN LIMIT, same as those siblings: needs an ambient `.git` to ask what is
 // tracked. Absent one the tree sweep DECLINES with a reason; the scanner's own
@@ -38,12 +40,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { gitEnv } from "./git-env.mjs";
-import { repoRoot, skipWithoutRepo } from "./repo-root.mjs";
+import { repoRoot, skipWithoutRepo, trackedPaths } from "./repo-root.mjs";
 
 const DIR = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = repoRoot(DIR);
@@ -114,20 +114,14 @@ test("scanner: a tracked file whose name carries the word is a hit even when its
 });
 
 /** Every tracked path, repo-relative — what the rule governs. */
-function tracked(root) {
-  return execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8", env: gitEnv() })
-    .split("\0")
-    .filter(Boolean);
-}
-
-const FILES = ROOT === null ? [] : tracked(ROOT);
+const FILES = ROOT === null ? [] : trackedPaths(ROOT);
 
 test("the sweep sees the tree it is supposed to police", { skip: SKIP_WITHOUT_REPO }, () => {
   // A guard on the guard: a `git ls-files` that answers nothing turns the
   // sweep below into a vacuous pass over an empty list — green, and blind.
   assert.ok(
     FILES.length > 200,
-    `git ls-files returned only ${FILES.length} entries — too few to be this repo's real tree, and the sweep below would pass vacuously`,
+    `trackedPaths(ROOT) returned only ${FILES.length} entries — too few to be this repo's real tree, and the sweep below would pass vacuously`,
   );
   assert.ok(FILES.includes(SELF), `${SELF} is not a tracked path, so its self-exemption names nothing — update SELF`);
   assert.ok(FILES.includes(GLOSSARY), `${GLOSSARY} is not a tracked path, so the _Avoid_: exemption names nothing — update GLOSSARY`);
