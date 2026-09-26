@@ -36,7 +36,7 @@ import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, read
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
 import {
   encodeClaudeProjectDir as encodeProjectDir, foldClaudeTranscript, claudeRoleSignals,
-  encodeOmpProjectDir, isOmpSessionDirName, ompSessionTranscripts, readOmpMember,
+  encodeOmpProjectDir, isOmpSessionDirName, ompSessionTranscripts, foldOmpTranscript, ompMemberRecord,
 } from "./member-record.mjs";
 import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
@@ -919,8 +919,8 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
     }
     if (!dir) return null; // resolved, but this session has spawned no agents yet
 
-    const read = isOmpSessionDirName(basename(dir)) ? readOmpSpend(dir, sinceMs) : readClaudeSpend(dir, sinceMs);
-    const { agents, skipped, metaErrors, damaged } = read;
+    const { agents, toolTables, skipped, metaErrors, damaged } =
+      isOmpSessionDirName(basename(dir)) ? readOmpSpend(dir, sinceMs) : readClaudeSpend(dir, sinceMs);
     if (!agents.length) {
       if (skipped) return { ok: false, error: `all ${skipped} transcripts unreadable` };
       // #1679: only for an EXPLICIT override — never the heuristic's own
@@ -934,30 +934,19 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
       return null;
     }
     const spend = computeSpend({ agents, topN });
-    let tools = null, attributedPct = null;
-    // #1716: omp has no tool table yet — say so in the payload, never an empty
-    // or zeroed one, which would read as "no tool spend" rather than "not
-    // measured". `tools`/`attributedPct` stay null so nothing downstream
-    // mistakes a missing key for an old payload.
-    if (!read.toolsUnavailable) {
-      tools = mergeTools(read.toolTables);
-      // What fraction of cache_creation the tool table actually explains. It is
-      // never 100%: only a turn that FOLLOWS a tool result can be attributed to a
-      // tool, and an agent's first turn — usually its largest single write, the
-      // system prompt and context — follows nothing. Surfacing the coverage keeps
-      // the two columns honest about being different bases; without it the tool
-      // percentages silently read as shares of the headline number, which they
-      // are not.
-      const attributed = tools.reduce((n, t) => n + t.cacheWrite, 0);
-      attributedPct = spend.totals.cacheWrite > 0 ? (attributed / spend.totals.cacheWrite) * 100 : 0;
-    }
+    const tools = mergeTools(toolTables);
+    // What fraction of cache_creation the tool table actually explains. It is
+    // never 100%: only a turn that FOLLOWS a tool result can be attributed to a
+    // tool, and an agent's first turn — usually its largest single write, the
+    // system prompt and context — follows nothing. Surfacing the coverage keeps
+    // the two columns honest about being different bases; without it the tool
+    // percentages silently read as shares of the headline number, which they
+    // are not.
+    const attributed = tools.reduce((n, t) => n + t.cacheWrite, 0);
+    const attributedPct = spend.totals.cacheWrite > 0 ? (attributed / spend.totals.cacheWrite) * 100 : 0;
     // `ok` last, so a future field named `ok` on computeSpend's return cannot
     // silently untag a success (a later spread key always wins over an earlier one).
-    return {
-      ...spend, tools, attributedPct,
-      ...(read.toolsUnavailable && { toolsUnavailable: read.toolsUnavailable }),
-      skipped, metaErrors, damaged, since: sinceMs, ok: true,
-    };
+    return { ...spend, tools, attributedPct, skipped, metaErrors, damaged, since: sinceMs, ok: true };
   } catch (e) {
     // A real bug, not an empty run — say so rather than hiding the panel, which
     // is what turned the last type surprise in here into "no panel appeared".
@@ -1041,21 +1030,23 @@ function readClaudeSpend(dir, sinceMs) {
 
 // omp's side (#1716): one agent per member transcript anywhere under the
 // session dir — a nested member's too, at its own spawnDepth — read by
-// member-record.mjs's own omp reader, readOmpMember over the walk
-// readOmpSession uses, never a second parse of omp's line shape. So each row's
-// totals, model and role are exactly the member record's: role from
-// `session_init`'s agent definition, task and AgentId, label the AgentId
-// itself (the path-relative stem, `review-pr-12/Security` for a nested one).
+// member-record.mjs's own omp reader over the walk readOmpSession uses:
+// foldOmpTranscript once per file, then ompMemberRecord on that fold, never
+// a second parse of omp's line shape. So each row's totals, model and role
+// are exactly the member record's: role from `session_init`'s agent
+// definition, task and AgentId, label the AgentId itself (the path-relative
+// stem, `review-pr-12/Security` for a nested one). The same fold's `entries`
+// are the tool stream (#1717), so the tool table goes through attributeTools
+// exactly as a Claude agent's does.
 //
 // Per-transcript tolerance is this file's, not readOmpSession's: readOmpSession
 // (used by the bulk scrape) lets a wrong-harness refusal propagate, and here
 // both — an unreadable file and a wrong-harness refusal — are one transcript's
 // fault, so readOmpSpend, this file's own reader, instead catches both per-
 // transcript, landing them in `skipped` with a stderr line, the same as a
-// broken Claude transcript. A
-// transcript readOmpMember answers null for (no assistant turn yet — a member
-// dispatched this second) has spent nothing, so it is neither booked nor
-// skipped.
+// broken Claude transcript. A transcript ompMemberRecord answers null for (no
+// assistant turn yet — a member dispatched this second) has spent nothing, so
+// it is neither booked nor skipped.
 //
 // `metaErrors` and `damaged` are 0 by construction here, not by measurement:
 // omp has no dispatch sidecar to corrupt, and foldOmpTranscript drops an
@@ -1063,22 +1054,28 @@ function readClaudeSpend(dir, sinceMs) {
 // a tear costs that turn and cannot corrupt a fold-back).
 function readOmpSpend(dir, sinceMs) {
   const agents = [];
+  const toolTables = [];
   let skipped = 0;
   for (const { file, agent, spawnDepth } of ompSessionTranscripts(dir)) {
     try {
       if (sinceMs != null && statSync(file).mtimeMs < sinceMs) continue;
-      const m = readOmpMember(readFileSync(file, "utf8"), file, agent, spawnDepth);
+      const folded = foldOmpTranscript(readFileSync(file, "utf8"), file);
+      const m = ompMemberRecord(folded, agent, spawnDepth);
       if (!m) continue;
+      // Both halves before either is recorded, for readClaudeSpend's reason:
+      // `skipped++` must keep meaning "contributed nothing".
+      const tools = attributeTools(folded.entries);
       agents.push({
         label: m.member, role: m.role, model: m.model,
         cacheWrite: m.tokens_cache_create, output: m.tokens_out, cacheRead: m.tokens_cache_read,
       });
+      toolTables.push(tools);
     } catch (e) {
       skipped++;
       warnOnce("skips", file, `skipping ${file}: ${e.message}`);
     }
   }
-  return { agents, skipped, metaErrors: 0, damaged: 0, toolsUnavailable: "tool attribution not available on omp yet" };
+  return { agents, toolTables, skipped, metaErrors: 0, damaged: 0 };
 }
 
 // `workspace`/`port` are the caller's answers, never read in here (#1584):

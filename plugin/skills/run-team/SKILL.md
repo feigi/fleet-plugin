@@ -299,11 +299,10 @@ phase, or in any later one, asks the maintainer which tickets to take.
    `~/.omp/agent/sessions`, both searched, newest transcript wins (#1716) —
    and is pinned to whichever session first writes a transcript on this
    cockpit's own watch (#1583/#1679): it will not follow a workspace that
-   already had another session's transcripts sitting there at launch. On omp
-   its tool column reads "tool attribution not available on omp yet"; the
-   role split and totals are real. If the panel is reading someone else's
-   numbers, relaunch with `--spend-dir <path>` naming this run's own session
-   directory to override the heuristic outright — on Claude Code
+   already had another session's transcripts sitting there at launch. If the
+   panel is reading someone else's numbers, relaunch with `--spend-dir <path>`
+   naming this run's own session directory to override the heuristic outright
+   — on Claude Code
    `~/.claude/projects/<encoded-cwd>/<session-uuid>/subagents`, on omp
    `~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>` (the directory, never
    the `.jsonl` file of the same name beside it).

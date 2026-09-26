@@ -111,7 +111,7 @@ export function normalizeModel(raw) {
 
 // A member's name is the only place its unit of work is recorded — nothing
 // writes ticket or PR into meta.json (Claude) or anywhere in the transcript
-// (omp; there is no dispatch sidecar at all — see readOmpMember).
+// (omp; there is no dispatch sidecar at all — see ompMemberRecord).
 //
 // FOUR finisher spellings are live on disk, measured 2026-08-27 across every
 // meta.json: finisher-pr-<n> 163, finish-pr-<n> 58, finisher-<n> 44,
@@ -518,14 +518,14 @@ function assertNotClaudeShaped(d, filePath) {
 //
 // `thinking` reads the harness-WRITTEN level, never the frontmatter — that is
 // what makes #1298's declared-vs-resolved comparison possible (#1302's
-// ruling). It stays `null` here (readOmpMember turns that into the record's
+// ruling). It stays `null` here (ompMemberRecord turns that into the record's
 // `-`) when no `thinking_level_change` line exists, rather than guessing the
 // default: a member that is not a fleet definition genuinely has no recorded
 // level, and the hole must stay visible.
 //
 // `session_init.task` is carried through as the closest thing omp has to
 // Claude's `meta.description` — there is no dispatch sidecar on this side at
-// all. readOmpMember below uses it, together with the transcript's own
+// all. ompMemberRecord below uses it, together with the transcript's own
 // nesting depth AND the AgentId itself, as REAL classifyRole() signals. A
 // canonically-stemmed AgentId (`impl-<n>`, `fix-pr-<n>`, `finisher-<n>`,
 // `review-pr-<n>`, `merge-bot-<n>`) IS matched against classifyRole, as
@@ -644,10 +644,10 @@ export function foldOmpTranscript(jsonlText, filePath) {
   };
 }
 
-// One member record from one omp transcript. `member` is the AgentId (the
-// filename stem, e.g. `InstallVerifySearch`) — omp has no separate display
-// name the way Claude's meta.json does, so `ticket`/`pr` extraction runs
-// against it directly.
+// One member record from one omp transcript's fold. `member` is the AgentId
+// (the filename stem, e.g. `InstallVerifySearch`) — omp has no separate
+// display name the way Claude's meta.json does, so `ticket`/`pr` extraction
+// runs against it directly.
 //
 // `role` is NEVER guessed off the bare AgentId ALONE — a generated CamelCase
 // word pair names nothing classifyRole can read. FOUR real signals exist:
@@ -716,8 +716,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // change, out of scope for a classifier fix, and unlike this one it cannot
 // repair the 478 historical rows already on disk.
 const OMP_CANONICAL_STEM_RE = new RegExp(`^(?:${CANONICAL_MEMBER_NAME_PREFIXES})-`);
-export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
-  const folded = foldOmpTranscript(jsonlText, filePath);
+export function ompMemberRecord(folded, agentStem, spawnDepth = 0) {
   if (!folded.model) return null; // no assistant turn — not a real member transcript
   const member = agentStem;
   const { ticket, pr } = parseMemberName(member);
@@ -751,16 +750,24 @@ export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
   };
 }
 
+// ompMemberRecord straight from the transcript text. board.mjs's live spend
+// panel calls the two halves itself instead, because it needs the fold's tool
+// stream (#1717) beside the record, and folding the file twice for it would
+// parse every transcript twice on every tick.
+export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
+  return ompMemberRecord(foldOmpTranscript(jsonlText, filePath), agentStem, spawnDepth);
+}
+
 // One omp session directory's member transcripts, as the walk both readers of
 // that directory need it: readOmpSession below, and board.mjs's live spend
-// panel (#1716), which calls readOmpMember per file itself so it can keep
-// its own per-transcript skip tally. RECURSIVE for the same reason as
+// panel (#1716), which folds each file itself so it can keep its own
+// per-transcript skip tally. RECURSIVE for the same reason as
 // Claude's reader: a member can itself dispatch further members (measured on
 // disk — a research session's `Facts1303/` held seven more `.jsonl` files one
 // level down), and `agent` is the path-relative stem so those nest instead of
 // colliding. `spawnDepth` is read straight off that path — one `/` per
 // nesting level, the same signal Claude's own reviewer fan-out relies on via
-// `meta.spawnDepth` — and handed to readOmpMember as a real fact about the
+// `meta.spawnDepth` — and handed to ompMemberRecord as a real fact about the
 // walk, not a guess about the member.
 //
 // Throws when the directory itself cannot be listed; the caller decides what

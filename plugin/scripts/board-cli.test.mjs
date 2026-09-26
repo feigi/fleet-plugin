@@ -217,7 +217,7 @@ function ompSessionAt(proj) {
   return dir;
 }
 
-test("build: on an omp-only machine the panel comes from this workspace's omp session, with the tool column marked unmeasured", () => {
+test("build: on an omp-only machine the panel comes from this workspace's omp session", () => {
   // The default path, no flag: HOME holds no ~/.claude tree at all, and the
   // child's cwd sits OUTSIDE HOME, so this also drives encodeOmpProjectDir's
   // realpath-wrapped form through the real process.cwd().
@@ -229,8 +229,6 @@ test("build: on an omp-only machine the panel comes from this workspace's omp se
   assert.equal(spend.ok, true, r.stderr);
   assert.equal(spend.totals.cacheWrite, 3000);
   assert.deepEqual(spend.top.map((t) => [t.label, t.role, t.model]), [["impl-7", "implementer", "claude-opus-5"]]);
-  assert.equal(spend.tools, null);
-  assert.equal(spend.toolsUnavailable, "tool attribution not available on omp yet");
 });
 
 test("build: --spend-dir accepts an omp session directory over a heuristic that resolves elsewhere", () => {
