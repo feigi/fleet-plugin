@@ -14,9 +14,13 @@
 // Two halves, because a guard that only ever sees valid input pins neither:
 //   - REFUSE: an empty match is exit 1 and the checker never runs.
 //   - ACCEPT: a populated tree still runs the checker on every file and exits 0,
-//     and a failing checker still fails the step. All five globs in ci.yml match
-//     files today (mjs 57, js 2, json 2, sh 13, py 7 at 6815db6), so the guard
-//     is not firing on the real tree — these two cases are what says so.
+//     and a failing checker still fails the step. Every glob ci.yml routes
+//     through check-tracked.sh matches files today, so the guard is not firing
+//     on the real tree — these two cases are what says so. No count of those
+//     globs and no file count per glob, on purpose: the "five globs" this
+//     sentence used to count, with a file count each, went stale as ci.yml's
+//     steps changed (#1943). ci.yml owns that set, and the source assertions
+//     at the bottom pin it.
 //
 // The behavioural cases pin the script. The source assertions at the bottom pin
 // that ci.yml actually ROUTES through it: without them a step reverted to bare
@@ -136,7 +140,7 @@ const flat = (s) => s.replace(/\s+/g, " ");
 test("every ls-files check in ci.yml goes through check-tracked.sh", () => {
   const ci = flat(readFileSync(CI_YML, "utf8"));
 
-  // No "*.py": skills/caveman-compress was the only tracked Python and left
+  // No "*.py": skills/caveman-compress, then the only tracked Python, left
   // with the 2026-09-08 config split, taking its ci.yml step with it.
   for (const glob of ["*.mjs", "*.json", "*.sh"]) {
     // ok(), not match(): a failed match dumps the whole flattened workflow into
