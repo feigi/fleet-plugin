@@ -344,9 +344,35 @@ const FILES = [
   // the cost of a silent pin, where only five of the 8 landed inside the 43
   // days. The count is corrected in both files; this keeps the copy from
   // reverting on its own.
+  //
+  // #1925. The bound's argument in pin-drift.sh, and the cadence note in
+  // pin-drift.yml that leans on it, still described the Renovate schedule
+  // #1753 replaced: the 1st of each month, 00:00–04:59 UTC. The window is now
+  // all day on the 1st–3rd, so the longest healthy gap is no longer "up to 31
+  // days", 35 leaves about a day of slack rather than "a few days'", and a
+  // Monday run on the 1st–3rd falls inside the window rather than "never"
+  // racing it. Each stale wording is banned in the file that carried it, and
+  // `(?:\s|#)+` spans a wrap across the `# ` gutter as the #1874 ban does. No
+  // live needle: the replacement states the window renovate.json owns, and
+  // pinning it would red a legitimate schedule change, not the stale copy.
   {
     path: ["..", ".github", "scripts", "pin-drift.sh"],
-    stale: [/across(?:\s|#)+8(?:\s|#)+releases/],
+    stale: [
+      /across(?:\s|#)+8(?:\s|#)+releases/,
+      /\b1st(?:\s|#)+of(?:\s|#)+each(?:\s|#)+month\b/,
+      /\b1st-to-1st\b/,
+      /\bup(?:\s|#)+to(?:\s|#)+31(?:\s|#)+days\b/,
+      /\ba(?:\s|#)+few(?:\s|#)+days'(?:\s|#)+slack\b/,
+    ],
+    live: [],
+  },
+  {
+    path: ["..", ".github", "workflows", "pin-drift.yml"],
+    stale: [
+      /\b1st(?:\s|#)+of(?:\s|#)+each(?:\s|#)+month\b/,
+      /00:00\s*[–-]\s*04:59/,
+      /\bnever(?:\s|#)+races\b/,
+    ],
     live: [],
   },
   // #1757. The glossary's Runtime heading names the two terms ADR 0010

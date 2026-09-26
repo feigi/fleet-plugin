@@ -16,13 +16,16 @@ name: Pin Drift
 # the same reason ADR 0010 turned the dependency dashboard off.
 #
 # Cadence: weekly. The drift bound is 35 days (the script's header argues it),
-# so a healthy repo — bumped on the 1st of each month — is green on every run
-# and says nothing, while a stalled one goes red on every run from day 36 until
-# the pin moves, and is first caught by day 42 at worst: short of the 43-day
-# stall ADR 0010 measured. Off the hour — 07:23 UTC against Renovate's
-# 00:00–04:59 UTC window — so it never races Renovate's own window, whatever
-# day of the month the Monday run lands on (day-of-week and day-of-month are
-# independent cron fields: a Monday can and periodically does fall on the 1st).
+# so a healthy repo — bumped within the first three days of each month — is
+# green on every run and says nothing, while a stalled one goes red on every
+# run from day 36 until the pin moves, and is first caught by day 42 at worst:
+# short of the 43-day stall ADR 0010 measured. The run can fall inside
+# Renovate's window: since #1753 that window is all day on the 1st–3rd, so no
+# hour clears it, and a Monday periodically falls on one of those days
+# (day-of-week and day-of-month are independent cron fields). That is
+# harmless: the run judges the one commit it checked out, a bump landing while
+# it runs is the next run's to see, and a healthy repo is inside the bound on
+# either side of that bump.
 #
 # GitHub disables scheduled workflows in a public repository when "no
 # repository activity has occurred in 60 days" (GitHub Docs, Actions →
