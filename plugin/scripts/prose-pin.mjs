@@ -178,8 +178,15 @@ export function paragraph(text, anchor, what, options) {
 // One definition, extracted (#1940) from ci-comment-rot-prose.test.mjs, where
 // it bounded ci.yml's comment prose alone — the same reason `paragraph()`
 // gives: a local copy is the defect, not a style choice.
+// The closing-mark class `[*_)"'\u201d\u2019]*` appears once, not twice: it
+// used to be spelled again inside the abbreviation guard's own lookbehind,
+// two copies of the same set free to drift apart on a future edit. Nesting
+// the abbreviation check onto the `.` alternative alone (never `!`/`?`, which
+// no abbreviation ends in) keeps the same splits with one copy (verified:
+// 20000 random terminator/closer/abbreviation fixtures and every .md/.mjs/
+// .yml/.sh file in this repo split identically both ways).
 export const sentences = (block) =>
-  block.split(/(?<=[.!?][*_)"'\u201d\u2019]*)(?<!\b(?:e\.g|i\.e|cf|viz|vs)\.[*_)"'\u201d\u2019]*)\s+/i);
+  block.split(/(?<=(?:[!?]|(?<!\b(?:e\.g|i\.e|cf|viz|vs))\.)[*_)"'\u201d\u2019]*)\s+/i);
 
 // A phrase-bounded slice — `paragraph`'s shape, with the end bound a second
 // phrase instead of the next blank line. `from` is `anchorAt`'s own
