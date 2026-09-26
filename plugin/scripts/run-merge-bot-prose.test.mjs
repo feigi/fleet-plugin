@@ -8,7 +8,7 @@
 // the step — drop-merged-label.test.mjs owns the script's own behavior.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -794,15 +794,16 @@ test("step 1 polls the branch ref, not the PR object's head", () => {
   // matches were measured green on that same mutant too — `headRefOid` survives
   // in the headline and in "Keep the `headRefOid` read", and `pr_head` in the
   // desync verdict and the `<pr_head>` ancestry command — so both are anchored
-  // to their own line here.
-  assert.match(step1(), /\n\s+printf 'rc=%s branch=%s pre=%s post=%s pr_head=%s\\n%s\\n'/);
+  // to their own line here. #1895 moved the rebase call's own output onto the
+  // fire block's report, so this line ends at `pr_head`.
+  assert.match(step1(), /\n\s+printf 'rc=%s branch=%s pre=%s post=%s pr_head=%s\\n'/);
   // #910: the field is the re-poll's result, never a read of its own. This
   // line used to carry an inline `"$(gh pr view <pr> --json headRefOid -q
   // .headRefOid)"`, a single read of the PR object taken in the instant the
   // ref poll broke, which is the lag window the settle paragraph measures.
   // Anchored to its own line like the format string above: `pr_head` recurs
   // through step 1, so a bare match survives the inline read being restored.
-  assert.match(step1(), /\n\s+"\$pr_head" "\$out"/);
+  assert.match(step1(), /\n\s+"\$pr_head"\n/);
 });
 
 // The settle-window paragraph is bracketed in the doc by two rules that ARE
@@ -871,13 +872,25 @@ test("step 1 requires an ancestry check before closing a desynced PR", () => {
 // so this measures the block's control flow and not real lag or wall time.
 // `seq` and `cut` are the real ones. `<pr>` is filled in, because a bot fills
 // it in, and left literal the shell reads it as two redirections.
-const STEP1_BLOCKS = [...DOC.matchAll(/```bash\n([\s\S]*?)```/g)]
-  .map((m) => m[1])
-  .filter((b) => b.includes("gh pr update-branch <pr> --rebase"));
+//
+// #1895 split the block in two: a fire block that reads `pre` and calls
+// `gh pr update-branch`, and a poll block handed `rc` and `pre` off the fire
+// block's report line. Both run here, in sequence, against one case directory,
+// and the poll's `<rc>`/`<pre>` are filled from what the fire block PRINTED —
+// the hand-off a bot makes — so a fire-to-poll value the report line drops
+// reds here instead of being carried in by the test.
+const BASH_BLOCKS = [...DOC.matchAll(/```bash\n([\s\S]*?)```/g)].map((m) => m[1]);
+const STEP1_FIRE = BASH_BLOCKS.filter((b) => b.includes("gh pr update-branch <pr> --rebase"));
 assert.equal(
-  STEP1_BLOCKS.length,
+  STEP1_FIRE.length,
   1,
-  `expected exactly one bash block running gh pr update-branch, found ${STEP1_BLOCKS.length}; update this test`,
+  `expected exactly one bash block running gh pr update-branch, found ${STEP1_FIRE.length}; update this test`,
+);
+const STEP1_POLL = BASH_BLOCKS.filter((b) => b.includes("<pre>") && b.includes("seq 1 60"));
+assert.equal(
+  STEP1_POLL.length,
+  1,
+  `expected exactly one bash block polling from a handed-over <pre>, found ${STEP1_POLL.length}; update this test`,
 );
 
 // `next`: one value per line in "$1", one consumed per call, the last one
@@ -885,7 +898,10 @@ assert.equal(
 // wc's count: BSD wc pads it with spaces. The counters are files because most
 // calls run in a `$(…)` subshell, where a variable would not survive. An empty
 // `ls` value is a failed read: no line at all, which `cut -f1` turns into an
-// empty `post`. `return`, never `exit`: `sleep` runs in the block's own shell.
+// empty `post`. `return`, never `exit`, with one exception: `sleep` runs in
+// the block's own shell, so its `exit` is the harness-deadline stand-in — with
+// `$CASE/kill` holding a count, the sleep that reaches it ends the whole block
+// mid-poll, no report line printed, and clears the file so a re-issue runs on.
 const STEP1_STUBS = `next() {
   stub_n=$(cat "$1.n" 2>/dev/null || echo 0); stub_n=$((stub_n+1)); echo "$stub_n" >"$1.n"
   stub_last=$(($(wc -l <"$1"))); [ "$stub_n" -gt "$stub_last" ] && stub_n=$stub_last
@@ -901,6 +917,7 @@ gh() {
   case "$*" in
     "pr view 42 --json headRefName -q .headRefName") echo feat ;;
     "pr update-branch 42 --rebase")
+      echo update-branch >>"$CASE/log"
       [ "$UPDATE_RC" -eq 0 ] || { echo "GraphQL: merge conflict" >&2; return "$UPDATE_RC"; }
       echo "PR branch updated" ;;
     "pr view 42 --json headRefOid -q .headRefOid")
@@ -909,9 +926,15 @@ gh() {
     *) echo "unexpected: gh $*" >&2; return 97 ;;
   esac
 }
-sleep() { echo "sleep $*" >>"$CASE/log"; }
+sleep() {
+  echo "sleep $*" >>"$CASE/log"
+  [ -f "$CASE/kill" ] && [ "$(grep -c '^sleep' "$CASE/log")" -ge "$(cat "$CASE/kill")" ] && { rm "$CASE/kill"; exit 137; }
+  return 0
+}
 `;
-const STEP1_SCRIPT = STEP1_STUBS + STEP1_BLOCKS[0].replaceAll("<pr>", "42");
+const STEP1_FIRE_SCRIPT = STEP1_STUBS + STEP1_FIRE[0].replaceAll("<pr>", "42");
+const step1PollScript = ({ rc, pre }) =>
+  STEP1_STUBS + STEP1_POLL[0].replaceAll("<pr>", "42").replaceAll("<rc>", rc).replaceAll("<pre>", pre);
 
 const STEP1_DIR = mkdtempSync(join(tmpdir(), "merge-bot-step1-"));
 
@@ -934,33 +957,55 @@ const THIRD = "c".repeat(40);
 // The timeout is the bound's own witness: a re-poll rewritten as an unbounded
 // `until` spins on a PR object that never moves, and reds here instead of
 // hanging the suite.
-function runStep1(shell, { ls, head, updateRc = 0 }) {
+function step1Case({ ls, head, updateRc = 0 }) {
   const dir = mkdtempSync(join(STEP1_DIR, "case-"));
   const lines = (xs) => xs.map((x) => `${x}\n`).join("");
   writeFileSync(join(dir, "ls"), lines(ls));
   writeFileSync(join(dir, "head"), lines(head));
   writeFileSync(join(dir, "log"), "");
-  const script = join(dir, "step1.sh");
-  writeFileSync(script, STEP1_SCRIPT);
-  const stdout = execFileSync(shell, [script], {
-    encoding: "utf8",
-    timeout: 30_000,
-    env: { ...process.env, CASE: dir, UPDATE_RC: String(updateRc) },
-  });
+  return { dir, env: { ...process.env, CASE: dir, UPDATE_RC: String(updateRc) } };
+}
+
+function step1Script(c, name, text) {
+  const script = join(c.dir, name);
+  writeFileSync(script, text);
+  return script;
+}
+
+const step1Run = (shell, c, script) => execFileSync(shell, [script], { encoding: "utf8", timeout: 30_000, env: c.env });
+
+// The fire block's report line, parsed the way a bot reads it to fill the
+// poll's `<rc>` and `<pre>`.
+function fireStep1(shell, c) {
+  const stdout = step1Run(shell, c, step1Script(c, "fire.sh", STEP1_FIRE_SCRIPT));
+  const fired = /^rc=(\S*) branch=\S* pre=(\S*)$/m.exec(stdout);
+  assert.ok(fired, `${shell}: the fire block printed no rc/pre line:\n${stdout}`);
+  return { rc: fired[1], pre: fired[2] };
+}
+
+function step1Report(shell, c, stdout) {
   const report = /^rc=(\S*) branch=\S* pre=(\S*) post=(\S*) pr_head=(\S*)$/m.exec(stdout);
-  assert.ok(report, `${shell}: the block printed no report line:\n${stdout}`);
-  const log = readFileSync(join(dir, "log"), "utf8").split("\n").filter(Boolean);
+  assert.ok(report, `${shell}: the poll block printed no report line:\n${stdout}`);
+  const log = readFileSync(join(c.dir, "log"), "utf8").split("\n").filter(Boolean);
   const firstRead = log.indexOf("headRefOid");
   return {
     rc: report[1],
+    pre: report[2],
     post: report[3],
     prHead: report[4],
+    fires: log.filter((l) => l === "update-branch").length,
     reads: log.filter((l) => l === "headRefOid").length,
     sleeps: log.filter((l) => l.startsWith("sleep")),
     // The re-poll's own sleeps: every one after the first PR-object read. The
     // ref poll's sleeps all come before it.
     repollSleeps: firstRead === -1 ? 0 : log.slice(firstRead).filter((l) => l.startsWith("sleep")).length,
   };
+}
+
+function runStep1(shell, fixture) {
+  const c = step1Case(fixture);
+  const poll = step1Script(c, "poll.sh", step1PollScript(fireStep1(shell, c)));
+  return step1Report(shell, c, step1Run(shell, c, poll));
 }
 
 test("step 1 re-polls a lagging PR object and reports the head it caught up to", () => {
@@ -1026,6 +1071,55 @@ test("step 1 takes one plain PR-object read wherever the ref did not land, or th
       assert.equal(got.repollSleeps, 0, `${shell}, ${what}: the block waited on the PR object ${got.repollSleeps} times`);
     }
   }
+});
+
+// #1895. The poll outlives a harness deadline on its COMMON path: the PR
+// object's measured 84s-2min lag alone runs past omp's ~60s backgrounding and
+// Claude Code's 120s default Bash timeout, and a deadline kills the poll with
+// no report line. The recovery the doc names is re-issuing the poll with the
+// fire block's `pre`, and what has to hold is that the recovery reports the
+// rebase as LANDED. Before the split the block could only be re-run whole,
+// which re-read `pre` off a ref the rebase had already moved, and
+// `gh pr update-branch` then answered "no new commits": reproduced against the
+// pre-split doc with these stubs, the re-run fired the rebase twice and printed
+// `rc=1` with `pre` and `post` both the rebased head — the already-current row,
+// for a rebase that landed and was never verified. A poll that re-derives `pre`
+// itself reds here the same way, reporting `post` equal to `pre`.
+test("step 1's poll, cut off mid-re-poll and re-issued with the fire block's pre, reports the landed rebase", () => {
+  for (const shell of STEP1_SHELLS) {
+    // The ref moves at once; the PR object lags 12 reads, and the deadline
+    // lands on the re-poll's 5th sleep, inside that lag.
+    const c = step1Case({ ls: [PRE, POST], head: [...Array(12).fill(PRE), POST] });
+    const poll = step1Script(c, "poll.sh", step1PollScript(fireStep1(shell, c)));
+    writeFileSync(join(c.dir, "kill"), "5");
+    const cut = spawnSync(shell, [poll], { encoding: "utf8", timeout: 30_000, env: c.env });
+    assert.equal(cut.status, 137, `${shell}: the deadline stand-in did not end the poll:\n${cut.stdout}${cut.stderr}`);
+    assert.doesNotMatch(cut.stdout, /^rc=/m, `${shell}: the cut-off poll printed a report line — the fixture no longer models a deadline`);
+    const reissued = step1Report(shell, c, step1Run(shell, c, poll));
+    assert.deepEqual(
+      { rc: reissued.rc, pre: reissued.pre, post: reissued.post, prHead: reissued.prHead },
+      { rc: "0", pre: PRE, post: POST, prHead: POST },
+      `${shell}: the re-issued poll did not report the rebase as landed`,
+    );
+    assert.equal(reissued.fires, 1, `${shell}: recovering the poll fired the rebase again`);
+  }
+});
+
+// The deadline half of #1895, split by harness the way step 2's CI wait and
+// the grace wait already are. Each marked line is pinned on what the other
+// cannot carry, so swapping the two lines reds both.
+test("step 1's poll splits by harness: the Bash ceiling and a poll-only re-issue on Claude, one eval cell on omp", () => {
+  const pair = between(DOC, "The poll splits by harness:", "**Poll `git ls-remote`, not", "run-merge-bot.md step 1 poll pair");
+  const claude = markedLine(pair, "CLAUDE", "step 1 poll");
+  assert.match(claude, phrase("`timeout` at 600000"), "the Claude line no longer lifts the poll off the 120s default");
+  assert.match(
+    claude,
+    phrase("re-issue the poll block once with the same `rc` and `pre`, never the fire block"),
+    "the Claude line no longer confines recovery to the poll",
+  );
+  const omp = markedLine(pair, "OMP", "step 1 poll");
+  assert.match(omp, phrase("one Python `eval` cell"));
+  assert.match(omp, phrase("never `bash` plus `wait`"), "the omp line no longer forbids the bash+wait form that backgrounds past ~60s");
 });
 
 // #908: a controller brief predicted the merge would be "a fast-forward". True
