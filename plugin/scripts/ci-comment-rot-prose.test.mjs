@@ -509,7 +509,7 @@ test("pinOwnerComment sees an owner written as a named step, so a bare-form deco
 // The wider match's own false-positive class: a `uses:` line is a step only
 // when the first shallower line above it opens a sequence entry. Inside a
 // `run:` script or under `with:` it is not, and a phantom step there would red
-// the pointer test with a comment nobody could add.
+// the pointer test over a step that does not exist.
 test("a `uses: actions/setup-node@` line that is not a step's own key is not taken for a step (#1873)", () => {
   const scripted = ["      - name: Print an example", "        run: |", "          uses: actions/setup-node@v5"];
   const nested = ["      - uses: some/action@v1", "        with:", "          uses: actions/setup-node@v5"];
