@@ -63,9 +63,10 @@ export function interval({ quiet, base, ceiling, multiplier }) {
 // Neither harness lets one command block for twenty minutes. Measured: omp
 // auto-backgrounds any foreground command at 60s (`bash.autoBackground`), and
 // its command deadline defaults to 300s; Claude Code kills a command at its own
-// shell timeout, which run-merge-bot.md:195 already records as shorter than a
-// ~5-6 minute CI cycle ("if `gh run watch` outlives your shell timeout,
-// re-issue it — that is still one blocking call per turn, not an idle turn").
+// shell timeout, which run-merge-bot.md's CLAUDE-harness CI wait already
+// records as shorter than a ~5-6 minute CI cycle ("if `gh run watch`
+// outlives your shell timeout, re-issue it — that is still one blocking
+// call per turn, not an idle turn").
 //
 // So a long interval is served by SEVERAL holds, and the elapsed total is
 // persisted rather than counted in prose. That is the same remedy the CI gate
@@ -100,7 +101,8 @@ const OPTIONS = {
   multiplier: { type: "string", default: "2" },
   // Per-invocation blocking budget, under both harnesses' defaults. 240s leaves
   // headroom below omp's 300s deadline and below the Claude Code timeout that
-  // run-merge-bot.md:195 measures as shorter than a 5-6 minute CI cycle. Raise
+  // run-merge-bot.md's CLAUDE-harness CI wait measures as shorter than a 5-6
+  // minute CI cycle. Raise
   // it only together with the tool call's own timeout.
   hold: { type: "string", default: "240" },
   // The deliberate stop, #1597. No default and no boolean spelling: the flag

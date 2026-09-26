@@ -148,7 +148,8 @@ test("the Specialists section says to brace a variable ref, and that quoting is 
 // the doc family the pin guards (plugin/scripts/derive-testcmd.sh:124,
 // plugin/skills/run-team/SKILL.md:608/1228,
 // plugin/skills/run-team/references/member-lifecycle.md:75,
-// plugin/commands/run-merge-bot.md:161). Verified: `git -C $D show
+// plugin/commands/run-merge-bot.md's "Confirm the worktree head *is* the
+// reviewed remote PR head before rebasing" step). Verified: `git -C $D show
 // "$SHA:t"` exits 0 unbraced on an absent path `t`, 128 braced — the
 // identical 0/128 split the table above records for bare `show`. The
 // leading-option group still misses the legitimate `git -C "$wt" rev-parse
