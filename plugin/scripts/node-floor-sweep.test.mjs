@@ -402,6 +402,17 @@ test("scanFileViolations reds the CommonJS require site of every module-site API
   assert.deepEqual(names, ["node:sqlite", "util.parseArgs()", "util.styleText()"]);
 });
 
+// A single-quoted require site alone — every other CommonJS fixture above
+// uses double quotes, which a quote-class regression in moduleSiteBinding's
+// require alternative (`["']` narrowed to `["]`) would pass undetected,
+// since the pattern is non-global and the double-quoted forms above already
+// satisfy it regardless of whether the single-quote branch works.
+test("scanFileViolations reds a single-quoted CommonJS require site", () => {
+  const src = "const { styleText } = require('node:util');\n";
+  const names = scanFileViolations(src, parseVersion("16.0.0")).map((h) => h.name).sort();
+  assert.deepEqual(names, ["util.styleText()"]);
+});
+
 test("scanFileViolations passes a CommonJS require of node:util taking neither API, beside same-named locals", () => {
   const src = 'const { inspect } = require("node:util");\n'
     + "function styleText(label) { return `[${label}]`; }\n"

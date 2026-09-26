@@ -363,8 +363,15 @@ function trackedFiles(caller, root, pathspecs) {
       + "an absent working tree is a skip for the caller to make, not an empty list to iterate",
     );
   }
-  return execFileSync("git", ["ls-files", ...pathspecs], { cwd: root, encoding: "utf8", env: gitEnv() })
-    .split("\n").filter(Boolean);
+  // `-z`, split on NUL: git's default `\n`-separated form C-quotes any path
+  // with a non-ASCII or otherwise "unusual" byte (for example `café.mjs`
+  // becomes the literal 12-character string `"caf\303\251.mjs"`), which
+  // fails a plain `.endsWith(".mjs")` and is not openable at that path
+  // either — a real tracked file silently missing from every caller's
+  // answer. `-z` never quotes; it is git's own NUL-terminated form for
+  // "give me the exact bytes".
+  return execFileSync("git", ["ls-files", "-z", ...pathspecs], { cwd: root, encoding: "utf8", env: gitEnv() })
+    .split("\0").filter(Boolean);
 }
 
 /**
@@ -389,7 +396,11 @@ const SHEBANG_BYTES = 256;
 /**
  * Whether the file at `path` starts with a node shebang, read into `buf`. A
  * tracked file the working tree no longer has — an `rm` not yet committed —
- * has no first line here, so it is not one; any other failure to read throws.
+ * has no first line here, so it is not one; a tracked path that resolves to
+ * a directory (a symlink to one, or a submodule's gitlink checked out on
+ * disk) is not a readable file either, so it answers the same "not one" —
+ * the pre-#1855 `.mjs`-only sweep never opened a non-.mjs path at all, so
+ * neither shape could reach it before. Any other failure to read throws.
  */
 function hasNodeShebang(path, buf) {
   let fd;
@@ -402,6 +413,9 @@ function hasNodeShebang(path, buf) {
   try {
     const n = readSync(fd, buf, 0, buf.length, 0);
     return NODE_SHEBANG.test(buf.toString("utf8", 0, n).split("\n", 1)[0]);
+  } catch (e) {
+    if (e.code === "EISDIR") return false;
+    throw e;
   } finally {
     closeSync(fd);
   }

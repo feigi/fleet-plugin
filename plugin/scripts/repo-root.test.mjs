@@ -382,6 +382,7 @@ test("trackedNodeScripts reads a non-.mjs file's first line: node by any shebang
   const node = {
     "bin/env": "#!/usr/bin/env node\n",
     "bin/env-flags": "#!/usr/bin/env -S node --no-warnings\n",
+    "bin/env-assign": "#!/usr/bin/env FOO=bar node\n",
     "bin/direct": "#!/usr/local/bin/node\n",
     "bin/hook.js": "#!/usr/bin/env node\n",
   };
@@ -393,7 +394,8 @@ test("trackedNodeScripts reads a non-.mjs file's first line: node by any shebang
     "LICENSE": "MIT\n",
     "bin/empty": "",
   };
-  const { dir } = repoTracking(t, [...Object.keys(node), ...Object.keys(other)], { ...node, ...other });
+  const files = { ...node, ...other };
+  const { dir } = repoTracking(t, Object.keys(files), files);
 
   assert.deepEqual(trackedNodeScripts(dir).sort(), Object.keys(node).sort(),
     "exactly the files whose first line runs node — no other interpreter, no later line, no extension rule");
