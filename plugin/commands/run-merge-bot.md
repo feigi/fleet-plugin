@@ -87,12 +87,20 @@ For each labeled PR clearing the hold rule, lowest first:
        sleep 5
      done
    fi
+   pr_head=$(gh pr view <pr> --json headRefOid -q .headRefOid)
+   if [ "$rc" -eq 0 ] && [ -n "$post" ] && [ "$post" != "$pre" ]; then
+     for _ in $(seq 1 60); do                 # PR object lags the ref (measured 84s-2min); same cap as above
+       [ -n "$pr_head" ] && [ "$pr_head" != "$pre" ] && break
+       sleep 5
+       pr_head=$(gh pr view <pr> --json headRefOid -q .headRefOid)
+     done
+   fi
    printf 'rc=%s branch=%s pre=%s post=%s pr_head=%s\n%s\n' \
      "$rc" "$branch" "$pre" "$post" \
-     "$(gh pr view <pr> --json headRefOid -q .headRefOid)" "$out"
+     "$pr_head" "$out"
    ```
 
-   **Poll `git ls-remote`, not `gh pr view headRefOid`** — the PR object's head is precisely the field that desyncs, so polling it asks the one source that can be wrong about the thing you are waiting for. Measured, feigi/claude-config#903: the rebase landed and moved the branch ref, `headRefOid` stayed on the pre-rebase SHA with `mergeable_state: unknown` and no CI run on the new head, and the loop burned all 60 iterations reading a landed rebase as un-landed — straight into the fallback, whose local rebase would then have replayed commits the remote already carried. `ls-remote` reads the ref itself and carries no local state, the same reason the `fetch.prune` note below re-derives a reading from `git ls-remote origin` rather than trusting a number measured while the ref was missing. Keep the `headRefOid` read in the printf: it is no longer the gate, and its *disagreement* with `post` is the desync signal you want on the record.
+   **Poll `git ls-remote`, not `gh pr view headRefOid`** — the PR object's head is precisely the field that desyncs, so polling it asks the one source that can be wrong about the thing you are waiting for. Measured, feigi/claude-config#903: the rebase landed and moved the branch ref, `headRefOid` stayed on the pre-rebase SHA with `mergeable_state: unknown` and no CI run on the new head, and the loop burned all 60 iterations reading a landed rebase as un-landed — straight into the fallback, whose local rebase would then have replayed commits the remote already carried. `ls-remote` reads the ref itself and carries no local state, the same reason the `fetch.prune` note below re-derives a reading from `git ls-remote origin` rather than trusting a number measured while the ref was missing. Keep the `headRefOid` read, as the `pr_head` the printf reports: it is no longer the gate, and its *disagreement* with `post` is the desync signal you want on the record. That is why the block re-polls it only once the ref has moved — to let the PR object catch up, never to decide whether the rebase landed.
 
    **Check the call's exit status before polling, and bound the poll.** The head never moving *is* the failure case, so an `until` that waits for it to move spins forever in exactly the states the fallback exists for — the escapes named below are unreachable from a loop that never exits. Read the four outcomes off `rc` and `post`:
 
@@ -101,7 +109,7 @@ For each labeled PR clearing the hold rule, lowest first:
    - Any other non-zero `rc`, **or** `post` still equal to `pre` once the cap runs out → the fallback below, not a retry.
    - **`post` empty once the cap runs out** → the ref read failed; this is never "the rebase landed". An empty `post` satisfies `post != pre` all by itself, so without this row a failed `ls-remote` is classified as success — the same hole `[ -n "$pre" ]` closes on the way in, and the loop's own `[ -n "$post" ]` is why an empty read cannot break out early. Take the fallback below, and report the ref as unreadable rather than as a head that never moved.
 
-   **`post != pre` with `pr_head` still on `pre` is not a desync until it SURVIVES a bounded re-poll.** The PR object lags the ref move, so a `headRefOid` read taken in the same instant as the rebase reproduces the desync signature exactly while nothing is wrong. Measured twice in one run on 2026-09-01: it cleared on re-poll attempt 24 (~2 min) in one pass and attempt 14 (~84s) in the next, both after `gh pr update-branch --rebase` returned `rc=0`. So re-poll `headRefOid` on the same bounded cap you already use for `ls-remote` before calling this, and report the desync only if `pr_head` is still on `pre` when that cap runs out. Reporting it on a single read costs a pass for a state that fixes itself, and it is the reading a bot gets when it does everything else right.
+   **`post != pre` with `pr_head` still on `pre` is not a desync until it SURVIVES a bounded re-poll.** The PR object lags the ref move, so a `headRefOid` read taken in the same instant as the rebase reproduces the desync signature exactly while nothing is wrong. Measured twice in one run on 2026-09-01: it cleared on re-poll attempt 24 (~2 min) in one pass and attempt 14 (~84s) in the next, both after `gh pr update-branch --rebase` returned `rc=0`. So re-poll `headRefOid` on the same bounded cap you already use for `ls-remote` before calling this, and report the desync only if `pr_head` is still on `pre` when that cap runs out. The block's second loop is that re-poll: a `pr_head` it prints still on `pre` beside a moved `post` has already survived the cap, so report it as printed and never poll a second round. Reporting it on a single read costs a pass for a state that fixes itself, and it is the reading a bot gets when it does everything else right.
 
    **A desync that DOES survive the cap is the one state that needs a controller.** The rebase landed; GitHub's PR object did not follow. CI is bound to the stale head or absent entirely, so the merge gate cannot clear no matter how long you wait, and no merge-bot action fixes it — do not retry the rebase, and do not rebase locally, because the remote is already correct. Report it and stop.
 
