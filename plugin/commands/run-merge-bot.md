@@ -82,12 +82,11 @@ For each labeled PR clearing the hold rule, lowest first:
    printf 'rc=%s branch=%s pre=%s\n%s\n' "$rc" "$branch" "$pre" "$out"
    ```
 
-   The poll block waits for the head to move, handed `rc` and `pre` off the fire block's report line:
+   The poll block waits for the head to move, handed `rc`, `branch` and `pre` off the fire block's report line:
 
    ```bash
-   rc=<rc>; pre=<pre>                         # off the fire block's report line, never re-derived here
-   [ -n "$rc" ] && [ -n "$pre" ] || { echo "rc and pre come from the fire block"; exit 2; }
-   branch=$(gh pr view <pr> --json headRefName -q .headRefName)
+   rc=<rc>; branch=<branch>; pre=<pre>        # off the fire block's report line, never re-derived here
+   [ -n "$rc" ] && [ -n "$branch" ] && [ -n "$pre" ] || { echo "rc, branch and pre come from the fire block"; exit 2; }
    ref="refs/heads/$branch"
    post=$pre
    if [ "$rc" -eq 0 ]; then
@@ -110,7 +109,7 @@ For each labeled PR clearing the hold rule, lowest first:
      "$pr_head"
    ```
 
-   **Fire once; only the poll is ever re-issued.** `pre` is the one reading nothing after the rebase can reconstruct: once the rebase lands, the ref it was read from *is* the rebased head. So a fire block run a second time reads the rebased head as its `pre`, `gh pr update-branch` answers `UNPROCESSABLE: There are no new commits on the base branch`, and a rebase that landed reports as the already-current row below, never verified. The poll only reads, so re-issuing it with the same `rc` and `pre` is safe — and it is the half that gets cut off. Each of its loops is capped at 60 × 5s, and the PR object's measured lag alone outruns both harnesses' defaults on the common landed-with-lag path (#1895, the block run against the lags measured below: 75.6s wall-clock at re-poll attempt 14, 129.2s at attempt 24). One re-issue is enough, never a loop of them: the ref poll alone ends inside the 600000 ceiling below, so a re-issued poll finds the ref already moved on its first read and waits out only the PR object's cap. The poll splits by harness:
+   **Fire once; only the poll is ever re-issued.** `pre` is the one reading nothing after the rebase can reconstruct: once the rebase lands, the ref it was read from *is* the rebased head. So a fire block run a second time reads the rebased head as its `pre`, `gh pr update-branch` answers `UNPROCESSABLE: There are no new commits on the base branch`, and a rebase that landed reports as the already-current row below, never verified. The poll only reads, so re-issuing it with the same `rc` and `pre` is safe — and it is the half that gets cut off. Each of its loops is capped at 60 × 5s, and the PR object's measured lag alone outruns both harnesses' defaults on the common landed-with-lag path (#1895's own repro: 75.6s wall-clock at re-poll attempt 14, 129.2s at attempt 24 — a separate measurement from the pr_head-catchup pass below, whose attempt 14/24 wall-clock times differ from these). One re-issue is enough, never a loop of them: the ref poll alone ends inside the 600000 ceiling below, so a re-issued poll finds the ref already moved on its first read and waits out only the PR object's cap. The poll splits by harness:
 
    CLAUDE: run the poll block as one foreground `Bash` call with its `timeout` at 600000, the tool's ceiling, not its 120000 default; if it is still cut off before its report line — both caps back to back can outrun even the ceiling — re-issue the poll block once with the same `rc` and `pre`, never the fire block.
    OMP: the `Bash` `timeout` ceiling does not apply — omp `bash` backgrounds any call past about 60s even with `timeout` set — so run the poll block in one Python `eval` cell through `subprocess.run`, its cell `timeout` at 900s or more, above both caps back to back; never `bash` plus `wait`.

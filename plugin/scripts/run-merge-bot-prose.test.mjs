@@ -874,10 +874,11 @@ test("step 1 requires an ancestry check before closing a desynced PR", () => {
 // it in, and left literal the shell reads it as two redirections.
 //
 // #1895 split the block in two: a fire block that reads `pre` and calls
-// `gh pr update-branch`, and a poll block handed `rc` and `pre` off the fire
-// block's report line. Both run here, in sequence, against one case directory,
-// and the poll's `<rc>`/`<pre>` are filled from what the fire block PRINTED —
-// the hand-off a bot makes — so a fire-to-poll value the report line drops
+// `gh pr update-branch`, and a poll block handed `rc`, `branch` and `pre` off
+// the fire block's report line. Both run here, in sequence, against one case
+// directory, and the poll's `<rc>`/`<branch>`/`<pre>` are filled from what the
+// fire block PRINTED — the hand-off a bot makes — so a fire-to-poll value the
+// report line drops
 // reds here instead of being carried in by the test.
 const BASH_BLOCKS = [...DOC.matchAll(/```bash\n([\s\S]*?)```/g)].map((m) => m[1]);
 const STEP1_FIRE = BASH_BLOCKS.filter((b) => b.includes("gh pr update-branch <pr> --rebase"));
@@ -933,8 +934,8 @@ sleep() {
 }
 `;
 const STEP1_FIRE_SCRIPT = STEP1_STUBS + STEP1_FIRE[0].replaceAll("<pr>", "42");
-const step1PollScript = ({ rc, pre }) =>
-  STEP1_STUBS + STEP1_POLL[0].replaceAll("<pr>", "42").replaceAll("<rc>", rc).replaceAll("<pre>", pre);
+const step1PollScript = ({ rc, branch, pre }) =>
+  STEP1_STUBS + STEP1_POLL[0].replaceAll("<pr>", "42").replaceAll("<rc>", rc).replaceAll("<branch>", branch).replaceAll("<pre>", pre);
 
 const STEP1_DIR = mkdtempSync(join(tmpdir(), "merge-bot-step1-"));
 
@@ -978,9 +979,9 @@ const step1Run = (shell, c, script) => execFileSync(shell, [script], { encoding:
 // poll's `<rc>` and `<pre>`.
 function fireStep1(shell, c) {
   const stdout = step1Run(shell, c, step1Script(c, "fire.sh", STEP1_FIRE_SCRIPT));
-  const fired = /^rc=(\S*) branch=\S* pre=(\S*)$/m.exec(stdout);
+  const fired = /^rc=(\S*) branch=(\S*) pre=(\S*)$/m.exec(stdout);
   assert.ok(fired, `${shell}: the fire block printed no rc/pre line:\n${stdout}`);
-  return { rc: fired[1], pre: fired[2] };
+  return { rc: fired[1], branch: fired[2], pre: fired[3] };
 }
 
 function step1Report(shell, c, stdout) {
