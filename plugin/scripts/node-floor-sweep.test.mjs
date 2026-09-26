@@ -189,6 +189,15 @@ const API_FLOORS = [
     pattern: /from\s*["']node:sqlite["']|\brequire\(\s*["']node:sqlite["']\s*\)/,
     since: "22.13.0",
   },
+  // Node v24.0.0 release notes: "The V8 engine is updated to version 13.6,
+  // which includes several new JavaScript features: … RegExp.escape" (#1932).
+  // Matched as a bare reference, not only a call: an escaper is passed as a
+  // callback as often as it is called — prose-pin.mjs's own `.map(escapeRe)`
+  // is the spelling a swap to the builtin would take — and a `\(`-suffixed
+  // pattern misses `.map(RegExp.escape)`. The cost is that a feature-detected
+  // `typeof RegExp.escape` reds too; accepted, since the escapeRe one-liner
+  // above is floor-safe unconditionally and leaves nothing to detect.
+  { name: "RegExp.escape()", pattern: /\bRegExp\.escape\b/, since: "24.0.0" },
 ];
 
 /** "MAJOR.MINOR.PATCH" -> [major, minor, patch], or throws. */
@@ -473,6 +482,32 @@ test("moduleSiteBinding matches a regex metacharacter in its name or module as i
   ]) {
     assert.doesNotMatch(src, re);
   }
+});
+
+// #1932. RegExp.escape as a call AND as a bare callback reference, each in its
+// own source: the pattern is non-global, so one fixture carrying both would
+// stay green under a call-only `\(`-suffixed pattern that misses the
+// `.map(RegExp.escape)` spelling. The since boundary both ways: red at the
+// declared floor, green from the release that shipped it.
+test("scanFileViolations reds RegExp.escape called or passed as a callback, below 24.0.0 only", () => {
+  for (const src of [
+    "const re = new RegExp(`^${RegExp.escape(name)}$`);\n",
+    'const re = new RegExp(words.map(RegExp.escape).join("|"));\n',
+  ]) {
+    const names = scanFileViolations(src, parseVersion("20.11.0")).map((h) => h.name);
+    assert.deepEqual(names, ["RegExp.escape()"], `expected RegExp.escape() flagged in: ${src}`);
+    assert.deepEqual(scanFileViolations(src, parseVersion("24.0.0")), []);
+  }
+});
+
+// What the RegExp.escape entry must ACCEPT: the floor-safe one-liner this repo
+// writes in its place, passed as a callback the same way, and an identifier
+// that merely ends in `RegExp`.
+test("scanFileViolations passes the escapeRe one-liner and a same-suffixed escape method", () => {
+  const src = 'const escapeRe = (s) => s.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&");\n'
+    + 'const re = new RegExp(words.map(escapeRe).join("|"));\n'
+    + "const own = myRegExp.escape(name);\n";
+  assert.deepEqual(scanFileViolations(src, parseVersion("16.0.0")), []);
 });
 
 test("parseDeclaredFloor refuses a missing engines.node declaration", () => {
