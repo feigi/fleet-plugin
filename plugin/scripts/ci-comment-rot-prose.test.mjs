@@ -1125,14 +1125,45 @@ const JSON_COUNT =
   /\b(?:(?<!-)\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|(?:thir|four|fif|six|seven|eigh|nine)teen|(?:twen|thir|for|fif|six|seven|eigh|nine)ty(?:[- ]?(?:one|two|three|four|five|six|seven|eight|nine))?|dozen|both)\s+(?:(?!\S*[.!?][)\]"'\u2019\u201d]*\s)\S+\s+){0,2}?(?:files|manifests)\b/i;
 
 // JSON_COUNT alone is context-blind: it flags a "<count> files" shape ANYWHERE
-// in the block, whether or not that particular sentence sizes the tracked set
-// at all — "The 2026-09-08 split removed two files that duplicated coverage"
+// in the block, whether or not that particular phrase sizes the tracked set at
+// all — "The 2026-09-08 split removed two files that duplicated coverage"
 // matched exactly like a real count, which would false-positive-fail CI on a
-// legitimate future comment edit (#1945). Every genuine sizing sentence in
-// this block says what it's counting in the same breath — "tracked", "JSON",
-// or "git ls-files" — so jsonCountFault below requires one of those alongside
-// JSON_COUNT in the SAME sentence, not merely the same block.
-const JSON_COUNT_CONTEXT = /\btracked\b|\bjson\b|git ls-files/i;
+// legitimate future comment edit (#1945). Nor is a context word anywhere in the
+// same sentence enough: this whole block is ABOUT JSON, so "two files that
+// duplicated JSON coverage", "two files from plugin.json's directory",
+// "Renovate tracked two files there" and "both valid JSON files would
+// otherwise fail" all carry one without sizing anything (#1991). So the
+// context word has to be attached to the count phrase itself, in one of three
+// places — the ones every genuine sizing sentence below uses:
+//   - as the count's own modifier, the word right after the count:
+//     "two tracked JSON files", "seven tracked `*.json` files", "the 7 JSON
+//     files". Only the FIRST word: "both valid JSON files" is a property of
+//     two files, not the name of the set;
+//   - as the clause the noun opens: "files are tracked", "files that
+//     `git ls-files` lists";
+//   - as the clause the count is set off from by a comma, colon, semicolon or
+//     dash, at most two words back: "Parses what `git ls-files` lists, both
+//     plugin manifests among them." — the context sits a clause away from the
+//     count, and only the punctuation says the count sizes what came before.
+// "json" counts only as a word of its own or the `*.json` glob, never as a
+// file name's extension ("plugin.json"). The ceiling: a count sentence with
+// no context word of its own, right after one that has it ("Every tracked
+// `*.json` file. Seven files at last count."), passes — sentences are the
+// unit, and "The 2026-09-08 split removed two of them." has the same shape
+// and must pass.
+const JSON_SET_WORD = String.raw`(?:\btracked\b|(?<![\w.\/-])json\b|\*\.json\b|git ls-files\b)`;
+const JSON_COUNT_ALL = new RegExp(JSON_COUNT.source, "gi");
+const JSON_COUNT_MODIFIER = new RegExp(String.raw`^\S+\s+[\x60'"(]*${JSON_SET_WORD}`, "i");
+const JSON_COUNT_CLAUSE_AFTER = new RegExp(String.raw`^\s*(?:(?:that|which)\s+)?(?:(?:are|were)\s+)?[\x60]?${JSON_SET_WORD}`, "i");
+const JSON_COUNT_CLAUSE_BEFORE = new RegExp(String.raw`${JSON_SET_WORD}[^\s,:;\u2013\u2014]*(?:\s+[^\s,:;\u2013\u2014]+){0,2}\s*[,:;\u2013\u2014]\s*$`, "i");
+
+function sizesTrackedSet(sentence, count) {
+  return (
+    JSON_COUNT_MODIFIER.test(count[0]) ||
+    JSON_COUNT_CLAUSE_AFTER.test(sentence.slice(count.index + count[0].length)) ||
+    JSON_COUNT_CLAUSE_BEFORE.test(sentence.slice(0, count.index))
+  );
+}
 
 export function jsonCountFault(block) {
   // The coverage check, scoped to the block's FIRST sentence only. A
@@ -1154,7 +1185,7 @@ export function jsonCountFault(block) {
     return "the Validate JSON comment no longer says which files the step parses — the slice this pin reads has lost its coverage paragraph";
   }
   // The count check, scoped one sentence at a time instead of the whole block
-  // (#1945) — see JSON_COUNT_CONTEXT above for why. `sentences()` itself only
+  // (#1945) — see sizesTrackedSet above for why. `sentences()` itself only
   // splits at a terminator immediately followed by whitespace, so a
   // parenthetical or quoted aside ending "...files.)" or `...files."` does
   // NOT end a sentences()-slice there — it runs on into the NEXT real
@@ -1168,9 +1199,12 @@ export function jsonCountFault(block) {
   // #1945).
   const countSentenceBoundary = /(?<=[.!?][)\]"'\u2019\u201d]*)(?<!\b(?:e\.g|i\.e|cf|viz|vs)\.[)\]"'\u2019\u201d]*)\s+/i;
   for (const sentence of sents.flatMap((s) => s.split(countSentenceBoundary))) {
-    const count = JSON_COUNT.exec(sentence);
-    if (count && JSON_COUNT_CONTEXT.test(sentence)) {
-      return `the Validate JSON comment sizes the tracked JSON set again ("${count[0]}") — a count there goes stale the next time a JSON file is added (#1903)`;
+    // Every match, not just the first: a sentence can open on an aside
+    // ("removed two files that duplicated coverage") and size the set later.
+    for (const count of sentence.matchAll(JSON_COUNT_ALL)) {
+      if (sizesTrackedSet(sentence, count)) {
+        return `the Validate JSON comment sizes the tracked JSON set again ("${count[0]}") — a count there goes stale the next time a JSON file is added (#1903)`;
+      }
     }
   }
   return null;
@@ -1234,8 +1268,8 @@ test("jsonCountFault still refuses a count parked in its own paragraph, split fr
 // not the tracked set — matched exactly like a real count. Reworded slightly
 // (spelling out "files" instead of "of them"), either sentence below would
 // have false-positive-failed CI on a legitimate future comment edit. Fixed
-// by requiring JSON_COUNT_CONTEXT ("tracked"/"json"/"git ls-files") in the
-// SAME sentence as the count, not merely the same block.
+// by requiring a "tracked"/"json"/"git ls-files" context word alongside the
+// count — since #1991, attached to the count phrase (see sizesTrackedSet).
 test("jsonCountFault ignores a count-shaped aside whose own sentence never sizes the tracked JSON set (#1945)", () => {
   const jq = "`jq empty`, not `jq -e .`: it exits 1 on a file holding `null` or `false` — both valid JSON.";
   const lead = "Parses every file `git ls-files '*.json'` lists.";
@@ -1250,29 +1284,48 @@ test("jsonCountFault ignores a count-shaped aside whose own sentence never sizes
 // unrelated "Files" text. The digit branch was also unanchored against a
 // trailing date fragment, so "2026-09-08 files" matched as "08 files". All
 // three fixed directly on JSON_COUNT. The first three asserts below carry no
-// "tracked"/"JSON" context word of their own, so JSON_COUNT_CONTEXT already
+// "tracked"/"JSON" context word of their own, so sizesTrackedSet already
 // refuses them regardless of JSON_COUNT's boundary behavior — they prove the
 // two fixes stack, not that either fires alone (PR #1984 review). The last
-// three pair each form — paren, quote, date — with a context word in the
-// SAME run so JSON_COUNT_CONTEXT cannot mask the result, independently
-// proving the paren-closer, quote-closer and digit-anchor branches each
-// still refuse the match on their own.
+// three put "tracked" right after the count — where sizesTrackedSet reads it
+// as the count's own modifier (#1991) — so context cannot mask the result:
+// a boundary that lets the window run on flags them.
 test("jsonCountFault treats a period-then-closer as a sentence end, and refuses a date fragment's last segment as a bare count (#1945)", () => {
   const jq = "`jq empty`, not `jq -e .`: it exits 1 on a file holding `null` or `false` — both valid JSON.";
   const lead = "Parses every file `git ls-files '*.json'` lists.";
   assert.equal(jsonCountFault(`${lead} Removed two of them.) Files added since need no edit. ${jq}`), null);
   assert.equal(jsonCountFault(`${lead} Removed two of them." Files added since need no edit. ${jq}`), null);
   assert.equal(jsonCountFault(`${lead} 2026-09-08 files were touched that week. ${jq}`), null);
-  assert.equal(
-    jsonCountFault(`${lead} The tracked JSON note: removed two of them.) Files added since need no edit here. ${jq}`),
-    null,
-  );
-  assert.equal(
-    jsonCountFault(`${lead} The tracked JSON note: removed two of them." Files added since need no edit here. ${jq}`),
-    null,
-  );
-  assert.equal(
-    jsonCountFault(`${lead} The tracked JSON audit: 2026-09-08 files were touched that week. ${jq}`),
-    null,
+  assert.equal(jsonCountFault(`${lead} Removed two tracked ones.) Files added since need no edit here. ${jq}`), null);
+  assert.equal(jsonCountFault(`${lead} Removed two tracked ones." Files added since need no edit here. ${jq}`), null);
+  assert.equal(jsonCountFault(`${lead} 2026-09-08 tracked files were touched that week. ${jq}`), null);
+});
+
+// #1991 (deferred from PR #1984 review): a context word anywhere in the count's
+// sentence was not evidence the count sizes the tracked set, because the whole
+// Validate JSON block is about JSON — every sentence in the accept loop below
+// carries "JSON", "plugin.json" or "tracked" without sizing anything, and each
+// one flagged. Two of them set the count off by punctuation, the one place the
+// context word may sit a clause away: after a file name's ".json", and more
+// than two words after "tracked". The last is the block's own jq sentence
+// after a natural one-word rewording. The refuse half pins that the context
+// test now walks EVERY count in a sentence: its aside comes first, and the
+// real count second.
+test("jsonCountFault ignores a context word the count phrase does not own, and still finds a sizing count behind an aside (#1991)", () => {
+  const jq = "`jq empty`, not `jq -e .`: it exits 1 on a file holding `null` or `false` — both valid JSON.";
+  const lead = "Parses every file `git ls-files '*.json'` lists.";
+  for (const aside of [
+    "The 2026-09-08 split removed two files that duplicated JSON coverage.",
+    "The 2026-09-08 split removed two files from plugin/.claude-plugin/plugin.json's directory.",
+    "Beside plugin/.claude-plugin/plugin.json, two files were removed that week.",
+    "The tracked set shrank last week: two files that duplicated coverage were deleted.",
+    "Renovate tracked two files there last week.",
+    "`jq empty`, not `jq -e .`: it exits 1 on a file holding `null` or `false` — both valid JSON files would otherwise fail.",
+  ]) {
+    assert.equal(jsonCountFault(`${lead} ${aside} ${jq}`), null, aside);
+  }
+  assert.match(
+    jsonCountFault(`${lead} The split removed two files that duplicated coverage, leaving nine tracked JSON files. ${jq}`),
+    /sizes the tracked JSON set again \("nine tracked JSON files"\)/,
   );
 });
