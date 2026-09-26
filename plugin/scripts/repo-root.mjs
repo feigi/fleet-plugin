@@ -386,9 +386,11 @@ export function trackedShellScripts(root) {
 // A first line that hands the file to node: `node` itself as the interpreter,
 // by a direct path (`#!/usr/local/bin/node`) or through `env` with any options
 // or assignments before it (`#!/usr/bin/env node`, `#!/usr/bin/env -S node
-// --no-warnings`). `node` is the WHOLE interpreter name — `nodemon` and `bun`
-// are other programs.
-const NODE_SHEBANG = /^#!\s*(?:\S*\/)?(?:env(?:\s+(?:-\S+|\w+=\S*))*\s+(?:\S*\/)?)?node(?:\s|$)/;
+// --no-warnings`) — including an option that takes a following bare argument
+// of its own (`#!/usr/bin/env -u FOO node`, `--unset FOO`, `-C DIR`), which is
+// still no part of the interpreter name. `node` is the WHOLE interpreter name
+// — `nodemon` and `bun` are other programs.
+const NODE_SHEBANG = /^#!\s*(?:\S*\/)?(?:env(?:\s+(?:-\S+(?:\s+\S+)?|\w+=\S*))*\s+(?:\S*\/)?)?node(?:\s|$)/;
 
 // A shebang is one short line; this holds any this repository would write.
 const SHEBANG_BYTES = 256;

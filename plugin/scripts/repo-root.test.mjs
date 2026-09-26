@@ -374,15 +374,22 @@ test("trackedNodeScripts answers the shipped node-script set for a verified root
 });
 
 // Which first lines hand a file to node. Through `env`, through `env -S` with
-// the interpreter's own flags, and by a direct interpreter path are all node,
-// whatever the file's extension; `sh`, `bun` and `nodemon` are other programs,
-// and a shebang that is not the FIRST line is no shebang at all. An empty
-// file, and one with no shebang, are simply not scripts.
+// the interpreter's own flags, through an `env` option that takes its OWN
+// following bare argument (`-u FOO`, `--unset FOO`) rather than being the
+// command itself, and by a direct interpreter path are all node, whatever the
+// file's extension; `sh`, `bun` and `nodemon` are other programs — including
+// where reached past an `-u`/`--unset` argument, which does not make the
+// command after it any less "not node". A shebang that is not the FIRST line
+// is no shebang at all. An empty file, and one with no shebang, are simply
+// not scripts.
 test("trackedNodeScripts reads a non-.mjs file's first line: node by any shebang spelling, nothing else", (t) => {
   const node = {
     "bin/env": "#!/usr/bin/env node\n",
     "bin/env-flags": "#!/usr/bin/env -S node --no-warnings\n",
     "bin/env-assign": "#!/usr/bin/env FOO=bar node\n",
+    "bin/env-unset": "#!/usr/bin/env -u FOO node\n",
+    "bin/env-unset-long": "#!/usr/bin/env --unset FOO node\n",
+    "bin/env-unset-multi": "#!/usr/bin/env -u FOO -u BAR node\n",
     "bin/direct": "#!/usr/local/bin/node\n",
     "bin/hook.js": "#!/usr/bin/env node\n",
   };
@@ -390,6 +397,7 @@ test("trackedNodeScripts reads a non-.mjs file's first line: node by any shebang
     "bin/check.sh": "#!/bin/sh\n",
     "bin/bun-tool": "#!/usr/bin/env bun\n",
     "bin/watch": "#!/usr/bin/env nodemon\n",
+    "bin/env-unset-other": "#!/usr/bin/env -u FOO bun\n",
     "docs/notes.md": "# notes\n#!/usr/bin/env node\n",
     "LICENSE": "MIT\n",
     "bin/empty": "",
