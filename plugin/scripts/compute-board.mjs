@@ -3,7 +3,7 @@
 // ledger I/O and calls computeBoard(); every stage-derivation and flag decision
 // lives here and is exercised by compute-board.test.mjs (`node --test`).
 //
-// #1597, #1820: the TWO imports this module takes, and both are pure ones.
+// #1597, #1820, #1839: the THREE imports this module takes, all pure ones.
 // fleet-state.mjs owns the heartbeat's `beat` key, and the rule for reading
 // that key travels with it rather than being copied here. That module's own
 // I/O (its path probe, its file read) is never called from this file; only
@@ -14,9 +14,18 @@
 // ledger-grammar.mjs owns the member grammar (`<member>` live,
 // `<member>=<outcome>` settled) and has no I/O at all; parseToken is read
 // from it for the same reason — one grammar, one reader, so the cockpit and
-// fleet-tick cannot disagree about which members are live.
+// fleet-tick.mjs cannot disagree about which members are live.
+// fleet-tick.mjs owns a row's PR reading, PR_MENTION, and a row with no impl
+// token is read through it (#1820 amendment 2a, below) so both readers name
+// the same PR for the same text, for a row that carries a PR-bound signal —
+// an unsignaled row (no mention, no PR-bound member, no review=/reviewed=)
+// still gets pr: null here while fleet-tick.mjs's own row-key fallback keys
+// it to its ticket number regardless; see the amendment note below. The
+// regex is all this file takes from it: the tick's I/O and main() never run
+// here, main() being guarded on argv[1].
 import { assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
 import { parseToken } from "./ledger-grammar.mjs";
+import { PR_MENTION } from "./fleet-tick.mjs";
 
 // A ledger row is freeform, controller-authored text. Two real examples:
 //   #332 impl-332=PR#344 → PR#344 → MERGED 73b356de
@@ -24,19 +33,28 @@ import { parseToken } from "./ledger-grammar.mjs";
 // Extract by token, never by position — the controller reorders and appends
 // tokens freely. Unknown text is ignored, never fatal.
 //
-// Member tokens are ledger-grammar.mjs's (#1820). The row's LAST `impl`
-// token, retry suffix included, decides the card: live → IMPLEMENTING,
-// `=PR#M` → that PR decides, `=released`/`=bailed` → no card of the row's own
-// (the POOL loop shows the ticket if it is still `ready-for-agent`),
-// `=killed`/`=tier-mismatch` → IMPLEMENTING with that outcome as a flag. The
-// `→ PR#M` arrow is human-readable only; parseRow ignores it and reads only
-// the settled impl token's outcome. fleet-tick.mjs's PR_MENTION is a blind
-// `PR#<n>` text scan that in practice also lands on the impl token's
-// embedded value, because that precedes the arrow in every row this run
-// writes — but nothing enforces that order, so the arrow is never a value
-// either reader may rely on. A member settled anywhere on the row is
-// settled — a bare copy beside `<member>=<outcome>` is what a whole-line
-// `row` rewrite leaves.
+// Member tokens are ledger-grammar.mjs's (#1820). On a row that has one, the
+// row's LAST `impl` token, retry suffix included, decides the card: live →
+// IMPLEMENTING, `=PR#M` → that PR decides, `=released`/`=bailed` → no card of
+// the row's own (the POOL loop shows the ticket if it is still
+// `ready-for-agent`), `=killed`/`=tier-mismatch` → IMPLEMENTING with that
+// outcome as a flag. There the `→ PR#M` arrow is human-readable only;
+// parseRow reads only the settled impl token's outcome. PR_MENTION is a blind
+// `PR#<n>` text scan that in practice also lands on the impl token's embedded
+// value, because that precedes the arrow in every row this run writes — but
+// nothing enforces that order, so on such a row the arrow is never a value
+// either reader may rely on.
+//
+// #1820 amendment 2a: a row with no `impl` token at all has no outcome to
+// read, so it takes the tick's reading. `ledger.mjs dispatch <pr> fix-pr-<pr>` /
+// `finisher-pr-<pr>` appends `#<pr> <member>` for a PR this run's
+// implementers did not open. Once such a row carries a PR-bound signal — a
+// `PR#M` mention, a `fix-pr-`/`finisher-pr-` member, `review=` or `reviewed=`
+// — its PR is PR_MENTION's, else the row key, and that PR decides the card as
+// `=PR#M` does. An Exclusion never takes one.
+//
+// A member settled anywhere on the row is settled — a bare copy beside
+// `<member>=<outcome>` is what a whole-line `row` rewrite leaves.
 //
 // A PR's review is not a member (#1773 §7): `review=wf:<runId>` is a Workflow
 // with nobody to name, while `review=member:<name>` and
@@ -72,6 +90,8 @@ export function parseRow(row) {
   const outcomes = new Map();
   const settled = new Set();
   let lastImpl = null;
+  let anyImpl = false;
+  let prMember = false;
   let review = false;
   let reviewed = false;
   let runners = [];
@@ -83,7 +103,11 @@ export function parseRow(row) {
       if (t.outcome === null) live.push(t);
       else settled.add(t.name);
       if (t.outcome !== null && !t.error) outcomes.set(t.name, t.outcome);
-      if (t.family === "impl" && !t.error) lastImpl = t.name;
+      if (t.family === "impl") {
+        anyImpl = true;
+        if (!t.error) lastImpl = t.name;
+      }
+      if (t.bound === "pr") prMember = true;
       continue;
     }
     if (tok.startsWith("review=")) {
@@ -102,13 +126,28 @@ export function parseRow(row) {
   const alive = live.filter((t) => !settled.has(t.name));
   const implOutcome = lastImpl ? (outcomes.get(lastImpl) ?? null) : null;
   const prM = implOutcome && /^PR#(\d+)$/.exec(implOutcome);
+  let pr = prM ? Number(prM[1]) : null;
+  // #1820 amendment 2a: a row with NO impl token — a malformed one still
+  // counts, since that row's key is a ticket — is keyed, once THIS row
+  // carries a PR-bound signal, the way fleet-tick.mjs's PR_MENTION-then-
+  // row-key logic would: its first PR_MENTION (itself a signal), else the
+  // row key when the first word is exactly `#N`. fleet-tick.mjs's own
+  // row-key fallback (deriveRun) is NOT itself gated on a signal — this
+  // module's extra gate exists so an ordinary unclaimed ticket never
+  // borrows its own number as a phantom PR. An Exclusion is supply and
+  // never takes a PR, whatever text it carries.
+  if (!anyImpl && !ex) {
+    const mention = PR_MENTION.exec(row);
+    if (mention) pr = Number(mention[1]);
+    else if ((prMember || review || reviewed) && row.split(/\s/)[0] === issueM[0]) pr = Number(issueM[1]);
+  }
   return {
     issue: Number(issueM[1]),
     excluded: ex ? [...ex[1].matchAll(PREMISE)].map(([, kind, target]) => ({ kind, target })) : null,
     impl: lastImpl,
     implOutcome,
     agent: alive.length ? alive[alive.length - 1].name : null,
-    pr: prM ? Number(prM[1]) : null,
+    pr,
     merged: !!mergedM,
     sha: mergedM ? mergedM[1] : null,
     heldBehind: heldM ? Number(heldM[1]) : null,
