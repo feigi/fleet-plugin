@@ -152,7 +152,7 @@ test("a paraphrase is accepted; a deleted citation and a misquote are not", () =
 // "v1.2"), or a period inside the quoted span itself. The quotation then fell
 // outside the sentence, and the misquote read as a paraphrase — the silent
 // direction. Each input below is the misquote the test above refuses.
-test("an abbreviation, mid-word, or quote/paren-closing period cannot hide a misquote from citationFault (#1898)", () => {
+test("an abbreviation sentences() exempts, mid-word, in-quotation, or quote/paren-closing period cannot hide a misquote from citationFault (#1898)", () => {
   const cited = "so this walk, not node, is what keeps vendored tests out.";
 
   for (const abbr of ["e.g.", "i.e.", "cf.", "viz.", "vs."]) {
@@ -199,11 +199,13 @@ test("an abbreviation, mid-word, or quote/paren-closing period cannot hide a mis
     citationFault('claim-ticket.sh \u2018as it says itself.\u2019 says "this filter, not node"', cited),
     /does not say it/,
   );
-  // Deliberately NOT tested here: a SPACED abbreviation ("e. g." — the space
-  // keeps sentences() from ever matching the "e.g" it exempts), a
-  // mid-sentence ellipsis ("..." — its own last period is a real,
-  // unexempted terminator), and a misquote reachable only via a SECOND,
-  // separate mention of claim-ticket.sh (out of scope regardless of
+  // Deliberately NOT tested here: a NON-EXEMPT abbreviation ("etc.", or any
+  // other word ending in a period sentences() does not name — the exempt
+  // list is fixed, not "abbreviation" in general), a SPACED abbreviation
+  // ("e. g." — the space keeps sentences() from ever matching the "e.g" it
+  // exempts), a mid-sentence ellipsis ("..." — its own last period is a
+  // real, unexempted terminator), and a misquote reachable only via a
+  // SECOND, separate mention of claim-ticket.sh (out of scope regardless of
   // sentences(): this function only ever reads the first sentence). Each
   // still lets a misquote read as a paraphrase; none is a regression, and
   // none is a form #1898's own remedy promised to close.
@@ -225,10 +227,11 @@ test("citationFault reads past 'e.g.' but not past the sentence's end (#1898)", 
     citationFault('claim-ticket.sh makes the same point, e.g. about its own walk. The runner\'s "find" was the defect.', cited),
     null,
   );
-  // #1940: sentences() also ends a sentence at a bare `?` or `!`, not only
-  // at `.` — see sentences()'s own comment in prose-pin.mjs for why that
-  // swaps which direction is silent for a checker like this one. A quote
-  // past either is just as unanswerable as one past a period.
+  // #1898: sentences() already ends a sentence at a bare `?` or `!`, not
+  // only at `.` — see its own comment in prose-pin.mjs (where #1940 later
+  // moved this shared definition) for why that swaps which direction is
+  // silent for a checker like this one. A quote past either is just as
+  // unanswerable as one past a period.
   assert.equal(
     citationFault('Does claim-ticket.sh agree? It says "this filter, not node".', cited),
     null,
