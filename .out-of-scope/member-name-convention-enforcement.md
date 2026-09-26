@@ -1,7 +1,7 @@
 # Member-Name Convention Enforcement
 
 A fleet member's role is one of five canonical name spellings — `impl-<issue#>`,
-`fix-pr-<pr#>`, `review-pr-<pr#>`, `finisher-pr-<pr#>`, `merge-bot-<wave#>`. That
+`fix-pr-<pr#>`, `review-pr-<pr#>`, `finisher-pr-<pr#>`, `merge-bot-<n>`. That
 convention is stated as prose in `run-team/SKILL.md` and
 `references/member-lifecycle.md`, and independently reconstructed by regex in two
 runtime modules: `classifyRole` in `compute-spend.mjs` and `parseMemberName` in

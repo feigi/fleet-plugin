@@ -230,7 +230,7 @@ export function checkOverrides({ expected, actual, modelRoles, agentsDir }) {
   const slowModel = resolveRole("slow", modelRoles);
   const taskModel = resolveRole("task", modelRoles);
   if (slowModel !== null && taskModel !== null && modelsEqual(slowModel, taskModel)) {
-    notices.push(`modelRoles.slow and modelRoles.task both resolve to ${slowModel} — the per-wave alternate-tier pairing controls nothing`);
+    notices.push(`modelRoles.slow and modelRoles.task both resolve to ${slowModel} — the alternate-tier comparison controls nothing`);
   }
 
   const overridesRemedy = overridesWrong ? mergedOverrides({ expected, actual }) : null;
