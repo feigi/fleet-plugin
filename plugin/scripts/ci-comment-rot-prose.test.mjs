@@ -754,7 +754,9 @@ test("pinOwnerComment sees an owner written as a named step, so a bare-form deco
 // it is not, and a phantom step there would red the pointer test over a step
 // that does not exist. It sits under `steps:`, so it is that first shallower
 // line, not #1920's parent check, refusing it. Inside a `run:` script the line
-// is no key at all: #1975's block-scalar check refuses it before any walk.
+// is refused the same way — `run: |` opens no sequence entry either, so the
+// shallower-line check above never needs #1975's block-scalar check to catch
+// this shape, though that check would refuse it too.
 test("a `uses: actions/setup-node@` line that is not a step's own key is not taken for a step (#1873)", () => {
   const scripted = ["      - name: Print an example", "        run: |", "          uses: actions/setup-node@v5"];
   const nested = ["      - uses: some/action@v1", "        with:", "          uses: actions/setup-node@v5"];
@@ -770,8 +772,10 @@ test("a `uses: actions/setup-node@` line that is not a step's own key is not tak
 // the dash line itself (`- with:`) makes the step's opener the first shallower
 // line above a `uses:` nested in that key's value; there the column does tell,
 // because a step's own keys start where the text after its `- ` does. The
-// `run: |` shapes here are lines of a script, which #1975's block-scalar check
-// refuses before any walk reads them.
+// `run: |` shapes here are still refused by those same two mechanisms — the
+// nested one because `run: |` opens no sequence entry, the dash-line one by
+// the column tell just above — not because #1975's block-scalar check ran;
+// that check would refuse either shape too, but neither depends on it.
 test("a `uses: actions/setup-node@` line under an entry that is not a step's, or inside a key on a step's dash line, is not a step (#1920)", () => {
   const job = ["  job:", "    steps:"];
   for (const shape of [
@@ -906,6 +910,45 @@ test("a block scalar's content is text: never a step, never a step's comment (#1
   ]) {
     assert.deepEqual(setupNodeComments(shape), [{ block: "", lines: 0, job: "job" }], shape.join("\n"));
   }
+
+  // Boundary precision on the depth arithmetic itself: an explicit
+  // indentation indicator's depth is the KEY's column plus the indicator —
+  // not the indicator alone — and a comment sitting one column shy of that
+  // depth has already left the scalar, so it is the next step's real
+  // comment, not swallowed script text. The chomping-then-indicator spelling
+  // (`|-2`) carries its digit in the same place as `|2-`; a first content
+  // line indented deeper than the indicator still leaves the depth at the
+  // indicator's own value, not an auto-detected one, which a second,
+  // shallower-but-still-in-scalar line below it proves. And a bare dash's
+  // column is the dash's own position, not one past it: content one column
+  // beyond it is swallowed, and nothing shallower is reachable without
+  // leaving the entry.
+  assert.deepEqual(
+    setupNodeComments([
+      ...job,
+      "      - name: Build",
+      "        run: |2",
+      "          npm run build",
+      "         # a real comment for the next step",
+      setup,
+    ]),
+    [{ block: "a real comment for the next step", lines: 1, job: "job" }],
+  );
+  assert.deepEqual(
+    setupNodeComments([
+      ...job,
+      "      - name: Build",
+      "        run: |-2",
+      "            npm run build",
+      "          # would-be leaked comment",
+      setup,
+    ]),
+    [{ block: "", lines: 0, job: "job" }],
+  );
+  assert.deepEqual(
+    setupNodeComments([...job, "      - |", "       # inside the scalar, must not surface as a comment", setup]),
+    [{ block: "", lines: 0, job: "job" }],
+  );
 });
 
 // #1975. Each key the walk reads by name was matched in its bare spelling
@@ -921,6 +964,7 @@ test("a key spelled quoted, with a space before its colon, or with a trailing co
     ["jobs:", "  job:", "    steps:", '      - "uses": actions/setup-node@v5'],
     ["jobs:", "  job:", "    steps:", "      - name: x", "        'uses' : actions/setup-node@v5"],
     ["jobs:", '  "job":', "    steps:", setup],
+    ["jobs:", "  job :", "    steps:", setup],
     ["jobs:", "  job: # the job's own note", "    steps:", setup],
   ]) {
     assert.deepEqual(setupNodeComments(shape), [{ block: "", lines: 0, job: "job" }], shape.join("\n"));
