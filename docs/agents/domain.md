@@ -10,7 +10,7 @@ How the engineering skills should consume this repo's domain documentation when 
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. `/improve-codebase-architecture` creates `CONTEXT.md` and ADRs lazily when terms or decisions actually get resolved — it adds a term to `CONTEXT.md` (creating the file if it's absent) and offers an ADR when a rejected candidate has a reason worth recording. Nothing creates `CONTEXT-MAP.md`.
 
-There is no `/domain-modeling` skill in this environment — neither `~/.claude/skills/domain-modeling` nor `~/.agents/skills/domain-modeling` exists — so don't route the work to one and don't wait for it. Where an installed skill defers to `/domain-modeling`, do the glossary or ADR edit inline instead.
+Where an installed skill defers to `/domain-modeling`, use `/domain-modeling` if it is available in your session, and do the glossary or ADR edit inline only if it is not. Whether it is installed differs from machine to machine, so check rather than assume either way.
 
 ## File structure
 
