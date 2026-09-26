@@ -127,12 +127,14 @@ through `ledger-grammar.mjs`, Exclusion rows, MERGED from `gh`, and the
 `review=`/`reviewed=` pair. Amendment 2a, #1839: a PR-bound row with no `impl`
 token takes its PR the way `fleet-tick.mjs` does — see **The row's PR** below.
 Amendment 5a, #1842: a `review=` token marks review only while it is live — see
-**REVIEW** below.)
+**REVIEW** below. #1843: the row's latest `impl` token is its greatest retry
+suffix — no suffix, then `-b`, `-c`, … — wherever it sits in the row, so any
+ordering of the same tokens renders the same card.)
 
 | Column | Derivation (durable, no controller push) |
 |---|---|
-| **POOL** | open `ready-for-agent` issue with **no** ledger row, or whose row's last `impl` token settled `=released`/`=bailed` (no card at all once the issue leaves `ready-for-agent`). An Exclusion row (`#N excluded · behind-pr:#M` / `behind-issue:#M`) is a POOL card with an `excluded:#M` badge (`excluded:<branch>` when `#M` is a branch name): supply, never `stale`, never in `attention`, never in the stall report's `claimed` |
-| **IMPLEMENTING** | the row's **last** `impl` token (retry suffix included) is live `impl-N`, or settled `=killed`/`=tier-mismatch` — the latter two carry that outcome as a flag in `attention` |
+| **POOL** | open `ready-for-agent` issue with **no** ledger row, or whose row's latest `impl` token settled `=released`/`=bailed` (no card at all once the issue leaves `ready-for-agent`). An Exclusion row (`#N excluded · behind-pr:#M` / `behind-issue:#M`) is a POOL card with an `excluded:#M` badge (`excluded:<branch>` when `#M` is a branch name): supply, never `stale`, never in `attention`, never in the stall report's `claimed` |
+| **IMPLEMENTING** | the row's **latest** `impl` token (greatest retry suffix, not last by position) is live `impl-N`, or settled `=killed`/`=tier-mismatch` — the latter two carry that outcome as a flag in `attention` |
 | **REVIEW** | the row's PR (below) is open (or closed unmerged), not `ready-to-merge`. Counts toward `reviewBacklog` (surfaced in the page footer as `review-backlog N`) when the row has neither a live `review=` nor a `reviewed=`, and no live `fix-pr-M`/`finisher-pr-M`. Amendment 5a (#1820, implemented by #1842): a settled `review=…=failed` is a dead review, and the PR is owed one again — run-team `SKILL.md`'s review-due and `fleet-tick.mjs`'s `reviewedAny` read the token the same way. A `=failed` followed by a live redispatch (`review=wf:a=failed review=fallback:review-pr-M-b`) is under review; any live `review=` on the row counts, not only the last one, as `reviewedAny` counts it |
 | **READY** | PR carries the `ready-to-merge` label |
 | **MERGED** | ledger row contains `MERGED <sha>`, or — the token being written by no rule — `gh` reports the row's PR merged (one `gh pr list --state merged` read per build, consulted for row PRs absent from the open list). The token wins when present |
@@ -144,7 +146,7 @@ The card's `agent` is the latest live member on the row: an unsettled
 nobody. The uppercase `KILLED`/`BLOCKED`/`SHA-OFF-BRANCH` cause tokens
 (Enrichment tier, below) still apply.
 
-**The row's PR.** On a row with an `impl` token it is the last `impl` token's
+**The row's PR.** On a row with an `impl` token it is the latest `impl` token's
 `=PR#M` outcome and nothing else: the `→ PR#M` arrow there is human-readable
 only. `fleet-tick.mjs`'s `PR_MENTION` is a blind `PR#<n>` text scan that in
 practice also lands on the impl token's embedded value, because that
