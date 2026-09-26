@@ -593,7 +593,7 @@ test("a `uses: actions/setup-node@` line that is not a step's own key is not tak
 // above it — a commented-out step, a trailing note on the step before. Pinned
 // in both halves and both opener forms, so the boundary is a decision, not
 // whatever the walk happens to do; the fault names the cause, because "no
-// comment at all" was false with a comment one line up.
+// comment at all" was false with a comment sitting right over the blank line.
 test("a blank line ends a setup-node step's comment run: it keeps an unrelated comment out, and detaches a comment from the step (#1919)", () => {
   const pointer = "      # Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.";
   const unrelated = "      # An unrelated note that happens to sit above the step.";
