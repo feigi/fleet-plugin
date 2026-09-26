@@ -222,7 +222,7 @@ test("checkOverrides: slow and task both resolving to the same model is a notice
   const { violations, notices } = checkOverrides({ expected: EXPECTED, actual: EXPECTED, modelRoles: roles, agentsDir: "agents" });
   assert.deepEqual(violations, []);
   assert.deepEqual(notices, [
-    `modelRoles.slow and modelRoles.task both resolve to anthropic/claude-opus-5 — the per-wave alternate-tier pairing controls nothing`,
+    `modelRoles.slow and modelRoles.task both resolve to anthropic/claude-opus-5 — the alternate-tier comparison controls nothing`,
   ]);
 });
 

@@ -265,7 +265,7 @@ for (const [route, args, opts] of [
 
 const CI_WORKFLOW_COMMENTED = CI_WORKFLOW.replace("name: CI", `name: "CI"  # main pipeline`);
 
-test("unreadable .github/workflows directory: exit 2, never no-ci — --declare-no-ci cannot wave it through", (t) => {
+test("unreadable .github/workflows directory: exit 2, never no-ci — --declare-no-ci cannot let it through", (t) => {
   if (process.getuid?.() === 0) return t.skip("root reads every directory");
   for (const args of [[], ["--declare-no-ci"]]) {
     // Same repo, same real CI: only the directory's mode differs. Reading this

@@ -3,8 +3,9 @@
 // 1 (#1314) is a static audit of the agent files' SHAPE, before any run
 // exists; this layer compares what a run actually DISPATCHED against what
 // the harness's own record says it RESOLVED, for every member dispatched by
-// named definition, on both harnesses. Not a lint — a refusal, run once per
-// dispatch batch and named to stop the wave (run-team/SKILL.md's phase 2).
+// named definition, on both harnesses. Not a lint — a refusal, run after
+// every Pull's dispatch, whose non-zero exit holds the next Pull
+// (run-team/SKILL.md's phase 2).
 //
 // Declared is the definition's own frontmatter — `model` (bare alias, both
 // harnesses), `effort` (Claude), `thinking-level` (omp) — the one tree #1297
@@ -44,12 +45,13 @@
 // and any `:suffix`/`[bracket]` tail before matching, the same normalisation
 // member-record.mjs's own `normalizeModel` applies for the bracket case.
 //
-// A batch, not one member: run-team's phase 2 dispatches several members per
-// wave and calls this ONCE after the batch, so `--batch` takes a JSON array
-// and the failure line — `member: declared <m>/<l> resolved <m>/<l>` — is
-// printed once per member that mismatched, not once per invocation. See
-// run-team/SKILL.md's phase-2 dispatch paragraph for the batch file's exact
-// entry shape and how the controller obtains each field.
+// A batch file, not one member: `--batch` takes a JSON array, and the failure
+// line — `member: declared <m>/<l> resolved <m>/<l>` — is printed once per
+// member that mismatched, not once per invocation. Under Pull, run-team's
+// phase 2 calls this after every Pull's dispatch with a batch of one, the
+// member just dispatched. See run-team/SKILL.md's phase-2 dispatch paragraph
+// for the batch file's exact entry shape and how the controller obtains each
+// field.
 
 import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";

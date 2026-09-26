@@ -211,7 +211,7 @@ const DEFAULT_DIMENSIONS = [
 // repo's own copy of the PR's head when the PR is cross-repo — and NEVER
 // `headRefOid`. That field LAGS a ref move: measured twice in one run on
 // 2026-09-01, `gh pr update-branch --rebase` returned `rc=0` and `headRefOid`
-// sat on the pre-rebase sha for ~2 min in one wave and ~84s in the next (see
+// sat on the pre-rebase sha for ~2 min in one merge-bot run and ~84s in the next (see
 // `run-merge-bot.md`'s step 1). A snapshot cut from the rebased tree inside
 // that window is CORRECT, and this predicate refused its diff anyway (#1513) —
 // #1168's mechanism with the sign flipped, a false REFUSAL where the

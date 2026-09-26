@@ -5,7 +5,7 @@
 //
 // Measured against the artifacts, not the ticket body (`gh api
 // repos/feigi/fleet-plugin/actions/runs/<id>`): every run the three PRs of
-// that wave produced carried `event=pull_request`, and each PR's first run was
+// one fleet run produced carried `event=pull_request`, and each PR's first run was
 // created 3-4 seconds after `gh pr create` — so the implementer's own firing
 // is first for every PR, arriving before any review has returned. A fourth
 // firing on PR #1052 (`33306306230`, head `fa65476`) came from a fix-applier

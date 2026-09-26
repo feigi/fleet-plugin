@@ -87,7 +87,7 @@ protection being requested is the protection already in the tree.
 
 **The rationale is denser than a function name.** `inflight.sh:718-739` carries
 twenty-two lines of comment on this one conditional: why emptiness and not a
-missing `gitdir` (git drops a `gitdir`-less entry, so keying the skip there waves
+missing `gitdir` (git drops a `gitdir`-less entry, so keying the skip there lets
 a corrupt entry through as "not git's" and the ticket reads free while its
 checkout is on disk — measured `rc 0, taken=false`); why `ls`'s status and not
 its output (0o000 unsearchable and 0o111 searchable-but-unreadable both print

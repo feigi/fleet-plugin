@@ -90,7 +90,7 @@ const RAW_NETWORK_GIT = /\bgit\s+(?:-[^\s]+\s+|-c\s+\S+\s+|-C\s+\S+\s+)*(ls-remo
 // closing quote. Known ceiling: a heredoc body, and a string that opens on one
 // line and closes on another, are judged per line — no fleet script writes a
 // git call in either, and the failure direction is a false OFFENDER, which is
-// read and dismissed, never a call waved through.
+// read and dismissed, never a call let through.
 const insideString = (prefix) => {
   const bare = prefix.replace(/\\./g, "");
   return (bare.split('"').length - 1) % 2 === 1 || (bare.split("'").length - 1) % 2 === 1;

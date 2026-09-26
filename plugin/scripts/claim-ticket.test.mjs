@@ -2379,7 +2379,7 @@ test("a missing worktree.sh is exit 2, before anything is created", () => {
 // same message a message-preserving downgrade still prints. This file spawns a
 // bare `sh`, and `.github/workflows/ci.yml`'s `check` job runs on
 // `ubuntu-latest`, where that name resolves to dash: an exit-code assertion
-// therefore pins this guard on a developer's Mac and waves the mutant through
+// therefore pins this guard on a developer's Mac and lets the mutant through
 // on the runner that gates the merge, and a wording assertion pins nothing in
 // either shell. `issue_wt` is what discriminates instead — both shells name it,
 // and it reaches stderr only from that nounset abort.

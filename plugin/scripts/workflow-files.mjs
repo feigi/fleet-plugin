@@ -58,8 +58,7 @@ import { join, relative, sep } from "node:path";
 // parse-checks `.js` with AsyncFunction and would send a `.mjs` to the
 // `node --check` step that cannot accept a workflow body — and
 // `docs/specs/2026-07-23-fleet-plugin-design.md`'s `## Layout` tree, whose
-// `~/.claude/workflows/` listing is flat `.js` (`review-pr.js`,
-// `merge-wave.js`).
+// `~/.claude/workflows/` listing is flat `.js` only.
 export const WORKFLOWS = join(import.meta.dirname, "..", "workflows");
 
 // Anything that reads as a script. A `.md` note or a stray `.DS_Store` beside a

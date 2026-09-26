@@ -111,7 +111,7 @@ const WHAT = `${DOC} step 4 finisher-dispatch premise`;
 // over the rest of the document: if step 4's own closing instruction is
 // reworded away, the LAST thing left matching `STEP4_TO` is whatever comes
 // after it — a single, unambiguous, and entirely wrong match, so a raw count
-// would see exactly 1 and wave it through.
+// would see exactly 1 and let it through.
 //
 // Bounded instead to step 4's own markdown list item — up to the next
 // ordered-list marker at column 0 (`\n5. `, never indented — the ACCEPT SIDE
@@ -285,7 +285,7 @@ test("the slice bound throws rather than widening when an anchor moves", () => {
   // The scenario a bare exactly-once count over the rest of the document
   // would miss: step 4's real closing instruction reworded away, with the
   // only remaining match sitting on a LATER line (step 5's). A count over
-  // the rest of the document sees exactly 1 hit and waves it through,
+  // the rest of the document sees exactly 1 hit and lets it through,
   // silently binding the slice to the decoy and widening it into step 5.
   // Bounding the search to step 4's own item excludes that decoy from the
   // count entirely, so this still throws "moved" rather than silently

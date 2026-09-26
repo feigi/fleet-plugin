@@ -469,17 +469,18 @@ test("ATTACK: octopus merge dragging in an unreviewed third parent proves false"
 
 test("post-fetch: a correct merge stays true once origin/main has moved past it", (t) => {
   // The script fetches before it checks, so by the time it runs the merge is
-  // already in the base ref — and in a cascade wave main has moved on again.
-  // Neither may, by itself, flip a correct merge to false.
+  // already in the base ref — and when one merge-bot run merges several PRs,
+  // main has moved on again. Neither may, by itself, flip a correct merge to
+  // false.
   const w = repo(t);
   git(w, "checkout", "-q", "-b", "feat");
   const head = commit(w, "feature work");
   const merge = mergeNoFf(w, head, "merge feat");
   git(w, "push", "-q", "origin", "main");
 
-  // A later merge in the same wave lands on top.
+  // A later merge in the same merge-bot run lands on top.
   git(w, "checkout", "-q", "-b", "feat2");
-  const head2 = commit(w, "the next PR in the wave");
+  const head2 = commit(w, "the next PR in the same run");
   mergeNoFf(w, head2, "merge feat2");
   git(w, "push", "-q", "origin", "main");
 
@@ -834,7 +835,7 @@ test("a missing json.sh is exit 2, never the exit 1 that means `not proved`", (t
 // and dash's lands on 2 — the very status a firing guard returns. This file
 // spawns a bare `sh`, and `.github/workflows/ci.yml`'s `check` job runs on
 // `ubuntu-latest`, where that name resolves to dash: an exit-code assertion
-// therefore pins this guard on a developer's Mac and waves the mutant through
+// therefore pins this guard on a developer's Mac and lets the mutant through
 // on the runner that gates the merge, and a wording assertion pins whichever
 // shell uses that wording. `first_j` is what discriminates instead — both
 // shells name it, and it reaches stderr only from that nounset abort: no

@@ -7,13 +7,13 @@
 //
 // HISTORY, because the filename keeps it. This file was #1590's: the pinned
 // pair then said Claude refilled a freed slot by hand while omp refilled it
-// from the staging wave's own `eval` workpool, which handed a queued item to a
+// from the staged set's own `eval` workpool, which handed a queued item to a
 // freed worker with no completion event. The two lines stated two mechanisms,
 // so the pair sat on `KNOWN_EQUALITY_EXCEPTIONS` under #1590. The spec retired
 // the pool (a pool's only refill virtue is exactly what a Pull forbids, its
 // completions never arrive per member, and the alternate tier was dispatched
 // outside it), so #1804 deleted the pool block with its preflight, its
-// per-wave lifetime, its cap-vs-worker-bound rule, its pool-derived liveness,
+// per-staged-set lifetime, its cap-vs-worker-bound rule, its pool-derived liveness,
 // its item-vs-context split, its blocked-only wait and its lost-kernel rule —
 // and the tests that pinned them, per spec § 2's change surface. What survives
 // is retargeted to the new Pair below: the neutral rule, each line's content

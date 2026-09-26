@@ -829,7 +829,7 @@ test("a positional argument is refused, not silently discarded (#525)", (t) => {
 // (macOS bash 3.2) aborts at 1 with `short_j: unbound variable`, /bin/dash at 2
 // with `short_j: parameter not set`. That 2 is the very status a firing guard
 // returns, and CI's `check` job runs on ubuntu-latest, where `sh` IS dash — so
-// an exit-code assertion pins this guard on a developer's Mac and waves the
+// an exit-code assertion pins this guard on a developer's Mac and lets the
 // mutant through on the runner that gates the merge, while a wording match pins
 // whichever shell uses that wording. The variable NAME is what discriminates:
 // both shells name it first and word the rest however they like.
@@ -1052,7 +1052,7 @@ test("an ambient GIT_DIR does not audit a different repository (#1020)", (t) => 
 //
 // The design spec's script-surface row states this script's failures as a
 // CLOSED enumeration — `exit 2 only — A, B, C` — and until this block nothing
-// in the repo read that cell. Two PRs in one wave each left a row asserting an
+// in the repo read that cell. Two PRs in one fleet run each left a row asserting an
 // enumeration its script had outgrown with the suite green (#1104/#525,
 // #1105/#482), and on `main` this row was silent about three refusals the
 // script reaches: the worktree-readers library guard, either library failing

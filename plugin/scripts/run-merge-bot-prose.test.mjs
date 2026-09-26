@@ -609,7 +609,7 @@ test("the fallback says the PR-object compare fails open too, and that a re-read
 //   - no refusal, and a head that moved during verification proceeds on an
 //     audit of a tree that is gone;
 //   - no `Equal`-is-unreachable clause, and the surviving mismatch can still
-//     be waved through as equal, which is #1512's own defect restored one
+//     be let through as equal, which is #1512's own defect restored one
 //     paragraph later than where it was removed.
 const reRead = () => paragraph(DOC, "**Unequal → `git fetch origin`", "run-merge-bot.md's fallback bounded re-read");
 

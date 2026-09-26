@@ -3465,7 +3465,7 @@ test("an ambient GIT_DIR does not move the deletions into another repository (#1
 // them taking its label off a real refusal. None asked "does the row mention
 // EVERY cause?", so a PR that gave a script a new refusal left the row's
 // `exit 2 only` list asserting an enumeration the script had outgrown with the
-// suite green — measured twice in one wave (#1104/#525, #1105/#482). On `main`
+// suite green — measured twice in one fleet run (#1104/#525, #1105/#482). On `main`
 // this row was silent about three refusals reap.sh reaches: the
 // worktree-readers library guard, any of the three libraries failing to load,
 // and the #1441 cwd-delete-guard probe refusing to proceed unverified.

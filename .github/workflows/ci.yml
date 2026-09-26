@@ -156,11 +156,10 @@ jobs:
       #     ci-comment-rot-prose.test.mjs checks several other claims in this
       #     file, but not this one.
       #     That test DERIVES its file set from plugin/scripts/workflow-files.mjs
-      #     (#1204) rather than naming review-pr.js, so it already covers
-      #     plugin/workflows/merge-wave.js
-      #     (docs/specs/2026-07-23-fleet-plugin-design.md, section `## Layout`:
-      #     the `~/.claude/workflows/` tree lists `merge-wave.js` as `(stage 2)`)
-      #     and every successor on arrival. This loop is therefore redundant
+      #     (#1204) rather than naming review-pr.js, so it already covers every
+      #     workflow file on arrival — flat `.js` only, the shape
+      #     docs/specs/2026-07-23-fleet-plugin-design.md's `## Layout` tree
+      #     gives `~/.claude/workflows/`. This loop is therefore redundant
       #     with it today — and kept, because it is the arm that runs when the
       #     suite does not: a workflow file whose syntax error reaches CI
       #     through a path that skips the tests still reds here.

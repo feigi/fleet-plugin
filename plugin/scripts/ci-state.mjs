@@ -403,8 +403,8 @@ function discoverWorkflowFile(dir, workflowName) {
   if (yamls.length) {
     // Workflows ARE configured here, just none under this name: a --workflow /
     // --workflow-file mismatch, not an absence. Saying "no CI configured" of a
-    // directory full of workflows is a false statement, and letting
-    // --declare-no-ci wave it through would hand the caller exit 0 for a repo
+    // directory full of workflows is a false statement, and if
+    // --declare-no-ci let it through, it would hand the caller exit 0 for a repo
     // whose CI it never looked at.
     die(
       `${yamls.length} workflow file(s) under ${dir}/ (${yamls.join(", ")}), none named '${workflowName}' — pass --workflow <name> or --workflow-file <path>`,

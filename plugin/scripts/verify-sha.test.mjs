@@ -582,7 +582,7 @@ test("an ordinary branch name is untouched — the escaping accepts what it shou
 // and dash's lands on 2 — the very status a firing guard returns. `verify`
 // spawns a bare `sh`, and `.github/workflows/ci.yml`'s `check` job runs on
 // `ubuntu-latest`, where that name resolves to dash: an exit-code assertion
-// therefore pins this guard on a developer's Mac and waves the mutant through
+// therefore pins this guard on a developer's Mac and lets the mutant through
 // on the runner that gates the merge. `sha_j` is what discriminates instead.
 // It reaches stderr only from that nounset abort — measured under /bin/sh and
 // /bin/dash, no healthy run, no genuine `not reachable`, no ordinary `die` and

@@ -324,7 +324,7 @@ test("trackedShellScripts: an inherited GIT_DIR must not substitute another repo
 // rather than a second site. The other repository tracks a module of its own:
 // the realistic shape (a hook's GIT_DIR names a repository with files in it),
 // and the one where the substituted list is non-empty, i.e. the one a caller's
-// non-vacuity guard waves through. No GIT_WORK_TREE twin: measured inert for
+// non-vacuity guard lets through. No GIT_WORK_TREE twin: measured inert for
 // this call (see `trackedFiles`), so a fixture for it could not red.
 test("trackedNodeScripts: an inherited GIT_DIR must not substitute another repository's tracked list for this one", (t) => {
   const { dir } = repoTracking(t, ["a.mjs", "a.test.mjs"]);

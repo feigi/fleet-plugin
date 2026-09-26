@@ -1141,7 +1141,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
     try {
       // JSON.parse SUCCEEDS on `null`, a bare number, a string and an array,
       // none of which is a board; `null` in particular is absent, not an
-      // object, and `typeof null` alone would wave it through. Same check and
+      // object, and `typeof null` alone would let it through. Same check and
       // same wording as readAgent's sidecar-meta read, which is this repo's
       // precedent for rejecting a parsed-but-wrong payload at its own read —
       // since #1546 literally the same, both calling the shared predicate.
@@ -1308,7 +1308,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   // resolution could name a different workspace's beat.
   // `ticked` rides beside `beat`, same file same read, and under the same
   // "no try/catch, no tryRun shape" rule just above — fleet-tick.mjs's own
-  // liveness key (#1597 follow-up), for the busy-wave case `beat` alone
+  // liveness key (#1597 follow-up), for the busy-stretch case `beat` alone
   // cannot see (fleet-state.mjs's assessBeat has the rule).
   const priorState = stateFile ? readState(stateFile, NAME) : null;
   const beat = priorState?.beat ?? null;

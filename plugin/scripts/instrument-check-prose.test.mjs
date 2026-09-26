@@ -116,7 +116,7 @@ test("the rule records that refs are out of the digest, and why", () => {
   // Not decoration: the ticket's corroborating evidence is a stray branch, so
   // the next reader will ask. Without the reason, "add refs to the digest" is
   // an obvious-looking improvement that fires on ordinary work several times a
-  // wave — which is the noise #436's third acceptance criterion rules out.
+  // fleet run — which is the noise #436's third acceptance criterion rules out.
   const rule = RULE();
   assert.match(rule, phrase("It does not cover refs, deliberately"));
   assert.match(rule, phrase("a per-gate refusal on that is noise"));

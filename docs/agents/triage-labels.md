@@ -39,7 +39,7 @@ The five `wayfinder:*` labels are mandated by `/wayfinder`'s own `SKILL.md` (`:2
 `:65`, `:113`) and were created here 2026-09-08. See `docs/agents/issue-tracker.md`
 "Wayfinding operations". A wayfinder ticket is a **decision** ticket worked one per
 session by `/wayfinder`, never an implementation ticket — but the thing keeping it
-out of a fleet wave is not its triage role. `plugin/scripts/candidates.mjs`'s `EXCLUDE`
+off a fleet run's Shortlist is not its triage role. `plugin/scripts/candidates.mjs`'s `EXCLUDE`
 negates all five `wayfinder:*` labels as their own clauses, unconditionally, so a
 wayfinder ticket never enters a candidate scan whatever role it carries. A
 `ready-for-agent` wayfinder ticket is therefore documentation of readiness, not a
