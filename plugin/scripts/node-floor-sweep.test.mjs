@@ -4,14 +4,14 @@
 // outrunning it silently.
 //
 // Four ways to red — the ticket's own three failure modes, plus #1763's:
-//   1. a shipped `.mjs` file reaches for an API above the declared floor
-//      ("every shipped .mjs file stays within the declared floor", below);
+//   1. a shipped node script reaches for an API above the declared floor
+//      ("every shipped node script stays within the declared floor", below);
 //   2. the declaration is missing or carries anything load-bearing beyond
 //      the floor itself ("package.json declares the consumer floor...");
 //   3. README's stated floor and package.json's declaration disagree
 //      ("README's stated floor agrees with package.json's declaration");
-//   4. a shipped `.mjs` file imports a relative module that is not `.mjs`
-//      ("every relative import in a shipped .mjs file names a .mjs module").
+//   4. a shipped node script imports a relative module that is not `.mjs`
+//      ("every relative import in a shipped node script names a .mjs module").
 //      Not an API but a LOADER behaviour: nothing that ships sets a `type`
 //      field (the root package.json never reaches an installed plugin, whose
 //      root is `plugin/`, and carries only `engines` anyway — check 2), so a
@@ -31,9 +31,21 @@
 //      this scan, where it can COIN a fake `from "<rel>"` beside a real,
 //      correct import on the same line (measured: appending `// … from
 //      "./old.js"` after a genuine `.mjs` import falsely reds this check).
+// "Shipped node script" is `trackedNodeScripts()`'s answer (repo-root.mjs):
+// every tracked `.mjs`, and every other tracked file whose first line is a
+// node shebang. Until #1855 the sweep read the `.mjs` half alone, so the three
+// extensionless entrypoints that run under the consumer's own node exactly as
+// the `.mjs` files do — `fleet-run` (the Resolver, copied to
+// `~/.fleet/bin/fleet-run`), `fleet-bootstrap`, `fleet-provenance` — could
+// reach above the floor unseen (measured: `Object.groupBy(` appended to
+// `fleet-run` left this suite green). They are CommonJS, so every table entry
+// below that is matched at a module site matches its `require(…)` form too.
+// `plugin/workflows/*.js` stays out: ESM a harness runs and plain node never
+// loads, so no node floor applies to it.
 // Non-vacuity is asserted explicitly, same discipline every other sweep in
 // this directory uses (see repo-root.mjs's own header, `check-tracked.sh`):
-// an empty shipped-file list is a broken glob, not "nothing to check".
+// an empty shipped-file list is a broken glob, not "nothing to check" — and
+// so, for each half of it, is an empty half.
 //
 // THE DETECTION MECHANISM, and its limits, stated plainly because this is
 // the hardest call in the ticket:
@@ -79,13 +91,23 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { repoRoot, skipWithoutRepo, trackedMjsScripts } from "./repo-root.mjs";
+import { repoRoot, skipWithoutRepo, trackedNodeScripts } from "./repo-root.mjs";
 import { stripComments } from "./strip-comments.mjs";
 
 const DIR = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = repoRoot(DIR);
 const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT, "the node-floor sweep");
-const MJS_FILES = ROOT === null ? [] : trackedMjsScripts(ROOT);
+const NODE_SCRIPTS = ROOT === null ? [] : trackedNodeScripts(ROOT);
+
+// A named binding taken from builtin `mod` at its MODULE SITE, in either module
+// system: ESM's `import { name } from "mod"`, or the CommonJS twin the
+// extensionless entrypoints write (#1855), `const { name } = require("mod")`.
+function moduleSiteBinding(name, mod) {
+  return new RegExp(
+    `import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from\\s*["']${mod}["']`
+    + `|\\b(?:const|let|var)\\s*\\{[^{}]*\\b${name}\\b[^{}]*\\}\\s*=\\s*require\\(\\s*["']${mod}["']\\s*\\)`,
+  );
+}
 
 // name: what a failure message calls it. pattern: non-global regex over
 // COMMENT-STRIPPED source. since: "MAJOR.MINOR.PATCH", the first Node
@@ -102,14 +124,10 @@ const API_FLOORS = [
   // Node v17.0.0 added the global structuredClone().
   { name: "structuredClone()", pattern: /\bstructuredClone\(/, since: "17.0.0" },
   // node/#46718: "util,doc: mark parseArgs() as stable", landed in Node
-  // v20.0.0 (SEMVER-MAJOR). Matched at the import site, not the bare word,
-  // so a comment discussing the sibling module (arg.mjs does, at length)
-  // cannot trip it even unstripped.
-  {
-    name: "util.parseArgs()",
-    pattern: /import\s*\{[^}]*\bparseArgs\b[^}]*\}\s*from\s*["']node:util["']/,
-    since: "20.0.0",
-  },
+  // v20.0.0 (SEMVER-MAJOR). Matched at the import or require site, not the
+  // bare word, so a comment discussing the sibling module (arg.mjs does, at
+  // length) cannot trip it even unstripped.
+  { name: "util.parseArgs()", pattern: moduleSiteBinding("parseArgs", "node:util"), since: "20.0.0" },
   // ES2023 array copy methods — Node 20+ per release notes; Node 18/19 ship
   // only findLast/findLastIndex from the same proposal.
   { name: "Array.prototype.toSorted()", pattern: /\.toSorted\(/, since: "20.0.0" },
@@ -127,16 +145,12 @@ const API_FLOORS = [
   // Using the introduction version as the floor: it exists and is usable
   // (with an experimental warning) from 20.12.0, and this table's job is
   // "what version must a consumer run", not "warning-free". Matched at the
-  // import site, same discipline as util.parseArgs() above: 20.12.0 sits
-  // ABOVE this table's other unanchored bare-call patterns' `since` values,
-  // so a same-named local (a custom `styleText`) is the one heuristic entry
-  // that's actually live today, not merely theoretical — anchoring it is
+  // import or require site, same discipline as util.parseArgs() above: 20.12.0
+  // sits ABOVE this table's other unanchored bare-call patterns' `since`
+  // values, so a same-named local (a custom `styleText`) is the one heuristic
+  // entry that's actually live today, not merely theoretical — anchoring it is
   // not optional.
-  {
-    name: "util.styleText()",
-    pattern: /import\s*\{[^}]*\bstyleText\b[^}]*\}\s*from\s*["']node:util["']/,
-    since: "20.12.0",
-  },
+  { name: "util.styleText()", pattern: moduleSiteBinding("styleText", "node:util"), since: "20.12.0" },
   // Node v21.0.0 shipped Object.groupBy/Map.groupBy (array grouping).
   { name: "Object.groupBy()", pattern: /\bObject\.groupBy\(/, since: "21.0.0" },
   { name: "Map.groupBy()", pattern: /\bMap\.groupBy\(/, since: "21.0.0" },
@@ -149,9 +163,13 @@ const API_FLOORS = [
   // unflagged (still experimental) in Node v22.13.0 (nodejs/node#55890).
   // "since" is the unflagged version, same rule this table's header states
   // and Promise.withResolvers() above already follows: a shipped `import
-  // ... from "node:sqlite"` on 22.5.0-22.12.x still needs the flag and
-  // would throw ERR_UNKNOWN_BUILTIN_MODULE without it.
-  { name: "node:sqlite", pattern: /from\s*["']node:sqlite["']/, since: "22.13.0" },
+  // ... from "node:sqlite"`, or `require("node:sqlite")`, on 22.5.0-22.12.x
+  // still needs the flag and would throw ERR_UNKNOWN_BUILTIN_MODULE without it.
+  {
+    name: "node:sqlite",
+    pattern: /from\s*["']node:sqlite["']|\brequire\(\s*["']node:sqlite["']\s*\)/,
+    since: "22.13.0",
+  },
 ];
 
 /** "MAJOR.MINOR.PATCH" -> [major, minor, patch], or throws. */
@@ -263,10 +281,18 @@ function nonMjsRelativeImports(source) {
   return hits;
 }
 
-test("the sweep sees the scripts it is supposed to police", { skip: SKIP_WITHOUT_REPO }, () => {
+// Both halves, not their sum: the `.mjs` half alone is dozens of files, so a
+// shebang probe that silently lost every extensionless entrypoint (#1855's
+// own gap) would leave a total count comfortably non-empty.
+test("the sweep sees the scripts it is supposed to police — .mjs modules and node-shebang entrypoints both", { skip: SKIP_WITHOUT_REPO }, () => {
   assert.ok(
-    MJS_FILES.length > 0,
-    `trackedMjsScripts(ROOT) returned zero shipped .mjs files — this is a broken glob/git call, and every check below would pass vacuously over an empty list`,
+    NODE_SCRIPTS.some((f) => f.endsWith(".mjs")),
+    `trackedNodeScripts(ROOT) returned zero shipped .mjs files — this is a broken glob/git call, and every check below would pass vacuously over them`,
+  );
+  assert.ok(
+    NODE_SCRIPTS.some((f) => !f.endsWith(".mjs")),
+    "trackedNodeScripts(ROOT) returned no node-shebang entrypoint — fleet-run, fleet-bootstrap and fleet-provenance are three, "
+    + "so this is a broken shebang probe, and every check below would pass vacuously over them (#1855)",
   );
 });
 
@@ -299,10 +325,10 @@ test("README's stated floor agrees with package.json's declaration", { skip: SKI
   );
 });
 
-test("every shipped .mjs file stays within the declared floor", { skip: SKIP_WITHOUT_REPO }, () => {
+test("every shipped node script stays within the declared floor", { skip: SKIP_WITHOUT_REPO }, () => {
   const declared = parseDeclaredFloor(readFileSync(join(ROOT, "package.json"), "utf8"));
   const violations = [];
-  for (const rel of MJS_FILES) {
+  for (const rel of NODE_SCRIPTS) {
     const source = readFileSync(join(ROOT, rel), "utf8");
     for (const hit of scanFileViolations(source, declared.version)) {
       violations.push(`${rel}: uses ${hit.name} (Node >=${hit.since}) above the declared floor (${declared.raw})`);
@@ -315,9 +341,9 @@ test("every shipped .mjs file stays within the declared floor", { skip: SKIP_WIT
   );
 });
 
-test("every relative import in a shipped .mjs file names a .mjs module", { skip: SKIP_WITHOUT_REPO }, () => {
+test("every relative import in a shipped node script names a .mjs module", { skip: SKIP_WITHOUT_REPO }, () => {
   const violations = [];
-  for (const rel of MJS_FILES) {
+  for (const rel of NODE_SCRIPTS) {
     for (const spec of nonMjsRelativeImports(readFileSync(join(ROOT, rel), "utf8"))) {
       violations.push(`${rel}: imports ${spec}`);
     }
@@ -363,6 +389,25 @@ test("scanFileViolations matches util.styleText() only at the import site, not a
   const real = 'import { styleText } from "node:util";\nconsole.log(styleText("red", "x"));\n';
   const names = scanFileViolations(real, parseVersion("16.0.0")).map((h) => h.name);
   assert.ok(names.includes("util.styleText()"), `expected util.styleText() flagged, got: ${names.join(", ")}`);
+});
+
+// #1855: the extensionless entrypoints this sweep reads are CommonJS, so each
+// entry matched at a MODULE SITE needs its `require` form as well — an
+// `import … from` shape can never match a file with no `import` in it.
+test("scanFileViolations reds the CommonJS require site of every module-site API", () => {
+  const src = 'const { parseArgs } = require("node:util");\n'
+    + 'const { inspect, styleText: paint } = require("node:util");\n'
+    + 'const { DatabaseSync } = require("node:sqlite");\n';
+  const names = scanFileViolations(src, parseVersion("16.0.0")).map((h) => h.name).sort();
+  assert.deepEqual(names, ["node:sqlite", "util.parseArgs()", "util.styleText()"]);
+});
+
+test("scanFileViolations passes a CommonJS require of node:util taking neither API, beside same-named locals", () => {
+  const src = 'const { inspect } = require("node:util");\n'
+    + "function styleText(label) { return `[${label}]`; }\n"
+    + "const parseArgs = (argv) => argv.slice(2);\n"
+    + "module.exports = { styled: styleText(inspect(parseArgs(process.argv))) };\n";
+  assert.deepEqual(scanFileViolations(src, parseVersion("16.0.0")), []);
 });
 
 test("parseDeclaredFloor refuses a missing engines.node declaration", () => {

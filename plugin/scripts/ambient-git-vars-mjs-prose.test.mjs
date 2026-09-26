@@ -148,7 +148,7 @@ const countGitEnvCalls = (src) =>
 const COVERED_MJS = {
   // Three separate `spawnSync`/`execFileSync` calls, no shared wrapper —
   // `isTrackedBy()`, `repoRoot()`, `trackedFiles()` (behind both
-  // `trackedShellScripts()` and `trackedMjsScripts()`) — each with its
+  // `trackedShellScripts()` and `trackedNodeScripts()`) — each with its
   // own `gitEnv(…)` call. Measured per site in repo-root.test.mjs: GIT_DIR
   // and GIT_WORK_TREE are each exposed on at least one of the three, and
   // `isTrackedBy`'s absolute pathspec is exposed on BOTH — no half here is

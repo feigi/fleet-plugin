@@ -33,7 +33,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ownPluginName, repoRoot, skipWithoutRepo, trackedMjsScripts, trackedShellScripts } from "./repo-root.mjs";
+import { ownPluginName, repoRoot, skipWithoutRepo, trackedNodeScripts, trackedShellScripts } from "./repo-root.mjs";
 
 const DIR = fileURLToPath(new URL(".", import.meta.url));
 
@@ -173,28 +173,30 @@ function installedCacheCopy(foreignRoot, { tracked }) {
 }
 
 /**
- * Writes each of `files` (repo-relative, parent directories created) empty
- * under `dir` and stages it. Staged is enough for `git ls-files` (the same
- * measurement `selfContainedFixture` relies on), so no commit.
+ * Writes each of `files` (repo-relative, parent directories created) under
+ * `dir` and stages it — empty, or `contents[file]` where the caller names one.
+ * Staged is enough for `git ls-files` (the same measurement
+ * `selfContainedFixture` relies on), so no commit.
  */
-function track(dir, files) {
+function track(dir, files, contents = {}) {
   for (const f of files) {
     mkdirSync(dirname(join(dir, f)), { recursive: true });
-    writeFileSync(join(dir, f), "");
+    writeFileSync(join(dir, f), contents[f] ?? "");
   }
   execFileSync("git", ["add", "--", ...files], { cwd: dir, env: ENV });
 }
 
 /**
- * A git repository tracking `files`, plus an UNTRACKED `scratch.mjs` at its
- * top — a module nobody committed is not what ships, so it is on disk for a
- * directory walk to find and must never reach an answer. Returns `{ dir }`.
+ * A git repository tracking `files` (written as `track` writes them), plus an
+ * UNTRACKED `scratch.mjs` at its top — a module nobody committed is not what
+ * ships, so it is on disk for a directory walk to find and must never reach
+ * an answer. Returns `{ dir }`.
  */
-function repoTracking(t, files) {
+function repoTracking(t, files, contents = {}) {
   const { dir } = noRepo(t);
   execFileSync("git", ["init", "-q", "-b", "main", dir], { env: ENV });
   assert.ok(existsSync(join(dir, ".git")), "fixture was not initialised as a repository");
-  track(dir, files);
+  track(dir, files, contents);
   writeFileSync(join(dir, "scratch.mjs"), "");
   return { dir };
 }
@@ -245,7 +247,7 @@ test("repoRoot answers the root where there IS one, and skipWithoutRepo then dec
 // Measured directly against this file: an ambient GIT_DIR or GIT_WORK_TREE
 // (a git hook, `rebase --exec`, `bisect run`) corrupts each call in its own
 // distinct way, silently, at exit 0. The four fixtures below isolate each
-// one, and a fifth reaches the third again through `trackedMjsScripts`;
+// one, and a fifth reaches the third again through `trackedNodeScripts`;
 // `noRepo(t)` doubles as "give me a disposable real repository" here,
 // since none of them needs a repo-LESS fixture.
 test("repoRoot()'s own rev-parse: an inherited GIT_WORK_TREE substitutes a foreign toplevel for the caller's own", async (t) => {
@@ -318,13 +320,13 @@ test("trackedShellScripts: an inherited GIT_DIR must not substitute another repo
 });
 
 // The same call reached through the sibling export — both lists come out of
-// one `trackedFiles` — so this pins the scrub for the `.mjs` answer rather
-// than a second site. The other repository tracks a module of its own: the
-// realistic shape (a hook's GIT_DIR names a repository with files in it), and
-// the one where the substituted list is non-empty, i.e. the one a caller's
+// one `trackedFiles` — so this pins the scrub for the node-script answer
+// rather than a second site. The other repository tracks a module of its own:
+// the realistic shape (a hook's GIT_DIR names a repository with files in it),
+// and the one where the substituted list is non-empty, i.e. the one a caller's
 // non-vacuity guard waves through. No GIT_WORK_TREE twin: measured inert for
 // this call (see `trackedFiles`), so a fixture for it could not red.
-test("trackedMjsScripts: an inherited GIT_DIR must not substitute another repository's tracked *.mjs list for this one", (t) => {
+test("trackedNodeScripts: an inherited GIT_DIR must not substitute another repository's tracked list for this one", (t) => {
   const { dir } = repoTracking(t, ["a.mjs", "a.test.mjs"]);
   const { dir: otherRepo } = repoTracking(t, ["foreign.mjs"]);
 
@@ -333,26 +335,80 @@ test("trackedMjsScripts: an inherited GIT_DIR must not substitute another reposi
   process.env.GIT_DIR = join(otherRepo, ".git");
   delete process.env.GIT_WORK_TREE;
 
-  assert.deepEqual(trackedMjsScripts(dir), ["a.mjs"],
-    "an ambient GIT_DIR must not substitute the OTHER repository's tracked *.mjs list for this one");
+  assert.deepEqual(trackedNodeScripts(dir), ["a.mjs"],
+    "an ambient GIT_DIR must not substitute the OTHER repository's tracked list for this one");
 });
 
-// The answer itself, for a root repoRoot vouched for: every tracked `.mjs` the
-// tree ships, and nothing else. Each test file sits beside a shipped module
-// its name extends. `latest.mjs` is the boundary on the other side — it ends
-// in `test.mjs` without being a test file, so a rule keyed on that looser
-// suffix drops a shipped module — and the untracked `scratch.mjs` is what a
-// directory walk standing in for git would wrongly add.
-test("trackedMjsScripts answers the shipped *.mjs set for a verified root — test files excluded, shipped ones kept", async (t) => {
+// The answer itself, for a root repoRoot vouched for: every tracked file the
+// consumer's own `node` executes, and nothing else — a `.mjs` by its
+// extension, any other file by a node shebang on its first line. #1855's own
+// case is `scripts/fleet-tool`, the shape of this repository's extensionless
+// entrypoints (`fleet-run`, `fleet-bootstrap`, `fleet-provenance`), which an
+// extension-only rule never listed. `eval-only.js` is the other half of that
+// ticket: review-pr.js's shape, ESM in a `.js` with no shebang, run only by a
+// harness and never by plain node, so no extension rule may pull it in. Each
+// test file sits beside a shipped module its name extends — one carries a
+// node shebang, and is still a test. `latest.mjs` is the boundary on the other
+// side — it ends in `test.mjs` without being a test file, so a rule keyed on
+// that looser suffix drops a shipped module — and the untracked `scratch.mjs`
+// and `scratch-tool` are what a directory walk standing in for git would
+// wrongly add.
+test("trackedNodeScripts answers the shipped node-script set for a verified root — .mjs and node-shebang files, test files excluded", async (t) => {
   const { dir, scriptsDir, repoRoot: fixtureRepoRoot } = await selfContainedFixture(t);
-  track(dir, ["scripts/latest.mjs", "scripts/lib/deep.mjs", "scripts/repo-root.test.mjs", "scripts/lib/deep.test.mjs"]);
+  track(dir, [
+    "scripts/latest.mjs", "scripts/lib/deep.mjs", "scripts/repo-root.test.mjs", "scripts/lib/deep.test.mjs",
+    "scripts/fleet-tool", "workflows/eval-only.js",
+  ], {
+    "scripts/lib/deep.test.mjs": "#!/usr/bin/env node\n",
+    "scripts/fleet-tool": "#!/usr/bin/env node\n\"use strict\";\n",
+    "workflows/eval-only.js": "export const meta = {};\n",
+  });
   writeFileSync(join(scriptsDir, "scratch.mjs"), "");
+  writeFileSync(join(scriptsDir, "scratch-tool"), "#!/usr/bin/env node\n");
 
   const root = fixtureRepoRoot(scriptsDir);
   assert.equal(root, dir);
-  assert.deepEqual(trackedMjsScripts(root).sort(),
-    ["scripts/git-env.mjs", "scripts/latest.mjs", "scripts/lib/deep.mjs", "scripts/repo-root.mjs"],
-    "the shipped set is every tracked *.mjs, at any depth, less the *.test.mjs beside them");
+  assert.deepEqual(trackedNodeScripts(root).sort(),
+    ["scripts/fleet-tool", "scripts/git-env.mjs", "scripts/latest.mjs", "scripts/lib/deep.mjs", "scripts/repo-root.mjs"],
+    "the shipped set is every tracked *.mjs and node-shebang file, at any depth, less the *.test.mjs beside them");
+});
+
+// Which first lines hand a file to node. Through `env`, through `env -S` with
+// the interpreter's own flags, and by a direct interpreter path are all node,
+// whatever the file's extension; `sh`, `bun` and `nodemon` are other programs,
+// and a shebang that is not the FIRST line is no shebang at all. An empty
+// file, and one with no shebang, are simply not scripts.
+test("trackedNodeScripts reads a non-.mjs file's first line: node by any shebang spelling, nothing else", (t) => {
+  const node = {
+    "bin/env": "#!/usr/bin/env node\n",
+    "bin/env-flags": "#!/usr/bin/env -S node --no-warnings\n",
+    "bin/direct": "#!/usr/local/bin/node\n",
+    "bin/hook.js": "#!/usr/bin/env node\n",
+  };
+  const other = {
+    "bin/check.sh": "#!/bin/sh\n",
+    "bin/bun-tool": "#!/usr/bin/env bun\n",
+    "bin/watch": "#!/usr/bin/env nodemon\n",
+    "docs/notes.md": "# notes\n#!/usr/bin/env node\n",
+    "LICENSE": "MIT\n",
+    "bin/empty": "",
+  };
+  const { dir } = repoTracking(t, [...Object.keys(node), ...Object.keys(other)], { ...node, ...other });
+
+  assert.deepEqual(trackedNodeScripts(dir).sort(), Object.keys(node).sort(),
+    "exactly the files whose first line runs node — no other interpreter, no later line, no extension rule");
+});
+
+// A tracked file missing from the working tree — an `rm` not yet committed —
+// has no first line to read. That is not a node script in this tree, and must
+// not throw: every sweep calls this at module scope, where a throw fails the
+// whole file over an unrelated deleted document.
+test("trackedNodeScripts passes over a tracked file the working tree no longer has", (t) => {
+  const { dir } = repoTracking(t, ["a.mjs", "NOTES"], { "NOTES": "notes\n" });
+  rmSync(join(dir, "NOTES"));
+
+  assert.deepEqual(trackedNodeScripts(dir), ["a.mjs"],
+    "a tracked file absent from the working tree is no node script here, and no reason to fail the listing");
 });
 
 // The half a skip cannot pin from inside itself, and the exact conflation #1149
@@ -375,14 +431,15 @@ test("an empty tracked-script list is NOT a skip — the sweep still runs and it
 });
 
 // The sibling's empty answer: a repository whose only tracked `.mjs` are test
-// files ships none, and says so with `[]` — not `null`, not a throw, not a
-// skip. Judging that emptiness is the importing sweep's non-vacuity guard's
-// job, exactly as for the shell list above. The untracked `scratch.mjs`
-// beside them keeps "none tracked" from passing for "none on disk".
-test("trackedMjsScripts: a repository that ships no *.mjs answers an empty list, not a skip", (t) => {
-  const { dir } = repoTracking(t, ["a.test.mjs", "lib/b.test.mjs"]);
+// files, and whose only other file runs `sh`, ships no node script, and says so
+// with `[]` — not `null`, not a throw, not a skip. Judging that emptiness is
+// the importing sweep's non-vacuity guard's job, exactly as for the shell list
+// above. The untracked `scratch.mjs` beside them keeps "none tracked" from
+// passing for "none on disk".
+test("trackedNodeScripts: a repository that ships no node script answers an empty list, not a skip", (t) => {
+  const { dir } = repoTracking(t, ["a.test.mjs", "lib/b.test.mjs", "run.sh"], { "run.sh": "#!/bin/sh\n" });
 
-  assert.deepEqual(trackedMjsScripts(dir), [], "a repository with only test *.mjs tracked ships none");
+  assert.deepEqual(trackedNodeScripts(dir), [], "a repository with only test *.mjs and a sh script tracked ships none");
   assert.equal(skipWithoutRepo(dir, "the tests"), false,
     "an empty match list inside a real repository is a broken glob or path join, "
     + "and must reach the caller's guard as a FAILURE");
@@ -606,9 +663,9 @@ test("trackedShellScripts refuses a root repoRoot did not answer", () => {
 
 // The same guard for the sibling, which shares it — and needs it for the same
 // reason: an absorbed null lists whatever repository the process sits in.
-test("trackedMjsScripts refuses a root repoRoot did not answer", () => {
-  assert.throws(() => trackedMjsScripts(null), /must come from repoRoot/);
-  assert.throws(() => trackedMjsScripts(undefined), /must come from repoRoot/);
+test("trackedNodeScripts refuses a root repoRoot did not answer", () => {
+  assert.throws(() => trackedNodeScripts(null), /must come from repoRoot/);
+  assert.throws(() => trackedNodeScripts(undefined), /must come from repoRoot/);
 });
 
 // And the guard must not fire in the tree it ships in.
