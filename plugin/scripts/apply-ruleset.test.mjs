@@ -343,7 +343,7 @@ test("a missing jq is refused by name", (t) => {
 
 // ---- --check: the same comparison, asked by something that cannot write ----
 //
-// #1710. The five contexts ADR 0007 added sat in the spec and not in the
+// #1710. The four contexts ADR 0007 added sat in the spec and not in the
 // live gate for the 4d22h between ratification and reconcile, because
 // nothing reads the gate unless a person decides to. What makes the flag
 // worth its branch is the third status: an unattended caller holds no
