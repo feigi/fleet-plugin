@@ -31,7 +31,7 @@ _Avoid_: OS, host, environment
 The exact node version `.nvmrc` holds — the runtime this repo's own suite is
 developed and verified against in CI. It makes no promise to a consumer; that is
 the **Consumer floor** (ADR 0010).
-_Avoid_: supported version, minimum node, node version (bare)
+_Avoid_: supported version, minimum node, node version (bare), runtime (bare)
 
 **Consumer floor**:
 The oldest node the shipped scripts support under a consumer's own `node`,

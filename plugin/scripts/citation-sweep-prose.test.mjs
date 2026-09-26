@@ -60,12 +60,15 @@ const read = (...segments) => readFileSync(join(REPO, ...segments), "utf8");
 // depend on where the line happened to break.
 const normalize = (text) => text.replace(/^[ \t]*(?:\/\/|#) ?/gm, "").replace(/\s+/g, " ");
 
-const ADRS = readdirSync(join(REPO, "..", "docs", "adr"));
+const ADRS = readdirSync(join(REPO, "..", "docs", "adr"), { withFileTypes: true })
+  .filter((entry) => entry.isFile())
+  .map((entry) => entry.name);
 const ADR_POINTER = /\bADR (\d{4})\b/g;
 
 // Null when exactly one `<number>-*.md` answers to the pointer, else the
 // reason. Takes a listing rather than reading docs/adr/ itself, so the tests
-// below can hand it the renamed and doubled trees this repo does not hold.
+// below can hand it the renamed, emptied, and doubled trees this repo does
+// not hold.
 function adrFault(number, names) {
   const hits = names.filter((name) => name.startsWith(`${number}-`) && name.endsWith(".md"));
   if (hits.length === 1) return null;
