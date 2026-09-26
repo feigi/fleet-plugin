@@ -531,8 +531,10 @@ const FILES = [
   // that span, for the reason ci-comment-rot-prose's windowClaimFault keeps
   // its distinction inside one sentence: read any wider, an unrelated mention
   // nearby supplies it. The cost of that ceiling is that a paraphrase scoping
-  // the claim only in the NEXT sentence reds too. No live needle, for the
-  // reason #1756's gives.
+  // the claim only in the NEXT sentence reds too — and so does one scoping it
+  // across a mid-sentence period SENTENCE_END still counts as an end: "etc.",
+  // an ellipsis, any abbreviation off its list (#1959). No live needle, for
+  // the reason #1756's gives.
   {
     path: ADR_0010,
     stale: [
