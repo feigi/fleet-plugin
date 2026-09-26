@@ -128,7 +128,8 @@ export function jsSelfLocationViolation(src) {
 // sh by extension or `#!/bin/sh`; js by `.mjs` extension (excluding tests,
 // filtered by the caller) or a node shebang for the three extensionless
 // Resolver scripts; anything else (board.html) is not a script this rule
-// has an opinion about.
+// has an opinion about — and neither is one of those three once it loses
+// its shebang, which is why the sweep below names them (#1923).
 function classifyScript(rel, content) {
   if (rel.endsWith(".sh")) return "sh";
   if (rel.endsWith(".mjs")) return "js";
@@ -138,6 +139,20 @@ function classifyScript(rel, content) {
   return null;
 }
 
+// The extensionless entrypoints, by path — the same three
+// node-floor-sweep.test.mjs names in its own NODE_SHEBANG_ENTRYPOINTS
+// (#1884). classifyScript() finds them by their first line alone, a line CI
+// never needs — .github/scripts/install-and-smoke.sh runs all three as
+// `node <path>`, so losing it breaks only direct-exec callers at run time —
+// so one that lost it came back `null` and was skipped by the sweep below
+// without a word. The sweep's `files.length > 0` guard cannot notice, since it
+// counts the tracked list BEFORE classification, where the dozens of
+// `.sh`/`.mjs` files, classified by extension, keep it non-empty. Measured
+// (#1923): `fleet-run` with its shebang deleted and a
+// `git rev-parse` call anchored at `cwd: __dirname` appended left this
+// suite green; with the shebang kept, the same call fails it.
+const NODE_SHEBANG_ENTRYPOINTS = ["plugin/scripts/fleet-bootstrap", "plugin/scripts/fleet-provenance", "plugin/scripts/fleet-run"];
+
 test(
   "no tracked production script under plugin/scripts/ derives the repo it operates on from its own location",
   { skip: SKIP_WITHOUT_REPO },
@@ -145,13 +160,27 @@ test(
     const files = trackedPaths(ROOT, ["plugin/scripts/*"]).filter((f) => !f.endsWith(".test.mjs"));
     assert.ok(files.length > 0, "the instrument set must not be empty");
     const violations = [];
+    const kinds = new Map();
     for (const rel of files) {
       const content = readFileSync(join(ROOT, rel), "utf8");
       const kind = classifyScript(rel, content);
+      kinds.set(rel, kind);
       if (kind === null) continue;
       const v = kind === "sh" ? shSelfLocationViolation(content) : jsSelfLocationViolation(content);
       if (v) violations.push(`${rel}: ${v}`);
     }
+    // Over what THIS loop classified, not a second pass beside it: `js` is
+    // the only kind that runs an entrypoint through the js detector.
+    const unpoliced = NODE_SHEBANG_ENTRYPOINTS
+      .filter((rel) => kinds.get(rel) !== "js")
+      .map((rel) => `${rel} (${kinds.has(rel) ? `classified ${kinds.get(rel)}` : "not tracked"})`);
+    assert.deepEqual(
+      unpoliced,
+      [],
+      "an extensionless entrypoint is classified js by its node shebang alone, so one that lost that first line "
+      + "(or a broken shebang probe in classifyScript) escapes this rule while it still runs as `node <path>`. "
+      + "Restore the shebang; or, if the file was renamed or retired, update NODE_SHEBANG_ENTRYPOINTS (#1884, #1923)",
+    );
     assert.deepEqual(
       violations,
       [],
