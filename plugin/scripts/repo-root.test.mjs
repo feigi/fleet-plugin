@@ -498,16 +498,17 @@ test("trackedNodeScripts reads a first line no further than its cap — one that
 // ACCEPT half: its text is there to read.
 test("every export passes over a tracked path the working tree holds no regular file at", (t) => {
   const { dir } = repoTracking(t, ["kept.sh", "kept.mjs", "NOTES", "gone.sh", "gone.mjs", "gone", "now-a-dir.sh", "was-a-dir/x.sh"]);
-  symlinkSync("kept.sh", join(dir, "link-to-file.sh"));
-  symlinkSync("nowhere.sh", join(dir, "dangling.sh"));
-  // Self-referential, and a two-link cycle: each resolves to itself forever.
-  // The extensionless one is what `trackedNodeScripts` would open to read a
-  // shebang from, where a `.mjs` is listed by its extension alone.
-  for (const f of ["loop.sh", "loop.mjs", "loop"]) symlinkSync(f, join(dir, f));
-  symlinkSync("cycle-b.sh", join(dir, "cycle-a.sh"));
-  symlinkSync("cycle-a.sh", join(dir, "cycle-b.sh"));
-  execFileSync("git", ["add", "--", "link-to-file.sh", "dangling.sh", "loop.sh", "loop.mjs", "loop", "cycle-a.sh", "cycle-b.sh"],
-    { cwd: dir, env: ENV });
+  // Each link and what it names. Self-referential, and a two-link cycle: each
+  // resolves to itself forever. The extensionless one is what
+  // `trackedNodeScripts` would open to read a shebang from, where a `.mjs` is
+  // listed by its extension alone.
+  const links = {
+    "link-to-file.sh": "kept.sh", "dangling.sh": "nowhere.sh",
+    "loop.sh": "loop.sh", "loop.mjs": "loop.mjs", "loop": "loop",
+    "cycle-a.sh": "cycle-b.sh", "cycle-b.sh": "cycle-a.sh",
+  };
+  for (const [link, target] of Object.entries(links)) symlinkSync(target, join(dir, link));
+  execFileSync("git", ["add", "--", ...Object.keys(links)], { cwd: dir, env: ENV });
   for (const f of ["gone.sh", "gone.mjs", "gone", "now-a-dir.sh"]) rmSync(join(dir, f));
   mkdirSync(join(dir, "now-a-dir.sh"));
   rmSync(join(dir, "was-a-dir"), { recursive: true });
