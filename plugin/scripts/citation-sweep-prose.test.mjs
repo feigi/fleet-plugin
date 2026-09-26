@@ -266,12 +266,13 @@ const FILES = [
   // #1874. Two more of the same, adjacent to #1756's. The Status line and a
   // Consequences bullet located the pin's owner comment in ci.yml as the
   // "first" `setup-node`, a position any `setup-node` step added above the
-  // `check` job's silently re-points; both now name the `check` job instead,
-  // and the positional form is banned. And the evidence counted "8 releases"
-  // and a security release "since the pin" without saying from what: 8 is the
-  // releases past `26.5.0`, three of them — the security release among them —
-  // already out when the pin was set. Those two wordings carry no live
-  // needle, for the reason #1756's gives.
+  // `check` job's silently re-points; both now name the `check` job instead.
+  // One needle serves both sites, so it is the ban on the positional form, not
+  // the needle, that reds either one reverting. And the evidence counted "8
+  // releases" and a security release "since the pin" without saying from
+  // what: 8 is the releases past `26.5.0`, three of them — the security
+  // release among them — already out when the pin was set. Those two
+  // evidence wordings carry no live needle, for the reason #1756's gives.
   {
     path: ["..", "docs", "adr", "0010-the-node-pin-stays-exact-and-a-bot-moves-it.md"],
     stale: [
