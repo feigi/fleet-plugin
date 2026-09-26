@@ -77,7 +77,11 @@ import { PR_MENTION } from "./fleet-tick.mjs";
 // that PR existed.
 const EXCLUDED_ROW = /^#[0-9]+[ \t]+excluded(?=[ \t]|$)([\s\S]*)$/;
 const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
-const REVIEW = /^review=(?:wf|member|fallback):([^=\s]+?)(=failed)?$/;
+// One pattern names every `review=` kind this module reads and captures which
+// one matched, so parseRow tells a Workflow from a runner by that capture
+// rather than by scanning the token a second time. All three kinds settle
+// `=failed` (amendment 5a); only `member`/`fallback` name a runner.
+const REVIEW = /^review=(wf|member|fallback):([^=\s]+?)(=failed)?$/;
 
 // #1843: which of two well-formed impl tokens is the later attempt for THIS
 // row's ticket. A token whose number matches the row's own ticket always
@@ -91,8 +95,8 @@ const REVIEW = /^review=(?:wf|member|fallback):([^=\s]+?)(=failed)?$/;
 // then by letter — never off row position, so every ordering of one row's
 // same-ticket impl tokens picks the same impl/outcome/pr. Between two
 // distinct foreign numbers (a shape nothing writes), the greater number
-// wins; two copies of one name tie, and its outcome is `outcomes`' latest
-// settle.
+// wins; two copies of one name tie, and its outcome is `implOutcomes`'
+// latest settle.
 const laterAttempt = (a, b, ticket) => {
   const aOwn = a.number === ticket, bOwn = b.number === ticket;
   if (aOwn !== bOwn) return aOwn;
@@ -111,14 +115,20 @@ export function parseRow(row) {
   }
   const ex = EXCLUDED_ROW.exec(row);
 
-  // `live` holds member names in row order; `outcomes` every settled name's
-  // latest outcome. A malformed outcome is still a settle — never counted
-  // live, never decides a card — but it is not silently dropped either: it
-  // earns the row a `ledger-error` flag (deriveFlags below), the same
-  // "refuse rather than guess" contract ledger-grammar.mjs's own docstring
-  // states `.error` exists for.
+  // `live` holds live entries in row order, each one of two kinds: a
+  // ledger-grammar member (`kind: "member"`, its parsed token as `token`) or
+  // a review runner a `review=member:`/`review=fallback:` token names
+  // (`kind: "runner"`, a name and nothing else — it is no ledger-grammar
+  // member, so it has no family, number, bound, outcome or error). A runner
+  // carries no `token`, so reading a member field off one throws rather than
+  // reading `undefined`. `implOutcomes` holds each well-formed impl name's
+  // latest outcome: only an impl outcome decides a card. A malformed outcome
+  // is still a settle — never counted live, never decides a card — but it is
+  // not silently dropped either: it earns the row a `ledger-error` flag
+  // (deriveFlags below), the same "refuse rather than guess" contract
+  // ledger-grammar.mjs's own docstring states `.error` exists for.
   const live = [];
-  const outcomes = new Map();
+  const implOutcomes = new Map();
   const settled = new Set();
   let lastImpl = null; // the latest well-formed impl token (laterAttempt)
   let anyImpl = false;
@@ -132,23 +142,25 @@ export function parseRow(row) {
     const t = parseToken(tok);
     if (t) {
       if (t.error) malformed = true;
-      if (t.outcome === null) live.push(t);
+      if (t.outcome === null) live.push({ kind: "member", name: t.name, token: t });
       else settled.add(t.name);
-      if (t.outcome !== null && !t.error) outcomes.set(t.name, t.outcome);
       if (t.family === "impl") {
         anyImpl = true;
-        if (!t.error && (!lastImpl || laterAttempt(t, lastImpl, ticket))) lastImpl = t;
+        if (!t.error) {
+          if (t.outcome !== null) implOutcomes.set(t.name, t.outcome);
+          if (!lastImpl || laterAttempt(t, lastImpl, ticket)) lastImpl = t;
+        }
       }
       if (t.bound === "pr") prMember = true;
       continue;
     }
     if (tok.startsWith("review=")) {
       review = true;
-      const m = REVIEW.exec(tok);
-      if (!m?.[2]) reviewLive = true;
-      if (m && !tok.startsWith("review=wf:")) {
-        if (m[2]) settled.add(m[1]);
-        else { live.push({ name: m[1], family: "review" }); runners.push(m[1]); }
+      const [, kind, name, failed] = REVIEW.exec(tok) ?? [];
+      if (!failed) reviewLive = true;
+      if (kind && kind !== "wf") {
+        if (failed) settled.add(name);
+        else { live.push({ kind: "runner", name }); runners.push(name); }
       }
     } else if (tok.startsWith("reviewed=")) {
       reviewed = true;
@@ -156,8 +168,8 @@ export function parseRow(row) {
       runners = [];
     }
   }
-  const alive = live.filter((t) => !settled.has(t.name));
-  const implOutcome = lastImpl ? (outcomes.get(lastImpl.name) ?? null) : null;
+  const alive = live.filter((e) => !settled.has(e.name));
+  const implOutcome = lastImpl ? (implOutcomes.get(lastImpl.name) ?? null) : null;
   const prM = implOutcome && /^PR#(\d+)$/.exec(implOutcome);
   let pr = prM ? Number(prM[1]) : null;
   // #1820 amendment 2a: a row with NO impl token — a malformed one still
@@ -186,9 +198,8 @@ export function parseRow(row) {
     heldBehind: heldM ? Number(heldM[1]) : null,
     causes,
     malformed,
-    review,
     reviewed,
-    underReview: reviewLive || alive.some((t) => t.family === "fix-pr" || t.family === "finisher-pr"),
+    underReview: reviewLive || alive.some((e) => e.kind === "member" && (e.token.family === "fix-pr" || e.token.family === "finisher-pr")),
   };
 }
 
