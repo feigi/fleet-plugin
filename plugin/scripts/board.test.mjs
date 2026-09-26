@@ -495,7 +495,7 @@ test("gather: a PR row with no number is dropped, loudly, not placed as undefine
 // missing the old PR rather than passing by accident. Every invocation's
 // argv is logged, so a test can count merged reads. The driver runs the real
 // computeBoard() over gather()'s answer: the card's column is the subject.
-function gatherMerged({ rows, prs = [], prev = null, states = {}, fail = false }) {
+function gatherMerged({ rows, prs = [], prev = null, states = {}, fail = false, emptyRepo = false }) {
   const cwd = mkdtempSync(join(tmpdir(), "board-gather-merged-"));
   const bin = mkdtempSync(join(tmpdir(), "board-gather-merged-bin-"));
   const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-merged-scripts-"));
@@ -504,7 +504,7 @@ function gatherMerged({ rows, prs = [], prev = null, states = {}, fail = false }
   writeFileSync(join(scriptDir, "ledger.mjs"),
     `process.stdout.write(${JSON.stringify(JSON.stringify({ rows, filed: [], ruled: [] }))});\n`);
   const window = Array.from({ length: 100 }, (_, i) => ({ number: 5000 + i, state: "MERGED" }));
-  const config = { prs: prs.map((n) => ({ number: n, state: "OPEN", title: "t", labels: [] })), window, states, fail, log };
+  const config = { prs: prs.map((n) => ({ number: n, state: "OPEN", title: "t", labels: [] })), window, states, fail, emptyRepo, log };
   writeFileSync(join(bin, "gh"), `#!/usr/bin/env node
 const fs = require("node:fs");
 const c = ${JSON.stringify(config)};
@@ -516,6 +516,7 @@ else if (a[0] === "pr" && a[1] === "list" && a.includes("merged")) out(c.window)
 else if (a[0] === "pr" && a[1] === "list") out(c.prs);
 else if (a[0] === "api" && a[1] === "graphql") {
   if (c.fail) { process.stderr.write("gh: HTTP 502: Bad Gateway\\n"); process.exit(1); }
+  if (c.emptyRepo) { out({ data: { repository: {} } }); process.exit(0); }
   const q = a[a.indexOf("-f") + 1];
   const repository = {}; const errors = [];
   for (const [, alias, n] of q.matchAll(/(\\w+)\\s*:\\s*pullRequest\\s*\\(\\s*number\\s*:\\s*(\\d+)\\s*\\)/g)) {
@@ -628,6 +629,25 @@ test("#1840: one unresolvable number does not poison the batch — the PRs gh di
   assert.deepEqual(r.merged, [930]);
   assert.equal(r.columns[930], "MERGED");
   assert.equal(r.columns[1840], "REVIEW");
+});
+
+// #1840 review: real GitHub always answers every requested `p<N>` alias
+// (null or an object), never omits one — so `data.repository` present with
+// NONE of the requested keys is not a shape the API produces, only a
+// corrupted/truncated one, and readMerged() must not read it as "checked,
+// nothing merged": it has to fail loudly (log + carry-forward/REVIEW) the
+// same as any other unusable answer, not silently.
+test("#1840: an object data.repository naming none of the requested PRs is a failed read, not a clean zero-merged answer", () => {
+  const r = gatherMerged({
+    rows: ["#907 impl-907=PR#930", "#908 impl-908=PR#931"],
+    emptyRepo: true,
+  });
+  assert.equal(r.mergedReads.length, 1);
+  assert.deepEqual(r.merged, []);
+  assert.match(r.stderr, /merged read \(2 PRs\) failed \(exit 0\) with no usable answer/,
+    "an empty-but-object repository must still log a failed-read line, not read as a clean empty answer");
+  assert.equal(r.columns[930], "REVIEW");
+  assert.equal(r.columns[931], "REVIEW");
 });
 
 // `state` and `title` used to default to a sentinel ("UNKNOWN" / `#<number>`)

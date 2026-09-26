@@ -381,19 +381,25 @@ function ghRows(json, what) {
 // the number on stderr). Refusing that body would let one such row — a
 // typo, or an amendment-2a row keyed by an issue number — put every other
 // row PR back in REVIEW on every tick. A null alias reads as not merged,
-// which is what a failed read means for that one PR. Anything else is a
-// failed read: `[]`, and computeBoard()'s #1841 rule takes it from there.
+// which is what a failed read means for that one PR.
+//
+// Real GitHub always answers EVERY requested `p<N>` alias, null or an
+// object — never omits one — so an object naming NONE of `prNums` is not a
+// shape the API produces, only a corrupted or truncated one; `isJsonObject`
+// alone cannot tell that apart from a genuine "checked, nothing merged"
+// answer, so it is checked for too. Anything else is a failed read: `[]`,
+// and computeBoard()'s #1841 rule takes it from there.
 async function readMerged(prNums) {
   if (!prNums.length) return [];
   const fields = prNums.map((n) => `p${n}:pullRequest(number:${n}){state}`).join(" ");
   const r = await execRead("gh", ["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}",
     "-f", `query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${fields}}}`]);
   let repo;
-  try { repo = JSON.parse(r.stdout)?.data?.repository; } catch { repo = undefined; }
-  if (!isJsonObject(repo)) {
+  try { repo = JSON.parse(r.stdout)?.data?.repository; } catch {}
+  if (!isJsonObject(repo) || !prNums.some((n) => Object.prototype.hasOwnProperty.call(repo, `p${n}`))) {
     // `how` as runCiState() spells it; never r.error.message, which repeats
     // the whole query — one field per PR — into every failed tick's line.
-    const how = !r.error ? "exit 0" : r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
+    const how = r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
     console.error(`${NAME}: gh api graphql merged read (${prNums.length} PR${prNums.length === 1 ? "" : "s"}) failed (${how}) with no usable answer; they read as not merged`);
     return [];
   }

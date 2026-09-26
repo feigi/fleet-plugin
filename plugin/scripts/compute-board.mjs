@@ -329,16 +329,26 @@ function carriedMerged(prevTicket, p) {
 // #1840: the row PRs whose merged status gather() has to ask gh about this
 // tick — exactly those computeBoard() would consult `merged` for and cannot
 // already place: a row PR absent from the open list `prs`, on a row that is
-// not an Exclusion (always POOL), carries no `MERGED <sha>` token, and is
-// not carried forward as MERGED. Sorted and unique. Empty means no merged
-// read is needed at all. `prev` is the previous board, as computeBoard()
-// takes it.
+// not an Exclusion (always POOL), carries no `MERGED <sha>` token, has a PR
+// at all, and is not carried forward as MERGED. Sorted and unique. Empty
+// means no merged read is needed at all. `prev` is the previous board, as
+// computeBoard() takes it.
+//
+// `Number.isSafeInteger(p.pr)` excludes a row whose PR mention is 22+ digits:
+// `Number()` renders it in exponential form (`1e+21`), which is not a valid
+// `pullRequest(number:)` argument/alias and fails gh's WHOLE batched query
+// (measured: `p1e+21:pullRequest(number:1e+21)` gets GitHub's parser
+// rejecting the query outright — no `data` at all, unlike a merely
+// nonexistent PR number, which resolves to a per-alias NOT_FOUND beside a
+// usable body). Leaving it out of `need` costs that one row the REVIEW it
+// would get from a failed batch anyway, and keeps every other row PR's
+// lookup intact.
 export function mergedReadPrs({ ledger, prs, prev }) {
   const open = new Set(prs.map((p) => p.number));
   const prevByIssue = new Map((prev?.tickets || []).map((t) => [t.issue, t]));
   const need = new Set();
   for (const p of (ledger.rows || []).map(parseRow).filter(Boolean)) {
-    if (p.excluded || p.merged || p.pr == null || open.has(p.pr)) continue;
+    if (p.excluded || p.merged || p.pr == null || !Number.isSafeInteger(p.pr) || open.has(p.pr)) continue;
     if (carriedMerged(prevByIssue.get(p.issue), p)) continue;
     need.add(p.pr);
   }

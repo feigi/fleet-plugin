@@ -725,6 +725,24 @@ test("#1840: mergedReadPrs is exactly the row PRs whose column the merged read c
   assert.deepEqual([...moved].sort((a, b) => a - b), need);
 });
 
+// #1840 review: a ledger row whose PR mention is 22+ digits parses (via
+// `Number()`) to a value outside Number.isSafeInteger, which readMerged()
+// would stringify in exponential form (`1e+21`) — not a valid gh api
+// graphql alias/argument, and one that fails the WHOLE batched query, not
+// just that row. mergedReadPrs excludes it before it ever reaches gh, the
+// same way a PR-less row is excluded, so every other row PR's lookup stays
+// intact.
+test("#1840: a PR number outside Number.isSafeInteger is excluded from mergedReadPrs, so it cannot poison the batch for other row PRs", () => {
+  const need = mergedReadPrs({
+    ledger: { rows: [
+      "#907 impl-907=PR#930",
+      "#908 impl-908=PR#1000000000000000000000", // 22 digits: Number() -> 1e+21
+    ], filed: [], ruled: [] },
+    prs: [], prev: null,
+  });
+  assert.deepEqual(need, [930], "the unsafe-integer PR is left out; 930 still gets asked about");
+});
+
 test("#1820: review=wf/member, or a live fix-pr/finisher-pr, is under review; agent is the latest live member", () => {
   const b = computeBoard(reproInputs());
   assert.equal(card(b, 908).column, "REVIEW");
