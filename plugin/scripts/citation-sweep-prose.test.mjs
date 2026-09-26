@@ -779,6 +779,8 @@ test("a word that only contains minor, patch or major scopes neither claim (#195
     "**Dispatched monthly, and automerged.**",
     "**Monthly, and automerged for the majority of bumps.**",
     "**Monthly, and automerged once patched.**",
+    // Ends in "patch": only the boundary BEFORE the word refuses it.
+    "**Monthly, and automerged on each dispatch.**",
   ]) {
     assert.match(text, UNSCOPED_AUTOMERGED_SPAN, text);
   }
@@ -787,6 +789,7 @@ test("a word that only contains minor, patch or major scopes neither claim (#195
     "Bounding drift at about one month, dispatched by the bot.\n",
     "Once patched, bounding drift at about one month.\n",
     "Bounding drift at about one month for a minority of releases.\n",
+    "Bounding drift at about one month, whatever Renovate dispatches.\n",
   ]) {
     assert.match(text, UNSCOPED_DRIFT_SENTENCE, text);
   }
