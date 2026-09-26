@@ -1048,18 +1048,26 @@ function readClaudeSpend(dir, sinceMs) {
 // assistant turn yet — a member dispatched this second) has spent nothing, so
 // it is neither booked nor skipped.
 //
-// `metaErrors` and `damaged` are 0 by construction here, not by measurement:
-// omp has no dispatch sidecar to corrupt, and foldOmpTranscript drops an
-// unparseable line without counting it (one line is one whole turn there, so
-// a tear costs that turn and cannot corrupt a fold-back).
+// `metaErrors` is 0 by construction here: omp has no dispatch sidecar to
+// corrupt. `damaged` is not — the tool-attribution stream (#1717) is a join
+// across lines (a toolCall's id names its tool, a pending result batch bills
+// the next turn), so a dropped MIDDLE line can silently shift spend onto a
+// neighbouring tool instead of just costing its own turn's totals, the same
+// hazard foldClaudeTranscript's `malformedNonLastLines` exists to catch.
+// foldOmpTranscript now counts it the same way; this reader sums it across
+// the transcript regardless of whether the file ends up booked as an agent,
+// so a transcript that is corrupt where its assistant-with-usage line should
+// be still surfaces here instead of falling through `if (!m) continue` unseen.
 function readOmpSpend(dir, sinceMs) {
   const agents = [];
   const toolTables = [];
   let skipped = 0;
+  let damaged = 0;
   for (const { file, agent, spawnDepth } of ompSessionTranscripts(dir)) {
     try {
       if (sinceMs != null && statSync(file).mtimeMs < sinceMs) continue;
       const folded = foldOmpTranscript(readFileSync(file, "utf8"), file);
+      damaged += folded.malformedNonLastLines;
       const m = ompMemberRecord(folded, agent, spawnDepth);
       if (!m) continue;
       // Both halves before either is recorded, for readClaudeSpend's reason:
@@ -1075,7 +1083,7 @@ function readOmpSpend(dir, sinceMs) {
       warnOnce("skips", file, `skipping ${file}: ${e.message}`);
     }
   }
-  return { agents, toolTables, skipped, metaErrors: 0, damaged: 0 };
+  return { agents, toolTables, skipped, metaErrors: 0, damaged };
 }
 
 // `workspace`/`port` are the caller's answers, never read in here (#1584):

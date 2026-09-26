@@ -864,8 +864,43 @@ test("an omp session's tool table is attributed per member and merged, as a Clau
   assert.equal(s.ok, true);
   assert.equal(s.totals.cacheWrite, 10_700);
   assert.deepEqual(s.tools.map((t) => [t.tool, t.calls, t.resultChars, t.cacheWrite]), [["read", 2, 350, 1500], ["bash", 1, 100, 200]]);
-  // Each member's first turn follows no result, so it stays outside the table: 1,700 of 10,700.
+  // Only 1,700 of the 10,700 total ends up attributed: each member's FIRST
+  // turn follows no result, so both first turns (5,000 + 4,000 = 9,000) stay
+  // outside the table.
   assert.equal(s.attributedPct.toFixed(2), "15.89");
+});
+
+test("an omp session's damaged count is real, not a hardcoded 0 (#1717 review)", () => {
+  // Mirrors board.mjs's Claude-side `damaged` block (#916): a mid-file tear
+  // now costs more than its own turn's totals once the same fold also feeds
+  // the tool table, so this reader has to count it rather than assume 0.
+  const msg = (message) => JSON.stringify({ type: "message", id: "m", parentId: "i1", timestamp: "2026-09-08T15:12:00.000Z", message });
+  const turn = (cacheWrite) => msg({ role: "assistant", model: "claude-opus-5", content: [{ type: "text", text: "ok" }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite, totalTokens: 0, cost: { total: 0.01 } } });
+  const TORN = '{"type":"message","message":{"role":"ass';
+  const { proj } = ompHome();
+  const dir = ompSession(proj, OMP_A, {
+    // The tear sits BETWEEN two good turns, so their spend still counts.
+    "impl-7": [turn(1000), TORN, turn(500)].join("\n") + "\n",
+  });
+  const s = gatherSpend({ dir });
+  assert.equal(s.ok, true);
+  assert.equal(s.totals.cacheWrite, 1500, "the surrounding turns still fold — only the torn line itself is lost");
+  assert.equal(s.damaged, 1);
+  assert.equal(s.skipped, 0, "booked, not skipped — a damaged line costs its own turn, never the whole member");
+});
+
+test("an omp session's torn LAST line stays silent — the tear a live write legitimately produces", () => {
+  const msg = (message) => JSON.stringify({ type: "message", id: "m", parentId: "i1", timestamp: "2026-09-08T15:12:00.000Z", message });
+  const turn = (cacheWrite) => msg({ role: "assistant", model: "claude-opus-5", content: [{ type: "text", text: "ok" }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite, totalTokens: 0, cost: { total: 0.01 } } });
+  const TORN = '{"type":"message","message":{"role":"ass';
+  const { proj } = ompHome();
+  // No trailing newline: the torn write is the final element of the split,
+  // the same discriminator foldClaudeTranscript's own `torn` case relies on.
+  const dir = ompSession(proj, OMP_A, { "impl-7": [turn(1000), TORN].join("\n") });
+  const s = gatherSpend({ dir });
+  assert.equal(s.ok, true);
+  assert.equal(s.totals.cacheWrite, 1000);
+  assert.equal(s.damaged, 0);
 });
 
 test("one bad transcript in an omp session is skipped and named, not a blackout of the members beside it", () => {

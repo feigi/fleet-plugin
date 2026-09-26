@@ -565,16 +565,23 @@ function assertNotClaudeShaped(d, filePath) {
 //   {"type":"message","message":{"role":"toolResult","toolCallId":"toolu_01JV…",
 //     "toolName":"bash","content":[{"type":"text","text":"…"}],"details":{…},
 //     "isError":false,"timestamp":1790415990525}}
-// All 176,056 `toolCall` blocks carried `id` and `name`. Each of the 176,027
-// results sat on its own line, so parallel calls arrive as consecutive
-// `toolResult` lines, which attributeTools accumulates into one batch (run
-// lengths 2 through 14 matched the calls-per-turn counts to within one).
+// All 176,056 `toolCall` blocks carried `id` and `name`; the ~29-call gap
+// against the 176,027 results below is orphan calls whose result never
+// landed (aborted before the tool replied) — attributeTools still counts
+// them under their own name via `calls++`, only `resultChars`/`cacheWrite`
+// stay at 0. Each of the 176,027 results sat on its own line, so parallel
+// calls arrive as consecutive `toolResult` lines, which attributeTools
+// accumulates into one batch (run lengths 2 through 14 matched the
+// calls-per-turn counts to within one).
 //
 // A result's `chars` sums its text blocks' lengths (`content` was an array
-// every time: 179,380 text blocks, 14 image blocks). That is Claude's
-// measure for the same output, since 95.3% of Claude's tool_result contents
-// are a bare string counted by its length. A non-text block (an image)
-// counts at its JSON length, as in Claude's array case. A result carrying
+// every time: 179,380 text blocks, 14 image blocks — an unmeasured non-array
+// `content` would fold to 0 blocks and `chars: 0`, not a fallback to a
+// string length the way foldClaudeTranscript's own string case gets one).
+// That is Claude's measure for the same output, since 95.3% of Claude's
+// tool_result contents are a bare string counted by its length. A non-text
+// block (an image) counts at its JSON length, as in Claude's array case when
+// that array holds a single block — the only shape measured on disk.
 // `prunedAt` (194) holds a placeholder such as "[Uneventful result elided]"
 // instead of the output, so its `chars` is the placeholder's length.
 //
@@ -594,14 +601,21 @@ export function foldOmpTranscript(jsonlText, filePath) {
   let firstTs = null, lastTs = null;
   let input = 0, cacheWrite = 0, cacheRead = 0, output = 0, cost = 0, turns = 0;
   let sawCost = false;
+  let malformedNonLastLines = 0;
   const entries = [];
-  for (const raw of String(jsonlText ?? "").split("\n")) {
+  const lines = String(jsonlText ?? "").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
     if (!raw.trim()) continue;
     let d;
-    // A torn tail (transcript read mid-write) is dropped like Claude's, but
-    // there is no fold-back to protect here — each surviving line is already
-    // one whole turn, so losing the last line costs at most that one turn.
-    try { d = JSON.parse(raw); } catch { continue; }
+    // A torn tail (transcript read mid-write) is dropped like Claude's, and
+    // costs at most that one turn either way. A MIDDLE line failing the same
+    // parse is not a live write in progress — it is lost data, and now
+    // (#1717) it can desync a toolCall from its toolResult, not just a
+    // turn's totals, so it is counted the same way foldClaudeTranscript
+    // counts its own non-last parse failures, never for the last line.
+    try { d = JSON.parse(raw); }
+    catch { if (i !== lines.length - 1) malformedNonLastLines++; continue; }
     assertNotClaudeShaped(d, filePath);
     if (typeof d.timestamp === "string") { firstTs ??= d.timestamp; lastTs = d.timestamp; }
     if (d.type === "thinking_level_change" && typeof d.thinkingLevel === "string") thinking = d.thinkingLevel;
@@ -641,6 +655,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
     turns,
     wallS: Number.isFinite(span) ? Math.round(span) : 0,
     entries,
+    malformedNonLastLines,
   };
 }
 

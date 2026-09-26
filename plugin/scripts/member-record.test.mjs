@@ -155,6 +155,28 @@ test("foldOmpTranscript: resolvedModelIdentity is null, never guessed, when sess
   assert.equal(foldOmpTranscript(lines.join("\n"), "/fake/path.jsonl").resolvedModelIdentity, null);
 });
 
+test("foldOmpTranscript: a malformed line away from the tail is counted, not silently dropped (#1717 review)", () => {
+  // The tool-attribution stream (#1717) turned the pre-existing silent
+  // per-line drop into a real hazard: losing a middle line can desync a
+  // toolCall from its toolResult, not just cost its own turn's totals — the
+  // same mid-file-tear shape foldClaudeTranscript's malformedNonLastLines
+  // exists to catch.
+  const good = assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 100, totalTokens: 0 });
+  const torn = '{"type":"message","message":{"role":"ass';
+  const folded = foldOmpTranscript([good, torn, good].join("\n") + "\n", "/fake/path.jsonl");
+  assert.equal(folded.malformedNonLastLines, 1);
+  assert.equal(folded.cacheWrite, 200, "surrounding turns still fold — only the torn line itself is lost");
+});
+
+test("foldOmpTranscript: a torn LAST line stays uncounted — the tear a live write legitimately produces", () => {
+  const good = assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 100, totalTokens: 0 });
+  const torn = '{"type":"message","message":{"role":"ass';
+  // No trailing newline: the torn write is the final element of the split.
+  const folded = foldOmpTranscript([good, torn].join("\n"), "/fake/path.jsonl");
+  assert.equal(folded.malformedNonLastLines, 0);
+  assert.equal(folded.cacheWrite, 100);
+});
+
 test("readOmpMember: resolvedModelIdentity rides alongside `model` as an additive field, never replacing it", () => {
   const lines = [
     sessionEvt("/Users/chris/dev/fleet-plugin"),
