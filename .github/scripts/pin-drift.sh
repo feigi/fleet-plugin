@@ -23,15 +23,22 @@
 # commit), not by when the bot authored it on its own branch: a bump PR that
 # sat red for a week has not moved the pin for that week.
 #
-# The bound. Renovate is scheduled for the 1st of each month (renovate.json),
-# so on a healthy repo the pin lands roughly monthly and the longest healthy
-# gap is one 1st-to-1st interval — up to 31 days. 35 days is that plus a few
-# days' slack for a bump PR that goes red and is fixed, or a hosted run that
-# lands late. It is short of the 43-day precedent with room for the workflow's
-# weekly cadence: a stall that starts right after a run is still caught by day
-# 35 + 7 = 42. A month where node ships nothing on the pinned line trips it
-# too — correctly: the pin did not move, and a human glancing at that is the
-# whole ask.
+# The bound. Renovate's window is all day on the first three days of each
+# month, UTC (renovate.json), so on a healthy repo the pin lands roughly
+# monthly. The longest healthy gap runs from a bump PR opened as one window
+# opens on the 1st to the next one opened as its window closes at the end of
+# the 3rd — up to 34 days across a 31-day month, and a hosted run that comes
+# late inside the window is already inside that figure — plus however long
+# that last PR's checks take to go green, since the merge waits on them, not
+# on the window. 35 days leaves about a day for those checks; a bump PR that
+# goes red and stays red longer than that trips it in such a month, like any
+# other pin that sat still past the bound. It is short of the 43-day
+# precedent with room for the workflow's weekly cadence: a stall that starts
+# right after a run is still caught by day 35 + 7 = 42 — which is also why
+# the slack cannot simply grow: at 36 the worst case is caught on day 43, no
+# longer short of it. A month where node ships nothing on the pinned line
+# trips it too — correctly: the pin did not move, and a human glancing at
+# that is the whole ask.
 #
 # Every way of failing to READ the history is exit 2, never exit 0 or a bare
 # abort. A shallow clone is the dangerous one: its boundary commit shows every
