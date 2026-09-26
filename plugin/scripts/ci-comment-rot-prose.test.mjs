@@ -133,6 +133,16 @@ test("a period that ends no sentence cannot hide a misquote from citationFault (
   assert.match(citationFault('claim-ticket.sh, unlike ci.yml (v1.2), says "this filter, not node"', cited), /does not say it/);
   assert.match(citationFault('claim-ticket.sh says "this filter. Not node"', cited), /does not say it/);
   assert.match(citationFault('claim-ticket.sh says "this filter, not node."', cited), /does not say it/);
+  // A quotation's own closing period is not a stop either: an implementation that
+  // ended the sentence right there — reasonable-looking, since the quote already
+  // carries its own terminator — would silently let a second, misquoted span right
+  // after it hide as though it were the next sentence this function's own comment
+  // says it may not answer for (verified: such an implementation passes every
+  // other assertion in this file and still accepts this one).
+  assert.match(
+    citationFault('claim-ticket.sh says "is what keeps vendored tests out." and adds "this filter, not node"', cited),
+    /does not say it/,
+  );
 });
 
 // The other half of #1898: the sentence still ends at its REAL end. A quoted
