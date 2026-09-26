@@ -124,13 +124,14 @@ prev board.json (dwell tracking)
 
 (amended by #1820: the table below reads the Pull-era ledger — member tokens
 through `ledger-grammar.mjs`, Exclusion rows, MERGED from `gh`, and the
-`review=`/`reviewed=` pair.)
+`review=`/`reviewed=` pair. Amendment 2a, #1839: a PR-bound row with no `impl`
+token takes its PR the way `fleet-tick.mjs` does — see **The row's PR** below.)
 
 | Column | Derivation (durable, no controller push) |
 |---|---|
 | **POOL** | open `ready-for-agent` issue with **no** ledger row, or whose row's last `impl` token settled `=released`/`=bailed` (no card at all once the issue leaves `ready-for-agent`). An Exclusion row (`#N excluded · behind-pr:#M` / `behind-issue:#M`) is a POOL card with an `excluded:#M` badge (`excluded:<branch>` when `#M` is a branch name): supply, never `stale`, never in `attention`, never in the stall report's `claimed` |
 | **IMPLEMENTING** | the row's **last** `impl` token (retry suffix included) is live `impl-N`, or settled `=killed`/`=tier-mismatch` — the latter two carry that outcome as a flag in `attention` |
-| **REVIEW** | the last `impl` token is `=PR#M`, PR open (or closed unmerged), not `ready-to-merge`. Counts toward `reviewBacklog` (surfaced in the page footer as `review-backlog N`) when the row has neither `review=` nor `reviewed=` and no live `fix-pr-M`/`finisher-pr-M` |
+| **REVIEW** | the row's PR (below) is open (or closed unmerged), not `ready-to-merge`. Counts toward `reviewBacklog` (surfaced in the page footer as `review-backlog N`) when the row has neither `review=` nor `reviewed=` and no live `fix-pr-M`/`finisher-pr-M` |
 | **READY** | PR carries the `ready-to-merge` label |
 | **MERGED** | ledger row contains `MERGED <sha>`, or — the token being written by no rule — `gh` reports the row's PR merged (one `gh pr list --state merged` read per build, consulted for row PRs absent from the open list). The token wins when present |
 
@@ -138,14 +139,28 @@ The card's `agent` is the latest live member on the row: an unsettled
 `ledger-grammar.mjs` member token, or the runner a `review=member:<name>` /
 `review=fallback:<name>` names until it is settled `=failed` or a later
 `reviewed=` records its result. `review=wf:<runId>` is a Workflow and names
-nobody. The `→ PR#M` arrow is human-readable only; `compute-board.mjs`'s
-`parseRow()` ignores it and reads only the settled `impl` token's outcome.
-`fleet-tick.mjs`'s `PR_MENTION` is a blind `PR#<n>` text scan that in
+nobody. The uppercase `KILLED`/`BLOCKED`/`SHA-OFF-BRANCH` cause tokens
+(Enrichment tier, below) still apply.
+
+**The row's PR.** On a row with an `impl` token it is the last `impl` token's
+`=PR#M` outcome and nothing else: the `→ PR#M` arrow there is human-readable
+only. `fleet-tick.mjs`'s `PR_MENTION` is a blind `PR#<n>` text scan that in
 practice also lands on the impl token's embedded value, because that
 precedes the arrow in every row this run writes — but nothing enforces that
-order, so the arrow is never a value either reader may rely on. The
-uppercase `KILLED`/`BLOCKED`/`SHA-OFF-BRANCH` cause tokens (Enrichment tier,
-below) still apply.
+order, so on such a row the arrow is never a value either reader may rely on.
+
+Amendment 2a (#1820, implemented by #1839): a row with **no** `impl` token —
+the `#<pr> <member>` row `ledger.mjs dispatch <pr> fix-pr-<pr>` /
+`finisher-pr-<pr>` appends for a PR this run's implementers did not open —
+has no outcome to read, so once it carries a PR-bound signal (a `PR#M`
+mention, a `fix-pr-M`/`finisher-pr-M` member, `review=` or `reviewed=`) it
+takes the tick's PR: its first `PR_MENTION`, else its row key when the row's
+first word is exactly `#N`. `compute-board.mjs` imports `PR_MENTION` from
+`fleet-tick.mjs` rather than restating it, so the two readers name the same PR
+for the same row text. That PR then decides the column exactly as a `=PR#M`
+outcome does: open → REVIEW (or READY), merged by `gh` or by a `MERGED <sha>`
+token → MERGED. A malformed `impl` token still counts as one — that row's key
+is a ticket — and an Exclusion row, or a row with no signal, takes no PR.
 
 **`## Dispatched` is deliberately not rendered** (amended by #1820). Its job is
 the `merge-bot-<n>` counter, and the row tokens already show every member's
