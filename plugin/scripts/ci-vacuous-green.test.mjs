@@ -19,8 +19,7 @@
 //     on the real tree — these two cases are what says so. No count of those
 //     globs and no file count per glob, on purpose: the "five globs" this
 //     sentence used to count, with a file count each, went stale as ci.yml's
-//     steps changed (#1943). ci.yml owns that set, and the source assertions
-//     at the bottom pin it.
+//     steps changed (#1943). ci.yml owns that set.
 //
 // The behavioural cases pin the script. The source assertions at the bottom pin
 // that ci.yml actually ROUTES through it: without them a step reverted to bare
