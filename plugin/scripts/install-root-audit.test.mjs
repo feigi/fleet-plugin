@@ -19,20 +19,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { repoRoot, skipWithoutRepo } from "./repo-root.mjs";
+import { repoRoot, skipWithoutRepo, trackedPaths } from "./repo-root.mjs";
 import { stripComments } from "./strip-comments.mjs";
 
 const DIR = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = repoRoot(DIR);
 const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT, "the install-root audit (#1335)");
-
-function tracked(root, pathspecs) {
-  return execFileSync("git", ["ls-files", "-z", "--", ...pathspecs], { cwd: root, encoding: "utf8" })
-    .split("\0").filter(Boolean);
-}
 
 // ==================== Rule (a): own-location repo derivation ====================
 
@@ -148,7 +142,7 @@ test(
   "no tracked production script under plugin/scripts/ derives the repo it operates on from its own location",
   { skip: SKIP_WITHOUT_REPO },
   () => {
-    const files = tracked(ROOT, ["plugin/scripts/*"]).filter((f) => !f.endsWith(".test.mjs"));
+    const files = trackedPaths(ROOT, ["plugin/scripts/*"]).filter((f) => !f.endsWith(".test.mjs"));
     assert.ok(files.length > 0, "the instrument set must not be empty");
     const violations = [];
     for (const rel of files) {
@@ -314,7 +308,7 @@ test(
   + "source/harness/registry path",
   { skip: SKIP_WITHOUT_REPO },
   () => {
-    const files = tracked(ROOT, ["plugin/skills/*", "plugin/commands/*", "plugin/agents/*", "plugin/workflows/*"]);
+    const files = trackedPaths(ROOT, ["plugin/skills/*", "plugin/commands/*", "plugin/agents/*", "plugin/workflows/*"]);
     assert.ok(files.length > 0, "the prose set must not be empty");
     const violations = [];
     for (const rel of files) {

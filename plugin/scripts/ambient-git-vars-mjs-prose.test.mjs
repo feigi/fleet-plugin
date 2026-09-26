@@ -147,13 +147,13 @@ const countGitEnvCalls = (src) =>
 // primitive and therefore one scrub.
 const COVERED_MJS = {
   // Three separate `spawnSync`/`execFileSync` calls, no shared wrapper —
-  // `isTrackedBy()`, `repoRoot()`, `trackedFiles()` (behind both
-  // `trackedShellScripts()` and `trackedNodeScripts()`) — each with its
-  // own `gitEnv(…)` call. Measured per site in repo-root.test.mjs: GIT_DIR
-  // and GIT_WORK_TREE are each exposed on at least one of the three, and
-  // `isTrackedBy`'s absolute pathspec is exposed on BOTH — no half here is
-  // inert the uniform way `ambient-git-vars-prose.test.mjs`'s `inflight.sh`/
-  // `derive-testcmd.sh` are.
+  // `isTrackedBy()`, `repoRoot()`, `trackedFiles()` (behind all three of
+  // `trackedPaths()`, `trackedShellScripts()` and `trackedNodeScripts()`) —
+  // each with its own `gitEnv(…)` call. Measured per site in
+  // repo-root.test.mjs: GIT_DIR and GIT_WORK_TREE are each exposed on at
+  // least one of the three, and `isTrackedBy`'s absolute pathspec is exposed
+  // on BOTH — no half here is inert the uniform way
+  // `ambient-git-vars-prose.test.mjs`'s `inflight.sh`/`derive-testcmd.sh` are.
   "repo-root.mjs": 3,
   // ONE spawn primitive (`tryRun`), reused for both this file's named git
   // call sites (`workflowsPath()`'s rev-parse, the behind-count block's

@@ -24,10 +24,10 @@
 // performs. A plain string literal holding the whole stale form would report
 // this file as its own first offender the moment it landed under `plugin/`.
 //
-// `git ls-files`, not a directory walk: an untracked scratch file must never
-// become a false positive, and a tracked file that moves out of `plugin/`
-// must fall out of the sweep with it — same premise `repo-root.mjs` states
-// for the sibling `*-sweep.test.mjs` files in this directory.
+// repo-root.mjs's `trackedPaths`, not a directory walk: an untracked scratch
+// file must never become a false positive, and a tracked file that moves out
+// of `plugin/` must fall out of the sweep with it — same premise `repo-root.mjs`
+// states for the sibling `*-sweep.test.mjs` files in this directory.
 //
 // KNOWN LIMIT, same as those siblings: needs an ambient `.git` to ask what
 // ships. Absent one — a bare `git archive` extraction, how review specialists
@@ -39,11 +39,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { repoRoot, skipWithoutRepo } from "./repo-root.mjs";
+import { repoRoot, skipWithoutRepo, trackedPaths } from "./repo-root.mjs";
 
 const DIR = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = repoRoot(DIR);
@@ -53,18 +52,12 @@ const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT, "the sweep for the nonexistent s
 const STALE_CITATION = ["node --test", " scripts/"].join("");
 
 /** Every tracked path under `plugin/`, repo-relative — what actually ships. */
-function trackedUnderPlugin(root) {
-  return execFileSync("git", ["ls-files", "--", "plugin"], { cwd: root, encoding: "utf8" })
-    .split("\n")
-    .filter(Boolean);
-}
-
-const FILES = ROOT === null ? [] : trackedUnderPlugin(ROOT);
+const FILES = ROOT === null ? [] : trackedPaths(ROOT, ["plugin"]);
 
 test("the sweep sees the tree it is supposed to police", { skip: SKIP_WITHOUT_REPO }, () => {
   assert.ok(
     FILES.length > 50,
-    `git ls-files -- plugin returned only ${FILES.length} entries — too few to be this plugin's real tree, and the check below would pass vacuously over an empty or near-empty list`,
+    `trackedPaths(ROOT, ["plugin"]) returned only ${FILES.length} entries — too few to be this plugin's real tree, and the check below would pass vacuously over an empty or near-empty list`,
   );
 });
 
