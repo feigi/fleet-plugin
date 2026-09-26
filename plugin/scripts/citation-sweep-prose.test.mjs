@@ -953,6 +953,10 @@ test("a period after \"etc.\", or after a word only ending in an abbreviation's 
     "Minor and patch bumps, the lockfile, etc. Bounding drift at about one month.\n",
     // "devs." is not "vs.".
     "Minor and patch bumps are for the devs. Bounding drift at about one month.\n",
+    // A digit disqualifies it exactly as a letter does (review finding, PR
+    // #1993): narrowing the boundary to `(?<![a-z])` alone still passes every
+    // other case here, so nothing else in this file pins the digit half.
+    "Minor bumps land in 26vs. Bounding drift at about one month.\n",
   ]) {
     assert.match(text, UNSCOPED_DRIFT_SENTENCE, text);
   }
