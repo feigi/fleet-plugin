@@ -17,7 +17,7 @@ release, restoring the auto-patching the old `node-version: 22` literal had.
 Measured 2026-09-23, before ruling:
 
 - **The exact pin does not get bumped.** `.nvmrc` sat at `26.5.0` for 43 days
-  across 8 releases (latest 26.x was v26.10.0, 2026-09-21). The cost #354
+  across 8 releases (latest 26.x was v26.10.0, 2026-09-22). The cost #354
   predicted is demonstrated, not argued: the one-file edit does not happen.
 - **The partial spec's premise is false for `nvm`.** `nvm use` with `26` selects
   the newest *locally installed* 26.x; only `nvm install` goes remote. A partial
@@ -35,7 +35,8 @@ Measured 2026-09-23, before ruling:
   in 26.x since the pin, and node here runs `node --check` on tracked files and
   this repo's own suite: no server, no untrusted input, no published artifact.
 - **Reproducibility is the real axis.** This suite pins node's *own* behaviour —
-  `claim-ticket.test.mjs:1597-1601` asserts node's argument-classification and
+  `claim-ticket.test.mjs`'s test "runner: a dash-led argument counts as an
+  operand only where it exists" asserts node's argument-classification and
   refusal semantics, and `board-cli.test.mjs:251-255` records a 100-run
   measurement against a named version. A floating runtime lets an unchosen node
   release turn `main` red on a PR that touched nothing.
@@ -64,12 +65,12 @@ Measured 2026-09-23, before ruling:
 - **A precise consumer floor is out of scope here.** Shipped scripts run under
   the user's own node via `#!/usr/bin/env node`; auditing every runtime API
   surface they touch to derive an accurate minimum is not attempted in this
-  ADR. `util.parseArgs` (stable since Node 20.0.0) is used by `candidates.mjs`,
-  `fleet-tick.mjs`, `fleet-heartbeat.mjs` — `arg.mjs` and `staleness.mjs` only
-  reference it in comments contrasting their own hand-rolled parsing against
-  it. The two files using `import.meta.dirname` — `prompt-renderer.mjs`,
-  `workflow-files.mjs` — are imported only by `*.test.mjs` and bind the dev
-  environment, not a user's.
+  ADR. Among shipped scripts, `util.parseArgs` (stable since Node 20.0.0) is
+  used by `candidates.mjs`, `fleet-tick.mjs`, `fleet-heartbeat.mjs` — `arg.mjs`
+  and `staleness.mjs` only reference it in comments contrasting their own
+  hand-rolled parsing against it. The two files using `import.meta.dirname` —
+  `prompt-renderer.mjs`, `workflow-files.mjs` — are imported only by
+  `*.test.mjs` and bind the dev environment, not a user's.
 
 ## Decision
 
@@ -121,10 +122,14 @@ Measured 2026-09-23, before ruling:
   `enabledManagers` excludes it, an action major can break the gate itself, and
   it deserves its own drift measurement.
 - Closing a bump PR unmerged is remembered — Renovate will not re-raise that
-  version. That is the deliberate-refusal escape hatch; there is no other.
+  version. That is the deliberate-refusal escape hatch; there is no other
+  Renovate-driven escape hatch.
 - If the app is ever uninstalled, the pin stops moving and the repo is back to
   the measured 43-day behaviour. As ruled, that had no signal: the bot's absence
-  was not observable from inside the tree. #1755 closed that:
+  was not observable from inside the tree. Point 5 bears on this: the Dependency
+  Dashboard it turned off is a standing issue giving the status of every update
+  — a passive heartbeat the bot would otherwise have carried between its PRs —
+  so turning it off removed that signal as well. #1755 closed that:
   `.github/workflows/pin-drift.yml` runs weekly and goes red once `.nvmrc` has
   not landed a move on `main` for more than 35 days, judged from `git log`
   alone so it keeps reporting with the app gone. A deliberately refused bump
