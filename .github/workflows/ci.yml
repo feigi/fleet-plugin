@@ -249,6 +249,32 @@ jobs:
       - name: Shellcheck
         run: .github/scripts/check-tracked.sh '*.sh' shellcheck -x -S warning
 
+      # Validate JSON above only parses renovate.json: `jq empty` passes a
+      # well-formed file whose timezone does not exist (#1854). Renovate's own
+      # validator is what checks the options — unknown ones, global-only ones,
+      # bad schedules, and with `--strict` a config that needs migrating.
+      # A step in `check`, which the `main` ruleset already requires, and on
+      # every PR: a `paths:`-filtered job skips on most PRs, and ADR 0007 keeps
+      # any check that can skip out of the required set.
+      # The file is named rather than discovered: with no argument the
+      # validator exits 0 on a tree holding no config at all, so a deleted
+      # renovate.json, or one moved to a name Renovate does not read, would go
+      # green having validated nothing. Named, a missing file is exit 1 — so
+      # moving it to another name Renovate does read means editing this line
+      # with it. `--no-global` because a named file is
+      # otherwise read as self-hosted GLOBAL config, which accepts options a
+      # repository config may not carry.
+      # Not a full schema check: it does not, in general, hold a string option
+      # to its declared allowed values — an invalid `internalChecksFilter`
+      # passes.
+      # Pinned, not `@latest`: a floating validator would change what this
+      # step accepts with no commit here saying so. An option newer than the
+      # pin is refused as unknown even where the hosted app accepts it — bump
+      # the pin with the config. npm's EBADENGINE warning is expected: this
+      # runs on the .nvmrc Node, outside the range Renovate declares.
+      - name: Validate renovate.json
+        run: npx --yes -p renovate@44.115.7 renovate-config-validator --strict --no-global renovate.json
+
       # gh applies `--jq` with its own embedded gojq (RE2), not the system jq
       # the candidates stub execs, so candidates.test.mjs gates its engine-parity
       # tests on a real gojq binary being resolvable — and a gate that does not
