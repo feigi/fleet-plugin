@@ -1239,12 +1239,18 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   }));
 
   // #1820: MERGED is gh's answer, not a ledger token — no rule writes `MERGED
-  // <sha>`, and the open list above drops a PR the moment it merges, so a
-  // merged row PR used to fall back to a stale REVIEW card. One read per build,
-  // degrading exactly like the open list's: a failed read is `[]`, which leaves
-  // every absent row PR in REVIEW, today's column. computeBoard() consults it
-  // only for a row PR absent from the open list. `state` is requested and
-  // checked, so an entry gh does not call MERGED never makes a card MERGED.
+  // <sha>`, and the open list above drops a PR the moment it merges. One read
+  // per build, degrading exactly like the open list's: a failed read is `[]`.
+  // Leaving that degrade as `[]` is fine (#1841) — it no longer means every
+  // absent row PR falls back to REVIEW, because computeBoard() carries the
+  // previous board's MERGED forward for the SAME PR that was already MERGED
+  // and is absent from both this list and the open one; a ticket retried
+  // under a new PR after an earlier one merged gets no such carry-forward
+  // for that new PR, and only a ticket never previously seen MERGED (for
+  // its current PR) reads a failed or incomplete merged read as REVIEW.
+  // computeBoard() consults `merged` only for a row PR absent from the open
+  // list. `state` is requested and checked, so an entry gh does not call
+  // MERGED never makes a card MERGED on its own account.
   const mergedJson = await tryRun("gh", ["pr", "list", "--state", "merged", "--limit", "100",
     "--json", "number,state"]);
   const merged = ghRows(mergedJson, "gh pr list --state merged")
