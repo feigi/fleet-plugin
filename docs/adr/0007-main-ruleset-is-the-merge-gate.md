@@ -167,7 +167,8 @@ whose failure condition a PR head could have been checked against first.
   added when this ADR was ratified reached the tree and never reached GitHub,
   because merging the spec is not applying it and nothing read the gate unless
   a person chose to. #1710 opened with that measurement in its body;
-  `gh issue view 1710 --json createdAt` prints `2026-09-23T07:30:07Z`.
+  `gh issue view 1710 --json createdAt --jq .createdAt` prints
+  `2026-09-23T07:30:07Z`.
   The ruleset version in force across the window below is
   50126119, written 2026-09-18T07:48:21Z; `gh api
   repos/feigi/fleet-plugin/rulesets/20119969/history/50126119 --jq
