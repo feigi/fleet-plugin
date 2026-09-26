@@ -34,8 +34,8 @@
 // anything else. A script renamed keeps the pin.
 //
 // CEILING, and it is the header's own. The header does not claim to NAME every
-// row its grep returns — `fleet-heartbeat.mjs` and `tier-check.mjs` are both in
-// that output and neither is named, and the header says the scripts it names
+// row its grep returns — `fleet-heartbeat.mjs`, for one, is in that output
+// and is not named, and the header says the scripts it names
 // "exemplify a way of qualifying, and were never the whole of it". So nothing
 // here demands a paragraph per row; the roster is the grep's output, and the
 // paragraphs are pinned only through the commands they carry.
