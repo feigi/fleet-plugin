@@ -324,16 +324,37 @@ test("a one-line pointer citing ADR 0010 is never taken for the owner (#1756)", 
 // step with no pointer, a pointer missing the ADR or the rule, a pointer grown
 // into a paragraph) and accepts any paraphrase. It pins no count of steps:
 // adding or dropping a Node-setup site needs no edit here. The rule and its
-// negation must share a sentence, for the reason windowClaimFault gives. The
+// negation must share a sentence, for the reason windowClaimFault gives, AND
+// sit within six words of "hand-edit" itself — co-occurrence anywhere in the
+// sentence is not enough, because "Hand-edit this pin whenever convenient;
+// there is no rule against it." shares a sentence with a negation that never
+// touches the verb it is supposed to forbid (reproduced: that exact wording,
+// and "Renovate no longer manages this on its own — hand-edit if it drifts.",
+// both passed here undetected until the word-window check was added). The
 // ceiling: an unrelated comment run directly above a pointer makes it a
 // multi-line citation, a second candidate owner that pinOwnerComment refuses
 // loudly; a blank line between the two keeps the pointer its own run.
 export function pointerFault({ block, lines }) {
   if (lines === 0) return "carries no comment at all — no pointer to ADR 0010 or the do-not-hand-edit rule";
   if (!block.includes("ADR 0010")) return "no longer points at ADR 0010";
-  const rule = block
-    .split(/(?<=[.!?])\s+/)
-    .some((s) => /hand-?edit/i.test(s) && /\b(?:not|never|no)\b|n't\b/i.test(s));
+  const rule = block.split(/(?<=[.!?])\s+/).some((s) => {
+    const m = /hand-?edit\w*/i.exec(s);
+    if (!m) return false;
+    const tokens = s.split(/\s+/);
+    let pos = 0;
+    let idx = -1;
+    for (let i = 0; i < tokens.length; i++) {
+      if (m.index >= pos && m.index < pos + tokens[i].length + 1) {
+        idx = i;
+        break;
+      }
+      pos += tokens[i].length + 1;
+    }
+    if (idx === -1) return false;
+    const WINDOW = 6;
+    const nearby = tokens.slice(Math.max(0, idx - WINDOW), idx + WINDOW + 1).join(" ");
+    return /\b(?:not|never|no)\b/i.test(nearby) || /n't\b/i.test(nearby);
+  });
   if (!rule) return "no longer carries the do-not-hand-edit rule";
   if (lines > 1) return "has grown past one line — a pointer that copies the owner's paragraph is the drift it exists to avoid";
   return null;
@@ -369,5 +390,18 @@ test("a paraphrased pointer is accepted; a missing one, a half one and a copied 
       ),
     ),
     /grown past one line/,
+  );
+});
+
+test("a negation sharing hand-edit's sentence but not touching it is still a missing rule (#1868)", () => {
+  const at = (...comment) => setupNodeComments(["  job:", ...comment, "      - uses: actions/setup-node@v5"])[0];
+
+  assert.match(
+    pointerFault(at("      # Hand-edit this pin whenever convenient; there is no rule against it. See ADR 0010.")),
+    /do-not-hand-edit rule/,
+  );
+  assert.match(
+    pointerFault(at("      # Renovate no longer manages this on its own — hand-edit if it drifts. See ADR 0010.")),
+    /do-not-hand-edit rule/,
   );
 });

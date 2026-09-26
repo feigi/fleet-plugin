@@ -235,7 +235,7 @@ const FILES = [
       // comment-only file, wherever in the list and however it wraps.
       /used by(?:[\s,]*(?:and\s+)?`[\w-]+\.mjs`)*[\s,]*(?:and\s+)?`(?:arg|staleness)\.mjs`/,
       /2026-09-21/,
-      /there is no other\./,
+      /there is no other(?!\s+Renovate-driven\b)/,
     ],
     live: [
       "`check`",
