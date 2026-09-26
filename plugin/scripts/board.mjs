@@ -40,6 +40,7 @@ import {
 } from "./member-record.mjs";
 import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { mergedReadPrs } from "./compute-board.mjs";
 // #1597: the heartbeat's liveness mark, read here and never written. The
 // cockpit is a READER of that key — the heartbeat is its only writer — and it
 // reaches the file through the module that owns the filename rather than
@@ -85,10 +86,11 @@ const stray = makeStray(die);
 // all. Hoisted in main() below, next to argPort()/has("open").
 
 // #1546: the "is this a plain JSON object" predicate and its kind word, one
-// copy for the three reads in this file that reject a parsed-but-wrong payload
-// WHOLE — readAgent's sidecar-meta read, gather's `--prev` payload, and
-// gather's per-entry `tickets[i]` check. Each carried its own inline copy of
-// both halves before, which is three places for one policy to drift in.
+// copy for the reads in this file that reject a parsed-but-wrong payload
+// WHOLE — readAgent's sidecar-meta read, gather's `--prev` payload, gather's
+// per-entry `tickets[i]` check, and readMerged()'s `data.repository` (#1840).
+// The first three each carried their own inline copy of both halves before,
+// which is three places for one policy to drift in.
 //
 // TWO functions and not one, because `typeof` alone cannot name the fault the
 // predicate rejects: it answers "object" for `null` and for `[]` alike, and
@@ -100,7 +102,7 @@ const stray = makeStray(die);
 // Not every payload-shape check in this file is one of these, and the others
 // are not oversights: mapCi's and tryParse's are both null-only, neither
 // refusing a payload for being an array or a scalar. A settled, deliberately
-// different policy — not a fourth caller waiting to be converted.
+// different policy — not more callers waiting to be converted.
 function isJsonObject(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -358,6 +360,44 @@ function withNumber(rows, what) {
 // helper rather than the same two-call chain typed twice for issues and PRs.
 function ghRows(json, what) {
   return withNumber(tryParse(json, [], what), what);
+}
+
+// #1840: which of `prNums` gh calls MERGED, in ONE `gh api graphql` query —
+// one aliased `pullRequest(number:)` field per PR, on the cwd's repository
+// (gh's own `{owner}`/`{repo}` placeholders, the repo every other read here
+// resolves) — so a PR merged at any age is found, and ten PRs cost what one
+// does. It replaced `gh pr list --state merged --limit 100`, the repo's 100
+// most recent merges: about six days on 2026-09-25, so a row PR merged
+// before that and never seen MERGED rendered REVIEW, turned stale and
+// counted as claimed. Measured 2026-09-26: 400 aliases answer in one call.
+//
+// An empty `prNums` makes no read at all. `state` is checked, so an entry gh
+// does not call MERGED never makes a card MERGED on its own account.
+//
+// A body with an object `data.repository` IS an answer even at exit 1:
+// GitHub resolves every alias it can and nulls the rest — a number that is
+// not a PR comes back null beside a NOT_FOUND error, and gh exits 1 with the
+// whole body on stdout (measured 2026-09-26, gh 2.101.0, which also names
+// the number on stderr). Refusing that body would let one such row — a
+// typo, or an amendment-2a row keyed by an issue number — put every other
+// row PR back in REVIEW on every tick. A null alias reads as not merged,
+// which is what a failed read means for that one PR. Anything else is a
+// failed read: `[]`, and computeBoard()'s #1841 rule takes it from there.
+async function readMerged(prNums) {
+  if (!prNums.length) return [];
+  const fields = prNums.map((n) => `p${n}:pullRequest(number:${n}){state}`).join(" ");
+  const r = await execRead("gh", ["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}",
+    "-f", `query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${fields}}}`]);
+  let repo;
+  try { repo = JSON.parse(r.stdout)?.data?.repository; } catch { repo = undefined; }
+  if (!isJsonObject(repo)) {
+    // `how` as runCiState() spells it; never r.error.message, which repeats
+    // the whole query — one field per PR — into every failed tick's line.
+    const how = !r.error ? "exit 0" : r.code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`);
+    console.error(`${NAME}: gh api graphql merged read (${prNums.length} PR${prNums.length === 1 ? "" : "s"}) failed (${how}) with no usable answer; they read as not merged`);
+    return [];
+  }
+  return prNums.filter((n) => repo[`p${n}`]?.state === "MERGED");
 }
 
 // labels: gh emits an array of {name,...} objects, but a malformed row can
@@ -1244,22 +1284,14 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   }));
 
   // #1820: MERGED is gh's answer, not a ledger token — no rule writes `MERGED
-  // <sha>`, and the open list above drops a PR the moment it merges. One read
-  // per build, degrading exactly like the open list's: a failed read is `[]`.
-  // Leaving that degrade as `[]` is fine (#1841) — it no longer means every
-  // absent row PR falls back to REVIEW, because computeBoard() carries the
-  // previous board's MERGED forward for the SAME PR that was already MERGED
-  // and is absent from both this list and the open one; a ticket retried
-  // under a new PR after an earlier one merged gets no such carry-forward
-  // for that new PR, and only a ticket never previously seen MERGED (for
-  // its current PR) reads a failed or incomplete merged read as REVIEW.
-  // computeBoard() consults `merged` only for a row PR absent from the open
-  // list. `state` is requested and checked, so an entry gh does not call
-  // MERGED never makes a card MERGED on its own account.
-  const mergedJson = await tryRun("gh", ["pr", "list", "--state", "merged", "--limit", "100",
-    "--json", "number,state"]);
-  const merged = ghRows(mergedJson, "gh pr list --state merged")
-    .filter((p) => p.state === "MERGED").map((p) => p.number);
+  // <sha>`, and the open list above drops a PR the moment it merges. #1840:
+  // asked only about mergedReadPrs()'s set — row PRs absent from the open
+  // list, with no token, not carried forward (#1841) — in one batched read
+  // that answers whatever their merge age; see readMerged(). A failed read
+  // is `[]`, and #1841's carry-forward in computeBoard() covers exactly the
+  // PRs this set leaves out, so a failure costs only a PR never yet seen
+  // MERGED, which reads REVIEW.
+  const merged = await readMerged(mergedReadPrs({ ledger, prs, prev }));
 
   // CI per open PR. On failure, carry the previous board's value for that PR.
   const prevCi = new Map((prev?.tickets || []).filter((t) => t.pr != null).map((t) => [t.pr, t.ci]));

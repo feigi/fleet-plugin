@@ -421,23 +421,18 @@ process.exit(first ? 1 : 0);`;
 // only needs to complete without throwing, its verdict is not what these
 // tests pin. Out of process for the same reason as gatherCi: gather() reads
 // process.argv and would otherwise read the test runner's.
-// `mergedJson` (#1820) answers the `gh pr list --state merged` read alone:
-// `null` makes that read fail; left undefined, it falls through to the open
-// list's `pr list` answer as every earlier caller's stub did.
-function gatherRows({ issuesJson, prsJson, mergedJson }) {
+function gatherRows({ issuesJson, prsJson }) {
   const cwd = mkdtempSync(join(tmpdir(), "board-gather-rows-"));
   const bin = mkdtempSync(join(tmpdir(), "board-gather-rows-bin-"));
   const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-rows-scripts-"));
   writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
-  const merged = mergedJson === undefined ? ""
-    : `case "$1 $2 $3 $4" in\n"pr list --state merged") ${mergedJson === null ? "exit 1" : `echo '${mergedJson}'; exit 0`} ;;\nesac\n`;
   writeFileSync(join(bin, "gh"),
-    `#!/bin/sh\n${merged}case "$1 $2" in\n"issue list") echo '${issuesJson}' ;;\n"pr list") echo '${prsJson}' ;;\n*) exit 1 ;;\nesac\n`);
+    `#!/bin/sh\ncase "$1 $2" in\n"issue list") echo '${issuesJson}' ;;\n"pr list") echo '${prsJson}' ;;\n*) exit 1 ;;\nesac\n`);
   chmodSync(join(bin, "gh"), 0o755);
   const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
     const r = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
                        prevFile: null, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
-    console.log(JSON.stringify({ issues: r.issues, prs: r.prs, merged: r.merged }));`;
+    console.log(JSON.stringify({ issues: r.issues, prs: r.prs }));`;
   const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
     cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
   });
@@ -483,28 +478,156 @@ test("gather: a PR row with no number is dropped, loudly, not placed as undefine
   assert.match(r.stderr, /gh pr list: dropping row with no usable number/);
 });
 
-// #1820: MERGED is read from gh, not from a `MERGED <sha>` token no rule
-// writes. One read beside the open list, answering PR numbers only, and only
-// entries gh itself calls MERGED count.
-test("gather: the merged-PR read yields the numbers gh calls MERGED", () => {
-  const r = gatherRows({
-    issuesJson: "[]",
-    prsJson: JSON.stringify([{ number: 931, state: "OPEN", title: "t", labels: [] }]),
-    mergedJson: JSON.stringify([{ number: 930, state: "MERGED" }, { number: 929, state: "CLOSED" }, { number: 928 }]),
+// #1820 read MERGED from gh; #1840 scoped that read to the ledger's own row
+// PRs. One batched `gh api graphql` query asks about exactly the row PRs that
+// need it — absent from the open list, carrying no `MERGED <sha>` token, and
+// not carried forward as MERGED by #1841 — whatever their merge age. That
+// replaced `gh pr list --state merged --limit 100`, which covered only the
+// repo's 100 most recent merges (about six days, measured 2026-09-25).
+//
+// The stub `gh` is a fake GitHub, not an echo of gather(): `api graphql`
+// answers every `ALIAS: pullRequest(number: N)` field in the query from
+// `states`, and a number missing there reads the way GitHub answers a number
+// that is not a PR (measured 2026-09-26, gh 2.101.0): the alias comes back
+// null beside a NOT_FOUND error, and gh exits 1 with the whole body on
+// stdout. `pr list --state merged` still answers with `window`, the most
+// recent merges, so a read that fell back to the window would be caught
+// missing the old PR rather than passing by accident. Every invocation's
+// argv is logged, so a test can count merged reads. The driver runs the real
+// computeBoard() over gather()'s answer: the card's column is the subject.
+function gatherMerged({ rows, prs = [], prev = null, states = {}, fail = false }) {
+  const cwd = mkdtempSync(join(tmpdir(), "board-gather-merged-"));
+  const bin = mkdtempSync(join(tmpdir(), "board-gather-merged-bin-"));
+  const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-merged-scripts-"));
+  const log = join(cwd, "gh-calls.jsonl");
+  writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
+  writeFileSync(join(scriptDir, "ledger.mjs"),
+    `process.stdout.write(${JSON.stringify(JSON.stringify({ rows, filed: [], ruled: [] }))});\n`);
+  const window = Array.from({ length: 100 }, (_, i) => ({ number: 5000 + i, state: "MERGED" }));
+  const config = { prs: prs.map((n) => ({ number: n, state: "OPEN", title: "t", labels: [] })), window, states, fail, log };
+  writeFileSync(join(bin, "gh"), `#!/usr/bin/env node
+const fs = require("node:fs");
+const c = ${JSON.stringify(config)};
+const a = process.argv.slice(2);
+fs.appendFileSync(c.log, JSON.stringify(a) + "\\n");
+const out = (v) => process.stdout.write(JSON.stringify(v));
+if (a[0] === "issue" && a[1] === "list") out([]);
+else if (a[0] === "pr" && a[1] === "list" && a.includes("merged")) out(c.window);
+else if (a[0] === "pr" && a[1] === "list") out(c.prs);
+else if (a[0] === "api" && a[1] === "graphql") {
+  if (c.fail) { process.stderr.write("gh: HTTP 502: Bad Gateway\\n"); process.exit(1); }
+  const q = a[a.indexOf("-f") + 1];
+  const repository = {}; const errors = [];
+  for (const [, alias, n] of q.matchAll(/(\\w+)\\s*:\\s*pullRequest\\s*\\(\\s*number\\s*:\\s*(\\d+)\\s*\\)/g)) {
+    const state = c.states[n];
+    repository[alias] = state ? { number: Number(n), state } : null;
+    if (!state) errors.push({ type: "NOT_FOUND", path: ["repository", alias], message: "Could not resolve to a PullRequest with the number of " + n + "." });
+  }
+  out(errors.length ? { data: { repository }, errors } : { data: { repository } });
+  if (errors.length) { process.stderr.write("gh: " + errors.map((e) => e.message).join("\\n") + "\\n"); process.exit(1); }
+}
+else process.exit(1);
+`);
+  chmodSync(join(bin, "gh"), 0o755);
+  const prevFile = join(cwd, "prev.json");
+  if (prev) writeFileSync(prevFile, JSON.stringify(prev));
+  const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
+    const { computeBoard } = await import(${JSON.stringify(fileURLToPath(new URL("./compute-board.mjs", import.meta.url)))});
+    const inputs = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "ledger.md"))},
+                       prevFile: ${JSON.stringify(prevFile)}, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
+    const b = computeBoard(inputs);
+    console.log(JSON.stringify({ merged: inputs.merged, columns: Object.fromEntries(b.tickets.map((t) => [t.pr, t.column])) }));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
+    cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
   });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const calls = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  // Any read that could answer "merged": the scoped query, or a fallback to
+  // the old window. Both count, so a regression to the window cannot hide.
+  const mergedReads = calls.filter((c) => c[0] === "api" || c.includes("merged"));
+  const asked = (c) => [...c[c.indexOf("-f") + 1].matchAll(/pullRequest\s*\(\s*number\s*:\s*(\d+)\s*\)/g)].map((m) => Number(m[1]));
+  return { ...JSON.parse(r.stdout.trim().split("\n").pop()), mergedReads, asked, stderr: r.stderr };
+}
+
+test("#1840: a row PR merged outside the most-recent-100 window renders MERGED with no previous board", () => {
+  const r = gatherMerged({ rows: ["#907 impl-907=PR#930"], states: { 930: "MERGED" } });
+  assert.equal(r.columns[930], "MERGED", r.stderr);
   assert.deepEqual(r.merged, [930]);
-  assert.deepEqual(r.prs.map((p) => p.number), [931]);
+  assert.equal(r.mergedReads.length, 1);
+  assert.deepEqual(r.asked(r.mergedReads[0]), [930]);
 });
 
-test("gather: a failed merged-PR read degrades to none known, like the open list", () => {
-  const r = gatherRows({
-    issuesJson: "[]",
-    prsJson: JSON.stringify([{ number: 931, state: "OPEN", title: "t", labels: [] }]),
-    mergedJson: null,
+test("#1840: a tick whose row PRs are all open, token-MERGED or carried forward makes no merged read", () => {
+  const r = gatherMerged({
+    rows: [
+      "#901 impl-901=PR#931",
+      "#902 impl-902=PR#932 → MERGED 73b356de",
+      "#903 impl-903=PR#933",
+      "#904 impl-904",
+      "#905 excluded · behind-pr:#931",
+    ],
+    prs: [931],
+    prev: { tickets: [{ issue: 903, pr: 933, column: "MERGED", sinceEnteredStage: 1 }] },
   });
+  assert.deepEqual(r.mergedReads, [], "nothing needed a merged read, so none was made");
   assert.deepEqual(r.merged, []);
-  assert.deepEqual(r.prs.map((p) => p.number), [931], "the open list is untouched by the merged read failing");
-  assert.match(r.stderr, /gh pr list --state merged .*failed/);
+  assert.equal(r.columns[931], "REVIEW");
+  assert.equal(r.columns[932], "MERGED");
+  assert.equal(r.columns[933], "MERGED");
+});
+
+test("#1840: the merged lookup is ONE gh invocation asking about exactly the row PRs that need it", () => {
+  const r = gatherMerged({
+    rows: [
+      "#901 impl-901=PR#931",
+      "#902 impl-902=PR#932 → MERGED 73b356de",
+      "#903 impl-903=PR#933",
+      "#906 impl-906=PR#930",
+      "#907 impl-907=PR#940",
+      "#908 impl-908=PR#950",
+      "#909 impl-909=PR#960",
+    ],
+    prs: [931],
+    prev: { tickets: [{ issue: 903, pr: 933, column: "MERGED", sinceEnteredStage: 1 }] },
+    states: { 930: "MERGED", 940: "CLOSED", 950: "MERGED", 960: "OPEN" },
+  });
+  assert.equal(r.mergedReads.length, 1, JSON.stringify(r.mergedReads));
+  assert.deepEqual(r.asked(r.mergedReads[0]).sort((a, b) => a - b), [930, 940, 950, 960],
+    "open 931, token-MERGED 932 and carried-forward 933 are not asked about");
+  assert.deepEqual(r.merged, [930, 950]);
+  assert.equal(r.columns[930], "MERGED");
+  assert.equal(r.columns[940], "REVIEW", "closed unmerged stays REVIEW");
+  assert.equal(r.columns[950], "MERGED");
+  assert.equal(r.columns[960], "REVIEW", "open but beyond the open list is not merged");
+});
+
+test("#1840: a failed merged lookup keeps #1841's rule — carried forward stays MERGED, the rest reads REVIEW", () => {
+  const r = gatherMerged({
+    rows: ["#903 impl-903=PR#933", "#907 impl-907=PR#930"],
+    prev: { tickets: [{ issue: 903, pr: 933, column: "MERGED", sinceEnteredStage: 1 }] },
+    states: { 930: "MERGED" },
+    fail: true,
+  });
+  assert.equal(r.mergedReads.length, 1);
+  assert.deepEqual(r.merged, []);
+  assert.equal(r.columns[933], "MERGED");
+  assert.equal(r.columns[930], "REVIEW");
+  assert.match(r.stderr, /merged read .*failed/);
+});
+
+// A row whose PR number GitHub cannot resolve as a PR — a typo, or an
+// amendment-2a row keyed by an issue number — makes gh exit 1, but the body
+// still answers every other number. Refusing the whole answer would let one
+// bad row put every cold-start merged PR back in REVIEW on every tick.
+test("#1840: one unresolvable number does not poison the batch — the PRs gh did answer still count", () => {
+  const r = gatherMerged({
+    rows: ["#907 impl-907=PR#930", "#908 impl-908=PR#1840"],
+    states: { 930: "MERGED" },
+  });
+  assert.equal(r.mergedReads.length, 1);
+  assert.deepEqual(r.merged, [930]);
+  assert.equal(r.columns[930], "MERGED");
+  assert.equal(r.columns[1840], "REVIEW");
 });
 
 // `state` and `title` used to default to a sentinel ("UNKNOWN" / `#<number>`)
