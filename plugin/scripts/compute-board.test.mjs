@@ -691,10 +691,78 @@ test("#1820: a bare `review-pr-<n>` token (no `review=` prefix) names nobody —
   assert.equal(b.queue.reviewBacklog, 1, "no review=, no reviewed=, no live fix-pr/finisher-pr — the bare token does not exempt it");
 });
 
-test("#1820: a settled `review=...=failed` token with no redispatch still keeps a row out of reviewBacklog, per the ruling's literal 'neither review= nor reviewed=' wording", () => {
-  const b = computeBoard(reproInputs({ rows: ["#961 impl-961=PR#931 · review=member:review-pr-961=failed"] }));
+// --------------------------------------------------------------------------
+// #1820 amendment 5a (#1842): a `review=` token puts a PR under review only
+// while it is live. A settled `review=…=failed` is a dead review — the PR is
+// owed one again, as run-team SKILL.md defines review-due and as
+// fleet-tick.mjs's `reviewedAny` reads the token.
+
+// fleet-tick.mjs's review-due for the same rows, observed through deriveRun
+// rather than restated: every PR open, unlabelled and closing an issue.
+const tickReviewDue = (rows, prs) => deriveRun({ rows, dispatched: [], drain: null },
+  prs.map((number) => ({ number, labels: [], closingIssuesReferences: [{ number }] }))).reviewDue;
+
+test("#1820 amendment 5a: a settled `review=...=failed` with no redispatch is owed a review — reviewBacklog agrees with fleet-tick.mjs's reviewDue", () => {
+  const row = "#961 impl-961=PR#961 · review=member:review-pr-961=failed";
+  const b = computeBoard(reproInputs({ rows: [row], prs: [openPr(961)] }));
+  assert.equal(card(b, 961).column, "REVIEW");
   assert.equal(card(b, 961).agent, null, "the reviewer settled failed; nobody is live");
-  assert.equal(b.queue.reviewBacklog, 0, "any review= token, settled or not, counts as 'has had a reviewer' per the current ruling's wording");
+  assert.equal(b.queue.reviewBacklog, 1, "a dead review is no review");
+  assert.deepEqual(tickReviewDue([row], [961]), [961], "the tick lists the same PR as review-due");
+});
+
+test("#1820 amendment 5a: `=failed` then a live redispatch is under review; any `reviewed=` stays out of the backlog whatever review= tokens it carries", () => {
+  for (const row of [
+    "#962 impl-962=PR#931 · review=wf:r1=failed review=fallback:review-pr-931-b",
+    "#962 impl-962=PR#931 · review=member:review-pr-931=failed review=wf:r2",
+    "#962 impl-962=PR#931 · review=member:review-pr-931=failed reviewed=abc1234:0/0/0",
+    "#962 impl-962=PR#931 · reviewed=abc1234:1/0/0 review=wf:r2=failed",
+    "#962 impl-962=PR#931 · review=wf:r1=failed review=fallback:review-pr-931-b=failed reviewed=abc1234:0/1/0",
+    // A live fix-applier or finisher is reviewing it too, as before (#1820).
+    "#962 impl-962=PR#931 · review=member:review-pr-931=failed · fix-pr-931",
+    "#962 impl-962=PR#931 · review=member:review-pr-931=failed · finisher-pr-931",
+  ]) {
+    const b = computeBoard(reproInputs({ rows: [row] }));
+    assert.equal(card(b, 962).column, "REVIEW", row);
+    assert.equal(b.queue.reviewBacklog, 0, row);
+  }
+});
+
+test("#1820 amendment 5a: on the same ledger and PR list, the cockpit's backlog is fleet-tick.mjs's reviewDue, row by row and in total", () => {
+  // [row, its PR, owed a review]. Every PR is open, unlabelled and closes an
+  // issue, and no row carries a live fix-pr-/finisher-pr-, which the tick's
+  // review-due does not read.
+  const cases = [
+    ["#961 impl-961=PR#961 · review=member:review-pr-961=failed", 961, true],
+    ["#962 impl-962=PR#962 · review=fallback:review-pr-962-b=failed", 962, true],
+    ["#963 impl-963=PR#963 · review=wf:r1=failed", 963, true],
+    ["#964 impl-964=PR#964 · review=wf:r1=failed review=fallback:review-pr-964-b=failed", 964, true],
+    ["#965 impl-965=PR#965 · review=member:review-pr-965=failed · fix-pr-965=failed", 965, true],
+    ["#966 impl-966=PR#966", 966, true],
+    ["#967 impl-967=PR#967 · review=wf:r1=failed review=fallback:review-pr-967-b", 967, false],
+    ["#968 impl-968=PR#968 · review=wf:r3", 968, false],
+    ["#969 impl-969=PR#969 · review=member:review-pr-969=failed reviewed=abc1234:0/0/0", 969, false],
+    ["#970 impl-970=PR#970 · reviewed=abc1234:1/0/0 review=wf:r2=failed", 970, false],
+    // A live copy left beside its settled one by a whole-line rewrite: the
+    // tick's `reviewedAny` counts any live review= token on the row, so the
+    // row is not owed one — the ruling's "neither a live review= nor a
+    // reviewed=", not the last review= token's liveness.
+    ["#971 impl-971=PR#971 · review=member:review-pr-971 review=member:review-pr-971=failed", 971, false],
+    // Amendment 2a rows — no impl token, PR from the mention or the row key.
+    ["#1237 review=wf:r9=failed", 1237, true],
+    ["#1238 -> PR#1238 · review=member:review-pr-1238=failed review=fallback:review-pr-1238-b", 1238, false],
+  ];
+  for (const [row, pr, owed] of cases) {
+    const b = computeBoard(reproInputs({ rows: [row], prs: [openPr(pr)] }));
+    assert.equal(b.tickets[0].column, "REVIEW", row);
+    assert.equal(b.queue.reviewBacklog, owed ? 1 : 0, `${row}: cockpit`);
+    assert.deepEqual(tickReviewDue([row], [pr]), owed ? [pr] : [], `${row}: tick`);
+  }
+  const rows = cases.map(([row]) => row);
+  const prs = cases.map(([, pr]) => pr);
+  const b = computeBoard(reproInputs({ rows, prs: prs.map((n) => openPr(n)) }));
+  assert.equal(b.queue.reviewBacklog, tickReviewDue(rows, prs).length);
+  assert.equal(b.queue.reviewBacklog, cases.filter(([, , owed]) => owed).length);
 });
 
 // --------------------------------------------------------------------------

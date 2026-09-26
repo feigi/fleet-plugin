@@ -61,6 +61,15 @@ import { PR_MENTION } from "./fleet-tick.mjs";
 // `review=fallback:<name>` name a runner member, live until the token is
 // settled `=failed` or a later `reviewed=` records its result.
 //
+// #1820 amendment 5a: a `review=` token puts the PR under review only while
+// it is live. A settled `review=…=failed` is a dead review and the PR is owed
+// one again, as run-team SKILL.md defines review-due and as fleet-tick.mjs's
+// `reviewedAny` reads the token: the PR is owed none while the row carries
+// ANY live `review=` — wherever it sits, not only as the last one — or any
+// `reviewed=`. A `review=` token outside the grammar is still read as live
+// here; fleet-tick.mjs refuses that ledger outright, so there is no reading of
+// it to agree with.
+//
 // `#N excluded · behind-pr:#M` / `behind-issue:#M` is an Exclusion — pool
 // supply, not a claim — spelled exactly as shortlist.mjs and fleet-tick.mjs
 // spell it. `#M` is an issue or PR number, or the branch name recorded before
@@ -92,7 +101,8 @@ export function parseRow(row) {
   let lastImpl = null;
   let anyImpl = false;
   let prMember = false;
-  let review = false;
+  let review = false; // any review= token: a PR-bound signal (amendment 2a)
+  let reviewLive = false; // one not settled `=failed` (amendment 5a)
   let reviewed = false;
   let runners = [];
   let malformed = false;
@@ -113,6 +123,7 @@ export function parseRow(row) {
     if (tok.startsWith("review=")) {
       review = true;
       const m = REVIEW.exec(tok);
+      if (!m?.[2]) reviewLive = true;
       if (m && !tok.startsWith("review=wf:")) {
         if (m[2]) settled.add(m[1]);
         else { live.push({ name: m[1], family: "review" }); runners.push(m[1]); }
@@ -155,7 +166,7 @@ export function parseRow(row) {
     malformed,
     review,
     reviewed,
-    underReview: review || alive.some((t) => t.family === "fix-pr" || t.family === "finisher-pr"),
+    underReview: reviewLive || alive.some((t) => t.family === "fix-pr" || t.family === "finisher-pr"),
   };
 }
 
@@ -357,8 +368,9 @@ export function computeBoard(inputs) {
   const attention = tickets.filter((t) => t.flags.some((f) => !isBadge(f)))
     .sort((a, b) => severity(b.flags) - severity(a.flags));
 
-  // Backlog is a PR nobody has reviewed and nobody is reviewing: no `review=`,
-  // no `reviewed=`, and no live fix-applier or finisher on the row.
+  // Backlog is a PR nobody has reviewed and nobody is reviewing: no live
+  // `review=` (#1820 amendment 5a — a settled `=failed` one is no review), no
+  // `reviewed=`, and no live fix-applier or finisher on the row.
   const parsedByIssue = new Map(parsed.map((p) => [p.issue, p]));
   const reviewBacklog = tickets.filter((t) => {
     const p = parsedByIssue.get(t.issue);
