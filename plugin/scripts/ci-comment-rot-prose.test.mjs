@@ -576,31 +576,43 @@ test("pointerFault still refuses a rule spelled with the opening curly quote —
 // #1903. The Validate JSON step's comment opened "Exactly two tracked JSON
 // files, both plugin manifests" and named the two. True the day it was written
 // (3f9dd372, the 2026-09-08 config split); five more tracked `*.json` files
-// landed over the next three weeks and the sentence stayed, because nothing
-// reads it — the step parses whatever `git ls-files '*.json'` returns. The
-// shape #348 fixed in the Shellcheck comment: prose measuring a set the comment
-// does not own.
+// landed over the following two-plus weeks and the sentence stayed, because
+// nothing reads it — the step parses whatever `git ls-files '*.json'` returns.
+// The shape #348 fixed in the Shellcheck comment: prose measuring a set the
+// comment does not own.
 //
 // Same rule as #348's pins: the FORM is banned and no number is pinned, so a
 // JSON file added or removed needs no edit here. The form is a count sizing the
-// files — a digit, a number word from two up, or "both" — with at most two words
-// between it and "files" or "manifests", none of them ending a sentence. A word
-// ENDING in a period is the sentence end; one merely containing a period is a
-// file name — "seven tracked `*.json` files" is the count, not a boundary. Plural
-// nouns only, because the jq rationale in the same block says the step "exits 1
-// on a file holding `null`": a singular noun would read that exit status as a
-// count. That is the ceiling as well — "exactly one tracked JSON file" passes,
-// and so does a bare list of paths with no count in front of it. The block is
-// the contiguous comment run above the step, anchored on the step's name like
-// the failglob pin, so a count moved into another step's comment is outside it.
+// files — a digit, a spelled-out number two and up (through the nineties, plus
+// "dozen"), or "both" — with at most two words between it and "files" or
+// "manifests", none of them ending a sentence. A word ENDING in a period is the
+// sentence end; one merely containing a period is a file name — "seven tracked
+// `*.json` files" is the count, not a boundary. Plural nouns only, because the
+// jq rationale in the same block says the step "exits 1 on a file holding
+// `null`": a singular noun would read that exit status as a count. That is the
+// ceiling as well — "exactly one tracked JSON file" passes, and so does a bare
+// list of paths with no count in front of it. The block is the contiguous
+// comment run above the step, anchored on the step's name like the failglob
+// pin, so a count moved into another step's comment is outside it.
 const JSON_COUNT =
-  /\b(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|both)\s+(?:\S*[^\s.!?]\s+){0,2}?(?:files|manifests)\b/i;
+  /\b(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|(?:thir|four|fif|six|seven|eigh|nine)teen|(?:twen|thir|for|fif|six|seven|eigh|nine)ty(?:[- ]?(?:one|two|three|four|five|six|seven|eight|nine))?|dozen|both)\s+(?:\S*[^\s.!?]\s+){0,2}?(?:files|manifests)\b/i;
 
 export function jsonCountFault(block) {
-  // The positive half. A doesNotMatch alone passes on a slice that has lost the
-  // paragraph it exists for: a blank line cutting the jq rationale off from the
-  // coverage sentences would leave the ban scanning only the jq half.
-  if (!/\btracked\b|git ls-files/.test(block)) {
+  // The positive half, scoped to the block's FIRST sentence only. A
+  // doesNotMatch over the WHOLE block is vacuous: this block's own cache
+  // sentence ("gitignored, so `git ls-files` never sees them") also contains
+  // `git ls-files`, so a stale count reintroduced as its OWN paragraph and
+  // split from the rest by a blank line — which the walk below (the same
+  // "blank line ends the comment run" rule the failglob pin and every other
+  // block-walk in this file already use) treats as ending the step's comment
+  // right there — would still leave a slice whose only surviving coverage
+  // word is that unrelated cache sentence, reading as covered while the
+  // actual coverage claim, and the count sitting above it, are both gone from
+  // what this function ever sees. The real coverage sentence leads the
+  // paragraph in the current wording, and every accepted paraphrase below
+  // does too — measured against `sentences()`, not a raw substring search.
+  const lead = sentences(block)[0] ?? "";
+  if (!/\btracked\b|git ls-files/.test(lead)) {
     return "the Validate JSON comment no longer says which files the step parses — the slice this pin reads has lost its coverage paragraph";
   }
   const count = JSON_COUNT.exec(block);
@@ -625,6 +637,9 @@ test("jsonCountFault refuses a count of the JSON files in any spelling, and a sl
     "Every tracked JSON file — seven tracked `*.json` files at the time of writing.",
     "Parses the 7 JSON files `git ls-files` lists.",
     "Parses what `git ls-files` lists, both plugin manifests among them.",
+    "A dozen tracked JSON files exist today.",
+    "Thirteen tracked JSON files, at last count.",
+    "Twenty-one files are tracked as JSON today.",
   ]) {
     assert.match(jsonCountFault(`${count} ${jq}`), /sizes the tracked JSON set again/, count);
   }
@@ -636,4 +651,24 @@ test("jsonCountFault accepts the block's own non-counting numbers and a count cu
   const cache = "The runtime caches are NOT covered — every one of them is gitignored, so `git ls-files` never sees them.";
   assert.equal(jsonCountFault(`Parses every file \`git ls-files '*.json'\` lists. ${cache} ${jq}`), null);
   assert.equal(jsonCountFault(`Every tracked \`*.json\` file. The 2026-09-08 split removed two of them. Files added since need no edit here. ${jq}`), null);
+});
+
+// Review of PR #1942 (correctness + tests dimensions, independently
+// corroborated 3 ways): the doesNotMatch above used to scan the WHOLE block,
+// so a stale count reintroduced as its own paragraph and separated from the
+// rest by a blank line survived undetected — the walk that slices the real
+// ci.yml file stops at that blank line (same rule every block-walk in this
+// file already follows), dropping the count-bearing line entirely, while the
+// truncated remainder still contained the cache sentence's OWN `git ls-files`
+// mention and satisfied the coverage check on that alone. Measured before the
+// fix: this exact input returned `null`. Pinned here as a unit test on
+// `jsonCountFault` directly, since the walk itself is correct per this file's
+// own convention — the bug was in what the coverage check was willing to
+// accept as evidence, not in where the block boundary falls.
+test("jsonCountFault still refuses a count parked in its own paragraph, split from the rest by a blank line the walk already treats as the block boundary (#1903 follow-up)", () => {
+  const jq = "`jq empty`, not `jq -e .`: it exits 1 on a file holding `null` or `false` — both valid JSON.";
+  const remainderAfterBlankLineSplit =
+    "No count and no list of them, on purpose: the count this comment used to carry went stale as files were added (#1903), and ci-comment-rot-prose.test.mjs refuses one coming back. The runtime caches are NOT covered and cannot be — every one of them is gitignored, so `git ls-files` never sees them. Do not read this step as saying anything about a cache. " +
+    jq;
+  assert.match(jsonCountFault(remainderAfterBlankLineSplit), /no longer says which files the step parses/);
 });
