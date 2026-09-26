@@ -274,6 +274,20 @@ const FILES = [
   // what: 8 is the releases past `26.5.0`, three of them — the security
   // release among them — already out when the pin was set. Those two
   // evidence wordings carry no live needle, for the reason #1756's gives.
+  //
+  // #1905. The release-age gate, stated in wall-clock days it does not give.
+  // The Status line's #1753 amendment said a release "must be three days old"
+  // before the bot acts, and point 3 (as #1900 left it) put the shortfall at
+  // "closer to two days", from a date that sits "hours to a day before" the
+  // publish. Renovate's `node-version` datasource reads index.json's day-only
+  // `date` as UTC midnight; across all 15 v26.x releases that midnight sat 12
+  // to 38.5 hours before the GitHub release, so the gate can pass a release
+  // 33.5 hours after it went out. All three wordings are banned. The third
+  // row also bans "up to a day before"; #1905's own suggested remedy said the
+  // datasource can "precede actual publish by up to a day", which undercounts
+  // the same gap the same way and gets its own fourth row below, since it
+  // drops the trailing "before" the third row's alternation needs. No live
+  // needle, for the reason #1756's gives.
   {
     path: ["..", "docs", "adr", "0010-the-node-pin-stays-exact-and-a-bot-moves-it.md"],
     stale: [
@@ -291,6 +305,10 @@ const FILES = [
       /used by(?:[\s,]*(?:and\s+)?`[\w-]+\.mjs`)*[\s,]*(?:and\s+)?`(?:arg|staleness)\.mjs`/,
       /2026-09-21/,
       /there is no other(?!\s+Renovate-driven\b)/,
+      /must\s+be\s+three\s+days\s+old/,
+      /closer\s+to\s+two\s+days/,
+      /(?:hours|up)\s+to\s+a\s+day\s+before/,
+      /\bby\s+up\s+to\s+a\s+day\b/,
     ],
     live: [
       "`check`",
