@@ -8,7 +8,9 @@
 // the step — drop-merged-label.test.mjs owns the script's own behavior.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { between, markedLine, paragraph, phrase } from "./prose-pin.mjs";
 
@@ -794,7 +796,13 @@ test("step 1 polls the branch ref, not the PR object's head", () => {
   // desync verdict and the `<pr_head>` ancestry command — so both are anchored
   // to their own line here.
   assert.match(step1(), /\n\s+printf 'rc=%s branch=%s pre=%s post=%s pr_head=%s\\n%s\\n'/);
-  assert.match(step1(), /\n\s+"\$\(gh pr view <pr> --json headRefOid -q \.headRefOid\)" "\$out"/);
+  // #910: the field is the re-poll's result, never a read of its own. This
+  // line used to carry an inline `"$(gh pr view <pr> --json headRefOid -q
+  // .headRefOid)"`, a single read of the PR object taken in the instant the
+  // ref poll broke, which is the lag window the settle paragraph measures.
+  // Anchored to its own line like the format string above: `pr_head` recurs
+  // through step 1, so a bare match survives the inline read being restored.
+  assert.match(step1(), /\n\s+"\$pr_head" "\$out"/);
 });
 
 // The settle-window paragraph is bracketed in the doc by two rules that ARE
@@ -838,6 +846,186 @@ test("step 1 re-polls before calling a desync, and that mandate is pinned", () =
 test("step 1 requires an ancestry check before closing a desynced PR", () => {
   assert.match(step1(), /git merge-base --is-ancestor <pr_head> origin\/<branch>/);
   assert.match(step1(), /Non-ancestor → \*\*do not close\*\*/);
+});
+
+// --- #910: step 1's block, lifted from the fence and executed ---------------
+//
+// The settle paragraph says a desync is not a desync until it survives a
+// bounded re-poll, and the block used to read `headRefOid` once, inline in its
+// printf, so a bot that ran the block and stopped reading reported one for a
+// state that clears itself. The ruling on #910 put the re-poll in the block.
+// The behaviour it asks for cannot be seen by a string pin: a loop's bound, its
+// break condition, and which outcomes enter it. So these RUN the block, the way
+// shell-traps-prose.test.mjs runs this document's monitor. `git`, `gh` and
+// `sleep` are stubbed, each probe answers from a per-case sequence (its last
+// value repeating), and every call is logged, so a case asserts what the block
+// printed and how many times it asked.
+//
+// The stubs are shell functions defined ahead of the block, not executables on
+// PATH. A function shadows a command in all three shells, `$(…)` and pipelines
+// included, and a freshly written executable is scanned on its first exec under
+// macOS: measured here at ~5s per stub, 15s a run for three, where the
+// functions cost nothing.
+//
+// THE CEILING: nothing here contacts GitHub, and `sleep` is logged, not taken,
+// so this measures the block's control flow and not real lag or wall time.
+// `seq` and `cut` are the real ones. `<pr>` is filled in, because a bot fills
+// it in, and left literal the shell reads it as two redirections.
+const STEP1_BLOCKS = [...DOC.matchAll(/```bash\n([\s\S]*?)```/g)]
+  .map((m) => m[1])
+  .filter((b) => b.includes("gh pr update-branch <pr> --rebase"));
+assert.equal(
+  STEP1_BLOCKS.length,
+  1,
+  `expected exactly one bash block running gh pr update-branch, found ${STEP1_BLOCKS.length}; update this test`,
+);
+
+// `next`: one value per line in "$1", one consumed per call, the last one
+// repeating once the sequence runs out. Arithmetic, not a bare `[ -gt ]`, on
+// wc's count: BSD wc pads it with spaces. The counters are files because most
+// calls run in a `$(…)` subshell, where a variable would not survive. An empty
+// `ls` value is a failed read: no line at all, which `cut -f1` turns into an
+// empty `post`. `return`, never `exit`: `sleep` runs in the block's own shell.
+const STEP1_STUBS = `next() {
+  stub_n=$(cat "$1.n" 2>/dev/null || echo 0); stub_n=$((stub_n+1)); echo "$stub_n" >"$1.n"
+  stub_last=$(($(wc -l <"$1"))); [ "$stub_n" -gt "$stub_last" ] && stub_n=$stub_last
+  sed -n "\${stub_n}p" "$1"
+}
+git() {
+  [ "$1" = ls-remote ] || { echo "unexpected: git $*" >&2; return 97; }
+  echo ls-remote >>"$CASE/log"
+  stub_sha=$(next "$CASE/ls")
+  [ -z "$stub_sha" ] || printf '%s\\t%s\\n' "$stub_sha" "$3"
+}
+gh() {
+  case "$*" in
+    "pr view 42 --json headRefName -q .headRefName") echo feat ;;
+    "pr update-branch 42 --rebase")
+      [ "$UPDATE_RC" -eq 0 ] || { echo "GraphQL: merge conflict" >&2; return "$UPDATE_RC"; }
+      echo "PR branch updated" ;;
+    "pr view 42 --json headRefOid -q .headRefOid")
+      echo headRefOid >>"$CASE/log"
+      next "$CASE/head" ;;
+    *) echo "unexpected: gh $*" >&2; return 97 ;;
+  esac
+}
+sleep() { echo "sleep $*" >>"$CASE/log"; }
+`;
+const STEP1_SCRIPT = STEP1_STUBS + STEP1_BLOCKS[0].replaceAll("<pr>", "42");
+
+const STEP1_DIR = mkdtempSync(join(tmpdir(), "merge-bot-step1-"));
+
+const step1HasShell = (s) => {
+  try {
+    execFileSync(s, ["-c", "exit 0"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
+// sh and bash exist on every runner; zsh, the shell this document says it runs
+// under, is absent on ubuntu-latest and is skipped there rather than faked.
+const STEP1_SHELLS = ["sh", "bash", "zsh"].filter(step1HasShell);
+
+const PRE = "a".repeat(40);
+const POST = "b".repeat(40);
+const THIRD = "c".repeat(40);
+
+// The timeout is the bound's own witness: a re-poll rewritten as an unbounded
+// `until` spins on a PR object that never moves, and reds here instead of
+// hanging the suite.
+function runStep1(shell, { ls, head, updateRc = 0 }) {
+  const dir = mkdtempSync(join(STEP1_DIR, "case-"));
+  const lines = (xs) => xs.map((x) => `${x}\n`).join("");
+  writeFileSync(join(dir, "ls"), lines(ls));
+  writeFileSync(join(dir, "head"), lines(head));
+  writeFileSync(join(dir, "log"), "");
+  const script = join(dir, "step1.sh");
+  writeFileSync(script, STEP1_SCRIPT);
+  const stdout = execFileSync(shell, [script], {
+    encoding: "utf8",
+    timeout: 30_000,
+    env: { ...process.env, CASE: dir, UPDATE_RC: String(updateRc) },
+  });
+  const report = /^rc=(\S*) branch=\S* pre=(\S*) post=(\S*) pr_head=(\S*)$/m.exec(stdout);
+  assert.ok(report, `${shell}: the block printed no report line:\n${stdout}`);
+  const log = readFileSync(join(dir, "log"), "utf8").split("\n").filter(Boolean);
+  const firstRead = log.indexOf("headRefOid");
+  return {
+    rc: report[1],
+    post: report[3],
+    prHead: report[4],
+    reads: log.filter((l) => l === "headRefOid").length,
+    sleeps: log.filter((l) => l.startsWith("sleep")),
+    // The re-poll's own sleeps: every one after the first PR-object read. The
+    // ref poll's sleeps all come before it.
+    repollSleeps: firstRead === -1 ? 0 : log.slice(firstRead).filter((l) => l.startsWith("sleep")).length,
+  };
+}
+
+test("step 1 re-polls a lagging PR object and reports the head it caught up to", () => {
+  for (const shell of STEP1_SHELLS) {
+    // The measured shape: the ref moved on the first poll, and the PR object
+    // followed a few reads later. A single read reports `pre` here, and that is
+    // a desync verdict for a state that cleared itself.
+    const lag = runStep1(shell, { ls: [PRE, POST], head: [PRE, PRE, PRE, POST] });
+    assert.equal(
+      lag.prHead,
+      POST,
+      `${shell}: pr_head reported ${lag.prHead} after the PR object caught up on read 4; the block read it too early`,
+    );
+    assert.equal(lag.reads, 4, `${shell}: expected 4 PR-object reads (3 lagging, 1 caught up), got ${lag.reads}`);
+    assert.equal(lag.repollSleeps, 3, `${shell}: expected one sleep between each pair of reads, got ${lag.repollSleeps}`);
+    // An empty read is no answer, so it cannot end the wait either.
+    const blank = runStep1(shell, { ls: [PRE, POST], head: ["", POST] });
+    assert.equal(blank.prHead, POST, `${shell}: an empty PR-object read ended the re-poll`);
+    assert.equal(blank.reads, 2, `${shell}: expected the empty read to be re-polled once, got ${blank.reads} reads`);
+  }
+});
+
+test("step 1 reports a desync only after the re-poll has run its 60 × 5s cap", () => {
+  for (const shell of STEP1_SHELLS) {
+    const stuck = runStep1(shell, { ls: [PRE, POST], head: [PRE] });
+    assert.equal(stuck.post, POST, `${shell}: fixture: the ref moved, so this is the desync signature`);
+    assert.equal(stuck.prHead, PRE, `${shell}: a PR object that never moved was reported as ${stuck.prHead}`);
+    assert.equal(
+      stuck.reads,
+      61,
+      `${shell}: the desync was reported after ${stuck.reads} PR-object reads; the cap is one read plus 60 re-polls`,
+    );
+    assert.equal(stuck.repollSleeps, 60, `${shell}: expected 60 re-poll sleeps, got ${stuck.repollSleeps}`);
+    assert.deepEqual(
+      [...new Set(stuck.sleeps)],
+      ["sleep 5"],
+      `${shell}: every wait is the ref poll's own 5s, got ${[...new Set(stuck.sleeps)].join(", ")}`,
+    );
+  }
+});
+
+// What the re-poll must NOT hold up. It is gated on the one outcome that can
+// produce the desync signature: `rc=0`, `post` non-empty, `post != pre`. The
+// other rows of the four-outcome list take the fallback, and a five-minute wait
+// on the PR object in front of each one would be spent on a question nobody
+// asked. A PR object already off `pre` has answered, even on a third sha: that
+// is merge-gate.mjs's `head-moved-after-label`, not this loop's to wait out.
+test("step 1 takes one plain PR-object read wherever the ref did not land, or the PR object already moved", () => {
+  const cases = [
+    ["a non-zero rc", { updateRc: 1, ls: [PRE], head: [PRE] }, { rc: "1", prHead: PRE }],
+    ["a ref that never moved", { ls: [PRE], head: [PRE] }, { post: PRE, prHead: PRE }],
+    ["an unreadable ref", { ls: [PRE, ""], head: [PRE] }, { post: "", prHead: PRE }],
+    ["a PR object already on post", { ls: [PRE, POST], head: [POST] }, { post: POST, prHead: POST }],
+    ["a PR object on a third sha", { ls: [PRE, POST], head: [THIRD] }, { post: POST, prHead: THIRD }],
+  ];
+  for (const shell of STEP1_SHELLS) {
+    for (const [what, fixture, want] of cases) {
+      const got = runStep1(shell, fixture);
+      for (const [k, v] of Object.entries(want)) {
+        assert.equal(got[k], v, `${shell}, ${what}: ${k} reported ${JSON.stringify(got[k])}`);
+      }
+      assert.equal(got.reads, 1, `${shell}, ${what}: expected one plain PR-object read, got ${got.reads}`);
+      assert.equal(got.repollSleeps, 0, `${shell}, ${what}: the block waited on the PR object ${got.repollSleeps} times`);
+    }
+  }
 });
 
 // #908: a controller brief predicted the merge would be "a fast-forward". True
