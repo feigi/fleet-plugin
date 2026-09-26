@@ -382,13 +382,38 @@ const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`].map((f)
 // case — a NAME match, never a prefix or shape test — by also checking a
 // word's own AS-SPELLED form against OWN_FLAGS, alongside the
 // one-dash-prepended form already there.
+//
+// #1851: a Unicode format character (general category Cf — U+200B zero-width
+// space, U+2060 word joiner, U+00AD soft hyphen, the bidi controls, …) is
+// invisible and sits outside `\s`, so the split above never cut on it and it
+// rode along inside the word: `\u200B-require-file` reads as `-require-file`
+// yet never equalled an own-flag spelling, and scored as subject text. Each
+// word now has every Cf code point stripped before either lookup, so it is
+// looked up as the word a reader sees — wherever the character sits, ahead of
+// the dash, inside the name, or behind it. Stripped, not split on: a word
+// the character sits inside of stays one word (`pre\u200B-file` is
+// `pre-file`, not a `-file`). And stripped AFTER the `\s` split, not before:
+// U+FEFF is the one code point in both Cf and `\s`, and a strip ahead of the
+// split would join `widget\uFEFF-require-file` into one word and stop
+// refusing it. The rule is still a NAME match — own names are ASCII, so only
+// a word that is an own-flag spelling plus Cf characters is newly refused.
+// Cf also holds a few VISIBLE marks (the Arabic number signs U+0600–0605,
+// among others); stripping them costs a refusal only of such a mark glued to
+// an own-flag name, which no subject carries.
+//
+// Left open, deliberately: invisible characters outside Cf — U+3164 and the
+// other Hangul fillers (letters), U+034F and the variation selectors
+// (combining marks) — which are text rather than format controls; and a Cf
+// character ahead of a NON-own `--word` leading a tail element, which the
+// outer `startsWith("--")` clause misses exactly as it misses ordinary
+// whitespace there.
 function refuseStrayInCheckTail(tail) {
   if (tail.length <= 1) return;
   const stray = tail.find(
     (a) =>
       a.startsWith("--") ||
       a.split(/\s+/).some((word) => {
-        const name = word.split("=")[0].toLowerCase();
+        const name = word.replace(/\p{Cf}/gu, "").split("=")[0].toLowerCase();
         return OWN_FLAGS.includes(name) || OWN_FLAGS.includes(`-${name}`);
       }),
   );

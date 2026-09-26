@@ -2239,6 +2239,66 @@ test("CLI: a two-dash spelling of either flag is refused anywhere in a quoted ta
   }
 });
 
+// #1851: a Unicode format character (general category Cf) is invisible and
+// sits outside `\s`, so the per-word split above never cuts on it and it rides
+// along inside the word it touches — `\u200B-require-file` never equalled an
+// own-flag spelling, and the call fell through to scoring the subject: the
+// verdict flip #1744/#1766/#1850 exist to refuse. The ticket's own probe
+// (U+200B and U+2060 leading the flag as its own argv element) is driven
+// first; the rest cover the positions and forms a leading-only strip, a
+// two-character strip, or a BMP-only hand-written class would each still
+// miss: trailing, inside the name, `=value`, the two-dash as-spelled branch
+// with a case variant, a Latin-1 Cf (U+00AD), U+180E (in `\s` before
+// Unicode 6.3, Cf only since), and an astral one (U+E0020 TAG SPACE). The
+// U+FEFF case was refused before this fix and is here because it is the one
+// Cf code point that is also `\s`: a strip run BEFORE the split would join
+// "widget" and "-require-file" into one word and stop refusing it.
+test("CLI: a format (Cf) character ahead of, inside or behind this script's own flag name still lets the clause refuse it (#1851)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#123 widget guard missing"]));
+  for (const stray of [
+    "\u200B-require-file",
+    "\u2060-require-file",
+    "widget -file\u200B",
+    "-require\u2060-file",
+    "\u200B-require-file=true",
+    "widget \u2060--REQUIRE-FILE",
+    "\u00AD-file",
+    "\u180E-require-file",
+    "\u{E0020}-file",
+    "widget\uFEFF-require-file",
+  ]) {
+    const r = cli(["--file", file, "check", stray, "widget", "guard", "missing"]);
+    const label = JSON.stringify(stray);
+    assert.equal(r.status, 2, `${label}: got exit ${r.status}\n${r.stderr}`);
+    assert.ok(
+      r.stderr.includes(`unknown flag ${stray} in subject`),
+      `${label}: the refusal must name the whole stray element, format character included\n${r.stderr}`,
+    );
+    assert.equal(r.stdout, "", `${label}: a refusal must not also emit a payload`);
+  }
+});
+
+// #1851's false-positive side: the fix strips format characters out of a
+// word, it does not split on them. A word the character sits INSIDE of stays
+// one word, so `pre\u200B-file` is looked up as `pre-file` — the word a reader
+// sees — and not as a `-file` that splitting on U+200B would expose. A
+// one-dash word sharing an own name's prefix and a non-own two-dash word stay
+// subject text with a format character ahead of them too: still a NAME match.
+test("CLI: a word carrying a format (Cf) character that is not this script's own flag name is still scored as subject text (#1851)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  for (const word of ["pre\u200B-file", "widget \u2060-files", "widget \u200B--basee"]) {
+    const subject = `${word} guard missing`;
+    writeFileSync(file, ledgerText([`#1419 ${subject}`]));
+    const r = cli(["--file", file, "check", word, "guard", "missing"]);
+    const label = JSON.stringify(word);
+    assert.equal(r.status, 1, `${label}: got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /ALREADY FILED/, `${label}: must still be scored as subject text`);
+  }
+});
+
 // The tail guard cannot reach the slot ahead of it: a stray flag one token
 // earlier becomes the id, and the tail behind it holds no `--` element to
 // find. Each subcommand loses something different to that — `filed` its
