@@ -2166,6 +2166,66 @@ test("CLI: a case-variant flag combined with leading whitespace, and a flag word
   assert.match(r2.stderr, /unknown flag widget -require-file extra in subject/, "a flag word in the middle of a 3-word element must still be refused");
 });
 
+// #1850: the trailing-position pin above (#1766) only ever exercises the
+// one-dash spelling of this script's own flag name. The same trailing
+// position, spelled with this script's own TWO dashes instead, reaches
+// neither clause: the outer `startsWith("--")` test only fires when a
+// two-dash name LEADS the whole tail element, and the per-word test below
+// it, before this fix, only ever built the one-dash-prepended form of a
+// word — never a word's own two-dash form — so a two-dash own-flag name
+// trailing a quoted multi-word element folded back into the subject
+// silently. Reproduced against the shipped script exactly as the ticket
+// gives it.
+test("CLI: this script's own flag name, two dashes, trailing a quoted multi-word tail element is refused (#1850)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#123 widget guard missing"]));
+  const r = cli(["--file", file, "check", "widget --require-file", "guard", "missing"]);
+  assert.equal(r.status, 2, `got exit ${r.status}\n${r.stderr}`);
+  assert.match(
+    r.stderr,
+    /unknown flag widget --require-file in subject/,
+    "the refusal must name the whole stray element",
+  );
+  assert.equal(r.stdout, "", "a refusal must not also emit a payload");
+});
+
+// #1850: the same three inputs #1744 drove through the one-dash clause —
+// the OTHER flag, a flag word in the MIDDLE rather than at either end of a
+// longer quoted element, and the `=value` spelling — driven through the
+// two-dash form instead, so a fix that only special-cased the trailing word
+// or only the one flag name could not still pass this. A generic two-dash
+// word that is NOT one of this script's own flags is driven alongside them,
+// pinned staying accepted: the per-word clause is a NAME match against
+// OWN_FLAGS, never a "starts with two dashes" shape test — that shape test
+// is the outer clause's alone, and only over the whole element.
+test("CLI: a two-dash spelling of either flag is refused anywhere in a quoted tail element, =value and a non-own two-dash word too (#1850)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#123 widget guard missing"]));
+  for (const [stray, tail] of [
+    ["widget --file", ["widget --file", "guard", "missing"]],
+    ["widget --require-file extra", ["widget --require-file extra", "guard", "missing"]],
+    ["widget --require-file=true", ["widget --require-file=true", "guard", "missing"]],
+  ]) {
+    const r = cli(["--file", file, "check", ...tail]);
+    assert.equal(r.status, 2, `${tail.join(" ")}: got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`unknown flag ${stray} in subject`), `${tail.join(" ")}: must name the stray`);
+    assert.equal(r.stdout, "", `${tail.join(" ")}: a refusal must not also emit a payload`);
+  }
+
+  const bareFile = join(dir, "bare.md");
+  const subject = "widget --basee guard missing";
+  writeFileSync(bareFile, ledgerText([`#1419 ${subject}`]));
+  const accepted = cli(["--file", bareFile, "check", "widget --basee", "guard", "missing"]);
+  assert.equal(accepted.status, 1, `got exit ${accepted.status}\n${accepted.stderr}`);
+  assert.match(
+    accepted.stderr,
+    /ALREADY FILED/,
+    "a two-dash word that is not this script's own flag must still be scored as subject text",
+  );
+});
+
 // The tail guard cannot reach the slot ahead of it: a stray flag one token
 // earlier becomes the id, and the tail behind it holds no `--` element to
 // find. Each subcommand loses something different to that — `filed` its

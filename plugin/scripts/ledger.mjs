@@ -365,12 +365,32 @@ const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`].map((f)
 // OWN_FLAGS itself is lower-cased once at declaration above, so this clause
 // stays correct even if FILE_FLAG_NAME/REQUIRE_FILE_FLAG_NAME ever gain a
 // capital letter.
+//
+// #1850: the per-word test above only ever builds the ONE-dash-PREPENDED
+// form of a word (`-${word...}`), so it matches a word already spelled with
+// one dash but never a word already spelled with this script's own TWO-dash
+// flag name — that spelling comes out of the split as `--require-file`,
+// prepending one more dash makes `---require-file`, and OWN_FLAGS only holds
+// `--require-file`. The outer `startsWith("--")` clause above only reaches a
+// two-dash name when it leads the WHOLE tail element; the same name landing
+// anywhere else in a quoted multi-word element — trailing, in the middle, or
+// alone behind leading whitespace — was invisible to both clauses and folded
+// back into the subject: the identical verdict flip #1744 and #1766 exist to
+// refuse, one dash count over. Reproducible on `main` before #1766 too;
+// #1766 only made it visible by contrast, once the one-dash mirror shape
+// started being refused. Fixed the same way #1744 chose for the one-dash
+// case — a NAME match, never a prefix or shape test — by also checking a
+// word's own AS-SPELLED form against OWN_FLAGS, alongside the
+// one-dash-prepended form already there.
 function refuseStrayInCheckTail(tail) {
   if (tail.length <= 1) return;
   const stray = tail.find(
     (a) =>
       a.startsWith("--") ||
-      a.split(/\s+/).some((word) => OWN_FLAGS.includes(`-${word.split("=")[0].toLowerCase()}`)),
+      a.split(/\s+/).some((word) => {
+        const name = word.split("=")[0].toLowerCase();
+        return OWN_FLAGS.includes(name) || OWN_FLAGS.includes(`-${name}`);
+      }),
   );
   if (stray) die(`unknown flag ${stray} in subject — quote the subject as one argument`);
 }
