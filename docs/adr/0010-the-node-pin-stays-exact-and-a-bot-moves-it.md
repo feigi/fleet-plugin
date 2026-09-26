@@ -56,12 +56,12 @@ Measured 2026-09-23, before ruling:
   `path: "plugin"` at `ref: "main"`, so `.nvmrc` is outside the shipped payload
   and installs track the branch: an unscheduled bot would mint roughly six
   user-invisible releases a month.
-- **An unlabelled issue is a fleet candidate.** `candidates.mjs:298` queries
-  `EXCLUDE` (+ an optional label), and `EXCLUDE` (:133) negates only
+- **An unlabelled issue is a fleet candidate.** `candidates.mjs`'s `query()`
+  searches `EXCLUDE` (+ an optional label), and `EXCLUDE` negates only
   `in-progress`, `onhold`, `wontfix`, `needs-triage`, `needs-info` and the
   `wayfinder:*` set. Renovate's default Dependency Dashboard issue carries no
   labels, so it would enter the candidate pool on any unfiltered run — including
-  the `--allow-fallback` retry at `candidates.mjs:473-476`.
+  the `--allow-fallback` retry, whose `query(null)` drops the label.
 - **A precise consumer floor is out of scope here.** Shipped scripts run under
   the user's own node via `#!/usr/bin/env node`; auditing every runtime API
   surface they touch to derive an accurate minimum is not attempted in this
