@@ -225,7 +225,7 @@ const FILES = [
   {
     path: ["..", "docs", "adr", "0010-the-node-pin-stays-exact-and-a-bot-moves-it.md"],
     stale: [
-      /\(lines\s+\d/,
+      /\blines?\s+\d/,
       /claim-ticket\.test\.mjs:\d/,
       // A backticked `.mjs` list straight after "used by" that includes either
       // comment-only file, wherever in the list and however it wraps.

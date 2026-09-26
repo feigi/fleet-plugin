@@ -217,7 +217,7 @@ export function setupNodeComments(lines = read("../../.github/workflows/ci.yml")
 // every other setup-node step carries a one-line pointer to the same ADR, and
 // a one-line citation is a pointer (checked by pointerFault), never a
 // candidate. Asserts uniqueness among candidates rather than returning the
-// first hit: a second paragraph-length comment that also happens to cite
+// first hit: a second multi-line comment that also happens to cite
 // "ADR 0010" would otherwise let this silently validate the WRONG block while
 // the real one rots unchecked (#1838 — reproduced: reverting the real comment
 // to its stale pre-#1753 form while an earlier decoy step's comment cited
@@ -324,7 +324,10 @@ test("a one-line pointer citing ADR 0010 is never taken for the owner (#1756)", 
 // step with no pointer, a pointer missing the ADR or the rule, a pointer grown
 // into a paragraph) and accepts any paraphrase. It pins no count of steps:
 // adding or dropping a Node-setup site needs no edit here. The rule and its
-// negation must share a sentence, for the reason windowClaimFault gives.
+// negation must share a sentence, for the reason windowClaimFault gives. The
+// ceiling: an unrelated comment run directly above a pointer makes it a
+// multi-line citation, a second candidate owner that pinOwnerComment refuses
+// loudly; a blank line between the two keeps the pointer its own run.
 export function pointerFault({ block, lines }) {
   if (lines === 0) return "carries no comment at all — no pointer to ADR 0010 or the do-not-hand-edit rule";
   if (!block.includes("ADR 0010")) return "no longer points at ADR 0010";
