@@ -288,6 +288,21 @@ const FILES = [
   // the same gap the same way and gets its own fourth row below, since it
   // drops the trailing "before" the third row's alternation needs. No live
   // needle, for the reason #1756's gives.
+  //
+  // #1906. Point 3's bold heading ("Monthly, and automerged.") and its
+  // closing figures ("about one PR, one release and one CI burst per month
+  // ... bounding drift at about one month") read as covering every bump,
+  // where the Status line's #1752 amendment keeps automerge for minor and
+  // patch bumps only: a major waits for a human, so neither its release date
+  // nor the drift bound is the calendar's. Both now name their scope. The last
+  // two rows ban each claim with no update type — minor, patch or major —
+  // named in its own span: a one-line bold span calling the bot automerged,
+  // and the sentence that bounds drift. The scope has to sit in that span, for
+  // the reason ci-comment-rot-prose's windowClaimFault keeps its distinction
+  // inside one sentence: read any wider, an unrelated mention nearby supplies
+  // it. The cost of that ceiling is that a paraphrase scoping the claim only
+  // in the NEXT sentence reds too. No live needle, for the reason #1756's
+  // gives.
   {
     path: ["..", "docs", "adr", "0010-the-node-pin-stays-exact-and-a-bot-moves-it.md"],
     stale: [
@@ -309,6 +324,8 @@ const FILES = [
       /closer\s+to\s+two\s+days/,
       /(?:hours|up)\s+to\s+a\s+day\s+before/,
       /\bby\s+up\s+to\s+a\s+day\b/,
+      /\*\*(?:(?!minor|patch|major)[^*\n])*\bautomerged\b(?:(?!minor|patch|major)[^*\n])*\*\*/i,
+      /(?:^|\.\s)(?:(?!\.\s|minor|patch|major)[^])*\bbounding\s+drift\b/i,
     ],
     live: [
       "`check`",

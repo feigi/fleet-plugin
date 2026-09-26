@@ -89,7 +89,8 @@ Measured 2026-09-23, before ruling:
    ["nvm"]`. The bump arrives as a PR that must pass all seven required checks —
    so a node regression surfaces as a closeable red PR instead of a red `main`,
    which is the exact inversion of what a floating pin buys.
-3. **Monthly, and automerged.** `schedule: ["* * 1-3 * *"]`, read in
+3. **Monthly, and automerged for minor and patch bumps.**
+   `schedule: ["* * 1-3 * *"]`, read in
    `timezone: "UTC"`, opens the bot's window all day on the first three days of
    each month, and `minimumReleaseAge: "3 days"` with `internalChecksFilter:
    "strict"` filters out any release dated less than three days ago, so the
@@ -98,13 +99,16 @@ Measured 2026-09-23, before ruling:
    UTC-midnight field that can sit anywhere from half a day to more than a day
    and a half before the actual publish; the Status line's #1753 amendment
    gives the measurement.
-   That keeps about one PR, one release and one CI burst per month — the
-   Status line's #1753 amendment names one case that opens a second — while
-   bounding drift at about one month.
+   For a minor or patch bump, that keeps about one PR, one release and one CI
+   burst per month — the Status line's #1753 amendment names one case that
+   opens a second — while bounding drift at about one month.
    `automerge` + `platformAutomerge` because a PR waiting on a human rots the
    same way the file edit did — and `platformAutomerge` hands the merge to
    GitHub, which fires when checks go green rather than only inside Renovate's
-   window.
+   window. A major is the exception the Status line's #1752 amendment records:
+   its PR opens in the same window, but it is not automerged and waits for a
+   human, so when it releases is that human's call and the one-month drift
+   bound does not hold for it.
 4. **`rebaseWhen: "behind-base-branch"` is mandatory, not taste.**
    `main.json` sets `strict_required_status_checks_policy: true`, and `ci.yml`'s
    `rebase-check` fails on merge commits above base — so GitHub's "Update
