@@ -100,13 +100,25 @@ const ROOT = repoRoot(DIR);
 const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT, "the node-floor sweep");
 const NODE_SCRIPTS = ROOT === null ? [] : trackedNodeScripts(ROOT);
 
+// Regex metacharacters escaped so a caller's literal stays a literal — the
+// one-liner prose-pin.mjs and ledger.mjs use, not `RegExp.escape`, which Node
+// first shipped in v24.0.0 (V8 13.6), above the floor this file polices.
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // A named binding taken from builtin `mod` at its MODULE SITE, in either module
 // system: ESM's `import { name } from "mod"`, or the CommonJS twin the
 // extensionless entrypoints write (#1855), `const { name } = require("mod")`.
+// Both arguments are escaped before they reach the pattern (#1888): each
+// matches only its own spelling, whatever a floor-table entry passes. The
+// `\b` anchors still assume `name` starts and ends with a word character —
+// true of both entries that call this, and of any identifier with no `$` at
+// either end.
 function moduleSiteBinding(name, mod) {
+  const n = escapeRe(name);
+  const m = escapeRe(mod);
   return new RegExp(
-    `import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from\\s*["']${mod}["']`
-    + `|\\b(?:const|let|var)\\s*\\{[^{}]*\\b${name}\\b[^{}]*\\}\\s*=\\s*require\\(\\s*["']${mod}["']\\s*\\)`,
+    `import\\s*\\{[^}]*\\b${n}\\b[^}]*\\}\\s*from\\s*["']${m}["']`
+    + `|\\b(?:const|let|var)\\s*\\{[^{}]*\\b${n}\\b[^{}]*\\}\\s*=\\s*require\\(\\s*["']${m}["']\\s*\\)`,
   );
 }
 
@@ -441,6 +453,26 @@ test("scanFileViolations passes a CommonJS require of node:util taking neither A
     + "const parseArgs = (argv) => argv.slice(2);\n"
     + "module.exports = { styled: styleText(inspect(parseArgs(process.argv))) };\n";
   assert.deepEqual(scanFileViolations(src, parseVersion("16.0.0")), []);
+});
+
+// #1888. moduleSiteBinding's two arguments are text to find, never regex
+// source, so a floor-table entry cannot widen, narrow or break its own
+// pattern by what it happens to spell. Both directions, at both module sites:
+// a pattern that stopped matching the literal spelling is as wrong as one
+// that started matching what the metacharacter would have admitted.
+test("moduleSiteBinding matches a regex metacharacter in its name or module as itself", () => {
+  const re = moduleSiteBinding("a+b", "x.y");
+  for (const src of ['import { a+b } from "x.y";', 'const { a+b } = require("x.y");']) {
+    assert.match(src, re);
+  }
+  for (const src of [
+    'import { aab } from "x.y";', // `+` read as a quantifier
+    'const { aab } = require("x.y");',
+    'import { a+b } from "xzy";', // `.` read as any character
+    'const { a+b } = require("xzy");',
+  ]) {
+    assert.doesNotMatch(src, re);
+  }
 });
 
 test("parseDeclaredFloor refuses a missing engines.node declaration", () => {
