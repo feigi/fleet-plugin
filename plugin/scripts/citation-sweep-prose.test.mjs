@@ -994,6 +994,9 @@ test("an unscoped drift sentence is refused after every block end and closing ma
     "# Minor and patch bumps\n#\n# Bounding drift at about one month.\n",
     "> - Minor and patch bumps\n> - Bounding drift at about one month.\n",
     "# 1) Minor and patch bumps\n# 2) Bounding drift at about one month.\n",
+    // A multi-digit ordered item marker — the digit branch is `\d{1,9}`,
+    // not just a single digit (PR #1998 review, fleet-review-tests).
+    "100) Monthly for minor and patch bumps\n101) Bounding drift at about one month.\n",
     // A line holding only a setext underline or thematic break — each
     // character its own case, since `* ` and `- ` would open a list item
     // instead — then a code fence and a table row.
