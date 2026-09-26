@@ -829,7 +829,7 @@ test("a positional argument is refused, not silently discarded (#525)", (t) => {
 // (macOS bash 3.2) aborts at 1 with `short_j: unbound variable`, /bin/dash at 2
 // with `short_j: parameter not set`. That 2 is the very status a firing guard
 // returns, and CI's `check` job runs on ubuntu-latest, where `sh` IS dash — so
-// an exit-code assertion pins this guard on a developer's Mac and waves the
+// an exit-code assertion pins this guard on a developer's Mac and lets the
 // mutant through on the runner that gates the merge, while a wording match pins
 // whichever shell uses that wording. The variable NAME is what discriminates:
 // both shells name it first and word the rest however they like.

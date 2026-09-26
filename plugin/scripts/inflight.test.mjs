@@ -881,7 +881,7 @@ test("probe 3: an entry git cannot fully read is unknown, not a stray to skip (#
   // test passes it and `gitdir` still resolves, but the entry itself is not
   // readable: `ls -A` fails EACCES and — its stderr discarded — prints exactly
   // what an empty stray `mkdir` prints. Skip on the OUTPUT alone and either
-  // shape is waved through as "not git's"; git drops both too (measured: 2
+  // shape is let through as "not git's"; git drops both too (measured: 2
   // listed, then 1), the counts AGREE, no mismatch fires, and the probe
   // answers `taken=false` for a ticket whose checkout is still on disk.
   for (const mode of [0o000, 0o111]) {
@@ -913,7 +913,7 @@ test("probe 3: an entry git cannot fully read is unknown, not a stray to skip (#
 test("probe 3: a registry entry whose gitdir is GONE is unknown, not a stray to skip", (t) => {
   // Why the skip tests EMPTINESS and not the absence of `gitdir`. Git drops an
   // entry whose `gitdir` file was deleted, so keying the skip on that file
-  // waves a corrupt entry through as "not git's" and the ticket reads FREE
+  // lets a corrupt entry through as "not git's" and the ticket reads FREE
   // while its checkout may still be on disk — the wrong "free" this probe
   // exists to rule out, reintroduced one layer in. An operator's stray `mkdir`
   // is empty; even a corrupt entry still holds git's own files (commondir,

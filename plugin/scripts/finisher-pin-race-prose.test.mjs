@@ -247,7 +247,7 @@ test("the cause list is open — no count is asserted, and an unmatched cause is
 
   // The fallback itself, and the report it forbids. `unexplained` is the exact
   // output the block exists to make unnecessary: it is the one verdict from
-  // which waving the mismatch through is the cheapest next step.
+  // which letting the mismatch through is the cheapest next step.
   assert.match(
     text,
     /\*\*Anything else\.\*\*/,

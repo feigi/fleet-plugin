@@ -696,7 +696,7 @@ exec ${realSed} "$@"
 // same message a message-preserving downgrade still prints. `release` spawns a
 // bare `sh`, and `.github/workflows/ci.yml`'s `check` job runs on
 // `ubuntu-latest`, where that name resolves to dash: an exit-code assertion
-// therefore pins this guard on a developer's Mac and waves the mutant through
+// therefore pins this guard on a developer's Mac and lets the mutant through
 // on the runner that gates the merge, and a wording assertion pins nothing in
 // either shell. `branch_rw` is what discriminates instead — both shells name
 // it, and it reaches stderr only from that nounset abort.
@@ -3272,7 +3272,7 @@ test("a worktree deleted by hand while its branch carries work still blocks", (t
 test("a worktree whose .git is a directory is unknown, never clean", (t) => {
   // Same leak as the absent .git, reached by a different input and missed by the
   // obvious predicate: `-e` is TRUE for a .git DIRECTORY, so an existence test
-  // waves it through, git walks UP exactly as it does for an absent one, and the
+  // lets it through, git walks UP exactly as it does for an absent one, and the
   // parent's status is believed at rc 0. Only `-f` separates them, and it costs
   // nothing — `git worktree add` always writes .git as a regular file, so no
   // healthy linked worktree is refused by it.
@@ -3618,7 +3618,7 @@ test("an entry that is searchable but UNREADABLE is unknown too, not an empty st
   // work: 0111 is searchable, so `-x` passes it, but it is not readable, so
   // `ls -A` fails EACCES and — its stderr discarded — prints exactly what an
   // empty stray `mkdir` prints. Skip on the OUTPUT alone and this entry is
-  // waved through as "not git's"; git drops it too (the `gitdir` inside is
+  // let through as "not git's"; git drops it too (the `gitdir` inside is
   // unreadable), the counts AGREE at 0, and no refusal fires. Both anomalies
   // together is what makes this the dangerous one — they cancel, where either
   // alone disagrees in the safe direction.
@@ -3662,7 +3662,7 @@ test("a registry entry whose gitdir is GONE is unknown, not a stray to skip (#39
   // Why the skip tests EMPTINESS and not the absence of a `gitdir` file — the
   // discriminator #384 shipped first and then replaced, which this copy must
   // not inherit. Git drops an entry whose `gitdir` was deleted (measured:
-  // listed 1, linked 0), so keying the skip on that file waves a corrupt entry
+  // listed 1, linked 0), so keying the skip on that file lets a corrupt entry
   // through as "not git's", the count agrees at 0, and the claim releases while
   // its checkout may still be on disk. An operator's stray `mkdir` is empty;
   // even a corrupt entry still holds git's own files — commondir, HEAD, index,

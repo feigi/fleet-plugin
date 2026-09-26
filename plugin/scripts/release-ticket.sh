@@ -335,7 +335,7 @@ count_registry() {
     #
     # Emptiness, NOT the absence of a `gitdir` file, and the difference is a
     # wrong "free": git drops an entry whose `gitdir` was deleted, so keying the
-    # skip on that file waves the entry through as "not git's", the count agrees,
+    # skip on that file lets the entry through as "not git's", the count agrees,
     # no refusal fires, and the release proceeds while the checkout may still be
     # on disk (measured: listed 1 → linked 0, and a gitdir-keyed count returns 0
     # to match). A corrupt entry still holds git's own files — commondir, HEAD,

@@ -347,7 +347,7 @@ branch_rev="refs/remotes/origin/$branch"
 # "Can git operate here" is NOT "is this the tree it answers about", and only
 # the second licenses the status below — every git command here walks UP,
 # `status` included. Delete the worktree's `.git` and git resolves the ENCLOSING
-# repo at rc 0, so a gate asking only the first waves the run through (a bare
+# repo at rc 0, so a gate asking only the first lets the run through (a bare
 # `rev-parse --git-dir` stood here and did exactly that); the status below then
 # answers for that repo, and with a clean parent (`.worktrees/` gitignored, the
 # fleet's own layout) the answer is EMPTY at rc 0 while the uncommitted work
