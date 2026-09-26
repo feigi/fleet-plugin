@@ -183,6 +183,24 @@ function securityReleaseFault(adr) {
     : "ADR 0010's security-release evidence no longer says v26.5.1 predates the pin — state it in that bullet's own words: already out when, before, predates, prior to, earlier than or ahead of the pin (#1874, #1928)";
 }
 
+// #1957. Where a sentence ends, for ADR 0010's drift-sentence row below: at
+// `.`, `!` or `?`, after any closing markup — `**`, `_`, a backtick, `)`, `]`,
+// a quote — then whitespace; or where a markdown block ends, as
+// securityReleaseFault splits them: a blank line, or the newline before a
+// `-`/`*`/`+` list item (an ordered item's `3. ` is already a terminator and
+// whitespace). The row's first cut, a bare `\.\s`, missed point 3's bold
+// heading ending `bumps.**`, so the heading's "minor and patch" read as the
+// next sentence's own scope, and an unscoped drift claim under a scoped
+// heading passed. A lone newline is no end: prose wraps mid-sentence. So a
+// heading with no terminator and no blank line after it still lends the next
+// line its scope — telling that line end from a wrap takes parsing the
+// heading, which a sentence boundary cannot do.
+const SENTENCE_END = String.raw`(?:[.!?][*_\x60)\]"'”’]*\s|\n(?=[ \t]*[-*+][ \t])|\n[ \t]*\n)`;
+const UNSCOPED_DRIFT_SENTENCE = new RegExp(
+  String.raw`(?:^|${SENTENCE_END})(?:(?!${SENTENCE_END}|minor|patch|major)[^])*\bbounding\s+drift\b(?:(?!${SENTENCE_END}|minor|patch|major)[^])*(?:${SENTENCE_END}|$)`,
+  "i",
+);
+
 const FILES = [
   {
     path: ["scripts", "arg.test.mjs"],
@@ -474,7 +492,7 @@ const FILES = [
       /(?:hours|up)\s+to\s+a\s+day\s+before/,
       /\bby\s+up\s+to\s+a\s+day\b/,
       /\*\*(?:(?!minor|patch|major)[^*\n])*\bautomerged\b(?:(?!minor|patch|major)[^*\n])*\*\*/i,
-      /(?:^|\.\s)(?:(?!\.\s|minor|patch|major)[^])*\bbounding\s+drift\b(?:(?!\.\s|minor|patch|major)[^])*(?:\.\s|$)/i,
+      UNSCOPED_DRIFT_SENTENCE,
     ],
     live: [
       "`check`",
@@ -689,4 +707,46 @@ test("the security bullet must place v26.5.1 before the pin itself — no neighb
   }
   assert.match(securityReleaseFault(adrWith("v26.8.0, already out when the pin was set")), /no longer names v26\.5\.1/);
   assert.match(securityReleaseFault(adrWith("v26.5.1").split("\n").slice(0, 2).join("\n")), /no longer names a security release/);
+});
+
+test("an unscoped drift sentence is refused, whatever ends the sentence before it (#1957)", () => {
+  for (const text of [
+    // Point 3's figures sentence as it read before #1906.
+    [
+      "   gives the measurement.",
+      "   That keeps about one PR, one release and one CI burst per month — the",
+      "   Status line's #1753 amendment names one case that opens a second — while",
+      "   bounding drift at about one month.",
+    ].join("\n"),
+    // The case #1957 was filed on: a scoped bold heading ending `bumps.**`.
+    "3. **Monthly, and automerged for minor and patch bumps.**\n   Bounding drift at about one month.\n",
+    "_Monthly for minor and patch bumps._ Bounding drift at about one month.\n",
+    "Minor and patch bumps follow `schedule: monthly.` Bounding drift at about one month.\n",
+    "Minor and patch bumps land monthly (see `renovate.json`.) Bounding drift at about one month.\n",
+    "[Minor and patch bumps only.] Bounding drift at about one month.\n",
+    'Renovate calls minor and patch bumps "monthly." Bounding drift at about one month.\n',
+    "Renovate calls minor and patch bumps 'monthly.' Bounding drift at about one month.\n",
+    "Renovate calls minor and patch bumps “monthly.” Bounding drift at about one month.\n",
+    "Renovate calls minor and patch bumps ‘monthly.’ Bounding drift at about one month.\n",
+    "**Why automerge minor and patch bumps?** Bounding drift at about one month.\n",
+    "Minor and patch bumps merge themselves! Bounding drift at about one month.\n",
+    "## Minor and patch bumps\n\nBounding drift at about one month.\n",
+    "- Monthly for minor and patch bumps\n- Bounding drift at about one month.\n",
+  ]) {
+    assert.match(text, UNSCOPED_DRIFT_SENTENCE, text);
+  }
+});
+
+test("a drift sentence naming its own scope passes, whatever markup it carries and however it wraps (#1957)", () => {
+  for (const text of [
+    // Closing markup ends nothing without a terminator before it, and a
+    // terminator ends nothing without whitespace after it.
+    "For **minor** and _patch_ bumps (automerged) under `renovate.json`, bounding drift at about one month.\n",
+    "For minor and patch bumps past v26.5.0, bounding drift at about one month.\n",
+    // A lone newline is a wrap, not an end — even before an issue number or
+    // a bold span, which open no heading and no list item.
+    "For a minor or patch bump, the Status line's\n   #1753 amendment names one case, and\n   **automerge** keeps\n   bounding drift at about one month.\n",
+  ]) {
+    assert.doesNotMatch(text, UNSCOPED_DRIFT_SENTENCE, text);
+  }
 });
