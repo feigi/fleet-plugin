@@ -552,11 +552,49 @@ function assertNotClaudeShaped(d, filePath) {
 // (`fleet-implementer` 51, `fleet-implementer-alt` 17, the default `task`
 // 220, plus the review fan-out's own definitions), absent only where the
 // line itself is.
+//
+// `entries` (#1717) is the per-agent tool stream compute-spend.mjs's
+// attributeTools reads: the same `assistant`/`result` entries
+// foldClaudeTranscript emits, so one attribution serves both harnesses.
+// Measured 2026-09-26 across 5,085 real `~/.omp/agent/sessions/**/*.jsonl`
+// files, the call is a block on the assistant message and the result a line
+// of its own:
+//   {"type":"message","message":{"role":"assistant","stopReason":"toolUse",
+//     "content":[{"type":"toolCall","id":"toolu_01JV…","name":"bash",
+//       "arguments":{…},"intent":"…"}],"usage":{…}}}
+//   {"type":"message","message":{"role":"toolResult","toolCallId":"toolu_01JV…",
+//     "toolName":"bash","content":[{"type":"text","text":"…"}],"details":{…},
+//     "isError":false,"timestamp":1790415990525}}
+// All 176,056 `toolCall` blocks carried `id` and `name`. Each of the 176,027
+// results sat on its own line, so parallel calls arrive as consecutive
+// `toolResult` lines, which attributeTools accumulates into one batch (run
+// lengths 2 through 14 matched the calls-per-turn counts to within one).
+//
+// A result's `chars` sums its text blocks' lengths (`content` was an array
+// every time: 179,380 text blocks, 14 image blocks). That is Claude's
+// measure for the same output, since 95.3% of Claude's tool_result contents
+// are a bare string counted by its length. A non-text block (an image)
+// counts at its JSON length, as in Claude's array case. A result carrying
+// `prunedAt` (194) holds a placeholder such as "[Uneventful result elided]"
+// instead of the output, so its `chars` is the placeholder's length.
+//
+// The result line names its tool (`toolName`), but the stream stays
+// id-only, so a result whose id no `toolCall` block carries books as
+// `unknown` on both harnesses. Measured, that is a turn aborted mid-stream
+// (2 results): the tool's "not executed" result is written first, then the
+// assistant message persists with empty content, so the call never lands.
+// That aborted message is still an `assistant` entry, as is every line
+// `turns` counts. 142 aborted or errored turns followed a result batch. When
+// one never reached the API its usage is all zero, and attributeTools books
+// the batch before it at 0. Claude's stream does the same with its
+// `<synthetic>` error turns (30 across this machine's Claude subagent
+// transcripts, every one with zero cache_creation).
 export function foldOmpTranscript(jsonlText, filePath) {
   let model = null, thinking = null, task = null, resolvedModelIdentity = null, agent = null;
   let firstTs = null, lastTs = null;
   let input = 0, cacheWrite = 0, cacheRead = 0, output = 0, cost = 0, turns = 0;
   let sawCost = false;
+  const entries = [];
   for (const raw of String(jsonlText ?? "").split("\n")) {
     if (!raw.trim()) continue;
     let d;
@@ -576,12 +614,23 @@ export function foldOmpTranscript(jsonlText, filePath) {
     if (d.type === "message" && m?.role === "assistant" && m.usage) {
       const u = m.usage;
       if (typeof m.model === "string" && m.model) model = m.model;
+      const cw = Number(u.cacheWrite ?? 0);
       input += Number(u.input ?? 0);
-      cacheWrite += Number(u.cacheWrite ?? 0);
+      cacheWrite += cw;
       cacheRead += Number(u.cacheRead ?? 0);
       output += Number(u.output ?? 0);
       if (u.cost && typeof u.cost.total === "number") { cost += u.cost.total; sawCost = true; }
       turns++;
+      const blocks = Array.isArray(m.content) ? m.content : [];
+      entries.push({
+        kind: "assistant", cacheWrite: cw,
+        tools: blocks.filter((c) => c?.type === "toolCall").map((c) => ({ id: c.id, name: c.name })),
+      });
+    } else if (d.type === "message" && m?.role === "toolResult") {
+      const blocks = Array.isArray(m.content) ? m.content : [];
+      const chars = blocks.reduce(
+        (n, b) => n + (b?.type === "text" && typeof b.text === "string" ? b.text.length : JSON.stringify(b).length), 0);
+      entries.push({ kind: "result", results: [{ id: m.toolCallId, chars }] });
     }
   }
   const span = firstTs && lastTs ? (Date.parse(lastTs) - Date.parse(firstTs)) / 1000 : 0;
@@ -591,6 +640,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
     cost: sawCost ? cost : null,
     turns,
     wallS: Number.isFinite(span) ? Math.round(span) : 0,
+    entries,
   };
 }
 

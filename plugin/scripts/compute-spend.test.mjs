@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
+import { foldOmpTranscript } from "./member-record.mjs";
 
 const agent = (o) => ({ label: "x", role: "other", cacheWrite: 0, output: 0, cacheRead: 0, maxCtx: 0, ...o });
 
@@ -33,18 +34,23 @@ test("a multi-result turn splits proportionally by result size", () => {
   assert.equal(by.Grep, 250);
 });
 
+// Shared with the omp tests below, which fold the same stream out of omp's
+// own line shape and must attribute it identically.
+const CONSECUTIVE = [
+  { kind: "assistant", cacheWrite: 0, tools: [{ id: "a", name: "Read" }, { id: "b", name: "Grep" }] },
+  result(["a", 750]),
+  result(["b", 250]),
+  { kind: "assistant", cacheWrite: 1000, tools: [] },
+];
+const ORPHAN = [result(["orphan", 100]), { kind: "assistant", cacheWrite: 50, tools: [] }];
+
 test("CONSECUTIVE result turns accumulate — that, not the multi-block turn, is the real shape", () => {
   // Regression. Parallel tool calls do NOT arrive as one user turn carrying two
   // tool_result blocks: across 45,062 real result-bearing turns, none carried
   // two. They arrive as N single-result turns in a row (4,087 occurrences).
   // Replacing `pending` per result turn dropped every batch but the last —
   // 9.1% of all attributions — and made the proportional split above dead code.
-  const tools = attributeTools([
-    { kind: "assistant", cacheWrite: 0, tools: [{ id: "a", name: "Read" }, { id: "b", name: "Grep" }] },
-    result(["a", 750]),
-    result(["b", 250]),
-    { kind: "assistant", cacheWrite: 1000, tools: [] },
-  ]);
+  const tools = attributeTools(CONSECUTIVE);
   const by = Object.fromEntries(tools.map((t) => [t.tool, t.cacheWrite]));
   assert.equal(by.Read, 750);
   assert.equal(by.Grep, 250);
@@ -64,7 +70,7 @@ test("an all-empty result batch still splits evenly rather than vanishing", () =
 });
 
 test("a result whose tool_use id was never seen is counted as unknown, not dropped", () => {
-  const tools = attributeTools([result(["orphan", 100]), { kind: "assistant", cacheWrite: 50, tools: [] }]);
+  const tools = attributeTools(ORPHAN);
   assert.equal(tools[0].tool, "unknown");
   assert.equal(tools[0].cacheWrite, 50);
 });
@@ -76,6 +82,43 @@ test("a trailing result with no following assistant turn costs nothing but is st
   assert.equal(tools[0].calls, 1);
   assert.equal(tools[0].resultChars, 900);
   assert.equal(tools[0].cacheWrite, 0);
+});
+
+// #1717: omp's side of the two fixtures above, as lines in the shape measured
+// against real ~/.omp/agent/sessions/** (member-record.mjs's foldOmpTranscript
+// comment): the call is a `toolCall` block on the assistant message, and each
+// result is a `toolResult` message line of its own naming the call's id.
+const ompMsg = (message) =>
+  JSON.stringify({ type: "message", id: "e1", parentId: null, timestamp: "2026-09-26T10:00:00.000Z", message });
+const ompTurn = (cacheWrite, ...calls) => ompMsg({
+  role: "assistant", model: "claude-opus-5", stopReason: calls.length ? "toolUse" : "stop",
+  content: calls.map(([id, name]) => ({ type: "toolCall", id, name, arguments: {}, intent: "x" })),
+  usage: { input: 1, output: 1, cacheRead: 0, cacheWrite, totalTokens: 2 + cacheWrite, cost: { total: 0.01 } },
+});
+const ompResult = (id, toolName, chars) => ompMsg({
+  role: "toolResult", toolCallId: id, toolName, isError: false, timestamp: 1790415990525, details: {},
+  content: [{ type: "text", text: "x".repeat(chars) }],
+});
+const ompTools = (...lines) => attributeTools(foldOmpTranscript(lines.join("\n"), "/fake/omp.jsonl").entries);
+
+test("omp: parallel results split the next turn's cache write exactly as the Claude stream does (#1717)", () => {
+  // Parallel calls land on omp as consecutive toolResult lines too — measured,
+  // the batch sizes match the calls-per-turn counts — so this is the real
+  // shape of the proportional split on this harness.
+  const tools = ompTools(ompTurn(0, ["a", "Read"], ["b", "Grep"]), ompResult("a", "Read", 750), ompResult("b", "Grep", 250), ompTurn(1000));
+  assert.deepEqual(tools, attributeTools(CONSECUTIVE));
+  const by = Object.fromEntries(tools.map((t) => [t.tool, [t.calls, t.resultChars, t.cacheWrite]]));
+  assert.deepEqual(by, { Read: [1, 750, 750], Grep: [1, 250, 250] });
+});
+
+test("omp: a result whose call never landed in an assistant message is unknown, as on Claude (#1717)", () => {
+  // The measured way this happens: a turn aborted mid-stream writes the tool's
+  // synthetic "not executed" result, then persists the assistant message with
+  // empty content, so no `toolCall` block ever carries the id. The result line
+  // names the tool itself, but the stream is id-only on both harnesses.
+  const tools = ompTools(ompResult("orphan", "bash", 100), ompTurn(50));
+  assert.deepEqual(tools, attributeTools(ORPHAN));
+  assert.deepEqual(tools.map((t) => [t.tool, t.calls, t.resultChars, t.cacheWrite]), [["unknown", 0, 100, 50]]);
 });
 
 test("mergeTools sums across agents and recomputes shares over the merged total", () => {
