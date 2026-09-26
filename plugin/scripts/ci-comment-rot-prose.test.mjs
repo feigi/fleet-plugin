@@ -282,9 +282,9 @@ export function setupNodeComments(lines = read("../../.github/workflows/ci.yml")
     // column, their values sit deeper — and that line is the entry's opener
     // only if it opens a sequence entry whose own keys start at `uses:`'s
     // column. `run: |` or `with:` there, on a line of its own or after the
-    // `- `, means the match was never an entry's own key. A bare `-` puts its
-    // keys on the lines below, which the walk has already held at or past
-    // that column (#1920).
+    // `- `, means the match was never an entry's own key. A bare `-` sets its
+    // keys under it, each of which the walk has already held at or past that
+    // column (#1920).
     let step = at;
     if (!uses[2]) {
       const depth = uses[1].length;
