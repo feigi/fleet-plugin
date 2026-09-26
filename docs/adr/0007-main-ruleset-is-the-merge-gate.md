@@ -162,11 +162,14 @@ whose failure condition a PR head could have been checked against first.
 - The gate's intended state is reviewable in the tree and provable against the
   live repo by one command. A UI edit that silently fails to save — which happened
   twice while this was being settled — is now detectable rather than believed.
-- **Detectable is not detected.** Measured 2026-09-18 (#1710): the spec above
+- **Detectable is not detected.** Measured 2026-09-23 (#1710): the spec above
   named seven required contexts and the live ruleset enforced three — the four
   added when this ADR was ratified reached the tree and never reached GitHub,
   because merging the spec is not applying it and nothing read the gate unless
-  a person chose to. The ruleset version in force across the window below is
+  a person chose to. #1710 opened with that measurement in its body;
+  `gh issue view 1710 --json createdAt --jq .createdAt` prints
+  `2026-09-23T07:30:07Z`.
+  The ruleset version in force across the window below is
   50126119, written 2026-09-18T07:48:21Z; `gh api
   repos/feigi/fleet-plugin/rulesets/20119969/history/50126119 --jq
   '.state.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context'`
