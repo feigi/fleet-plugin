@@ -532,14 +532,16 @@ test("#1820: the merged read is consulted only for PRs absent from the open list
 });
 
 // #1841: MERGED is terminal. A row PR absent from the open list stays MERGED
-// once the previous board already showed the same ticket MERGED, whether
-// today's merged-PR read failed outright (`[]`) or simply succeeded without
-// listing that PR (#1840's window-scoping symptom — a separate ticket).
+// once the previous board already showed the SAME PR, on this ticket,
+// MERGED — whether today's merged-PR read failed outright (`[]`) or simply
+// succeeded without listing that PR (#1840's window-scoping symptom — a
+// separate ticket). Keyed on the PR, not just the ticket: a retry under a
+// NEW PR after an earlier one merged must not inherit that earlier verdict.
 test("#1841: a failed merged read carries forward the previous board's MERGED, preserving dwell and excluding it from claimed", () => {
   const b = computeBoard(reproInputs({
     rows: ["#907 impl-907=PR#930"],
     merged: [], // the merged-PR read failed and degraded to []
-    prev: { tickets: [{ issue: 907, column: "MERGED", sinceEnteredStage: 3 * HOUR }] },
+    prev: { tickets: [{ issue: 907, pr: 930, column: "MERGED", sinceEnteredStage: 3 * HOUR }] },
     beat: { at: 10 * HOUR - 90 * MIN, interval: 1200, stopped: "" },
   }));
   const t = card(b, 907);
@@ -553,7 +555,7 @@ test("#1841: a successful merged read that simply omits the PR still carries MER
   const b = computeBoard(reproInputs({
     rows: ["#907 impl-907=PR#930"],
     merged: [999], // read succeeded but this PR aged out of its window (#1840), not this ticket
-    prev: { tickets: [{ issue: 907, column: "MERGED", sinceEnteredStage: 3 * HOUR }] },
+    prev: { tickets: [{ issue: 907, pr: 930, column: "MERGED", sinceEnteredStage: 3 * HOUR }] },
   }));
   assert.equal(card(b, 907).column, "MERGED");
 });
@@ -571,9 +573,52 @@ test("#1841: an open PR is never forced to MERGED by carry-forward", () => {
   const b = computeBoard(reproInputs({
     rows: ["#908 impl-908=PR#931"],
     prs: [openPr(931)],
-    prev: { tickets: [{ issue: 908, column: "MERGED", sinceEnteredStage: 3 * HOUR }] },
+    prev: { tickets: [{ issue: 908, pr: 931, column: "MERGED", sinceEnteredStage: 3 * HOUR }] },
   }));
   assert.equal(card(b, 908).column, "REVIEW", "the open list is gh's fresher answer — a stale MERGED carry-forward must not override it");
+});
+
+test("#1841: a retry under a different PR does not inherit the previous board's MERGED for this ticket", () => {
+  const b = computeBoard(reproInputs({
+    rows: ["#907 impl-907=PR#930 impl-907-b=PR#940"],
+    prs: [],
+    merged: [], // PR#940 was never observed open or merged this run
+    prev: { tickets: [{ issue: 907, pr: 930, column: "MERGED", sinceEnteredStage: 3 * HOUR }] },
+  }));
+  assert.equal(card(b, 907).column, "REVIEW", "the previous MERGED verdict was about PR#930, not today's PR#940 — carry-forward is keyed on the PR, not just the ticket");
+});
+
+test("#1841: a previous board entry for this ticket that was not MERGED never triggers carry-forward", () => {
+  const b = computeBoard(reproInputs({
+    rows: ["#907 impl-907=PR#930"],
+    merged: [],
+    prev: { tickets: [{ issue: 907, pr: 930, column: "REVIEW", sinceEnteredStage: 3 * HOUR }] },
+  }));
+  assert.equal(card(b, 907).column, "REVIEW");
+});
+
+test("#1841: another ticket's MERGED entry in the same previous board does not carry forward onto this row", () => {
+  const b = computeBoard(reproInputs({
+    rows: ["#907 impl-907=PR#930", "#908 impl-908=PR#940"],
+    prs: [],
+    merged: [],
+    prev: { tickets: [
+      { issue: 907, pr: 930, column: "MERGED", sinceEnteredStage: 3 * HOUR },
+      { issue: 908, pr: 940, column: "REVIEW", sinceEnteredStage: 1 * HOUR },
+    ] },
+  }));
+  assert.equal(card(b, 907).column, "MERGED", "#907's own previous MERGED still carries forward");
+  assert.equal(card(b, 908).column, "REVIEW", "#908 must not inherit #907's MERGED from the same prev.tickets array");
+});
+
+test("#1841: a no-impl-token PR-bound row (amendment 2a) also carries MERGED forward", () => {
+  const b = computeBoard(reproInputs({
+    rows: ["#1237 -> PR#1237 · review=member:review-pr-1237"],
+    prs: [],
+    merged: [],
+    prev: { tickets: [{ issue: 1237, pr: 1237, column: "MERGED", sinceEnteredStage: 3 * HOUR }] },
+  }));
+  assert.equal(card(b, 1237).column, "MERGED");
 });
 
 test("#1820: review=wf/member, or a live fix-pr/finisher-pr, is under review; agent is the latest live member", () => {

@@ -164,10 +164,12 @@ export function parseRow(row) {
 // POOL loop shows it if it is still `ready-for-agent`). An Exclusion is POOL.
 // MERGED is an explicit `MERGED <sha>` token or, failing one, `prState.merged`
 // — gh's answer for a row PR absent from the open list, or (#1841) a
-// carry-forward of the previous board's MERGED for that same ticket: MERGED
-// is terminal, so a merged PR never reopens regardless of what this run's
-// merged read says. READY needs the live PR label; any other PR,
-// closed-unmerged included, is in REVIEW.
+// carry-forward of the previous board's MERGED for that SAME PR on that
+// ticket: MERGED is terminal, so a merged PR never reopens regardless of
+// what this run's merged read says — but a ticket retried under a NEW PR
+// after its earlier one merged gets no such carry-forward; that new PR's
+// state is unknown, not MERGED. READY needs the live PR label; any other
+// PR, closed-unmerged included, is in REVIEW.
 export function deriveColumn(parsed, prState) {
   if (parsed.excluded) return "POOL";
   if (parsed.merged) return "MERGED";
@@ -283,11 +285,14 @@ function stall(beat, ticked, tickets, pool, { ledgerOk, poolOk }, now) {
 // `merged` (#1820) is gh's list of merged PR numbers, consulted only for a row
 // PR absent from the open list `prs`; absent means none known, and a PR in
 // neither list (closed unmerged, or a failed read) keeps REVIEW — unless
-// (#1841) the previous board already showed this same ticket MERGED, in
-// which case it stays MERGED: MERGED is terminal, so a merged PR cannot
-// reopen, whether this run's merged read failed outright or simply
+// (#1841) the previous board already showed the SAME PR MERGED for this
+// ticket, in which case it stays MERGED: MERGED is terminal, so a merged PR
+// cannot reopen, whether this run's merged read failed outright or simply
 // succeeded without listing it (#1840's window-scoping symptom, a separate
-// fix). A PR that IS in the open list is never eligible for this
+// fix). Keyed on the PR, not just the ticket: a ticket retried under a NEW
+// PR after its earlier one merged carries no MERGED verdict forward for
+// that new, unrelated PR — only a previous board entry for the SAME `p.pr`
+// counts. A PR that IS in the open list is never eligible for this
 // carry-forward — only the "absent from both `prs` and (maybe) `merged`"
 // branch below ever consults it.
 export function computeBoard(inputs) {
@@ -310,7 +315,7 @@ export function computeBoard(inputs) {
     const prevTicket = prevByIssue.get(p.issue);
     const prState = p.pr == null ? null
       : pr ? { open: pr.state === "OPEN", labels: pr.labels || [] }
-           : { open: false, labels: [], merged: mergedPrs.has(p.pr) || prevTicket?.column === "MERGED" };
+           : { open: false, labels: [], merged: mergedPrs.has(p.pr) || (prevTicket?.column === "MERGED" && prevTicket.pr === p.pr) };
     const column = deriveColumn(p, prState);
     if (column === null) continue; // released/bailed: the POOL loop below decides
     rowIssues.add(p.issue);
