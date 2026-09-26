@@ -326,6 +326,39 @@ test("a period after 'etc.' still ends the sentence, so the next one's negation 
   );
 });
 
+test("windowClaimFault's splitter skips every listed abbreviation, not only 'e.g.' (#1852)", () => {
+  const lead = ".nvmrc holds an EXACT version, and Renovate moves it on a monthly schedule rather than a human noticing: see ADR 0010.";
+  const tail = "Do not hand-edit this to float.";
+  for (const abbr of ["i.e.", "cf.", "viz.", "vs."]) {
+    assert.equal(
+      windowClaimFault(`${lead} The window bounds when the bot opens its PR (${abbr} once a month), not when the PR merges. ${tail}`),
+      null,
+      `${abbr} should not split the sentence`,
+    );
+  }
+});
+
+test("windowClaimFault still splits after a word that only ends in an abbreviation's letters (#1852)", () => {
+  // "devs." is not "vs." — the lookbehind's `\b` anchors the abbreviation to a
+  // whole word, or a period after any word ending in these letters would
+  // silently stop splitting there, joining two real sentences.
+  assert.match(
+    windowClaimFault("In the window the bot opens its PR and merges it for the devs. Do not hand-edit this to float."),
+    /no longer says, in one sentence/,
+  );
+});
+
+test("windowClaimFault still refuses a negation spelled with the opening curly quote — only U+2019 is accepted (#1852)", () => {
+  // U+2018 is what smart-quote engines use to OPEN a single-quoted span, never
+  // inside a contraction, so a paraphrase relying on it for "doesn't" is not one.
+  assert.match(
+    windowClaimFault(
+      ".nvmrc holds an EXACT version, and Renovate moves it on a monthly schedule rather than a human noticing: see ADR 0010. That schedule’s window bounds when the bot opens its PR; it doesn\u2018t decide when the PR merges. Do not hand-edit this to float.",
+    ),
+    /no longer says, in one sentence/,
+  );
+});
+
 test("pinOwnerComment refuses to pick silently between two setup-node comments that both cite ADR 0010 (#1838)", () => {
   const lines = [
     "      # decoy: cites ADR 0010 but is not the real pin,",
@@ -394,7 +427,9 @@ export function pointerFault({ block, lines }) {
     if (idx === -1) return false;
     const WINDOW = 6;
     const nearby = tokens.slice(Math.max(0, idx - WINDOW), idx + WINDOW + 1).join(" ");
-    // The same two spellings windowClaimFault's NEGATION accepts (#1852).
+    // cannot and the curly apostrophe — the two forms this fix adds — match
+    // windowClaimFault's NEGATION too (#1852); the two functions' negation
+    // word lists otherwise differ intentionally (this one also accepts "no").
     return /\b(?:not|cannot|never|no)\b/i.test(nearby) || /n['’]t\b/i.test(nearby);
   });
   if (!rule) return "no longer carries the do-not-hand-edit rule";
@@ -454,4 +489,12 @@ test("pointerFault accepts a rule negated by 'cannot' or a curly apostrophe, or 
   assert.equal(pointerFault(at("      # .nvmrc is exact and bot-moved (ADR 0010); it cannot be hand-edited to float.")), null);
   assert.equal(pointerFault(at("      # Exact pin Renovate moves: see ADR 0010. Don’t hand-edit this to float.")), null);
   assert.equal(pointerFault(at("      # Never, e.g. for a patch, hand-edit this pin: see ADR 0010.")), null);
+});
+
+test("pointerFault still refuses a rule spelled with the opening curly quote — only U+2019 is accepted (#1852)", () => {
+  const at = (...comment) => setupNodeComments(["  job:", ...comment, "      - uses: actions/setup-node@v5"])[0];
+  assert.match(
+    pointerFault(at("      # Exact pin Renovate moves: see ADR 0010. Don\u2018t hand-edit this to float.")),
+    /no longer carries the do-not-hand-edit rule/,
+  );
 });
