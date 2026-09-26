@@ -245,6 +245,20 @@ test("build: --spend-dir accepts an omp session directory over a heuristic that 
   assert.equal(spend.top[0].label, "impl-7");
 });
 
+test("build: --spend-dir naming an omp-shaped directory that does not exist yet is accepted, not refused", () => {
+  // #1867 review (tests dimension): the Claude-side sibling above is not
+  // mirrored for omp — a mutation that silently swallows readOmpSpend's
+  // missing-directory throw (treating it as zero agents instead of letting
+  // it surface) passed every other omp-tagged test in this file. Named after
+  // an `<ISO>_<uuid>` directory so isOmpSessionDirName routes it to
+  // readOmpSpend, not readClaudeSpend.
+  const r = runBoard(["--spend-dir", join(mkdtempSync(join(tmpdir(), "since-omp-absent-")), OMP_SESSION)]);
+  assert.equal(r.status, 0, r.stderr);
+  const spend = JSON.parse(r.stdout).spend;
+  assert.equal(spend.ok, false, "an unreadable named omp directory must not report spend");
+  assert.equal(spend.totals, undefined, "and must not render a zeroed total in its place");
+});
+
 // #366: the SECOND --interval read site. gather()'s own argInterval() fallback
 // — reached only through `build`, after the same gh reads as --spend-since
 // above — is distinct from serve()'s (pinned in board.test.mjs) and a fix

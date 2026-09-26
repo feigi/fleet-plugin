@@ -219,8 +219,9 @@ function spendView(sp) {
       sp.skipped ? `${sp.skipped} transcript${sp.skipped === 1 ? "" : "s"} skipped` : null,
       sp.damaged ? damagedPhrase(sp.damaged, " — spend may be incomplete") : null,
       sp.metaErrors ? metaErrorsPhrase(sp.metaErrors, " — role/label degraded") : null,
+      "ranked on cache-creation",
       // #1716: with no tool column there is no split to caveat.
-      sp.toolsUnavailable ? "ranked on cache-creation" : "ranked on cache-creation; tool split is attributed, not billed",
+      sp.toolsUnavailable ? null : "tool split is attributed, not billed",
     ].filter(Boolean).join("; "),
     // These bars are percentages of the ATTRIBUTED subtotal, not of the headline
     // number: only a turn FOLLOWING a tool result can be charged to a tool, and an

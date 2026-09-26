@@ -625,14 +625,24 @@ function claudeSessionDirs(home, cwd) {
 // the controller's own, never a member's, the same way Claude's
 // `<session-uuid>.jsonl` beside its directory is never a candidate either.
 //
-// encodeOmpProjectDir realpath-resolves a cwd outside $HOME, which throws when
-// that cwd does not exist. No omp session can be keyed on such a cwd, so that
-// is this tree's absence — not a lookup fault that would also black out a
-// readable Claude tree beside it.
+// encodeOmpProjectDir realpath-resolves a cwd outside $HOME, which throws
+// ENOENT when that cwd does not exist. No omp session can be keyed on such a
+// cwd, so THAT is this tree's absence — not a lookup fault that would also
+// black out a readable Claude tree beside it. Any OTHER error (EACCES on an
+// ancestor directory, say) is a real fault, not an absence, and must not be
+// relabelled as one: swallowing it here would let the omp side crash silently
+// while a readable Claude tree beside it takes over with no signal anything
+// went wrong. It is rethrown, uncaught, into findSubagentsDir's own catch —
+// the same fate a listing failure below already gets, deliberately.
 function ompSessionDirs(home, cwd) {
   const sessions = join(home, ".omp", "agent", "sessions");
   let root;
-  try { root = join(sessions, encodeOmpProjectDir(cwd, { home })); } catch { return { root: sessions, dirs: null }; }
+  try {
+    root = join(sessions, encodeOmpProjectDir(cwd, { home }));
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+    return { root: sessions, dirs: null };
+  }
   if (!existsSync(root)) return { root, dirs: null };
   const dirs = readdirSync(root, { withFileTypes: true })
     .filter((e) => e.isDirectory() && isOmpSessionDirName(e.name))
@@ -640,9 +650,18 @@ function ompSessionDirs(home, cwd) {
   return { root, dirs };
 }
 
-// Newest *.jsonl mtime directly inside a session's transcript dir, 0 if it
-// holds none. A dir whose transcripts are all unreadable loses to one that is
-// readable, which is the behaviour we want when picking "the live session".
+// Newest *.jsonl mtime anywhere under a session's transcript dir, 0 if it
+// holds none. Recursive: a nested member (a dispatcher's own further
+// fan-out, one directory level down — the same walk ompSessionTranscripts
+// does to book their spend) can be the only fresh activity in an otherwise
+// idle-looking omp session, and a scan bounded to the top level would score
+// that session 0 and lose it to a genuinely stale sibling. Claude's
+// `subagents/` dirs are flat, so recursion changes nothing there — the same
+// scan now correctly covers both harnesses' shapes instead of assuming
+// Claude's.
+//
+// A dir whose transcripts are all unreadable loses to one that is readable,
+// which is the behaviour we want when picking "the live session".
 //
 // The scan is wrapped for the same reason the per-file stat below is. This runs
 // once per CANDIDATE, so an uncaught throw here does not just lose one dir — it
@@ -651,7 +670,7 @@ function ompSessionDirs(home, cwd) {
 // the comment above already promises: a dir we cannot read simply loses.
 function newestTranscriptMs(dir) {
   let names;
-  try { names = readdirSync(dir); } catch { return 0; }
+  try { names = readdirSync(dir, { recursive: true }); } catch { return 0; }
   let newest = 0;
   for (const f of names) {
     if (!f.endsWith(".jsonl")) continue;
@@ -915,26 +934,30 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
       return null;
     }
     const spend = computeSpend({ agents, topN });
+    let tools = null, attributedPct = null;
     // #1716: omp has no tool table yet — say so in the payload, never an empty
     // or zeroed one, which would read as "no tool spend" rather than "not
-    // measured". `tools`/`attributedPct` stay present as null so nothing
-    // downstream mistakes a missing key for an old payload.
-    if (read.toolsUnavailable) {
-      return { ...spend, tools: null, attributedPct: null, toolsUnavailable: read.toolsUnavailable, skipped, metaErrors, damaged, since: sinceMs, ok: true };
+    // measured". `tools`/`attributedPct` stay null so nothing downstream
+    // mistakes a missing key for an old payload.
+    if (!read.toolsUnavailable) {
+      tools = mergeTools(read.toolTables);
+      // What fraction of cache_creation the tool table actually explains. It is
+      // never 100%: only a turn that FOLLOWS a tool result can be attributed to a
+      // tool, and an agent's first turn — usually its largest single write, the
+      // system prompt and context — follows nothing. Surfacing the coverage keeps
+      // the two columns honest about being different bases; without it the tool
+      // percentages silently read as shares of the headline number, which they
+      // are not.
+      const attributed = tools.reduce((n, t) => n + t.cacheWrite, 0);
+      attributedPct = spend.totals.cacheWrite > 0 ? (attributed / spend.totals.cacheWrite) * 100 : 0;
     }
-    const tools = mergeTools(read.toolTables);
-    // What fraction of cache_creation the tool table actually explains. It is
-    // never 100%: only a turn that FOLLOWS a tool result can be attributed to a
-    // tool, and an agent's first turn — usually its largest single write, the
-    // system prompt and context — follows nothing. Surfacing the coverage keeps
-    // the two columns honest about being different bases; without it the tool
-    // percentages silently read as shares of the headline number, which they
-    // are not.
-    const attributed = tools.reduce((n, t) => n + t.cacheWrite, 0);
-    const attributedPct = spend.totals.cacheWrite > 0 ? (attributed / spend.totals.cacheWrite) * 100 : 0;
     // `ok` last, so a future field named `ok` on computeSpend's return cannot
     // silently untag a success (a later spread key always wins over an earlier one).
-    return { ...spend, tools, attributedPct, skipped, metaErrors, damaged, since: sinceMs, ok: true };
+    return {
+      ...spend, tools, attributedPct,
+      ...(read.toolsUnavailable && { toolsUnavailable: read.toolsUnavailable }),
+      skipped, metaErrors, damaged, since: sinceMs, ok: true,
+    };
   } catch (e) {
     // A real bug, not an empty run — say so rather than hiding the panel, which
     // is what turned the last type surprise in here into "no panel appeared".
@@ -1024,10 +1047,12 @@ function readClaudeSpend(dir, sinceMs) {
 // `session_init`'s agent definition, task and AgentId, label the AgentId
 // itself (the path-relative stem, `review-pr-12/Security` for a nested one).
 //
-// Per-transcript tolerance is this file's, not readOmpSession's: that reader
-// drops an unreadable file in silence and lets a wrong-harness refusal
-// propagate, and here both are one transcript's fault, so both land in
-// `skipped` with a stderr line, the same as a broken Claude transcript. A
+// Per-transcript tolerance is this file's, not readOmpSession's: readOmpSession
+// (used by the bulk scrape) lets a wrong-harness refusal propagate, and here
+// both — an unreadable file and a wrong-harness refusal — are one transcript's
+// fault, so readOmpSpend, this file's own reader, instead catches both per-
+// transcript, landing them in `skipped` with a stderr line, the same as a
+// broken Claude transcript. A
 // transcript readOmpMember answers null for (no assistant turn yet — a member
 // dispatched this second) has spent nothing, so it is neither booked nor
 // skipped.

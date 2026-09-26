@@ -724,6 +724,48 @@ test("findSubagentsDir on omp picks this workspace's newest session DIRECTORY �
   assert.equal(findSubagentsDir(home, cwd), older, "the ranking reads member transcripts, so it follows them");
 });
 
+test("findSubagentsDir on omp follows a NESTED member's mtime, not just the session dir's top-level files", () => {
+  // #1867 review: a session whose only fresh activity is a member ONE LEVEL
+  // DOWN (its own further fan-out — a dispatcher blocked on its task tool
+  // while its specialists run) must still outrank a stale sibling session.
+  // Regression for a scan bounded to a session dir's direct children only.
+  const { home, cwd, proj } = ompHome();
+  const liveViaNested = ompSession(proj, OMP_A, { "impl-1": ompTranscript() }, 1000);
+  const staleSibling = ompSession(proj, OMP_B, { "impl-2": ompTranscript() }, 5000);
+  const nestedFile = join(liveViaNested, "review-pr-9", "Security.jsonl");
+  mkdirSync(dirname(nestedFile), { recursive: true });
+  writeFileSync(nestedFile, ompTranscript({ agent: "fleet-review-correctness" }));
+  utimesSync(nestedFile, new Date(90000), new Date(90000));
+
+  assert.equal(findSubagentsDir(home, cwd), liveViaNested,
+    "the nested member's fresher mtime must win the ranking, not lose to staleSibling's stale top-level file");
+});
+
+test("findSubagentsDir: an EACCES resolving the omp encoding (not ENOENT) surfaces as an error, even with a readable Claude tree beside it", () => {
+  // #1867 review: ompSessionDirs's catch around encodeOmpProjectDir must only
+  // swallow ENOENT ("this cwd doesn't exist" — the documented case). Any
+  // other error (EACCES on an ancestor, here) is a real fault and must
+  // propagate, never be silently relabelled as "no omp session" while a
+  // readable Claude tree quietly takes over with no signal anything crashed.
+  const home = mkdtempSync(join(tmpdir(), "spend-eacces-home-"));
+  const outer = mkdtempSync(join(tmpdir(), "spend-eacces-outer-"));
+  const blocked = join(outer, "blocked");
+  mkdirSync(blocked);
+  const cwd = join(blocked, "sub", "repo");
+  mkdirSync(cwd, { recursive: true });
+  const sub = join(home, ".claude", "projects", encodeProjectDir(cwd), "sess", "subagents");
+  mkdirSync(sub, { recursive: true });
+  writeFileSync(join(sub, "agent-a.jsonl"), "");
+  chmodSync(blocked, 0o000);
+  try {
+    const result = findSubagentsDir(home, cwd);
+    assert.notEqual(result, sub, "an omp-side EACCES must not be silently absorbed into a confident Claude-only answer");
+    assert.ok(result && typeof result === "object" && "error" in result, "it must surface as a lookup error, the same as any other real fault");
+  } finally {
+    chmodSync(blocked, 0o755);
+  }
+});
+
 test("both harnesses' trees are one ranking: whichever session wrote last wins", () => {
   // One cwd used under both harnesses — this machine's own shape — holds both
   // trees at once. Neither harness is preferred; the live one is the one writing.
