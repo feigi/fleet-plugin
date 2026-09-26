@@ -45,7 +45,8 @@
 // Non-vacuity is asserted explicitly, same discipline every other sweep in
 // this directory uses (see repo-root.mjs's own header, `check-tracked.sh`):
 // an empty shipped-file list is a broken glob, not "nothing to check" — and
-// so, for each half of it, is an empty half.
+// so is an empty `.mjs` half. The shebang half is held to more than that:
+// each of the three entrypoints must be in it by name (#1884).
 //
 // THE DETECTION MECHANISM, and its limits, stated plainly because this is
 // the hardest call in the ticket:
@@ -283,16 +284,29 @@ function nonMjsRelativeImports(source) {
 
 // Both halves, not their sum: the `.mjs` half alone is dozens of files, so a
 // shebang probe that silently lost every extensionless entrypoint (#1855's
-// own gap) would leave a total count comfortably non-empty.
-test("the sweep sees the scripts it is supposed to police — .mjs modules and node-shebang entrypoints both", { skip: SKIP_WITHOUT_REPO }, () => {
+// own gap) would leave a total count comfortably non-empty. And the shebang
+// half by NAME, not merely non-empty (#1884): a file is in it on its first
+// line alone, a line none of the three needs to run — each is invoked as
+// `node <path>` somewhere (`fleet-run` in skills/run-team/SKILL.md,
+// `fleet-bootstrap` and `fleet-provenance` in install-and-smoke.sh) — so one
+// that lost its shebang would drop out of every check below while the other
+// two kept the half non-empty. Measured: `fleet-run` with its shebang line
+// deleted and `Object.groupBy(` appended still ran `node fleet-run --root`
+// to exit 0, and left this suite green under a non-empty-half check.
+const NODE_SHEBANG_ENTRYPOINTS = ["plugin/scripts/fleet-bootstrap", "plugin/scripts/fleet-provenance", "plugin/scripts/fleet-run"];
+
+test("the sweep sees the scripts it is supposed to police — .mjs modules and every node-shebang entrypoint", { skip: SKIP_WITHOUT_REPO }, () => {
   assert.ok(
     NODE_SCRIPTS.some((f) => f.endsWith(".mjs")),
     `trackedNodeScripts(ROOT) returned zero shipped .mjs files — this is a broken glob/git call, and every check below would pass vacuously over them`,
   );
-  assert.ok(
-    NODE_SCRIPTS.some((f) => !f.endsWith(".mjs")),
-    "trackedNodeScripts(ROOT) returned no node-shebang entrypoint — fleet-run, fleet-bootstrap and fleet-provenance are three, "
-    + "so this is a broken shebang probe, and every check below would pass vacuously over them (#1855)",
+  const missing = NODE_SHEBANG_ENTRYPOINTS.filter((f) => !NODE_SCRIPTS.includes(f));
+  assert.deepEqual(
+    missing,
+    [],
+    `trackedNodeScripts(ROOT) does not list ${missing.join(", ")} — an entrypoint is listed by its node shebang alone, so one `
+    + "that lost that first line (or a broken shebang probe) escapes every check below while it still runs as `node <path>`. "
+    + "Restore the shebang; or, if the file was renamed or retired, update NODE_SHEBANG_ENTRYPOINTS (#1855, #1884)",
   );
 });
 
