@@ -201,8 +201,8 @@ const SENTENCE_END = String.raw`(?:[.!?][*_\x60)\]"'”’]*\s|\n(?=[ \t]*[-*+][
 // substring, so "dispatched" and "majority" scoped a claim that names no
 // update type, and an unscoped bold span or drift sentence passed. `\b` is not
 // the boundary either: it counts `_` as a word character, so an italic
-// `_patch_` would stop scoping its claim. Letters and digits bound the word
-// here, nothing else. A plural still names the type — "automerged for minors
+// `_patch_` would stop scoping its claim. Only a letter or digit beside the
+// word disqualifies it. A plural still names the type — "automerged for minors
 // and patches" is scoped — so minors, majors and patches count; "patched" and
 // "patching" do not. "Patches" read as a verb still scopes a claim it does not:
 // a hole left open, because closing it refuses the noun, and so reds prose
