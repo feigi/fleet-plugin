@@ -1062,6 +1062,61 @@ test("one bad transcript in an omp session is skipped and named, not a blackout 
   assert.match(errs[0], /Stray\.jsonl/);
 });
 
+// #1894: a transcript foldOmpTranscript reads no assistant-with-usage line out
+// of has no model, so ompMemberRecord answers null and readOmpSpend books
+// nothing — without a throw, so `skipped` stays 0 as well. `damaged` is then
+// the only thing that says the directory held a transcript at all, and the
+// `!agents.length` branch used to read `skipped` alone: an --spend-dir
+// operator was told the directory "holds no agent transcripts", and the
+// heuristic's panel simply hid — a destroyed session rendered as one that had
+// not started. Claude's side cannot reach that branch this way: readAgent
+// books a wholly-corrupt transcript at zero spend, so its damage already
+// arrives on the success return's note.
+test("an omp session whose only transcript is wholly corrupt reports the damage, not an empty directory (#1894)", () => {
+  const { proj } = ompHome();
+  // Every line unparseable — the ticket's own reproduction, via --spend-dir.
+  const allGarbage = ompSession(proj, OMP_A, { "impl-7": "garbage\n{not json\nmore garbage\n" });
+  let s;
+  const errs = withStderr(() => { s = gatherSpend({ dir: allGarbage, explicit: true }); });
+  assert.equal(s?.ok, false, JSON.stringify(s));
+  assert.match(s.error, /3 damaged transcript lines/);
+  assert.deepEqual(errs.filter((e) => /holds no agent transcripts/.test(e)), [], "the directory holds a transcript; saying otherwise is the defect");
+  // Its header parses and only the line its spend lives on is lost — the
+  // same null from ompMemberRecord, reached from the heuristic, which used to
+  // return the silent `null` that hides the panel.
+  const initOnly = JSON.stringify({ type: "session_init", id: "i1", parentId: null, timestamp: "2026-09-08T15:11:49.495Z", task: "t", agent: "fleet-implementer" });
+  const headerIntact = ompSession(proj, OMP_B, { "impl-8": `${initOnly}\n{"type":"message","message":{"role":"ass\n` });
+  const h = gatherSpend({ dir: headerIntact });
+  assert.equal(h?.ok, false, JSON.stringify(h));
+  assert.match(h.error, /1 damaged transcript line\b/);
+});
+
+test("an omp session losing one transcript whole and another to damaged lines names both, not 'all 1 unreadable' (#1894)", () => {
+  // The `skipped`-only wording counts whole files: beside a second transcript
+  // lost to damaged lines it would claim one transcript was ALL there was.
+  const { proj } = ompHome();
+  const dir = ompSession(proj, OMP_A, { "impl-7": "garbage\n{not json\n" });
+  writeFileSync(join(dir, "Stray.jsonl"), JSON.stringify({ type: "assistant", sessionId: "x", message: { id: "m", usage: {} } }) + "\n");
+  let s;
+  withStderr(() => { s = gatherSpend({ dir }); }); // Stray's skip line is the skips gate's, not under test
+  assert.equal(s.ok, false);
+  assert.doesNotMatch(s.error, /all 1 transcripts/);
+  // One assertion pinning both substrings AND their relative order — two
+  // independent assert.match calls each pass regardless of which clause
+  // comes first, so a swap of the unshift/push that builds `lost` (reversing
+  // the skipped-clause and the damaged-clause) would slip through unnoticed.
+  assert.match(s.error, /1 transcript unreadable; 2 damaged transcript lines/);
+});
+
+test("an omp session whose only transcript is a live write's torn first line is still 'nothing yet', not damage (#1894)", () => {
+  // The input the new branch must ACCEPT: a member dispatched this second has
+  // one partial line and no newline after it. That tail is exactly what
+  // foldOmpTranscript declines to count, so this stays the silent null.
+  const { proj } = ompHome();
+  const dir = ompSession(proj, OMP_A, { "impl-7": '{"type":"session_init","id":"i1","par' });
+  assert.equal(gatherSpend({ dir }), null);
+});
+
 // ── #1583/#1679: the pin ──────────────────────────────────────────────────────
 //
 // Two sessions under ONE project directory is the mode this whole ticket is
