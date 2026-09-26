@@ -417,6 +417,47 @@ test("trackedNodeScripts reads a non-.mjs file's first line: node by any shebang
     "exactly the files whose first line runs node — no other interpreter, no later line, no extension rule");
 });
 
+// A first line is judged WHOLE, however long — never on the prefix one fixed
+// read of it holds (#1887). The first read is 256 bytes (`SHEBANG_BYTES`), and
+// a verdict taken on those bytes alone parts from the whole line's both ways:
+// a `node` past the cut goes unseen; `nodemon` cut right after its `node`
+// reads as `node` at the end of the line, a false accept; and a two-byte
+// character cut in half decodes to U+FFFD, so the character after `node` is no
+// longer the one the file has. Each long line pads an `env -S` assignment so
+// its tail starts at a chosen byte. That last case is pinned against its own
+// short twin rather than to a verdict of its own: whether U+00A0 separates
+// `node` from its flags is NODE_SHEBANG's call, and the cut must not change
+// it. `short/node-at-eof` is a first line the END of the file closes, no
+// newline, and git lists it right after `short/nbsp`, whose longer line
+// leaves a newline in the read buffer past its last byte: that buffer is
+// reused from file to file, so a newline search that ran on past the bytes
+// actually read would end this line on a stale one.
+test("trackedNodeScripts judges a first line whole, however long — never on the prefix its first read holds", (t) => {
+  const padded = (at, tail) => {
+    const head = "#!/usr/bin/env -S A=";
+    return `${head}${"x".repeat(at - head.length - 1)} ${tail}`;
+  };
+  const files = {
+    "long/node": padded(300, "node --no-warnings\n// a later line\n"),
+    "long/node-at-eof": padded(1000, "node"),
+    "cut/nodemon": padded(252, "nodemon\n"),
+    "cut/nbsp": padded(251, "node\u00a0--no-warnings\n"),
+    "short/nbsp": "#!/usr/bin/env -S node\u00a0--no-warnings\n",
+    "short/node-at-eof": "#!/usr/bin/env node",
+  };
+  assert.equal(Buffer.from(files["cut/nodemon"]).indexOf("nodemon") + "node".length, 256,
+    "fixture: `cut/nodemon`'s `node` must end exactly at byte 256");
+  assert.equal(Buffer.from(files["cut/nbsp"]).indexOf(0xc2), 255,
+    "fixture: `cut/nbsp`'s U+00A0 must straddle byte 256");
+  const { dir } = repoTracking(t, Object.keys(files), files);
+
+  const listed = trackedNodeScripts(dir);
+  assert.equal(listed.includes("cut/nbsp"), listed.includes("short/nbsp"),
+    "a character cut in half by the first read must not change the verdict the whole line gets");
+  assert.deepEqual(listed.filter((f) => !f.endsWith("/nbsp")).sort(), ["long/node", "long/node-at-eof", "short/node-at-eof"],
+    "a node shebang past the first read is still one, and a `nodemon` the read cuts after its `node` is still not");
+});
+
 // A tracked file missing from the working tree — an `rm` not yet committed —
 // has no first line to read. That is not a node script in this tree, and must
 // not throw: every sweep calls this at module scope, where a throw fails the

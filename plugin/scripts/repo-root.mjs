@@ -399,11 +399,19 @@ export function trackedShellScripts(root) {
 // and `bun` are other programs.
 const NODE_SHEBANG = /^#!\s*(?:\S*\/)?(?:env(?:\s+(?:-(?:u|-unset|C|-chdir)(?:=\S*|\s+\S+)|-(?!(?:u|-unset|C|-chdir)\s)\S+|\w+=\S*))*\s+(?:\S*\/)?)?node(?:\s|$)/;
 
-// A shebang is one short line; this holds any this repository would write.
+// The first read's size. A shebang is one short line, and this holds any this
+// repository would write, so one read decides it; a longer line reads on.
 const SHEBANG_BYTES = 256;
 
 /**
- * Whether the file at `path` starts with a node shebang, read into `buf`. A
+ * Whether the first line of the file at `path` is a node shebang — the WHOLE
+ * line, up to its newline or the end of the file, however long; `buf` is
+ * scratch for the first read and grows past it only for a longer line. A
+ * verdict on the prefix one read holds parts from the line's own both ways
+ * (#1887): it misses a `node` past its end, reads `nodemon` cut after its
+ * `node` as `node` at the end of the line, and decodes a character it cuts in
+ * half as U+FFFD. A file that does not open with `#!` is decided on that first
+ * read however long its first line, since NODE_SHEBANG is anchored there. A
  * tracked file the working tree no longer has — an `rm` not yet committed —
  * has no first line here, so it is not one; a tracked path that resolves to
  * a directory (a symlink to one, or a submodule's gitlink checked out on
@@ -420,8 +428,27 @@ function hasNodeShebang(path, buf) {
     throw e;
   }
   try {
-    const n = readSync(fd, buf, 0, buf.length, 0);
-    return NODE_SHEBANG.test(buf.toString("utf8", 0, n).split("\n", 1)[0]);
+    let len = readSync(fd, buf, 0, buf.length, 0);
+    if (len < 2 || buf[0] !== 0x23 || buf[1] !== 0x21) return false;
+    // `buf` is reused across files, so the search stops at the bytes read.
+    // The buffer doubles, so rescanning from 0 each pass stays linear.
+    let end;
+    while ((end = buf.subarray(0, len).indexOf(0x0a)) === -1) {
+      if (len === buf.length) {
+        const grown = Buffer.allocUnsafe(len * 2);
+        buf.copy(grown, 0, 0, len);
+        buf = grown;
+      }
+      const n = readSync(fd, buf, len, buf.length - len, len);
+      if (n === 0) {
+        end = len;
+        break;
+      }
+      len += n;
+    }
+    // A newline byte never falls inside a multi-byte UTF-8 character, and
+    // the end of the file is the file's own, so nothing here is cut in half.
+    return NODE_SHEBANG.test(buf.toString("utf8", 0, end));
   } catch (e) {
     if (e.code === "EISDIR") return false;
     throw e;
