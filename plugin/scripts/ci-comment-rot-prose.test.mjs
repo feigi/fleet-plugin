@@ -191,7 +191,7 @@ export function windowClaimFault(block) {
 // lines it spans, and the job it sits in — anchored on the step, never a line
 // number. Exported with an optional `lines` override (same idiom as
 // windowClaimFault's `block` param and citationFault's `citing`/`cited`
-// params) so the cases below can feed it synthetic input the real ci.yml does
+// params) so a test can feed it synthetic input the real ci.yml does
 // not contain; the production call sites take no argument and read the real
 // file. The owner pin and the pointer pin both read the steps through this, so
 // they cannot disagree about where a step's comment starts.
@@ -320,7 +320,7 @@ test("a one-line pointer citing ADR 0010 is never taken for the owner (#1756)", 
 // warning at all. Each of those steps now carries a one-line pointer to both.
 // One line is the FORM being pinned, not a figure: a copied paragraph is two
 // copies of one rule, the drift workflow-files.mjs's header names for a
-// discovery rule. Same rule as the pins above — it bans the stale forms (a
+// discovery rule. Same rule as #348's pins — it bans the stale forms (a
 // step with no pointer, a pointer missing the ADR or the rule, a pointer grown
 // into a paragraph) and accepts any paraphrase. It pins no count of steps:
 // adding or dropping a Node-setup site needs no edit here. The rule and its
