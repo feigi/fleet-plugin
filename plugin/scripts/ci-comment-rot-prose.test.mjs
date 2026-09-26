@@ -261,7 +261,7 @@ export function windowClaimFault(block) {
 
 // Every setup-node step's contiguous comment run: its prose, how many comment
 // lines it spans, and the job it sits in — anchored on the step, never a line
-// number. A step is an entry of a job's `steps:`, found by its
+// number. A step is an entry of `steps:`, found by its
 // `uses: actions/setup-node@` key wherever that key sits among the entry's own
 // keys, and its comment is the run directly above the step's own `- ` opener,
 // where a reader meets it (#1873) — a blank line ends that run, the opener's
@@ -605,12 +605,13 @@ test("a `uses: actions/setup-node@` line that is not a step's own key is not tak
 
 // #1920. That first shallower line can open a sequence entry and still not be
 // a step's: a list nested in `with:` or a matrix `include:` has `- ` entries of
-// its own, keyed at exactly the column of a `uses:` under them, so no column
-// check tells them from a step. What does is the key they hang from — a step is
+// its own, keyed at exactly the column of a `uses:` under them — or written as
+// `- uses:` outright, as a line of a `run: |` script can be too — so no column
+// check tells them from a step. What does is the key they hang from: a step is
 // an entry of `steps:`. And a key written on the dash line itself (`- run: |`)
 // makes the step's opener the first shallower line above a `uses:` that is
-// only a line of that key's value; there the column does tell, because a step's
-// own keys start where the text after its `- ` does.
+// only a line of that key's value; there the column does tell, because a
+// step's own keys start where the text after its `- ` does.
 test("a `uses: actions/setup-node@` line under an entry that is not a step's, or inside a key on a step's dash line, is not a step (#1920)", () => {
   const job = ["  job:", "    steps:"];
   for (const shape of [
