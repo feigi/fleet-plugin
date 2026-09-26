@@ -445,6 +445,63 @@ test("every setup-node step but the owner points at ADR 0010 and the do-not-hand
   }
 });
 
+// #1873. A setup-node step whose `- ` opener is another key — `- name:` above
+// its `uses:`, a shape other steps in ci.yml already take — was never
+// discovered, so every pin reading steps through setupNodeComments was blind
+// to it: such a step with no pointer at all passed every test here. A reader
+// meets the step's comment above its opener, not above `uses:`, so that is
+// where the run is read.
+test("a setup-node step opened by another key is discovered, its comment read above that opener (#1873)", () => {
+  const pointer = "      # Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.";
+  const named = ["      - name: Set up Node", "        uses: actions/setup-node@v5"];
+
+  // The ticket's own repro: no comment, and the step used to come back unseen.
+  assert.deepEqual(setupNodeComments(["  job:", ...named]), [{ block: "", lines: 0, job: "job" }]);
+  assert.match(pointerFault(setupNodeComments(["  job:", ...named])[0]), /no comment at all/);
+
+  // What the wider match must still ACCEPT: a pointer above the opener, with
+  // sibling keys, a nested value or a quoted scalar anywhere in between.
+  for (const step of [
+    named,
+    ["      - id: node", "        with:", "          node-version-file: .nvmrc", "        uses: 'actions/setup-node@v5'"],
+    ['      - uses: "actions/setup-node@v5"'],
+  ]) {
+    const found = setupNodeComments(["  job:", pointer, ...step]);
+    assert.deepEqual(found, [{ block: pointer.replace(/^\s*#\s?/, ""), lines: 1, job: "job" }], step.join("\n"));
+    assert.equal(pointerFault(found[0]), null);
+  }
+});
+
+// #1838's exploit through the same gap: with the real owner refactored into a
+// named step, a bare-form decoy was the only candidate pinOwnerComment could
+// see, so it validated the decoy while the real paragraph rotted unchecked.
+test("pinOwnerComment sees an owner written as a named step, so a bare-form decoy cannot stand in for it (#1873)", () => {
+  const owner = [
+    "      # .nvmrc holds an EXACT version, and Renovate moves it on a monthly",
+    "      # schedule: see ADR 0010. Do not hand-edit this to float.",
+    "      - name: Set up Node",
+    "        uses: actions/setup-node@v5",
+  ];
+  const decoy = [
+    "      # decoy: cites ADR 0010 but is not the real pin,",
+    "      # over two lines like the real one.",
+    "      - uses: actions/setup-node@v5",
+  ];
+  assert.match(pinOwnerComment(owner), /monthly schedule: see ADR 0010/);
+  assert.throws(() => pinOwnerComment([...decoy, ...owner]), /2 setup-node comment blocks citing "ADR 0010"/);
+});
+
+// The wider match's own false-positive class: a `uses:` line is a step only
+// when the first shallower line above it opens a sequence entry. Inside a
+// `run:` script or under `with:` it is not, and a phantom step there would red
+// the pointer test with a comment nobody could add.
+test("a `uses: actions/setup-node@` line that is not a step's own key is not taken for a step (#1873)", () => {
+  const scripted = ["      - name: Print an example", "        run: |", "          uses: actions/setup-node@v5"];
+  const nested = ["      - uses: some/action@v1", "        with:", "          uses: actions/setup-node@v5"];
+  assert.deepEqual(setupNodeComments(["  job:", ...scripted]), []);
+  assert.deepEqual(setupNodeComments(["  job:", ...nested]), []);
+});
+
 test("a paraphrased pointer is accepted; a missing one, a half one and a copied paragraph are not", () => {
   const at = (...comment) => setupNodeComments(["  job:", ...comment, "      - uses: actions/setup-node@v5"])[0];
 
