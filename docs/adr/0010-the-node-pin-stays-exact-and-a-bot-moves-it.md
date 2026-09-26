@@ -1,6 +1,6 @@
 # 0010 — The node pin stays exact, and a bot moves it
 
-**Status:** Accepted. Ruled 2026-09-23 on #354, against the measurements below. Amended by #1752: point 3's automerge stays the default for minor and patch bumps only — a major waits for a human — and each bump carries its own release label from `renovate.json`'s `packageRules`, so `release-label.yml`'s blind `patch` fallback stands down once the bot's own label is present rather than being guaranteed never to fire — the write order between Renovate's label and the fallback's read on the same `opened` event is runtime behaviour this repo does not record; `plugin/scripts/renovate-release-contract.test.mjs` pins the config/workflow contract itself, across the bot config and both release workflows. Amended by #1753: point 3's window is now the first three days of the month, all day, in a `timezone` stated as `UTC` rather than inherited, and a release must be three days old before the bot acts on it (`minimumReleaseAge`, with `internalChecksFilter: "strict"` stated so a too-young release opens no PR at all — Renovate's pending `renovate/stability-days` status is not a required check, so `platformAutomerge` could otherwise merge straight past it). A Node release dated the day the window opens therefore cannot be pinned inside that window, and an age equal to the window's width keeps the worst-case drift at about one month. The hour limit went too: Mend schedules a repo whose bot has not yet had a PR merged only daily, so a five-hour slot on one day could miss every run and silently cost the month. Monthly holds in effect, not absolutely — a release dated in the two days before the window opens ages in on its second or third day and, if the first bump has already merged, opens a second PR that month. The window bounds when the bot opens a PR, not when it merges; `ci.yml`'s first `setup-node` comment says so. Points 1–8 otherwise stand.
+**Status:** Accepted. Ruled 2026-09-23 on #354, against the measurements below. Amended by #1752: point 3's automerge stays the default for minor and patch bumps only — a major waits for a human — and each bump carries its own release label from `renovate.json`'s `packageRules`, so `release-label.yml`'s blind `patch` fallback stands down once the bot's own label is present rather than being guaranteed never to fire — the write order between Renovate's label and the fallback's read on the same `opened` event is runtime behaviour this repo does not record; `plugin/scripts/renovate-release-contract.test.mjs` pins the config/workflow contract itself, across the bot config and both release workflows. Amended by #1753: point 3's window is now the first three days of the month, all day, in a `timezone` stated as `UTC` rather than inherited, and a release must be three days old before the bot acts on it (`minimumReleaseAge`, with `internalChecksFilter: "strict"` stated so a too-young release opens no PR at all — Renovate's pending `renovate/stability-days` status is not a required check, so `platformAutomerge` could otherwise merge straight past it). A Node release dated the day the window opens therefore cannot be pinned inside that window, and an age equal to the window's width keeps the worst-case drift at about one month. The hour limit went too: Mend schedules a repo whose bot has not yet had a PR merged only daily, so a five-hour slot on one day could miss every run and silently cost the month. Monthly holds in effect, not absolutely — a release dated in the two days before the window opens ages in on its second or third day and, if the first bump has already merged, opens a second PR that month. The window bounds when the bot opens a PR, not when it merges; the comment above the `check` job's `setup-node` step in `ci.yml` says so. Points 1–8 otherwise stand.
 
 ## Context
 
@@ -16,9 +16,13 @@ release, restoring the auto-patching the old `node-version: 22` literal had.
 
 Measured 2026-09-23, before ruling:
 
-- **The exact pin does not get bumped.** `.nvmrc` sat at `26.5.0` for 43 days
-  across 8 releases (latest 26.x was v26.10.0, 2026-09-22). The cost #354
-  predicted is demonstrated, not argued: the one-file edit does not happen.
+- **The exact pin does not get bumped.** `.nvmrc` sat at `26.5.0` for 43 days,
+  from #335 setting it on 2026-08-11 to this measurement, while Node shipped
+  five 26.x releases (v26.8.0 through v26.10.0, the latest 26.x, dated
+  2026-09-22). Three more past `26.5.0` — v26.5.1, v26.6.0 and v26.7.0 — were
+  already out when the pin was set, so it ended the 43 days with 8 releases
+  behind. The cost #354 predicted is demonstrated, not argued: the one-file
+  edit does not happen.
 - **The partial spec's premise is false for `nvm`.** `nvm use` with `26` selects
   the newest *locally installed* 26.x; only `nvm install` goes remote. A partial
   spec therefore **widens** the dev/CI gap it was meant to close. (Measured
@@ -31,9 +35,11 @@ Measured 2026-09-23, before ruling:
   Restoring the float then needs `check-latest: true` at all three call sites, a
   knob that cannot live in `.nvmrc` — which splits the single-source-of-truth
   story the file exists for.
-- **Security was never the axis.** Exactly one security release (v26.5.1) landed
-  in 26.x since the pin, and node here runs `node --check` on tracked files and
-  this repo's own suite: no server, no untrusted input, no published artifact.
+- **Security was never the axis.** Of those 8 releases past `26.5.0`, exactly
+  one was a security release — v26.5.1, already out when the pin was set, so
+  none landed in the 43 days after — and node here runs `node --check` on
+  tracked files and this repo's own suite: no server, no untrusted input, no
+  published artifact.
 - **Reproducibility is the real axis.** This suite pins node's *own* behaviour —
   `claim-ticket.test.mjs`'s test "runner: a dash-led argument counts as an
   operand only where it exists" asserts node's argument-classification and
@@ -124,9 +130,10 @@ Measured 2026-09-23, before ruling:
 
 ## Consequences
 
-- `ci.yml`'s comment above the first `setup-node` no longer argues the exact-pin
-  tradeoff; it points here. Its old text asserted that a patch bump "is now a
-  deliberate one-file edit here", which the 43-day measurement falsified.
+- The comment above the `check` job's `setup-node` step in `ci.yml` no longer
+  argues the exact-pin tradeoff; it points here. Its old text asserted that a
+  patch bump "is now a deliberate one-file edit here", which the 43-day
+  measurement falsified.
 - `README.md` no longer carries the version literal. Renovate's `nvm` manager
   matches `.nvmrc` only, so a second copy would be falsified by every bump.
 - Node currency for **GitHub Actions** is explicitly out of scope:

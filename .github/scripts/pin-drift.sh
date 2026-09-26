@@ -10,7 +10,7 @@
 # the app is uninstalled, suspended, or its hosted schedule silently breaks,
 # the pin stops moving and nothing says so — `dependencyDashboard: false`
 # removed the one passive heartbeat there was. The measured cost of that
-# silence is 43 days across 8 releases.
+# silence is 43 days, with five 26.x releases landing inside them.
 #
 # So the judgement is read off `git log`, never off the integration. Asking
 # the bot, its dashboard or the app whether it is healthy goes quiet at exactly
