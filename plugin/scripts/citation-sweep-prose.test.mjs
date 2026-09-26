@@ -196,8 +196,24 @@ function securityReleaseFault(adr) {
 // line its scope — telling that line end from a wrap takes parsing the
 // heading, which a sentence boundary cannot do.
 const SENTENCE_END = String.raw`(?:[.!?][*_\x60)\]"'”’]*\s|\n(?=[ \t]*[-*+][ \t])|\n[ \t]*\n)`;
+// #1958. What names an update type, for both of ADR 0010's #1906 rows below:
+// minor, patch or major as a whole word. The rows' first cut matched the bare
+// substring, so "dispatched" and "majority" scoped a claim that names no
+// update type, and an unscoped bold span or drift sentence passed. `\b` is not
+// the boundary either: it counts `_` as a word character, so an italic
+// `_patch_` would stop scoping its claim. Letters and digits bound the word
+// here, nothing else. A plural still names the type — "automerged for minors
+// and patches" is scoped — so minors, majors and patches count; "patched" and
+// "patching" do not. "Patches" read as a verb still scopes a claim it does not:
+// a hole left open, because closing it refuses the noun, and so reds prose
+// that names exactly the scope the rows ask for.
+const UPDATE_TYPE = String.raw`(?<![a-z\d])(?:minors?|majors?|patch(?:es)?)(?![a-z\d])`;
 const UNSCOPED_DRIFT_SENTENCE = new RegExp(
-  String.raw`(?:^|${SENTENCE_END})(?:(?!${SENTENCE_END}|minor|patch|major)[^])*\bbounding\s+drift\b(?:(?!${SENTENCE_END}|minor|patch|major)[^])*(?:${SENTENCE_END}|$)`,
+  String.raw`(?:^|${SENTENCE_END})(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*\bbounding\s+drift\b(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*(?:${SENTENCE_END}|$)`,
+  "i",
+);
+const UNSCOPED_AUTOMERGED_SPAN = new RegExp(
+  String.raw`\*\*(?:(?!${UPDATE_TYPE})[^*\n])*\bautomerged\b(?:(?!${UPDATE_TYPE})[^*\n])*\*\*`,
   "i",
 );
 
@@ -491,7 +507,7 @@ const FILES = [
       /closer\s+to\s+two\s+days/,
       /(?:hours|up)\s+to\s+a\s+day\s+before/,
       /\bby\s+up\s+to\s+a\s+day\b/,
-      /\*\*(?:(?!minor|patch|major)[^*\n])*\bautomerged\b(?:(?!minor|patch|major)[^*\n])*\*\*/i,
+      UNSCOPED_AUTOMERGED_SPAN,
       UNSCOPED_DRIFT_SENTENCE,
     ],
     live: [
@@ -750,6 +766,45 @@ test("a drift sentence naming its own scope passes, whatever markup it carries a
     // A lone newline is a wrap, not an end — even before an issue number or
     // a bold span, which open no heading and no list item.
     "For a minor or patch bump, the Status line's\n   #1753 amendment names one case, and\n   **automerge** keeps\n   bounding drift at about one month.\n",
+  ]) {
+    assert.doesNotMatch(text, UNSCOPED_DRIFT_SENTENCE, text);
+  }
+});
+
+test("a word that only contains minor, patch or major scopes neither claim (#1958)", () => {
+  for (const text of [
+    // Point 3's heading as it read before #1906.
+    "3. **Monthly, and automerged.**\n",
+    "**Monthly, and automerged; dispatched by the bot.**",
+    "**Dispatched monthly, and automerged.**",
+    "**Monthly, and automerged for the majority of bumps.**",
+    "**Monthly, and automerged once patched.**",
+  ]) {
+    assert.match(text, UNSCOPED_AUTOMERGED_SPAN, text);
+  }
+  for (const text of [
+    "For the majority of bumps that keeps one PR while bounding drift at a month.\n",
+    "Bounding drift at about one month, dispatched by the bot.\n",
+    "Once patched, bounding drift at about one month.\n",
+    "Bounding drift at about one month for a minority of releases.\n",
+  ]) {
+    assert.match(text, UNSCOPED_DRIFT_SENTENCE, text);
+  }
+});
+
+test("minor, patch or major still scopes both claims in italics or as a plural (#1958)", () => {
+  for (const text of [
+    "3. **Monthly, and automerged for minor and patch bumps.**\n",
+    "**Monthly, and automerged for _patch_ bumps.**",
+    "**Monthly, and automerged for minors and patches.**",
+    "**Majors wait; the rest are automerged.**",
+  ]) {
+    assert.doesNotMatch(text, UNSCOPED_AUTOMERGED_SPAN, text);
+  }
+  for (const text of [
+    "For _patch_ bumps, bounding drift at about one month.\n",
+    "Bounding drift at about one month for minors and patches.\n",
+    "Majors aside, bounding drift at about one month.\n",
   ]) {
     assert.doesNotMatch(text, UNSCOPED_DRIFT_SENTENCE, text);
   }
