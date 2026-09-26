@@ -106,8 +106,12 @@ const ADR_0010 = ["..", "docs", "adr", "0010-the-node-pin-stays-exact-and-a-bot-
 // "earlier than", "ahead of" put the release before it; "since", "after",
 // "postdates", "later than" after it — and "in", "within", "inside" or
 // "during" the N days (or the window) places it after the pin too. A negation
-// between that word and the token before it flips the side: "none landed in
-// the 43 days after" is a before-the-pin claim. Nearest, not first, is what
+// in the same breath as that word flips the side, scanned back only to the
+// nearest `and`/`but`/`so`/`yet` or the clause start — so a `not` attached to
+// an earlier, unrelated verb ("does not affect us and landed after…") can't
+// reach across it, and `not…until` reads as naming the word after `until`,
+// not negating it ("didn't land until after" stays after). "none landed in
+// the 43 days after" is a before-the-pin claim; nearest, not first, is what
 // lets "since" be a conjunction — "since it predates the pin" is read at
 // "predates". Any after-the-pin clause reds, even beside a before-the-pin
 // one, and a scope with no before-the-pin clause reds.
@@ -125,10 +129,16 @@ const PIN_ORDER = new RegExp(
     String.raw`\b(?<before>already|before|predat\w*|prior\s+to|earlier\s+than|ahead\s+of)\b`,
     String.raw`\b(?<after>since|after|postdat\w*|later\s+than)\b`,
     String.raw`\b(?<window>(?:in|within|inside|during)\s+(?:the|those|that|this|its)\s+(?:\d+[\s-]days?|(?:\d+[\s-]day\s+)?window))\b`,
-    String.raw`\b(?<pin>pin\w*)`,
+    // Only "pin", "pins", "pinned" or "pinning" — not every pin-prefixed
+    // word. A bare `pin\w*` also matched "pinpointed", letting an unrelated
+    // before-clause about "the pinpointed advisory" stand in for the pin.
+    String.raw`\b(?<pin>pin(?:s|ned|ning)?)\b`,
   ].join("|"),
   "gi",
 );
+// Bounds the negation scan below to the same breath as the order word: text
+// back to the nearest coordinating conjunction, not the whole clause.
+const CLAUSE_BREAK = /\b(?:and|but|so|yet)\b/gi;
 const NEGATION = /\b(?:not|no|none|never|nothing|neither|nor|cannot)\b|n['’]t\b/i;
 const OTHER_SIDE = { before: "after", after: "before" };
 
@@ -148,7 +158,10 @@ function securityReleaseFault(adr) {
     let side = null;
     let last = 0;
     for (const { groups, index, 0: token } of clause.matchAll(PIN_ORDER)) {
-      const negated = NEGATION.test(clause.slice(last, index));
+      let window = clause.slice(last, index);
+      const breaks = [...window.matchAll(CLAUSE_BREAK)];
+      if (breaks.length) window = window.slice(breaks[breaks.length - 1].index + breaks[breaks.length - 1][0].length);
+      const negated = NEGATION.test(window) && !/\buntil\b/i.test(window);
       last = index + token.length;
       if (groups.before || groups.after) {
         const said = groups.before ? "before" : "after";
@@ -614,6 +627,43 @@ test("the same false claim in other words — v26.5.1 landing after the pin — 
   ]) {
     assert.match(securityReleaseFault(adrWith(claim)), /places it after the pin/, claim);
   }
+});
+
+test("a negation on an earlier, unrelated verb does not excuse an after-the-pin clause in the same breath (PR #1969 review)", () => {
+  // Caught in #1969's review: `NEGATION.test(clause.slice(last, index))` used
+  // to scan the WHOLE span back to the previous match, so a `not` attached to
+  // a different verb, on the other side of `and`, wrongly flipped "after" to
+  // "before" — accepting the exact false claim #1928 exists to refuse.
+  for (const claim of [
+    "v26.5.1, which does not affect us and landed after the pin was set",
+    "v26.5.1, which is not exploitable here and landed after the pin",
+  ]) {
+    assert.match(securityReleaseFault(adrWith(claim)), /places it after the pin/, claim);
+  }
+});
+
+test("`not … until` names the word after `until`, it does not negate it (PR #1969 review)", () => {
+  // "didn't land until after the pin" states the pin as when it DID land —
+  // the most natural English phrasing of the false claim, and the negation
+  // scan used to flip it to a before-the-pin claim regardless.
+  for (const claim of ["v26.5.1, which didn't land until after the pin was set", "v26.5.1, which wasn't out until after the pin"]) {
+    assert.match(securityReleaseFault(adrWith(claim)), /places it after the pin/, claim);
+  }
+});
+
+test("the pin token only matches \"pin\", \"pins\", \"pinned\" or \"pinning\" (PR #1969 review)", () => {
+  // A bare `pin\w*` also matched "pinpointed", so an unrelated before-clause
+  // about "the pinpointed advisory" stood in for the pin mention itself,
+  // leaving `before` true and excusing a same-clause "landed after #335" — a
+  // false claim in the function's own vocabulary — as accepted. Tightened,
+  // neither clause names the pin at all (the second names it only as
+  // "#335", outside vocabulary — the loud direction, per THE CEILING), so
+  // the claim is refused for naming no valid before-clause rather than
+  // silently accepted.
+  assert.match(
+    securityReleaseFault(adrWith("v26.5.1, which predates the pinpointed advisory, landed after #335")),
+    /no longer says v26\.5\.1 predates the pin/,
+  );
 });
 
 test("the sentence #1874 replaced is refused for what it says, not how it was spelled (#1928)", () => {
