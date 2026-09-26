@@ -52,6 +52,14 @@ import { join } from "node:path";
 // pointer names the ADR by number, so a retitle that keeps the number keeps
 // the pointer true and stays green. A construct needle is still never checked
 // against its target.
+//
+// And one claim is held by what it says, not by how it was spelled (#1928):
+// ADR 0010's security release, which a stale form here once guarded by the
+// wrong sentence's exact words. A false claim needs no particular spelling to
+// return, so securityReleaseFault reads which side of the pin the ADR places
+// v26.5.1 on. It is the table's stale-form rule taken one step further, for a
+// claim whose rewording is as likely as its reversion — not a second
+// convention to reach for when a spelling ban would do.
 const REPO = join(import.meta.dirname, "..");
 const read = (...segments) => readFileSync(join(REPO, ...segments), "utf8");
 
@@ -75,6 +83,104 @@ function adrFault(number, names) {
   return hits.length === 0
     ? `no docs/adr/${number}-*.md exists — the ADR was renumbered or moved out of docs/adr/`
     : `${hits.length} files answer to ADR ${number} (${hits.join(", ")}) — the pointer no longer names one ruling`;
+}
+
+const ADR_0010 = ["..", "docs", "adr", "0010-the-node-pin-stays-exact-and-a-bot-moves-it.md"];
+
+// #1928. ADR 0010's security evidence names its one security release past
+// `26.5.0`, v26.5.1, and #1874 corrected WHEN it landed: already out when #335
+// set the pin, not "since the pin". The spelling ban this replaced refused
+// only that sentence; "v26.5.1, which has since landed after the pin was set"
+// states the same false claim and passed every test here. So the claim is read
+// for what it says. Null when the evidence still says v26.5.1 predates the
+// pin, else the reason. Takes the text rather than reading the ADR itself, so
+// the tests below can hand it rewordings the ADR does not hold.
+//
+// The scope is each markdown block — list item or paragraph — naming
+// "security", never the document: the release-list bullet above it says
+// v26.5.1 was "already out when the pin was set" as well, and read file-wide
+// that sentence vouches for a security bullet claiming the opposite. Inside
+// the scope, each clause (cut at `, ; : ( ) — –` and sentence ends) is read
+// for what it places relative to the pin: the order word nearest before a
+// `pin…` mention decides — "already", "before", "predates", "prior to",
+// "earlier than", "ahead of" put the release before it; "since", "after",
+// "postdates", "later than" after it — and "in", "within", "inside" or
+// "during" the N days (or the window) places it after the pin too. A negation
+// in the same breath as that word flips the side, scanned back only to the
+// nearest `and`/`but`/`so`/`yet` or the clause start — so a `not` attached to
+// an earlier, unrelated verb ("does not affect us and landed after…") can't
+// reach across it, and `not…until` reads as naming the word after `until`,
+// not negating it ("didn't land until after" stays after). "none landed in
+// the 43 days after" is a before-the-pin claim; nearest, not first, is what
+// lets "since" be a conjunction — "since it predates the pin" is read at
+// "predates". Any after-the-pin clause reds, even beside a before-the-pin
+// one, and a scope with no before-the-pin clause reds.
+//
+// THE CEILING. It knows those words and nothing else. A true reword outside
+// them — "out by the time #335 pinned it", or the pin as the subject, "the pin
+// came after v26.5.1" — reds, the loud direction; a false claim outside them
+// passes only if the scope also keeps a clause that still reads before the
+// pin. It reads no date, so it holds the ADR to #1874's measurement, and it
+// cannot notice a double negation. Every block naming "security" is in scope,
+// so a later amendment that names it and places any release after the pin
+// reds too — a claim of the same shape, and worth the same re-read.
+const PIN_ORDER = new RegExp(
+  [
+    String.raw`\b(?<before>already|before|predat\w*|prior\s+to|earlier\s+than|ahead\s+of)\b`,
+    String.raw`\b(?<after>since|after|postdat\w*|later\s+than)\b`,
+    String.raw`\b(?<window>(?:in|within|inside|during)\s+(?:the|those|that|this|its)\s+(?:\d+[\s-]days?|(?:\d+[\s-]day\s+)?window))\b`,
+    // Only "pin", "pins", "pinned" or "pinning" — not every pin-prefixed
+    // word. A bare `pin\w*` also matched "pinpointed", letting an unrelated
+    // before-clause about "the pinpointed advisory" stand in for the pin.
+    String.raw`\b(?<pin>pin(?:s|ned|ning)?)\b`,
+  ].join("|"),
+  "gi",
+);
+// Bounds the negation scan below to the same breath as the order word: text
+// back to the nearest coordinating conjunction, not the whole clause.
+const CLAUSE_BREAK = /\b(?:and|but|so|yet)\b/gi;
+const NEGATION = /\b(?:not|no|none|never|nothing|neither|nor|cannot)\b|n['’]t\b/i;
+const OTHER_SIDE = { before: "after", after: "before" };
+
+function securityReleaseFault(adr) {
+  const scope = adr
+    .split(/\n(?=[ \t]*(?:[-*+]|\d+\.)[ \t])|\n[ \t]*\n/)
+    .map((block) => block.replace(/\s+/g, " "))
+    .filter((block) => /\bsecurity\b/i.test(block));
+  if (scope.length === 0) {
+    return "ADR 0010 no longer names a security release in its evidence — the claim #1874 corrected, that v26.5.1 predates the pin, is gone rather than kept current";
+  }
+  if (!scope.some((block) => /\bv?26\.5\.1\b/.test(block))) {
+    return "ADR 0010's security-release evidence no longer names v26.5.1, the one security release past `26.5.0` (#1874)";
+  }
+  let before = false;
+  for (const clause of scope.flatMap((block) => block.split(/[,;:()—–]|[.!?]\**\s/))) {
+    let side = null;
+    let last = 0;
+    for (const { groups, index, 0: token } of clause.matchAll(PIN_ORDER)) {
+      let window = clause.slice(last, index);
+      const breaks = [...window.matchAll(CLAUSE_BREAK)];
+      if (breaks.length) window = window.slice(breaks[breaks.length - 1].index + breaks[breaks.length - 1][0].length);
+      const negated = NEGATION.test(window) && !/\buntil\b/i.test(window);
+      last = index + token.length;
+      if (groups.before || groups.after) {
+        const said = groups.before ? "before" : "after";
+        side = negated ? OTHER_SIDE[said] : said;
+        continue;
+      }
+      // A pin mention takes the side of the order word nearest before it; a
+      // window is the 43 days after the pin, so landing in it is "after".
+      const placed = groups.pin ? side : negated ? "before" : "after";
+      side = null;
+      if (placed === "after") {
+        return `ADR 0010's security-release evidence places it after the pin ("${clause.trim()}") — v26.5.1 was already out when #335 set the pin, so none landed in the 43 days after (#1874, #1928)`;
+      }
+      if (placed === "before") before = true;
+    }
+  }
+  return before
+    ? null
+    : "ADR 0010's security-release evidence no longer says v26.5.1 predates the pin — state it in that bullet's own words: already out when, before, predates, prior to, earlier than or ahead of the pin (#1874, #1928)";
 }
 
 const FILES = [
@@ -313,8 +419,11 @@ const FILES = [
   // the needle, that reds either one reverting. And the evidence counted "8
   // releases" and a security release "since the pin" without saying from
   // what: 8 is the releases past `26.5.0`, three of them — the security
-  // release among them — already out when the pin was set. Those two
-  // evidence wordings carry no live needle, for the reason #1756's gives.
+  // release among them — already out when the pin was set. The count's
+  // wording carries no live needle, for the reason #1756's gives. The
+  // security release's was a ban on the old sentence's spelling until #1928:
+  // the same false claim in other words passed it, so securityReleaseFault,
+  // above the table, reads that claim for what it says instead.
   //
   // #1905. The release-age gate, stated in wall-clock days it does not give.
   // The Status line's #1753 amendment said a release "must be three days old"
@@ -345,7 +454,7 @@ const FILES = [
   // the claim only in the NEXT sentence reds too. No live needle, for the
   // reason #1756's gives.
   {
-    path: ["..", "docs", "adr", "0010-the-node-pin-stays-exact-and-a-bot-moves-it.md"],
+    path: ADR_0010,
     stale: [
       /\blines?\s+\d/,
       /claim-ticket\.test\.mjs:\d/,
@@ -355,7 +464,6 @@ const FILES = [
       /release-label\.yml:\d/,
       /\bfirst\s+`?setup-node\b/,
       /across\s+8\s+releases/,
-      /landed\s+in\s+26\.x\s+since\s+the\s+pin\b/,
       // A backticked `.mjs` list straight after "used by" that includes either
       // comment-only file, wherever in the list and however it wraps.
       /used by(?:[\s,]*(?:and\s+)?`[\w-]+\.mjs`)*[\s,]*(?:and\s+)?`(?:arg|staleness)\.mjs`/,
@@ -469,4 +577,116 @@ test("an ADR pointer reds once its number stops naming exactly one file: renumbe
   assert.match(adrFault("0010", ["0009-supported-platforms-are-macos-linux-wsl.md", "0014-the-node-pin-stays-exact-and-a-bot-moves-it.md"]), /no docs\/adr\/0010-\*\.md/);
   assert.match(adrFault("0010", []), /no docs\/adr\/0010-\*\.md/);
   assert.match(adrFault("0010", ["0010-one-ruling.md", "0010-another-ruling.md"]), /2 files answer to ADR 0010/);
+});
+
+// #1928. The security bullet in a fixture ADR, between two neighbours that
+// stay fixed: the release-list bullet above names v26.5.1 as "already out when
+// the pin was set" too, so a claim the security bullet no longer makes has a
+// true one right beside it to lean on — the scope the fault reads is what the
+// last of these tests proves.
+const adrWith = (claim) =>
+  [
+    "- **The exact pin does not get bumped.** Three more past `26.5.0` — v26.5.1, v26.6.0",
+    "  and v26.7.0 — were already out when the pin was set.",
+    "- **Security was never the axis.** Of those 8 releases past `26.5.0`, exactly",
+    `  one was a security release — ${claim} — and node here runs \`node --check\` on`,
+    "  tracked files and this repo's own suite: no server, no untrusted input, no",
+    "  published artifact.",
+    "- **Reproducibility is the real axis.** This suite pins node's *own* behaviour.",
+  ].join("\n");
+
+test("ADR 0010's security evidence still says its lone security release predates the pin (#1928)", () => {
+  assert.equal(securityReleaseFault(read(...ADR_0010)), null);
+});
+
+test("a security-release claim reworded with v26.5.1 still before the pin is accepted (#1928)", () => {
+  for (const claim of [
+    "v26.5.1, already out when the pin was set, so none landed in the 43 days after",
+    "v26.5.1, which predates the pin",
+    "v26.5.1, shipped before #335 set the pin, and none has landed since",
+    "v26.5.1, and none has landed since the pin",
+    "v26.5.1, which did not land after the pin was set",
+    // "since" as the causal conjunction: the order word nearest the pin is
+    // "predates", so a first-word reading refuses the first of these. In the
+    // second, the "cannot" before "since" negates nothing about "predates".
+    "v26.5.1, which is harmless here since it predates the pin",
+    "v26.5.1, which cannot matter here since it predates the pin",
+  ]) {
+    assert.equal(securityReleaseFault(adrWith(claim)), null, claim);
+  }
+});
+
+test("the same false claim in other words — v26.5.1 landing after the pin — is refused (#1928)", () => {
+  for (const claim of [
+    // The rewording #1928 was filed on, which the spelling ban let through.
+    "v26.5.1, which has since landed after the pin was set",
+    "v26.5.1, which postdates the pin",
+    "v26.5.1, which landed in the 43 days after #335 pinned it",
+    "v26.5.1, which landed during the 43-day window",
+    "v26.5.1, which was not already out when the pin was set",
+  ]) {
+    assert.match(securityReleaseFault(adrWith(claim)), /places it after the pin/, claim);
+  }
+});
+
+test("a negation on an earlier, unrelated verb does not excuse an after-the-pin clause in the same breath (PR #1969 review)", () => {
+  // Caught in #1969's review: `NEGATION.test(clause.slice(last, index))` used
+  // to scan the WHOLE span back to the previous match, so a `not` attached to
+  // a different verb, on the other side of `and`, wrongly flipped "after" to
+  // "before" — accepting the exact false claim #1928 exists to refuse.
+  for (const claim of [
+    "v26.5.1, which does not affect us and landed after the pin was set",
+    "v26.5.1, which is not exploitable here and landed after the pin",
+  ]) {
+    assert.match(securityReleaseFault(adrWith(claim)), /places it after the pin/, claim);
+  }
+});
+
+test("`not … until` names the word after `until`, it does not negate it (PR #1969 review)", () => {
+  // "didn't land until after the pin" states the pin as when it DID land —
+  // the most natural English phrasing of the false claim, and the negation
+  // scan used to flip it to a before-the-pin claim regardless.
+  for (const claim of ["v26.5.1, which didn't land until after the pin was set", "v26.5.1, which wasn't out until after the pin"]) {
+    assert.match(securityReleaseFault(adrWith(claim)), /places it after the pin/, claim);
+  }
+});
+
+test("the pin token only matches \"pin\", \"pins\", \"pinned\" or \"pinning\" (PR #1969 review)", () => {
+  // A bare `pin\w*` also matched "pinpointed", so an unrelated before-clause
+  // about "the pinpointed advisory" stood in for the pin mention itself,
+  // leaving `before` true and excusing a same-clause "landed after #335" — a
+  // false claim in the function's own vocabulary — as accepted. Tightened,
+  // neither clause names the pin at all (the second names it only as
+  // "#335", outside vocabulary — the loud direction, per THE CEILING), so
+  // the claim is refused for naming no valid before-clause rather than
+  // silently accepted.
+  assert.match(
+    securityReleaseFault(adrWith("v26.5.1, which predates the pinpointed advisory, landed after #335")),
+    /no longer says v26\.5\.1 predates the pin/,
+  );
+});
+
+test("the sentence #1874 replaced is refused for what it says, not how it was spelled (#1928)", () => {
+  const before1874 = [
+    "- **Security was never the axis.** Exactly one security release (v26.5.1) landed",
+    "  in 26.x since the pin, and node here runs `node --check` on tracked files and",
+    "  this repo's own suite: no server, no untrusted input, no published artifact.",
+  ].join("\n");
+  assert.match(securityReleaseFault(before1874), /places it after the pin \("landed in 26\.x since the pin"\)/);
+});
+
+test("a before-the-pin clause does not excuse an after-the-pin one beside it (#1928)", () => {
+  // The negative half's own case: the positive half alone passes this.
+  assert.match(
+    securityReleaseFault(adrWith("v26.5.1, already out when the pin was set; it has since landed after the pin")),
+    /places it after the pin \("it has since landed after the pin"\)/,
+  );
+});
+
+test("the security bullet must place v26.5.1 before the pin itself — no neighbour vouches for it (#1928)", () => {
+  for (const claim of ["v26.5.1, which is outside this repo's threat model", "v26.5.1, not yet out when the pin was set"]) {
+    assert.match(securityReleaseFault(adrWith(claim)), /no longer says v26\.5\.1 predates the pin/, claim);
+  }
+  assert.match(securityReleaseFault(adrWith("v26.8.0, already out when the pin was set")), /no longer names v26\.5\.1/);
+  assert.match(securityReleaseFault(adrWith("v26.5.1").split("\n").slice(0, 2).join("\n")), /no longer names a security release/);
 });
