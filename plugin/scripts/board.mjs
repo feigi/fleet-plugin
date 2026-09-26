@@ -968,6 +968,26 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
     const { agents, toolTables, skipped, metaErrors, damaged } =
       isOmpSessionDirName(basename(dir)) ? readOmpSpend(dir, sinceMs) : readClaudeSpend(dir, sinceMs);
     if (!agents.length) {
+      // #1894: `damaged` belongs here beside `skipped`. An omp transcript with
+      // no parseable assistant-with-usage line folds to no model, so
+      // readOmpSpend drops it without a throw — `skipped` stays 0 — and its
+      // non-last parse failures are the only trace that the directory held a
+      // transcript at all. Reading `skipped` alone sent that down the empty
+      // path below: a hidden panel, or an explicit override told the directory
+      // "holds no agent transcripts". A torn LAST line never counts as damaged,
+      // so a live write's partial first line still takes the empty path.
+      // Claude never reaches this with `damaged` set: readAgent books a
+      // wholly-corrupt transcript at zero spend instead of dropping it.
+      //
+      // `damaged` counts LINES, `skipped` whole transcripts, so each keeps its
+      // own clause — the lines one in board.html's damagedPhrase wording. "all
+      // N transcripts unreadable" stays for `skipped` alone: beside damaged
+      // lines it would count only the whole files and read as the entire loss.
+      if (damaged) {
+        const lost = [`${damaged} damaged transcript line${damaged === 1 ? "" : "s"}`];
+        if (skipped) lost.unshift(`${skipped} transcript${skipped === 1 ? "" : "s"} unreadable`);
+        return { ok: false, error: `no agent turn readable: ${lost.join("; ")}` };
+      }
       if (skipped) return { ok: false, error: `all ${skipped} transcripts unreadable` };
       // #1679: only for an EXPLICIT override — never the heuristic's own
       // "resolved, no session yet" `null` case two arms up, which is the
