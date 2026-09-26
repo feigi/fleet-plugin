@@ -104,6 +104,7 @@ test("deriveFlags: cause tokens surface as flags", () => {
 });
 
 import { computeBoard } from "./compute-board.mjs";
+import { deriveRun } from "./fleet-tick.mjs";
 
 const baseInputs = () => ({
   ledger: {
@@ -604,4 +605,74 @@ test("#1820: a settled `review=...=failed` token with no redispatch still keeps 
   const b = computeBoard(reproInputs({ rows: ["#961 impl-961=PR#931 · review=member:review-pr-961=failed"] }));
   assert.equal(card(b, 961).agent, null, "the reviewer settled failed; nobody is live");
   assert.equal(b.queue.reviewBacklog, 0, "any review= token, settled or not, counts as 'has had a reviewer' per the current ruling's wording");
+});
+
+// --------------------------------------------------------------------------
+// #1820 amendment 2a (#1839): a PR-bound row with no `impl` token — the shape
+// `ledger.mjs dispatch <pr> fix-pr-<pr>|finisher-pr-<pr>` appends for a PR
+// this run's implementers did not open — takes its PR the way fleet-tick.mjs
+// does, the first `PR#M` mention else the row key, and that PR decides the
+// card exactly as an impl token's `=PR#M` outcome does. Measured before the
+// fix: this row was `IMPLEMENTING pr=null`, merged or not.
+const INHERITED = "#1237 -> PR#1237 · review=member:review-pr-1237";
+
+test("#1820 amendment 2a: a PR-bound row with no impl token is a REVIEW card for its open PR", () => {
+  const b = computeBoard(reproInputs({ rows: [INHERITED], prs: [openPr(1237)] }));
+  assert.equal(card(b, 1237).column, "REVIEW");
+  assert.equal(card(b, 1237).pr, 1237);
+  assert.equal(card(b, 1237).agent, "review-pr-1237");
+  assert.equal(b.queue.reviewBacklog, 0, "its live review= runner is reviewing it");
+});
+
+test("#1820 amendment 2a: the same row is MERGED once gh reports its PR merged", () => {
+  const b = computeBoard(reproInputs({ rows: [INHERITED], prs: [], merged: [1237] }));
+  assert.equal(card(b, 1237).column, "MERGED");
+  assert.equal(card(b, 1237).pr, 1237);
+  assert.deepEqual(card(b, 1237).flags, [], "MERGED is terminal — never stale");
+});
+
+test("#1820 amendment 2a: with no PR#M mention, a PR-bound member or review token keys the PR to the row key; a mention wins over the key", () => {
+  for (const row of ["#1237 fix-pr-1237", "#1237 finisher-pr-1237=labelled", "#1237 review=wf:r9", "#1237 reviewed=abc1234:0/0/0"]) {
+    assert.equal(parseRow(row).pr, 1237, row);
+  }
+  assert.equal(parseRow("#1300 PR#1301 · fix-pr-1301").pr, 1301);
+});
+
+test("#1820 amendment 2a: an Exclusion, and a row with no impl token and no PR-bound signal, keep no PR", () => {
+  const b = computeBoard(reproInputs({
+    rows: ["#901 excluded · behind-pr:#880", "#1500 excluded · behind-pr:#1499 · PR#1499 still open", "#1501 class=routine"],
+    prs: [openPr(1499)],
+  }));
+  for (const [n, badge] of [[901, "excluded:#880"], [1500, "excluded:#1499"]]) {
+    assert.equal(card(b, n).column, "POOL");
+    assert.deepEqual(card(b, n).flags, [badge]);
+    assert.equal(card(b, n).pr, null, `#${n} is supply — a PR mention on it names no card of its own`);
+  }
+  assert.equal(card(b, 1501).column, "IMPLEMENTING");
+  assert.equal(card(b, 1501).pr, null);
+});
+
+test("#1820 amendment 2a: a row carrying any impl token is untouched, a malformed one included — its key is a ticket, not a PR", () => {
+  const b = computeBoard(reproInputs({ rows: ["#925 impl-925=PR#93l · review=member:review-pr-925"], prs: [openPr(925)] }));
+  assert.equal(card(b, 925).column, "IMPLEMENTING");
+  assert.equal(card(b, 925).pr, null);
+  assert.ok(card(b, 925).flags.includes("ledger-error"));
+});
+
+// fleet-tick.mjs's PR for a row, observed rather than restated: a merge hold on
+// a queued PR counts only when the row carrying the hold is keyed to that PR.
+const tickKeysTo = (row, n) => deriveRun({ rows: [`${row} held-behind:#1`], dispatched: [], drain: null }, [
+  { number: n, labels: [{ name: "ready-to-merge" }], closingIssuesReferences: [] },
+  { number: 1, labels: [], closingIssuesReferences: [] },
+]).mergeHeld === 1;
+
+test("#1820 amendment 2a: on the same row text, the cockpit's PR is fleet-tick.mjs's", () => {
+  const rows = [INHERITED, "#1237 fix-pr-1237", "#1237 finisher-pr-1237=labelled", "#1237 reviewed=abc1234:1/0/0", "#1300 PR#1301 · fix-pr-1301"];
+  for (const row of rows) {
+    const pr = parseRow(row).pr;
+    assert.ok(pr != null && tickKeysTo(row, pr), `${row}: cockpit ${pr}, tick disagrees`);
+  }
+  // Keyed only by an exact `#N` first word, as fleet-tick.mjs keys it.
+  assert.equal(parseRow("#1237: fix-pr-1237").pr, null);
+  assert.ok(!tickKeysTo("#1237: fix-pr-1237", 1237));
 });

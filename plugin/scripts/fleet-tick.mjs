@@ -184,7 +184,7 @@ export class LedgerError extends Error {}
 // this run's implementers did not open), the fallback ledger.mjs's
 // memberRowIndex() takes. Ticket and PR numbers share GitHub's one number
 // space, so a ticket's key never names an open PR.
-const PR_MENTION = /\bPR\s*#(\d+)\b/;
+export const PR_MENTION = /\bPR\s*#(\d+)\b/;
 // shortlist.mjs's own spelling of an Exclusion row and its premises.
 const EXCLUDED_ROW = /^#[0-9]+[ \t]+excluded(?=[ \t]|$)([\s\S]*)$/;
 const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
