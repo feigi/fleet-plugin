@@ -77,10 +77,9 @@ import { PR_MENTION } from "./fleet-tick.mjs";
 // that PR existed.
 const EXCLUDED_ROW = /^#[0-9]+[ \t]+excluded(?=[ \t]|$)([\s\S]*)$/;
 const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
-// One pattern names every `review=` kind this module reads and captures which
-// one matched, so parseRow tells a Workflow from a runner by that capture
-// rather than by scanning the token a second time. All three kinds settle
-// `=failed` (amendment 5a); only `member`/`fallback` name a runner.
+// Captures the matched kind, so parseRow tells a Workflow from a runner by
+// that capture instead of a second scan; see the review notes above for
+// what each kind means and how `=failed` settles it.
 const REVIEW = /^review=(wf|member|fallback):([^=\s]+?)(=failed)?$/;
 
 // #1843: which of two well-formed impl tokens is the later attempt for THIS
@@ -119,14 +118,15 @@ export function parseRow(row) {
   // ledger-grammar member (`kind: "member"`, its parsed token as `token`) or
   // a review runner a `review=member:`/`review=fallback:` token names
   // (`kind: "runner"`, a name and nothing else — it is no ledger-grammar
-  // member, so it has no family, number, bound, outcome or error). A runner
-  // carries no `token`, so reading a member field off one throws rather than
-  // reading `undefined`. `implOutcomes` holds each well-formed impl name's
-  // latest outcome: only an impl outcome decides a card. A malformed outcome
-  // is still a settle — never counted live, never decides a card — but it is
-  // not silently dropped either: it earns the row a `ledger-error` flag
-  // (deriveFlags below), the same "refuse rather than guess" contract
-  // ledger-grammar.mjs's own docstring states `.error` exists for.
+  // member, so it has none of a parsed token's fields). A runner carries no
+  // `token`, so reading a member field off one through `.token` throws
+  // rather than reading `undefined`. `implOutcomes` holds each impl name's
+  // latest well-formed outcome: only an impl outcome decides a card. A
+  // malformed outcome is still a settle — never counted live, never decides
+  // a card — but it is not silently dropped either: it earns the row a
+  // `ledger-error` flag (deriveFlags below), the same "refuse rather than
+  // guess" contract ledger-grammar.mjs's own docstring states `.error`
+  // exists for.
   const live = [];
   const implOutcomes = new Map();
   const settled = new Set();
@@ -158,7 +158,7 @@ export function parseRow(row) {
       review = true;
       const [, kind, name, failed] = REVIEW.exec(tok) ?? [];
       if (!failed) reviewLive = true;
-      if (kind && kind !== "wf") {
+      if (kind === "member" || kind === "fallback") {
         if (failed) settled.add(name);
         else { live.push({ kind: "runner", name }); runners.push(name); }
       }
