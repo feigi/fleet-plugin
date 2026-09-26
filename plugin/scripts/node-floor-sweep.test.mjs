@@ -178,6 +178,17 @@ const API_FLOORS = [
   { name: "Promise.withResolvers()", pattern: /\bPromise\.withResolvers\(/, since: "22.0.0" },
   // Array.fromAsync — Node 22.0.0+.
   { name: "Array.fromAsync()", pattern: /\bArray\.fromAsync\(/, since: "22.0.0" },
+  // Set composition/query methods (union, intersection, difference,
+  // symmetricDifference, isSubsetOf, isSupersetOf, isDisjointFrom) shipped
+  // unflagged in Node v22.0.0 via the V8 12.4 update (nodejs.org's
+  // v22-release-announce blog: "updates of the V8 JavaScript engine").
+  // ledger.mjs's `check` subcommand called `Set.prototype.isSubsetOf`
+  // (#1954) — the only member of this family measured in a shipped script
+  // so far, and the fix replaced it with a manual walk rather than raising
+  // the floor. Only that one method is listed here, per the header's own
+  // rule: extend to a sibling (`.union(`, `.isDisjointFrom(`, …) the day one
+  // is actually measured, not ahead of time.
+  { name: "Set.prototype.isSubsetOf()", pattern: /\.isSubsetOf\(/, since: "22.0.0" },
   // node:sqlite — introduced Node v22.5.0 behind --experimental-sqlite;
   // unflagged (still experimental) in Node v22.13.0 (nodejs/node#55890).
   // "since" is the unflagged version, same rule this table's header states

@@ -712,7 +712,11 @@ function runCheck() {
     // same-size near-miss that cleared the subset floor for an answer the
     // first walk had already produced — equal sizes are exactly the case
     // where the two walks are the same walk.
-    return (small.size === big.size || small.size >= 4) && small.isSubsetOf(big);
+    // `Set.prototype.isSubsetOf` ships in Node v22.0.0, above this repo's
+    // declared >=20.11.0 floor (#1954) — the walk below is the same subset
+    // test written out by hand: every token of `small` must be present in
+    // `big`, same short-circuit-on-first-miss shape as the builtin.
+    return (small.size === big.size || small.size >= 4) && [...small].every((t) => big.has(t));
   };
   // Strip the leading `#NNN ` issue number: it is metadata, not part of the
   // finding's subject. Left in, it becomes a stray token the checked subject
