@@ -286,13 +286,15 @@ function nonMjsRelativeImports(source) {
 // shebang probe that silently lost every extensionless entrypoint (#1855's
 // own gap) would leave a total count comfortably non-empty. And the shebang
 // half by NAME, not merely non-empty (#1884): a file is in it on its first
-// line alone, a line none of the three needs to run — each is invoked as
-// `node <path>` somewhere (`fleet-run` in skills/run-team/SKILL.md,
-// `fleet-bootstrap` and `fleet-provenance` in install-and-smoke.sh) — so one
-// that lost its shebang would drop out of every check below while the other
-// two kept the half non-empty. Measured: `fleet-run` with its shebang line
-// deleted and `Object.groupBy(` appended still ran `node fleet-run --root`
-// to exit 0, and left this suite green under a non-empty-half check.
+// line alone, a line CI never needs — .github/scripts/install-and-smoke.sh
+// runs all three as `node <path>` (and skills/run-team/SKILL.md:282 runs
+// fleet-run that way too), so losing it breaks only direct-exec callers
+// (`~/.fleet/bin/fleet-run <script>`, and fleet-run's own spawnSync of
+// fleet-bootstrap/fleet-provenance) at run time, not any check here. It
+// would drop out of every check below while the other two kept the half
+// non-empty. Measured: `fleet-run` with its shebang line deleted and
+// `Object.groupBy(` appended still ran `node fleet-run --root` to exit 0,
+// and left this suite green under a non-empty-half check.
 const NODE_SHEBANG_ENTRYPOINTS = ["plugin/scripts/fleet-bootstrap", "plugin/scripts/fleet-provenance", "plugin/scripts/fleet-run"];
 
 test("the sweep sees the scripts it is supposed to police — .mjs modules and every node-shebang entrypoint", { skip: SKIP_WITHOUT_REPO }, () => {
