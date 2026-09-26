@@ -37,8 +37,10 @@ Measured 2026-09-23, before ruling:
 - **Reproducibility is the real axis.** This suite pins node's *own* behaviour —
   `claim-ticket.test.mjs`'s test "runner: a dash-led argument counts as an
   operand only where it exists" asserts node's argument-classification and
-  refusal semantics, and `board-cli.test.mjs:251-255` records a 100-run
-  measurement against a named version. A floating runtime lets an unchosen node
+  refusal semantics, and `board-cli.test.mjs` records a 100-run measurement
+  against a named version in the #363 section above its test
+  "build: --spend-since's refusal survives a gh child that has already pushed
+  past the pipe buffer, unread". A floating runtime lets an unchosen node
   release turn `main` red on a PR that touched nothing.
 - **Dependabot cannot do this job.** `.nvmrc` is absent from GitHub's supported
   ecosystems, and the request has been open in `dependabot-core` since 2019
@@ -49,8 +51,9 @@ Measured 2026-09-23, before ruling:
   Renovate would open PRs that none of the seven required checks ever report on
   — permanently `BLOCKED`, and with the pre-merge proof this ADR depends on
   missing entirely. A GitHub App's PRs do trigger `pull_request` workflows.
-- **Every merged PR mints a release.** `release.yml:17` cuts a tag and a GitHub
-  release per merged PR, and `release-label.yml:41` already auto-labels
+- **Every merged PR mints a release.** `release.yml`'s `release` job, gated on
+  `github.event.pull_request.merged == true`, cuts a tag and a GitHub release
+  per merged PR, and `release-label.yml`'s `auto-label-bots` job already labels
   `renovate[bot]` PRs `patch` while `validate-release-label` is required — so a
   bot PR cannot merge *without* minting a version. `marketplace.json` ships
   `path: "plugin"` at `ref: "main"`, so `.nvmrc` is outside the shipped payload

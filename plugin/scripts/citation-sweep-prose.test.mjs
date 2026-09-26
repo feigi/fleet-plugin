@@ -253,12 +253,24 @@ const FILES = [
   // rather than every other Renovate-driven one. None of those was replaced
   // by a construct, so they carry no live needle — pinning the new wording
   // instead would red a legitimate reword.
+  //
+  // #1872. The three citations #1756 left in line form, all in the same
+  // evidence list: `board-cli.test.mjs`'s 100-run measurement, and the
+  // `release.yml` / `release-label.yml` citations behind "every merged PR
+  // mints a release". The board-cli one had already rotted when this ticket
+  // reached it — later edits to that file had moved the measurement out of the
+  // cited range, and nothing went red. Each now names its construct instead —
+  // the test the measurement sits above, and each workflow's job — and each
+  // line form is banned generally, for the same reason.
   {
     path: ["..", "docs", "adr", "0010-the-node-pin-stays-exact-and-a-bot-moves-it.md"],
     stale: [
       /\blines?\s+\d/,
       /claim-ticket\.test\.mjs:\d/,
       /candidates\.mjs:\d/,
+      /board-cli\.test\.mjs:\d/,
+      /release\.yml:\d/,
+      /release-label\.yml:\d/,
       // A backticked `.mjs` list straight after "used by" that includes either
       // comment-only file, wherever in the list and however it wraps.
       /used by(?:[\s,]*(?:and\s+)?`[\w-]+\.mjs`)*[\s,]*(?:and\s+)?`(?:arg|staleness)\.mjs`/,
@@ -272,6 +284,9 @@ const FILES = [
       "runner: a dash-led argument counts as an operand only where it exists",
       "`query()`",
       "`query(null)`",
+      "build: --spend-since's refusal survives a gh child that has already pushed past the pipe buffer, unread",
+      "`release.yml`'s `release` job",
+      "`release-label.yml`'s `auto-label-bots` job",
     ],
   },
   // #1757. The glossary's Runtime heading names the two terms ADR 0010
