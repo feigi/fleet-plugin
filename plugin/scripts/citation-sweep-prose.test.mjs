@@ -94,6 +94,22 @@ const FILES = [
     live: ["## 1. Candidates"],
   },
   {
+    // #1935. Two citations of `run-merge-bot.md:195` in this file, both
+    // pointing at the CLAUDE-harness CI wait's shell-timeout-vs-CI-cycle
+    // claim, and both already stale before #1895's step-1 fire/poll split
+    // moved the target's own numbering again. Banned generally rather than
+    // at the one drifted value: a ban on `:195` alone lets `:196` or any
+    // other number straight back in, and this file already carried the
+    // identical stale number at two independent sites.
+    path: ["scripts", "fleet-heartbeat.mjs"],
+    stale: [/run-merge-bot\.md:\d+/],
+    // One needle per SITE — either can revert independently of the other.
+    live: [
+      "run-merge-bot.md's CLAUDE-harness CI wait already records",
+      "run-merge-bot.md's CLAUDE-harness CI wait measures",
+    ],
+  },
+  {
     path: ["scripts", "implementer-model-tier.test.mjs"],
     stale: [/member-lifecycle\.md:7/],
     live: ["member-lifecycle.md's"],
@@ -159,6 +175,19 @@ const FILES = [
     path: ["scripts", "release-ticket.test.mjs"],
     stale: [/release-ticket\.sh:303/],
     live: ["empty-entry skip"],
+  },
+  {
+    // #1935. `run-merge-bot.md:161` sat in a list of four `git -C` idiom
+    // citations and was already stale before #1895's step-1 fire/poll split
+    // moved the target's own numbering again — the cited line was a STOP
+    // arm, not the `git -C <worktree> rev-parse HEAD` example this citation
+    // names. Banned generally, the same reason the fleet-heartbeat.mjs entry
+    // above gives. The other three citations sharing this list
+    // (derive-testcmd.sh, SKILL.md, member-lifecycle.md) are untouched here
+    // — out of scope for this ticket, not re-derived either way.
+    path: ["scripts", "review-pr-citation-prose.test.mjs"],
+    stale: [/run-merge-bot\.md:\d+/],
+    live: [`run-merge-bot.md's "Confirm the worktree head *is* the reviewed remote PR head before rebasing" step`],
   },
   {
     path: ["scripts", "review-pr-reads.test.mjs"],
