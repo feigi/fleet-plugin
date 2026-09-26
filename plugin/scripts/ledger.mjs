@@ -712,7 +712,9 @@ function runCheck() {
     // same-size near-miss that cleared the subset floor for an answer the
     // first walk had already produced — equal sizes are exactly the case
     // where the two walks are the same walk.
-    return (small.size === big.size || small.size >= 4) && small.isSubsetOf(big);
+    // Not `small.isSubsetOf(big)`: that's Node v22.0.0+, above this repo's
+    // declared >=20.11.0 floor (#1954; node-floor-sweep.test.mjs reds it).
+    return (small.size === big.size || small.size >= 4) && [...small].every((t) => big.has(t));
   };
   // Strip the leading `#NNN ` issue number: it is metadata, not part of the
   // finding's subject. Left in, it becomes a stray token the checked subject

@@ -162,13 +162,15 @@ const API_FLOORS = [
   // pattern declared EARLIER in this table has a `since` at or below the
   // declared floor (package.json's `engines.node`), so a false positive there
   // is never reported. Every unanchored entry declared LATER, though higher
-  // still, matches only the global-qualified spelling (`Object.groupBy(` …),
-  // so a same-named local function or method never trips it; `node:sqlite`
-  // below is anchored instead, like this entry and util.parseArgs() above, and
-  // is excluded from that count for the same reason. 20.12.0 sits ABOVE that
-  // floor, so a same-named local (a custom `styleText`) is the one heuristic
-  // entry that's actually live today, not merely theoretical — anchoring it is
-  // not optional.
+  // still, matches only the global-qualified spelling (`Object.groupBy(` …)
+  // — `Set.prototype.isSubsetOf()` below excepted, see its own comment —
+  // so a same-named local function or method never trips the rest;
+  // `node:sqlite` below is anchored instead, like this entry and
+  // util.parseArgs() above, and is excluded from that count for the same
+  // reason. 20.12.0 sits ABOVE that floor, so a same-named local (a custom
+  // `styleText`) was the first heuristic entry actually live today, not
+  // merely theoretical — anchoring it is not optional; `isSubsetOf()` below
+  // is the second, left unanchored instead.
   { name: "util.styleText()", pattern: moduleSiteBinding("styleText", "node:util"), since: "20.12.0" },
   // Node v21.0.0 shipped Object.groupBy/Map.groupBy (array grouping).
   { name: "Object.groupBy()", pattern: /\bObject\.groupBy\(/, since: "21.0.0" },
@@ -178,6 +180,14 @@ const API_FLOORS = [
   { name: "Promise.withResolvers()", pattern: /\bPromise\.withResolvers\(/, since: "22.0.0" },
   // Array.fromAsync — Node 22.0.0+.
   { name: "Array.fromAsync()", pattern: /\bArray\.fromAsync\(/, since: "22.0.0" },
+  // Set composition/query methods (union … isDisjointFrom) — Node v22.0.0,
+  // V8 12.4 (nodejs.org's v22-release-announce blog). Only isSubsetOf is
+  // listed: it is the one member of this family measured in a shipped
+  // script so far (ledger.mjs, #1954); extend per the header's own rule the
+  // day a sibling is. Unqualified and unanchored like `.at(` above, just
+  // above the floor instead of below it — a same-named local method would
+  // false-positive (see the header's accepted false-positive note).
+  { name: "Set.prototype.isSubsetOf()", pattern: /\.isSubsetOf\(/, since: "22.0.0" },
   // node:sqlite — introduced Node v22.5.0 behind --experimental-sqlite;
   // unflagged (still experimental) in Node v22.13.0 (nodejs/node#55890).
   // "since" is the unflagged version, same rule this table's header states
