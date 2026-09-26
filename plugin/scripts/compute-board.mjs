@@ -34,8 +34,9 @@ import { PR_MENTION } from "./fleet-tick.mjs";
 // tokens freely. Unknown text is ignored, never fatal.
 //
 // Member tokens are ledger-grammar.mjs's (#1820). On a row that has one, the
-// row's LAST `impl` token, retry suffix included, decides the card: live →
-// IMPLEMENTING, `=PR#M` → that PR decides, `=released`/`=bailed` → no card of
+// row's latest `impl` attempt decides the card — the greatest retry suffix,
+// wherever it sits (#1843, laterAttempt below): live → IMPLEMENTING, `=PR#M`
+// → that PR decides, `=released`/`=bailed` → no card of
 // the row's own (the POOL loop shows the ticket if it is still
 // `ready-for-agent`), `=killed`/`=tier-mismatch` → IMPLEMENTING with that
 // outcome as a flag. There the `→ PR#M` arrow is human-readable only;
@@ -78,9 +79,30 @@ const EXCLUDED_ROW = /^#[0-9]+[ \t]+excluded(?=[ \t]|$)([\s\S]*)$/;
 const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
 const REVIEW = /^review=(?:wf|member|fallback):([^=\s]+?)(=failed)?$/;
 
+// #1843: which of two well-formed impl tokens is the later attempt for THIS
+// row's ticket. A token whose number matches the row's own ticket always
+// outranks one that does not: a retry suffix only orders attempts on ONE
+// number (ledger-grammar.mjs's MEMBER regex comment — "Attempts on one
+// number order by it"), so comparing retry across a different ticket's
+// number is meaningless and must never let a foreign token's suffix beat
+// this ticket's own token (a dead-attempt-masks-a-live-implementer regression
+// by a different mechanism than the one this ticket fixes). Within one
+// ticket, read off ledger-grammar.mjs's parsed `retry` — no suffix first,
+// then by letter — never off row position, so every ordering of one row's
+// same-ticket impl tokens picks the same impl/outcome/pr. Between two
+// distinct foreign numbers (a shape nothing writes), the greater number
+// wins; two copies of one name tie, and its outcome is `outcomes`' latest
+// settle.
+const laterAttempt = (a, b, ticket) => {
+  const aOwn = a.number === ticket, bOwn = b.number === ticket;
+  if (aOwn !== bOwn) return aOwn;
+  return (a.retry ?? "") !== (b.retry ?? "") ? (a.retry ?? "") > (b.retry ?? "") : a.number > b.number;
+};
+
 export function parseRow(row) {
   const issueM = row.match(/^#(\d+)\b/);
   if (!issueM) return null;
+  const ticket = Number(issueM[1]);
   const mergedM = row.match(/\bMERGED\s+([0-9a-f]{7,40})\b/i);
   const heldM = row.match(/\bheld-behind[:\s]+#?(\d+)\b/i);
   const causes = [];
@@ -98,7 +120,7 @@ export function parseRow(row) {
   const live = [];
   const outcomes = new Map();
   const settled = new Set();
-  let lastImpl = null;
+  let lastImpl = null; // the latest well-formed impl token (laterAttempt)
   let anyImpl = false;
   let prMember = false;
   let review = false; // any review= token: a PR-bound signal (amendment 2a)
@@ -115,7 +137,7 @@ export function parseRow(row) {
       if (t.outcome !== null && !t.error) outcomes.set(t.name, t.outcome);
       if (t.family === "impl") {
         anyImpl = true;
-        if (!t.error) lastImpl = t.name;
+        if (!t.error && (!lastImpl || laterAttempt(t, lastImpl, ticket))) lastImpl = t;
       }
       if (t.bound === "pr") prMember = true;
       continue;
@@ -135,7 +157,7 @@ export function parseRow(row) {
     }
   }
   const alive = live.filter((t) => !settled.has(t.name));
-  const implOutcome = lastImpl ? (outcomes.get(lastImpl) ?? null) : null;
+  const implOutcome = lastImpl ? (outcomes.get(lastImpl.name) ?? null) : null;
   const prM = implOutcome && /^PR#(\d+)$/.exec(implOutcome);
   let pr = prM ? Number(prM[1]) : null;
   // #1820 amendment 2a: a row with NO impl token — a malformed one still
@@ -155,7 +177,7 @@ export function parseRow(row) {
   return {
     issue: Number(issueM[1]),
     excluded: ex ? [...ex[1].matchAll(PREMISE)].map(([, kind, target]) => ({ kind, target })) : null,
-    impl: lastImpl,
+    impl: lastImpl?.name ?? null,
     implOutcome,
     agent: alive.length ? alive[alive.length - 1].name : null,
     pr,

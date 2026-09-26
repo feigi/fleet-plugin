@@ -19,27 +19,31 @@ const VOCABULARY = [
 
 test("a bare member token is live, and names its family, number and binding", () => {
   assert.deepEqual(parseToken("impl-412"), {
-    name: "impl-412", family: "impl", number: 412, bound: "ticket", outcome: null, error: null,
+    name: "impl-412", family: "impl", number: 412, retry: null, bound: "ticket", outcome: null, error: null,
   });
   assert.deepEqual(parseToken("fix-pr-346"), {
-    name: "fix-pr-346", family: "fix-pr", number: 346, bound: "pr", outcome: null, error: null,
+    name: "fix-pr-346", family: "fix-pr", number: 346, retry: null, bound: "pr", outcome: null, error: null,
   });
   assert.deepEqual(parseToken("finisher-pr-346"), {
-    name: "finisher-pr-346", family: "finisher-pr", number: 346, bound: "pr", outcome: null, error: null,
+    name: "finisher-pr-346", family: "finisher-pr", number: 346, retry: null, bound: "pr", outcome: null, error: null,
   });
   assert.deepEqual(parseToken("merge-bot-3"), {
-    name: "merge-bot-3", family: "merge-bot", number: 3, bound: null, outcome: null, error: null,
+    name: "merge-bot-3", family: "merge-bot", number: 3, retry: null, bound: null, outcome: null, error: null,
   });
 });
 
 // "Replacement members (`-b`) get their own token": the suffix is part of the
 // name, so `impl-412-b` settles apart from `impl-412` while working the same
-// ticket.
+// ticket. `retry` carries the suffix letter on its own, so a reader ordering
+// a ticket's attempts reads it here rather than re-parsing the name.
 test("a replacement member's retry suffix is its own token, bound to the same number", () => {
   const b = parseToken("impl-412-b");
   assert.equal(b.name, "impl-412-b");
   assert.equal(b.number, 412);
-  assert.equal(parseToken("fix-pr-346-c=no-op").name, "fix-pr-346-c");
+  assert.equal(b.retry, "b");
+  const c = parseToken("fix-pr-346-c=no-op");
+  assert.equal(c.name, "fix-pr-346-c");
+  assert.equal(c.retry, "c");
   assert.equal(parseToken("finisher-pr-346-b").family, "finisher-pr");
 });
 
