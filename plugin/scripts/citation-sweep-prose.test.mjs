@@ -881,6 +881,11 @@ test("a merge-on-checks sentence naming its scope passes, as does a sentence wit
     // checks with no merge — neither says what a bump's merge waits on.
     "# `--first-parent` dates the move by when it LANDED on the branch (the merge\n# commit), not by when the bot authored it: a bump PR that sat red for a week\n# has not moved the pin for that week.\n",
     "# 35 days leaves about a day for those checks; a bump PR that goes red and\n# stays red longer than that trips it in such a month.\n",
+    // The unrelated business sense of "merger" starts with the same four
+    // letters as "merge" — a bare `\b(?:auto-?)?merg` would trip here too,
+    // since a word boundary sits before "merg" in "merger" as well (review
+    // finding, PR #1990). Bounding the trigger to a real verb form excludes it.
+    "# The merger of the checks team and CI team went smoothly and green-lit.\n",
   ]) {
     assert.doesNotMatch(text, UNSCOPED_MERGE_SENTENCE, text);
   }
