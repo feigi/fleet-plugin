@@ -85,7 +85,7 @@
 //   the root answers, and it IS    a real failure — a broken glob or path join
 //   this plugin's own, but the     inside a tree that genuinely is this
 //   list of tracked scripts is     plugin's own. `trackedShellScripts` and
-//   empty                          `trackedMjsScripts` are therefore free to
+//   empty                          `trackedNodeScripts` are therefore free to
 //                                  return an empty array and say nothing about
 //                                  skipping; each caller's own non-vacuity
 //                                  guard is what judges it. The
@@ -99,7 +99,7 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { gitEnv } from "./git-env.mjs";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -351,10 +351,10 @@ export function skipWithoutRepo(root, subject) {
  * substitutes a DIFFERENT repository's tracked list for `root`'s own — the
  * caller's non-vacuity guard cannot see this, since the wrong list is
  * routinely non-empty. GIT_WORK_TREE is inert here (measured, for `*.sh` and
- * for `*.mjs` with its `:(exclude)` alike) for a reason specific to THIS call
- * rather than transferable from `isTrackedBy` above: every pathspec here is a
- * relative glob, never `realpathSync`'d, so there is no absolute path for an
- * ambient work tree to reject as outside itself.
+ * for the lone `:(exclude)*.test.mjs` alike) for a reason specific to THIS
+ * call rather than transferable from `isTrackedBy` above: every pathspec here
+ * is a relative glob, never `realpathSync`'d, so there is no absolute path for
+ * an ambient work tree to reject as outside itself.
  */
 function trackedFiles(caller, root, pathspecs) {
   if (typeof root !== "string") {
@@ -363,8 +363,15 @@ function trackedFiles(caller, root, pathspecs) {
       + "an absent working tree is a skip for the caller to make, not an empty list to iterate",
     );
   }
-  return execFileSync("git", ["ls-files", ...pathspecs], { cwd: root, encoding: "utf8", env: gitEnv() })
-    .split("\n").filter(Boolean);
+  // `-z`, split on NUL: git's default `\n`-separated form C-quotes any path
+  // with a non-ASCII or otherwise "unusual" byte (for example `café.mjs`
+  // becomes the literal 12-character string `"caf\303\251.mjs"`), which
+  // fails a plain `.endsWith(".mjs")` and is not openable at that path
+  // either — a real tracked file silently missing from every caller's
+  // answer. `-z` never quotes; it is git's own NUL-terminated form for
+  // "give me the exact bytes".
+  return execFileSync("git", ["ls-files", "-z", ...pathspecs], { cwd: root, encoding: "utf8", env: gitEnv() })
+    .split("\0").filter(Boolean);
 }
 
 /**
@@ -376,13 +383,57 @@ export function trackedShellScripts(root) {
   return trackedFiles("trackedShellScripts", root, ["*.sh"]);
 }
 
+// A first line that hands the file to node: `node` itself as the interpreter,
+// by a direct path (`#!/usr/local/bin/node`) or through `env` with any options
+// or assignments before it (`#!/usr/bin/env node`, `#!/usr/bin/env -S node
+// --no-warnings`). `node` is the WHOLE interpreter name — `nodemon` and `bun`
+// are other programs.
+const NODE_SHEBANG = /^#!\s*(?:\S*\/)?(?:env(?:\s+(?:-\S+|\w+=\S*))*\s+(?:\S*\/)?)?node(?:\s|$)/;
+
+// A shebang is one short line; this holds any this repository would write.
+const SHEBANG_BYTES = 256;
+
 /**
- * Every tracked `*.mjs` this repository ships in the working tree at `root`,
- * repo-relative: test files — `*.test.mjs`, the one naming this repository
- * gives them — are not shipped, so they are not in the answer. `root`, an
- * empty answer and the ambient git variables all behave as `trackedFiles`
- * says.
+ * Whether the file at `path` starts with a node shebang, read into `buf`. A
+ * tracked file the working tree no longer has — an `rm` not yet committed —
+ * has no first line here, so it is not one; a tracked path that resolves to
+ * a directory (a symlink to one, or a submodule's gitlink checked out on
+ * disk) is not a readable file either, so it answers the same "not one" —
+ * the pre-#1855 `.mjs`-only sweep never opened a non-.mjs path at all, so
+ * neither shape could reach it before. Any other failure to read throws.
  */
-export function trackedMjsScripts(root) {
-  return trackedFiles("trackedMjsScripts", root, ["*.mjs", ":(exclude)*.test.mjs"]);
+function hasNodeShebang(path, buf) {
+  let fd;
+  try {
+    fd = openSync(path, "r");
+  } catch (e) {
+    if (e.code === "ENOENT") return false;
+    throw e;
+  }
+  try {
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    return NODE_SHEBANG.test(buf.toString("utf8", 0, n).split("\n", 1)[0]);
+  } catch (e) {
+    if (e.code === "EISDIR") return false;
+    throw e;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Every tracked file this repository ships that the consumer's own `node`
+ * executes, in the working tree at `root`, repo-relative: each `*.mjs`, and
+ * any other file whose first line is a node shebang — the extensionless
+ * entrypoints `fleet-run`, `fleet-bootstrap` and `fleet-provenance` (#1855).
+ * A shebang decides, never an extension alone: `plugin/workflows/*.js` is ESM
+ * a harness runs and plain node never loads, and carries none. Test files —
+ * `*.test.mjs`, the one naming this repository gives them — are not shipped,
+ * so they are not in the answer, shebang or not. `root`, an empty answer and
+ * the ambient git variables all behave as `trackedFiles` says.
+ */
+export function trackedNodeScripts(root) {
+  const buf = Buffer.alloc(SHEBANG_BYTES);
+  return trackedFiles("trackedNodeScripts", root, [":(exclude)*.test.mjs"])
+    .filter((f) => f.endsWith(".mjs") || hasNodeShebang(join(root, f), buf));
 }
