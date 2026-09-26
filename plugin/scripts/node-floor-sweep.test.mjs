@@ -143,17 +143,20 @@ const API_FLOORS = [
     since: "20.11.0",
   },
   // util.styleText — introduced Node v20.12.0, stable Node v21.7.0/v22.13.0.
-  // Using the introduction version as the floor: it exists and is usable
-  // (with an experimental warning) from 20.12.0, and this table's job is
-  // "what version must a consumer run", not "warning-free". Matched at the
-  // import or require site, same discipline as util.parseArgs() above: every
-  // unanchored pattern declared EARLIER in this table has a `since` at or
-  // below the declared floor (20.11.0), so a false positive there is never
-  // reported, and every one declared after this entry, though higher still,
-  // matches only a global-qualified call (`Object.groupBy(` …), never a call
-  // to a same-named local. 20.12.0 sits ABOVE that floor, so a same-named
-  // local (a custom `styleText`) is the one heuristic entry that's actually
-  // live today, not merely theoretical — anchoring it is not optional.
+  // Using the introduction version as the floor: it exists and is usable (with
+  // an experimental warning) from 20.12.0, and this table's job is "what
+  // version must a consumer run", not "warning-free". Matched at the import or
+  // require site, same discipline as util.parseArgs() above: every unanchored
+  // pattern declared EARLIER in this table has a `since` at or below the
+  // declared floor (package.json's `engines.node`), so a false positive there
+  // is never reported. Every unanchored entry declared LATER, though higher
+  // still, matches only the global-qualified spelling (`Object.groupBy(` …),
+  // so a same-named local function or method never trips it; `node:sqlite`
+  // below is anchored instead, like this entry and util.parseArgs() above, and
+  // is excluded from that count for the same reason. 20.12.0 sits ABOVE that
+  // floor, so a same-named local (a custom `styleText`) is the one heuristic
+  // entry that's actually live today, not merely theoretical — anchoring it is
+  // not optional.
   { name: "util.styleText()", pattern: moduleSiteBinding("styleText", "node:util"), since: "20.12.0" },
   // Node v21.0.0 shipped Object.groupBy/Map.groupBy (array grouping).
   { name: "Object.groupBy()", pattern: /\bObject\.groupBy\(/, since: "21.0.0" },
