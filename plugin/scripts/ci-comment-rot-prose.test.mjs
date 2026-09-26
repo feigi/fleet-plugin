@@ -44,6 +44,17 @@ const prose = (src) =>
 const CI = prose(read("../../.github/workflows/ci.yml"));
 const CLAIM_TICKET = prose(read("./claim-ticket.sh"));
 
+// Prose cut into sentences, for every pin below that holds a claim to ONE
+// sentence: citationFault's quotation, and the two pins that require a claim
+// and its negation to share one. A period closing an abbreviation that
+// never ends a sentence — "e.g.", "i.e.", "cf.", "viz.", "vs." — is no break:
+// splitting there scattered one sentence's words across two fragments, neither
+// of which satisfied the pin, so a paraphrase using one was refused (#1852).
+// "etc." is deliberately absent: it ends sentences as often as not, and reading
+// past it would join two real sentences — the block-wide scan windowClaimFault's
+// ceiling exists to forbid.
+const sentences = (block) => block.split(/(?<=[.!?])(?<!\b(?:e\.g|i\.e|cf|viz|vs)\.)\s+/i);
+
 /**
  * The citation rule, as a function so the accept case can be fed input this
  * repo does not contain. Returns null when the pair is sound, else the reason.
@@ -58,9 +69,22 @@ export function citationFault(citing, cited) {
   // fixes #348 sanctions — the rule re-attaches to an unrelated quoted phrase
   // further down ci.yml and demands claim-ticket.sh contain that. Taking only
   // the FIRST span is the silent direction: an aside that does quote the file
-  // stands in front of a misquote and absorbs the whole check. The early return
-  // above is what guarantees this match is non-null.
-  const sentence = citing.match(/claim-ticket\.sh[^.]*/)[0];
+  // stands in front of a misquote and absorbs the whole check.
+  //
+  // The sentence runs from the name to its real end as sentences() finds it,
+  // never to the first period: "e.g.", "ci.yml" and a period inside the
+  // quotation itself each came before the quoted span, cut the sentence short
+  // of it, and let a misquote read as a paraphrase (#1898). Quoted spans are
+  // blanked to same-length filler before splitting, so no period inside one can
+  // end the sentence, and the cut lands at the same offset in the real text.
+  // That holds for a quotation's closing period too (`…out." Next`): the
+  // sentence then runs on to the next real end, which can only add spans to
+  // check — the loud direction. Ending it at the closing mark instead would
+  // also end `says "…out." and adds "…"` before its second quotation, unread.
+  // The early return above is what keeps indexOf off -1.
+  const from = citing.slice(citing.indexOf("claim-ticket.sh"));
+  const opaque = from.replace(/"[^"]+"/g, (span) => `"${"x".repeat(span.length - 2)}"`);
+  const sentence = from.slice(0, sentences(opaque)[0].length);
   // No quoted span at all is a paraphrase: nothing claims to be verbatim, and
   // dropping the quotation marks is the other of the two fixes #348 sanctions.
   for (const [, quoted] of sentence.matchAll(/"([^"]+)"/g)) {
@@ -88,6 +112,42 @@ test("a paraphrase is accepted; a deleted citation and a misquote are not", () =
 
   assert.match(citationFault("the find in the emitted runner is what does it", cited), /no longer names/);
   assert.match(citationFault('claim-ticket.sh says: "this filter, not node"', cited), /does not say it/);
+});
+
+// #1898. The citing sentence used to end at the FIRST period after the name, so
+// a period that ends no sentence cut it short of its quotation: an abbreviation
+// ("e.g.", or any other sentences() skips), a period inside a word ("ci.yml",
+// "v1.2"), or a period inside the quoted span itself. The quotation then fell
+// outside the sentence, and the misquote read as a paraphrase — the silent
+// direction. Each input below is the misquote the test above refuses.
+test("a period that ends no sentence cannot hide a misquote from citationFault (#1898)", () => {
+  const cited = "so this walk, not node, is what keeps vendored tests out.";
+
+  for (const abbr of ["e.g.", "i.e.", "cf.", "viz.", "vs."]) {
+    assert.match(
+      citationFault(`claim-ticket.sh says, ${abbr} "this filter, not node"`, cited),
+      /does not say it/,
+      `${abbr} ended the citing sentence before its quotation`,
+    );
+  }
+  assert.match(citationFault('claim-ticket.sh, unlike ci.yml (v1.2), says "this filter, not node"', cited), /does not say it/);
+  assert.match(citationFault('claim-ticket.sh says "this filter. Not node"', cited), /does not say it/);
+  assert.match(citationFault('claim-ticket.sh says "this filter, not node."', cited), /does not say it/);
+});
+
+// The other half of #1898: the sentence still ends at its REAL end. A quoted
+// span in the next sentence is not claim-ticket.sh's to answer for — reading on
+// past the end is the unbounded scan citationFault's own comment forbids — and a
+// true quotation reached across "e.g.", or carrying its own period, still passes.
+test("citationFault reads past 'e.g.' but not past the sentence's end (#1898)", () => {
+  const cited = "so this walk, not node, is what keeps vendored tests out.";
+
+  assert.equal(citationFault('see claim-ticket.sh, e.g. "walk, not node"', cited), null);
+  assert.equal(citationFault('claim-ticket.sh says "is what keeps vendored tests out."', cited), null);
+  assert.equal(
+    citationFault('claim-ticket.sh makes the same point, e.g. about its own walk. The runner\'s "find" was the defect.', cited),
+    null,
+  );
 });
 
 test("the Shellcheck comment does not present its examples as the complete set", () => {
@@ -146,16 +206,6 @@ test("the vendored-tree sentence makes a structural claim, not a size claim", ()
     `the vendored-tree claim sizes the directory again, and the number is stale on arrival: "${span[0]}"`,
   );
 });
-
-// A comment block cut into sentences, for the two pins below that require a
-// claim and its negation to share one. A period closing an abbreviation that
-// never ends a sentence — "e.g.", "i.e.", "cf.", "viz.", "vs." — is no break:
-// splitting there scattered one sentence's words across two fragments, neither
-// of which satisfied the pin, so a paraphrase using one was refused (#1852).
-// "etc." is deliberately absent: it ends sentences as often as not, and reading
-// past it would join two real sentences — the block-wide scan windowClaimFault's
-// ceiling exists to forbid.
-const sentences = (block) => block.split(/(?<=[.!?])(?<!\b(?:e\.g|i\.e|cf|viz|vs)\.)\s+/i);
 
 // #1753. The comment above the setup-node step that owns `.nvmrc`'s explanation
 // says Renovate moves the pin on a schedule. Read alone, that schedule looks
