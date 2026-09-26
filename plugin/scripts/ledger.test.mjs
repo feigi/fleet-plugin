@@ -2245,14 +2245,17 @@ test("CLI: a two-dash spelling of either flag is refused anywhere in a quoted ta
 // own-flag spelling, and the call fell through to scoring the subject: the
 // verdict flip #1744/#1766/#1850 exist to refuse. The ticket's own probe
 // (U+200B and U+2060 leading the flag as its own argv element) is driven
-// first; the rest cover the positions and forms a leading-only strip, a
-// two-character strip, or a BMP-only hand-written class would each still
-// miss: trailing, inside the name, `=value`, the two-dash as-spelled branch
-// with a case variant, a Latin-1 Cf (U+00AD), U+180E (in `\s` before
-// Unicode 6.3, Cf only since), and an astral one (U+E0020 TAG SPACE). The
-// U+FEFF case was refused before this fix and is here because it is the one
-// Cf code point that is also `\s`: a strip run BEFORE the split would join
-// "widget" and "-require-file" into one word and stop refusing it.
+// first. Trailing, inside the name, a Latin-1 Cf (U+00AD), U+180E (in `\s`
+// before Unicode 6.3, Cf only since), and an astral one (U+E0020 TAG SPACE)
+// are each cases at least one of a leading-only strip, a two-character
+// strip, or a BMP-only hand-written class would still miss. `=value` and
+// the two-dash as-spelled branch with a case variant do not: the Cf
+// character leads the word in both, so all three of those narrower fixes
+// still catch it — those two entries instead cover that `split("=")` and
+// `toLowerCase()` still see the stripped name correctly. The U+FEFF case
+// was refused before this fix and is here for the strip-after-split
+// ordering rationale refuseStrayInCheckTail()'s own comment gives in full
+// — it is the one Cf code point that is also `\s`.
 test("CLI: a format (Cf) character ahead of, inside or behind this script's own flag name still lets the clause refuse it (#1851)", (t) => {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");

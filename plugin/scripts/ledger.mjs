@@ -391,12 +391,14 @@ const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`].map((f)
 // word now has every Cf code point stripped before either lookup, so it is
 // looked up as the word a reader sees — wherever the character sits, ahead of
 // the dash, inside the name, or behind it. Stripped, not split on: a word
-// the character sits inside of stays one word (`pre\u200B-file` is
+// any OTHER Cf character sits inside of stays one word (`pre\u200B-file` is
 // `pre-file`, not a `-file`). And stripped AFTER the `\s` split, not before:
-// U+FEFF is the one code point in both Cf and `\s`, and a strip ahead of the
-// split would join `widget\uFEFF-require-file` into one word and stop
-// refusing it. The rule is still a NAME match — own names are ASCII, so only
-// a word that is an own-flag spelling plus Cf characters is newly refused.
+// U+FEFF is the one code point in both Cf and `\s` — the one exception to
+// the sentence just above, since it keeps splitting a word in two there the
+// way it always did — and a strip ahead of the split would join
+// `widget\uFEFF-require-file` into one word and stop refusing it. Own names
+// are ASCII, so only a word that is an own-flag spelling plus Cf characters
+// is newly refused.
 // Cf also holds a few VISIBLE marks (the Arabic number signs U+0600–0605,
 // among others); stripping them costs a refusal only of such a mark glued to
 // an own-flag name, which no subject carries.
