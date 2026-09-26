@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 // #516. A scan over every tracked `.mjs`/`.sh`/`.js`/`.yml` file for
@@ -41,6 +41,17 @@ import { join } from "node:path";
 // file, so nothing in this table notices the TARGET losing the construct — the
 // direction #870 closes for probe 3's citation, in
 // inflight-citation-prose.test.mjs, and leaves open for every entry below.
+//
+// One target-side check runs here, for one citation shape only (#1757): a
+// `live` needle that names an ADR by number (`ADR 0010`) is a pointer, and the
+// number must still resolve to exactly one `docs/adr/<number>-*.md`. Read off
+// the needle itself, never a second list, so the pointer and what it is checked
+// against have one spelling between them — the reason inflight-citation-prose's
+// WTROOT gives: renumber or move the ADR and this reds; repoint the needle
+// alone and the needle reds against the citing file's unchanged prose. The
+// pointer names the ADR by number, so a retitle that keeps the number keeps
+// the pointer true and stays green. A construct needle is still never checked
+// against its target.
 const REPO = join(import.meta.dirname, "..");
 const read = (...segments) => readFileSync(join(REPO, ...segments), "utf8");
 
@@ -48,6 +59,20 @@ const read = (...segments) => readFileSync(join(REPO, ...segments), "utf8");
 // the `//` or `#` gutter and collapse whitespace so a presence check does not
 // depend on where the line happened to break.
 const normalize = (text) => text.replace(/^[ \t]*(?:\/\/|#) ?/gm, "").replace(/\s+/g, " ");
+
+const ADRS = readdirSync(join(REPO, "..", "docs", "adr"));
+const ADR_POINTER = /\bADR (\d{4})\b/g;
+
+// Null when exactly one `<number>-*.md` answers to the pointer, else the
+// reason. Takes a listing rather than reading docs/adr/ itself, so the tests
+// below can hand it the renamed and doubled trees this repo does not hold.
+function adrFault(number, names) {
+  const hits = names.filter((name) => name.startsWith(`${number}-`) && name.endsWith(".md"));
+  if (hits.length === 1) return null;
+  return hits.length === 0
+    ? `no docs/adr/${number}-*.md exists — the ADR was renumbered or moved out of docs/adr/`
+    : `${hits.length} files answer to ADR ${number} (${hits.join(", ")}) — the pointer no longer names one ruling`;
+}
 
 const FILES = [
   {
@@ -250,8 +275,8 @@ const FILES = [
   // separates, and each entry points at that ADR from its cross-reference to
   // the other term. One needle per SITE, for the reason the reaping-prose
   // entry gives: a bare `(ADR 0010)` would stay satisfied by either entry
-  // after the other lost its pointer. Nothing is stale here yet — these are
-  // new pointers, not converted ones — so the entry carries no `stale` form.
+  // after the other lost its pointer. These are new pointers, not converted
+  // ones, so the entry carries no `stale` form.
   {
     path: ["..", "CONTEXT.md"],
     stale: [],
@@ -275,11 +300,28 @@ for (const { path, stale, live } of FILES) {
   }
 
   for (const needle of live) {
-    test(`${label} still names the construct that replaced the stale form (${needle})`, () => {
+    test(`${label} still names the construct its citation rests on (${needle})`, () => {
       assert.ok(
         prose.includes(needle),
-        `${label} no longer mentions "${needle}" anywhere — the construct that replaced the stale form here appears to have been deleted outright rather than kept current`,
+        `${label} no longer mentions "${needle}" anywhere — the construct this citation rests on appears to have been deleted outright rather than kept current`,
       );
     });
+
+    for (const [, number] of needle.matchAll(ADR_POINTER)) {
+      test(`${label}'s pointer to ADR ${number} still resolves to one file under docs/adr/ (${needle})`, () => {
+        const fault = adrFault(number, ADRS);
+        assert.equal(fault, null, `${label} points at ADR ${number} through "${needle}", but ${fault}`);
+      });
+    }
   }
 }
+
+test("an ADR pointer resolves by number alone, so a retitled ADR still answers to it", () => {
+  assert.equal(adrFault("0010", ["0009-supported-platforms-are-macos-linux-wsl.md", "0010-a-retitled-ruling.md"]), null);
+});
+
+test("an ADR pointer reds once its number stops naming exactly one file: renumbered, moved out, or doubled", () => {
+  assert.match(adrFault("0010", ["0009-supported-platforms-are-macos-linux-wsl.md", "0014-the-node-pin-stays-exact-and-a-bot-moves-it.md"]), /no docs\/adr\/0010-\*\.md/);
+  assert.match(adrFault("0010", []), /no docs\/adr\/0010-\*\.md/);
+  assert.match(adrFault("0010", ["0010-one-ruling.md", "0010-another-ruling.md"]), /2 files answer to ADR 0010/);
+});
