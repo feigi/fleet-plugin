@@ -262,6 +262,16 @@ const FILES = [
   // cited range, and nothing went red. Each now names its construct instead —
   // the test the measurement sits above, and each workflow's job — and each
   // line form is banned generally, for the same reason.
+  //
+  // #1874. Two more of the same, adjacent to #1756's. The Status line and a
+  // Consequences bullet located the pin's owner comment in ci.yml as the
+  // "first" `setup-node`, a position any `setup-node` step added above the
+  // `check` job's silently re-points; both now name the `check` job instead,
+  // and the positional form is banned. And the evidence counted "8 releases"
+  // and a security release "since the pin" without saying from what: 8 is the
+  // releases past `26.5.0`, three of them — the security release among them —
+  // already out when the pin was set. Those two wordings carry no live
+  // needle, for the reason #1756's gives.
   {
     path: ["..", "docs", "adr", "0010-the-node-pin-stays-exact-and-a-bot-moves-it.md"],
     stale: [
@@ -271,6 +281,9 @@ const FILES = [
       /board-cli\.test\.mjs:\d/,
       /release\.yml:\d/,
       /release-label\.yml:\d/,
+      /\bfirst\s+`?setup-node\b/,
+      /across\s+8\s+releases/,
+      /landed\s+in\s+26\.x\s+since\s+the\s+pin\b/,
       // A backticked `.mjs` list straight after "used by" that includes either
       // comment-only file, wherever in the list and however it wraps.
       /used by(?:[\s,]*(?:and\s+)?`[\w-]+\.mjs`)*[\s,]*(?:and\s+)?`(?:arg|staleness)\.mjs`/,
@@ -287,7 +300,17 @@ const FILES = [
       "build: --spend-since's refusal survives a gh child that has already pushed past the pipe buffer, unread",
       "`release.yml`'s `release` job",
       "`release-label.yml`'s `auto-label-bots` job",
+      "the `check` job's `setup-node`",
     ],
+  },
+  // #1874. pin-drift.sh restated ADR 0010's "43 days across 8 releases" as
+  // the cost of a silent pin, where only five of the 8 landed inside the 43
+  // days. The count is corrected in both files; this keeps the copy from
+  // reverting on its own.
+  {
+    path: ["..", ".github", "scripts", "pin-drift.sh"],
+    stale: [/across\s+8\s+releases/],
+    live: [],
   },
   // #1757. The glossary's Runtime heading names the two terms ADR 0010
   // separates, and each entry points at that ADR from its cross-reference to
