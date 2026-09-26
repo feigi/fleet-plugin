@@ -201,12 +201,25 @@ const SENTENCE_END = String.raw`(?:[.!?][*_\x60)\]"'”’]*\s|\n(?=[ \t]*[-*+][
 // substring, so "dispatched" and "majority" scoped a claim that names no
 // update type, and an unscoped bold span or drift sentence passed. `\b` is not
 // the boundary either: it counts `_` as a word character, so an italic
-// `_patch_` would stop scoping its claim. Only a letter or digit beside the
-// word disqualifies it. A plural still names the type — "automerged for minors
-// and patches" is scoped — so minors, majors and patches count; "patched" and
-// "patching" do not. "Patches" read as a verb still scopes a claim it does not:
-// a hole left open, because closing it refuses the noun, and so reds prose
-// that names exactly the scope the rows ask for.
+// `_patch_` would stop scoping its claim. Only an ASCII letter or digit beside
+// the word disqualifies it. A plural still names the type — "automerged for
+// minors and patches" is scoped — so minors, majors and patches count;
+// "patched" and "patching" do not.
+//
+// #1988. Three holes are left open, each a word that names no update type
+// still scoping its claim. The plain-English sense: "patches" read as a verb,
+// as #1958 left it, and "we patch monthly", "at minor cost", "a major
+// benefit". A whole word cannot tell that sense from the update type, and
+// asking for the type's own context — "bump" beside it — refuses "Majors
+// aside" and "for minors and patches", prose that names exactly the scope the
+// rows ask for. A word no reader sees: a link target, as in
+// `[notes](https://x.io/patch-notes)`, a reference label, an HTML comment.
+// Skipping those takes a second alternative in every tempered token this is
+// spliced into, for markup ADR 0010 has none of. And a non-ASCII letter
+// beside the word: "patché" scopes. `[\p{L}\p{N}]` would refuse it only under
+// the `u` flag, and each regex this is spliced into sets its own flags: built
+// without `u`, `\p` is a plain "p" and the class a few literal characters, so
+// "dispatched" scopes again, silently.
 const UPDATE_TYPE = String.raw`(?<![a-z\d])(?:minors?|majors?|patch(?:es)?)(?![a-z\d])`;
 const UNSCOPED_DRIFT_SENTENCE = new RegExp(
   String.raw`(?:^|${SENTENCE_END})(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*\bbounding\s+drift\b(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*(?:${SENTENCE_END}|$)`,
