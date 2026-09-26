@@ -25,6 +25,20 @@ platform runs both harnesses. An artefact that works on only some platforms is a
 defect, with the same standing as a harness-bound one.
 _Avoid_: OS, host, environment
 
+### Runtime
+
+**Runtime pin**:
+The exact node version `.nvmrc` holds — the runtime this repo's own suite is
+developed and verified against in CI. It makes no promise to a consumer; that is
+the **Consumer floor** (ADR 0010).
+_Avoid_: supported version, minimum node, node version (bare)
+
+**Consumer floor**:
+The oldest node the shipped scripts support under a consumer's own `node`,
+declared in the root `package.json`'s `engines.node`. The compatibility statement
+the **Runtime pin** (ADR 0010) is not.
+_Avoid_: pin, required version, engines (bare)
+
 ### Claim lifecycle
 
 **Claim**:

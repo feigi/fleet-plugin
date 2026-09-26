@@ -246,6 +246,17 @@ const FILES = [
       "`query(null)`",
     ],
   },
+  // #1757. The glossary's Runtime heading names the two terms ADR 0010
+  // separates, and each entry points at that ADR from its cross-reference to
+  // the other term. One needle per SITE, for the reason the reaping-prose
+  // entry gives: a bare `(ADR 0010)` would stay satisfied by either entry
+  // after the other lost its pointer. Nothing is stale here yet — these are
+  // new pointers, not converted ones — so the entry carries no `stale` form.
+  {
+    path: ["..", "CONTEXT.md"],
+    stale: [],
+    live: ["**Consumer floor** (ADR 0010)", "**Runtime pin** (ADR 0010)"],
+  },
 ];
 
 for (const { path, stale, live } of FILES) {
