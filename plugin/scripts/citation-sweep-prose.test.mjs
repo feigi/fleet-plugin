@@ -53,13 +53,16 @@ import { join } from "node:path";
 // the pointer true and stays green. A construct needle is still never checked
 // against its target.
 //
-// And one claim is held by what it says, not by how it was spelled (#1928):
-// ADR 0010's security release, which a stale form here once guarded by the
-// wrong sentence's exact words. A false claim needs no particular spelling to
-// return, so securityReleaseFault reads which side of the pin the ADR places
-// v26.5.1 on. It is the table's stale-form rule taken one step further, for a
-// claim whose rewording is as likely as its reversion — not a second
-// convention to reach for when a spelling ban would do.
+// And two claims are held by what they say, not by how they were spelled:
+// ADR 0010's security release (#1928) and its count of releases in the 43
+// days the pin sat, which pin-drift.sh restates (#1970). Stale forms here once
+// guarded each by the wrong sentence's exact words. A false claim needs no
+// particular spelling to return, so securityReleaseFault reads which side of
+// the pin the ADR places v26.5.1 on, and windowReleaseCountFault how many
+// releases each file puts inside the 43 days. It is the table's stale-form
+// rule taken one step further, for a claim whose rewording is as likely as
+// its reversion — not a second convention to reach for when a spelling ban
+// would do.
 const REPO = join(import.meta.dirname, "..");
 const read = (...segments) => readFileSync(join(REPO, ...segments), "utf8");
 
@@ -86,6 +89,7 @@ function adrFault(number, names) {
 }
 
 const ADR_0010 = ["..", "docs", "adr", "0010-the-node-pin-stays-exact-and-a-bot-moves-it.md"];
+const PIN_DRIFT_SH = ["..", ".github", "scripts", "pin-drift.sh"];
 
 // #1928. ADR 0010's security evidence names its one security release past
 // `26.5.0`, v26.5.1, and #1874 corrected WHEN it landed: already out when #335
@@ -272,6 +276,64 @@ const UNSCOPED_MERGE_SENTENCE = new RegExp(
   String.raw`(?:^|${SENTENCE_END})(?=(?:(?!${SENTENCE_END})[^])*?\b(?:auto-?)?merg(?:e[sd]?|ing)\b)(?=(?:(?!${SENTENCE_END})[^])*?\b(?:checks?|CI|green)\b)(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*(?:${SENTENCE_END}|$)`,
   "i",
 );
+
+// #1970. How many releases landed in the 43 days the pin sat, which ADR 0010
+// and pin-drift.sh both state. #1874 corrected the count: 8 releases are past
+// `26.5.0`, three of them already out when #335 set the pin, so five landed
+// inside the 43 days. Until #1970 both files' rows banned only the old
+// spelling, "across 8 releases", and "43 days, with eight 26.x releases
+// landing inside them" states the same false count and passed. So the count
+// is read for what it says, as securityReleaseFault reads its claim. Null when
+// every count the 43 days owns is five, else the reason. Takes the text, so
+// the tests can hand it rewordings neither file holds.
+//
+// The scope is each sentence (SENTENCE_END, gutter stripped) naming the
+// window: "43 days", or since/after the pin or #335. A count there is a
+// number — digits, or "no" and "zero" through "twelve" — then "release(s)",
+// with only "more", "new", "further", "other", "Node" or a `26`/`26.x`
+// between; any other word between makes it a count of some kind of release —
+// "no security release" — not the window's total. The rest of the count's
+// clause, up to `, ; : ( ) — –`, says which reference point it counts from:
+// pinPlacements reading it after the pin, or "in the 43 days", ties it to the
+// window whatever else the clause says; failing that, a before-the-pin
+// reading, or "past", "behind", "beyond", or since/after/from `26.5.0`,
+// measures it from somewhere else — "Of those 8 releases past `26.5.0`",
+// "ended the 43 days with 8 releases behind". A count with none of those
+// belongs to the window its sentence names. A bare "not" (or "not all")
+// directly before it denies the count rather than claiming it.
+//
+// THE CEILING. It knows the window only as the words above, so "while the
+// pin sat unbumped, Node shipped 8 releases" names no window and passes; so
+// does a count spelled outside that vocabulary, "a dozen", or measured past
+// `26.5.0` in a clause that never says where it landed. A true reword that
+// counts from somewhere it does not know — "8 releases, three of them already
+// out" — reds, the loud direction. It checks the window's count alone: the 8
+// behind and the three before the pin are not held to their numbers. And,
+// unlike securityReleaseFault, a file stating no count at all passes: the
+// rows below carry no live needle for this count, for #1756's reason.
+const COUNT_WORDS = { no: 0, zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+const RELEASE_COUNT = new RegExp(
+  String.raw`(?<![\w.\x60-])(?<!\bnode\s+)(?<count>\d+|${Object.keys(COUNT_WORDS).join("|")})\s+(?:(?:more|new|further|other|node|\x60?v?26(?:\.x)?\x60?)\s+)*releases?\b`,
+  "gi",
+);
+const PIN_WINDOW = /\b43[\s-]days?\b|\b(?:since|after)\s+(?:#335\b|(?:the\s+|it\s+was\s+)?pin(?:s|ned|ning)?\b)/i;
+const MEASURED_ELSEWHERE = /\b(?:past|behind|beyond)\b|\b(?:since|after|from)\s+\x60?v?26\.5\.0\b/i;
+
+function windowReleaseCountFault(text) {
+  for (const sentence of text.split(new RegExp(SENTENCE_END)).map(normalize)) {
+    if (!PIN_WINDOW.test(sentence)) continue;
+    for (const { groups, index, 0: phrase } of sentence.matchAll(RELEASE_COUNT)) {
+      if (/\bnot\s+(?:all\s+)?$/i.test(sentence.slice(0, index))) continue;
+      const rest = sentence.slice(index + phrase.length).split(/[,;:()—–]/)[0];
+      const placements = [...pinPlacements(rest)];
+      if (!placements.includes("after") && (placements.includes("before") || MEASURED_ELSEWHERE.test(rest))) continue;
+      const count = groups.count.toLowerCase();
+      if ((COUNT_WORDS[count] ?? Number(count)) === 5) continue;
+      return `counts ${phrase} in the 43 days the pin sat ("${sentence.trim()}") — five landed inside them, v26.8.0 through v26.10.0; the other three of the 8 past \`26.5.0\` were already out when #335 set the pin (#1874, #1970)`;
+    }
+  }
+  return null;
+}
 
 const FILES = [
   {
@@ -509,11 +571,11 @@ const FILES = [
   // the needle, that reds either one reverting. And the evidence counted "8
   // releases" and a security release "since the pin" without saying from
   // what: 8 is the releases past `26.5.0`, three of them — the security
-  // release among them — already out when the pin was set. The count's
-  // wording carries no live needle, for the reason #1756's gives. The
-  // security release's was a ban on the old sentence's spelling until #1928:
-  // the same false claim in other words passed it, so securityReleaseFault,
-  // above the table, reads that claim for what it says instead.
+  // release among them — already out when the pin was set. Both were bans on
+  // the old sentence's spelling, and the same false claim in other words
+  // passed each: securityReleaseFault reads the security release's for what it
+  // says since #1928, and windowReleaseCountFault the count's since #1970,
+  // both above the table and both tested below it.
   //
   // #1905. The release-age gate, stated in wall-clock days it does not give.
   // The Status line's #1753 amendment said a release "must be three days old"
@@ -555,7 +617,6 @@ const FILES = [
       /release\.yml:\d/,
       /release-label\.yml:\d/,
       /\bfirst\s+`?setup-node\b/,
-      /across\s+8\s+releases/,
       // A backticked `.mjs` list straight after "used by" that includes either
       // comment-only file, wherever in the list and however it wraps.
       /used by(?:[\s,]*(?:and\s+)?`[\w-]+\.mjs`)*[\s,]*(?:and\s+)?`(?:arg|staleness)\.mjs`/,
@@ -583,8 +644,8 @@ const FILES = [
   },
   // #1874. pin-drift.sh restated ADR 0010's "43 days across 8 releases" as
   // the cost of a silent pin, where only five of the 8 landed inside the 43
-  // days. The count is corrected in both files; this keeps the copy from
-  // reverting on its own.
+  // days. The count is corrected in both files, and windowReleaseCountFault
+  // keeps both from counting anything else in the 43 days (#1970).
   //
   // #1925. The bound's argument in pin-drift.sh, and the cadence note in
   // pin-drift.yml that leans on it, still described the Renovate schedule
@@ -593,7 +654,7 @@ const FILES = [
   // days", 35 leaves about a day of slack rather than "a few days'", and a
   // Monday run on the 1st–3rd falls inside the window rather than "never"
   // racing it. Each stale wording is banned in the file that carried it, and
-  // `(?:\s|#)+` spans a wrap across the `# ` gutter as the #1874 ban does. No
+  // `(?:\s|#)+` spans a wrap across the `# ` gutter. No
   // live needle: the replacement states the window renovate.json owns, and
   // pinning it would red a legitimate schedule change, not the stale copy.
   //
@@ -606,9 +667,8 @@ const FILES = [
   // SENTENCE_END finds the sentence across the `# ` gutter as it does in the
   // ADR. No live needle, for #1756's reason.
   {
-    path: ["..", ".github", "scripts", "pin-drift.sh"],
+    path: PIN_DRIFT_SH,
     stale: [
-      /across(?:\s|#)+8(?:\s|#)+releases/,
       /\b1st(?:\s|#)+of(?:\s|#)+each(?:\s|#)+month\b/,
       /\b1st-to-1st\b/,
       /\bup(?:\s|#)+to(?:\s|#)+31(?:\s|#)+days\b/,
@@ -791,6 +851,60 @@ test("the security bullet must place v26.5.1 before the pin itself — no neighb
   }
   assert.match(securityReleaseFault(adrWith("v26.8.0, already out when the pin was set")), /no longer names v26\.5\.1/);
   assert.match(securityReleaseFault(adrWith("v26.5.1").split("\n").slice(0, 2).join("\n")), /no longer names a security release/);
+});
+
+test("ADR 0010 and pin-drift.sh still count five releases in the 43 days the pin sat (#1970)", () => {
+  for (const path of [ADR_0010, PIN_DRIFT_SH]) {
+    assert.equal(windowReleaseCountFault(read(...path)), null, path.join("/"));
+  }
+});
+
+test("the sentences #1874 replaced are refused for what they count, not how they were spelled (#1970)", () => {
+  for (const text of [
+    "- **The exact pin does not get bumped.** `.nvmrc` sat at `26.5.0` for 43 days\n  across 8 releases (latest 26.x was v26.10.0, 2026-09-21). The cost #354\n",
+    "# removed the one passive heartbeat there was. The measured cost of that\n# silence is 43 days across 8 releases.\n#\n",
+  ]) {
+    assert.match(windowReleaseCountFault(text), /counts 8 releases in the 43 days/, text);
+  }
+});
+
+test("the same false count in other words — releases in the 43 days that are not five — is refused (#1970)", () => {
+  for (const text of [
+    "The measured cost of that silence is 43 days, with eight 26.x releases landing inside them.",
+    "`.nvmrc` sat at `26.5.0` for 43 days, while Node shipped 8 releases.",
+    "It sat for 43 days, during which Node shipped eight new releases.",
+    "It sat for 43 days and saw only one release.",
+    "Node shipped 8 releases since the pin was set.",
+    "Node shipped 8 releases after #335 pinned it.",
+    // "before" names the measurement here, not the pin: still inside the window.
+    "Eight releases landed in the 43 days before this measurement.",
+    "Of those 8 releases in the 43 days, exactly one was a security release.",
+    // A reference point beside the count does not excuse placing it in the window.
+    "Node shipped 8 releases past `26.5.0` in the 43 days.",
+    // Wrapped across the `# ` gutter.
+    "# The measured cost of that silence is 43 days, with\n# eight releases landing inside them.\n",
+  ]) {
+    assert.match(windowReleaseCountFault(text), /releases? in the 43 days/, text);
+  }
+});
+
+test("a count measured from `26.5.0`, or placed before the pin, is not read as the 43 days' own (#1970)", () => {
+  for (const text of [
+    "It sat for 43 days, with five 26.x releases landing inside them.",
+    // "26" names the release line, not a count.
+    "It sat for 43 days while Node 26 releases kept shipping.",
+    "It sat for 43 days while Node shipped 5 releases.",
+    "Three more releases were already out when the pin was set, so it ended the 43 days eight releases behind.",
+    "Of those 8 releases past `26.5.0`, exactly one was a security release — v26.5.1, already out when the pin was set, so none landed in the 43 days after.",
+    "Of the 8 releases since `26.5.0`, five landed in the 43 days.",
+    "Not all 8 releases landed in the 43 days.",
+    // A sub-count of one kind of release is not the window's total.
+    "No security release landed in the 43 days.",
+    // Naming no window, a count is not this claim.
+    "An unscheduled bot would mint roughly 8 releases a month.",
+  ]) {
+    assert.equal(windowReleaseCountFault(text), null, text);
+  }
 });
 
 test("an unscoped drift sentence is refused, whatever ends the sentence before it (#1957)", () => {
