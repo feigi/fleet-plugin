@@ -2629,7 +2629,7 @@ test("both docs' exit-2 prose keeps the two linkage failures distinct", () => {
 // The two pins above read this row for its FIELDS and for one clause of its
 // exit-2 prose. Neither asks the closed-list question — does the row name
 // every cause this script can refuse for, and none it cannot reach? #1108
-// answered that for worktree-audit.sh and reap.sh after two PRs in one wave
+// answered that for worktree-audit.sh and reap.sh after two PRs in one fleet run
 // each left a row asserting an enumeration its script had outgrown with the
 // suite green (#1104/#525, #1105/#482). This block answers it here, both
 // directions:

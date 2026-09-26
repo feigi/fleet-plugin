@@ -69,7 +69,7 @@ test("usableDiff rejects a diff that would lie about the snapshot", () => {
 
 // #1513, the OPERAND. `prHead` is the PR object's `headRefOid`, which LAGS a ref
 // move: `gh pr update-branch --rebase` returns rc=0 and that field sits on the
-// pre-rebase sha for minutes (~2 min in one wave, ~84s in the next, measured in
+// pre-rebase sha for minutes (~2 min in one merge-bot run, ~84s in the next, measured in
 // `run-merge-bot.md`'s step 1). A snapshot cut from the rebased tree inside that
 // window matches the branch ref exactly and the old compare threw its diff away.
 // The ref answers "is this tree the PR's head"; `headRefOid` answers "has

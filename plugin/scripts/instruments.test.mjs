@@ -396,8 +396,8 @@ test("a mode-only change to a tracked instrument is accepted — modes are not i
 test("branch and worktree churn in the shared ref store is accepted", (t) => {
   const root = repo(t);
   pin(root);
-  // Exactly what claim-ticket.sh and reap.sh do to the main checkout every
-  // wave. A ref digest would refuse here, several times per wave.
+  // Exactly what claim-ticket.sh and reap.sh do to the main checkout during
+  // every fleet run. A ref digest would refuse here, several times per run.
   git(root, "branch", "fix/42-slug");
   git(root, "worktree", "add", "-q", join(root, "wt"), "fix/42-slug");
   assert.equal(run(root).status, 0);

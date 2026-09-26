@@ -165,7 +165,7 @@ test("a tree whose head is not the branch ref's is refused, naming both commits"
 // dispatch. This refusal runs BEFORE `usableDiff`, so the operand it reads
 // decides whether the review happens AT ALL: against `prHead` — the PR object's
 // `headRefOid`, which sits on the pre-rebase sha for minutes after a rebase has
-// landed (~2 min in one wave and ~84s in the next, measured in
+// landed (~2 min in one merge-bot run and ~84s in the next, measured in
 // `run-merge-bot.md`'s step 1) — a snapshot cut from the CORRECT tree inside
 // that window cancelled the whole review, which is strictly worse than the
 // dropped diff the same operand cost `usableDiff`.

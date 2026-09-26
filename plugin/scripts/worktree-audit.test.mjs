@@ -1052,7 +1052,7 @@ test("an ambient GIT_DIR does not audit a different repository (#1020)", (t) => 
 //
 // The design spec's script-surface row states this script's failures as a
 // CLOSED enumeration — `exit 2 only — A, B, C` — and until this block nothing
-// in the repo read that cell. Two PRs in one wave each left a row asserting an
+// in the repo read that cell. Two PRs in one fleet run each left a row asserting an
 // enumeration its script had outgrown with the suite green (#1104/#525,
 // #1105/#482), and on `main` this row was silent about three refusals the
 // script reaches: the worktree-readers library guard, either library failing
