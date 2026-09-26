@@ -201,8 +201,7 @@ function securityReleaseFault(adr) {
 // `.`, `!` or `?`, after any closing markup — `**`, `_`, a backtick, `)`, `]`,
 // a quote — then whitespace; or where a markdown block ends, as
 // securityReleaseFault splits them: a blank line, or the newline before a
-// `-`/`*`/`+` list item (an ordered item's `3. ` is already a terminator and
-// whitespace). The row's first cut, a bare `\.\s`, missed point 3's bold
+// `-`/`*`/`+` list item. The row's first cut, a bare `\.\s`, missed point 3's bold
 // heading ending `bumps.**`, so the heading's "minor and patch" read as the
 // next sentence's own scope, and an unscoped drift claim under a scoped
 // heading passed. A lone newline is no end: prose wraps mid-sentence. So a
@@ -219,7 +218,25 @@ function securityReleaseFault(adr) {
 // past a real end is the silent direction: the next sentence's scope would
 // reach back. Before the abbreviation, only a letter or digit disqualifies it,
 // as for UPDATE_TYPE below: an italic `_e.g._` is one, "devs." is not "vs.".
-const SENTENCE_END = String.raw`(?:(?:[!?]|(?<!(?<![a-z\d])(?:e\.g|i\.e|cf|viz|vs))\.)[*_\x60)\]"'”’]*\s|\n(?=[ \t]*[-*+][ \t])|\n[ \t]*\n)`;
+//
+// #1981. The rest of the block ends and closing markup #1957 named only in
+// part. A blank line may be CRLF, or blank but for a gutter — a blockquote's
+// `>`, a shell comment's `#` as in pin-drift.sh (a bare `#` is an empty
+// heading in markdown, so a block end there too) — or hold only a setext
+// underline or thematic break, `---`, `===`, `***`, `___`. A block may open
+// behind that gutter too: a list item, ordered as well — `1)` as well as
+// `1.`, which the terminator branch only caught by the accident of its `. ` —
+// a code fence or a table row. Any item number counts, since every item past
+// a list's first carries one, so a wrapped line opening "2) " ends the
+// sentence it continues: the loud direction, as above. An ellipsis `…` ends a
+// sentence with or without whitespace after it: unlike a period it sits inside
+// no version, file name or range, where three periods do — `main...HEAD` — so
+// `...` still needs the whitespace. Closing markup also takes strikethrough's
+// `~~`, `}`, `>`, `»`, `›` and an HTML closing tag such as `</b>`. Still no end:
+// an ATX heading with no blank line before it, since every line behind the
+// `# ` gutter would open one and the merge row reads sentences across it.
+const CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|<\/[a-z][a-z\d]*>)`;
+const SENTENCE_END = String.raw`(?:(?:[!?]|(?<!(?<![a-z\d])(?:e\.g|i\.e|cf|viz|vs))\.)${CLOSING_MARKUP}*\s|…${CLOSING_MARKUP}*\s?|\n(?=(?:[ \t]*[>#])*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]|\x60{3}|~{3}|\|))|\n(?:[ \t]*[>#])*(?:[ \t]*[-=*_])*[ \t]*\r?\n)`;
 // #1958. What names an update type, for both of ADR 0010's #1906 rows below:
 // minor, patch or major as a whole word. The rows' first cut matched the bare
 // substring, so "dispatched" and "majority" scoped a claim that names no
@@ -960,6 +977,55 @@ test("a drift sentence naming its own scope passes, whatever markup it carries a
     // A lone newline is a wrap, not an end — even before an issue number or
     // a bold span, which open no heading and no list item.
     "For a minor or patch bump, the Status line's\n   #1753 amendment names one case, and\n   **automerge** keeps\n   bounding drift at about one month.\n",
+  ]) {
+    assert.doesNotMatch(text, UNSCOPED_DRIFT_SENTENCE, text);
+  }
+});
+
+test("an unscoped drift sentence is refused after every block end and closing markup #1957 left out (#1981)", () => {
+  for (const text of [
+    // The three cases #1981 was filed on.
+    "1) Monthly for minor and patch bumps\n2) Bounding drift at about one month.\n",
+    "> Minor and patch bumps\n>\n> Bounding drift at about one month.\n",
+    "Minor and patch bumps merge monthly…Bounding drift at about one month.\n",
+    "Minor and patch bumps\r\n\r\nBounding drift at about one month.\r\n",
+    // The same blank line behind pin-drift.sh's `# ` gutter, and a list item
+    // behind either gutter.
+    "# Minor and patch bumps\n#\n# Bounding drift at about one month.\n",
+    "> - Minor and patch bumps\n> - Bounding drift at about one month.\n",
+    "# 1) Minor and patch bumps\n# 2) Bounding drift at about one month.\n",
+    // A line holding only a setext underline or thematic break — each
+    // character its own case, since `* ` and `- ` would open a list item
+    // instead — then a code fence and a table row.
+    "Minor and patch bumps\n===\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n---\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n***\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n___\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n```\nbounding drift at about one month.\n```\n",
+    "Minor and patch bumps\n~~~\nbounding drift at about one month.\n~~~\n",
+    "| Minor and patch bumps |\n| Bounding drift at about one month. |\n",
+    // Closing markup past the class #1957 added.
+    "~~Minor and patch bumps only.~~ Bounding drift at about one month.\n",
+    "Renovate calls minor and patch bumps «monthly.» Bounding drift at about one month.\n",
+    "Renovate calls minor and patch bumps ‹monthly.› Bounding drift at about one month.\n",
+    "Minor and patch bumps set `{schedule: monthly.}` Bounding drift at about one month.\n",
+    "Minor and patch bumps land monthly <see renovate.json.> Bounding drift at about one month.\n",
+    "<b>Minor and patch bumps only.</b> Bounding drift at about one month.\n",
+  ]) {
+    assert.match(text, UNSCOPED_DRIFT_SENTENCE, text);
+  }
+});
+
+test("a scoped drift sentence still wraps behind a gutter, over CRLF, past `...` and a leading number (#1981)", () => {
+  for (const text of [
+    // A lone newline behind a gutter is a wrap, as it is without one.
+    "> For minor and patch bumps, the gap keeps\n> bounding drift at about one month.\n",
+    "# For minor and patch bumps, the gap keeps\n# bounding drift at about one month.\n",
+    "For minor and patch bumps, the gap keeps\r\nbounding drift at about one month.\r\n",
+    // Three periods inside a range end nothing; only `…` needs no whitespace.
+    "For minor and patch bumps, `main...HEAD` keeps bounding drift at about one month.\n",
+    // A number opens a list item only with its `.` or `)` and a space.
+    "For minor and patch bumps the gap runs\n35 days, bounding drift at about one month.\n",
   ]) {
     assert.doesNotMatch(text, UNSCOPED_DRIFT_SENTENCE, text);
   }
