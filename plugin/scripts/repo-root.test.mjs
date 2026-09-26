@@ -31,7 +31,7 @@ import {
   chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   ownPluginName, repoRoot, skipWithoutRepo, trackedNodeScripts, trackedPaths, trackedShellScripts,
@@ -544,6 +544,54 @@ test("every export throws for a tracked path it could not look at — never pass
   } finally {
     // Before the fixture's own cleanup, which cannot remove what it cannot enter.
     chmodSync(locked, 0o700);
+  }
+});
+
+// The module's second named probe that could not look: ENAMETOOLONG, a tracked
+// file under a path longer than the OS will take whole — every component
+// short, the checkout's path and the tracked one together past the limit
+// (#1973). The file is really there and ships, so every export throws, naming
+// it. The limit is the platform's own (1024 bytes on macOS, 4096 on Linux), so
+// it is found rather than assumed: one short directory at a time until the
+// kernel refuses the next for its length, which puts a file named that
+// directory plus `.sh` past it by construction. The file is written from
+// inside its own directory and tracked by git's plumbing, since
+// `writeFileSync` takes the path whole and `git add` stats the repo-relative
+// one, which under a short enough checkout path is over the limit too.
+//
+// EIO, the third, has no fixture: an I/O error from the device itself takes
+// fault injection — a failing disk, a filesystem that answers EIO — that no
+// unprivileged test can set up. It is reasoned, not executed:
+// NO_REGULAR_FILE_THERE lists the codes that pass, not the ones that throw, so
+// EIO takes the same rethrow the EACCES and ENAMETOOLONG fixtures pin.
+test("every export throws for a tracked path past the OS's path limit — never passes over it", (t) => {
+  const { dir } = repoTracking(t, ["kept.sh"]);
+  const seg = "d".repeat(100);
+  let deepest = dir;
+  for (let depth = 0; ; depth++) {
+    assert.ok(depth < 100, `fixture: the kernel took a ${deepest.length}-byte path with no ENAMETOOLONG`);
+    try {
+      mkdirSync(join(deepest, seg));
+    } catch (e) {
+      if (e.code === "ENAMETOOLONG") break;
+      throw e;
+    }
+    deepest = join(deepest, seg);
+  }
+  const name = `${seg}.sh`;
+  execFileSync("touch", [name], { cwd: deepest });
+  try {
+    const blob = execFileSync("git", ["hash-object", "-w", "--stdin"], { cwd: dir, env: ENV, input: "", encoding: "utf8" }).trim();
+    const cacheinfo = `100644,${blob},${relative(dir, join(deepest, name))}`;
+    execFileSync("git", ["update-index", "--add", "--cacheinfo", cacheinfo], { cwd: dir, env: ENV });
+
+    const tooLong = { code: "ENAMETOOLONG", path: join(deepest, name) };
+    assert.throws(() => trackedPaths(dir), tooLong, "a path too long to look at whole is not one with no file behind it");
+    assert.throws(() => trackedShellScripts(dir), tooLong, "the shell-script answer does not pass over it either");
+    assert.throws(() => trackedNodeScripts(dir), tooLong, "nor does the node-script answer");
+  } finally {
+    // Before the fixture's own cleanup, which cannot name this file either.
+    execFileSync("rm", [name], { cwd: deepest });
   }
 });
 
