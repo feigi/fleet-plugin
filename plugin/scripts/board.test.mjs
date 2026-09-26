@@ -1101,8 +1101,11 @@ test("an omp session losing one transcript whole and another to damaged lines na
   withStderr(() => { s = gatherSpend({ dir }); }); // Stray's skip line is the skips gate's, not under test
   assert.equal(s.ok, false);
   assert.doesNotMatch(s.error, /all 1 transcripts/);
-  assert.match(s.error, /1 transcript unreadable/);
-  assert.match(s.error, /2 damaged transcript lines/);
+  // One assertion pinning both substrings AND their relative order — two
+  // independent assert.match calls each pass regardless of which clause
+  // comes first, so a swap of the unshift/push that builds `lost` (reversing
+  // the skipped-clause and the damaged-clause) would slip through unnoticed.
+  assert.match(s.error, /1 transcript unreadable; 2 damaged transcript lines/);
 });
 
 test("an omp session whose only transcript is a live write's torn first line is still 'nothing yet', not damage (#1894)", () => {
