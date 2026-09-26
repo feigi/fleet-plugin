@@ -217,6 +217,29 @@ const UNSCOPED_AUTOMERGED_SPAN = new RegExp(
   "i",
 );
 
+// #1978. The merge counterpart of UNSCOPED_DRIFT_SENTENCE, for pin-drift.sh's
+// bound row below: a sentence that ties a bump's merge to its checks — merge,
+// merges, automerged; checks, CI, green — with no update type named in it.
+// Both trigger words sit in lookaheads so either may come first, and the scope
+// ban spans the whole sentence, so UPDATE_TYPE anywhere inside it passes —
+// rebased onto #1958's shared constant rather than a bare `minor|patch|major`,
+// so "dispatched"/"majority" scope nothing here either, same as its drift
+// twin. It pins the scope's presence, not its polarity — "every bump, major
+// included, merges once the checks pass" names a type and passes — since
+// which types automerge is renovate.json's to say, and
+// renovate-release-contract.test.mjs already reds a major that automerges.
+// The merge trigger is closed with its own `\b`, matching the checks
+// trigger's bilateral bounding: `merg` alone left the noun "merger" (an
+// unrelated business sense, not a PR merge) free to trip this beside
+// "checks"/"CI"/"green", since a word boundary sits before "merg" in "merger"
+// too. Bounding it to `merg(?:e[sd]?|ing)` keeps every verb form this needs —
+// merge, merges, merged, merging, automerges, automerged — while
+// "merger"/"mergers" no longer satisfy it (review finding, PR #1990).
+const UNSCOPED_MERGE_SENTENCE = new RegExp(
+  String.raw`(?:^|${SENTENCE_END})(?=(?:(?!${SENTENCE_END})[^])*?\b(?:auto-?)?merg(?:e[sd]?|ing)\b)(?=(?:(?!${SENTENCE_END})[^])*?\b(?:checks?|CI|green)\b)(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*(?:${SENTENCE_END}|$)`,
+  "i",
+);
+
 const FILES = [
   {
     path: ["scripts", "arg.test.mjs"],
@@ -538,6 +561,15 @@ const FILES = [
   // `(?:\s|#)+` spans a wrap across the `# ` gutter as the #1874 ban does. No
   // live needle: the replacement states the window renovate.json owns, and
   // pinning it would red a legitimate schedule change, not the stale copy.
+  //
+  // #1978. The same argument added that last PR's checks to the gap "since
+  // the merge waits on them, not on the window" — every bump's merge, as
+  // #1956 found ci.yml saying, when #1752 had narrowed automerge to minor and
+  // patch: a major waits on a human, which no drift bound covers. The bound
+  // stays at 35 (the script now argues why a pending major needs no slack);
+  // the row bans a merge-on-checks sentence that names no update type, and
+  // SENTENCE_END finds the sentence across the `# ` gutter as it does in the
+  // ADR. No live needle, for #1756's reason.
   {
     path: ["..", ".github", "scripts", "pin-drift.sh"],
     stale: [
@@ -546,6 +578,7 @@ const FILES = [
       /\b1st-to-1st\b/,
       /\bup(?:\s|#)+to(?:\s|#)+31(?:\s|#)+days\b/,
       /\ba(?:\s|#)+few(?:\s|#)+days'(?:\s|#)+slack\b/,
+      UNSCOPED_MERGE_SENTENCE,
     ],
     live: [],
   },
@@ -811,4 +844,55 @@ test("minor, patch or major still scopes both claims in italics or as a plural (
   ]) {
     assert.doesNotMatch(text, UNSCOPED_DRIFT_SENTENCE, text);
   }
+});
+
+test("a merge-on-checks sentence naming no update type is refused, across the gutter and in either word order (#1978)", () => {
+  for (const text of [
+    // pin-drift.sh's bound argument as it read before #1978.
+    [
+      "# monthly. The longest healthy gap runs from a bump PR opened as one window",
+      "# opens on the 1st to the next one opened as its window closes at the end of",
+      "# the 3rd — up to 34 days across a 31-day month, and a hosted run that comes",
+      "# late inside the window is already inside that figure — plus however long",
+      "# that last PR's checks take to go green, since the merge waits on them, not",
+      "# on the window. 35 days leaves about a day for those checks.",
+    ].join("\n"),
+    "# The bump automerges once CI goes green.\n",
+    "# Once the checks pass, the bump PR merges itself.\n",
+    // UPDATE_TYPE's word boundary, not a bare substring test: "dispatch" and
+    // "majority" contain no whole minor/patch/major token (#1958).
+    "# The bump merges once CI goes green, as a workflow_dispatch run shows.\n",
+    "# The bump merges once CI goes green, in the majority of months.\n",
+    // The ceiling: the next sentence's scope does not reach back.
+    "# Its merge waits on the checks, not the window. A major waits on a human too.\n",
+  ]) {
+    assert.match(text, UNSCOPED_MERGE_SENTENCE, text);
+  }
+});
+
+test("a merge-on-checks sentence naming its scope passes, as does a sentence with only one of merge and checks (#1978)", () => {
+  for (const text of [
+    [
+      "# that last PR's checks take to go green, since a minor or patch bump is",
+      "# automerged and its merge waits on them, not on the window.",
+    ].join("\n"),
+    "# A major's merge waits on a human as well as its checks.\n",
+    // pin-drift.sh's own neighbours: a merge commit with no checks, and
+    // checks with no merge — neither says what a bump's merge waits on.
+    "# `--first-parent` dates the move by when it LANDED on the branch (the merge\n# commit), not by when the bot authored it: a bump PR that sat red for a week\n# has not moved the pin for that week.\n",
+    "# 35 days leaves about a day for those checks; a bump PR that goes red and\n# stays red longer than that trips it in such a month.\n",
+  ]) {
+    assert.doesNotMatch(text, UNSCOPED_MERGE_SENTENCE, text);
+  }
+});
+
+test("the merge trigger only fires on a real merge verb, not a word that merely starts with it (#1990)", () => {
+  // "merger" (an unrelated business sense) starts with the same four letters
+  // as "merge" — a bare `\bmerg` trigger with no closing boundary would trip
+  // beside "checks"/"CI"/"green" here too, since a word boundary sits before
+  // "merg" in "merger" as well.
+  assert.doesNotMatch(
+    "# The merger of the checks team and CI team went smoothly and green-lit.\n",
+    UNSCOPED_MERGE_SENTENCE,
+  );
 });
