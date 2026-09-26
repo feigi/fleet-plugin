@@ -142,6 +142,32 @@ const CLAUSE_BREAK = /\b(?:and|but|so|yet)\b/gi;
 const NEGATION = /\b(?:not|no|none|never|nothing|neither|nor|cannot)\b|n['’]t\b/i;
 const OTHER_SIDE = { before: "after", after: "before" };
 
+// Where one clause places what it names relative to the pin, in order: the
+// reading the comment above spells out, one "before" or "after" per pin or
+// window mention. A pin mention no order word precedes places nothing.
+// windowReleaseCountFault, below, reads a release count's clause with it too.
+function* pinPlacements(clause) {
+  let side = null;
+  let last = 0;
+  for (const { groups, index, 0: token } of clause.matchAll(PIN_ORDER)) {
+    let window = clause.slice(last, index);
+    const breaks = [...window.matchAll(CLAUSE_BREAK)];
+    if (breaks.length) window = window.slice(breaks[breaks.length - 1].index + breaks[breaks.length - 1][0].length);
+    const negated = NEGATION.test(window) && !/\buntil\b/i.test(window);
+    last = index + token.length;
+    if (groups.before || groups.after) {
+      const said = groups.before ? "before" : "after";
+      side = negated ? OTHER_SIDE[said] : said;
+      continue;
+    }
+    // A pin mention takes the side of the order word nearest before it; a
+    // window is the 43 days after the pin, so landing in it is "after".
+    const placed = groups.pin ? side : negated ? "before" : "after";
+    side = null;
+    if (placed) yield placed;
+  }
+}
+
 function securityReleaseFault(adr) {
   const scope = adr
     .split(/\n(?=[ \t]*(?:[-*+]|\d+\.)[ \t])|\n[ \t]*\n/)
@@ -155,27 +181,11 @@ function securityReleaseFault(adr) {
   }
   let before = false;
   for (const clause of scope.flatMap((block) => block.split(/[,;:()—–]|[.!?]\**\s/))) {
-    let side = null;
-    let last = 0;
-    for (const { groups, index, 0: token } of clause.matchAll(PIN_ORDER)) {
-      let window = clause.slice(last, index);
-      const breaks = [...window.matchAll(CLAUSE_BREAK)];
-      if (breaks.length) window = window.slice(breaks[breaks.length - 1].index + breaks[breaks.length - 1][0].length);
-      const negated = NEGATION.test(window) && !/\buntil\b/i.test(window);
-      last = index + token.length;
-      if (groups.before || groups.after) {
-        const said = groups.before ? "before" : "after";
-        side = negated ? OTHER_SIDE[said] : said;
-        continue;
-      }
-      // A pin mention takes the side of the order word nearest before it; a
-      // window is the 43 days after the pin, so landing in it is "after".
-      const placed = groups.pin ? side : negated ? "before" : "after";
-      side = null;
+    for (const placed of pinPlacements(clause)) {
       if (placed === "after") {
         return `ADR 0010's security-release evidence places it after the pin ("${clause.trim()}") — v26.5.1 was already out when #335 set the pin, so none landed in the 43 days after (#1874, #1928)`;
       }
-      if (placed === "before") before = true;
+      before = true;
     }
   }
   return before
