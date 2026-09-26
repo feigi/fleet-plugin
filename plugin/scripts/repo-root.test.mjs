@@ -28,12 +28,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-  chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync,
+  chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ownPluginName, repoRoot, skipWithoutRepo, trackedNodeScripts, trackedShellScripts } from "./repo-root.mjs";
+import {
+  ownPluginName, repoRoot, skipWithoutRepo, trackedNodeScripts, trackedPaths, trackedShellScripts,
+} from "./repo-root.mjs";
 
 const DIR = fileURLToPath(new URL(".", import.meta.url));
 
@@ -458,16 +460,31 @@ test("trackedNodeScripts judges a first line whole, however long — never on th
     "a node shebang past the first read is still one, and a `nodemon` the read cuts after its `node` is still not");
 });
 
-// A tracked file missing from the working tree — an `rm` not yet committed —
-// has no first line to read. That is not a node script in this tree, and must
-// not throw: every sweep calls this at module scope, where a throw fails the
-// whole file over an unrelated deleted document.
-test("trackedNodeScripts passes over a tracked file the working tree no longer has", (t) => {
-  const { dir } = repoTracking(t, ["a.mjs", "NOTES"], { "NOTES": "notes\n" });
-  rmSync(join(dir, "NOTES"));
+// A tracked path the working tree holds no regular file at has no text for a
+// sweep to read: an `rm` or `mv` not yet committed, a dangling symlink, a
+// directory where a file is tracked (a symlink to one, or a submodule's gitlink
+// checked out on disk), and a file standing where a tracked path's own
+// directory was. Every export passes over it, and none may throw: each sweep
+// lists at module scope, then reads every path it was handed, and one listed
+// absent path aborted that read with a raw ENOENT — every real hit in every
+// other file went unreported (#1910). A symlink to a regular file is the ACCEPT
+// half: its text is there to read.
+test("every export passes over a tracked path the working tree holds no regular file at", (t) => {
+  const { dir } = repoTracking(t, ["kept.sh", "kept.mjs", "NOTES", "gone.sh", "gone.mjs", "gone", "now-a-dir.sh", "was-a-dir/x.sh"]);
+  symlinkSync("kept.sh", join(dir, "link-to-file.sh"));
+  symlinkSync("nowhere.sh", join(dir, "dangling.sh"));
+  execFileSync("git", ["add", "--", "link-to-file.sh", "dangling.sh"], { cwd: dir, env: ENV });
+  for (const f of ["gone.sh", "gone.mjs", "gone", "now-a-dir.sh"]) rmSync(join(dir, f));
+  mkdirSync(join(dir, "now-a-dir.sh"));
+  rmSync(join(dir, "was-a-dir"), { recursive: true });
+  writeFileSync(join(dir, "was-a-dir"), "");
 
-  assert.deepEqual(trackedNodeScripts(dir), ["a.mjs"],
-    "a tracked file absent from the working tree is no node script here, and no reason to fail the listing");
+  assert.deepEqual(trackedPaths(dir).sort(), ["NOTES", "kept.mjs", "kept.sh", "link-to-file.sh"],
+    "every tracked path with a regular file behind it, and none of the paths without one");
+  assert.deepEqual(trackedShellScripts(dir).sort(), ["kept.sh", "link-to-file.sh"],
+    "the shell-script answer passes over the same absent paths");
+  assert.deepEqual(trackedNodeScripts(dir), ["kept.mjs"],
+    "the node-script answer passes over them too — an absent `.mjs` included, which its extension alone once listed");
 });
 
 // The half a skip cannot pin from inside itself, and the exact conflation #1149
@@ -725,6 +742,13 @@ test("trackedShellScripts refuses a root repoRoot did not answer", () => {
 test("trackedNodeScripts refuses a root repoRoot did not answer", () => {
   assert.throws(() => trackedNodeScripts(null), /must come from repoRoot/);
   assert.throws(() => trackedNodeScripts(undefined), /must come from repoRoot/);
+});
+
+// The third export shares the guard — the one #1910 found a sweep's own
+// inlined `git ls-files` had dropped.
+test("trackedPaths refuses a root repoRoot did not answer", () => {
+  assert.throws(() => trackedPaths(null), /must come from repoRoot/);
+  assert.throws(() => trackedPaths(undefined), /must come from repoRoot/);
 });
 
 // And the guard must not fire in the tree it ships in.
