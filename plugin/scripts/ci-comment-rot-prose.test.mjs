@@ -485,7 +485,7 @@ test("windowClaimFault still refuses a negation spelled with the opening curly q
 export function majorMergeFault(block) {
   const unscoped = sentences(block).find(
     (s) =>
-      /\bmerg/i.test(s) &&
+      /\b(?:auto-?)?merg/i.test(s) &&
       /\b(checks?|CI|green)\b/i.test(s) &&
       !(/\bmajors?\b/i.test(s) && /\b(humans?|maintainers?|manual(?:ly)?|by hand)\b/i.test(s)),
   );
@@ -515,6 +515,10 @@ test("majorMergeFault accepts a scoped merge clause or none; an unscoped one, or
   // Half the exception: a major with no human, or a human with no major.
   assert.match(majorMergeFault(`${lead} ${window}: the merge waits on the required checks, major or not. ${tail}`), /#1956/);
   assert.match(majorMergeFault(`${lead} ${window}: the merge waits on the required checks and a human. ${tail}`), /#1956/);
+  // "automerges"/"automerged" makes the same unscoped claim without the bare
+  // word "merge" — the trigger must catch it too, scoped or not (#1956 follow-up).
+  assert.match(majorMergeFault(`${lead} ${window}: every bump automerges once the required checks pass. ${tail}`), /#1956/);
+  assert.equal(majorMergeFault(`${lead} ${window}: every bump automerges once the required checks pass, except a major, which waits on a human. ${tail}`), null);
   // The ceiling: the next sentence's exception does not scope this one.
   assert.match(majorMergeFault(`${lead} ${window}: the merge waits on the required checks. A major waits on a human too. ${tail}`), /#1956/);
 });
