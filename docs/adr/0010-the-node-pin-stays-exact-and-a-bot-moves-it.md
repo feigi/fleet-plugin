@@ -80,8 +80,13 @@ Measured 2026-09-23, before ruling:
    ["nvm"]`. The bump arrives as a PR that must pass all seven required checks —
    so a node regression surfaces as a closeable red PR instead of a red `main`,
    which is the exact inversion of what a floating pin buys.
-3. **Monthly, and automerged.** `schedule: ["* 0-4 1 * *"]` keeps one PR, one
-   release and one CI burst per month while bounding drift at ~30 days.
+3. **Monthly, and automerged.** `schedule: ["* * 1-3 * *"]`, read in
+   `timezone: "UTC"`, opens the bot's window all day on the first three days of
+   each month, and `minimumReleaseAge: "3 days"` with `internalChecksFilter:
+   "strict"` filters out any release younger than three days, so the bot never
+   proposes one. That keeps about one PR, one release and one CI burst per
+   month — the Status line's #1753 amendment names one case that opens a
+   second — while bounding drift at about one month.
    `automerge` + `platformAutomerge` because a PR waiting on a human rots the
    same way the file edit did — and `platformAutomerge` hands the merge to
    GitHub, which fires when checks go green rather than only inside Renovate's
