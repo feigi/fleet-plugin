@@ -70,7 +70,6 @@
   .spend-cols { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
   @media (max-width:900px) { .spend-cols { grid-template-columns:1fr; } }
   .spend-cols h3 { font-size:11px; color:var(--dim); margin:0 0 6px; font-weight:600; letter-spacing:.04em; }
-  .spend-cols .note { color:var(--dim); font-size:12px; }
   .srow { display:grid; grid-template-columns:8.5em 3.4em 1fr 3em; gap:8px; align-items:center; margin-bottom:3px; font-size:12px; }
   .srow .lbl { color:var(--fg); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .srow .num { color:var(--dim); text-align:right; }
@@ -219,9 +218,7 @@ function spendView(sp) {
       sp.skipped ? `${sp.skipped} transcript${sp.skipped === 1 ? "" : "s"} skipped` : null,
       sp.damaged ? damagedPhrase(sp.damaged, " — spend may be incomplete") : null,
       sp.metaErrors ? metaErrorsPhrase(sp.metaErrors, " — role/label degraded") : null,
-      "ranked on cache-creation",
-      // #1716: with no tool column there is no split to caveat.
-      sp.toolsUnavailable ? null : "tool split is attributed, not billed",
+      "ranked on cache-creation; tool split is attributed, not billed",
     ].filter(Boolean).join("; "),
     // These bars are percentages of the ATTRIBUTED subtotal, not of the headline
     // number: only a turn FOLLOWING a tool result can be charged to a tool, and an
@@ -233,10 +230,6 @@ function spendView(sp) {
       : "by tool",
     roles: sp.roles || [],
     tools: (sp.tools || []).slice(0, 8),
-    // #1716: why the tool column is empty, said IN the column — an omp run has
-    // no tool attribution yet, and bare empty rows would read as "no tool
-    // spend", which is a claim, not an absence.
-    toolNote: sp.toolsUnavailable || null,
   };
 }
 
@@ -274,7 +267,6 @@ function renderSpend(sp) {
     value: (t) => k(t.cacheWrite),
     pct: (t) => t.pct,
   });
-  if (v.toolNote) byTool.append(el("div", "note", v.toolNote));
   cols.append(byRole, byTool);
   wrap.append(cols);
   host.append(wrap);

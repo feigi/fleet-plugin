@@ -111,7 +111,7 @@ export function normalizeModel(raw) {
 
 // A member's name is the only place its unit of work is recorded — nothing
 // writes ticket or PR into meta.json (Claude) or anywhere in the transcript
-// (omp; there is no dispatch sidecar at all — see readOmpMember).
+// (omp; there is no dispatch sidecar at all — see ompMemberRecord).
 //
 // FOUR finisher spellings are live on disk, measured 2026-08-27 across every
 // meta.json: finisher-pr-<n> 163, finish-pr-<n> 58, finisher-<n> 44,
@@ -518,14 +518,14 @@ function assertNotClaudeShaped(d, filePath) {
 //
 // `thinking` reads the harness-WRITTEN level, never the frontmatter — that is
 // what makes #1298's declared-vs-resolved comparison possible (#1302's
-// ruling). It stays `null` here (readOmpMember turns that into the record's
+// ruling). It stays `null` here (ompMemberRecord turns that into the record's
 // `-`) when no `thinking_level_change` line exists, rather than guessing the
 // default: a member that is not a fleet definition genuinely has no recorded
 // level, and the hole must stay visible.
 //
 // `session_init.task` is carried through as the closest thing omp has to
 // Claude's `meta.description` — there is no dispatch sidecar on this side at
-// all. readOmpMember below uses it, together with the transcript's own
+// all. ompMemberRecord below uses it, together with the transcript's own
 // nesting depth AND the AgentId itself, as REAL classifyRole() signals. A
 // canonically-stemmed AgentId (`impl-<n>`, `fix-pr-<n>`, `finisher-<n>`,
 // `review-pr-<n>`, `merge-bot-<n>`) IS matched against classifyRole, as
@@ -552,18 +552,70 @@ function assertNotClaudeShaped(d, filePath) {
 // (`fleet-implementer` 51, `fleet-implementer-alt` 17, the default `task`
 // 220, plus the review fan-out's own definitions), absent only where the
 // line itself is.
+//
+// `entries` (#1717) is the per-agent tool stream compute-spend.mjs's
+// attributeTools reads: the same `assistant`/`result` entries
+// foldClaudeTranscript emits, so one attribution serves both harnesses.
+// Measured 2026-09-26 across 5,085 real `~/.omp/agent/sessions/**/*.jsonl`
+// files, the call is a block on the assistant message and the result a line
+// of its own:
+//   {"type":"message","message":{"role":"assistant","stopReason":"toolUse",
+//     "content":[{"type":"toolCall","id":"toolu_01JV…","name":"bash",
+//       "arguments":{…},"intent":"…"}],"usage":{…}}}
+//   {"type":"message","message":{"role":"toolResult","toolCallId":"toolu_01JV…",
+//     "toolName":"bash","content":[{"type":"text","text":"…"}],"details":{…},
+//     "isError":false,"timestamp":1790415990525}}
+// All 176,056 `toolCall` blocks carried `id` and `name`; the ~29-call gap
+// against the 176,027 results below is orphan calls whose result never
+// landed (aborted before the tool replied) — attributeTools still counts
+// them under their own name via `calls++`, only `resultChars`/`cacheWrite`
+// stay at 0. Each of the 176,027 results sat on its own line, so parallel
+// calls arrive as consecutive `toolResult` lines, which attributeTools
+// accumulates into one batch (run lengths 2 through 14 matched the
+// calls-per-turn counts to within one).
+//
+// A result's `chars` sums its text blocks' lengths (`content` was an array
+// every time: 179,380 text blocks, 14 image blocks — an unmeasured non-array
+// `content` would fold to 0 blocks and `chars: 0`, not a fallback to a
+// string length the way foldClaudeTranscript's own string case gets one).
+// That is Claude's measure for the same output, since 95.3% of Claude's
+// tool_result contents are a bare string counted by its length. A non-text
+// block (an image) counts at its JSON length, as in Claude's array case when
+// that array holds a single block — the only shape measured on disk.
+// `prunedAt` (194) holds a placeholder such as "[Uneventful result elided]"
+// instead of the output, so its `chars` is the placeholder's length.
+//
+// The result line names its tool (`toolName`), but the stream stays
+// id-only, so a result whose id no `toolCall` block carries books as
+// `unknown` on both harnesses. Measured, that is a turn aborted mid-stream
+// (2 results): the tool's "not executed" result is written first, then the
+// assistant message persists with empty content, so the call never lands.
+// That aborted message is still an `assistant` entry, as is every line
+// `turns` counts. 142 aborted or errored turns followed a result batch. When
+// one never reached the API its usage is all zero, and attributeTools books
+// the batch before it at 0. Claude's stream does the same with its
+// `<synthetic>` error turns (30 across this machine's Claude subagent
+// transcripts, every one with zero cache_creation).
 export function foldOmpTranscript(jsonlText, filePath) {
   let model = null, thinking = null, task = null, resolvedModelIdentity = null, agent = null;
   let firstTs = null, lastTs = null;
   let input = 0, cacheWrite = 0, cacheRead = 0, output = 0, cost = 0, turns = 0;
   let sawCost = false;
-  for (const raw of String(jsonlText ?? "").split("\n")) {
+  let malformedNonLastLines = 0;
+  const entries = [];
+  const lines = String(jsonlText ?? "").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
     if (!raw.trim()) continue;
     let d;
-    // A torn tail (transcript read mid-write) is dropped like Claude's, but
-    // there is no fold-back to protect here — each surviving line is already
-    // one whole turn, so losing the last line costs at most that one turn.
-    try { d = JSON.parse(raw); } catch { continue; }
+    // A torn tail (transcript read mid-write) is dropped like Claude's, and
+    // costs at most that one turn either way. A MIDDLE line failing the same
+    // parse is not a live write in progress — it is lost data, and now
+    // (#1717) it can desync a toolCall from its toolResult, not just a
+    // turn's totals, so it is counted the same way foldClaudeTranscript
+    // counts its own non-last parse failures, never for the last line.
+    try { d = JSON.parse(raw); }
+    catch { if (i !== lines.length - 1) malformedNonLastLines++; continue; }
     assertNotClaudeShaped(d, filePath);
     if (typeof d.timestamp === "string") { firstTs ??= d.timestamp; lastTs = d.timestamp; }
     if (d.type === "thinking_level_change" && typeof d.thinkingLevel === "string") thinking = d.thinkingLevel;
@@ -576,12 +628,23 @@ export function foldOmpTranscript(jsonlText, filePath) {
     if (d.type === "message" && m?.role === "assistant" && m.usage) {
       const u = m.usage;
       if (typeof m.model === "string" && m.model) model = m.model;
+      const cw = Number(u.cacheWrite ?? 0);
       input += Number(u.input ?? 0);
-      cacheWrite += Number(u.cacheWrite ?? 0);
+      cacheWrite += cw;
       cacheRead += Number(u.cacheRead ?? 0);
       output += Number(u.output ?? 0);
       if (u.cost && typeof u.cost.total === "number") { cost += u.cost.total; sawCost = true; }
       turns++;
+      const blocks = Array.isArray(m.content) ? m.content : [];
+      entries.push({
+        kind: "assistant", cacheWrite: cw,
+        tools: blocks.filter((c) => c?.type === "toolCall").map((c) => ({ id: c.id, name: c.name })),
+      });
+    } else if (d.type === "message" && m?.role === "toolResult") {
+      const blocks = Array.isArray(m.content) ? m.content : [];
+      const chars = blocks.reduce(
+        (n, b) => n + (b?.type === "text" && typeof b.text === "string" ? b.text.length : JSON.stringify(b).length), 0);
+      entries.push({ kind: "result", results: [{ id: m.toolCallId, chars }] });
     }
   }
   const span = firstTs && lastTs ? (Date.parse(lastTs) - Date.parse(firstTs)) / 1000 : 0;
@@ -591,13 +654,15 @@ export function foldOmpTranscript(jsonlText, filePath) {
     cost: sawCost ? cost : null,
     turns,
     wallS: Number.isFinite(span) ? Math.round(span) : 0,
+    entries,
+    malformedNonLastLines,
   };
 }
 
-// One member record from one omp transcript. `member` is the AgentId (the
-// filename stem, e.g. `InstallVerifySearch`) — omp has no separate display
-// name the way Claude's meta.json does, so `ticket`/`pr` extraction runs
-// against it directly.
+// One member record from one omp transcript's fold. `member` is the AgentId
+// (the filename stem, e.g. `InstallVerifySearch`) — omp has no separate
+// display name the way Claude's meta.json does, so `ticket`/`pr` extraction
+// runs against it directly.
 //
 // `role` is NEVER guessed off the bare AgentId ALONE — a generated CamelCase
 // word pair names nothing classifyRole can read. FOUR real signals exist:
@@ -666,8 +731,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // change, out of scope for a classifier fix, and unlike this one it cannot
 // repair the 478 historical rows already on disk.
 const OMP_CANONICAL_STEM_RE = new RegExp(`^(?:${CANONICAL_MEMBER_NAME_PREFIXES})-`);
-export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
-  const folded = foldOmpTranscript(jsonlText, filePath);
+export function ompMemberRecord(folded, agentStem, spawnDepth = 0) {
   if (!folded.model) return null; // no assistant turn — not a real member transcript
   const member = agentStem;
   const { ticket, pr } = parseMemberName(member);
@@ -701,16 +765,24 @@ export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
   };
 }
 
+// ompMemberRecord straight from the transcript text. board.mjs's live spend
+// panel calls the two halves itself instead, because it needs the fold's tool
+// stream (#1717) beside the record, and folding the file twice for it would
+// parse every transcript twice on every tick.
+export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
+  return ompMemberRecord(foldOmpTranscript(jsonlText, filePath), agentStem, spawnDepth);
+}
+
 // One omp session directory's member transcripts, as the walk both readers of
 // that directory need it: readOmpSession below, and board.mjs's live spend
-// panel (#1716), which calls readOmpMember per file itself so it can keep
-// its own per-transcript skip tally. RECURSIVE for the same reason as
+// panel (#1716), which folds each file itself so it can keep its own
+// per-transcript skip tally. RECURSIVE for the same reason as
 // Claude's reader: a member can itself dispatch further members (measured on
 // disk — a research session's `Facts1303/` held seven more `.jsonl` files one
 // level down), and `agent` is the path-relative stem so those nest instead of
 // colliding. `spawnDepth` is read straight off that path — one `/` per
 // nesting level, the same signal Claude's own reviewer fan-out relies on via
-// `meta.spawnDepth` — and handed to readOmpMember as a real fact about the
+// `meta.spawnDepth` — and handed to ompMemberRecord as a real fact about the
 // walk, not a guess about the member.
 //
 // Throws when the directory itself cannot be listed; the caller decides what

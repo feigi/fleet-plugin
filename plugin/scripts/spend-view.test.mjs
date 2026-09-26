@@ -109,9 +109,6 @@ for (const [claim, re] of [
   ["the note string fills the note slot", /el\("span", "note", \w+\.note\)/],
   ["the role list fills the column headed `by role`", /(\w+)\.append\(el\("h3", null, "by role"\),?\); spendRows\(\1, \w+\.roles,/],
   ["the tool list fills the column headed by the tool heading", /(\w+)\.append\(el\("h3", null, \w+\.toolHeading\),?\); spendRows\(\1, \w+\.tools,/],
-  // #1716: the one line an omp run's tool column shows. Same host as the tool
-  // heading, so it cannot land in the role column or nowhere at all.
-  ["the tool note fills the tool column, after its rows", /(\w+)\.append\(el\("h3", null, \w+\.toolHeading\),?\); spendRows\(\1, \w+\.tools, [\s\S]*?\}\); if \(\w+\.toolNote\) \1\.append\(el\("div", "note", \w+\.toolNote\)\);/],
 ]) {
   test(`renderSpend wires the decision through: ${claim}`, () => {
     assert.match(renderSpendFlat, re);
@@ -344,18 +341,4 @@ test("an untagged payload is treated as an error, never as a success (#959)", ()
   // A legacy error payload keeps its message rather than losing it to the fallback.
   assert.deepEqual(spendView({ error: "no transcript dir for cwd /x" }),
     { kind: "error", text: "spend unavailable: no transcript dir for cwd /x" });
-});
-
-test("an omp payload says why the tool column is empty rather than rendering it as a zeroed table (#1716)", () => {
-  // gatherSpend's omp shape: no tool table was measured, so there is nothing
-  // to attribute and no split to caveat — but the column must still say so,
-  // because bare empty rows read as "no tool spend".
-  const v = spendView(ok({ tools: null, attributedPct: null, toolsUnavailable: "tool attribution not available on omp yet" }));
-  assert.equal(v.kind, "panel");
-  assert.deepEqual(v.tools, []);
-  assert.equal(v.toolHeading, "by tool", "a heading that states a coverage percentage would present a zero as measured");
-  assert.equal(v.toolNote, "tool attribution not available on omp yet");
-  assert.equal(v.note, "ranked on cache-creation");
-  // And a Claude payload has no note in its tool column.
-  assert.equal(spendView(ok()).toolNote, null);
 });

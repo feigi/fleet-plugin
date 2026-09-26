@@ -200,10 +200,22 @@ test("build: --spend-dir naming a directory that does not exist yet is accepted,
 // One omp member transcript in the measured line shape (member-record.mjs's
 // foldOmpTranscript comment), with numbers no Claude fixture here uses.
 const OMP_SESSION = "2026-09-08T13-13-27-300Z_01a08126-ee04-7095-a695-14e3249f1127";
+// #1717 (tests dimension, board-cli.test.mjs review): a toolCall/toolResult
+// pair ahead of the billing turn, so this is the one place the merged tool
+// table's numbers survive the real CLI subprocess + JSON.stringify/JSON.parse
+// boundary — every other assertion on this shape calls gatherSpend()/
+// attributeTools() in-process. The call turn itself bills 0, so `cacheWrite`
+// below still lands whole on the total AND (via the pending result batch)
+// wholly attributed to "read".
 const ompMember = (cacheWrite) => [
   { type: "session", version: 3, id: "s1", timestamp: "2026-09-08T15:11:49.444Z", cwd: "/w" },
   { type: "session_init", id: "i1", parentId: null, timestamp: "2026-09-08T15:11:49.495Z", task: "Implement ticket 7", agent: "fleet-implementer" },
-  { type: "message", id: "m1", parentId: "i1", timestamp: "2026-09-08T15:12:00.000Z",
+  { type: "message", id: "m1", parentId: "i1", timestamp: "2026-09-08T15:11:59.000Z",
+    message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "t1", name: "read", arguments: {}, intent: "x" }],
+      model: "claude-opus-5", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } } } },
+  { type: "message", id: "m2", parentId: "m1", timestamp: "2026-09-08T15:11:59.500Z",
+    message: { role: "toolResult", toolCallId: "t1", toolName: "read", content: [{ type: "text", text: "x".repeat(100) }], details: {}, isError: false, timestamp: 0 } },
+  { type: "message", id: "m3", parentId: "m2", timestamp: "2026-09-08T15:12:00.000Z",
     message: { role: "assistant", content: [{ type: "text", text: "ok" }], model: "claude-opus-5", usage: { input: 1, output: 3, cacheRead: 40, cacheWrite, totalTokens: 0, cost: { total: 0.01 } } } },
 ].map((l) => JSON.stringify(l)).join("\n") + "\n";
 
@@ -217,7 +229,7 @@ function ompSessionAt(proj) {
   return dir;
 }
 
-test("build: on an omp-only machine the panel comes from this workspace's omp session, with the tool column marked unmeasured", () => {
+test("build: on an omp-only machine the panel comes from this workspace's omp session", () => {
   // The default path, no flag: HOME holds no ~/.claude tree at all, and the
   // child's cwd sits OUTSIDE HOME, so this also drives encodeOmpProjectDir's
   // realpath-wrapped form through the real process.cwd().
@@ -229,8 +241,8 @@ test("build: on an omp-only machine the panel comes from this workspace's omp se
   assert.equal(spend.ok, true, r.stderr);
   assert.equal(spend.totals.cacheWrite, 3000);
   assert.deepEqual(spend.top.map((t) => [t.label, t.role, t.model]), [["impl-7", "implementer", "claude-opus-5"]]);
-  assert.equal(spend.tools, null);
-  assert.equal(spend.toolsUnavailable, "tool attribution not available on omp yet");
+  assert.deepEqual(spend.tools.map((t) => [t.tool, t.calls, t.resultChars, t.cacheWrite]), [["read", 1, 100, 3000]]);
+  assert.equal(spend.attributedPct, 100);
 });
 
 test("build: --spend-dir accepts an omp session directory over a heuristic that resolves elsewhere", () => {
