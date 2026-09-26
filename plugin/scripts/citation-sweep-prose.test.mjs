@@ -261,10 +261,22 @@ const FILES = [
   // the `# Blocking, every PR` comment anchor. Ban the general `\d+` form,
   // not just the one drifted value: a ban on `:269` alone lets `:270` right
   // back in.
+  //
+  // #1916. Two more citations rotted the same way: `release.yml:41` (the
+  // false-claim history in Context) and `release-label.yml:39-41` /
+  // `release-label.yml:68-70` (the `auto-label-bots` and
+  // `validate-release-label` jobs' `if:` conditions, both cited on the same
+  // `required_status_checks` table row). Converted to the job/step names,
+  // the same construct ADR 0010 already uses for these same two files.
   {
     path: ["..", "docs", "adr", "0007-main-ruleset-is-the-merge-gate.md"],
-    stale: [/ci\.yml:\d+/],
-    live: ["# Blocking, every PR"],
+    stale: [/ci\.yml:\d+/, /release\.yml:\d+/, /release-label\.yml:\d+/],
+    live: [
+      "# Blocking, every PR",
+      "`release.yml`'s `Determine bump segment` step",
+      "`release-label.yml`'s `auto-label-bots` job",
+      "`release-label.yml`'s `validate-release-label` job",
+    ],
   },
   // #1756. ADR 0010's own evidence, corrected in place. Its ci.yml citation
   // named the `node-version-file` sites by line, numbers the introducing PR's
