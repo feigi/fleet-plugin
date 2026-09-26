@@ -438,17 +438,37 @@ const NODE_SHEBANG = /^#!\s*(?:\S*\/)?(?:env(?:\s+(?:-(?:u|-unset|C|-chdir)(?:=\
 // repository would write, so one read decides it; a longer line reads on.
 const SHEBANG_BYTES = 256;
 
+// The most of a first line ever read, and the length at which one is not a
+// node shebang (#1941). Reading on to the end of the line however long read a
+// tracked `#!` file holding no newline into memory whole to answer a boolean —
+// measured, 300 MiB of one peaked above 1.1 GiB, and one past the longest
+// string V8 builds (~512 MiB) threw ERR_STRING_TOO_LONG out of the whole
+// listing. No kernel runs a line this long as written: measured, macOS refuses
+// to exec a first line of 512 bytes or more (ENOEXEC), and Linux reads its
+// first 255 and cuts the rest. So the cap sits well past any shebang a kernel
+// honours whole; the one line it refuses that a kernel would still start —
+// Linux, on a prefix naming node — is one no author writes.
+//
+// A cap, not a verdict on the bytes before it: those are not judged at all,
+// so this is never the prefix verdict #1887 retired. Refused rather than
+// thrown, because one pathological tracked file must not abort every sweep's
+// listing (#1910); rather than listed, because a sweep reads each listed file
+// whole, which would move the unbounded read, not remove it.
+const SHEBANG_MAX_BYTES = 4096;
+
 /**
  * Whether the first line of the file at `path` is a node shebang — the WHOLE
- * line, up to its newline or the end of the file, however long; `buf` is
- * scratch for the first read and grows past it only for a longer line. A
- * verdict on the prefix one read holds parts from the line's own both ways
- * (#1887): it misses a `node` past its end, reads `nodemon` cut after its
- * `node` as `node` at the end of the line, and decodes a character it cuts in
- * half as U+FFFD. A file that does not open with `#!` is decided on that first
- * read however long its first line, since NODE_SHEBANG is anchored there.
- * `path` is one `trackedFiles` answered, so the working tree holds a regular
- * file there, and any failure to read it throws.
+ * line, up to its newline or the end of the file; `buf` is scratch for the
+ * first read and grows past it only for a longer line, never past
+ * SHEBANG_MAX_BYTES: a first line that long or longer, newline not counted, is
+ * not one, and nothing past the cap is read. A verdict on the prefix one read
+ * holds parts from the line's own both ways (#1887): it misses a `node` past
+ * its end, reads `nodemon` cut after its `node` as `node` at the end of the
+ * line, and decodes a character it cuts in half as U+FFFD. A file that does
+ * not open with `#!` is decided on that first read however long its first
+ * line, since NODE_SHEBANG is anchored there. `path` is one `trackedFiles`
+ * answered, so the working tree holds a regular file there, and any failure to
+ * read it throws.
  */
 function hasNodeShebang(path, buf) {
   const fd = openSync(path, "r");
@@ -460,7 +480,8 @@ function hasNodeShebang(path, buf) {
     let end;
     while ((end = buf.subarray(0, len).indexOf(0x0a)) === -1) {
       if (len === buf.length) {
-        const grown = Buffer.allocUnsafe(len * 2);
+        if (len >= SHEBANG_MAX_BYTES) return false;
+        const grown = Buffer.allocUnsafe(Math.min(len * 2, SHEBANG_MAX_BYTES));
         buf.copy(grown, 0, 0, len);
         buf = grown;
       }

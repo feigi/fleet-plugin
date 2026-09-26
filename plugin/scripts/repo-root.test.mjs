@@ -419,22 +419,22 @@ test("trackedNodeScripts reads a non-.mjs file's first line: node by any shebang
     "exactly the files whose first line runs node — no other interpreter, no later line, no extension rule");
 });
 
-// A first line is judged WHOLE, however long — never on the prefix one fixed
-// read of it holds (#1887). The first read is 256 bytes (`SHEBANG_BYTES`), and
-// a verdict taken on those bytes alone parts from the whole line's both ways:
-// a `node` past the cut goes unseen; `nodemon` cut right after its `node`
-// reads as `node` at the end of the line, a false accept; and a two-byte
-// character cut in half decodes to U+FFFD, so the character after `node` is no
-// longer the one the file has. Each long line pads an `env -S` assignment so
-// its tail starts at a chosen byte. That last case is pinned against its own
-// short twin rather than to a verdict of its own: whether U+00A0 separates
-// `node` from its flags is NODE_SHEBANG's call, and the cut must not change
-// it. `short/node-at-eof` is a first line the END of the file closes, no
-// newline, and git lists it right after `short/nbsp`, whose longer line
-// leaves a newline in the read buffer past its last byte: that buffer is
-// reused from file to file, so a newline search that ran on past the bytes
-// actually read would end this line on a stale one.
-test("trackedNodeScripts judges a first line whole, however long — never on the prefix its first read holds", (t) => {
+// A first line is judged WHOLE, up to its cap (next test) — never on the
+// prefix one fixed read of it holds (#1887). The first read is 256 bytes
+// (`SHEBANG_BYTES`), and a verdict taken on those bytes alone parts from the
+// whole line's both ways: a `node` past the cut goes unseen; `nodemon` cut
+// right after its `node` reads as `node` at the end of the line, a false
+// accept; and a two-byte character cut in half decodes to U+FFFD, so the
+// character after `node` is no longer the one the file has. Each long line
+// pads an `env -S` assignment so its tail starts at a chosen byte. That last
+// case is pinned against its own short twin rather than to a verdict of its
+// own: whether U+00A0 separates `node` from its flags is NODE_SHEBANG's call,
+// and the cut must not change it. `short/node-at-eof` is a first line the END
+// of the file closes, no newline, and git lists it right after `short/nbsp`,
+// whose longer line leaves a newline in the read buffer past its last byte:
+// that buffer is reused from file to file, so a newline search that ran on
+// past the bytes actually read would end this line on a stale one.
+test("trackedNodeScripts judges a first line whole — never on the prefix its first read holds", (t) => {
   const padded = (at, tail) => {
     const head = "#!/usr/bin/env -S A=";
     return `${head}${"x".repeat(at - head.length - 1)} ${tail}`;
@@ -458,6 +458,31 @@ test("trackedNodeScripts judges a first line whole, however long — never on th
     "a character cut in half by the first read must not change the verdict the whole line gets");
   assert.deepEqual(listed.filter((f) => !f.endsWith("/nbsp")).sort(), ["long/node", "long/node-at-eof", "short/node-at-eof"],
     "a node shebang past the first read is still one, and a `nodemon` the read cuts after its `node` is still not");
+});
+
+// A first line is read no further than 4096 bytes (`SHEBANG_MAX_BYTES`), and
+// one that reaches the cap is not a node shebang (#1941): read to its end
+// however long, a tracked `#!` file holding no newline was read into memory
+// whole to answer one boolean. The cap is not a verdict on the bytes before it
+// — every line here names node well inside its first read — so a line one byte
+// short of the cap is still judged whole, closed by a newline or by the end of
+// the file alike, and one that reaches it is refused either way.
+test("trackedNodeScripts reads a first line no further than its cap — one that reaches it is not a node shebang", (t) => {
+  const line = (bytes) => {
+    const head = "#!/usr/bin/env -S node --title=";
+    return `${head}${"x".repeat(bytes - head.length)}`;
+  };
+  const files = {
+    "under/node": `${line(4095)}\n`,
+    "under/node-at-eof": line(4095),
+    "at/node": `${line(4096)}\n`,
+    "at/node-at-eof": line(4096),
+  };
+  assert.equal(Buffer.byteLength(line(4096)), 4096, "fixture: `line(n)` must be exactly n bytes");
+  const { dir } = repoTracking(t, Object.keys(files), files);
+
+  assert.deepEqual(trackedNodeScripts(dir).sort(), ["under/node", "under/node-at-eof"],
+    "a first line one byte short of the cap is judged whole; one that reaches it is not a node shebang");
 });
 
 // A tracked path the working tree holds no regular file at has no text for a
