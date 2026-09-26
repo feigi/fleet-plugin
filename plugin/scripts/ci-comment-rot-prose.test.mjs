@@ -221,7 +221,8 @@ test("the vendored-tree sentence makes a structural claim, not a size claim", ()
 // says Renovate moves the pin on a schedule. Read alone, that schedule looks
 // like a promise about when the bump LANDS, and it never was one: the window
 // bounds when the bot opens its PR, and the merge waits on the required checks
-// whenever they finish. The comment now says so, and this keeps it saying so.
+// whenever they finish — a major's on a human too, which majorMergeFault holds
+// the comment to. The comment now says so, and this keeps it saying so.
 //
 // Same rule as #348's pins above. It bans the stale FORM — a schedule named with
 // nothing saying what its window bounds (the text before #1753), or a sentence
@@ -465,6 +466,57 @@ test("windowClaimFault still refuses a negation spelled with the opening curly q
     ),
     /no longer says, in one sentence/,
   );
+});
+
+// #1956. The same comment's merge clause said the merge waits on the required
+// checks, whenever they finish — written by #1753 as if the checks alone gate
+// every bump, when #1752 had already narrowed that: renovate.json's `major`
+// rule sets `automerge: false`, so a major bump's merge waits on a human as
+// well. ADR 0010 point 3 took the same narrowing in #1906. This bans the
+// unscoped form: a sentence that ties the merge to the checks must name both
+// the major and the human it waits on, inside that sentence, for the reason
+// windowClaimFault gives for its ceiling — read any wider, the lead's "rather
+// than a human noticing" supplies the human for a merge clause that never
+// mentions one. The ceiling's cost: a paraphrase stating the exception only
+// in the NEXT sentence reds too. It pins the exception's presence, not its
+// polarity — "a major merges without a human" names both and passes — and no
+// update-type list: which types automerge is renovate.json's to say, and
+// renovate-release-contract.test.mjs already reds a major that automerges.
+export function majorMergeFault(block) {
+  const unscoped = sentences(block).find(
+    (s) =>
+      /\bmerg/i.test(s) &&
+      /\b(checks?|CI|green)\b/i.test(s) &&
+      !(/\bmajors?\b/i.test(s) && /\b(humans?|maintainers?|manual(?:ly)?|by hand)\b/i.test(s)),
+  );
+  return unscoped === undefined
+    ? null
+    : `the pin's comment ties the merge to the checks without saying, in that sentence, that a major bump's merge waits on a human too — #1956: "${unscoped}"`;
+}
+
+test("the pin's comment says a major bump's merge waits on a human, not on the checks alone (#1956)", () => {
+  const block = pinOwnerComment();
+  assert.ok(block, "no setup-node step in ci.yml carries a comment pointing at ADR 0010 any more");
+  assert.equal(majorMergeFault(block), null);
+});
+
+test("majorMergeFault accepts a scoped merge clause or none; an unscoped one, or one scoped only in the next sentence, is refused (#1956)", () => {
+  const lead = ".nvmrc holds an EXACT version, and Renovate moves it on a monthly schedule rather than a human noticing: see ADR 0010.";
+  const tail = "Do not hand-edit this to float.";
+  const window = "That schedule's window bounds when the bot opens its PR, not when the PR merges";
+
+  assert.equal(majorMergeFault(`${lead} ${window}: the merge waits on the required checks, whenever they finish, and a major bump's waits on a human too. ${tail}`), null);
+  assert.equal(majorMergeFault(`${lead} ${window}: minor and patch bumps merge once CI goes green; a major waits for a maintainer as well. ${tail}`), null);
+  assert.equal(majorMergeFault(`${lead} ${window}. ${tail}`), null);
+
+  // The text as it stood before #1956, and the paraphrase #1753 accepted of it.
+  assert.match(majorMergeFault(`${lead} ${window}: the merge waits on the required checks, whenever they finish. ${tail}`), /#1956/);
+  assert.match(majorMergeFault(`${lead} The window only limits when Renovate raises the pull request; merging happens whenever the required checks go green. ${tail}`), /#1956/);
+  // Half the exception: a major with no human, or a human with no major.
+  assert.match(majorMergeFault(`${lead} ${window}: the merge waits on the required checks, major or not. ${tail}`), /#1956/);
+  assert.match(majorMergeFault(`${lead} ${window}: the merge waits on the required checks and a human. ${tail}`), /#1956/);
+  // The ceiling: the next sentence's exception does not scope this one.
+  assert.match(majorMergeFault(`${lead} ${window}: the merge waits on the required checks. A major waits on a human too. ${tail}`), /#1956/);
 });
 
 test("pinOwnerComment refuses to pick silently between two setup-node comments that both cite ADR 0010 (#1838)", () => {
