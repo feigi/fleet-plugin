@@ -603,11 +603,11 @@ test("a blank line ends a setup-node step's comment run: it keeps an unrelated c
   ]) {
     const hugging = setupNodeComments(["  job:", unrelated, "", pointer, ...step]);
     assert.deepEqual(hugging, [{ block: pointer.replace(/^\s*#\s?/, ""), lines: 1, job: "job" }], step.join("\n"));
-    assert.equal(pointerFault(hugging[0]), null);
+    assert.equal(pointerFault(hugging[0]), null, step.join("\n"));
 
     const detached = setupNodeComments(["  job:", pointer, "", ...step]);
     assert.deepEqual(detached, [{ block: "", lines: 0, job: "job" }], step.join("\n"));
-    assert.match(pointerFault(detached[0]), /no comment directly above its opener/);
+    assert.match(pointerFault(detached[0]), /no comment directly above its opener/, step.join("\n"));
   }
 });
 
