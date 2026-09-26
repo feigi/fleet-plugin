@@ -262,9 +262,11 @@ export function windowClaimFault(block) {
 // Every setup-node step's contiguous comment run: its prose, how many comment
 // lines it spans, and the job it sits in — anchored on the step, never a line
 // number. A step is found by its `uses: actions/setup-node@` key wherever that
-// key sits in the step, and its comment is the run above the step's own `- `
-// opener, where a reader meets it (#1873). Exported with an optional `lines`
-// override (same idiom as windowClaimFault's `block` param and citationFault's
+// key sits in the step, and its comment is the run directly above the step's
+// own `- ` opener, where a reader meets it (#1873) — a blank line ends that
+// run, the opener's side included, so a comment with a blank line under it is
+// not the step's (#1919). Exported with an optional `lines` override (same
+// idiom as windowClaimFault's `block` param and citationFault's
 // `citing`/`cited` params) so a test can feed it synthetic input the real
 // ci.yml does not contain; the production call sites take no argument and read
 // the real file. The owner pin and the pointer pin both read the steps through
@@ -484,7 +486,7 @@ test("a one-line pointer citing ADR 0010 is never taken for the owner (#1756)", 
 // multi-line citation, a second candidate owner that pinOwnerComment refuses
 // loudly; a blank line between the two keeps the pointer its own run.
 export function pointerFault({ block, lines }) {
-  if (lines === 0) return "carries no comment at all — no pointer to ADR 0010 or the do-not-hand-edit rule";
+  if (lines === 0) return "carries no comment directly above its opener — no pointer to ADR 0010 or the do-not-hand-edit rule, and a comment with a blank line under it is not the step's";
   if (!block.includes("ADR 0010")) return "no longer points at ADR 0010";
   const rule = sentences(block).some((s) => {
     const m = /hand-?edit\w*/i.exec(s);
@@ -532,7 +534,7 @@ test("a setup-node step opened by another key is discovered, its comment read ab
 
   // The ticket's own repro: no comment, and the step used to come back unseen.
   assert.deepEqual(setupNodeComments(["  job:", ...named]), [{ block: "", lines: 0, job: "job" }]);
-  assert.match(pointerFault(setupNodeComments(["  job:", ...named])[0]), /no comment at all/);
+  assert.match(pointerFault(setupNodeComments(["  job:", ...named])[0]), /no comment directly above its opener/);
 
   // What the wider match must still ACCEPT: a pointer above the opener, with
   // sibling keys, a nested value or a quoted scalar anywhere in between.
@@ -579,6 +581,36 @@ test("a `uses: actions/setup-node@` line that is not a step's own key is not tak
   assert.deepEqual(setupNodeComments(["  job:", ...nested]), []);
 });
 
+// #1919. A blank line ends a step's comment run wherever it falls — the rule
+// the failglob and Validate JSON walks in this file follow too, so no walk here
+// disagrees with another about where a comment stops. Above a pointer,
+// that is the ceiling pointerFault documents: the blank line keeps an
+// unrelated comment out of the pointer's run. Under a comment, it detaches the
+// comment from the step: ci.yml sets a blank line between each step and the
+// one before it, and every comment directly on the step it explains, so a
+// comment with a blank line under it is, by the file's own layout, not the
+// step's. Skipping that one gap instead would hand the step whatever floats
+// above it — a commented-out step, a trailing note on the step before. Pinned
+// in both halves and both opener forms, so the boundary is a decision, not
+// whatever the walk happens to do; the fault names the cause, because "no
+// comment at all" was false with a comment one line up.
+test("a blank line ends a setup-node step's comment run: it keeps an unrelated comment out, and detaches a comment from the step (#1919)", () => {
+  const pointer = "      # Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.";
+  const unrelated = "      # An unrelated note that happens to sit above the step.";
+  for (const step of [
+    ["      - uses: actions/setup-node@v5"],
+    ["      - name: Set up Node", "        uses: actions/setup-node@v5"],
+  ]) {
+    const hugging = setupNodeComments(["  job:", unrelated, "", pointer, ...step]);
+    assert.deepEqual(hugging, [{ block: pointer.replace(/^\s*#\s?/, ""), lines: 1, job: "job" }], step.join("\n"));
+    assert.equal(pointerFault(hugging[0]), null);
+
+    const detached = setupNodeComments(["  job:", pointer, "", ...step]);
+    assert.deepEqual(detached, [{ block: "", lines: 0, job: "job" }], step.join("\n"));
+    assert.match(pointerFault(detached[0]), /no comment directly above its opener/);
+  }
+});
+
 test("a paraphrased pointer is accepted; a missing one, a half one and a copied paragraph are not", () => {
   const at = (...comment) => setupNodeComments(["  job:", ...comment, "      - uses: actions/setup-node@v5"])[0];
 
@@ -586,7 +618,7 @@ test("a paraphrased pointer is accepted; a missing one, a half one and a copied 
   assert.equal(pointerFault(at("      # .nvmrc is exact and bot-moved (ADR 0010); never hand-edit it to float.")), null);
   assert.equal(pointerFault(at("      # Hand-editing this to float is not allowed: ADR 0010 explains why.")), null);
 
-  assert.match(pointerFault(at()), /no comment at all/);
+  assert.match(pointerFault(at()), /no comment directly above its opener/);
   assert.match(pointerFault(at("      # Exact pin Renovate moves. Do not hand-edit this to float.")), /no longer points at ADR 0010/);
   assert.match(pointerFault(at("      # Exact pin Renovate moves: see ADR 0010.")), /do-not-hand-edit rule/);
   assert.match(
