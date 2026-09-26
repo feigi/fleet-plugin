@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 
+// Regex metacharacters escaped so a caller's `name` or `signature` stays a
+// literal — the one-liner prose-pin.mjs and node-floor-sweep.test.mjs use, not
+// `RegExp.escape`, which Node first shipped in v24.0.0, above the floor
+// package.json declares (#1932).
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // Lift a plain top-level `function name(signature) { ... }` declaration out of
 // `workflows/review-pr.js`'s source text and evaluate it standalone.
 //
@@ -44,7 +50,7 @@ import assert from "node:assert/strict";
 // that choice — and the obligation to strip — with the caller.
 export function lift(code, name, signature) {
   const re = new RegExp(
-    `^function ${RegExp.escape(name)}\\(${RegExp.escape(signature)}\\) \\{[\\s\\S]*?^\\}$`,
+    `^function ${escapeRe(name)}\\(${escapeRe(signature)}\\) \\{[\\s\\S]*?^\\}$`,
     "m",
   );
   const m = code.match(re);
@@ -63,7 +69,7 @@ export function lift(code, name, signature) {
 // carry over — a second top-level `const NAME` is a SyntaxError in the file
 // itself, not a copy that silently wins at runtime.
 export function liftConst(code, name) {
-  const m = code.match(new RegExp(`^const ${RegExp.escape(name)} = \\{[\\s\\S]*?^\\};$`, "m"));
+  const m = code.match(new RegExp(`^const ${escapeRe(name)} = \\{[\\s\\S]*?^\\};$`, "m"));
   assert.ok(m, `review-pr.js no longer declares a top-level \`const ${name} = { ... };\` object literal — update this test`);
   return new Function(`${m[0]}\nreturn ${name};`)();
 }
