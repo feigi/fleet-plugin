@@ -195,7 +195,17 @@ function securityReleaseFault(adr) {
 // heading with no terminator and no blank line after it still lends the next
 // line its scope — telling that line end from a wrap takes parsing the
 // heading, which a sentence boundary cannot do.
-const SENTENCE_END = String.raw`(?:[.!?][*_\x60)\]"'”’]*\s|\n(?=[ \t]*[-*+][ \t])|\n[ \t]*\n)`;
+//
+// #1959. A period closing an abbreviation that never ends a sentence — "e.g.",
+// "i.e.", "cf.", "viz.", "vs.", ci-comment-rot-prose's list (#1852) — is no
+// end either: splitting there dropped a scope word on one side of it out of
+// the claim's sentence on the other, and a scoped drift sentence read as
+// unscoped. Any other period before whitespace still ends one — "etc.", an
+// ellipsis, "a.m." — since each ends a sentence as often as not, and reading
+// past a real end is the silent direction: the next sentence's scope would
+// reach back. Before the abbreviation, only a letter or digit disqualifies it,
+// as for UPDATE_TYPE below: an italic `_e.g._` is one, "devs." is not "vs.".
+const SENTENCE_END = String.raw`(?:(?:[!?]|(?<!(?<![a-z\d])(?:e\.g|i\.e|cf|viz|vs))\.)[*_\x60)\]"'”’]*\s|\n(?=[ \t]*[-*+][ \t])|\n[ \t]*\n)`;
 // #1958. What names an update type, for both of ADR 0010's #1906 rows below:
 // minor, patch or major as a whole word. The rows' first cut matched the bare
 // substring, so "dispatched" and "majority" scoped a claim that names no
@@ -521,8 +531,10 @@ const FILES = [
   // that span, for the reason ci-comment-rot-prose's windowClaimFault keeps
   // its distinction inside one sentence: read any wider, an unrelated mention
   // nearby supplies it. The cost of that ceiling is that a paraphrase scoping
-  // the claim only in the NEXT sentence reds too. No live needle, for the
-  // reason #1756's gives.
+  // the claim only in the NEXT sentence reds too — and so does one scoping it
+  // across a mid-sentence period SENTENCE_END still counts as an end: "etc.",
+  // an ellipsis, any abbreviation off its list (#1959). No live needle, for
+  // the reason #1756's gives.
   {
     path: ADR_0010,
     stale: [
@@ -913,4 +925,39 @@ test("the merge trigger only fires on a real merge verb, not a word that merely 
     "# The merger of the checks team and CI team went smoothly and green-lit.\n",
     UNSCOPED_MERGE_SENTENCE,
   );
+});
+test("a drift sentence scoped across an abbreviation passes — its period ends no sentence (#1959)", () => {
+  for (const text of [
+    // The case #1959 was filed on: the scope before "e.g.", the claim after.
+    "For a minor bump, e.g. 26.6, that keeps one PR while bounding drift at a month.\n",
+    // And the scope after it, the claim before.
+    "Bounding drift at about one month, i.e. for minor and patch bumps.\n",
+    "For minor bumps (cf. the Status line) bounding drift at about one month.\n",
+    "For patch bumps, viz. 26.5.x, bounding drift at about one month.\n",
+    "For a minor bump (a small vs. a big change) bounding drift at about one month.\n",
+    // Closing markup after the abbreviation, as after any other terminator.
+    "For minor bumps (e.g.) bounding drift at about one month.\n",
+    "For minor bumps, **e.g.** 26.6, bounding drift at about one month.\n",
+    // `_` is a word character, so a `\b` before the abbreviation would miss
+    // an italic one, as #1958 found for an italic `_patch_`.
+    "For minor bumps, _e.g._ 26.6, bounding drift at about one month.\n",
+  ]) {
+    assert.doesNotMatch(text, UNSCOPED_DRIFT_SENTENCE, text);
+  }
+});
+
+test("a period after \"etc.\", or after a word only ending in an abbreviation's letters, still ends the sentence (#1959)", () => {
+  for (const text of [
+    // "etc." ends a sentence as often as not, so it is off the list: skipping
+    // it would lend this claim the scope of the sentence before it.
+    "Minor and patch bumps, the lockfile, etc. Bounding drift at about one month.\n",
+    // "devs." is not "vs.".
+    "Minor and patch bumps are for the devs. Bounding drift at about one month.\n",
+    // A digit disqualifies it exactly as a letter does (review finding, PR
+    // #1993): narrowing the boundary to `(?<![a-z])` alone still passes every
+    // other case here, so nothing else in this file pins the digit half.
+    "Minor bumps land in 26vs. Bounding drift at about one month.\n",
+  ]) {
+    assert.match(text, UNSCOPED_DRIFT_SENTENCE, text);
+  }
 });
