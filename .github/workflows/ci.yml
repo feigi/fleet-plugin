@@ -203,12 +203,14 @@ jobs:
             esac
           done
 
-      # Exactly two tracked JSON files, both plugin manifests:
-      # plugin/.claude-plugin/plugin.json and .claude-plugin/marketplace.json.
-      # `settings.json` used to be the first of them and left with the
-      # 2026-09-08 config split. The runtime caches are NOT covered and cannot
-      # be — every one of them is gitignored, so `git ls-files` never sees
-      # them. Do not read this step as saying anything about a cache.
+      # Parses every file `git ls-files '*.json'` lists — whatever the tree
+      # tracks on the day, so a JSON file committed later is covered with no
+      # edit here. No count and no list of them, on purpose: the count this
+      # comment used to carry went stale as files were added (#1903), and
+      # ci-comment-rot-prose.test.mjs refuses one coming back. The runtime
+      # caches are NOT covered and cannot be — every one of them is
+      # gitignored, so `git ls-files` never sees them. Do not read this step
+      # as saying anything about a cache.
       # `jq empty`, not `jq -e .`: `-e` takes its status from the last OUTPUT
       # value, so it exits 1 on a file holding `null` or `false` — both valid
       # JSON — and a step named "Validate JSON" then fails saying nothing.

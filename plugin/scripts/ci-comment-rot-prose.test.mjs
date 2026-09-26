@@ -572,3 +572,68 @@ test("pointerFault still refuses a rule spelled with the opening curly quote —
     /no longer carries the do-not-hand-edit rule/,
   );
 });
+
+// #1903. The Validate JSON step's comment opened "Exactly two tracked JSON
+// files, both plugin manifests" and named the two. True the day it was written
+// (3f9dd372, the 2026-09-08 config split); five more tracked `*.json` files
+// landed over the next three weeks and the sentence stayed, because nothing
+// reads it — the step parses whatever `git ls-files '*.json'` returns. The
+// shape #348 fixed in the Shellcheck comment: prose measuring a set the comment
+// does not own.
+//
+// Same rule as #348's pins: the FORM is banned and no number is pinned, so a
+// JSON file added or removed needs no edit here. The form is a count sizing the
+// files — a digit, a number word from two up, or "both" — with at most two words
+// between it and "files" or "manifests", none of them ending a sentence. A word
+// ENDING in a period is the sentence end; one merely containing a period is a
+// file name — "seven tracked `*.json` files" is the count, not a boundary. Plural
+// nouns only, because the jq rationale in the same block says the step "exits 1
+// on a file holding `null`": a singular noun would read that exit status as a
+// count. That is the ceiling as well — "exactly one tracked JSON file" passes,
+// and so does a bare list of paths with no count in front of it. The block is
+// the contiguous comment run above the step, anchored on the step's name like
+// the failglob pin, so a count moved into another step's comment is outside it.
+const JSON_COUNT =
+  /\b(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|both)\s+(?:\S*[^\s.!?]\s+){0,2}?(?:files|manifests)\b/i;
+
+export function jsonCountFault(block) {
+  // The positive half. A doesNotMatch alone passes on a slice that has lost the
+  // paragraph it exists for: a blank line cutting the jq rationale off from the
+  // coverage sentences would leave the ban scanning only the jq half.
+  if (!/\btracked\b|git ls-files/.test(block)) {
+    return "the Validate JSON comment no longer says which files the step parses — the slice this pin reads has lost its coverage paragraph";
+  }
+  const count = JSON_COUNT.exec(block);
+  return count
+    ? `the Validate JSON comment sizes the tracked JSON set again ("${count[0]}") — a count there goes stale the next time a JSON file is added (#1903)`
+    : null;
+}
+
+test("the Validate JSON comment says which files it parses without counting them (#1903)", () => {
+  const lines = read("../../.github/workflows/ci.yml").split("\n");
+  const step = lines.findIndex((l) => /^\s*- name: Validate JSON$/.test(l));
+  assert.ok(step >= 0, "ci.yml no longer has a Validate JSON step");
+  let i = step;
+  while (/^\s*#/.test(lines[i - 1])) i--;
+  assert.equal(jsonCountFault(prose(lines.slice(i, step).join("\n"))), null);
+});
+
+test("jsonCountFault refuses a count of the JSON files in any spelling, and a slice without its coverage paragraph (#1903)", () => {
+  const jq = "`jq empty`, not `jq -e .`: it exits 1 on a file holding `null` or `false` — both valid JSON.";
+  for (const count of [
+    "Exactly two tracked JSON files, both plugin manifests: plugin/.claude-plugin/plugin.json and .claude-plugin/marketplace.json.",
+    "Every tracked JSON file — seven tracked `*.json` files at the time of writing.",
+    "Parses the 7 JSON files `git ls-files` lists.",
+    "Parses what `git ls-files` lists, both plugin manifests among them.",
+  ]) {
+    assert.match(jsonCountFault(`${count} ${jq}`), /sizes the tracked JSON set again/, count);
+  }
+  assert.match(jsonCountFault(jq), /no longer says which files the step parses/);
+});
+
+test("jsonCountFault accepts the block's own non-counting numbers and a count cut off by a sentence end (#1903)", () => {
+  const jq = "`jq empty`, not `jq -e .`: it exits 1 on a file holding `null` or `false` — both valid JSON.";
+  const cache = "The runtime caches are NOT covered — every one of them is gitignored, so `git ls-files` never sees them.";
+  assert.equal(jsonCountFault(`Parses every file \`git ls-files '*.json'\` lists. ${cache} ${jq}`), null);
+  assert.equal(jsonCountFault(`Every tracked \`*.json\` file. The 2026-09-08 split removed two of them. Files added since need no edit here. ${jq}`), null);
+});
