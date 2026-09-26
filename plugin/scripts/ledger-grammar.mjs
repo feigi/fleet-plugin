@@ -32,14 +32,16 @@ const OUTCOME_PATTERNS = {
 // `impl-412`. A single trailing lowercase letter is a replacement's retry
 // suffix (`impl-<N>-b` — member-record.mjs has -b, -c and -d observed);
 // merge bots take none, because a replacement for a dead bot gets a new n.
+// Attempts on one number order by it: no suffix first, then by letter.
 const MEMBER = /^(impl|fix-pr|finisher-pr|merge-bot)-([1-9][0-9]*)(-[a-z])?$/;
 
-/** `{name, family, number, bound}` for a member name, else null. `bound` is
- * "ticket", "pr", or null for a merge bot, which works neither. */
+/** `{name, family, number, retry, bound}` for a member name, else null.
+ * `retry` is the suffix letter (`"b"` for `impl-412-b`), null for none.
+ * `bound` is "ticket", "pr", or null for a merge bot, which works neither. */
 export function parseMember(name) {
   const m = MEMBER.exec(name);
   if (!m || (m[1] === "merge-bot" && m[3])) return null;
-  return { name, family: m[1], number: Number(m[2]), bound: FAMILIES[m[1]].bound };
+  return { name, family: m[1], number: Number(m[2]), retry: m[3] ? m[3].slice(1) : null, bound: FAMILIES[m[1]].bound };
 }
 
 /**
