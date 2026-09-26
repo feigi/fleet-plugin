@@ -732,6 +732,10 @@ test("an unscoped drift sentence is refused, whatever ends the sentence before i
     "Minor and patch bumps merge themselves! Bounding drift at about one month.\n",
     "## Minor and patch bumps\n\nBounding drift at about one month.\n",
     "- Monthly for minor and patch bumps\n- Bounding drift at about one month.\n",
+    // The other two markers SENTENCE_END's `[-*+]` list-item lookahead
+    // allows — each is its own branch, not implied by `-` alone.
+    "* Monthly for minor and patch bumps\n* Bounding drift at about one month.\n",
+    "+ Monthly for minor and patch bumps\n+ Bounding drift at about one month.\n",
   ]) {
     assert.match(text, UNSCOPED_DRIFT_SENTENCE, text);
   }
