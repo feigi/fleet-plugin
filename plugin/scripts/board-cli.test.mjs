@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeProjectDir } from "./board.mjs";
+import { encodeOmpProjectDir } from "./member-record.mjs";
 
 const BOARD = fileURLToPath(new URL("./board.mjs", import.meta.url));
 const LEDGER = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
@@ -47,8 +48,10 @@ const NAMED_TURN = [
 // replacing it, because gather() also shells out to `node`.
 // `ledgerFile` overrides the missing-ledger default the --spend-since and
 // --interval cases want: those die before the read matters, while the #807
-// case below needs a real one the read has to carry back whole.
-function runBoard(sinceArgs, ledgerFile) {
+// case below needs a real one the read has to carry back whole. `seed` lays
+// the transcript tree into the fake $HOME for the child's cwd — Claude's by
+// default; the #1716 cases lay omp's instead.
+function runBoard(sinceArgs, ledgerFile, seed = seedClaude) {
   const home = mkdtempSync(join(tmpdir(), "since-home-"));
   // realpath, not the bare mkdtemp path: on darwin $TMPDIR is under /var, which
   // is a symlink to /private/var, and the child's process.cwd() reports the
@@ -58,12 +61,7 @@ function runBoard(sinceArgs, ledgerFile) {
   const bin = mkdtempSync(join(tmpdir(), "since-bin-"));
   writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   chmodSync(join(bin, "gh"), 0o755);
-  // findSubagentsDir() defaults to $HOME and cwd, so the fixture has to sit
-  // where the encoding puts it — encodeProjectDir is the real function, not a
-  // hand-rolled path, so this cannot drift from it.
-  const sub = join(home, ".claude", "projects", encodeProjectDir(cwd), "sess", "subagents");
-  mkdirSync(sub, { recursive: true });
-  writeFileSync(join(sub, "agent-a.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  seed(home, cwd);
   return spawnSync(process.execPath, [BOARD, "build", "--ledger", ledgerFile ?? join(cwd, "nope.md"), ...sinceArgs], {
     cwd, encoding: "utf8",
     // This harness's own ceiling, not the subject's: a board built over a big
@@ -74,6 +72,15 @@ function runBoard(sinceArgs, ledgerFile) {
     maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },
   });
+}
+
+// findSubagentsDir() defaults to $HOME and cwd, so the fixture has to sit
+// where the encoding puts it — encodeProjectDir is the real function, not a
+// hand-rolled path, so this cannot drift from it.
+function seedClaude(home, cwd) {
+  const sub = join(home, ".claude", "projects", encodeProjectDir(cwd), "sess", "subagents");
+  mkdirSync(sub, { recursive: true });
+  writeFileSync(join(sub, "agent-a.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
 }
 
 test("--spend-since rejects a seconds-magnitude epoch — the mistake its own comment names", () => {
@@ -186,6 +193,56 @@ test("build: --spend-dir naming a directory that does not exist yet is accepted,
   // The override really did override: the heuristic's session is still sitting
   // there readable, and a fallback to it would have produced a panel.
   assert.doesNotMatch(r.stdout, /"cacheWrite":1000/);
+});
+
+// ── #1716: the same two paths on an omp tree ─────────────────────────────────
+//
+// One omp member transcript in the measured line shape (member-record.mjs's
+// foldOmpTranscript comment), with numbers no Claude fixture here uses.
+const OMP_SESSION = "2026-09-08T13-13-27-300Z_01a08126-ee04-7095-a695-14e3249f1127";
+const ompMember = (cacheWrite) => [
+  { type: "session", version: 3, id: "s1", timestamp: "2026-09-08T15:11:49.444Z", cwd: "/w" },
+  { type: "session_init", id: "i1", parentId: null, timestamp: "2026-09-08T15:11:49.495Z", task: "Implement ticket 7", agent: "fleet-implementer" },
+  { type: "message", id: "m1", parentId: "i1", timestamp: "2026-09-08T15:12:00.000Z",
+    message: { role: "assistant", content: [{ type: "text", text: "ok" }], model: "claude-opus-5", usage: { input: 1, output: 3, cacheRead: 40, cacheWrite, totalTokens: 0, cost: { total: 0.01 } } } },
+].map((l) => JSON.stringify(l)).join("\n") + "\n";
+
+// The session dir as omp lays it out, with its main-session FILE beside it
+// carrying a number that only a wrong read could put on the panel.
+function ompSessionAt(proj) {
+  const dir = join(proj, OMP_SESSION);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "impl-7.jsonl"), ompMember(3000));
+  writeFileSync(join(proj, `${OMP_SESSION}.jsonl`), ompMember(999_999));
+  return dir;
+}
+
+test("build: on an omp-only machine the panel comes from this workspace's omp session, with the tool column marked unmeasured", () => {
+  // The default path, no flag: HOME holds no ~/.claude tree at all, and the
+  // child's cwd sits OUTSIDE HOME, so this also drives encodeOmpProjectDir's
+  // realpath-wrapped form through the real process.cwd().
+  const r = runBoard([], undefined, (home, cwd) => {
+    ompSessionAt(join(home, ".omp", "agent", "sessions", encodeOmpProjectDir(cwd, { home })));
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const spend = JSON.parse(r.stdout).spend;
+  assert.equal(spend.ok, true, r.stderr);
+  assert.equal(spend.totals.cacheWrite, 3000);
+  assert.deepEqual(spend.top.map((t) => [t.label, t.role, t.model]), [["impl-7", "implementer", "claude-opus-5"]]);
+  assert.equal(spend.tools, null);
+  assert.equal(spend.toolsUnavailable, "tool attribution not available on omp yet");
+});
+
+test("build: --spend-dir accepts an omp session directory over a heuristic that resolves elsewhere", () => {
+  // runBoard's default seed gives the heuristic a Claude session of its own
+  // (1000), so the omp numbers can only arrive through the named directory.
+  const dir = ompSessionAt(mkdtempSync(join(tmpdir(), "since-omp-")));
+  const r = runBoard(["--spend-dir", dir]);
+  assert.equal(r.status, 0, r.stderr);
+  const spend = JSON.parse(r.stdout).spend;
+  assert.equal(spend.ok, true, r.stderr);
+  assert.equal(spend.totals.cacheWrite, 3000);
+  assert.equal(spend.top[0].label, "impl-7");
 });
 
 // #366: the SECOND --interval read site. gather()'s own argInterval() fallback

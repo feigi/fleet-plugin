@@ -5,10 +5,11 @@
 // depends on the controller feeding it.
 //
 // Pipeline state is a pure function of ledger + GitHub. The spend panel adds a
-// THIRD input that is neither — the local Claude Code transcript tree under
-// ~/.claude/projects — so the "f(ledger, gh)" property no longer covers the
-// whole model. It is telemetry, kept strictly to the side: it can only ever
-// populate or omit `spend`, never change a ticket's stage.
+// THIRD input that is neither — the local member-transcript tree, Claude
+// Code's under ~/.claude/projects or omp's under ~/.omp/agent/sessions — so
+// the "f(ledger, gh)" property no longer covers the whole model. It is
+// telemetry, kept strictly to the side: it can only ever populate or omit
+// `spend`, never change a ticket's stage.
 //
 // That transcript tree is keyed by PROJECT DIRECTORY, not by session, and one
 // directory can hold several sessions at once. `serve` therefore resolves ONE
@@ -33,7 +34,10 @@
 import { execFile, spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync, writeSync } from "node:fs";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
-import { encodeClaudeProjectDir as encodeProjectDir, foldClaudeTranscript, claudeRoleSignals } from "./member-record.mjs";
+import {
+  encodeClaudeProjectDir as encodeProjectDir, foldClaudeTranscript, claudeRoleSignals,
+  encodeOmpProjectDir, isOmpSessionDirName, ompSessionTranscripts, readOmpMember,
+} from "./member-record.mjs";
 import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 // #1597: the heartbeat's liveness mark, read here and never written. The
@@ -45,7 +49,7 @@ import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 // caller takes (#1582), and a second probe could answer differently.
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { createServer, request as httpRequest } from "node:http";
 import { inspect } from "node:util";
 
@@ -561,44 +565,84 @@ export function mapCi(ciJson, pr) {
   return "unknown";
 }
 
-// Where this session's subagent transcripts live: Claude Code writes them to
-// ~/.claude/projects/<encoded-cwd>/<session-uuid>/subagents/. The encoder
-// itself now lives in member-record.mjs (#1342), shared with the omp reader
-// and with member-outcomes.mjs; re-exported here under its original name so
-// nothing importing `encodeProjectDir` from this file needs to change.
+// Where this session's member transcripts live. One tree per harness, and the
+// board cannot tell which harness launched it — fleet-run's own header
+// measures why no env probe answers that (omp sets CLAUDECODE too, and
+// OMPCODE is inherited by anything an omp shell starts) — so it looks in both
+// and lets the transcripts say which one is live (#1716):
+//   Claude Code  ~/.claude/projects/<encoded-cwd>/<session-uuid>/subagents/
+//   omp          ~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>/
+// The two encoders differ (member-record.mjs, #1342) and live there, shared
+// with member-outcomes.mjs; the Claude one is re-exported here under its
+// original name so nothing importing `encodeProjectDir` from this file needs
+// to change.
 export { encodeProjectDir };
 
 // The session uuid is not knowable from here, so take the most recently active
-// one. Rank on the newest TRANSCRIPT mtime, not on the subagents directory's
-// own: a directory's mtime moves when an entry is created or removed, never
-// when a file inside it is appended to. Ranking on the directory therefore
-// tracked the last agent SPAWN rather than the last agent activity — and since
-// the cockpit launches in run-team phase 0, before the first agent spawns, the
-// live session has no subagents dir yet and a PREVIOUS session won. The board
-// would render a prior run's spend as this run's, then silently switch when the
+// one — across BOTH trees, in one ranking, so a cwd that has run under each
+// harness still resolves to whichever session is writing now. Rank on the
+// newest TRANSCRIPT mtime, not on the session directory's own: a directory's
+// mtime moves when an entry is created or removed, never when a file inside
+// it is appended to. Ranking on the directory therefore tracked the last
+// agent SPAWN rather than the last agent activity — and since the cockpit
+// launches in run-team phase 0, before the first agent spawns, the live
+// session has no transcript yet and a PREVIOUS session won. The board would
+// render a prior run's spend as this run's, then silently switch when the
 // first agent landed. That is the one failure mode here that produces
 // confidently wrong numbers rather than no numbers.
 //
-// Returns { error } when the project dir cannot be resolved at all — a bug that
-// never fixes itself — and null when it resolves but holds no sessions yet,
-// which is normal at run start. Collapsing those two into one bare null is what
-// hid the encoding bug above.
+// Returns { error } when neither harness has a project dir for this cwd — a
+// bug that never fixes itself — and null when one resolves but holds no
+// sessions yet, which is normal at run start. Collapsing those two into one
+// bare null is what hid the encoding bug above. A tree whose listing THROWS is
+// { error } too, even with the other tree readable: the one we cannot read
+// may hold the live session, and ranking only the other would put a stale
+// session's numbers up as this run's — the failure mode above.
 export function findSubagentsDir(home = process.env.HOME, cwd = process.cwd()) {
   try {
-    const projects = join(home, ".claude", "projects", encodeProjectDir(cwd));
-    if (!existsSync(projects)) return { error: `no transcript dir for cwd ${cwd} (looked in ${projects})` };
-    const cands = readdirSync(projects)
-      .map((s) => join(projects, s, "subagents"))
-      .filter((d) => existsSync(d))
+    const trees = [claudeSessionDirs(home, cwd), ompSessionDirs(home, cwd)];
+    if (trees.every((t) => t.dirs === null)) {
+      return { error: `no transcript dir for cwd ${cwd} (looked in ${trees.map((t) => t.root).join(" and ")})` };
+    }
+    const cands = trees.flatMap((t) => t.dirs ?? [])
       .map((d) => ({ d, m: newestTranscriptMs(d) }))
       .sort((a, b) => b.m - a.m);
     return cands.length ? cands[0].d : null;
   } catch (e) { return { error: `transcript lookup failed: ${e.message}` }; }
 }
 
-// Newest *.jsonl mtime in a subagents dir, 0 if it holds none. A dir whose
-// transcripts are all unreadable loses to one that is readable, which is the
-// behaviour we want when picking "the live session".
+// Each harness's candidate session directories for this cwd. `dirs: null`
+// means the harness has no project dir here at all; `[]` means it has one
+// holding no session yet. `root` is where it looked, for the error above.
+function claudeSessionDirs(home, cwd) {
+  const root = join(home, ".claude", "projects", encodeProjectDir(cwd));
+  if (!existsSync(root)) return { root, dirs: null };
+  return { root, dirs: readdirSync(root).map((s) => join(root, s, "subagents")).filter((d) => existsSync(d)) };
+}
+
+// Only the `<ISO>_<uuid>` DIRECTORIES are sessions. The project dir also holds
+// each session's MAIN transcript as a plain file sibling to its directory —
+// the controller's own, never a member's, the same way Claude's
+// `<session-uuid>.jsonl` beside its directory is never a candidate either.
+//
+// encodeOmpProjectDir realpath-resolves a cwd outside $HOME, which throws when
+// that cwd does not exist. No omp session can be keyed on such a cwd, so that
+// is this tree's absence — not a lookup fault that would also black out a
+// readable Claude tree beside it.
+function ompSessionDirs(home, cwd) {
+  const sessions = join(home, ".omp", "agent", "sessions");
+  let root;
+  try { root = join(sessions, encodeOmpProjectDir(cwd, { home })); } catch { return { root: sessions, dirs: null }; }
+  if (!existsSync(root)) return { root, dirs: null };
+  const dirs = readdirSync(root, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && isOmpSessionDirName(e.name))
+    .map((e) => join(root, e.name));
+  return { root, dirs };
+}
+
+// Newest *.jsonl mtime directly inside a session's transcript dir, 0 if it
+// holds none. A dir whose transcripts are all unreadable loses to one that is
+// readable, which is the behaviour we want when picking "the live session".
 //
 // The scan is wrapped for the same reason the per-file stat below is. This runs
 // once per CANDIDATE, so an uncaught throw here does not just lose one dir — it
@@ -806,7 +850,10 @@ function readAgent(file, metaFile) {
 // that matters here.
 
 // Scope is the SESSION directory, which is the closest thing to a run boundary
-// that actually exists on disk — one Claude Code session, one folder.
+// that actually exists on disk — one harness session, one folder. Which
+// harness wrote it is read off the directory's own NAME: an omp session dir is
+// `<ISO>_<uuid>` (member-record.mjs's isOmpSessionDirName, the rule its own
+// readers dispatch on), and anything else is read as Claude's `subagents/`.
 //
 // `sinceMs` is opt-in and defaults to no filter. An earlier attempt defaulted it
 // to the ledger's mtime as a "run start" marker; that is wrong and silently
@@ -853,63 +900,8 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
     }
     if (!dir) return null; // resolved, but this session has spawned no agents yet
 
-    const agents = [];
-    const toolTables = [];
-    let skipped = 0;
-    // #602: a corrupt meta sidecar does not throw past readAgent — the agent is
-    // still booked, under role "other" and its bare filename as label, which is
-    // indistinguishable on the page from a genuinely unnamed agent. `skipped`
-    // cannot carry this: that count means "contributed nothing", and this agent
-    // still does. A second tally, reaching the browser the same way `skipped`
-    // does — via this return and spendView's note — is the channel #325 shipped
-    // for the transcript half of this exact fault but not the sidecar half.
-    let metaErrors = 0;
-    // #916: the transcript-side sibling of the tally above, and the third
-    // distinct lie this panel can tell. `skipped` means a transcript
-    // contributed NOTHING; `metaErrors` means it contributed under a degraded
-    // role and label; `damaged` means it contributed but part of its spend is
-    // simply gone — the only one of the three that makes the NUMBERS beside it
-    // wrong. Folding it into either of the others would say something false,
-    // so it is its own count, summed over the whole dir per tick exactly as
-    // they are.
-    let damaged = 0;
-    for (const f of readdirSync(dir).filter((x) => x.endsWith(".jsonl"))) {
-      const file = join(dir, f);
-      // One unreadable transcript must not take the whole panel down with it.
-      // The file-level equivalent of the torn-line skip below: a transcript can
-      // vanish between readdir and read while an agent is being cleaned up, and
-      // losing every other agent's numbers over it would be a blackout, not
-      // degradation.
-      try {
-        // Filter on the transcript's own mtime, not on any timestamp inside it —
-        // an agent that ran before this run is simply not this run's cost.
-        if (sinceMs != null && statSync(file).mtimeMs < sinceMs) continue;
-        const a = readAgent(file, join(dir, f.replace(/\.jsonl$/, ".meta.json")));
-        // Both halves computed before either is recorded, so `skipped++` below
-        // always means "this transcript contributed nothing" — which is what the
-        // UI's "N transcripts skipped" claims. Pushing the agent first would let
-        // a throw from the tool half bill the agent AND count it as skipped.
-        // Unreachable today: nothing readAgent emits can make attributeTools
-        // throw, and readAgent's own throws land here before anything is pushed.
-        // Ordering, not a guard — keep it if this block is edited again.
-        const tools = attributeTools(a.entries);
-        if (a.metaFault) metaErrors++;
-        // Beside metaErrors deliberately: past the throw-capable work above and
-        // ahead of the push, so the invariant that comment states keeps holding
-        // — a transcript that ends up `skipped` ("contributed nothing") can
-        // never also report damaged lines on top of it.
-        damaged += a.damaged;
-        agents.push({
-          label: a.meta.description ?? f.replace(/^agent-|\.jsonl$/g, ""),
-          role: classifyRole(claudeRoleSignals(a.meta)),
-          cacheWrite: a.cacheWrite, output: a.output, cacheRead: a.cacheRead, maxCtx: a.maxCtx,
-        });
-        toolTables.push(tools);
-      } catch (e) {
-        skipped++;
-        warnOnce("skips", file, `skipping ${file}: ${e.message}`);
-      }
-    }
+    const read = isOmpSessionDirName(basename(dir)) ? readOmpSpend(dir, sinceMs) : readClaudeSpend(dir, sinceMs);
+    const { agents, skipped, metaErrors, damaged } = read;
     if (!agents.length) {
       if (skipped) return { ok: false, error: `all ${skipped} transcripts unreadable` };
       // #1679: only for an EXPLICIT override — never the heuristic's own
@@ -923,7 +915,14 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
       return null;
     }
     const spend = computeSpend({ agents, topN });
-    const tools = mergeTools(toolTables);
+    // #1716: omp has no tool table yet — say so in the payload, never an empty
+    // or zeroed one, which would read as "no tool spend" rather than "not
+    // measured". `tools`/`attributedPct` stay present as null so nothing
+    // downstream mistakes a missing key for an old payload.
+    if (read.toolsUnavailable) {
+      return { ...spend, tools: null, attributedPct: null, toolsUnavailable: read.toolsUnavailable, skipped, metaErrors, damaged, since: sinceMs, ok: true };
+    }
+    const tools = mergeTools(read.toolTables);
     // What fraction of cache_creation the tool table actually explains. It is
     // never 100%: only a turn that FOLLOWS a tool result can be attributed to a
     // tool, and an agent's first turn — usually its largest single write, the
@@ -951,6 +950,110 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
     warnOnce("spend-read-failed", e.message, `spend read failed: ${e.message}`);
     return { ok: false, error: e.message };
   }
+}
+
+// Claude's side of gatherSpend: one agent per `subagents/*.jsonl`, through
+// readAgent above, plus the per-agent tool tables the panel's second column is
+// built from.
+function readClaudeSpend(dir, sinceMs) {
+  const agents = [];
+  const toolTables = [];
+  let skipped = 0;
+  // #602: a corrupt meta sidecar does not throw past readAgent — the agent is
+  // still booked, under role "other" and its bare filename as label, which is
+  // indistinguishable on the page from a genuinely unnamed agent. `skipped`
+  // cannot carry this: that count means "contributed nothing", and this agent
+  // still does. A second tally, reaching the browser the same way `skipped`
+  // does — via this return and spendView's note — is the channel #325 shipped
+  // for the transcript half of this exact fault but not the sidecar half.
+  let metaErrors = 0;
+  // #916: the transcript-side sibling of the tally above, and the third
+  // distinct lie this panel can tell. `skipped` means a transcript
+  // contributed NOTHING; `metaErrors` means it contributed under a degraded
+  // role and label; `damaged` means it contributed but part of its spend is
+  // simply gone — the only one of the three that makes the NUMBERS beside it
+  // wrong. Folding it into either of the others would say something false,
+  // so it is its own count, summed over the whole dir per tick exactly as
+  // they are.
+  let damaged = 0;
+  for (const f of readdirSync(dir).filter((x) => x.endsWith(".jsonl"))) {
+    const file = join(dir, f);
+    // One unreadable transcript must not take the whole panel down with it.
+    // The file-level equivalent of the torn-line skip below: a transcript can
+    // vanish between readdir and read while an agent is being cleaned up, and
+    // losing every other agent's numbers over it would be a blackout, not
+    // degradation.
+    try {
+      // Filter on the transcript's own mtime, not on any timestamp inside it —
+      // an agent that ran before this run is simply not this run's cost.
+      if (sinceMs != null && statSync(file).mtimeMs < sinceMs) continue;
+      const a = readAgent(file, join(dir, f.replace(/\.jsonl$/, ".meta.json")));
+      // Both halves computed before either is recorded, so `skipped++` below
+      // always means "this transcript contributed nothing" — which is what the
+      // UI's "N transcripts skipped" claims. Pushing the agent first would let
+      // a throw from the tool half bill the agent AND count it as skipped.
+      // Unreachable today: nothing readAgent emits can make attributeTools
+      // throw, and readAgent's own throws land here before anything is pushed.
+      // Ordering, not a guard — keep it if this block is edited again.
+      const tools = attributeTools(a.entries);
+      if (a.metaFault) metaErrors++;
+      // Beside metaErrors deliberately: past the throw-capable work above and
+      // ahead of the push, so the invariant that comment states keeps holding
+      // — a transcript that ends up `skipped` ("contributed nothing") can
+      // never also report damaged lines on top of it.
+      damaged += a.damaged;
+      agents.push({
+        label: a.meta.description ?? f.replace(/^agent-|\.jsonl$/g, ""),
+        role: classifyRole(claudeRoleSignals(a.meta)),
+        cacheWrite: a.cacheWrite, output: a.output, cacheRead: a.cacheRead, maxCtx: a.maxCtx,
+      });
+      toolTables.push(tools);
+    } catch (e) {
+      skipped++;
+      warnOnce("skips", file, `skipping ${file}: ${e.message}`);
+    }
+  }
+  return { agents, toolTables, skipped, metaErrors, damaged };
+}
+
+// omp's side (#1716): one agent per member transcript anywhere under the
+// session dir — a nested member's too, at its own spawnDepth — read by
+// member-record.mjs's own omp reader, readOmpMember over the walk
+// readOmpSession uses, never a second parse of omp's line shape. So each row's
+// totals, model and role are exactly the member record's: role from
+// `session_init`'s agent definition, task and AgentId, label the AgentId
+// itself (the path-relative stem, `review-pr-12/Security` for a nested one).
+//
+// Per-transcript tolerance is this file's, not readOmpSession's: that reader
+// drops an unreadable file in silence and lets a wrong-harness refusal
+// propagate, and here both are one transcript's fault, so both land in
+// `skipped` with a stderr line, the same as a broken Claude transcript. A
+// transcript readOmpMember answers null for (no assistant turn yet — a member
+// dispatched this second) has spent nothing, so it is neither booked nor
+// skipped.
+//
+// `metaErrors` and `damaged` are 0 by construction here, not by measurement:
+// omp has no dispatch sidecar to corrupt, and foldOmpTranscript drops an
+// unparseable line without counting it (one line is one whole turn there, so
+// a tear costs that turn and cannot corrupt a fold-back).
+function readOmpSpend(dir, sinceMs) {
+  const agents = [];
+  let skipped = 0;
+  for (const { file, agent, spawnDepth } of ompSessionTranscripts(dir)) {
+    try {
+      if (sinceMs != null && statSync(file).mtimeMs < sinceMs) continue;
+      const m = readOmpMember(readFileSync(file, "utf8"), file, agent, spawnDepth);
+      if (!m) continue;
+      agents.push({
+        label: m.member, role: m.role, model: m.model,
+        cacheWrite: m.tokens_cache_create, output: m.tokens_out, cacheRead: m.tokens_cache_read,
+      });
+    } catch (e) {
+      skipped++;
+      warnOnce("skips", file, `skipping ${file}: ${e.message}`);
+    }
+  }
+  return { agents, skipped, metaErrors: 0, damaged: 0, toolsUnavailable: "tool attribution not available on omp yet" };
 }
 
 // `workspace`/`port` are the caller's answers, never read in here (#1584):

@@ -225,11 +225,15 @@ export function computeSpend({ agents = [], topN = 8 } = {}) {
     .map(([role, b]) => ({ role, ...b, pct: share(b.cacheWrite) }))
     .sort((a, b) => b.cacheWrite - a.cacheWrite);
 
+  // `model` rides along only where the harness reader supplied one — omp's
+  // member record carries it (#1716); Claude's readAgent row does not, and
+  // its payload stays exactly as it was rather than gaining a null column.
   const top = [...agents]
     .sort((a, b) => (b.cacheWrite ?? 0) - (a.cacheWrite ?? 0))
     .slice(0, topN)
     .map((a) => ({
       label: a.label ?? "?", role: a.role ?? "other",
+      ...(a.model != null && { model: a.model }),
       cacheWrite: a.cacheWrite ?? 0, maxCtx: a.maxCtx ?? 0, pct: share(a.cacheWrite ?? 0),
     }));
 

@@ -251,7 +251,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   // flag the operator typed.
   if (isFlagLike(file)) die("--file needs a path");
 
-  // findSubagentsDir() (board.mjs) returns .../<session>/subagents; a human
+  // findSubagentsDir() (board.mjs) returns .../<session>/subagents on Claude
+  // (the omp session dir itself on omp, which needs no unwrapping); a human
   // types the session dir instead. Accept both rather than making the caller
   // remember which.
   const arg = dirs[0].replace(/\/+$/, "");
