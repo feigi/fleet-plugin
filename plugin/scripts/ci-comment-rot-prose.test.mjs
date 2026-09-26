@@ -147,6 +147,16 @@ test("the vendored-tree sentence makes a structural claim, not a size claim", ()
   );
 });
 
+// A comment block cut into sentences, for the two pins below that require a
+// claim and its negation to share one. A period closing an abbreviation that
+// never ends a sentence — "e.g.", "i.e.", "cf.", "viz.", "vs." — is no break:
+// splitting there scattered one sentence's words across two fragments, neither
+// of which satisfied the pin, so a paraphrase using one was refused (#1852).
+// "etc." is deliberately absent: it ends sentences as often as not, and reading
+// past it would join two real sentences — the block-wide scan windowClaimFault's
+// ceiling exists to forbid.
+const sentences = (block) => block.split(/(?<=[.!?])(?<!\b(?:e\.g|i\.e|cf|viz|vs)\.)\s+/i);
+
 // #1753. The comment above the setup-node step that owns `.nvmrc`'s explanation
 // says Renovate moves the pin on a schedule. Read alone, that schedule looks
 // like a promise about when the bump LANDS, and it never was one: the window
@@ -166,7 +176,7 @@ export function windowClaimFault(block) {
   if (!/\b(schedule|window)\b/i.test(block)) {
     return "the pin's comment no longer says the bot moves .nvmrc on a schedule — the pointer to how it moves is gone";
   }
-  const bounded = block.split(/(?<=[.!?])\s+/).some((s) => {
+  const bounded = sentences(block).some((s) => {
     if (!/\b(schedule|window)\b/i.test(s)) return false;
     if (!/\b(open|opens|opened|opening|create|creates|created|creating|creation|raise|raises|raised|raising)\b/i.test(s)) return false;
     if (!/\b(PRs?|pull requests?)\b/i.test(s)) return false;
@@ -179,7 +189,9 @@ export function windowClaimFault(block) {
     // misreading #1753 exists to rule out, e.g. "the PR merges whenever the window
     // is open" (#1838 — reproduced by direct execution against this function).
     if (/\b(schedule|window)\b/i.test(s.slice(mergeAt))) return false;
-    const NEGATION = /\b(not|never|nothing|regardless|whenever)\b|n't\b/i;
+    // "cannot" is "can not" fused, whose two-word form already passed on "not";
+    // ’ is the apostrophe smart quotes type into "doesn’t" (#1852).
+    const NEGATION = /\b(not|cannot|never|nothing|regardless|whenever)\b|n['’]t\b/i;
     return NEGATION.test(s.slice(0, mergeAt)) || NEGATION.test(s.slice(mergeAt));
   });
   return bounded
@@ -285,6 +297,35 @@ test("windowClaimFault refuses a merge promise stated via 'whenever'/'regardless
   );
 });
 
+test("windowClaimFault accepts a paraphrase negated by 'cannot' or a curly apostrophe, or broken by 'e.g.' (#1852)", () => {
+  const lead = ".nvmrc holds an EXACT version, and Renovate moves it on a monthly schedule rather than a human noticing: see ADR 0010.";
+  const tail = "Do not hand-edit this to float.";
+
+  // Each carries its negation in exactly the form named, and nowhere else.
+  assert.equal(
+    windowClaimFault(`${lead} That schedule's window bounds when the bot opens its PR; it doesn’t decide when the PR merges. ${tail}`),
+    null,
+  );
+  assert.equal(
+    windowClaimFault(`${lead} The window bounds when the bot opens its PR, and it cannot hurry or delay when the PR merges. ${tail}`),
+    null,
+  );
+  assert.equal(
+    windowClaimFault(`${lead} The window bounds when the bot opens its PR (e.g. once a month), not when the PR merges. ${tail}`),
+    null,
+  );
+});
+
+test("a period after 'etc.' still ends the sentence, so the next one's negation cannot rescue a merge promise (#1852)", () => {
+  // Read as one sentence this is accepted — the trailing "Do not" supplies the
+  // negation. "etc." ends sentences as often as not, so it is no abbreviation
+  // the splitter may skip: skipping it is the block-wide scan the ceiling bans.
+  assert.match(
+    windowClaimFault("In the window the bot opens its PR and merges it, etc. Do not hand-edit this to float."),
+    /no longer says, in one sentence/,
+  );
+});
+
 test("pinOwnerComment refuses to pick silently between two setup-node comments that both cite ADR 0010 (#1838)", () => {
   const lines = [
     "      # decoy: cites ADR 0010 but is not the real pin,",
@@ -337,7 +378,7 @@ test("a one-line pointer citing ADR 0010 is never taken for the owner (#1756)", 
 export function pointerFault({ block, lines }) {
   if (lines === 0) return "carries no comment at all — no pointer to ADR 0010 or the do-not-hand-edit rule";
   if (!block.includes("ADR 0010")) return "no longer points at ADR 0010";
-  const rule = block.split(/(?<=[.!?])\s+/).some((s) => {
+  const rule = sentences(block).some((s) => {
     const m = /hand-?edit\w*/i.exec(s);
     if (!m) return false;
     const tokens = s.split(/\s+/);
@@ -353,7 +394,8 @@ export function pointerFault({ block, lines }) {
     if (idx === -1) return false;
     const WINDOW = 6;
     const nearby = tokens.slice(Math.max(0, idx - WINDOW), idx + WINDOW + 1).join(" ");
-    return /\b(?:not|never|no)\b/i.test(nearby) || /n't\b/i.test(nearby);
+    // The same two spellings windowClaimFault's NEGATION accepts (#1852).
+    return /\b(?:not|cannot|never|no)\b/i.test(nearby) || /n['’]t\b/i.test(nearby);
   });
   if (!rule) return "no longer carries the do-not-hand-edit rule";
   if (lines > 1) return "has grown past one line — a pointer that copies the owner's paragraph is the drift it exists to avoid";
@@ -404,4 +446,12 @@ test("a negation sharing hand-edit's sentence but not touching it is still a mis
     pointerFault(at("      # Renovate no longer manages this on its own — hand-edit if it drifts. See ADR 0010.")),
     /do-not-hand-edit rule/,
   );
+});
+
+test("pointerFault accepts a rule negated by 'cannot' or a curly apostrophe, or broken by 'e.g.' (#1852)", () => {
+  const at = (...comment) => setupNodeComments(["  job:", ...comment, "      - uses: actions/setup-node@v5"])[0];
+
+  assert.equal(pointerFault(at("      # .nvmrc is exact and bot-moved (ADR 0010); it cannot be hand-edited to float.")), null);
+  assert.equal(pointerFault(at("      # Exact pin Renovate moves: see ADR 0010. Don’t hand-edit this to float.")), null);
+  assert.equal(pointerFault(at("      # Never, e.g. for a patch, hand-edit this pin: see ADR 0010.")), null);
 });
