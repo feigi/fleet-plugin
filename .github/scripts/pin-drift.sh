@@ -29,16 +29,30 @@
 # opens on the 1st to the next one opened as its window closes at the end of
 # the 3rd — up to 34 days across a 31-day month, and a hosted run that comes
 # late inside the window is already inside that figure — plus however long
-# that last PR's checks take to go green, since the merge waits on them, not
-# on the window. 35 days leaves about a day for those checks; a bump PR that
-# goes red and stays red longer than that trips it in such a month, like any
-# other pin that sat still past the bound. It is short of the 43-day
-# precedent with room for the workflow's weekly cadence: a stall that starts
-# right after a run is still caught by day 35 + 7 = 42 — which is also why
-# the slack cannot simply grow: at 36 the worst case is caught on day 43, no
-# longer short of it. A month where node ships nothing on the pinned line
-# trips it too — correctly: the pin did not move, and a human glancing at
-# that is the whole ask.
+# that last PR's checks take to go green, since a minor or patch bump is
+# automerged: its merge waits on them, not on the window. 35 days leaves
+# about a day for those checks; a bump PR that goes red and stays red longer
+# than that trips it in such a month, like any other pin that sat still past
+# the bound. It is short of the 43-day precedent with room for the workflow's
+# weekly cadence: a stall that starts right after a run is still caught by
+# day 35 + 7 = 42 — which is also why the slack cannot simply grow: at 36 the
+# worst case is caught on day 43, no longer short of it. A month where node
+# ships nothing on the pinned line trips it too — correctly: the pin did not
+# move, and a human glancing at that is the whole ask.
+#
+# A major is left out of that arithmetic on purpose. Its PR opens in the same
+# window but is not automerged: it waits on a human, so no drift bound holds
+# for it (ADR 0010 point 3), and no slack added here could outwait a human who
+# has not got to it yet — while any slack past 35 gives up the day-42 catch
+# above. It needs none. Renovate raises the pinned line's own minor and patch
+# bumps in a PR of their own beside a pending major (separateMajorMinor, on by
+# default), so those keep landing and the bound above keeps measuring them. A
+# major holds the pin still only when it is the one move on offer, the pinned
+# line having shipped nothing newer, and then it trips this exactly as that
+# empty month does — correctly, with its PR already waiting on the human the
+# red run asks for. Excusing it by asking the host whether a major is open is
+# the integration question this script refuses: an uninstalled app answers
+# nothing, and a major nobody gets to would silence the report for good.
 #
 # Every way of failing to READ the history is exit 2, never exit 0 or a bare
 # abort. A shallow clone is the dangerous one: its boundary commit shows every
@@ -106,7 +120,7 @@ fi
 
 if [ "$age" -gt $(( MAX_DAYS * 86400 )) ]; then
   verdict="stalled"
-  msg="$PIN has held $pin for over $age_days days (last moved in $short, $moved_iso) — longer than the $MAX_DAYS-day drift bound. The bot that moves it (ADR 0010) has likely stopped: check the Renovate app is installed and not suspended, and whether a bump PR is sitting red or was closed."
+  msg="$PIN has held $pin for over $age_days days (last moved in $short, $moved_iso) — longer than the $MAX_DAYS-day drift bound. The bot that moves it (ADR 0010) has likely stopped: check the Renovate app is installed and not suspended, and whether a bump PR is sitting red, was closed, or is a major waiting on a human to merge it."
   echo "::error file=$PIN,title=Node pin stalled::$msg"
 else
   verdict="moving"
