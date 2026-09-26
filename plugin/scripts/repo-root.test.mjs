@@ -487,18 +487,28 @@ test("trackedNodeScripts reads a first line no further than its cap — one that
 
 // A tracked path the working tree holds no regular file at has no text for a
 // sweep to read: an `rm` or `mv` not yet committed, a dangling symlink, a
+// symlink that loops (ELOOP — no reader can ever open a file there, #1950), a
 // directory where a file is tracked (a symlink to one, or a submodule's gitlink
 // checked out on disk), and a file standing where a tracked path's own
 // directory was. Every export passes over it, and none may throw: each sweep
-// lists at module scope, then reads every path it was handed, and one listed
-// absent path aborted that read with a raw ENOENT — every real hit in every
-// other file went unreported (#1910). A symlink to a regular file is the ACCEPT
-// half: its text is there to read.
+// lists at module scope, so a throw here fails that whole file before any of
+// its tests run (#1950), and it then reads every path it was handed, and one
+// listed absent path aborted that read with a raw ENOENT — every real hit in
+// every other file went unreported (#1910). A symlink to a regular file is the
+// ACCEPT half: its text is there to read.
 test("every export passes over a tracked path the working tree holds no regular file at", (t) => {
   const { dir } = repoTracking(t, ["kept.sh", "kept.mjs", "NOTES", "gone.sh", "gone.mjs", "gone", "now-a-dir.sh", "was-a-dir/x.sh"]);
-  symlinkSync("kept.sh", join(dir, "link-to-file.sh"));
-  symlinkSync("nowhere.sh", join(dir, "dangling.sh"));
-  execFileSync("git", ["add", "--", "link-to-file.sh", "dangling.sh"], { cwd: dir, env: ENV });
+  // Each link and what it names. Self-referential, and a two-link cycle: each
+  // resolves to itself forever. The extensionless one is what
+  // `trackedNodeScripts` would open to read a shebang from, where a `.mjs` is
+  // listed by its extension alone.
+  const links = {
+    "link-to-file.sh": "kept.sh", "dangling.sh": "nowhere.sh",
+    "loop.sh": "loop.sh", "loop.mjs": "loop.mjs", "loop": "loop",
+    "cycle-a.sh": "cycle-b.sh", "cycle-b.sh": "cycle-a.sh",
+  };
+  for (const [link, target] of Object.entries(links)) symlinkSync(target, join(dir, link));
+  execFileSync("git", ["add", "--", ...Object.keys(links)], { cwd: dir, env: ENV });
   for (const f of ["gone.sh", "gone.mjs", "gone", "now-a-dir.sh"]) rmSync(join(dir, f));
   mkdirSync(join(dir, "now-a-dir.sh"));
   rmSync(join(dir, "was-a-dir"), { recursive: true });
@@ -510,6 +520,31 @@ test("every export passes over a tracked path the working tree holds no regular 
     "the shell-script answer passes over the same absent paths");
   assert.deepEqual(trackedNodeScripts(dir), ["kept.mjs"],
     "the node-script answer passes over them too — an absent `.mjs` included, which its extension alone once listed");
+});
+
+// The other side of that line, and what widening it would silently cost: a
+// tracked path the probe could not LOOK at is not an answer about it — #1149's
+// rule, the one `repoRoot` keeps below. A directory the reader may not search
+// hides a file that may well be there and ship, so passing over it would drop
+// it from every sweep with nothing to say so. Every export throws instead,
+// naming the path; in a sweep that lands at module load, which is where
+// `repoRoot`'s own "could not answer" lands too (#1950). Declines under root
+// for the reason the unreadable-`.git` test below gives.
+test("every export throws for a tracked path it could not look at — never passes over it", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads every directory");
+
+  const { dir } = repoTracking(t, ["kept.sh", "locked/x.sh"]);
+  const locked = join(dir, "locked");
+  chmodSync(locked, 0o000);
+  try {
+    const couldNotLook = { code: "EACCES", path: join(locked, "x.sh") };
+    assert.throws(() => trackedPaths(dir), couldNotLook, "a path nobody could look at is not one with no file behind it");
+    assert.throws(() => trackedShellScripts(dir), couldNotLook, "the shell-script answer does not pass over it either");
+    assert.throws(() => trackedNodeScripts(dir), couldNotLook, "nor does the node-script answer");
+  } finally {
+    // Before the fixture's own cleanup, which cannot remove what it cannot enter.
+    chmodSync(locked, 0o700);
+  }
 });
 
 // The half a skip cannot pin from inside itself, and the exact conflation #1149

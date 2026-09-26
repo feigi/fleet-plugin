@@ -331,16 +331,37 @@ export function skipWithoutRepo(root, subject) {
     : false;
 }
 
+// The `stat` failures that ARE an answer — the working tree holds no regular
+// file at the path, for any reader — rather than a failure to look: nothing
+// there at all (ENOENT); a file standing where one of the path's own
+// directories should be (ENOTDIR); and a symlink that loops, or chains past the
+// kernel's link limit (ELOOP), which no reader can ever open a file through
+// (#1950). `root` is git's own resolved toplevel, so every link counted toward
+// that limit is one inside the tracked path itself — a fact about the tree,
+// not about where the checkout sits.
+//
+// Every other code is a probe that could not look — EACCES from a directory
+// the reader may not search, ENAMETOOLONG from a checkout nested past the
+// OS's path limit, EIO — where a file may well be there and ship. Passing
+// over one would drop it from every sweep with nothing to say so, so those
+// throw, and in a sweep that lists at module scope the throw fails the whole
+// file: the loud module-load failure the header above keeps for `repoRoot`'s
+// own "git cannot answer the question", and for the same reason.
+const NO_REGULAR_FILE_THERE = new Set(["ENOENT", "ENOTDIR", "ELOOP"]);
+
 /**
  * Whether the working tree holds a regular file at `path`, following a symlink
- * to whatever it names — a link to a file is one, a dangling link is not.
- * Nothing there at all (ENOENT) and a file standing where one of the path's
- * own directories should be (ENOTDIR) are both "no" — `throwIfNoEntry: false`
- * answers `undefined` for exactly those two codes and no other; any other
- * failure to look still throws.
+ * to whatever it names — a link to a file is one; a dangling link, a looping
+ * one, a directory and nothing at all are not. A failure outside
+ * NO_REGULAR_FILE_THERE throws.
  */
 function isRegularFile(path) {
-  return statSync(path, { throwIfNoEntry: false })?.isFile() === true;
+  try {
+    return statSync(path).isFile();
+  } catch (e) {
+    if (NO_REGULAR_FILE_THERE.has(e.code)) return false;
+    throw e;
+  }
 }
 
 /**
@@ -361,14 +382,16 @@ function isRegularFile(path) {
  * it.
  *
  * A tracked path the working tree holds no regular file at is not in the
- * answer: an `rm` or `mv` not yet committed, a dangling symlink, a directory
- * where a file is tracked (a symlink to one, or a submodule's gitlink checked
- * out on disk), a file standing where the path's own directory was. Every
- * caller reads each path it is handed, and one absent path in the answer
+ * answer: an `rm` or `mv` not yet committed, a symlink that dangles or loops, a
+ * directory where a file is tracked (a symlink to one, or a submodule's gitlink
+ * checked out on disk), a file standing where the path's own directory was.
+ * Every caller reads each path it is handed, and one absent path in the answer
  * aborted that read with a raw ENOENT, leaving every real finding in every
  * other file unreported (#1910). Passing over it lets nothing ship unswept: a
  * deletion that is committed does not ship, and one that is not is swept again
- * in any checkout that has the file.
+ * in any checkout that has the file; a link with no file behind it has no text
+ * to sweep. A path the probe could not look at is not one of these — it
+ * throws, as NO_REGULAR_FILE_THERE says.
  *
  * GIT_DIR scrubbed (#1599, gitEnv()): measured, an ambient GIT_DIR silently
  * substitutes a DIFFERENT repository's tracked list for `root`'s own — the
