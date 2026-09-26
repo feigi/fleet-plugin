@@ -370,7 +370,7 @@ const FILES = [
     path: ["..", ".github", "workflows", "pin-drift.yml"],
     stale: [
       /\b1st(?:\s|#)+of(?:\s|#)+each(?:\s|#)+month\b/,
-      /00:00\s*[–-]\s*04:59/,
+      /00:00(?:\s|#)*[–-](?:\s|#)*04:59/,
       /\bnever(?:\s|#)+races\b/,
     ],
     live: [],
