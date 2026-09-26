@@ -201,16 +201,31 @@ export function windowClaimFault(block) {
 
 // Every setup-node step's contiguous comment run: its prose, how many comment
 // lines it spans, and the job it sits in — anchored on the step, never a line
-// number. Exported with an optional `lines` override (same idiom as
-// windowClaimFault's `block` param and citationFault's `citing`/`cited`
-// params) so a test can feed it synthetic input the real ci.yml does
-// not contain; the production call sites take no argument and read the real
-// file. The owner pin and the pointer pin both read the steps through this, so
-// they cannot disagree about where a step's comment starts.
+// number. A step is found by its `uses: actions/setup-node@` key wherever that
+// key sits in the step, and its comment is the run above the step's own `- `
+// opener, where a reader meets it (#1873). Exported with an optional `lines`
+// override (same idiom as windowClaimFault's `block` param and citationFault's
+// `citing`/`cited` params) so a test can feed it synthetic input the real
+// ci.yml does not contain; the production call sites take no argument and read
+// the real file. The owner pin and the pointer pin both read the steps through
+// this, so they cannot disagree about where a step's comment starts.
 export function setupNodeComments(lines = read("../../.github/workflows/ci.yml").split("\n")) {
   const found = [];
-  for (let step = 0; step < lines.length; step++) {
-    if (!/^\s*- uses: actions\/setup-node@/.test(lines[step])) continue;
+  for (let at = 0; at < lines.length; at++) {
+    const uses = /^(\s*)(-\s+)?uses:\s*["']?actions\/setup-node@/.exec(lines[at]);
+    if (!uses) continue;
+    // `- uses:` opens its own step. Any other `uses:` belongs to the first
+    // line above it that sits shallower than the key — sibling keys share its
+    // column, their values sit deeper — and that line is the step's opener only
+    // if it opens a sequence entry. `run: |` or `with:` there means the match
+    // was never a step's own key.
+    let step = at;
+    if (!uses[2]) {
+      const depth = uses[1].length;
+      step--;
+      while (step >= 0 && (/^\s*(?:#|$)/.test(lines[step]) || lines[step].search(/\S/) >= depth)) step--;
+      if (step < 0 || !/^\s*-(?:\s|$)/.test(lines[step])) continue;
+    }
     let i = step;
     while (i > 0 && /^\s*#/.test(lines[i - 1])) i--;
     let j = step;
