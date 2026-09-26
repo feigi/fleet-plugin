@@ -145,6 +145,42 @@ export function paragraph(text, anchor, what, options) {
   return end === -1 ? rest : rest.slice(0, end);
 }
 
+// Prose cut into sentences, for a pin that holds a claim to ONE sentence. A
+// sentence ends at `.`, `!` or `?` followed by whitespace, with any closing
+// marks between the two — `.**`, `.)`, `."` — so a bold lead-in, a
+// parenthetical sentence or a quoted one ends where its reader sees it end.
+// Without them a pinned sentence runs on into whatever follows a bold one, a
+// shape run-team's SKILL.md opens paragraphs with throughout (#1940). A
+// backtick is not one: a code span ending in punctuation (`git restore .`,
+// `runSubprocess(...)`) sits mid-sentence far more often than it ends one.
+//
+// A period closing an abbreviation that never ends a sentence — "e.g.",
+// "i.e.", "cf.", "viz.", "vs." — is no break, closing marks or not ("e.g.)"):
+// splitting there scattered one sentence's words across two fragments, neither
+// of which satisfied the pin, so a paraphrase using one was refused (#1852).
+// "etc." is deliberately absent: it ends sentences as often as not, and reading
+// past it would join two real sentences. A period inside a word ("ci.yml",
+// "v1.2") is no break either, since no whitespace follows it.
+//
+// This replaces the first-period `[^.]*` scan (#1898, #1940), which is wrong
+// both ways at once: it ends the window at every period above, and it runs
+// straight past a `?` or `!` into the next sentence. Which of the two is the
+// SILENT direction depends on the pin. For one that requires something to be
+// IN the sentence, a window cut short reds on a valid rewording and a window
+// run long lets a neighbour supply what the sentence lacks; for one that checks
+// everything the sentence holds — citationFault's quoted spans — the two swap.
+// So a boundary this function misjudges is silent for some caller whichever
+// way it errs, and the calls above are the ones prose makes far more often
+// than not. Two it gets wrong: a bolded or quoted question used mid-sentence
+// as a name (`judge **decided?** — …`) splits, as a bare `?` always has; and a
+// whole sentence in parentheses mid-sentence ends the outer one at its `.)`.
+//
+// One definition, extracted (#1940) from ci-comment-rot-prose.test.mjs, where
+// it bounded ci.yml's comment prose alone — the same reason `paragraph()`
+// gives: a local copy is the defect, not a style choice.
+export const sentences = (block) =>
+  block.split(/(?<=[.!?][*_)"'\u201d\u2019]*)(?<!\b(?:e\.g|i\.e|cf|viz|vs)\.[*_)"'\u201d\u2019]*)\s+/i);
+
 // A phrase-bounded slice — `paragraph`'s shape, with the end bound a second
 // phrase instead of the next blank line. `from` is `anchorAt`'s own
 // exactly-once anchor; `to` is a phrase asserted exactly once inside the

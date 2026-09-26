@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { sentences } from "./prose-pin.mjs";
 
 // #389. The runbook calls the finisher an auditor, but its gate MUTATES: the
 // controller has it independently re-run the ticket's acceptance mutation, run
@@ -169,9 +170,13 @@ test("independent re-verification survives — the gate still mutates and runs t
   // finisher only through the controller's prompt — there is no fleet-finisher
   // agent definition to carry a default — and the runbook's pass-list named
   // the workflow and the fix-applier only, so the gate shipped unenforceable.
-  assert.match(
-    duty1Text(),
-    /Give it `<testCmd>` too[^.]*duty 2's mutation gate runs it/,
+  //
+  // The instruction and its reason in ONE sentence, `sentences()`'s (#1940).
+  // The first-period `[^.]*` gap this replaces refused a valid rewording with
+  // an "e.g." or a filename between the two, and ran on past a `?` or `!` —
+  // the latter nearly inert here, since both phrases must be verbatim anyway.
+  assert.ok(
+    sentences(duty1Text()).some((s) => /Give it `<testCmd>` too.*duty 2's mutation gate runs it/.test(s)),
     "the controller is no longer told to hand the finisher a `<testCmd>` — duty 2's placeholders reach it unsubstituted and the gate has no command to run",
   );
 });

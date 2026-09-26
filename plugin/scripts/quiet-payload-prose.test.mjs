@@ -102,7 +102,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { paragraph, runAbove } from "./prose-pin.mjs";
+import { paragraph, runAbove, sentences } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const read = (p) => readFileSync(join(REPO, ...p.split("/")), "utf8");
@@ -166,10 +166,25 @@ function siteSlice(name, anchor) {
 // sentence ABOUT the flag rather than whichever sentence says `drops` first.
 // It is matched and discarded, not captured: a clause starting at `--quiet`
 // would swallow the preamble the bound exists to exclude.
+//
+// The sentence is `sentences()`'s, never a first-period `[^.]*` window
+// (#1940). That window ran on past a `?` or `!`, so a statement naming one
+// field borrowed the other from the sentence after it — the incomplete copy
+// this file exists to catch, passing — and it stopped at a period no sentence
+// ends on (`ci-state.mjs`, "e.g."), reddening a complete one. Returns null when
+// no sentence in the slice has a `--quiet` followed by `drops`.
+export function quietClause(slice) {
+  for (const sentence of sentences(slice)) {
+    const clause = /`--quiet`[\s\S]*?(drops[\s\S]*)/.exec(sentence);
+    if (clause) return clause[1];
+  }
+  return null;
+}
+
 function dropsClause(name, anchor) {
-  const clause = siteSlice(name, anchor).match(/`--quiet`[^.]*?(drops[^.]*)/);
+  const clause = quietClause(siteSlice(name, anchor));
   assert.ok(clause, `${name}: the "${anchor}" paragraph no longer has a \`--quiet\` sentence saying what it drops`);
-  return clause[1];
+  return clause;
 }
 
 const SITES = [
@@ -190,3 +205,18 @@ for (const [name, anchor, label] of SITES) {
     }
   });
 }
+
+// #1940. The clause bound, fed statements no site holds today. Each refused one
+// leaves a field out of the `--quiet` sentence and names it in the next, where
+// it may even say the opposite. The first two passed the first-period window,
+// which ran on past a `!` or `?`; the third passes any splitter that misses a
+// bold sentence's closing `.**`. Each accepted one is complete, and that window
+// refused it for a period inside the sentence.
+test("a `--quiet` statement cannot borrow a field from the sentence after it, and a period inside it does not cut it short (#1940)", () => {
+  assert.equal(quietClause("Pass `--quiet` — that flag drops `jobs`! Without it, `missing` stays."), "drops `jobs`!");
+  assert.equal(quietClause("Does `--quiet` drop anything? It drops `jobs`, and `missing` stays in the payload."), null);
+  assert.equal(quietClause("**`--quiet` drops `jobs`.** Read `missing` from the full payload."), "drops `jobs`.**");
+
+  assert.equal(quietClause("Pass `--quiet`; ci-state.mjs then drops `jobs` and `missing`. Read the verdict."), "drops `jobs` and `missing`.");
+  assert.equal(quietClause("With `--quiet` the payload drops the per-job fields, e.g. `jobs` and `missing`. Next."), "drops the per-job fields, e.g. `jobs` and `missing`.");
+});

@@ -26,7 +26,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { accessSync, constants, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph, phrase } from "./prose-pin.mjs";
+import { between, paragraph, phrase, sentences } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -137,7 +137,12 @@ test("phase 0 step 0 pins the set, and only after the fast-forward", () => {
   between(RUN_TEAM, "git merge --ff-only origin/main", "**Pin the instruments,", "run-team phase 0 ordering");
 });
 
-test("phase 0 step 0 states the WRONG pin order as a counterfactual, not as a fact", () => {
+/**
+ * The counterfactual rule, as a function so the refuse and accept cases can be
+ * fed input this repo does not contain. Returns null when the step is sound,
+ * else the reason.
+ */
+export function wrongOrderFault(step) {
   // #1061. This sentence states what happens in the order the instruction
   // above it forbids, so its MOOD is the whole content. Unmarked ("Pinning
   // ahead of the fast-forward pins the superseded text and certifies it for
@@ -151,25 +156,60 @@ test("phase 0 step 0 states the WRONG pin order as a counterfactual, not as a fa
   // the marker can be a modal ("Pinning before … WOULD instead pin") or a
   // conditional ("IF you pin before …") and only the second keeps "Pinning"
   // as the subject — a start anchor on that word makes every conditional
-  // rewording an anchor red. The leading `[^.]*` walks back no further than
-  // the previous period, and newlines are inside the class, so a rewrap
-  // moves neither bound; the count is `anchorAt`'s exactly-once guarantee,
-  // held inline because this bound needs the sentence's END too and one
-  // caller does not earn a second slicer in prose-pin.mjs. The window is the
-  // sentence only while no `filename.ext` sits inside it before the cost —
-  // one there starts the slice after its period and can strip the marker.
-  const hits = PIN_STEP().match(/[^.]*superseded\s+text[^.]*\./g) ?? [];
-  assert.equal(hits.length, 1, `run-team phase 0 pin: the sentence naming what pinning in the wrong order costs occurs ${hits.length} times — re-anchor this test, never widen it to the paragraph`);
+  // rewording an anchor red.
+  //
+  // The sentence is `sentences()`'s, never a first-period `[^.]*` window
+  // (#1940). That window ran straight past a `?` or `!` — and so did a
+  // splitter that missed a bold sentence's `.**` — so a neighbour ending in
+  // one lent the declarative its `if` or `would` and the mutant below passed.
+  // It also began after any period inside the sentence (`instruments.sh`,
+  // "e.g."), which stripped the marker from a valid conditional rewording.
+  // Newlines are whitespace to the splitter, so a rewrap moves neither end;
+  // the count is `anchorAt`'s exactly-once guarantee, held inline because this
+  // bound is a sentence rather than an anchor.
+  const hits = sentences(step).filter((s) => /superseded\s+text/.test(s));
+  if (hits.length !== 1) {
+    return `the sentence naming what pinning in the wrong order costs occurs ${hits.length} times — re-anchor this test, never widen it to the paragraph`;
+  }
   const [wrongOrder] = hits;
-  // The marker, and the mutant this assertion exists to kill: restore the
+  // The marker, and the mutant this check exists to kill: restore the
   // declarative above, which keeps every token pinned anywhere in this file
   // and flips only the mood — RED here and nowhere else. Deleting the
   // sentence reds on the count above instead, which measures vocabulary
   // removal and proves less.
-  assert.match(wrongOrder, /\bwould\b|\bif\b/i, "the wrong-order sentence lost its counterfactual marker — it now reads as a statement of what pinning DOES, which is the failure it is describing");
+  if (!/\bwould\b|\bif\b/i.test(wrongOrder)) {
+    return "the wrong-order sentence lost its counterfactual marker — it now reads as a statement of what pinning DOES, which is the failure it is describing";
+  }
   // And it still says whose order is wrong. A marked sentence that no longer
   // names the fast-forward it is contrasting with pins mood over nothing.
-  assert.match(wrongOrder, phrase("fast-forward"), "the wrong-order sentence stopped naming the fast-forward it is the counterfactual of");
+  if (!phrase("fast-forward").test(wrongOrder)) {
+    return "the wrong-order sentence stopped naming the fast-forward it is the counterfactual of";
+  }
+  return null;
+}
+
+test("phase 0 step 0 states the WRONG pin order as a counterfactual, not as a fact", () => {
+  assert.equal(wrongOrderFault(PIN_STEP()), null);
+});
+
+// #1940. The other half, fed shapes the step does not hold today. The
+// first-period window accepted the declarative whenever the sentence beside it
+// ended in `?` or `!` and carried a marker of its own — the one mutant this
+// rule exists to kill — and refused a conditional with a filename or an
+// abbreviation ahead of its `if`.
+test("a neighbouring sentence cannot lend the declarative its marker, and a period inside the sentence cannot strip it (#1940)", () => {
+  const declarative = "Pinning ahead of the fast-forward pins the superseded text and certifies it for the rest of the run.";
+  for (const neighbour of [
+    `What if one refuses? ${declarative}`,
+    `It would be too late afterwards! ${declarative}`,
+    `**If in doubt, pin after the fast-forward.** ${declarative}`,
+    "Pinning ahead of the fast-forward pins the superseded text! If in doubt, re-pin.",
+  ]) {
+    assert.match(wrongOrderFault(neighbour), /counterfactual marker/, neighbour);
+  }
+
+  assert.equal(wrongOrderFault("If you run instruments.sh --pin before that fast-forward, it pins the superseded text."), null);
+  assert.equal(wrongOrderFault("Pinning before that fast-forward (e.g. from a stale tree) would instead pin the superseded text."), null);
 });
 
 test("the mid-run tooling fix re-pins — the one legitimate writer to the set", () => {

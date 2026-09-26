@@ -23,6 +23,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sentences } from "./prose-pin.mjs";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 
@@ -43,17 +44,6 @@ const prose = (src) =>
 
 const CI = prose(read("../../.github/workflows/ci.yml"));
 const CLAIM_TICKET = prose(read("./claim-ticket.sh"));
-
-// Prose cut into sentences, for every pin below that holds a claim to ONE
-// sentence: citationFault's quotation, and the two pins that require a claim
-// and its negation to share one. A period closing an abbreviation that
-// never ends a sentence — "e.g.", "i.e.", "cf.", "viz.", "vs." — is no break:
-// splitting there scattered one sentence's words across two fragments, neither
-// of which satisfied the pin, so a paraphrase using one was refused (#1852).
-// "etc." is deliberately absent: it ends sentences as often as not, and reading
-// past it would join two real sentences — the block-wide scan windowClaimFault's
-// ceiling exists to forbid.
-const sentences = (block) => block.split(/(?<=[.!?])(?<!\b(?:e\.g|i\.e|cf|viz|vs)\.)\s+/i);
 
 /**
  * The citation rule, as a function so the accept case can be fed input this
@@ -81,9 +71,18 @@ export function citationFault(citing, cited) {
   // sentence then runs on to the next real end, which can only add spans to
   // check — the loud direction. Ending it at the closing mark instead would
   // also end `says "…out." and adds "…"` before its second quotation, unread.
+  // Parenthesized spans are blanked the same way, after the quoted ones: since
+  // #1940 sentences() ends a sentence at a closing mark behind a terminator, so
+  // a whole sentence in parentheses between the name and its quotation
+  // (`claim-ticket.sh (as it says.) says "…"`) would otherwise end the citing
+  // sentence at its `.)` and hide the quotation — the short direction here.
+  // A bold `.**` or a single-quoted `.'` still ends it; ci.yml's comments are
+  // not markdown and single quotes there are apostrophes as often as not.
   // The early return above is what keeps indexOf off -1.
   const from = citing.slice(citing.indexOf("claim-ticket.sh"));
-  const opaque = from.replace(/"[^"]+"/g, (span) => `"${"x".repeat(span.length - 2)}"`);
+  const opaque = from
+    .replace(/"[^"]+"/g, (span) => `"${"x".repeat(span.length - 2)}"`)
+    .replace(/\([^()]*\)/g, (span) => `(${"x".repeat(span.length - 2)})`);
   const sentence = from.slice(0, sentences(opaque)[0].length);
   // No quoted span at all is a paraphrase: nothing claims to be verbatim, and
   // dropping the quotation marks is the other of the two fixes #348 sanctions.
@@ -143,6 +142,9 @@ test("a period that ends no sentence cannot hide a misquote from citationFault (
     citationFault('claim-ticket.sh says "is what keeps vendored tests out." and adds "this filter, not node"', cited),
     /does not say it/,
   );
+  // #1940: sentences() now ends a sentence at `.)`, so a whole sentence in
+  // parentheses ahead of the quotation is a stop unless it is blanked too.
+  assert.match(citationFault('claim-ticket.sh (as it says itself.) says "this filter, not node"', cited), /does not say it/);
 });
 
 // The other half of #1898: the sentence still ends at its REAL end. A quoted
