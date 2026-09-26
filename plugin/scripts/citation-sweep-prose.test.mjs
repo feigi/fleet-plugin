@@ -209,6 +209,43 @@ const FILES = [
     stale: [/ci\.yml:\d+/],
     live: ["# Blocking, every PR"],
   },
+  // #1756. ADR 0010's own evidence, corrected in place. Its ci.yml citation
+  // named the `node-version-file` sites by line, numbers the introducing PR's
+  // own hunk had already shifted; 8ec241f, in that same PR, named the jobs
+  // holding them instead. Its claim-ticket.test.mjs citation landed on a
+  // comment above the assertions it describes, and now names the test by its
+  // title. Its candidates.mjs citations for the query and the fallback retry
+  // pointed at comment lines even at the ADR's own commit, and now name
+  // `query()` and the retry's `query(null)`. Each of those line forms is
+  // banned generally, for the reason the ADR 0007 entry gives. The remaining
+  // stale forms are not citations but the same rot, the widening #1555 made:
+  // a parseArgs caller list crediting arg.mjs and staleness.mjs, whose
+  // mentions are comments; a Node release date a day earlier than the
+  // changelog's; and an escape-hatch sentence that ruled out every other hatch
+  // rather than every other Renovate-driven one. None of those was replaced
+  // by a construct, so they carry no live needle — pinning the new wording
+  // instead would red a legitimate reword.
+  {
+    path: ["..", "docs", "adr", "0010-the-node-pin-stays-exact-and-a-bot-moves-it.md"],
+    stale: [
+      /\blines?\s+\d/,
+      /claim-ticket\.test\.mjs:\d/,
+      /candidates\.mjs:\d/,
+      // A backticked `.mjs` list straight after "used by" that includes either
+      // comment-only file, wherever in the list and however it wraps.
+      /used by(?:[\s,]*(?:and\s+)?`[\w-]+\.mjs`)*[\s,]*(?:and\s+)?`(?:arg|staleness)\.mjs`/,
+      /2026-09-21/,
+      /there is no other(?!\s+Renovate-driven\b)/,
+    ],
+    live: [
+      "`check`",
+      "`validate-claude`",
+      "`install-and-smoke`",
+      "runner: a dash-led argument counts as an operand only where it exists",
+      "`query()`",
+      "`query(null)`",
+    ],
+  },
 ];
 
 for (const { path, stale, live } of FILES) {

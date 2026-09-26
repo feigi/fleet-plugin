@@ -187,30 +187,50 @@ export function windowClaimFault(block) {
     : "the pin's comment names the bot's schedule but no longer says, in one sentence, that its window bounds PR creation and not merge timing — #1753";
 }
 
-// The contiguous comment run above the setup-node step whose comment cites ADR
-// 0010 — anchored on the step and the ADR it points at, never a line number.
-// Exported with an optional `lines` override (same idiom as windowClaimFault's
-// `block` param and citationFault's `citing`/`cited` params above) so the
-// ambiguity case below can feed it synthetic input the real ci.yml does not
-// contain; the production call site below takes no argument and reads the
-// real file. Asserts uniqueness rather than returning the first hit: a second
-// setup-node step whose comment also happens to cite "ADR 0010" would
-// otherwise let this silently validate the WRONG block while the real one
-// rots unchecked (#1838 — reproduced: reverting the real comment to its stale
-// pre-#1753 form while an earlier decoy step's comment cited "ADR 0010" left
-// every test in this file green).
-export function pinOwnerComment(lines = read("../../.github/workflows/ci.yml").split("\n")) {
-  const matches = [];
+// Every setup-node step's contiguous comment run: its prose, how many comment
+// lines it spans, and the job it sits in — anchored on the step, never a line
+// number. Exported with an optional `lines` override (same idiom as
+// windowClaimFault's `block` param and citationFault's `citing`/`cited`
+// params) so a test can feed it synthetic input the real ci.yml does
+// not contain; the production call sites take no argument and read the real
+// file. The owner pin and the pointer pin both read the steps through this, so
+// they cannot disagree about where a step's comment starts.
+export function setupNodeComments(lines = read("../../.github/workflows/ci.yml").split("\n")) {
+  const found = [];
   for (let step = 0; step < lines.length; step++) {
     if (!/^\s*- uses: actions\/setup-node@/.test(lines[step])) continue;
     let i = step;
     while (i > 0 && /^\s*#/.test(lines[i - 1])) i--;
-    const block = prose(lines.slice(i, step).join("\n"));
-    if (block.includes("ADR 0010")) matches.push(block);
+    let j = step;
+    while (j > 0 && !/^ {2}[\w-]+:\s*$/.test(lines[j])) j--;
+    found.push({
+      block: prose(lines.slice(i, step).join("\n")),
+      lines: step - i,
+      job: lines[j].trim().replace(/:$/, ""),
+    });
   }
+  return found;
+}
+
+// The comment run above the setup-node step that owns ADR 0010's explanation.
+// A candidate is a run citing "ADR 0010" over more than one line: since #1756
+// every other setup-node step carries a one-line pointer to the same ADR, and
+// a one-line citation is a pointer (checked by pointerFault), never a
+// candidate. Asserts uniqueness among candidates rather than returning the
+// first hit: a second multi-line comment that also happens to cite
+// "ADR 0010" would otherwise let this silently validate the WRONG block while
+// the real one rots unchecked (#1838 — reproduced: reverting the real comment
+// to its stale pre-#1753 form while an earlier decoy step's comment cited
+// "ADR 0010" left every test in this file green). A one-line decoy cannot
+// reopen that: it is never a candidate, so the real paragraph is still the
+// one checked.
+export function pinOwnerComment(lines) {
+  const matches = setupNodeComments(lines)
+    .filter((c) => c.lines > 1 && c.block.includes("ADR 0010"))
+    .map((c) => c.block);
   assert.ok(
     matches.length <= 1,
-    `ci.yml has ${matches.length} setup-node comment blocks citing "ADR 0010" — the pin can no longer tell which one owns it`,
+    `ci.yml has ${matches.length} setup-node comment blocks citing "ADR 0010" over more than one line — the pin can no longer tell which one owns it`,
   );
   return matches[0] ?? null;
 }
@@ -267,10 +287,121 @@ test("windowClaimFault refuses a merge promise stated via 'whenever'/'regardless
 
 test("pinOwnerComment refuses to pick silently between two setup-node comments that both cite ADR 0010 (#1838)", () => {
   const lines = [
-    "      # decoy: cites ADR 0010 but is not the real pin.",
+    "      # decoy: cites ADR 0010 but is not the real pin,",
+    "      # over two lines like the real one.",
     "      - uses: actions/setup-node@v5",
-    "      # the real pin, citing ADR 0010 too.",
+    "      # the real pin, citing ADR 0010 too,",
+    "      # over two lines.",
     "      - uses: actions/setup-node@v5",
   ];
   assert.throws(() => pinOwnerComment(lines), /2 setup-node comment blocks citing "ADR 0010"/);
+});
+
+// #1838's exploit, re-run against the pointer rule: a one-line citation of
+// ADR 0010 at an earlier step, then the real paragraph reverted to its stale
+// pre-#1753 form. The pointer is not a candidate, so the stale paragraph is
+// the block checked, and it still reds.
+test("a one-line pointer citing ADR 0010 is never taken for the owner (#1756)", () => {
+  const lines = [
+    "      # Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.",
+    "      - uses: actions/setup-node@v5",
+    "      # .nvmrc holds an EXACT version, and Renovate moves it on a monthly",
+    "      # schedule rather than a human noticing: see ADR 0010. Do not hand-edit",
+    "      # this to float.",
+    "      - uses: actions/setup-node@v5",
+  ];
+  const owner = pinOwnerComment(lines);
+  assert.match(owner, /monthly schedule rather than a human noticing/);
+  assert.match(windowClaimFault(owner), /no longer says, in one sentence/);
+});
+
+// #1756. Only the owner's comment named ADR 0010 and the do-not-hand-edit
+// rule, so a reader who opened ci.yml at any other setup-node step met no
+// warning at all. Each of those steps now carries a one-line pointer to both.
+// One line is the FORM being pinned, not a figure: a copied paragraph is two
+// copies of one rule, the drift workflow-files.mjs's header names for a
+// discovery rule. Same rule as #348's pins — it bans the stale forms (a
+// step with no pointer, a pointer missing the ADR or the rule, a pointer grown
+// into a paragraph) and accepts any paraphrase. It pins no count of steps:
+// adding or dropping a Node-setup site needs no edit here. The rule and its
+// negation must share a sentence, for the reason windowClaimFault gives, AND
+// sit within six words of "hand-edit" itself — co-occurrence anywhere in the
+// sentence is not enough, because "Hand-edit this pin whenever convenient;
+// there is no rule against it." shares a sentence with a negation that never
+// touches the verb it is supposed to forbid (reproduced: that exact wording,
+// and "Renovate no longer manages this on its own — hand-edit if it drifts.",
+// both passed here undetected until the word-window check was added). The
+// ceiling: an unrelated comment run directly above a pointer makes it a
+// multi-line citation, a second candidate owner that pinOwnerComment refuses
+// loudly; a blank line between the two keeps the pointer its own run.
+export function pointerFault({ block, lines }) {
+  if (lines === 0) return "carries no comment at all — no pointer to ADR 0010 or the do-not-hand-edit rule";
+  if (!block.includes("ADR 0010")) return "no longer points at ADR 0010";
+  const rule = block.split(/(?<=[.!?])\s+/).some((s) => {
+    const m = /hand-?edit\w*/i.exec(s);
+    if (!m) return false;
+    const tokens = s.split(/\s+/);
+    let pos = 0;
+    let idx = -1;
+    for (let i = 0; i < tokens.length; i++) {
+      if (m.index >= pos && m.index < pos + tokens[i].length + 1) {
+        idx = i;
+        break;
+      }
+      pos += tokens[i].length + 1;
+    }
+    if (idx === -1) return false;
+    const WINDOW = 6;
+    const nearby = tokens.slice(Math.max(0, idx - WINDOW), idx + WINDOW + 1).join(" ");
+    return /\b(?:not|never|no)\b/i.test(nearby) || /n't\b/i.test(nearby);
+  });
+  if (!rule) return "no longer carries the do-not-hand-edit rule";
+  if (lines > 1) return "has grown past one line — a pointer that copies the owner's paragraph is the drift it exists to avoid";
+  return null;
+}
+
+test("every setup-node step but the owner points at ADR 0010 and the do-not-hand-edit rule in one line", () => {
+  const owner = pinOwnerComment();
+  for (const c of setupNodeComments().filter((c) => c.block !== owner)) {
+    const fault = pointerFault(c);
+    assert.equal(fault, null, `the setup-node step in ci.yml's \`${c.job}\` job ${fault}`);
+  }
+});
+
+test("a paraphrased pointer is accepted; a missing one, a half one and a copied paragraph are not", () => {
+  const at = (...comment) => setupNodeComments(["  job:", ...comment, "      - uses: actions/setup-node@v5"])[0];
+
+  assert.equal(pointerFault(at("      # Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.")), null);
+  assert.equal(pointerFault(at("      # .nvmrc is exact and bot-moved (ADR 0010); never hand-edit it to float.")), null);
+  assert.equal(pointerFault(at("      # Hand-editing this to float is not allowed: ADR 0010 explains why.")), null);
+
+  assert.match(pointerFault(at()), /no comment at all/);
+  assert.match(pointerFault(at("      # Exact pin Renovate moves. Do not hand-edit this to float.")), /no longer points at ADR 0010/);
+  assert.match(pointerFault(at("      # Exact pin Renovate moves: see ADR 0010.")), /do-not-hand-edit rule/);
+  assert.match(
+    pointerFault(at("      # Hand-edit this freely. See ADR 0010; it does not apply here.")),
+    /do-not-hand-edit rule/,
+  );
+  assert.match(
+    pointerFault(
+      at(
+        "      # .nvmrc holds an EXACT version, and Renovate moves it on a monthly",
+        "      # schedule: see ADR 0010. Do not hand-edit this to float.",
+      ),
+    ),
+    /grown past one line/,
+  );
+});
+
+test("a negation sharing hand-edit's sentence but not touching it is still a missing rule (#1868)", () => {
+  const at = (...comment) => setupNodeComments(["  job:", ...comment, "      - uses: actions/setup-node@v5"])[0];
+
+  assert.match(
+    pointerFault(at("      # Hand-edit this pin whenever convenient; there is no rule against it. See ADR 0010.")),
+    /do-not-hand-edit rule/,
+  );
+  assert.match(
+    pointerFault(at("      # Renovate no longer manages this on its own — hand-edit if it drifts. See ADR 0010.")),
+    /do-not-hand-edit rule/,
+  );
 });

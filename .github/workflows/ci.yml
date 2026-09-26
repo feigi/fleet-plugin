@@ -310,6 +310,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.
       - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
@@ -392,6 +393,7 @@ jobs:
           ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
+      # Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.
       - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
