@@ -495,6 +495,57 @@ test("#1820: the row's LAST impl token decides, retry suffix included", () => {
   assert.equal(card(b, 917).pr, null);
 });
 
+// #1843: the deciding impl token is the one with the greatest retry suffix,
+// wherever it sits in the row. ledger.mjs appends in retry order, so only a
+// hand-written `row` rewrite reorders them — and every ordering of the same
+// tokens must render the same card. No `prev`, so no card is stale and
+// `attention` holds only what the tokens themselves earn.
+const permutations = (xs) => (xs.length <= 1 ? [xs]
+  : xs.flatMap((x, i) => permutations([...xs.slice(0, i), ...xs.slice(i + 1)]).map((rest) => [x, ...rest])));
+const cardFor = (row, n) => {
+  const b = computeBoard(reproInputs({ rows: [row], prev: { tickets: [] } }));
+  return { card: card(b, n), attention: b.attention.map((t) => t.issue) };
+};
+
+test("#1843: a replacement written before its predecessor still decides the card", () => {
+  for (const row of ["#5 impl-5-b · class=routine · impl-5=killed", "#5 impl-5=killed · class=routine · impl-5-b"]) {
+    assert.equal(parseRow(row).impl, "impl-5-b", row);
+    const { card: c, attention } = cardFor(row, 5);
+    assert.equal(c.column, "IMPLEMENTING", row);
+    assert.equal(c.agent, "impl-5-b", row);
+    assert.deepEqual(c.flags, [], `${row}: the killed attempt was replaced`);
+    assert.deepEqual(attention, [], row);
+  }
+});
+
+test("#1843: the greatest retry suffix decides in every ordering of a row's impl tokens", () => {
+  const rows = permutations(["impl-5=killed", "impl-5-b=PR#9", "impl-5-c"]).map((p) => `#5 ${p.join(" · ")}`);
+  for (const row of rows) {
+    assert.equal(parseRow(row).impl, "impl-5-c", row);
+    assert.deepEqual(cardFor(row, 5), cardFor(rows[0], 5), row);
+  }
+  const { card: c } = cardFor(rows[0], 5);
+  assert.equal(c.column, "IMPLEMENTING", "impl-5-c is live, back at work after PR#9");
+  assert.equal(c.pr, null);
+  assert.deepEqual(c.flags, []);
+});
+
+test("#1843: a malformed token never decides, however great its retry suffix", () => {
+  for (const row of ["#5 impl-5=PR#931 · impl-5-b=PR#93l", "#5 impl-5-b=PR#93l · impl-5=PR#931"]) {
+    assert.equal(parseRow(row).impl, "impl-5", row);
+    const { card: c } = cardFor(row, 5);
+    assert.equal(c.column, "REVIEW", row);
+    assert.equal(c.pr, 931, row);
+    assert.ok(c.flags.includes("ledger-error"), row);
+  }
+});
+
+test("#1843: two distinct impl names at one retry suffix render one card in either order", () => {
+  // Not a row anything writes; the pick between them is incidental, but it
+  // must be a function of the tokens, never of which one was typed last.
+  assert.deepEqual(cardFor("#5 impl-5=killed · impl-6", 5), cardFor("#5 impl-6 · impl-5=killed", 5));
+});
+
 test("#1820: a live implementer is IMPLEMENTING, and still earns stale", () => {
   const b = computeBoard(reproInputs());
   assert.equal(card(b, 906).column, "IMPLEMENTING");

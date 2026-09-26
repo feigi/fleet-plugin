@@ -34,8 +34,9 @@ import { PR_MENTION } from "./fleet-tick.mjs";
 // tokens freely. Unknown text is ignored, never fatal.
 //
 // Member tokens are ledger-grammar.mjs's (#1820). On a row that has one, the
-// row's LAST `impl` token, retry suffix included, decides the card: live →
-// IMPLEMENTING, `=PR#M` → that PR decides, `=released`/`=bailed` → no card of
+// row's latest `impl` attempt decides the card — the greatest retry suffix,
+// wherever it sits (#1843, laterAttempt below): live → IMPLEMENTING, `=PR#M`
+// → that PR decides, `=released`/`=bailed` → no card of
 // the row's own (the POOL loop shows the ticket if it is still
 // `ready-for-agent`), `=killed`/`=tier-mismatch` → IMPLEMENTING with that
 // outcome as a flag. There the `→ PR#M` arrow is human-readable only;
@@ -78,6 +79,16 @@ const EXCLUDED_ROW = /^#[0-9]+[ \t]+excluded(?=[ \t]|$)([\s\S]*)$/;
 const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
 const REVIEW = /^review=(?:wf|member|fallback):([^=\s]+?)(=failed)?$/;
 
+// #1843: which of two well-formed impl tokens is the later attempt, read off
+// ledger-grammar.mjs's parsed `retry` — no suffix first, then by letter —
+// never off row position, so every ordering of one row's tokens renders one
+// card. The number decides only between two distinct names at one suffix,
+// which nothing writes, so the pick stays a function of the tokens alone.
+// Two copies of one name tie; its outcome is `outcomes`' latest settle.
+const laterAttempt = (a, b) => ((a.retry ?? "") !== (b.retry ?? "")
+  ? (a.retry ?? "") > (b.retry ?? "")
+  : a.number > b.number);
+
 export function parseRow(row) {
   const issueM = row.match(/^#(\d+)\b/);
   if (!issueM) return null;
@@ -98,7 +109,7 @@ export function parseRow(row) {
   const live = [];
   const outcomes = new Map();
   const settled = new Set();
-  let lastImpl = null;
+  let lastImpl = null; // the latest well-formed impl token (laterAttempt)
   let anyImpl = false;
   let prMember = false;
   let review = false; // any review= token: a PR-bound signal (amendment 2a)
@@ -115,7 +126,7 @@ export function parseRow(row) {
       if (t.outcome !== null && !t.error) outcomes.set(t.name, t.outcome);
       if (t.family === "impl") {
         anyImpl = true;
-        if (!t.error) lastImpl = t.name;
+        if (!t.error && (!lastImpl || laterAttempt(t, lastImpl))) lastImpl = t;
       }
       if (t.bound === "pr") prMember = true;
       continue;
@@ -135,7 +146,7 @@ export function parseRow(row) {
     }
   }
   const alive = live.filter((t) => !settled.has(t.name));
-  const implOutcome = lastImpl ? (outcomes.get(lastImpl) ?? null) : null;
+  const implOutcome = lastImpl ? (outcomes.get(lastImpl.name) ?? null) : null;
   const prM = implOutcome && /^PR#(\d+)$/.exec(implOutcome);
   let pr = prM ? Number(prM[1]) : null;
   // #1820 amendment 2a: a row with NO impl token — a malformed one still
@@ -155,7 +166,7 @@ export function parseRow(row) {
   return {
     issue: Number(issueM[1]),
     excluded: ex ? [...ex[1].matchAll(PREMISE)].map(([, kind, target]) => ({ kind, target })) : null,
-    impl: lastImpl,
+    impl: lastImpl?.name ?? null,
     implOutcome,
     agent: alive.length ? alive[alive.length - 1].name : null,
     pr,
