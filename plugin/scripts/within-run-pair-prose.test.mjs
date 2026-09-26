@@ -7,7 +7,7 @@ import { between as section } from "./prose-pin.mjs";
 // #864's finding is that tier is entangled with calendar date and therefore
 // with prompt evolution — 8 of 9 sonnet rows in one week, 23 of 24 opus rows in
 // the next. Dispatching every 5th Pull at the alternate tier (ADR 0013 §6,
-// which replaced "one per staged wave" when #1804 retired staging) makes
+// which replaced the one-per-staged-set rate when #1804 retired staging) makes
 // tier orthogonal to date BY CONSTRUCTION, which is the only thing that lets
 // the accumulated rows ever answer the question they are collected for.
 //
@@ -84,7 +84,7 @@ test("phase 2 does NOT ask the controller to label the control", () => {
 });
 
 test("phase 2 says why the pairing is within-run and not week-by-week", () => {
-  // Without the reason, "one per wave" reads as arbitrary overhead and the next
+  // Without the reason, the every-5th-Pull rate reads as arbitrary overhead and the next
   // cost-trimming pass converts it back into a block design — which is the
   // state #864 documents.
   assert.match(
@@ -151,9 +151,10 @@ test("the alternate definition's body is byte-identical to the default's (#1801)
 
 test("phase 2 counts the rate off the ledger's impl- rows, and a replacement does not count again", () => {
   // The pin above binds the WORDS, not a countable rule — the same gap the old
-  // per-wave rate had, measured then: appending either explicit resolution of
-  // "per wave" left every assertion GREEN while the two readings differed by an
-  // order of magnitude in how much of the fleet ran at the alternate tier.
+  // one-per-staged-set rate had, measured then: appending either explicit
+  // resolution of its wording left every assertion GREEN while the two readings
+  // differed by an order of magnitude in how much of the fleet ran at the
+  // alternate tier.
   //
   // Under Pull the count is the ledger's (ADR 0013 §6), and what disambiguates
   // it is what a row IS: one `impl-` row per pulled ticket, so a replacement

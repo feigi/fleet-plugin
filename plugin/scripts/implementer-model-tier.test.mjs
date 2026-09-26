@@ -384,8 +384,9 @@ test("phase 2 runs the tier check after every Pull's dispatch and holds the next
   );
   // The consequence, bound adjacent to "holds the" so a rewrite that keeps
   // the word "holds" elsewhere in the slice does not satisfy this on its own.
-  // Under Pull there is no wave to stop (ADR 0013): the mismatch holds the
-  // next Pull, and the tick's own HOLD row is what keeps it held.
+  // Under Pull nothing larger than the one dispatch exists to stop (ADR 0013):
+  // the mismatch holds the next Pull, and the tick's own HOLD row is what
+  // keeps it held.
   assert.match(
     slice,
     /non-zero exit \*\*holds the\s+next Pull\*\*/,
@@ -409,8 +410,8 @@ test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
   const slice = guard();
 
   // The unit. Supply is one Pull per free slot (ADR 0013), so no batch of
-  // implementers exists to compare — the original "compare this wave against
-  // the prior wave" named two sets nobody can enumerate.
+  // implementers exists to compare — the original rule compared one staged set
+  // of implementers against the set before it, two sets nobody can enumerate.
   assert.match(slice, /unit is the PR/, "the guard's unit is no longer the PR");
   assert.match(
     slice,

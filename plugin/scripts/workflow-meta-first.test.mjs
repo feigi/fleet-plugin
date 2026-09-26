@@ -155,7 +155,7 @@ test("discovery splits the tree the way the harness's loader does", () => {
     mkdirSync(join(dir, "nested"));
     for (const rel of [
       "review-pr.js",
-      "merge-wave.js",
+      "second.js",
       "nearmiss.mjs",
       "nearmiss.cjs",
       "nearmiss.ts",
@@ -174,7 +174,7 @@ test("discovery splits the tree the way the harness's loader does", () => {
     const { registrable, unregistrable } = discoverWorkflowFiles(dir);
     assert.deepEqual(
       registrable,
-      ["linked.js", "merge-wave.js", "review-pr.js"],
+      ["linked.js", "review-pr.js", "second.js"],
       "the registrable set is not exactly the flat .js files the loader reaches",
     );
     assert.deepEqual(
