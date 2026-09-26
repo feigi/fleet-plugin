@@ -23,6 +23,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { sentences } from "./prose-pin.mjs";
 
 const read = (rel) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 
@@ -43,17 +44,6 @@ const prose = (src) =>
 
 const CI = prose(read("../../.github/workflows/ci.yml"));
 const CLAIM_TICKET = prose(read("./claim-ticket.sh"));
-
-// Prose cut into sentences, for every pin below that holds a claim to ONE
-// sentence: citationFault's quotation, and the two pins that require a claim
-// and its negation to share one. A period closing an abbreviation that
-// never ends a sentence — "e.g.", "i.e.", "cf.", "viz.", "vs." — is no break:
-// splitting there scattered one sentence's words across two fragments, neither
-// of which satisfied the pin, so a paraphrase using one was refused (#1852).
-// "etc." is deliberately absent: it ends sentences as often as not, and reading
-// past it would join two real sentences — the block-wide scan windowClaimFault's
-// ceiling exists to forbid.
-const sentences = (block) => block.split(/(?<=[.!?])(?<!\b(?:e\.g|i\.e|cf|viz|vs)\.)\s+/i);
 
 /**
  * The citation rule, as a function so the accept case can be fed input this
@@ -81,9 +71,47 @@ export function citationFault(citing, cited) {
   // sentence then runs on to the next real end, which can only add spans to
   // check — the loud direction. Ending it at the closing mark instead would
   // also end `says "…out." and adds "…"` before its second quotation, unread.
+  // Parenthesized spans are blanked the same way, after the quoted ones: since
+  // #1940 sentences() ends a sentence at a closing mark behind a terminator, so
+  // a whole sentence in parentheses between the name and its quotation
+  // (`claim-ticket.sh (as it says.) says "…"`) would otherwise end the citing
+  // sentence at its `.)` and hide the quotation — the short direction here.
+  // A bold `.**`, an underscore-italic `._`, or a single-quoted `.'` still
+  // ends it unblanked: ci.yml's comments are not markdown, and a straight
+  // single quote there is an apostrophe as often as not, so neither is a
+  // reliably paired delimiter worth chasing. Curly quotes ARE reliably
+  // paired (an opener and a closer are different characters, unlike a
+  // straight quote or `*`/`_`), so they get the same blanking as a straight
+  // quotation — left out of a first pass here would have been the same
+  // silent gap the parenthesis fix above closes, just spelled `.”`/`.’`.
   // The early return above is what keeps indexOf off -1.
   const from = citing.slice(citing.indexOf("claim-ticket.sh"));
-  const opaque = from.replace(/"[^"]+"/g, (span) => `"${"x".repeat(span.length - 2)}"`);
+  const blankQuotes = (s) =>
+    s
+      .replace(/"[^"]+"/g, (span) => `"${"x".repeat(span.length - 2)}"`)
+      .replace(/\u201c[^\u201d]+\u201d/g, (span) => `\u201c${"x".repeat(span.length - 2)}\u201d`)
+      .replace(/\u2018[^\u2019]+\u2019/g, (span) => `\u2018${"x".repeat(span.length - 2)}\u2019`);
+  const blankParens = (s) => {
+    let depth = 0;
+    return [...s]
+      .map((ch) => {
+        if (ch === "(") return depth++, ch;
+        if (ch === ")") return (depth = Math.max(depth - 1, 0)), ch;
+        return depth > 0 ? "x" : ch;
+      })
+      .join("");
+  };
+  // A single regex pass (`/\([^()]*\)/g`) only strips the INNERMOST paren:
+  // nested parens (`(as it says itself (in section 2).)`) leave the outer
+  // `)` — and the real period right before it — untouched, so the outer
+  // `.)` still ends the sentence early and hides a misquote past it
+  // (measured: a regex pass here let a misquote inside a nested aside read
+  // as a paraphrase). `blankParens` tracks depth across the WHOLE string
+  // instead: every character between any `(` and its matching `)` is
+  // blanked regardless of nesting, while depth returns to 0 between two
+  // SEPARATE (non-nested) parenthetical asides, so real prose sitting
+  // between them is not swept in with them.
+  const opaque = blankParens(blankQuotes(from));
   const sentence = from.slice(0, sentences(opaque)[0].length);
   // No quoted span at all is a paraphrase: nothing claims to be verbatim, and
   // dropping the quotation marks is the other of the two fixes #348 sanctions.
@@ -141,6 +169,30 @@ test("a period that ends no sentence cannot hide a misquote from citationFault (
   // other assertion in this file and still accepts this one).
   assert.match(
     citationFault('claim-ticket.sh says "is what keeps vendored tests out." and adds "this filter, not node"', cited),
+    /does not say it/,
+  );
+  // #1940: sentences() now ends a sentence at `.)`, so a whole sentence in
+  // parentheses ahead of the quotation is a stop unless it is blanked too.
+  assert.match(citationFault('claim-ticket.sh (as it says itself.) says "this filter, not node"', cited), /does not say it/);
+  // A NESTED parenthetical, one level deep: a single un-repeated blanking pass
+  // strips only the inner `(in section 2)`, leaving the outer `.)` — a real,
+  // now-unblanked terminator-plus-closing-mark — to end the sentence early and
+  // hide the quotation past it exactly as the unnested case above would without
+  // any blanking at all.
+  assert.match(
+    citationFault('claim-ticket.sh (as it says itself (in section 2).) says "this filter, not node"', cited),
+    /does not say it/,
+  );
+  // Curly quotes are a reliably paired delimiter too (opener and closer are
+  // different characters), so an aside set off by them gets the same
+  // protection as one set off by straight quotes or parens — a `.”`/`.’`
+  // ahead of the real quotation must not cut the sentence short either.
+  assert.match(
+    citationFault('claim-ticket.sh \u201cas it says itself.\u201d says "this filter, not node"', cited),
+    /does not say it/,
+  );
+  assert.match(
+    citationFault('claim-ticket.sh \u2018as it says itself.\u2019 says "this filter, not node"', cited),
     /does not say it/,
   );
 });

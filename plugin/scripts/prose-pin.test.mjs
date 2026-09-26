@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { anchorAt, between, betweenPhrases, paragraph, phrase, quoteBlock, quoteBlocks, runAbove, stripSlashGutter, pairSlices, logicalLines } from "./prose-pin.mjs";
+import { anchorAt, between, betweenPhrases, paragraph, phrase, quoteBlock, quoteBlocks, runAbove, sentences, stripSlashGutter, pairSlices, logicalLines } from "./prose-pin.mjs";
 
 // The 14 consumer files exercise only between()'s HAPPY path: every one of them
 // slices a document that still holds both anchors. Measured on this PR: deleting
@@ -234,6 +234,35 @@ test("phrase escapes regex metacharacters taken from its input", () => {
   // construction instead of failing an assertion.
   assert.doesNotThrow(() => phrase("*.mjs"));
   assert.match("run node --test *.mjs here", phrase("*.mjs"));
+});
+
+// #1940: the shared sentence bound, at both of the ends the first-period
+// `[^.]*` scan it replaced got wrong — it ran on past `?` and `!`, and it
+// stopped at every period, a word's or an abbreviation's included. The
+// closing marks are the case that scan happened to get right and a bare
+// `[.!?]\s` split does not: a bold lead-in sentence, a shape run-team's
+// SKILL.md uses throughout, would otherwise join the sentence after it.
+test("sentences ends a sentence at `?` and `!`, and at a terminator behind closing marks", () => {
+  assert.deepEqual(sentences("Why pin now? It is late! Pin it."), ["Why pin now?", "It is late!", "Pin it."]);
+  assert.deepEqual(
+    sentences('**Pin first.** Then read. (Both run.) Next. "Say it." After. _Done._ End'),
+    ["**Pin first.**", "Then read.", "(Both run.)", "Next.", '"Say it."', "After.", "_Done._", "End"],
+  );
+  // A hard wrap is whitespace like any other, so a rewrap moves no end.
+  assert.deepEqual(sentences("Pin it.\n   Then\n   read."), ["Pin it.", "Then\n   read."]);
+});
+
+test("sentences does not end one at an abbreviation, closing marks or not, nor at a period inside a word", () => {
+  for (const s of [
+    "Pin it, e.g. now, then read.",
+    "Pin it early (e.g.) and then read.",
+    "Pin it, i.e. first, cf. the rule, viz. step 0, vs. later.",
+    "Run instruments.sh at v1.2 first.",
+  ]) {
+    assert.deepEqual(sentences(s), [s]);
+  }
+  // "etc." is deliberately off the list: it ends a sentence as often as not.
+  assert.deepEqual(sentences("Pin, read, etc. Then go."), ["Pin, read, etc.", "Then go."]);
 });
 
 // #1346/#1361: the third gutter shape, exercised nowhere else until a real
