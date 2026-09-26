@@ -273,7 +273,7 @@ phase, or in any later one, asks the maintainer which tickets to take.
    is sourced from the spec plus ADR 0007 and is true of the live gate only
    while this check is green, so a 3 means saying "the gate requires X"
    without naming the drift is a false claim, and a 2 means you never learned
-   either way. Measured 2026-09-18 (#1710): five contexts ADR 0007 had
+   either way. Measured 2026-09-23 (#1710): four contexts ADR 0007 had
    selected were required by the spec and by nothing live, and the gap sat
    there unnoticed because the only thing that ever read the live gate was a
    person choosing to.
