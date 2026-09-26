@@ -386,11 +386,18 @@ export function trackedShellScripts(root) {
 // A first line that hands the file to node: `node` itself as the interpreter,
 // by a direct path (`#!/usr/local/bin/node`) or through `env` with any options
 // or assignments before it (`#!/usr/bin/env node`, `#!/usr/bin/env -S node
-// --no-warnings`) — including an option that takes a following bare argument
-// of its own (`#!/usr/bin/env -u FOO node`, `--unset FOO`, `-C DIR`), which is
-// still no part of the interpreter name. `node` is the WHOLE interpreter name
-// — `nodemon` and `bun` are other programs.
-const NODE_SHEBANG = /^#!\s*(?:\S*\/)?(?:env(?:\s+(?:-\S+(?:\s+\S+)?|\w+=\S*))*\s+(?:\S*\/)?)?node(?:\s|$)/;
+// --no-warnings`) — including `env`'s own `-u`/`--unset` and `-C`/`--chdir`,
+// each of which takes a following bare argument of its own (`#!/usr/bin/env
+// -u FOO node`, `--unset FOO`, `-C DIR`) that is still no part of the
+// interpreter name. Only THESE two options ever consume a following word:
+// every other flag (`-S`, `-i`, …) stays exactly one token, so it can never
+// swallow the real command as if it were its own argument and let a
+// non-node interpreter through (`#!/usr/bin/env -S bun node` runs bun, not
+// node, and must still refuse) — and, since no flag but these two has more
+// than one way to be parsed, a long adversarial options list can never blow
+// up matching it either. `node` is the WHOLE interpreter name — `nodemon`
+// and `bun` are other programs.
+const NODE_SHEBANG = /^#!\s*(?:\S*\/)?(?:env(?:\s+(?:-(?:u|-unset|C|-chdir)(?:=\S*|\s+\S+)|-(?!(?:u|-unset|C|-chdir)\s)\S+|\w+=\S*))*\s+(?:\S*\/)?)?node(?:\s|$)/;
 
 // A shebang is one short line; this holds any this repository would write.
 const SHEBANG_BYTES = 256;
