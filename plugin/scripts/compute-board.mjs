@@ -315,19 +315,55 @@ function stall(beat, ticked, tickets, pool, { ledgerOk, poolOk }, now) {
   return { ...verdict, claimed, supply, text: stallReport(verdict, { claimed, supply }) };
 }
 
+// #1841: the previous board already showed this SAME PR MERGED on this
+// ticket. MERGED is terminal, so that verdict stands whatever this run's
+// merged read says. Keyed on the PR, not just the ticket: a ticket retried
+// under a NEW PR after its earlier one merged carries no MERGED verdict
+// forward for that new, unrelated PR. One definition, because computeBoard()
+// applies it and mergedReadPrs() skips what it covers — two copies could
+// drift into a PR that neither is asked about nor carried.
+function carriedMerged(prevTicket, p) {
+  return prevTicket?.column === "MERGED" && prevTicket.pr === p.pr;
+}
+
+// #1840: the row PRs whose merged status gather() has to ask gh about this
+// tick — exactly those computeBoard() would consult `merged` for and cannot
+// already place: a row PR absent from the open list `prs`, on a row that is
+// not an Exclusion (always POOL), carries no `MERGED <sha>` token, has a PR
+// at all, and is not carried forward as MERGED. Sorted and unique. Empty
+// means no merged read is needed at all. `prev` is the previous board, as
+// computeBoard() takes it.
+//
+// `Number.isSafeInteger(p.pr)` excludes a row whose PR mention is 22+ digits:
+// `Number()` renders it in exponential form (`1e+21`), which is not a valid
+// `pullRequest(number:)` argument/alias and fails gh's WHOLE batched query
+// (measured: `p1e+21:pullRequest(number:1e+21)` gets GitHub's parser
+// rejecting the query outright — no `data` at all, unlike a merely
+// nonexistent PR number, which resolves to a per-alias NOT_FOUND beside a
+// usable body). Leaving it out of `need` costs that one row the REVIEW it
+// would get from a failed batch anyway, and keeps every other row PR's
+// lookup intact.
+export function mergedReadPrs({ ledger, prs, prev }) {
+  const open = new Set(prs.map((p) => p.number));
+  const prevByIssue = new Map((prev?.tickets || []).map((t) => [t.issue, t]));
+  const need = new Set();
+  for (const p of (ledger.rows || []).map(parseRow).filter(Boolean)) {
+    if (p.excluded || p.merged || p.pr == null || !Number.isSafeInteger(p.pr) || open.has(p.pr)) continue;
+    if (carriedMerged(prevByIssue.get(p.issue), p)) continue;
+    need.add(p.pr);
+  }
+  return [...need].sort((a, b) => a - b);
+}
+
 // `merged` (#1820) is gh's list of merged PR numbers, consulted only for a row
 // PR absent from the open list `prs`; absent means none known, and a PR in
 // neither list (closed unmerged, or a failed read) keeps REVIEW — unless
-// (#1841) the previous board already showed the SAME PR MERGED for this
-// ticket, in which case it stays MERGED: MERGED is terminal, so a merged PR
-// cannot reopen, whether this run's merged read failed outright or simply
-// succeeded without listing it (#1840's window-scoping symptom, a separate
-// fix). Keyed on the PR, not just the ticket: a ticket retried under a NEW
-// PR after its earlier one merged carries no MERGED verdict forward for
-// that new, unrelated PR — only a previous board entry for the SAME `p.pr`
-// counts. A PR that IS in the open list is never eligible for this
-// carry-forward — only the "absent from both `prs` and (maybe) `merged`"
-// branch below ever consults it.
+// (#1841) carriedMerged() holds for it, in which case it stays MERGED
+// whether this run's merged read failed outright or simply succeeded
+// without listing it. A PR that IS in the open list is never eligible for
+// this carry-forward — only the "absent from both `prs` and (maybe)
+// `merged`" branch below ever consults it. gather() asks gh only about
+// mergedReadPrs()'s set (#1840), so `merged` never lists more than that.
 export function computeBoard(inputs) {
   const { ledger, issues, prs, ci, prev, now } = inputs;
   const prByNum = new Map(prs.map((p) => [p.number, p]));
@@ -348,7 +384,7 @@ export function computeBoard(inputs) {
     const prevTicket = prevByIssue.get(p.issue);
     const prState = p.pr == null ? null
       : pr ? { open: pr.state === "OPEN", labels: pr.labels || [] }
-           : { open: false, labels: [], merged: mergedPrs.has(p.pr) || (prevTicket?.column === "MERGED" && prevTicket.pr === p.pr) };
+           : { open: false, labels: [], merged: mergedPrs.has(p.pr) || carriedMerged(prevTicket, p) };
     const column = deriveColumn(p, prState);
     if (column === null) continue; // released/bailed: the POOL loop below decides
     rowIssues.add(p.issue);

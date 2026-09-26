@@ -103,7 +103,7 @@ test("deriveFlags: cause tokens surface as flags", () => {
   assert.ok(f.includes("killed"));
 });
 
-import { computeBoard } from "./compute-board.mjs";
+import { computeBoard, mergedReadPrs } from "./compute-board.mjs";
 import { deriveRun } from "./fleet-tick.mjs";
 
 const baseInputs = () => ({
@@ -603,9 +603,10 @@ test("#1820: the merged read is consulted only for PRs absent from the open list
 // #1841: MERGED is terminal. A row PR absent from the open list stays MERGED
 // once the previous board already showed the SAME PR, on this ticket,
 // MERGED — whether today's merged-PR read failed outright (`[]`) or simply
-// succeeded without listing that PR (#1840's window-scoping symptom — a
-// separate ticket). Keyed on the PR, not just the ticket: a retry under a
-// NEW PR after an earlier one merged must not inherit that earlier verdict.
+// succeeded without listing that PR (since #1840 gather() never asks about a
+// carried-forward PR, so a successful read never lists it). Keyed on the PR,
+// not just the ticket: a retry under a NEW PR after an earlier one merged
+// must not inherit that earlier verdict.
 test("#1841: a failed merged read carries forward the previous board's MERGED, preserving dwell and excluding it from claimed", () => {
   const b = computeBoard(reproInputs({
     rows: ["#907 impl-907=PR#930"],
@@ -623,7 +624,7 @@ test("#1841: a failed merged read carries forward the previous board's MERGED, p
 test("#1841: a successful merged read that simply omits the PR still carries MERGED forward", () => {
   const b = computeBoard(reproInputs({
     rows: ["#907 impl-907=PR#930"],
-    merged: [999], // read succeeded but this PR aged out of its window (#1840), not this ticket
+    merged: [999], // read succeeded without this PR, which gather() no longer asks about (#1840)
     prev: { tickets: [{ issue: 907, pr: 930, column: "MERGED", sinceEnteredStage: 3 * HOUR }] },
   }));
   assert.equal(card(b, 907).column, "MERGED");
@@ -688,6 +689,58 @@ test("#1841: a no-impl-token PR-bound row (amendment 2a) also carries MERGED for
     prev: { tickets: [{ issue: 1237, pr: 1237, column: "MERGED", sinceEnteredStage: 3 * HOUR }] },
   }));
   assert.equal(card(b, 1237).column, "MERGED");
+});
+
+// #1840: gather() asks gh about mergedReadPrs()'s set and nothing else, so
+// that set has to be EXACTLY the row PRs whose card `merged` can change: one
+// it leaves out renders REVIEW however long ago it merged, and one it adds is
+// a wasted question. The invariant is read off computeBoard() itself — the
+// PRs whose column moves between "gh knows of no merge" and "gh calls every
+// PR merged" — so the two functions cannot drift apart unseen.
+test("#1840: mergedReadPrs is exactly the row PRs whose column the merged read can change", () => {
+  const rows = [
+    "#901 impl-901=PR#931", // open: the open list answers it
+    "#902 impl-902=PR#932 → MERGED 73b356de", // token-MERGED
+    "#903 impl-903=PR#933", // carried forward (#1841)
+    "#904 impl-904=PR#930 impl-904-b=PR#940", // retried under a new PR: 940 is not carried
+    "#905 impl-905=PR#950", // previous board had it, not as MERGED
+    "#906 impl-906", // implementing, no PR
+    "#907 impl-907=released", // released, no PR
+    "#908 excluded · behind-pr:#931 impl-908=PR#960", // an Exclusion is POOL whatever it carries
+    "#1237 -> PR#1237 · review=member:review-pr-1237", // amendment 2a: no impl token, PR-bound
+    "#909 impl-909=PR#950", // a second row on 950: asked once
+  ];
+  const prev = { tickets: [
+    { issue: 903, pr: 933, column: "MERGED", sinceEnteredStage: HOUR },
+    { issue: 904, pr: 930, column: "MERGED", sinceEnteredStage: HOUR },
+    { issue: 905, pr: 950, column: "REVIEW", sinceEnteredStage: HOUR },
+  ] };
+  const inp = { ledger: { rows, filed: [], ruled: [] }, prs: [openPr(931)], prev };
+  const need = mergedReadPrs(inp);
+  assert.deepEqual(need, [940, 950, 1237]);
+  const col = (merged) => new Map(computeBoard(reproInputs({ ...inp, merged })).tickets.map((t) => [t.issue, t.column]));
+  const none = col([]);
+  const all = col([930, 931, 932, 933, 940, 950, 960, 1237]);
+  const moved = new Set([...none].filter(([issue, c]) => all.get(issue) !== c).map(([issue]) => rows.map(parseRow).find((p) => p.issue === issue).pr));
+  assert.deepEqual([...moved].sort((a, b) => a - b), need);
+});
+
+// #1840 review: a ledger row whose PR mention is 22+ digits parses (via
+// `Number()`) to a value outside Number.isSafeInteger, which readMerged()
+// would stringify in exponential form (`1e+21`) — not a valid gh api
+// graphql alias/argument, and one that fails the WHOLE batched query, not
+// just that row. mergedReadPrs excludes it before it ever reaches gh, the
+// same way a PR-less row is excluded, so every other row PR's lookup stays
+// intact.
+test("#1840: a PR number outside Number.isSafeInteger is excluded from mergedReadPrs, so it cannot poison the batch for other row PRs", () => {
+  const need = mergedReadPrs({
+    ledger: { rows: [
+      "#907 impl-907=PR#930",
+      "#908 impl-908=PR#1000000000000000000000", // 22 digits: Number() -> 1e+21
+    ], filed: [], ruled: [] },
+    prs: [], prev: null,
+  });
+  assert.deepEqual(need, [930], "the unsafe-integer PR is left out; 930 still gets asked about");
 });
 
 test("#1820: review=wf/member, or a live fix-pr/finisher-pr, is under review; agent is the latest live member", () => {
