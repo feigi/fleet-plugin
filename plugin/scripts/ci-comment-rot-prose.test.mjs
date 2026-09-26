@@ -65,8 +65,12 @@ export function citationFault(citing, cited) {
   // never to the first period: "e.g.", "ci.yml" and a period inside the
   // quotation itself each came before the quoted span, cut the sentence short
   // of it, and let a misquote read as a paraphrase (#1898). Quoted spans are
-  // blanked to same-length filler before splitting, so no period inside one can
-  // end the sentence, and the cut lands at the same offset in the real text.
+  // blanked to same-length filler before splitting — straight quotes are
+  // assumed to come in proper, non-empty pairs; a stray unpaired `"` or an
+  // empty `""` shifts that pairing instead of closing it, a masking gap this
+  // function doesn't guard (tracked separately, #1962) — so a period inside a
+  // PROPERLY PAIRED quotation can't end the sentence, and the cut lands at
+  // the same offset in the real text.
   // That holds for a quotation's closing period too (`…out." Next`): the
   // sentence then runs on to the next real end, which can only add spans to
   // check — the loud direction. Ending it at the closing mark instead would
@@ -148,7 +152,7 @@ test("a paraphrase is accepted; a deleted citation and a misquote are not", () =
 // "v1.2"), or a period inside the quoted span itself. The quotation then fell
 // outside the sentence, and the misquote read as a paraphrase — the silent
 // direction. Each input below is the misquote the test above refuses.
-test("a period that ends no sentence cannot hide a misquote from citationFault (#1898)", () => {
+test("an abbreviation, mid-word, or quote/paren-closing period cannot hide a misquote from citationFault (#1898)", () => {
   const cited = "so this walk, not node, is what keeps vendored tests out.";
 
   for (const abbr of ["e.g.", "i.e.", "cf.", "viz.", "vs."]) {
@@ -195,12 +199,23 @@ test("a period that ends no sentence cannot hide a misquote from citationFault (
     citationFault('claim-ticket.sh \u2018as it says itself.\u2019 says "this filter, not node"', cited),
     /does not say it/,
   );
+  // Deliberately NOT tested here: a SPACED abbreviation ("e. g." — the space
+  // keeps sentences() from ever matching the "e.g" it exempts), a
+  // mid-sentence ellipsis ("..." — its own last period is a real,
+  // unexempted terminator), and a misquote reachable only via a SECOND,
+  // separate mention of claim-ticket.sh (out of scope regardless of
+  // sentences(): this function only ever reads the first sentence). Each
+  // still lets a misquote read as a paraphrase; none is a regression, and
+  // none is a form #1898's own remedy promised to close.
 });
 
-// The other half of #1898: the sentence still ends at its REAL end. A quoted
-// span in the next sentence is not claim-ticket.sh's to answer for — reading on
-// past the end is the unbounded scan citationFault's own comment forbids — and a
-// true quotation reached across "e.g.", or carrying its own period, still passes.
+// The other half of #1898: the sentence still ends at its REAL end. Once
+// sentences() actually lands a boundary there, a quoted span past it is not
+// claim-ticket.sh's to answer for — reading on past the end is the unbounded
+// scan citationFault's own comment forbids — and a true quotation reached
+// across "e.g.", or carrying its own period, still passes. A quotation's own
+// closing period is not that boundary, though: the previous test pins the
+// loud direction that falls out when it stands in for one instead.
 test("citationFault reads past 'e.g.' but not past the sentence's end (#1898)", () => {
   const cited = "so this walk, not node, is what keeps vendored tests out.";
 
@@ -208,6 +223,18 @@ test("citationFault reads past 'e.g.' but not past the sentence's end (#1898)", 
   assert.equal(citationFault('claim-ticket.sh says "is what keeps vendored tests out."', cited), null);
   assert.equal(
     citationFault('claim-ticket.sh makes the same point, e.g. about its own walk. The runner\'s "find" was the defect.', cited),
+    null,
+  );
+  // #1940: sentences() also ends a sentence at a bare `?` or `!`, not only
+  // at `.` — see sentences()'s own comment in prose-pin.mjs for why that
+  // swaps which direction is silent for a checker like this one. A quote
+  // past either is just as unanswerable as one past a period.
+  assert.equal(
+    citationFault('Does claim-ticket.sh agree? It says "this filter, not node".', cited),
+    null,
+  );
+  assert.equal(
+    citationFault('claim-ticket.sh agrees! It also says "this filter, not node".', cited),
     null,
   );
 });
