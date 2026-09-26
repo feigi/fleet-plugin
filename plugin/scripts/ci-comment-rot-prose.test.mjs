@@ -282,16 +282,18 @@ export function setupNodeComments(lines = read("../../.github/workflows/ci.yml")
     // column, their values sit deeper — and that line is the entry's opener
     // only if it opens a sequence entry whose own keys start at `uses:`'s
     // column. `run: |` or `with:` there, on a line of its own or after the
-    // `- `, means the match was never an entry's own key. A bare `-` sets its
-    // keys under it, each of which the walk has already held at or past that
-    // column (#1920).
+    // `- `, means the match was never an entry's own key. A bare `-`, or a
+    // dash whose only remainder is a comment, sets its keys under it, each of
+    // which the walk has already held at or past that column (#1920 follow-up:
+    // a trailing comment's own text is not a key, so it must not set the
+    // column the way a real key would).
     let step = at;
     if (!uses[2]) {
       const depth = uses[1].length;
       step--;
       while (step >= 0 && (/^\s*(?:#|$)/.test(lines[step]) || lines[step].search(/\S/) >= depth)) step--;
       if (step < 0) continue;
-      if (!/^\s*-\s*$/.test(lines[step]) && /^\s*-\s+(?=\S)/.exec(lines[step])?.[0].length !== depth) continue;
+      if (!/^\s*-\s*(?:#.*)?$/.test(lines[step]) && /^\s*-\s+(?=\S)/.exec(lines[step])?.[0].length !== depth) continue;
     }
     // Either way the entry is a step only if it hangs from `steps:`: the first
     // line above the opener that neither sits deeper than its `- ` nor opens a
@@ -307,6 +309,16 @@ export function setupNodeComments(lines = read("../../.github/workflows/ci.yml")
     )
       parent--;
     if (parent < 0 || !/^\s*steps:(?:\s|$)/.test(lines[parent])) continue;
+    // `steps:` is just a key spelled that way — nothing above checks that it
+    // sits directly under a job, not inside some action's own config that
+    // happens to reuse the name. The line immediately shallower than it, if
+    // the walk finds one before running off the top, must open a job
+    // (`  name:`); anything else — another `with:`, a matrix `include:` —
+    // means this `steps:` is not the job's (#1920 follow-up).
+    const stepsDepth = lines[parent].search(/\S/);
+    let jobLine = parent - 1;
+    while (jobLine >= 0 && (/^\s*(?:#|$)/.test(lines[jobLine]) || lines[jobLine].search(/\S/) >= stepsDepth)) jobLine--;
+    if (jobLine >= 0 && !/^ {2}[\w-]+:\s*$/.test(lines[jobLine])) continue;
     let i = step;
     while (i > 0 && /^\s*#/.test(lines[i - 1])) i--;
     let j = step;
@@ -621,6 +633,8 @@ test("a `uses: actions/setup-node@` line under an entry that is not a step's, or
     ["  job:", "    strategy:", "      matrix:", "        include:", "          - node: 20", "            uses: actions/setup-node@v5"],
     [...job, "      - run: |", "          uses: actions/setup-node@v5"],
     [...job, "      - with:", "          uses: actions/setup-node@v5"],
+    [...job, "      - uses: some/action@v1", "        with:", "          - uses: actions/setup-node@v5"],
+    ["  job:", "    volumes:", "      -", "        uses: actions/setup-node@v5"],
   ]) {
     assert.deepEqual(setupNodeComments(shape), [], shape.join("\n"));
   }
@@ -649,6 +663,36 @@ test("a `uses: actions/setup-node@` line under an entry that is not a step's, or
   ]) {
     assert.deepEqual(setupNodeComments(shape), [{ block: text, lines: 1, job: "job" }], shape.join("\n"));
   }
+});
+
+// #1920 follow-up: `steps:` is only a key spelled that way — the parent check
+// alone never verifies it opens the JOB's list rather than some nested config
+// that happens to reuse the name. An action's `with:` block (or any other
+// nesting) can carry its own key called `steps:` several levels down; without
+// checking that `steps:` itself hangs from a job, that nested key passes the
+// parent check exactly like the real one and manufactures a phantom step.
+test("a nested key merely spelled `steps:` cannot own a step; only one hanging from a job can (#1920 follow-up)", () => {
+  const collision = [
+    "  job:",
+    "    steps:",
+    "      - uses: some/action@v1",
+    "        with:",
+    "          config:",
+    "            steps:",
+    "              - uses: actions/setup-node@v5",
+  ];
+  assert.deepEqual(setupNodeComments(collision), [], collision.join("\n"));
+});
+
+// #1920 follow-up: the column check's bare-`-` exemption matched only a dash
+// with NOTHING after it. A dash followed by a trailing comment (a note on the
+// opener itself, not one of its keys) has no key text of its own either, but
+// the comment's own column is not its keys' column — so without the same
+// exemption, a real step opened that way silently dropped out of the
+// returned set instead of being found.
+test("a bare `-` opener followed only by a trailing comment does not perturb the column check; the step is still discovered (#1920 follow-up)", () => {
+  const found = setupNodeComments(["  job:", "    steps:", "      -  # Set up Node", "        name: Set up Node", "        uses: actions/setup-node@v5"]);
+  assert.deepEqual(found, [{ block: "", lines: 0, job: "job" }]);
 });
 
 // #1919. A blank line ends a step's comment run wherever it falls — the rule
