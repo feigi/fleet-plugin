@@ -494,7 +494,9 @@ test("pinOwnerComment sees an owner written as a named step, so a bare-form deco
   const owner = [
     "      # .nvmrc holds an EXACT version, and Renovate moves it on a monthly",
     "      # schedule: see ADR 0010. Do not hand-edit this to float.",
-    "      - name: Set up Node",
+    "      - id: node",
+    "        with:",
+    "          node-version-file: .nvmrc",
     "        uses: actions/setup-node@v5",
   ];
   const decoy = [
