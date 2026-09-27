@@ -162,6 +162,17 @@ export function paragraph(text, anchor, what, options) {
 // past it would join two real sentences. A period inside a word ("ci.yml",
 // "v1.2") is no break either, since no whitespace follows it.
 //
+// The abbreviations match lowercase only, as this repo's prose spells every
+// one of them (#1899). Folded case, a sentence genuinely ending in a word
+// that merely shares their letters — a proper noun "Vs.", a stray "E.g." —
+// read as the abbreviation and joined the sentence after it, the same silent
+// merge "etc." is kept off the list to avoid. The cost runs the other way: a
+// capitalized one anywhere — a sentence OPENING "E.g. …", a parenthetical
+// "(Cf. …)" mid-sentence — now ends the sentence right there, not only at a
+// sentence's own start. No file's PROSE spells any of the five capitalized,
+// outside this ticket's own fixtures illustrating the defect (#1899 grepped
+// the corpus).
+//
 // This replaces the first-period `[^.]*` scan (#1898, #1940), which is wrong
 // both ways at once: it ends the window at every period above, and it runs
 // straight past a `?` or `!` into the next sentence. Which of the two is the
@@ -186,7 +197,7 @@ export function paragraph(text, anchor, what, options) {
 // 20000 random terminator/closer/abbreviation fixtures and every .md/.mjs/
 // .yml/.sh file in this repo split identically both ways).
 export const sentences = (block) =>
-  block.split(/(?<=(?:[!?]|(?<!\b(?:e\.g|i\.e|cf|viz|vs))\.)[*_)"'\u201d\u2019]*)\s+/i);
+  block.split(/(?<=(?:[!?]|(?<!\b(?:e\.g|i\.e|cf|viz|vs))\.)[*_)"'\u201d\u2019]*)\s+/);
 
 // A phrase-bounded slice — `paragraph`'s shape, with the end bound a second
 // phrase instead of the next blank line. `from` is `anchorAt`'s own
