@@ -358,8 +358,10 @@ function walkDiscrepancy(root, scannedFiles) {
 // extension, and a non-scoped file in every scoped directory must all be
 // judged correctly, or the real-tree check below reds on a legitimate tree.
 // Then the reject half, on the same tree: #2044's exact shape — one file
-// dropped from each md directory at once — is named file by file.
-test("fixture: the walk oracle accepts a full scan and names every file a one-per-directory thinning drops", (t) => {
+// dropped from each md directory at once — is named file by file. A third
+// assertion, same tree again, covers `extra`'s own two triggers: a file
+// returned twice, and a file outside every scoped directory.
+test("fixture: the walk oracle accepts a full scan, names a one-per-directory thinning's missing files, and flags a duplicated or out-of-scope file as extra", (t) => {
   const root = fixtureTree(t, {
     "skills/a/SKILL.md": "",
     "skills/a/references/deep.md": "",
