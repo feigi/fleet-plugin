@@ -167,10 +167,13 @@ const NEEDS_REVIEW =
 // word (#1983). The gap tolerates a period now, and the SENTENCE, from
 // `sentences()`, is what bounds it: widened over the raw slice instead, the gap
 // would pair a modal in one sentence with a verb in the next. RESIDUAL:
-// sentences() still cuts short at a `.)`, `.**`, `."`, a mid-sentence `?`, a
-// capitalised "E.g." or an "etc." (silent here), and still merges two real
-// sentences across #1987's `**late**.[1]` and #1899's sentence-final lowercase
-// "vs." (an over-fire here). None is in either slice today.
+// sentences() still cuts short at a `.)`, `."`, a mid-sentence `?`, a
+// capitalised "E.g." or an "etc." (silent here — none of those four is in
+// either slice today), and still merges two real sentences across #1987's
+// `**late**.[1]` and #1899's sentence-final lowercase "vs." (an over-fire
+// here, also absent today). `.**` itself IS in the artifact-rules slice
+// (twice) and absent from the invariant slice, but both occurrences are
+// genuine sentence boundaries, neither straddling a permission/review fact.
 const faults = (pattern, slice) => sentences(slice).filter((s) => pattern.test(s));
 
 // Every pin in one place, so a fixture asserts WHICH pins fire rather than that

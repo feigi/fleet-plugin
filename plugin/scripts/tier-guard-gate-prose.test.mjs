@@ -105,11 +105,14 @@ const OWN_COUNT = /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\b/
 // a window cut short is its silent direction: an "e.g." or a `SKILL.md` between
 // "since" and "last" ended the old window before the recency word. The sentence
 // is what bounds the gap, so a "since" in one sentence never pairs with a
-// recency word in the next. RESIDUAL: sentences() still cuts short at a `.)`,
-// `.**`, `."`, a mid-sentence `?`, a capitalised "E.g." or an "etc." (silent
-// here), and still merges two real sentences across #1987's `**late**.[1]` and
-// #1899's sentence-final lowercase "vs." (an over-fire here). None is in this
-// paragraph today.
+// recency word in the next. RESIDUAL: sentences() still cuts short at a
+// `.)`, `."`, a mid-sentence `?`, a capitalised "E.g." or an "etc." (silent
+// here — none of those four is in this paragraph today), and still merges
+// two real sentences across #1987's `**late**.[1]` and #1899's
+// sentence-final lowercase "vs." (an over-fire here, also absent today).
+// `.**` itself IS in this slice once (its own opening bold lead), but that
+// boundary is a genuine sentence end, not one straddling the since/recency
+// pair this pin reads.
 const UNPERSISTED_SET =
   /\b(?:since|after)\b[\s\S]{0,40}\b(?:last|previous|prior|earlier|latest|most\s+recent)\b|\bnot\s+yet\s+\w+ed\b/i;
 const unpersisted = (slice) => sentences(slice).filter((s) => UNPERSISTED_SET.test(s));

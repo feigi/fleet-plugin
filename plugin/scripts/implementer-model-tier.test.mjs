@@ -62,22 +62,52 @@ const REVERT_NOTE = /\*\*`class=routine` → `sonnet` was REVERTED on [\s\S]*?\*
 // pairs with a `sonnet` in the next. Each sentence's offset is recovered by
 // searching the slice from the previous sentence's end — sentences() drops the
 // whitespace it splits on — so a hit's index is still an index into `slice`,
-// comparable against the note's span as before. RESIDUAL: sentences() still
-// cuts short at a `.)`, `.**`, `."`, a mid-sentence `?`, a capitalised "E.g."
-// or an "etc." (silent here), and still merges two real sentences across
-// #1987's `**late**.[1]` and #1899's sentence-final lowercase "vs." (an
-// over-fire here). None is in this slice today.
+// comparable against the note's span as before.
+//
+// The note's own span is masked out of whichever sentence it falls in before
+// matching, the same technique citationFault uses for quoted/parenthesized
+// spans. Found in review: without this, a restoration glued onto the note's
+// closing `**` with no whitespace before it (`.**;`, `.**,`, or nothing at
+// all) leaves the note and the restoration in ONE sentence, because
+// `sentences()` only splits at a terminator FOLLOWED by whitespace. The
+// note's own `class=routine`/`sonnet` pair would then anchor a match whose
+// gap runs past the note and swallows the restoration, and the exemption
+// filter below — keyed on where the match STARTS — would read the whole
+// thing as covered by the note, a silent miss the OLD raw-slice scan did not
+// have (the note's literal period ended its `[^.]` tail first). Masking
+// keeps the sentence the same length, so the offsets recovered above still
+// line up, and the filter below is now a second, redundant guard rather than
+// the only one.
+//
+// RESIDUAL: sentences() still cuts short at a `.)`, `."`, a mid-sentence `?`,
+// a capitalised "E.g." or an "etc." (silent here — none of those four is in
+// this slice today), and still merges two real sentences across #1987's
+// `**late**.[1]` and #1899's sentence-final lowercase "vs." (an over-fire
+// here, also absent today). `.**` itself is common in this slice (14
+// bold-lead sentence ends) but each is a genuine boundary between two
+// unrelated sentences, not one straddling a rebinding fact — the note's own
+// `.**` is the one exception, which is exactly what the masking above is for
+// rather than trusting the corpus to stay accidentally clean.
 const REBINDING = /`class=routine`[\s\S]{0,120}sonnet[\s\S]{0,40}|sonnet[\s\S]{0,120}`class=routine`[\s\S]{0,40}/g;
 const rebindingsOutside = (slice, note) => {
   const noteAt = slice.indexOf(note);
+  const noteEnd = noteAt + note.length;
   const hits = [];
   let cursor = 0;
   for (const sentence of sentences(slice)) {
     const at = slice.indexOf(sentence, cursor);
     cursor = at + sentence.length;
-    for (const hit of sentence.matchAll(REBINDING)) hits.push({ index: at + hit.index, text: hit[0] });
+    const overlapStart = Math.max(at, noteAt);
+    const overlapEnd = Math.min(cursor, noteEnd);
+    const masked = overlapStart < overlapEnd
+      ? sentence.slice(0, overlapStart - at) + "#".repeat(overlapEnd - overlapStart) + sentence.slice(overlapEnd - at)
+      : sentence;
+    for (const hit of masked.matchAll(REBINDING)) {
+      const index = at + hit.index;
+      hits.push({ index, text: slice.slice(index, index + hit[0].length) });
+    }
   }
-  return hits.filter((hit) => hit.index < noteAt || hit.index >= noteAt + note.length).map((hit) => hit.text);
+  return hits.filter((hit) => hit.index < noteAt || hit.index >= noteEnd).map((hit) => hit.text);
 };
 
 test("phase 0 step 4 still earns its class judgement now that the class prices nothing", () => {
@@ -408,6 +438,27 @@ test("a period in the gap does not hide a rebinding outside the revert note", ()
     [],
     "a `class=routine` and a `sonnet` in two different sentences read as one binding",
   );
+});
+
+test("a rebinding glued onto the revert note with no sentence break does not hide inside its span", () => {
+  // Found in review of #1983: sentences() only splits at a terminator FOLLOWED
+  // by whitespace, so a restoration glued directly onto the note's closing
+  // `**` — a semicolon, a comma, or nothing at all before the next token —
+  // leaves the note and the restoration in ONE sentence. Unmasked, the note's
+  // own `class=routine`/`sonnet` pair anchors a match whose gap runs past the
+  // note and swallows the restoration, and the exemption filter, keyed on
+  // where the match starts, reads the whole thing as covered by the note.
+  const slice = dispatch();
+  const note = REVERT_NOTE.exec(slice)?.[0];
+  for (const glue of [
+    `${note}; \`class=routine\` is back at \`sonnet\`.`,
+    `${note}, and \`class=routine\` is back at \`sonnet\`.`,
+    `${note}\`class=routine\` binds \`sonnet\` immediately.`,
+  ]) {
+    const mutated = slice.replace(note, glue);
+    assert.notEqual(mutated, slice, `the glued fixture no longer matches the dispatch slice: ${glue}`);
+    assert.equal(rebindingsOutside(mutated, note).length, 1, `a rebinding glued onto the note's own span read as covered by it: ${glue}`);
+  }
 });
 
 // #1345: the dispatch-time tier check. A scripted step, not a prose

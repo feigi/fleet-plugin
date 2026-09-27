@@ -119,13 +119,15 @@ test("run-team/SKILL.md: a dead member recovers exactly as the Member-killed row
 // This pin is NEGATIVE, so a window cut short is its silent direction: "Treat
 // silence (i.e. no report) as a bail." ended the old window at "i.e." and
 // passed. The sentence bound is load-bearing the other way too: this
-// paragraph's own "never silence alone." sits 27 characters before the next
+// paragraph's own "never silence alone." sits 20 characters before the next
 // sentence's "bail", so an unbounded period-tolerant gap reds the real text.
-// RESIDUAL: sentences() still cuts short at a `.)`, `.**`, `."`, a
-// mid-sentence `?`, a capitalised "E.g." or an "etc." (silent here), and still
-// merges two real sentences across #1987's `**late**.[1]` and #1899's
-// sentence-final lowercase "vs." (an over-fire here). None is in this
-// paragraph today.
+// RESIDUAL: sentences() still cuts short at a `.)`, `."`, a mid-sentence `?`,
+// a capitalised "E.g." or an "etc." (silent here — none of those four is in
+// this paragraph today), and still merges two real sentences across #1987's
+// `**late**.[1]` and #1899's sentence-final lowercase "vs." (an over-fire
+// here, also absent today). `.**` itself IS in this paragraph once (its own
+// opening bold lead), but that boundary is a genuine sentence end, not one
+// straddling the silence/bail co-location this pin reads.
 const silenceBails = (p) => sentences(p).filter((s) => /\bsilence\b[\s\S]{0,30}\bbail\b/i.test(s));
 
 test("run-team/SKILL.md: no text in the outcome paragraph lets silence alone stand in for a bail or a confirmed death", () => {
