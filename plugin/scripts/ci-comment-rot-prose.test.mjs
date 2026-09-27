@@ -125,36 +125,43 @@ export function citationFault(citing, cited) {
   // comment) shifts the pairing of every quote after it: the real quotation
   // then pairs with its neighbours' gaps and a misquote reads as a
   // paraphrase (#1962). Which words the sentence quotes is then unknowable,
-  // so it is refused, never taken for a paraphrase. Usually only the citing
-  // sentence counts — later ci.yml prose is not claim-ticket.sh's to answer
-  // for — but a shifted pairing can blank the citing sentence's OWN
-  // terminator too, pulling later prose into `sentence` right along with it
-  // (#2013, filed separately; the underlying blankQuotes/sentences
-  // interaction predates this PR).
-  // Two shapes stay out of reach even so. Nested quotes left unescaped pair
-  // evenly and read exactly like two adjacent quotations — loud only if
-  // claim-ticket.sh happens to contain the mis-paired gap's words verbatim,
-  // real coincidence. A stray `"` whose shifted pairing exposes a period
-  // inside the real quotation is a worse bet than that framing suggests: the
-  // span it leaves to check can be as short as the one blanked character
-  // between the stray quote and the real quotation's opener, and almost any
-  // cited prose contains a bare space — so this shape passes far more often
-  // than "unless it happens to match" implies. Either way every mis-paired
-  // span found is still checked below; it just isn't always a span worth
-  // much.
+  // so it is refused, never taken for a paraphrase.
+  //
+  // An odd count only catches the shift while the sentence still ends where
+  // it really does. The shifted pairing can blank the citing sentence's own
+  // terminator (`node". The install"` is one span), running `sentence` on
+  // into later ci.yml prose until the count is even again (#2013) — or
+  // expose a period inside the real quotation and end it early, or nest
+  // quotes unescaped; every one of those pairs evenly. What gives all of
+  // them away is which side of its word each mark sits on: a shift makes a
+  // real closing mark open a span and a real opening mark close one. So
+  // every span must open with a mark that can open and close with one that
+  // can close, by CommonMark's flanking rule — an opener not followed by
+  // whitespace, nor by punctuation unless whitespace or punctuation precedes
+  // it; a closer the mirror image. A mark glued to a word on BOTH sides
+  // (`don"t`, `x"this`) can play either role, so a shift through one is
+  // still out of reach; every span it produces is still checked below.
+  const at = (i) => from[i] ?? " ";
+  const space = (ch) => /\s/.test(ch);
+  const punct = (ch) => /[\p{P}\p{S}]/u.test(ch);
+  const canOpen = (i) => !space(at(i + 1)) && (!punct(at(i + 1)) || space(at(i - 1)) || punct(at(i - 1)));
+  const canClose = (i) => !space(at(i - 1)) && (!punct(at(i - 1)) || space(at(i + 1)) || punct(at(i + 1)));
+  const spans = [...sentence.matchAll(/"([^"]+)"/g)];
   const malformed = sentence.includes('""')
     ? 'an empty ""'
     : sentence.includes('\\"')
       ? 'a backslash-escaped \\"'
       : sentence.split('"').length % 2 === 0
         ? 'an unpaired "'
-        : null;
+        : spans.some((m) => !canOpen(m.index) || !canClose(m.index + m[0].length - 1))
+          ? 'a mis-paired " (a mark opening or closing a span from the wrong side of its word)'
+          : null;
   if (malformed) {
     return `ci.yml's sentence citing claim-ticket.sh has ${malformed}, so which words it quotes is ambiguous — pair every quotation mark, or paraphrase`;
   }
   // No quoted span at all is a paraphrase: nothing claims to be verbatim, and
   // dropping the quotation marks is the other of the two fixes #348 sanctions.
-  for (const [, quoted] of sentence.matchAll(/"([^"]+)"/g)) {
+  for (const [, quoted] of spans) {
     if (!cited.includes(quoted)) {
       return `ci.yml quotes claim-ticket.sh as saying "${quoted}", and that file does not say it`;
     }
@@ -321,6 +328,60 @@ test("citationFault accepts well-paired quotations, and malformed quotes outside
   // A backslash-escaped quote in a LATER sentence is later prose too — only
   // the citing sentence's own malformed check counts.
   assert.equal(citationFault('claim-ticket.sh says "walk, not node". A shell writes \\" here.', cited), null);
+});
+
+// #2013. The #1962 checks catch a shifted pairing only while the quote count
+// the citing sentence ends up with is odd. A stray `"` can instead pair its
+// way past the citing sentence's own terminator — `node". The install"` is
+// one blanked span — so the sentence runs on into later prose, the count
+// comes out even again, and the gap spans are what gets checked while the
+// real (here fabricated) quotation never is. Reproduced: the first input
+// returned null against a cited text holding those gap spans, and the second
+// returned a fault naming ". The install", the wrong span. The same shifted
+// pairing reads as two adjacent quotations when it ends the sentence EARLY
+// (a period inside the real quotation) or when quotes are nested unescaped;
+// both returned null here too, since the one gap span left is a bare space
+// or a phrase the cited text holds.
+test("citationFault refuses a straight-quote pairing that opens or closes a span from the wrong side of its word (#2013)", () => {
+  const cited = "so this walk, not node, is what keeps vendored tests out.";
+  const misPaired = /mis-paired "/;
+
+  assert.match(
+    citationFault(
+      'claim-ticket.sh says a" "this filter, not node". The install" step runs later.',
+      `${cited} The install step runs later.`,
+    ),
+    misPaired,
+  );
+  assert.match(
+    citationFault('claim-ticket.sh says a" "this filter, not node". The install" rest of the later sentence.', cited),
+    misPaired,
+  );
+  assert.match(citationFault('claim-ticket.sh says 6" "this filter. Not node"', cited), misPaired);
+  assert.match(citationFault('claim-ticket.sh says "so this "walk" not node"', cited), misPaired);
+  // A span whose closer sits after an opening parenthesis is opener-shaped
+  // even with no whitespace beside it: the punctuation half of the rule.
+  assert.match(
+    citationFault('claim-ticket.sh says a"b ("this filter, not node"). Later ("x") 6" end.', cited),
+    misPaired,
+  );
+});
+
+// The other half of #2013: a quotation mark counts as correctly placed from
+// either side of punctuation, not only of whitespace — an opener behind a
+// parenthesis or a colon, a closer after the quotation's own comma or period
+// — and a quotation's own period still does not end the citing sentence.
+test("citationFault accepts quotation marks set against punctuation (#2013)", () => {
+  const cited = "so this walk, not node, is what keeps vendored tests out.";
+
+  assert.equal(citationFault('claim-ticket.sh says ("walk, not node").', cited), null);
+  assert.equal(citationFault('claim-ticket.sh says:"walk, not node"', cited), null);
+  assert.equal(citationFault('claim-ticket.sh says "walk, not node," and more', cited), null);
+  assert.equal(citationFault('claim-ticket.sh\'s "walk, not node"', cited), null);
+  assert.equal(
+    citationFault('claim-ticket.sh says "is what keeps vendored tests out." and "walk, not node". Later "a" b.', cited),
+    null,
+  );
 });
 
 // #1999. The blanked text has to stay the SAME length as the real text, since
