@@ -66,11 +66,9 @@ export function citationFault(citing, cited) {
   // quotation itself each came before the quoted span, cut the sentence short
   // of it, and let a misquote read as a paraphrase (#1898). Quoted spans are
   // blanked to same-length filler before splitting — straight quotes are
-  // assumed to come in proper, non-empty pairs; a stray unpaired `"` or an
-  // empty `""` shifts that pairing instead of closing it, a masking gap this
-  // function doesn't guard (tracked separately, #1962) — so a period inside a
-  // PROPERLY PAIRED quotation can't end the sentence, and the cut lands at
-  // the same offset in the real text.
+  // assumed to come in proper, non-empty pairs, and the check below refuses a
+  // citing sentence where they don't — so a period inside a quotation can't
+  // end the sentence, and the cut lands at the same offset in the real text.
   // That holds for a quotation's closing period too (`…out." Next`): the
   // sentence then runs on to the next real end, which can only add spans to
   // check — the loud direction. Ending it at the closing mark instead would
@@ -117,6 +115,30 @@ export function citationFault(citing, cited) {
   // between them is not swept in with them.
   const opaque = blankParens(blankQuotes(from));
   const sentence = from.slice(0, sentences(opaque)[0].length);
+  // Straight quotes pair by position alone — opener and closer are the same
+  // character — so an empty `""` (never a span to either regex), a stray
+  // unpaired `"`, or a backslash "escape" (none exists in a YAML `#`
+  // comment) shifts the pairing of every quote after it: the real quotation
+  // then pairs with its neighbours' gaps and a misquote reads as a
+  // paraphrase (#1962). Which words the sentence quotes is then unknowable,
+  // so it is refused, never taken for a paraphrase. Only the citing sentence
+  // counts — later ci.yml prose is not claim-ticket.sh's to answer for.
+  // Two shapes stay out of reach, both still loud unless claim-ticket.sh
+  // happens to contain a mis-paired gap's words verbatim: nested quotes left
+  // unescaped pair evenly and read exactly like two adjacent quotations; and
+  // a stray `"` whose shifted pairing exposes a period inside the real
+  // quotation ends the sentence there on an even count. Either way every
+  // mis-paired span is still checked below.
+  const malformed = sentence.includes('""')
+    ? 'an empty ""'
+    : sentence.includes('\\"')
+      ? 'a backslash-escaped \\"'
+      : sentence.split('"').length % 2 === 0
+        ? 'an unpaired "'
+        : null;
+  if (malformed) {
+    return `ci.yml's sentence citing claim-ticket.sh has ${malformed}, so which words it quotes is ambiguous — pair every quotation mark, or paraphrase`;
+  }
   // No quoted span at all is a paraphrase: nothing claims to be verbatim, and
   // dropping the quotation marks is the other of the two fixes #348 sanctions.
   for (const [, quoted] of sentence.matchAll(/"([^"]+)"/g)) {
@@ -240,6 +262,39 @@ test("citationFault reads past 'e.g.' but not past the sentence's end (#1898)", 
     citationFault('claim-ticket.sh agrees! It also says "this filter, not node".', cited),
     null,
   );
+});
+
+// #1962. Both quote regexes need one or more characters between two straight
+// quotes, so an empty `""` is never a span: it shifts the pairing of every
+// quote after it instead. That is not a harmless no-citation — the real
+// quotation behind it pairs with its neighbours' gaps, and a misquote there
+// read as a paraphrase (reproduced: the first two inputs below returned null).
+// A stray unpaired `"` shifts the pairing the same way, and a backslash
+// "escape" is no escape in a YAML `#` comment, just a third quote mark. None
+// of the three can be read as a citation, so each is refused as one, never
+// let through as a paraphrase — even where the words happen to be right.
+test("citationFault refuses an empty, unpaired or backslash-escaped straight quote in the citing sentence (#1962)", () => {
+  const cited = "so this walk, not node, is what keeps vendored tests out.";
+
+  assert.match(citationFault('claim-ticket.sh says "" "this filter, not node"', cited), /empty ""/);
+  assert.match(citationFault('claim-ticket.sh says "" "walk" "this filter, not node"', cited), /empty ""/);
+  assert.match(citationFault('claim-ticket.sh says ""', cited), /empty ""/);
+  assert.match(citationFault('claim-ticket.sh says "walk, \\"not node"', cited), /backslash-escaped \\"/);
+  assert.match(citationFault('claim-ticket.sh, 6" wide, says "walk, not node"', cited), /unpaired "/);
+});
+
+// The other half of #1962: only the citing sentence's own quote marks count.
+// ci.yml's later prose is free to mention an empty string or a stray inch
+// mark, and a sentence quoting the file twice, or setting an empty curly pair
+// beside the quotation (distinct opener and closer, so it shifts nothing),
+// is still a well-formed citation.
+test("citationFault accepts well-paired quotations, and malformed quotes outside the citing sentence (#1962)", () => {
+  const cited = "so this walk, not node, is what keeps vendored tests out.";
+
+  assert.equal(citationFault('claim-ticket.sh says "walk, not node". Here "" is an empty string.', cited), null);
+  assert.equal(citationFault('claim-ticket.sh says "walk, not node". The pipe is 6" wide.', cited), null);
+  assert.equal(citationFault('claim-ticket.sh says "walk, not node" and "vendored tests out"', cited), null);
+  assert.equal(citationFault('claim-ticket.sh says \u201c\u201d then "walk, not node"', cited), null);
 });
 
 test("the Shellcheck comment does not present its examples as the complete set", () => {
