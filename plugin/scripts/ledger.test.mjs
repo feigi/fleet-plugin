@@ -2312,7 +2312,10 @@ test("CLI: a word carrying a format (Cf) character that is not this script's own
 // then trailing and inside the name, the positions a leading-only strip
 // would miss. U+17B4 and U+180B are DICP members the ticket does not name:
 // a hand-curated block list of the named ranges would still miss both,
-// which is why the strip is the property union and not such a list.
+// which is why the strip is the property union and not such a list. And
+// U+0600 is the other half of that union: a visible Cf mark DICP leaves
+// out, which #1851 already stripped — swapping DICP in for Cf rather than
+// adding it would stop refusing this one, and no #1851 pin covers it.
 test("CLI: a non-Cf default-ignorable character (Hangul filler, variation selector) ahead of, inside or behind this script's own flag name still lets the clause refuse it (#1904)", (t) => {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");
@@ -2330,6 +2333,7 @@ test("CLI: a non-Cf default-ignorable character (Hangul filler, variation select
     "widget \u034F--REQUIRE-FILE",
     "\u17B4-file",
     "\u180B-require-file",
+    "\u0600-file",
   ]) {
     const r = cli(["--file", file, "check", stray, "widget", "guard", "missing"]);
     const label = JSON.stringify(stray);
