@@ -174,30 +174,91 @@ export function paragraph(text, anchor, what, options) {
   return end === -1 ? rest : rest.slice(0, end);
 }
 
-// One list item: from `from` to the next item at the same or a shallower
-// indent, and never past `to`. `between` alone on a fixed end anchor takes every
-// item between the two anchors, so a sibling inserted there joins the slice and
-// carries a pin the real item lost. Measured on run-team's `no-ci` edge (#747,
-// #491): the ruling clause gutted, then restated in an inserted sibling bullet,
-// stayed green. `to` stays as the outer bound and as the "moved — update this
-// test" tripwire `between` already raises.
+// One list item: from `from` to where markdown ends the item, and never past
+// `to`. `between` alone on a fixed end anchor takes every item between the two
+// anchors, so a sibling inserted there joins the slice and carries a pin the
+// real item lost. Measured on run-team's `no-ci` edge (#747, #491): the ruling
+// clause gutted, then restated in an inserted sibling bullet, stayed green. `to`
+// stays as the outer bound and as the "moved — update this test" tripwire
+// `between` already raises.
 //
-// Any list marker ends the item (`-`, `*`, `+`, `1.`, `1)`), not only the
-// `- **` lead-in the item itself happens to use: a sibling without a bold
-// lead-in is a sibling too. A marker indented deeper than the line `from`
-// starts on is the item's own child, and stays in. Returns raw bytes, like
-// `between`; a caller flattens or matches through `phrase()`.
+// A line belongs to the item only if it is indented to the item's CONTENT
+// column — past the marker and the gap after it, CommonMark's rule — or is a
+// lazy continuation: a plain line straight after the item's text, which
+// markdown renders inside the item's paragraph. A shallower line ends the item
+// when it opens a list marker (a sibling, whatever its marker: `-`, `*`, `+`,
+// `1.`, `1)`), when it opens a block that interrupts a paragraph (an ATX
+// heading, `>`, a fence, a thematic break), or when a blank line precedes it.
+// Only the first ended it before #2077, so a restatement in a paragraph after
+// the item, or under a new heading, stayed inside the slice and held the pin.
+// Not modelled: which block the previous line was, so a shallower plain line
+// straight after the item's own heading or closing fence reads as lazy and
+// stays in.
+//
+// Columns are visual, a tab advancing to the next multiple of 4 (CommonMark's
+// tab stop): counted in characters, a one-tab item read a two-space sibling as
+// a deeper child (#2077). The item's line is the one `from`'s first
+// non-whitespace character sits on, and the walk starts after `from`'s trailing
+// whitespace, so a leading-`\n` anchor — load-bearing in `between` — measures
+// its own line and not the one before it, and a trailing-`\n` anchor does not
+// eat the line break the next line's check needs (#2077). `from` must occur
+// exactly once: a list-item anchor is a start anchor, and a second copy would
+// silently decide which item is read.
+//
+// Returns raw bytes starting with `from` in full, like `between`, without the
+// blank lines before whatever ended the item; a caller flattens or matches
+// through `phrase()`.
 //
 // The single definition of a list-item bound in this directory (#491), moved
 // out of no-ci-gate-prose.test.mjs, where #747 had clamped a local copy.
 export function bullet(text, from, to, what) {
   const slice = between(text, from, to, what);
-  const at = text.indexOf(from);
-  const indent = text.slice(text.lastIndexOf("\n", at - 1) + 1).match(/^[ \t]*/)[0].length;
-  const sibling = new RegExp(`\\n[ \\t]{0,${indent}}(?:[-*+]|\\d+[.)])[ \\t]`);
-  const next = slice.slice(from.length).search(sibling);
-  return next === -1 ? slice : slice.slice(0, from.length + next);
+  const hits = occurrenceCount(text, from);
+  assert.equal(hits, 1, `${what}: list-item anchor "${from}" occurs ${hits} times — the item would be read off the first copy; narrow the anchor`);
+  const at = text.indexOf(from) + (from.length - from.trimStart().length);
+  const lineStart = text.lastIndexOf("\n", at - 1) + 1;
+  const lineEnd = text.indexOf("\n", at);
+  const content = contentColumn(text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd));
+  let kept = slice.indexOf("\n", from.trimEnd().length);
+  let blankBefore = false;
+  for (let nl = kept; nl !== -1; ) {
+    const next = slice.indexOf("\n", nl + 1);
+    const line = slice.slice(nl + 1, next === -1 ? slice.length : next);
+    const indent = line.match(/^[ \t]*/)[0];
+    if (indent.length === line.length) {
+      blankBefore = true;
+    } else if (columnOf(indent) < content && (blankBefore || ITEM_MARKER.test(line) || PARAGRAPH_INTERRUPT.test(line))) {
+      return slice.slice(0, Math.max(kept, from.length));
+    } else {
+      blankBefore = false;
+      kept = next;
+    }
+    nl = next;
+  }
+  return slice;
 }
+
+// Visual width of leading whitespace, a tab advancing to the next multiple of 4.
+function columnOf(whitespace) {
+  let col = 0;
+  for (const c of whitespace) col = c === "\t" ? col + 4 - (col % 4) : col + 1;
+  return col;
+}
+
+// Where a list item's text starts: past the marker and its gap, or one column
+// past the marker when the gap is over 4 (the rest is an indented code block).
+// A line with no marker has no content column of its own, so anything deeper
+// than its indent counts as its child.
+function contentColumn(line) {
+  const item = line.match(/^([ \t]*(?:[-*+]|\d+[.)]))([ \t]+)/);
+  if (!item) return columnOf(line.match(/^[ \t]*/)[0]) + 1;
+  const marker = columnOf(item[1]);
+  const gap = columnOf(item[1] + item[2]) - marker;
+  return gap > 4 ? marker + 1 : marker + gap;
+}
+
+const ITEM_MARKER = /^[ \t]*(?:[-*+]|\d+[.)])[ \t]/;
+const PARAGRAPH_INTERRUPT = /^[ \t]*(?:#{1,6}(?:[ \t]|$)|>|```|~~~|(?:-{3,}|\*{3,}|_{3,})[ \t]*$)/;
 
 // Prose cut into sentences, for a pin that holds a claim to ONE sentence. A
 // sentence ends at `.`, `!` or `?` followed by whitespace, with any closing
