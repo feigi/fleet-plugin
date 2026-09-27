@@ -489,6 +489,45 @@ for (const [shape, links] of [
   });
 }
 
+// #2076 hardening: the ancestor-chain guard also fires through shapes beyond
+// the ticket's own two direct repros, verified for real (not by reading the
+// code) during PR #2090's review — a ring spanning three distinct
+// directories where no single link is its own parent (only the closed chain
+// is a cycle), two independent cycles coexisting in one scoped directory
+// (the scan must abort on the first one found, not silently continue past
+// it), and a symlink-to-a-symlink chain whose final target is a cycle
+// (`statSync` resolves the whole chain in one call, so the guard never sees
+// the intermediate hop as a separate decision).
+test("fixture: a 3-directory ring cycle (a -> b -> c -> a, no single link is its own parent) fails fast", (t) => {
+  const root = fixtureTree(t, { "skills/a/SKILL.md": "" });
+  mkdirSync(join(root, "skills", "b"), { recursive: true });
+  mkdirSync(join(root, "skills", "c"), { recursive: true });
+  symlinkSync(join("..", "b"), join(root, "skills", "a", "next"), "dir");
+  symlinkSync(join("..", "c"), join(root, "skills", "b", "next"), "dir");
+  symlinkSync(join("..", "a"), join(root, "skills", "c", "next"), "dir");
+  const r = scanInChild(root);
+  assert.notEqual(r.status, 0, `a ring cycle must refuse, not return a list: ${r.stdout.slice(0, 200)}`);
+  assert.match(r.stderr, /symlink cycle: .*skills\/a\/next\/next\/next resolves to its own ancestor/);
+});
+
+test("fixture: two independent, non-overlapping symlink cycles in one scoped directory — the scan aborts on the first one found", (t) => {
+  const root = fixtureTree(t, { "skills/p/SKILL.md": "", "skills/q/SKILL.md": "" });
+  symlinkSync("..", join(root, "skills", "p", "up"), "dir");
+  symlinkSync("..", join(root, "skills", "q", "up"), "dir");
+  const r = scanInChild(root);
+  assert.notEqual(r.status, 0, `either cycle must refuse the whole scan, not return a list: ${r.stdout.slice(0, 200)}`);
+  assert.match(r.stderr, /symlink cycle: .*skills\/(p|q)\/up resolves to its own ancestor/);
+});
+
+test("fixture: a symlink-to-a-symlink chain whose final target is a cycle is still caught", (t) => {
+  const root = fixtureTree(t, { "skills/a/SKILL.md": "" });
+  symlinkSync("hop2", join(root, "skills", "a", "hop"), "dir");
+  symlinkSync("..", join(root, "skills", "a", "hop2"), "dir");
+  const r = scanInChild(root);
+  assert.notEqual(r.status, 0, `a chained cycle must refuse, not return a list: ${r.stdout.slice(0, 200)}`);
+  assert.match(r.stderr, /symlink cycle: .*skills\/a\/hop2? resolves to its own ancestor/);
+});
+
 // The accept half of the same guard: every symlink shape that is NOT a cycle
 // must still scan exactly as the native recursive walk did (#2056's ruling
 // stands). Two links to one directory and a link to a link are a DAG, not a

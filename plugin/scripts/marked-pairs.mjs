@@ -296,23 +296,23 @@ function isExempt(pair) {
   return KNOWN_EQUALITY_EXCEPTIONS.some((e) => e.file === pair.file && e.claude === pair.claude && e.omp === pair.omp);
 }
 
-// Every regular file under `dir`, listed under the path the walk took to
-// reach it. A symlinked directory is followed and its contents listed under
-// the LINK's path (#2056 rules on what that means for the real-tree check);
-// a symlink to a file, or a dangling one, is not a regular file and is
-// skipped. That is what native `readdirSync(dir, { recursive: true })` does
-// on Node >=22 — this walk is hand-rolled one level per call only so it can
-// see a cycle (#2076): native recursion enumerates every PATH through the
-// links up to the OS symlink-depth cutoff, so one way back into a loop is a
-// long finite list, and two ways back double the paths at every level and
-// never return. Here a directory that resolves to one of its OWN ancestors
-// throws, naming the link. Only ancestors: two links to one directory are
-// not a loop, and both are still listed.
 class SymlinkCycleError extends Error {}
 
+// Every regular file under `dir`, listed under the path the walk took to reach
+// it. A symlinked directory is followed and its contents listed under the LINK's
+// path (#2056 rules on what that means for the real-tree check); a symlink to a
+// file, or a dangling one, is not a regular file and is skipped. That is what
+// native `readdirSync(dir, { recursive: true, withFileTypes: true })` does on
+// Node >=22 — this walk is hand-rolled one level per call only so it can see a
+// cycle (#2076): native recursion enumerates every PATH through the links up to
+// the OS symlink-depth cutoff, so one way back into a loop is a long finite list,
+// and two ways back double the paths at every level and never return. Here a
+// directory that resolves to one of its OWN ancestors throws, naming the link.
+// Only ancestors: two links to one directory are not a loop, and both are still
+// listed.
 function walk(dir) {
   try {
-    return walkBelow(dir, new Map([[dirKey(statSync(dir)), dir]]));
+    return walkBelow(dir, new Map([[dirKey(statSync(dir, { bigint: true })), dir]]));
   } catch (e) {
     if (e instanceof SymlinkCycleError) throw e;
     // A directory that does not exist yet (e.g. a fixture tree missing one
@@ -333,10 +333,10 @@ function walkBelow(dir, ancestors) {
     const path = join(dir, e.name);
     if (e.isFile()) return [path];
     let st;
-    if (e.isDirectory()) st = statSync(path);
+    if (e.isDirectory()) st = statSync(path, { bigint: true });
     else if (e.isSymbolicLink()) {
       try {
-        st = statSync(path);
+        st = statSync(path, { bigint: true });
       } catch {
         return []; // dangling
       }
