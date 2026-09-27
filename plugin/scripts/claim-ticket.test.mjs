@@ -593,7 +593,7 @@ test("runner: the divergence walk ends on an argument that resolves TO the share
   // them is vendored, so a count is what says the vendored one stayed out.
   // It does NOT say the argument was honoured rather than dropped — measured,
   // discarding the runner's own file-list handoff (`set -- "$@"` in place of
-  // `set -- "$@" $files`, claim-ticket.sh:834) leaves this row byte-identical
+  // `set -- "$@" $files`, claim-ticket.sh:843) leaves this row byte-identical
   // at `pass 1`, because node's own default discovery from this cwd
   // independently excludes the same vendored file too. V2's `pass 12` below
   // is what pins the argument being honoured; this row does not.

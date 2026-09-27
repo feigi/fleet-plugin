@@ -118,6 +118,15 @@ runner="$wt/agent-test"
 # set of inputs, no second inference to drift.
 [ "$writeonly" = false ] || runner=$dest
 
+# A repository probe, and deliberately no more. The git-dir identity invariant
+# release-ticket.sh and no-undo-audit.sh check (the git dir answering for $wt
+# must belong to $wt) is not owed here (#421): this script never asks git
+# anything through a $wt it did not just create. The pair below establishes
+# the path is absent, `git worktree add` then writes the .git and its admin
+# dir itself, and the one later `git -C "$wt"` call (the lockfile check) runs
+# against that fresh linkage, so there is no prior one to verify. The ambient
+# GIT_DIR / GIT_WORK_TREE version of "which repo answered" is closed by the
+# unset above.
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # `-e` alone STATS, so it follows the link and reads a DANGLING symlink as an
 # absent path, while `git worktree add` refuses it on lstat semantics (`fatal:

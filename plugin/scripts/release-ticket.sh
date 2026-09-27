@@ -1429,10 +1429,37 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   # below is there to preserve with a message this script invented instead.
   #
   # `git -C "$wt" rev-parse --show-toplevel` answers with the linkage's own idea
-  # of $wt's working tree, canonicalised — comparing it against $wt itself is
-  # what closes the class (#74, #115, #135's own repro: a hand-written .git
-  # naming a gitdir whose core.worktree is elsewhere makes this comparison
-  # mismatch, refusing before the status below is ever believed).
+  # of $wt's working tree, canonicalised. Comparing it against $wt itself
+  # refuses every shape that moves git's WORKING TREE away from $wt while
+  # $wt/.git still passes the `-f` gate above — #74/#115's walk-up (an
+  # absent, empty-directory, or dangling-symlink .git) fails that gate and is
+  # refused there instead, never reaching this compare: #135's own repro, a
+  # hand-written .git naming a gitdir whose core.worktree is elsewhere, whether
+  # or not that gitdir is named `.git`; and core.worktree set in the worktree's
+  # own config.worktree under extensions.worktreeConfig, the .git file
+  # untouched (all measured, git 2.50.1).
+  #
+  # no-undo-audit.sh calls this "the spelling to avoid". Its three false-refusal
+  # classes (a relative $wt, a symlinked path, macOS's /private) cannot arise
+  # here: $wt comes from `worktree list --porcelain`, so it is absolute, and
+  # both sides are canonicalised (below). Measured passing on all three, and
+  # after `git worktree move`. That script's spelling is no substitute either:
+  # `--show-prefix` is empty at rc 0 for both core.worktree shapes above.
+  #
+  # What this does NOT cover (#421): shapes that swap which git dir answers
+  # while the working tree stays $wt. A .git naming a SIBLING worktree's admin
+  # dir (#189; copying one worktree's contents, .git included, over another
+  # produces it), or a foreign git dir whose core.worktree points back at $wt.
+  # `--show-toplevel` answers $wt for both, so the compare passes them. They
+  # are stopped downstream, before anything changes: the status below reads
+  # $wt's real files against the borrowed index, so uncommitted work shows as
+  # dirty (measured); and when it does not, `git worktree remove`, the first
+  # mutation, ahead of the branch and the label, refuses at rc 128 ("does not
+  # point back to .git/worktrees/<name>", measured). The cost is a dry run that
+  # can call such a claim releasable and an --apply that then halts. Left
+  # there on purpose: these shapes need a hand-copied .git or deliberate
+  # tampering, `git worktree` never writes one, and #421 ruled a stricter
+  # check here not worth its code.
   #
   # $wt must be canonicalised too, or this false-refuses a HEALTHY worktree:
   # `worktree list --porcelain` echoes the admin file's recorded path verbatim,
