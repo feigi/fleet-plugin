@@ -3272,8 +3272,11 @@ live count from it, so nobody states one. Write neither by hand:
   failed | killed`; `finisher-pr-M` = `labelled | failed | killed`;
   `merge-bot-n` = `done | killed`. A settled member stays settled. `settle
   impl-N=PR#M` also folds a `#M` row a PR-bound dispatch made before the settle
-  (no `impl-` token on it) into `#N`'s row, so one row names each PR — from then
-  on `#N`'s row is the PR's row.
+  into `#N`'s row, so one row names each PR from then on — but only when `#N`'s
+  row named no PR before this write (a second `PR#` on it would misattribute
+  the fold, or bury `#N`'s own fresher `review=` state under an older one) and
+  `#M`'s row is genuinely the fallback (a live or settled PR-bound token on it,
+  or nothing at all) rather than an unrelated row that merely shares the key.
 - **`ledger.mjs drain "<reason>"`** — the one drain marker per run; supply
   stops, the review and merge sides keep going.
 

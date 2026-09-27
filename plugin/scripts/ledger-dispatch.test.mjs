@@ -307,6 +307,70 @@ test("settle folds no row keyed to another PR, no row carrying an impl- token, a
   assert.ok(read().rows.includes("#777 fix-pr-777"));
 });
 
+// The fold's key match is exact, never a prefix: `#42` must not absorb an
+// unrelated row keyed `#420` just because one key is a prefix of the other.
+test("settle to PR#42 does not fold an unrelated row keyed #420", (t) => {
+  const { ok, read } = fixture(t);
+  ok("row", "420", "unrelated other content for #420");
+  ok("dispatch", "100", "impl-100");
+  assert.equal(ok("settle", "impl-100", "PR#42").line, "#100 impl-100=PR#42");
+  assert.deepEqual(read().rows, ["#420 unrelated other content for #420", "#100 impl-100=PR#42"]);
+});
+
+// #1876 follow-up: a row that already names a PR before this settle writes
+// to it must never be folded from — `rowPr()` and the tick's `PR_MENTION`
+// read only the FIRST `PR#` mention on a row, so folding here would let a
+// second PR's content ride on the first PR's identity (a replacement
+// implementer opening a second, different PR for the same ticket), or bury
+// the row's own fresher `review=` state under an older one the tick reads
+// last. The pre-existing two-row shape is left as it was rather than risk
+// either.
+test("settle does not fold when its own row already names a PR", (t) => {
+  const { ok, read } = fixture(t);
+  ok("dispatch", "100", "impl-100");
+  ok("settle", "impl-100", "PR#150");
+  ok("dispatch", "100", "impl-100-b");
+  ok("dispatch", "160", "fix-pr-160");
+  ok("row", "160", "fix-pr-160 · review=member:review-pr-160");
+  assert.equal(ok("settle", "impl-100-b", "PR#160").line, "#100 impl-100=PR#150 · impl-100-b=PR#160");
+  assert.deepEqual(read().rows, [
+    "#100 impl-100=PR#150 · impl-100-b=PR#160",
+    "#160 fix-pr-160 · review=member:review-pr-160",
+  ]);
+});
+
+// #1876 follow-up: a row keyed `#M` with no impl- token is not always
+// dispatch's PR-M fallback — a mistyped PR number can coincide with an
+// unrelated ticket row (an Exclusion, here) that carries no PR-bound member
+// token at all. The fold must tell the two apart positively, not merely by
+// the absence of an impl- token, or a typo silently deletes real state a
+// settled member can never restore.
+test("settle to a mistyped PR number does not fold an unrelated row with no PR-bound token", (t) => {
+  const { ok, read } = fixture(t);
+  ok("row", "358", "excluded · behind-pr:#346");
+  ok("dispatch", "351", "impl-351");
+  assert.equal(ok("settle", "impl-351", "PR#358").line, "#351 impl-351=PR#358");
+  assert.deepEqual(read().rows, ["#358 excluded · behind-pr:#346", "#351 impl-351=PR#358"]);
+});
+
+// Two genuinely separate PR-bound dispatches (a fix-pr and, after its own
+// settle, a finisher-pr replacement) can land on the same fallback row via
+// runDispatch()'s rowKey fallback — not just one `row` call's worth of
+// text — and an unrelated row between the fallback and the ticket must not
+// disturb the splice/index-repair distance from either side.
+test("the fold carries both families' settled tokens from separate dispatches, across an intervening unrelated row", (t) => {
+  const { ok, read } = fixture(t);
+  ok("dispatch", "900", "fix-pr-900");
+  ok("settle", "fix-pr-900", "failed");
+  ok("dispatch", "800", "impl-800");
+  ok("dispatch", "900", "finisher-pr-900-b");
+  ok("settle", "finisher-pr-900-b", "labelled");
+  ok("dispatch", "700", "impl-700");
+  assert.deepEqual(read().rows, ["#900 fix-pr-900=failed · finisher-pr-900-b=labelled", "#800 impl-800", "#700 impl-700"]);
+  assert.equal(ok("settle", "impl-700", "PR#900").line, "#700 impl-700=PR#900 · fix-pr-900=failed · finisher-pr-900-b=labelled");
+  assert.deepEqual(read().rows, ["#800 impl-800", "#700 impl-700=PR#900 · fix-pr-900=failed · finisher-pr-900-b=labelled"]);
+});
+
 test("drain writes one marker a later reader recognises, and it holds supply alone", (t) => {
   const { ok, read, bytes, refused } = fixture(t);
   ok("dispatch", "410", "impl-410");
