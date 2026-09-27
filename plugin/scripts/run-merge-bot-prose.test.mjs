@@ -808,15 +808,21 @@ test("step 1 polls the branch ref, not the PR object's head", () => {
 
 // The settle-window paragraph is bracketed in the doc by two rules that ARE
 // pinned — the test above anchors the headline naming which source is
-// authoritative, the test below the ancestry precondition — and neither reaches
-// the paragraph between them. That gap is the shape #1147 was scored for in this
-// branch's own tier row: every explanatory sentence around a mandate pinned, the
-// mandate itself left bare, so inverting it to "either is fine" costs nothing.
-// Measured against the doc as it stood before this test existed: inverting the
-// imperative to "report the desync on the first `headRefOid` read … without any
-// re-poll or cap", deleting the whole paragraph, and reverting the prose hunk
-// outright each left the whole suite green. So this anchors the two imperative
-// clauses and nothing else.
+// authoritative, the ancestry test further below the precondition — and
+// neither reaches the paragraphs between them. That gap is the shape #1147 was
+// scored for in this branch's own tier row: every explanatory sentence around a
+// mandate pinned, the mandate itself left bare, so inverting it to "either is
+// fine" costs nothing. Measured against the doc as it stood before this test
+// existed: inverting the imperative to "report the desync on the first
+// `headRefOid` read … without any re-poll or cap", deleting the whole
+// paragraph, and reverting the prose hunk outright each left the whole suite
+// green. So this anchors the two imperative clauses and nothing else. The other
+// two paragraphs in the narrower settle-window-to-ancestry stretch — the empty
+// `pr_head` and the surviving desync — are pinned by the tests that follow it
+// (#1948), so no paragraph from the settle window to the ancestry rule is bare
+// now. The wider #1147 gap this paragraph opens with (headline to ancestry)
+// still holds other unpinned paragraphs outside that stretch — #1948's own
+// scope stops at the settle window and the surviving desync, not the whole gap.
 //
 // The clauses are split because they fail independently: dropping "on the same
 // bounded cap" turns a bounded re-poll into an unbounded one while the "only if"
@@ -835,6 +841,62 @@ test("step 1 re-polls before calling a desync, and that mandate is pinned", () =
     step1(),
     /report the desync only if `pr_head` is still on `pre` when that cap runs out/,
   );
+});
+
+// #1946 added the third outcome of that re-poll: `pr_head` still EMPTY when
+// the cap runs out. It landed between the settle-window paragraph and the
+// desync verdict with no pin, and #1948 measured the whole file green with the
+// paragraph deleted and with its imperative inverted to fold the empty read
+// into the desync and feed it to the ancestry check. Three clauses, each
+// failing alone:
+//
+//   - no "unreadable" report, and the empty read has no row of its own;
+//   - the "rather than folding it into" negation split from the "either the
+//     desync above or the landed row" list it governs, and the empty read
+//     gets filed as one of the two outcomes it is neither of — measured: two
+//     independent presence asserts here (one per side) both stayed green
+//     when "rather than folding it into" was reworded to "then fold it
+//     into", the exact inversion the test title forbids. Bound to one
+//     contiguous span instead so the negation and its list cannot drift
+//     apart;
+//   - no ancestry refusal, and `git merge-base --is-ancestor` is run with an
+//     empty operand, which has no head in it to place.
+//
+// Bounded by `paragraph()`, not `step1()`: step 1 runs ~60 lines through the
+// fallback, and a copy of any of these clauses there would hold a step-1 pin
+// green with this paragraph gone. Matched through `phrase()`, so a rewrap
+// stays green. THE CEILING: the paragraph's rationale — why an empty value only
+// proves the LAST read failed — is deliberately unpinned; it can be reworded
+// freely.
+const emptyPrHead = () =>
+  paragraph(DOC, "**`pr_head` still empty once the re-poll cap runs out", "run-merge-bot.md step 1 empty pr_head");
+
+test("step 1 reports a pr_head still empty after the cap as unreadable, never as a desync or a landed rebase", () => {
+  assert.match(emptyPrHead(), phrase("Report the PR-object read as unreadable"));
+  assert.match(
+    emptyPrHead(),
+    phrase("unreadable rather than folding it into either the desync above or the landed row"),
+  );
+});
+
+test("step 1 never feeds an empty pr_head into the close-and-reopen ancestry check", () => {
+  assert.match(emptyPrHead(), phrase("do not feed an empty `pr_head` into the close-and-reopen check"));
+});
+
+// The verdict the settle window exists to delay, unpinned until #1948 though
+// it is the one outcome the bot must not act on. Four clauses, each failing
+// alone: the controller routing, the two forbidden repairs, and the stop. The
+// reason the local rebase is forbidden is pinned apart from the prohibition, so
+// "because" → "since" leaves both green while dropping either reds.
+const survivingDesync = () =>
+  paragraph(DOC, "**A desync that DOES survive the cap", "run-merge-bot.md step 1 surviving desync");
+
+test("step 1 hands a desync that survives the cap to the controller and repairs nothing itself", () => {
+  assert.match(survivingDesync(), phrase("is the one state that needs a controller"));
+  assert.match(survivingDesync(), phrase("do not retry the rebase"));
+  assert.match(survivingDesync(), phrase("do not rebase locally"));
+  assert.match(survivingDesync(), phrase("the remote is already correct"));
+  assert.match(survivingDesync(), phrase("Report it and stop"));
 });
 
 // #903's expensive half. Close-and-reopen is the usual remedy for a desynced PR
