@@ -246,20 +246,29 @@ function securityReleaseFault(adr) {
 // behind the gutter, and so does a quote nested inside one, `> a` then
 // `> > b` — the silent direction, like the ATX gap above, left since telling it
 // from a wrap means counting both lines' `>`; a lazy line between two quoted
-// ones splits the quote in two, the loud direction. A setext underline or
-// thematic break is now only what CommonMark renders as one: a run of `=` or
-// of `-`, or three or more of one of `-`, `*`, `_`, spaced or not, indented at
-// most three spaces past the gutter. `_`, `**`, `-=-`, `*-_` or `    ---` is a
-// paragraph line, and reading one as an end was the loud direction. A `#` is
-// gutter only before whitespace, another `#` or the text's end, as in a shell
-// comment or an ATX heading: a wrapped line opening `#1906) ` is a citation,
-// not a gutter and a list item. Closing markup also takes a link's destination
-// or reference label, `](renovate.json)` or `][ref]`, a footnote reference
-// `[^1]`, and a closing tag with a hyphen in its name or whitespace before its
-// `>`, `</my-el>`, `</b >`. Tag names match in either case only where the
-// splicing pattern carries `i`, as the drift and merge rows do.
+// ones splits the quote in two, the loud direction. Neither this branch nor
+// the HTML block's own caps how far a `<div>`/`>` line can indent, unlike the
+// setext/thematic branch below — a line indented four or more spaces still
+// ends the sentence here, the same loud direction the pre-existing list
+// lookahead already allowed. A setext underline or thematic break is now only
+// what CommonMark renders as one: a run of `=` or of `-`, or three or more of
+// one of `-`, `*`, `_`, spaced or not, indented at most three spaces past the
+// gutter. `_`, `**`, `-=-`, `*-_` or `    ---` is a paragraph line, and reading
+// one as an end was the loud direction. That three-space cap counts from the
+// margin, not a list item's own content column — inside a list item a deeper
+// underline can still be a real end CommonMark would honor; the silent
+// direction, left beside the ATX and nested-quote gaps above, since a
+// line-based regex can't carry a list item's column forward. A `#` is gutter
+// unless it's followed directly by a digit, as in a shell comment, an ATX
+// heading or a comment-only rule line (`#---`, `#===`): a wrapped line
+// opening `#1906) ` is a citation, not a gutter and a list item. Closing
+// markup also takes a link's destination or reference label,
+// `](renovate.json)` or `][ref]`, a footnote reference `[^1]`, and a closing
+// tag with a hyphen in its name or whitespace before its `>`, `</my-el>`,
+// `</b >`. Tag names match in either case only where the splicing pattern
+// carries `i`, as the drift and merge rows do.
 const CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]\[[^\]]*\]|\[\^[^\]\s]+\]|<\/[a-z][a-z\d-]*\s*>)`;
-const HASH_GUTTER = String.raw`[ \t]*#(?=[#\s]|$)`;
+const HASH_GUTTER = String.raw`[ \t]*#(?!\d)`;
 const GUTTER = String.raw`(?:[ \t]*>|${HASH_GUTTER})`;
 const HTML_BLOCK_OPEN = String.raw`<(?:!--|\?|![A-Za-z]|!\[CDATA\[|(?:script|pre|style|textarea)(?=[\s>]|$)|\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s>]|\/>|$))`;
 const SENTENCE_END = String.raw`(?:(?:[!?]|(?<!(?<![a-z\d])(?:e\.g|i\.e|cf|viz|vs))\.)${CLOSING_MARKUP}*\s|…${CLOSING_MARKUP}*\s?|\n(?=${GUTTER}*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]|\x60{3}|~{3}|\||${HTML_BLOCK_OPEN}))|\n(?=(?:${HASH_GUTTER})*[ \t]*>)(?<=(?:^|\n)(?!(?:${HASH_GUTTER})*[ \t]*>)[^\n]*\n)|\n${GUTTER}*[ \t]*\r?\n|\n(?:${GUTTER}+ ?)? {0,3}(?:=+|-+|(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})[ \t]*\r?\n)`;
@@ -1157,8 +1166,20 @@ test("an unscoped drift sentence is refused after an HTML block or blockquote op
     "Minor and patch bumps\n</details>\nBounding drift at about one month.\n",
     "Minor and patch bumps\n<!-- monthly -->\nBounding drift at about one month.\n",
     "Minor and patch bumps\n<pre>\nBounding drift at about one month.\n",
+    // The rest of HTML_BLOCK_OPEN's own openers: the other type-1 tags, a
+    // processing instruction, a doctype, a CDATA section, and a block tag's
+    // self-closing boundary.
+    "Minor and patch bumps\n<script>\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n<?php\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n<!DOCTYPE html>\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n<![CDATA[x]]>\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n<hr/>\nBounding drift at about one month.\n",
     // A quote opening behind pin-drift.sh's `# ` gutter.
     "# Minor and patch bumps\n# > Bounding drift at about one month.\n",
+    // A `#`-gutter rule line or gutter list item, with no space after the
+    // `#`, still ends the sentence — the digit-only exception #2002 needs.
+    "# Minor and patch bumps\n#------------------------------\n# Bounding drift at about one month.\n",
+    "# Minor and patch bumps\n#- Bounding drift at about one month.\n",
     // What still ends at the underline: a setext run of one, a spaced break,
     // three spaces of indent.
     "Minor and patch bumps\n-\nBounding drift at about one month.\n",
