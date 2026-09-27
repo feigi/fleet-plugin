@@ -3191,3 +3191,66 @@ test("lock: a holder this process may not signal (EPERM) is live, never taken ov
   assert.equal(readFileSync(lock, "utf8"), "1", "a live holder's lock was taken over");
   assert.equal(existsSync(file), false, "a write landed without the lock");
 });
+
+test("lock: a dangling symlink at the lock path fails closed within the timeout, not a CPU spin (#531)", (t) => {
+  // `openSync(lock, "wx")` sees the dirent and reports EEXIST even when the
+  // symlink's target does not exist; every `readFileSync(lock)` after that
+  // reports ENOENT for a reason readLock()'s own "released between our
+  // failed create and this read" comment does not cover — the lock was
+  // never released, it is simply unreadable, and the create will report
+  // EEXIST again next time exactly as it did this time. Before this fix that
+  // combination skipped the deadline check entirely and spun at 100% CPU
+  // past the timeout this test bounds the whole run by.
+  const { dir, file, lock, cli } = lockFixture(t);
+  symlinkSync(join(dir, "nowhere"), lock);
+  const r = cli(["filed", "9", "x"], { LEDGER_LOCK_TIMEOUT_MS: "200" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /cannot lock .* exists but cannot be read/, r.stderr);
+  assert.equal(existsSync(file), false, "a write landed without the lock");
+});
+
+// isDigits()'s job here is #1199's for LEDGER_GIT_TIMEOUT, restated for this
+// override: the accepted spelling is digits alone, so anything Number()
+// would still happily parse — a decimal point, a leading `-`, exponent
+// notation — must be rejected FLAT rather than taken as a genuine, tiny
+// bound. A regression that swapped
+// `isDigits(String(v)) ? Number(v) : 0` for a bare `Number(v) || 0` would
+// still pass every #531 test above unmodified, since none of them use a
+// value Number() itself rejects — this is the discriminating case.
+//
+// Bounded fast rather than proven against the full 10 s default: the holder
+// planted here never releases, so a value wrongly accepted as a genuine
+// sub-second bound exits well inside this test's own short external
+// timeout, where the correct fallback to the 10 s default is still running
+// when that external timeout fires. spawnSync reports that as `ETIMEDOUT`,
+// not as a raw signal kill — the child's own SIGTERM handler (acquireLock(),
+// above) turns the timeout's SIGTERM into its own graceful `exit 2` first.
+test("a malformed LEDGER_LOCK_TIMEOUT_MS override is rejected outright, not coerced by Number() (#531)", (t) => {
+  const { file, lock } = lockFixture(t);
+  writeFileSync(lock, String(process.pid));
+  for (const bad of ["1.5", "-5", "5e3", "abc"]) {
+    const r = spawnSync(process.execPath, [SCRIPT, "--file", file, "filed", "9", "x"], {
+      encoding: "utf8", timeout: 300,
+      env: { ...process.env, LEDGER_LOCK_TIMEOUT_MS: bad },
+    });
+    assert.equal(r.error?.code, "ETIMEDOUT",
+      `${JSON.stringify(bad)}: resolved before this test's own bound could prove it, meaning the malformed value became the wait (status ${r.status}, stderr ${r.stderr})`);
+  }
+});
+
+// The other half of "can only shorten": a well-formed override ABOVE the
+// 10 s default must clamp down to it, not stand as a 100 s (or longer)
+// bound — the same claim #1199 proves for LEDGER_GIT_TIMEOUT, at the same
+// real-time cost, because there is no fixed-latency "real answer" for a
+// held lock to arrive at partway through the way a probe's own sleep gives
+// that test.
+test("LEDGER_LOCK_TIMEOUT_MS cannot lengthen the bound past 10 s, only shorten it (#531)", (t) => {
+  const { file, lock, cli } = lockFixture(t);
+  writeFileSync(lock, String(process.pid));
+  const t0 = Date.now();
+  const r = cli(["filed", "9", "x"], { LEDGER_LOCK_TIMEOUT_MS: "99999" });
+  const elapsed = Date.now() - t0;
+  assert.equal(r.status, 2, r.stderr);
+  assert.ok(elapsed < 11_000, `a 99999 ms override became the bound: waited ${elapsed} ms`);
+  assert.ok(elapsed >= 9_500, `exited before the untouched 10 s default could have fired: waited ${elapsed} ms`);
+});

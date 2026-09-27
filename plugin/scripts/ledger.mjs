@@ -551,15 +551,17 @@ function save(d) {
 // as a LIVE holder — keep waiting, and never hand it to process.kill, where
 // NaN is a TypeError crash rather than a wait.
 //
-// A holder that died without releasing (only SIGKILL can: exit and the three
-// catchable signals release below) is taken over, but only under a second
-// O_EXCL lock, `<file>.lock.reap`, and only after RE-READING the lock under it
-// and finding the same dead pid. Unlink-then-create, or a bare rename, lets
-// two waiters that both saw the dead pid each remove the other's FRESH lock
-// and write at once; the re-read is what makes the takeover safe. A reap lock
-// is held for one read and one unlink, and one left behind by a SIGKILL in
-// that window is deliberately NOT reclaimed: waiters time out naming the
-// holder, and the operator removes it. Fail closed.
+// A holder that died without releasing — SIGKILL always, and so does any
+// signal this file leaves unhandled (SIGQUIT, SIGABRT, a segfault: only a
+// normal exit and the three catchable signals below run the `exit` event
+// that releases it) — is taken over, but only under a second O_EXCL lock,
+// `<file>.lock.reap`, and only after RE-READING the lock under it and
+// finding the same dead pid. Unlink-then-create, or a bare rename, lets two
+// waiters that both saw the dead pid each remove the other's FRESH lock and
+// write at once; the re-read is what makes the takeover safe. A reap lock is
+// held for one read and one unlink, and one left behind by any of those same
+// abrupt deaths in that window is deliberately NOT reclaimed: waiters time
+// out naming the holder, and the operator removes it. Fail closed.
 //
 // A dead holder whose pid was recycled reads as live until the timeout.
 // Accepted: an mtime/age heuristic instead would take over a live writer on a
@@ -622,7 +624,16 @@ function reapDeadHolder(deadPid) {
     closeSync(fd);
     // Exact match only — a waiter that got here first may already have
     // reaped the dead lock and taken a fresh one of its own.
-    if (readLock() === String(deadPid)) unlinkSync(LOCK);
+    if (readLock() === String(deadPid)) {
+      // Already gone is already the outcome this call wants: an operator
+      // clearing a wedged lock by hand between the read above and here must
+      // not turn our own cleanup into an uncaught crash.
+      try {
+        unlinkSync(LOCK);
+      } catch (e) {
+        if (e.code !== "ENOENT") throw e;
+      }
+    }
   } finally {
     unlinkSync(REAP);
   }
@@ -671,7 +682,18 @@ async function acquireLock() {
       return;
     }
     const holder = readLock();
-    if (holder === null) continue;
+    if (holder === null) {
+      // Ordinarily transient — released between our failed create above and
+      // this read — so retrying the create at once beats sleeping first.
+      // But that same shape recurs FOREVER if reading it fails for a reason
+      // this read can never clear: a `.lock` path that is a dangling
+      // symlink reports EEXIST to the create (the dirent exists) and ENOENT
+      // to every read (its target does not). Bounding it here is what keeps
+      // that case inside the 10 s wait this lock promises rather than
+      // spinning past it at 100% CPU.
+      if (Date.now() >= deadline) die(`cannot lock ${file} — ${LOCK} exists but cannot be read`);
+      continue;
+    }
     const pid = parsePid(holder);
     if (pid !== null && isDead(pid) && reapDeadHolder(pid)) continue;
     if (Date.now() >= deadline) die(`cannot lock ${file} — held by pid ${pid ?? JSON.stringify(holder)}`);
