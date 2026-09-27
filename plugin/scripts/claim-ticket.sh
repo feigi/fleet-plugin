@@ -120,13 +120,30 @@ runner="$wt/agent-test"
 
 # A repository probe, and deliberately no more. The git-dir identity invariant
 # release-ticket.sh and no-undo-audit.sh check (the git dir answering for $wt
-# must belong to $wt) is not owed here (#421): this script never asks git
-# anything through a $wt it did not just create. The pair below establishes
-# the path is absent, `git worktree add` then writes the .git and its admin
-# dir itself, and the one later `git -C "$wt"` call (the lockfile check) runs
-# against that fresh linkage, so there is no prior one to verify. The ambient
-# GIT_DIR / GIT_WORK_TREE version of "which repo answered" is closed by the
-# unset above.
+# must belong to $wt) is not owed here (#421) — but only on the claim path
+# (writeonly=false): this script never asks git anything through a $wt it did
+# not just create. The pair below establishes the path is absent, `git
+# worktree add` then writes the .git and its admin dir itself, and the one
+# later `git -C "$wt"` call (the lockfile check) runs against that fresh
+# linkage, so there is no prior one to verify. The ambient GIT_DIR /
+# GIT_WORK_TREE version of "which repo answered" is closed by the unset
+# above.
+#
+# --write-runner does not share that cover. $dest is an arbitrary,
+# pre-existing tree (the main checkout, an existing worktree) this script
+# never verifies before deriving from it: `ref=HEAD` below, the `git
+# show`/`git cat-file -e` calls that follow it, and derive-testcmd.sh's own
+# git calls (invoked with `.` a few lines further down, not `$dest`) all
+# resolve against wherever the ambient invocation's cwd points, never against
+# $dest itself. No guard is added for that gap: a `--show-toplevel`
+# canonicalised-compare guard — the shape release-ticket.sh's own #421
+# comment builds — does not catch a foreign git dir whose `core.worktree`
+# points back at $dest, since that shape still answers $dest's own toplevel;
+# and $dest is not guaranteed to sit inside a git repository at all (the
+# "divergence walk … shared ancestor" fixture in claim-ticket.test.mjs writes
+# a runner straight into a destination that is never `git init`'d). Neither
+# gap this paragraph's claim-path check closes is available to close for
+# $dest.
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # `-e` alone STATS, so it follows the link and reads a DANGLING symlink as an
 # absent path, while `git worktree add` refuses it on lstat semantics (`fatal:
