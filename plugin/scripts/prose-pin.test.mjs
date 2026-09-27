@@ -279,6 +279,29 @@ test("sentences ends one at a capitalized abbreviation lookalike, and still skip
   }
 });
 
+// #2053: the guard before the abbreviation was a `\b`, which reads `_` as a
+// word character, so an italic abbreviation ended its own sentence
+// mid-abbreviation. Only a letter or digit glued on disqualifies one — the
+// guard citation-sweep's SENTENCE_END and jsonCountFault's re-split carry.
+test("sentences does not end one at an italic abbreviation, and still ends one at a word merely ending in its letters", () => {
+  for (const abbr of ["e.g.", "i.e.", "cf.", "viz.", "vs."]) {
+    const s = `Pin it, _${abbr}_ now, then read.`;
+    assert.deepEqual(sentences(s), [s], abbr);
+  }
+  for (const word of ["Xvs.", "26vs.", "gcf.", "Xe.g."]) {
+    assert.deepEqual(sentences(`Pin it for the ${word} Then read.`), [`Pin it for the ${word}`, "Then read."], word);
+  }
+  // The disclosed cost, in the same fixture shape as #1899's own accepted
+  // one above: a bare snake_case word ending in the abbreviation's letters —
+  // no italic markup, just an underscore glued on — now joins too. Locked in
+  // here so a future narrowing or widening of the guard cannot drift this
+  // cost silently.
+  for (const abbr of ["e.g.", "i.e.", "cf.", "viz.", "vs."]) {
+    const s = `Pin it for the snake_${abbr} Then read.`;
+    assert.deepEqual(sentences(s), [s], abbr);
+  }
+});
+
 // #1987: a footnote-style marker between a terminator and the whitespace
 // after it — `.[1]`, `![note]`, `.[^1]`, a run of them — ended no sentence,
 // so two real ones merged and a pin scoped to the first could borrow a word
