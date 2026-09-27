@@ -378,11 +378,14 @@ branch_rev="refs/remotes/origin/$branch"
 # repo, deleted/empty/lone-HEAD `.git` all 0), so keeping both left one gate
 # that could never fire and an ordering dependency that did not exist.
 #
-# `--show-toplevel` compared against `$wt` is the spelling to avoid: it needs a
-# string compare, and `$wt` arrives relative (claim-ticket.sh's
+# `--show-toplevel` compared RAW against `$wt` is the spelling to avoid for this
+# gate: it needs a string compare, and `$wt` arrives relative (claim-ticket.sh's
 # `wt=".worktrees/$issue-$slug"`), through a
 # symlink, or under a macOS tmpdir git reports back through `/private` — three
-# false-refusal classes `--show-prefix` cannot have, comparing nothing. git's
+# false-refusal classes `--show-prefix` cannot have, comparing nothing. It is
+# asked further down all the same, against a CANONICAL `$wt`, for the one claim
+# `--show-prefix` cannot make: which working tree git answers for once
+# `core.worktree` has moved it (#2040). git's
 # `prunable` is no use either: it marks a worktree whose DIRECTORY is gone, and
 # stays silent for one still holding work whose linkage broke (measured).
 prefix=$(git -C "$wt" rev-parse --show-prefix) \
@@ -417,8 +420,8 @@ prefix=$(git -C "$wt" rev-parse --show-prefix) \
 # `pwd -P` from `common` alone changes no verdict, git 2.50.1). It is on `$gd`
 # and `common` as insurance, and the reason to apply that insurance to BOTH or
 # neither is that a spelling difference between them is not a false refusal on
-# one shape but on every main checkout. `--show-toplevel` remains the spelling
-# to avoid, for the reason the comment above gives.
+# one shape but on every main checkout. The canonical `$wt_real` is also what
+# lets the `core.worktree` check below compare `--show-toplevel` at all.
 #
 # `--git-common-dir` is what says which shape $gd is. A LINKED worktree gets
 # its own per-worktree admin dir, so $gd differs from the common dir, and every
@@ -434,14 +437,24 @@ prefix=$(git -C "$wt" rev-parse --show-prefix) \
 #
 # Ceiling: a git dir that IS the common dir and is NOT named `.git` — a
 # submodule's `.git/modules/<name>`, a `--separate-git-dir` target — records
-# nothing naming its worktree (measured: no `gitdir`, no `core.worktree`), so
-# there is nothing here to verify and the root claim above stands alone for it.
+# nothing naming its worktree (measured: no `gitdir`, and `core.worktree` only
+# when git itself set one), so there is nothing HERE to verify, and the root
+# claim above and the working-tree claim below are what stand for it.
 # Admitted rather than refused: git's own linkage for those is one-directional
 # by construction, and refusing turned two healthy checkouts into "ask a human"
 # for having no record to check. The residual is a `.git` redirected at a
-# FOREIGN repo of that shape, which no `git worktree add` can produce.
-# `core.worktree` redirection is not that residual and is not left open here:
-# the `--show-prefix` claim above already refuses it (measured, #189).
+# FOREIGN repo of that shape whose working tree is $wt, which no `git worktree
+# add` can produce.
+#
+# `core.worktree` redirection is NOT caught by either check so far, whatever an
+# earlier version of this comment claimed (#2040, correcting #189's credit):
+# `--show-prefix` is empty at rc 0 for every redirect shape measured, and this
+# owner check passes the two it can see — `$gd` is $wt's own admin dir with its
+# back-pointer intact when the redirect sits in `config.worktree`, and a foreign
+# git dir not named `.git` is the ceiling's admitted shape. The canonical #135
+# redirect, a foreign git dir literally named `.git`, IS refused here, by the
+# `${gd%/.git}` owner compare, not by `--show-prefix`. The working-tree compare
+# after this block is what refuses the rest.
 #
 # Both rev-parse calls keep a `|| die` the comment above says can never fire,
 # for one reason the retired gate did not have: their job is to produce a path,
@@ -450,19 +463,39 @@ prefix=$(git -C "$wt" rev-parse --show-prefix) \
 # variable — but it would exit 128, and 128 is not one of the three verdicts
 # this script's callers read. The `cd`/`pwd -P` lines below are left bare for
 # the same measurement: unreachable, and `set -e` stops them regardless.
+#
+# `$(...)` strips EVERY trailing newline it captures, not one: a `$wt` or a
+# `core.worktree` target whose real directory name itself ends in a literal
+# newline byte loses that byte on whichever side of a compare below reads it,
+# so two directories differing only by that byte compare equal — a redirect
+# this script exists to refuse instead reads clean (measured, #2040). `git
+# worktree add`/`git config core.worktree` both accept the byte as an
+# ordinary path character; nothing upstream rejects it.
+#
+# `wt_real`, the if-branch `owner` below, and `top` further down all guard
+# against it the same way: an `echo x` inside the substitution, so the ONLY
+# newline `$(...)` can strip is the one `pwd`/`rev-parse` already appends to
+# its own answer, then `${var%?x}` strips exactly the sentinel and the ONE
+# character before it — nothing extra when the real answer has no trailing
+# newline, and the one real byte restored when it does. `gd` and `common`
+# stay bare: they are admin-directory paths git itself names, never a
+# `core.worktree` target, and the branch they select never turns a
+# mismatch INTO a match on this byte alone (measured).
 gd=$(git -C "$wt" rev-parse --path-format=absolute --git-dir) \
   || die "git will not name the git dir answering for $wt — cannot verify its linkage"
 common=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir) \
   || die "git will not name $wt's common git dir — cannot verify its linkage"
 gd=$(cd "$gd" && pwd -P)
 common=$(cd "$common" && pwd -P)
-wt_real=$(cd "$wt" && pwd -P)
+wt_real=$(cd "$wt" && pwd -P && echo x)
+wt_real=${wt_real%?x}
 if [ "$gd" != "$common" ]; then
   back=$(cat "$gd/gitdir" 2>/dev/null) \
     || die "$gd/gitdir is missing or unreadable — cannot verify $wt's linkage"
   back=${back%"${back##*[![:space:]]}"}
-  owner=$(cd "$gd" && cd "$(dirname "$back")" && pwd -P) \
+  owner=$(cd "$gd" && cd "$(dirname "$back")" && pwd -P && echo x) \
     || die "$gd/gitdir names a directory that does not resolve — cannot verify $wt's linkage"
+  owner=${owner%?x}
   [ "$owner" = "$wt_real" ] \
     || die "$wt's .git names another worktree's admin dir — cannot tell a clean worktree from a dirty one"
 else
@@ -470,6 +503,47 @@ else
   [ "$owner" = "$gd" ] || [ "$owner" = "$wt_real" ] \
     || die "$wt's .git names $gd, whose worktree is $owner, not $wt — cannot tell a clean worktree from a dirty one"
 fi
+
+# `core.worktree` moves the WORKING TREE and nothing the checks above read:
+# they ask where git STARTED and which git dir answered, and a redirect changes
+# neither. `git config --worktree core.worktree <dir>` on a linked worktree
+# (with extensions.worktreeConfig), `git config core.worktree <dir>` on a main
+# checkout, a relative `<dir>` in either, or a `.git` naming a foreign git dir
+# not called `.git` whose `core.worktree` is `<dir>`: all pass both checks, and
+# `status` then compares the index against `<dir>`'s files. `<dir>` holding the
+# tracked content — any other checkout of the branch — reads `clean` at rc 0
+# over the work sitting in $wt (measured, git 2.50.1, #2040). A `<dir>` INSIDE
+# $wt is the same leak for every file outside it.
+#
+# `--show-toplevel` names the working tree git actually answers for, so it is
+# compared against `$wt_real`, and the union of this with the checks above is
+# the guard: none is dropped, since this one passes the #189 sibling spoof and
+# a foreign `*/.git` whose `core.worktree` names $wt back. The raw-compare
+# false refusals the `--show-prefix` comment warns about do not arise against
+# the canonical `$wt_real`: measured passing on a relative, symlinked and
+# `/private`-less `$wt`, after `git worktree move`, under
+# `worktree.useRelativePaths`, on a submodule, a `--separate-git-dir` clone and
+# a `core.worktree` naming $wt itself.
+#
+# `$top` is compared as git spells it, NOT canonicalised through `cd`. git
+# resolves it already (measured: symlinked `core.worktree` targets and
+# `/private` both come back resolved), and the `cd` would add two holes: a
+# `core.worktree` naming a missing or unsearchable directory still answers at
+# rc 0 (measured), so the `cd` fails and `set -e` exits 1 — the DIRTY verdict
+# — over a tree nothing looked at; and an empty `$top` makes `cd ""` a no-op
+# in the caller's cwd, which may be $wt. A `$top` that is not canonical can
+# only fail this compare, which is the refusing direction.
+#
+# Not refused, because git does not honour them and `status` reads $wt
+# (measured): `core.worktree` in the COMMON config seen from a linked worktree,
+# one reached through `include.path`, and one passed as GIT_CONFIG_COUNT or
+# GIT_CONFIG_PARAMETERS. The check keys on git's answer, not on the config, so
+# it cannot refuse a setting git ignores.
+top=$(git -C "$wt" rev-parse --show-toplevel && echo x) \
+  || die "git will not name the working tree answering for $wt — cannot verify its linkage"
+top=${top%?x}
+[ "$top" = "$wt_real" ] \
+  || die "git answers for the working tree at $top, not $wt — cannot tell a clean worktree from a dirty one"
 
 git -C "$wt" rev-parse --verify "$base_rev" >/dev/null || die "$base does not resolve as $base_rev"
 # Left unchecked, merge-tree below fails silently and "no conflicting files" is
