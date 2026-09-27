@@ -218,6 +218,13 @@ function securityReleaseFault(adr) {
 // past a real end is the silent direction: the next sentence's scope would
 // reach back. Before the abbreviation, only a letter or digit disqualifies it,
 // as for UPDATE_TYPE below: an italic `_e.g._` is one, "devs." is not "vs.".
+// The abbreviations match lowercase only, as sentences()'s do (#1899, #2021),
+// even inside both rows' `i` flag — the `(?-i:…)` group (Node 23+; .nvmrc pins
+// 26): folded, a sentence ending in a proper noun "Vs." read as the
+// abbreviation, the silent direction above. The cost: a capitalized one
+// anywhere, a parenthetical "(Cf. …)" included, ends the sentence there. Keep
+// the group to literals: V8 (14.6) still folds a character class in any but
+// its first alternative.
 //
 // #1981. The rest of the block ends and closing markup #1957 named only in
 // part. A blank line may be CRLF, or blank but for a gutter — a blockquote's
@@ -271,7 +278,7 @@ const CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]
 const HASH_GUTTER = String.raw`[ \t]*#(?!\d)`;
 const GUTTER = String.raw`(?:[ \t]*>|${HASH_GUTTER})`;
 const HTML_BLOCK_OPEN = String.raw`<(?:!--|\?|![A-Za-z]|!\[CDATA\[|(?:script|pre|style|textarea)(?=[\s>]|$)|\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s>]|\/>|$))`;
-const SENTENCE_END = String.raw`(?:(?:[!?]|(?<!(?<![a-z\d])(?:e\.g|i\.e|cf|viz|vs))\.)${CLOSING_MARKUP}*\s|…${CLOSING_MARKUP}*\s?|\n(?=${GUTTER}*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]|\x60{3}|~{3}|\||${HTML_BLOCK_OPEN}))|\n(?=(?:${HASH_GUTTER})*[ \t]*>)(?<=(?:^|\n)(?!(?:${HASH_GUTTER})*[ \t]*>)[^\n]*\n)|\n${GUTTER}*[ \t]*\r?\n|\n(?:${GUTTER}+ ?)? {0,3}(?:=+|-+|(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})[ \t]*\r?\n)`;
+const SENTENCE_END = String.raw`(?:(?:[!?]|(?<!(?<![a-z\d])(?-i:e\.g|i\.e|cf|viz|vs))\.)${CLOSING_MARKUP}*\s|…${CLOSING_MARKUP}*\s?|\n(?=${GUTTER}*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]|\x60{3}|~{3}|\||${HTML_BLOCK_OPEN}))|\n(?=(?:${HASH_GUTTER})*[ \t]*>)(?<=(?:^|\n)(?!(?:${HASH_GUTTER})*[ \t]*>)[^\n]*\n)|\n${GUTTER}*[ \t]*\r?\n|\n(?:${GUTTER}+ ?)? {0,3}(?:=+|-+|(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})[ \t]*\r?\n)`;
 // #1958. What names an update type, for both of ADR 0010's #1906 rows below:
 // minor, patch or major as a whole word. The rows' first cut matched the bare
 // substring, so "dispatched" and "majority" scoped a claim that names no
@@ -1380,4 +1387,35 @@ test("a period after \"etc.\", or after a word only ending in an abbreviation's 
   ]) {
     assert.match(text, UNSCOPED_DRIFT_SENTENCE, text);
   }
+});
+
+test("a period after a capitalized abbreviation lookalike still ends the sentence, in both rows (#2021)", () => {
+  // "Vs." is not "vs.": the rows match case-insensitively, and the list used
+  // to fold with them, so a proper noun ending a sentence was read as the
+  // abbreviation and the sentence before lent the claim its scope — the
+  // silent direction. sentences() matches the list lowercase only (#1899).
+  for (const word of ["Vs.", "VS.", "E.g.", "I.e.", "Cf.", "Viz."]) {
+    assert.match(`Minor and patch bumps are for the ${word} Bounding drift at about one month.\n`, UNSCOPED_DRIFT_SENTENCE, word);
+    assert.match(`# Minor and patch bumps are for the ${word} The bump merges once CI goes green.\n`, UNSCOPED_MERGE_SENTENCE, word);
+  }
+  // The accept side, in the same fixture shape: lowercase stays one sentence.
+  for (const abbr of ["vs.", "e.g.", "i.e.", "cf.", "viz."]) {
+    assert.doesNotMatch(`Minor and patch bumps are for the ${abbr} Bounding drift at about one month.\n`, UNSCOPED_DRIFT_SENTENCE, abbr);
+    assert.doesNotMatch(`# Minor and patch bumps are for the ${abbr} The bump merges once CI goes green.\n`, UNSCOPED_MERGE_SENTENCE, abbr);
+  }
+  // Only the list itself stopped folding: the letter-or-digit guard before it
+  // still does, so a capital glued to a lowercase abbreviation disqualifies it
+  // just as "devs." does, and the sentence ends. Both ends of the list: V8
+  // (14.6) still folds a character class in any but the first alternative of
+  // a `(?-i:…)` group, so a guard moved inside it is only caught at "e.g".
+  for (const word of ["Ee.g.", "DEvs."]) {
+    assert.match(`Minor and patch bumps are for the ${word} Bounding drift at about one month.\n`, UNSCOPED_DRIFT_SENTENCE, word);
+  }
+});
+
+test("a capitalized abbreviation mid-sentence ends the sentence too — the cost of matching lowercase only (#2021)", () => {
+  // Loud here: the scope before the parenthetical drops out of the claim's
+  // sentence, and a scoped drift sentence is refused. No file's prose spells
+  // one capitalized; the pin is here so a change to the list meets it.
+  assert.match("For minor bumps (Cf. the Status line) bounding drift at about one month.\n", UNSCOPED_DRIFT_SENTENCE);
 });

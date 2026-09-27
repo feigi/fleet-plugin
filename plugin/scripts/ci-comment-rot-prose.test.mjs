@@ -829,6 +829,24 @@ test("windowClaimFault still splits after a sentence-final word that only case-f
   );
 });
 
+test("windowClaimFault ends a sentence at a capitalized abbreviation mid-sentence too — the cost #1899 accepted (#2021)", () => {
+  // The lowercase-only match has no notion of where in a sentence it sits, so
+  // a capitalized abbreviation inside a parenthetical ends the sentence right
+  // there, splitting the negation off from the PR-creation claim: the pin
+  // refuses a paraphrase it accepts spelled lowercase (the test above). This
+  // is the loud direction, and no file's prose spells one capitalized; the
+  // pin is here so a change to the guard meets this shape on purpose.
+  const lead = ".nvmrc holds an EXACT version, and Renovate moves it on a monthly schedule rather than a human noticing: see ADR 0010.";
+  const tail = "Do not hand-edit this to float.";
+  for (const abbr of ["E.g.", "I.e.", "Cf.", "Viz.", "Vs."]) {
+    assert.match(
+      windowClaimFault(`${lead} The window bounds when the bot opens its PR (${abbr} once a month), not when the PR merges. ${tail}`),
+      /no longer says, in one sentence/,
+      abbr,
+    );
+  }
+});
+
 test("windowClaimFault still refuses a negation spelled with the opening curly quote — only U+2019 is accepted (#1852)", () => {
   // U+2018 is what smart-quote engines use to OPEN a single-quoted span, never
   // inside a contraction, so a paraphrase relying on it for "doesn't" is not one.
@@ -1602,8 +1620,10 @@ export function jsonCountFault(block) {
   // otherwise a count sentence borrows a following real sentence's context
   // word through the gap `sentences()` leaves open, and the #1942 bug
   // returns for any aside written in parentheses or quotes (PR #1984 review,
-  // #1945).
-  const countSentenceBoundary = /(?<=[.!?][)\]"'\u2019\u201d]*)(?<!\b(?:e\.g|i\.e|cf|viz|vs)\.[)\]"'\u2019\u201d]*)\s+/i;
+  // #1945). Its abbreviations match lowercase only, as sentences()'s do
+  // (#1899, #2021) — with the same cost: a capitalized one anywhere, a
+  // parenthetical "(E.g. …)" included, ends the sentence right there.
+  const countSentenceBoundary = /(?<=[.!?][)\]"'\u2019\u201d]*)(?<!\b(?:e\.g|i\.e|cf|viz|vs)\.[)\]"'\u2019\u201d]*)\s+/;
   for (const sentence of sents.flatMap((s) => s.split(countSentenceBoundary))) {
     // Every count-shape START, not just the first match — and not matchAll's
     // non-overlapping walk either: a match's window can swallow the real
@@ -1654,6 +1674,48 @@ test("jsonCountFault accepts the block's own non-counting numbers and a count cu
   const cache = "The runtime caches are NOT covered — every one of them is gitignored, so `git ls-files` never sees them.";
   assert.equal(jsonCountFault(`Parses every file \`git ls-files '*.json'\` lists. ${cache} ${jq}`), null);
   assert.equal(jsonCountFault(`Every tracked \`*.json\` file. The 2026-09-08 split removed two of them. Files added since need no edit here. ${jq}`), null);
+});
+
+// #2021: jsonCountFault's re-split carries its own copy of sentences()'s
+// abbreviation list, and #1899's lowercase-only fix has to reach it too. The
+// `]` closer here is one sentences() never splits after, so this re-split is
+// the only boundary between the two sentences in these fixtures.
+test("jsonCountFault ends a count sentence at a capitalized abbreviation lookalike, and still skips the lowercase abbreviation (#2021)", () => {
+  const lead = "Parses every file `git ls-files '*.json'` lists.";
+  // "[Vs.]" ends its sentence, so "tracked" is no context for the count in the
+  // next one. Folded case, the re-split read it as "vs.", joined the two, and
+  // refused the block as sizing the tracked set.
+  for (const word of ["Vs.", "VS.", "E.g.", "I.e.", "Cf.", "Viz."]) {
+    assert.equal(jsonCountFault(`${lead} The cache is tracked per [${word}] - two files sit there.`), null, word);
+  }
+  // The refuse side, in the same fixture shape: lowercase is the abbreviation,
+  // one sentence, whose "tracked" sizes the count.
+  for (const abbr of ["vs.", "e.g.", "i.e.", "cf.", "viz."]) {
+    assert.match(
+      jsonCountFault(`${lead} The cache is tracked per [${abbr}] - two files sit there.`),
+      /sizes the tracked JSON set again/,
+      abbr,
+    );
+  }
+});
+
+test("jsonCountFault ends a count sentence at a capitalized abbreviation mid-sentence too — the cost #1899 accepted (#2021)", () => {
+  // The lowercase-only match fires wherever the abbreviation sits, so a
+  // capitalized one in a parenthetical cuts the count off from the context
+  // word before it, and the count passes: the silent direction here, unlike
+  // windowClaimFault's. No file's prose spells one capitalized; the pin is
+  // here so a change to the guard meets this shape on purpose. The `]`
+  // closer (review finding, fix-pr-2024): a plain-space closer here lets
+  // sentences() (lowercase-only since #1899/#2018) end the sentence first,
+  // so the fixture measured that cost instead of countSentenceBoundary's own
+  // — the `]` closer is one sentences() never splits after (#2021's sibling
+  // test above uses the same shape), so this re-split is the only boundary.
+  const jq = "`jq empty`, not `jq -e .`: it exits 1 on a file holding `null` or `false` — both valid JSON.";
+  const count = (abbr) => `Parses tracked JSON [${abbr}] manifests: two files at last count. ${jq}`;
+  assert.match(jsonCountFault(count("e.g.")), /sizes the tracked JSON set again/);
+  for (const abbr of ["E.g.", "Cf.", "Vs."]) {
+    assert.equal(jsonCountFault(count(abbr)), null, abbr);
+  }
 });
 
 // Review of PR #1942 (correctness + tests dimensions, independently
