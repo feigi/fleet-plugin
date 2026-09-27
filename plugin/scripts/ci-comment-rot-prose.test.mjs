@@ -1283,9 +1283,16 @@ test("pointerFault still refuses a rule spelled with the opening curly quote —
 // window run past the real sentence end into unrelated text (#1945). One word
 // merely containing a period, with no closer-after-terminator at its end, is
 // still a file name, not a boundary — "seven tracked `*.json` files" is the
-// count. The digit branch also refuses to start right after a hyphen, so a
-// date fragment like "2026-09-08" can't hand its last segment to the window as
-// a bare count ("08 files", #1945). Plural nouns only, because the jq
+// count. No branch may start right after a hyphen, so a date fragment like
+// "2026-09-08" can't hand its last segment to the window as a bare count
+// ("08 files", #1945) — and a spelled-out compound like "twenty-two" can't
+// hand its OWN last segment to the window as a second, narrower match once
+// the whole compound has already been tested and refused: the exec-loop
+// restart below resumes one character past a refused match's start, and
+// without the guard on every branch that restart could land right after the
+// hyphen inside "twenty-two", find "two files" there, and have
+// JSON_COUNT_CLAUSE_BEFORE read the swallowed hyphen as the clause-setting
+// dash that sizes it (#2012 review). Plural nouns only, because the jq
 // rationale in the same block says the step "exits 1 on a file holding
 // `null`": a singular noun would read that exit status as a count. That is the
 // ceiling as well — "exactly one tracked JSON file" passes, and so does a bare
@@ -1293,7 +1300,7 @@ test("pointerFault still refuses a rule spelled with the opening curly quote —
 // comment run above the step, anchored on the step's name like the failglob
 // pin, so a count moved into another step's comment is outside it.
 const JSON_COUNT =
-  /\b(?:(?<!-)\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|(?:thir|four|fif|six|seven|eigh|nine)teen|(?:twen|thir|for|fif|six|seven|eigh|nine)ty(?:[- ]?(?:one|two|three|four|five|six|seven|eight|nine))?|dozen|both)\s+(?:(?!\S*[.!?][)\]"'\u2019\u201d]*\s)\S+\s+){0,2}?(?:files|manifests)\b/i;
+  /\b(?<!-)(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|(?:thir|four|fif|six|seven|eigh|nine)teen|(?:twen|thir|for|fif|six|seven|eigh|nine)ty(?:[- ]?(?:one|two|three|four|five|six|seven|eight|nine))?|dozen|both)\s+(?:(?!\S*[.!?][)\]"'\u2019\u201d]*\s)\S+\s+){0,2}?(?:files|manifests)\b/i;
 
 // JSON_COUNT alone is context-blind: it flags a "<count> files" shape ANYWHERE
 // in the block, whether or not that particular phrase sizes the tracked set at
@@ -1316,13 +1323,36 @@ const JSON_COUNT =
 //     dash, at most two words back: "Parses what `git ls-files` lists, both
 //     plugin manifests among them." — the context sits a clause away from the
 //     count, and only the punctuation says the count sizes what came before.
-//     Between that punctuation and the count, only a determiner may sit
-//     ("lists, the two plugin manifests", "lists, all nine files") — any
-//     other word ("`git ls-files`, the author removed two files") starts a
-//     clause of its own, which the count belongs to instead (#2004).
+//     Between that punctuation and the count, up to two determiners, and
+//     only a determiner, may sit — a third word past the cap, determiner or
+//     not, is not recognized either ("lists, the two plugin manifests",
+//     "lists, all just nine files", but not "lists, all just the nine
+//     files"): any word past that cap, or any word not on the list at all
+//     ("`git ls-files`, the author removed two files"), starts a clause of
+//     its own, which the count belongs to instead (#2004).
 // "json" counts only as a word of its own, the `*.json` glob or a bare
-// `.json` with no stem in front ("Seven .json files" names the type exactly
-// as the glob does), never as a file name's extension ("plugin.json") (#2004).
+// `.json` — but the character right before that bare `.json` must be
+// whitespace, an opener, or nothing at all (string start): a stem ending in
+// a word character, `.`, `/` or `-` is the original exclusion
+// ("plugin.json", "..json", "/.json"), and a stem ending in anything else —
+// `}`, `)`, an accented letter — excludes it the same way, on the same
+// reasoning, not just the ASCII subset \w covers ("${name}.json",
+// "résumé.json") (#2004, tightened #2012 review). That boundary character
+// has to be a REAL one, too: JSON_COUNT always ends its own match on the
+// literal word "files" or "manifests", so a bare `.json` glued directly onto
+// that word with no separator at all ("Seven files.json are made up.") is
+// still an extension, not a name of its own, even though the clause-after
+// check below tests a slice starting right where the count match ends, where
+// there is no character left for a lookbehind to see — the check now
+// requires a real separator before its own context word can start, so a
+// glued `.json` never reaches it (#2012 review). The clause-after check
+// shares its allowed openers with the modifier check above so the two can't
+// drift apart (#2004) — but a parenthetical description is not an opener a
+// noun's own clause can start with: sharing the modifier's full opener set
+// pulled in `(`, so "two files (JSON fixtures nobody read)" read as the
+// clause "files" opens; the shared set carries only the backtick and quote
+// characters #2004's own gap needed, and the modifier check never itself
+// depended on `(` (#2012 review).
 // The ceiling: a count sentence with no context word of its own, right after
 // one that has it ("Every tracked `*.json` file. Seven files at last
 // count."), passes — sentences are the unit. So does a context word pushed
@@ -1331,11 +1361,11 @@ const JSON_COUNT =
 // "both valid JSON files" (#2004). The existing "The 2026-09-08 split
 // removed two of them." fixture must pass too, for a simpler reason: "two of
 // them" is not a JSON_COUNT match at all.
-const JSON_SET_WORD = String.raw`(?:\btracked\b|(?<![\w.\/-])\.?json\b|\*\.json\b|git ls-files\b)`;
+const JSON_SET_WORD = String.raw`(?:\btracked\b|(?<![\w.\/-])json\b|(?<![^\s\x60'"(])\.json\b|\*\.json\b|git ls-files\b)`;
 const JSON_COUNT_ALL = new RegExp(JSON_COUNT.source, "gi");
-const JSON_CODE_OPENER = String.raw`[\x60'"(]*`;
+const JSON_CODE_OPENER = String.raw`[\x60'"]*`;
 const JSON_COUNT_MODIFIER = new RegExp(String.raw`^\S+\s+(?:(?:one|two|three|four|five|six|seven|eight|nine)\s+)?${JSON_CODE_OPENER}${JSON_SET_WORD}`, "i");
-const JSON_COUNT_CLAUSE_AFTER = new RegExp(String.raw`^\s*(?:(?:that|which)\s+)?(?:(?:are|were)\s+)?${JSON_CODE_OPENER}${JSON_SET_WORD}`, "i");
+const JSON_COUNT_CLAUSE_AFTER = new RegExp(String.raw`^\s+(?:(?:that|which)\s+)?(?:(?:are|were)\s+)?${JSON_CODE_OPENER}${JSON_SET_WORD}`, "i");
 const JSON_COUNT_CLAUSE_BEFORE = new RegExp(String.raw`${JSON_SET_WORD}[^\s,:;\u2013\u2014-]*(?:\s+[^\s,:;\u2013\u2014-]+){0,2}\s*[,:;\u2013\u2014-]\s*(?:(?:the|these|those|its|their|all|exactly|only|just)\s+){0,2}$`, "i");
 
 function sizesTrackedSet(sentence, count) {
@@ -1544,6 +1574,40 @@ test("jsonCountFault refuses a count swallowed by an earlier match, set off by a
   for (const aside of [
     "Beside `git ls-files`, the author removed two files last week.",
     "In 2026 twelve files were removed from plugin.json's directory.",
+  ]) {
+    assert.equal(jsonCountFault(`${lead} ${aside} ${jq}`), null, aside);
+  }
+});
+
+// Review of PR #2012 (correctness + tests dimensions, independently
+// corroborated 3 ways): four false positives in #2004's own fixes above,
+// each measured on the unmodified PR-head file before landing the fix — a
+// hyphenated spelled-out number could hand JSON_COUNT_CLAUSE_BEFORE its own
+// hyphen as clause punctuation once the exec-loop restart found a second,
+// narrower match inside it; a stem character outside \w (`}`, an accented
+// letter) slipped past the bare-`.json` lookbehind's deny-list; a `.json`
+// glued directly onto the count's own "files"/"manifests" with no separator
+// reached the clause-after check's now-visible-nothing lookbehind; and
+// sharing the modifier's full opener set pulled `(` into the clause-after
+// check along with the quote #2004 needed there. Each is the same shape as
+// an aside this file already pins as accepted, just spelled differently.
+// Also: #2004's own test above pins the determiner-before-the-count rule
+// with exactly one determiner: the "{0,2}" cap itself — two determiners
+// still counted, three past it not — was never itself pinned, so a mutation
+// narrowing the cap to one determiner passed the suite silently.
+test("jsonCountFault refuses a count set off by exactly two determiners but not three, and accepts four asides #2004's own fixes newly broke (#2012 review)", () => {
+  const jq = "`jq empty`, not `jq -e .`: it exits 1 on a file holding `null` or `false` — both valid JSON.";
+  const lead = "Parses every file `git ls-files '*.json'` lists.";
+  assert.match(
+    jsonCountFault(`${lead} Parses what \`git ls-files\` lists, all exactly nine files remain. ${jq}`) ?? "",
+    /sizes the tracked JSON set again \("nine files"\)/,
+  );
+  assert.equal(jsonCountFault(`${lead} Parses what \`git ls-files\` lists, all exactly the nine files remain. ${jq}`), null);
+  for (const aside of [
+    "Renovate tracked twenty-two files there last week.",
+    "Beside `${name}.json`, two files were removed that week.",
+    "The split removed two files (JSON fixtures nobody read) that week.",
+    "Seven files.json are made up.",
   ]) {
     assert.equal(jsonCountFault(`${lead} ${aside} ${jq}`), null, aside);
   }
