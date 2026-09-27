@@ -1798,9 +1798,15 @@ test("jsonCountFault reads an italic abbreviation in the coverage lead as part o
 // guard was a SEPARATE lookbehind, re-matched independently at the final
 // whitespace, so it could match the closer's own swallowed `e.g.`/`vs.`
 // instead of whatever preceded the actual terminator. Confirmed not a
-// regression from #2043 — the pre-#2043 narrow closer set produced the same
-// non-split on these three, for the unrelated reason that a plain char class
-// can't span `](`/`][` at all — a genuine, deeper guard-anchoring gap.
+// regression from #2043 — the pre-#2043 narrow closer set (`)]"'’”` only, no
+// `](...)`/`][...]` alternatives) produced the same non-split on these three
+// too, but not for the reason its narrowness usually mattered (#2043's own
+// `Vs.**`/`Vs.>>` repro, where `*`/`>` were never in that class at all): `]`
+// and `)` were already members of it, so the terminator-lookbehind still
+// found the same candidate boundary right behind the closer, and the guard —
+// already this same separately-re-matchable lookbehind — was independently
+// blocking the split there too. The gap this PR fixes predates #2043
+// entirely; #2043's closer-set widening never touched the guard clause.
 test("the count re-split still ends a sentence when the closer embeds its own abbreviation+period (#2054)", () => {
   for (const t of ["It shipped.[^vs.] Next one", "It shipped.](see e.g.) Next one", "It shipped.][ref vs.] Next one"]) {
     assert.equal(t.split(COUNT_SENTENCE_BOUNDARY).length, 2, t);
