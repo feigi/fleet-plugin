@@ -44,14 +44,14 @@
 import { execFileSync } from "node:child_process";
 import { gitEnv } from "./git-env.mjs";
 import { relative, resolve } from "node:path";
-import { makeDie, makeArg, makeSweep, makeStray, writeAll } from "./arg.mjs";
+import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 
 const NAME = "staleness";
 
 const die = makeDie(NAME);
-const arg = makeArg(die);
-const sweep = makeSweep(die);
-const stray = makeStray(die);
+const { arg, sweep, stray } = defineFlags(die, {
+  flags: { path: "value", gone: "value", present: "value" },
+});
 
 // #818: a needle QUOTED OUT OF A TICKET can legitimately start with `--`
 // (#240's is `--label ready-for-agent`), and arg()'s value guard refuses
@@ -130,21 +130,20 @@ if (!path) die("--path <path> is required");
 // script's question — `arg()` refuses it as a missing value, at exit 2, which
 // is the verdict that keeps the ticket in the queue. `--gone -- '<value>'`
 // (separatedNeedles() above) is the opt-in past that, one flag at a time.
-sweep(["path", "gone", "present"]);
+sweep();
 
 // #463: the sweep above only ever refuses a `--`-prefixed token, so a bare
 // or single-dash stray rode through in silence here too — measured, `--path
 // README.md --present needle JUNKTOKEN` returned a payload byte-identical to
 // the same invocation without it. This script takes no positional of its
-// own and all three of its flags take a value, so any leftover token is a
-// stray.
+// own, so any leftover token is a stray.
 //
 // The shape that makes it worse here than elsewhere is an unquoted needle:
 // `--present two words` takes `two` and discards `words` (measured), then
 // answers with full confidence about a needle the caller never asked about.
 // This verdict feeds ticket selection, where a wrong `fixed`/`live` retires
 // live supply or claims dead work.
-stray(["path", "gone", "present"]);
+stray();
 
 const mode = gone ? "gone" : "present";
 const needle = gone ?? present;

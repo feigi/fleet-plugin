@@ -38,7 +38,7 @@ import {
   encodeClaudeProjectDir as encodeProjectDir, foldClaudeTranscript, claudeRoleSignals,
   encodeOmpProjectDir, isOmpSessionDirName, ompSessionTranscripts, foldOmpTranscript, ompMemberRecord,
 } from "./member-record.mjs";
-import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
+import { makeDie, defineFlags } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 import { mergedReadPrs } from "./compute-board.mjs";
 // #1597: the heartbeat's liveness mark, read here and never written. The
@@ -59,10 +59,18 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 // die()/arg()/has() shared with the other fleet scripts — see arg.mjs for
 // the fail-open (#61/#169/#364) and pipe-safety (#176/#328/#363) rationale.
 const die = makeDie(NAME);
-const arg = makeArg(die);
-const has = makeHas(die);
-const sweep = makeSweep(die);
-const stray = makeStray(die);
+const { arg, has, sweep, stray } = defineFlags(die, {
+  flags: {
+    ledger: "value",
+    prev: "value",
+    port: "value",
+    interval: "value",
+    "spend-since": "value",
+    "spend-dir": "value",
+    open: "bool",
+  },
+  positionals: ["build", "serve"],
+});
 // `ledger`/`prev`/`spend-since`/`port`/`interval` are all read with `||`/`??`
 // fallbacks, so a trailing flag previously substituted a default in total
 // silence — `--spend-since` with nothing after it silently widened the spend
@@ -168,7 +176,7 @@ function argInterval() {
 // gives for argPort()/has("open") staying in serve() too).
 function argSpendSince() {
   const sinceRaw = arg("spend-since");
-  if (!has("spend-since")) return null;
+  if (sinceRaw === null) return null;
   const sinceMs = Number(sinceRaw);
   if (!Number.isFinite(sinceMs) || sinceMs < 1e12 || sinceMs > Date.now()) {
     die(`--spend-since wants epoch milliseconds, got ${sinceRaw}`);
@@ -183,8 +191,8 @@ function argSpendSince() {
 // value, a following flag eaten as the value, and the `--spend-dir=` form.
 // What this read buys is that all four refuse under THIS flag's name instead
 // of stray()'s generic "unexpected argument", and they do so before gather()
-// shells out to anything — which is what declaring it in VALUE_FLAGS and
-// calling it from main() (both below) is for, exactly as #1076 did for
+// shells out to anything — which is what declaring it in the flag table above
+// and calling it from main() below are for, exactly as #1076 did for
 // --spend-since. A named read rather than a bare arg() at each call site so
 // the flag is spelled in one place and this reasoning has a home.
 //
@@ -1392,12 +1400,7 @@ async function main() {
   // Above `cmd`, so `board.mjs --prot 9000` names the stray rather than
   // printing the usage line for a missing subcommand. `build`/`serve` carry
   // no `--` and are never the sweep's business.
-  // One list rather than the same six names spelled out in the sweep and in
-  // both stray() calls below. `open` is not in it: it is boolean (has()), so
-  // it never has a value token for stray() to skip over, and the sweep needs
-  // the name anyway.
-  const VALUE_FLAGS = ["ledger", "prev", "port", "interval", "spend-since", "spend-dir"];
-  sweep([...VALUE_FLAGS, "open"]);
+  sweep();
   const cmd = process.argv[2];
   // #1656: no default applied here any more — `build` and `serve` now each
   // apply their own. `build` has no workspace instance to default against
@@ -1490,7 +1493,7 @@ async function main() {
   // the usage die below, which is `cmd`'s wrong-subcommand case to name, not
   // stray()'s to relitigate.
   if (cmd === "build") {
-    stray(VALUE_FLAGS, ["build", "serve"]);
+    stray();
     const { computeBoard } = await import("./compute-board.mjs");
     // #1584: a snapshot printed here outlives the process that printed it —
     // redirected to a file, pasted into a ticket, read back by the next
@@ -1527,7 +1530,7 @@ async function main() {
     return;
   }
   if (cmd === "serve") {
-    stray(VALUE_FLAGS, ["build", "serve"]);
+    stray();
     await serve({ ledgerFile });
     return;
   }

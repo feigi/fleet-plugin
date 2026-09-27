@@ -42,9 +42,9 @@
 //
 // Which scripts those are is readable off the `from "./arg.mjs"` grep this
 // header already recommends, provided you read the imported SYMBOL list and
-// not the filenames: a row binding makeSweep has delegated the unknown-flag
+// not the filenames: a row binding defineFlags has delegated the unknown-flag
 // refusal, so `grep -n '^import .*makeDie.* from "./arg.mjs"'
-// scripts/*.mjs | grep -v test | grep -v makeSweep` leaves the
+// scripts/*.mjs | grep -v test | grep -v defineFlags` leaves the
 // rows that hold their own. Anchoring on `^import` is load-bearing for the
 // same reason it is on the die() grep: unanchored, this very comment matches
 // itself. Requiring makeDie is what keeps the rows to SCRIPTS: every script
@@ -83,7 +83,7 @@
 // wording from here — and it parses with node:util's parseArgs as well, whose
 // unknown-flag refusal is its own edit site: `node
 // scripts/candidates.mjs --bogus`. Why that refusal is not
-// sweep()'s is argued at makeSweep(), which owns the trade-off; this names the
+// sweep()'s is argued at refuseUnknown(), which owns the trade-off; this names the
 // edit site rather than restating it.
 //
 // Each factory takes (or returns something bound to) the caller's own die(),
@@ -319,7 +319,7 @@ export function isDigits(value) {
   return /^[0-9]+$/.test(value);
 }
 
-// Built ON makeArg, not beside it, so the digits test runs AFTER arg()'s own
+// numArg() is built ON arg(), not beside it, so the digits test runs AFTER arg()'s own
 // value guards: `--pr` given trailing still reports "--pr needs a value" and
 // `--pr=5` still reports the `=` form. Where both would refuse, the more
 // specific wording wins — the same ordering rule sweep() states below.
@@ -346,14 +346,11 @@ export function isDigits(value) {
 // absence as `=== null`, never `!pr` — `--pr 0` is a value the caller GAVE,
 // and answering it with a usage line claiming `--pr` is required would be a
 // lie, where `gh` answers it truthfully as no such PR.
-export function makeNumArg(die) {
-  const arg = makeArg(die);
-  return function numArg(name) {
-    const raw = arg(name);
-    if (raw === null) return null;
-    if (!isDigits(raw)) die(`--${name} needs a number, got ${raw}`);
-    return Number(raw);
-  };
+function readNum(die, arg, name) {
+  const raw = arg(name);
+  if (raw === null) return null;
+  if (!isDigits(raw)) die(`--${name} needs a number, got ${raw}`);
+  return Number(raw);
 }
 
 // #365: the guards above all answer "was this flag given well?", and none of
@@ -374,9 +371,10 @@ export function makeNumArg(die) {
 // #463: that leftover class — a bare or single-dash token nothing reads,
 // `ci-state.mjs --pr 42 basee main` or `-basee` — is not this function's fix,
 // and stays out of scope here for the same reason board.mjs's subcommands are:
-// this sweep still refuses ONLY a `--`-prefixed token, unchanged. makeStray()
-// below covers it instead, because unlike this sweep it DOES need to know
-// which names take a value, to skip over one instead of refusing it.
+// this sweep still refuses ONLY a `--`-prefixed token, unchanged.
+// refuseStrays() below covers it instead, because unlike this sweep it DOES
+// need to know which names take a value, to skip over one instead of refusing
+// it.
 //
 // The `=` form is looked up by NAME alone: `--base=main` stays arg()/has()'s to
 // refuse in their own wording, while `--basee=main` is caught here. The token
@@ -447,14 +445,12 @@ export function makeNumArg(die) {
 // unread` answered at exit 0 before #584 and exits 2 after it. The residual
 // that stays open and owned is a lone stray with no subject beside it, still
 // taken as the subject, which ledger.mjs's own comment prices.
-export function makeSweep(die) {
-  return function sweep(known) {
-    for (const a of process.argv.slice(2)) {
-      if (a.startsWith("--") && !known.includes(a.slice(2).split("=")[0])) {
-        die(`unknown flag ${a} — accepted: ${known.map((k) => `--${k}`).join(", ")}`);
-      }
+function refuseUnknown(die, known) {
+  for (const a of process.argv.slice(2)) {
+    if (a.startsWith("--") && !known.includes(a.slice(2).split("=")[0])) {
+      die(`unknown flag ${a} — accepted: ${known.map((k) => `--${k}`).join(", ")}`);
     }
-  };
+  }
 }
 
 // #463: sweep() above only ever refuses a `--`-prefixed token — deliberately,
@@ -474,8 +470,8 @@ export function makeSweep(die) {
 // by mistake. Nor can `startsWith("-")`: it refuses a legitimate negative
 // value such as `--spend-since -1`, which arg() accepts today. The only way
 // to tell a stray from a value is to know, by NAME, which flags take one —
-// so unlike every guard above, this one takes that set as an argument
-// instead of discovering it from argv.
+// so unlike every guard above, this one takes that set from the script's flag
+// table (defineFlags() below) instead of discovering it from argv.
 //
 // `positionals` is the script's own declared grammar for the one slot ahead
 // of its flags — board.mjs's `build`/`serve`; every other caller passes
@@ -491,21 +487,85 @@ export function makeSweep(die) {
 // (`--pr=5`) is never treated as carrying a value to skip over: has()/arg()
 // already refuse that form, by name, for every flag `valueFlags` lists,
 // wherever the script reads it — before or after this call.
-export function makeStray(die) {
-  return function stray(valueFlags, positionals = []) {
-    const argv = process.argv.slice(2);
-    let usedPositional = false;
-    for (let i = 0; i < argv.length; i++) {
-      const a = argv[i];
-      if (a.startsWith("--")) {
-        if (!a.includes("=") && valueFlags.includes(a.slice(2))) i++;
-        continue;
-      }
-      if (!usedPositional && positionals.includes(a)) {
-        usedPositional = true;
-        continue;
-      }
-      die(`unexpected argument '${a}'`);
+function refuseStrays(die, valueFlags, positionals) {
+  const argv = process.argv.slice(2);
+  let usedPositional = false;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith("--")) {
+      if (!a.includes("=") && valueFlags.includes(a.slice(2))) i++;
+      continue;
     }
+    if (!usedPositional && positionals.includes(a)) {
+      usedPositional = true;
+      continue;
+    }
+    die(`unexpected argument '${a}'`);
+  }
+}
+
+// #1077: ONE declaration of a script's flags, and every reader bound to it.
+// `flags` maps each name to "value" or "bool"; `positionals` is the grammar
+// refuseStrays() above accepts ahead of the flags (board.mjs's
+// `build`/`serve`). One key per flag, so a name cannot be declared both ways.
+//
+// The invariant this carries used to be prose at each call site: stray()'s
+// `valueFlags` must name exactly, and only, the flags the script reads with
+// arg(). A name wrongly present buys the token after it an unconditional
+// skip, so the very stray the guard exists to catch becomes invisible; a name
+// wrongly absent turns a legitimate value into a refused stray. Five scripts
+// typed that list twice, once for sweep() and once for stray(), and nothing
+// checked either copy against which reader the script actually called. A
+// bare table would only have moved that risk — a boolean marked "value" is
+// the same typo in new syntax — so the table and the reads are bound
+// instead: sweep() accepts every declared name, stray() skips after the
+// "value" ones, and a read of the wrong KIND refuses the first time it runs.
+// arg()/numArg() accept only a "value" name and has() only a "bool" one, so a
+// presence test on a value flag is refused too: test arg()'s result against
+// null instead.
+//
+// That refusal goes through die() at exit 2, never a thrown Error: exit 1 is
+// a verdict in ci-state.mjs (not green), merge-gate.mjs (blocked) and
+// tier-roles.mjs (check failed), which is the inversion makeDie() exists to
+// prevent (#299/#328). It is worded `bug:` because only the script's own
+// source can reach it — no command line can make a correct table disagree
+// with a correct read.
+//
+// Construction runs nothing. sweep() and stray() stay explicit calls the
+// script places, below its own per-flag guards, so the more specific wording
+// still wins where both would refuse (diff-stats.mjs's `--pr --json`,
+// tier-check.mjs's roster flags). And every reader looks at process.argv when
+// CALLED, never at a copy taken here: staleness.mjs splices its `--gone --
+// <needle>` triple out of process.argv before its sweep()/stray() run, and a
+// snapshot would refuse the needle.
+export function defineFlags(die, { flags, positionals = [] }) {
+  const names = Object.keys(flags);
+  const valueFlags = names.filter((name) => flags[name] === "value");
+  const rawArg = makeArg(die);
+  const rawHas = makeHas(die);
+  const expect = (name, kind) => {
+    const declared = Object.hasOwn(flags, name) ? flags[name] : undefined;
+    if (declared === kind) return;
+    die(`bug: --${name} read as ${kind} but ${declared === undefined ? "not declared" : `declared ${declared}`}`);
+  };
+  return {
+    arg(name) {
+      expect(name, "value");
+      return rawArg(name);
+    },
+    numArg(name) {
+      expect(name, "value");
+      return readNum(die, rawArg, name);
+    },
+    has(name) {
+      expect(name, "bool");
+      return rawHas(name);
+    },
+    sweep() {
+      refuseUnknown(die, names);
+    },
+    stray() {
+      refuseStrays(die, valueFlags, positionals);
+    },
   };
 }

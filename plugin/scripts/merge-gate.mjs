@@ -56,7 +56,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeDie, makeArg, makeNumArg, makeSweep, makeStray, writeAll } from "./arg.mjs";
+import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 
 const NAME = "merge-gate";
@@ -68,10 +68,9 @@ const NAME = "merge-gate";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 const die = makeDie(NAME);
-const arg = makeArg(die);
-const numArg = makeNumArg(die);
-const sweep = makeSweep(die);
-const stray = makeStray(die);
+const { arg, numArg, sweep, stray } = defineFlags(die, {
+  flags: { pr: "value", pre: "value", post: "value", out: "value" },
+});
 
 const USAGE = "usage: merge-gate.mjs --pr <n> --pre <sha> [--post <sha>] [--out <path>]";
 
@@ -84,9 +83,8 @@ if (pr === null || preArg === null) die(USAGE);
 // `--declare-no-ci` is deliberately NOT a flag here: the gate passes it to
 // ci-state.mjs on every call (see readCi), so the sweep refuses it by name
 // rather than letting a caller believe it changed anything.
-const VALUE_FLAGS = ["pr", "pre", "post", "out"];
-sweep(VALUE_FLAGS);
-stray(VALUE_FLAGS);
+sweep();
+stray();
 
 // Full SHAs only. The head check is an exact comparison against what gh
 // reports, which is always the full lowercase SHA, so an abbreviated `--pre`

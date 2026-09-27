@@ -14,7 +14,7 @@
 import { execFileSync } from "node:child_process";
 import { gitEnv } from "./git-env.mjs";
 import { basename, dirname, extname } from "node:path";
-import { makeDie, makeNumArg, makeSweep, makeStray } from "./arg.mjs";
+import { makeDie, defineFlags } from "./arg.mjs";
 
 const NAME = "pr-overlap";
 
@@ -35,9 +35,7 @@ const NAME = "pr-overlap";
 // non-numeric ref as a BRANCH, so the overlap underneath was genuine and
 // about two PRs nobody named.
 const die = makeDie(NAME);
-const numArg = makeNumArg(die);
-const sweep = makeSweep(die);
-const stray = makeStray(die);
+const { numArg, sweep, stray } = defineFlags(die, { flags: { a: "value", b: "value" } });
 
 // `=== null`, not `!a || !b`: numArg() returns a NUMBER, so `--a 0` — a value
 // the caller did give — would otherwise draw the usage line, where gh answers
@@ -54,11 +52,11 @@ if (a === null || b === null) die("usage: pr-overlap.mjs --a <pr> --b <pr>");
 // at exit 0. The sweep closes that and upgrades the first case's message from
 // a usage dump to the offending token. Below the usage guard so the usage
 // text still wins where it is the better answer; above the first gh call.
-sweep(["a", "b"]);
+sweep();
 // #463: sweep() above only refuses a `--`-prefixed token; a bare or
 // single-dash one (`--a 5 --b 6 stray`) rode along in silence the same way.
 // This file takes no positional, so any leftover token is a stray.
-stray(["a", "b"]);
+stray();
 
 function changedFiles(pr) {
   console.error(`$ gh pr diff ${pr} --name-only`);

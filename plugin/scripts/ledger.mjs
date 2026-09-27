@@ -212,12 +212,13 @@ const file = fileIdx === -1 ? defaultLedgerPath() : argv[fileIdx + 1];
 // Refusing a `--`-prefixed value forfeits a path that legitimately begins
 // with `--`. That is not a local choice: isFlagLike() below IS arg.mjs's rule,
 // so this reader forfeits exactly what every script routing through arg()
-// forfeits, no more and no less — the set of them being whatever `grep -l
-// '^const arg = makeArg' scripts/*.mjs` reports. Anchored on the
-// binding, because the unanchored `grep -l makeArg` matched this comment and
-// so listed ledger.mjs, the one script this paragraph says does NOT route
-// through arg(). A single leading `-`, or a `--` anywhere but the front, is
-// still a path.
+// forfeits, no more and no less — the set of them being whatever `grep -lE
+// '^const arg = makeArg|^import .*defineFlags' scripts/*.mjs` reports: a
+// makeArg binding, or a defineFlags() table whose arg()/numArg() are built on
+// it. Anchored on the binding and the import, because the unanchored `grep -l
+// makeArg` matched this comment and so listed ledger.mjs, the one script this
+// paragraph says does NOT route through arg(). A single leading `-`, or a `--`
+// anywhere but the front, is still a path.
 //
 // The `file &&` term is load-bearing and must not fold into isFlagLike(),
 // which answers TRUE for an absent value: without it a truly trailing `--file`
@@ -266,7 +267,7 @@ function unescapeText(s) {
 // straight into the duplicate-filing subject, so a misspelled flag searched
 // for a DIFFERENT subject and read "safe to file" where the correct spelling
 // answers ALREADY FILED at exit 1. A `--` token can legitimately BE that data
-// (arg.mjs's makeSweep() comment names why sweep() stays out of this file),
+// (arg.mjs's refuseUnknown() comment names why sweep() stays out of this file),
 // so what separates a stray flag from data is length: `check`'s documented
 // calling convention hands the subject as ONE argument, so an unquoted stray
 // reveals itself by making the tail longer than that one argument allows.
@@ -293,7 +294,7 @@ function unescapeText(s) {
 // other tickets holding that file open.
 //
 // Stated here and nowhere else (#1557). This paragraph is the one copy of why
-// the rule is `check`'s alone; arg.mjs's makeSweep() comment and
+// the rule is `check`'s alone; arg.mjs's refuseUnknown() comment and
 // ledger.test.mjs's two stray-tail blocks each used to carry their own, and
 // now point here instead. Anything that reads on the docs or the
 // measurement belongs in this paragraph, not beside a caller.
