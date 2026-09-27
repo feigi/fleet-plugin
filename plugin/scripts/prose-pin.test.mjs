@@ -238,6 +238,85 @@ test("bullet throws rather than widening when either anchor is gone", () => {
   assert.throws(() => bullet("- **Edge A**\n- b\n", "- **Edge A**", "END", "the fixture"), /no longer contains "END" after "- \*\*Edge A\*\*"/);
 });
 
+// #2077: a restatement need not be a list item to escape the item. A paragraph
+// after a blank line, or a heading, quote, fence or rule, written shallower than
+// the item's content ends the item in markdown, so it ends the slice too —
+// otherwise the claim gutted from the item and restated there stays green.
+test("bullet ends the item at a shallower non-list block, not only at a sibling marker", () => {
+  const after = (block) => `intro\n- **Edge A** first line\n  wraps here.\n${block}\nrestates the words\n\nEND`;
+  for (const block of ["\nPlain paragraph", "\n### Some other section", "### Some other section", "> quoted", "```", "~~~", "---", "***", " ## one-space heading"]) {
+    assert.equal(bullet(after(block), "- **Edge A**", "END", "the fixture"), "- **Edge A** first line\n  wraps here.", block);
+  }
+  // Shallower than the CONTENT column is outside the item, even when deeper
+  // than its marker: one space under a `- ` item is not its paragraph.
+  assert.equal(bullet("- **Edge A** body\n\n Para at column one\nEND", "- **Edge A**", "END", "the fixture"), "- **Edge A** body");
+  // A nested item's paragraph-level peer belongs to the PARENT item.
+  assert.equal(bullet("1. step\n   - **Item** body\n\n   parent's paragraph\nEND", "- **Item**", "END", "the fixture"), "- **Item** body");
+});
+
+// The half the new bound can wrongly REFUSE: blocks written at the item's
+// content column are the item's own, and a shallower plain line with no blank
+// before it is a lazy continuation of the item's paragraph, which markdown
+// renders inside the item.
+test("bullet keeps the item's own paragraphs, blocks and lazy continuation lines", () => {
+  const own = "- **Edge A** body\nlazy continuation\n\n  second paragraph\nlazy again\n\n  > own quote\n  ### own heading\n  ```\n  code\n\n  more code\n  ```\n- sibling\nEND";
+  assert.equal(
+    bullet(own, "- **Edge A**", "END", "the fixture"),
+    "- **Edge A** body\nlazy continuation\n\n  second paragraph\nlazy again\n\n  > own quote\n  ### own heading\n  ```\n  code\n\n  more code\n  ```",
+  );
+  // The content column follows the marker's width and the gap after it — and
+  // a gap over 4 counts as 1, the rest being an indented code block.
+  assert.equal(bullet("10.  **Item** body\n\n     own paragraph\n11. next\nEND", "**Item**", "END", "the fixture"), "**Item** body\n\n     own paragraph");
+  assert.equal(bullet("-     **Item** code\n\n  own paragraph\n- next\nEND", "**Item**", "END", "the fixture"), "**Item** code\n\n  own paragraph");
+  // A tab-indented child of a space-indented item is still its child.
+  assert.equal(bullet("- **Edge A** body\n\t- tab child\n- sibling\nEND", "- **Edge A**", "END", "the fixture"), "- **Edge A** body\n\t- tab child");
+});
+
+// #2077: the item line is the one `from`'s first non-whitespace character sits
+// on, and the walk starts after `from`'s trailing whitespace. Read off `from`'s
+// first CHARACTER, a leading-`\n` anchor measures the previous line; started at
+// `from.length`, a trailing-`\n` anchor has already eaten the newline the next
+// line's check needs. Each probe widened or narrowed the slice silently.
+test("bullet measures the item from the anchor's text, not its surrounding newlines", () => {
+  assert.equal(bullet("- parent\n  - **A** body\n  - sibling\n- next\nEND", "\n  - **A**", "END", "the fixture"), "\n  - **A** body");
+  assert.equal(bullet("intro\n  indented prose\n- **A** body\n  - child\n- sib\nEND", "\n- **A**", "END", "the fixture"), "\n- **A** body\n  - child");
+  assert.equal(bullet("- **A** body\n- sib\nEND", "- **A** body\n", "END", "the fixture"), "- **A** body\n");
+});
+
+// #2077: indent is compared in visual columns, a tab advancing to the next
+// multiple of 4 (CommonMark's tab stop). Counted in characters, a one-tab item
+// read a two-space sibling as its own deeper child and kept it.
+test("bullet compares tab and space indentation by column, not by character count", () => {
+  assert.equal(bullet("intro\n\t- **A** body\n  - two-space sibling\n\t- **B**\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+  // The tab puts this item's text at column 6; four spaces is 3 characters
+  // deeper than the tab by count, and still a sibling by column.
+  assert.equal(bullet("intro\n\t- **A** body\n    - four-space sibling\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+});
+
+// #2091 (hand-dispatched review, correctness): a marker with nothing after
+// it on its own line — content on the next, indented line — is still a
+// separate list item in CommonMark, not a lazy continuation of the item
+// above it. `[ \t]` alone missed this shape; `(?:[ \t]|$)` catches the
+// marker whether or not anything follows it on the same line.
+test("bullet ends the item at a bare-marker sibling, with nothing after the marker on its own line", () => {
+  assert.equal(bullet("- **A** body\n-\n  restated claim\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+  assert.equal(bullet("- **A** body\n2.\n   restated claim\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+});
+
+// #2091 (hand-dispatched review, correctness): a thematic break may space its
+// repeated character out (CommonMark), not only run it together. `-`-spaced
+// forms already end the item via ITEM_MARKER; `_`/`*` have no such fallback.
+test("bullet ends the item at a spaced thematic break, not only a run-together one", () => {
+  assert.equal(bullet("- **A** body\n_ _ _\nafter\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+  assert.equal(bullet("- **A** body\n* * *\nafter\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+});
+
+// A list-item anchor is a start anchor, never a "nearest" bound, so a second
+// copy means the item would be read off whichever comes first.
+test("bullet throws when the item anchor occurs more than once", () => {
+  assert.throws(() => bullet("- **A** one\n- **A** two\nEND", "- **A**", "END", "the fixture"), /the fixture: list-item anchor "- \*\*A\*\*" occurs 2 times/);
+});
+
 // `\s+` between words, never a literal space: the prose these match against is
 // hard-wrapped, so any inter-word space in the source may be a newline plus
 // indent. Replacing the join with " " passes a single-line fixture and fails
