@@ -291,6 +291,15 @@ test("sentences does not end one at an italic abbreviation, and still ends one a
   for (const word of ["Xvs.", "26vs.", "gcf.", "Xe.g."]) {
     assert.deepEqual(sentences(`Pin it for the ${word} Then read.`), [`Pin it for the ${word}`, "Then read."], word);
   }
+  // The disclosed cost, in the same fixture shape as #1899's own accepted
+  // one above: a bare snake_case word ending in the abbreviation's letters —
+  // no italic markup, just an underscore glued on — now joins too. Locked in
+  // here so a future narrowing or widening of the guard cannot drift this
+  // cost silently.
+  for (const abbr of ["e.g.", "i.e.", "cf.", "viz.", "vs."]) {
+    const s = `Pin it for the snake_${abbr} Then read.`;
+    assert.deepEqual(sentences(s), [s], abbr);
+  }
 });
 
 // #1987: a footnote-style marker between a terminator and the whitespace

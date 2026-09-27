@@ -169,8 +169,10 @@ export function paragraph(text, anchor, what, options) {
 // re-split, whose guard this now matches. Running first does not make the
 // narrower guard moot for a caller that re-splits a slice: a re-split can only
 // cut a piece further, never rejoin two this function wrongly parted. The
-// cost: a bare snake_case word ending `_vs.` or `_cf.` at a sentence's real
-// end now joins the next one. Measured over every tracked .md/.mjs/.yml/.sh/
+// cost: a bare snake_case word ending in any of the five — `_vs.`, `_cf.`,
+// `_viz.`, `_e.g.`, `_i.e.` — at a sentence's real end now joins the next
+// one, the same underscore-adjacency this fix widens the guard to accept.
+// Measured over every tracked .md/.mjs/.yml/.sh/
 // .json file, the widening moved no split but three in fixtures of those two
 // sibling fixes, each an italic abbreviation.
 //
