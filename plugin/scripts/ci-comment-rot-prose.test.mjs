@@ -534,9 +534,11 @@ function blockScalarText(lines) {
 // allows there too (#2000) — including the
 // bare `!` non-specific tag, which has no characters of its own to require
 // (found in review of #2005: `\S+` after `[&!]` refused it where the header
-// regex above already used `\S*`) — and the job key, `steps:` and `uses:`
-// may carry one before the key itself, as may a step right after its own
-// `- `, whether its keys follow on that line or under it (#2006). Exported with
+// regex above already used `\S*`) — and the job key and `uses:` may carry
+// one before the key itself, as may a step right after its own `- `,
+// whether its keys follow on that line or under it (#2006). The `steps:`
+// key takes the same fix too, generalizing #2006's own wording to a spot
+// the ticket never named. Exported with
 // an optional `lines` override (same idiom as windowClaimFault's `block`
 // param and citationFault's `citing`/`cited` params) so a test can feed it
 // synthetic input the real ci.yml does not contain; the production call
@@ -1223,12 +1225,14 @@ test("a job key's anchor, tag or comment needs whitespace after its colon, as a 
 });
 
 // #2006 finding B. An anchor or tag may also sit BEFORE a key — on the job
-// key, the `steps:` key or a `uses:` key — or right after a step's own `- `,
-// on a line of its own over the step's keys; #2000 only taught the walk the
-// spot between a key's colon and its value, so each of these real steps
-// (confirmed against PyYAML's `compose`) dropped out of the returned set.
-// The property still has to be its own whitespace-separated token: glued to
-// the key it is part of the key's text, and names some other key.
+// key or a `uses:` key — or right after a step's own `- `, on a line of its
+// own over the step's keys; #2000 only taught the walk the spot between a
+// key's colon and its value, so each of these real steps (confirmed against
+// PyYAML's `compose`) dropped out of the returned set. The `steps:` key
+// takes the same fix too, generalizing the ticket's own wording to a spot
+// it never named. The property still has to be its own whitespace-separated
+// token: glued to the key it is part of the key's text, and names some
+// other key.
 test("an anchor or tag before a key, or after a step's own `- `, does not drop the step (#2006 finding B)", () => {
   const setup = "      - uses: actions/setup-node@v5";
   for (const shape of [
@@ -1251,6 +1255,8 @@ test("an anchor or tag before a key, or after a step's own `- `, does not drop t
     ["jobs:", ...job, "      - &s uses:actions/setup-node@v5"],
     ["jobs:", ...job, "      - &s with:", "          uses: actions/setup-node@v5"],
     ["jobs:", "  job:", "    with:", "      &k steps:", "        - uses: actions/setup-node@v5"],
+    ["jobs:", "  &kjob:", "    steps:", setup],
+    ["jobs:", "  job:", "    &ksteps:", setup],
   ]) {
     assert.deepEqual(setupNodeComments(shape), [], shape.join("\n"));
   }
