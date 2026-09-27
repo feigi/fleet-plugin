@@ -259,13 +259,15 @@ test("bullet ends the item at a shallower non-list block, not only at a sibling 
 // before it is a lazy continuation of the item's paragraph, which markdown
 // renders inside the item.
 test("bullet keeps the item's own paragraphs, blocks and lazy continuation lines", () => {
-  const own = "- **Edge A** body\nlazy continuation\n\n  second paragraph\n\n  > own quote\n  ### own heading\n  ```\n  code\n\n  more code\n  ```\n- sibling\nEND";
+  const own = "- **Edge A** body\nlazy continuation\n\n  second paragraph\nlazy again\n\n  > own quote\n  ### own heading\n  ```\n  code\n\n  more code\n  ```\n- sibling\nEND";
   assert.equal(
     bullet(own, "- **Edge A**", "END", "the fixture"),
-    "- **Edge A** body\nlazy continuation\n\n  second paragraph\n\n  > own quote\n  ### own heading\n  ```\n  code\n\n  more code\n  ```",
+    "- **Edge A** body\nlazy continuation\n\n  second paragraph\nlazy again\n\n  > own quote\n  ### own heading\n  ```\n  code\n\n  more code\n  ```",
   );
-  // The content column follows the marker's width and the gap after it.
+  // The content column follows the marker's width and the gap after it — and
+  // a gap over 4 counts as 1, the rest being an indented code block.
   assert.equal(bullet("10.  **Item** body\n\n     own paragraph\n11. next\nEND", "**Item**", "END", "the fixture"), "**Item** body\n\n     own paragraph");
+  assert.equal(bullet("-     **Item** code\n\n  own paragraph\n- next\nEND", "**Item**", "END", "the fixture"), "**Item** code\n\n  own paragraph");
   // A tab-indented child of a space-indented item is still its child.
   assert.equal(bullet("- **Edge A** body\n\t- tab child\n- sibling\nEND", "- **Edge A**", "END", "the fixture"), "- **Edge A** body\n\t- tab child");
 });
@@ -286,6 +288,9 @@ test("bullet measures the item from the anchor's text, not its surrounding newli
 // read a two-space sibling as its own deeper child and kept it.
 test("bullet compares tab and space indentation by column, not by character count", () => {
   assert.equal(bullet("intro\n\t- **A** body\n  - two-space sibling\n\t- **B**\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+  // The tab puts this item's text at column 6; four spaces is 3 characters
+  // deeper than the tab by count, and still a sibling by column.
+  assert.equal(bullet("intro\n\t- **A** body\n    - four-space sibling\nEND", "- **A**", "END", "the fixture"), "- **A** body");
 });
 
 // A list-item anchor is a start anchor, never a "nearest" bound, so a second
