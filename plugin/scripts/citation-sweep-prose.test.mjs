@@ -302,13 +302,14 @@ const UNSCOPED_AUTOMERGED_SPAN = new RegExp(
 //
 // #1992. Its trigger has the drift row's ceiling in merge words: "a bump
 // lands once its checks go green" and "the bump is approved once checks are
-// green" pass. Widening the verb list buys more spellings, not the concept,
-// and each costs a false red. `land`, the likeliest synonym, is in
-// pin-drift.sh four times already — releases "landing inside" the 43 days, a
-// move "LANDED on the branch", the pin "lands roughly", bumps that "keep
-// landing" — each a "check" away from tripping it; and the same widened
-// trigger reds ADR 0010's "none landed in the 43 days after — and node here
-// runs `node --check`", whose "check" is a flag.
+// green" pass. Widening the verb list buys more spellings, not the concept.
+// `land`, the likeliest synonym, is in pin-drift.sh four times already —
+// releases "landing inside" the 43 days, a move "LANDED on the branch", the
+// pin "lands roughly", bumps that "keep landing" — none shares a sentence
+// with a checks/CI/green word, so none would trip even a widened trigger
+// here; the row does not guard ADR 0010, but the same widened trigger reds
+// its "none landed in the 43 days after — and node here runs `node
+// --check`", whose "check" is a flag.
 const UNSCOPED_MERGE_SENTENCE = new RegExp(
   String.raw`(?:^|${SENTENCE_END})(?=(?:(?!${SENTENCE_END})[^])*?\b(?:auto-?)?merg(?:e[sd]?|ing)\b)(?=(?:(?!${SENTENCE_END})[^])*?\b(?:checks?|CI|green)\b)(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*(?:${SENTENCE_END}|$)`,
   "i",
