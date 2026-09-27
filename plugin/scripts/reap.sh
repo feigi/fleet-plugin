@@ -277,11 +277,21 @@ fi
 # `--apply` deleted the cwd it was standing in, #992's signature (measured,
 # #2072). An empty `$self_wt` (no worktree) names no directory, so it matches
 # nothing; the walk ends when no `/` is left to strip.
+#
+# `elif` on `$?`, same refusing direction `wt_linkage_why` states for its own
+# `-ef`: every shell this file targets (dash, bash, ksh — all three tested)
+# implements it, so a `[` that cannot evaluate it (rc 2) is
+# unreached today, not impossible — and unlike `wt_linkage_why`, nothing
+# downstream of THIS guard re-checks the directory it protects. Reading that
+# rc as a plain "not this one" would silently disable both cwd-delete guards
+# exactly the way an unrecognised `self_wt` failure would (#1441's note
+# above), just one layer further in.
 holds_cwd() {
   hc_d=$self_wt
   while :; do
-    # shellcheck disable=SC3013 # -ef is a ksh-derived extension bash/dash/BSD sh share, base in POSIX.1-2024 (see wt_linkage_why below); this file targets dash too and -ef is verified there
-    if [ "$hc_d" -ef "$1" ]; then return 0; fi
+    # shellcheck disable=SC3013,SC2319 # -ef is a ksh-derived extension bash/dash/BSD sh share, base in POSIX.1-2024; the else's $? is deliberately the `[ -ef ]` test's own rc, read before anything else runs, to fail closed (return 0) on rc>=2 same as wt_linkage_why below
+    if [ "$hc_d" -ef "$1" ]; then hc_rc=0; else hc_rc=$?; fi
+    if [ "$hc_rc" -eq 0 ] || [ "$hc_rc" -ge 2 ]; then return 0; fi
     case "$hc_d" in
       */*) hc_d=${hc_d%/*} ;;
       *) return 1 ;;
