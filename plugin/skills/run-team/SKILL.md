@@ -3270,7 +3270,10 @@ live count from it, so nobody states one. Write neither by hand:
   `<member>=<outcome>` in both places. Outcomes: `impl-N` = `PR#M | bailed |
   released | killed | tier-mismatch`; `fix-pr-M` = `applied:<head> | no-op |
   failed | killed`; `finisher-pr-M` = `labelled | failed | killed`;
-  `merge-bot-n` = `done | killed`. A settled member stays settled.
+  `merge-bot-n` = `done | killed`. A settled member stays settled. `settle
+  impl-N=PR#M` also folds a `#M` row a PR-bound dispatch made before the settle
+  (no `impl-` token on it) into `#N`'s row, so one row names each PR — from then
+  on `#N`'s row is the PR's row.
 - **`ledger.mjs drain "<reason>"`** — the one drain marker per run; supply
   stops, the review and merge sides keep going.
 
