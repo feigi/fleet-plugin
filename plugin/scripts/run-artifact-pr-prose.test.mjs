@@ -283,6 +283,21 @@ for (const [what, expected, mutate] of mutants) {
   });
 }
 
+// The accept half of #1983's widening: the gap tolerates a period now, so the
+// SENTENCE is all that keeps a permission or need word in one sentence from
+// pairing with a sharing or review word in the next. Both fixtures are benign
+// and both red the moment the scan reads the raw slice instead of `sentences()`.
+test("a permission or need word in one sentence does not pair with the next sentence's sharing or review word", () => {
+  for (const mutate of [
+    appendTo(RULE_CHANGE_COST, "A reviewer may ask why. Rows never share a PR with prose."),
+    appendTo(phrase("stranding the rows behind it."), "Nothing here needs one. A reviewer is for ticket work."),
+  ]) {
+    const mutated = mutate(RUN_TEAM);
+    assert.notEqual(mutated, RUN_TEAM, "an accept fixture no longer matches the prose and applied nothing — update it");
+    assert.deepEqual(firing(mutated), [], "a permission or need word paired with a word in the NEXT sentence");
+  }
+});
+
 // KNOWN GAP: NO_COMMIT only fires when the negation sits immediately before
 // the verb (`\s+`, nothing between). A negation placed elsewhere in the same
 // sentence, semantically identical, evades it. Widening to scan the whole

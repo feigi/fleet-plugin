@@ -188,6 +188,15 @@ for (const [what, expected, mutate] of mutants) {
   });
 }
 
+test("a since/after in one sentence does not pair with the next sentence's recency word", () => {
+  // The accept half of #1983's widening: the gap tolerates a period now, so the
+  // SENTENCE is all that keeps the two halves apart. Benign, and red the moment
+  // the scan reads the raw slice instead of `sentences()`.
+  const mutated = append("It runs after each Pull's dispatch. The last word on the floor is phase 2's.")(RUN_TEAM);
+  assert.notEqual(mutated, RUN_TEAM, "the accept fixture no longer matches the paragraph — update it");
+  assert.deepEqual(firing(gate(mutated)), [], "a since/after paired with a recency word in the NEXT sentence");
+});
+
 test("reflowing the paragraph and editing it elsewhere stays green", () => {
   // The accept direction. A pin that reddens on any edit to the section has
   // discriminated nothing, and would be deleted by whoever next reflows this
