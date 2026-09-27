@@ -2473,6 +2473,67 @@ test("a core.worktree naming a MISSING directory is unanswerable (2), never the 
   assert.match(r.stderr, /answers for the working tree at .*never-created, not /);
 });
 
+// Why the working-tree compare was ADDED to the owner check rather than
+// replacing it: a `.git` naming a foreign git dir literally called `.git`
+// whose `core.worktree` names $wt BACK passes the new compare — git answers
+// for $wt — while every read goes against the foreign repo's HEAD and index.
+// A foreign index that already carries `precious.txt`, byte for byte, reads
+// clean over work that exists nowhere in THIS repo. Only the `${gd%/.git}`
+// owner compare refuses it; drop that and this reds (measured, #2040).
+test("a foreign */.git whose core.worktree names $wt back is still refused by the owner compare (#2040)", (t) => {
+  const c = nestedWorktree(t);
+  const foreign = join(dirname(c.parent), "foreign");
+  execFileSync("git", ["clone", "-q", git(c.parent, "remote", "get-url", "origin"), foreign], { env: ENV });
+  git(foreign, "checkout", "-q", c.branch);
+  copyFileSync(join(c.w, "precious.txt"), join(foreign, "precious.txt"));
+  git(foreign, "add", "precious.txt");
+  git(foreign, "commit", "-q", "-m", "precious, committed in a repo that is not $wt's");
+  git(foreign, "config", "core.worktree", c.w);
+  writeFileSync(join(c.w, ".git"), `gitdir: ${join(foreign, ".git")}\n`);
+  assert.equal(git(c.w, "rev-parse", "--show-toplevel"), `${git(c.parent, "rev-parse", "--show-toplevel")}/.worktrees/9-x`,
+    "fixture: git must answer for $wt itself, or the working-tree compare refuses this and it pins nothing about the owner check");
+  assert.equal(git(c.w, "status", "--porcelain", "-uall"), "", "fixture: the foreign index must read clean over the work");
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /whose worktree is .*foreign, not /);
+});
+
+// The `$(...)` that captures `wt_real` and `top` for the working-tree compare
+// strips ALL trailing newlines, not one: a `core.worktree` target whose REAL
+// directory name itself ends in a newline byte would lose it on both sides of
+// the compare, so a redirect to a genuinely different directory could string-
+// match into $wt. Constructed rather than found: `git worktree add`/`git
+// config core.worktree` both accept the byte as an ordinary path character.
+//
+// `refusedAsRedirected` is not reused here: it asserts `--show-toplevel`
+// against a JS-trimmed `target`, and `.trim()` removes the one real byte
+// this case is about, which would make the fixture assertion itself fail
+// against a correctly-fixed script. The behaviour asserted below is the
+// same as every other redirect case: refused, no payload, before the audit.
+test("a core.worktree target whose real name ends in a newline is still refused, never string-matched into $wt (#2040)", (t) => {
+  const c = nestedWorktree(t);
+  const twin = join(c.parent, ".worktrees", "9-x\n");
+  execFileSync("git", ["clone", "-q", git(c.parent, "remote", "get-url", "origin"), twin], { env: ENV });
+  git(twin, "checkout", "-q", c.branch);
+  redirectWorktree(c.parent, c.w, twin);
+
+  const rawTop = execFileSync("git", ["-C", twin, "rev-parse", "--show-toplevel"], { env: ENV, encoding: "utf8" });
+  assert.ok(rawTop.endsWith("9-x\n\n"), "fixture: git must resolve the twin to its real, newline-suffixed path, or this pins nothing new");
+  assert.equal(
+    execFileSync("git", ["-C", c.w, "status", "--porcelain", "-uall"], { env: ENV, encoding: "utf8" }),
+    "",
+    "fixture: git must read clean through the newline-suffixed target — the false clean this pins",
+  );
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `a newline-suffixed redirect target must not string-compare equal to $wt: got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.match(r.stderr, /git answers for the working tree at/);
+  assert.match(r.stderr, /cannot tell a clean worktree from a dirty one/);
+});
+
 // The ACCEPT side, which a refusal-only suite cannot see: the compare keys on
 // the working tree git answers for, so a `core.worktree` that leaves it at $wt
 // must still be audited. Both measured admitted with the fix in place.

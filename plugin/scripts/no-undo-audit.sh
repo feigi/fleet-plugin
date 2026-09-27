@@ -463,19 +463,39 @@ prefix=$(git -C "$wt" rev-parse --show-prefix) \
 # variable — but it would exit 128, and 128 is not one of the three verdicts
 # this script's callers read. The `cd`/`pwd -P` lines below are left bare for
 # the same measurement: unreachable, and `set -e` stops them regardless.
+#
+# `$(...)` strips EVERY trailing newline it captures, not one: a `$wt` or a
+# `core.worktree` target whose real directory name itself ends in a literal
+# newline byte loses that byte on whichever side of a compare below reads it,
+# so two directories differing only by that byte compare equal — a redirect
+# this script exists to refuse instead reads clean (measured, #2040). `git
+# worktree add`/`git config core.worktree` both accept the byte as an
+# ordinary path character; nothing upstream rejects it.
+#
+# `wt_real`, the if-branch `owner` below, and `top` further down all guard
+# against it the same way: an `echo x` inside the substitution, so the ONLY
+# newline `$(...)` can strip is the one `pwd`/`rev-parse` already appends to
+# its own answer, then `${var%?x}` strips exactly the sentinel and the ONE
+# character before it — nothing extra when the real answer has no trailing
+# newline, and the one real byte restored when it does. `gd` and `common`
+# stay bare: they are admin-directory paths git itself names, never a
+# `core.worktree` target, and the branch they select never turns a
+# mismatch INTO a match on this byte alone (measured).
 gd=$(git -C "$wt" rev-parse --path-format=absolute --git-dir) \
   || die "git will not name the git dir answering for $wt — cannot verify its linkage"
 common=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir) \
   || die "git will not name $wt's common git dir — cannot verify its linkage"
 gd=$(cd "$gd" && pwd -P)
 common=$(cd "$common" && pwd -P)
-wt_real=$(cd "$wt" && pwd -P)
+wt_real=$(cd "$wt" && pwd -P && echo x)
+wt_real=${wt_real%?x}
 if [ "$gd" != "$common" ]; then
   back=$(cat "$gd/gitdir" 2>/dev/null) \
     || die "$gd/gitdir is missing or unreadable — cannot verify $wt's linkage"
   back=${back%"${back##*[![:space:]]}"}
-  owner=$(cd "$gd" && cd "$(dirname "$back")" && pwd -P) \
+  owner=$(cd "$gd" && cd "$(dirname "$back")" && pwd -P && echo x) \
     || die "$gd/gitdir names a directory that does not resolve — cannot verify $wt's linkage"
+  owner=${owner%?x}
   [ "$owner" = "$wt_real" ] \
     || die "$wt's .git names another worktree's admin dir — cannot tell a clean worktree from a dirty one"
 else
@@ -519,8 +539,9 @@ fi
 # one reached through `include.path`, and one passed as GIT_CONFIG_COUNT or
 # GIT_CONFIG_PARAMETERS. The check keys on git's answer, not on the config, so
 # it cannot refuse a setting git ignores.
-top=$(git -C "$wt" rev-parse --show-toplevel) \
+top=$(git -C "$wt" rev-parse --show-toplevel && echo x) \
   || die "git will not name the working tree answering for $wt — cannot verify its linkage"
+top=${top%?x}
 [ "$top" = "$wt_real" ] \
   || die "git answers for the working tree at $top, not $wt — cannot tell a clean worktree from a dirty one"
 
