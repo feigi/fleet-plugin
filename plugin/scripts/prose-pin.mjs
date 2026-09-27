@@ -196,8 +196,25 @@ export function paragraph(text, anchor, what, options) {
 // no abbreviation ends in) keeps the same splits with one copy (verified:
 // 20000 random terminator/closer/abbreviation fixtures and every .md/.mjs/
 // .yml/.sh file in this repo split identically both ways).
+//
+// A footnote-style marker straight behind the terminator — `.[1]`, `?[^2]`,
+// `.[1][2]`, closing marks allowed after it — is part of the sentence it
+// annotates, and the end falls after it (#1987). Without it a `.[1]` ended
+// nothing, so two real sentences merged: the silent direction for a pin that
+// needs a word IN its sentence, which could borrow it from the next one. The
+// marker holds at least one character and no whitespace, and must follow a
+// terminator that closes a word, a code span, a paren or a curly quote. Code
+// quoted in prose puts brackets straight after a period too, with whitespace
+// after them — jq's `'.[] | …'`, JavaScript's `m?.[1] || …`, a glob's
+// `*.[0-9]*' ` — behind a quote, a `?`, a `*` or a space; and where one sits
+// behind a word, jq's `.jobs.[] | …` or `.jobs.[0, 1] | …`, its bracket is
+// empty or spaced. Measured over every tracked .md/.mjs/.yml/.sh/.json file:
+// a bare `\[[^\]]*\]` after the terminator split 15 such code spots, and this
+// rule none — its one new split is a real footnote, `only.[^1] `, in a
+// citation-sweep fixture. A marker behind bold or italics (`**late**.[1]`)
+// still merges, as it always has.
 export const sentences = (block) =>
-  block.split(/(?<=(?:[!?]|(?<!\b(?:e\.g|i\.e|cf|viz|vs))\.)[*_)"'\u201d\u2019]*)\s+/);
+  block.split(/(?<=(?:[!?]|(?<!\b(?:e\.g|i\.e|cf|viz|vs))\.)(?:(?<=[\p{L}\p{N}`)\u201d\u2019][.!?])(?:\[[^\]\s]+\])+)?[*_)"'\u201d\u2019]*)\s+/u);
 
 // A phrase-bounded slice — `paragraph`'s shape, with the end bound a second
 // phrase instead of the next blank line. `from` is `anchorAt`'s own
