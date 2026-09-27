@@ -56,7 +56,7 @@ const FILES = ROOT === null ? [] : trackedPaths(ROOT, ["plugin"]);
 
 test("the sweep sees the tree it is supposed to police", { skip: SKIP_WITHOUT_REPO }, () => {
   assert.ok(
-    FILES.length > 50,
+    FILES.length > 150,
     `trackedPaths(ROOT, ["plugin"]) returned only ${FILES.length} entries — too few to be this plugin's real tree, and the check below would pass vacuously over an empty or near-empty list`,
   );
 });

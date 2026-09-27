@@ -158,7 +158,10 @@ test(
   { skip: SKIP_WITHOUT_REPO },
   () => {
     const files = trackedPaths(ROOT, ["plugin/scripts/*"]).filter((f) => !f.endsWith(".test.mjs"));
-    assert.ok(files.length > 0, "the instrument set must not be empty");
+    assert.ok(
+      files.length > 30,
+      `the instrument set has only ${files.length} entries — too few to be plugin/scripts/*'s real non-test-file tree, and the sweep below would pass vacuously over an empty or near-empty list`,
+    );
     const violations = [];
     const kinds = new Map();
     for (const rel of files) {
@@ -338,7 +341,10 @@ test(
   { skip: SKIP_WITHOUT_REPO },
   () => {
     const files = trackedPaths(ROOT, ["plugin/skills/*", "plugin/commands/*", "plugin/agents/*", "plugin/workflows/*"]);
-    assert.ok(files.length > 0, "the prose set must not be empty");
+    assert.ok(
+      files.length > 15,
+      `the prose set has only ${files.length} entries — too few to be the real tree across plugin/skills/, plugin/commands/, plugin/agents/ and plugin/workflows/, and the sweep below would pass vacuously over an empty or near-empty list`,
+    );
     const violations = [];
     for (const rel of files) {
       const text = readFileSync(join(ROOT, rel), "utf8");
