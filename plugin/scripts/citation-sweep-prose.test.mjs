@@ -297,8 +297,14 @@ function securityReleaseFault(adr) {
 // which sentences() does not take. That extra split is the loud direction for
 // the rows, and none of the code shapes above starts with one. The caret form
 // `[^1]` stays in CLOSING_MARKUP, unguarded, as #2002 left it.
+//
+// #2063. The `][ref]` closer skips a label `[^1]` reads whole — `][^1]` is
+// `]` then `[^1]` and nothing else — so no run of closers has two readings.
+// Read both ways, a chain of n `][^1]` had 2^n, and a match failing after
+// it walked all of them first. `][^]` and `][^a b]`, which `[^1]` cannot
+// read, stay `][ref]` closers.
 const FOOTNOTE_MARKERS = String.raw`(?:(?<=[A-Za-z\d\x60)\u0080-\uFFFF][.!?])(?:\[[^\]\s]+\])+)?`;
-const CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]\[[^\]]*\]|\[\^[^\]\s]+\]|<\/[a-z][a-z\d-]*\s*>)`;
+const CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]\[(?!\^[^\]\s]+\])[^\]]*\]|\[\^[^\]\s]+\]|<\/[a-z][a-z\d-]*\s*>)`;
 const HASH_GUTTER = String.raw`[ \t]*#(?!\d)`;
 const GUTTER = String.raw`(?:[ \t]*>|${HASH_GUTTER})`;
 const HTML_BLOCK_OPEN = String.raw`<(?:!--|\?|![A-Za-z]|!\[CDATA\[|(?:script|pre|style|textarea)(?=[\s>]|$)|\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s>]|\/>|$))`;
@@ -1537,6 +1543,38 @@ test("SENTENCE_END ends nothing at a jq, JavaScript or glob index quoted after a
       "e.g.[1] Next",
     ]) {
       assert.deepEqual(text.split(new RegExp(SENTENCE_END, flags)), [text], `${text} /${flags}`);
+    }
+  }
+});
+
+// #2063. `][^1]` read two ways under CLOSING_MARKUP — one `][ref]` closer, or
+// a bare `]` then a `[^1]` footnote — so a chain of n of them had 2^n
+// readings, and SENTENCE_END walked every one before giving up on a chain
+// with no whitespace after it. At this n the chain took half a second to
+// several seconds, doubling with every link; unambiguous, it takes well under
+// a millisecond, so the budget only catches a return to the blow-up, not a
+// slow machine.
+test("SENTENCE_END stays fast on a closer chain that once read two ways (#2063)", () => {
+  const text = "x." + "][^a]".repeat(25) + "z";
+  for (const flags of ["", "i"]) {
+    const start = performance.now();
+    const parts = text.split(new RegExp(SENTENCE_END, flags));
+    const ms = performance.now() - start;
+    assert.deepEqual(parts, [text], `/${flags}`);
+    assert.ok(ms < 100, `${ms.toFixed(0)}ms /${flags}`);
+  }
+});
+
+// The fix drops only the `][ref]` reading that `]` plus `[^1]` already
+// covers, so every closer run ends the same sentences as before. A `][^…]`
+// label that `[^1]` cannot read — empty, or holding a space — is still one
+// `][ref]` closer; a fix that refused every `][^` would lose those two.
+test("SENTENCE_END ends the same sentences behind a `][^…]` closer as before #2063", () => {
+  for (const flags of ["", "i"]) {
+    const split = (text) => text.split(new RegExp(SENTENCE_END, flags));
+    for (const closer of ["][^1]", "][^1]][^2]", "][^a b]", "][^]", "][^vs.]"]) {
+      assert.deepEqual(split(`It shipped.${closer} Next`), ["It shipped", "Next"], `${closer} /${flags}`);
+      assert.deepEqual(split(`per vs.${closer} next`), [`per vs.${closer} next`], `${closer} /${flags}`);
     }
   }
 });

@@ -1597,7 +1597,9 @@ function sizesTrackedSet(sentence, count) {
 // pattern carries no `i` for them to fold under. The guard before the
 // abbreviation is that file's too: only a letter or digit disqualifies it, so
 // an italic `_vs._` is one — a `\b` there read the `_` as a word character.
-const COUNT_CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]\[[^\]]*\]|\[\^[^\]\s]+\]|<\/[A-Za-z][A-Za-z\d-]*\s*>)`;
+// Its `][ref]` closer skips a label `[^1]` reads whole, as CLOSING_MARKUP's
+// does (#2063).
+const COUNT_CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]\[(?!\^[^\]\s]+\])[^\]]*\]|\[\^[^\]\s]+\]|<\/[A-Za-z][A-Za-z\d-]*\s*>)`;
 // #2054: the guard used to be a SEPARATE lookbehind,
 // `(?<!(?<!...)abbr\.${COUNT_CLOSING_MARKUP}*)`, re-matched independently at
 // the final `\s+` position — so it could walk back over a DIFFERENT, inner
@@ -1828,6 +1830,43 @@ test("jsonCountFault does not merge a count sentence across a closer that embeds
     jsonCountFault('Parses every tracked file `git ls-files` lists. It once read [JSON.](x.md "e.g.") — two files were removed later.'),
     null,
   );
+});
+
+// #2063. `][^1]` read two ways under COUNT_CLOSING_MARKUP — one `][ref]`
+// closer, or a bare `]` then a `[^1]` footnote — so a chain of n of them had
+// 2^n readings, and a lookbehind that ends in no split walked every one first.
+// #2054's folded guard put the must-accept shape on that path: a guarded
+// `vs.` ahead of the chain. At this n each fixture took half a second to
+// several seconds, doubling with every link; unambiguous, all three take well
+// under a millisecond, so the budget only catches a return to the blow-up,
+// not a slow machine.
+test("the count re-split stays fast on a closer chain that once read two ways (#2063)", () => {
+  const links = 25;
+  for (const text of [
+    // The ticket's two post-#2054 repros: the guarded terminator ahead of
+    // the chain, and the guarded `vs.` inside each link.
+    "per vs." + "][^1]".repeat(links) + " y",
+    "x" + "][^vs.]".repeat(links) + " y",
+    // The same chain with no terminator at all, slow before #2054 too.
+    "x" + "][^a]".repeat(links) + " y",
+  ]) {
+    const start = performance.now();
+    const parts = text.split(COUNT_SENTENCE_BOUNDARY);
+    const ms = performance.now() - start;
+    assert.deepEqual(parts, [text], text);
+    assert.ok(ms < 100, `${ms.toFixed(0)}ms on ${text}`);
+  }
+});
+
+// The fix drops only the `][ref]` reading that `]` plus `[^1]` already
+// covers, so every closer run ends the same sentences as before. A `][^…]`
+// label that `[^1]` cannot read — empty, or holding a space — is still one
+// `][ref]` closer; a fix that refused every `][^` would lose those two.
+test("the count re-split ends the same sentences behind a `][^…]` closer as before #2063", () => {
+  for (const closer of ["][^1]", "][^1]][^2]", "][^a b]", "][^]", "][^vs.]"]) {
+    assert.deepEqual(`It shipped.${closer} Next`.split(COUNT_SENTENCE_BOUNDARY), [`It shipped.${closer}`, "Next"], closer);
+    assert.deepEqual(`per vs.${closer} next`.split(COUNT_SENTENCE_BOUNDARY), [`per vs.${closer} next`], closer);
+  }
 });
 
 // Review of PR #1942 (correctness + tests dimensions, independently
