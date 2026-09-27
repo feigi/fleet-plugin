@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase, stripHashGutter, unemphasized } from "./prose-pin.mjs";
+import { between, phrase, sentences, stripHashGutter, unemphasized } from "./prose-pin.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "./member-outcomes.mjs";
 
 // #472: this file's header has never been pinned, while SKILL.md's guard tells
@@ -51,6 +51,21 @@ const COLUMNS = [
 // of prose about exactly these words. One definition, because three hand-rolled
 // copies of one slice is how two of them end up bounded differently.
 const rulingStep = () => between(RUN_TEAM, "**Guard: accumulate per PR", "**Then record the run's member facts", "phase 3's ruling step");
+
+// The first sentence of the ruling step that names `sizing` — the sentence the
+// phase-0 negative below reads. `sentences()`, never a first-period `[^.]`
+// window (#1983): the pin is NEGATIVE, so a window cut short is its silent
+// direction, and "e.g.", `SKILL.md` or `v1.2` between `sizing` and "phase 0"
+// ended the old window before the forbidden words and passed the misattribution
+// green. RESIDUAL, both directions: sentences() still cuts short at a `.)`,
+// `."`, a mid-sentence `?`, a capitalised "E.g." or an "etc." — the silent
+// direction for this pin — and still merges two real sentences across its
+// known shapes (#1987's `**late**.[1]`, #1899's sentence-final lowercase
+// "vs."), which here can only over-fire. None of those four is in this slice
+// today. `.**` itself IS in this slice (3 bold-lead sentence ends), but each
+// is a genuine boundary between two unrelated sentences, not one straddling
+// the `sizing`/`phase 0` attribution this pin reads.
+const sizingSentence = (slice) => sentences(slice).find((s) => /`sizing`/i.test(s)) ?? "";
 
 // Same reason as `rulingStep` above: one definition of the `minted_false_claim`
 // slice, so two hand-rolled copies do not drift to different bounds.
@@ -259,22 +274,64 @@ test("the sizing verdict has a stated collection channel, and it is not phase 0"
   // Negative pinned on the ATTRIBUTION, not on one phrasing of it: the first
   // draft of this test forbade the literal `sizing` is phase 0's and stayed
   // green under a reworded restatement of the same error.
-  const sizingSentence = /`sizing`[^.]{0,120}/i.exec(slice)?.[0] ?? "";
-  assert.ok(sizingSentence, "the ruling step no longer describes `sizing` at all");
+  const sentence = sizingSentence(slice);
+  assert.ok(sentence, "the ruling step no longer describes `sizing` at all");
   assert.doesNotMatch(
-    sizingSentence,
+    sentence,
     /phase 0/i,
-    `the ruling step attributes sizing to phase 0 again — phase 0 shortlists, it does not size: ${sizingSentence}`,
+    `the ruling step attributes sizing to phase 0 again — phase 0 shortlists, it does not size: ${sentence}`,
   );
+  // Bound to the word `sizing` itself, not just "somewhere in the sentence":
+  // found in review, widening `sizingSentence` from a 120-char window to the
+  // whole ~326-char sentence also widened THIS pre-existing positive check,
+  // which used to be tight against that same window. A misattribution that
+  // keeps "member" alive later in the sentence (e.g. in the trailing
+  // `diff-stats.mjs` clause) would otherwise still pass.
   assert.match(
-    sizingSentence,
-    /member/i,
-    "the ruling step no longer says the sizing verdict is the member's",
+    sentence,
+    /`sizing`[\s\S]{0,40}member/i,
+    "the ruling step no longer says the sizing verdict is the member's, within reach of `sizing` itself",
   );
   assert.match(
     slice,
     /PR body|Sizing:/,
     "the ruling step no longer says where the controller reads the sizing verdict from",
+  );
+});
+
+test("a period in the gap does not hide a phase-0 attribution, and the next sentence's phase 0 is not this one's", () => {
+  // #1983's reproduction, both directions. Refuse: "e.g." sat between `sizing`
+  // and "phase 0" and the first-period window stopped at it, green. Accept: the
+  // window is the sentence, so a "phase 0" in the NEXT sentence is not an
+  // attribution — widening past the real end would red a true statement.
+  const slice = rulingStep();
+  const opening = phrase("`sizing` is the");
+  const misattributed = slice.replace(opening, "`sizing` is the member's verdict, e.g. the one phase 0 records. `sizing` is the");
+  assert.notEqual(misattributed, slice, "the fixture's anchor no longer matches the ruling step — update it, do not delete it");
+  assert.match(sizingSentence(misattributed), /phase 0/i, "a phase-0 attribution with an abbreviation before it read as clean");
+  const nextSentence = slice.replace(opening, "`sizing` is the member's verdict, e.g. from its own run. Phase 0 only shortlists. `sizing` is the");
+  assert.doesNotMatch(sizingSentence(nextSentence), /phase 0/i, "the sizing sentence ran on into the next one");
+});
+
+test("a `member` mentioned later in the sentence does not cover a `sizing` misattributed near its own start", () => {
+  // Found in review of #1983: extracting the WHOLE sentence (up from a 120-char
+  // window) also widened the pre-existing positive check above, which used to
+  // require "member" within that same 120 chars. A misattribution that keeps
+  // "member" alive later in the ~326-char sentence — here, in the trailing
+  // `diff-stats.mjs` clause — passed silently until that check was re-bound to
+  // the word `sizing` itself.
+  const slice = rulingStep();
+  const misattributed = slice
+    .replace("`sizing` is the\n**member's** own", "`sizing` is the\n**controller's** own")
+    .replace(
+      "`profile`, `loc` and `files` all come from `diff-stats.mjs` over the merged\ndiff.",
+      "`profile`, `loc` and `files` all come from `diff-stats.mjs` over the member's merged\ndiff.",
+    );
+  assert.notEqual(misattributed, slice, "the fixture's anchors no longer match the ruling step — update it, do not delete it");
+  assert.doesNotMatch(
+    sizingSentence(misattributed),
+    /`sizing`[\s\S]{0,40}member/i,
+    "a `sizing` misattributed to the controller read as the member's because `member` appears later in the sentence",
   );
 });
 

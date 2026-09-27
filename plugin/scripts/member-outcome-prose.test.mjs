@@ -34,7 +34,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph, phrase } from "./prose-pin.mjs";
+import { between, paragraph, phrase, sentences } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -113,15 +113,39 @@ test("run-team/SKILL.md: a dead member recovers exactly as the Member-killed row
 // ticket on its silence demotes a ticket" (describing the collapse the line
 // BLOCKS, not endorsing it) must keep passing, which is why the demote guard
 // requires an equivalence construction rather than bare proximity.
+//
+// The co-location is read one sentence at a time, via `sentences()`, with a
+// gap that tolerates a period — never a first-period `[^.]` window (#1983).
+// This pin is NEGATIVE, so a window cut short is its silent direction: "Treat
+// silence (i.e. no report) as a bail." ended the old window at "i.e." and
+// passed. The sentence bound is load-bearing the other way too: this
+// paragraph's own "never silence alone." sits 20 characters before the next
+// sentence's "bail", so an unbounded period-tolerant gap reds the real text.
+// RESIDUAL: sentences() still cuts short at a `.)`, `."`, a mid-sentence `?`,
+// a capitalised "E.g." or an "etc." (silent here — none of those four is in
+// this paragraph today), and still merges two real sentences across #1987's
+// `**late**.[1]` and #1899's sentence-final lowercase "vs." (an over-fire
+// here, also absent today). `.**` itself IS in this paragraph once (its own
+// opening bold lead), but that boundary is a genuine sentence end, not one
+// straddling the silence/bail co-location this pin reads.
+const silenceBails = (p) => sentences(p).filter((s) => /\bsilence\b[\s\S]{0,30}\bbail\b/i.test(s));
+
 test("run-team/SKILL.md: no text in the outcome paragraph lets silence alone stand in for a bail or a confirmed death", () => {
   const p = outcomeParagraph();
-  assert.doesNotMatch(p, /\bsilence\b[^.]{0,30}\bbail\b/i);
+  assert.deepEqual(silenceBails(p), [], "a sentence of the outcome paragraph co-locates silence with a bail");
   assert.doesNotMatch(
     p,
     /\bsilence\b(?:\s+alone)?\s*[:,]?\s*(?:is|means|counts\s+as|equates?\s+to|treat(?:s|ed)?(?:\s+it)?\s+as|reads?\s+as)\s+(?:an?\s+)?(?:clean\s+)?(?:grounds?\s+(?:for|to)\s+)?demot\w*/i,
   );
   assert.doesNotMatch(p, /(?:always|automatically)\s+demote/i);
   assert.doesNotMatch(p, /\b(?:is|are)\s+demoted\b/i);
+});
+
+test("a period between silence and bail does not hide the co-location", () => {
+  // #1983's reproduction, copied from the ticket: green under the `[^.]` window.
+  const p = outcomeParagraph();
+  assert.deepEqual(silenceBails(`${p} Treat silence (i.e. no report) as a bail.`), ["Treat silence (i.e. no report) as a bail."]);
+  assert.deepEqual(silenceBails(`${p} Treat silence, per SKILL.md, as a bail.`), ["Treat silence, per SKILL.md, as a bail."]);
 });
 
 // #1591's second acceptance, in the Pull's shape: a relabel must hold across a

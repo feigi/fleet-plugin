@@ -49,7 +49,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./prose-pin.mjs";
+import { between, phrase, sentences } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -99,8 +99,23 @@ const OWN_COUNT = /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\b/
 // "not yet <verb>ed" set. A recency set named without either — "the rows this
 // run appended" — is caught only when it displaces DUTY, which is where the
 // review's own within-run mutant was caught.
+//
+// Read one sentence at a time, via `sentences()`, with a gap that tolerates a
+// period — never a first-period `[^.]` window (#1983). The pin is NEGATIVE, so
+// a window cut short is its silent direction: an "e.g." or a `SKILL.md` between
+// "since" and "last" ended the old window before the recency word. The sentence
+// is what bounds the gap, so a "since" in one sentence never pairs with a
+// recency word in the next. RESIDUAL: sentences() still cuts short at a
+// `.)`, `."`, a mid-sentence `?`, a capitalised "E.g." or an "etc." (silent
+// here — none of those four is in this paragraph today), and still merges
+// two real sentences across #1987's `**late**.[1]` and #1899's
+// sentence-final lowercase "vs." (an over-fire here, also absent today).
+// `.**` itself IS in this slice once (its own opening bold lead), but that
+// boundary is a genuine sentence end, not one straddling the since/recency
+// pair this pin reads.
 const UNPERSISTED_SET =
-  /\b(?:since|after)\b[^.]{0,40}\b(?:last|previous|prior|earlier|latest|most\s+recent)\b|\bnot\s+yet\s+\w+ed\b/i;
+  /\b(?:since|after)\b[\s\S]{0,40}\b(?:last|previous|prior|earlier|latest|most\s+recent)\b|\bnot\s+yet\s+\w+ed\b/i;
+const unpersisted = (slice) => sentences(slice).filter((s) => UNPERSISTED_SET.test(s));
 
 // Every pin in one place, so a fixture can assert WHICH ones fire rather than
 // that something somewhere went red — a pin that reddens on the wrong mutant has
@@ -109,7 +124,7 @@ const PINS = {
   duty: (slice) => !DUTY.test(slice),
   negation: (slice) => NEGATED.test(slice),
   count: (slice) => OWN_COUNT.test(countable(slice)),
-  unpersisted: (slice) => UNPERSISTED_SET.test(slice),
+  unpersisted: (slice) => unpersisted(slice).length > 0,
 };
 const firing = (slice) => Object.keys(PINS).filter((name) => PINS[name](slice));
 
@@ -129,7 +144,7 @@ test("the alt-Pull gate states no count of its own", () => {
 });
 
 test("the alt-Pull gate keys on nothing that has to be remembered between runs", () => {
-  assert.doesNotMatch(gate(), UNPERSISTED_SET, "the alt-Pull gate names a set nothing on disk records");
+  assert.deepEqual(unpersisted(gate()), [], "the alt-Pull gate names a set nothing on disk records");
 });
 
 // The refuse direction. Entry one is the sentence #528 actually removed; the
@@ -160,6 +175,12 @@ const mutants = [
     append("Re-run it only for rows appended after the most recent check.")],
   ["a count no comparator list reaches", ["count"],
     append("Run it once six or more `class=routine` PRs have been ruled, or 3+ in a day.")],
+  // #1983: a period in the gap ended the old `[^.]` window before the recency
+  // word, and both of these were green.
+  ["an incremental key comes back with an abbreviation in the gap", ["unpersisted"],
+    append("Re-run it only for rows appended after, e.g., the most recent check.")],
+  ["an incremental key comes back with a filename in the gap", ["unpersisted"],
+    append("Re-run it only for rows appended since SKILL.md was last edited.")],
 ];
 
 for (const [what, expected, mutate] of mutants) {
@@ -169,6 +190,15 @@ for (const [what, expected, mutate] of mutants) {
     assert.deepEqual(firing(gate(mutated)), expected, `the "${what}" fixture did not fire exactly the pins it is here to exercise`);
   });
 }
+
+test("a since/after in one sentence does not pair with the next sentence's recency word", () => {
+  // The accept half of #1983's widening: the gap tolerates a period now, so the
+  // SENTENCE is all that keeps the two halves apart. Benign, and red the moment
+  // the scan reads the raw slice instead of `sentences()`.
+  const mutated = append("It runs after each Pull's dispatch. The last word on the floor is phase 2's.")(RUN_TEAM);
+  assert.notEqual(mutated, RUN_TEAM, "the accept fixture no longer matches the paragraph — update it");
+  assert.deepEqual(firing(gate(mutated)), [], "a since/after paired with a recency word in the NEXT sentence");
+});
 
 test("reflowing the paragraph and editing it elsewhere stays green", () => {
   // The accept direction. A pin that reddens on any edit to the section has
