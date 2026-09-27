@@ -2102,6 +2102,38 @@ test("a symlink standing in for the worktree directory blocks instead of promisi
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
 });
 
+// #2073. The `-L` guard above `block`s rather than `die`s, so a symlinked
+// $wt (the shape the previous test drives) still reaches the linkage compare
+// below — it does not stop at "not a directory". When the symlink's real
+// target happens to end in a newline, BOTH `wt_canon` and `--show-toplevel`
+// canonicalise through it to that same real, newline-suffixed directory, so
+// they must compare equal. Stripping the newline on only one side would
+// break that equality and turn the correct, already-blocked "not a
+// directory" verdict into a second, fabricated "does not point at itself"
+// blocker over two identical paths — this is what pins the `wt_canon`-side
+// sentinel as load-bearing rather than mere symmetry with `toplevel`'s.
+test("a symlink standing in for the worktree directory, whose real target ends in a newline, blocks at exit 1 alone (#2073)", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const real = `${c.wt}-real\n`;
+  renameSync(c.wt, real);
+  symlinkSync(real, c.wt);
+
+  const dry = release(r, c, { apply: false });
+  assert.equal(dry.json.released, false, "the dry run must not promise what --apply will refuse");
+  assert.equal(dry.json.blockers.length, 1, "not a directory alone, no fabricated linkage mismatch");
+  assert.match(dry.json.blockers[0], /exists but is not a directory/);
+
+  const apply = release(r, c);
+  assert.equal(apply.code, 1, "blocked before any mutation, not the exit 2 a fabricated linkage mismatch would produce");
+  assert.equal(apply.json.blockers.length, 1);
+  assert.match(apply.json.blockers[0], /exists but is not a directory/);
+  assert.equal(lstatSync(c.wt).isSymbolicLink(), true, "the symlink is untouched");
+  assert.equal(existsSync(join(real, ".git")), true, "and so is the real worktree behind it");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
 test("a dangling symlink at the worktree path blocks, not a mid-flight refusal", (t) => {
   // The other symlink shape, and the one the guard's own comment cites: -e is
   // false through a dangling link, so `gone` reports it established-absent and
