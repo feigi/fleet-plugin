@@ -2347,15 +2347,19 @@ test("CLI: a non-Cf default-ignorable character (Hangul filler, variation select
 });
 
 // #1904's false-positive side, the #1851 pin's shape over the new classes:
-// an emoji carrying its presentation selector (U+FE0F) ahead of ordinary
-// subject text, a Hangul filler inside an unrelated word, and one ahead of a
-// word that only shares an own name's prefix all stay subject text — the
-// strip only ever makes an own-flag spelling out of a word that already was
-// one plus invisible characters.
+// an emoji's own presentation selector (U+FE0F) glued directly ahead of a
+// dash-suffixed near-miss of an own flag name, a Hangul filler inside an
+// unrelated word, and one ahead of a word that only shares an own name's
+// prefix all stay subject text — the strip only ever makes an own-flag
+// spelling out of a word that already was one plus invisible characters.
+// The first case is glued, not merely adjacent, so a split-instead-of-strip
+// bug refuses it too (the same shape the second case already catches with
+// a different DICP class) — a bare emoji ahead of an unrelated word stays
+// accepted under every strip-shaped mutant and would prove nothing.
 test("CLI: a word carrying a non-Cf default-ignorable character that is not this script's own flag name is still scored as subject text (#1904)", (t) => {
   const { dir, cli } = cliFixture(t);
   const file = join(dir, "ledger.md");
-  for (const word of ["\u2764\uFE0F widget", "pre\u3164-file", "widget \u3164-files", "widget \u{E0100}--basee"]) {
+  for (const word of ["\u2764\uFE0F-file", "pre\u3164-file", "widget \u3164-files", "widget \u{E0100}--basee"]) {
     const subject = `${word} guard missing`;
     writeFileSync(file, ledgerText([`#1419 ${subject}`]));
     const r = cli(["--file", file, "check", word, "guard", "missing"]);
