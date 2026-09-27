@@ -257,8 +257,19 @@ function contentColumn(line) {
   return gap > 4 ? marker + 1 : marker + gap;
 }
 
-const ITEM_MARKER = /^[ \t]*(?:[-*+]|\d+[.)])[ \t]/;
-const PARAGRAPH_INTERRUPT = /^[ \t]*(?:#{1,6}(?:[ \t]|$)|>|```|~~~|(?:-{3,}|\*{3,}|_{3,})[ \t]*$)/;
+// A marker with nothing after it on its own line (content on the next,
+// indented line) is still a valid, separate list item — `(?:[ \t]|$)`, not
+// only `[ \t]`, so a bare `-`/`2.` sibling is recognised too. Reviewed PR
+// #2091, hand-dispatched review: `bullet('- **A** body\n-\n  restated
+// claim\nEND','- **A**','END')` kept the bare-marker sibling inside the
+// slice under the narrower form — the same #747/#2077 escape this bound
+// exists to close, just via a marker shape the sibling regex didn't cover.
+const ITEM_MARKER = /^[ \t]*(?:[-*+]|\d+[.)])(?:[ \t]|$)/;
+// A thematic break may space its repeated character out (`- - -`, `_ _ _`,
+// `* * *`), not only run it together — CommonMark's own rule. The `_`/`*`
+// forms have no marker regex to fall back on (unlike `-`, which ITEM_MARKER
+// already catches), so an unspaced-only rule here missed them. Same review.
+const PARAGRAPH_INTERRUPT = /^[ \t]*(?:#{1,6}(?:[ \t]|$)|>|```|~~~|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$)/;
 
 // Prose cut into sentences, for a pin that holds a claim to ONE sentence. A
 // sentence ends at `.`, `!` or `?` followed by whitespace, with any closing

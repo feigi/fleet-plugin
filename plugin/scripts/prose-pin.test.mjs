@@ -293,6 +293,24 @@ test("bullet compares tab and space indentation by column, not by character coun
   assert.equal(bullet("intro\n\t- **A** body\n    - four-space sibling\nEND", "- **A**", "END", "the fixture"), "- **A** body");
 });
 
+// #2091 (hand-dispatched review, correctness): a marker with nothing after
+// it on its own line — content on the next, indented line — is still a
+// separate list item in CommonMark, not a lazy continuation of the item
+// above it. `[ \t]` alone missed this shape; `(?:[ \t]|$)` catches the
+// marker whether or not anything follows it on the same line.
+test("bullet ends the item at a bare-marker sibling, with nothing after the marker on its own line", () => {
+  assert.equal(bullet("- **A** body\n-\n  restated claim\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+  assert.equal(bullet("- **A** body\n2.\n   restated claim\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+});
+
+// #2091 (hand-dispatched review, correctness): a thematic break may space its
+// repeated character out (CommonMark), not only run it together. `-`-spaced
+// forms already end the item via ITEM_MARKER; `_`/`*` have no such fallback.
+test("bullet ends the item at a spaced thematic break, not only a run-together one", () => {
+  assert.equal(bullet("- **A** body\n_ _ _\nafter\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+  assert.equal(bullet("- **A** body\n* * *\nafter\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+});
+
 // A list-item anchor is a start anchor, never a "nearest" bound, so a second
 // copy means the item would be read off whichever comes first.
 test("bullet throws when the item anchor occurs more than once", () => {
