@@ -1598,8 +1598,21 @@ function sizesTrackedSet(sentence, count) {
 // abbreviation is that file's too: only a letter or digit disqualifies it, so
 // an italic `_vs._` is one — a `\b` there read the `_` as a word character.
 const COUNT_CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]\[[^\]]*\]|\[\^[^\]\s]+\]|<\/[A-Za-z][A-Za-z\d-]*\s*>)`;
+// #2054: the guard used to be a SEPARATE lookbehind,
+// `(?<!(?<!...)abbr\.${COUNT_CLOSING_MARKUP}*)`, re-matched independently at
+// the final `\s+` position — so it could walk back over a DIFFERENT, inner
+// occurrence of `abbr.` than the one the first lookbehind's `[.!?]` actually
+// anchored on, including one supplied by a `](...)`/`][...]` closer's own
+// swallowed content ("`](see e.g.)`", "`][ref vs.]`"). SENTENCE_END never had
+// this gap: its guard sits on the single terminator character, checked once,
+// before its own `CLOSING_MARKUP*` ever runs. Folding the guard into the SAME
+// lookbehind that finds the terminator — `(?:[!?]|(?<!guard)\.)` in place of
+// the bare `[.!?]` — reproduces that anchoring here: the guard is now
+// evaluated only against the character `COUNT_CLOSING_MARKUP*`'s run is
+// itself anchored to, so a closer's own embedded abbreviation can no longer
+// stand in for it.
 const COUNT_SENTENCE_BOUNDARY = new RegExp(
-  String.raw`(?<=[.!?]${COUNT_CLOSING_MARKUP}*)(?<!(?<![A-Za-z\d])(?:e\.g|i\.e|cf|viz|vs)\.${COUNT_CLOSING_MARKUP}*)\s+`,
+  String.raw`(?<=(?:[!?]|(?<!(?<![A-Za-z\d])(?:e\.g|i\.e|cf|viz|vs))\.)${COUNT_CLOSING_MARKUP}*)\s+`,
 );
 
 export function jsonCountFault(block) {
@@ -1776,6 +1789,38 @@ test("jsonCountFault reads an italic abbreviation in the coverage lead as part o
   assert.match(
     jsonCountFault("# Parses _e.g._ every file it finds. Every tracked file is parsed."),
     /no longer says which files the step parses/,
+  );
+});
+
+// #2054: deferred from #2043's own review. A closer that embeds its OWN
+// abbreviation+period — `](see e.g.)`, `][ref vs.]`, `[^vs.]` — used to
+// survive the guard even though SENTENCE_END already split after it: the
+// guard was a SEPARATE lookbehind, re-matched independently at the final
+// whitespace, so it could match the closer's own swallowed `e.g.`/`vs.`
+// instead of whatever preceded the actual terminator. Confirmed not a
+// regression from #2043 — the pre-#2043 narrow closer set produced the same
+// non-split on these three, for the unrelated reason that a plain char class
+// can't span `](`/`][` at all — a genuine, deeper guard-anchoring gap.
+test("the count re-split still ends a sentence when the closer embeds its own abbreviation+period (#2054)", () => {
+  for (const t of ["It shipped.[^vs.] Next one", "It shipped.](see e.g.) Next one", "It shipped.][ref vs.] Next one"]) {
+    assert.equal(t.split(COUNT_SENTENCE_BOUNDARY).length, 2, t);
+  }
+  // The must-ACCEPT side of the same guard: when the OUTER terminator itself
+  // is the abbreviation, the closer's embedded `e.g.` must not manufacture a
+  // split the outer guard alone already refuses — same as SENTENCE_END.
+  assert.deepEqual("per vs.](see e.g.) next".split(COUNT_SENTENCE_BOUNDARY), ["per vs.](see e.g.) next"]);
+  // The guard is folded into the SAME lookbehind that finds the terminator
+  // (SENTENCE_END's own shape), not applied uniformly to it — `!`/`?` never
+  // carried a guard at all, on either side of #2054's rewrite, and a mutant
+  // that widens the guard to cover them too must go red here.
+  assert.deepEqual("per vs! next".split(COUNT_SENTENCE_BOUNDARY), ["per vs!", "next"]);
+  assert.deepEqual("per vs? next".split(COUNT_SENTENCE_BOUNDARY), ["per vs?", "next"]);
+});
+
+test("jsonCountFault does not merge a count sentence across a closer that embeds its own abbreviation (#2054)", () => {
+  assert.equal(
+    jsonCountFault('Parses every tracked file `git ls-files` lists. It once read [JSON.](x.md "e.g.") — two files were removed later.'),
+    null,
   );
 });
 
