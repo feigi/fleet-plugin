@@ -2061,9 +2061,57 @@ test("a dying `git worktree list` keeps every [gone] branch and names git's caus
   assert.equal(json.kept[2].branch, null, "a sweep that never named a worktree has no branch to blame");
   assert.match(json.kept[2].reason, /^cannot enumerate worktrees/);
   assert.match(json.kept[2].reason, /worktree list exploded/, "git's own words, not just the label");
+  assert.match(stderr, /KEEP feature\/a-merged — worktree lookup failed/);
   assert.match(stderr, /KEEP feature\/b-merged — worktree lookup failed/);
   assert.equal(branchExists(w, "feature/a-merged"), true);
   assert.equal(branchExists(w, "feature/b-merged"), true, "the branch with no worktree is no longer reaped blind");
+});
+
+test("a transient `git worktree list` failure keeps only the branch it hit — not the whole pass (#622)", (t) => {
+  // #622's own fix comment says the listing is re-read per branch, so "one
+  // repo-level failure keeps every [gone] branch in the pass" describes a
+  // PERSISTENT fault (the realistic case: filesystem or registry
+  // corruption), not a mechanism that latches once true for every later
+  // iteration. No fixture above distinguishes the two: every other
+  // listing-failure test in this file starves `worktree list` for the whole
+  // run, which a sticky "cache the failure at the loop's first hit" bug would
+  // pass exactly as well as a genuine per-iteration re-read.
+  //
+  // Three branches, alphabetical so `for-each-ref`'s default refname sort
+  // fixes the iteration order; the shim fails ONLY the SECOND `worktree list`
+  // call. If the guard truly re-reads per branch, the first and third
+  // branches see a healthy listing and reap normally — only the second, the
+  // one whose own call hit the fault, is kept.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/a-first", "a work");
+  mergedGoneBranch(w, "feature/b-second", "b work");
+  mergedGoneBranch(w, "feature/c-third", "c work");
+
+  const countDir = mkdtempSync(join(tmpdir(), "reap-count-"));
+  t.after(() => rmSync(countDir, { recursive: true, force: true }));
+  const counter = join(countDir, "n");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = worktree ] && [ "$2" = list ] && ` +
+      `{ n=$(( $(cat "${counter}" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "${counter}"; [ "$n" -eq 2 ]; }`,
+    ["fatal: worktree list exploded"],
+    128,
+  );
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.deepEqual(
+    json.reaped,
+    ["feature/a-first", "feature/c-third"],
+    "only the branch whose OWN lookup call failed is kept — a sticky/hoisted failure would keep all three",
+  );
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/b-second");
+  assert.match(json.kept[0].reason, /^worktree lookup failed/);
+  assert.equal(branchExists(w, "feature/a-first"), false);
+  assert.equal(branchExists(w, "feature/b-second"), true);
+  assert.equal(branchExists(w, "feature/c-third"), false);
 });
 
 test("quotes and backslashes in git's stderr still round-trip through the new reasons (#391, #119)", (t) => {
