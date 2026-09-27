@@ -1512,35 +1512,117 @@ for (const shape of ["c2", "b2", "nl"]) {
   }
 }
 
-for (const sweep of ["[gone]-branch", "branchless"]) {
-  test(`a healthy worktree listed through a symlinked parent still reaps in the ${sweep} sweep (#2042)`, (t) => {
-    // The accept side of the compare above. `worktree list --porcelain` echoes
-    // the path recorded at `worktree add` time, and a parent that was a plain
-    // directory then and is a symlink now leaves that path non-canonical while
-    // `--show-toplevel` answers canonical — so a raw compare refuses every
-    // healthy worktree in that layout.
-    const w = repo(t);
-    const branchless = sweep === "branchless";
-    const wt = branchless
-      ? detachedMergedWorktree(w, "docs/79-brief", "work that landed")
-      : mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+/**
+ * A merged worktree — a `[gone]` branch's, or a detached one for the
+ * branchless sweep — that `worktree list --porcelain` names by a different
+ * SPELLING than git's own `--show-toplevel` answer: one directory, two byte
+ * strings. Returns `{ wt, cwd }`: the listed spelling reap.sh acts on, and the
+ * directory to run it from when the run must stand inside the worktree —
+ * `wt` itself, or with `nested` a detached worktree inside it holding
+ * uncommitted work (#1441's shape; `ignoreNestedWorktrees` keeps it out of the
+ * outer one's dirty check).
+ *
+ *   symlink — `.worktrees` moved aside and symlinked back: the listing keeps
+ *             the path recorded at `worktree add` time, git answers canonical
+ *             (#2042).
+ *   nfd     — the worktree's name is `cafe` + U+0301 COMBINING ACUTE ACCENT.
+ *             Where the filesystem also resolves the precomposed spelling to
+ *             that directory (APFS), the `core.precomposeunicode` `git clone`
+ *             writes there lists it precomposed while `--show-toplevel`
+ *             answers the on-disk NFD bytes (#2072). Where it does not
+ *             (ext4), the two spellings are two names, both answers are the
+ *             NFD bytes, and this row is the plain case — which is why the
+ *             symlink row exists beside it: it reaches the same compare on
+ *             every filesystem.
+ */
+function respelledWorktree(w, sweep, spelling, { nested = false } = {}) {
+  const branchless = sweep === "branchless";
+  const make = branchless ? detachedMergedWorktree : mergedGoneBranchWithWorktree;
+  const name = branchless ? "docs/79-brief" : "feature/merged";
+  if (nested) ignoreNestedWorktrees(w);
+  const addNested = (outer) => {
+    if (!nested) return outer;
+    const inner = join(outer, "nested");
+    git(w, "worktree", "add", "-q", "--detach", inner, "main");
+    writeFileSync(join(inner, "wip.txt"), "work that exists nowhere else\n");
+    return inner;
+  };
+  const listing = () => git(w, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).map((l) => l.slice(9));
+
+  if (spelling === "symlink") {
+    const wt = make(w, name, "merged work");
+    const cwd = addNested(wt);
     renameSync(join(w, ".worktrees"), join(w, ".worktrees-real"));
     symlinkSync(".worktrees-real", join(w, ".worktrees"));
     assert.notEqual(realpathSync(wt), wt, "fixture: the listed path must not be canonical");
-    assert.match(git(w, "worktree", "list", "--porcelain"), new RegExp(`^worktree ${wt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"), "fixture: git must list it through the symlink");
+    assert.ok(listing().includes(wt), "fixture: git must list it through the symlink");
+    return { wt, cwd };
+  }
 
-    const dry = runReap(w, []);
-    assert.equal(dry.code, 0, dry.stderr);
-    assert.deepEqual(dry.json.kept, [], `nothing here is a finding: ${JSON.stringify(dry.json.kept)}`);
-    assert.deepEqual(dry.json.worktreesRemoved, [wt]);
+  const onDisk = join(w, ".worktrees", "cafe\u0301");
+  mkdirSync(onDisk, { recursive: true });
+  make(w, name, "merged work", onDisk);
+  const wt = listing().find((p) => p.normalize("NFC") === onDisk.normalize("NFC"));
+  assert.ok(wt, `fixture: git must list the worktree: ${listing()}`);
+  assert.equal(git(onDisk, "rev-parse", "--show-toplevel"), onDisk, "fixture: git must answer the on-disk NFD bytes");
+  if (existsSync(onDisk.normalize("NFC"))) {
+    assert.equal(wt, onDisk.normalize("NFC"), "fixture: a filesystem that aliases the two spellings must list the precomposed one");
+    assert.notEqual(wt, onDisk, "fixture: so the listing and git's answer differ byte for byte");
+  }
+  return { wt, cwd: addNested(wt) };
+}
 
-    const { code, json, stderr } = runReap(w, ["--apply"]);
-    assert.equal(code, 0, stderr);
-    assert.deepEqual(json.kept, []);
-    assert.deepEqual(json.worktreesRemoved, [wt]);
-    assert.equal(existsSync(wt), false, "the directory itself must be gone");
-    if (!branchless) assert.equal(branchExists(w, "feature/merged"), false);
-  });
+for (const spelling of ["symlink", "nfd"]) {
+  for (const sweep of ["[gone]-branch", "branchless"]) {
+    test(`a healthy worktree listed under another spelling (${spelling}) still reaps in the ${sweep} sweep (#2042, #2072)`, (t) => {
+      // The accept side of the compare above: a string compare refuses every
+      // healthy worktree in either layout, forever, and names the directory
+      // itself as the tree its linkage "answers for" instead.
+      const w = repo(t);
+      const { wt } = respelledWorktree(w, sweep, spelling);
+
+      const dry = runReap(w, []);
+      assert.equal(dry.code, 0, dry.stderr);
+      assert.deepEqual(dry.json.kept, [], `nothing here is a finding: ${JSON.stringify(dry.json.kept)}`);
+      assert.deepEqual(dry.json.worktreesRemoved, [wt]);
+
+      const { code, json, stderr } = runReap(w, ["--apply"]);
+      assert.equal(code, 0, stderr);
+      assert.deepEqual(json.kept, []);
+      assert.deepEqual(json.worktreesRemoved, [wt]);
+      assert.equal(existsSync(wt), false, "the directory itself must be gone");
+      if (sweep !== "branchless") assert.equal(branchExists(w, "feature/merged"), false);
+    });
+  }
+}
+
+// The cwd-delete guard (#992, #1441) matched the listed `$wt` against git's
+// `--show-toplevel` for the cwd by string prefix, so the same two spellings
+// hid the worktree a run stands in from it and `--apply` deleted its own cwd:
+// `REMOVED worktree`, then every later git call dead on "Unable to read current
+// working directory", exit 2 (measured on both layouts). Under a string
+// linkage compare the NFD worktree never got this far; it does now.
+for (const spelling of ["symlink", "nfd"]) {
+  for (const [sweep, nested] of [["[gone]-branch", false], ["branchless", false], ["[gone]-branch", true]]) {
+    const where = nested ? "a worktree nested inside it" : "it";
+    test(`a run standing in ${where} keeps a worktree listed under another spelling (${spelling}, ${sweep} sweep, #2072)`, (t) => {
+      const w = repo(t);
+      const { wt, cwd } = respelledWorktree(w, sweep, spelling, { nested });
+
+      for (const args of [[], ["--apply"]]) {
+        const mode = args.length ? "--apply" : "dry run";
+        const { code, json, stderr } = runReap(cwd, args);
+        assert.equal(code, 0, `${mode}: ${stderr}`);
+        assert.deepEqual(json.worktreesRemoved, [], `${mode}: the worktree holding cwd must not be promised or removed`);
+        const mine = json.kept.find((k) => k.reason.startsWith(`worktree ${wt} `));
+        assert.ok(mine, `${mode}: the worktree must be its own finding: ${JSON.stringify(json.kept)}`);
+        assert.match(mine.reason, /holds the working directory this run was started in/, mode);
+      }
+      assert.equal(existsSync(cwd), true);
+      if (nested) assert.equal(readFileSync(join(cwd, "wip.txt"), "utf8"), "work that exists nowhere else\n");
+      if (sweep !== "branchless") assert.equal(branchExists(w, "feature/merged"), true);
+    });
+  }
 }
 
 for (const sweep of ["[gone]-branch", "branchless"]) {

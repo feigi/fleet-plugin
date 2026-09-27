@@ -217,11 +217,13 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # the LAST call that needs a cwd, not the only one. #992
 #
 # `--show-toplevel`, never `pwd`: this script may be invoked from a
-# subdirectory, and that answers the worktree ROOT — the path
-# `git worktree list --porcelain` names. Measured (git 2.50.1, Apple Git-155):
-# both are physical paths, git resolving cwd through symlinks and
-# canonicalising what it records in the registry, so they compare byte for
-# byte, from a subdirectory too.
+# subdirectory, and that answers the worktree ROOT — the directory
+# `git worktree list --porcelain` names. It does not always SPELL it the same:
+# the listing echoes the path recorded at `worktree add` time, which a parent
+# turned symlink since leaves non-canonical, and which `core.precomposeunicode`
+# prints precomposed for a worktree whose on-disk name is NFD while git's own
+# answer is the NFD bytes (measured, git 2.50.1, Apple Git-155, #2072). So
+# `holds_cwd` below matches on the directory, not only the string.
 #
 # `2>/dev/null` and never `2>&1`, for the reason the in-progress guard below
 # records at its own `rev-parse`: this capture is used as a PATH, not as
@@ -265,8 +267,26 @@ if [ "$self_wt_rc" -ne 0 ]; then
     ;;
   esac
 fi
-# The `[ -n ]` at each guard site keeps an empty value from matching an empty
-# `$wt`.
+
+# True when removing worktree `$1` would delete this run's cwd: `$self_wt` is
+# `$1` or lies anywhere beneath it (#1441's nested worktree). Asked of the
+# DIRECTORY, not the string: `-ef` (same device and inode) of `$self_wt` and of
+# each of its parents in turn. The byte-boundary prefix match this replaces
+# missed the same directory spelled two ways — the symlinked parent and the NFD
+# name the header above records share no prefix with git's own answer — and
+# `--apply` deleted the cwd it was standing in, #992's signature (measured,
+# #2072). An empty `$self_wt` (no worktree) names no directory, so it matches
+# nothing; the walk ends when no `/` is left to strip.
+holds_cwd() {
+  hc_d=$self_wt
+  while :; do
+    if [ "$hc_d" -ef "$1" ]; then return 0; fi
+    case "$hc_d" in
+      */*) hc_d=${hc_d%/*} ;;
+      *) return 1 ;;
+    esac
+  done
+}
 
 echo "\$ git fetch --prune origin" >&2
 fetch_budget=$(net_fetch_budget)
@@ -519,20 +539,30 @@ gp_why() {
 # shapes, both sweeps, git 2.50.1, #2042). `--show-toplevel` names the tree git
 # actually answers for, so it is compared against `$1`.
 #
-# `$1` is canonicalised (`cd && pwd -P`, the POSIX spelling; no `realpath` is
-# guaranteed) and `--show-toplevel` is not: `worktree list --porcelain` echoes
-# the path recorded at `worktree add` time, which a parent that has become a
-# symlink since leaves non-canonical while git's own answer is always resolved
-# (measured) — a raw compare refuses every healthy worktree in that layout.
-# A `--show-toplevel` git did not resolve can only fail the compare, which is
-# the refusing direction.
+# Compared as a DIRECTORY (`-ef`, same device and inode), never as a string:
+# `$1` is the path `worktree list --porcelain` echoes and `--show-toplevel` is
+# git's own resolved spelling, and the two legitimately differ for one and the
+# same directory. A parent that was a plain directory at `worktree add` time
+# and is a symlink now leaves the listed path non-canonical while git's answer
+# is resolved (measured, #2042). And a worktree whose name is Unicode
+# NFD-composed (`cafe` + U+0301) is listed PRECOMPOSED by the
+# `core.precomposeunicode` git writes into every new repo on macOS, while
+# `--show-toplevel` answers the on-disk NFD bytes — visually identical,
+# byte-different, one directory (measured, git 2.50.1, Apple Git-155, #2072).
+# `cd && pwd -P` canonicalises only the first: it echoes the spelling it was
+# given, so a byte compare against it kept every healthy NFD worktree forever.
+# `-ef` answers "same directory" for both and for any other spelling the
+# filesystem aliases, and still refuses every redirect — each names a
+# different directory. It is XSI in POSIX.1-2017 and base in POSIX.1-2024; a
+# `[` that cannot evaluate it fails, which is the refusing direction, as is a
+# `--show-toplevel` naming a path that does not exist.
 #
-# `&& echo x` inside both substitutions, then `%?x`: `$(...)` strips EVERY
+# `&& echo x` inside the substitution, then `%?x`: `$(...)` strips EVERY
 # trailing newline, so a `core.worktree` naming a sibling directory called
 # `<wt>` plus a newline byte — git accepts one as an ordinary path character —
-# would otherwise compare EQUAL to `$1` and pass the redirect (measured; the
-# shape no-undo-audit.sh closed the same way, #2040). The sentinel leaves
-# `$(...)` only git's/pwd's own terminating newline to strip.
+# would otherwise name `$1` itself and pass the redirect (measured; the shape
+# no-undo-audit.sh closed the same way, #2040). The sentinel leaves `$(...)`
+# only git's own terminating newline to strip.
 #
 # What this does NOT cover, the boundary release-ticket.sh's copy of this
 # compare also states (#421): shapes that swap which git DIR answers while the
@@ -547,17 +577,13 @@ gp_why() {
 # top of this file fetches its own, so the answer the compare reads never
 # carries stderr.
 wt_linkage_why() {
-  if ! lk_canon=$(cd "$1" 2>/dev/null && pwd -P && echo x); then
-    lk_why="could not be resolved to a canonical path, so which tree its .git linkage answers for is unknown"
-    return 1
-  fi
-  lk_canon=${lk_canon%?x}
   if ! lk_top=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null && echo x); then
     lk_why="has a .git linkage git cannot resolve$(gp_why "$(git -C "$1" rev-parse --show-toplevel 2>&1 >/dev/null)")"
     return 1
   fi
   lk_top=${lk_top%?x}
-  [ "$lk_top" != "$lk_canon" ] || return 0
+  # `if`, never `[ ! … ] || return 0`: a `[` that errors (rc 2) must refuse.
+  if [ "$lk_top" -ef "$1" ]; then return 0; fi
   lk_why="has a .git linkage that answers for $lk_top, not for it — its dirty check would read that tree"
   return 1
 }
@@ -872,7 +898,7 @@ for b in $gone_branches; do
       # worktree-audit.sh this does not also need to accept a `.git`
       # directory. This `-f` test establishes only that the linkage EXISTS,
       # the same gate release-ticket.sh (#74) and worktree-audit.sh (#128) carry;
-      # that it answers for `$wt` is established by the canonicalised
+      # that it answers for `$wt` is established by the same-directory
       # `--show-toplevel` compare right after it (`wt_linkage_why`, #2042).
       # The main checkout reaches here, and must be answered before the
       # linkage guard below sees it. `git worktree list --porcelain` emits a
@@ -1062,22 +1088,16 @@ for b in $gone_branches; do
     # main-checkout reason already states, and `git branch -D` would refuse a
     # branch checked out in a surviving worktree anyway. #992
     #
-    # Path-BOUNDARY match, not exact equality: a worktree nested inside `$wt`
+    # Ancestor match, not exact equality: a worktree nested inside `$wt`
     # (a real, documented shape — SKILL.md names a member committing from a
     # nested worktree) has `$wt` as an ancestor on disk, so removing `$wt`
     # removes the nested one's files too — taking any uncommitted work in it
     # along, the exact #992 signature one path further out — even though
-    # `$wt` itself never equals `$self_wt` in that shape. Trailing slashes on
-    # both sides of the match keep a sibling like `$wt2` from matching `$wt`;
-    # quoting `$wt` on the pattern side keeps any glob metacharacter in the
-    # path literal. (#1441)
-    if [ -n "$self_wt" ]; then
-      case "$self_wt/" in
-        "$wt"/*)
-          keep "$b" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
-          continue
-          ;;
-      esac
+    # `$wt` itself never equals `$self_wt` in that shape (#1441). `holds_cwd`
+    # carries the match and why it is on the directory, not only the string.
+    if holds_cwd "$wt"; then
+      keep "$b" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
+      continue
     fi
 
     # Reached with $wt either present-readable-clean or established absent —
@@ -1432,17 +1452,13 @@ else
     # never remove needs no word about where the script is standing, and the
     # bound's own reason is the one true of it. #992
     #
-    # Path-boundary match, not exact equality — same reasoning as the branch
+    # Ancestor match, not exact equality — same reasoning as the branch
     # sweep's copy of this guard: a worktree nested inside `$wt` is removed
     # along with it even though `$wt` never equals `$self_wt` in that shape.
     # (#1441)
-    if [ -n "$self_wt" ]; then
-      case "$self_wt/" in
-        "$wt"/*)
-          keep "" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
-          continue
-          ;;
-      esac
+    if holds_cwd "$wt"; then
+      keep "" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
+      continue
     fi
 
     if [ "$apply" = true ]; then
