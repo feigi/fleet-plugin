@@ -1543,6 +1543,32 @@ for (const sweep of ["[gone]-branch", "branchless"]) {
   });
 }
 
+for (const sweep of ["[gone]-branch", "branchless"]) {
+  test(`an unsearchable worktree is kept with git's own denial, not a linkage cause the compare invented (${sweep} sweep, #2042)`, (t) => {
+    // The `-f` gate in front of the #2042 compare is what keeps this reason
+    // git's: `-f "$wt/.git"` is false when `$wt` cannot be searched, so the
+    // compare stands aside and the status probe reports the denial. Without
+    // the gate the compare's own `cd` fails first and the keep blames a
+    // linkage nothing ever looked at.
+    const w = repo(t);
+    const branchless = sweep === "branchless";
+    const wt = branchless
+      ? detachedMergedWorktree(w, "docs/79-brief", "work that landed")
+      : mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+
+    chmodSync(wt, 0o000);
+    const { code, json, stderr } = runReap(w, []);
+    chmodSync(wt, 0o755);
+
+    assert.equal(code, 0, stderr);
+    assert.deepEqual(json.worktreesRemoved, []);
+    const mine = json.kept.filter((k) => k.reason.includes(wt));
+    assert.equal(mine.length, 1, JSON.stringify(json.kept));
+    assert.match(mine[0].reason, /could not be read: .*Permission denied/);
+    assert.doesNotMatch(mine[0].reason, /linkage/);
+  });
+}
+
 test("a non-fleet worktree holding an ignored file is kept, never reaped", (t) => {
   // The one keep the worktree-present branch owns that nothing else here
   // reaches. `git worktree remove` refuses on modified and untracked files but
