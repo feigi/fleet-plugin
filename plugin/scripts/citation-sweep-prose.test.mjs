@@ -222,7 +222,9 @@ function securityReleaseFault(adr) {
 // even inside both rows' `i` flag — the `(?-i:…)` group (Node 23+; .nvmrc pins
 // 26): folded, a sentence ending in a proper noun "Vs." read as the
 // abbreviation, the silent direction above. The cost: a capitalized one
-// anywhere, a parenthetical "(Cf. …)" included, ends the sentence there.
+// anywhere, a parenthetical "(Cf. …)" included, ends the sentence there. Keep
+// the group to literals: V8 (14.6) still folds a character class in any but
+// its first alternative.
 //
 // #1981. The rest of the block ends and closing markup #1957 named only in
 // part. A blank line may be CRLF, or blank but for a gutter — a blockquote's
@@ -1400,6 +1402,14 @@ test("a period after a capitalized abbreviation lookalike still ends the sentenc
   for (const abbr of ["vs.", "e.g.", "i.e.", "cf.", "viz."]) {
     assert.doesNotMatch(`Minor and patch bumps are for the ${abbr} Bounding drift at about one month.\n`, UNSCOPED_DRIFT_SENTENCE, abbr);
     assert.doesNotMatch(`# Minor and patch bumps are for the ${abbr} The bump merges once CI goes green.\n`, UNSCOPED_MERGE_SENTENCE, abbr);
+  }
+  // Only the list itself stopped folding: the letter-or-digit guard before it
+  // still does, so a capital glued to a lowercase abbreviation disqualifies it
+  // just as "devs." does, and the sentence ends. Both ends of the list: V8
+  // (14.6) still folds a character class in any but the first alternative of
+  // a `(?-i:…)` group, so a guard moved inside it is only caught at "e.g".
+  for (const word of ["Ee.g.", "DEvs."]) {
+    assert.match(`Minor and patch bumps are for the ${word} Bounding drift at about one month.\n`, UNSCOPED_DRIFT_SENTENCE, word);
   }
 });
 
