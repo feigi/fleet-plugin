@@ -403,19 +403,33 @@ const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`].map((f)
 // among others); stripping them costs a refusal only of such a mark glued to
 // an own-flag name, which no subject carries.
 //
-// Left open, deliberately: invisible characters outside Cf — U+3164 and the
-// other Hangul fillers (letters), U+034F and the variation selectors
-// (combining marks) — which are text rather than format controls; and a Cf
-// character ahead of a NON-own `--word` leading a tail element, which the
-// outer `startsWith("--")` clause misses exactly as it misses ordinary
-// whitespace there.
+// #1904: invisible characters OUTSIDE Cf — U+3164 and the other Hangul
+// fillers (letters), U+034F and the variation selectors (combining marks) —
+// are text rather than format controls, so the Cf strip above let them ride
+// inside the word exactly as a zero-width space rode before it. The strip is
+// now the union of Cf and Default_Ignorable_Code_Point, the property Unicode
+// itself keeps for code points a renderer shows nothing for: one property
+// rather than a hand-curated block list, which would miss the members no
+// ticket named (U+17B4, the Mongolian selectors U+180B–180F, …). A union,
+// not DICP alone: DICP leaves out the visible Cf marks just above, so
+// swapping it in would drop cases #1851 already refuses. Same site and the
+// same after-the-split order as #1851; U+FEFF stays the one code point in
+// both the strip and `\s`, no DICP member adding another. An emoji's own
+// presentation selector (U+FE0F) is stripped too, which costs nothing: only
+// a word that is an own-flag spelling once stripped is refused.
+//
+// Left open, deliberately: blank-rendering code points outside both
+// properties (U+2800 braille blank, among others), which Unicode classes as
+// ordinary visible symbols; and a Cf character ahead of a NON-own `--word`
+// leading a tail element, which the outer `startsWith("--")` clause misses
+// exactly as it misses ordinary whitespace there.
 function refuseStrayInCheckTail(tail) {
   if (tail.length <= 1) return;
   const stray = tail.find(
     (a) =>
       a.startsWith("--") ||
       a.split(/\s+/).some((word) => {
-        const name = word.replace(/\p{Cf}/gu, "").split("=")[0].toLowerCase();
+        const name = word.replace(/[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu, "").split("=")[0].toLowerCase();
         return OWN_FLAGS.includes(name) || OWN_FLAGS.includes(`-${name}`);
       }),
   );

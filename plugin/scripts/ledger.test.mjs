@@ -2302,6 +2302,73 @@ test("CLI: a word carrying a format (Cf) character that is not this script's own
   }
 });
 
+// #1904: invisible characters OUTSIDE Cf that Unicode still marks
+// Default_Ignorable_Code_Point — the Hangul fillers (U+3164, U+115F, U+1160,
+// U+FFA0; category Letter) and the combining grapheme joiner plus the
+// variation selectors (U+034F, U+FE00, astral U+E0100; category Mark) — rode
+// through #1851's Cf-only strip the same way a zero-width space did before
+// it, and the call scored the subject. Each code point the ticket names is
+// driven leading the flag as its own argv element, the ticket's own probe;
+// then trailing and inside the name, the positions a leading-only strip
+// would miss. U+17B4 and U+180B are DICP members the ticket does not name:
+// a hand-curated block list of the named ranges would still miss both,
+// which is why the strip is the property union and not such a list. And
+// U+0600 is the other half of that union: a visible Cf mark DICP leaves
+// out, which #1851 already stripped — swapping DICP in for Cf rather than
+// adding it would stop refusing this one, and no #1851 pin covers it.
+test("CLI: a non-Cf default-ignorable character (Hangul filler, variation selector) ahead of, inside or behind this script's own flag name still lets the clause refuse it (#1904)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  writeFileSync(file, ledgerText(["#123 widget guard missing"]));
+  for (const stray of [
+    "\u3164-require-file",
+    "\uFE00-require-file",
+    "\u115F-require-file",
+    "\u1160-file",
+    "\uFFA0-require-file",
+    "\u034F-file",
+    "\u{E0100}-require-file",
+    "widget -file\uFE0F",
+    "-require\u3164-file",
+    "widget \u034F--REQUIRE-FILE",
+    "\u17B4-file",
+    "\u180B-require-file",
+    "\u0600-file",
+  ]) {
+    const r = cli(["--file", file, "check", stray, "widget", "guard", "missing"]);
+    const label = JSON.stringify(stray);
+    assert.equal(r.status, 2, `${label}: got exit ${r.status}\n${r.stderr}`);
+    assert.ok(
+      r.stderr.includes(`unknown flag ${stray} in subject`),
+      `${label}: the refusal must name the whole stray element, invisible character included\n${r.stderr}`,
+    );
+    assert.equal(r.stdout, "", `${label}: a refusal must not also emit a payload`);
+  }
+});
+
+// #1904's false-positive side, the #1851 pin's shape over the new classes:
+// an emoji's own presentation selector (U+FE0F) glued directly ahead of a
+// dash-suffixed near-miss of an own flag name, a Hangul filler inside an
+// unrelated word, and one ahead of a word that only shares an own name's
+// prefix all stay subject text — the strip only ever makes an own-flag
+// spelling out of a word that already was one plus invisible characters.
+// The first case is glued, not merely adjacent, so a split-instead-of-strip
+// bug refuses it too (the same shape the second case already catches with
+// a different DICP class) — a bare emoji ahead of an unrelated word stays
+// accepted under every strip-shaped mutant and would prove nothing.
+test("CLI: a word carrying a non-Cf default-ignorable character that is not this script's own flag name is still scored as subject text (#1904)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  for (const word of ["\u2764\uFE0F-file", "pre\u3164-file", "widget \u3164-files", "widget \u{E0100}--basee"]) {
+    const subject = `${word} guard missing`;
+    writeFileSync(file, ledgerText([`#1419 ${subject}`]));
+    const r = cli(["--file", file, "check", word, "guard", "missing"]);
+    const label = JSON.stringify(word);
+    assert.equal(r.status, 1, `${label}: got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /ALREADY FILED/, `${label}: must still be scored as subject text`);
+  }
+});
+
 // The tail guard cannot reach the slot ahead of it: a stray flag one token
 // earlier becomes the id, and the tail behind it holds no `--` element to
 // find. Each subcommand loses something different to that — `filed` its
