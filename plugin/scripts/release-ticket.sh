@@ -1476,7 +1476,12 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   # check then reading that sibling's clean copy over $wt's work (measured,
   # #2073; the shape no-undo-audit.sh closed the same way, #2040, and reap.sh's
   # copy of this compare, #2042). The sentinel leaves `$(...)` only pwd's/git's
-  # own terminating newline to strip.
+  # own terminating newline to strip. The `toplevel` half is the one that
+  # closes it; the `wt_canon` half keeps the two sides byte-for-byte alike and
+  # changes no reachable answer today — a newline in the listed path is
+  # encoded out before here (#551), so `-d` fails for it, and a real,
+  # non-symlink $wt with no newline in its own name has none at its canonical
+  # end either (measured: stripping only that half leaves every case green).
   if [ -f "$wt/.git" ]; then
     wt_canon=$(cd "$wt" && pwd -P && echo x) || die "cannot resolve $wt, so whether it holds uncommitted work is unknown"
     wt_canon=${wt_canon%?x}
