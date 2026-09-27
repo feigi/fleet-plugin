@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between as section, phrase, stripQuoteGutter } from "./prose-pin.mjs";
+import { between as section, bullet, phrase, stripQuoteGutter } from "./prose-pin.mjs";
 // The board's real parser, imported rather than re-described: the doc example
 // below is fed through it, so a widened/narrowed regex and a reverted example
 // both surface here instead of only in compute-board.test.mjs's own fixtures.
@@ -321,7 +321,10 @@ test("the Phase 3 finisher edges gate on a ruling the controller still owes", ()
     /never dispatch off it while you do/i,
     "the CI-completes edge lost the outstanding-ruling gate — it applies wherever a fix-applier pushed, which is one of the firings this edge takes (#1053)",
   );
-  const noCiEdge = flat(section(RUN_TEAM, '- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**Every wake ends in the tick.**", "run-team no-ci edge"));
+  // One list item, not anchor to anchor: on the fixed end anchor alone, the
+  // clause gutted here and restated in an inserted sibling bullet stayed green
+  // (#491, measured). `bullet` clamps the slice at that sibling.
+  const noCiEdge = flat(bullet(RUN_TEAM, '- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**Every wake ends in the tick.**", "run-team no-ci edge"));
   assert.match(
     noCiEdge,
     /never while you still owe it a ruling/i,

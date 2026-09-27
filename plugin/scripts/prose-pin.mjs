@@ -1,3 +1,32 @@
+// THE PIN CONVENTION (#491), for every new prose pin in this directory.
+// Existing pins move onto it only where a hole in them is measured.
+//
+// A pin holding a claim asserts ONE contiguous `phrase()` span: the smallest
+// clause that makes the claim, never independent keywords. Keywords each
+// satisfied somewhere in the slice stay green when the sentence carrying them
+// is gutted and its words restated beside it with the meaning inverted: the
+// slice bounds WHERE the words are, only a span binds them to each other.
+// Measured on ci-state-prose.test.mjs, where three independent checks (two
+// regexes and a substring match) stayed green
+// under exactly that restatement inside the pinned paragraph. A literal the
+// source owns (a reason string read out of the script) may be interpolated
+// into the span, so renaming it there reddens the pin too.
+//
+// A reflow stays green, since `phrase()` joins words on `\s+`; so does a `**`
+// move, where the slice is matched through `unemphasized()`. A reword inside
+// the span goes red, and that is accepted as the loud direction: the assertion
+// message names what the span protects, so whoever rewords it re-pins
+// deliberately. `sentences()` may locate a sentence; it does not replace the
+// span.
+//
+// THE CEILING: a negating sentence added beside an intact span stays green.
+// No tighter regex closes that; it is the limit of pinning prose by matching it.
+//
+// A list item is sliced with `bullet()`, never with a bare `between()` on a
+// fixed end anchor, for the same reason one level up: every sibling item
+// inserted between the anchors joins that slice and can carry the span the
+// real item lost.
+
 import assert from "node:assert/strict";
 
 // How many times `needle` occurs in `haystack`, overlaps included — two
@@ -143,6 +172,31 @@ export function paragraph(text, anchor, what, options) {
   const rest = text.slice(anchorAt(text, anchor, what, options));
   const end = rest.search(/\n[ \t]*\n/);
   return end === -1 ? rest : rest.slice(0, end);
+}
+
+// One list item: from `from` to the next item at the same or a shallower
+// indent, and never past `to`. `between` alone on a fixed end anchor takes every
+// item between the two anchors, so a sibling inserted there joins the slice and
+// carries a pin the real item lost. Measured on run-team's `no-ci` edge (#747,
+// #491): the ruling clause gutted, then restated in an inserted sibling bullet,
+// stayed green. `to` stays as the outer bound and as the "moved — update this
+// test" tripwire `between` already raises.
+//
+// Any list marker ends the item (`-`, `*`, `+`, `1.`, `1)`), not only the
+// `- **` lead-in the item itself happens to use: a sibling without a bold
+// lead-in is a sibling too. A marker indented deeper than the line `from`
+// starts on is the item's own child, and stays in. Returns raw bytes, like
+// `between`; a caller flattens or matches through `phrase()`.
+//
+// The single definition of a list-item bound in this directory (#491), moved
+// out of no-ci-gate-prose.test.mjs, where #747 had clamped a local copy.
+export function bullet(text, from, to, what) {
+  const slice = between(text, from, to, what);
+  const at = text.indexOf(from);
+  const indent = text.slice(text.lastIndexOf("\n", at - 1) + 1).match(/^[ \t]*/)[0].length;
+  const sibling = new RegExp(`\\n[ \\t]{0,${indent}}(?:[-*+]|\\d+[.)])[ \\t]`);
+  const next = slice.slice(from.length).search(sibling);
+  return next === -1 ? slice : slice.slice(0, from.length + next);
 }
 
 // Prose cut into sentences, for a pin that holds a claim to ONE sentence. A

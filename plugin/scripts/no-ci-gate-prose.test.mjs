@@ -33,6 +33,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { bullet } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -58,26 +59,17 @@ function paragraphSaying(text, anchor, label) {
 
 // SKILL.md's Phase 3 edge cannot use paragraphSaying: the whole event-loop
 // bullet list is one blank-line-free paragraph (~3.6k chars), and a regex over
-// that is satisfied by a neighbouring edge — vacuous. It gets a bullet-to-bullet
-// slice instead, on the SAME anchor pair review-path-default.test.mjs already
-// uses for this bullet, so this file adds no new anchor to that document.
-function bullet(source, startAnchor, endAnchor, label) {
-  const at = source.indexOf(startAnchor);
-  assert.notEqual(at, -1, `${label}: '${startAnchor}' moved — update this test`);
-  const endAt = source.indexOf(endAnchor, at + startAnchor.length);
-  assert.notEqual(endAt, -1, `${label}: '${endAnchor}' moved — update this test`);
-  // Clamp to the NEXT top-level bullet too. The end anchor is fixed, so on it
-  // alone a sibling edge inserted between the two joins the slice and can carry
-  // a pin the real edge has lost — the vacuity this slice exists to rule out.
-  // The endAnchor assertion stays as the "moved — update this test" tripwire.
-  const next = source.indexOf("\n- **", at + startAnchor.length);
-  return flat(source.slice(at, next === -1 ? endAt : Math.min(next, endAt)));
-}
+// that is satisfied by a neighbouring edge — vacuous. It gets prose-pin.mjs's
+// `bullet` instead, on the SAME anchor pair review-path-default.test.mjs already
+// uses for this bullet, so this file adds no new anchor to that document. That
+// clamps at the next sibling bullet, not only at the fixed end anchor, so a
+// sibling edge inserted between the two cannot carry a pin the real edge lost
+// (#747).
 
 const SITES = [
   [
     "run-team Phase 3 no-ci edge",
-    () => bullet(RUN_TEAM, '- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**Every wake ends in the tick.**", "run-team no-ci edge"),
+    () => flat(bullet(RUN_TEAM, '- **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`**', "**Every wake ends in the tick.**", "run-team no-ci edge")),
     /label off the reviewer's (own )?verified suite run/i,
     /without it, do not label/i,
   ],

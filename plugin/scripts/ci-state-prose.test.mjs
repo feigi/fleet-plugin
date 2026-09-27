@@ -8,14 +8,14 @@
 // below rather than restated here — and a non-empty `reasons` is verdict
 // `not-green`, exit 1.
 //
-// THE CEILING: these prove the clauses are PRESENT in the smallest slice that
-// can hold them. They cannot prove a sentence added beside one does not negate
-// it, and they do not run ci-state.mjs — ci-state.test.mjs owns its behavior.
+// THE CEILING: a sentence added beside an intact span that negates it stays
+// green. And these do not run ci-state.mjs — ci-state.test.mjs owns its
+// behavior.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { paragraph } from "./prose-pin.mjs";
+import { paragraph, phrase, unemphasized } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
@@ -28,12 +28,17 @@ const RUN_MERGE_BOT = readFileSync(join(REPO, "commands", "run-merge-bot.md"), "
 const CI_STATE = readFileSync(join(import.meta.dirname, "ci-state.mjs"), "utf8");
 const ABSENT_REASON = (CI_STATE.match(/reasons\.push\(`([^`$]+)\$\{missing\.join/) ?? [])[1];
 
-// SLICE SIZE is what anchors these. Both documents discuss `pending`, cancelled
-// runs and force-pushes in neighbouring paragraphs, so a regex over the section
-// — let alone the file — stays green with the sentence under test deleted
-// outright. So each slice stops at the end of its own PARAGRAPH, not at the next
-// section marker: without that bound a gutted sentence stays pinned by a fresh
-// paragraph inserted before the marker (measured — both documents, suite green).
+// Each claim is ONE contiguous span (prose-pin.mjs's convention), because
+// keywords bound only by the slice were not enough: with the `pending`
+// sentence gutted and its phrases restated as a second sentence in the same
+// paragraph, meaning inverted, three independent checks (two regexes and a
+// substring match) stayed green (#491,
+// measured — both documents). The slice still does its own half: it bounds
+// WHERE the span may be found. Both documents discuss `pending`, cancelled runs
+// and force-pushes in neighbouring paragraphs, so each slice stops at the end
+// of its own PARAGRAPH, not at the next section marker: without that bound a
+// gutted sentence stays pinned by a fresh paragraph inserted before the marker
+// (measured — both documents, suite green).
 //
 // The shared bound, not a local copy of it (#1372). What it closes that a local
 // copy could not: a blank line carrying whitespace, which a literal `\n\n`
@@ -75,26 +80,34 @@ test("each pinned paragraph is still followed by a blank line and the paragraph 
   }
 });
 
-// Both documents carry both clauses, but each words the aftermath its own way,
-// so the shared cause is one regex and the aftermath is per-document. Pinning
-// either clause against one document only leaves the other free to lose it.
+// Both documents carry both claims, but each words the aftermath its own way,
+// so the force-push span is per-document and the `pending` span is shared.
+// Pinning either claim against one document only leaves the other free to lose
+// it. Matched through `unemphasized()` so a `**` move stays green, and through
+// `phrase()` so a reflow does.
 const DOCS = [
-  ["review-and-fix", reviewAndFix, /finished jobs keep the conclusions they already reached/],
-  ["run-merge-bot", runMergeBot, /finished jobs go on reporting what they concluded/],
+  ["review-and-fix", reviewAndFix, "a force-push cancels the run under you, its finished jobs keep the conclusions they already reached"],
+  ["run-merge-bot", runMergeBot, "a force-push cancels the run under you, its finished jobs go on reporting what they concluded"],
 ];
 
 test("both documents name the force-push that cancels the run whose finished jobs keep reporting", () => {
-  for (const [label, slice, aftermath] of DOCS) {
-    assert.match(slice(), /a force-push cancels the run under you/, `${label}: does not name a force-push as what cancels the run`);
-    assert.match(slice(), aftermath, `${label}: does not say the cancelled run's finished jobs go on reporting`);
+  for (const [label, slice, span] of DOCS) {
+    assert.match(
+      unemphasized(slice()),
+      phrase(span),
+      `${label}: lost or reworded the span "${span}" — the claim that a force-push cancels the run and its finished jobs go on reporting. If the claim still stands in new words, re-pin this span deliberately`,
+    );
   }
 });
 
 test("both documents scope `pending` to the aggregating view, never to ci-state.mjs", () => {
+  assert.ok(ABSENT_REASON, "ci-state.mjs no longer pushes a reason built from `missing` — update this test");
+  const span = `reads as \`pending\` in an aggregating checks summary, never here: \`ci-state.mjs\` names it in the reason \`${ABSENT_REASON}…\` and refuses green`;
   for (const [label, slice] of DOCS) {
-    assert.match(slice(), /reads as `pending` in an aggregating checks summary/, `${label}: \`pending\` is unscoped — it reads as ci-state.mjs's own behavior`);
-    assert.ok(ABSENT_REASON, "ci-state.mjs no longer pushes a reason built from `missing` — update this test");
-    assert.ok(slice().includes(ABSENT_REASON), `${label}: does not quote ci-state.mjs's actual reason string \`${ABSENT_REASON}\``);
-    assert.match(slice(), /refuses green/, `${label}: does not say ci-state.mjs withholds green on an absent job`);
+    assert.match(
+      unemphasized(slice()),
+      phrase(span),
+      `${label}: lost or reworded the span "${span}" — the claim that \`pending\` belongs to an aggregating checks summary while ci-state.mjs names the absent job in its actual reason string and withholds green. If the claim still stands in new words, re-pin this span deliberately`,
+    );
   }
 });
