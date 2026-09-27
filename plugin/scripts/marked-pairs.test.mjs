@@ -70,8 +70,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, symlinkSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   scanFile,
   scanTree,
@@ -308,9 +310,9 @@ test("mutation run 4 (the two-dialect-specific mutant): a token swap survives no
 // floor has the same margin problem summed, and an exact count or a
 // manifest hash goes stale on every legitimate addition; comparing against
 // the directory itself needs no number at all. The listing is hand-rolled
-// one level per `readdirSync` call — deliberately NOT `walk()`'s
-// `{ recursive: true }` form — with the same inclusion rule (regular files
-// only, exact extension), so it shares no code with what it checks.
+// here, one level per `readdirSync` call, with the same inclusion rule
+// (regular files only, exact extension) and no code shared with `walk()`,
+// the thing it checks.
 //
 // COARSE, against the tree itself shrinking: both sides of the exact check
 // read the same directories, so a mass deletion, or a wrong root, leaves
@@ -363,18 +365,18 @@ const WALK_SCOPE = { ".md": ["skills", "commands", "agents"], ".js": ["workflows
 
 // Deliberately does NOT follow a symlinked directory (#2056): a symlink
 // entry's `Dirent.isDirectory()` is `false`, so the recursion below skips it.
-// `walk()`'s native `readdirSync(..., { recursive: true })` DOES follow one
-// on Node >=22 (this repo's `.nvmrc`/CI pin; Node 20.x/21.x, also inside
-// `package.json`'s declared `engines.node` floor, do not — walk() and this
-// oracle happen to agree there instead), listing a followed link's contents
-// under the symlink's own path — so a symlinked directory under a scoped
-// directory surfaces in `walkDiscrepancy()`'s `extra`, and the real-tree
-// walk test reds. That red is intentional, not a false positive to silence
-// by matching `walk()` here: the same file can end up scanned under two
-// paths (as here, where the symlink's target is itself in scope) — or, if
-// the target has no copy anywhere in scope, simply appear as a new path
-// nothing else reaches. Either way, whether that tree shape is wanted is a
-// decision to file when one is actually added. None exists today.
+// `walk()` DOES follow one, on every Node version (it did natively on Node
+// >=22 only, before #2076 hand-rolled it to refuse a symlink cycle), listing
+// a followed link's contents under the symlink's own path — so a symlinked
+// directory under a scoped directory surfaces in `walkDiscrepancy()`'s
+// `extra`, and the real-tree walk test reds. That red is intentional, not a
+// false positive to silence by matching `walk()` here: the same file can end
+// up scanned under two paths (as here, where the symlink's target is itself
+// in scope) — or, if the target has no copy anywhere in scope, simply appear
+// as a new path nothing else reaches. Either way, whether that tree shape is
+// wanted is a decision to file when one is actually added. None exists
+// today. A symlink back into an ancestor never gets this far: `walk()`
+// throws on it (#2076).
 function listIndependently(root, dir, ext) {
   let entries;
   try {
@@ -450,6 +452,100 @@ test("fixture: a file reached through a symlinked directory in scope is reported
   const scanned = scanTree(root).map((f) => f.file);
   assert.deepEqual([...scanned].sort(), [linked, real], "premise: walk() follows a symlinked directory and lists it under the symlink's path");
   assert.deepEqual(walkDiscrepancy(root, scanned), { missing: [], extra: [linked] });
+});
+
+// #2076: a symlink cycle under a scoped directory. Native recursive
+// `readdirSync` enumerates every PATH through the links, bounded only by the
+// OS symlink-depth cutoff: one way back into the loop (`skills/a/up -> ..`)
+// is a finite, deeply nested list (measured: 96 entries, 64 levels on
+// darwin); two (`skills/b -> a` beside it) doubles the paths at every level
+// and never returned (measured: killed at 20 s, zero output). `walk()` now
+// refuses both shapes by name the moment a directory resolves to one of its
+// own ancestors.
+//
+// Run in a child under a hard bound: the walk is synchronous, so a hang in
+// this process would block node:test's own timeout timer as well — the
+// suite would stall rather than red. Here a hang is a bounded failure that
+// says it hung.
+const WALK_BOUND_MS = 10_000;
+function scanInChild(root) {
+  const mod = pathToFileURL(join(import.meta.dirname, "marked-pairs.mjs")).href;
+  const src = `const { scanTree } = await import(${JSON.stringify(mod)}); process.stdout.write(JSON.stringify(scanTree(process.argv[1]).map((f) => f.file)));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", src, root], { encoding: "utf8", timeout: WALK_BOUND_MS, maxBuffer: 64 * 1024 * 1024 });
+  assert.equal(r.error?.code, undefined, `scanTree() did not return within ${WALK_BOUND_MS} ms — the walk hung (${r.error?.code})`);
+  return r;
+}
+
+for (const [shape, links] of [
+  ["two-branch (the ticket's repro)", [["..", "skills/a/up"], ["a", "skills/b"]]],
+  ["single-branch", [["..", "skills/a/up"]]],
+]) {
+  test(`fixture: a ${shape} symlink cycle under a scoped directory fails fast, naming the link — never hangs`, (t) => {
+    const root = fixtureTree(t, { "skills/a/SKILL.md": "" });
+    for (const [target, at] of links) symlinkSync(target, join(root, at), "dir");
+    const r = scanInChild(root);
+    assert.notEqual(r.status, 0, `a cycle must refuse, not return a list: ${r.stdout.slice(0, 200)}`);
+    assert.match(r.stderr, /symlink cycle: .*skills\/(a|b)\/up resolves to its own ancestor/);
+  });
+}
+
+// #2076 hardening: the ancestor-chain guard also fires through shapes beyond
+// the ticket's own two direct repros, verified for real (not by reading the
+// code) during PR #2090's review — a ring spanning three distinct
+// directories where no single link is its own parent (only the closed chain
+// is a cycle), two independent cycles coexisting in one scoped directory
+// (the scan must abort on the first one found, not silently continue past
+// it), and a symlink-to-a-symlink chain whose final target is a cycle
+// (`statSync` resolves the whole chain in one call, so the guard never sees
+// the intermediate hop as a separate decision).
+test("fixture: a 3-directory ring cycle (a -> b -> c -> a, no single link is its own parent) fails fast", (t) => {
+  const root = fixtureTree(t, { "skills/a/SKILL.md": "" });
+  mkdirSync(join(root, "skills", "b"), { recursive: true });
+  mkdirSync(join(root, "skills", "c"), { recursive: true });
+  symlinkSync(join("..", "b"), join(root, "skills", "a", "next"), "dir");
+  symlinkSync(join("..", "c"), join(root, "skills", "b", "next"), "dir");
+  symlinkSync(join("..", "a"), join(root, "skills", "c", "next"), "dir");
+  const r = scanInChild(root);
+  assert.notEqual(r.status, 0, `a ring cycle must refuse, not return a list: ${r.stdout.slice(0, 200)}`);
+  assert.match(r.stderr, /symlink cycle: .*skills\/a\/next\/next\/next resolves to its own ancestor/);
+});
+
+test("fixture: two independent, non-overlapping symlink cycles in one scoped directory — the scan aborts on the first one found", (t) => {
+  const root = fixtureTree(t, { "skills/p/SKILL.md": "", "skills/q/SKILL.md": "" });
+  symlinkSync("..", join(root, "skills", "p", "up"), "dir");
+  symlinkSync("..", join(root, "skills", "q", "up"), "dir");
+  const r = scanInChild(root);
+  assert.notEqual(r.status, 0, `either cycle must refuse the whole scan, not return a list: ${r.stdout.slice(0, 200)}`);
+  assert.match(r.stderr, /symlink cycle: .*skills\/(p|q)\/up resolves to its own ancestor/);
+});
+
+test("fixture: a symlink-to-a-symlink chain whose final target is a cycle is still caught", (t) => {
+  const root = fixtureTree(t, { "skills/a/SKILL.md": "" });
+  symlinkSync("hop2", join(root, "skills", "a", "hop"), "dir");
+  symlinkSync("..", join(root, "skills", "a", "hop2"), "dir");
+  const r = scanInChild(root);
+  assert.notEqual(r.status, 0, `a chained cycle must refuse, not return a list: ${r.stdout.slice(0, 200)}`);
+  assert.match(r.stderr, /symlink cycle: .*skills\/a\/hop2? resolves to its own ancestor/);
+});
+
+// The accept half of the same guard: every symlink shape that is NOT a cycle
+// must still scan exactly as the native recursive walk did (#2056's ruling
+// stands). Two links to one directory and a link to a link are a DAG, not a
+// loop — a guard keyed on "seen this directory anywhere" rather than "is my
+// own ancestor" would refuse or silently de-duplicate them. A dangling link
+// and a link to a file are skipped: neither is a regular file, and the
+// dangling one must not take the rest of `skills/` down with it.
+test("fixture: non-cyclic symlinks under a scoped directory still scan — shared targets and chained links followed, dangling and file links skipped", (t) => {
+  const root = fixtureTree(t, { "skills/real/SKILL.md": "", "skills/real/sub/deep.md": "" });
+  symlinkSync("real", join(root, "skills", "one"), "dir");
+  symlinkSync("real", join(root, "skills", "two"), "dir");
+  symlinkSync("one", join(root, "skills", "chain"), "dir");
+  symlinkSync("nowhere", join(root, "skills", "dangling"));
+  symlinkSync(join("real", "SKILL.md"), join(root, "skills", "filelink.md"));
+  const r = scanInChild(root);
+  assert.equal(r.status, 0, r.stderr);
+  const expected = ["chain", "one", "real", "two"].flatMap((d) => [join("skills", d, "SKILL.md"), join("skills", d, "sub", "deep.md")]);
+  assert.deepEqual(JSON.parse(r.stdout), expected.sort());
 });
 
 test("real tree: the walk returns every scoped file — not a thinned, padded or duplicated list", () => {
