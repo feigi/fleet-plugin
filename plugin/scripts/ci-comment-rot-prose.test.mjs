@@ -1597,7 +1597,9 @@ function sizesTrackedSet(sentence, count) {
 // pattern carries no `i` for them to fold under. The guard before the
 // abbreviation is that file's too: only a letter or digit disqualifies it, so
 // an italic `_vs._` is one — a `\b` there read the `_` as a word character.
-const COUNT_CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]\[[^\]]*\]|\[\^[^\]\s]+\]|<\/[A-Za-z][A-Za-z\d-]*\s*>)`;
+// Its `][ref]` closer skips a label `[^1]` reads whole, as CLOSING_MARKUP's
+// does (#2063).
+const COUNT_CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]\[(?!\^[^\]\s]+\])[^\]]*\]|\[\^[^\]\s]+\]|<\/[A-Za-z][A-Za-z\d-]*\s*>)`;
 // #2054: the guard used to be a SEPARATE lookbehind,
 // `(?<!(?<!...)abbr\.${COUNT_CLOSING_MARKUP}*)`, re-matched independently at
 // the final `\s+` position — so it could walk back over a DIFFERENT, inner

@@ -297,8 +297,14 @@ function securityReleaseFault(adr) {
 // which sentences() does not take. That extra split is the loud direction for
 // the rows, and none of the code shapes above starts with one. The caret form
 // `[^1]` stays in CLOSING_MARKUP, unguarded, as #2002 left it.
+//
+// #2063. The `][ref]` closer skips a label `[^1]` reads whole — `][^1]` is
+// `]` then `[^1]` and nothing else — so no run of closers has two readings.
+// Read both ways, a chain of n `][^1]` had 2^n, and a match failing after
+// it walked all of them first. `][^]` and `][^a b]`, which `[^1]` cannot
+// read, stay `][ref]` closers.
 const FOOTNOTE_MARKERS = String.raw`(?:(?<=[A-Za-z\d\x60)\u0080-\uFFFF][.!?])(?:\[[^\]\s]+\])+)?`;
-const CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]\[[^\]]*\]|\[\^[^\]\s]+\]|<\/[a-z][a-z\d-]*\s*>)`;
+const CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]\[(?!\^[^\]\s]+\])[^\]]*\]|\[\^[^\]\s]+\]|<\/[a-z][a-z\d-]*\s*>)`;
 const HASH_GUTTER = String.raw`[ \t]*#(?!\d)`;
 const GUTTER = String.raw`(?:[ \t]*>|${HASH_GUTTER})`;
 const HTML_BLOCK_OPEN = String.raw`<(?:!--|\?|![A-Za-z]|!\[CDATA\[|(?:script|pre|style|textarea)(?=[\s>]|$)|\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s>]|\/>|$))`;
