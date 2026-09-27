@@ -312,6 +312,41 @@ export function windowClaimFault(block) {
     : "the pin's comment names the bot's schedule but no longer says, in one sentence, that its window bounds PR creation and not merge timing — #1753";
 }
 
+// The indices of `lines` that are a block scalar's content (#1975): after a
+// `key: |` or `- >-` header — chomping and indentation indicators, an anchor
+// or tag, a quoted key and a trailing comment allowed — every line up to the
+// first non-blank one set shallower than the content. The content's column
+// is the header's indentation indicator past the column of its key (of its
+// dash, for a bare `- |`), or else the first non-blank line's own, which
+// must sit deeper than that column or the scalar is empty. A line in there is
+// text however it is spelled, so a header inside it opens nothing. Only block
+// scalars: a quoted or plain scalar can span lines too, but none in ci.yml
+// does, and at a step's depth the job check below refuses any step such a
+// string could spell.
+function blockScalarText(lines) {
+  const text = new Set();
+  for (let at = 0; at < lines.length; at++) {
+    const header =
+      /^(\s*(?:-\s+)*)((?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s#"'][^#]*?)\s*:\s+)?(?:[&!]\S*\s+)*[|>]([1-9])?[-+]?([1-9])?\s*(?:#.*)?$/.exec(
+        lines[at],
+      );
+    if (!header || (!header[2] && !header[1].includes("-"))) continue;
+    const column = header[2] ? header[1].length : header[1].trimEnd().length - 1;
+    const indicator = Number(header[3] ?? header[4] ?? 0);
+    let depth = indicator ? column + indicator : null;
+    let end = at + 1;
+    for (; end < lines.length; end++) {
+      if (/^\s*$/.test(lines[end])) continue;
+      const col = lines[end].search(/\S/);
+      depth ??= col;
+      if (col < depth || col <= column) break;
+    }
+    for (let k = at + 1; k < end; k++) text.add(k);
+    at = end - 1;
+  }
+  return text;
+}
+
 // Every setup-node step's contiguous comment run: its prose, how many comment
 // lines it spans, and the job it sits in — anchored on the step, never a line
 // number. A step is an entry of `steps:`, found by its
@@ -319,23 +354,26 @@ export function windowClaimFault(block) {
 // keys, and its comment is the run directly above the step's own `- ` opener,
 // where a reader meets it (#1873) — a blank line ends that run, the opener's
 // side included, so a comment with a blank line under it is not the step's
-// (#1919). Exported with an optional `lines` override (same
+// (#1919). A block scalar's content is neither a step's key nor a comment,
+// and a key read by name here may be quoted or spaced from its colon, as YAML
+// allows (#1975). Exported with an optional `lines` override (same
 // idiom as windowClaimFault's `block` param and citationFault's
 // `citing`/`cited` params) so a test can feed it synthetic input the real
 // ci.yml does not contain; the production call sites take no argument and read
 // the real file. The owner pin and the pointer pin both read the steps through
 // this, so they cannot disagree about where a step's comment starts.
 export function setupNodeComments(lines = read("../../.github/workflows/ci.yml").split("\n")) {
+  const text = blockScalarText(lines);
   const found = [];
   for (let at = 0; at < lines.length; at++) {
-    const uses = /^(\s*)(-\s+)?uses:\s*["']?actions\/setup-node@/.exec(lines[at]);
-    if (!uses) continue;
+    const uses = /^(\s*)(-\s+)?(["']?)uses\3\s*:\s*["']?actions\/setup-node@/.exec(lines[at]);
+    if (!uses || text.has(at)) continue;
     // `- uses:` opens its entry. Any other `uses:` belongs to the first line
     // above it that sits shallower than the key — sibling keys share its
     // column, their values sit deeper — and that line is the entry's opener
     // only if it opens a sequence entry whose own keys start at `uses:`'s
-    // column. `run: |` or `with:` there, on a line of its own or after the
-    // `- `, means the match was never an entry's own key. A bare `-`, or a
+    // column. `with:` there, on a line of its own or after the `- `, means
+    // the match was never an entry's own key. A bare `-`, or a
     // dash whose only remainder is a comment, sets its keys under it, each of
     // which the walk has already held at or past that column (#1920 follow-up:
     // a trailing comment's own text is not a key, so it must not set the
@@ -361,25 +399,25 @@ export function setupNodeComments(lines = read("../../.github/workflows/ci.yml")
         (lines[parent].search(/\S/) === dash && /^\s*-(?:\s|$)/.test(lines[parent])))
     )
       parent--;
-    if (parent < 0 || !/^\s*steps:(?:\s|$)/.test(lines[parent])) continue;
+    if (parent < 0 || !/^\s*(["']?)steps\1\s*:(?:\s|$)/.test(lines[parent])) continue;
     // `steps:` is just a key spelled that way — nothing above checks that it
     // sits directly under a job, not inside some action's own config that
     // happens to reuse the name. The line immediately shallower than it, if
     // the walk finds one before running off the top, must open a job
-    // (`  name:`); anything else — another `with:`, a matrix `include:` —
-    // means this `steps:` is not the job's (#1920 follow-up).
+    // (`  name:`, quoted or not, a comment after it allowed); anything else —
+    // another `with:`, a matrix `include:` — means this `steps:` is not the
+    // job's (#1920 follow-up). That line names the job.
     const stepsDepth = lines[parent].search(/\S/);
     let jobLine = parent - 1;
     while (jobLine >= 0 && (/^\s*(?:#|$)/.test(lines[jobLine]) || lines[jobLine].search(/\S/) >= stepsDepth)) jobLine--;
-    if (jobLine >= 0 && !/^ {2}[\w-]+:\s*$/.test(lines[jobLine])) continue;
+    const jobKey = jobLine >= 0 ? /^ {2}(["']?)([\w-]+)\1\s*:(?:\s+#.*)?\s*$/.exec(lines[jobLine]) : null;
+    if (jobLine >= 0 && !jobKey) continue;
     let i = step;
-    while (i > 0 && /^\s*#/.test(lines[i - 1])) i--;
-    let j = step;
-    while (j > 0 && !/^ {2}[\w-]+:\s*$/.test(lines[j])) j--;
+    while (i > 0 && /^\s*#/.test(lines[i - 1]) && !text.has(i - 1)) i--;
     found.push({
       block: prose(lines.slice(i, step).join("\n")),
       lines: step - i,
-      job: lines[j].trim().replace(/:$/, ""),
+      job: jobKey?.[2] ?? null,
     });
   }
   return found;
@@ -712,10 +750,13 @@ test("pinOwnerComment sees an owner written as a named step, so a bare-form deco
 });
 
 // The wider match's own false-positive class: a `uses:` line is a step only
-// when the first shallower line above it opens a sequence entry. Inside a
-// `run:` script or under `with:` it is not, and a phantom step there would red
-// the pointer test over a step that does not exist. Both sit under `steps:`,
-// so it is that first shallower line, not #1920's parent check, refusing them.
+// when the first shallower line above it opens a sequence entry. Under `with:`
+// it is not, and a phantom step there would red the pointer test over a step
+// that does not exist. It sits under `steps:`, so it is that first shallower
+// line, not #1920's parent check, refusing it. Inside a `run:` script the line
+// is refused the same way — `run: |` opens no sequence entry either, so the
+// shallower-line check above never needs #1975's block-scalar check to catch
+// this shape, though that check would refuse it too.
 test("a `uses: actions/setup-node@` line that is not a step's own key is not taken for a step (#1873)", () => {
   const scripted = ["      - name: Print an example", "        run: |", "          uses: actions/setup-node@v5"];
   const nested = ["      - uses: some/action@v1", "        with:", "          uses: actions/setup-node@v5"];
@@ -726,12 +767,15 @@ test("a `uses: actions/setup-node@` line that is not a step's own key is not tak
 // #1920. That first shallower line can open a sequence entry and still not be
 // a step's: a list nested in `with:` or a matrix `include:` has `- ` entries of
 // its own, keyed at exactly the column of a `uses:` under them — or written as
-// `- uses:` outright, as a line of a `run: |` script can be too — so no column
-// check tells them from a step. What does is the key they hang from: a step is
-// an entry of `steps:`. And a key written on the dash line itself (`- run: |`)
-// makes the step's opener the first shallower line above a `uses:` that is
-// only a line of that key's value; there the column does tell, because a
-// step's own keys start where the text after its `- ` does.
+// `- uses:` outright — so no column check tells them from a step. What does is
+// the key they hang from: a step is an entry of `steps:`. And a key written on
+// the dash line itself (`- with:`) makes the step's opener the first shallower
+// line above a `uses:` nested in that key's value; there the column does tell,
+// because a step's own keys start where the text after its `- ` does. The
+// `run: |` shapes here are still refused by those same two mechanisms — the
+// nested one because `run: |` opens no sequence entry, the dash-line one by
+// the column tell just above — not because #1975's block-scalar check ran;
+// that check would refuse either shape too, but neither depends on it.
 test("a `uses: actions/setup-node@` line under an entry that is not a step's, or inside a key on a step's dash line, is not a step (#1920)", () => {
   const job = ["  job:", "    steps:"];
   for (const shape of [
@@ -801,6 +845,138 @@ test("a nested key merely spelled `steps:` cannot own a step; only one hanging f
 test("a bare `-` opener followed only by a trailing comment does not perturb the column check; the step is still discovered (#1920 follow-up)", () => {
   const found = setupNodeComments(["  job:", "    steps:", "      -  # Set up Node", "        name: Set up Node", "        uses: actions/setup-node@v5"]);
   assert.deepEqual(found, [{ block: "", lines: 0, job: "job" }]);
+});
+
+// #1975. A block scalar's content — a `run: |` script, a github-script body, a
+// heredoc writing a fixture workflow — is one string, however much of it is
+// spelled like keys, `- ` entries or comments. Read as structure it made a
+// phantom step, or lent the step under it a comment that was a line of the
+// script above. At a step's depth #1920's job check already refuses the
+// phantom, since no line of a step's scalar sits where a job key does; a
+// top-level scalar's content can, and the comment run has no job check at all.
+test("a block scalar's content is text: never a step, never a step's comment (#1975)", () => {
+  const job = ["  job:", "    steps:"];
+  const setup = "      - uses: actions/setup-node@v5";
+  const text = "Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.";
+
+  // A job-shaped fixture as a top-level scalar, the last with an indentation
+  // indicator setting its content shallower than its first line, which
+  // auto-detection would miss.
+  for (const shape of [
+    ["description: |", "  job:", "    steps:", setup],
+    ["description: >-", "  job:", "    steps:", setup],
+    ["description: |2", "    deeper", "  job:", "    steps:", setup],
+  ]) {
+    assert.deepEqual(setupNodeComments(shape), [], shape.join("\n"));
+  }
+
+  // Each header spelling, its script ending in a shell comment right above the
+  // next step's opener: that line is the script's, not the step's comment. A
+  // bare `- |` is the entry's own value, so its content need only sit deeper
+  // than the dash, not than a key.
+  const script = ["          npm run build", "          # shell note, script content"];
+  for (const scalar of [
+    ["      - name: Build", "        run: |", ...script],
+    ["      - name: Build", "        run: >-", ...script],
+    ["      - name: Build", "        run: |+ # keep the final newline", ...script],
+    ["      - name: Build", "        run: &build |", ...script],
+    ["      - name: Build", "        run: !!str |", ...script],
+    ["      - name: Build", '        "run": |2', ...script],
+    ["      - run: |", ...script],
+    ["      - |", "        npm run build", "        # shell note, script content"],
+  ]) {
+    const shape = [...job, ...scalar, setup];
+    assert.deepEqual(setupNodeComments(shape), [{ block: "", lines: 0, job: "job" }], shape.join("\n"));
+  }
+
+  // What the check must still ACCEPT: a comment the scalar has ended before —
+  // back at the dash, or deeper than `run:` but shallower than the script's
+  // own lines, where YAML ends the scalar too — a value that merely ends in a
+  // `|`, and a step after a top-level scalar.
+  for (const shape of [
+    [...job, "      - name: Build", "        run: |", "          npm run build", `      # ${text}`, setup],
+    [...job, "      - name: Build", "        run: |", "          npm run build", `         # ${text}`, setup],
+    [...job, "      - name: Build", "        run: npm test ||", `          # ${text}`, setup],
+    ["description: |", "  text", "jobs:", "  job:", "    steps:", `      # ${text}`, setup],
+  ]) {
+    assert.deepEqual(setupNodeComments(shape), [{ block: text, lines: 1, job: "job" }], shape.join("\n"));
+  }
+
+  // An empty scalar ends where it starts: a key level with its own is the
+  // step's next key, whether the scalar's key sits on the dash line or not.
+  for (const shape of [
+    [...job, "      - run: |", "        uses: actions/setup-node@v5"],
+    [...job, "      - name: Build", "        run: |", "        uses: actions/setup-node@v5"],
+  ]) {
+    assert.deepEqual(setupNodeComments(shape), [{ block: "", lines: 0, job: "job" }], shape.join("\n"));
+  }
+
+  // Boundary precision on the depth arithmetic itself: an explicit
+  // indentation indicator's depth is the KEY's column plus the indicator —
+  // not the indicator alone — and a comment sitting one column shy of that
+  // depth has already left the scalar, so it is the next step's real
+  // comment, not swallowed script text. The chomping-then-indicator spelling
+  // (`|-2`) carries its digit in the same place as `|2-`; a first content
+  // line indented deeper than the indicator still leaves the depth at the
+  // indicator's own value, not an auto-detected one, which a second,
+  // shallower-but-still-in-scalar line below it proves. And a bare dash's
+  // column is the dash's own position, not one past it: content one column
+  // beyond it is swallowed, and nothing shallower is reachable without
+  // leaving the entry.
+  assert.deepEqual(
+    setupNodeComments([
+      ...job,
+      "      - name: Build",
+      "        run: |2",
+      "          npm run build",
+      "         # a real comment for the next step",
+      setup,
+    ]),
+    [{ block: "a real comment for the next step", lines: 1, job: "job" }],
+  );
+  assert.deepEqual(
+    setupNodeComments([
+      ...job,
+      "      - name: Build",
+      "        run: |-2",
+      "            npm run build",
+      "          # would-be leaked comment",
+      setup,
+    ]),
+    [{ block: "", lines: 0, job: "job" }],
+  );
+  assert.deepEqual(
+    setupNodeComments([...job, "      - |", "       # inside the scalar, must not surface as a comment", setup]),
+    [{ block: "", lines: 0, job: "job" }],
+  );
+});
+
+// #1975. Each key the walk reads by name was matched in its bare spelling
+// only, so a genuine step under a quoted `"steps":` — valid YAML — silently
+// dropped out of the returned set; a quoted `uses:` or job key did the same,
+// and so did a job key carrying a trailing comment.
+test("a key spelled quoted, with a space before its colon, or with a trailing comment still names it (#1975)", () => {
+  const setup = "      - uses: actions/setup-node@v5";
+  for (const shape of [
+    ["jobs:", "  job:", '    "steps":', "      - name: x", "        uses: actions/setup-node@v5"],
+    ["jobs:", "  job:", "    'steps':", setup],
+    ["jobs:", "  job:", "    steps :", setup],
+    ["jobs:", "  job:", "    steps:", '      - "uses": actions/setup-node@v5'],
+    ["jobs:", "  job:", "    steps:", "      - name: x", "        'uses' : actions/setup-node@v5"],
+    ["jobs:", '  "job":', "    steps:", setup],
+    ["jobs:", "  job :", "    steps:", setup],
+    ["jobs:", "  job: # the job's own note", "    steps:", setup],
+  ]) {
+    assert.deepEqual(setupNodeComments(shape), [{ block: "", lines: 0, job: "job" }], shape.join("\n"));
+  }
+
+  // A key that only contains the name is still not it.
+  for (const shape of [
+    ["jobs:", "  job:", "    pre-steps:", setup],
+    ["jobs:", "  job:", '    "steps2":', setup],
+  ]) {
+    assert.deepEqual(setupNodeComments(shape), [], shape.join("\n"));
+  }
 });
 
 // #1919. A blank line ends a step's comment run wherever it falls — the rule
