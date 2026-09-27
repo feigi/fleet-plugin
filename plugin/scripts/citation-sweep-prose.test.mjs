@@ -354,12 +354,13 @@ const UNSCOPED_MERGE_SENTENCE = new RegExp(
 // also reads a count that never sits beside the word "release(s)" at all —
 // an anaphoric "eight of them", "eight of those", or "eight of Node's
 // releases" referring back to a "release(s)" named earlier in the same
-// sentence makes the identical false claim, the house style ADR 0010, this
-// ticket's own review comment and ADR 0002/0008 all reach for elsewhere
-// (#2003).
+// sentence makes the identical false claim. The house style already reaches
+// for this shape: this function's own design note above reads "8 releases,
+// three of them already out", and ADR 0010, ADR 0002 and ADR 0008 each use
+// "of those"/"any of them" the same way (#2003).
 const COUNT_WORDS = { no: 0, zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
 const RELEASE_COUNT = new RegExp(
-  String.raw`(?<![\w.\x60-])(?<!\bnode\s+)(?<count>\d+|${Object.keys(COUNT_WORDS).join("|")})\s+(?:(?:more|new|further|other|node|of\s+(?:node['’]s|the)|\x60?v?26(?:\.x)?\x60?)\s+)*releases?\b`,
+  String.raw`(?<![\w.\x60-])(?<!\bnode\s+)(?<count>\d+|${Object.keys(COUNT_WORDS).join("|")})\s+(?:(?:more|new|further|other|node|of\s+(?:node['’]s|the|those|these)|\x60?v?26(?:\.x)?\x60?)\s+)*releases?\b`,
   "gi",
 );
 // A count with no noun following it at all — "eight of them"/"eight of
@@ -992,22 +993,28 @@ test("an anaphoric release count is refused the same as one spelled beside the w
     assert.match(windowReleaseCountFault(text), /\bof (?:them|those)\b in the 43 days|releases? in the 43 days/, text);
   }
   // "of the releases" is the same literal noun as "releases" alone, with
-  // the anaphoric "the" sitting between the count and it.
-  assert.match(
-    windowReleaseCountFault("In the 43 days, eight of the releases landed after the pin."),
-    /releases? in the 43 days/,
-  );
+  // the anaphoric "the"/"those"/"these" sitting between the count and it.
+  for (const text of [
+    "In the 43 days, eight of the releases landed after the pin.",
+    "In the 43 days, eight of those releases landed after the pin.",
+    "In the 43 days, eight of these releases landed after the pin.",
+  ]) {
+    assert.match(windowReleaseCountFault(text), /releases? in the 43 days/, text);
+  }
 });
 
 test("a true anaphoric count stays green, and a count with no release to refer back to is not this claim (#2003)", () => {
   for (const text of [
-    // The true count, anaphoric to "them" or to "Node's releases".
+    // The true count, anaphoric to "them" or to "Node's"/"the"/"those" releases.
     "Node shipped releases in the 43 days, five of them landed after the pin.",
     "In the 43 days, five of Node's releases landed after the pin.",
     "Node shipped releases in the 43 days; five of those landed after the pin.",
+    "In the 43 days, five of those releases landed after the pin.",
     // No "release(s)" is ever named for "them" to stand in for — an
     // ordinary count of something else inside the window is not this claim.
-    "Node shipped 8 issues in the 43 days; five of them are still urgent.",
+    // Eight, not five, so this case cannot pass merely because it shares the
+    // count the five-exemption above already treats as correct.
+    "Node shipped 8 issues in the 43 days; eight of them are still urgent.",
   ]) {
     assert.equal(windowReleaseCountFault(text), null, text);
   }
