@@ -153,6 +153,31 @@ function classifyScript(rel, content) {
 // suite green; with the shebang kept, the same call fails it.
 const NODE_SHEBANG_ENTRYPOINTS = ["plugin/scripts/fleet-bootstrap", "plugin/scripts/fleet-provenance", "plugin/scripts/fleet-run"];
 
+// Per-kind floors over what classifyScript() returns, at ~60% of each kind's
+// measured baseline — the ratio no-wave.test.mjs's tracked-file floor and
+// marked-pairs.test.mjs's MD_DIR_FLOORS use. Measured 2026-09-27 (#2025): 14
+// `sh` (every `.sh`) and 36 `js` (33 `.mjs` plus the three
+// NODE_SHEBANG_ENTRYPOINTS), out of 52 tracked; board.html and the one
+// `.json` classify `null` and are policed by nothing here, so they carry no
+// floor. The aggregate `files.length > 30` guard cannot see a filter bug that
+// empties ONE kind: dropping every `.sh` leaves 38 entries, still above it,
+// while shSelfLocationViolation() runs over nothing (measured, PR #2023
+// review). Counted after classification, so a broken classifyScript() branch
+// that sends a whole extension to `null` fails here too.
+const KIND_FLOORS = { sh: 8, js: 21 };
+
+/**
+ * Each KIND_FLOORS kind that `kinds` (rel → classifyScript() result) holds
+ * fewer of than its floor, as a description; empty when every kind clears.
+ */
+export function kindFloorShortfalls(kinds) {
+  const counts = {};
+  for (const k of kinds.values()) if (k !== null) counts[k] = (counts[k] ?? 0) + 1;
+  return Object.entries(KIND_FLOORS)
+    .filter(([k, floor]) => (counts[k] ?? 0) < floor)
+    .map(([k, floor]) => `${k}: ${counts[k] ?? 0} classified, under its floor of ${floor}`);
+}
+
 test(
   "no tracked production script under plugin/scripts/ derives the repo it operates on from its own location",
   { skip: SKIP_WITHOUT_REPO },
@@ -172,6 +197,12 @@ test(
       const v = kind === "sh" ? shSelfLocationViolation(content) : jsSelfLocationViolation(content);
       if (v) violations.push(`${rel}: ${v}`);
     }
+    assert.deepEqual(
+      kindFloorShortfalls(kinds),
+      [],
+      "a filter or classifyScript() bug is thinning one script kind out of the instrument set while the aggregate "
+      + "count floor above still clears — that kind's detector would sweep a near-empty list (#2025)",
+    );
     // Over what THIS loop classified, not a second pass beside it: `js` is
     // the only kind that runs an entrypoint through the js detector.
     const unpoliced = NODE_SHEBANG_ENTRYPOINTS
@@ -198,6 +229,32 @@ test(
     );
   },
 );
+
+// ---- kindFloorShortfalls: the per-kind floors must refuse a one-kind drop the aggregate floor passes, and accept the real shape ----
+
+function kindsOf(counts) {
+  const kinds = new Map();
+  for (const [kind, n] of Object.entries(counts)) {
+    for (let i = 0; i < n; i++) kinds.set(`plugin/scripts/${kind}-${i}`, kind === "null" ? null : kind);
+  }
+  return kinds;
+}
+
+test("kindFloorShortfalls: accepts the measured baseline shape and each kind sitting exactly at its floor", () => {
+  assert.deepEqual(kindFloorShortfalls(kindsOf({ sh: 14, js: 36, null: 2 })), []);
+  assert.deepEqual(kindFloorShortfalls(kindsOf({ sh: 8, js: 21 })), []);
+});
+
+test("kindFloorShortfalls: flags every .sh dropped even though 38 entries still clear the aggregate > 30 floor", () => {
+  const kinds = kindsOf({ js: 36, null: 2 });
+  assert.ok(kinds.size > 30);
+  assert.deepEqual(kindFloorShortfalls(kinds), ["sh: 0 classified, under its floor of 8"]);
+});
+
+test("kindFloorShortfalls: flags a kind thinned to one under its floor, and js as well as sh", () => {
+  assert.deepEqual(kindFloorShortfalls(kindsOf({ sh: 7, js: 36 })), ["sh: 7 classified, under its floor of 8"]);
+  assert.deepEqual(kindFloorShortfalls(kindsOf({ sh: 14, js: 20 })), ["js: 20 classified, under its floor of 21"]);
+});
 
 // ---- Mutation tests: rule (a) must fail on the introduced pattern and pass without it, both directions ----
 
