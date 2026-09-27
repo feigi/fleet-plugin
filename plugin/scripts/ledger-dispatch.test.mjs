@@ -14,6 +14,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { computeBoard } from "./compute-board.mjs";
+import { deriveRun } from "./fleet-tick.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
 
@@ -217,6 +219,88 @@ test("settle accepts a live token `row` wrote, and restores a token a later `row
   ok("row", "415", "rewritten by hand");
   assert.equal(ok("settle", "impl-415", "PR#9").line, "#415 rewritten by hand · impl-415=PR#9");
   assert.deepEqual(read().dispatched, ["impl-415=PR#9"]);
+});
+
+// #1876: the tick owes an open PR a review while its implementer is still
+// live, so a PR-bound member can be dispatched before `settle impl-N=PR#M`
+// names the PR on the ticket row. dispatch's fallback then keys a row of its
+// own to the PR — truthful until the settle, when two rows would name one PR:
+// the cockpit drew two REVIEW cards and the tick's first-row-wins `byPr` lost
+// the live review. The settle folds the PR-keyed row into the ticket row.
+test("settle impl-N=PR#M folds the PR-keyed row a pre-settle dispatch created into the ticket row", (t) => {
+  const { ok, read } = fixture(t);
+  ok("dispatch", "1300", "impl-1300");
+  assert.equal(ok("dispatch", "1301", "fix-pr-1301").line, "#1301 fix-pr-1301");
+  ok("row", "1301", "fix-pr-1301 · review=member:review-pr-1301");
+  assert.deepEqual(read().rows, ["#1300 impl-1300", "#1301 fix-pr-1301 · review=member:review-pr-1301"]);
+
+  const folded = "#1300 impl-1300=PR#1301 · fix-pr-1301 · review=member:review-pr-1301";
+  assert.deepEqual(ok("settle", "impl-1300=PR#1301"), {
+    member: "impl-1300", outcome: "PR#1301", ticket: "#1300", line: folded, changed: true,
+  });
+  const l = read();
+  assert.deepEqual(l.rows, [folded]);
+  assert.deepEqual(l.dispatched, ["impl-1300=PR#1301", "fix-pr-1301"], "the fold moves row tokens only");
+
+  // Both readers see one PR with one live review on it.
+  const board = computeBoard({
+    ledger: { rows: l.rows, filed: [], ruled: [] }, issues: [], merged: [], ci: {}, prev: { tickets: [] }, now: 0,
+    prs: [{ number: 1301, state: "OPEN", labels: [], title: "pr 1301" }],
+  });
+  const cards = board.tickets.filter((c) => c.pr === 1301);
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].column, "REVIEW");
+  assert.equal(cards[0].agent, "review-pr-1301");
+  assert.equal(board.queue.reviewBacklog, 0, "the PR is under review, not owed one");
+  const run = deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null },
+    [{ number: 1301, labels: [], closingIssuesReferences: [{ number: 1300 }] }]);
+  assert.equal(run.reviewsLive, 1);
+  assert.deepEqual(run.reviewDue, []);
+
+  // Every later PR-bound write finds the one row naming the PR.
+  assert.equal(ok("settle", "fix-pr-1301", "no-op").ticket, "#1300");
+  assert.equal(ok("dispatch", "1301", "finisher-pr-1301").ticket, "#1300");
+  assert.equal(read().rows.length, 1);
+});
+
+test("the fold takes the PR row's settled tokens in order, under the two-argument spelling, wherever the PR row sits", (t) => {
+  const { ok, read } = fixture(t);
+  // The PR's row comes first here, and a third row follows the ticket's.
+  ok("dispatch", "1311", "fix-pr-1311");
+  ok("settle", "fix-pr-1311", "applied:73b356de");
+  ok("row", "1311", "fix-pr-1311=applied:73b356de · review=wf:r1=failed reviewed=abc1234:1/0/0 · ci=9:1:success");
+  ok("row", "1310", "impl-1310 · class=routine");
+  ok("dispatch", "1320", "impl-1320");
+  const folded = "#1310 impl-1310=PR#1311 · class=routine · fix-pr-1311=applied:73b356de · review=wf:r1=failed reviewed=abc1234:1/0/0 · ci=9:1:success";
+  assert.deepEqual(ok("settle", "impl-1310", "PR#1311"), {
+    member: "impl-1310", outcome: "PR#1311", ticket: "#1310", line: folded, changed: true,
+  });
+  assert.deepEqual(read().rows, [folded, "#1320 impl-1320"]);
+});
+
+// The must-LEAVE half: only the row keyed to the settled PR, and only when it
+// carries no implementer, is folded. A settle to a PR with no row of its own
+// is today's token rewrite and nothing more.
+test("settle folds no row keyed to another PR, no row carrying an impl- token, and nothing when the PR has no row", (t) => {
+  const { ok, read } = fixture(t);
+  ok("dispatch", "412", "impl-412");
+  ok("dispatch", "777", "fix-pr-777");
+  ok("dispatch", "420", "impl-420");
+  ok("row", "421", "impl-421=killed · review=wf:r2");
+  ok("dispatch", "413", "impl-413");
+  ok("dispatch", "414", "impl-414");
+  const before = read().rows;
+
+  // #420 is keyed to the PR but is an implementer's own row (live or settled).
+  assert.equal(ok("settle", "impl-412", "PR#420").line, "#412 impl-412=PR#420");
+  assert.equal(ok("settle", "impl-413=PR#421").line, "#413 impl-413=PR#421");
+  // No row keyed #500 at all; #777 belongs to a PR nobody here settles to.
+  assert.equal(ok("settle", "impl-414", "PR#500").line, "#414 impl-414=PR#500");
+  assert.deepEqual(read().rows, before.map((r) => r
+    .replace(/^#412 impl-412$/, "#412 impl-412=PR#420")
+    .replace(/^#413 impl-413$/, "#413 impl-413=PR#421")
+    .replace(/^#414 impl-414$/, "#414 impl-414=PR#500")));
+  assert.ok(read().rows.includes("#777 fix-pr-777"));
 });
 
 test("drain writes one marker a later reader recognises, and it holds supply alone", (t) => {

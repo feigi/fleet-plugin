@@ -1445,6 +1445,24 @@ function runSettle() {
     i = memberRowIndex(parsed);
     if (i !== -1 && !carries(data.rows[i], name)) data.rows[i] = `${data.rows[i]} · ${token}`;
   }
+  // #1876: the tick owes an open PR a review while its implementer is still
+  // live, so a PR-bound member can be dispatched before this settle names the
+  // PR here — and memberRowIndex() then finds no row naming it, so
+  // runDispatch() keys a row of its own to the PR. Once this row names the PR
+  // too, two rows would: the cockpit draws two cards and the tick's
+  // first-row-wins `byPr` reads one. Fold that row's tokens onto this one, in
+  // order, so later PR-bound writes find the one row through rowPr(). A row
+  // keyed to the PR carrying an implementer is that implementer's own, never
+  // folded.
+  const prKey = parsed.family === "impl" && outcome.startsWith("PR#") ? `#${outcome.slice("PR#".length)}` : null;
+  const j = prKey === null || i === -1 ? -1
+    : data.rows.findIndex((r) => rowKey(r) === prKey && !memberTokens(r).some((t) => t.family === "impl"));
+  if (j !== -1) {
+    const tail = data.rows[j].slice(prKey.length).trim();
+    if (tail !== "") data.rows[i] = `${data.rows[i]} · ${tail}`;
+    data.rows.splice(j, 1);
+    if (j < i) i -= 1;
+  }
   save(data);
   console.error(`    settled ${token}`);
   console.log(JSON.stringify(payload(i, true)));
