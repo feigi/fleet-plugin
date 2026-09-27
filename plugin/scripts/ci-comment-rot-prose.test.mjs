@@ -819,6 +819,16 @@ test("windowClaimFault still splits after a word that only ends in an abbreviati
   );
 });
 
+test("windowClaimFault still splits after a sentence-final word that only case-folds to an abbreviation (#1899)", () => {
+  // "Vs." is not "vs." — matched case-insensitively, the splitter read this
+  // proper noun as the abbreviation, joined the two sentences, and the next
+  // one's "Do not" rescued the merge promise.
+  assert.match(
+    windowClaimFault("In the window the bot opens its PR and merges it for the Vs. Do not hand-edit this to float."),
+    /no longer says, in one sentence/,
+  );
+});
+
 test("windowClaimFault still refuses a negation spelled with the opening curly quote — only U+2019 is accepted (#1852)", () => {
   // U+2018 is what smart-quote engines use to OPEN a single-quoted span, never
   // inside a contraction, so a paraphrase relying on it for "doesn't" is not one.

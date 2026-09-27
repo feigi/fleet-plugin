@@ -265,6 +265,20 @@ test("sentences does not end one at an abbreviation, closing marks or not, nor a
   assert.deepEqual(sentences("Pin, read, etc. Then go."), ["Pin, read, etc.", "Then go."]);
 });
 
+// #1899: the abbreviations are matched lowercase only. Folded case, a sentence
+// really ending in a word that shares their letters — a proper noun "Vs." —
+// was read as the abbreviation and joined to the next, two real sentences one.
+test("sentences ends one at a capitalized abbreviation lookalike, and still skips the lowercase abbreviation", () => {
+  for (const word of ["Vs.", "VS.", "E.g.", "E.G.", "I.e.", "Cf.", "CF.", "Viz.", "VIZ."]) {
+    assert.deepEqual(sentences(`Pin it for the ${word} Then read.`), [`Pin it for the ${word}`, "Then read."], word);
+  }
+  // The accept side, in the same fixture shape: lowercase stays one sentence.
+  for (const abbr of ["vs.", "e.g.", "i.e.", "cf.", "viz."]) {
+    const s = `Pin it for the ${abbr} Then read.`;
+    assert.deepEqual(sentences(s), [s], abbr);
+  }
+});
+
 // #1346/#1361: the third gutter shape, exercised nowhere else until a real
 // `.js` comment-form pair lands. Written here rather than left for that
 // consumer, per this file's own header: a guard with no dedicated test is a
