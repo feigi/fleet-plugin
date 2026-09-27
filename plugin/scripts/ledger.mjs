@@ -18,8 +18,16 @@
 // ledger-grammar.mjs's. `## Dispatched` gains an entry per dispatch and never
 // loses or reorders one — settling annotates an entry in place — which is what
 // lets `merge-bot-<n>` be counted from it.
+//
+// Writer policy (#531, reversing #151's item #7): the controller owns run
+// state (`row`/`settle`/`dispatch`/`drain`/`ruled`); filers append filings
+// with `filed`; all writes are serialized by `<file>.lock`. Every write
+// subcommand rewrites the WHOLE file from what it loaded, so two unlocked
+// writers are last-writer-wins — measured, 8 concurrent `filed` kept 2-5 of 8
+// rows — and the lock is what lets a second kind of writer exist at all. The
+// reasoning for each part of the lock lives at acquireLock() below.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
@@ -517,14 +525,183 @@ function save(d) {
     mkdirSync(dirname(file), { recursive: true });
     // Write to a sibling temp file and rename over the target. rename is
     // atomic on a POSIX filesystem — a crash mid-write leaves the temp file
-    // corrupt but never truncates the durability file itself.
-    const tmp = `${file}.tmp`;
+    // corrupt but never truncates the durability file itself. The temp name
+    // carries the pid: a shared `${file}.tmp` let one writer rename another's
+    // temp file out from under it, and the loser died on ENOENT (#531).
+    const tmp = `${file}.${process.pid}.tmp`;
     writeFileSync(tmp, out);
     renameSync(tmp, file);
   } catch (e) {
     die(`cannot write ${file}: ${e.message}`);
   }
   console.error(`    wrote ${file}`);
+}
+
+// ── The write lock (#531) ────────────────────────────────────────────────────
+//
+// Held from before load() through save() on every write subcommand, because
+// save() rewrites the whole document from what load() read: without it two
+// writers each load, append and save, and whichever renames last silently
+// discards the other's row. Reads (`check`, `read`) take no lock — the rename
+// already hands them either the old file or the new one, never a torn one.
+//
+// `<file>.lock` is created O_EXCL and holds its owner's pid. Creating it and
+// writing the pid are two steps, so a waiter can read an empty or partial
+// lock in between: anything that is not a canonical positive integer counts
+// as a LIVE holder — keep waiting, and never hand it to process.kill, where
+// NaN is a TypeError crash rather than a wait.
+//
+// A holder that died without releasing — SIGKILL always, and so does any
+// signal this file leaves unhandled (SIGQUIT, SIGABRT, a segfault: only a
+// normal exit and the three catchable signals below run the `exit` event
+// that releases it) — is taken over, but only under a second O_EXCL lock,
+// `<file>.lock.reap`, and only after RE-READING the lock under it and
+// finding the same dead pid. Unlink-then-create, or a bare rename, lets two
+// waiters that both saw the dead pid each remove the other's FRESH lock and
+// write at once; the re-read is what makes the takeover safe. A reap lock is
+// held for one read and one unlink, and one left behind by any of those same
+// abrupt deaths in that window is deliberately NOT reclaimed: waiters time
+// out naming the holder, and the operator removes it. Fail closed.
+//
+// A dead holder whose pid was recycled reads as live until the timeout.
+// Accepted: an mtime/age heuristic instead would take over a live writer on a
+// slow disk, which is the row loss this lock exists to prevent.
+//
+// The wait is bounded — 10 s by default — and the timeout is die(), exit 2,
+// having written nothing. `LEDGER_LOCK_TIMEOUT_MS` overrides it and, like
+// `LEDGER_GIT_TIMEOUT` above, can only ever SHORTEN it.
+//
+// What the lock does NOT cover: `check` -> `gh issue create` -> `filed` is
+// three commands, and each takes the lock (or not) alone, so two filers can
+// both read `clean` before either records. Accepted (#531): the measured
+// same-run accidental duplicate, #298 -> #302, was filed minutes apart, and a
+// claim/reserve subcommand closing that window was ruled out.
+const LOCK = `${file}.lock`;
+const REAP = `${LOCK}.reap`;
+const LOCK_WAIT_MS = (() => {
+  const v = process.env.LEDGER_LOCK_TIMEOUT_MS;
+  const ms = isDigits(String(v)) ? Number(v) : 0;
+  return ms > 0 && ms < 10_000 ? ms : 10_000;
+})();
+let lockHeld = false;
+
+const parsePid = (text) => (/^[1-9][0-9]*$/.test(text) ? Number(text) : null);
+
+// null when there is no lock to read — it was released between our failed
+// create and this read, and the next create attempt is the right response.
+function readLock() {
+  try {
+    return readFileSync(LOCK, "utf8");
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    die(`cannot read ${LOCK}: ${e.message}`);
+  }
+}
+
+// ESRCH alone is dead. EPERM is a live process we may not signal, and any
+// other error is not evidence of death either.
+function isDead(pid) {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (e) {
+    return e.code === "ESRCH";
+  }
+}
+
+// true when the takeover ran (whatever it found under the reap lock), so the
+// caller retries the create at once; false when another waiter holds the
+// reap lock, so the caller waits like any other contended lock.
+function reapDeadHolder(deadPid) {
+  let fd;
+  try {
+    fd = openSync(REAP, "wx");
+  } catch (e) {
+    if (e.code === "EEXIST") return false;
+    die(`cannot create ${REAP}: ${e.message}`);
+  }
+  try {
+    closeSync(fd);
+    // Exact match only — a waiter that got here first may already have
+    // reaped the dead lock and taken a fresh one of its own.
+    if (readLock() === String(deadPid)) {
+      // Already gone is already the outcome this call wants: an operator
+      // clearing a wedged lock by hand between the read above and here must
+      // not turn our own cleanup into an uncaught crash.
+      try {
+        unlinkSync(LOCK);
+      } catch (e) {
+        if (e.code !== "ENOENT") throw e;
+      }
+    }
+  } finally {
+    unlinkSync(REAP);
+  }
+  return true;
+}
+
+function releaseLock() {
+  if (!lockHeld) return;
+  lockHeld = false;
+  try {
+    if (readFileSync(LOCK, "utf8") === String(process.pid)) unlinkSync(LOCK);
+  } catch {
+    // Nothing to release, or nothing this process can do about it on its way
+    // out: exit handlers cannot fail usefully.
+  }
+}
+
+async function acquireLock() {
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+  } catch (e) {
+    die(`cannot write ${file}: ${e.message}`);
+  }
+  process.on("exit", releaseLock);
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => process.exit(2));
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    let fd = null;
+    try {
+      fd = openSync(LOCK, "wx");
+    } catch (e) {
+      if (e.code !== "EEXIST") die(`cannot create ${LOCK}: ${e.message}`);
+    }
+    if (fd !== null) {
+      try {
+        writeSync(fd, String(process.pid));
+      } catch (e) {
+        // Ours, and empty or partial: every waiter reads it as live, and
+        // releaseLock() will not match it, so it goes now or never.
+        closeSync(fd);
+        unlinkSync(LOCK);
+        die(`cannot write ${LOCK}: ${e.message}`);
+      }
+      closeSync(fd);
+      lockHeld = true;
+      return;
+    }
+    const holder = readLock();
+    if (holder === null) {
+      // Ordinarily transient — released between our failed create above and
+      // this read — so retrying the create at once beats sleeping first.
+      // But that same shape recurs FOREVER if reading it fails for a reason
+      // this read can never clear: a `.lock` path that is a dangling
+      // symlink reports EEXIST to the create (the dirent exists) and ENOENT
+      // to every read (its target does not). Bounding it here is what keeps
+      // that case inside the 10 s wait this lock promises rather than
+      // spinning past it at 100% CPU.
+      if (Date.now() >= deadline) die(`cannot lock ${file} — ${LOCK} exists but cannot be read`);
+      continue;
+    }
+    const pid = parsePid(holder);
+    if (pid !== null && isDead(pid) && reapDeadHolder(pid)) continue;
+    if (Date.now() >= deadline) die(`cannot lock ${file} — held by pid ${pid ?? JSON.stringify(holder)}`);
+    // A timer, not a blocking sleep: a waiter holds no lock, so a SIGTERM
+    // that arrives while it waits should end it now, and the handlers above
+    // only run when the event loop is free to run them.
+    await new Promise((r) => setTimeout(r, 5 + Math.random() * 15));
+  }
 }
 
 // Read ahead of the dispatch, not inside one branch of it. This guard used to
@@ -552,6 +729,8 @@ function save(d) {
 // bundles both under one undifferentiated exit 2, with no ordering between them.
 if (requireFile && !existsSync(file)) die(`--require-file given but ledger file does not exist: ${file}`);
 
+const WRITE_COMMANDS = new Set(["row", "filed", "ruled", "dispatch", "settle", "drain"]);
+if (WRITE_COMMANDS.has(cmd)) await acquireLock();
 const data = load();
 
 // The payload subcommands end by falling out of this chain, never by calling

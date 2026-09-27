@@ -1358,8 +1358,8 @@ for a token on a ticket's line — never a hand edit.
 |---|---|
 | Implementer report | `verify-sha.sh`; `ledger.mjs settle impl-<N>=PR#<M>`, or `=bailed` and relabel by cause (**Implementer bails before implementing**, below) |
 | Review workflow notification / `review-pr-<n>` report | write `<scratch>/review-<pr>.json`; `reviewed=<head>:<survived>/<refuted>/<unverified>` on the PR's row (**Reviewers**) |
-| Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; copy the refutations it reversed to `ruled` |
-| Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled` |
+| Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; copy the refutations it reversed to `ruled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
+| Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Label seen (persistent Monitor) | nothing to record |
 | CI run terminal | `ci=<run-id>:<attempt>:<conclusion>` on the row; then the finisher gate (below) |
 | Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `reap.sh --apply` |
@@ -2240,7 +2240,9 @@ all.
 > halted on a diverged head.
 >
 > Then `SendMessage` the controller the pushed SHA, your apply/defer split, and
-> the deferral issue numbers, and exit. **Deferring everything is a normal
+> the deferral issue numbers — a `filed: #N <subject>` line for every issue
+> step 5 created, and `unrecorded: #N <subject>` for one whose `ledger.mjs filed`
+> failed twice — and exit. **Deferring everything is a normal
 > outcome, not a stall:** nothing is then staged, `git commit` refuses an empty
 > index, `git push origin HEAD:<branch>` prints `Everything up-to-date`, and you
 > report `no-op, HEAD unchanged at <sha>` in place of a new SHA. Say it
@@ -2331,7 +2333,11 @@ a minute apart showed *different* mutants, so a member's report and any single
    never label over it — and file it the way step 5 does, through
    `ledger.mjs check "<subject>"`, never a bare search. The finisher files last,
    off its own read of what the reviewer left behind, so a deferral it reads as
-   unfiled may already be on the tracker under someone else's wording.
+   unfiled may already be on the tracker under someone else's wording. Then
+   record it the way step 5 does: `ledger.mjs filed <N> "<subject>"`
+   immediately after `gh issue create`, with the same subject string you passed
+   to `check`. If `filed` fails, retry once; if it fails again, leave the issue
+   alone — it exists and is correct — and report it `unrecorded: #N <subject>`.
 
    **A fix-applier's "applied" is a claim like any other**, and nothing else
    checks it — the review ran against a snapshot cut before those edits existed.
@@ -2402,8 +2408,10 @@ a minute apart showed *different* mutants, so a member's report and any single
    them passes unchanged. A repo that defines none of the three does not gate on
    one — `gh label list` settles that, and it is no licence to skip the read
    where they exist.
-4. `SendMessage` you the label, the deferral issue numbers, and anything it
-   halted on — cause and evidence, below, never a bare "head moved".
+4. `SendMessage` you the label, the deferral issue numbers — a
+   `filed: #N <subject>` line for every issue duty 2 created, and
+   `unrecorded: #N <subject>` for one whose `filed` failed twice — and anything
+   it halted on — cause and evidence, below, never a bare "head moved".
 
 **Give the finisher the instrument re-check verbatim too.** Duty 1 and duty 2
 each run a script the digest covers — `worktree-audit.sh` and `ledger.mjs`,
@@ -3298,9 +3306,28 @@ Plus two append-only lists:
 - **filed** (`ledger.mjs filed <issue> <subject>`, checked with `ledger.mjs check
   <subject>` before every `gh issue create`) — so a finding already recorded
   this run is not filed twice. That is not a guarantee against duplicates at
-  large; the tracker query below is what covers those.
+  large; the tracker query below is what covers those. The FILER writes this
+  one, not you: `review-and-fix.md` step 5 and finisher duty 2 each run `filed`
+  immediately after their own `gh issue create`, with the subject they passed
+  to `check`, and report `filed: #N <subject>`. A filer whose `filed` failed
+  twice reports `unrecorded: #N <subject>` instead, and you run `filed` for it.
 - **ruled** (`ledger.mjs ruled <pr> <decision>`) — PR + decision + one-line reason,
   so a replacement controller does not re-litigate a settled call.
+
+**Writer policy: the controller owns run state (`row`/`settle`/`dispatch`/`drain`/`ruled`);
+filers append filings with `filed`; all writes are serialized by `<file>.lock`.**
+Every write rewrites the whole file from what it read, so without the lock two
+concurrent writers are last-writer-wins — measured, 8 concurrent `filed` kept
+2–5 of 8 rows (#531). A writer that cannot take the lock within 10 s exits 2
+naming the holder's pid, having written nothing; a lock whose holder is dead is
+taken over, and a leftover `<file>.lock.reap` is never reclaimed — remove it by
+hand once nothing is writing. Reads (`check`, `read`) take no lock.
+
+**The gap the lock does not close:** `check` → `gh issue create` → `filed` is
+three commands, and the lock covers each one alone, so two filers can both read
+`clean` in the seconds before either records. Accepted — the measured
+same-run accidental duplicate, #298 → #302, was filed minutes apart — and no
+claim/reserve step exists to close it.
 
 `check` exits **0** clean, **1** already in this run's filed list, **2** usage
 error (no JSON on stdout), **3** the ledger is clean but open or closed tracker issues match — read

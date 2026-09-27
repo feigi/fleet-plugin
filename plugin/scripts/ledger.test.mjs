@@ -11,8 +11,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, existsSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, existsSync, readFileSync, readdirSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -3005,4 +3005,252 @@ test("a malformed LEDGER_GIT_TIMEOUT override is rejected outright, not coerced 
     "a malformed override must not shorten the bound — the probe should still be accepted at the untouched 10 s default");
   assert.equal(r.json.tracker.ok, true, `a malformed override cut the probe short: ${r.stderr}`);
   assert.doesNotMatch(r.stderr, /ETIMEDOUT/, "the default bound must not have fired");
+});
+
+// ── The write lock (#531) ────────────────────────────────────────────────────
+//
+// Every write subcommand rewrites the whole ledger from what it loaded, so an
+// unlocked pair of writers is last-writer-wins — measured before the lock, 8
+// concurrent `filed` kept 2-5 of 8 rows, and the losers exited 2 on a shared
+// temp file's rename. These spawn REAL concurrent processes and assert
+// invariants that hold on every run under the lock, rather than timing a
+// window; nothing here sleeps. The timeout tests hold the lock explicitly, as a
+// file carrying a pid, and shorten the wait through LEDGER_LOCK_TIMEOUT_MS.
+function lockFixture(t) {
+  const dir = mkdtempSync(join(tmpdir(), "ledger-lock-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "ledger.md");
+  const lock = `${file}.lock`;
+  // PATH holds `git` alone, as in cliFixture(): nothing below reaches the
+  // tracker, and the real `gh` must not be reachable if something ever does.
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  symlinkSync(REAL_GIT, join(bin, "git"));
+  const env = { ...process.env, PATH: bin };
+  delete env.LEDGER_LOCK_TIMEOUT_MS;
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  const argvOf = (args) => [SCRIPT, "--file", file, ...args];
+  // Bounded, so a writer that never gives up waiting fails its test instead
+  // of hanging the suite: spawnSync blocks the event loop the runner's own
+  // --test-timeout needs.
+  const cli = (args, extraEnv = {}) =>
+    spawnSync(process.execPath, argvOf(args), { encoding: "utf8", env: { ...env, ...extraEnv }, cwd: dir, timeout: 20_000 });
+  // Resolves on `close`, not `exit`, so stdout/stderr are complete.
+  const cliAsync = (args) => new Promise((resolve, reject) => {
+    const c = spawn(process.execPath, argvOf(args), { env, cwd: dir });
+    let stderr = "";
+    c.stderr.on("data", (b) => { stderr += b; });
+    c.on("error", reject);
+    c.on("close", (status) => resolve({ status, stderr }));
+  });
+  // Every sibling of the ledger this suite's lock could leave behind: the
+  // lock, the reap lock, and a per-pid temp file.
+  const residue = () => readdirSync(dir).filter((f) => f.startsWith("ledger.md") && f !== "ledger.md");
+  return { dir, file, lock, cli, cliAsync, residue };
+}
+
+// A pid that is certainly not running: spawnSync has already reaped the
+// child. Asserted rather than assumed, so a recycled pid fails here loudly
+// instead of turning a takeover test into a timeout.
+function deadPid() {
+  const { pid } = spawnSync(process.execPath, ["-e", ""]);
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" }, `pid ${pid} was recycled before the test could use it`);
+  return pid;
+}
+
+const filedRows = (file) => (readFileSync(file, "utf8").match(/^- #\d+ /gm) ?? []).length;
+
+test("lock: 8 concurrent `filed` on a fresh ledger keep all 8 rows and all exit 0 (#531)", async (t) => {
+  const { file, cliAsync, residue } = lockFixture(t);
+  const results = await Promise.all(Array.from({ length: 8 }, (_, i) => cliAsync(["filed", String(100 + i), `concurrent subject ${i}`])));
+  assert.deepEqual(results.map((r) => r.status), Array(8).fill(0), results.map((r) => r.stderr).join("\n"));
+  assert.equal(filedRows(file), 8, `a concurrent writer lost a row:\n${readFileSync(file, "utf8")}`);
+  assert.deepEqual(residue(), []);
+});
+
+test("lock: a lock left by a dead pid is taken over and the write lands (#531)", (t) => {
+  const { file, lock, cli, residue } = lockFixture(t);
+  writeFileSync(lock, String(deadPid()));
+  const r = cli(["filed", "7", "survives a dead holder"], { LEDGER_LOCK_TIMEOUT_MS: "2000" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(readFileSync(file, "utf8"), /^- #7 survives a dead holder$/m);
+  assert.deepEqual(residue(), [], "the dead holder's lock, the reap lock or a temp file was left behind");
+});
+
+test("lock: concurrent takeover of a dead-pid lock yields one holder at a time — all rows, all exit 0, no residue (#531)", async (t) => {
+  // The takeover is the part a naive unlink-then-create gets wrong: two
+  // waiters that both saw the dead pid each remove the other's fresh lock and
+  // write at once. All N rows surviving is what "one holder at a time" looks
+  // like from outside.
+  //
+  // THE CEILING: this pins the invariant, not the re-read under the reap lock
+  // that keeps it. That re-read only matters when a second waiter's stale
+  // read of the dead pid straddles the first waiter's whole takeover, a
+  // window of microseconds — measured, a mutant that unlinks unconditionally
+  // there lost a row in 3 of 40 rounds of this test. It is green on every
+  // round of the real lock, so a red here is always real; a green is not
+  // proof the re-read is still there.
+  const { file, lock, cliAsync, residue } = lockFixture(t);
+  writeFileSync(lock, String(deadPid()));
+  const results = await Promise.all(Array.from({ length: 8 }, (_, i) => cliAsync(["filed", String(200 + i), `takeover subject ${i}`])));
+  assert.deepEqual(results.map((r) => r.status), Array(8).fill(0), results.map((r) => r.stderr).join("\n"));
+  assert.equal(filedRows(file), 8, `a writer lost a row across the takeover:\n${readFileSync(file, "utf8")}`);
+  assert.deepEqual(residue(), []);
+});
+
+test("lock: a lock held by a live pid times out at exit 2 naming it, and the ledger is byte-for-byte unchanged (#531)", (t) => {
+  const { file, lock, cli } = lockFixture(t);
+  writeFileSync(file, ledgerText(["#1 already here"]));
+  const before = readFileSync(file);
+  writeFileSync(lock, String(process.pid));
+  const r = cli(["filed", "2", "must not land"], { LEDGER_LOCK_TIMEOUT_MS: "150" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.ok(r.stderr.includes(`ledger: cannot lock ${file} — held by pid ${process.pid}`), r.stderr);
+  assert.equal(r.stdout, "", "a timed-out write printed a payload");
+  assert.deepEqual(readFileSync(file), before, "the ledger changed under a lock this writer never got");
+  assert.equal(readFileSync(lock, "utf8"), String(process.pid), "a live holder's lock was taken over or removed");
+});
+
+test("lock: every write subcommand takes the lock, before it validates anything (#531)", (t) => {
+  // One set names the writers; a subcommand missing from it writes unlocked
+  // and silently races every locked writer. Each call here would otherwise
+  // succeed or fail on its own terms, so exit 2 WITH the lock message is only
+  // reachable through the lock.
+  const { lock, cli } = lockFixture(t);
+  writeFileSync(lock, String(process.pid));
+  for (const args of [
+    ["row", "5", "a row"],
+    ["filed", "5", "a subject"],
+    ["ruled", "5", "a decision"],
+    ["dispatch", "5", "impl-5"],
+    ["settle", "impl-5", "PR#6"],
+    ["drain", "a reason"],
+  ]) {
+    const r = cli(args, { LEDGER_LOCK_TIMEOUT_MS: "50" });
+    assert.equal(r.status, 2, `${args[0]}: ${r.stderr}`);
+    assert.match(r.stderr, /cannot lock .* held by pid/, `${args[0]} wrote without the lock`);
+  }
+});
+
+test("lock: reads take no lock — `check` and `read` answer while a live writer holds it (#531)", (t) => {
+  // The accept half: a lock that also gated the reads would put the
+  // duplicate-filing guard behind every concurrent write, and turn a slow
+  // writer into a `check` that refuses at exit 2 — nothing checked at all.
+  const { file, lock, cli } = lockFixture(t);
+  writeFileSync(file, ledgerText(["#9 widget guard missing"]));
+  writeFileSync(lock, String(process.pid));
+  const read = cli(["read"], { LEDGER_LOCK_TIMEOUT_MS: "50" });
+  assert.equal(read.status, 0, read.stderr);
+  assert.deepEqual(JSON.parse(read.stdout).filed, ["#9 widget guard missing"]);
+  const check = cli(["check", "widget guard missing"], { LEDGER_LOCK_TIMEOUT_MS: "50" });
+  assert.equal(check.status, 1, `check must still reach its ledger arm under a held lock: ${check.stderr}`);
+  assert.match(check.stderr, /ALREADY FILED/);
+});
+
+test("lock: an unparseable holder is a live one — waited on, never signalled, never taken over (#531)", (t) => {
+  // O_EXCL create and pid write are two steps, so an empty or partial lock is
+  // a normal thing for a waiter to read. process.kill(NaN, 0) throws
+  // ERR_INVALID_ARG_TYPE — a crash where a wait belongs.
+  const { lock, cli } = lockFixture(t);
+  for (const content of ["", "12ab", "0", "-5"]) {
+    writeFileSync(lock, content);
+    const r = cli(["filed", "3", "x"], { LEDGER_LOCK_TIMEOUT_MS: "50" });
+    assert.equal(r.status, 2, `${JSON.stringify(content)}: ${r.stderr}`);
+    assert.match(r.stderr, /cannot lock .* held by pid/, `${JSON.stringify(content)}: ${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /ERR_INVALID_ARG_TYPE/);
+    assert.equal(readFileSync(lock, "utf8"), content, `an unparseable holder ${JSON.stringify(content)} was taken over`);
+  }
+});
+
+test("lock: a reap lock left behind fails closed — the dead holder is named, nothing is removed (#531)", (t) => {
+  // A reap lock outliving its reaper means a takeover was in flight when it
+  // was SIGKILLed. Reclaiming it would need exactly the age heuristic the lock
+  // refuses, so waiters time out and the operator removes it.
+  const { file, lock, cli } = lockFixture(t);
+  const dead = deadPid();
+  writeFileSync(lock, String(dead));
+  writeFileSync(`${lock}.reap`, "");
+  const r = cli(["filed", "4", "x"], { LEDGER_LOCK_TIMEOUT_MS: "50" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.ok(r.stderr.includes(`held by pid ${dead}`), r.stderr);
+  assert.equal(readFileSync(lock, "utf8"), String(dead));
+  assert.ok(existsSync(`${lock}.reap`), "a stale reap lock was reclaimed");
+  assert.equal(existsSync(file), false, "a write landed without the lock");
+});
+
+test("lock: a holder this process may not signal (EPERM) is live, never taken over (#531)", (t) => {
+  // pid 1 always exists. Unprivileged, kill(1, 0) is EPERM; as root it
+  // succeeds. Either way the holder is alive, and only ESRCH reads as dead —
+  // a takeover on EPERM would remove a running writer's lock.
+  const { file, lock, cli } = lockFixture(t);
+  writeFileSync(lock, "1");
+  const r = cli(["filed", "8", "x"], { LEDGER_LOCK_TIMEOUT_MS: "50" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.ok(r.stderr.includes("held by pid 1"), r.stderr);
+  assert.equal(readFileSync(lock, "utf8"), "1", "a live holder's lock was taken over");
+  assert.equal(existsSync(file), false, "a write landed without the lock");
+});
+
+test("lock: a dangling symlink at the lock path fails closed within the timeout, not a CPU spin (#531)", (t) => {
+  // `openSync(lock, "wx")` sees the dirent and reports EEXIST even when the
+  // symlink's target does not exist; every `readFileSync(lock)` after that
+  // reports ENOENT for a reason readLock()'s own "released between our
+  // failed create and this read" comment does not cover — the lock was
+  // never released, it is simply unreadable, and the create will report
+  // EEXIST again next time exactly as it did this time. Before this fix that
+  // combination skipped the deadline check entirely and spun at 100% CPU
+  // past the timeout this test bounds the whole run by.
+  const { dir, file, lock, cli } = lockFixture(t);
+  symlinkSync(join(dir, "nowhere"), lock);
+  const r = cli(["filed", "9", "x"], { LEDGER_LOCK_TIMEOUT_MS: "200" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /cannot lock .* exists but cannot be read/, r.stderr);
+  assert.equal(existsSync(file), false, "a write landed without the lock");
+});
+
+// isDigits()'s job here is #1199's for LEDGER_GIT_TIMEOUT, restated for this
+// override: the accepted spelling is digits alone, so anything Number()
+// would still happily parse — a decimal point, a leading `-`, exponent
+// notation — must be rejected FLAT rather than taken as a genuine, tiny
+// bound. A regression that swapped
+// `isDigits(String(v)) ? Number(v) : 0` for a bare `Number(v) || 0` would
+// still pass every #531 test above unmodified, since none of them use a
+// value Number() itself rejects — this is the discriminating case.
+//
+// Bounded fast rather than proven against the full 10 s default: the holder
+// planted here never releases, so a value wrongly accepted as a genuine
+// sub-second bound exits well inside this test's own short external
+// timeout, where the correct fallback to the 10 s default is still running
+// when that external timeout fires. spawnSync reports that as `ETIMEDOUT`,
+// not as a raw signal kill — the child's own SIGTERM handler (acquireLock(),
+// above) turns the timeout's SIGTERM into its own graceful `exit 2` first.
+test("a malformed LEDGER_LOCK_TIMEOUT_MS override is rejected outright, not coerced by Number() (#531)", (t) => {
+  const { file, lock } = lockFixture(t);
+  writeFileSync(lock, String(process.pid));
+  for (const bad of ["1.5", "-5", "5e3", "abc"]) {
+    const r = spawnSync(process.execPath, [SCRIPT, "--file", file, "filed", "9", "x"], {
+      encoding: "utf8", timeout: 300,
+      env: { ...process.env, LEDGER_LOCK_TIMEOUT_MS: bad },
+    });
+    assert.equal(r.error?.code, "ETIMEDOUT",
+      `${JSON.stringify(bad)}: resolved before this test's own bound could prove it, meaning the malformed value became the wait (status ${r.status}, stderr ${r.stderr})`);
+  }
+});
+
+// The other half of "can only shorten": a well-formed override ABOVE the
+// 10 s default must clamp down to it, not stand as a 100 s (or longer)
+// bound — the same claim #1199 proves for LEDGER_GIT_TIMEOUT, at the same
+// real-time cost, because there is no fixed-latency "real answer" for a
+// held lock to arrive at partway through the way a probe's own sleep gives
+// that test.
+test("LEDGER_LOCK_TIMEOUT_MS cannot lengthen the bound past 10 s, only shorten it (#531)", (t) => {
+  const { file, lock, cli } = lockFixture(t);
+  writeFileSync(lock, String(process.pid));
+  const t0 = Date.now();
+  const r = cli(["filed", "9", "x"], { LEDGER_LOCK_TIMEOUT_MS: "99999" });
+  const elapsed = Date.now() - t0;
+  assert.equal(r.status, 2, r.stderr);
+  assert.ok(elapsed < 11_000, `a 99999 ms override became the bound: waited ${elapsed} ms`);
+  assert.ok(elapsed >= 9_500, `exited before the untouched 10 s default could have fired: waited ${elapsed} ms`);
 });
