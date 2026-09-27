@@ -262,6 +262,16 @@ const SENTENCE_END = String.raw`(?:(?:[!?]|(?<!(?<![a-z\d])(?:e\.g|i\.e|cf|viz|v
 // plain "p" and the class a few literal characters, so "dispatched" scopes
 // again, silently.
 const UPDATE_TYPE = String.raw`(?<![a-z\d])(?:minors?|majors?|patch(?:es)?)(?![a-z\d])`;
+
+// #1992. Both sentence rows are spelling bans, triggered by the stale
+// sentence's own words: "bounding drift" here, a merge verb in
+// UNSCOPED_MERGE_SENTENCE below. The same unscoped claim reworded — "keeping
+// drift bounded at about one month", "that caps drift at a month" — passes.
+// That ceiling is accepted, not missed: the table bans a stale FORM, and
+// reading a claim for what it says is kept, by the header's rule, for a claim
+// whose rewording is as likely as its reversion, as securityReleaseFault and
+// windowReleaseCountFault read theirs. A longer list of trigger words would
+// still be a spelling, only a longer one.
 const UNSCOPED_DRIFT_SENTENCE = new RegExp(
   String.raw`(?:^|${SENTENCE_END})(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*\bbounding\s+drift\b(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*(?:${SENTENCE_END}|$)`,
   "i",
@@ -289,6 +299,17 @@ const UNSCOPED_AUTOMERGED_SPAN = new RegExp(
 // too. Bounding it to `merg(?:e[sd]?|ing)` keeps every verb form this needs —
 // merge, merges, merged, merging, automerges, automerged — while
 // "merger"/"mergers" no longer satisfy it (review finding, PR #1990).
+//
+// #1992. Its trigger has the drift row's ceiling in merge words: "a bump
+// lands once its checks go green" and "the bump is approved once checks are
+// green" pass. Widening the verb list buys more spellings, not the concept.
+// `land`, the likeliest synonym, is in pin-drift.sh four times already —
+// releases "landing inside" the 43 days, a move "LANDED on the branch", the
+// pin "lands roughly", bumps that "keep landing" — none shares a sentence
+// with a checks/CI/green word, so none would trip even a widened trigger
+// here; the row does not guard ADR 0010, but the same widened trigger reds
+// its "none landed in the 43 days after — and node here runs `node
+// --check`", whose "check" is a flag.
 const UNSCOPED_MERGE_SENTENCE = new RegExp(
   String.raw`(?:^|${SENTENCE_END})(?=(?:(?!${SENTENCE_END})[^])*?\b(?:auto-?)?merg(?:e[sd]?|ing)\b)(?=(?:(?!${SENTENCE_END})[^])*?\b(?:checks?|CI|green)\b)(?:(?!${SENTENCE_END}|${UPDATE_TYPE})[^])*(?:${SENTENCE_END}|$)`,
   "i",
