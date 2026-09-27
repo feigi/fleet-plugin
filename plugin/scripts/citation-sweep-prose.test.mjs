@@ -293,14 +293,16 @@ const UNSCOPED_MERGE_SENTENCE = new RegExp(
 // with only "more", "new", "further", "other", "Node" or a `26`/`26.x`
 // between; any other word between makes it a count of some kind of release —
 // "no security release" — not the window's total. The rest of the count's
-// clause, up to `, ; : ( ) — –`, says which reference point it counts from:
-// pinPlacements reading it after the pin, or "in the 43 days", ties it to the
-// window whatever else the clause says; failing that, a before-the-pin
-// reading, or "past", "behind", "beyond", or since/after/from `26.5.0`,
-// measures it from somewhere else — "Of those 8 releases past `26.5.0`",
-// "ended the 43 days with 8 releases behind". A count with none of those
-// belongs to the window its sentence names. A bare "not" (or "not all")
-// directly before it denies the count rather than claiming it.
+// clause, up to `, ; : ( ) — –` or a clause break (`and`, `but`, `so`,
+// `yet`), says which reference point it counts from: pinPlacements reading
+// it after the pin, or "in the 43 days", ties it to the window whatever
+// else the clause says; failing that, a before-the-pin reading, or "past"
+// (not the window's own "the past 43 days"), "behind", "beyond", or
+// since/after/from `26.5.0`, measures it from somewhere else — "Of those 8
+// releases past `26.5.0`", "ended the 43 days with 8 releases behind". A
+// count with none of those belongs to the window its sentence names. A bare
+// "not" (or "not all") directly before it denies the count rather than
+// claiming it.
 //
 // THE CEILING. It knows the window only as the words above, so "while the
 // pin sat unbumped, Node shipped 8 releases" names no window and passes; so
@@ -310,21 +312,23 @@ const UNSCOPED_MERGE_SENTENCE = new RegExp(
 // out" — reds, the loud direction. It checks the window's count alone: the 8
 // behind and the three before the pin are not held to their numbers. And,
 // unlike securityReleaseFault, a file stating no count at all passes: the
-// rows below carry no live needle for this count, for #1756's reason.
+// rows below carry no live needle for this count, for #1756's reason. It
+// also reads no count that never sits beside the word "release(s)" itself,
+// so an anaphoric "eight of them" evades it entirely (#2003).
 const COUNT_WORDS = { no: 0, zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
 const RELEASE_COUNT = new RegExp(
   String.raw`(?<![\w.\x60-])(?<!\bnode\s+)(?<count>\d+|${Object.keys(COUNT_WORDS).join("|")})\s+(?:(?:more|new|further|other|node|\x60?v?26(?:\.x)?\x60?)\s+)*releases?\b`,
   "gi",
 );
 const PIN_WINDOW = /\b43[\s-]days?\b|\b(?:since|after)\s+(?:#335\b|(?:the\s+|it\s+was\s+)?pin(?:s|ned|ning)?\b)/i;
-const MEASURED_ELSEWHERE = /\b(?:past|behind|beyond)\b|\b(?:since|after|from)\s+\x60?v?26\.5\.0\b/i;
+const MEASURED_ELSEWHERE = /\b(?:(?<!\bthe\s+)past|behind|beyond)\b|\b(?:since|after|from)\s+\x60?v?26\.5\.0\b/i;
 
 function windowReleaseCountFault(text) {
   for (const sentence of text.split(new RegExp(SENTENCE_END)).map(normalize)) {
     if (!PIN_WINDOW.test(sentence)) continue;
     for (const { groups, index, 0: phrase } of sentence.matchAll(RELEASE_COUNT)) {
       if (/\bnot\s+(?:all\s+)?$/i.test(sentence.slice(0, index))) continue;
-      const rest = sentence.slice(index + phrase.length).split(/[,;:()—–]/)[0];
+      const rest = sentence.slice(index + phrase.length).split(new RegExp(String.raw`[,;:()—–]|${CLAUSE_BREAK.source}`, "i"))[0];
       const placements = [...pinPlacements(rest)];
       if (!placements.includes("after") && (placements.includes("before") || MEASURED_ELSEWHERE.test(rest))) continue;
       const count = groups.count.toLowerCase();
@@ -881,6 +885,11 @@ test("the same false count in other words — releases in the 43 days that are n
     "Of those 8 releases in the 43 days, exactly one was a security release.",
     // A reference point beside the count does not excuse placing it in the window.
     "Node shipped 8 releases past `26.5.0` in the 43 days.",
+    // A clause break (and/but/so/yet) after the count does not excuse it —
+    // the reference point has to sit in the count's own clause (#1970 review).
+    "`.nvmrc` sat at `26.5.0` for 43 days, from #335 setting it on 2026-08-11 to this measurement, while Node shipped eight 26.x releases and the pin fell behind.",
+    // "the past 43 days" is the window naming itself, not a reference point.
+    "Node shipped 8 releases in the past 43 days.",
     // Wrapped across the `# ` gutter.
     "# The measured cost of that silence is 43 days, with\n# eight releases landing inside them.\n",
   ]) {
@@ -900,6 +909,9 @@ test("a count measured from `26.5.0`, or placed before the pin, is not read as t
     "Not all 8 releases landed in the 43 days.",
     // A sub-count of one kind of release is not the window's total.
     "No security release landed in the 43 days.",
+    "Node shipped 8 releases past `26.5.0` and the pin never moved.",
+    // "the past 43 days" still names the window when the count is true.
+    "It sat for the past 43 days, with five 26.x releases landing inside them.",
     // Naming no window, a count is not this claim.
     "An unscheduled bot would mint roughly 8 releases a month.",
   ]) {
