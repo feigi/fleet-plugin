@@ -351,20 +351,43 @@ const UNSCOPED_MERGE_SENTENCE = new RegExp(
 // behind and the three before the pin are not held to their numbers. And,
 // unlike securityReleaseFault, a file stating no count at all passes: the
 // rows below carry no live needle for this count, for #1756's reason. It
-// also reads no count that never sits beside the word "release(s)" itself,
-// so an anaphoric "eight of them" evades it entirely (#2003).
+// also reads a count that never sits beside the word "release(s)" at all —
+// an anaphoric "eight of them", "eight of those", or "eight of Node's
+// releases" referring back to a "release(s)" named earlier in the same
+// sentence makes the identical false claim, the house style ADR 0010, this
+// ticket's own review comment and ADR 0002/0008 all reach for elsewhere
+// (#2003).
 const COUNT_WORDS = { no: 0, zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
 const RELEASE_COUNT = new RegExp(
-  String.raw`(?<![\w.\x60-])(?<!\bnode\s+)(?<count>\d+|${Object.keys(COUNT_WORDS).join("|")})\s+(?:(?:more|new|further|other|node|\x60?v?26(?:\.x)?\x60?)\s+)*releases?\b`,
+  String.raw`(?<![\w.\x60-])(?<!\bnode\s+)(?<count>\d+|${Object.keys(COUNT_WORDS).join("|")})\s+(?:(?:more|new|further|other|node|of\s+(?:node['’]s|the)|\x60?v?26(?:\.x)?\x60?)\s+)*releases?\b`,
   "gi",
 );
+// A count with no noun following it at all — "eight of them"/"eight of
+// those" — has no "release(s)" to match beside, so it needs its own shape:
+// the pronoun, plus RELEASE_NAMED reading back over the sentence so far for
+// the antecedent it stands in for. That scope is the sentence, not the
+// clause: #2003's own motivating example names "releases" ahead of an
+// em-dash and reads "8 of them" only after it, past the clause break the
+// window/pin scan elsewhere in this file stops at. The same width that lets
+// it catch that example lets an unrelated "N of them" later in a sentence
+// that also happens to name a release ride along — a false-alarm risk this
+// shape accepts rather than parses away.
+const ANAPHORIC_RELEASE_COUNT = new RegExp(
+  String.raw`(?<![\w.\x60-])(?<!\bnode\s+)(?<count>\d+|${Object.keys(COUNT_WORDS).join("|")})\s+of\s+(?:them|those)\b`,
+  "gi",
+);
+const RELEASE_NAMED = /\breleases?\b/i;
 const PIN_WINDOW = /\b43[\s-]days?\b|\b(?:since|after)\s+(?:#335\b|(?:the\s+|it\s+was\s+)?pin(?:s|ned|ning)?\b)/i;
 const MEASURED_ELSEWHERE = /\b(?:(?<!\bthe\s+)past|behind|beyond)\b|\b(?:since|after|from)\s+\x60?v?26\.5\.0\b/i;
 
 function windowReleaseCountFault(text) {
   for (const sentence of text.split(new RegExp(SENTENCE_END)).map(normalize)) {
     if (!PIN_WINDOW.test(sentence)) continue;
-    for (const { groups, index, 0: phrase } of sentence.matchAll(RELEASE_COUNT)) {
+    const matches = [
+      ...sentence.matchAll(RELEASE_COUNT),
+      ...[...sentence.matchAll(ANAPHORIC_RELEASE_COUNT)].filter((match) => RELEASE_NAMED.test(sentence.slice(0, match.index))),
+    ].sort((a, b) => a.index - b.index);
+    for (const { groups, index, 0: phrase } of matches) {
       if (/\bnot\s+(?:all\s+)?$/i.test(sentence.slice(0, index))) continue;
       const rest = sentence.slice(index + phrase.length).split(new RegExp(String.raw`[,;:()—–]|${CLAUSE_BREAK.source}`, "i"))[0];
       const placements = [...pinPlacements(rest)];
@@ -952,6 +975,39 @@ test("a count measured from `26.5.0`, or placed before the pin, is not read as t
     "It sat for the past 43 days, with five 26.x releases landing inside them.",
     // Naming no window, a count is not this claim.
     "An unscheduled bot would mint roughly 8 releases a month.",
+  ]) {
+    assert.equal(windowReleaseCountFault(text), null, text);
+  }
+});
+
+test("an anaphoric release count is refused the same as one spelled beside the word (#2003)", () => {
+  for (const text of [
+    // #2003's own three motivating examples.
+    "It shipped releases inside the 43 days — 8 of them, all after the pin.",
+    "Node shipped releases in the 43 days; eight of them landed after the pin.",
+    "In the 43 days, eight of Node's releases landed after the pin.",
+    // "those" reaches the same pronoun shape as "them".
+    "Node shipped releases in the 43 days; eight of those landed after the pin.",
+  ]) {
+    assert.match(windowReleaseCountFault(text), /\bof (?:them|those)\b in the 43 days|releases? in the 43 days/, text);
+  }
+  // "of the releases" is the same literal noun as "releases" alone, with
+  // the anaphoric "the" sitting between the count and it.
+  assert.match(
+    windowReleaseCountFault("In the 43 days, eight of the releases landed after the pin."),
+    /releases? in the 43 days/,
+  );
+});
+
+test("a true anaphoric count stays green, and a count with no release to refer back to is not this claim (#2003)", () => {
+  for (const text of [
+    // The true count, anaphoric to "them" or to "Node's releases".
+    "Node shipped releases in the 43 days, five of them landed after the pin.",
+    "In the 43 days, five of Node's releases landed after the pin.",
+    "Node shipped releases in the 43 days; five of those landed after the pin.",
+    // No "release(s)" is ever named for "them" to stand in for — an
+    // ordinary count of something else inside the window is not this claim.
+    "Node shipped 8 issues in the 43 days; five of them are still urgent.",
   ]) {
     assert.equal(windowReleaseCountFault(text), null, text);
   }
