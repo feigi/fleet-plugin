@@ -154,8 +154,9 @@ function classifyScript(rel, content) {
 const NODE_SHEBANG_ENTRYPOINTS = ["plugin/scripts/fleet-bootstrap", "plugin/scripts/fleet-provenance", "plugin/scripts/fleet-run"];
 
 // Per-kind floors over what classifyScript() returns, at ~60% of each kind's
-// measured baseline — the ratio no-wave.test.mjs's tracked-file floor and
-// marked-pairs.test.mjs's MD_DIR_FLOORS use. Measured 2026-09-27 (#2025): 14
+// measured baseline — the ratio the #1821 retired-word sweep's own
+// tracked-file floor and marked-pairs.test.mjs's MD_DIR_FLOORS use. Measured
+// 2026-09-27 (#2025): 14
 // `sh` (every `.sh`) and 36 `js` (33 `.mjs` plus the three
 // NODE_SHEBANG_ENTRYPOINTS), out of 52 tracked; board.html and the one
 // `.json` classify `null` and are policed by nothing here, so they carry no
