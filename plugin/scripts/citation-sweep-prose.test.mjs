@@ -279,11 +279,30 @@ function securityReleaseFault(adr) {
 // tag with a hyphen in its name or whitespace before its `>`, `</my-el>`,
 // `</b >`. Tag names match in either case only where the splicing pattern
 // carries `i`, as every consumer of SENTENCE_END here does (#2043).
+//
+// #2027. A bare footnote marker straight behind the terminator — `.[1]`,
+// `?[note]`, `.[1][2]`, closing markup allowed after it — ends the sentence
+// after it, as sentences() in prose-pin.mjs has since #1987. Without it
+// `only.[1] Bounding drift…` read as one sentence here while sentences() read
+// two, the silent direction for both rows. It is sentences()'s rule, not a
+// bare `\[[^\]]*\]`: the marker holds at least one character and no
+// whitespace, and the terminator must close a word, a digit, a code span, a
+// paren or a curly quote — so jq's `'.[] | …'`, JavaScript's `m?.[1] || …`, a
+// glob's `*.[0-9]*' ` and jq's `.jobs.[0, 1] | …` end nothing, and a single
+// unspaced `.jobs.[0] | …` still does, the same known gap sentences() carries.
+// One divergence, forced: every consumer here compiles without `u`, where
+// `\p{L}` is a literal "p" (see UPDATE_TYPE's #1988 note), so "a letter" is
+// an ASCII one or ANY non-ASCII character — every non-ASCII letter sentences()
+// takes, `”` and `’` included, and also non-ASCII punctuation such as `»`,
+// which sentences() does not take. That extra split is the loud direction for
+// the rows, and none of the code shapes above starts with one. The caret form
+// `[^1]` stays in CLOSING_MARKUP, unguarded, as #2002 left it.
+const FOOTNOTE_MARKERS = String.raw`(?:(?<=[A-Za-z\d\x60)\u0080-\uFFFF][.!?])(?:\[[^\]\s]+\])+)?`;
 const CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]\[[^\]]*\]|\[\^[^\]\s]+\]|<\/[a-z][a-z\d-]*\s*>)`;
 const HASH_GUTTER = String.raw`[ \t]*#(?!\d)`;
 const GUTTER = String.raw`(?:[ \t]*>|${HASH_GUTTER})`;
 const HTML_BLOCK_OPEN = String.raw`<(?:!--|\?|![A-Za-z]|!\[CDATA\[|(?:script|pre|style|textarea)(?=[\s>]|$)|\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s>]|\/>|$))`;
-const SENTENCE_END = String.raw`(?:(?:[!?]|(?<!(?<![A-Za-z\d])(?-i:e\.g|i\.e|cf|viz|vs))\.)${CLOSING_MARKUP}*\s|…${CLOSING_MARKUP}*\s?|\n(?=${GUTTER}*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]|\x60{3}|~{3}|\||${HTML_BLOCK_OPEN}))|\n(?=(?:${HASH_GUTTER})*[ \t]*>)(?<=(?:^|\n)(?!(?:${HASH_GUTTER})*[ \t]*>)[^\n]*\n)|\n${GUTTER}*[ \t]*\r?\n|\n(?:${GUTTER}+ ?)? {0,3}(?:=+|-+|(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})[ \t]*\r?\n)`;
+const SENTENCE_END = String.raw`(?:(?:[!?]|(?<!(?<![A-Za-z\d])(?-i:e\.g|i\.e|cf|viz|vs))\.)${FOOTNOTE_MARKERS}${CLOSING_MARKUP}*\s|…${CLOSING_MARKUP}*\s?|\n(?=${GUTTER}*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]|\x60{3}|~{3}|\||${HTML_BLOCK_OPEN}))|\n(?=(?:${HASH_GUTTER})*[ \t]*>)(?<=(?:^|\n)(?!(?:${HASH_GUTTER})*[ \t]*>)[^\n]*\n)|\n${GUTTER}*[ \t]*\r?\n|\n(?:${GUTTER}+ ?)? {0,3}(?:=+|-+|(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})[ \t]*\r?\n)`;
 // #1958. What names an update type, for both of ADR 0010's #1906 rows below:
 // minor, patch or major as a whole word. The rows' first cut matched the bare
 // substring, so "dispatched" and "majority" scoped a claim that names no
@@ -1463,4 +1482,98 @@ test("SENTENCE_END's abbreviation guard reads a capital the same with or without
     }
     assert.deepEqual("for the vs. Next".split(new RegExp(SENTENCE_END, flags)), ["for the vs. Next"], `vs. /${flags}`);
   }
+});
+
+// #2027: sentences() (prose-pin.mjs) ends a sentence behind a bare footnote
+// marker since #1987, and SENTENCE_END took only the caret form `[^1]`, so
+// the two read `only.[1] Next` differently. Each shape below is checked with
+// and without `i`, since SENTENCE_END is spliced into patterns of both kinds.
+test("SENTENCE_END ends a sentence behind a bare footnote marker, as sentences() does, and still behind `[^1]` (#2027)", () => {
+  for (const flags of ["", "i"]) {
+    const split = (text) => text.split(new RegExp(SENTENCE_END, flags));
+    // The ticket's repro, and the caret form beside it.
+    assert.deepEqual(split("Bounding drift, only.[1] Elsewhere more."), ["Bounding drift, only", "Elsewhere more."], `[1] /${flags}`);
+    assert.deepEqual(split("Bounding drift, only.[^1] Elsewhere more."), ["Bounding drift, only", "Elsewhere more."], `[^1] /${flags}`);
+    // Whatever closes before the terminator: a word, a non-ASCII letter, a
+    // digit, a code span, a paren, a curly quote. Any terminator, a named
+    // marker, a run of markers, closing markup after.
+    for (const [text, first] of [
+      ["a café.[1] Next", "a café"],
+      // A capital, which the guard names itself, as #2043's does.
+      ["ran on CI.[1] Next", "ran on CI"],
+      ["only 26.[1] Next", "only 26"],
+      ["run `jq`.[1] Next", "run `jq`"],
+      ["(see above).[1] Next", "(see above)"],
+      ["said \u201cstop\u201d.[1] Next", "said \u201cstop\u201d"],
+      ["it said \u2018stop\u2019.[1] Next", "it said \u2018stop\u2019"],
+      ["done?[note] Next", "done"],
+      ["done![1] Next", "done"],
+      ["only.[1][2] Next", "only"],
+      ["**only.[1]** Next", "**only"],
+      // The caret form behind a closer the bare marker's guard refuses: it
+      // stays closing markup, as #2002 left it.
+      ["**only**.[^1] Next", "**only**"],
+    ]) {
+      assert.deepEqual(split(text), [first, "Next"], `${text} /${flags}`);
+    }
+  }
+});
+
+test("SENTENCE_END ends nothing at a jq, JavaScript or glob index quoted after a period (#2027)", () => {
+  // The code shapes #1987 measured a bare `\[[^\]]*\]` splitting: behind a
+  // quote, a `?`, a `*`, or behind a word with an empty or comma-spaced
+  // bracket.
+  for (const flags of ["", "i"]) {
+    for (const text of [
+      "jq '.[] | select(.x)' here",
+      "const n = m?.[1] || fallback;",
+      "ls *.[0-9]*' now",
+      "jq '.jobs.[] | .x'",
+      "jq '.jobs.[0, 1] | .x'",
+      // The guard refuses `*` on its own, not only via the caret form
+      // (#2002) or by riding along on the unrelated glob fixture above.
+      "**only**.[1] Next",
+      // An abbreviation's period is no terminator, marker or not.
+      "e.g.[1] Next",
+    ]) {
+      assert.deepEqual(text.split(new RegExp(SENTENCE_END, flags)), [text], `${text} /${flags}`);
+    }
+  }
+});
+
+test("both rows and the window count read a bare footnote marker as a sentence end (#2027)", () => {
+  // The next sentence's scope no longer reaches back across the marker.
+  for (const text of [
+    "Minor and patch bumps only.[1] Bounding drift at about one month.\n",
+    "Minor and patch bumps only.[note] Bounding drift at about one month.\n",
+    "Minor and patch bumps only.[^1] Bounding drift at about one month.\n",
+  ]) {
+    assert.match(text, UNSCOPED_DRIFT_SENTENCE, text);
+  }
+  // Only the simplest marker (`.[1]`, letter-preceded) reached
+  // UNSCOPED_MERGE_SENTENCE and windowReleaseCountFault below, once each —
+  // a consumer that quietly stopped splicing the current SENTENCE_END, or
+  // carried its own narrower guard, would still pass those two single rows
+  // and only red the direct-split test above. Every marker shape, and a
+  // backtick- or paren-preceded terminator, through both consumers here too.
+  for (const text of [
+    "# Minor and patch bumps only.[1] The bump merges once CI goes green.\n",
+    "# Minor and patch bumps only.[note] The bump merges once CI goes green.\n",
+    "# Minor and patch bumps only.[1][2] The bump merges once CI goes green.\n",
+    "# Minor and patch bumps `only`.[1] The bump merges once CI goes green.\n",
+  ]) {
+    assert.match(text, UNSCOPED_MERGE_SENTENCE, text);
+  }
+  // The count in the first sentence, the window in the second.
+  for (const text of [
+    "Node shipped 8 releases.[1] The pin sat 43 days.",
+    "Node shipped 8 releases.[note] The pin sat 43 days.",
+    "Node shipped 8 releases.[1][2] The pin sat 43 days.",
+    "Node shipped 8 releases (confirmed).[1] The pin sat 43 days.",
+  ]) {
+    assert.equal(windowReleaseCountFault(text), null, text);
+  }
+  // The accept side: a scoped sentence quoting a jq index wraps past it.
+  assert.doesNotMatch("For minor and patch bumps, jq '.[] | .x' keeps bounding drift at about one month.\n", UNSCOPED_DRIFT_SENTENCE);
+  assert.doesNotMatch("For minor and patch bumps, `m?.[1] || x` keeps bounding drift at about one month.\n", UNSCOPED_DRIFT_SENTENCE);
 });
