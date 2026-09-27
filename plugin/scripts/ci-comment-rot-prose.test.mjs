@@ -365,6 +365,11 @@ test("citationFault refuses a straight-quote pairing that opens or closes a span
     citationFault('claim-ticket.sh says a"b ("this filter, not node"). Later ("x") 6" end.', cited),
     misPaired,
   );
+  // One half of the rule each, with the other half blind: a mark glued to a
+  // word on both sides (`k"b`, `a"l`) passes as either role, so only the
+  // stray's own side gives the shift away. Both returned null before #2013.
+  assert.match(citationFault('claim-ticket.sh says a" walk"b "not node"', cited), misPaired);
+  assert.match(citationFault('claim-ticket.sh says "so this "wa"lk, not node"', cited), misPaired);
 });
 
 // The other half of #2013: a quotation mark counts as correctly placed from
@@ -382,6 +387,9 @@ test("citationFault accepts quotation marks set against punctuation (#2013)", ()
     citationFault('claim-ticket.sh says "is what keeps vendored tests out." and "walk, not node". Later "a" b.', cited),
     null,
   );
+  // A backtick is punctuation too (CommonMark counts Unicode symbols), so a
+  // quotation set in a code span closes cleanly after its own period.
+  assert.equal(citationFault('claim-ticket.sh says `"is what keeps vendored tests out."`', cited), null);
 });
 
 // #1999. The blanked text has to stay the SAME length as the real text, since
