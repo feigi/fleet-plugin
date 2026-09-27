@@ -572,8 +572,8 @@ function save(d) {
 // What the lock does NOT cover: `check` -> `gh issue create` -> `filed` is
 // three commands, and each takes the lock (or not) alone, so two filers can
 // both read `clean` before either records. Accepted (#531): the measured
-// same-run duplicate pair was minutes apart, and a claim/reserve subcommand
-// closing that window was ruled out.
+// same-run accidental duplicate, #298 -> #302, was filed minutes apart, and a
+// claim/reserve subcommand closing that window was ruled out.
 const LOCK = `${file}.lock`;
 const REAP = `${LOCK}.reap`;
 const LOCK_WAIT_MS = (() => {
