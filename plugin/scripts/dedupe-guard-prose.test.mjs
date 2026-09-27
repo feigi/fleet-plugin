@@ -168,3 +168,76 @@ test("the finisher files its own deferrals through the same guard", () => {
   // the agent most likely to re-file what a reviewer already filed.
   assert.match(finisherDeferrals(), /ledger\.mjs check/, "the finisher's file-it branch no longer runs the dedupe guard");
 });
+
+// ── Filers record what they file (#531) ──────────────────────────────────────
+//
+// `check`'s ledger arm — exit 1, `already-filed`, and the near-miss rows behind
+// `soft-hit` — reads a `## Filed` list, and until #531 no filing site wrote to
+// it: both sites ran `check` and then `gh issue create`, and the controller,
+// which owned every ledger write, never files. So the arm had never held a row.
+// The fix is the filer recording its own filing, under a ledger lock that lets
+// a second kind of writer exist; these pin the instruction half of it.
+const runLedger = () => flat(between(RUN_TEAM, "## Run ledger", "\n## Report", "run-team Run ledger section"));
+const finisherReport = () =>
+  flat(between(RUN_TEAM, "4. `SendMessage` you the label", "**Give the finisher the instrument", "run-team finisher duty 4"));
+const fixApplierReport = () =>
+  flat(between(RUN_TEAM, "> Then `SendMessage` the controller the pushed SHA", "**Deferring everything", "fix-applier report line"));
+
+test("both filing sites run `ledger.mjs filed` right after `gh issue create`, under the subject they checked", () => {
+  // The subject is half of it: `check` matches the filed list by the words in
+  // the subject, so a filing recorded under different words is one the next
+  // `check` for the same finding can only score as a near miss, never exit 1.
+  const s = step5();
+  assert.match(s, /immediately after each `gh issue create`, run `[^`]*ledger\.mjs filed <N> "<subject>"`/, "step 5 no longer records the issue it just created");
+  assert.match(s, /the same subject string you passed to `check`/, "step 5 no longer ties the recorded subject to the one it checked");
+  const f = finisherDeferrals();
+  assert.match(f, /`ledger\.mjs filed <N> "<subject>"` immediately after `gh issue create`/, "the finisher's file-it branch no longer records the issue it created");
+  assert.match(f, /the same subject string you passed to `check`/, "the finisher no longer ties the recorded subject to the one it checked");
+});
+
+test("a failed `filed` is retried once, then reported unrecorded — never a second issue", () => {
+  // The issue exists and is correct once `gh issue create` returned; only its
+  // ledger row is missing. Re-filing to "fix" that makes the duplicate the
+  // whole guard exists to stop.
+  for (const [where, s] of [["step 5", step5()], ["finisher duty 2", finisherDeferrals()]]) {
+    assert.match(s, /retry (it )?once/, `${where} no longer retries a failed \`filed\``);
+    assert.match(s, /leave the issue alone — it exists and is correct/, `${where} no longer says to leave a created issue alone`);
+    assert.match(s, /`unrecorded: #N <subject>`/, `${where} no longer reports a filing it could not record`);
+  }
+});
+
+test("both report contracts carry `filed: #N <subject>` and the `unrecorded:` fallback", () => {
+  for (const [where, s] of [["fix-applier report", fixApplierReport()], ["finisher duty 4", finisherReport()], ["step 5", step5()]]) {
+    assert.match(s, /`filed: #N <subject>`/, `${where} no longer returns the issues it filed`);
+  }
+  for (const [where, s] of [["fix-applier report", fixApplierReport()], ["finisher duty 4", finisherReport()]]) {
+    assert.match(s, /`unrecorded: #N <subject>`/, `${where} no longer carries the unrecorded fallback`);
+  }
+});
+
+test("the controller records every filing a filer reported unrecorded", () => {
+  // The fallback is only a fallback if someone acts on it: an `unrecorded:`
+  // line nobody turns into a `filed` row leaves the arm exactly as blind as
+  // before, one filing at a time.
+  const table = between(RUN_TEAM, "| Wake | Record, then tick |", "\n\n", "record-before-tick table");
+  for (const wake of ["Fix-applier report", "Finisher report"]) {
+    const row = table.split("\n").find((r) => r.startsWith(`| ${wake} |`)) ?? "";
+    assert.match(row, /`ledger\.mjs filed <N> "<subject>"` for each `unrecorded:` line/, `the "${wake}" wake no longer records unrecorded filings`);
+  }
+  assert.match(runLedger(), /reports `unrecorded: #N <subject>` instead, and you run `filed` for it/, "the Run ledger section no longer hands unrecorded filings to the controller");
+});
+
+test("the Run ledger section states the writer policy and the check→create gap; step 5 states the gap too", () => {
+  const r = runLedger();
+  assert.match(
+    r,
+    /the controller owns run state \(`row`\/`settle`\/`dispatch`\/`drain`\/`ruled`\); filers append filings with `filed`; all writes are serialized by `<file>\.lock`/,
+    "the Run ledger section no longer states who writes what, and that the lock serializes it",
+  );
+  // The lock covers each command alone. Stated at the section and at the
+  // filing site, so neither reader takes the lock for a reservation.
+  for (const [where, s] of [["Run ledger", r], ["step 5", step5()]]) {
+    assert.match(s, /`check` → `gh issue create` → `filed` is three commands/, `${where} no longer states the check→create gap`);
+    assert.match(s, /both read `clean`/, `${where} no longer says what the gap lets through`);
+  }
+});

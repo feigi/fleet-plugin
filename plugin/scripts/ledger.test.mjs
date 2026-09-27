@@ -3031,8 +3031,11 @@ function lockFixture(t) {
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
   const argvOf = (args) => [SCRIPT, "--file", file, ...args];
+  // Bounded, so a writer that never gives up waiting fails its test instead
+  // of hanging the suite: spawnSync blocks the event loop the runner's own
+  // --test-timeout needs.
   const cli = (args, extraEnv = {}) =>
-    spawnSync(process.execPath, argvOf(args), { encoding: "utf8", env: { ...env, ...extraEnv }, cwd: dir });
+    spawnSync(process.execPath, argvOf(args), { encoding: "utf8", env: { ...env, ...extraEnv }, cwd: dir, timeout: 20_000 });
   // Resolves on `close`, not `exit`, so stdout/stderr are complete.
   const cliAsync = (args) => new Promise((resolve, reject) => {
     const c = spawn(process.execPath, argvOf(args), { env, cwd: dir });
