@@ -310,9 +310,9 @@ test("mutation run 4 (the two-dialect-specific mutant): a token swap survives no
 // floor has the same margin problem summed, and an exact count or a
 // manifest hash goes stale on every legitimate addition; comparing against
 // the directory itself needs no number at all. The listing is hand-rolled
-// one level per `readdirSync` call — deliberately NOT `walk()`'s
-// `{ recursive: true }` form — with the same inclusion rule (regular files
-// only, exact extension), so it shares no code with what it checks.
+// here, one level per `readdirSync` call, with the same inclusion rule
+// (regular files only, exact extension) and no code shared with `walk()`,
+// the thing it checks.
 //
 // COARSE, against the tree itself shrinking: both sides of the exact check
 // read the same directories, so a mass deletion, or a wrong root, leaves
@@ -365,18 +365,18 @@ const WALK_SCOPE = { ".md": ["skills", "commands", "agents"], ".js": ["workflows
 
 // Deliberately does NOT follow a symlinked directory (#2056): a symlink
 // entry's `Dirent.isDirectory()` is `false`, so the recursion below skips it.
-// `walk()`'s native `readdirSync(..., { recursive: true })` DOES follow one
-// on Node >=22 (this repo's `.nvmrc`/CI pin; Node 20.x/21.x, also inside
-// `package.json`'s declared `engines.node` floor, do not — walk() and this
-// oracle happen to agree there instead), listing a followed link's contents
-// under the symlink's own path — so a symlinked directory under a scoped
-// directory surfaces in `walkDiscrepancy()`'s `extra`, and the real-tree
-// walk test reds. That red is intentional, not a false positive to silence
-// by matching `walk()` here: the same file can end up scanned under two
-// paths (as here, where the symlink's target is itself in scope) — or, if
-// the target has no copy anywhere in scope, simply appear as a new path
-// nothing else reaches. Either way, whether that tree shape is wanted is a
-// decision to file when one is actually added. None exists today.
+// `walk()` DOES follow one, on every Node version (it did natively on Node
+// >=22 only, before #2076 hand-rolled it to refuse a symlink cycle), listing
+// a followed link's contents under the symlink's own path — so a symlinked
+// directory under a scoped directory surfaces in `walkDiscrepancy()`'s
+// `extra`, and the real-tree walk test reds. That red is intentional, not a
+// false positive to silence by matching `walk()` here: the same file can end
+// up scanned under two paths (as here, where the symlink's target is itself
+// in scope) — or, if the target has no copy anywhere in scope, simply appear
+// as a new path nothing else reaches. Either way, whether that tree shape is
+// wanted is a decision to file when one is actually added. None exists
+// today. A symlink back into an ancestor never gets this far: `walk()`
+// throws on it (#2076).
 function listIndependently(root, dir, ext) {
   let entries;
   try {

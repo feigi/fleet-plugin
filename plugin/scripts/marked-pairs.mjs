@@ -186,7 +186,7 @@
 // which is what exposed run 1/2's gap above), in its own comments, with the
 // actual pass/fail counts observed on a scratch copy.
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 import { DIALECT_TOKENS, stripQuoteGutter, stripSlashGutter } from "./prose-pin.mjs";
 
@@ -296,17 +296,56 @@ function isExempt(pair) {
   return KNOWN_EQUALITY_EXCEPTIONS.some((e) => e.file === pair.file && e.claude === pair.claude && e.omp === pair.omp);
 }
 
+// Every regular file under `dir`, listed under the path the walk took to
+// reach it. A symlinked directory is followed and its contents listed under
+// the LINK's path (#2056 rules on what that means for the real-tree check);
+// a symlink to a file, or a dangling one, is not a regular file and is
+// skipped. That is what native `readdirSync(dir, { recursive: true })` does
+// on Node >=22 — this walk is hand-rolled one level per call only so it can
+// see a cycle (#2076): native recursion enumerates every PATH through the
+// links up to the OS symlink-depth cutoff, so one way back into a loop is a
+// long finite list, and two ways back double the paths at every level and
+// never return. Here a directory that resolves to one of its OWN ancestors
+// throws, naming the link. Only ancestors: two links to one directory are
+// not a loop, and both are still listed.
+class SymlinkCycleError extends Error {}
+
 function walk(dir) {
   try {
-    return readdirSync(dir, { recursive: true, withFileTypes: true })
-      .filter((e) => e.isFile())
-      .map((e) => join(e.parentPath, e.name));
-  } catch {
+    return walkBelow(dir, new Map([[dirKey(statSync(dir)), dir]]));
+  } catch (e) {
+    if (e instanceof SymlinkCycleError) throw e;
     // A directory that does not exist yet (e.g. a fixture tree missing one
     // of the three md dirs) contributes no files rather than throwing —
     // callers that need every dir present assert that separately.
     return [];
   }
+}
+
+function dirKey(st) {
+  return `${st.dev}:${st.ino}`;
+}
+
+// `ancestors`: dev:ino -> path, for `dir` and every directory above it on
+// the current descent, never siblings already walked.
+function walkBelow(dir, ancestors) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const path = join(dir, e.name);
+    if (e.isFile()) return [path];
+    let st;
+    if (e.isDirectory()) st = statSync(path);
+    else if (e.isSymbolicLink()) {
+      try {
+        st = statSync(path);
+      } catch {
+        return []; // dangling
+      }
+      if (!st.isDirectory()) return [];
+    } else return [];
+    const key = dirKey(st);
+    if (ancestors.has(key)) throw new SymlinkCycleError(`symlink cycle: ${path} resolves to its own ancestor ${ancestors.get(key)}`);
+    return walkBelow(path, new Map(ancestors).set(key, path));
+  });
 }
 
 function gutterStrip(ext, text) {
