@@ -1453,8 +1453,8 @@ function runSettle() {
   // first-row-wins `byPr` reads one. Fold that row's tokens onto this one, in
   // order, so later PR-bound writes find the one row through rowPr(). A row
   // keyed to the PR carrying an implementer is that implementer's own, never
-  // folded.
-  const prKey = parsed.family === "impl" && outcome.startsWith("PR#") ? `#${outcome.slice("PR#".length)}` : null;
+  // folded. Only an implementer settles to `PR#M` (ledger-grammar.mjs).
+  const prKey = outcome.startsWith("PR#") ? `#${outcome.slice("PR#".length)}` : null;
   const j = prKey === null || i === -1 ? -1
     : data.rows.findIndex((r) => rowKey(r) === prKey && !memberTokens(r).some((t) => t.family === "impl"));
   if (j !== -1) {

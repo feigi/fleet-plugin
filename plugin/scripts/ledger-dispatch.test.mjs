@@ -276,6 +276,10 @@ test("the fold takes the PR row's settled tokens in order, under the two-argumen
     member: "impl-1310", outcome: "PR#1311", ticket: "#1310", line: folded, changed: true,
   });
   assert.deepEqual(read().rows, [folded, "#1320 impl-1320"]);
+  // A PR row holding nothing past its key leaves no stray separator behind.
+  ok("row", "1321", " ");
+  assert.equal(ok("settle", "impl-1320=PR#1321").line, "#1320 impl-1320=PR#1321");
+  assert.deepEqual(read().rows, [folded, "#1320 impl-1320=PR#1321"]);
 });
 
 // The must-LEAVE half: only the row keyed to the settled PR, and only when it
