@@ -145,7 +145,7 @@ function classifyScript(rel, content) {
 // never needs — .github/scripts/install-and-smoke.sh runs all three as
 // `node <path>`, so losing it breaks only direct-exec callers at run time —
 // so one that lost it came back `null` and was skipped by the sweep below
-// without a word. The sweep's `files.length > 0` guard cannot notice, since it
+// without a word. The sweep's `files.length > 30` guard cannot notice, since it
 // counts the tracked list BEFORE classification, where the dozens of
 // `.sh`/`.mjs` files, classified by extension, keep it non-empty. Measured
 // (#1923): `fleet-run` with its shebang deleted and a
@@ -158,7 +158,10 @@ test(
   { skip: SKIP_WITHOUT_REPO },
   () => {
     const files = trackedPaths(ROOT, ["plugin/scripts/*"]).filter((f) => !f.endsWith(".test.mjs"));
-    assert.ok(files.length > 0, "the instrument set must not be empty");
+    assert.ok(
+      files.length > 30,
+      `the instrument set has only ${files.length} entries — too few to be plugin/scripts/*'s real non-test-file tree, and the sweep below would pass vacuously over an empty or near-empty list`,
+    );
     const violations = [];
     const kinds = new Map();
     for (const rel of files) {
@@ -338,7 +341,16 @@ test(
   { skip: SKIP_WITHOUT_REPO },
   () => {
     const files = trackedPaths(ROOT, ["plugin/skills/*", "plugin/commands/*", "plugin/agents/*", "plugin/workflows/*"]);
-    assert.ok(files.length > 0, "the prose set must not be empty");
+    assert.ok(
+      files.length > 15,
+      `the prose set has only ${files.length} entries — too few to be the real tree across plugin/skills/, plugin/commands/, plugin/agents/ and plugin/workflows/, and the sweep below would pass vacuously over an empty or near-empty list`,
+    );
+    for (const d of ["plugin/skills/", "plugin/commands/", "plugin/agents/", "plugin/workflows/"]) {
+      assert.ok(
+        files.some((f) => f.startsWith(d)),
+        `${d} contributed no tracked file to the prose set — an over-narrow pathspec or filter bug can drop one whole directory without the count floor above noticing`,
+      );
+    }
     const violations = [];
     for (const rel of files) {
       const text = readFileSync(join(ROOT, rel), "utf8");
