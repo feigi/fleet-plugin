@@ -363,13 +363,18 @@ const WALK_SCOPE = { ".md": ["skills", "commands", "agents"], ".js": ["workflows
 
 // Deliberately does NOT follow a symlinked directory (#2056): a symlink
 // entry's `Dirent.isDirectory()` is `false`, so the recursion below skips it.
-// `walk()`'s native `readdirSync(..., { recursive: true })` DOES follow one,
-// listing its contents under the symlink's own path — so a symlinked
-// directory under a scoped directory surfaces in `walkDiscrepancy()`'s
-// `extra`, and the real-tree walk test reds. That red is intentional, not a
-// false positive to silence by matching `walk()` here: the same file would
-// be scanned twice under two paths, and whether that tree shape is wanted is
-// a decision to file when one is actually added. None exists today.
+// `walk()`'s native `readdirSync(..., { recursive: true })` DOES follow one
+// on Node >=22 (this repo's `.nvmrc`/CI pin; Node 20.x/21.x, also inside
+// `package.json`'s declared `engines.node` floor, do not — walk() and this
+// oracle happen to agree there instead), listing a followed link's contents
+// under the symlink's own path — so a symlinked directory under a scoped
+// directory surfaces in `walkDiscrepancy()`'s `extra`, and the real-tree
+// walk test reds. That red is intentional, not a false positive to silence
+// by matching `walk()` here: the same file can end up scanned under two
+// paths (as here, where the symlink's target is itself in scope) — or, if
+// the target has no copy anywhere in scope, simply appear as a new path
+// nothing else reaches. Either way, whether that tree shape is wanted is a
+// decision to file when one is actually added. None exists today.
 function listIndependently(root, dir, ext) {
   let entries;
   try {
