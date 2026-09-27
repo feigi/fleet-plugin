@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between as section } from "./prose-pin.mjs";
+import { between as section, sentences } from "./prose-pin.mjs";
 
 // Implementers dispatch at the SESSION's tier, whatever the ticket class. The
 // `class=routine` → `sonnet` binding was reverted 2026-08-16 when the phase-2
@@ -47,6 +47,38 @@ const dispatch = () =>
   section(RUN_TEAM, "**Dispatch every implementer", "**Guard: accumulate per PR", "run-team phase 2 dispatch rule");
 const guard = () =>
   section(RUN_TEAM, "**Guard: accumulate per PR", "Why the agent body carries what it does", "run-team phase 2 tier guard");
+
+// The dispatch slice's past-tense revert note — the one legitimate statement of
+// the `class=routine` → `sonnet` binding, whose SPAN the rebindings scan exempts.
+const REVERT_NOTE = /\*\*`class=routine` → `sonnet` was REVERTED on [\s\S]*?\*\*/;
+
+// Every `class=routine`/`sonnet` binding stated in `slice` that starts outside
+// `note`'s span. Read one sentence at a time, via `sentences()`, with a gap that
+// tolerates a period — never a first-period `[^.]` window over the raw slice
+// (#1983). Any hit is a fault, so a window cut short is this scan's silent
+// direction: "`class=routine` tickets follow `agents/fleet-implementer.agent.md`
+// at `sonnet`" ended the old window at the filename's period and passed. The
+// sentence is what bounds the gap, so a `class=routine` in one sentence never
+// pairs with a `sonnet` in the next. Each sentence's offset is recovered by
+// searching the slice from the previous sentence's end — sentences() drops the
+// whitespace it splits on — so a hit's index is still an index into `slice`,
+// comparable against the note's span as before. RESIDUAL: sentences() still
+// cuts short at a `.)`, `.**`, `."`, a mid-sentence `?`, a capitalised "E.g."
+// or an "etc." (silent here), and still merges two real sentences across
+// #1987's `**late**.[1]` and #1899's sentence-final lowercase "vs." (an
+// over-fire here). None is in this slice today.
+const REBINDING = /`class=routine`[\s\S]{0,120}sonnet[\s\S]{0,40}|sonnet[\s\S]{0,120}`class=routine`[\s\S]{0,40}/g;
+const rebindingsOutside = (slice, note) => {
+  const noteAt = slice.indexOf(note);
+  const hits = [];
+  let cursor = 0;
+  for (const sentence of sentences(slice)) {
+    const at = slice.indexOf(sentence, cursor);
+    cursor = at + sentence.length;
+    for (const hit of sentence.matchAll(REBINDING)) hits.push({ index: at + hit.index, text: hit[0] });
+  }
+  return hits.filter((hit) => hit.index < noteAt || hit.index >= noteAt + note.length).map((hit) => hit.text);
+};
 
 test("phase 0 step 4 still earns its class judgement now that the class prices nothing", () => {
   const slice = step4();
@@ -158,7 +190,7 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   // that adds no further mention of the binding, trips none of them — but
   // that is narrower than "any reword": the third check's own grid below
   // measures which benign rewords DO trip it (3/7, corrected below).
-  const revertNote = /\*\*`class=routine` → `sonnet` was REVERTED on [\s\S]*?\*\*/.exec(slice)?.[0];
+  const revertNote = REVERT_NOTE.exec(slice)?.[0];
   assert.ok(
     revertNote,
     "the revert note's opening clause changed shape enough that this pin can no longer find it — read the slice and update the anchor",
@@ -266,12 +298,8 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   // quoted. The ORDER is not assumed either, for the same reason the arrow is
   // not: the mirrored sentence states the same binding and matched nothing at
   // all.
-  const noteAt = slice.indexOf(revertNote);
-  const rebindings = [
-    ...slice.matchAll(/`class=routine`[^.]{0,120}sonnet[^.]{0,40}|sonnet[^.]{0,120}`class=routine`[^.]{0,40}/g),
-  ];
   assert.deepEqual(
-    rebindings.filter((hit) => hit.index < noteAt || hit.index >= noteAt + revertNote.length).map((hit) => hit[0]),
+    rebindingsOutside(slice, revertNote),
     [],
     "phase 2 states a `class=routine` → `sonnet` binding outside the past-tense revert note — the reverted rule is back",
   );
@@ -357,6 +385,28 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
     slice,
     /replaces the whole line/,
     "phase 2 shows a ledger literal without saying `row` replaces rather than appends",
+  );
+});
+
+test("a period in the gap does not hide a rebinding outside the revert note", () => {
+  // #1983's shape, both directions, on the real dispatch slice. Refuse: each
+  // restoration carries a period between the two tokens — a filename, an
+  // abbreviation — which ended the old `[^.]` window, green. Accept: the note
+  // itself stays exempt, and two tokens in DIFFERENT sentences are no binding.
+  const slice = dispatch();
+  const note = REVERT_NOTE.exec(slice)?.[0];
+  assert.ok(note, "the revert note is no longer findable — update REVERT_NOTE");
+  const after = (sentence) => slice.replace(note, `${note} ${sentence}`);
+  for (const restoration of [
+    "Every `class=routine` ticket follows `agents/fleet-implementer.agent.md` at `sonnet` again.",
+    "Dispatch `sonnet` for, e.g. docs fixes, every `class=routine` ticket.",
+  ]) {
+    assert.equal(rebindingsOutside(after(restoration), note).length, 1, `a restoration read as clean: ${restoration}`);
+  }
+  assert.deepEqual(
+    rebindingsOutside(after("Record `class=routine` in the ledger row. No member dispatches at `sonnet` by class."), note),
+    [],
+    "a `class=routine` and a `sonnet` in two different sentences read as one binding",
   );
 });
 
