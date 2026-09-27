@@ -1499,6 +1499,8 @@ test("SENTENCE_END ends a sentence behind a bare footnote marker, as sentences()
     // marker, a run of markers, closing markup after.
     for (const [text, first] of [
       ["a café.[1] Next", "a café"],
+      // A capital, which the guard names itself, as #2043's does.
+      ["ran on CI.[1] Next", "ran on CI"],
       ["only 26.[1] Next", "only 26"],
       ["run `jq`.[1] Next", "run `jq`"],
       ["(see above).[1] Next", "(see above)"],
