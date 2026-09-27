@@ -167,8 +167,11 @@ export function paragraph(text, anchor, what, options) {
 // that merely shares their letters — a proper noun "Vs.", a stray "E.g." —
 // read as the abbreviation and joined the sentence after it, the same silent
 // merge "etc." is kept off the list to avoid. The cost runs the other way: a
-// sentence OPENING "E.g. …" or "Cf. …" now splits after it — and no file in
-// this repo spells any of the five capitalized (#1899 grepped the corpus).
+// capitalized one anywhere — a sentence OPENING "E.g. …", a parenthetical
+// "(Cf. …)" mid-sentence — now ends the sentence right there, not only at a
+// sentence's own start. No file's PROSE spells any of the five capitalized,
+// outside this ticket's own fixtures illustrating the defect (#1899 grepped
+// the corpus).
 //
 // This replaces the first-period `[^.]*` scan (#1898, #1940), which is wrong
 // both ways at once: it ends the window at every period above, and it runs
