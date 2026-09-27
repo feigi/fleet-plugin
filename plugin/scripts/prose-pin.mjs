@@ -203,16 +203,23 @@ export function paragraph(text, anchor, what, options) {
 // nothing, so two real sentences merged: the silent direction for a pin that
 // needs a word IN its sentence, which could borrow it from the next one. The
 // marker holds at least one character and no whitespace, and must follow a
-// terminator that closes a word, a code span, a paren or a curly quote. Code
-// quoted in prose puts brackets straight after a period too, with whitespace
-// after them — jq's `'.[] | …'`, JavaScript's `m?.[1] || …`, a glob's
-// `*.[0-9]*' ` — behind a quote, a `?`, a `*` or a space; and where one sits
-// behind a word, jq's `.jobs.[] | …` or `.jobs.[0, 1] | …`, its bracket is
-// empty or spaced. Measured over every tracked .md/.mjs/.yml/.sh/.json file:
-// a bare `\[[^\]]*\]` after the terminator split 15 such code spots, and this
-// rule none — its one new split is a real footnote, `only.[^1] `, in a
-// citation-sweep fixture. A marker behind bold or italics (`**late**.[1]`)
-// still merges, as it always has.
+// terminator that closes a word, a digit, a code span, a paren or a curly
+// quote. Code quoted in prose puts brackets straight after a period too,
+// with whitespace after them — jq's `'.[] | …'`, JavaScript's `m?.[1] || …`,
+// a glob's `*.[0-9]*' ` — behind a quote, a `?`, a `*` or a space, and jq's
+// `.jobs.[] | …` or `.jobs.[0, 1] | …` behind a word, with an empty or
+// comma-spaced bracket. Measured over every tracked .md/.mjs/.yml/.sh/.json
+// file: a bare `\[[^\]]*\]` after the terminator split 15 such code spots,
+// and this rule none — its one new split is a real footnote, `only.[^1] `,
+// in a citation-sweep fixture. Three shapes are known and left unfixed,
+// none of them occurring in that same corpus today: a marker behind bold
+// or italics (`**late**.[1]`) still merges, same as before; so does one
+// behind a closing quote or paren that itself follows the terminator
+// (`"stop."[1]`, `(noon.)[1]`) — the guard only tolerates closing marks
+// AFTER the bracket run, not before it; and a single, unspaced jq index
+// straight behind a word (`.jobs.[0] | …`) is the same shape as a real
+// marker at the regex level, so it still splits — wrongly, the direction
+// this rule exists to avoid.
 export const sentences = (block) =>
   block.split(/(?<=(?:[!?]|(?<!\b(?:e\.g|i\.e|cf|viz|vs))\.)(?:(?<=[\p{L}\p{N}`)\u201d\u2019][.!?])(?:\[[^\]\s]+\])+)?[*_)"'\u201d\u2019]*)\s+/u);
 
