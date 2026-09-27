@@ -12,8 +12,9 @@
 // liveness count from this file alone, rather than from row text a controller
 // typed by hand: `dispatch` writes a member's live token onto its row and
 // appends it to `## Dispatched`, `settle` rewrites that token to
-// `<member>=<outcome>` in both places, and `drain` writes the one marker that
-// stops supply. The token grammar is
+// `<member>=<outcome>` in both places (an implementer's settle to `PR#M` also
+// folds the PR's own `#M` row into its ticket's, #1876), and `drain` writes the
+// one marker that stops supply. The token grammar is
 // ledger-grammar.mjs's. `## Dispatched` gains an entry per dispatch and never
 // loses or reorders one — settling annotates an entry in place — which is what
 // lets `merge-bot-<n>` be counted from it.
@@ -1433,6 +1434,12 @@ function runSettle() {
     return;
   }
 
+  // #1876: capture whether the row this settle is about to write to already
+  // named a PR, before the rewrite below touches it. The fold further down
+  // must refuse to run once a row already has PR-specific content on it —
+  // see the fold's own comment for why.
+  const targetBefore = liveRows[0] ?? memberRowIndex(parsed);
+  const priorPr = targetBefore === -1 ? null : rowPr(data.rows[targetBefore]);
   // A live token `row` wrote is settled like one `dispatch` wrote; `##
   // Dispatched` only records what `dispatch` did.
   if (liveEntry) data.dispatched[di] = token;
@@ -1444,6 +1451,39 @@ function runSettle() {
     // `## Dispatched`.
     i = memberRowIndex(parsed);
     if (i !== -1 && !carries(data.rows[i], name)) data.rows[i] = `${data.rows[i]} · ${token}`;
+  }
+  // #1876: the tick owes an open PR a review while its implementer is still
+  // live, so a PR-bound member can be dispatched before this settle names the
+  // PR here — and memberRowIndex() then finds no row naming it, so
+  // runDispatch() keys a row of its own to the PR. Once this row names the PR
+  // too, two rows would: the cockpit draws two cards and the tick's
+  // first-row-wins `byPr` reads one. Fold that row's tokens onto this one, in
+  // order, so later PR-bound writes find the one row through rowPr(). Only
+  // an implementer settles to `PR#M` (ledger-grammar.mjs), and only when the
+  // settling row named NO PR before this write: `rowPr()` and the tick's
+  // `PR_MENTION` both read the FIRST `PR#` mention on a row, so a row that
+  // already named one — this PR via a hand-written `→ PR#M` arrow, or a
+  // different PR from an earlier attempt — would let the fold misattribute
+  // its content to the wrong PR, or bury the row's own fresher
+  // `review=`/`reviewed=` state under the folded row's older one (the tick
+  // reads only the LAST). The candidate row must itself carry a live or
+  // settled PR-bound token for this exact PR — never an unrelated row that
+  // merely shares the key (an Exclusion row, say, on a mistyped PR number) —
+  // unless the row holds nothing past its key at all, in which case there is
+  // nothing it could be but an empty fallback and nothing to lose by
+  // folding it. Never one an implementer already claims as its own.
+  const prNum = outcome.startsWith("PR#") ? Number(outcome.slice("PR#".length)) : null;
+  const j = prNum === null || i === -1 || priorPr !== null ? -1
+    : data.rows.findIndex((r) => {
+        if (rowKey(r) !== `#${prNum}` || memberTokens(r).some((t) => t.family === "impl")) return false;
+        const tail = r.slice(`#${prNum}`.length).trim();
+        return tail === "" || memberTokens(r).some((t) => t.bound === "pr" && t.number === prNum);
+      });
+  if (j !== -1) {
+    const tail = data.rows[j].slice(`#${prNum}`.length).trim();
+    if (tail !== "") data.rows[i] = `${data.rows[i]} · ${tail}`;
+    data.rows.splice(j, 1);
+    if (j < i) i -= 1;
   }
   save(data);
   console.error(`    settled ${token}`);
