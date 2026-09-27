@@ -1085,8 +1085,10 @@ test("minor, patch or major still scopes both claims in italics or as a plural (
 // Pins #1988's accepted plain-English hole, not a bug: a whole word cannot
 // tell the verb "patches" or "patch", or the adjective "minor" or "major",
 // from the update type, so each still scopes its claim. A change that closes
-// the hole — or widens it — should fail here and update UPDATE_TYPE's comment
-// with it (#1989).
+// the hole should fail here; one that widens it instead fails #1958's "a word
+// that only contains…" test above, since that is the row already pinning
+// which inflected forms of "patch" scope nothing. Either way, update
+// UPDATE_TYPE's comment with it (#1989).
 test("minor, patch or major in its plain-English sense still scopes all three claims, as documented (#1989)", () => {
   for (const text of [
     "**Renovate patches the automerged bumps.**",
