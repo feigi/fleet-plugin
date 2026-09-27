@@ -280,6 +280,7 @@ fi
 holds_cwd() {
   hc_d=$self_wt
   while :; do
+    # shellcheck disable=SC3013 # -ef is a ksh-derived extension bash/dash/BSD sh share, base in POSIX.1-2024 (see wt_linkage_why below); this file targets dash too and -ef is verified there
     if [ "$hc_d" -ef "$1" ]; then return 0; fi
     case "$hc_d" in
       */*) hc_d=${hc_d%/*} ;;
@@ -553,9 +554,12 @@ gp_why() {
 # given, so a byte compare against it kept every healthy NFD worktree forever.
 # `-ef` answers "same directory" for both and for any other spelling the
 # filesystem aliases, and still refuses every redirect — each names a
-# different directory. It is XSI in POSIX.1-2017 and base in POSIX.1-2024; a
-# `[` that cannot evaluate it fails, which is the refusing direction, as is a
-# `--show-toplevel` naming a path that does not exist.
+# different directory. POSIX.1-2017's own `test` page does not define `-ef`
+# at all, XSI or otherwise — it is a ksh-derived extension bash, dash, and
+# BSD sh already share; POSIX.1-2024 (Austin Group bug 375) is what actually
+# adds it, as a base utility primary. A `[` that cannot evaluate it fails,
+# which is the refusing direction, as is a `--show-toplevel` naming a path
+# that does not exist.
 #
 # `&& echo x` inside the substitution, then `%?x`: `$(...)` strips EVERY
 # trailing newline, so a `core.worktree` naming a sibling directory called
@@ -583,6 +587,7 @@ wt_linkage_why() {
   fi
   lk_top=${lk_top%?x}
   # `if`, never `[ ! … ] || return 0`: a `[` that errors (rc 2) must refuse.
+  # shellcheck disable=SC3013 # -ef is a ksh-derived extension bash/dash/BSD sh share, base in POSIX.1-2024; this file targets dash too and -ef is verified there
   if [ "$lk_top" -ef "$1" ]; then return 0; fi
   lk_why="has a .git linkage that answers for $lk_top, not for it — its dirty check would read that tree"
   return 1
