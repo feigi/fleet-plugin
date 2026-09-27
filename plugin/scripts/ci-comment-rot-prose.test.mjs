@@ -121,14 +121,23 @@ export function citationFault(citing, cited) {
   // comment) shifts the pairing of every quote after it: the real quotation
   // then pairs with its neighbours' gaps and a misquote reads as a
   // paraphrase (#1962). Which words the sentence quotes is then unknowable,
-  // so it is refused, never taken for a paraphrase. Only the citing sentence
-  // counts — later ci.yml prose is not claim-ticket.sh's to answer for.
-  // Two shapes stay out of reach, both still loud unless claim-ticket.sh
-  // happens to contain a mis-paired gap's words verbatim: nested quotes left
-  // unescaped pair evenly and read exactly like two adjacent quotations; and
-  // a stray `"` whose shifted pairing exposes a period inside the real
-  // quotation ends the sentence there on an even count. Either way every
-  // mis-paired span is still checked below.
+  // so it is refused, never taken for a paraphrase. Usually only the citing
+  // sentence counts — later ci.yml prose is not claim-ticket.sh's to answer
+  // for — but a shifted pairing can blank the citing sentence's OWN
+  // terminator too, pulling later prose into `sentence` right along with it
+  // (#2013, filed separately; the underlying blankQuotes/sentences
+  // interaction predates this PR).
+  // Two shapes stay out of reach even so. Nested quotes left unescaped pair
+  // evenly and read exactly like two adjacent quotations — loud only if
+  // claim-ticket.sh happens to contain the mis-paired gap's words verbatim,
+  // real coincidence. A stray `"` whose shifted pairing exposes a period
+  // inside the real quotation is a worse bet than that framing suggests: the
+  // span it leaves to check can be as short as the one blanked character
+  // between the stray quote and the real quotation's opener, and almost any
+  // cited prose contains a bare space — so this shape passes far more often
+  // than "unless it happens to match" implies. Either way every mis-paired
+  // span found is still checked below; it just isn't always a span worth
+  // much.
   const malformed = sentence.includes('""')
     ? 'an empty ""'
     : sentence.includes('\\"')
@@ -281,6 +290,11 @@ test("citationFault refuses an empty, unpaired or backslash-escaped straight quo
   assert.match(citationFault('claim-ticket.sh says ""', cited), /empty ""/);
   assert.match(citationFault('claim-ticket.sh says "walk, \\"not node"', cited), /backslash-escaped \\"/);
   assert.match(citationFault('claim-ticket.sh, 6" wide, says "walk, not node"', cited), /unpaired "/);
+  // Precedence, pinned: an empty "" and a backslash-escaped \" can both be
+  // true of the same sentence at once (the escape's own closing quote can
+  // complete an unrelated empty pair) — the empty check runs first, so that
+  // reason wins, not the backslash one.
+  assert.match(citationFault('claim-ticket.sh says "" then "walk, \\"not node"', cited), /empty ""/);
 });
 
 // The other half of #1962: only the citing sentence's own quote marks count.
@@ -295,6 +309,14 @@ test("citationFault accepts well-paired quotations, and malformed quotes outside
   assert.equal(citationFault('claim-ticket.sh says "walk, not node". The pipe is 6" wide.', cited), null);
   assert.equal(citationFault('claim-ticket.sh says "walk, not node" and "vendored tests out"', cited), null);
   assert.equal(citationFault('claim-ticket.sh says \u201c\u201d then "walk, not node"', cited), null);
+  // A backslash with no quote next to it is not the escape check's target —
+  // only a backslash-quote adjacency is (#1962 gap: not pinned by the
+  // original two tests, since every backslash they carry sits beside a
+  // quote already).
+  assert.equal(citationFault('claim-ticket.sh says the \\d pattern matches "walk, not node"', cited), null);
+  // A backslash-escaped quote in a LATER sentence is later prose too — only
+  // the citing sentence's own malformed check counts.
+  assert.equal(citationFault('claim-ticket.sh says "walk, not node". A shell writes \\" here.', cited), null);
 });
 
 test("the Shellcheck comment does not present its examples as the complete set", () => {
