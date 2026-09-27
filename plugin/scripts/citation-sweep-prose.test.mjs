@@ -1530,6 +1530,9 @@ test("SENTENCE_END ends nothing at a jq, JavaScript or glob index quoted after a
       "ls *.[0-9]*' now",
       "jq '.jobs.[] | .x'",
       "jq '.jobs.[0, 1] | .x'",
+      // The guard refuses `*` on its own, not only via the caret form
+      // (#2002) or by riding along on the unrelated glob fixture above.
+      "**only**.[1] Next",
       // An abbreviation's period is no terminator, marker or not.
       "e.g.[1] Next",
     ]) {
@@ -1547,9 +1550,29 @@ test("both rows and the window count read a bare footnote marker as a sentence e
   ]) {
     assert.match(text, UNSCOPED_DRIFT_SENTENCE, text);
   }
-  assert.match("# Minor and patch bumps only.[1] The bump merges once CI goes green.\n", UNSCOPED_MERGE_SENTENCE);
+  // Only the simplest marker (`.[1]`, letter-preceded) reached
+  // UNSCOPED_MERGE_SENTENCE and windowReleaseCountFault below, once each —
+  // a consumer that quietly stopped splicing the current SENTENCE_END, or
+  // carried its own narrower guard, would still pass those two single rows
+  // and only red the direct-split test above. Every marker shape, and a
+  // backtick- or paren-preceded terminator, through both consumers here too.
+  for (const text of [
+    "# Minor and patch bumps only.[1] The bump merges once CI goes green.\n",
+    "# Minor and patch bumps only.[note] The bump merges once CI goes green.\n",
+    "# Minor and patch bumps only.[1][2] The bump merges once CI goes green.\n",
+    "# Minor and patch bumps `only`.[1] The bump merges once CI goes green.\n",
+  ]) {
+    assert.match(text, UNSCOPED_MERGE_SENTENCE, text);
+  }
   // The count in the first sentence, the window in the second.
-  assert.equal(windowReleaseCountFault("Node shipped 8 releases.[1] The pin sat 43 days."), null);
+  for (const text of [
+    "Node shipped 8 releases.[1] The pin sat 43 days.",
+    "Node shipped 8 releases.[note] The pin sat 43 days.",
+    "Node shipped 8 releases.[1][2] The pin sat 43 days.",
+    "Node shipped 8 releases (confirmed).[1] The pin sat 43 days.",
+  ]) {
+    assert.equal(windowReleaseCountFault(text), null, text);
+  }
   // The accept side: a scoped sentence quoting a jq index wraps past it.
   assert.doesNotMatch("For minor and patch bumps, jq '.[] | .x' keeps bounding drift at about one month.\n", UNSCOPED_DRIFT_SENTENCE);
   assert.doesNotMatch("For minor and patch bumps, `m?.[1] || x` keeps bounding drift at about one month.\n", UNSCOPED_DRIFT_SENTENCE);
