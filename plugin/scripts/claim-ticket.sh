@@ -133,7 +133,7 @@ runner="$wt/agent-test"
 # pre-existing tree (the main checkout, an existing worktree) this script
 # never verifies before deriving from it: `ref=HEAD` below, the `git
 # show`/`git cat-file -e` calls that follow it, and derive-testcmd.sh's own
-# git calls (invoked with `.` a few lines further down, not `$dest`) all
+# git calls (invoked with `.` as its own `<repo>` argument, not `$dest`) all
 # resolve against wherever the ambient invocation's cwd points, never against
 # $dest itself. No guard is added for that gap: a `--show-toplevel`
 # canonicalised-compare guard — the shape release-ticket.sh's own #421
@@ -141,9 +141,10 @@ runner="$wt/agent-test"
 # points back at $dest, since that shape still answers $dest's own toplevel;
 # and $dest is not guaranteed to sit inside a git repository at all (the
 # "divergence walk … shared ancestor" fixture in claim-ticket.test.mjs writes
-# a runner straight into a destination that is never `git init`'d). Neither
-# gap this paragraph's claim-path check closes is available to close for
-# $dest.
+# a runner straight into a destination that is never `git init`'d). The
+# fresh-linkage argument that closes this for $wt has no equivalent for
+# $dest; the ambient GIT_DIR/GIT_WORK_TREE half is closed for both paths
+# alike, by the same unset above.
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # `-e` alone STATS, so it follows the link and reads a DANGLING symlink as an
 # absent path, while `git worktree add` refuses it on lstat semantics (`fatal:
