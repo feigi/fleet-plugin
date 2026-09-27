@@ -218,8 +218,14 @@ export function paragraph(text, anchor, what, options) {
 // needs a word IN its sentence, which could borrow it from the next one. The
 // marker holds at least one character and no whitespace, and must follow a
 // terminator that closes a word, a digit, a code span, a paren or a curly
-// quote. Code quoted in prose puts brackets straight after a period too,
-// with whitespace after them — jq's `'.[] | …'`, JavaScript's `m?.[1] || …`,
+// quote. A word here is a letter in any script, combining marks on it
+// included (#2041): an NFD "é" is `e` + U+0301 and Devanagari "हिंदी" ends in
+// the vowel sign U+0940, so a word's last code point can be a mark, and the
+// guard reads past any run of them to whichever of the five bases above sits
+// under it. A mark with no accepted base under it closes nothing. Code quoted
+// in prose puts brackets straight after a period too, with whitespace after
+// them — jq's
+// `'.[] | …'`, JavaScript's `m?.[1] || …`,
 // a glob's `*.[0-9]*' ` — behind a quote, a `?`, a `*` or a space, and jq's
 // `.jobs.[] | …` or `.jobs.[0, 1] | …` behind a word, with an empty or
 // comma-spaced bracket. Measured over every tracked .md/.mjs/.yml/.sh/.json
@@ -235,7 +241,7 @@ export function paragraph(text, anchor, what, options) {
 // marker at the regex level, so it still splits — wrongly, the direction
 // this rule exists to avoid.
 export const sentences = (block) =>
-  block.split(/(?<=(?:[!?]|(?<!(?<![A-Za-z\d])(?:e\.g|i\.e|cf|viz|vs))\.)(?:(?<=[\p{L}\p{N}`)\u201d\u2019][.!?])(?:\[[^\]\s]+\])+)?[*_)"'\u201d\u2019]*)\s+/u);
+  block.split(/(?<=(?:[!?]|(?<!(?<![A-Za-z\d])(?:e\.g|i\.e|cf|viz|vs))\.)(?:(?<=[\p{L}\p{N}`)\u201d\u2019]\p{M}*[.!?])(?:\[[^\]\s]+\])+)?[*_)"'\u201d\u2019]*)\s+/u);
 
 // A phrase-bounded slice — `paragraph`'s shape, with the end bound a second
 // phrase instead of the next blank line. `from` is `anchorAt`'s own

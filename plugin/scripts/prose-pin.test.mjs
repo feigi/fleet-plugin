@@ -308,7 +308,10 @@ test("sentences does not end one at an italic abbreviation, and still ends one a
 // from the second. The marker stays with the sentence it annotates, a closing
 // mark after it still counts, and whatever closes the word before the
 // terminator — a letter in any script, a digit, a code span, a paren, a curly
-// quote — lets it end one.
+// quote — lets it end one, whatever closed it. It still counts with combining
+// marks on it (#2041): an NFD "é" is `e` + U+0301 and Devanagari "हिंदी" ends
+// in the vowel sign U+0940, so the word's last code point is a mark, not a
+// letter, and before the fix both merged.
 test("sentences ends a sentence behind a footnote-style bracket marker", () => {
   assert.deepEqual(
     sentences("Pass `--quiet`; ci-state.mjs drops `jobs`.[1] Elsewhere, `missing` is unaffected."),
@@ -326,9 +329,20 @@ test("sentences ends a sentence behind a footnote-style bracket marker", () => {
     "\u2018late\u2019.[1]",
     "at 12.[1]",
     "at the caf\u00e9.[1]",
+    "at the cafe\u0301.[1]",
+    "\u092f\u0939 \u0939\u093f\u0902\u0926\u0940.[1]",
+    "v\u1ec7.[1]",
+    "ve\u0323\u0302.[1]",
+    "at 1\u20e3.[1]",
   ]) {
     assert.deepEqual(sentences(`Pin it ${end}\nThen read.`), [`Pin it ${end}`, "Then read."], end);
   }
+  // #2041's own repros, verbatim.
+  assert.deepEqual(sentences("At the cafe\u0301.[1] Then read."), ["At the cafe\u0301.[1]", "Then read."]);
+  assert.deepEqual(
+    sentences("\u092f\u0939 \u0939\u093f\u0902\u0926\u0940.[1] Then read."),
+    ["\u092f\u0939 \u0939\u093f\u0902\u0926\u0940.[1]", "Then read."],
+  );
 });
 
 // The accept side of #1987: a bracket only ends a sentence as a marker — one
@@ -350,6 +364,11 @@ test("sentences does not end one at a bracket that is code, a link or an index, 
     "Read it.[the docs](https://example.com) first, then stop.",
     "Read it.[1]: first, then stop.",
     "Read it, e.g.[1] first, then stop.",
+    // #2041: a combining mark only counts atop one of the bases above — one
+    // with no accepted base under it, straight after a space or another
+    // rejected character, closes no word, however many marks pile onto it.
+    "Read it \u0301.[1] first, then stop.",
+    "Read it,\u0301\u0302.[1] first, then stop.",
   ]) {
     assert.deepEqual(sentences(s), [s], s);
   }
