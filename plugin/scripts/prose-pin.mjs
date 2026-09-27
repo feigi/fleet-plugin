@@ -221,9 +221,10 @@ export function paragraph(text, anchor, what, options) {
 // quote. A word here is a letter in any script, combining marks on it
 // included (#2041): an NFD "é" is `e` + U+0301 and Devanagari "हिंदी" ends in
 // the vowel sign U+0940, so a word's last code point can be a mark, and the
-// guard reads past any run of them to the base under it. A mark with no
-// letter or digit under it closes nothing. Code quoted in prose puts brackets
-// straight after a period too, with whitespace after them — jq's
+// guard reads past any run of them to whichever of the five bases above sits
+// under it. A mark with no accepted base under it closes nothing. Code quoted
+// in prose puts brackets straight after a period too, with whitespace after
+// them — jq's
 // `'.[] | …'`, JavaScript's `m?.[1] || …`,
 // a glob's `*.[0-9]*' ` — behind a quote, a `?`, a `*` or a space, and jq's
 // `.jobs.[] | …` or `.jobs.[0, 1] | …` behind a word, with an empty or
