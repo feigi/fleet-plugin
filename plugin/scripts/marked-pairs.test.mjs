@@ -70,8 +70,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, symlinkSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   scanFile,
   scanTree,
@@ -450,6 +452,61 @@ test("fixture: a file reached through a symlinked directory in scope is reported
   const scanned = scanTree(root).map((f) => f.file);
   assert.deepEqual([...scanned].sort(), [linked, real], "premise: walk() follows a symlinked directory and lists it under the symlink's path");
   assert.deepEqual(walkDiscrepancy(root, scanned), { missing: [], extra: [linked] });
+});
+
+// #2076: a symlink cycle under a scoped directory. Native recursive
+// `readdirSync` enumerates every PATH through the links, bounded only by the
+// OS symlink-depth cutoff: one way back into the loop (`skills/a/up -> ..`)
+// is a finite, deeply nested list (measured: 96 entries, 64 levels on
+// darwin); two (`skills/b -> a` beside it) doubles the paths at every level
+// and never returned (measured: killed at 20 s, zero output). `walk()` now
+// refuses both shapes by name the moment a directory resolves to one of its
+// own ancestors.
+//
+// Run in a child under a hard bound: the walk is synchronous, so a hang in
+// this process would block node:test's own timeout timer as well — the
+// suite would stall rather than red. Here a hang is a bounded failure that
+// says it hung.
+const WALK_BOUND_MS = 10_000;
+function scanInChild(root) {
+  const mod = pathToFileURL(join(import.meta.dirname, "marked-pairs.mjs")).href;
+  const src = `const { scanTree } = await import(${JSON.stringify(mod)}); process.stdout.write(JSON.stringify(scanTree(process.argv[1]).map((f) => f.file)));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", src, root], { encoding: "utf8", timeout: WALK_BOUND_MS, maxBuffer: 64 * 1024 * 1024 });
+  assert.equal(r.error?.code, undefined, `scanTree() did not return within ${WALK_BOUND_MS} ms — the walk hung (${r.error?.code})`);
+  return r;
+}
+
+for (const [shape, links] of [
+  ["two-branch (the ticket's repro)", [["..", "skills/a/up"], ["a", "skills/b"]]],
+  ["single-branch", [["..", "skills/a/up"]]],
+]) {
+  test(`fixture: a ${shape} symlink cycle under a scoped directory fails fast, naming the link — never hangs`, (t) => {
+    const root = fixtureTree(t, { "skills/a/SKILL.md": "" });
+    for (const [target, at] of links) symlinkSync(target, join(root, at), "dir");
+    const r = scanInChild(root);
+    assert.notEqual(r.status, 0, `a cycle must refuse, not return a list: ${r.stdout.slice(0, 200)}`);
+    assert.match(r.stderr, /symlink cycle: .*skills\/(a|b)\/up resolves to its own ancestor/);
+  });
+}
+
+// The accept half of the same guard: every symlink shape that is NOT a cycle
+// must still scan exactly as the native recursive walk did (#2056's ruling
+// stands). Two links to one directory and a link to a link are a DAG, not a
+// loop — a guard keyed on "seen this directory anywhere" rather than "is my
+// own ancestor" would refuse or silently de-duplicate them. A dangling link
+// and a link to a file are skipped: neither is a regular file, and the
+// dangling one must not take the rest of `skills/` down with it.
+test("fixture: non-cyclic symlinks under a scoped directory still scan — shared targets and chained links followed, dangling and file links skipped", (t) => {
+  const root = fixtureTree(t, { "skills/real/SKILL.md": "", "skills/real/sub/deep.md": "" });
+  symlinkSync("real", join(root, "skills", "one"), "dir");
+  symlinkSync("real", join(root, "skills", "two"), "dir");
+  symlinkSync("one", join(root, "skills", "chain"), "dir");
+  symlinkSync("nowhere", join(root, "skills", "dangling"));
+  symlinkSync(join("real", "SKILL.md"), join(root, "skills", "filelink.md"));
+  const r = scanInChild(root);
+  assert.equal(r.status, 0, r.stderr);
+  const expected = ["chain", "one", "real", "two"].flatMap((d) => [join("skills", d, "SKILL.md"), join("skills", d, "sub", "deep.md")]);
+  assert.deepEqual(JSON.parse(r.stdout), expected.sort());
 });
 
 test("real tree: the walk returns every scoped file — not a thinned, padded or duplicated list", () => {
