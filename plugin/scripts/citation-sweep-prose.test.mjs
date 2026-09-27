@@ -235,8 +235,43 @@ function securityReleaseFault(adr) {
 // `~~`, `}`, `>`, `»`, `›` and an HTML closing tag such as `</b>`. Still no end:
 // an ATX heading with no blank line before it, since every line behind the
 // `# ` gutter would open one and the merge row reads sentences across it.
-const CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|<\/[a-z][a-z\d]*>)`;
-const SENTENCE_END = String.raw`(?:(?:[!?]|(?<!(?<![a-z\d])(?:e\.g|i\.e|cf|viz|vs))\.)${CLOSING_MARKUP}*\s|…${CLOSING_MARKUP}*\s?|\n(?=(?:[ \t]*[>#])*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]|\x60{3}|~{3}|\|))|\n(?:[ \t]*[>#])*(?:[ \t]*[-=*_])*[ \t]*\r?\n)`;
+//
+// #2002. More of what CommonMark (0.31.2) lets interrupt a paragraph, and
+// closing markup #1981 still missed. An HTML block opens straight under
+// prose with no blank line between — `<div>`, `<table>`, `<details>`, `<!--`,
+// `<?`, `<!DOCTYPE`, `<pre>`, any of CommonMark's block tag names, opening or
+// closing — and ends the sentence there; any other tag, `<span>` or
+// `<divider>`, opens no block, so the line still wraps. A blockquote's `>`
+// ends it too, opening straight under an unquoted line. Two quoted lines wrap
+// behind the gutter, and so does a quote nested inside one, `> a` then
+// `> > b` — the silent direction, like the ATX gap above, left since telling it
+// from a wrap means counting both lines' `>`; a lazy line between two quoted
+// ones splits the quote in two, the loud direction. Neither this branch nor
+// the HTML block's own caps how far a `<div>`/`>` line can indent, unlike the
+// setext/thematic branch below — a line indented four or more spaces still
+// ends the sentence here, the same loud direction the pre-existing list
+// lookahead already allowed. A setext underline or thematic break is now only
+// what CommonMark renders as one: a run of `=` or of `-`, or three or more of
+// one of `-`, `*`, `_`, spaced or not, indented at most three spaces past the
+// gutter. `_`, `**`, `-=-`, `*-_` or `    ---` is a paragraph line, and reading
+// one as an end was the loud direction. That three-space cap counts from the
+// margin, not a list item's own content column — inside a list item a deeper
+// underline can still be a real end CommonMark would honor; the silent
+// direction, left beside the ATX and nested-quote gaps above, since a
+// line-based regex can't carry a list item's column forward. A `#` is gutter
+// unless it's followed directly by a digit, as in a shell comment, an ATX
+// heading or a comment-only rule line (`#---`, `#===`): a wrapped line
+// opening `#1906) ` is a citation, not a gutter and a list item. Closing
+// markup also takes a link's destination or reference label,
+// `](renovate.json)` or `][ref]`, a footnote reference `[^1]`, and a closing
+// tag with a hyphen in its name or whitespace before its `>`, `</my-el>`,
+// `</b >`. Tag names match in either case only where the splicing pattern
+// carries `i`, as the drift and merge rows do.
+const CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]\[[^\]]*\]|\[\^[^\]\s]+\]|<\/[a-z][a-z\d-]*\s*>)`;
+const HASH_GUTTER = String.raw`[ \t]*#(?!\d)`;
+const GUTTER = String.raw`(?:[ \t]*>|${HASH_GUTTER})`;
+const HTML_BLOCK_OPEN = String.raw`<(?:!--|\?|![A-Za-z]|!\[CDATA\[|(?:script|pre|style|textarea)(?=[\s>]|$)|\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s>]|\/>|$))`;
+const SENTENCE_END = String.raw`(?:(?:[!?]|(?<!(?<![a-z\d])(?:e\.g|i\.e|cf|viz|vs))\.)${CLOSING_MARKUP}*\s|…${CLOSING_MARKUP}*\s?|\n(?=${GUTTER}*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]|\x60{3}|~{3}|\||${HTML_BLOCK_OPEN}))|\n(?=(?:${HASH_GUTTER})*[ \t]*>)(?<=(?:^|\n)(?!(?:${HASH_GUTTER})*[ \t]*>)[^\n]*\n)|\n${GUTTER}*[ \t]*\r?\n|\n(?:${GUTTER}+ ?)? {0,3}(?:=+|-+|(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})[ \t]*\r?\n)`;
 // #1958. What names an update type, for both of ADR 0010's #1906 rows below:
 // minor, patch or major as a whole word. The rows' first cut matched the bare
 // substring, so "dispatched" and "majority" scoped a claim that names no
@@ -1113,6 +1148,68 @@ test("a scoped drift sentence still wraps behind a gutter, over CRLF, past `...`
     "For minor and patch bumps, `main...HEAD` keeps bounding drift at about one month.\n",
     // A number opens a list item only with its `.` or `)` and a space.
     "For minor and patch bumps the gap runs\n35 days, bounding drift at about one month.\n",
+  ]) {
+    assert.doesNotMatch(text, UNSCOPED_DRIFT_SENTENCE, text);
+  }
+});
+
+test("an unscoped drift sentence is refused after an HTML block or blockquote opens, a short setext underline, and a link or footnote (#2002)", () => {
+  for (const text of [
+    // The cases #2002 was filed on that read past a real end.
+    "Minor and patch bumps\n<div>\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n> Bounding drift at about one month.\n",
+    "[Minor and patch bumps only.](renovate.json) Bounding drift at about one month.\n",
+    "<my-el>Minor and patch bumps only.</my-el> Bounding drift at about one month.\n",
+    "<b>Minor and patch bumps only.</b > Bounding drift at about one month.\n",
+    // The HTML block's other openers: a closing block tag, a comment, a
+    // type-1 tag outside the block tag list.
+    "Minor and patch bumps\n</details>\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n<!-- monthly -->\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n<pre>\nBounding drift at about one month.\n",
+    // The rest of HTML_BLOCK_OPEN's own openers: the other type-1 tags, a
+    // processing instruction, a doctype, a CDATA section, and a block tag's
+    // self-closing boundary.
+    "Minor and patch bumps\n<script>\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n<?php\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n<!DOCTYPE html>\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n<![CDATA[x]]>\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n<hr/>\nBounding drift at about one month.\n",
+    // A quote opening behind pin-drift.sh's `# ` gutter.
+    "# Minor and patch bumps\n# > Bounding drift at about one month.\n",
+    // A `#`-gutter rule line or gutter list item, with no space after the
+    // `#`, still ends the sentence — the digit-only exception #2002 needs.
+    "# Minor and patch bumps\n#------------------------------\n# Bounding drift at about one month.\n",
+    "# Minor and patch bumps\n#- Bounding drift at about one month.\n",
+    // What still ends at the underline: a setext run of one, a spaced break,
+    // three spaces of indent.
+    "Minor and patch bumps\n-\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n_ _ _\nBounding drift at about one month.\n",
+    "Minor and patch bumps\n   ===\nBounding drift at about one month.\n",
+    // A reference link's label and a footnote reference close a sentence too.
+    "[Minor and patch bumps only.][renovate] Bounding drift at about one month.\n",
+    "Minor and patch bumps only.[^1] Bounding drift at about one month.\n",
+  ]) {
+    assert.match(text, UNSCOPED_DRIFT_SENTENCE, text);
+  }
+});
+
+test("a scoped drift sentence still wraps past an inline tag, a line CommonMark renders as prose, and a `#NNNN)` citation (#2002)", () => {
+  for (const text of [
+    // Not an HTML block: a tag outside the block list, or a block tag's name
+    // as the prefix of a longer one.
+    "For minor and patch bumps, the gap keeps\n<span>\nbounding drift at about one month.\n",
+    "For minor and patch bumps, the gap keeps\n<divider>\nbounding drift at about one month.\n",
+    // Neither a setext underline nor a thematic break.
+    "For minor and patch bumps, the gap keeps\n_\nbounding drift at about one month.\n",
+    "For minor and patch bumps, the gap keeps\n**\nbounding drift at about one month.\n",
+    "For minor and patch bumps, the gap keeps\n-=-\nbounding drift at about one month.\n",
+    "For minor and patch bumps, the gap keeps\n*-_\nbounding drift at about one month.\n",
+    "For minor and patch bumps, the gap keeps\n    ---\nbounding drift at about one month.\n",
+    // An issue citation wrapped to a line's start, with or without a gutter.
+    "For minor and patch bumps (see\n#1906) the gap keeps bounding drift at about one month.\n",
+    "# For minor and patch bumps (see\n# #1906) the gap keeps bounding drift at about one month.\n",
+    // A link ends nothing without a terminator inside it.
+    "For minor and patch bumps [the gap](renovate.json) keeps bounding drift at about one month.\n",
   ]) {
     assert.doesNotMatch(text, UNSCOPED_DRIFT_SENTENCE, text);
   }
