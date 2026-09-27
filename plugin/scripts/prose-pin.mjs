@@ -6,7 +6,8 @@
 // satisfied somewhere in the slice stay green when the sentence carrying them
 // is gutted and its words restated beside it with the meaning inverted: the
 // slice bounds WHERE the words are, only a span binds them to each other.
-// Measured on ci-state-prose.test.mjs, where three keyword regexes stayed green
+// Measured on ci-state-prose.test.mjs, where three independent checks (two
+// regexes and a substring match) stayed green
 // under exactly that restatement inside the pinned paragraph. A literal the
 // source owns (a reason string read out of the script) may be interpolated
 // into the span, so renaming it there reddens the pin too.

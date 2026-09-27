@@ -31,7 +31,8 @@ const ABSENT_REASON = (CI_STATE.match(/reasons\.push\(`([^`$]+)\$\{missing\.join
 // Each claim is ONE contiguous span (prose-pin.mjs's convention), because
 // keywords bound only by the slice were not enough: with the `pending`
 // sentence gutted and its phrases restated as a second sentence in the same
-// paragraph, meaning inverted, three independent regexes stayed green (#491,
+// paragraph, meaning inverted, three independent checks (two regexes and a
+// substring match) stayed green (#491,
 // measured — both documents). The slice still does its own half: it bounds
 // WHERE the span may be found. Both documents discuss `pending`, cancelled runs
 // and force-pushes in neighbouring paragraphs, so each slice stops at the end
