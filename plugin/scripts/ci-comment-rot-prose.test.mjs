@@ -1149,13 +1149,14 @@ const JSON_COUNT =
 // file name's extension ("plugin.json"). The ceiling: a count sentence with
 // no context word of its own, right after one that has it ("Every tracked
 // `*.json` file. Seven files at last count."), passes — sentences are the
-// unit, and "The 2026-09-08 split removed two of them." has the same shape
-// and must pass.
+// unit. The existing "The 2026-09-08 split removed two of them." fixture
+// must pass too, for a simpler reason: "two of them" is not a JSON_COUNT
+// match at all.
 const JSON_SET_WORD = String.raw`(?:\btracked\b|(?<![\w.\/-])json\b|\*\.json\b|git ls-files\b)`;
 const JSON_COUNT_ALL = new RegExp(JSON_COUNT.source, "gi");
-const JSON_COUNT_MODIFIER = new RegExp(String.raw`^\S+\s+[\x60'"(]*${JSON_SET_WORD}`, "i");
+const JSON_COUNT_MODIFIER = new RegExp(String.raw`^\S+\s+(?:(?:one|two|three|four|five|six|seven|eight|nine)\s+)?[\x60'"(]*${JSON_SET_WORD}`, "i");
 const JSON_COUNT_CLAUSE_AFTER = new RegExp(String.raw`^\s*(?:(?:that|which)\s+)?(?:(?:are|were)\s+)?[\x60]?${JSON_SET_WORD}`, "i");
-const JSON_COUNT_CLAUSE_BEFORE = new RegExp(String.raw`${JSON_SET_WORD}[^\s,:;\u2013\u2014]*(?:\s+[^\s,:;\u2013\u2014]+){0,2}\s*[,:;\u2013\u2014]\s*$`, "i");
+const JSON_COUNT_CLAUSE_BEFORE = new RegExp(String.raw`${JSON_SET_WORD}[^\s,:;\u2013\u2014-]*(?:\s+[^\s,:;\u2013\u2014-]+){0,2}\s*[,:;\u2013\u2014-]\s*$`, "i");
 
 function sizesTrackedSet(sentence, count) {
   return (
@@ -1229,6 +1230,8 @@ test("jsonCountFault refuses a count of the JSON files in any spelling, and a sl
     "A dozen tracked JSON files exist today.",
     "Thirteen tracked JSON files, at last count.",
     "Twenty-one files are tracked as JSON today.",
+    "Twenty one tracked JSON files exist today.",
+    "Parses what `git ls-files` lists - both plugin manifests among them.",
   ]) {
     assert.match(jsonCountFault(`${count} ${jq}`), /sizes the tracked JSON set again/, count);
   }
