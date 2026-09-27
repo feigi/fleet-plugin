@@ -279,6 +279,59 @@ test("sentences ends one at a capitalized abbreviation lookalike, and still skip
   }
 });
 
+// #1987: a footnote-style marker between a terminator and the whitespace
+// after it — `.[1]`, `![note]`, `.[^1]`, a run of them — ended no sentence,
+// so two real ones merged and a pin scoped to the first could borrow a word
+// from the second. The marker stays with the sentence it annotates, a closing
+// mark after it still counts, and whatever closes the word before the
+// terminator — a letter in any script, a digit, a code span, a paren, a curly
+// quote — lets it end one.
+test("sentences ends a sentence behind a footnote-style bracket marker", () => {
+  assert.deepEqual(
+    sentences("Pass `--quiet`; ci-state.mjs drops `jobs`.[1] Elsewhere, `missing` is unaffected."),
+    ["Pass `--quiet`; ci-state.mjs drops `jobs`.[1]", "Elsewhere, `missing` is unaffected."],
+  );
+  for (const end of [
+    "late![note]",
+    "late?[^1]",
+    "late.[1][2]",
+    "late.[1])",
+    "late.[12]\u201d",
+    "late.[1]",
+    "(late).[1]",
+    "\u201clate\u201d.[1]",
+    "\u2018late\u2019.[1]",
+    "at 12.[1]",
+    "at the caf\u00e9.[1]",
+  ]) {
+    assert.deepEqual(sentences(`Pin it ${end}\nThen read.`), [`Pin it ${end}`, "Then read."], end);
+  }
+});
+
+// The accept side of #1987: a bracket only ends a sentence as a marker — one
+// that holds something and no whitespace, straight behind a terminator that
+// closes a word, with whitespace after it. Code quoted in prose carries the
+// other shapes: a jq path or filter, an optional-chained index, a glob, an
+// array index mid-sentence; and a link after a period is no marker either.
+test("sentences does not end one at a bracket that is code, a link or an index, nor at an abbreviation's marker", () => {
+  for (const s of [
+    "Read `.[].number` from each, then stop.",
+    "Read `gh api -q '.[] | .name'` first, then stop.",
+    "Read `'.[0] | .x'` first, then stop.",
+    "Read `.jobs.[] | .name` first, then stop.",
+    "Read `.jobs.[0, 1] | .name` first, then stop.",
+    'Read `jq ".[0] | .x"` first, then stop.',
+    "Read `m?.[1] || null` first, then stop.",
+    "Read `git tag --list 'v[0-9]*.[0-9]*' | sort` first, then stop.",
+    "Read `jobs[1] and more` first, then stop.",
+    "Read it.[the docs](https://example.com) first, then stop.",
+    "Read it.[1]: first, then stop.",
+    "Read it, e.g.[1] first, then stop.",
+  ]) {
+    assert.deepEqual(sentences(s), [s], s);
+  }
+});
+
 // #1346/#1361: the third gutter shape, exercised nowhere else until a real
 // `.js` comment-form pair lands. Written here rather than left for that
 // consumer, per this file's own header: a guard with no dedicated test is a
