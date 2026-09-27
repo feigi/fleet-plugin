@@ -1,0 +1,14 @@
+{
+  "as_of": "2026-09-27",
+  "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+  "unit": "USD per MTok (million tokens)",
+  "note": "cache_write_5m = 1.25x input (5-minute prompt-cache write); cache_write_1h = 2x input (1-hour prompt-cache write, providers.cacheRetention=long or auto-on-OAuth-subscriber); cache_read = 0.1x input on every model here. Never pool across the generation boundaries member-outcomes.tsv documents (claude-opus-4-7/4-8 vs claude-opus-5 vs claude-opus-5-5): list price moves per generation, and older is not cheaper. claude-fable-5-1 is omp's own '__advisor' control-plane model (see docs/research/token-pricing.md); it is not a fleet-implementer candidate cell but is priced here because rows carrying it exist in member-outcomes.tsv.",
+  "claude-opus-5": { "input": 5, "cache_write_5m": 6.25, "cache_write_1h": 10, "cache_read": 0.5, "output": 25 },
+  "claude-opus-5-5": { "input": 4, "cache_write_5m": 5, "cache_write_1h": 8, "cache_read": 0.2, "output": 20 },
+  "claude-sonnet-5": { "input": 2, "cache_write_5m": 2.5, "cache_write_1h": 4, "cache_read": 0.2, "output": 10 },
+  "claude-haiku-4-5": { "input": 1, "cache_write_5m": 1.25, "cache_write_1h": 2, "cache_read": 0.1, "output": 5 },
+  "claude-haiku-4-5-20251001": { "input": 1, "cache_write_5m": 1.25, "cache_write_1h": 2, "cache_read": 0.1, "output": 5 },
+  "claude-opus-4-7": { "input": 5, "cache_write_5m": 6.25, "cache_write_1h": 10, "cache_read": 0.5, "output": 25 },
+  "claude-opus-4-8": { "input": 5, "cache_write_5m": 6.25, "cache_write_1h": 10, "cache_read": 0.5, "output": 25 },
+  "claude-fable-5-1": { "input": 10, "cache_write_5m": 12.5, "cache_write_1h": 20, "cache_read": 0.25, "output": 50 }
+}
