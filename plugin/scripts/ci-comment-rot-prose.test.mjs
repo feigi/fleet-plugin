@@ -347,22 +347,37 @@ export function windowClaimFault(block) {
 // or tag, a quoted key and a trailing comment allowed — every line up to the
 // first non-blank one set shallower than the content. The content's column
 // is the header's indentation indicator past the column of its key (of its
-// dash, for a bare `- |`), or else the first non-blank line's own, which
-// must sit deeper than that column or the scalar is empty. A line in there is
-// text however it is spelled, so a header inside it opens nothing. Only block
-// scalars: a quoted or plain scalar can span lines too, but none in ci.yml
-// does, and at a step's depth the job check below refuses any step such a
-// string could spell.
+// dash, for a bare `- |`, or of the document itself for a bare `--- |`), or
+// else the first non-blank line's own, which must sit deeper than that
+// column or the scalar is empty. A line in there is text however it is
+// spelled, so a header inside it opens nothing. Only block scalars: a quoted
+// or plain scalar can span lines too, but none in ci.yml does, and at a
+// step's depth the job check below refuses any step such a string could
+// spell — that check has no equivalent for the comment-run walk, so a
+// multi-line quoted or plain scalar can still lend the wrong text to a
+// step's comment; ci.yml has no such scalar today, so this is a documented,
+// latent gap, not a live one (#2000).
+//
+// Two header shapes #1975 left undetected (#2000). The plain-key
+// alternative used to exclude `#` outright; YAML only starts a comment at
+// whitespace-then-`#`, so it now excludes `#` only when whitespace precedes
+// it, letting a plain key contain one (`C#: |`). And a document-start
+// marker (`--- |`) opens a scalar with no key at all — its own production,
+// column −1, since the content it owns need only sit deeper than the
+// document itself, never as shallow as a real job or key.
 function blockScalarText(lines) {
   const text = new Set();
   for (let at = 0; at < lines.length; at++) {
     const header =
-      /^(\s*(?:-\s+)*)((?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s#"'][^#]*?)\s*:\s+)?(?:[&!]\S*\s+)*[|>]([1-9])?[-+]?([1-9])?\s*(?:#.*)?$/.exec(
+      /^(\s*(?:-\s+)*)((?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s#"'](?:[^#]|(?<!\s)#)*?)\s*:\s+)?(?:[&!]\S*\s+)*[|>]([1-9])?[-+]?([1-9])?\s*(?:#.*)?$/.exec(
         lines[at],
       );
-    if (!header || (!header[2] && !header[1].includes("-"))) continue;
-    const column = header[2] ? header[1].length : header[1].trimEnd().length - 1;
-    const indicator = Number(header[3] ?? header[4] ?? 0);
+    const docHeader =
+      !header && /^---\s+(?:[&!]\S*\s+)*[|>]([1-9])?[-+]?([1-9])?\s*(?:#.*)?$/.exec(lines[at]);
+    if (!header && !docHeader) continue;
+    if (header && !header[2] && !header[1].includes("-")) continue;
+    const column = docHeader ? -1 : header[2] ? header[1].length : header[1].trimEnd().length - 1;
+    const indicator = Number((docHeader ? docHeader[1] : header[3]) ?? (docHeader ? docHeader[2] : header[4]) ?? 0);
     let depth = indicator ? column + indicator : null;
     let end = at + 1;
     for (; end < lines.length; end++) {
@@ -386,17 +401,22 @@ function blockScalarText(lines) {
 // side included, so a comment with a blank line under it is not the step's
 // (#1919). A block scalar's content is neither a step's key nor a comment,
 // and a key read by name here may be quoted or spaced from its colon, as YAML
-// allows (#1975). Exported with an optional `lines` override (same
-// idiom as windowClaimFault's `block` param and citationFault's
-// `citing`/`cited` params) so a test can feed it synthetic input the real
-// ci.yml does not contain; the production call sites take no argument and read
-// the real file. The owner pin and the pointer pin both read the steps through
-// this, so they cannot disagree about where a step's comment starts.
+// allows (#1975). A `uses:` key's colon must still be followed by real
+// whitespace — YAML's own rule for telling a key from a plain scalar that
+// merely contains one (`uses:actions/…` is the latter, never a key) — and
+// either a job's own key or a `uses:` key may carry an anchor or tag between
+// its colon and its value, as YAML allows there too (#2000). Exported with
+// an optional `lines` override (same idiom as windowClaimFault's `block`
+// param and citationFault's `citing`/`cited` params) so a test can feed it
+// synthetic input the real ci.yml does not contain; the production call
+// sites take no argument and read the real file. The owner pin and the
+// pointer pin both read the steps through this, so they cannot disagree
+// about where a step's comment starts.
 export function setupNodeComments(lines = read("../../.github/workflows/ci.yml").split("\n")) {
   const text = blockScalarText(lines);
   const found = [];
   for (let at = 0; at < lines.length; at++) {
-    const uses = /^(\s*)(-\s+)?(["']?)uses\3\s*:\s*["']?actions\/setup-node@/.exec(lines[at]);
+    const uses = /^(\s*)(-\s+)?(["']?)uses\3\s*:\s+(?:[&!]\S+\s+)*["']?actions\/setup-node@/.exec(lines[at]);
     if (!uses || text.has(at)) continue;
     // `- uses:` opens its entry. Any other `uses:` belongs to the first line
     // above it that sits shallower than the key — sibling keys share its
@@ -440,7 +460,7 @@ export function setupNodeComments(lines = read("../../.github/workflows/ci.yml")
     const stepsDepth = lines[parent].search(/\S/);
     let jobLine = parent - 1;
     while (jobLine >= 0 && (/^\s*(?:#|$)/.test(lines[jobLine]) || lines[jobLine].search(/\S/) >= stepsDepth)) jobLine--;
-    const jobKey = jobLine >= 0 ? /^ {2}(["']?)([\w-]+)\1\s*:(?:\s+#.*)?\s*$/.exec(lines[jobLine]) : null;
+    const jobKey = jobLine >= 0 ? /^ {2}(["']?)([\w-]+)\1\s*:\s*(?:[&!]\S+\s*)*(?:#.*)?$/.exec(lines[jobLine]) : null;
     if (jobLine >= 0 && !jobKey) continue;
     let i = step;
     while (i > 0 && /^\s*#/.test(lines[i - 1]) && !text.has(i - 1)) i--;
@@ -1008,6 +1028,40 @@ test("a key spelled quoted, with a space before its colon, or with a trailing co
     assert.deepEqual(setupNodeComments(shape), [], shape.join("\n"));
   }
 });
+
+// #2000. Four more gaps in the same two functions as #1975's, confirmed
+// against PyYAML and confirmed identical on PR #1995's base and head —
+// pre-existing, not a regression of that fix. Grouped by the ticket's own
+// finding numbers for traceability.
+test("an anchor or tag on a job key or a uses: key does not drop the step (#2000 finding 1)", () => {
+  assert.deepEqual(setupNodeComments(["jobs:", "  job: &j", "    steps:", "      - uses: actions/setup-node@v5"]), [
+    { block: "", lines: 0, job: "job" },
+  ]);
+  assert.deepEqual(setupNodeComments(["jobs:", "  job:", "    steps:", "      - uses: &u actions/setup-node@v5"]), [
+    { block: "", lines: 0, job: "job" },
+  ]);
+});
+
+test("uses: with no whitespace before its value is a plain scalar, never a step's own key (#2000 finding 2)", () => {
+  assert.deepEqual(setupNodeComments(["jobs:", "  job:", "    steps:", "      - uses:actions/setup-node@v5"]), []);
+});
+
+test("a plain key containing a literal # is still a block-scalar header, not read as structure (#2000 finding 3)", () => {
+  assert.deepEqual(setupNodeComments(["C#: |", "  job:", "    steps:", "      - uses: actions/setup-node@v5"]), []);
+});
+
+test("a document-start scalar (--- |) is still a block-scalar header, not read as structure (#2000 finding 4)", () => {
+  assert.deepEqual(setupNodeComments(["--- |", "  job:", "    steps:", "      - uses: actions/setup-node@v5"]), []);
+});
+
+// #2000 finding 5, deliberately NOT fixed here: blockScalarText's own doc
+// comment above says why — the comment-run walk has no job check to mirror
+// the one #1920 gives the phantom-step half, so a multi-line quoted or
+// plain scalar can still lend a step the wrong comment. ci.yml has no such
+// scalar today, so the gap is latent, and detecting one needs the same
+// column/indentation tracking this file already does for block scalars,
+// extended to a wholly different, unindented production — its own design
+// work the other four findings didn't need.
 
 // #1919. A blank line ends a step's comment run wherever it falls — the rule
 // the failglob and Validate JSON walks in this file follow too, so no walk here
