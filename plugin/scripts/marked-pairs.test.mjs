@@ -69,9 +69,9 @@
 //      with).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import {
   scanFile,
   scanTree,
@@ -295,35 +295,108 @@ test("mutation run 4 (the two-dialect-specific mutant): a token swap survives no
 // Real-tree divergence check.
 // ---------------------------------------------------------------------------
 
-// Per-directory `.md` floors at ~60% of each directory's measured baseline —
-// the same floor-to-baseline ratio this repo's own tracked-file-count guard
-// uses elsewhere (200 of 338 tracked paths). Measured 2026-09-27
-// (#2026): skills/ 8, commands/ 3, agents/ 13. A bare non-zero check cannot
-// see a walk or filter bug that thins a directory without emptying it, and
-// the real-tree pair tests cannot either when the lost files carry no
-// marker — every agents/ file and most skills/ files carry none today, yet a
-// marker later added to one of them would go unscanned. Measured: a stray
-// exclude dropping agents/fleet-review-* (13 → 4), or dropping every unmarked
-// skills/ file (8 → 2), passed the whole file under `> 0`.
+// Two guards on the walk, for two different failures.
+//
+// EXACT, against a walk or filter bug (#2044): `scanTree`'s file list must
+// equal an independent listing of the same directories — every in-scope
+// file present, none duplicated, none of the wrong extension. A floor
+// cannot do this at these baselines: #2044 measured an exclude dropping one
+// unmarked file from EACH of skills/, commands/ and agents/ (8→7, 3→2,
+// 13→12) staying at or above every floor, and commands/ alone losing its
+// unmarked file (3→2) landing exactly on its floor — the pair tests below
+// cannot see either, because the lost files carry no marker. An aggregate
+// floor has the same margin problem summed, and an exact count or a
+// manifest hash goes stale on every legitimate addition; comparing against
+// the directory itself needs no number at all. The listing is hand-rolled
+// one level per `readdirSync` call — deliberately NOT `walk()`'s
+// `{ recursive: true }` form — with the same inclusion rule (regular files
+// only, exact extension), so it shares no code with what it checks.
+//
+// COARSE, against the tree itself shrinking: both sides of the exact check
+// read the same directories, so a mass deletion, or a wrong root, leaves
+// them agreeing on too little. Per-directory `.md` floors at ~60% of each
+// directory's measured baseline catch that — the same floor-to-baseline
+// ratio this repo's own tracked-file-count guard uses elsewhere (200 of 338
+// tracked paths). Measured 2026-09-27 (#2026): skills/ 8, commands/ 3,
+// agents/ 13. A deliberate deletion of one file is a real tree change, not
+// a defect, and passes both guards by design.
 const MD_DIR_FLOORS = { skills: 5, commands: 2, agents: 8 };
 
-test("real tree: the walk reaches every scoped directory", () => {
+function listIndependently(root, dir, ext) {
+  let entries;
+  try {
+    entries = readdirSync(join(root, dir), { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries.flatMap((e) => {
+    const rel = join(dir, e.name);
+    if (e.isDirectory()) return listIndependently(root, rel, ext);
+    return e.isFile() && extname(e.name) === ext ? [rel] : [];
+  });
+}
+
+// `missing`: in-scope files the scan never returned (the thinning #2044
+// names). `extra`: anything returned that is not an in-scope file, or is
+// returned twice.
+function walkDiscrepancy(root, scannedFiles) {
+  const expected = new Set([
+    ...MD_DIRS.flatMap((d) => listIndependently(root, d, ".md")),
+    ...JS_DIRS.flatMap((d) => listIndependently(root, d, ".js")),
+  ]);
+  const seen = new Set();
+  const extra = [];
+  for (const f of scannedFiles) {
+    if (!expected.has(f) || seen.has(f)) extra.push(f);
+    seen.add(f);
+  }
+  const missing = [...expected].filter((f) => !seen.has(f)).sort();
+  return { missing, extra };
+}
+
+// The accept half: nested subdirectories, a file of the other scoped
+// extension, and a non-scoped file in every scoped directory must all be
+// judged correctly, or the real-tree check below reds on a legitimate tree.
+// Then the reject half, on the same tree: #2044's exact shape — one file
+// dropped from each md directory at once — is named file by file.
+test("fixture: the walk oracle accepts a full scan and names every file a one-per-directory thinning drops", (t) => {
+  const root = fixtureTree(t, {
+    "skills/a/SKILL.md": "",
+    "skills/a/references/deep.md": "",
+    "skills/a/notes.txt": "",
+    "commands/one.md": "",
+    "commands/two.md": "",
+    "commands/helper.js": "",
+    "agents/x.agent.md": "",
+    "agents/y.agent.md": "",
+    "workflows/flow.js": "",
+    "workflows/README.md": "",
+  });
+  const scanned = scanTree(root).map((f) => f.file);
+  assert.deepEqual(walkDiscrepancy(root, scanned), { missing: [], extra: [] });
+
+  const dropped = [join("skills", "a", "references", "deep.md"), join("commands", "two.md"), join("agents", "y.agent.md")];
+  assert.deepEqual(walkDiscrepancy(root, scanned.filter((f) => !dropped.includes(f))), { missing: [...dropped].sort(), extra: [] });
+  assert.deepEqual(walkDiscrepancy(root, [...scanned, scanned[0], join("workflows", "README.md")]), {
+    missing: [],
+    extra: [scanned[0], join("workflows", "README.md")],
+  });
+});
+
+test("real tree: the walk returns every scoped file — not a thinned, padded or duplicated list", () => {
+  const { missing, extra } = walkDiscrepancy(REPO, scanTree(REPO).map((f) => f.file));
+  assert.deepEqual(missing, [], "in-scope files the scan never returned — a walk or filter bug is thinning it");
+  assert.deepEqual(extra, [], "files the scan returned that are out of scope, or returned twice");
+});
+
+test("real tree: every scoped directory stays above its measured floor", () => {
   assert.deepEqual(Object.keys(MD_DIR_FLOORS).sort(), [...MD_DIRS].sort(), "every MD_DIRS entry needs a measured floor in MD_DIR_FLOORS");
   for (const d of MD_DIRS) {
     const files = scanTree(REPO).filter((f) => f.file.startsWith(d + "/") && f.file.endsWith(".md"));
     assert.ok(
       files.length >= MD_DIR_FLOORS[d],
-      `${d}/ contributed only ${files.length} .md file(s) to the scan, under its floor of ${MD_DIR_FLOORS[d]} — a walk or filter bug is thinning it`,
+      `${d}/ contributed only ${files.length} .md file(s) to the scan, under its floor of ${MD_DIR_FLOORS[d]} — the tree itself has shrunk`,
     );
-  }
-  // workflows/ is in scope by design (this file's header) even though no
-  // real .js comment-form pair exists yet (verified 2026-09-09, pre-#1361) —
-  // asserted as a walk floor of zero, not skipped, so a future regression
-  // that stops walking workflows/ entirely still reds this test once #1361
-  // lands its first real pair.
-  for (const d of JS_DIRS) {
-    const files = scanTree(REPO).filter((f) => f.file.startsWith(d + "/") && f.file.endsWith(".js"));
-    assert.ok(files.length >= 0);
   }
 });
 
