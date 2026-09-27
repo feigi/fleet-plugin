@@ -798,37 +798,30 @@ for b in $gone_branches; do
   # space in it — ordinary on macOS — was otherwise truncated at the first
   # one, and every check below then ran against a wrong, nonexistent path.
   #
-  # This pipeline DOES take awk's status rather than git's, the swallow #264
-  # fixed for `git cherry` above — left deliberately. Making it fail closed is
-  # a control-flow change, not a message one: measured, a dying
-  # `git worktree list` leaves $wt empty, and a merged [gone] branch with no
-  # worktree is then reaped by `git branch -D`, which needs no answer from the
-  # registry. Keeping it instead strands every [gone] branch in the sweep, and
-  # #391's ruling was to report the state, not to change what gets reaped. The
-  # half that IS a message change is already made: a branch that does have a
-  # worktree still reaches `git branch -D` and still refuses, and that refusal
-  # now carries git's own `used by worktree at …` instead of a bare label. #622
+  # A listing that cannot be read fails CLOSED, like every other could-not-check
+  # in this file: `$wt` would be empty, every guard under `[ -n "$wt" ]` below
+  # skipped, and `git branch -D` needs no answer from the registry to delete a
+  # branch with no worktree — so a merged [gone] branch was force-deleted while
+  # the sweep could not see the registry at all. Keeping it strands every [gone]
+  # branch in this pass on one repo-level failure, since the listing is re-read
+  # per branch (header: every precondition is recomputed); reap runs after every
+  # merge pass, so each waits one pass with the cause named. #622
   #
-  # `|| :` keeps that swallow exactly where it was after the read moved into
-  # `wt_listing`: a listing that could not be produced leaves `$wt_list` empty,
-  # the awk matches nothing, `$wt` is empty, and the branch is reaped as before.
-  # Without it the helper's status would reach `set -e` and end the sweep, which
-  # is the control-flow change the paragraph above declines to make.
-  #
-  # A genuine awk failure is a DIFFERENT fault from that swallow, and is guarded
-  # below rather than left to it: it fires only when `wt_listing` itself
-  # succeeded — a real, non-empty `$wt_list` — and awk could not finish scanning
-  # it (the #614/#790 multibyte trigger this file's header documents), never
-  # when the listing failed and left `$wt_list` empty, which reaches this same
-  # assignment as awk matching nothing at rc 0, exactly as the paragraph above
-  # describes. Left bare, that failure aborted the whole script on awk's own
-  # diagnostic, with no `reap:`-prefixed line for a caller to grep stderr for —
-  # the same shape #243 fixed in release-ticket.sh's own copy of this lookup.
-  # `keep`, not `die`: nothing has mutated $b yet, and dying here would also
-  # discard whatever earlier iterations of this loop already reaped — the same
-  # reason the branchless sweep below keeps rather than dies on its own copy of
-  # this pipe. #789
-  wt_listing || :
+  # A genuine awk failure is a DIFFERENT fault from the listing failing, and is
+  # guarded separately: it fires only when `wt_listing` itself succeeded — a
+  # real, non-empty `$wt_list` — and awk could not finish scanning it (the
+  # #614/#790 multibyte trigger this file's header documents). Left bare, that
+  # failure aborted the whole script on awk's own diagnostic, with no
+  # `reap:`-prefixed line for a caller to grep stderr for — the same shape #243
+  # fixed in release-ticket.sh's own copy of this lookup. `keep`, not `die`:
+  # nothing has mutated $b yet, and dying here would also discard whatever
+  # earlier iterations of this loop already reaped — the same reason the
+  # branchless sweep below keeps rather than dies on its own copy of this pipe,
+  # and the same reason the listing failure above keeps. #789
+  if ! wt_listing; then
+    keep "$b" "worktree lookup failed — cannot tell whether $b has a worktree; kept until a pass that can read the registry: $(printf '%s' "$wt_err" | tr '\n' ' ')"
+    continue
+  fi
   if ! wt=$(printf '%s\n' "$wt_list" |
             awk -v b="refs/heads/$b" '/^worktree /{w=substr($0,10)} /^branch /&&$2==b{print w}'); then
     keep "$b" "could not scan the worktree listing for $b — treating it as unresolved rather than guessing it has none"
@@ -1231,8 +1224,8 @@ if ! wt_listing; then
 # Status taken, not swallowed: this pipeline's last command is the awk, so an
 # awk that could not run leaves `$detached` empty and every branchless worktree
 # goes unmentioned — this ticket's own defect, committed inside its fix. The
-# swallow the branch sweep above leaves deliberately is a different trade: there
-# an empty answer still reaps the branch, here it silently reaps nothing.
+# branch sweep above takes both statuses too — the listing's and its awk's —
+# and keeps the branch on either, since #622.
 #
 # Pinned since #993, at the same arm the paragraph above admits to: reap.test.mjs
 # shims a failing `awk` onto PATH, selected by this program's own `/^bare$/`
