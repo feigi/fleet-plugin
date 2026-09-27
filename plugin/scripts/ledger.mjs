@@ -640,7 +640,7 @@ function releaseLock() {
   }
 }
 
-function acquireLock() {
+async function acquireLock() {
   try {
     mkdirSync(dirname(file), { recursive: true });
   } catch (e) {
@@ -648,7 +648,6 @@ function acquireLock() {
   }
   process.on("exit", releaseLock);
   for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => process.exit(2));
-  const sleeper = new Int32Array(new SharedArrayBuffer(4));
   const deadline = Date.now() + LOCK_WAIT_MS;
   for (;;) {
     let fd = null;
@@ -676,7 +675,10 @@ function acquireLock() {
     const pid = parsePid(holder);
     if (pid !== null && isDead(pid) && reapDeadHolder(pid)) continue;
     if (Date.now() >= deadline) die(`cannot lock ${file} — held by pid ${pid ?? JSON.stringify(holder)}`);
-    Atomics.wait(sleeper, 0, 0, 5 + Math.random() * 15);
+    // A timer, not a blocking sleep: a waiter holds no lock, so a SIGTERM
+    // that arrives while it waits should end it now, and the handlers above
+    // only run when the event loop is free to run them.
+    await new Promise((r) => setTimeout(r, 5 + Math.random() * 15));
   }
 }
 
@@ -706,7 +708,7 @@ function acquireLock() {
 if (requireFile && !existsSync(file)) die(`--require-file given but ledger file does not exist: ${file}`);
 
 const WRITE_COMMANDS = new Set(["row", "filed", "ruled", "dispatch", "settle", "drain"]);
-if (WRITE_COMMANDS.has(cmd)) acquireLock();
+if (WRITE_COMMANDS.has(cmd)) await acquireLock();
 const data = load();
 
 // The payload subcommands end by falling out of this chain, never by calling
