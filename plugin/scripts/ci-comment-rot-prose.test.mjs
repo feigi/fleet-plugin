@@ -1762,6 +1762,23 @@ test("jsonCountFault ends a count sentence at a capitalized lookalike behind clo
   }
 });
 
+// #2053: sentences() runs first here, and the re-split after it can only cut
+// a piece further, never rejoin two, so a split sentences() made
+// mid-abbreviation was final. Its guard read `_` as a word character, so an
+// italic abbreviation in the coverage lead cut the lead's coverage words off
+// into the next piece, and an intact comment read as one that lost them.
+test("jsonCountFault reads an italic abbreviation in the coverage lead as part of that sentence (#2053)", () => {
+  for (const abbr of ["_e.g._", "e.g."]) {
+    assert.equal(jsonCountFault(`# Parses ${abbr} every file \`git ls-files '*.json'\` lists. Nothing else applies here.`), null, abbr);
+  }
+  // The refuse side: the lead still ends at its real end, so a coverage word
+  // in the sentence after it is no coverage for the lead.
+  assert.match(
+    jsonCountFault("# Parses _e.g._ every file it finds. Every tracked file is parsed."),
+    /no longer says which files the step parses/,
+  );
+});
+
 // Review of PR #1942 (correctness + tests dimensions, independently
 // corroborated 3 ways): the doesNotMatch above used to scan the WHOLE block,
 // so a stale count reintroduced as its own paragraph and separated from the

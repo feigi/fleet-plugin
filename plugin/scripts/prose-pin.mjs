@@ -162,6 +162,18 @@ export function paragraph(text, anchor, what, options) {
 // past it would join two real sentences. A period inside a word ("ci.yml",
 // "v1.2") is no break either, since no whitespace follows it.
 //
+// Only a letter or digit right before the abbreviation disqualifies it, so an
+// italic `_e.g._` is one (#2053). A `\b` there read the `_` as a word
+// character, so the period split the sentence mid-abbreviation — the same gap
+// #2021/#2043 closed in citation-sweep's SENTENCE_END and jsonCountFault's
+// re-split, whose guard this now matches. Running first does not make the
+// narrower guard moot for a caller that re-splits a slice: a re-split can only
+// cut a piece further, never rejoin two this function wrongly parted. The
+// cost: a bare snake_case word ending `_vs.` or `_cf.` at a sentence's real
+// end now joins the next one. Measured over every tracked .md/.mjs/.yml/.sh/
+// .json file, the widening moved no split but three in fixtures of those two
+// sibling fixes, each an italic abbreviation.
+//
 // The abbreviations match lowercase only, as this repo's prose spells every
 // one of them (#1899). Folded case, a sentence genuinely ending in a word
 // that merely shares their letters — a proper noun "Vs.", a stray "E.g." —
@@ -221,7 +233,7 @@ export function paragraph(text, anchor, what, options) {
 // marker at the regex level, so it still splits — wrongly, the direction
 // this rule exists to avoid.
 export const sentences = (block) =>
-  block.split(/(?<=(?:[!?]|(?<!\b(?:e\.g|i\.e|cf|viz|vs))\.)(?:(?<=[\p{L}\p{N}`)\u201d\u2019][.!?])(?:\[[^\]\s]+\])+)?[*_)"'\u201d\u2019]*)\s+/u);
+  block.split(/(?<=(?:[!?]|(?<!(?<![A-Za-z\d])(?:e\.g|i\.e|cf|viz|vs))\.)(?:(?<=[\p{L}\p{N}`)\u201d\u2019][.!?])(?:\[[^\]\s]+\])+)?[*_)"'\u201d\u2019]*)\s+/u);
 
 // A phrase-bounded slice — `paragraph`'s shape, with the end bound a second
 // phrase instead of the next blank line. `from` is `anchorAt`'s own
