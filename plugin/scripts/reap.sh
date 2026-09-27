@@ -878,7 +878,7 @@ for b in $gone_branches; do
       # `git worktree add` always writes `.git` as a regular file — so unlike
       # worktree-audit.sh this does not also need to accept a `.git`
       # directory. This `-f` test establishes only that the linkage EXISTS,
-      # the same gate release-ticket.sh and worktree-audit.sh carry (#128);
+      # the same gate release-ticket.sh (#74) and worktree-audit.sh (#128) carry;
       # that it answers for `$wt` is established by the canonicalised
       # `--show-toplevel` compare right after it (`wt_linkage_why`, #2042).
       # The main checkout reaches here, and must be answered before the
