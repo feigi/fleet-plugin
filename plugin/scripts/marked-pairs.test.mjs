@@ -295,10 +295,26 @@ test("mutation run 4 (the two-dialect-specific mutant): a token swap survives no
 // Real-tree divergence check.
 // ---------------------------------------------------------------------------
 
+// Per-directory `.md` floors at ~60% of each directory's measured baseline —
+// the same floor-to-baseline ratio this repo's own tracked-file-count guard
+// uses elsewhere (200 of 338 tracked paths). Measured 2026-09-27
+// (#2026): skills/ 8, commands/ 3, agents/ 13. A bare non-zero check cannot
+// see a walk or filter bug that thins a directory without emptying it, and
+// the real-tree pair tests cannot either when the lost files carry no
+// marker — every agents/ file and most skills/ files carry none today, yet a
+// marker later added to one of them would go unscanned. Measured: a stray
+// exclude dropping agents/fleet-review-* (13 → 4), or dropping every unmarked
+// skills/ file (8 → 2), passed the whole file under `> 0`.
+const MD_DIR_FLOORS = { skills: 5, commands: 2, agents: 8 };
+
 test("real tree: the walk reaches every scoped directory", () => {
+  assert.deepEqual(Object.keys(MD_DIR_FLOORS).sort(), [...MD_DIRS].sort(), "every MD_DIRS entry needs a measured floor in MD_DIR_FLOORS");
   for (const d of MD_DIRS) {
     const files = scanTree(REPO).filter((f) => f.file.startsWith(d + "/") && f.file.endsWith(".md"));
-    assert.ok(files.length > 0, `${d}/ must contribute at least one .md file to the scan`);
+    assert.ok(
+      files.length >= MD_DIR_FLOORS[d],
+      `${d}/ contributed only ${files.length} .md file(s) to the scan, under its floor of ${MD_DIR_FLOORS[d]} — a walk or filter bug is thinning it`,
+    );
   }
   // workflows/ is in scope by design (this file's header) even though no
   // real .js comment-form pair exists yet (verified 2026-09-09, pre-#1361) —
