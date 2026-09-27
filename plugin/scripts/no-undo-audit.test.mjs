@@ -28,7 +28,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
 
@@ -2152,9 +2152,9 @@ test("an intact linked worktree, whose .git is a file, still passes", (t) => {
 });
 
 // The same worktree, reached through a symlinked path. `--show-toplevel`
-// resolves the symlink away and would make this look identical to the case
-// above by construction — the reason the linkage guard never string-compares
-// against it (see the comment ahead of the guard itself).
+// resolves the symlink away, so the linkage guard's working-tree compare
+// (#2040) holds it against the CANONICAL `$wt`, never against the path as
+// typed — this case is what reds if that canonicalisation is ever dropped.
 test("an intact linked worktree, reached through a symlinked path, still passes", (t) => {
   const c = nestedWorktree(t);
   rmSync(join(c.w, "precious.txt"));
@@ -2379,6 +2379,125 @@ test("a dangling .git symlink is unanswerable (2), never clean (0)", (t) => {
 });
 
 // ---------------------------------------------------------------------------
+// #2040: `core.worktree` moves the WORKING TREE, not the git dir. Every shape
+// below passes the `--show-prefix` root claim (empty at rc 0) and the git-dir
+// owner check, and `status` then compares $wt's own HEAD and index against the
+// redirect target's files. A target holding the tracked content — any other
+// checkout of the branch — reads clean at rc 0 over `precious.txt`: the one
+// WRONG VERDICT this script can give, where every other broken shape refuses.
+// Refused by the working-tree compare (`--show-toplevel` against the canonical
+// $wt), exit 2, before anything is audited.
+// ---------------------------------------------------------------------------
+
+/**
+ * The three fixture claims that make a redirect case pin something: the work
+ * is on disk, the root claim still admits the shape (or this is the #74 walk-up
+ * again under another name), and git itself answers "clean" — the false clean
+ * the refusal exists to replace. Then the refusal: exit 2, no payload, before
+ * the audit runs, naming the working tree git actually answered for.
+ */
+function refusedAsRedirected(c, target) {
+  assert.ok(existsSync(join(c.w, "precious.txt")), "fixture: uncommitted work must still be on disk");
+  assert.equal(git(c.w, "rev-parse", "--show-prefix"), "", "fixture: the --show-prefix gate must still admit this shape, or this pins nothing new");
+  assert.equal(git(c.w, "rev-parse", "--show-toplevel"), target, "fixture: git must answer for the redirect target");
+  assert.equal(git(c.w, "status", "--porcelain", "-uall"), "", "fixture: git must read clean over the work — the false clean this pins");
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `a core.worktree redirect must be unanswerable, not clean: got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.doesNotMatch(r.stderr, /status --porcelain/, "the refusal must land before the audit runs");
+  assert.ok(r.stderr.includes(`git answers for the working tree at ${target}, not ${c.w}`), r.stderr);
+}
+
+/** extensions.worktreeConfig on in `repoDir`, then `core.worktree` set for `w` alone. */
+function redirectWorktree(repoDir, w, target) {
+  git(repoDir, "config", "extensions.worktreeConfig", "true");
+  git(w, "config", "--worktree", "core.worktree", target);
+}
+
+test("b2: a linked worktree whose config.worktree sets core.worktree elsewhere is refused, never clean (#2040)", (t) => {
+  // The ticket's b2: `.git` untouched, `$gd` is $wt's own admin dir with its
+  // back-pointer intact, one `git config --worktree` away from a healthy tree.
+  const c = nestedWorktreePair(t);
+  redirectWorktree(c.parent, c.w, c.sibling);
+  refusedAsRedirected(c, git(c.sibling, "rev-parse", "--show-toplevel"));
+});
+
+test("c2: a .git naming a foreign git dir NOT called .git, whose core.worktree is elsewhere, is refused (#2040)", (t) => {
+  // The ticket's c2. `$gd == common` and the `${gd%/.git}` strip is a no-op,
+  // so the owner check admits it as the ceiling's `--separate-git-dir` shape.
+  const c = nestedWorktree(t);
+  const root = dirname(c.parent);
+  const foreignGd = join(root, "foreign-gd");
+  const foreign = join(root, "foreign");
+  execFileSync("git", ["clone", "-q", "--separate-git-dir", foreignGd, git(c.parent, "remote", "get-url", "origin"), foreign], { env: ENV });
+  git(foreign, "checkout", "-q", c.branch);
+  git(foreign, "config", "core.worktree", foreign);
+  writeFileSync(join(c.w, ".git"), `gitdir: ${foreignGd}\n`);
+  assert.equal(git(c.w, "rev-parse", "--path-format=absolute", "--git-dir"), git(c.w, "rev-parse", "--path-format=absolute", "--git-common-dir"),
+    "fixture: the foreign git dir must be the common-dir shape the owner check admits");
+  refusedAsRedirected(c, git(foreign, "rev-parse", "--show-toplevel"));
+});
+
+test("a MAIN checkout whose core.worktree names another checkout is refused, never clean (#2040)", (t) => {
+  // Beyond the ticket's table, and the cheapest of all: one `git config
+  // core.worktree` on an ordinary clone. `$gd == common`, named `.git`, owner
+  // `$wt` — the owner check has nothing to object to.
+  const c = repo(t);
+  const elsewhere = `${c.w}-elsewhere`;
+  git(c.w, "worktree", "add", "-q", "--detach", elsewhere);
+  git(c.w, "config", "core.worktree", elsewhere);
+  writeFileSync(join(c.w, "precious.txt"), "work that exists nowhere else\n");
+  refusedAsRedirected(c, git(elsewhere, "rev-parse", "--show-toplevel"));
+});
+
+test("a core.worktree INSIDE $wt is refused: every file outside it goes unread (#2040)", (t) => {
+  const c = nestedWorktree(t);
+  const sub = join(c.w, "sub");
+  mkdirSync(sub);
+  for (const f of [".gitignore", "f.txt", "g.txt"]) copyFileSync(join(c.w, f), join(sub, f));
+  redirectWorktree(c.parent, c.w, sub);
+  refusedAsRedirected(c, git(sub, "rev-parse", "--show-toplevel"));
+});
+
+test("a core.worktree naming a MISSING directory is unanswerable (2), never the dirty verdict (1) (#2040)", (t) => {
+  // git still answers `--show-toplevel` at rc 0 here (measured), so a guard
+  // that canonicalised that answer through `cd` would fail under `set -e` and
+  // exit 1 — the dirty verdict — over a tree nothing looked at.
+  const c = nestedWorktree(t);
+  const missing = join(dirname(c.parent), "never-created");
+  redirectWorktree(c.parent, c.w, missing);
+  const r = audit(c);
+  assert.equal(r.status, 2, `got ${r.status} ${r.stdout} ${r.stderr}`);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /answers for the working tree at .*never-created, not /);
+});
+
+// The ACCEPT side, which a refusal-only suite cannot see: the compare keys on
+// the working tree git answers for, so a `core.worktree` that leaves it at $wt
+// must still be audited. Both measured admitted with the fix in place.
+test("a core.worktree naming $wt itself, through a symlinked spelling, is audited, not refused (#2040)", (t) => {
+  const c = nestedWorktree(t);
+  const link = join(dirname(c.parent), "parent-link");
+  symlinkSync(c.parent, link);
+  redirectWorktree(c.parent, c.w, join(link, ".worktrees", "9-x"));
+  const r = audit(c);
+  assert.equal(r.status, 1, `a core.worktree naming the worktree itself must not refuse: got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, false);
+});
+
+test("a core.worktree git IGNORES — the common config, seen from a linked worktree — is audited, not refused (#2040)", (t) => {
+  // git does not apply the shared config's core.worktree to a linked worktree
+  // (measured: `--show-toplevel` and `status` both still answer for $wt), so
+  // refusing it would be refusing a setting that changes nothing.
+  const c = nestedWorktree(t);
+  git(c.parent, "config", "core.worktree", join(dirname(c.parent), "elsewhere"));
+  const r = audit(c);
+  assert.equal(r.status, 1, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, false);
+});
+
+// ---------------------------------------------------------------------------
 // Dirty means dirty. Every fixture above leaves an untracked file, which is the
 // one form `status --porcelain` reports with no index involved at all.
 // ---------------------------------------------------------------------------
@@ -2581,13 +2700,16 @@ test("the design spec's script-surface row names every field the payload actuall
 });
 
 // Both docs describe this script's exit-2 causes, and its linkage clause covers
-// TWO failures git reports differently. A parenthetical naming only the walk-up
-// one stood, byte-identical, in both files, and was false for the other (#420).
-// Measured, git 2.50.1: delete the worktree's `.git` and `rev-parse
-// --show-prefix` returns `.worktrees/<wt>/` while `--show-toplevel` is the
-// enclosing repo; rewrite that file to `gitdir: …/worktrees/<sibling>` and
-// `--show-prefix` is empty at rc 0 with `--show-toplevel` the worktree itself,
-// while HEAD, the branch and `status` all answer from the sibling.
+// THREE failures git reports differently. A parenthetical naming only the
+// walk-up one stood, byte-identical, in both files, and was false for the
+// second (#420); the third arrived with #2040. Measured, git 2.50.1: delete the
+// worktree's `.git` and `rev-parse --show-prefix` returns `.worktrees/<wt>/`
+// while `--show-toplevel` is the enclosing repo; rewrite that file to
+// `gitdir: …/worktrees/<sibling>` and `--show-prefix` is empty at rc 0 with
+// `--show-toplevel` the worktree itself, while HEAD, the branch and `status`
+// all answer from the sibling; set `core.worktree` elsewhere and
+// `--show-prefix` is still empty at rc 0 while `--show-toplevel` and `status`
+// answer for the other directory, against $wt's own HEAD and index.
 //
 // ONE exact-span assertion rather than a match per mechanism, because the claim
 // lives in the JOIN: separate matches for `enclosing repo` and for `another
@@ -2609,9 +2731,9 @@ test("the design spec's script-surface row names every field the payload actuall
 // scoping, and the string is byte-identical across the docs this test reads
 // and this constant, so every carrier moves together.
 const LINKAGE_PARENTHETICAL =
-  "its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir";
+  "its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir, against another directory's files when `core.worktree` moves the working tree there";
 
-test("both docs' exit-2 prose keeps the two linkage failures distinct", () => {
+test("both docs' exit-2 prose keeps the three linkage failures distinct", () => {
   for (const [rel, anchor] of [
     ["../commands/run-merge-bot.md", (l) => l.includes("Exit **2**")],
     ["../../docs/specs/2026-07-23-fleet-plugin-design.md", (l) => l.startsWith("| `no-undo-audit.sh` |")],
@@ -2620,7 +2742,7 @@ test("both docs' exit-2 prose keeps the two linkage failures distinct", () => {
       .split("\n").find(anchor);
     assert.ok(line, `${rel} must still describe this script's exit-2 causes`);
     assert.ok(line.includes(LINKAGE_PARENTHETICAL),
-      `${rel} no longer names both linkage failures as distinct: a deleted \`.git\` is the one git walks up from, and a \`.git\` naming another worktree's admin dir is the one git answers for this worktree while reading the other one's HEAD and index. Merging them, or generalising until it names neither, both land here.`);
+      `${rel} no longer names all three linkage failures as distinct: a deleted \`.git\` is the one git walks up from, a \`.git\` naming another worktree's admin dir is the one git answers for this worktree while reading the other one's HEAD and index, and a \`core.worktree\` redirect is the one git answers with this worktree's HEAD and index against another directory's files. Merging them, or generalising until it names none, all land here.`);
   }
 });
 
@@ -2710,7 +2832,7 @@ const nonZeroCell = () => {
  * does — the slice is the size of the claim.
  */
 const EXIT2_ENUMERATION =
-  "exit 2 the question is unanswerable — bad argument, no such worktree, a worktree git does not answer for (its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir), `BASE_REF` is not spelled `origin/<branch>` or `refs/remotes/<path>` (#1565), `BASE_REF` names the audited branch (#1565), a ref that does not resolve, a probe that could not run — with the stash reflog's path resolution the exception (#570): that one failing reports `unknown` on the payload at the verdict's own exit code rather than withholding the audit, the same rule `worktree`/`branch` follow below — a conflicting path no pathspec can name, `json.sh` missing, unreadable or failed to load, a conflicting-path or at-risk array that could not be escaped (#119) — and no payload is emitted, or the audit itself could not be written (#1472) — that one can fail after the payload has already begun printing, so stdout carries it truncated and unparseable, which that exit code and the named stderr line are what distinguish from a complete answer.";
+  "exit 2 the question is unanswerable — bad argument, no such worktree, a worktree git does not answer for (its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir, against another directory's files when `core.worktree` moves the working tree there), `BASE_REF` is not spelled `origin/<branch>` or `refs/remotes/<path>` (#1565), `BASE_REF` names the audited branch (#1565), a ref that does not resolve, a probe that could not run — with the stash reflog's path resolution the exception (#570): that one failing reports `unknown` on the payload at the verdict's own exit code rather than withholding the audit, the same rule `worktree`/`branch` follow below — a conflicting path no pathspec can name, `json.sh` missing, unreadable or failed to load, a conflicting-path or at-risk array that could not be escaped (#119) — and no payload is emitted, or the audit itself could not be written (#1472) — that one can fail after the payload has already begun printing, so stdout carries it truncated and unparseable, which that exit code and the named stderr line are what distinguish from a complete answer.";
 
 /**
  * Everything in the cell AFTER `EXIT2_ENUMERATION`, verbatim: the
@@ -2728,10 +2850,10 @@ const EXIT2_TAIL =
 
 /**
  * The clauses the ROW collapses several refusals into, named because the
- * bindings below share them and a phrase typed eight times drifts seven ways.
+ * bindings below share them and a phrase typed ten times drifts nine ways.
  *
  * Sharing is the row's editorial call and not a looseness here: a reader who
- * meets any of the eight refusals about a worktree git will not answer for
+ * meets any of the ten refusals about a worktree git will not answer for
  * does the same thing about it, and so does one who meets either library
  * refusal. The phrases are the short load-bearing labels; their exact wording
  * is `EXIT2_ENUMERATION`'s job.
@@ -2786,6 +2908,8 @@ const CAUSES = new Map([
   ["$gd/gitdir names a directory that does not resolve — cannot verify $wt's linkage", LINKAGE_CLAUSE],
   ["$wt's .git names another worktree's admin dir — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
   ["$wt's .git names $gd, whose worktree is $owner, not $wt — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
+  ["git will not name the working tree answering for $wt — cannot verify its linkage", LINKAGE_CLAUSE],
+  ["git answers for the working tree at $top, not $wt — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
   ["BASE_REF must be spelled origin/<branch> or refs/remotes/<path>, got '$base'", BASE_REF_SHAPE_CLAUSE],
   ["BASE_REF must not name the audited branch, got '$base'", AUDITED_BRANCH_CLAUSE],
   ["$base does not resolve as $base_rev", REF_CLAUSE],
