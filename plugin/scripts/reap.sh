@@ -503,6 +503,65 @@ gp_why() {
   if [ -n "$gp_w" ]; then printf ': %s' "$gp_w"; fi
 }
 
+# True when `$1`'s `.git` answers for `$1` itself; otherwise false, with the
+# reason in `$lk_why`. Both sweeps call it once their `-f "$wt/.git"` test has
+# established the linkage EXISTS, and before any git command run through `$wt`
+# is believed — the dirty check first among them.
+#
+# Existing is not answering. Two shapes keep `.git` a well-formed regular file
+# and move git's WORKING TREE elsewhere: a `.git` naming a foreign git dir not
+# called `.git` whose `core.worktree` is another directory, and `core.worktree`
+# set in the worktree's own `config.worktree` under `extensions.worktreeConfig`,
+# `.git` untouched. `git -C "$wt" status` then reads THAT tree, so a clean one
+# there reads clean over the work sitting in `$wt` — the dry run promised a
+# removal `--apply` could not perform, `git worktree remove`'s own back-pointer
+# and untracked-file checks being all that kept the work (measured on both
+# shapes, both sweeps, git 2.50.1, #2042). `--show-toplevel` names the tree git
+# actually answers for, so it is compared against `$1`.
+#
+# `$1` is canonicalised (`cd && pwd -P`, the POSIX spelling; no `realpath` is
+# guaranteed) and `--show-toplevel` is not: `worktree list --porcelain` echoes
+# the path recorded at `worktree add` time, which a parent that has become a
+# symlink since leaves non-canonical while git's own answer is always resolved
+# (measured) — a raw compare refuses every healthy worktree in that layout.
+# A `--show-toplevel` git did not resolve can only fail the compare, which is
+# the refusing direction.
+#
+# `&& echo x` inside both substitutions, then `%?x`: `$(...)` strips EVERY
+# trailing newline, so a `core.worktree` naming a sibling directory called
+# `<wt>` plus a newline byte — git accepts one as an ordinary path character —
+# would otherwise compare EQUAL to `$1` and pass the redirect (measured; the
+# shape no-undo-audit.sh closed the same way, #2040). The sentinel leaves
+# `$(...)` only git's/pwd's own terminating newline to strip.
+#
+# What this does NOT cover, the boundary release-ticket.sh's copy of this
+# compare also states (#421): shapes that swap which git DIR answers while the
+# working tree stays `$1` — a `.git` naming a sibling worktree's admin dir
+# (#189), or a foreign git dir whose `core.worktree` points back at `$1`.
+# `--show-toplevel` answers `$1` for both. The dirty check reads `$1`'s real
+# files against the borrowed index, and `git worktree remove` refuses a
+# `.git` that does not point back at its admin dir, so neither is removed.
+#
+# A git that cannot answer at all is a refusal, never a pass: the reason is
+# fetched with a second call only on that path, the way the cwd guard at the
+# top of this file fetches its own, so the answer the compare reads never
+# carries stderr.
+wt_linkage_why() {
+  if ! lk_canon=$(cd "$1" 2>/dev/null && pwd -P && echo x); then
+    lk_why="could not be resolved to a canonical path, so which tree its .git linkage answers for is unknown"
+    return 1
+  fi
+  lk_canon=${lk_canon%?x}
+  if ! lk_top=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null && echo x); then
+    lk_why="has a .git linkage git cannot resolve$(gp_why "$(git -C "$1" rev-parse --show-toplevel 2>&1 >/dev/null)")"
+    return 1
+  fi
+  lk_top=${lk_top%?x}
+  [ "$lk_top" != "$lk_canon" ] || return 0
+  lk_why="has a .git linkage that answers for $lk_top, not for it — its dirty check would read that tree"
+  return 1
+}
+
 # Runs `grep -q` over CAPTURED text and hands back grep's own status separately
 # from the verdict grep was asked for.
 #
@@ -818,8 +877,10 @@ for b in $gone_branches; do
       # main checkout — it was found by matching a `[gone]` branch above, and
       # `git worktree add` always writes `.git` as a regular file — so unlike
       # worktree-audit.sh this does not also need to accept a `.git`
-      # directory. Reference shape: release-ticket.sh's own linkage guard,
-      # same reason worktree-audit.sh gives its copy (#128).
+      # directory. This `-f` test establishes only that the linkage EXISTS,
+      # the same gate release-ticket.sh (#74) and worktree-audit.sh (#128) carry;
+      # that it answers for `$wt` is established by the canonicalised
+      # `--show-toplevel` compare right after it (`wt_linkage_why`, #2042).
       # The main checkout reaches here, and must be answered before the
       # linkage guard below sees it. `git worktree list --porcelain` emits a
       # `branch refs/heads/...` line for the main worktree too, so a `[gone]`
@@ -842,6 +903,13 @@ for b in $gone_branches; do
       fi
       if [ -x "$wt" ] && [ ! -f "$wt/.git" ]; then
         keep "$b" "worktree $wt has no .git linkage — git would answer for the enclosing repo, not this one"
+        continue
+      fi
+      # Gated on `-f` rather than on "not kept above": an unsearchable `$wt`
+      # fails `-f` too, and is left to the status probe below, which keeps it
+      # with git's own "Permission denied" instead of a cause invented here.
+      if [ -f "$wt/.git" ] && ! wt_linkage_why "$wt"; then
+        keep "$b" "worktree $wt $lk_why"
         continue
       fi
       # `-uall`, never a bare `--porcelain`: the untracked mode is CONFIG, and
@@ -1288,12 +1356,16 @@ else
     if [ -e "$wt" ]; then
       # The remaining guards the branch sweep above documents, in the same order
       # and for the same measured reasons — the main checkout already answered
-      # for above, the linkage established before anything git says through
-      # `$wt` is trusted (#128), and existence settled by this `if` so a deleted
-      # directory never reaches a status call that would read as dirty forever
-      # (#83).
+      # for above, the linkage established — present (#128), then answering
+      # for `$wt` itself (#2042) — before anything git says through `$wt` is
+      # trusted, and existence settled by this `if` so a deleted directory
+      # never reaches a status call that would read as dirty forever (#83).
       if [ -x "$wt" ] && [ ! -f "$wt/.git" ]; then
         keep "" "worktree $wt has no .git linkage — git would answer for the enclosing repo, not this one"
+        continue
+      fi
+      if [ -f "$wt/.git" ] && ! wt_linkage_why "$wt"; then
+        keep "" "worktree $wt $lk_why"
         continue
       fi
       # `-uall`: #730, see the branch sweep's copy of this probe above for the

@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1424,6 +1424,150 @@ test("a worktree whose .git is a dangling symlink is kept, never reaped as clean
   assert.match(json.kept[0].reason, /no \.git linkage/);
   assert.equal(branchExists(w, "feature/merged"), true);
 });
+
+// #2042. A `.git` that exists as a regular file is not yet a `.git` that
+// answers for `$wt`: two shapes keep the file well-formed and move git's
+// WORKING TREE elsewhere, so the dirty check reads that other tree, calls it
+// clean over the work sitting in `$wt`, and the dry run promised a removal
+// that `--apply` then could not perform (measured before the fix: both shapes,
+// both sweeps, `would remove worktree` in the dry run, `worktree remove
+// refused` under `--apply`). Each fixture below is also the control for the
+// other sweep's copy of the guard — the two are separately duplicated in the
+// script, so one sweep's fix leaves the other's matrix rows red.
+
+/**
+ * Redirect git's working tree for `wt` away from it, then plant uncommitted
+ * work in `wt` that the redirect hides. Returns the directory git now answers
+ * for, spelled exactly as `--show-toplevel` prints it.
+ *
+ *   c2 — `wt/.git` rewritten to name a foreign git dir NOT called `.git`, whose
+ *        `core.worktree` is a clean checkout elsewhere.
+ *   b2 — `wt/.git` untouched; `extensions.worktreeConfig` on, and one
+ *        `git config --worktree core.worktree <elsewhere>` in `wt` itself.
+ *   nl — b2, but `<elsewhere>` is `wt`'s own canonical path plus a trailing
+ *        newline byte: a real, distinct directory whose name `$(...)` would
+ *        strip back to `wt`'s own, so a compare built on bare command
+ *        substitution reads the redirect as a match.
+ */
+function redirectWorkingTree(w, wt, shape) {
+  let elsewhere;
+  if (shape === "nl") {
+    elsewhere = `${realpathSync(wt)}\n`;
+    mkdirSync(elsewhere);
+  } else {
+    elsewhere = join(w, "..", "elsewhere");
+    execFileSync("git", ["clone", "-q", join(w, "..", "origin.git"), elsewhere], { env: ENV });
+  }
+  if (shape === "c2") {
+    const foreign = join(w, "..", "foreign-gitdir");
+    renameSync(join(elsewhere, ".git"), foreign);
+    execFileSync("git", ["--git-dir", foreign, "config", "core.worktree", elsewhere], { env: ENV });
+    writeFileSync(join(wt, ".git"), `gitdir: ${foreign}\n`);
+  } else {
+    git(w, "config", "extensions.worktreeConfig", "true");
+    git(wt, "config", "--worktree", "core.worktree", elsewhere);
+  }
+  writeFileSync(join(wt, "precious.txt"), "work that exists nowhere else\n");
+  assert.equal(git(wt, "status", "--porcelain", "-uall"), "", `fixture (${shape}): the redirect must hide the planted work from the dirty check`);
+  // Untrimmed, unlike `git()`: the `nl` shape's whole point is a byte a trim eats.
+  const top = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: wt, env: ENV, encoding: "utf8" }).slice(0, -1);
+  assert.equal(top, shape === "nl" ? elsewhere : realpathSync(elsewhere), `fixture (${shape}): git must answer for the other tree`);
+  assert.notEqual(top, realpathSync(wt), `fixture (${shape}): and that tree must not be the worktree's own`);
+  return top;
+}
+
+for (const shape of ["c2", "b2", "nl"]) {
+  for (const sweep of ["[gone]-branch", "branchless"]) {
+    test(`a worktree whose working tree is redirected (${shape}) is kept by the ${sweep} sweep, dry run and --apply alike (#2042)`, (t) => {
+      const w = repo(t);
+      const branchless = sweep === "branchless";
+      const wt = branchless
+        ? detachedMergedWorktree(w, "docs/79-brief", "work that landed")
+        : mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+      const top = redirectWorkingTree(w, wt, shape);
+
+      for (const args of [[], ["--apply"]]) {
+        const mode = args.length ? "--apply" : "dry run";
+        const { code, json, stderr } = runReap(w, args);
+
+        assert.equal(code, 0, `${mode}: ${stderr}`);
+        assert.deepEqual(json.worktreesRemoved, [], `${mode}: the redirected worktree must not be promised or removed`);
+        assert.doesNotMatch(stderr, /would remove worktree|REMOVED worktree/, `${mode}: ${stderr}`);
+        const mine = json.kept.filter((k) => k.reason.includes(wt));
+        assert.equal(mine.length, 1, `${mode}: exactly one keep must name the worktree: ${JSON.stringify(json.kept)}`);
+        assert.equal(mine[0].branch, branchless ? null : "feature/merged");
+        // Refused by the linkage guard itself, not by `git worktree remove`'s
+        // own backstop further down — which only --apply reaches, and which is
+        // why the dry run used to promise what --apply then kept.
+        assert.match(mine[0].reason, /linkage/, `${mode}: ${mine[0].reason}`);
+        assert.ok(mine[0].reason.includes(top), `${mode}: the reason must name where the linkage resolves: ${mine[0].reason}`);
+        assert.doesNotMatch(mine[0].reason, /worktree remove refused/, mode);
+        if (!branchless) assert.deepEqual(json.reaped, [], `${mode}: the branch goes nowhere its worktree cannot`);
+      }
+
+      assert.equal(readFileSync(join(wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
+      assert.match(git(w, "worktree", "list", "--porcelain"), new RegExp(`^worktree ${wt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
+      if (!branchless) assert.equal(branchExists(w, "feature/merged"), true);
+    });
+  }
+}
+
+for (const sweep of ["[gone]-branch", "branchless"]) {
+  test(`a healthy worktree listed through a symlinked parent still reaps in the ${sweep} sweep (#2042)`, (t) => {
+    // The accept side of the compare above. `worktree list --porcelain` echoes
+    // the path recorded at `worktree add` time, and a parent that was a plain
+    // directory then and is a symlink now leaves that path non-canonical while
+    // `--show-toplevel` answers canonical — so a raw compare refuses every
+    // healthy worktree in that layout.
+    const w = repo(t);
+    const branchless = sweep === "branchless";
+    const wt = branchless
+      ? detachedMergedWorktree(w, "docs/79-brief", "work that landed")
+      : mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+    renameSync(join(w, ".worktrees"), join(w, ".worktrees-real"));
+    symlinkSync(".worktrees-real", join(w, ".worktrees"));
+    assert.notEqual(realpathSync(wt), wt, "fixture: the listed path must not be canonical");
+    assert.match(git(w, "worktree", "list", "--porcelain"), new RegExp(`^worktree ${wt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"), "fixture: git must list it through the symlink");
+
+    const dry = runReap(w, []);
+    assert.equal(dry.code, 0, dry.stderr);
+    assert.deepEqual(dry.json.kept, [], `nothing here is a finding: ${JSON.stringify(dry.json.kept)}`);
+    assert.deepEqual(dry.json.worktreesRemoved, [wt]);
+
+    const { code, json, stderr } = runReap(w, ["--apply"]);
+    assert.equal(code, 0, stderr);
+    assert.deepEqual(json.kept, []);
+    assert.deepEqual(json.worktreesRemoved, [wt]);
+    assert.equal(existsSync(wt), false, "the directory itself must be gone");
+    if (!branchless) assert.equal(branchExists(w, "feature/merged"), false);
+  });
+}
+
+for (const sweep of ["[gone]-branch", "branchless"]) {
+  test(`an unsearchable worktree is kept with git's own denial, not a linkage cause the compare invented (${sweep} sweep, #2042)`, (t) => {
+    // The `-f` gate in front of the #2042 compare is what keeps this reason
+    // git's: `-f "$wt/.git"` is false when `$wt` cannot be searched, so the
+    // compare stands aside and the status probe reports the denial. Without
+    // the gate the compare's own `cd` fails first and the keep blames a
+    // linkage nothing ever looked at.
+    const w = repo(t);
+    const branchless = sweep === "branchless";
+    const wt = branchless
+      ? detachedMergedWorktree(w, "docs/79-brief", "work that landed")
+      : mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+
+    chmodSync(wt, 0o000);
+    const { code, json, stderr } = runReap(w, []);
+    chmodSync(wt, 0o755);
+
+    assert.equal(code, 0, stderr);
+    assert.deepEqual(json.worktreesRemoved, []);
+    const mine = json.kept.filter((k) => k.reason.includes(wt));
+    assert.equal(mine.length, 1, JSON.stringify(json.kept));
+    assert.match(mine[0].reason, /could not be read: .*Permission denied/);
+    assert.doesNotMatch(mine[0].reason, /linkage/);
+  });
+}
 
 test("a non-fleet worktree holding an ignored file is kept, never reaped", (t) => {
   // The one keep the worktree-present branch owns that nothing else here
