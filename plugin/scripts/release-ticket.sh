@@ -1468,10 +1468,36 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   # (measured) — while `--show-toplevel` always answers canonical. `cd "$wt" &&
   # pwd -P` is the POSIX way to the same canonical form; no `realpath` needed,
   # and none is guaranteed to exist.
+  #
+  # `&& echo x` inside both substitutions, then `%?x`: `$(...)` strips EVERY
+  # trailing newline, so a `core.worktree` naming a sibling directory called
+  # `$wt` plus a newline byte — git accepts one as an ordinary path character —
+  # would otherwise compare EQUAL to `$wt` and pass the redirect, the dirty
+  # check then reading that sibling's clean copy over $wt's work (measured,
+  # #2073; the shape no-undo-audit.sh closed the same way, #2040, and reap.sh's
+  # copy of this compare, #2042). The sentinel leaves `$(...)` only pwd's/git's
+  # own terminating newline to strip. The `toplevel` half closes #2073's
+  # redirect: a newline in a LISTED path is encoded to a marker before here
+  # (#551), so `-d` above already refuses that shape, and an ordinary $wt has
+  # none at its own canonical end either.
+  #
+  # The `wt_canon` half is not mere symmetry — dropping it is not an
+  # equivalent mutation. The `-L` guard just above `block`s rather than
+  # `die`s (see its own comment), so a $wt whose own leaf was replaced by a
+  # symlink — never `git worktree add`'s own shape, hand tampering only —
+  # still reaches this compare, and `pwd -P` canonicalises through it to
+  # whatever real, possibly newline-suffixed, directory it names: the SAME
+  # directory `--show-toplevel` answers for too. Stripping only `toplevel`
+  # there turns an already-blocked "not a directory" verdict (exit 1) into a
+  # fabricated "does not point at itself" mismatch (exit 2) over two
+  # identical paths (measured). Kept on both sides so that case stays
+  # exactly as blocked, never worse.
   if [ -f "$wt/.git" ]; then
-    wt_canon=$(cd "$wt" && pwd -P) || die "cannot resolve $wt, so whether it holds uncommitted work is unknown"
-    toplevel=$(git -C "$wt" rev-parse --show-toplevel) ||
+    wt_canon=$(cd "$wt" && pwd -P && echo x) || die "cannot resolve $wt, so whether it holds uncommitted work is unknown"
+    wt_canon=${wt_canon%?x}
+    toplevel=$(git -C "$wt" rev-parse --show-toplevel && echo x) ||
       die "cannot read the git repository at $wt (its .git file or the gitdir it names), so whether it holds uncommitted work is unknown"
+    toplevel=${toplevel%?x}
     [ "$wt_canon" = "$toplevel" ] ||
       die "$wt's .git does not point at $wt — it resolves to $toplevel — so whether it holds uncommitted work is unknown"
   fi

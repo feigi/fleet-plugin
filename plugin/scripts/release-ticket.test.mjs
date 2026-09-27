@@ -2102,6 +2102,38 @@ test("a symlink standing in for the worktree directory blocks instead of promisi
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
 });
 
+// #2073. The `-L` guard above `block`s rather than `die`s, so a symlinked
+// $wt (the shape the previous test drives) still reaches the linkage compare
+// below — it does not stop at "not a directory". When the symlink's real
+// target happens to end in a newline, BOTH `wt_canon` and `--show-toplevel`
+// canonicalise through it to that same real, newline-suffixed directory, so
+// they must compare equal. Stripping the newline on only one side would
+// break that equality and turn the correct, already-blocked "not a
+// directory" verdict into a second, fabricated "does not point at itself"
+// blocker over two identical paths — this is what pins the `wt_canon`-side
+// sentinel as load-bearing rather than mere symmetry with `toplevel`'s.
+test("a symlink standing in for the worktree directory, whose real target ends in a newline, blocks at exit 1 alone (#2073)", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const real = `${c.wt}-real\n`;
+  renameSync(c.wt, real);
+  symlinkSync(real, c.wt);
+
+  const dry = release(r, c, { apply: false });
+  assert.equal(dry.json.released, false, "the dry run must not promise what --apply will refuse");
+  assert.equal(dry.json.blockers.length, 1, "not a directory alone, no fabricated linkage mismatch");
+  assert.match(dry.json.blockers[0], /exists but is not a directory/);
+
+  const apply = release(r, c);
+  assert.equal(apply.code, 1, "blocked before any mutation, not the exit 2 a fabricated linkage mismatch would produce");
+  assert.equal(apply.json.blockers.length, 1);
+  assert.match(apply.json.blockers[0], /exists but is not a directory/);
+  assert.equal(lstatSync(c.wt).isSymbolicLink(), true, "the symlink is untouched");
+  assert.equal(existsSync(join(real, ".git")), true, "and so is the real worktree behind it");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
 test("a dangling symlink at the worktree path blocks, not a mid-flight refusal", (t) => {
   // The other symlink shape, and the one the guard's own comment cites: -e is
   // false through a dangling link, so `gone` reports it established-absent and
@@ -4322,6 +4354,47 @@ test("a .git linkage naming another repository's worktree refuses instead of lea
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
   assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
 });
+
+// #2073. The other working-tree shape the linkage guard's comment names —
+// `core.worktree` set in the worktree's own `config.worktree` under
+// `extensions.worktreeConfig`, the .git file untouched — and its `nl` variant:
+// the redirect target is `$wt`'s own canonical path plus one trailing newline
+// byte, a real and distinct directory (git accepts the byte as an ordinary path
+// character) whose name a bare `$(...)` strips back to `$wt`'s own. The target
+// carries a copy of the claim's tracked file, so the dirty check reading it
+// answers clean over the work planted in `$wt` — the false clean, not merely a
+// false dirty. `b2` is the same redirect at an unrelated name: the control that
+// says the fixture redirects at all, so a red `nl` row is the sentinel's alone.
+// Mirrors reap.test.mjs's `redirectWorkingTree(..., "nl")` (#2042) and the
+// shape no-undo-audit.sh closed first (#2040).
+for (const shape of ["b2", "nl"]) {
+  for (const apply of [false, true]) {
+    test(`a core.worktree redirect (${shape}) is refused by the linkage guard, ${apply ? "--apply" : "dry run"} (#2073)`, (t) => {
+      const r = repo(t);
+      const c = claim(r.w, 9, "release-ticket");
+      const elsewhere = shape === "nl" ? `${realpathSync(c.wt)}\n` : join(r.w, "..", "elsewhere");
+      mkdirSync(elsewhere);
+      writeFileSync(join(elsewhere, "f.txt"), "root\n");
+      git(r.w, "config", "extensions.worktreeConfig", "true");
+      git(c.wt, "config", "--worktree", "core.worktree", elsewhere);
+      writeFileSync(join(c.wt, "precious.txt"), "work that exists nowhere else\n");
+      assert.equal(git(c.wt, "status", "--porcelain", "-uall"), "", `fixture (${shape}): the redirect must hide the planted work from the dirty check`);
+      // Untrimmed, unlike `git()`: the `nl` shape's whole point is a byte a trim eats.
+      const top = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: c.wt, env: ENV, encoding: "utf8" }).slice(0, -1);
+      assert.equal(top, shape === "nl" ? elsewhere : realpathSync(elsewhere), `fixture (${shape}): git must answer for the other tree`);
+      assert.notEqual(top, realpathSync(c.wt), `fixture (${shape}): and that tree must not be the worktree's own`);
+
+      const { code, json, stderr } = release(r, c, { apply });
+      assert.equal(code, 2, stderr);
+      assert.equal(json, null, "refused at the linkage guard, before any receipt or mutation");
+      assert.match(stderr, /does not point at .*\/9-release-ticket/, "names the mismatch, not just 'unknown'");
+      assert.match(stderr, /whether it holds uncommitted work is unknown/);
+      assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+      assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+      assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
+    });
+  }
+}
 
 test("a healthy worktree reached through a symlinked parent still releases normally", (t) => {
   // The false refusal the widened linkage guard must not introduce: `worktree
