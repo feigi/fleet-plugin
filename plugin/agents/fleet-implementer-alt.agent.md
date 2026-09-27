@@ -3,7 +3,7 @@ name: fleet-implementer-alt
 description: A /fleet-ctl:run-team implementer dispatched at the ALTERNATE tier, so every run carries its own unconfounded comparison. Identical to fleet-implementer except for the tier.
 model: sonnet
 effort: xhigh
-thinking-level: xhigh
+thinking-level: high
 ---
 
 **You are an unattended fleet member.** No maintainer is reachable, no user

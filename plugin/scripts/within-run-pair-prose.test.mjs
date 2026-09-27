@@ -111,10 +111,10 @@ test("the alternate definition differs from the default in MODEL ONLY", () => {
   // #1343: pinned alongside effort, on the same "shared, not varied" side of
   // the pair — the omp-side key, so a divergence here is the omp analogue of
   // the effort check above. Mutation-tested: setting
-  // fleet-implementer-alt.agent.md's `thinking-level` to `high` (leaving
-  // fleet-implementer's `xhigh` alone) fails this assertion (`'high' !==
-  // 'xhigh'`); reverting the file green again confirms the pin only fires on
-  // the real divergence, not on file-read noise.
+  // fleet-implementer-alt.agent.md's `thinking-level` to `xhigh` (leaving
+  // fleet-implementer's `high` alone, #2059) fails this assertion (`'xhigh'
+  // !== 'high'`); reverting the file green again confirms the pin only fires
+  // on the real divergence, not on file-read noise.
   assert.equal(
     field("thinking-level", "fleet-implementer-alt"),
     field("thinking-level", "fleet-implementer"),

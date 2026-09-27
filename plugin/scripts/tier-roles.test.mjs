@@ -71,7 +71,7 @@ test("expectedOverrides: every real plugin/agents definition routes to a string,
   for (const [name, value] of Object.entries(overrides)) {
     assert.equal(typeof value, "string", `${name}: ${JSON.stringify(value)}`);
   }
-  assert.equal(overrides["fleet-implementer"], "@slow:xhigh");
+  assert.equal(overrides["fleet-implementer"], "@slow:high");
   assert.equal(overrides["fleet-review-snapshot"], "@smol:low");
 });
 
