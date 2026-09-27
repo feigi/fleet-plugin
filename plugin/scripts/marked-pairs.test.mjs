@@ -84,6 +84,7 @@ import {
   KNOWN_EQUALITY_EXCEPTIONS,
   DOES_NOT_APPLY_RE,
   MD_DIRS,
+  JS_DIRS,
 } from "./marked-pairs.mjs";
 import { between, pairSlices, DIALECT_TOKENS } from "./prose-pin.mjs";
 
@@ -334,13 +335,30 @@ const MD_DIR_FLOORS = { skills: 5, commands: 2, agents: 8 };
 // would pin them but not what the scan does with them; scoping the oracle
 // here pins the behavior — every `.js` under `workflows/` must come back
 // from `scanTree` whatever list or code produces it. After this change, same
-// method: `JS_DIRS = []` 17/20 and, with the exception entry also removed,
-// 18/20 — both red on the real-tree walk test (`workflows/review-pr.js`
-// missing) and the walk-oracle fixture; so is `listFiles` ignoring
-// `JS_DIRS` while the constant stays intact (17/20), which a pin on the
-// constant alone would pass. Widening the scan's scope reds the fixture
+// method: `JS_DIRS = []` 17/20 — red on the real-tree walk test
+// (`workflows/review-pr.js` missing), the walk-oracle fixture, AND the same
+// incidental exception-membership test as the pre-fix case above; and, with
+// the exception entry also removed, 18/20, red on just the first two (the
+// membership test now correctly passes — no exempted pair remains to miss).
+// `listFiles` ignoring `JS_DIRS` while the constant stays intact reds the
+// same three as the 17/20 case, which a pin on the constant alone would pass.
+// Widening the scan's scope reds the fixture
 // (its `commands/helper.js` turns `extra`), and the real-tree walk test too
 // once the new directory holds a file of that extension: add it here too.
+//
+// A widening with NO such file yet is the gap that leaves open: `JS_DIRS`
+// gaining `commands`, `skills` or `agents` — each already populated with
+// `.md`, none with a single `.js` today — reds nothing behavioral at all,
+// because `scanTree` and `listIndependently` still agree on zero files
+// either way (measured: `JS_DIRS = ["workflows", "agents"]` and `JS_DIRS =
+// ["workflows", "skills"]` each pass 20/20, undetected). `MD_DIRS` never had
+// this gap — the floors' key-parity assertion below pins its value directly,
+// so any change to `MD_DIRS` fails regardless of content (verified: adding
+// `workflows` to `MD_DIRS` reds the floors assertion and the fixture at
+// 18/21, before a single `.md` file is scanned — the parity test below
+// reds too, redundantly). The real-tree test below closes the same gap for
+// `JS_DIRS`, the same way: `WALK_SCOPE` must equal `MD_DIRS`/`JS_DIRS`'s
+// actual values, not just agree with `scanTree`'s output on today's tree.
 const WALK_SCOPE = { ".md": ["skills", "commands", "agents"], ".js": ["workflows"] };
 
 function listIndependently(root, dir, ext) {
@@ -407,6 +425,21 @@ test("real tree: the walk returns every scoped file — not a thinned, padded or
   const { missing, extra } = walkDiscrepancy(REPO, scanTree(REPO).map((f) => f.file));
   assert.deepEqual(missing, [], "in-scope files the scan never returned — a walk or filter bug is thinning it");
   assert.deepEqual(extra, [], "files the scan returned that are out of scope, or returned twice");
+});
+
+// `scanTree`'s output can't tell the difference between "MD_DIRS/JS_DIRS
+// genuinely say this" and "MD_DIRS/JS_DIRS say something wider, but nothing
+// of the new extension exists yet to disagree about" — the gap WALK_SCOPE's
+// own header comment measures. Pinning the two directly, the same way the
+// floors' key-parity assertion below already pins MD_DIRS, closes it for
+// JS_DIRS too: a scope-list change fails here the moment it's made, not
+// whenever someone gets around to adding a matching file.
+test("real tree: WALK_SCOPE matches MD_DIRS/JS_DIRS's actual values, not just their scanTree output", () => {
+  assert.deepEqual(
+    WALK_SCOPE,
+    { ".md": [...MD_DIRS], ".js": [...JS_DIRS] },
+    "WALK_SCOPE has drifted from the module's own MD_DIRS/JS_DIRS — a scope-list change with no file of the new extension yet leaves no other test able to see it",
+  );
 });
 
 test("real tree: every scoped directory stays above its measured floor", () => {
