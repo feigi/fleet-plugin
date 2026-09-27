@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { anchorAt, between, betweenPhrases, paragraph, phrase, quoteBlock, quoteBlocks, runAbove, sentences, stripSlashGutter, pairSlices, logicalLines } from "./prose-pin.mjs";
+import { anchorAt, between, betweenPhrases, bullet, paragraph, phrase, quoteBlock, quoteBlocks, runAbove, sentences, stripSlashGutter, pairSlices, logicalLines } from "./prose-pin.mjs";
 
 // The 14 consumer files exercise only between()'s HAPPY path: every one of them
 // slices a document that still holds both anchors. Measured on this PR: deleting
@@ -203,6 +203,39 @@ test("between's tolerant END anchor is still searched only after the start ancho
 test("between's tolerant mode leaves whitespace literal at both anchors, so a leading newline still bounds the slice", () => {
   assert.equal(between("HEAD one **Put** two\n**Put the rest", "HEAD", "\n**Put", "the fixture", { emphasisTolerant: true }), "HEAD one **Put** two");
   assert.equal(between("pad **HEAD** inline\nHEAD at line start\n\nEND", "\n**HEAD**", "END", "the fixture", { emphasisTolerant: true }), "\nHEAD at line start\n\n");
+});
+
+// #491: a sibling item inserted between the anchors is the hole `bullet`
+// closes, whatever marker it opens with — the #747 clamp this replaced looked
+// only for `- **`, so a plain `- ` or numbered sibling still joined the slice.
+test("bullet ends the item at the next sibling, whatever its marker, and never past the end anchor", () => {
+  const list = (sibling) => `intro\n- **Edge A** first line\n  wraps here.\n${sibling} carries the words\n- **Edge B** more\n\nEND`;
+  for (const sibling of ["- **Inserted**", "- inserted", "* inserted", "+ inserted", "3. inserted", "3) inserted"]) {
+    assert.equal(bullet(list(sibling), "- **Edge A**", "END", "the fixture"), "- **Edge A** first line\n  wraps here.", sibling);
+  }
+  // No sibling before the end anchor: the end anchor bounds it, exclusive.
+  assert.equal(bullet("- **Edge A** only item\nEND tail", "- **Edge A**", "END", "the fixture"), "- **Edge A** only item\n");
+});
+
+// The half a clamp can wrongly REFUSE: an item's own nested list, and its own
+// wrapped lines, belong to it. A clamp at any `\n- ` or at any list marker
+// regardless of indent cuts the item at its first child and drops the rest.
+test("bullet keeps the item's own deeper-indented children and continuation lines", () => {
+  const text = "- **Edge A** lead\n  continues\n  - child one\n    - grandchild\n  1. numbered child\n  tail line\n- **Edge B**\nEND";
+  assert.equal(
+    bullet(text, "- **Edge A**", "END", "the fixture"),
+    "- **Edge A** lead\n  continues\n  - child one\n    - grandchild\n  1. numbered child\n  tail line",
+  );
+  // An indented item's siblings are at ITS indent: a shallower marker ends it
+  // too, a same-indent one ends it, a deeper one is its child.
+  const nested = "1. step\n   - **Item** body\n     - child\n   - sibling\n2. next step\nEND";
+  assert.equal(bullet(nested, "- **Item**", "END", "the fixture"), "- **Item** body\n     - child");
+  assert.equal(bullet("1. step\n   - **Item** body\n2. next\nEND", "- **Item**", "END", "the fixture"), "- **Item** body");
+});
+
+test("bullet throws rather than widening when either anchor is gone", () => {
+  assert.throws(() => bullet("- a\n- b\nEND", "- **Edge A**", "END", "the fixture"), /the fixture no longer contains "- \*\*Edge A\*\*" — update this test/);
+  assert.throws(() => bullet("- **Edge A**\n- b\n", "- **Edge A**", "END", "the fixture"), /no longer contains "END" after "- \*\*Edge A\*\*"/);
 });
 
 // `\s+` between words, never a literal space: the prose these match against is
