@@ -57,7 +57,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { anchorAt, betweenPhrases, phrase } from "./prose-pin.mjs";
+import { anchorAt, betweenPhrases, phrase, sentences } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -144,7 +144,7 @@ const ONLY_METRICS = phrase("carries the two `docs/metrics/` files and nothing e
 // modal at all ("is allowed to ride", "unless ... put it on the data branch"),
 // co-located with the same sharing vocabulary plus `same PR`/`one PR`/`data
 // branch`, since the modal list alone let both proven phrasings through.
-const MAY_BUNDLE = /\b(?:may|can|could|might)\b[^.]{0,60}\b(?:share|bundle|bundled|accompany|travel|ride)\b|\b(?:allowed|licensed|fine|ok|permitted|unless|except)\b[^.]{0,60}\b(?:ride|share|same\s+PR|one\s+PR|data\s+branch)\b/i;
+const MAY_BUNDLE = /\b(?:may|can|could|might)\b[\s\S]{0,60}\b(?:share|bundle|bundled|accompany|travel|ride)\b|\b(?:allowed|licensed|fine|ok|permitted|unless|except)\b[\s\S]{0,60}\b(?:ride|share|same\s+PR|one\s+PR|data\s+branch)\b/i;
 
 const EXEMPT_DUTY = phrase("The run's own artifact PR is exempt, and it is exempt because this invariant does not reach it");
 // The positive duty the exemption exists to license. A slice that states the
@@ -158,7 +158,20 @@ const LABEL_DUTY = phrase("Label and merge that one yourself");
 // still be reviewed", "reviewed first/before", and approve/sign-off language —
 // none of which collide with "review queue" either.
 const NEEDS_REVIEW =
-  /\b(?:needs?|requires?|await|awaits|wait\s+for|must\s+(?:get|have|obtain))\b[^.]{0,60}\b(?:reviewer|review-pr|a\s+review)\b|\b(?:must|has\s+to|needs?\s+to|should)\b[^.]{0,40}\bbe\s+review|\breview(?:ed)?\s+(?:first|before)\b|\b(?:approve[ds]?|approval|sign(?:ed)?[- ]off)\b/i;
+  /\b(?:needs?|requires?|await|awaits|wait\s+for|must\s+(?:get|have|obtain))\b[\s\S]{0,60}\b(?:reviewer|review-pr|a\s+review)\b|\b(?:must|has\s+to|needs?\s+to|should)\b[\s\S]{0,40}\bbe\s+review|\breview(?:ed)?\s+(?:first|before)\b|\b(?:approve[ds]?|approval|sign(?:ed)?[- ]off)\b/i;
+
+// The sentences of `slice` a fault pattern matches. MAY_BUNDLE and NEEDS_REVIEW
+// are NEGATIVE — a match is the failure — so a window cut short is their silent
+// direction, and a first-period `[^.]` gap cut one short at every "e.g.",
+// `SKILL.md` or `v1.2` between the permission word and the sharing or review
+// word (#1983). The gap tolerates a period now, and the SENTENCE, from
+// `sentences()`, is what bounds it: widened over the raw slice instead, the gap
+// would pair a modal in one sentence with a verb in the next. RESIDUAL:
+// sentences() still cuts short at a `.)`, `.**`, `."`, a mid-sentence `?`, a
+// capitalised "E.g." or an "etc." (silent here), and still merges two real
+// sentences across #1987's `**late**.[1]` and #1899's sentence-final lowercase
+// "vs." (an over-fire here). None is in either slice today.
+const faults = (pattern, slice) => sentences(slice).filter((s) => pattern.test(s));
 
 // Every pin in one place, so a fixture asserts WHICH pins fire rather than that
 // something somewhere went red — a pin that reddens on the wrong mutant has
@@ -168,10 +181,10 @@ const PINS = {
   noCommit: (t) => NO_COMMIT.test(artifactRules(t)),
   split: (t) => !SPLIT_DUTY.test(artifactRules(t)),
   onlyMetrics: (t) => !ONLY_METRICS.test(artifactRules(t)),
-  mayBundle: (t) => MAY_BUNDLE.test(artifactRules(t)),
+  mayBundle: (t) => faults(MAY_BUNDLE, artifactRules(t)).length > 0,
   exempt: (t) => !EXEMPT_DUTY.test(invariant(t)),
   label: (t) => !LABEL_DUTY.test(invariant(t)),
-  needsReview: (t) => NEEDS_REVIEW.test(invariant(t)),
+  needsReview: (t) => faults(NEEDS_REVIEW, invariant(t)).length > 0,
 };
 const firing = (text) => Object.keys(PINS).filter((name) => PINS[name](text));
 
@@ -189,7 +202,7 @@ test("data rows and rule-doc prose are kept to separate PRs, and the data branch
   const slice = artifactRules();
   assert.match(slice, SPLIT_DUTY, "the load-bearing rule — data rows and rule-doc prose never share a PR — is no longer stated word for word");
   assert.match(slice, ONLY_METRICS, "the artifact branch is no longer scoped to the two `docs/metrics/` files, so 'never share a PR' has nothing left to bite on");
-  assert.doesNotMatch(slice, MAY_BUNDLE, "the split rule now licenses the bundling it forbids");
+  assert.deepEqual(faults(MAY_BUNDLE, slice), [], "the split rule now licenses the bundling it forbids");
 });
 
 test("the ready-to-merge invariant states its own artifact-PR exemption", () => {
@@ -197,7 +210,7 @@ test("the ready-to-merge invariant states its own artifact-PR exemption", () => 
   assert.ok(slice.length > 200, `the ready-to-merge invariant sliced down to ${slice.length} chars — the extractor is broken, not the docs`);
   assert.match(slice, EXEMPT_DUTY, "the `ready-to-merge` invariant no longer says the run's own artifact PR is outside it, which is the blocker #619 re-derived");
   assert.match(slice, LABEL_DUTY, "the exemption no longer tells the controller to label and merge that PR itself, so it licenses nothing");
-  assert.doesNotMatch(slice, NEEDS_REVIEW, "the invariant re-imposes a reviewer on the controller's own artifact PR");
+  assert.deepEqual(faults(NEEDS_REVIEW, slice), [], "the invariant re-imposes a reviewer on the controller's own artifact PR");
 });
 
 test("the invariant slice stops at its own bullet", () => {
@@ -250,6 +263,16 @@ const mutants = [
     (text) => text.replace(phrase("and that branch name is the convention rather than a suggestion"), "and the branch name is a suggestion, not a strict convention")],
   ["a reviewer is re-imposed on the run's own artifact PR via passive phrasing NEEDS_REVIEW's old keyword list missed", ["needsReview"],
     appendTo(LABEL_DUTY, "It must still be reviewed before the label goes on.")],
+  // #1983: a period in the gap — an abbreviation, a filename — ended the old
+  // `[^.]` window before the sharing or review word, and each of these was green.
+  ["bundling is licensed with an abbreviation between the modal and the sharing verb", ["mayBundle"],
+    appendTo(RULE_CHANGE_COST, "A one-line rule fix may, e.g. when the run is short, ride along with the rows.")],
+  ["bundling is licensed with a filename between the permission and the data branch", ["mayBundle"],
+    appendTo(RULE_CHANGE_COST, "A fix is fine if it only touches SKILL.md, so put it on the data branch.")],
+  ["a reviewer is re-imposed with an abbreviation between the need and the reviewer", ["needsReview"],
+    appendTo(LABEL_DUTY, "It still needs, i.e. before the label goes on, a reviewer.")],
+  ["a reviewer is re-imposed passively with a filename in the gap", ["needsReview"],
+    appendTo(LABEL_DUTY, "It must, per SKILL.md, still be reviewed.")],
 ];
 
 for (const [what, expected, mutate] of mutants) {
