@@ -458,13 +458,11 @@ export function setupNodeComments(lines = read("../../.github/workflows/ci.yml")
     // `include:` has entries shaped exactly like a step's (#1920).
     const dash = lines[step].search(/\S/);
     let parent = step - 1;
-    while (
-      parent >= 0 &&
-      (/^\s*(?:#|$)/.test(lines[parent]) ||
-        lines[parent].search(/\S/) > dash ||
-        (lines[parent].search(/\S/) === dash && /^\s*-(?:\s|$)/.test(lines[parent])))
-    )
-      parent--;
+    for (; parent >= 0; parent--) {
+      if (/^\s*(?:#|$)/.test(lines[parent])) continue;
+      const col = lines[parent].search(/\S/);
+      if (col < dash || (col === dash && !/^\s*-(?:\s|$)/.test(lines[parent]))) break;
+    }
     if (parent < 0 || !/^\s*(["']?)steps\1\s*:(?:\s|$)/.test(lines[parent])) continue;
     // `steps:` is just a key spelled that way — nothing above checks that it
     // sits directly under a job, not inside some action's own config that
@@ -767,6 +765,14 @@ test("every setup-node step but the owner points at ADR 0010 and the do-not-hand
   }
 });
 
+// The prefix every synthetic workflow below hangs its steps from: a job, and
+// its `steps:` key (#1920 — a step is only an entry of `steps:`). Shapes that
+// vary the job or `steps:` spelling itself still spell it out.
+const job = ["  job:", "    steps:"];
+
+// The comment run a bare `- uses:` step directly under `comment` gets.
+const at = (...comment) => setupNodeComments([...job, ...comment, "      - uses: actions/setup-node@v5"])[0];
+
 // #1873. A setup-node step whose `- ` opener is another key — `- name:` above
 // its `uses:`, a shape other steps in ci.yml already take — was never
 // discovered, so every pin reading steps through setupNodeComments was blind
@@ -778,8 +784,8 @@ test("a setup-node step opened by another key is discovered, its comment read ab
   const named = ["      - name: Set up Node", "        uses: actions/setup-node@v5"];
 
   // The ticket's own repro: no comment, and the step used to come back unseen.
-  assert.deepEqual(setupNodeComments(["  job:", "    steps:", ...named]), [{ block: "", lines: 0, job: "job" }]);
-  assert.match(pointerFault(setupNodeComments(["  job:", "    steps:", ...named])[0]), /no comment directly above its opener/);
+  assert.deepEqual(setupNodeComments([...job, ...named]), [{ block: "", lines: 0, job: "job" }]);
+  assert.match(pointerFault(setupNodeComments([...job, ...named])[0]), /no comment directly above its opener/);
 
   // What the wider match must still ACCEPT: a pointer above the opener, with
   // sibling keys, a nested value or a quoted scalar anywhere in between.
@@ -788,7 +794,7 @@ test("a setup-node step opened by another key is discovered, its comment read ab
     ["      - id: node", "        with:", "          node-version-file: .nvmrc", "        uses: 'actions/setup-node@v5'"],
     ['      - uses: "actions/setup-node@v5"'],
   ]) {
-    const found = setupNodeComments(["  job:", "    steps:", pointer, ...step]);
+    const found = setupNodeComments([...job, pointer, ...step]);
     assert.deepEqual(found, [{ block: pointer.replace(/^\s*#\s?/, ""), lines: 1, job: "job" }], step.join("\n"));
     assert.equal(pointerFault(found[0]), null);
   }
@@ -826,8 +832,8 @@ test("pinOwnerComment sees an owner written as a named step, so a bare-form deco
 test("a `uses: actions/setup-node@` line that is not a step's own key is not taken for a step (#1873)", () => {
   const scripted = ["      - name: Print an example", "        run: |", "          uses: actions/setup-node@v5"];
   const nested = ["      - uses: some/action@v1", "        with:", "          uses: actions/setup-node@v5"];
-  assert.deepEqual(setupNodeComments(["  job:", "    steps:", ...scripted]), []);
-  assert.deepEqual(setupNodeComments(["  job:", "    steps:", ...nested]), []);
+  assert.deepEqual(setupNodeComments([...job, ...scripted]), []);
+  assert.deepEqual(setupNodeComments([...job, ...nested]), []);
 });
 
 // #1920. That first shallower line can open a sequence entry and still not be
@@ -843,7 +849,6 @@ test("a `uses: actions/setup-node@` line that is not a step's own key is not tak
 // the column tell just above — not because #1975's block-scalar check ran;
 // that check would refuse either shape too, but neither depends on it.
 test("a `uses: actions/setup-node@` line under an entry that is not a step's, or inside a key on a step's dash line, is not a step (#1920)", () => {
-  const job = ["  job:", "    steps:"];
   for (const shape of [
     [...job, "      - uses: some/action@v1", "        with:", "          items:", "            - key: a", "              uses: actions/setup-node@v5"],
     [...job, "      - uses: some/action@v1", "        with:", "          items:", "            - uses: actions/setup-node@v5"],
@@ -862,8 +867,8 @@ test("a `uses: actions/setup-node@` line under an entry that is not a step's, or
   // `steps:`, and an earlier step whose `with:` nests an entry of its own.
   const text = "Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.";
   for (const shape of [
-    ["  job:", "    steps:", `    # ${text}`, "    - name: Set up Node", "      uses: actions/setup-node@v5"],
-    ["  job:", "    steps:", `    # ${text}`, "    - uses: actions/setup-node@v5"],
+    [...job, `    # ${text}`, "    - name: Set up Node", "      uses: actions/setup-node@v5"],
+    [...job, `    # ${text}`, "    - uses: actions/setup-node@v5"],
     [...job, `      # ${text}`, "      -   name: Set up Node", "          uses: actions/setup-node@v5"],
     [...job, `      # ${text}`, "      -", "        name: Set up Node", "        uses: actions/setup-node@v5"],
     [
@@ -891,8 +896,7 @@ test("a `uses: actions/setup-node@` line under an entry that is not a step's, or
 // parent check exactly like the real one and manufactures a phantom step.
 test("a nested key merely spelled `steps:` cannot own a step; only one hanging from a job can (#1920 follow-up)", () => {
   const collision = [
-    "  job:",
-    "    steps:",
+    ...job,
     "      - uses: some/action@v1",
     "        with:",
     "          config:",
@@ -909,7 +913,7 @@ test("a nested key merely spelled `steps:` cannot own a step; only one hanging f
 // exemption, a real step opened that way silently dropped out of the
 // returned set instead of being found.
 test("a bare `-` opener followed only by a trailing comment does not perturb the column check; the step is still discovered (#1920 follow-up)", () => {
-  const found = setupNodeComments(["  job:", "    steps:", "      -  # Set up Node", "        name: Set up Node", "        uses: actions/setup-node@v5"]);
+  const found = setupNodeComments([...job, "      -  # Set up Node", "        name: Set up Node", "        uses: actions/setup-node@v5"]);
   assert.deepEqual(found, [{ block: "", lines: 0, job: "job" }]);
 });
 
@@ -921,7 +925,6 @@ test("a bare `-` opener followed only by a trailing comment does not perturb the
 // phantom, since no line of a step's scalar sits where a job key does; a
 // top-level scalar's content can, and the comment run has no job check at all.
 test("a block scalar's content is text: never a step, never a step's comment (#1975)", () => {
-  const job = ["  job:", "    steps:"];
   const setup = "      - uses: actions/setup-node@v5";
   const text = "Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.";
 
@@ -929,9 +932,9 @@ test("a block scalar's content is text: never a step, never a step's comment (#1
   // indicator setting its content shallower than its first line, which
   // auto-detection would miss.
   for (const shape of [
-    ["description: |", "  job:", "    steps:", setup],
-    ["description: >-", "  job:", "    steps:", setup],
-    ["description: |2", "    deeper", "  job:", "    steps:", setup],
+    ["description: |", ...job, setup],
+    ["description: >-", ...job, setup],
+    ["description: |2", "    deeper", ...job, setup],
   ]) {
     assert.deepEqual(setupNodeComments(shape), [], shape.join("\n"));
   }
@@ -963,7 +966,7 @@ test("a block scalar's content is text: never a step, never a step's comment (#1
     [...job, "      - name: Build", "        run: |", "          npm run build", `      # ${text}`, setup],
     [...job, "      - name: Build", "        run: |", "          npm run build", `         # ${text}`, setup],
     [...job, "      - name: Build", "        run: npm test ||", `          # ${text}`, setup],
-    ["description: |", "  text", "jobs:", "  job:", "    steps:", `      # ${text}`, setup],
+    ["description: |", "  text", "jobs:", ...job, `      # ${text}`, setup],
   ]) {
     assert.deepEqual(setupNodeComments(shape), [{ block: text, lines: 1, job: "job" }], shape.join("\n"));
   }
@@ -1027,8 +1030,8 @@ test("a key spelled quoted, with a space before its colon, or with a trailing co
     ["jobs:", "  job:", '    "steps":', "      - name: x", "        uses: actions/setup-node@v5"],
     ["jobs:", "  job:", "    'steps':", setup],
     ["jobs:", "  job:", "    steps :", setup],
-    ["jobs:", "  job:", "    steps:", '      - "uses": actions/setup-node@v5'],
-    ["jobs:", "  job:", "    steps:", "      - name: x", "        'uses' : actions/setup-node@v5"],
+    ["jobs:", ...job, '      - "uses": actions/setup-node@v5'],
+    ["jobs:", ...job, "      - name: x", "        'uses' : actions/setup-node@v5"],
     ["jobs:", '  "job":', "    steps:", setup],
     ["jobs:", "  job :", "    steps:", setup],
     ["jobs:", "  job: # the job's own note", "    steps:", setup],
@@ -1053,21 +1056,21 @@ test("an anchor or tag on a job key or a uses: key does not drop the step (#2000
   assert.deepEqual(setupNodeComments(["jobs:", "  job: &j", "    steps:", "      - uses: actions/setup-node@v5"]), [
     { block: "", lines: 0, job: "job" },
   ]);
-  assert.deepEqual(setupNodeComments(["jobs:", "  job:", "    steps:", "      - uses: &u actions/setup-node@v5"]), [
+  assert.deepEqual(setupNodeComments(["jobs:", ...job, "      - uses: &u actions/setup-node@v5"]), [
     { block: "", lines: 0, job: "job" },
   ]);
 });
 
 test("uses: with no whitespace before its value is a plain scalar, never a step's own key (#2000 finding 2)", () => {
-  assert.deepEqual(setupNodeComments(["jobs:", "  job:", "    steps:", "      - uses:actions/setup-node@v5"]), []);
+  assert.deepEqual(setupNodeComments(["jobs:", ...job, "      - uses:actions/setup-node@v5"]), []);
 });
 
 test("a plain key containing a literal # is still a block-scalar header, not read as structure (#2000 finding 3)", () => {
-  assert.deepEqual(setupNodeComments(["C#: |", "  job:", "    steps:", "      - uses: actions/setup-node@v5"]), []);
+  assert.deepEqual(setupNodeComments(["C#: |", ...job, "      - uses: actions/setup-node@v5"]), []);
 });
 
 test("a document-start scalar (--- |) is still a block-scalar header, not read as structure (#2000 finding 4)", () => {
-  assert.deepEqual(setupNodeComments(["--- |", "  job:", "    steps:", "      - uses: actions/setup-node@v5"]), []);
+  assert.deepEqual(setupNodeComments(["--- |", ...job, "      - uses: actions/setup-node@v5"]), []);
 });
 
 // Found in review of #2005, alongside the ticket's own five: the bare `!`
@@ -1080,7 +1083,7 @@ test("a bare ! non-specific tag on a job key or a uses: key does not drop the st
   assert.deepEqual(setupNodeComments(["jobs:", "  job: !", "    steps:", "      - uses: actions/setup-node@v5"]), [
     { block: "", lines: 0, job: "job" },
   ]);
-  assert.deepEqual(setupNodeComments(["jobs:", "  job:", "    steps:", "      - uses: ! actions/setup-node@v5"]), [
+  assert.deepEqual(setupNodeComments(["jobs:", ...job, "      - uses: ! actions/setup-node@v5"]), [
     { block: "", lines: 0, job: "job" },
   ]);
 });
@@ -1093,7 +1096,7 @@ test("a bare ! non-specific tag on a job key or a uses: key does not drop the st
 // PyYAML confirms the second document's step is real.
 test("a document marker still ends a document-start scalar that carries an explicit indentation indicator", () => {
   assert.deepEqual(
-    setupNodeComments(["--- |1", " text", "---", "jobs:", "  job:", "    steps:", "      - uses: actions/setup-node@v5"]),
+    setupNodeComments(["--- |1", " text", "---", "jobs:", ...job, "      - uses: actions/setup-node@v5"]),
     [{ block: "", lines: 0, job: "job" }],
   );
 });
@@ -1127,19 +1130,17 @@ test("a blank line ends a setup-node step's comment run: it keeps an unrelated c
     ["      - uses: actions/setup-node@v5"],
     ["      - name: Set up Node", "        uses: actions/setup-node@v5"],
   ]) {
-    const hugging = setupNodeComments(["  job:", "    steps:", unrelated, "", pointer, ...step]);
+    const hugging = setupNodeComments([...job, unrelated, "", pointer, ...step]);
     assert.deepEqual(hugging, [{ block: pointer.replace(/^\s*#\s?/, ""), lines: 1, job: "job" }], step.join("\n"));
     assert.equal(pointerFault(hugging[0]), null, step.join("\n"));
 
-    const detached = setupNodeComments(["  job:", "    steps:", pointer, "", ...step]);
+    const detached = setupNodeComments([...job, pointer, "", ...step]);
     assert.deepEqual(detached, [{ block: "", lines: 0, job: "job" }], step.join("\n"));
     assert.match(pointerFault(detached[0]), /no comment directly above its opener/, step.join("\n"));
   }
 });
 
 test("a paraphrased pointer is accepted; a missing one, a half one and a copied paragraph are not", () => {
-  const at = (...comment) => setupNodeComments(["  job:", "    steps:", ...comment, "      - uses: actions/setup-node@v5"])[0];
-
   assert.equal(pointerFault(at("      # Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.")), null);
   assert.equal(pointerFault(at("      # .nvmrc is exact and bot-moved (ADR 0010); never hand-edit it to float.")), null);
   assert.equal(pointerFault(at("      # Hand-editing this to float is not allowed: ADR 0010 explains why.")), null);
@@ -1163,8 +1164,6 @@ test("a paraphrased pointer is accepted; a missing one, a half one and a copied 
 });
 
 test("a negation sharing hand-edit's sentence but not touching it is still a missing rule (#1868)", () => {
-  const at = (...comment) => setupNodeComments(["  job:", "    steps:", ...comment, "      - uses: actions/setup-node@v5"])[0];
-
   assert.match(
     pointerFault(at("      # Hand-edit this pin whenever convenient; there is no rule against it. See ADR 0010.")),
     /do-not-hand-edit rule/,
@@ -1176,15 +1175,12 @@ test("a negation sharing hand-edit's sentence but not touching it is still a mis
 });
 
 test("pointerFault accepts a rule negated by 'cannot' or a curly apostrophe, or broken by 'e.g.' (#1852)", () => {
-  const at = (...comment) => setupNodeComments(["  job:", "    steps:", ...comment, "      - uses: actions/setup-node@v5"])[0];
-
   assert.equal(pointerFault(at("      # .nvmrc is exact and bot-moved (ADR 0010); it cannot be hand-edited to float.")), null);
   assert.equal(pointerFault(at("      # Exact pin Renovate moves: see ADR 0010. Don’t hand-edit this to float.")), null);
   assert.equal(pointerFault(at("      # Never, e.g. for a patch, hand-edit this pin: see ADR 0010.")), null);
 });
 
 test("pointerFault still refuses a rule spelled with the opening curly quote — only U+2019 is accepted (#1852)", () => {
-  const at = (...comment) => setupNodeComments(["  job:", "    steps:", ...comment, "      - uses: actions/setup-node@v5"])[0];
   assert.match(
     pointerFault(at("      # Exact pin Renovate moves: see ADR 0010. Don\u2018t hand-edit this to float.")),
     /no longer carries the do-not-hand-edit rule/,
