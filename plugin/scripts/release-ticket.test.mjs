@@ -4323,6 +4323,47 @@ test("a .git linkage naming another repository's worktree refuses instead of lea
   assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
 });
 
+// #2073. The other working-tree shape the linkage guard's comment names —
+// `core.worktree` set in the worktree's own `config.worktree` under
+// `extensions.worktreeConfig`, the .git file untouched — and its `nl` variant:
+// the redirect target is `$wt`'s own canonical path plus one trailing newline
+// byte, a real and distinct directory (git accepts the byte as an ordinary path
+// character) whose name a bare `$(...)` strips back to `$wt`'s own. The target
+// carries a copy of the claim's tracked file, so the dirty check reading it
+// answers clean over the work planted in `$wt` — the false clean, not merely a
+// false dirty. `b2` is the same redirect at an unrelated name: the control that
+// says the fixture redirects at all, so a red `nl` row is the sentinel's alone.
+// Mirrors reap.test.mjs's `redirectWorkingTree(..., "nl")` (#2042) and the
+// shape no-undo-audit.sh closed first (#2040).
+for (const shape of ["b2", "nl"]) {
+  for (const apply of [false, true]) {
+    test(`a core.worktree redirect (${shape}) is refused by the linkage guard, ${apply ? "--apply" : "dry run"} (#2073)`, (t) => {
+      const r = repo(t);
+      const c = claim(r.w, 9, "release-ticket");
+      const elsewhere = shape === "nl" ? `${realpathSync(c.wt)}\n` : join(r.w, "..", "elsewhere");
+      mkdirSync(elsewhere);
+      writeFileSync(join(elsewhere, "f.txt"), "root\n");
+      git(r.w, "config", "extensions.worktreeConfig", "true");
+      git(c.wt, "config", "--worktree", "core.worktree", elsewhere);
+      writeFileSync(join(c.wt, "precious.txt"), "work that exists nowhere else\n");
+      assert.equal(git(c.wt, "status", "--porcelain", "-uall"), "", `fixture (${shape}): the redirect must hide the planted work from the dirty check`);
+      // Untrimmed, unlike `git()`: the `nl` shape's whole point is a byte a trim eats.
+      const top = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: c.wt, env: ENV, encoding: "utf8" }).slice(0, -1);
+      assert.equal(top, shape === "nl" ? elsewhere : realpathSync(elsewhere), `fixture (${shape}): git must answer for the other tree`);
+      assert.notEqual(top, realpathSync(c.wt), `fixture (${shape}): and that tree must not be the worktree's own`);
+
+      const { code, json, stderr } = release(r, c, { apply });
+      assert.equal(code, 2, stderr);
+      assert.equal(json, null, "refused at the linkage guard, before any receipt or mutation");
+      assert.match(stderr, /does not point at .*\/9-release-ticket/, "names the mismatch, not just 'unknown'");
+      assert.match(stderr, /whether it holds uncommitted work is unknown/);
+      assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+      assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing may be touched");
+      assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
+    });
+  }
+}
+
 test("a healthy worktree reached through a symlinked parent still releases normally", (t) => {
   // The false refusal the widened linkage guard must not introduce: `worktree
   // list --porcelain` echoes the admin file's recorded path verbatim, and that
