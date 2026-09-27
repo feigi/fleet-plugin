@@ -327,10 +327,12 @@ test("citationFault accepts well-paired quotations, and malformed quotes outside
 // the real sentence is cut at the blanked sentence's length. An astral
 // character (an emoji, two UTF-16 units) inside a parenthetical aside used to
 // blank to ONE "x", so every one of them cut the real sentence a unit short.
-// That fails both ways: a correct quotation loses its closing mark and is
-// refused as unpaired, and a cut that lands exactly before a short quoted span
-// drops it whole — pairing stays even, so a misquote there read as a
-// paraphrase (reproduced: the last input below returned null).
+// That fails three ways: a correct quotation loses its closing mark and is
+// refused as unpaired; a genuine misquote behind the same short aside is ALSO
+// refused as unpaired — the wrong reason, hiding which words it actually
+// misquotes; and a cut that lands exactly before a short quoted span drops it
+// whole — pairing stays even, so a misquote there read as a paraphrase
+// (reproduced: the last input below returned null).
 test("an astral character inside a parenthetical aside does not shorten the citing sentence (#1999)", () => {
   const cited = "so this walk, not node, is what keeps vendored tests out.";
   const aside = "(\u{1F600}\u{1F600}\u{1F600})";
@@ -338,6 +340,18 @@ test("an astral character inside a parenthetical aside does not shorten the citi
   assert.equal(citationFault(`claim-ticket.sh ${aside} says "walk, not node"`, cited), null);
   assert.match(citationFault(`claim-ticket.sh ${aside} says "this filter, not node"`, cited), /does not say it/);
   assert.match(citationFault(`claim-ticket.sh ${aside} says "walk, not node" and "q"`, cited), /saying "q"/);
+});
+
+// #1999 follow-up. blankQuotes was never touched by that bug — span.length is
+// already a UTF-16-unit count, not a code-point count, so an astral character
+// INSIDE a quoted span (no parens involved) never shortened the blanked span.
+// Pinned separately from the parenthetical case above so a future edit to
+// either helper cannot quietly drop the other's coverage.
+test("an astral character inside a quoted span alone does not affect blankQuotes (#1999)", () => {
+  const cited = "so this walk\u{1F600}, not node, is what keeps vendored tests out.";
+
+  assert.equal(citationFault('claim-ticket.sh says "walk\u{1F600}, not node"', cited), null);
+  assert.match(citationFault('claim-ticket.sh says "walk\u{1F600}, not filter"', cited), /does not say it/);
 });
 
 test("the Shellcheck comment does not present its examples as the complete set", () => {
