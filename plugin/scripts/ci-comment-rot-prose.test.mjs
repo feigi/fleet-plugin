@@ -1704,9 +1704,14 @@ test("jsonCountFault ends a count sentence at a capitalized abbreviation mid-sen
   // capitalized one in a parenthetical cuts the count off from the context
   // word before it, and the count passes: the silent direction here, unlike
   // windowClaimFault's. No file's prose spells one capitalized; the pin is
-  // here so a change to the guard meets this shape on purpose.
+  // here so a change to the guard meets this shape on purpose. The `]`
+  // closer (review finding, fix-pr-2024): a plain-space closer here lets
+  // sentences() (lowercase-only since #1899/#2018) end the sentence first,
+  // so the fixture measured that cost instead of countSentenceBoundary's own
+  // — the `]` closer is one sentences() never splits after (#2021's sibling
+  // test above uses the same shape), so this re-split is the only boundary.
   const jq = "`jq empty`, not `jq -e .`: it exits 1 on a file holding `null` or `false` — both valid JSON.";
-  const count = (abbr) => `Parses tracked JSON (${abbr} manifests): two files at last count. ${jq}`;
+  const count = (abbr) => `Parses tracked JSON [${abbr}] manifests: two files at last count. ${jq}`;
   assert.match(jsonCountFault(count("e.g.")), /sizes the tracked JSON set again/);
   for (const abbr of ["E.g.", "Cf.", "Vs."]) {
     assert.equal(jsonCountFault(count(abbr)), null, abbr);
