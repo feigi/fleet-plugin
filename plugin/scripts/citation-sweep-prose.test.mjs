@@ -237,12 +237,12 @@ function securityReleaseFault(adr) {
 // `# ` gutter would open one and the merge row reads sentences across it.
 //
 // #2002. More of what CommonMark (0.31.2) lets interrupt a paragraph, and
-// closing markup #1981 still missed. An HTML block opens on the line after
+// closing markup #1981 still missed. An HTML block opens straight under
 // prose with no blank line between — `<div>`, `<table>`, `<details>`, `<!--`,
 // `<?`, `<!DOCTYPE`, `<pre>`, any of CommonMark's block tag names, opening or
 // closing — and ends the sentence there; any other tag, `<span>` or
 // `<divider>`, opens no block, so the line still wraps. A blockquote's `>`
-// ends it too, on the line after one with none. Two quoted lines still wrap
+// ends it too, opening straight under an unquoted line. Two quoted lines wrap
 // behind the gutter, and so does a quote nested inside one, `> a` then
 // `> > b` — the silent direction, like the ATX gap above, left since telling it
 // from a wrap means counting both lines' `>`; a lazy line between two quoted
