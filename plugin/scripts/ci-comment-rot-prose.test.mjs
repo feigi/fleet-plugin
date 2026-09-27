@@ -1830,6 +1830,43 @@ test("jsonCountFault does not merge a count sentence across a closer that embeds
   );
 });
 
+// #2063. `][^1]` read two ways under COUNT_CLOSING_MARKUP — one `][ref]`
+// closer, or a bare `]` then a `[^1]` footnote — so a chain of n of them had
+// 2^n readings, and a lookbehind that ends in no split walked every one first.
+// #2054's folded guard put the must-accept shape on that path: a guarded
+// `vs.` ahead of the chain. At this n each fixture took half a second to
+// several seconds, doubling with every link; unambiguous, all three take well
+// under a millisecond, so the budget only catches a return to the blow-up,
+// not a slow machine.
+test("the count re-split stays fast on a closer chain that once read two ways (#2063)", () => {
+  const links = 25;
+  for (const text of [
+    // The ticket's two post-#2054 repros: the guarded terminator ahead of
+    // the chain, and the guarded `vs.` inside each link.
+    "per vs." + "][^1]".repeat(links) + " y",
+    "x" + "][^vs.]".repeat(links) + " y",
+    // The same chain with no terminator at all, slow before #2054 too.
+    "x" + "][^a]".repeat(links) + " y",
+  ]) {
+    const start = performance.now();
+    const parts = text.split(COUNT_SENTENCE_BOUNDARY);
+    const ms = performance.now() - start;
+    assert.deepEqual(parts, [text], text);
+    assert.ok(ms < 100, `${ms.toFixed(0)}ms on ${text}`);
+  }
+});
+
+// The fix drops only the `][ref]` reading that `]` plus `[^1]` already
+// covers, so every closer run ends the same sentences as before. A `][^…]`
+// label that `[^1]` cannot read — empty, or holding a space — is still one
+// `][ref]` closer; a fix that refused every `][^` would lose those two.
+test("the count re-split ends the same sentences behind a `][^…]` closer as before #2063", () => {
+  for (const closer of ["][^1]", "][^1]][^2]", "][^a b]", "][^]", "][^vs.]"]) {
+    assert.deepEqual(`It shipped.${closer} Next`.split(COUNT_SENTENCE_BOUNDARY), [`It shipped.${closer}`, "Next"], closer);
+    assert.deepEqual(`per vs.${closer} next`.split(COUNT_SENTENCE_BOUNDARY), [`per vs.${closer} next`], closer);
+  }
+});
+
 // Review of PR #1942 (correctness + tests dimensions, independently
 // corroborated 3 ways): the doesNotMatch above used to scan the WHOLE block,
 // so a stale count reintroduced as its own paragraph and separated from the

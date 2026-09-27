@@ -1541,6 +1541,38 @@ test("SENTENCE_END ends nothing at a jq, JavaScript or glob index quoted after a
   }
 });
 
+// #2063. `][^1]` read two ways under CLOSING_MARKUP — one `][ref]` closer, or
+// a bare `]` then a `[^1]` footnote — so a chain of n of them had 2^n
+// readings, and SENTENCE_END walked every one before giving up on a chain
+// with no whitespace after it. At this n the chain took half a second to
+// several seconds, doubling with every link; unambiguous, it takes well under
+// a millisecond, so the budget only catches a return to the blow-up, not a
+// slow machine.
+test("SENTENCE_END stays fast on a closer chain that once read two ways (#2063)", () => {
+  const text = "x." + "][^a]".repeat(25) + "z";
+  for (const flags of ["", "i"]) {
+    const start = performance.now();
+    const parts = text.split(new RegExp(SENTENCE_END, flags));
+    const ms = performance.now() - start;
+    assert.deepEqual(parts, [text], `/${flags}`);
+    assert.ok(ms < 100, `${ms.toFixed(0)}ms /${flags}`);
+  }
+});
+
+// The fix drops only the `][ref]` reading that `]` plus `[^1]` already
+// covers, so every closer run ends the same sentences as before. A `][^…]`
+// label that `[^1]` cannot read — empty, or holding a space — is still one
+// `][ref]` closer; a fix that refused every `][^` would lose those two.
+test("SENTENCE_END ends the same sentences behind a `][^…]` closer as before #2063", () => {
+  for (const flags of ["", "i"]) {
+    const split = (text) => text.split(new RegExp(SENTENCE_END, flags));
+    for (const closer of ["][^1]", "][^1]][^2]", "][^a b]", "][^]", "][^vs.]"]) {
+      assert.deepEqual(split(`It shipped.${closer} Next`), ["It shipped", "Next"], `${closer} /${flags}`);
+      assert.deepEqual(split(`per vs.${closer} next`), [`per vs.${closer} next`], `${closer} /${flags}`);
+    }
+  }
+});
+
 test("both rows and the window count read a bare footnote marker as a sentence end (#2027)", () => {
   // The next sentence's scope no longer reaches back across the marker.
   for (const text of [
