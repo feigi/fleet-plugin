@@ -84,7 +84,6 @@ import {
   KNOWN_EQUALITY_EXCEPTIONS,
   DOES_NOT_APPLY_RE,
   MD_DIRS,
-  JS_DIRS,
 } from "./marked-pairs.mjs";
 import { between, pairSlices, DIALECT_TOKENS } from "./prose-pin.mjs";
 
@@ -322,6 +321,28 @@ test("mutation run 4 (the two-dialect-specific mutant): a token swap survives no
 // a defect, and passes both guards by design.
 const MD_DIR_FLOORS = { skills: 5, commands: 2, agents: 8 };
 
+// The exact check's scope, written here rather than imported (#2057). Built
+// from `marked-pairs.mjs`'s own `MD_DIRS`/`JS_DIRS`, the oracle shrank with
+// the module it checks: `JS_DIRS = []` dropped `workflows/` from the scan
+// AND from the expected set, so the two agreed. Measured on a scratch copy
+// before this change: that mutant passed 19/20 — its only red was the
+// exception-membership test, incidentally, because `review-pr.js`'s
+// exempted pair vanished with the scan — and 20/20 once that exception
+// entry was also removed (the state #1362 resolving the pair would leave).
+// `MD_DIRS` had an independent pin in the floors' key-parity assertion
+// below; `JS_DIRS` had none. A literal `deepEqual` on the two constants
+// would pin them but not what the scan does with them; scoping the oracle
+// here pins the behavior — every `.js` under `workflows/` must come back
+// from `scanTree` whatever list or code produces it. After this change, same
+// method: `JS_DIRS = []` 17/20 and, with the exception entry also removed,
+// 18/20 — both red on the real-tree walk test (`workflows/review-pr.js`
+// missing) and the walk-oracle fixture; so is `listFiles` ignoring
+// `JS_DIRS` while the constant stays intact (17/20), which a pin on the
+// constant alone would pass. Widening the scan's scope reds the fixture
+// (its `commands/helper.js` turns `extra`), and the real-tree walk test too
+// once the new directory holds a file of that extension: add it here too.
+const WALK_SCOPE = { ".md": ["skills", "commands", "agents"], ".js": ["workflows"] };
+
 function listIndependently(root, dir, ext) {
   let entries;
   try {
@@ -340,10 +361,7 @@ function listIndependently(root, dir, ext) {
 // names). `extra`: anything returned that is not an in-scope file, or is
 // returned twice.
 function walkDiscrepancy(root, scannedFiles) {
-  const expected = new Set([
-    ...MD_DIRS.flatMap((d) => listIndependently(root, d, ".md")),
-    ...JS_DIRS.flatMap((d) => listIndependently(root, d, ".js")),
-  ]);
+  const expected = new Set(Object.entries(WALK_SCOPE).flatMap(([ext, dirs]) => dirs.flatMap((d) => listIndependently(root, d, ext))));
   const seen = new Set();
   const extra = [];
   for (const f of scannedFiles) {
