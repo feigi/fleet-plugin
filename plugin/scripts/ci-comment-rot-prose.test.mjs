@@ -528,12 +528,15 @@ function blockScalarText(lines) {
 // and a key read by name here may be quoted or spaced from its colon, as YAML
 // allows (#1975). A `uses:` key's colon must still be followed by real
 // whitespace — YAML's own rule for telling a key from a plain scalar that
-// merely contains one (`uses:actions/…` is the latter, never a key) — and
-// either a job's own key or a `uses:` key may carry an anchor or tag between
-// its colon and its value, as YAML allows there too (#2000) — including the
+// merely contains one (`uses:actions/…` is the latter, never a key) — and so
+// must a job key's, before any anchor, tag or comment after it (#2006). Either
+// key may carry an anchor or tag between its colon and its value, as YAML
+// allows there too (#2000) — including the
 // bare `!` non-specific tag, which has no characters of its own to require
 // (found in review of #2005: `\S+` after `[&!]` refused it where the header
-// regex above already used `\S*`). Exported with
+// regex above already used `\S*`) — and the job key, `steps:` and `uses:`
+// may carry one before the key itself, as may a step right after its own
+// `- `, whether its keys follow on that line or under it (#2006). Exported with
 // an optional `lines` override (same idiom as windowClaimFault's `block`
 // param and citationFault's `citing`/`cited` params) so a test can feed it
 // synthetic input the real ci.yml does not contain; the production call
@@ -544,25 +547,25 @@ export function setupNodeComments(lines = read("../../.github/workflows/ci.yml")
   const text = blockScalarText(lines);
   const found = [];
   for (let at = 0; at < lines.length; at++) {
-    const uses = /^(\s*)(-\s+)?(["']?)uses\3\s*:\s+(?:[&!]\S*\s+)*["']?actions\/setup-node@/.exec(lines[at]);
+    const uses = /^(\s*)(-\s+)?(?:[&!]\S*\s+)*(["']?)uses\3\s*:\s+(?:[&!]\S*\s+)*["']?actions\/setup-node@/.exec(lines[at]);
     if (!uses || text.has(at)) continue;
     // `- uses:` opens its entry. Any other `uses:` belongs to the first line
     // above it that sits shallower than the key — sibling keys share its
     // column, their values sit deeper — and that line is the entry's opener
     // only if it opens a sequence entry whose own keys start at `uses:`'s
     // column. `with:` there, on a line of its own or after the `- `, means
-    // the match was never an entry's own key. A bare `-`, or a
-    // dash whose only remainder is a comment, sets its keys under it, each of
-    // which the walk has already held at or past that column (#1920 follow-up:
-    // a trailing comment's own text is not a key, so it must not set the
-    // column the way a real key would).
+    // the match was never an entry's own key. A bare `-`, or a dash whose
+    // only remainder is anchors, tags or a comment, sets its keys under it,
+    // each of which the walk has already held at or past that column (#1920
+    // follow-up: a trailing comment's own text is not a key, so it must not
+    // set the column the way a real key would; nor is a property's, #2006).
     let step = at;
     if (!uses[2]) {
       const depth = uses[1].length;
       step--;
       while (step >= 0 && (/^\s*(?:#|$)/.test(lines[step]) || lines[step].search(/\S/) >= depth)) step--;
       if (step < 0) continue;
-      if (!/^\s*-\s*(?:#.*)?$/.test(lines[step]) && /^\s*-\s+(?=\S)/.exec(lines[step])?.[0].length !== depth) continue;
+      if (!/^\s*-(?:\s+[&!]\S*)*\s*(?:#.*)?$/.test(lines[step]) && /^\s*-\s+(?=\S)/.exec(lines[step])?.[0].length !== depth) continue;
     }
     // Either way the entry is a step only if it hangs from `steps:`: the first
     // line above the opener that neither sits deeper than its `- ` nor opens a
@@ -575,7 +578,7 @@ export function setupNodeComments(lines = read("../../.github/workflows/ci.yml")
       const col = lines[parent].search(/\S/);
       if (col < dash || (col === dash && !/^\s*-(?:\s|$)/.test(lines[parent]))) break;
     }
-    if (parent < 0 || !/^\s*(["']?)steps\1\s*:(?:\s|$)/.test(lines[parent])) continue;
+    if (parent < 0 || !/^\s*(?:[&!]\S*\s+)*(["']?)steps\1\s*:(?:\s|$)/.test(lines[parent])) continue;
     // `steps:` is just a key spelled that way — nothing above checks that it
     // sits directly under a job, not inside some action's own config that
     // happens to reuse the name. The line immediately shallower than it, if
@@ -586,7 +589,10 @@ export function setupNodeComments(lines = read("../../.github/workflows/ci.yml")
     const stepsDepth = lines[parent].search(/\S/);
     let jobLine = parent - 1;
     while (jobLine >= 0 && (/^\s*(?:#|$)/.test(lines[jobLine]) || lines[jobLine].search(/\S/) >= stepsDepth)) jobLine--;
-    const jobKey = jobLine >= 0 ? /^ {2}(["']?)([\w-]+)\1\s*:\s*(?:[&!]\S*\s*)*(?:#.*)?$/.exec(lines[jobLine]) : null;
+    const jobKey =
+      jobLine >= 0
+        ? /^ {2}(?:[&!]\S*\s+)*(["']?)([\w-]+)\1\s*:(?:\s+(?:[&!]\S*\s*)*(?:#.*)?)?$/.exec(lines[jobLine])
+        : null;
     if (jobLine >= 0 && !jobKey) continue;
     let i = step;
     while (i > 0 && /^\s*#/.test(lines[i - 1]) && !text.has(i - 1)) i--;
@@ -1198,6 +1204,56 @@ test("a bare ! non-specific tag on a job key or a uses: key does not drop the st
   assert.deepEqual(setupNodeComments(["jobs:", ...job, "      - uses: ! actions/setup-node@v5"]), [
     { block: "", lines: 0, job: "job" },
   ]);
+});
+
+// #2006 finding A. A job key's colon took an anchor, tag or comment with no
+// whitespace before it (`job:&j`), where a `uses:` key's already needed some
+// (#2000 finding 2) — YAML's own rule, and the one line with no document
+// behind it: PyYAML refuses every rejected shape here outright. Both halves
+// pinned, so the tightening cannot creep into refusing a key whose colon ends
+// the line or is followed by real whitespace.
+test("a job key's anchor, tag or comment needs whitespace after its colon, as a uses: key's does (#2006 finding A)", () => {
+  const setup = "      - uses: actions/setup-node@v5";
+  for (const key of ["  job:&j", "  job:!t", "  job:!", "  job:#c"]) {
+    assert.deepEqual(setupNodeComments(["jobs:", key, "    steps:", setup]), [], key);
+  }
+  for (const key of ["  job:", "  job:  ", "  job: &j !!map # c"]) {
+    assert.deepEqual(setupNodeComments(["jobs:", key, "    steps:", setup]), [{ block: "", lines: 0, job: "job" }], key);
+  }
+});
+
+// #2006 finding B. An anchor or tag may also sit BEFORE a key — on the job
+// key, the `steps:` key or a `uses:` key — or right after a step's own `- `,
+// on a line of its own over the step's keys; #2000 only taught the walk the
+// spot between a key's colon and its value, so each of these real steps
+// (confirmed against PyYAML's `compose`) dropped out of the returned set.
+// The property still has to be its own whitespace-separated token: glued to
+// the key it is part of the key's text, and names some other key.
+test("an anchor or tag before a key, or after a step's own `- `, does not drop the step (#2006 finding B)", () => {
+  const setup = "      - uses: actions/setup-node@v5";
+  for (const shape of [
+    ["jobs:", "  &k job:", "    steps:", setup],
+    ["jobs:", "  !!str job:", "    steps:", setup],
+    ["jobs:", '  &k ! "job": &j', "    steps:", setup],
+    ["jobs:", "  job:", "    &k steps:", setup],
+    ["jobs:", "  job:", "    !!str steps:", "      - name: x", "        uses: actions/setup-node@v5"],
+    ["jobs:", ...job, "      - &s uses: actions/setup-node@v5"],
+    ["jobs:", ...job, "      - &s !!str uses: &u actions/setup-node@v5"],
+    ["jobs:", ...job, "      - name: x", "        &u uses: actions/setup-node@v5"],
+    ["jobs:", ...job, "      - &s", "          uses: actions/setup-node@v5"],
+    ["jobs:", ...job, "      - !!map # c", "          name: x", "          uses: actions/setup-node@v5"],
+  ]) {
+    assert.deepEqual(setupNodeComments(shape), [{ block: "", lines: 0, job: "job" }], shape.join("\n"));
+  }
+
+  for (const shape of [
+    ["jobs:", ...job, "      - &suses: actions/setup-node@v5"],
+    ["jobs:", ...job, "      - &s uses:actions/setup-node@v5"],
+    ["jobs:", ...job, "      - &s with:", "          uses: actions/setup-node@v5"],
+    ["jobs:", "  job:", "    with:", "      &k steps:", "        - uses: actions/setup-node@v5"],
+  ]) {
+    assert.deepEqual(setupNodeComments(shape), [], shape.join("\n"));
+  }
 });
 
 // Found in review of #2005: a document-start scalar's own indentation
