@@ -1589,6 +1589,19 @@ function sizesTrackedSet(sentence, count) {
   );
 }
 
+// Where jsonCountFault re-splits a sentences() slice (see the loop there).
+// Its closing markup is citation-sweep-prose.test.mjs's CLOSING_MARKUP, copied
+// whole (#2043): the narrow `) ] " ' ’ ”` set this carried before let "Vs.**"
+// or "Vs.>>" end a sentence there and not here, two copies of the #2021 fix
+// disagreeing on the same input. Tag names spell both cases out, since this
+// pattern carries no `i` for them to fold under. The guard before the
+// abbreviation is that file's too: only a letter or digit disqualifies it, so
+// an italic `_vs._` is one — a `\b` there read the `_` as a word character.
+const COUNT_CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]\[[^\]]*\]|\[\^[^\]\s]+\]|<\/[A-Za-z][A-Za-z\d-]*\s*>)`;
+const COUNT_SENTENCE_BOUNDARY = new RegExp(
+  String.raw`(?<=[.!?]${COUNT_CLOSING_MARKUP}*)(?<!(?<![A-Za-z\d])(?:e\.g|i\.e|cf|viz|vs)\.${COUNT_CLOSING_MARKUP}*)\s+`,
+);
+
 export function jsonCountFault(block) {
   // The coverage check, scoped to the block's FIRST sentence only. A
   // doesNotMatch over the WHOLE block is vacuous: this block's own cache
@@ -1623,8 +1636,7 @@ export function jsonCountFault(block) {
   // #1945). Its abbreviations match lowercase only, as sentences()'s do
   // (#1899, #2021) — with the same cost: a capitalized one anywhere, a
   // parenthetical "(E.g. …)" included, ends the sentence right there.
-  const countSentenceBoundary = /(?<=[.!?][)\]"'\u2019\u201d]*)(?<!\b(?:e\.g|i\.e|cf|viz|vs)\.[)\]"'\u2019\u201d]*)\s+/;
-  for (const sentence of sents.flatMap((s) => s.split(countSentenceBoundary))) {
+  for (const sentence of sents.flatMap((s) => s.split(COUNT_SENTENCE_BOUNDARY))) {
     // Every count-shape START, not just the first match — and not matchAll's
     // non-overlapping walk either: a match's window can swallow the real
     // count sitting inside it ("In 2026 twelve tracked files" matches as
@@ -1707,7 +1719,7 @@ test("jsonCountFault ends a count sentence at a capitalized abbreviation mid-sen
   // here so a change to the guard meets this shape on purpose. The `]`
   // closer (review finding, fix-pr-2024): a plain-space closer here lets
   // sentences() (lowercase-only since #1899/#2018) end the sentence first,
-  // so the fixture measured that cost instead of countSentenceBoundary's own
+  // so the fixture measured that cost instead of COUNT_SENTENCE_BOUNDARY's own
   // — the `]` closer is one sentences() never splits after (#2021's sibling
   // test above uses the same shape), so this re-split is the only boundary.
   const jq = "`jq empty`, not `jq -e .`: it exits 1 on a file holding `null` or `false` — both valid JSON.";
@@ -1715,6 +1727,38 @@ test("jsonCountFault ends a count sentence at a capitalized abbreviation mid-sen
   assert.match(jsonCountFault(count("e.g.")), /sizes the tracked JSON set again/);
   for (const abbr of ["E.g.", "Cf.", "Vs."]) {
     assert.equal(jsonCountFault(count(abbr)), null, abbr);
+  }
+});
+
+// #2043: the re-split's closing markup was narrower than SENTENCE_END's, so
+// the two copies of the #2021 fix disagreed on a capitalized lookalike
+// behind any closer only the latter took.
+test("the count re-split ends a sentence after every closing markup SENTENCE_END takes, and still skips the abbreviation behind it (#2043)", () => {
+  const closers = ["**", ">>", "_", "\x60", "}", "~~", "»", "›", ")", "]", '"', "’", "”", "](x.md)", "][ref]", "[^1]", "</b>", "</B>", "</my-el >"];
+  for (const closer of closers) {
+    // The cases #2043 was filed on, "Vs.**" and "Vs.>>", and the rest of the set.
+    assert.deepEqual(`per Vs.${closer} next`.split(COUNT_SENTENCE_BOUNDARY), [`per Vs.${closer}`, "next"], closer);
+    // The accept side: the abbreviation behind the same closer ends nothing.
+    assert.deepEqual(`per vs.${closer} next`.split(COUNT_SENTENCE_BOUNDARY), [`per vs.${closer} next`], closer);
+  }
+  // The guard: an italic abbreviation is one, a letter or digit glued on is not.
+  assert.deepEqual("per _vs._ next".split(COUNT_SENTENCE_BOUNDARY), ["per _vs._ next"]);
+  for (const word of ["Xvs.", "26vs.", "DEvs."]) {
+    assert.deepEqual(`per ${word} next`.split(COUNT_SENTENCE_BOUNDARY), [`per ${word}`, "next"], word);
+  }
+});
+
+test("jsonCountFault ends a count sentence at a capitalized lookalike behind closing markup sentences() never splits after (#2043)", () => {
+  // sentences() already ends one at `*`, `_`, a quote or `)`, so these are the
+  // closers where the re-split is the only boundary between the two sentences.
+  const lead = "Parses every file `git ls-files '*.json'` lists.";
+  for (const closer of [">>", "\x60", "}", "~~", "»", "](x.md)", "</b>"]) {
+    assert.equal(jsonCountFault(`${lead} The cache is tracked per Vs.${closer} - two files sit there.`), null, closer);
+    assert.match(
+      jsonCountFault(`${lead} The cache is tracked per vs.${closer} - two files sit there.`),
+      /sizes the tracked JSON set again/,
+      closer,
+    );
   }
 });
 

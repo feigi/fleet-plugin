@@ -217,14 +217,19 @@ function securityReleaseFault(adr) {
 // ellipsis, "a.m." — since each ends a sentence as often as not, and reading
 // past a real end is the silent direction: the next sentence's scope would
 // reach back. Before the abbreviation, only a letter or digit disqualifies it,
-// as for UPDATE_TYPE below: an italic `_e.g._` is one, "devs." is not "vs.".
+// as for UPDATE_TYPE below: an italic `_e.g._` is one, "devs." is not "vs.",
+// and neither is "DEvs." — the guard spells both cases out, so it reads a
+// capital the same whatever flag the pattern splicing it carries (#2043).
 // The abbreviations match lowercase only, as sentences()'s do (#1899, #2021),
 // even inside both rows' `i` flag — the `(?-i:…)` group (Node 23+; .nvmrc pins
 // 26): folded, a sentence ending in a proper noun "Vs." read as the
 // abbreviation, the silent direction above. The cost: a capitalized one
 // anywhere, a parenthetical "(Cf. …)" included, ends the sentence there. Keep
 // the group to literals: V8 (14.6) still folds a character class in any but
-// its first alternative.
+// its first alternative. Every consumer below compiles it with `i`, as the
+// rows do: windowReleaseCountFault's split once carried no flag, so a capital
+// glued to an abbreviation and a tag name in capitals read there as they
+// read nowhere else (#2043).
 //
 // #1981. The rest of the block ends and closing markup #1957 named only in
 // part. A blank line may be CRLF, or blank but for a gutter — a blockquote's
@@ -273,12 +278,12 @@ function securityReleaseFault(adr) {
 // `](renovate.json)` or `][ref]`, a footnote reference `[^1]`, and a closing
 // tag with a hyphen in its name or whitespace before its `>`, `</my-el>`,
 // `</b >`. Tag names match in either case only where the splicing pattern
-// carries `i`, as the drift and merge rows do.
+// carries `i`, as every consumer of SENTENCE_END here does (#2043).
 const CLOSING_MARKUP = String.raw`(?:[*_\x60)\]}>~"'”’»›]|\]\([^()]*\)|\]\[[^\]]*\]|\[\^[^\]\s]+\]|<\/[a-z][a-z\d-]*\s*>)`;
 const HASH_GUTTER = String.raw`[ \t]*#(?!\d)`;
 const GUTTER = String.raw`(?:[ \t]*>|${HASH_GUTTER})`;
 const HTML_BLOCK_OPEN = String.raw`<(?:!--|\?|![A-Za-z]|!\[CDATA\[|(?:script|pre|style|textarea)(?=[\s>]|$)|\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s>]|\/>|$))`;
-const SENTENCE_END = String.raw`(?:(?:[!?]|(?<!(?<![a-z\d])(?-i:e\.g|i\.e|cf|viz|vs))\.)${CLOSING_MARKUP}*\s|…${CLOSING_MARKUP}*\s?|\n(?=${GUTTER}*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]|\x60{3}|~{3}|\||${HTML_BLOCK_OPEN}))|\n(?=(?:${HASH_GUTTER})*[ \t]*>)(?<=(?:^|\n)(?!(?:${HASH_GUTTER})*[ \t]*>)[^\n]*\n)|\n${GUTTER}*[ \t]*\r?\n|\n(?:${GUTTER}+ ?)? {0,3}(?:=+|-+|(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})[ \t]*\r?\n)`;
+const SENTENCE_END = String.raw`(?:(?:[!?]|(?<!(?<![A-Za-z\d])(?-i:e\.g|i\.e|cf|viz|vs))\.)${CLOSING_MARKUP}*\s|…${CLOSING_MARKUP}*\s?|\n(?=${GUTTER}*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]|\x60{3}|~{3}|\||${HTML_BLOCK_OPEN}))|\n(?=(?:${HASH_GUTTER})*[ \t]*>)(?<=(?:^|\n)(?!(?:${HASH_GUTTER})*[ \t]*>)[^\n]*\n)|\n${GUTTER}*[ \t]*\r?\n|\n(?:${GUTTER}+ ?)? {0,3}(?:=+|-+|(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})[ \t]*\r?\n)`;
 // #1958. What names an update type, for both of ADR 0010's #1906 rows below:
 // minor, patch or major as a whole word. The rows' first cut matched the bare
 // substring, so "dispatched" and "majority" scoped a claim that names no
@@ -424,7 +429,7 @@ const PIN_WINDOW = /\b43[\s-]days?\b|\b(?:since|after)\s+(?:#335\b|(?:the\s+|it\
 const MEASURED_ELSEWHERE = /\b(?:(?<!\bthe\s+)past|behind|beyond)\b|\b(?:since|after|from)\s+\x60?v?26\.5\.0\b/i;
 
 function windowReleaseCountFault(text) {
-  for (const sentence of text.split(new RegExp(SENTENCE_END)).map(normalize)) {
+  for (const sentence of text.split(new RegExp(SENTENCE_END, "i")).map(normalize)) {
     if (!PIN_WINDOW.test(sentence)) continue;
     const matches = [
       ...sentence.matchAll(RELEASE_COUNT),
@@ -1404,10 +1409,9 @@ test("a period after a capitalized abbreviation lookalike still ends the sentenc
     assert.doesNotMatch(`# Minor and patch bumps are for the ${abbr} The bump merges once CI goes green.\n`, UNSCOPED_MERGE_SENTENCE, abbr);
   }
   // Only the list itself stopped folding: the letter-or-digit guard before it
-  // still does, so a capital glued to a lowercase abbreviation disqualifies it
-  // just as "devs." does, and the sentence ends. Both ends of the list: V8
-  // (14.6) still folds a character class in any but the first alternative of
-  // a `(?-i:…)` group, so a guard moved inside it is only caught at "e.g".
+  // still reads a capital — by folding until #2043, by spelling both cases
+  // since — so a capital glued to a lowercase abbreviation disqualifies it
+  // just as "devs." does, and the sentence ends. Both ends of the list.
   for (const word of ["Ee.g.", "DEvs."]) {
     assert.match(`Minor and patch bumps are for the ${word} Bounding drift at about one month.\n`, UNSCOPED_DRIFT_SENTENCE, word);
   }
@@ -1418,4 +1422,45 @@ test("a capitalized abbreviation mid-sentence ends the sentence too — the cost
   // sentence, and a scoped drift sentence is refused. No file's prose spells
   // one capitalized; the pin is here so a change to the list meets it.
   assert.match("For minor bumps (Cf. the Status line) bounding drift at about one month.\n", UNSCOPED_DRIFT_SENTENCE);
+});
+
+// #2043: windowReleaseCountFault split on SENTENCE_END compiled with no flag,
+// unlike both rows, so every case-sensitive piece of it read differently
+// there: the letter-or-digit guard missed a capital, and a closing tag or
+// block tag spelled in capitals ended nothing. Each fixture below is two
+// sentences, the count in the first and the window in the second, so a
+// missed end joins them and the count reads as the window's own — the loud
+// direction.
+test("windowReleaseCountFault ends a sentence wherever both rows do, capitals included (#2043)", () => {
+  for (const text of [
+    // The cases #2043 was filed on: a capital glued to the abbreviation.
+    "Node shipped 8 releases for the Xvs. The pin sat 43 days.",
+    "Node shipped 8 releases for the Ee.g. The pin sat 43 days.",
+    "Node shipped 8 releases for the DEvs. The pin sat 43 days.",
+    // The same flag, on tag names: a closing tag and an HTML block in capitals.
+    "Node shipped **8 releases.</B> The pin sat 43 days.",
+    "Node shipped 8 releases\n<DIV>\nThe pin sat 43 days.",
+  ]) {
+    assert.equal(windowReleaseCountFault(text), null, text);
+  }
+  // The refuse side, in the same fixture shape: the abbreviation itself, and
+  // a tag that opens no block, join the two into one sentence.
+  for (const text of [
+    "Node shipped 8 releases for the vs. The pin sat 43 days.",
+    "Node shipped 8 releases for the e.g. The pin sat 43 days.",
+    "Node shipped 8 releases\n<SPAN>\nThe pin sat 43 days.",
+  ]) {
+    assert.match(windowReleaseCountFault(text), /counts 8 releases in the 43 days/, text);
+  }
+});
+
+test("SENTENCE_END's abbreviation guard reads a capital the same with or without `i` (#2043)", () => {
+  // The guard names both cases itself, so no consumer's flag decides whether
+  // "DEvs." is "vs.".
+  for (const flags of ["", "i"]) {
+    for (const word of ["Xvs.", "Ee.g.", "DEvs."]) {
+      assert.deepEqual(`for the ${word} Next`.split(new RegExp(SENTENCE_END, flags)), [`for the ${word.slice(0, -1)}`, "Next"], `${word} /${flags}`);
+    }
+    assert.deepEqual("for the vs. Next".split(new RegExp(SENTENCE_END, flags)), ["for the vs. Next"], `vs. /${flags}`);
+  }
 });
