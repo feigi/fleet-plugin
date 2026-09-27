@@ -382,6 +382,19 @@ function blockScalarText(lines) {
     let end = at + 1;
     for (; end < lines.length; end++) {
       if (/^\s*$/.test(lines[end])) continue;
+      // A document marker (`---`/`...`) always ends the current document —
+      // and any scalar still open in it — under both YAML 1.1 and 1.2.
+      // Without this, a document-start scalar's own indentation indicator
+      // of exactly 1 sets `depth` to 0 (column −1 plus indicator 1), a floor
+      // no real line's column can ever go under, so the scalar never closes
+      // and swallows the rest of the file — silently dropping every step in
+      // a later document. Found in review of #2005 (`--- |1` followed by a
+      // second document holding a real step); ci.yml has neither a document
+      // marker nor an explicit indentation indicator today, so this was
+      // unreachable there, but the production this file emits for `--- |1`
+      // should still match PyYAML rather than trust a floor that can go
+      // non-positive.
+      if (/^(?:---|\.\.\.)(?:\s|$)/.test(lines[end])) break;
       const col = lines[end].search(/\S/);
       depth ??= col;
       if (col < depth || col <= column) break;
@@ -405,7 +418,10 @@ function blockScalarText(lines) {
 // whitespace — YAML's own rule for telling a key from a plain scalar that
 // merely contains one (`uses:actions/…` is the latter, never a key) — and
 // either a job's own key or a `uses:` key may carry an anchor or tag between
-// its colon and its value, as YAML allows there too (#2000). Exported with
+// its colon and its value, as YAML allows there too (#2000) — including the
+// bare `!` non-specific tag, which has no characters of its own to require
+// (found in review of #2005: `\S+` after `[&!]` refused it where the header
+// regex above already used `\S*`). Exported with
 // an optional `lines` override (same idiom as windowClaimFault's `block`
 // param and citationFault's `citing`/`cited` params) so a test can feed it
 // synthetic input the real ci.yml does not contain; the production call
@@ -416,7 +432,7 @@ export function setupNodeComments(lines = read("../../.github/workflows/ci.yml")
   const text = blockScalarText(lines);
   const found = [];
   for (let at = 0; at < lines.length; at++) {
-    const uses = /^(\s*)(-\s+)?(["']?)uses\3\s*:\s+(?:[&!]\S+\s+)*["']?actions\/setup-node@/.exec(lines[at]);
+    const uses = /^(\s*)(-\s+)?(["']?)uses\3\s*:\s+(?:[&!]\S*\s+)*["']?actions\/setup-node@/.exec(lines[at]);
     if (!uses || text.has(at)) continue;
     // `- uses:` opens its entry. Any other `uses:` belongs to the first line
     // above it that sits shallower than the key — sibling keys share its
@@ -460,7 +476,7 @@ export function setupNodeComments(lines = read("../../.github/workflows/ci.yml")
     const stepsDepth = lines[parent].search(/\S/);
     let jobLine = parent - 1;
     while (jobLine >= 0 && (/^\s*(?:#|$)/.test(lines[jobLine]) || lines[jobLine].search(/\S/) >= stepsDepth)) jobLine--;
-    const jobKey = jobLine >= 0 ? /^ {2}(["']?)([\w-]+)\1\s*:\s*(?:[&!]\S+\s*)*(?:#.*)?$/.exec(lines[jobLine]) : null;
+    const jobKey = jobLine >= 0 ? /^ {2}(["']?)([\w-]+)\1\s*:\s*(?:[&!]\S*\s*)*(?:#.*)?$/.exec(lines[jobLine]) : null;
     if (jobLine >= 0 && !jobKey) continue;
     let i = step;
     while (i > 0 && /^\s*#/.test(lines[i - 1]) && !text.has(i - 1)) i--;
@@ -1052,6 +1068,34 @@ test("a plain key containing a literal # is still a block-scalar header, not rea
 
 test("a document-start scalar (--- |) is still a block-scalar header, not read as structure (#2000 finding 4)", () => {
   assert.deepEqual(setupNodeComments(["--- |", "  job:", "    steps:", "      - uses: actions/setup-node@v5"]), []);
+});
+
+// Found in review of #2005, alongside the ticket's own five: the bare `!`
+// non-specific tag (YAML's tag shorthand with no characters of its own) was
+// refused by the `\S+` this PR's finding-1 fix used for the anchor/tag
+// token, where blockScalarText's own header regex above already accepted it
+// via `\S*`. Confirmed against PyYAML (`compose`): both shapes hold a real
+// step.
+test("a bare ! non-specific tag on a job key or a uses: key does not drop the step", () => {
+  assert.deepEqual(setupNodeComments(["jobs:", "  job: !", "    steps:", "      - uses: actions/setup-node@v5"]), [
+    { block: "", lines: 0, job: "job" },
+  ]);
+  assert.deepEqual(setupNodeComments(["jobs:", "  job:", "    steps:", "      - uses: ! actions/setup-node@v5"]), [
+    { block: "", lines: 0, job: "job" },
+  ]);
+});
+
+// Found in review of #2005: a document-start scalar's own indentation
+// indicator of exactly 1 set `depth` to 0 (column −1 plus indicator 1), a
+// floor no real line's column can ever go under, so the scalar never closed
+// and swallowed every later document whole — including a real step in one.
+// ci.yml has no document marker today, so this was unreachable there, but
+// PyYAML confirms the second document's step is real.
+test("a document marker still ends a document-start scalar that carries an explicit indentation indicator", () => {
+  assert.deepEqual(
+    setupNodeComments(["--- |1", " text", "---", "jobs:", "  job:", "    steps:", "      - uses: actions/setup-node@v5"]),
+    [{ block: "", lines: 0, job: "job" }],
+  );
 });
 
 // #2000 finding 5, deliberately NOT fixed here: blockScalarText's own doc
