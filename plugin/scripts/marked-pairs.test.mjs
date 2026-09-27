@@ -69,7 +69,7 @@
 //      with).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import {
@@ -361,6 +361,20 @@ const MD_DIR_FLOORS = { skills: 5, commands: 2, agents: 8 };
 // actual values, not just agree with `scanTree`'s output on today's tree.
 const WALK_SCOPE = { ".md": ["skills", "commands", "agents"], ".js": ["workflows"] };
 
+// Deliberately does NOT follow a symlinked directory (#2056): a symlink
+// entry's `Dirent.isDirectory()` is `false`, so the recursion below skips it.
+// `walk()`'s native `readdirSync(..., { recursive: true })` DOES follow one
+// on Node >=22 (this repo's `.nvmrc`/CI pin; Node 20.x/21.x, also inside
+// `package.json`'s declared `engines.node` floor, do not — walk() and this
+// oracle happen to agree there instead), listing a followed link's contents
+// under the symlink's own path — so a symlinked directory under a scoped
+// directory surfaces in `walkDiscrepancy()`'s `extra`, and the real-tree
+// walk test reds. That red is intentional, not a false positive to silence
+// by matching `walk()` here: the same file can end up scanned under two
+// paths (as here, where the symlink's target is itself in scope) — or, if
+// the target has no copy anywhere in scope, simply appear as a new path
+// nothing else reaches. Either way, whether that tree shape is wanted is a
+// decision to file when one is actually added. None exists today.
 function listIndependently(root, dir, ext) {
   let entries;
   try {
@@ -377,7 +391,8 @@ function listIndependently(root, dir, ext) {
 
 // `missing`: in-scope files the scan never returned (the thinning #2044
 // names). `extra`: anything returned that is not an in-scope file, or is
-// returned twice.
+// returned twice — including, on purpose, a file `walk()` reached through a
+// symlinked directory, which `listIndependently` never lists (#2056).
 function walkDiscrepancy(root, scannedFiles) {
   const expected = new Set(Object.entries(WALK_SCOPE).flatMap(([ext, dirs]) => dirs.flatMap((d) => listIndependently(root, d, ext))));
   const seen = new Set();
@@ -419,6 +434,22 @@ test("fixture: the walk oracle accepts a full scan, names a one-per-directory th
     missing: [],
     extra: [scanned[0], join("workflows", "README.md")],
   });
+});
+
+// #2056's exact repro, pinning the ruling above `listIndependently`: a
+// symlinked directory under a scoped directory is scanned by `walk()` under
+// the symlink's own path, and the oracle reports that path as `extra` — a
+// loud red forcing a decision, not an absorbed one. The first assertion pins
+// the premise: if `walk()` ever stops following symlinks, this says so
+// directly instead of the second assertion failing with a bare empty list.
+test("fixture: a file reached through a symlinked directory in scope is reported as extra, not silently accepted", (t) => {
+  const root = fixtureTree(t, { "skills/real-skill/SKILL.md": "" });
+  symlinkSync("real-skill", join(root, "skills", "linked-skill"), "dir");
+  const real = join("skills", "real-skill", "SKILL.md");
+  const linked = join("skills", "linked-skill", "SKILL.md");
+  const scanned = scanTree(root).map((f) => f.file);
+  assert.deepEqual([...scanned].sort(), [linked, real], "premise: walk() follows a symlinked directory and lists it under the symlink's path");
+  assert.deepEqual(walkDiscrepancy(root, scanned), { missing: [], extra: [linked] });
 });
 
 test("real tree: the walk returns every scoped file — not a thinned, padded or duplicated list", () => {
