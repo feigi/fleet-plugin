@@ -817,9 +817,12 @@ test("step 1 polls the branch ref, not the PR object's head", () => {
 // `headRefOid` read … without any re-poll or cap", deleting the whole
 // paragraph, and reverting the prose hunk outright each left the whole suite
 // green. So this anchors the two imperative clauses and nothing else. The other
-// two paragraphs in the same gap — the empty `pr_head` and the surviving desync
-// — are pinned by the tests that follow it (#1948), so no paragraph from the
-// settle window to the ancestry rule is bare now.
+// two paragraphs in the narrower settle-window-to-ancestry stretch — the empty
+// `pr_head` and the surviving desync — are pinned by the tests that follow it
+// (#1948), so no paragraph from the settle window to the ancestry rule is bare
+// now. The wider #1147 gap this paragraph opens with (headline to ancestry)
+// still holds other unpinned paragraphs outside that stretch — #1948's own
+// scope stops at the settle window and the surviving desync, not the whole gap.
 //
 // The clauses are split because they fail independently: dropping "on the same
 // bounded cap" turns a bounded re-poll into an unbounded one while the "only if"
@@ -848,9 +851,14 @@ test("step 1 re-polls before calling a desync, and that mandate is pinned", () =
 // failing alone:
 //
 //   - no "unreadable" report, and the empty read has no row of its own;
-//   - no "either the desync above or the landed row", and it may be filed as
-//     one of the two outcomes it is neither of — the landed row being the one
-//     the printed line sits beside;
+//   - the "rather than folding it into" negation split from the "either the
+//     desync above or the landed row" list it governs, and the empty read
+//     gets filed as one of the two outcomes it is neither of — measured: two
+//     independent presence asserts here (one per side) both stayed green
+//     when "rather than folding it into" was reworded to "then fold it
+//     into", the exact inversion the test title forbids. Bound to one
+//     contiguous span instead so the negation and its list cannot drift
+//     apart;
 //   - no ancestry refusal, and `git merge-base --is-ancestor` is run with an
 //     empty operand, which has no head in it to place.
 //
@@ -865,7 +873,10 @@ const emptyPrHead = () =>
 
 test("step 1 reports a pr_head still empty after the cap as unreadable, never as a desync or a landed rebase", () => {
   assert.match(emptyPrHead(), phrase("Report the PR-object read as unreadable"));
-  assert.match(emptyPrHead(), phrase("either the desync above or the landed row"));
+  assert.match(
+    emptyPrHead(),
+    phrase("unreadable rather than folding it into either the desync above or the landed row"),
+  );
 });
 
 test("step 1 never feeds an empty pr_head into the close-and-reopen ancestry check", () => {
