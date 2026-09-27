@@ -141,7 +141,21 @@ export function citationFault(citing, cited) {
   // it; a closer the mirror image. A mark glued to a word on BOTH sides
   // (`don"t`, `x"this`) can play either role, so a shift through one is
   // still out of reach; every span it produces is still checked below.
-  const at = (i) => from[i] ?? " ";
+  // `from` indexes by UTF-16 unit, so a neighbour outside the BMP (an
+  // astral symbol — many emoji are `\p{S}`) is split across two units, and
+  // testing `\p{P}`/`\p{S}` against just the half next to the mark never
+  // matches even though the whole code point does — the same trap #1999
+  // fixed for blankParens's length, here for the flanking read. `at`
+  // reassembles the pair regardless of which half sits next to the mark.
+  const isHighSurrogate = (ch) => ch !== undefined && ch >= "\uD800" && ch <= "\uDBFF";
+  const isLowSurrogate = (ch) => ch !== undefined && ch >= "\uDC00" && ch <= "\uDFFF";
+  const at = (i) => {
+    const ch = from[i];
+    if (ch === undefined) return " ";
+    if (isHighSurrogate(ch) && isLowSurrogate(from[i + 1])) return ch + from[i + 1];
+    if (isLowSurrogate(ch) && isHighSurrogate(from[i - 1])) return from[i - 1] + ch;
+    return ch;
+  };
   const space = (ch) => /\s/.test(ch);
   const punct = (ch) => /[\p{P}\p{S}]/u.test(ch);
   const canOpen = (i) => !space(at(i + 1)) && (!punct(at(i + 1)) || space(at(i - 1)) || punct(at(i - 1)));
@@ -390,6 +404,11 @@ test("citationFault accepts quotation marks set against punctuation (#2013)", ()
   // A backtick is punctuation too (CommonMark counts Unicode symbols), so a
   // quotation set in a code span closes cleanly after its own period.
   assert.equal(citationFault('claim-ticket.sh says `"is what keeps vendored tests out."`', cited), null);
+  // Every opener above is followed by a word character, so `canOpen` never
+  // needs its "or preceded by whitespace" half — the quoted content's own
+  // leading mark is punctuation here, so the opener is let through only
+  // because ordinary whitespace, not punctuation, precedes it.
+  assert.equal(citationFault('claim-ticket.sh says ", is what keeps vendored tests out."', cited), null);
 });
 
 // #1999. The blanked text has to stay the SAME length as the real text, since
