@@ -189,7 +189,7 @@ test("the commit-past-the-pin report names the commit and whether it is pushed, 
   // used to read as "anything else" — the same shape as a genuinely absent
   // ref — which folds an unknown answer into "unpushed" and reports an
   // already-pushed commit as local-only. This is the unknown-answer-as-a-"no"
-  // hole `release-ticket.sh` (1157-1179) and `reaping.md` (55) both forbid;
+  // hole `release-ticket.sh` (1157-1179) and `reaping.md` (56) both forbid;
   // pinning that this bullet now matches them.
   assert.match(
     text,

@@ -2022,25 +2022,17 @@ test("a `git branch -D` failure carries git's own message, not just the label (#
   assert.equal(branchExists(w, "feature/b-healthy"), false, "reached only by continuing past the failure");
 });
 
-test("a dying `git worktree list` still reaps what it can, and quotes git for what it cannot (#391)", (t) => {
-  // The pipeline into awk takes awk's status, never git's, so a dying list
-  // leaves $wt empty: every check under `[ -n "$wt" ]` is skipped and flow
-  // falls through to `git branch -D`. That was #391's visible symptom — the
-  // payload blamed the branch delete for a failure two steps earlier, under a
-  // bare label, while git's own `fatal:` reached the terminal and never the
-  // JSON the caller parses.
+test("a dying `git worktree list` keeps every [gone] branch and names git's cause (#622)", (t) => {
+  // The per-branch lookup used to swallow the listing's failure (`|| :`), so
+  // a dying list left $wt empty: every check under `[ -n "$wt" ]` was skipped
+  // and flow fell through to `git branch -D`. A merged branch with no worktree
+  // was then force-deleted while the sweep could not see the registry at all,
+  // and only a branch that DID have a worktree was saved — by git's own
+  // refusal, under the label `branch delete failed`.
   //
-  // Fixed here as the MESSAGE change #391 asked for: the branch git refuses
-  // now carries git's reason, which names the worktree still holding it — the
-  // only thing that tells an operator which remedy applies.
-  //
-  // What is deliberately NOT changed is which branches get reaped. Measured:
-  // `git branch -D` needs no answer from the registry to delete a branch that
-  // has no worktree, so `feature/b-merged` goes exactly as it did before.
-  // Making the lookup fail closed would keep the whole sweep instead — a
-  // control-flow ruling #391 reserved for the maintainer, filed as
-  // #622. This test is the pin that a fix for it would have to move
-  // deliberately.
+  // Ruled on #622: fail closed, like every other could-not-check in reap.sh.
+  // Both branches are kept with the cause, `git branch -D` is never reached,
+  // and the next merge pass retries them. This moves the pin #391 left here.
   const w = repo(t);
   mergedGoneBranchWithWorktree(w, "feature/a-merged", "merged work");
   mergedGoneBranch(w, "feature/b-merged", "more merged work");
@@ -2053,27 +2045,73 @@ test("a dying `git worktree list` still reaps what it can, and quotes git for wh
 
   const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
 
-  assert.equal(code, 0, "a branch git refuses to delete is a finding, not a script failure");
-  assert.deepEqual(
-    json.reaped,
-    ["feature/b-merged"],
-    "a lookup nobody could answer must not change what gets reaped — that ruling is not this ticket's",
-  );
-  assert.equal(json.kept.length, 2);
-  assert.equal(json.kept[0].branch, "feature/a-merged");
-  assert.match(json.kept[0].reason, /^branch delete failed: /, "the label stays — it is the reason that gains a cause");
+  assert.equal(code, 0, "a registry nobody could read is a finding, not a script failure");
+  assert.deepEqual(json.reaped, [], "nothing is reaped while the registry is unread");
+  assert.equal(json.kept.length, 3);
+  for (const [i, branch] of [[0, "feature/a-merged"], [1, "feature/b-merged"]]) {
+    assert.equal(json.kept[i].branch, branch);
+    assert.match(json.kept[i].reason, /^worktree lookup failed/);
+    assert.match(json.kept[i].reason, /worktree list exploded/, "git's own words, not just the label");
+    assert.doesNotMatch(json.kept[i].reason, /branch delete failed/, "`git branch -D` is never reached");
+    assert.doesNotMatch(json.kept[i].reason, /\n/, "flattened into one JSON string");
+  }
   // The worktree sweep reads the same dead registry, and says so rather than
   // reporting an empty enumeration as "no branchless worktrees" — the silence
-  // #381 exists to end, reachable here by a different route (the sweep is the
-  // one place in this script that takes `git worktree list`'s own status).
-  assert.equal(json.kept[1].branch, null, "a sweep that never named a worktree has no branch to blame");
-  assert.match(json.kept[1].reason, /^cannot enumerate worktrees/);
-  assert.match(json.kept[1].reason, /worktree list exploded/, "git's own words, not just the label");
-  assert.match(json.kept[0].reason, /used by worktree at/, "git's diagnosis must reach the payload, not just the terminal");
-  assert.doesNotMatch(json.kept[0].reason, /\n/, "flattened into one JSON string");
-  assert.match(stderr, /KEEP feature\/a-merged — branch delete failed: /);
-  assert.equal(branchExists(w, "feature/a-merged"), true, "the branch git refused to delete survives");
-  assert.equal(branchExists(w, "feature/b-merged"), false);
+  // #381 exists to end, reachable here by a different route.
+  assert.equal(json.kept[2].branch, null, "a sweep that never named a worktree has no branch to blame");
+  assert.match(json.kept[2].reason, /^cannot enumerate worktrees/);
+  assert.match(json.kept[2].reason, /worktree list exploded/, "git's own words, not just the label");
+  assert.match(stderr, /KEEP feature\/a-merged — worktree lookup failed/);
+  assert.match(stderr, /KEEP feature\/b-merged — worktree lookup failed/);
+  assert.equal(branchExists(w, "feature/a-merged"), true);
+  assert.equal(branchExists(w, "feature/b-merged"), true, "the branch with no worktree is no longer reaped blind");
+});
+
+test("a transient `git worktree list` failure keeps only the branch it hit — not the whole pass (#622)", (t) => {
+  // #622's own fix comment says the listing is re-read per branch, so "one
+  // repo-level failure keeps every [gone] branch in the pass" describes a
+  // PERSISTENT fault (the realistic case: filesystem or registry
+  // corruption), not a mechanism that latches once true for every later
+  // iteration. No fixture above distinguishes the two: every other
+  // listing-failure test in this file starves `worktree list` for the whole
+  // run, which a sticky "cache the failure at the loop's first hit" bug would
+  // pass exactly as well as a genuine per-iteration re-read.
+  //
+  // Three branches, alphabetical so `for-each-ref`'s default refname sort
+  // fixes the iteration order; the shim fails ONLY the SECOND `worktree list`
+  // call. If the guard truly re-reads per branch, the first and third
+  // branches see a healthy listing and reap normally — only the second, the
+  // one whose own call hit the fault, is kept.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/a-first", "a work");
+  mergedGoneBranch(w, "feature/b-second", "b work");
+  mergedGoneBranch(w, "feature/c-third", "c work");
+
+  const countDir = mkdtempSync(join(tmpdir(), "reap-count-"));
+  t.after(() => rmSync(countDir, { recursive: true, force: true }));
+  const counter = join(countDir, "n");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = worktree ] && [ "$2" = list ] && ` +
+      `{ n=$(( $(cat "${counter}" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "${counter}"; [ "$n" -eq 2 ]; }`,
+    ["fatal: worktree list exploded"],
+    128,
+  );
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.deepEqual(
+    json.reaped,
+    ["feature/a-first", "feature/c-third"],
+    "only the branch whose OWN lookup call failed is kept — a sticky/hoisted failure would keep all three",
+  );
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/b-second");
+  assert.match(json.kept[0].reason, /^worktree lookup failed/);
+  assert.equal(branchExists(w, "feature/a-first"), false);
+  assert.equal(branchExists(w, "feature/b-second"), true);
+  assert.equal(branchExists(w, "feature/c-third"), false);
 });
 
 test("quotes and backslashes in git's stderr still round-trip through the new reasons (#391, #119)", (t) => {
