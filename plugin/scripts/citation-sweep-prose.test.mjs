@@ -1064,6 +1064,10 @@ test("minor, patch or major still scopes both claims in italics or as a plural (
     "**Monthly, and automerged for _patch_ bumps.**",
     "**Monthly, and automerged for minors and patches.**",
     "**Majors wait; the rest are automerged.**",
+    // Italic and plural at once (#1989): the `_` beside the word and the
+    // plural's "es"/"s" meet in one token, before and after the claim.
+    "**Monthly, and automerged for _patches_.**",
+    "**_Majors_ wait; the rest are automerged.**",
   ]) {
     assert.doesNotMatch(text, UNSCOPED_AUTOMERGED_SPAN, text);
   }
@@ -1071,8 +1075,38 @@ test("minor, patch or major still scopes both claims in italics or as a plural (
     "For _patch_ bumps, bounding drift at about one month.\n",
     "Bounding drift at about one month for minors and patches.\n",
     "Majors aside, bounding drift at about one month.\n",
+    "Bounding drift at about one month for _patches_.\n",
+    "_Minors_ aside, bounding drift at about one month.\n",
   ]) {
     assert.doesNotMatch(text, UNSCOPED_DRIFT_SENTENCE, text);
+  }
+});
+
+// Pins #1988's accepted plain-English hole, not a bug: a whole word cannot
+// tell the verb "patches" or "patch", or the adjective "minor" or "major",
+// from the update type, so each still scopes its claim. A change that closes
+// the hole should fail here; one that widens it instead fails #1958's "a word
+// that only contains…" test above, since that is the row already pinning
+// which inflected forms of "patch" scope nothing. Either way, update
+// UPDATE_TYPE's comment with it (#1989).
+test("minor, patch or major in its plain-English sense still scopes all three claims, as documented (#1989)", () => {
+  for (const text of [
+    "**Renovate patches the automerged bumps.**",
+    "**We patch monthly, and the bumps are automerged.**",
+  ]) {
+    assert.doesNotMatch(text, UNSCOPED_AUTOMERGED_SPAN, text);
+  }
+  for (const text of [
+    "Renovate patches each dependency, bounding drift at about one month.\n",
+    "At minor cost, bounding drift at about one month.\n",
+  ]) {
+    assert.doesNotMatch(text, UNSCOPED_DRIFT_SENTENCE, text);
+  }
+  for (const text of [
+    "# Renovate patches the lockfile, and the bump merges once CI goes green.\n",
+    "# A major benefit: the bump merges once CI goes green.\n",
+  ]) {
+    assert.doesNotMatch(text, UNSCOPED_MERGE_SENTENCE, text);
   }
 });
 
