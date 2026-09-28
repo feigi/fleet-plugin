@@ -550,7 +550,11 @@ function save(d) {
 // writing the pid are two steps, so a waiter can read an empty or partial
 // lock in between: anything that is not a canonical positive integer counts
 // as a LIVE holder — keep waiting, and never hand it to process.kill, where
-// NaN is a TypeError crash rather than a wait.
+// NaN is a TypeError crash rather than a wait. That empty or partial lock
+// never clears on its own, either: nothing revisits and finishes writing it
+// — the writer that would have finished died before the second step. Same
+// permanent wedge as a leftover reap lock below, same fix: the operator
+// removes it by hand once nothing is writing.
 //
 // A holder that died without releasing — SIGKILL always, and so does any
 // signal this file leaves unhandled (SIGQUIT, SIGABRT, a segfault: only a
@@ -583,6 +587,14 @@ function save(d) {
 // A dead holder whose pid was recycled reads as live until the timeout.
 // Accepted: an mtime/age heuristic instead would take over a live writer on a
 // slow disk, which is the row loss this lock exists to prevent.
+//
+// A live-looking holder can also be a zombie: a pid whose process exited but
+// whose parent never `wait()`-ed on it. The OS keeps that pid reserved until
+// reaped, so `process.kill(pid, 0)` still succeeds and isDead() reads it as
+// alive — but unlike the two wedges above, that clears on its own once the
+// pid is reaped (the parent's own exit is normally enough to trigger this),
+// and the next writer's death check then takes the lock over like any other
+// dead holder. No hand removal needed.
 //
 // The wait is bounded — 10 s by default — and the timeout is die(), exit 2,
 // having written nothing. `LEDGER_LOCK_TIMEOUT_MS` overrides it and, like
@@ -718,15 +730,17 @@ async function acquireLock() {
     const dead = pid !== null && isDead(pid);
     if (dead && reapDeadHolder(pid)) continue;
     if (Date.now() >= deadline) {
-      // `dead` here but still not taken over means every reap attempt found
-      // `${REAP}` already there and backed off — the shape a reaper
-      // SIGKILLed between its own create and unlink leaves behind forever
-      // (see the comment above `reapDeadHolder`). Naming the pid alone
-      // points an operator at a process that no longer exists; naming
-      // `${REAP}` is what lets them find the file `run-team/SKILL.md`'s
-      // runbook tells them to remove by hand.
+      // `dead` here but still not taken over means this call's own reap
+      // attempt found `${REAP}` already there right now — the same instant a
+      // reaper SIGKILLed between its own create and unlink leaves behind
+      // forever (see the write-lock header comment above `LOCK`/`REAP`), and
+      // indistinguishable at this instant from a live reaper mid-takeover.
+      // Naming the pid alone points an operator at a process that no longer
+      // exists; naming `${REAP}` is what lets them find the file
+      // `run-team/SKILL.md`'s runbook tells them to remove by hand, once
+      // nothing is writing.
       if (dead) {
-        die(`cannot lock ${file} — held by pid ${pid}, which is dead; ${REAP} is blocking its takeover — remove it by hand`);
+        die(`cannot lock ${file} — held by pid ${pid}, which is dead; ${REAP} is blocking its takeover — if nothing is currently writing, remove it by hand`);
       }
       die(`cannot lock ${file} — held by pid ${pid ?? JSON.stringify(holder)}`);
     }

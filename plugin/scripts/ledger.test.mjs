@@ -3259,6 +3259,7 @@ test("lock: a holder this process may not signal (EPERM) is live, never taken ov
   const r = cli(["filed", "8", "x"], { LEDGER_LOCK_TIMEOUT_MS: "50" });
   assert.equal(r.status, 2, r.stderr);
   assert.ok(r.stderr.includes("held by pid 1"), r.stderr);
+  assert.ok(!r.stderr.includes("which is dead"), `a live EPERM holder was reported as dead: ${r.stderr}`);
   assert.equal(readFileSync(lock, "utf8"), "1", "a live holder's lock was taken over");
   assert.equal(existsSync(file), false, "a write landed without the lock");
 });
