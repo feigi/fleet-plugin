@@ -3330,8 +3330,19 @@ Every write rewrites the whole file from what it read, so without the lock two
 concurrent writers are last-writer-wins — measured, 8 concurrent `filed` kept
 2–5 of 8 rows (#531). A writer that cannot take the lock within 10 s exits 2
 naming the holder's pid, having written nothing; a lock whose holder is dead is
-taken over, and a leftover `<file>.lock.reap` is never reclaimed — remove it by
-hand once nothing is writing. Reads (`check`, `read`) take no lock.
+taken over, and a leftover `<file>.lock.reap` is never reclaimed. One other
+shape wedges the lock permanently the same way, needing the same fix: an empty
+`<file>.lock` — its writer was killed between creating it and writing its pid
+into it — is unparseable and therefore, by design, always read as live rather
+than handed to the death check. A zombie holder — a pid whose process exited
+but whose parent never `wait()`-ed on it — also answers a liveness check as
+alive, because the OS keeps a reserved pid until it is reaped, but that is
+transient, not a wedge: once the pid is reaped (the parent's own exit is
+normally enough to trigger this), the next writer's death check reads it as
+dead and takes the lock over the same as any other dead holder — no hand
+removal needed. The other two shapes do not clear on their own — remove
+`<file>.lock` or `<file>.lock.reap` by hand once nothing is writing. Reads
+(`check`, `read`) take no lock.
 
 **The gap the lock does not close:** `check` → `gh issue create` → `filed` is
 three commands, and the lock covers each one alone, so two filers can both read
