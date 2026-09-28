@@ -2553,8 +2553,16 @@ test("a detached worktree whose HEAD git cannot resolve is kept, never swept (#3
   assert.equal(code, 0);
   assert.deepEqual(json.worktreesRemoved, []);
   assert.equal(existsSync(wt), true);
-  assert.equal(json.kept.length, 1);
-  assert.equal(json.kept[0].reason, `worktree ${wt} has an unresolvable HEAD — git cannot say what it holds`);
+  // The worktree sweep's report, unchanged by #2078. The fixture's own
+  // `[gone]` branch is kept too since #2078: the entry no longer says which
+  // branch it held, so the branch sweep cannot clear any branch against it.
+  const sweep = json.kept.filter((k) => k.branch === null);
+  const branches = json.kept.filter((k) => k.branch !== null);
+  assert.equal(sweep.length, 1);
+  assert.equal(sweep[0].reason, `worktree ${wt} has an unresolvable HEAD — git cannot say what it holds`);
+  assert.deepEqual(branches.map((k) => k.branch), ["docs/79-brief"]);
+  assert.match(branches[0].reason, /^worktree registry inconsistent — git listed a linked worktree with a null HEAD/);
+  assert.equal(branchExists(w, "docs/79-brief"), true);
 });
 
 test("a detached worktree with a BISECT in progress is kept — git is no backstop here (#381)", (t) => {
@@ -3971,3 +3979,160 @@ test("a fetch killed by its budget refuses to reap on stale refs, in this script
   assert.ok(branchExists(w, "feature/merged"),
     "and the branch a working fetch would have reaped is still there — a refusal that deleted anything would be reaping on exactly the stale refs it declined to trust");
 });
+
+/**
+ * #2078's fixture: two merged `[gone]` branches in one pass. `feature/held`
+ * is checked out in a linked worktree holding an untracked file — work that
+ * exists nowhere else — and `feature/free` has no worktree at all.
+ * Alphabetical, so `for-each-ref`'s refname sort visits `feature/free` FIRST:
+ * a guard that only protected the tampered branch would reap it before ever
+ * looking at `feature/held`.
+ */
+function heldAndFree(t) {
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/held", "held work");
+  writeFileSync(join(wt, "untracked.txt"), "work that exists nowhere else\n");
+  mergedGoneBranch(w, "feature/free", "free work");
+  return { w, wt, admin: adminEntry(w, wt) };
+}
+
+const keptFor = (json, branch) => json.kept.filter((k) => k.branch === branch);
+
+// Each measured family that leaves `git worktree list --porcelain -z` at rc 0
+// while it drops the held entry's `branch` line, or the entry itself — and
+// fools `git branch -D`'s own "used by worktree" refusal the same way, since
+// both read the same admin state (git 2.50.1, #2078's table). `cause` is the
+// reason reap now gives; `chmod` marks the fixtures euid 0 reads straight
+// through, and `restore` puts the permission bit back so `t.after` can clean up.
+// The `gitdir chmod 000` restore checks first: reap's closing `git worktree
+// prune` reads an unreadable `gitdir` as prunable and removes the entry, which
+// is git's own housekeeping and outside what this guard decides.
+const UNSAFE_REGISTRY = [
+  { name: "HEAD garbage", cause: /linked worktree with a null HEAD and no branch/,
+    fault: ({ admin }) => writeFileSync(join(admin, "HEAD"), "not an object id\n") },
+  { name: "HEAD empty", cause: /linked worktree with a null HEAD and no branch/,
+    fault: ({ admin }) => writeFileSync(join(admin, "HEAD"), "") },
+  { name: "HEAD missing", cause: /linked worktree with a null HEAD and no branch/,
+    fault: ({ admin }) => rmSync(join(admin, "HEAD")) },
+  { name: "HEAD chmod 000", chmod: true, cause: /linked worktree with a null HEAD and no branch/,
+    fault: ({ admin }) => chmodSync(join(admin, "HEAD"), 0o000),
+    restore: ({ admin }) => chmodSync(join(admin, "HEAD"), 0o644) },
+  { name: "gitdir missing", cause: /git listed 0 linked worktrees for 1 registry entries/,
+    fault: ({ admin }) => rmSync(join(admin, "gitdir")) },
+  { name: "gitdir chmod 000", chmod: true, cause: /git listed 0 linked worktrees for 1 registry entries/,
+    fault: ({ admin }) => chmodSync(join(admin, "gitdir"), 0o000),
+    restore: ({ admin }) => existsSync(join(admin, "gitdir")) && chmodSync(join(admin, "gitdir"), 0o644) },
+  { name: "admin dir chmod 000", chmod: true, cause: /git listed 0 linked worktrees for 1 registry entries/,
+    fault: ({ admin }) => chmodSync(admin, 0o000),
+    restore: ({ admin }) => chmodSync(admin, 0o755) },
+  { name: ".git/worktrees replaced by a file", cause: /worktree registry .* could not be read/,
+    fault: ({ w }) => {
+      const reg = join(w, ".git", "worktrees");
+      renameSync(reg, join(w, ".git", "worktrees.moved"));
+      // Mode 755: a file `-r` and `-x` both pass, so only the `-d` arm
+      // refuses it — the tightening over inflight.sh's copy this row pins.
+      writeFileSync(reg, "not a directory\n", { mode: 0o755 });
+    } },
+];
+
+for (const f of UNSAFE_REGISTRY) {
+  test(`an rc-0 listing inconsistent with the registry keeps the whole pass: ${f.name} (#2078)`, (t) => {
+    if (f.chmod && process.getuid?.() === 0) return t.skip("root reads every file");
+    const fx = heldAndFree(t);
+    f.fault(fx);
+    let r;
+    try {
+      r = runReap(fx.w, ["--apply"]);
+    } finally {
+      f.restore?.(fx);
+    }
+    const { json, stderr } = r;
+
+    assert.ok(json, `a payload, not a bare failure: ${stderr}`);
+    assert.deepEqual(json.reaped, [], "nothing is reaped against a registry the listing does not match");
+    assert.equal(branchExists(fx.w, "feature/held"), true, "the branch a live worktree holds survives");
+    assert.equal(branchExists(fx.w, "feature/free"), true,
+      "and so does the healthy one: a dropped entry names no branch, so it could have been hiding this one too");
+    for (const b of ["feature/free", "feature/held"]) {
+      const k = keptFor(json, b);
+      assert.equal(k.length, 1, `${b} is kept exactly once: ${JSON.stringify(json.kept)}`);
+      assert.match(k[0].reason, f.cause);
+      assert.match(k[0].reason, /kept until a pass that reads a consistent registry/);
+      assert.doesNotMatch(k[0].reason, /branch delete failed/, "`git branch -D` is never reached");
+    }
+    assert.equal(existsSync(join(fx.wt, "untracked.txt")), true);
+  });
+}
+
+// The control rows: no fault, and the three faults #2078 measured git itself
+// still answering safely — the listing keeps the held entry's `branch` line,
+// so the counts agree, no HEAD is null, and the registry guard must not fire.
+// This is the half that pins what the guard must ACCEPT: `feature/free` is
+// still reaped, and `feature/held` is kept for what its worktree actually
+// holds, exactly as before the guard.
+//
+// `gitdir garbage` is the exception on `feature/held`, and not one this guard
+// decides: the listing names the held branch at the garbage path, which reap's
+// own absent-worktree arm reads as a removed checkout — measured before and
+// after #2078 alike, it clears the registration and reaps the branch. The row
+// stays to pin that the guard leaves `feature/free` alone there.
+const SAFE_REGISTRY = [
+  { name: "baseline (no fault)", heldKept: true, fault: () => {} },
+  { name: "gitdir garbage", heldKept: false, fault: ({ admin }) => writeFileSync(join(admin, "gitdir"), "not a path\n") },
+  { name: "commondir missing", heldKept: true, fault: ({ admin }) => rmSync(join(admin, "commondir")) },
+  { name: "lock file present", heldKept: true, fault: ({ admin }) => writeFileSync(join(admin, "locked"), "held by a test\n") },
+];
+
+for (const f of SAFE_REGISTRY) {
+  test(`a registry the listing still matches keeps reaping as before: ${f.name} (#2078)`, (t) => {
+    const fx = heldAndFree(t);
+    f.fault(fx);
+
+    const { json, stderr } = runReap(fx.w, ["--apply"]);
+
+    assert.ok(json, `a payload, not a bare failure: ${stderr}`);
+    for (const k of json.kept) assert.doesNotMatch(k.reason, /worktree registry inconsistent/);
+    assert.equal(json.reaped[0], "feature/free", "the guard does not refuse a registry the listing matches");
+    assert.equal(branchExists(fx.w, "feature/free"), false);
+    if (f.heldKept) {
+      assert.deepEqual(json.reaped, ["feature/free"]);
+      assert.equal(keptFor(json, "feature/held").length, 1);
+      assert.equal(branchExists(fx.w, "feature/held"), true);
+    }
+  });
+}
+
+// The recount-before-refuse (#1408/#1421, inflight.sh's order): a sibling's
+// `worktree add` or `remove` landing between the registry count and git's
+// listing makes the two disagree with nothing wrong. The shim lands exactly
+// that mutation on the FIRST `worktree list` call, ahead of the real listing,
+// so the first pair disagrees in the named direction and only the recount can
+// reach the healthy answer. Without it, `feature/free` is kept on a false
+// "registry inconsistent", once per direction.
+const SIBLING_MUTATIONS = [
+  { name: "a sibling's `worktree add`", pre: false, mutate: (sib) => `worktree add -q --detach "${sib}" main` },
+  { name: "a sibling's `worktree remove`", pre: true, mutate: (sib) => `worktree remove "${sib}"` },
+];
+
+for (const m of SIBLING_MUTATIONS) {
+  test(`${m.name} landing between the registry count and the listing is absorbed by the recount (#2078)`, (t) => {
+    const w = repo(t);
+    mergedGoneBranch(w, "feature/free", "free work");
+    const sib = join(w, "..", "sibling");
+    if (m.pre) git(w, "worktree", "add", "-q", "--detach", sib, "main");
+    const bin = failOnlyShim(
+      t,
+      `[ "$1" = worktree ] && [ "$2" = list ] && [ ! -e "$0.fired" ] && ` +
+        `{ ${SHIM_FIRED}; "${REAL_GIT}" ${m.mutate(sib)} >/dev/null 2>&1; false; }`,
+      [],
+    );
+
+    const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+    assertShimFired(bin, "the mutation must land inside the window the recount closes", /^worktree list/);
+    assert.equal(code, 0, stderr);
+    assert.deepEqual(json.reaped, ["feature/free"], JSON.stringify(json.kept));
+    for (const k of json.kept) assert.doesNotMatch(k.reason, /worktree registry inconsistent/);
+    assert.equal(branchExists(w, "feature/free"), false);
+  });
+}
