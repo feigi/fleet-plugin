@@ -198,11 +198,11 @@ export function paragraph(text, anchor, what, options) {
 // exists only when the content column is past marker column + 4 — a `100.`
 // marker, or a 4-space gap (#2100); a blank line still ends the item there.
 // Not modelled: which block the previous line was, so a shallower plain line
-// straight after the item's own heading, fence, thematic break or indented
-// code — none of them a paragraph a lazy line could continue — reads as lazy
-// and stays in; so does a shallower line inside the item's own still-open
-// fence, where CommonMark ends the fence and the item both; and so does any
-// shallower line at marker column + 4 or deeper in that zone.
+// straight after the item's own heading, fence, thematic break, indented code
+// or HTML block — none of them a paragraph a lazy line could continue — reads
+// as lazy and stays in; so does a shallower line inside the item's own
+// still-open fence, where CommonMark ends the fence and the item both; and so
+// does any shallower line at marker column + 4 or deeper in that zone.
 // Nor the parent's content column: marker column + 4 stands in for it + 4,
 // exact while the marker sits AT that column, as in any normal list. A marker
 // indented 1-3 columns past it (`   100. **Item**` at top level) still ends
