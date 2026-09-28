@@ -1,5 +1,47 @@
 # arg.mjs Factory Collapse
 
+> **Superseded in part (2026-09-28).** #1077 (PR #2105) changed the module this
+> record describes. `makeSweep`, `makeStray` and `makeNumArg` are deleted. Eight
+> scripts (board, ci-state, diff-stats, merge-gate, pr-overlap, staleness,
+> tier-check, tier-roles) now wire through one factory,
+> `defineFlags(die, { flags, positionals = [] })`. `flags` maps each name to
+> `"value"` or `"bool"`. The call returns `{ arg, numArg, has, sweep, stray }`,
+> every reader bound to that one table, and a read of the wrong kind or of an
+> undeclared name refuses through `die()` at exit 2. The stanza is now:
+>
+> ```js
+> const die = makeDie(NAME);
+> const { arg, has, sweep, stray } = defineFlags(die, { flags: { … } });
+> ```
+>
+> So the opening list and the first "Why" paragraph no longer describe the
+> code. No standalone `makeSweep` is left to split the module into a collapsed
+> half and a threaded half, and "five of the nine consumers import it" counts an
+> export that no longer exists. The consumer counts further down ("nine wiring
+> sites") are the August tree's too; read today's roster with
+> `grep -n '^import .* from "./arg.mjs"' plugin/scripts/*.mjs | grep -v test`.
+>
+> The refusal of `makeCli` returning `{ die, arg, has }` is resolved, not
+> reversed. Its `arg`/`has` half shipped as `defineFlags`, through the door the
+> closing paragraph left open: the export shape changed for a reason other than
+> line count — binding the flag table to the reads, so the two can no longer
+> drift apart. The `die` half did not ship. #1077's brief specified
+> `defineFlags(die, …)`, so `die` is still bound by `makeDie(NAME)` and still
+> explicitly threaded. `makeArg`/`makeHas` stay exported because
+> `candidates.mjs` binds them directly.
+>
+> Folding `makeDie(NAME)` into that call, so `defineFlags(NAME, …)` also returns
+> `die`, is the one piece of the proposal still open, and nothing here reopens
+> it. It saves one line per script, which is line count. It would not retire
+> `makeDie` either: six scripts bind `die` without `defineFlags` (candidates,
+> fleet-heartbeat, fleet-tick, ledger, member-outcomes, shortlist). That brings
+> back the two-shapes split the first "Why" paragraph refused, with `die` as the
+> split point this time. The pins, churn and header-rationale paragraphs still
+> hold on the current tree: `arg.test.mjs` still pins the import,
+> `const die = makeDie(NAME);` and the `NAME` constant, four of its consumers
+> among the `defineFlags` scripts. The analysis below is left as written, in the
+> tense it was written in.
+
 `scripts/arg.mjs` exports separate factories — `makeDie(name)`,
 `makeArg(die)`, `makeHas(die)`, `makeSweep(die)` — and each consumer wires them
 in a short stanza:
