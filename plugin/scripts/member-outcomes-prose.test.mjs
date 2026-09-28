@@ -29,7 +29,7 @@ const RUNNABLE = [
   /node scripts\/member-outcomes\.mjs/,
   // every shell expansion quoted — an unquoted one splits on the spaces in a
   // stringified error object and turns exit 2 into a usage error
-  /"\$HOME\/\.claude\/projects\/\$PROJECT_DIR"/,
+  /"\$HOME\/\.omp\/agent\/sessions\/\$PROJECT_DIR"/,
 ];
 
 test("the ruling step carries a RUNNABLE scraper invocation, not a mention of one", () => {
@@ -45,10 +45,11 @@ test("the ruling step carries a RUNNABLE scraper invocation, not a mention of on
 
 test("the ruling step scrapes EVERY session for the cwd, not one guessed session", () => {
   // findSubagentsDir answers "newest transcript for this cwd", which is not
-  // "this run". 86 sessions share ~/.claude and 17 of 21 active days had two or
-  // more writing, so the wrong-session pick is routine, silent, and exits 0.
+  // "this run" — any other session sharing this cwd can hold a newer
+  // transcript at the moment this step runs, so the wrong-session pick is
+  // routine, silent, and exits 0.
   const slice = SLICE();
-  assert.match(slice, /for d in .*\/\*\/subagents/, "the scrape must loop every session dir");
+  assert.match(slice, /for d in .*\*\/;/, "the scrape must loop every session dir");
   // Banned from the COMMAND, not from the prose — the paragraph that explains
   // why the single-session helper is wrong has to be able to name it.
   const block = /```bash\n([\s\S]*?)```/.exec(slice)[1];

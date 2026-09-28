@@ -151,7 +151,8 @@ function foreignRepoWithTrackedScripts(t) {
  * `.claude-plugin/plugin.json` into
  * `<foreignRoot>/plugins/cache/mkt/fleet/0.1.1/{scripts,.claude-plugin}` —
  * the exact layout an installed plugin's cache directory takes (#1339's own
- * measured shape, `~/.claude/plugins/cache/fleet-plugin/fleet/0.1.1/...`).
+ * measured shape, pre-cutover: `plugins/cache/fleet-plugin/fleet/0.1.1/...`
+ * under the operator's dotfiles checkout).
  *
  * `tracked` decides whether the copy is committed into `foreignRoot`'s own
  * index. `false` is the real #1339 shape: a cache directory that ships
@@ -347,9 +348,10 @@ test("trackedNodeScripts: an inherited GIT_DIR must not substitute another repos
 // case is `scripts/fleet-tool`, the shape of this repository's extensionless
 // entrypoints (`fleet-run`, `fleet-bootstrap`, `fleet-provenance`), which an
 // extension-only rule never listed. `eval-only.js` is the other half of that
-// ticket: review-pr.js's shape, ESM in a `.js` with no shebang, run only by a
-// harness and never by plain node, so no extension rule may pull it in. Each
-// test file sits beside a shipped module its name extends — one carries a
+// ticket: ESM in a `.js` with no shebang, run only by a plugin-runner's own
+// loader and never by plain node — the shape this repo's own retired review
+// workflow script had — so no extension rule may pull it in.
+// Each test file sits beside a shipped module its name extends — one carries a
 // node shebang, and is still a test. `latest.mjs` is the boundary on the other
 // side — it ends in `test.mjs` without being a test file, so a rule keyed on
 // that looser suffix drops a shipped module — and the untracked `scratch.mjs`
@@ -652,9 +654,10 @@ test("a foreign git repository with tracked scripts is refused, not returned —
 
   // The plugin-cache-like nested directory: no .git, no copy of this module,
   // exactly what an installed copy's PARENT looks like when it lands inside
-  // an ambient working tree that is not its own (the shape #1339 measured
-  // under `~/.claude`). The more precise test below places an actual copy of
-  // this file there and asks IT about itself.
+  // an ambient working tree that is not its own (the shape #1339 measured,
+  // pre-cutover, under the operator's dotfiles checkout). The more precise
+  // test below places an actual copy of this file there and asks IT about
+  // itself.
   const nested = join(foreignRoot, "plugins", "cache", "fleet-plugin", "fleet", "0.1.1", "scripts");
   mkdirSync(nested, { recursive: true });
 
@@ -676,8 +679,9 @@ test("a foreign git repository with tracked scripts is refused, not returned —
 // scripts" but the actual installed-cache layout — a real copy of THIS file
 // at `plugins/cache/mkt/fleet/0.1.1/scripts/repo-root.mjs`, UNTRACKED by the
 // ambient repository it happens to sit inside (a cache directory is never
-// committed there). This is the exact configuration #1339 measured under
-// `~/.claude`: self genuinely lives inside the foreign repository — so a
+// committed there). This is the exact configuration #1339 measured,
+// pre-cutover, under the operator's dotfiles checkout: self genuinely lives
+// inside the foreign repository — so a
 // CONTAINMENT check (tried and reverted between #1354's first two rounds)
 // wrongly accepts it, and only tracked-ness tells them apart.
 //

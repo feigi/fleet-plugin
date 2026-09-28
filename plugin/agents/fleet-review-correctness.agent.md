@@ -1,9 +1,7 @@
 ---
 name: fleet-review-correctness
-description: Dispatched by review-pr.js/review-core.mjs's Review phase for the "correctness" dimension. Never invoked directly.
-model: opus
-effort: high
-thinking-level: high
+description: Dispatched by review-core.mjs's Review phase for the "correctness" dimension. Never invoked directly.
+model: "@slow:high"
 ---
 
 <!-- Prompt adapted from Anthropic's vendored `code-reviewer` agent

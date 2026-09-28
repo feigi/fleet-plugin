@@ -228,14 +228,14 @@ test("phase 1 binds the loud failure to the runner and the silent one to the bas
   assert.match(slice(), /stale\s+base(?:(?!LOUDLY)[^.])*?SILENTLY/);
 });
 
-// The backstop's SCOPE. "review-pr.js refuses" alone reads as coverage and makes
+// The backstop's SCOPE. "review-core.mjs refuses" alone reads as coverage and makes
 // the phase-1 verify look redundant — the exact reasoning that would delete it.
 // What has to survive is that a hand-dispatched worktree is outside that net,
 // and that the net covering the other path is still not a substitute for the
 // compare in this one.
 //
 // #1168 wove that net from the lagging field, and this paragraph said so. #1513
-// moved `review-pr.js`'s own operand to the same `ls-remote` read this bullet
+// moved `review-core.mjs`'s own operand to the same `ls-remote` read this bullet
 // uses, which makes the old sentence FALSE — and false in the direction that
 // costs something, since a controller told the workflow check is unsound has a
 // reason to distrust a review that refused for a real mismatch. So the claim is
@@ -259,18 +259,18 @@ test("phase 1 keeps the workflow backstop from reading as full coverage", () => 
 });
 
 // The run-log marker this paragraph QUOTES is a verbatim copy of a string in
-// `review-pr.js`, which is the disconnect this repo files as a defect in its own
+// `review-core.mjs`, which is the disconnect this repo files as a defect in its own
 // right: a prose-only presence pin stays green while the code's marker moves,
 // and a controller then hunts a run log for a line it will never find. Compared
 // against the source, so either side moving reds.
-test("phase 1's quoted run-log marker is the one review-pr.js actually prints", () => {
+test("phase 1's quoted run-log marker is the one review-core.mjs actually prints", () => {
   assert.match(slice(), phrase("head ref (absent): head check SKIPPED"));
-  const line = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8")
+  const line = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8")
     .split("\n")
-    .find((l) => l.startsWith("log(`snapshot "));
-  assert.ok(line, "review-pr.js's snapshot run-log line is gone — the marker this paragraph quotes is printed nowhere");
+    .find((l) => l.includes("log(`snapshot "));
+  assert.ok(line, "review-core.mjs's snapshot run-log line is gone — the marker this paragraph quotes is printed nowhere");
   assert.ok(
     line.includes("head ref ") && line.includes("(absent): head check SKIPPED"),
-    `phase 1 quotes a run-log marker review-pr.js no longer prints:\n  ${line}`,
+    `phase 1 quotes a run-log marker review-core.mjs no longer prints:\n  ${line}`,
   );
 });

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { anchorAt, between, betweenPhrases, bullet, paragraph, phrase, quoteBlock, quoteBlocks, runAbove, sentences, stripSlashGutter, pairSlices, logicalLines } from "./prose-pin.mjs";
+import { anchorAt, between, betweenPhrases, bullet, paragraph, phrase, quoteBlock, quoteBlocks, runAbove, sentences, stripSlashGutter, logicalLines } from "./prose-pin.mjs";
 
 // The 14 consumer files exercise only between()'s HAPPY path: every one of them
 // slices a document that still holds both anchors. Measured on this PR: deleting
@@ -9,7 +9,7 @@ import { anchorAt, between, betweenPhrases, bullet, paragraph, phrase, quoteBloc
 // was extracted rather than left inline, and nothing was pinning them.
 //
 // Fixtures here are short literal strings on purpose. Pinning the guards against
-// a real document would re-couple this file to whatever review-pr.js or a SKILL.md
+// a real document would re-couple this file to whatever review-core.mjs or a SKILL.md
 // happens to say today, which is the rot the name-based citations elsewhere in
 // this repo exist to avoid.
 
@@ -486,58 +486,17 @@ test("sentences does not end one at a bracket that is code, a link or an index, 
   }
 });
 
-// #1346/#1361: the third gutter shape, exercised nowhere else until a real
-// `.js` comment-form pair lands. Written here rather than left for that
-// consumer, per this file's own header: a guard with no dedicated test is a
-// guard nobody is pinning.
+// #1346/#1361/#1619: the `.mjs`-header-comment gutter shape, exercised by
+// candidates-exit3-prose.test.mjs and review-core-unrun.test.mjs against a
+// real header, but pinned here as its own dedicated guard: a guard with no
+// dedicated test is a guard nobody is pinning.
 test("stripSlashGutter strips a leading `// ` and leaves everything else untouched", () => {
-  assert.equal(stripSlashGutter("// CLAUDE: dispatch it"), "CLAUDE: dispatch it");
-  assert.equal(stripSlashGutter("  //CLAUDE: no space after slash"), "CLAUDE: no space after slash");
-  // A trailing comment is not a marked line's gutter — stripping mid-line
-  // would turn code-with-a-note into a false marker.
-  assert.equal(stripSlashGutter('const x = 1; // CLAUDE: not a marked line'), 'const x = 1; // CLAUDE: not a marked line');
+  assert.equal(stripSlashGutter("// dispatch it"), "dispatch it");
+  assert.equal(stripSlashGutter("  //no space after slash"), "no space after slash");
+  // A trailing comment is not a whole-line gutter — stripping mid-line
+  // would turn code-with-a-note into a false comment line.
+  assert.equal(stripSlashGutter('const x = 1; // not a comment line'), 'const x = 1; // not a comment line');
   assert.equal(stripSlashGutter("plain code\nmore code"), "plain code\nmore code");
-});
-
-// pairSlices' four throw guards, each isolated — #1346's acceptance
-// criterion ("a pin that matches both lines is rejected at construction")
-// is one of these four, demonstrated again in `marked-pairs.test.mjs`
-// against the divergence-check module; here each guard gets its OWN case,
-// independent of that module ever existing.
-const SECTION = (claude, omp) => `## S\n\nCLAUDE: ${claude}\nOMP: ${omp}\n\n## Next`;
-
-test("pairSlices: a clean pair returns both one-line slices", () => {
-  const { claude, omp } = pairSlices(SECTION("`SendMessage` wakes it.", "`hub send` wakes it."), "## S", "## Next");
-  assert.equal(claude, "CLAUDE: `SendMessage` wakes it.");
-  assert.equal(omp, "OMP: `hub send` wakes it.");
-});
-
-test("pairSlices throws when the CLAUDE line names no recognized dialect token", () => {
-  assert.throws(
-    () => pairSlices(SECTION("nothing tool-shaped here.", "`hub send` wakes it."), "## S", "## Next"),
-    /CLAUDE line names no recognized dialect token/,
-  );
-});
-
-test("pairSlices throws when the OMP line names no recognized dialect token", () => {
-  assert.throws(
-    () => pairSlices(SECTION("`SendMessage` wakes it.", "nothing tool-shaped here."), "## S", "## Next"),
-    /OMP line names no recognized dialect token/,
-  );
-});
-
-test("pairSlices throws when the CLAUDE line's own token also matches the OMP line", () => {
-  assert.throws(
-    () => pairSlices(SECTION("`SendMessage` wakes it.", "`hub send` and `SendMessage` both wake it."), "## S", "## Next"),
-    /the CLAUDE line's "send\/wake channel" token also matches the OMP line/,
-  );
-});
-
-test("pairSlices throws when the OMP line's own token also matches the CLAUDE line", () => {
-  assert.throws(
-    () => pairSlices(SECTION("`SendMessage` and `hub send` both wake it.", "`hub send` wakes it."), "## S", "## Next"),
-    /the OMP line's "send\/wake channel" token also matches the CLAUDE line/,
-  );
 });
 
 // `paragraph`'s two halves are its bound and its anchor, and each has its own
@@ -566,7 +525,7 @@ test("paragraph cuts at a blank line that carries whitespace", () => {
 
 // The bound's mirror image: an anchor matching twice binds the pin to
 // whichever copy comes first, so the real rule below can be gutted with the
-// suite green. Same standard `markedLine` already holds its own marker to.
+// suite green.
 test("paragraph throws when its anchor matches twice, rather than binding the wrong copy", () => {
   assert.throws(
     () => paragraph("THE RULE says do X.\n\nprose.\n\nTHE RULE says do X.\n", "THE RULE", "the fixture"),

@@ -28,8 +28,8 @@
 // never a citation, so the rule that shipped is the portable spelling with the
 // zsh-only one named as the trap it is.
 //
-// FIVE SEATS, because the rule has to reach the member that WRITES the harness,
-// in the prompt text, and no member reads all five:
+// FOUR SEATS, because the rule has to reach the member that WRITES the harness,
+// in the prompt text, and no member reads all four:
 //
 //   1. run-team/SKILL.md's Reviewers prose — the controller's own admission
 //      gate, and the one place the rule is JUSTIFIED rather than dictated, so
@@ -39,12 +39,11 @@
 //      refuter-scratch-prose.test.mjs already treats as one population,
 //      for the reason it gives: a rule added to one is the one that misses
 //      whichever path a caller takes.
-//   4/5. The refuter prompt TEMPLATE on each harness — workflows/review-pr.js
-//      (Claude) and scripts/review-core.mjs (omp). These carry the largest
-//      refuter population by far: the workflow dispatches up to two per
+//   4. The refuter prompt TEMPLATE — scripts/review-core.mjs. It carries the
+//      largest refuter population by far: the review dispatches up to two per
 //      critical/important finding, where the hand-dispatch briefs cover one per
 //      in-scope `suggestion`. The ticket's Key interfaces say no script change
-//      is required; against this tree that is false, and leaving them out would
+//      is required; against this tree that is false, and leaving it out would
 //      have put the rule everywhere except where most refuters read it.
 //
 // Plus the fix-applier's own mutation paragraph, which is a sixth site with
@@ -57,8 +56,8 @@
 // A source grep cannot tell a correctly escaped `\${cfg[@]}` from one that
 // renders as an interpolation of `cfg[@]`, and the prompt a refuter actually
 // receives is the RENDERED string. So both templates are lifted and evaluated,
-// the technique review-pr-refuter-scratch.test.mjs uses and for its reason —
-// a Workflow script cannot be imported — and extraction runs against
+// the technique review-core-refuter-scratch.test.mjs uses — the template lives
+// inline in a function body, not exported as its own value — and extraction runs against
 // comment-stripped code so a commented-out `agent(...)` call cannot satisfy a
 // pin with the live dispatch gutted.
 //
@@ -149,13 +148,10 @@ const SEATS = [
     "review-and-fix.md step 2's refuter brief",
     () => between(REVIEW_AND_FIX, "Try to REFUTE this finding", "That last clause is the whole mechanism", "review-and-fix.md"),
   ],
-  ["workflows/review-pr.js's rendered refuter prompt", () => renderTemplate("workflows", "review-pr.js")],
   ["scripts/review-core.mjs's rendered refuter prompt", () => renderTemplate("scripts", "review-core.mjs")],
 ];
 
-// The free names each template interpolates, in the order `render` binds them —
-// the same list review-pr-refuter-scratch.test.mjs uses, because both harnesses'
-// copies of this dispatch interpolate the same set.
+// The free names the template interpolates, in the order `render` binds them.
 const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote"];
 const TEMPLATE_START = "`Try to REFUTE this finding from PR #";
 const TEMPLATE_END = "{ label: `verify:";

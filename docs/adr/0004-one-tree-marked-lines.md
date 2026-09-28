@@ -1,6 +1,6 @@
 # 0004 — One tree speaks two dialects: neutral prose, the dialect on marked lines
 
-**Status:** Accepted. Ruled 2026-09-09 on #1297, #1299, #1315, #1316, against the measurements below.
+**Status:** Accepted. Ruled 2026-09-09 on #1297, #1299, #1315, #1316, against the measurements below. Superseded by ADR 0014: one harness, no dialect — marked lines and the pair discipline are retired.
 
 ## Context
 

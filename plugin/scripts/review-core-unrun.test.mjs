@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 import { between, paragraph, phrase, stripSlashGutter } from "./prose-pin.mjs";
+import { unrunReason, unrunEntries, unrunCrashed, FINDINGS_SCHEMA } from "./review-core.mjs";
 
 // A dimension that crashed and a dimension that ran clean returned BYTE-
 // IDENTICAL shapes: `findings: []` either way, with the key listed in
@@ -17,45 +18,9 @@ import { between, paragraph, phrase, stripSlashGutter } from "./prose-pin.mjs";
 // vacuous against a field commented out with `/* */` (see strip-comments.mjs),
 // and a schema pin written against raw source passes with the field dead under
 // `additionalProperties: false`.
-//
-// That stripper is LINE-BASED, though, and its ceiling was measured here too: an
-// entry commented out INSIDE an array literal — `["dimension", /* "x", */ …]` —
-// survives stripping, so a `required:\s*\[([^\]]*)\]` match still sees the
-// quoted text while the real array has lost it. So the schema pins below read no
-// text at all. They EVALUATE the declaration and assert against the object,
-// which is the one reader a comment cannot fool.
 const REPO = join(import.meta.dirname, "..");
-const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
+const SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
 const CODE = stripComments(SOURCE);
-
-// review-pr.js runs a top-level `await pipeline(...)` and cannot be imported, so
-// the seam is lifted out of the source text — the same technique
-// `review-pr-testcmd.test.mjs` uses for `resolveTestCmd`. It only works while
-// these stay PURE: a free variable (`testCmd`, `snap`) would throw a
-// ReferenceError here on the branch that reads it, which is a property worth
-// having anyway. All three go into ONE scope because each calls the one before
-// it — `unrunEntries` wraps `unrunReason`, `unrunCrashed` wraps `unrunEntries`.
-//
-// Does NOT route through lift.mjs's single-function lift(), even for
-// `unrunReason` alone: every one of these three is exercised directly by a
-// test below, and `unrunEntries`/`unrunCrashed` call their callee BY NAME in
-// the lifted source text, so each needs every function it calls present in
-// its own `new Function` eval scope — measured, isolating `unrunEntries`
-// through `lift(CODE, "unrunEntries", "review, dimension")` alone throws
-// "unrunReason is not defined" the first time the returned function runs.
-// Same class of incompatibility as `selectDimensions`/`verifiersFor` below in
-// select-dimensions.test.mjs, just interdependence instead of a closed-over
-// const or an injected parameter.
-const SEAM = ["unrunReason(review)", "unrunEntries(review, dimension)", "unrunCrashed(reviewed, dimensions)"];
-function liftSeam() {
-  const bodies = SEAM.map((sig) => {
-    const m = CODE.match(new RegExp(`^function ${sig.replace(/[()]/g, "\\$&")} \\{[\\s\\S]*?^\\}$`, "m"));
-    assert.ok(m, `review-pr.js no longer declares ${sig} at top level — update this test`);
-    return m[0];
-  });
-  return new Function(`${bodies.join("\n")}\nreturn { ${SEAM.map((sig) => sig.slice(0, sig.indexOf("("))).join(", ")} };`)();
-}
-const { unrunReason, unrunEntries, unrunCrashed } = liftSeam();
 
 // #138's case. The `review &&` guard the ticket cites proves the author already
 // expects a falsy return here — spend limit, timeout, terminal error — and the
@@ -318,24 +283,12 @@ test("a run that reported tests but not pass/fail is NOT unrun", () => {
   );
 });
 
-// SOURCE, not CODE: `new Function` is a real parser and drops every comment form
-// unconditionally, which is the whole point of reading the object rather than
-// the text (see the header). Stripping first would only re-narrow it.
-//
-// Not routed through lift.mjs's lift(): FINDINGS_SCHEMA is a `const` object
-// literal, not a `function name(signature)` declaration — same reason
-// DEFAULT_DIMENSIONS stays local in select-dimensions.test.mjs.
-function findingsSchema() {
-  const src = between(SOURCE, "const FINDINGS_SCHEMA = {", "const VERDICT_SCHEMA", "review-pr.js");
-  return new Function(`${src}\nreturn FINDINGS_SCHEMA;`)();
-}
-
 // #139: the description at `:37` called `scope_searched` **Required** while the
 // `required` array omitted it, so a specialist that skipped it validated clean —
 // reproducing the exact failure the description exists to prevent. Both halves
 // pinned, because either one alone re-opens the ticket.
 test("scope_searched is in the required array, not only in its own description", () => {
-  const { required } = findingsSchema();
+  const { required } = FINDINGS_SCHEMA;
   assert.ok(Array.isArray(required), "FINDINGS_SCHEMA no longer has a top-level required array — update this test");
   assert.ok(required.includes("scope_searched"), "scope_searched is documented Required and is not in the required array (#139)");
   assert.ok(required.includes("test_run"), "test_run is not required, so an unrun dimension can still return a clean-looking object (#137)");
@@ -345,7 +298,7 @@ test("scope_searched is in the required array, not only in its own description",
 // entry whose property is not declared is worse than neither: the specialist is
 // forced to send a field the schema then drops. Both halves, one pin.
 test("test_run is declared, carries the command and count, and does not force pass/fail", () => {
-  const testRun = findingsSchema().properties.test_run;
+  const testRun = FINDINGS_SCHEMA.properties.test_run;
   assert.ok(testRun, "test_run is not declared in FINDINGS_SCHEMA's properties — additionalProperties:false drops it");
   for (const field of ["command", "tests", "pass", "fail"]) {
     assert.ok(testRun.properties[field], `test_run no longer declares ${field}`);
@@ -449,7 +402,7 @@ test("both halves are wired in: the verify stage, and the pipeline result the st
 test("the returned object carries dimensionsUnrun alongside dimensionsRun", () => {
   assert.match(CODE, /const dimensionsUnrun = \[\]/, "dimensionsUnrun is never declared — the return would throw");
   const at = CODE.lastIndexOf("return {");
-  assert.notEqual(at, -1, "review-pr.js no longer ends in a return literal — update this test");
+  assert.notEqual(at, -1, "review-core.mjs no longer ends in a return literal — update this test");
   const tail = CODE.slice(at);
   // BOTH, adjacent. `dimensionsRun` keeps its meaning and its value — the
   // dispatched set after the size trim — because a consumer diffing it against
@@ -561,17 +514,17 @@ test("run-team claims a suite RAN from a key's absence from dimensionsUnrun, nev
 // retracted wording is caught wherever it comes back, and it targets `only
 // thing that means covered` rather than `covered` alone so the paragraph's own
 // correct denials — which must keep saying the word — stay green.
-test("review-pr.js's own comment claims a suite RAN from a key's absence from dimensionsUnrun, never that it is covered", () => {
+test("review-core.mjs's own comment claims a suite RAN from a key's absence from dimensionsUnrun, never that it is covered", () => {
   const prose = stripSlashGutter(SOURCE);
-  const para = paragraph(prose, "`dimensionsRun` names what was DISPATCHED", "review-pr.js");
+  const para = paragraph(prose, "`dimensionsRun` names what was DISPATCHED", "review-core.mjs");
   assert.match(
     para,
     phrase("A key in the first and NOT in the second ran a suite — not that it is covered (#535)."),
-    "review-pr.js's dimensionsRun/dimensionsUnrun comment no longer says a key absent from dimensionsUnrun ran a suite, full stop",
+    "review-core.mjs's dimensionsRun/dimensionsUnrun comment no longer says a key absent from dimensionsUnrun ran a suite, full stop",
   );
   assert.doesNotMatch(
     prose,
     /only\s+thing\s+that\s+means\s+covered/i,
-    "review-pr.js is back to reading a key's absence from dimensionsUnrun as coverage — `unrunReason` never compares `run.command` against the command the dispatch handed out (#535)",
+    "review-core.mjs is back to reading a key's absence from dimensionsUnrun as coverage — `unrunReason` never compares `run.command` against the command the dispatch handed out (#535)",
   );
 });

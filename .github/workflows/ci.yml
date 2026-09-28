@@ -129,81 +129,6 @@ jobs:
       - name: Syntax-check scripts
         run: .github/scripts/check-tracked.sh '*.mjs' -n1 node --check
 
-      # The two kinds of tracked `.js` file need DIFFERENT invocations, not a wider glob:
-      #   - an ordinary CommonJS script, which `node --check` accepts as-is.
-      #     hooks/statusline.js was the only one and left with the 2026-09-08
-      #     config split, so the `*)` branch matches nothing today — it stays
-      #     for the next plain .js this repo grows. (plugin/scripts/review-core.js
-      #     matched it until #1763 renamed it to .mjs: it was ESM, which a `.js`
-      #     is only where Node's syntax detection is on by default — not at the
-      #     declared consumer floor. ESM belongs in `.mjs`; node-floor-sweep.test.mjs
-      #     reds on a shipped .mjs importing a relative module that is not.)
-      #   - plugin/workflows/*.js (review-pr.js) is a Workflow-harness script: the
-      #     harness reads `export const meta = …` off it without running it,
-      #     then wraps the REST of the file's body in an async function it
-      #     executes — so the file also has top-level `await`/`return`, legal
-      #     only inside that wrapper. That combination parses as neither a
-      #     module (top-level `return` is always illegal in ESM) nor a plain
-      #     CJS script (the `export`) — `node --check` rejects it either way.
-      #     `new AsyncFunction(...)` is the one thing that compiles both parts
-      #     without running them; it's also what
-      #     plugin/scripts/review-pr-reads.test.mjs's "every workflow file
-      #     parses — no other reader in this repo would notice a syntax error"
-      #     already uses to catch exactly this, reused here rather than
-      #     reinvented.
-      #     Cited by test NAME, not by line: a refactor that shifts that file
-      #     silently re-points a line number at unrelated code, and this
-      #     particular argument isn't pinned by any test — plugin/scripts/
-      #     ci-comment-rot-prose.test.mjs checks several other claims in this
-      #     file, but not this one.
-      #     That test DERIVES its file set from plugin/scripts/workflow-files.mjs
-      #     (#1204) rather than naming review-pr.js, so it already covers every
-      #     workflow file on arrival — flat `.js` only, the shape
-      #     docs/specs/2026-07-23-fleet-plugin-design.md's `## Layout` tree
-      #     gives `~/.claude/workflows/`. This loop is therefore redundant
-      #     with it today — and kept, because it is the arm that runs when the
-      #     suite does not: a workflow file whose syntax error reaches CI
-      #     through a path that skips the tests still reds here.
-      #     Exactly ONE top-level `export` is the contract (`meta`, first thing
-      #     in the file), which is why the strip below is `/m` and not `/gm`: a
-      #     second top-level export is a file the harness rejects, and `/gm`
-      #     would green it.
-      #   Naively widening the old glob to `*.js` turns this red: node --check
-      #   parses plugin/workflows/*.js as CJS and dies on its first `export`.
-      #   Next person to touch this glob: this is why it isn't `*.js`.
-      - name: Syntax-check .js scripts
-        run: |
-          set -euo pipefail
-          # Same vacuous green as the check-tracked.sh steps, different shape: a
-          # `for` over an empty list iterates zero times and exits 0. The
-          # per-file dispatch below is what keeps this step off that script, so
-          # it carries the count and the refusal itself.
-          files=()
-          while IFS= read -r -d '' f; do files+=("$f"); done < <(git ls-files -z -- '*.js')
-          echo "checking ${#files[@]} file(s) matching *.js"
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "::error::no tracked file matches *.js — this check verified nothing"
-            exit 1
-          fi
-          for f in "${files[@]}"; do
-            case "$f" in
-              plugin/workflows/*)
-                node -e '
-                  const fs = require("fs");
-                  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-                  const src = fs.readFileSync(process.argv[1], "utf8");
-                  new AsyncFunction(
-                    "args", "budget", "agent", "parallel", "pipeline", "phase", "log", "workflow",
-                    src.replace(/^export /m, ""),
-                  );
-                ' "$f"
-                ;;
-              *)
-                node --check "$f"
-                ;;
-            esac
-          done
-
       # Parses every file `git ls-files '*.json'` lists — whatever the tree
       # tracks on the day, so a JSON file committed later is covered with no
       # edit here. No count and no list of them, on purpose: the count this
@@ -221,7 +146,7 @@ jobs:
       # The allow-list checker (#1314, #1347). frontmatter-check.mjs enforces
       # frontmatter-allowlist.json's three key sets (agents, skills, commands)
       # in BOTH directions — unknown keys rejected, required keys enforced —
-      # plus a forbidden class for keys that ARE documented on a harness but
+      # plus a forbidden class for keys that ARE documented but
       # silently reroute a member's tier, tree, or dispatch. One
       # check-tracked.sh call per kind: each glob's own non-vacuity refusal
       # covers the day one of the three directories goes missing entirely,
@@ -327,32 +252,6 @@ jobs:
           shopt -s failglob
           node --test plugin/scripts/*.test.mjs
 
-  # #1314's ruling: a separate job, not a step inside `check` — keeps "the
-  # manifest is bad" distinguishable from "omp/Claude cannot load the tree"
-  # at a glance, and neither shares `check`'s already-tight time budget.
-  # Blocking, every PR, no `paths:` filter (#1314: a path filter silently
-  # stops covering a renamed or newly added component directory).
-  validate-claude:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v5
-
-      # Exact pin Renovate moves: see ADR 0010. Do not hand-edit this to float.
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-
-      # Pinned, not `@latest` — a Claude Code release would otherwise change
-      # what this job verifies without a commit here (#1314), and #1347's own
-      # routed note measured this exact version's warning wording, which
-      # validate-claude-warning-allowlist.test.mjs pins against the same pin.
-      - name: Install pinned Claude Code
-        run: npm install -g @anthropic-ai/claude-code@2.1.265
-
-      - name: validate-claude
-        run: .github/scripts/validate-claude.sh
-
   # #1314's ruling, #1293's findings on what "loaded" can mean headlessly.
   # Registers this checkout as a throwaway `file://` git-subdir catalog
   # (never the tracked marketplace, never a directory source — ADR 0003) and
@@ -405,10 +304,10 @@ jobs:
   # (cannot pass: a git-subdir install carries `plugin/` alone, and ~30 test
   # files read repo-root paths a plugin-only payload never has). The actual
   # ruling (#1294): source unit tests plus ONE install-and-smoke job proving
-  # the Install-root/target-repo invariant is exercised — installs on both
-  # harnesses, runs `fleet-provenance`, resolves every `fleet-run <script>`
-  # prose callsite under both harnesses, execs `fleet-run arg.mjs` once per
-  # harness. No test suite runs from an install. See
+  # the Install-root/target-repo invariant is exercised — installs on omp,
+  # runs `fleet-provenance`, resolves every `fleet-run <script>` prose
+  # callsite, execs `fleet-run arg.mjs` once. No test suite runs from an
+  # install. See
   # .github/scripts/install-and-smoke.sh's own header for the full
   # reasoning and the measured 70/1964-failure reproduction that forced
   # this rewrite.
@@ -432,9 +331,6 @@ jobs:
 
       - name: Install pinned omp
         run: bun install -g @oh-my-pi/pi-coding-agent@18.1.15
-
-      - name: Install pinned Claude Code
-        run: npm install -g @anthropic-ai/claude-code@2.1.265
 
       - name: install-and-smoke
         run: .github/scripts/install-and-smoke.sh

@@ -1,6 +1,6 @@
 # 0008 — A turn-based fleet holds its own turn; nothing external wakes it
 
-**Status:** Accepted. Ruled 2026-09-18 on #357 (item 2 of #3), against the measurements below. Amended by ADR 0012: §1 reads "records, then ticks" — the ledger now records dispatch and settlement, so the tick derives its counts and the controller states none; §2–§8 unchanged.
+**Status:** Accepted. Ruled 2026-09-18 on #357 (item 2 of #3), against the measurements below. Amended by ADR 0012: §1 reads "records, then ticks" — the ledger now records dispatch and settlement, so the tick derives its counts and the controller states none; §2–§8 unchanged. Amended by ADR 0014: the dual-harness comparison measurements (periodic-hook absence on either harness, the block-duration asymmetry between them, and omp-only background-wake behavior) are retired as moot under one harness; the ruling and the remaining measurements stand.
 
 ## Context
 
@@ -37,24 +37,6 @@ Measured before ruling:
   prose."* The accepted cure was a blocking primitive held inside one turn —
   `gh run watch <run-id> --exit-status` — with an explicit re-issue rule when it
   outlives the shell timeout.
-- **Neither harness has a periodic hook.** Claude Code's hook events are all
-  edge-triggered off a user or agent action (`~/.claude/settings.json`); omp's
-  extension timers (`ctx.setInterval`) are session-bound and cleared on
-  `session_shutdown` (`omp://extensions.md`). Neither documents an entry point
-  by which an external process injects a turn into an idle agent.
-- **The harnesses differ in how long one command may block, and this is the one
-  asymmetry the design must absorb.** Measured 2026-09-18 on omp: a foreground
-  `sleep 55` held the turn (55.00 s wall, returned in-foreground), while
-  anything past the 60 s `bash.autoBackground.thresholdMs` converts to a
-  background job; `timeout` sets the deadline without extending foreground
-  waiting. Claude Code instead kills at its shell timeout, which
-  `run-merge-bot.md` already records as shorter than a ~5-6 minute CI cycle.
-- **Background-job completion does inject a turn on omp** — observed twice in
-  one session, each time while the agent sat idle awaiting user input with no
-  keystroke intervening. This is *not* generalised: the two-hour no-wake
-  measurement above was a **member** (subagent) on **Claude Code**, and these
-  were the **main agent** on **omp**. Two variables differ; neither result
-  settles the other, and the design deliberately does not depend on either.
 - **Operating target is unattended/overnight** (maintainer's ruling). The
   ledger records a 9-hour intra-session gap, and run wall-clock of 58 min to
   3.5 h.

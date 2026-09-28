@@ -7,16 +7,19 @@ import { between as section, bullet, phrase, stripQuoteGutter } from "./prose-pi
 // below is fed through it, so a widened/narrowed regex and a reverted example
 // both surface here instead of only in compute-board.test.mjs's own fixtures.
 import { parseRow } from "./compute-board.mjs";
+import { runReview } from "./review-core.mjs";
+import { pipeline, parallel, ARGS, SNAP, review, finding, vote, scriptedHost } from "./review-host-fixture.mjs";
 
-// The fleet's default review path is the controller running `review-pr.js`
-// itself. Only the controller can: subagents have no `Workflow` tool, so on the
-// hand-dispatch path neither `selectDimensions` nor the severity-budgeted verify
-// pass runs at all — sizing falls back to the reviewer's own judgement and
-// nothing budgets the adversarial refuters. Hand-dispatch also carries no
-// delivery guarantee: a specialist's report surfaces to the CONTROLLER, so the
-// reviewer has to retrieve it from the specialist's output file or be relayed
-// it, and reports have gone missing both ways. On the workflow path `agent()`
-// returns into the script, so neither problem exists.
+// The fleet's default review path is the controller running `review-eval.mjs`
+// itself, via `eval`. Only the controller can: subagents have no `eval`
+// access, so on the hand-dispatch path neither `selectDimensions` nor the
+// severity-budgeted verify pass runs at all — sizing falls back to the
+// reviewer's own judgement and nothing budgets the adversarial refuters.
+// Hand-dispatch also carries no delivery guarantee: a specialist's report
+// surfaces to the CONTROLLER, so the reviewer has to retrieve it from the
+// specialist's output file or be relayed it, and reports have gone missing
+// both ways. On the `eval` path `agent()` returns into the script, so
+// neither problem exists.
 //
 // All of that rots silently. A default demoted back to a preference still reads
 // as documented; relay prose left in the Phase 3 event loop reads as an
@@ -168,14 +171,14 @@ const TRANSCRIPT_NONEXISTENCE_CLAIM = new RegExp(
   "i",
 );
 
-test("the Reviewers section names the workflow call as the default, ahead of the fallback", () => {
+test("the Reviewers section names the task-member dispatch as the default, ahead of the fallback", () => {
   const dflt = reviewersSection();
-  // Loose on the example's punctuation — reordering the args object or wrapping
-  // after the paren changes no instruction — tight on the call being present.
+  // Loose on the example's punctuation — reordering the args or wrapping
+  // after the paren changes no instruction — tight on the dispatch being present.
   assert.match(
     dflt,
-    /Workflow\([\s\S]{0,12}name: "fleet-ctl:review-pr"/,
-    "run-team no longer names the review-pr Workflow call on the default path",
+    /a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`/,
+    "run-team no longer names the review-pr task-member dispatch on the default path",
   );
   // Pin the SENTENCE, not the word `default`. A bare /default/i over this slice
   // stays green through "that is one option; the fallback below is the default
@@ -183,7 +186,7 @@ test("the Reviewers section names the workflow call as the default, ahead of the
   assert.match(
     dflt,
     /That is the default path/,
-    "the workflow call is no longer stated to be THE default review path",
+    "the task-member dispatch is no longer stated to be THE default review path",
   );
 });
 
@@ -664,27 +667,31 @@ test("the fix-applier's self-retrieval is scoped to its own refuters, on a premi
   );
 });
 
-test("run-team's documented return shape is exactly review-pr.js's actual return", () => {
-  // The one claim in this file pinned against `review-pr.js`'s own return
+test("run-team's documented return shape is exactly review-core.mjs's actual return", async () => {
+  // The one claim in this file pinned against review-core.mjs's own return
   // value — the board-parser test below holds this file's other machine. A
   // prose pin cannot catch this: the sentence stays well-formed while the
-  // script's `return` grows or loses a field, nothing errors, and the
+  // function's `return` grows or loses a field, nothing errors, and the
   // controller looks for a field that is not there or never reads one that is.
   // `dimensionsUnrun` is the worked example: it was added to both sides after
-  // the prose settled, and the ticket asking for this pin still describes the
+  // the prose settled, and the ticket asking for this pin still described the
   // shape as seven fields. That is the drift, and it is exactly what nothing
   // was measuring.
   //
-  // Cross-checked, not transcribed: a literal field list here would be one more
-  // copy to drift. Reading review-pr.js's own `return` means the pin fails in
-  // EITHER direction — a field added to the script and not the prose, or a name
-  // dropped from the prose and not the script.
-  const src = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
-  // The workflow's own result is the file's only top-level `return {` — the
-  // others are inside helpers and indented. Read by brace depth, not by line,
-  // so a field added on a line it shares with another is still a field (#667).
-  const returned = objectKeys(section(src, "\nreturn {", "\n};", "review-pr.js return").replace("\nreturn {", ""));
-  assert.ok(returned.length, "review-pr.js's top-level return no longer parses as a plain object — update this test");
+  // Cross-checked, not transcribed: a literal field list here would be one
+  // more copy to drift. Reading review-core.mjs's own RETURNED OBJECT — run
+  // through a real `runReview()` call via review-host-fixture.mjs's scripted
+  // host, never source text — means the pin fails in EITHER direction: a
+  // field added to the function and not the prose, or a name dropped from
+  // the prose and not the function.
+  const { host } = scriptedHost({
+    snapshot: [SNAP],
+    "review:correctness": [review([finding("critical")])],
+    "verify:correctness": [vote(false), vote(false)],
+  });
+  const result = await runReview({ ...host, pipeline, parallel }, ARGS);
+  const returned = Object.keys(result);
+  assert.ok(returned.length, "runReview's returned object is empty — update this test");
   const documented = section(RUN_TEAM, "It returns `{", "}`", "run-team return shape")
     .replace("It returns `{", "")
     .split(",")
@@ -694,7 +701,7 @@ test("run-team's documented return shape is exactly review-pr.js's actual return
   assert.deepEqual(
     [...documented].sort(),
     [...returned].sort(),
-    "run-team's `It returns …` field list has drifted from review-pr.js's actual return",
+    "run-team's `It returns …` field list has drifted from review-core.mjs's actual return",
   );
 });
 
@@ -703,10 +710,10 @@ test("the member-naming rule still names the fix-applier", () => {
   // file-wide: the Reviewers lead-in says `fix-pr-<pr#>` too (pinned separately
   // above, at the site that DISPATCHES it), and that hit is what a wider match
   // resolves against — leaving this list free to lose the name with the pin
-  // green. The name is what carries the `Agent` tool, so a controller reading
-  // only this list names the member something else and loses delegation with no
-  // error.
-  const naming = section(RUN_TEAM, "**Name every member.**", "**Inverts one level down", "run-team member naming");
+  // green. The name is the ledger token and the hub address, so a controller
+  // reading only this list names the member something else and the ledger
+  // cannot match it.
+  const naming = section(RUN_TEAM, "**Name every member.**", "**A depth-2 member cannot dispatch further", "run-team member naming");
   assert.match(
     naming,
     /fix-pr-<pr#>/,

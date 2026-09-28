@@ -88,7 +88,7 @@ const withTimeout = (pr, ms, what) => Promise.race([
 ]);
 
 // HOME is redirected at every child: gatherSpend() scans $HOME for this cwd's
-// Claude Code transcripts, and an empty directory keeps these runs off the
+// omp session transcripts, and an empty directory keeps these runs off the
 // machine's real session tree.
 const childEnv = (bin, home) => ({ ...process.env, PATH: bin, HOME: home });
 

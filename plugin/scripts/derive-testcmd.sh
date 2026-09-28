@@ -10,7 +10,7 @@
 # silence as a green suite. Refuse rather than guess.
 #
 # The ONE place this inference lives — reused, not reimplemented, by
-# claim-ticket.sh (worktree setup, ref origin/main) and by review-pr.js's
+# claim-ticket.sh (worktree setup, ref origin/main) and by review-core.mjs's
 # snapshot agent (review fan-out, ref HEAD of the repo under review). Two
 # independent copies is what drifts; see #142.
 set -eu
@@ -77,7 +77,7 @@ export LC_ALL=C
 # `node --test` at rc 0 — the other repository's entrypoint, reported as this
 # one's, with no cue anywhere that the question asked was not the question
 # answered. Both consumers act on that string: claim-ticket.sh bakes it into
-# the runner it materialises, and review-pr.js's snapshot agent runs it
+# the runner it materialises, and review-core.mjs's snapshot agent runs it
 # against the repo under review. A silently wrong entrypoint passes
 # vacuously, which is the one outcome the refusal at the foot of this file
 # exists to rule out.
@@ -146,7 +146,7 @@ if [ -n "$pkg" ]; then
   # <ref>:package.json` — indistinguishable by message from a manifest that
   # genuinely does not parse, which is the very distinction the three-outcome
   # split exists to keep. Two consumers read this refusal: claim-ticket.sh
-  # wraps it into its own, and review-pr.js's snapshot agent reads it against
+  # wraps it into its own, and review-core.mjs's snapshot agent reads it against
   # the repo under review. The probe is an INVOCATION rather than a name
   # lookup, because those are not the same question: `command -v` answers only
   # that a PATH entry named `node` exists and is executable, which a
@@ -172,7 +172,7 @@ fi
 # matched, rc 1 none did, rc 2+ the scan itself broke — so folding 2 into 1
 # lets grep's own failure reach this refusal indistinguishable from a repo
 # that genuinely carries no test files, handing claim-ticket.sh and
-# review-pr.js's snapshot agent the wrong cause for a listing nothing
+# review-core.mjs's snapshot agent the wrong cause for a listing nothing
 # actually read. #1543, independently reported as #1230, whose two open
 # questions this fix already settles: the grep-died arm below exits 1 like
 # every other refusal in this script — `die` enforces that unconditionally,

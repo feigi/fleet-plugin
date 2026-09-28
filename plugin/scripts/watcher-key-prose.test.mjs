@@ -38,7 +38,7 @@ const FLEET = REPO;
 // claim about which paths this test does and does not police, and a bare
 // `readdirSync` would silently annex `docs/`, `.github/` and the rest of the
 // repo root as out of scope.
-const WALK = ["commands", "scripts", "skills", "agents", "workflows"];
+const WALK = ["commands", "scripts", "skills", "agents"];
 const CI_AND_STALENESS = readFileSync(
   join(FLEET, "skills", "run-team", "references", "ci-and-staleness.md"),
   "utf8",

@@ -109,10 +109,9 @@ For each labeled PR clearing the hold rule, lowest first:
      "$pr_head"
    ```
 
-   **Fire once; only the poll is ever re-issued.** `pre` is the one reading nothing after the rebase can reconstruct: once the rebase lands, the ref it was read from *is* the rebased head. So a fire block run a second time reads the rebased head as its `pre`, `gh pr update-branch` answers `UNPROCESSABLE: There are no new commits on the base branch`, and a rebase that landed reports as the already-current row below, never verified. The poll only reads, so re-issuing it with the same `rc` and `pre` is safe — and it is the half that gets cut off. Each of its loops is capped at 60 × 5s, and the PR object's measured lag alone outruns both harnesses' defaults on the common landed-with-lag path (#1895's own repro: 75.6s wall-clock at re-poll attempt 14, 129.2s at attempt 24 — a separate measurement from the pr_head-catchup pass below, whose attempt 14/24 wall-clock times differ from these). One re-issue is enough, never a loop of them: the ref poll alone ends inside the 600000 ceiling below, so a re-issued poll finds the ref already moved on its first read and waits out only the PR object's cap. The poll splits by harness:
+   **Fire once; only the poll is ever re-issued.** `pre` is the one reading nothing after the rebase can reconstruct: once the rebase lands, the ref it was read from *is* the rebased head. So a fire block run a second time reads the rebased head as its `pre`, `gh pr update-branch` answers `UNPROCESSABLE: There are no new commits on the base branch`, and a rebase that landed reports as the already-current row below, never verified. The poll only reads, so re-issuing it with the same `rc` and `pre` is safe — and it is the half that gets cut off. Each of its loops is capped at 60 × 5s, and the PR object's measured lag alone outruns that cap on the common landed-with-lag path (#1895's own repro: 75.6s wall-clock at re-poll attempt 14, 129.2s at attempt 24 — a separate measurement from the pr_head-catchup pass below, whose attempt 14/24 wall-clock times differ from these). One re-issue is enough, never a loop of them: the ref poll alone ends inside the 600000 ceiling below, so a re-issued poll finds the ref already moved on its first read and waits out only the PR object's cap. The poll:
 
-   CLAUDE: run the poll block as one foreground `Bash` call with its `timeout` at 600000, the tool's ceiling, not its 120000 default; if it is still cut off before its report line — both caps back to back can outrun even the ceiling — re-issue the poll block once with the same `rc` and `pre`, never the fire block.
-   OMP: the `Bash` `timeout` ceiling does not apply — omp `bash` backgrounds any call past about 60s even with `timeout` set — so run the poll block in one Python `eval` cell through `subprocess.run`, its cell `timeout` at 900s or more, above both caps back to back; never `bash` plus `wait`.
+   `bash` backgrounds any call past about 60s even with `timeout` set — so run the poll block in one Python `eval` cell through `subprocess.run`, its cell `timeout` at 900s or more, above both caps back to back; never `bash` plus `wait`.
 
    **Poll `git ls-remote`, not `gh pr view headRefOid`** — the PR object's head is precisely the field that desyncs, so polling it asks the one source that can be wrong about the thing you are waiting for. Measured, feigi/claude-config#903: the rebase landed and moved the branch ref, `headRefOid` stayed on the pre-rebase SHA with `mergeable_state: unknown` and no CI run on the new head, and the loop burned all 60 iterations reading a landed rebase as un-landed — straight into the fallback, whose local rebase would then have replayed commits the remote already carried. `ls-remote` reads the ref itself and carries no local state, the same reason the `fetch.prune` note below re-derives a reading from `git ls-remote origin` rather than trusting a number measured while the ref was missing. Keep the `headRefOid` read, as the `pr_head` the printf reports: it is no longer the gate, and its *disagreement* with `post` is the desync signal you want on the record. That is why the poll block re-polls it only once the ref has moved — to let the PR object catch up, never to decide whether the rebase landed.
 
@@ -181,10 +180,9 @@ For each labeled PR clearing the hold rule, lowest first:
 
 2. Watch checks settle **on the rebased head**. A missing release label (`patch`/`minor`/`major`) fails `validate-release-label` — add the one matching; `release-label.yml` defines that job and exits 1 when the count of those three is zero. A stale `rebase-check` failure usually means step 1 has not landed. Where a repo chains jobs behind that check with `needs:`, they come back `skipped` rather than red and the currency check is the only thing to fix — check `ci.yml` for a `needs:` chain before assuming that: it declares none as of this reading, so no job is currently skipped behind `rebase-check`.
 
-   **Hold the wait inside one blocking call — you are turn-based and cannot "keep an eye on" a run.** If you push and then end your turn, your pass stops there and nothing resumes it: whatever wakes you is external and may never come. Observed repeatedly — a bot rebases, pushes, goes idle, and the queue silently stalls with the PR one command from merging. Block instead, on the run step 3's first gate reading names — its `ci.runId` — the wait split by harness:
+   **Hold the wait inside one blocking call — you are turn-based and cannot "keep an eye on" a run.** If you push and then end your turn, your pass stops there and nothing resumes it: whatever wakes you is external and may never come. Observed repeatedly — a bot rebases, pushes, goes idle, and the queue silently stalls with the PR one command from merging. Block instead, on the run step 3's first gate reading names — its `ci.runId` — the wait:
 
-   CLAUDE: `gh run watch <run-id> --exit-status` returns only when the run reaches a terminal state; if it outlives your shell timeout, re-issue it — still one blocking call per turn, not an idle turn.
-   OMP: `gh run watch` does not apply — omp `bash` backgrounds any call past about 60s even with `timeout` set, so hold the wait in one Python `eval` cell that polls `gh run view <run-id> --json status,conclusion` through `subprocess.run` until `status` reads `completed`, its cell `timeout` well above the CI cycle.
+   `bash` backgrounds any call past about 60s even with `timeout` set, so hold the wait in one Python `eval` cell that polls `gh run view <run-id> --json status,conclusion` through `subprocess.run` until `status` reads `completed`, its cell `timeout` well above the CI cycle.
 
    A CI cycle here runs ~5-6 minutes. Never `sleep`-poll in a loop you exit early.
 
@@ -283,15 +281,13 @@ Three dots, never two: a two-dot diff on a stale branch renders `main`'s gains a
 - Every 60s, poll `gh pr list --state open --label ready-to-merge --json number`. A number not in the seed → **re-run selection from the top**, hold rule included, drain what it makes actionable, and restart the grace after that drain. A failed poll is no reading: keep the seed and poll again.
 - 15 minutes with no new label → report and exit.
 
-The wait itself splits by harness:
+The wait:
 
-CLAUDE: hold the grace in foreground `Bash` calls of at most 4 minutes each, polling every 60s inside each — about four per grace — so no turn outlives the 5-minute prompt-cache cliff.
-OMP: the 4-minute foreground `Bash` chunking does not apply — hold the whole grace in one Python `eval` cell that polls `gh` through `subprocess.run`, its cell `timeout` at 1000s or more; never `bash` plus `wait`: omp `bash` backgrounds any call past about 60s even with `timeout` set, and `wait` then returns "Skipped due to a queued background completion".
+`bash` backgrounds any call past about 60s even with `timeout` set — hold the whole grace in one Python `eval` cell that polls `gh` through `subprocess.run`, its cell `timeout` at 1000s or more; never `bash` plus `wait`, which then returns "Skipped due to a queued background completion".
 
 **One report, at exit, and none before it** — every PR this pass touched, in the vocabulary above, a pass that merged nothing included. The controller reaps on that report and records each `held-behind-#<lower>` on the held ticket's row, so a report sent mid-pass is one it acts on too early.
 
-CLAUDE: `SendMessage` the report to the controller, then exit.
-OMP: a separate send does not apply — your `task` result is the report, delivered when you exit.
+Your `task` result is the report, delivered when you exit.
 
 ## Then stay armed
 
@@ -333,4 +329,4 @@ Arm with `persistent: true`, description `ready-to-merge label on this repo's PR
 - 60s poll — remote API, stay off rate limits.
 - A held PR stays in `seen`, so its own label will not re-fire. Fine: what unblocks it is the **lower** PR getting labeled, which does fire, and step 4's re-evaluation picks up both in numeric order.
 
-On an event, do not merge that PR on sight — **re-run selection from the top**, hold rule included. Report each outcome and leave the monitor armed. One watch per session; stop with TaskStop.
+On an event, do not merge that PR on sight — **re-run selection from the top**, hold rule included. Report each outcome and leave the monitor armed. One watch per session; stop it with `proc://<id>/kill`.

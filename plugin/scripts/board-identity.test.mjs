@@ -77,7 +77,7 @@ function gitRepo(prefix) {
 }
 
 // HOME is redirected at every child: gatherSpend() scans $HOME for this cwd's
-// Claude Code transcripts, and pointing it at an empty directory keeps these
+// omp session transcripts, and pointing it at an empty directory keeps these
 // runs off the machine's real session tree.
 function runBuild(cwd, bin) {
   const home = mkdtempSync(join(tmpdir(), "board-id-home-"));

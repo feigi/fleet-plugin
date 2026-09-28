@@ -59,7 +59,7 @@ function readRegistry(registryPath) {
 }
 
 // See scripts/fleet-run's own selectEntry for the full measurement (a
-// Claude --scope=project install adds an entry alongside any --scope=user
+// `--scope=project` install adds an entry alongside any `--scope=user`
 // one in the SAME registry this reads) — duplicated rather than shared for
 // the same "this file has no siblings once it matters" reasoning fleet-run's
 // header gives for its own duplication.
@@ -76,9 +76,9 @@ function selectEntry(entries) {
 
 // Every regular file under `<root>/scripts`, repo-relative, sorted — a
 // filesystem walk rather than `git ls-files`: an installed copy need not
-// carry `.git` at all (a directory-source Claude install excludes it,
-// measured, ADR 0003), so git is not an instrument this check can rely on
-// being present in the tree it is reading.
+// carry `.git` at all (a directory-source install can exclude it, ADR
+// 0003), so git is not an instrument this check can rely on being present
+// in the tree it is reading.
 function walkFiles(dir, base = dir, out = []) {
   let entries;
   try {
@@ -117,7 +117,6 @@ function digestScriptsDir(root) {
 }
 
 function kindOf(installPath) {
-  if (installPath.includes(`${path.sep}.claude${path.sep}plugins${path.sep}cache${path.sep}`)) return "claude-install";
   if (installPath.includes(`${path.sep}.omp${path.sep}plugins${path.sep}cache${path.sep}`)) return "omp-install";
   return "unrecognized-install-shape";
 }
@@ -166,14 +165,10 @@ function main() {
   }
 
   const home = os.homedir();
-  const regs = {
-    claude: readRegistry(path.join(home, ".claude", "plugins", "installed_plugins.json")),
-    omp: readRegistry(path.join(home, ".omp", "plugins", "installed_plugins.json")),
-  };
-  const present = ["claude", "omp"].filter((h) => regs[h].present);
+  const reg = readRegistry(path.join(home, ".omp", "plugins", "installed_plugins.json"));
 
-  if (present.length === 0) {
-    process.stderr.write(`${NAME}: no registry carries "${PLUGIN_KEY}" — ${regs.claude.reason}; ${regs.omp.reason}\n`);
+  if (!reg.present) {
+    process.stderr.write(`${NAME}: no registry carries "${PLUGIN_KEY}" — ${reg.reason}\n`);
     process.exit(2);
   }
 
@@ -188,73 +183,68 @@ function main() {
 
   let failed = false;
 
-  for (const h of present) {
-    const r = regs[h];
-    const kind = kindOf(r.installPath);
-    process.stdout.write(`${NAME}: [${h}] Install root: ${r.installPath}\n`);
-    process.stdout.write(`${NAME}: [${h}] kind: ${kind}\n`);
-    process.stdout.write(`${NAME}: [${h}] version: ${r.version ?? "(none recorded)"}\n`);
-    process.stdout.write(`${NAME}: [${h}] gitCommitSha: ${r.gitCommitSha ?? "(none recorded)"}\n`);
+  const kind = kindOf(reg.installPath);
+  process.stdout.write(`${NAME}: Install root: ${reg.installPath}\n`);
+  process.stdout.write(`${NAME}: kind: ${kind}\n`);
+  process.stdout.write(`${NAME}: version: ${reg.version ?? "(none recorded)"}\n`);
+  process.stdout.write(`${NAME}: gitCommitSha: ${reg.gitCommitSha ?? "(none recorded)"}\n`);
 
-    const digest = digestScriptsDir(r.installPath);
-    if (digest.error) {
-      process.stdout.write(`${NAME}: [${h}] scripts/ digest: UNAVAILABLE — ${digest.error}\n`);
-    } else {
-      process.stdout.write(`${NAME}: [${h}] scripts/ digest: sha256 ${digest.digest} (${digest.fileCount} files)\n`);
-    }
-
-    const installedRunPath = path.join(r.installPath, "scripts", "fleet-run");
-    let installedRunBuf = null;
-    let installedRunError = null;
-    try {
-      installedRunBuf = fs.readFileSync(installedRunPath);
-    } catch (e) {
-      installedRunError = `${e.code || e.message}`;
-    }
-
-    if (placedError) {
-      process.stdout.write(`${NAME}: [${h}] Resolver drift: REFUSED — placed copy ${placedPath} unreadable (${placedError})\n`);
-      failed = true;
-    } else if (installedRunError) {
-      process.stdout.write(`${NAME}: [${h}] Resolver drift: REFUSED — installed copy ${installedRunPath} unreadable (${installedRunError})\n`);
-      failed = true;
-    } else if (!placedBuf.equals(installedRunBuf)) {
-      process.stdout.write(
-        `${NAME}: [${h}] Resolver drift: REFUSED — ${placedPath} (sha256 ${sha256(placedBuf)}) `
-        + `!= ${installedRunPath} (sha256 ${sha256(installedRunBuf)})\n`,
-      );
-      failed = true;
-    } else {
-      process.stdout.write(`${NAME}: [${h}] Resolver drift: none — ${placedPath} matches ${installedRunPath}\n`);
-    }
+  const digest = digestScriptsDir(reg.installPath);
+  if (digest.error) {
+    process.stdout.write(`${NAME}: scripts/ digest: UNAVAILABLE — ${digest.error}\n`);
+  } else {
+    process.stdout.write(`${NAME}: scripts/ digest: sha256 ${digest.digest} (${digest.fileCount} files)\n`);
   }
 
-  if (present.includes("omp")) {
-    let ompConfigText = null;
-    let ompConfigError = null;
-    try {
-      ompConfigText = fs.readFileSync(ompConfigPath, "utf8");
-    } catch (e) {
-      ompConfigError = `${e.code || e.message}`;
-    }
-    const remedy = `add \`enabledProviders: ["claude-plugins"]\` to ${ompConfigPath} — plugin agents are `
-      + "invisible on omp without it (measured, can1357/oh-my-pi#11362); this check never writes it for you";
-    if (ompConfigError) {
-      process.stdout.write(`${NAME}: [omp] enabledProviders: REFUSED — cannot read ${ompConfigPath} (${ompConfigError})\n`);
-      process.stdout.write(`${NAME}: [omp] remedy: ${remedy}\n`);
-      failed = true;
+  const installedRunPath = path.join(reg.installPath, "scripts", "fleet-run");
+  let installedRunBuf = null;
+  let installedRunError = null;
+  try {
+    installedRunBuf = fs.readFileSync(installedRunPath);
+  } catch (e) {
+    installedRunError = `${e.code || e.message}`;
+  }
+
+  if (placedError) {
+    process.stdout.write(`${NAME}: Resolver drift: REFUSED — placed copy ${placedPath} unreadable (${placedError})\n`);
+    failed = true;
+  } else if (installedRunError) {
+    process.stdout.write(`${NAME}: Resolver drift: REFUSED — installed copy ${installedRunPath} unreadable (${installedRunError})\n`);
+    failed = true;
+  } else if (!placedBuf.equals(installedRunBuf)) {
+    process.stdout.write(
+      `${NAME}: Resolver drift: REFUSED — ${placedPath} (sha256 ${sha256(placedBuf)}) `
+      + `!= ${installedRunPath} (sha256 ${sha256(installedRunBuf)})\n`,
+    );
+    failed = true;
+  } else {
+    process.stdout.write(`${NAME}: Resolver drift: none — ${placedPath} matches ${installedRunPath}\n`);
+  }
+
+  let ompConfigText = null;
+  let ompConfigError = null;
+  try {
+    ompConfigText = fs.readFileSync(ompConfigPath, "utf8");
+  } catch (e) {
+    ompConfigError = `${e.code || e.message}`;
+  }
+  const remedy = `add \`enabledProviders: ["claude-plugins"]\` to ${ompConfigPath} — plugin agents are `
+    + "invisible on omp without it (measured, can1357/oh-my-pi#11362); this check never writes it for you";
+  if (ompConfigError) {
+    process.stdout.write(`${NAME}: enabledProviders: REFUSED — cannot read ${ompConfigPath} (${ompConfigError})\n`);
+    process.stdout.write(`${NAME}: remedy: ${remedy}\n`);
+    failed = true;
+  } else {
+    const providers = enabledProvidersFromYaml(ompConfigText);
+    if (providers.includes("claude-plugins")) {
+      process.stdout.write(`${NAME}: enabledProviders: includes claude-plugins (${ompConfigPath})\n`);
     } else {
-      const providers = enabledProvidersFromYaml(ompConfigText);
-      if (providers.includes("claude-plugins")) {
-        process.stdout.write(`${NAME}: [omp] enabledProviders: includes claude-plugins (${ompConfigPath})\n`);
-      } else {
-        process.stdout.write(
-          `${NAME}: [omp] enabledProviders: REFUSED — ${ompConfigPath} does not list claude-plugins `
-          + `(found: ${providers.length ? providers.join(", ") : "(no enabledProviders key)"})\n`,
-        );
-        process.stdout.write(`${NAME}: [omp] remedy: ${remedy}\n`);
-        failed = true;
-      }
+      process.stdout.write(
+        `${NAME}: enabledProviders: REFUSED — ${ompConfigPath} does not list claude-plugins `
+        + `(found: ${providers.length ? providers.join(", ") : "(no enabledProviders key)"})\n`,
+      );
+      process.stdout.write(`${NAME}: remedy: ${remedy}\n`);
+      failed = true;
     }
   }
 

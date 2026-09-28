@@ -130,7 +130,7 @@ for (const [name, prompt] of [
 // --- Part 2.5 (#1721): where the snapshot/scratch dir are named, per prompt
 // Each prompt's own claim (SCRATCH_NAMED_SPECIALIST / SCRATCH_NAMED_REFUTER,
 // cwd-isolation-pins.mjs says why the two differ). Regression pin: reverting
-// review-pr.js's specialist prompt back to "above" while leaving this file on
+// review-core.mjs's specialist prompt back to "above" while leaving this file on
 // "in this prompt" passed the entire suite otherwise (measured at PR #1825's
 // review) — nothing previously pinned past PWD_FIRST's "no-run zone from then
 // on" on either prompt.

@@ -92,10 +92,9 @@ function main() {
 
   const home = os.homedir();
   const PLUGIN_KEY = "fleet-ctl@fleet-plugin";
-  const claudeInstall = readInstallPath(path.join(home, ".claude", "plugins", "installed_plugins.json"), PLUGIN_KEY);
   const ompInstall = readInstallPath(path.join(home, ".omp", "plugins", "installed_plugins.json"), PLUGIN_KEY);
   const parent = canonical(path.dirname(ownDir));
-  const runningFromInstall = parent === canonical(claudeInstall) || parent === canonical(ompInstall);
+  const runningFromInstall = parent === canonical(ompInstall);
 
   const target = path.join(home, ".fleet", "bin", "fleet-run");
 
@@ -107,7 +106,6 @@ function main() {
   if (!runningFromInstall && !fromCheckoutFlag) {
     die(
       `refusing to place ${target} from ${ownDir}, which is not a registry-resolved install (looked at `
-      + `${claudeInstall ? `claude: ${claudeInstall}` : "claude: not installed"}; `
       + `${ompInstall ? `omp: ${ompInstall}` : "omp: not installed"}) — re-run with --from-checkout to take `
       + "ADR 0003's one-time bootstrap exception explicitly",
     );
@@ -117,7 +115,6 @@ function main() {
     process.stderr.write(
       `${NAME}: BOOTSTRAP EXCEPTION — running from a source checkout (${ownDir}), not a registry-resolved `
       + "install (looked at "
-      + `${claudeInstall ? `claude: ${claudeInstall}` : "claude: not installed"}; `
       + `${ompInstall ? `omp: ${ompInstall}` : "omp: not installed"}). `
       + "ADR 0003 licenses this ONCE, as the Resolver's own bootstrap, because no install anywhere yet carries "
       + "scripts/fleet-run for a registry-driven copy to come from. Every other fleet script must run through "

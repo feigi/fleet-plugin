@@ -13,11 +13,11 @@ import { stripComments } from "./strip-comments.mjs";
 // anchor-finding half to prose-pin.mjs's `between()`; the other two
 // reimplemented the same `indexOf`/`assert.notEqual` pair by hand. Only the
 // extraction MACHINERY moves here; the prompt RULE PROSE itself stays inline
-// in review-pr.js/review-core.mjs per #496's brief against a shared source for
+// in review-core.mjs per #496's brief against a shared source for
 // the rules themselves.
 const REPO = join(import.meta.dirname, "..");
 
-// `file` is relative to the plugin root (e.g. "workflows/review-pr.js").
+// `file` is relative to the plugin root (e.g. "scripts/review-core.mjs").
 // Extraction runs against the comment-stripped text, not the raw source: a
 // block-commented `agent(...)` call still contains the whole template, so
 // extracting from raw source would render dead text and report every

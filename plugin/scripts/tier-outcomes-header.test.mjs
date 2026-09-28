@@ -546,13 +546,10 @@ test("the header's `run_date` source claims still hold against the query, the sc
   // The DERIVED half as code, not prose: the date comes off a transcript
   // mtime. A scraper switched to a clock read would make this header's
   // central contrast false while every prose pin above stayed green. Bound
-  // to EACH of member-outcomes.mjs's two independent stamp sites separately
-  // — rowsForSession (the live path every real caller uses to build rows)
-  // and rowsForOmpSession (the omp-session sibling) — rather than scanning
-  // the whole file: `assert.match` over MEMBER_SRC as a whole is satisfied
-  // by EITHER site alone, so a regression confined to just the live path
-  // left the header's contrast false while this assertion, and the suite,
-  // stayed green.
+  // to rowsForSession, member-outcomes.mjs's one stamp site, rather than
+  // scanning the whole file — a regression outside this slice could
+  // otherwise satisfy `assert.match` over MEMBER_SRC as a whole through
+  // unrelated text elsewhere.
   const rowsForSessionSrc = between(
     MEMBER_SRC,
     "export function rowsForSession(sessionDir, stats = {}) {",
@@ -568,23 +565,6 @@ test("the header's `run_date` source claims still hold against the query, the sc
     rowsForSessionSrc,
     /const run_date = newest \? new Date\(newest\)/,
     "member-outcomes.mjs's rowsForSession no longer stamps `run_date` from that mtime",
-  );
-
-  const rowsForOmpSessionSrc = between(
-    MEMBER_SRC,
-    "function rowsForOmpSession(sessionDir, stats) {",
-    "export function rowsForSession",
-    "member-outcomes.mjs's rowsForOmpSession",
-  );
-  assert.match(
-    rowsForOmpSessionSrc,
-    /newest = Math\.max\(newest, statSync\(.+\)\.mtimeMs\)/,
-    "member-outcomes.mjs's rowsForOmpSession no longer takes its date from a transcript mtime",
-  );
-  assert.match(
-    rowsForOmpSessionSrc,
-    /const run_date = newest \? new Date\(newest\)/,
-    "member-outcomes.mjs's rowsForOmpSession no longer stamps `run_date` from that mtime",
   );
 
   // The RULED-BY-HAND half as SKILL.md's stated duty. If this file ever becomes

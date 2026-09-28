@@ -7,11 +7,11 @@
 //
 // Contract, fixed on #1314 and recorded with the key sets on its closing
 // comment: three key sets (agents, skills, commands), enforced in BOTH
-// directions — an unknown key is a violation (half a contract leaves
-// omp-side or Claude-side additions silent) and a missing REQUIRED key is a
-// violation — plus a third class, FORBIDDEN: a key that IS documented on a
-// harness but silently re-routes a member's tier, tree, or dispatch rather
-// than merely doing nothing. `frontmatter-allowlist.json` carries the data;
+// directions — an unknown key is a violation (half a contract leaves an
+// undocumented addition silent) and a missing REQUIRED key is a
+// violation — plus a third class, FORBIDDEN: a key that IS documented but
+// silently re-routes a member's tier, tree, or dispatch rather than merely
+// doing nothing. `frontmatter-allowlist.json` carries the data;
 // this file carries no key names of its own.
 //
 // Failure contract: exit 1 per violation, each printed as
@@ -100,7 +100,10 @@ export function kindForPath(anyPath) {
  * Reads the flat `key: value` fields out of a `---`-fenced frontmatter
  * block. `{ fields: [{ key, value, line }] }` or `{ error }`. `line` is the
  * 1-based source line the field's `key:` token sits on, so callers can print
- * `file:line:` without re-deriving it.
+ * `file:line:` without re-deriving it. A value wrapped in a single matching
+ * pair of double or single quotes has them stripped (YAML's own scalar
+ * quoting) — `model: "@slow:xhigh"` and `model: @slow:xhigh` parse to the
+ * same value.
  */
 export function parseFrontmatter(text) {
   const src = String(text ?? "");
@@ -120,7 +123,10 @@ export function parseFrontmatter(text) {
     if (line.trim() === "") continue;
     const m = /^([A-Za-z][\w-]*):\s?(.*)$/.exec(line);
     if (!m) return { error: `unparseable frontmatter at line ${sourceLine}: ${JSON.stringify(line)}` };
-    fields.push({ key: m[1], value: m[2].trim(), line: sourceLine });
+    let value = m[2].trim();
+    const quoted = /^"(.*)"$/.exec(value) || /^'(.*)'$/.exec(value);
+    if (quoted) value = quoted[1];
+    fields.push({ key: m[1], value, line: sourceLine });
   }
   return { fields };
 }

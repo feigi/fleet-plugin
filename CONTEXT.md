@@ -1,28 +1,24 @@
 # Fleet Plugin
 
 The **fleet**: scripts, skills, commands and agents that run parallel agents against
-a repo's issue tracker, packaged as a plugin and supported on two harnesses
-indefinitely. This glossary covers the vocabulary those artefacts share; it is a
-glossary only, not a spec.
+a repo's issue tracker, packaged as an omp.sh plugin. This glossary covers the
+vocabulary those artefacts share; it is a glossary only, not a spec.
 
 ## Language
 
 ### Harness
 
 **Harness**:
-The agent environment the fleet is loaded into — Claude Code or omp.sh. Both are
-supported permanently and neither is primary. A fleet artefact that names one
-harness's tools without the other's is harness-bound, which is a defect rather than
-a variant.
+The agent environment the fleet is loaded into — omp.sh. A fleet artefact
+that names another harness's tools is a defect.
 _Avoid_: host, platform, client, runtime
 
 ### Platform
 
 **Platform**:
 The operating system the fleet's scripts run on — macOS, Linux, or Windows via WSL.
-Native Windows is not a platform (ADR 0009). Independent of **Harness**: every
-platform runs both harnesses. An artefact that works on only some platforms is a
-defect, with the same standing as a harness-bound one.
+Native Windows is not a platform (ADR 0009). Independent of **Harness**. An
+artefact that works on only some platforms is a defect.
 _Avoid_: OS, host, environment
 
 ### Runtime
@@ -140,20 +136,16 @@ _Avoid_: undecided, unclear
 ### Install
 
 **Install root**:
-The directory a harness actually loaded the plugin from, as recorded in its own
-registry. Never the checkout, and never a path any artefact may write down: Claude
-Code's is version- or commit-stamped and changes on every install, omp's is named
-differently again.
+The directory omp actually loaded the plugin from, as recorded in its own
+registry. Never the checkout, and never a path any artefact may write down: it
+is version- or commit-stamped and changes on every install.
 _Avoid_: cache dir, plugin dir, install path
 
 **Resolver**:
 The shipped executable that maps a script name to the Install root and execs it there.
 The single door between prose and code — a callsite naming any other path is a defect.
-Placed once by hand outside the plugin, because it cannot resolve itself. Picks the
-running harness from ambient environment signals, falling back to a byte-identical-`scripts/`
-shortcut and then to a refusal naming both installs; `FLEET_HARNESS=claude` or
-`FLEET_HARNESS=omp` overrides the pick outright when a callsite must be operable
-under a genuine misdetection.
+Placed once by hand outside the plugin, because it cannot resolve itself. Reads
+omp's own registry and nothing else.
 _Avoid_: shim, wrapper, launcher
 
 **Provenance check**:
@@ -169,28 +161,26 @@ tracked catalog, which names the shipped branch and nothing else.
 _Avoid_: local marketplace, dev source
 
 **Install-time precondition**:
-A harness setting the fleet depends on, set once by the operator at install and never
+An omp setting the fleet depends on, set once by the operator at install and never
 written by a run — a run that wrote one would be changing every other session on the
-machine to dispatch its own members. Two exist, both on omp, both session-wide:
-`enabledProviders: ["claude-plugins"]`, and `task.agentModelOverrides` carrying
-the fleet's Tier routes (ADR 0011). ADR 0003 point 8 carries the first's required
-value, its global and project-scoped set paths, and the read that verifies it;
-`tier-roles.mjs --check` is the read that verifies the second.
+machine to dispatch its own members. Two exist, both session-wide:
+`enabledProviders: ["claude-plugins"]` (omp's provider name for marketplace
+plugins — not a Claude artefact), and `modelRoles.slow|task|smol` pointing at
+models this install has, the fleet's tier routes (ADR 0011, ADR 0014). ADR
+0003 point 8 carries the first's required value, its global and
+project-scoped set paths, and the read that verifies it; `tier-roles.mjs
+--check` is the read that verifies the second.
 _Avoid_: requirement, dependency, flag
 
 ### Coordination
 
 **Dispatch**:
 Starting a fleet member — a fresh agent under a new identity, never a resumed
-one. The controller-to-member vocabulary fixed on #1316, true on both
-harnesses.
+one. The controller-to-member vocabulary fixed on #1316.
 _Avoid_: spawn, `Agent(...)`, `task`
 
 **Send**:
-Messaging a live member. The channel differs by harness — `SendMessage` to a
-named agent on Claude, `hub send` on omp — but the neutral contract only ever
-says Send.
-_Avoid_: SendMessage, hub send
+Messaging a live member — `hub send`.
 
 **Wake**:
 A Send that resumes a finished member's transcript. Forbidden for a refill: a
@@ -199,17 +189,14 @@ its old one.
 _Avoid_: resume, re-task
 
 **Settle**:
-A member's job reaching a terminal outcome — `completed`/`failed`/`cancelled`
-on omp, the corresponding terminal state on Claude. Distinct from the
-member's liveness, which is a separate axis on omp (`running`/`idle`/
-`parked`).
+A member's job reaching a terminal outcome — `completed`/`failed`/`cancelled`.
+Distinct from the member's liveness, which is a separate axis
+(`running`/`idle`/`parked`).
 _Avoid_: complete, truncated
 
 **Consume**:
-The controller deliberately taking a settled result. The discipline holds on
-both harnesses even though the hazard behind it does not: an unconsumed
-Claude result is lost, an unconsumed omp result auto-delivers or is still
-readable in a later `hub jobs`/`wait` snapshot.
+The controller deliberately reading and reconciling a settled result —
+results auto-deliver, so the discipline is reconciliation, not retrieval.
 _Avoid_: return value, retrieve
 
 **Liveness mark**:
@@ -259,69 +246,24 @@ labels, reports once and exits. A label seen after the exit starts a new Pass un
 fresh name.
 _Avoid_: wave, batch, cycle, round
 
-### Dialect
-
-**Marked line**:
-A one-line, per-harness statement of a dispatch instruction, adjacent to its
-partner and pinned as its own slice — never a section. The marker is the
-line's first token once any GUTTER is stripped, `CLAUDE: ` or `OMP: `
-(uppercase, colon, space), so a pin addresses exactly one line by
-`^\s*(?:>+\s*)?(CLAUDE|OMP): ` in markdown prose — the shape that keeps a
-two-dialect rule from becoming the fat slice that let 22 of 33 mutations
-survive. Three gutter shapes are recognized, one per carrier: a markdown
-blockquote (`>`, prose embedded in a quoted dispatch prompt — the gutter is
-a rendering artifact, not part of the marker); a `.js` `//` line comment
-(the shape a future single-line comment pair would use); and a bare line
-inside a `/* ... */` block comment, no per-line gutter at all — #1361's
-`review-pr.js` `resumeFor` cross-reference, the first `.js` marked pair,
-uses this third shape, because `.js` files (`workflows/`) cannot `import` a
-shared prose module and so carry the pair as a documentary code comment
-instead of prose. Scope: `.md` under `skills/`, `commands/`, `agents/`, and
-`.js` under `workflows/`; `docs/` is out (read by humans, never dispatched).
-A marker written as a markdown code EXAMPLE (inside a ` ``` ` fence) is
-scanned and pinned exactly like real prose — fences are not tracked, by
-design (#1346): an example is a pair, so write examples clean, rather than
-risk a real pair mistakenly indented into a fence going unseen. Neither
-token occurs anywhere else in the prose tree (verified 2026-09-09).
-_Avoid_: dialect card, shell
-
-**Pair**:
-The two adjacent Marked lines for one rule. A same-rule pair differs only in
-dialect tokens (tool names, agent-name conventions) once those are stripped;
-a does-not-apply pair states the absence explicitly, on the harness where the
-rule does not hold, using one of two recognized literal idioms — **"does not
-apply"** (the wording `member-lifecycle.md`'s grandchild-recipe and
-result-consumption pairs use) or **"has no slot for"** (the Settle/liveness
-pair's wording, added after #1346's review found it being misclassified as a
-same-rule pair the equality bar could never satisfy) — grepped before fixing
-either here, never a translation of the rule that does hold on the other
-harness. #1346's divergence check greps for these exact phrases to classify
-a pair; a pair carrying a recognized idiom on both lines, or on neither, is
-a defect, not a third shape.
-_Avoid_: translation, duplicate
-
 ### Tier
 
 **Declared tier**:
-The agent file's own frontmatter, harness-keyed: `model` as a bare alias (a
-vendor alias on Claude, a Tier route's tier name on omp), `effort` for
-Claude, `thinking-level` for omp. What the file says, version-controlled,
-and the only intent this port records — no dispatch-time ledger entry
+The agent file's own frontmatter `model: "@<role>:<level>"` — a fleet tier
+route with an explicit level; what the file says, version-controlled, and
+the only intent this port records — no dispatch-time ledger entry
 duplicates it.
 _Avoid_: recorded intent, dispatch-time intent
 
 **Resolved tier**:
-What the harness wrote about the member after dispatch: Claude's transcript
-`model`/`effort`, omp's `session_init.resolvedModel` identity plus the
-`thinking_level_change.thinkingLevel` event — never the `:suffix`, which is
-absent when resolution came from an agent's own frontmatter rather than a
-`modelRoles` alias.
+What omp wrote about the member after dispatch: `session_init.resolvedModel`
+identity plus the `thinking_level_change.thinkingLevel` event — never the
+`:suffix`, which is absent when resolution came from an agent's own
+frontmatter rather than a `modelRoles` alias.
 _Avoid_: effective tier, actual model
 
 **Tier route**:
-What turns a Declared tier's alias into a model on omp — the operator's
-`task.agentModelOverrides` entry for that definition, `@<role>:<level>`,
-derived from the definition and never hand-written, so `opus`/`sonnet`/
-`haiku` name the `slow`/`task`/`smol` roles rather than a vendor model.
-Claude has no route: the alias is the model.
+What turns a Declared tier's alias into a model — the operator's
+`modelRoles.<role>` entry (`slow`/`task`/`smol`), never a vendor id in the
+definition; no per-agent override record exists (ADR 0014).
 _Avoid_: mapping, override, translation

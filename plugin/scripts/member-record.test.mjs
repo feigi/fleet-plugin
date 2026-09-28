@@ -5,72 +5,26 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
 import {
-  encodeClaudeProjectDir, encodeOmpProjectDir,
-  readClaudeMember, readClaudeSession, claudeRoleSignals,
+  encodeProjectDir,
   readOmpMember, readOmpSession, foldOmpTranscript,
   readMembers,
 } from "./member-record.mjs";
 
 // ---------------------------------------------------------------------------
-// cwd encoders, verified against real directory names
+// cwd encoder, verified against real directory names
 // ---------------------------------------------------------------------------
 
-test("encodeClaudeProjectDir replaces every non-alphanumeric character, dots included", () => {
-  assert.equal(encodeClaudeProjectDir("/Users/x/.claude"), "-Users-x--claude");
-  assert.equal(encodeClaudeProjectDir("/Users/x/dev/repo"), "-Users-x-dev-repo");
-});
-
-test("readClaudeMember: harness is claude and cost is null — no pricing table exists in this repo", () => {
-  const line = JSON.stringify({
-    type: "assistant", sessionId: "sess-1", uuid: "u1", timestamp: "2026-08-25T07:14:12.147Z",
-    message: { id: "m1", model: "claude-opus-5", usage: { cache_creation_input_tokens: 10, output_tokens: 1 } },
-  });
-  const rec = readClaudeMember(line, { name: "impl-580", agentType: "impl-580", spawnDepth: 0 });
-  assert.equal(rec.harness, "claude");
-  assert.equal(rec.model, "claude-opus-5");
-  assert.equal(rec.cost, null);
-  assert.equal(rec.ticket, "580");
-});
-
-test("readClaudeMember: thinking is `-`, never blank, when the transcript carries no `d.effort` (haiku has no effort control)", () => {
-  const line = JSON.stringify({
-    type: "assistant", sessionId: "sess-1", uuid: "u1", timestamp: "2026-08-25T07:14:12.147Z",
-    message: { id: "m1", model: "claude-haiku-4-5-20251001", usage: { cache_creation_input_tokens: 10, output_tokens: 1 } },
-  });
-  const rec = readClaudeMember(line, { name: "impl-580", agentType: "impl-580", spawnDepth: 0 });
-  assert.equal(rec.thinking, "-");
-});
-
-test("readClaudeMember: subagent_type is the sidecar's customAgentType, blank when the dispatch named none", () => {
-  // #1066: the deliberate alternate-tier pair is identifiable ONLY from what
-  // the dispatch named, and `-` is the wrong spelling for its absence — an
-  // untyped Task call is a closed category (5,997 of 6,136 sidecars measured
-  // 2026-09-12, none of them typed before 2026-08-28), not a hole a re-scrape
-  // could fill.
-  //
-  // Mutation this must survive: falling back to `meta.agentType`, which is the
-  // member's own NAME (`impl-580`) and would fill every row with a definition
-  // that never existed.
-  const line = JSON.stringify({
-    type: "assistant", sessionId: "sess-1", uuid: "u1", timestamp: "2026-08-25T07:14:12.147Z",
-    message: { id: "m1", model: "claude-sonnet-5", usage: { cache_creation_input_tokens: 10, output_tokens: 1 } },
-  });
-  const base = { name: "impl-580", agentType: "impl-580", spawnDepth: 0 };
-  assert.equal(readClaudeMember(line, { ...base, customAgentType: "fleet-implementer-alt" }).subagent_type, "fleet-implementer-alt");
-  assert.equal(readClaudeMember(line, base).subagent_type, "");
-});
-
-test("encodeOmpProjectDir: home-relative cwd is `-` + segments joined by `-`, dots preserved", () => {
+test("encodeProjectDir: home-relative cwd is `-` + segments joined by `-`, dots preserved", () => {
   // Verified 2026-09-09 against real `~/.omp/agent/sessions/*` directory
   // names on this machine, read out of each transcript's own
   // {"type":"session",...,"cwd":...} line:
   //   ~/dev/fleet-plugin -> -dev-fleet-plugin   (dir exists on disk)
-  //   ~/.claude          -> -.claude            (dir exists on disk, dot kept)
-  assert.equal(encodeOmpProjectDir("/Users/chris/dev/fleet-plugin", { home: "/Users/chris" }), "-dev-fleet-plugin");
-  assert.equal(encodeOmpProjectDir("/Users/chris/.claude", { home: "/Users/chris" }), "-.claude");
+  //   ~/.ssh             -> -.ssh               (dir exists on disk, dot kept)
+  assert.equal(encodeProjectDir("/Users/chris/dev/fleet-plugin", { home: "/Users/chris" }), "-dev-fleet-plugin");
+  assert.equal(encodeProjectDir("/Users/chris/.ssh", { home: "/Users/chris" }), "-.ssh");
 });
 
-test("encodeOmpProjectDir: non-home cwd is realpath-resolved and double-dash wrapped", () => {
+test("encodeProjectDir: non-home cwd is realpath-resolved and double-dash wrapped", () => {
   // Verified 2026-09-09 against a real transcript's session line —
   // {"type":"session",...,"cwd":"/tmp/fix685/scratch"} — which lived under
   // ~/.omp/agent/sessions/--private-tmp-fix685-scratch--/. macOS symlinks
@@ -79,11 +33,11 @@ test("encodeOmpProjectDir: non-home cwd is realpath-resolved and double-dash wra
   // depend on that scratch directory still existing on disk.
   const macRealpath = (p) => p.replace(/^\/tmp\b/, "/private/tmp");
   assert.equal(
-    encodeOmpProjectDir("/tmp/fix685/scratch", { home: "/Users/chris", realpath: macRealpath }),
+    encodeProjectDir("/tmp/fix685/scratch", { home: "/Users/chris", realpath: macRealpath }),
     "--private-tmp-fix685-scratch--",
   );
   // Bare /tmp itself, confirmed against the real `--private-tmp--` directory.
-  assert.equal(encodeOmpProjectDir("/tmp", { home: "/Users/chris", realpath: macRealpath }), "--private-tmp--");
+  assert.equal(encodeProjectDir("/tmp", { home: "/Users/chris", realpath: macRealpath }), "--private-tmp--");
 });
 
 // ---------------------------------------------------------------------------
@@ -159,8 +113,7 @@ test("foldOmpTranscript: a malformed line away from the tail is counted, not sil
   // The tool-attribution stream (#1717) turned the pre-existing silent
   // per-line drop into a real hazard: losing a middle line can desync a
   // toolCall from its toolResult, not just cost its own turn's totals — the
-  // same mid-file-tear shape foldClaudeTranscript's malformedNonLastLines
-  // exists to catch.
+  // same mid-file-tear shape `malformedNonLastLines` exists to catch.
   const good = assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 100, totalTokens: 0 });
   const torn = '{"type":"message","message":{"role":"ass';
   const folded = foldOmpTranscript([good, torn, good].join("\n") + "\n", "/fake/path.jsonl");
@@ -190,13 +143,11 @@ test("readOmpMember: resolvedModelIdentity rides alongside `model` as an additiv
 });
 
 test("readOmpMember: subagent_type is session_init's `agent`, blank when the transcript carries no session_init", () => {
-  // #1066's omp arm. It cannot ride on `role`: since #1486 both definitions
-  // book `role=implementer`, so a role filter selects the pair's members
-  // without saying which arm each is — and before #1486 it failed the other
-  // way, omp booking every one of them `role=other` (23 fleet-implementer/-alt
-  // members measured on disk 2026-09-12) so a role-filtered pair query dropped
-  // this whole harness. A classification that moved twice is why the join key
-  // is the dispatch RECORD.
+  // #1066: the deliberate alternate-tier pair is identifiable ONLY from
+  // what the dispatch named. It cannot ride on `role`: since #1486 both
+  // definitions book `role=implementer`, so a role filter selects the
+  // pair's members without saying which arm each is. A classification that
+  // moved is why the join key is the dispatch RECORD.
   const withAgent = [
     sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("xhigh"),
     sessionInitEvt("Implement ticket 580", "anthropic/claude-sonnet-5", "fleet-implementer-alt"),
@@ -260,8 +211,8 @@ test("readOmpMember: role comes off session_init's `agent`, the identity the row
   // The defect this closes. `agent` was in scope and written to the row's own
   // `subagent_type` column, but never handed to classifyRole — so classifyRole's
   // FIRST branch, the one whose comment says memory-system work must "never land
-  // in review spend", was structurally unreachable from this harness and every
-  // omp row's role was decided by dispatch-prompt prose alone.
+  // in review spend", was structurally unreachable and every omp row's role
+  // was decided by dispatch-prompt prose alone.
   //
   // Measured 2026-09-16 over the live corpus: 50 omp/memory-proxy rows, none of
   // them role=memory — 47 booked `other`, 2 `finisher`, 1 `reviewer`, entirely
@@ -280,8 +231,8 @@ test("readOmpMember: role comes off session_init's `agent`, the identity the row
   assert.equal(rec.subagent_type, "memory-proxy");
 
   // The review fan-out is the same defect at depth 0, which is where omp puts
-  // it: `review-eval.mjs` runs inside the controller's own session, so the
-  // depth branch that books Claude's fan-out cannot fire here.
+  // it: `review-eval.mjs` runs inside the controller's own session, so a
+  // depth-only rule cannot separate it from a top-level dispatch.
   const verifier = [
     sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("high"),
     sessionInitEvt("Refute finding unv1 on PR 1353", "anthropic/claude-sonnet-5", "fleet-review-verifier"),
@@ -295,76 +246,6 @@ test("readOmpMember: role comes off session_init's `agent`, the identity the row
     assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 10, totalTokens: 2 }),
   ];
   assert.equal(readOmpMember(impl.join("\n"), "/fake/path.jsonl", "InstallVerifySearch", 0).role, "implementer");
-});
-
-test("both readers fill classifyRole's `agentDefinition` from the dispatch record, so the memory exclusion cannot re-diverge per harness (#1505)", () => {
-  // #1505's defect was ONE parameter carrying two meanings: the omp reader
-  // passed the agent DEFINITION, the Claude reader handed over its whole sidecar
-  // whose `agentType` is the member's NAME. So the memory exclusion — the branch
-  // whose own comment says memory work must "never land in review spend" —
-  // decided on a definition here and on a name there, and one
-  // `memory-housekeeper` dispatch booked memory, other or specialist purely by
-  // what the member was called. Measured on the corpus: 14 such rows across
-  // three buckets, one of them `specialist`, moving its session's review-spend
-  // headline by 22 points.
-  //
-  // BOTH halves are asserted in ONE table on purpose. The failure mode is the
-  // two readers DISAGREEING, and split across two tests a fix to one side passes
-  // while the other stays broken — which is precisely how this survived #1486's
-  // fix to the omp side.
-  //
-  // The member is named `brain-housekeeping` on both sides deliberately: it
-  // carries no memory word, so a reader still classifying off the name reds
-  // here. spawnDepth 1 is load-bearing too — it makes the fall-through land in
-  // `specialist`, the bucket the review-spend headline actually reads.
-  const claudeLine = JSON.stringify({
-    type: "assistant", sessionId: "sess-1", uuid: "u1", timestamp: "2026-09-10T07:14:12.147Z",
-    message: { id: "m1", model: "claude-opus-5", usage: { cache_creation_input_tokens: 66782, output_tokens: 1 } },
-  });
-  const claudeRec = readClaudeMember(claudeLine, {
-    name: "brain-housekeeping", agentType: "brain-housekeeping",
-    customAgentType: "memory-housekeeper", description: "Housekeep the brain", spawnDepth: 1,
-  });
-  const ompLines = [
-    sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("high"),
-    sessionInitEvt("Housekeep the brain", "anthropic/claude-opus-5", "memory-housekeeper"),
-    assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 66782, totalTokens: 2 }),
-  ];
-  const ompRec = readOmpMember(ompLines.join("\n"), "/fake/path.jsonl", "BrainHousekeeping", 1);
-  assert.deepEqual(
-    { claude: claudeRec.role, omp: ompRec.role },
-    { claude: "memory", omp: "memory" },
-    "a memory-system dispatch must book memory on BOTH harnesses whatever the member was named",
-  );
-});
-
-test("claudeRoleSignals: the definition is customAgentType, else agentType unless that merely echoes the name (#1505)", () => {
-  // The Claude sidecar's `agentType` is ambiguous AT SOURCE, and this is the one
-  // place that resolves it. Measured over all 4,574 sidecars on disk:
-  //   3,587 name no member  -> `agentType` IS the definition
-  //     849 name one and repeat it in `agentType` -> no definition recorded
-  //     138 name one and record the definition in `customAgentType`
-  //      16 name one AND carry a different `agentType` -> that is a definition
-  //
-  // Two mutations this must survive, both of which look like simplifications:
-  // reading `agentType` as the definition unconditionally makes 849 member names
-  // masquerade as definitions (`impl-580` becomes an agent that never existed);
-  // reading only `customAgentType` strips the definition off 3,587 rows,
-  // including every memory-system member dispatched before typed agents existed
-  // — which is #1505's own bug pointing the other way.
-  const def = (meta) => claudeRoleSignals(meta).agentDefinition;
-  assert.equal(def({ agentType: "memory-proxy", spawnDepth: 1 }), "memory-proxy");
-  assert.equal(def({ name: "impl-580", agentType: "impl-580", spawnDepth: 0 }), "");
-  assert.equal(def({ name: "impl-580", agentType: "impl-580", customAgentType: "fleet-implementer-alt" }), "fleet-implementer-alt");
-  assert.equal(def({ name: "housekeeper-startup", agentType: "memory-housekeeper" }), "memory-housekeeper");
-  // The name is reported separately and is never folded into the definition —
-  // that conflation is the whole of #1505.
-  assert.equal(claudeRoleSignals({ name: "impl-580", agentType: "impl-580" }).memberName, "impl-580");
-  assert.equal(claudeRoleSignals({ agentType: "memory-proxy" }).memberName, "");
-  // A sidecar board.mjs rejected as unusable degrades to no signal at all,
-  // rather than throwing on the way to a role.
-  assert.deepEqual(claudeRoleSignals({}), { agentDefinition: "", memberName: "", description: undefined, spawnDepth: undefined });
-  assert.equal(claudeRoleSignals(undefined).agentDefinition, "");
 });
 
 test("readOmpMember: the agent definition is a role signal in its own right, so a task-less dispatch still classifies", () => {
@@ -483,34 +364,19 @@ test("readOmpSession: nesting depth is read off the path and feeds classifyRole'
 });
 
 // ---------------------------------------------------------------------------
-// readMembers — the one entry point that owns both roots
+// readMembers — the tree-walking entry point
 // ---------------------------------------------------------------------------
 
-function claudeSessionFixture(members) {
-  const root = mkdtempSync(join(tmpdir(), "mr-claude-"));
-  const dir = join(root, ".claude", "projects", "-x", "sess-1", "subagents");
-  mkdirSync(dir, { recursive: true });
-  const claudeLine = (id) => JSON.stringify({
-    type: "assistant", sessionId: "sess-1", uuid: id, timestamp: "2026-08-25T07:14:12.147Z",
-    message: { id, model: "claude-opus-5", usage: { cache_creation_input_tokens: 10, output_tokens: 1 } },
-  });
-  for (const [agent, meta] of members) {
-    writeFileSync(join(dir, `${agent}.jsonl`), claudeLine(`msg-${agent}`) + "\n");
-    writeFileSync(join(dir, `${agent}.meta.json`), JSON.stringify(meta));
-  }
-  return join(root, ".claude", "projects", "-x", "sess-1");
-}
-
-test("readMembers: a mixed set of roots yields one array whose harness column is correct per row", () => {
-  const claudeSession = claudeSessionFixture([["agent-a1", { name: "impl-1", agentType: "impl-1", spawnDepth: 0 }]]);
-  const ompDir = ompSessionFixture("2026-09-09T00-00-00-000Z_deadbeef-dead-dead-dead-deadbeefdead", {
+test("readMembers: multiple roots merge into one array", () => {
+  const dirA = ompSessionFixture("2026-09-09T00-00-00-000Z_deadbeef-dead-dead-dead-deadbeefdead", {
     Solo: [sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("high"), assistantEvt("claude-sonnet-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0.001 } })],
   });
-  const rows = readMembers([claudeSession, ompDir]);
+  const dirB = ompSessionFixture("2026-09-09T03-00-00-000Z_feedface-feed-face-feed-facefeedface", {
+    Solo2: [sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("high"), assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0.002 } })],
+  });
+  const rows = readMembers([dirA, dirB]);
   assert.equal(rows.length, 2);
-  const byHarness = Object.fromEntries(rows.map((r) => [r.harness, r]));
-  assert.equal(byHarness.claude.member, "impl-1");
-  assert.equal(byHarness.omp.agent, "Solo");
+  assert.deepEqual(new Set(rows.map((r) => r.agent)), new Set(["Solo", "Solo2"]));
 });
 
 test("readMembers: a loose top-level session .jsonl FILE beside session directories is not swept in as a member, and `session` is the session directory's own name", () => {
@@ -540,46 +406,32 @@ test("readMembers: a loose top-level session .jsonl FILE beside session director
   assert.equal(rows[0].session, sessionName, "session must be the <ISO>_<uuid> DIRECTORY name, not the encoded-cwd dir");
 });
 
-test("readMembers: a Claude-shaped file under the omp root is refused loudly, not parsed as omp", () => {
+test("readMembers: a not-omp-shaped file under an omp root is refused loudly, not silently parsed", () => {
   const ompDir = ompSessionFixture("2026-09-09T01-00-00-000Z_baadf00d-baad-baad-baad-baadf00dbaad", {});
-  // A real Claude line carries `sessionId` on every line (measured against
-  // ~/.claude/projects/**/subagents/*.jsonl); an omp line never does.
-  const claudeShaped = JSON.stringify({
+  // `sessionId`/`parentUuid` are assertOmpShaped's own structural check — an
+  // omp line never carries either (session id lives in the DIRECTORY name);
+  // any line that does is a foreign or corrupted file, not this reader's
+  // business to guess at.
+  const foreignShaped = JSON.stringify({
     type: "assistant", sessionId: "sess-1", uuid: "u1", timestamp: "2026-08-25T07:14:12.147Z",
-    message: { id: "m1", model: "claude-opus-5", usage: { cache_creation_input_tokens: 10, output_tokens: 1 } },
+    message: { id: "m1", model: "claude-opus-5" },
   });
-  writeFileSync(join(ompDir, "wrong-root.jsonl"), claudeShaped + "\n");
+  writeFileSync(join(ompDir, "wrong-root.jsonl"), foreignShaped + "\n");
   assert.throws(() => readMembers([ompDir]), /wrong-root\.jsonl/);
 });
 
-test("readMembers: an omp-shaped file under the Claude root is refused loudly, not silently skipped", () => {
-  // Mirrors the omp-side test above: `thinking_level_change`'s `parentId`
-  // key is omp's own envelope signature, never present on a real Claude
-  // line (which spells it `parentUuid`), and never set by any Claude
-  // fixture in this repo either — a safe positive check.
-  const claudeSession = claudeSessionFixture([["agent-a1", { name: "impl-1", agentType: "impl-1", spawnDepth: 0 }]]);
-  writeFileSync(join(claudeSession, "subagents", "wrong-root.jsonl"), thinkingEvt("high") + "\n");
-  assert.throws(() => readMembers([claudeSession]), /wrong-root\.jsonl/);
+test("readMembers: a line matching NEITHER shape (no `type`, no Claude keys) is refused loudly too, not folded into a fabricated null record", () => {
+  // The blocklist half of assertOmpShaped (sessionId/parentUuid absence)
+  // only catches a Claude-shaped foreign line. A line that is foreign or
+  // corrupted in some OTHER way — missing omp's own `type` field entirely —
+  // used to pass that check silently and fold into an all-null/zero member
+  // record instead of the refusal the function's own comment promises.
+  const ompDir = ompSessionFixture("2026-09-09T02-00-00-000Z_deadbeef-dead-dead-dead-deadbeefdead", {});
+  writeFileSync(join(ompDir, "no-envelope.jsonl"), JSON.stringify({ foo: "bar" }) + "\n");
+  assert.throws(() => readMembers([ompDir]), /no-envelope\.jsonl/);
 });
 
-test("readMembers: a Claude root with no subagents/ directory anywhere is refused, not silently empty", () => {
-  // The omp side of this exact mistake: dropping an omp session directory
-  // (no `subagents/` child anywhere) under `~/.claude/projects/<enc>/`.
-  const root = mkdtempSync(join(tmpdir(), "mr-claude-empty-"));
-  const encDir = join(root, ".claude", "projects", "-x");
-  mkdirSync(encDir, { recursive: true });
-  assert.throws(() => readMembers([encDir]), /no subagents\/ directory/);
-});
-
-test("readMembers: a root under neither tree is refused, not silently empty", () => {
+test("readMembers: a root holding no omp session directory anywhere is refused, not silently empty", () => {
   const stray = mkdtempSync(join(tmpdir(), "mr-stray-"));
-  assert.throws(() => readMembers([stray]), /neither a Claude nor an omp/);
-});
-
-test("readClaudeSession and readOmpSession agree on the record's harness field for their own harness", () => {
-  const claudeSession = claudeSessionFixture([["agent-a1", { name: "impl-1", agentType: "impl-1", spawnDepth: 0 }]]);
-  const claudeRows = readClaudeSession(join(claudeSession, "subagents"));
-  assert.equal(claudeRows.length, 1);
-  assert.equal(claudeRows[0].harness, "claude");
-  assert.equal(claudeRows[0].cost, null);
+  assert.throws(() => readMembers([stray]), /no omp session directory/);
 });

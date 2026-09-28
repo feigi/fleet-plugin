@@ -1,9 +1,7 @@
 ---
 name: fleet-review-runner
 description: A /fleet-ctl:run-team review runner on omp — dispatched by the controller as review-pr-<pr#> with pr, branch, worktree, testCmd and scratch; runs runReviewOnOmp to completion in its own eval cell, writes <scratch>/review-<pr>.json, and reports the digest and the path. Never invoked directly.
-model: haiku
-effort: low
-thinking-level: low
+model: "@smol:low"
 spawns: fleet-review-snapshot, fleet-review-correctness, fleet-review-silent-failure, fleet-review-tests, fleet-review-comments, fleet-review-types, fleet-review-simplify, fleet-review-verifier
 ---
 
@@ -39,7 +37,7 @@ redid the whole snapshot/fan-out sequence from scratch.
 
    ```js
    return await (async () => {
-     const path = (await Bun.$`FLEET_HARNESS=omp ~/.fleet/bin/fleet-run --path review-eval.mjs`.text()).trim();
+     const path = (await Bun.$`~/.fleet/bin/fleet-run --path review-eval.mjs`.text()).trim();
      const { runReviewToFile } = await import(path);
      return runReviewToFile({ pr: 1234, branch: "the-branch", worktree: "/abs/worktree", testCmd: "the test command", scratch: "/abs/scratch" });
    })();
@@ -50,8 +48,6 @@ redid the whole snapshot/fan-out sequence from scratch.
    runners, and a top-level name there is a shared global that a sibling's
    cell can rebind while yours is awaiting; inside the function body the
    bindings are yours alone.
-   `FLEET_HARNESS=omp` stays inline on the Resolver call: this machine carries
-   both harnesses' registries, and without it the Resolver refuses to guess.
 
 2. **If `eval` answers `Backgrounded as job <id>` instead of a result, the cell
    is still running** — an install with `eval.autoBackground` on does this to

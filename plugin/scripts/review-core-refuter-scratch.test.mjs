@@ -1,10 +1,9 @@
-// #1561. PR #1082 (#496) added two directory-safety rules to
-// `workflows/review-pr.js`'s refuter prompt — chain the directory change into
-// the command, and bracket a fixture's own git with `git rev-parse
-// --show-toplevel`. PR #1530 (#1084) separately added them to
-// `workflows/review-pr.js`'s own SPECIALIST prompt
-// (review-pr-specialist-scratch.test.mjs pins that copy), and PR #1559
-// (#1550) mirrored them into `review-core.mjs`'s own SPECIALIST prompt
+// #1561. PR #1082 (#496) added two directory-safety rules to the
+// (since-retired) `review-pr` WORKFLOW's refuter prompt — chain the
+// directory change into the command, and bracket a fixture's own git with
+// `git rev-parse --show-toplevel`. PR #1530 (#1084) separately added them to
+// that same retired file's own SPECIALIST prompt, and PR #1559 (#1550)
+// mirrored them into `review-core.mjs`'s own SPECIALIST prompt
 // (review-core-specialist-scratch.test.mjs pins that copy). `review-core.mjs`
 // carries a THIRD copy of the same rules' target risk in its own REFUTER
 // prompt — "Verify against the snapshot ... by RUNNING
@@ -15,16 +14,18 @@
 // Naming the scratch path is not the same rule and does not close either
 // failure mode: a `cd` that silently fails leaves the following `;`-separated
 // `git` running in whatever directory the agent was already in (the incident
-// review-pr-refuter-scratch.test.mjs records as commit 020d6ea, reached during
+// this file's own fixture records as commit 020d6ea, reached during
 // the PR #488 fix-applier run), and an agent that BELIEVES it is already in
 // its scratch copy and is wrong runs `git init` / `git commit` against the
 // repository. Neither is caught by a sentence about where writes SHOULD go.
 //
-// INLINED, NOT SHARED, same as this file's specialist copy and for the same
-// reason: #496's brief rules the shared-source route out, and this is a
-// fourth distinct prompt block in this codebase (review-pr.js's specialist,
-// review-pr.js's refuter, review-core.mjs's specialist, and this one), not an
-// import target.
+// INLINED, NOT SHARED, same as review-core-specialist-scratch.test.mjs's
+// reasoning and for the same reason: #496's brief rules the shared-source
+// route out, and this was a fourth distinct prompt block in this codebase
+// (the retired review-workflow script's specialist, the retired
+// review-workflow script's refuter, review-core.mjs's specialist, and this
+// one — two of the four since retired along with that script itself), not
+// an import target.
 //
 // WHY THIS PIN RENDERS RATHER THAN GREPS. The rules live inside a template
 // literal with escaped backticks (`` \` ``); a source-text pin has to tolerate
@@ -32,21 +33,20 @@
 // refuter a literal `\` instead of a code span. Rendering settles what the
 // agent actually reads.
 //
-// THE SLICE IS THE PIN. Both rules already exist in this same file's
-// SPECIALIST prompt (lines above this one), so a pin unbounded to the whole
-// file would pass on that copy alone — exactly the defect this ticket
-// reports, and exactly what "review-core.mjs's refuter prompt" must not be
-// allowed to mean here. The extraction is bounded by the refuter `agent()`
-// call's own template, opening at `Try to REFUTE this finding from PR #` and
-// closing at its own `label: \`verify:`, so the specialist prompt sits
-// entirely outside it by construction. Measured: reverting the two rules out
-// of only the refuter prompt (leaving the specialist's copy untouched) reds
-// both rule tests below.
+// THE SLICE IS THE PIN. Both rules already exist in review-core.mjs's own
+// SPECIALIST prompt, so a pin unbounded to the whole file would pass on that
+// copy alone — exactly the defect this ticket reports, and exactly what
+// "review-core.mjs's refuter prompt" must not be allowed to mean here. The
+// extraction is bounded by the refuter `agent()` call's own template,
+// opening at `Try to REFUTE this finding from PR #` and closing at its own
+// `label: \`verify:`, so the specialist prompt sits entirely outside it by
+// construction. Measured: reverting the two rules out of only the refuter
+// prompt (leaving the specialist's copy untouched) reds both rule tests
+// below.
 //
-// THE CEILING, same as review-pr-refuter-scratch.test.mjs's and
-// review-core-specialist-scratch.test.mjs's: nothing here reaches the agent's
-// own obedience. These pins settle what a refuter is TOLD, never where it
-// actually writes.
+// THE CEILING, same as review-core-specialist-scratch.test.mjs's: nothing
+// here reaches the agent's own obedience. These pins settle what a refuter
+// is TOLD, never where it actually writes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -108,9 +108,8 @@ const render = () =>
 // are the literal punctuation the rendered prompt carries around "never"
 // ("…`, " before it, a line break plus backtick after) rather than a
 // free-text `.{0,N}` span — mutation-tested: splicing "never except in dry
-// runs" into the first gap reds this assertion, where a `.{0,60}`-gapped
-// version of this same regex (as used by review-pr-refuter-scratch.test.mjs)
-// does not catch that splice.
+// runs" into the first gap reds this assertion, where an earlier
+// `.{0,60}`-gapped version of this same regex does not catch that splice.
 test("the rendered refuter prompt chains cd into the git command, never semicolon", () => {
   assert.match(
     render(),

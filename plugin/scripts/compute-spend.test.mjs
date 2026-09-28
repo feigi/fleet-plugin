@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
 import { foldOmpTranscript } from "./member-record.mjs";
 
-const agent = (o) => ({ label: "x", role: "other", cacheWrite: 0, output: 0, cacheRead: 0, maxCtx: 0, ...o });
+const agent = (o) => ({ label: "x", role: "other", cacheWrite: 0, output: 0, cacheRead: 0, ...o });
 
 const call = (id, name, cacheWrite = 0) => ({ kind: "assistant", cacheWrite, tools: [{ id, name }] });
 const result = (...rs) => ({ kind: "result", results: rs.map(([id, chars]) => ({ id, chars })) });
@@ -101,21 +101,21 @@ const ompResult = (id, toolName, chars) => ompMsg({
 });
 const ompTools = (...lines) => attributeTools(foldOmpTranscript(lines.join("\n"), "/fake/omp.jsonl").entries);
 
-test("omp: parallel results split the next turn's cache write exactly as the Claude stream does (#1717)", () => {
+test("omp: parallel results split the next turn's cache write, same as the synthetic fixture above (#1717)", () => {
   // Parallel calls land on omp as consecutive toolResult lines too — measured,
   // the batch sizes match the calls-per-turn counts — so this is the real
-  // shape of the proportional split on this harness.
+  // shape of the proportional split.
   const tools = ompTools(ompTurn(0, ["a", "Read"], ["b", "Grep"]), ompResult("a", "Read", 750), ompResult("b", "Grep", 250), ompTurn(1000));
   assert.deepEqual(tools, attributeTools(CONSECUTIVE));
   const by = Object.fromEntries(tools.map((t) => [t.tool, [t.calls, t.resultChars, t.cacheWrite]]));
   assert.deepEqual(by, { Read: [1, 750, 750], Grep: [1, 250, 250] });
 });
 
-test("omp: a result whose call never landed in an assistant message is unknown, as on Claude (#1717)", () => {
+test("omp: a result whose call never landed in an assistant message is unknown (#1717)", () => {
   // The measured way this happens: a turn aborted mid-stream writes the tool's
   // synthetic "not executed" result, then persists the assistant message with
   // empty content, so no `toolCall` block ever carries the id. The result line
-  // names the tool itself, but the stream is id-only on both harnesses.
+  // names the tool itself, but the stream is id-only.
   const tools = ompTools(ompResult("orphan", "bash", 100), ompTurn(50));
   assert.deepEqual(tools, attributeTools(ORPHAN));
   assert.deepEqual(tools.map((t) => [t.tool, t.calls, t.resultChars, t.cacheWrite]), [["unknown", 0, 100, 50]]);
@@ -158,7 +158,7 @@ test("the sizing pattern is anchored, so a specialist that mentions sizing stays
 
 test("the memory exclusion reads the recorded DEFINITION, so any member name books memory", () => {
   // #1505. The exclusion used to test the one `agentType` parameter, which the
-  // Claude reader filled with the member's NAME — so the same dispatch
+  // pre-cutover reader filled with the member's NAME — so the same dispatch
   // (`memory-housekeeper`) booked three different roles depending on what it
   // was called: `memory-housekeeper` memory, `housekeeper` other,
   // `brain-housekeeping` specialist. Measured on the corpus that last one alone
@@ -287,8 +287,8 @@ test("implementers classify off the member NAME, which is where `impl-` actually
 });
 
 test("the omp review fan-out classifies off its agent DEFINITION — depth cannot reach it there", () => {
-  // The depth check above books Claude's fan-out, whose specialists are the
-  // reviewer's grandchildren. omp has no such nesting: its review path runs
+  // The depth check above books a nested fan-out whose specialists are the
+  // reviewer's grandchildren under that shape. omp has no such nesting: its
   // `review-eval.mjs` inside the CONTROLLER's own session, so every fan-out
   // member arrives at depth 0 and falls through to the description patterns —
   // which is the exact "Review PR 539 correctness" misread the depth check
@@ -299,23 +299,13 @@ test("the omp review fan-out classifies off its agent DEFINITION — depth canno
   assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-review-verifier", description: "Refute finding unv1 on PR 1353" }), "specialist");
   assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-review-correctness", description: "Review PR 1353 correctness" }), "specialist");
   assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-review-snapshot", description: "Cut the snapshot for PR 1353" }), "specialist");
-  // A dispatch may write the `fleet-ctl:`-prefixed spelling (run-team's Phase 2
-  // does) even though every sidecar on disk records the bare name — the same
-  // tolerance member-outcomes.tsv's own pair query is written with.
-  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-ctl:fleet-review-tests", description: "whatever" }), "specialist");
   // And the definition is the ONLY thing these two branches read: a member
-  // merely NAMED after a review definition was not dispatched as one (#1505).
+  // merely NAMED after a review definition was not dispatched as one (#1505) —
+  // `def` empty and `name` carrying the review-shaped string falls through to
+  // the description-inclusive fallback below, which has no "fleet-review-"
+  // pattern of its own (only `review pr`/`review-pr-`/etc.), so it resolves
+  // "other" rather than "specialist".
   assert.equal(classifyRole({ spawnDepth: 0, memberName: "fleet-review-verifier", description: "whatever" }), "other");
-  // The bare-name case above cannot catch a blend regression: an empty `def`
-  // puts a SPACE, not a `:`, in front of a bare member name, so `(^|:)` fails
-  // either way and the assertion passes whether the branch reads `def` alone
-  // or the `${def} ${name}` blend. The `fleet-ctl:`-prefixed spelling above
-  // is what discriminates when used as the NAME instead of the DEFINITION:
-  // blending puts its own `:` in front of `fleet-review-`, so a branch that
-  // reads the blend wrongly matches and returns "specialist" here, while the
-  // real `def`-only branch still returns "other" (measured: reverting to the
-  // blend keeps the rest of this suite green).
-  assert.equal(classifyRole({ spawnDepth: 0, memberName: "fleet-ctl:fleet-review-tests", description: "whatever" }), "other");
 });
 
 test("the omp review RUNNER is the reviewer member, not a fan-out specialist, though its definition shares the prefix", () => {
@@ -325,7 +315,6 @@ test("the omp review RUNNER is the reviewer member, not a fan-out specialist, th
   // above books as "specialist" would swallow it on the definition alone,
   // before the `review-pr-` name ever got read.
   assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-review-runner", memberName: "review-pr-1353", description: "whatever" }), "reviewer");
-  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-ctl:fleet-review-runner", description: "whatever" }), "reviewer");
   // Exact, not a second prefix: every dimension definition still books as the
   // fan-out it is, including one whose key merely starts with `runner`.
   assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-review-runner-probe", description: "whatever" }), "specialist");
@@ -339,17 +328,8 @@ test("a definition name in the dispatch PROSE is not a dispatch — the fleet br
   // these names appear in description text constantly; matching the
   // `${memberName} ${description}` blend would book a finisher that merely
   // mentions the review fan-out as one of its specialists.
-  //
-  // The cases below are written in the `fleet-ctl:`-PREFIXED spelling on
-  // purpose. A prose mention in the bare spelling cannot reach either pattern
-  // anyway — `hay` starts with a space when `memberName` is blank, so neither
-  // `^` nor `:` sits in front of it — which means a bare-name test passes even
-  // against a `hay`-matching implementation and proves nothing. The prefixed
-  // spelling is the one every dispatch instruction in run-team's own prose is
-  // written in, so it is both the realistic prose shape and the one that
-  // discriminates.
-  assert.equal(classifyRole({ spawnDepth: 0, description: "Relay the report to fleet-ctl:fleet-review-verifier" }), "other");
-  assert.equal(classifyRole({ spawnDepth: 0, description: "Dispatch every implementer as fleet-ctl:fleet-implementer" }), "other");
+  assert.equal(classifyRole({ spawnDepth: 0, description: "Relay the report to fleet-review-verifier" }), "other");
+  assert.equal(classifyRole({ spawnDepth: 0, description: "Dispatch every implementer as fleet-implementer" }), "other");
   // And the control that must stay GREEN: prose-only input still classifies by
   // its prose, so this narrowing did not cost the description patterns anything.
   assert.equal(classifyRole({ spawnDepth: 0, description: "Apply fleet-review-verifier findings, then finish PR 563" }), "finisher");
@@ -358,9 +338,9 @@ test("a definition name in the dispatch PROSE is not a dispatch — the fleet br
 test("the fleet implementer definitions classify as implementer, independent of the `^impl-` name pattern", () => {
   // `agentDefinition`-based classification (`fleet-implementer(-alt)`) is
   // checked BEFORE the `^impl-` name/description pattern below it, so it must
-  // not depend on a Claude-shaped member name to fire — this pin exercises
-  // classifyRole directly, on `agentDefinition` alone, so it stays green
-  // whatever either reader hands `memberName`.
+  // not depend on a canonically-shaped member name to fire — this pin
+  // exercises classifyRole directly, on `agentDefinition` alone, so it stays
+  // green whatever the reader hands `memberName`.
   //
   // Historically this was the ONLY implementer signal an omp member had:
   // before #1486, `agentDefinition` did not reach classifyRole from omp at
@@ -371,11 +351,10 @@ test("the fleet implementer definitions classify as implementer, independent of 
   // this branch already reaches it through `agentDefinition`. Measured
   // 2026-09-16 before #1486's branch: 90 omp fleet-implementer/-alt rows
   // split 73 other, 7 merge-bot, 5 finisher, 5 reviewer, none of them
-  // implementer, while the same definition booked implementer on all 109
-  // Claude rows.
+  // implementer — the gap was in what omp handed classifyRole, not in the
+  // classifier's own patterns.
   assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-implementer", description: "Ticket #1486. Worktree: .worktrees/1486-classify" }), "implementer");
   assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-implementer-alt", description: "Ticket #1486. Worktree: .worktrees/1486-classify" }), "implementer");
-  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-ctl:fleet-implementer-alt", description: "whatever" }), "implementer");
   // EXACT, unlike the review prefix above: the alternate-tier pairing is closed
   // at these two names, so a third `fleet-implementer-`-prefixed definition is a
   // deliberate addition and not something to classify in advance.
@@ -439,14 +418,6 @@ test("an empty run produces zeroes, not NaN", () => {
   assert.equal(s.reviewPct, 0);
 });
 
-test("maxCtx is a max, never a sum", () => {
-  const { roles, totals } = computeSpend({
-    agents: [agent({ role: "reviewer", maxCtx: 324_000 }), agent({ role: "reviewer", maxCtx: 120_000 })],
-  });
-  assert.equal(roles[0].maxCtx, 324_000);
-  assert.equal(totals.maxCtx, 324_000);
-});
-
 test("top is ranked by cache_creation and honours topN", () => {
   const { top } = computeSpend({
     agents: [
@@ -459,24 +430,22 @@ test("top is ranked by cache_creation and honours topN", () => {
   assert.deepEqual(top.map((t) => t.label), ["b", "c"]);
 });
 
-// #1879: `model` rides along on a top row only where the harness reader
-// supplied one. Claude's readAgent row (board.mjs readClaudeSpend) carries no
-// `model` key at all — the `agent()` shape here — and its top row must not gain
-// one: neither `model: null`, a column the served payload would then carry on
-// every Claude row, nor `model: undefined`, which JSON drops but an own-key
-// check on the in-process object still sees. The omp-shaped row beside it keeps
-// this from passing on a builder that simply stopped emitting `model` at all.
-test("a top row carries `model` only when its agent supplied one — a Claude row gains no key (#1879)", () => {
+// #1879: `model` rides along on a top row only where the caller's agent
+// object supplied one. An agent with no `model` key must not gain one on its
+// top row: neither `model: null`, a column the served payload would then
+// carry, nor `model: undefined`, which JSON drops but an own-key check on
+// the in-process object still sees.
+test("a top row carries `model` only when its agent supplied one (#1879)", () => {
   const { top } = computeSpend({
     agents: [
-      agent({ label: "claude-impl", role: "implementer", cacheWrite: 30 }),
-      agent({ label: "omp-impl", role: "implementer", model: "claude-opus-5", cacheWrite: 20 }),
+      agent({ label: "no-model", role: "implementer", cacheWrite: 30 }),
+      agent({ label: "with-model", role: "implementer", model: "claude-opus-5", cacheWrite: 20 }),
     ],
   });
-  const [claude, omp] = top;
-  assert.equal(claude.label, "claude-impl");
-  assert.equal(Object.hasOwn(claude, "model"), false,
-    `a Claude top row must carry no \`model\` key at all, got ${JSON.stringify(Object.keys(claude))}`);
-  assert.equal(omp.label, "omp-impl");
-  assert.equal(omp.model, "claude-opus-5");
+  const [noModel, withModel] = top;
+  assert.equal(noModel.label, "no-model");
+  assert.equal(Object.hasOwn(noModel, "model"), false,
+    `a row with no supplied model must carry no \`model\` key at all, got ${JSON.stringify(Object.keys(noModel))}`);
+  assert.equal(withModel.label, "with-model");
+  assert.equal(withModel.model, "claude-opus-5");
 });

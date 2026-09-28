@@ -12,30 +12,31 @@ Run `next-ticket`, `review-and-fix`, `run-merge-bot` as one fleet. You are the
 hard cap — they become the tick's `--implementer-cap` and `--reviewer-cap`.
 Merge bot is at most one, not configurable.
 
-Rationale: `~/.claude/docs/specs/2026-07-22-run-team-agent-fleet-design.md`. The
+Rationale: `docs/specs/2026-07-22-run-team-agent-fleet-design.md`. The
 war story behind a rule ending `See references/<file>` lives in that file; load
 it only when a member needs the *why*. A rule without that line carries its
 reasoning inline — nothing is missing.
 
 ## Rules that fail silently
 
-**A report is a `SendMessage`, not the end of a turn.** Every member owes the
-controller one `SendMessage` naming its outcome before it exits — including a
+**A report is delivered, not implied by ending a turn.** Every member owes
+the controller one report naming its outcome before it exits — including a
 member whose prompt carries no explicit report line. The "report the SHA",
-"report PR number" and "stop and report" instructions below *are* that message,
-not a second obligation on top of it. A member that does the work correctly and
-ends its turn has reported nothing: the controller learns the outcome only by
-re-reading artifacts and pinging, and a finding held only in that member's
-context is lost. Members did exactly this in one run — finishers, a reviewer and
-merge bots alike, the work done and only the delivery missing. Say it in every
-dispatch prompt. See references/member-lifecycle.md.
+"report PR number" and "stop and report" instructions below *are* that
+report, not a second obligation on top of it. A member that does the work
+correctly and ends its turn has reported nothing: the controller learns the
+outcome only by re-reading artifacts and pinging, and a finding held only in
+that member's context is lost. Members did exactly this in one run —
+finishers, a reviewer and merge bots alike, the work done and only the
+delivery missing. Say it in every dispatch prompt. See
+references/member-lifecycle.md.
 
-**Say in every dispatch prompt that you do not acknowledge reports.** A member
-cannot see whether its `SendMessage` arrived, so silence from you is
-indistinguishable from loss and it re-sends — three members did in one run, each
-burning a turn, and in all three the original had in fact arrived. Give them the
-line verbatim: *"The controller does not acknowledge reports. Send once and exit;
-never re-send unless the controller asks by name."*
+**Say in every dispatch prompt that you do not acknowledge reports.** A
+member cannot see whether its report arrived, so silence from you is
+indistinguishable from loss and it re-sends — three members did in one run,
+each burning a turn, and in all three the original had in fact arrived. Give
+them the line verbatim: *"The controller does not acknowledge reports. Send
+once and exit; never re-send unless the controller asks by name."*
 
 **But a missing report is NOT evidence the member failed to send one — the
 inbound direction drops AND delays messages.** Both were measured in one run,
@@ -67,26 +68,24 @@ alongside results — "I escalated X, received no ruling, proceeded on default Y
 That sentence is the only thing that made either loss visible. After any ruling
 you cannot confirm was received, re-check the artifacts it governed.
 
-**Name every member.** The name makes it a team member, and membership is what
-carries the `Agent` tool. Omit it → the member loses delegation with no error.
+**Name every member.** The name is the ledger token and the hub address; omit
+it and the ledger cannot match the member.
 Names follow the unit of work: `impl-<issue#>`, `fix-pr-<pr#>`,
 `review-pr-<pr#>`, `finisher-pr-<pr#>`, `merge-bot-<n>`. See
 references/member-lifecycle.md.
 
-**Inverts one level down: members must name their children `undefined`.** A named
-member passing a `name` fails with `teammates cannot spawn teammates`, so
-specialists are dispatched **unnamed**. Say so in a fallback reviewer's prompt, or
-it silently downgrades to a solo review. See references/member-lifecycle.md.
+**A depth-2 member cannot dispatch further** (`task.maxRecursionDepth: 2`):
+if `task` is absent at your depth, ask the controller to dispatch the
+specialists and relay their reports. Say so in a fallback reviewer's prompt,
+or it silently downgrades to a solo review. See references/member-lifecycle.md.
 
 **Fresh context per member.** One member, one unit of work, gone. Never
-`subagent_type: "fork"` (inherits your whole conversation). Never re-task a
-finished member — waking it drags the old ticket back in. Refill = **new**
-member, **new** name. Sending is still right for pinging a live member for a
-report it owes, or resuming a truncated reply — never for handing a finished
-member the next ticket.
+re-task a finished member — waking it drags the old ticket back in. Refill =
+**new** member, **new** name. Sending is still right for pinging a live
+member for a report it owes, or resuming a truncated reply — never for
+handing a finished member the next ticket.
 
-CLAUDE: `SendMessage` to a finished agent resumes its transcript and drags the old ticket in — the wake this contract forbids for a refill.
-OMP: `hub send` to an idle peer wakes it into its old transcript the same way; re-dispatching under the same name does not reset it — omp auto-suffixes a fresh peer (`name-2`) instead.
+`hub send` to an idle peer wakes it into its old transcript the same way; re-dispatching under the same name does not reset it — omp auto-suffixes a fresh peer (`name-2`) instead.
 
 See references/member-lifecycle.md.
 
@@ -294,16 +293,12 @@ phase, or in any later one, asks the maintainer which tickets to take.
    else — either way it gets its own board, just not always on the port its
    hash predicts.
 
-   The spend panel reads whichever harness's transcript tree this workspace
-   has — Claude Code's under `~/.claude/projects` or omp's under
-   `~/.omp/agent/sessions`, both searched, newest transcript wins (#1716) —
-   and is pinned to whichever session first writes a transcript on this
+   The spend panel reads this workspace's own `~/.omp/agent/sessions` tree
+   (#1716), and is pinned to whichever session first writes a transcript on this
    cockpit's own watch (#1583/#1679): it will not follow a workspace that
    already had another session's transcripts sitting there at launch. If the
    panel is reading someone else's numbers, relaunch with `--spend-dir <path>`
-   naming this run's own session directory to override the heuristic outright
-   — on Claude Code
-   `~/.claude/projects/<encoded-cwd>/<session-uuid>/subagents`, on omp
+   naming this run's own session directory to override the heuristic outright —
    `~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>` (the directory, never
    the `.jsonl` file of the same name beside it).
 
@@ -807,8 +802,8 @@ refuse and report, because the second reading is a push that landed while
 you worked, or a ref this clone cannot resolve, and neither gets better with
 more waiting.
 
-`review-pr.js` refuses a snapshot whose head is not the branch ref's, so the
-workflow review path is backstopped — except when the operand comes back
+`review-core.mjs` refuses a snapshot whose head is not the branch ref's, so the
+review path is backstopped — except when the operand comes back
 empty, which skips the compare rather than refusing on it. A same-repo PR
 still reads `refs/heads/<branch>` first and falls back to
 `refs/pull/<number>/head` only when that comes back empty; a cross-repo PR (a
@@ -820,22 +815,20 @@ norm for forks. Its run log names the skip: `head ref (absent): head check
 SKIPPED`. A worktree you hand to an agent directly is not backstopped at all.
 Verify here anyway. **That backstop now compares against the same ref this
 bullet does** — #1513 moved its operand off `headRefOid` for the reason
-above, in the Claude workflow and its omp-side twin alike — so it is a second
+above — so it is a second
 chance to notice a stale snapshot on the one path it covers, never a reason
 to skip the ref compare here.
 
 ## Phase 2 — dispatch the Pull's implementer
 
 **A Pull is one claim followed by one dispatch of a new member under a name no
-member has held; nothing holds a queue.** That is true on both harnesses and is
-the whole of what either of them promises: the implementer cap is the fleet's
-own accounting rather than anything the runtime enforces, the member is fresh
-and never a wake of one that already ran, and no knob on this path works on one
-harness only. Admission is per slot and never batched, so there is nothing to
-hand a freed slot its next ticket but the next Pull.
+member has held; nothing holds a queue.** The implementer cap is the fleet's
+own accounting rather than anything the runtime enforces, and the member is
+fresh and never a wake of one that already ran. Admission is per slot and
+never batched, so there is nothing to hand a freed slot its next ticket but
+the next Pull.
 
-CLAUDE: a Pull dispatches its member with one more `Agent` call — definition `fleet-ctl:fleet-implementer`, or `fleet-ctl:fleet-implementer-alt` on every 5th Pull; name `impl-<N>`; in the background, so its report arrives on its own.
-OMP: a Pull dispatches its member with one more `task` call — definition `fleet-implementer`, or `fleet-implementer-alt` on every 5th Pull; name `impl-<N>`; in the background, so its report arrives on its own.
+a Pull dispatches its member with one more `task` call — definition `fleet-implementer`, or `fleet-implementer-alt` on every 5th Pull; name `impl-<N>`; in the background, so its report arrives on its own.
 
 **No workpool, and no kernel-resident handle.** A pool's only refill virtue —
 handing a queued item to a freed worker without a controller turn — is exactly
@@ -906,8 +899,8 @@ merely-quiet member's silence never does. A confirmed-dead member recovers
 exactly as the Member-killed row says — new member, new name, the SAME ticket —
 never a demotion.
 
-**Dispatch every implementer as `subagent_type: "fleet-ctl:fleet-implementer"`, and still
-omit `model` on the Agent call, whatever the class.** The tier now lives in that
+**Dispatch every implementer as `agent: "fleet-implementer"`, and still
+omit `model` on the `task` call, whatever the class.** The tier now lives in that
 definition's frontmatter (`agents/fleet-implementer.agent.md`), which is what an
 omitted `model` takes first — the session's tier applies only when the definition
 names none, and a member dispatched with `model` set does not get the declared
@@ -929,44 +922,44 @@ replacement is dispatched at the right tier.
 
 **The batch file is a JSON array, one entry per dispatched member** — under
 Pull, a batch of one, the member just dispatched:
-`{member, agentFile, harness, ...}` plus exactly one of the three fields
+`{member, agentFile, ...}` plus exactly one of the three fields
 below, in the order the controller should prefer them:
-- `resolvedModel` **and** `resolvedThinkingLevel` together (omp only) — the
+- `resolvedModel` **and** `resolvedThinkingLevel` together — the
   dispatch's own job record, when the controller already holds both; no
   file is opened at all. Holding only one of the two does not count: give
   `session` or `transcript` instead so the missing half is read, never
   guessed.
-- `session` — a root the controller already knows: the SAME session or
-  `subagents/` directory `member-outcomes.mjs`/`board.mjs` are already
-  handed for this run. The check finds the named member under it itself
-  (member-record.mjs's own readers on Claude; the member's own
-  `<session>/<member>.jsonl` file directly on omp, so a member with no
-  assistant turn yet still resolves off its dispatch-time record).
+- `session` — a root the controller already knows: the SAME session
+  directory `member-outcomes.mjs`/`board.mjs` are already handed for this
+  run. The check finds the named member under it itself
+  — the member's own `<session>/<member>.jsonl` file directly, so a
+  member with no assistant turn yet still resolves off its dispatch-time
+  record.
 - `transcript` — the member's own transcript file, for a caller that
   already holds the exact path.
 
 `agentFile` and `transcript`/`session` resolve relative to `--repo`
-(defaults to the plugin's own root). `member` is `impl-<N>` on Claude
-(`name:` on the Agent call) and the AgentId on omp — the same value either
-harness's own dispatch already returns.
+(defaults to the plugin's own root). `member` is the AgentId the dispatch
+returns.
 
-**The declaration names a bare alias (`opus`), never a versioned id.** An alias
-tracks the newest generation; a pinned id rots into a superseded one that is
-weaker AND more expensive, because pricing falls with each generation.
+**The declaration is `model: "@<role>:<level>"` — a fleet tier route, never
+a vendor id.** `@slow`, `@task`, `@smol` resolve through the operator's
+`modelRoles`, so an install with no Anthropic model still runs the fleet
+at whatever each role points at; the explicit `:<level>` suffix wins over
+the role's baked one, and the tier check judges a member against the
+role's own target (`modelRoles.<role>`), never a model family (ADR 0011,
+ADR 0014).
 
-**On omp the alias is the fleet's tier name, not a vendor model.** `opus`,
-`sonnet` and `haiku` route through the operator's `task.agentModelOverrides`
-entry for the definition — `@slow:<level>`, `@task:<level>`, `@smol:<level>`,
-derived from the definition by `tier-roles.mjs` and never hand-written — and
-the tier check judges an omp member against the role's own target
-(`modelRoles.<role>`), never against the alias's model family (ADR 0011).
-
-CLAUDE: the routing precheck does not apply — the bare alias in the `Agent` dispatch's definition is the model, and nothing routes it.
-OMP: before the run's first dispatch run `~/.fleet/bin/fleet-run tier-roles.mjs --check`; exit 1 names every `task.agentModelOverrides` entry that is missing, stale or wrong and every unset `modelRoles.<role>`, prints the exact `omp config set task.agentModelOverrides` remedy only when an override is wrong (merged, so the operator's own non-fleet entries survive a set that replaces the whole record), names each unset role to give a model rather than a no-op overrides command, and **stops the run** before any member is dispatched — the fleet reads that config and never writes it (ADR 0003).
+Before the run's first dispatch run `~/.fleet/bin/fleet-run tier-roles.mjs
+--check`; exit 1 names every definition whose `model:` is not a route,
+every unset `modelRoles.<role>` a definition needs, and every
+`task.agentModelOverrides` entry that would shadow a fleet definition,
+prints the exact remedy, and **stops the run** before any member is
+dispatched — the fleet reads that config and never writes it (ADR 0003).
 
 **Every 5th Pull by ledger count goes at the alternate tier.** Count the `impl-`
 rows in `.fleet/ledger.md` at Pull time; the Pull that creates row 5, 10, 15 …
-dispatches `subagent_type: "fleet-ctl:fleet-implementer-alt"` and records
+dispatches `agent: "fleet-implementer-alt"` and records
 `tier=alt` in the row, and a replacement inherits the row's tier. The
 assignment rolls to the next Pull when the pulled ticket is `class=correction`
 or another open ticket sequences after it — a ticket the rest of the run
@@ -983,8 +976,7 @@ pairing is a query over `docs/metrics/member-outcomes.tsv` (the exact awk sits
 in that file's header): a `session` that ran BOTH implementer definitions at
 DIFFERENT `model`s — one member whose `subagent_type` is
 `fleet-implementer-alt`, another whose is `fleet-implementer`. That column is
-the harness's own record of what each member was dispatched AS (Claude's
-`meta.customAgentType`, omp's `session_init.agent`), scraped like every other
+the record of what each member was dispatched AS, scraped like every other
 column, so it survives the file's regeneration and mislabels no historical row
 — a pre-rule session carries no such dispatch to find. A hand-set column would
 fail both of those tests, and one derived against today's declared tiers would
@@ -1151,35 +1143,40 @@ directory for this cwd, not one:
 
 ```bash
 PROJECT_DIR="$(node -e 'import("./scripts/board.mjs").then(m => console.log(m.encodeProjectDir(process.cwd())))')"
-for d in "$HOME/.claude/projects/$PROJECT_DIR"/*/subagents; do
+for d in "$HOME/.omp/agent/sessions/$PROJECT_DIR"/*/; do
   node scripts/member-outcomes.mjs "$d"
 done
 ```
 
-`encodeProjectDir` (`scripts/board.mjs`) encodes the cwd the way Claude Code
-does — every non-alphanumeric character becomes `-`, so a leading dot segment
-doubles its dash (`board.test.mjs`'s regression case: `.claude` becomes
-`--claude`, not `-.claude`) — and hand-guessing that path is why the fleet's
-own panel once rendered nothing here.
+`encodeProjectDir` (`scripts/board.mjs`) encodes the cwd the way omp's own
+session directory naming does — every non-alphanumeric character becomes
+`-`, with a leading dot segment's dot PRESERVED rather than folded into the
+dash run (`member-record.test.mjs`'s regression case: `.claude` becomes
+`-.claude`, not `--claude`) — and hand-guessing that path is why the fleet's
+own panel once rendered nothing here. The trailing `/` on the glob matters:
+the same encoded-cwd directory also holds this cwd's own top-level session
+transcripts as loose FILES sibling to the per-session directories, and a
+glob without it would try to scrape one of those as if it were a session.
 
 **Do not narrow this to "this run's session" with `findSubagentsDir`.** That helper
 answers a different question — the session with the NEWEST transcript for this cwd,
-which is not the same as the one you are in. Measured 2026-08-27: 86 sessions share
-`~/.claude`, and 17 of the 21 days with any subagent activity had two or more of them
-writing. A second Claude session dispatching anything while you reach this step wins
-the tie, and the run then re-scrapes a stranger's members, prints a plausible row
-count and exits 0 while its own facts are never recorded. Looping every session dir
-costs a few seconds, cannot pick wrong, and is idempotent by construction.
+which is not the same as the one you are in. Any other session sharing this cwd —
+a second terminal, a second controller run — can hold a newer transcript than
+yours at the moment you reach this step, and a second session dispatching
+anything while you reach it wins the tie: the run then re-scrapes a stranger's
+members, prints a plausible row count and exits 0 while its own facts are
+never recorded. Looping every session dir costs a few seconds, cannot pick
+wrong, and is idempotent by construction.
 
-The scraper accepts either a `subagents/` directory or its parent session directory,
-and refuses a path it cannot read — a missing, unreadable or non-directory
-`subagents/` all exit 2 — so a wrong path fails loudly instead of writing nothing and
-exiting 0. It reports the run's own YIELD, `scraped N of M members (D dropped)`,
-alongside the file's total: read the yield, because the total is the whole corpus and
-looks healthy even when every member of this session dropped.
+The scraper takes the session directory itself and refuses a path it cannot
+read — a missing, unreadable or non-directory path all exit 2 — so a wrong
+path fails loudly instead of writing nothing and exiting 0. It reports the
+run's own YIELD, `scraped N of M members (D dropped)`, alongside the file's
+total: read the yield, because the total is the whole corpus and looks
+healthy even when every member of this session dropped.
 
-It derives every row from the subagent transcripts the harness already wrote — both
-the flat ones and a Workflow's nested `subagents/workflows/wf_*/` fan-out — so a
+It derives every row from the member transcripts omp already wrote — both the
+flat ones and a member's own nested fan-out one level down — so a
 second run over the same session changes nothing and a re-run after a member is
 re-dispatched picks the new transcript up. **Never hand-edit
 `docs/metrics/member-outcomes.tsv`** — it is regenerated wholesale whenever the
@@ -1284,10 +1281,8 @@ that literal instead of merely asserted: a PR count alone is satisfied by a
 single run's rows, which is the state this file ships in. Without the floor a
 single noisy PR reverts a class; without a `no` count, "trending" names no
 threshold and whether the guard fires is undefined. Per-`impl-<N>`
-spend is not available from `.spend.top` on either harness: on Claude Code it
-labels agents by their Agent-call `description`, not their member name, and on
-omp, where the label is the member name, it still holds only the eight
-largest spenders.
+spend is not available from `.spend.top`: it labels agents by the member
+name, but holds only the eight largest spenders.
 
 **Never read the guard's silence as a pass** — and never read a single run's rows
 as its verdict.
@@ -1548,9 +1543,10 @@ phase 2's own step, and a mismatch it finds is the
 
 **`--max-reviews <n>`** bounds how many reviews are in flight at once, inside
 the reviewer cap. It defaults to the reviewer cap, and the reviewer slots it
-leaves still serve fix-appliers. It is a Marked-line Pair:
-CLAUDE: `~/.fleet/bin/fleet-run fleet-tick.mjs --max-reviews 1` — at most one review Workflow in flight until two concurrent ones are measured on a live run; lifting the bound then is a change to this one line.
-OMP: `~/.fleet/bin/fleet-run fleet-tick.mjs` — the one-review bound does not apply: every review unit already counts against the session's single `task.maxConcurrency` semaphore, which queues at its ceiling rather than refusing (#1771), so reviews run up to the reviewer cap.
+leaves still serve fix-appliers. Leave it at its default: every review unit
+already counts against the session's single `task.maxConcurrency` semaphore,
+which queues at its ceiling rather than refusing (#1771), so reviews run up
+to the reviewer cap without a tighter explicit bound.
 
 **Why every wake.** A merge cascade is a firehose of merges, CI greens and
 rebases that holds your attention on the merge side while the implementer side
@@ -1579,8 +1575,8 @@ It blocks, then prints one line. Which line it is, is the whole protocol:
   Run the tick above **with `--fold-unchanged`** and act on what it prints.
   Then arm the beat again.
 - `… Ns of Ms remain → re-issue this command now, do not end your turn` — no
-  harness lets one command block for a whole interval (omp backgrounds one at
-  60s; a Claude Code shell timeout is shorter than a CI cycle, which is why the
+  command blocks for a whole interval (omp backgrounds one at
+  60s, which is why the
   CI gate tells you to re-issue `gh run watch`). Issue it again. That is still
   one blocking call per turn, never an idle turn.
 
@@ -1803,8 +1799,7 @@ report recovery, never the exit code alone.
 The tick names every PR owed one — `DISPATCH review PR#<M>`, oldest first —
 and each gets one review, once per PR:
 
-CLAUDE: `Workflow({name: "fleet-ctl:review-pr", args: {pr, branch, worktree, testCmd, scratch}})` — it returns `async_launched` in about 1.5 s with a `Run ID`, and you carry on; record `review=wf:<runId>` on the PR's row.
-OMP: a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the same five args — it loads `review-eval.mjs` through the Resolver (`FLEET_HARNESS=omp ~/.fleet/bin/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file and reports; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call.
+a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the same five args — it loads `review-eval.mjs` through the Resolver (`~/.fleet/bin/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file and reports; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call.
 
 Write the `review=` token with `ledger.mjs row`, which **replaces the whole
 line**, so carry every other field. The tick counts in-flight reviews off the
@@ -1848,24 +1843,21 @@ one-file rewrite trims too. An unknown profile widens to the full six, the safe
 direction, so a trim is never something to count on in advance — and a full six
 is never something to assume.
 
-**The reviewer cap counts live review units.** A review in flight — a review
-Workflow still running, or a `review-pr-<pr#>` member — is one; each
+**The reviewer cap counts live review units.** A review in flight — a
+`review-pr-<pr#>` member still running — is one; each
 `fix-pr-<pr#>` is one; a finisher and a CI wait are zero; and a PR holds at most
 one slot at a time. In-flight reviews are derived, never remembered: a row with
 `review=` and no `reviewed=` is one, which is why the token goes on before
 anything else. The defaults are 2 implementers and 6 reviewers, and neither is
 a hard cap. The cap bounds units, not the agents a review fans out to — 1
 snapshot + up to 6 specialists + 2 refuters per critical/important finding — and
-how many reviews may be in flight at once, inside it, is `--max-reviews`, whose
-Marked-line Pair is under **Every wake ends in the tick** in Phase 3. The slots a
-review does not hold still serve fix-appliers.
+how many reviews may be in flight at once, inside it, is `--max-reviews`. The
+slots a review does not hold still serve fix-appliers.
 
 It returns `{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts, snapshot, survived, refuted, unverified}` —
-the **digest** first, so it survives the ~8 KB cut of an inline result, then
-the snapshot and the findings — and it lands as one artefact on both harnesses,
-`<scratch>/review-<pr>.json`, holding that bare object:
-CLAUDE: on the Workflow's notification, write it yourself — `jq '.result' <output-file> > <scratch>/review-<pr>.json` — in the shell only: the `<output-file>` lives under the session-scoped `/private/tmp/claude-501/…`, and reading it into your context is the cost the file exists to avoid.
-OMP: the `review-pr-<pr#>` runner writes it and reports the digest and the path, so writing it yourself does not apply.
+the **digest** first, then the snapshot and the findings — and it lands as
+one artefact, `<scratch>/review-<pr>.json`, holding that bare object: the
+`review-pr-<pr#>` runner writes it and reports the digest and the path.
 
 **You read the digest; the findings are the fix-applier's.**
 `jq '{pr, head, resume, testEnvironment, dimensionsRun, dimensionsUnrun, cwdAudit, counts}' <scratch>/review-<pr>.json`
@@ -1896,8 +1888,7 @@ which records only how much a finding would matter if true. `resume` is
 non-null exactly when a specialist or a refuter pair crashed again after the
 review's own in-run retry, and **resume beats handing a crash-heavy review
 on**: a deferred crash is a finding nobody ever looked at.
-CLAUDE: you are the seat that can still make something look — relaunch with `Workflow({scriptPath, resumeFromRunId})`, which replays this run's unchanged prefix from cache and re-runs only the calls that died.
-OMP: no replay exists for a review that ran in a runner's own kernel, so a relaunch does not apply — `resume` is reported, not acted on, and the fix-applier defers what it names.
+No replay exists for a review that ran in a runner's own kernel — `resume` is reported, not acted on, and the fix-applier defers what it names.
 `refuted` comes back deliberately as well — a refutation is itself a claim, and
 one has been reversed on new evidence. The fix-applier may reverse one; its
 report lists every refutation it reversed, and you copy those to the ledger's
@@ -1934,8 +1925,7 @@ is a failure event, not a clean review.** The review throws on missing
 failure surfaces mid-loop, where "react, never block" makes it easy to log and
 carry on — leaving a PR that *reads* as reviewed and is not. **Retry once, then
 fall back — and whoever holds the review call is who retries:**
-CLAUDE: you hold the `Workflow` call, so relaunch it once yourself; still failing → hand-dispatch the fallback reviewer below as `review-pr-<pr#>`.
-OMP: your own relaunch does not apply — the `review-pr-<pr#>` runner already retried once inside its cell and reports `failed` with both errors; hand-dispatch the fallback reviewer below as `review-pr-<pr#>-b`, the name that report gives.
+The `review-pr-<pr#>` runner already retried once inside its cell and reports `failed` with both errors; hand-dispatch the fallback reviewer below as `review-pr-<pr#>-b`, the name that report gives.
 Either way, settle the dead review by appending `=failed` to its `review=`
 token, then append `review=fallback:review-pr-<pr#>[-b]` after it, both in one
 `ledger.mjs row` rewrite — the tick takes the last `review=` token on a row as
@@ -1991,7 +1981,7 @@ specialists per **Give specialists a stack-free test command** above — in this
 repo `node --test plugin/scripts/*.test.mjs`. Pass the same string to the
 review, to the fix-applier, and to the finisher — whose duty-2 mutation gate
 runs it too — so every gate runs one command. Omit it from the review args and
-the review — `review-pr.js`, and `review-core.mjs` in a runner — now DERIVES it
+the review (`review-core.mjs`, in a runner) now DERIVES it
 from the repo under review (#142) instead of defaulting to a fixed string —
 refusing outright if it can't; the fix-applier has no such fallback, so
 substituting `<testCmd>` with nothing leaves it no gate at all.
@@ -2154,8 +2144,7 @@ all.
 > relay that never comes strands the finding. Its transcript is at the output file
 > named in your spawn result, and its report is the last record:
 >
-> CLAUDE: retrieve via `tail -1 <output-file> | jq -r '.message.content[]?|select(.type=="text").text'` — never read the whole file, it is the full JSONL transcript and will overflow your context. Pinging is not retrieval and never becomes one: `SendMessage` to a finished subagent returns `had no active task; resumed from transcript` without the report (~15 pinged in one run, 0 retrieved).
-> OMP: the tail/jq recipe does not apply — a depth-2 helper cannot dispatch further (`task.maxRecursionDepth: 2`); reach it directly instead, by its full dotted id (`<member>.<helper>`), via `hub send` — delivered, woken, no transcript workaround needed.
+> A depth-2 helper cannot dispatch further (`task.maxRecursionDepth: 2`); reach it directly instead, by its full dotted id (`<member>.<helper>`), via `hub send` — delivered, woken, no transcript workaround needed.
 >
 > If retrieval comes back empty, ask the controller by name. Only when neither
 > works is the finding **unchecked** — defer and file it, and say so in the body. This is
@@ -2240,7 +2229,7 @@ all.
 > that was two commits stale, and a finisher dispatched on either would have
 > halted on a diverged head.
 >
-> Then `SendMessage` the controller the pushed SHA, your apply/defer split, and
+> Then report to the controller the pushed SHA, your apply/defer split, and
 > the deferral issue numbers — a `filed: #N <subject>` line for every issue
 > step 5 created, and `unrecorded: #N <subject>` for one whose `ledger.mjs filed`
 > failed twice — and exit. **Deferring everything is a normal
@@ -2268,10 +2257,9 @@ has returned and its fix-applier, if one was dispatched, has sent its report,
 which the CI-completes edge above states in full** — dispatch a
 **finisher** — a fresh small agent, not the fix-applier resumed. **Dispatch it
 by its own definition and omit `model` on the call** — the tier (`haiku`)
-lives in `agents/fleet-finisher.agent.md`, on both harnesses:
+lives in `agents/fleet-finisher.agent.md`:
 
-CLAUDE: `fleet-ctl:fleet-finisher`.
-OMP: `fleet-finisher`.
+`fleet-finisher`.
 
 Record it with `ledger.mjs dispatch <pr#> finisher-pr-<pr#>` before the call.
 Its four duties are a checklist — audit the
@@ -2409,7 +2397,7 @@ a minute apart showed *different* mutants, so a member's report and any single
    them passes unchanged. A repo that defines none of the three does not gate on
    one — `gh label list` settles that, and it is no licence to skip the read
    where they exist.
-4. `SendMessage` you the label, the deferral issue numbers — a
+4. Report you the label, the deferral issue numbers — a
    `filed: #N <subject>` line for every issue duty 2 created, and
    `unrecorded: #N <subject>` for one whose `filed` failed twice — and anything
    it halted on — cause and evidence, below, never a bare "head moved".
@@ -2634,10 +2622,7 @@ leaves the likeliest failure with no sanctioned path at all. One named member
 per PR — `review-pr-<pr#>`, or `review-pr-<pr#>-b` where a runner already held
 that name — never its implementer, recorded as
 `review=fallback:review-pr-<pr#>[-b]` on the PR's row. It runs off your turn
-like the review it replaces:
-CLAUDE: dispatch it with `run_in_background: true` on the `Agent` call.
-OMP: a `task` member already runs off your turn, so the background flag does not apply.
-Give it the PR number and tell it to read
+like the review it replaces. Give it the PR number and tell it to read
 `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` — the resolved file
 path, not a slash invocation; command availability inside a member is not
 guaranteed the way skill availability is. It then does the fix-applier's job too:
@@ -2671,8 +2656,9 @@ is live:
   dispatched) → **relay it to the reviewer that owns the PR — source named, text
   included.** Relay anyway even though the reviewer can retrieve it itself — a
   duplicate costs nothing, a missed report costs a verdict. Telling it to ping the
-  specialist still returns `had no active task; resumed from transcript` and
-  delivers nothing.
+  specialist does not work either — a depth-2 member cannot dispatch
+  further, so the reviewer has no path to its own un-nameable children
+  beyond reading their output file.
 - **A reviewer's verdict claims a dimension went undelivered** → reconcile it
   against your relay receipts before accepting it. Receipts say relayed → re-send
   naming the specialist and hold that verdict until it lands; a relay can arrive
@@ -2708,10 +2694,9 @@ pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace
 for late labels, then report once and exit — and say that you dispatched it,
 which is what makes it hold that grace instead of arming its own watcher. **Dispatch
 it by its own definition and omit `model` on the call** — the tier (`haiku`)
-lives in `agents/fleet-merge-bot.agent.md`, on both harnesses:
+lives in `agents/fleet-merge-bot.agent.md`:
 
-CLAUDE: `fleet-ctl:fleet-merge-bot`.
-OMP: `fleet-merge-bot`.
+`fleet-merge-bot`.
 
 Rebase, wait for green, check the
 label, merge is checklist work, and a bad merge still needs the label and the
@@ -2828,12 +2813,10 @@ drains, and on the spot for a claim abandoned mid-run (a bail before
 implementing, a collision found after the claim). Update the released tickets'
 ledger rows in the same step. See references/reaping.md.
 
-## Worktree and claim model, on both harnesses
+## Worktree and claim model
 
 Ruled on #1315, measured 2026-09-09 in a throwaway clone (`/tmp/fleet-probe`)
-that never touched the real checkout. Container per #1297: one tree, neutral
-prose, the harness split stated inline as the marked pair below — no
-per-harness `SKILL.md`, no shell wrapping the shared claim.
+that never touched the real checkout.
 
 **Claim, release and reap are unchanged on omp.** `claim-ticket.sh`,
 `release-ticket.sh`, `reap.sh` and `inflight.sh` are git-native and operate on
@@ -2854,15 +2837,18 @@ silent-spill hazard this section exists to guard against, on by default, so
 `isolated` stays unused for every member and `task.isolation.enabled` stays
 off.
 
-**A member's tree is the claimed worktree, addressed by absolute path — the
-shared contract, true on both harnesses without translation.** Claude carries
-the identical hazard for the identical reason: an `edit` header without the
-worktree prefix lands in the main checkout (**You read your instruments out of
-a tree every member can write to** above), so this is one rule, not two; only
-the mechanism for handing a member its cwd splits by harness:
-
-CLAUDE: the `Agent` tool call this runbook dispatches through (`subagent_type`, no working-directory field anywhere in this file) hands a member its cwd purely through the dispatch prompt — **Phase 2**'s "You are ALREADY in worktree `<abs-path>`" — so every write that member makes is addressed there by the absolute path alone.
-OMP: the `task` tool's item schema — `name`/`agent`/`task`/`outputSchema`/`schemaMode` always, `effort`/`isolated` only when their own settings enable them — carries no working-directory field either; measured directly: a member dispatched through it with none of those fields, told only to report `pwd`, returned the calling session's own cwd, not the claimed worktree, the same output an un-`cwd`-set `bash` call gives from that session, so the recipe is the same dispatch-prompt absolute path, plus `bash`'s own `cwd` parameter set to it on every call and absolute paths for `write`/`edit`.
+**A member's tree is the claimed worktree, addressed by absolute path.** An
+`edit` header without the worktree prefix lands in the main checkout (**You
+read your instruments out of a tree every member can write to** above). How a
+member gets its cwd: the `task` tool's item schema — `name`/`agent`/`task`/
+`outputSchema`/`schemaMode` always, `effort`/`isolated` only when their own
+settings enable them — carries no working-directory field; measured
+directly: a member dispatched through it with none of those fields, told
+only to report `pwd`, returned the calling session's own cwd, not the
+claimed worktree, the same output an un-`cwd`-set `bash` call gives from
+that session, so the recipe is the dispatch-prompt absolute path, plus
+`bash`'s own `cwd` parameter set to it on every call and absolute paths for
+`write`/`edit`.
 
 **The one open gap this ticket measured: `task` does not accept a per-dispatch
 working directory.** `omp://tools/task.md` documents non-isolated spawns as
@@ -2909,14 +2895,14 @@ land in its own `~/.omp/wt/…` workspace regardless of the prompt — but it
 neither removes nor hides the claim, and `~/.omp/wt/` was empty after every
 isolated run: omp's own teardown touches only omp's own workspace, never the
 claim. `release-ticket.sh`'s three-artifact teardown (label, worktree, branch)
-is therefore exactly as necessary as on Claude. With the member live inside
+is therefore still necessary. With the member live inside
 the worktree, `git worktree list` and `git branch --list` from the main
 checkout reported the claim unchanged before, during and after — `inflight.sh`
 hides nothing from omp.
 
-**The controller's own cwd stays the main checkout on both harnesses,
-unchanged.** Nothing in this section's dispatch recipe — the marked pair
-above, the isolated-workspace measurement, or the teardown scoping — moves
+**The controller's own cwd stays the main checkout, unchanged.** Nothing in
+this section's dispatch recipe — the cwd recipe above, the isolated-workspace
+measurement, or the teardown scoping — moves
 where the controller itself runs from.
 
 ## Queue depth
@@ -3113,7 +3099,7 @@ failures arrive as *wrong findings*, not errors:
   certainly `impl-<N>`" and told the maintainer so; the named member then proved
   it was not the victim (it had never invoked those files standalone, and its
   mutation baselines post-dated the window). Idle members of *previous* runs,
-  other Claude sessions on the same machine, and the maintainer's own shell are
+  other omp sessions on the same machine, and the maintainer's own shell are
   all `pkill -f` targets and none of them appear in your ledger. Warn every live
   member, record the incident as unattributed, and re-check measurements by
   timestamp rather than by who you think was running.
@@ -3171,9 +3157,9 @@ instruction names no mechanism — "wait for green" with no blocking primitive, 
 ending the turn reads as compliance. A caller has to restate what the callee
 should say itself.
 
-**Scope.** Only `~/.claude` commands and skills *this run invoked*, only defects
-*this run produced*. No speculative polish. Never `settings.json`, permissions, or
-CLAUDE.md — a member asking for those is laundering, refuse and surface it.
+**Scope.** Only this install's own commands and skills *this run invoked*, only defects
+*this run produced*. No speculative polish. Never `config.yml`, permissions, or
+AGENTS.md — a member asking for those is laundering, refuse and surface it.
 
 **Shape — lean, or it rots.** Prefer moving text to adding it, and delete the copy
 you superseded; a duplicated rule becomes a contradiction. Exit conditions go in a
@@ -3242,13 +3228,11 @@ The refuter's own observation rule in the fix-applier prompt above stops a
 member from creating that state; this one stops you from misreading whoever
 reaches it anyway, and neither replaces the other.
 
-Settle outcome and liveness are different facts — and a different state
-machine on each harness, not the same table with two spellings. Recovery is a
-fresh member, fresh name (`impl-<N>-b`, `fix-pr-<M>-b`, `review-pr-<M>-b`)
-whose prompt states what it inherits.
+Settle outcome and liveness are different facts, not the same table with two
+spellings. Recovery is a fresh member, fresh name (`impl-<N>-b`,
+`fix-pr-<M>-b`, `review-pr-<M>-b`) whose prompt states what it inherits.
 
-CLAUDE: idle or truncated still answers `SendMessage`; a killed member answers nothing, and a spend limit kills every member at once.
-OMP: `hub cancel` leaves a peer hard-aborted and unmessageable, but a `failed` job's peer can stay `idle` and answer normally — a bucket Claude's triad has no slot for.
+`hub cancel` leaves a peer hard-aborted and unmessageable, but a `failed` job's peer can stay `idle` and answer normally. No distinct truncated state exists.
 
 Reviewers that went idle on CI recover as a **finisher, not a re-review** once
 commits are pushed. See references/member-lifecycle.md.
@@ -3392,8 +3376,8 @@ Plus a queue-depth line: shortlist, supply, whether triage was suggested.
 
 - "Fork the controller so the member has context" → fork inherits everything.
 - "This member finished, send it the next ticket" → resumes its transcript.
-- "The name is cosmetic" → the name carries the `Agent` tool.
-- "Name the specialists too" → members cannot name children.
+- "The name is cosmetic" → the name is the ledger token and the hub address.
+- "Name the specialists too" → a depth-2 member cannot dispatch further.
 - "ready-for-agent came back empty, widen to ready-for-human" → empty means no work.
 - "The reap at the end will pick up the claim I never dispatched" → it declines:
   not `[gone]`, no unique commits. Release it, or it reads as taken next run.
@@ -3402,9 +3386,9 @@ Plus a queue-depth line: shortlist, supply, whether triage was suggested.
 - "The brief is thorough, so it's decided" → thorough ≠ decided. Read it for the
   choice it leaves open.
 - "I'd have to pick an approach myself" → that IS undecided.
-- "The reviewer has the Agent tool, it'll fan out" → not unless authorized.
-- "Tell the reviewer to ping its specialists" (fallback path) → the ping returns
-  `had no active task; resumed from transcript` and delivers nothing. Tell it to
+- "The reviewer can dispatch, it'll fan out" → not unless authorized.
+- "Tell the reviewer to ping its specialists" (fallback path) → a depth-2 member
+  cannot dispatch further, so the ping goes nowhere. Tell it to
   read the specialist's output file instead; your relay is the backup, not the
   only path.
 - "I relayed it, so the reviewer has it" (fallback path) → sent is not read, and a relay can land
@@ -3413,7 +3397,7 @@ Plus a queue-depth line: shortlist, supply, whether triage was suggested.
   refuted. Reconcile verdicts against your receipts.
 - "It reported the SHA, so it's on the branch" → verify.
 - "Let the merge bot arm its own monitor" → it dies, the queue stops.
-- "The member died, SendMessage it the state" → dead agents do not read mail.
+- "The member died, message it the state" → dead agents do not read mail.
 - "Its CI is green, ship it" → check behind-count; green decays invisibly.
 - "The specialist says nothing else references it" → the claim most often wrong.
   Ask what scope it searched.

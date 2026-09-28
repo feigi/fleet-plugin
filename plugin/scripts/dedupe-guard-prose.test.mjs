@@ -179,9 +179,9 @@ test("the finisher files its own deferrals through the same guard", () => {
 // a second kind of writer exist; these pin the instruction half of it.
 const runLedger = () => flat(between(RUN_TEAM, "## Run ledger", "\n## Report", "run-team Run ledger section"));
 const finisherReport = () =>
-  flat(between(RUN_TEAM, "4. `SendMessage` you the label", "**Give the finisher the instrument", "run-team finisher duty 4"));
+  flat(between(RUN_TEAM, "4. Report you the label", "**Give the finisher the instrument", "run-team finisher duty 4"));
 const fixApplierReport = () =>
-  flat(between(RUN_TEAM, "> Then `SendMessage` the controller the pushed SHA", "**Deferring everything", "fix-applier report line"));
+  flat(between(RUN_TEAM, "> Then report to the controller the pushed SHA", "**Deferring everything", "fix-applier report line"));
 
 test("both filing sites run `ledger.mjs filed` right after `gh issue create`, under the subject they checked", () => {
   // The subject is half of it: `check` matches the filed list by the words in

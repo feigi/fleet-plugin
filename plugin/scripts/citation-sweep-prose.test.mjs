@@ -491,7 +491,7 @@ const FILES = [
   },
   {
     // #1935. Two citations of `run-merge-bot.md:195` in this file, both
-    // pointing at the CLAUDE-harness CI wait's shell-timeout-vs-CI-cycle
+    // pointing at the CI wait rule's shell-timeout-vs-CI-cycle
     // claim, and both already stale before #1895's step-1 fire/poll split
     // moved the target's own numbering again. Banned generally rather than
     // at the one drifted value: a ban on `:195` alone lets `:196` or any
@@ -501,8 +501,8 @@ const FILES = [
     stale: [/run-merge-bot\.md:\d+/],
     // One needle per SITE — either can revert independently of the other.
     live: [
-      "run-merge-bot.md's CLAUDE-harness CI wait already records",
-      "run-merge-bot.md's CLAUDE-harness CI wait measures",
+      "run-merge-bot.md's CI wait rule already states",
+      "run-merge-bot.md's CI wait rule measures",
     ],
   },
   {
@@ -519,11 +519,6 @@ const FILES = [
     path: ["scripts", "ledger.test.mjs"],
     stale: [/fleet-plugin-design\.md:200/],
     live: ["fleet-plugin-design.md's"],
-  },
-  {
-    path: ["scripts", "lift.mjs"],
-    stale: [/review-pr-specialist-read-rules-design\.md:277/],
-    live: ["review-pr-specialist-read-rules-design.md"],
   },
   {
     path: ["scripts", "member-outcomes.mjs"],
@@ -573,27 +568,14 @@ const FILES = [
     live: ["empty-entry skip"],
   },
   {
-    // #1935. `run-merge-bot.md:161` sat in a list of four `git -C` idiom
-    // citations and was already stale before #1895's step-1 fire/poll split
-    // moved the target's own numbering again — the cited line was a STOP
-    // arm, not the `git -C <worktree> rev-parse HEAD` example this citation
-    // names. Banned generally, the same reason the fleet-heartbeat.mjs entry
-    // above gives. The other three citations sharing this list
-    // (derive-testcmd.sh, SKILL.md, member-lifecycle.md) are untouched here
-    // — out of scope for this ticket, not re-derived either way.
-    path: ["scripts", "review-pr-citation-prose.test.mjs"],
-    stale: [/run-merge-bot\.md:\d+/],
-    live: [`run-merge-bot.md's "Confirm the worktree head *is* the reviewed remote PR head before rebasing" step`],
+    path: ["scripts", "review-core-reads.test.mjs"],
+    stale: [/select-dimensions\.test\.mjs:211-216/],
+    live: ["reviewDispatchOptions"],
   },
   {
-    path: ["scripts", "review-pr-reads.test.mjs"],
-    stale: [/select-dimensions\.test\.mjs:23-40/, /select-dimensions\.test\.mjs:211-216/],
-    live: ["liftFromSource", "reviewDispatchOptions"],
-  },
-  {
-    path: ["scripts", "review-pr-snapshot-path.test.mjs"],
-    stale: [/select-dimensions\.test\.mjs:251-256/, /review-pr-citation-prose\.test\.mjs:23/],
-    live: ["resolveDimensions", "review-pr-citation-prose.test.mjs"],
+    path: ["scripts", "review-core-snapshot-path.test.mjs"],
+    stale: [/select-dimensions\.test\.mjs:251-256/],
+    live: ["resolveDimensions"],
   },
   {
     path: ["scripts", "run-merge-bot-prose.test.mjs"],
@@ -608,40 +590,13 @@ const FILES = [
     // after the citation was deleted outright.
     live: ['[ "$parents" -ge 2 ]'],
   },
-  {
-    // #1555. The one entry here that is not a citation. #1125 moved this
-    // file's `resolveDimensions` lift onto stripComments(SOURCE) because
-    // lift() matches with a non-global `.match`, so against raw source a
-    // block-commented dead copy of the function satisfies the pin while the
-    // live declaration ships the regression. Reverting that one line alone
-    // was measured green everywhere — this suite and select-dimensions.test.mjs
-    // both — so nothing but this entry stops it rotting back.
-    path: ["scripts", "select-dimensions.test.mjs"],
-    // Banned generally rather than at the one reverted spelling, the reason
-    // the run-merge-bot entry above gives: a ban on `lift(SOURCE,` alone lets
-    // `lift( SOURCE` straight back in. That claim is about the TARGET file:
-    // select-dimensions.test.mjs spells `lift(` on nothing starting SOURCE
-    // today. It is not a claim about this file — this comment block's own
-    // prose, describing the banned pattern, does spell it literally (as text
-    // above and in this sentence), which is fine and expected: `stale` below
-    // matches select-dimensions.test.mjs's source, never this file's.
-    stale: [/lift\(\s*SOURCE/, /const CODE = SOURCE\b/],
-    // The whole live call, not a bare `stripComments(SOURCE)`: that shorter
-    // needle is vacuous here. Deleting this lift outright still leaves five
-    // spellings of it in that file — the `verifiersFor` branch's stripped
-    // read, the header-dereference check, the specialistModel ban, and two
-    // comments, which count because the live half matches gutter-stripped
-    // prose. Measured both ways with the lift's line deleted: the needle
-    // below reds, a bare `stripComments(SOURCE)` stays green.
-    //
-    // Second pair: `verifiersFor`'s own stripped read (line 72), the repo's
-    // only guard on the live `verifiersBySeverity` map per that branch's own
-    // comment. Reverting just that one line to `const CODE = SOURCE;` was
-    // measured green across this suite AND select-dimensions.test.mjs's own
-    // 41 tests — the same silent-rot shape as the `resolveDimensions` pair
-    // above, so it gets the same two-sided pin.
-    live: ['lift(stripComments(SOURCE), "resolveDimensions"', "const CODE = stripComments(SOURCE);"],
-  },
+  // #1349 retired this entry outright rather than leaving it to rot:
+  // select-dimensions.test.mjs's `lift(stripComments(SOURCE), "resolveDimensions"...)`
+  // machinery this pin guarded no longer exists anywhere in this file —
+  // the omp-only cutover converted it to direct imports of
+  // `resolveDimensions`/`verifiersFor`/`DEFAULT_DIMENSIONS`, so there is no
+  // construct left to name here. Removed with the cutover that obsoleted
+  // it, not left as a stale form for a future sweep to catch.
   // #1349 retired this entry outright rather than leaving it to rot: the
   // vendored `code-reviewer.md` this citation pointed at (via its "Review
   // Scope" section) no longer exists anywhere in this port — the fork ruled

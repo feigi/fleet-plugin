@@ -10,7 +10,7 @@ import { spawnSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, spendDirPin, gatherSpend, faultText, resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "./board.mjs";
-import { encodeOmpProjectDir, readOmpMember } from "./member-record.mjs";
+import { readOmpMember } from "./member-record.mjs";
 import { stripComments } from "./strip-comments.mjs";
 import { gitEnv } from "./git-env.mjs";
 
@@ -719,35 +719,26 @@ test("createBoardServer serves board.json and the page", async () => {
 // both live in the I/O that feeds them: a wrong path and a wrong summation. Each
 // failed silently as "panel hidden" or "plausible but 3x too big".
 
-test("encodeProjectDir replaces dots as well as slashes", () => {
-  // Regression: replacing only `/` produced `-Users-x-.claude`, which never
-  // exists, so the panel silently vanished for every dotted cwd — including the
-  // repo the fleet skills themselves run out of.
-  assert.equal(encodeProjectDir("/Users/x/.claude"), "-Users-x--claude");
-  assert.equal(encodeProjectDir("/Users/x/dev/repo"), "-Users-x-dev-repo");
-  assert.equal(encodeProjectDir("/Users/x/dev/repo/.claude/worktrees/a"), "-Users-x-dev-repo--claude-worktrees-a");
-});
-
-test("findSubagentsDir resolves a dotted cwd and picks the newest session", () => {
+test("findSubagentsDir picks the session with the newest transcript", () => {
   const home = mkdtempSync(join(tmpdir(), "spend-home-"));
-  const proj = join(home, ".claude", "projects", "-Users-x--claude");
-  const older = join(proj, "11111111-aaaa", "subagents");
-  const newer = join(proj, "22222222-bbbb", "subagents");
+  const proj = join(home, ".omp", "agent", "sessions", "-x");
+  const older = join(proj, "2026-09-08T13-13-27-300Z_11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  const newer = join(proj, "2026-09-09T02-00-00-000Z_22222222-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
   mkdirSync(older, { recursive: true });
   mkdirSync(newer, { recursive: true });
   // Ranking reads the newest *.jsonl mtime, so stamp the TRANSCRIPTS, not the
   // dirs. Stamp both explicitly rather than sleeping for a clock tick: both are
   // created inside the same millisecond on a fast filesystem, `mtimeMs` ties,
-  // and the sort is stable — a tie would resolve to readdir order and
-  // `11111111-aaaa` would win on name.
+  // and the sort is stable — a tie would resolve to readdir order and the
+  // OLDER directory would win on name.
   writeFileSync(join(older, "agent-a.jsonl"), "");
   utimesSync(join(older, "agent-a.jsonl"), new Date(1000), new Date(1000));
   writeFileSync(join(newer, "agent-b.jsonl"), "");
   utimesSync(join(newer, "agent-b.jsonl"), new Date(9000), new Date(9000));
 
-  assert.equal(findSubagentsDir(home, "/Users/x/.claude"), newer);
+  assert.equal(findSubagentsDir(home, join(home, "x")), newer);
   // Unresolvable path is a bug, not an empty run — it must be distinguishable.
-  assert.ok(findSubagentsDir(home, "/Users/x/nonexistent").error);
+  assert.ok(findSubagentsDir(home, "/nonexistent").error);
 });
 
 test("session ranking uses transcript mtime, not directory mtime", () => {
@@ -766,9 +757,9 @@ test("session ranking uses transcript mtime, not directory mtime", () => {
   // dirs: creating a file is the one operation that moves its parent's mtime,
   // and rewriting an existing file's mtime does not.
   const home = mkdtempSync(join(tmpdir(), "spend-home-"));
-  const proj = join(home, ".claude", "projects", "-x");
-  const busy = join(proj, "aaaa", "subagents");   // spawned its agents early, still appending
-  const idle = join(proj, "bbbb", "subagents");   // spawned one last agent, then went quiet
+  const proj = join(home, ".omp", "agent", "sessions", "-x");
+  const busy = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");   // spawned its agents early, still appending
+  const idle = join(proj, "2026-09-09T02-00-00-000Z_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");   // spawned one last agent, then went quiet
   mkdirSync(busy, { recursive: true });
   mkdirSync(idle, { recursive: true });
   writeFileSync(join(busy, "agent-b.jsonl"), "");
@@ -778,7 +769,7 @@ test("session ranking uses transcript mtime, not directory mtime", () => {
   utimesSync(busy, new Date(1000), new Date(1000));
   utimesSync(idle, new Date(9000), new Date(9000));                        // newest DIRECTORY
 
-  assert.equal(findSubagentsDir(home, "/x"), busy);
+  assert.equal(findSubagentsDir(home, join(home, "x")), busy);
 });
 
 test("one unreadable session directory loses the ranking instead of sinking the lookup", () => {
@@ -788,18 +779,22 @@ test("one unreadable session directory loses the ranking instead of sinking the 
   // readable live session — a blackout where the per-file catch beside it
   // already chose degradation. A candidate we cannot read must score 0 and lose.
   //
-  // `subagents` as a regular FILE rather than a chmod 000 dir: ENOTDIR is the
-  // same uncaught throw and, unlike a permission bit, it still throws when the
-  // suite runs as root.
+  // The bad sibling is a regular FILE where a directory is expected: EISDIR/
+  // ENOTDIR is the same uncaught throw and, unlike a permission bit, it still
+  // throws when the suite runs as root.
   const home = mkdtempSync(join(tmpdir(), "spend-home-"));
-  const proj = join(home, ".claude", "projects", "-x");
-  const good = join(proj, "aaaa", "subagents");
+  const proj = join(home, ".omp", "agent", "sessions", "-x");
+  const good = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   mkdirSync(good, { recursive: true });
-  mkdirSync(join(proj, "bbbb"), { recursive: true });
-  writeFileSync(join(proj, "bbbb", "subagents"), "not a directory");
   writeFileSync(join(good, "agent-a.jsonl"), "");
-
-  assert.equal(findSubagentsDir(home, "/x"), good);
+  const badName = "2026-09-09T02-00-00-000Z_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+  mkdirSync(join(proj, badName, "nested"), { recursive: true });
+  chmodSync(join(proj, badName), 0o000);
+  try {
+    assert.equal(findSubagentsDir(home, join(home, "x")), good);
+  } finally {
+    chmodSync(join(proj, badName), 0o755);
+  }
 });
 
 // ── #1716: the omp tree ───────────────────────────────────────────────────────
@@ -826,11 +821,11 @@ function ompTranscript({ agent, task, model = "claude-opus-5", turns = [] } = {}
 
 // A $HOME whose cwd sits under it, so the encoded project dir is the
 // home-relative form (`-dev-repo`) and needs no realpath of a cwd that does
-// not exist. encodeOmpProjectDir is the real encoder, not a hand-rolled path.
+// not exist. encodeProjectDir is the real encoder, not a hand-rolled path.
 function ompHome() {
   const home = mkdtempSync(join(tmpdir(), "spend-omp-home-"));
   const cwd = join(home, "dev", "repo");
-  const proj = join(home, ".omp", "agent", "sessions", encodeOmpProjectDir(cwd, { home }));
+  const proj = join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home }));
   mkdirSync(proj, { recursive: true });
   return { home, cwd, proj };
 }
@@ -861,7 +856,7 @@ test("findSubagentsDir on omp picks this workspace's newest session DIRECTORY �
   writeFileSync(join(proj, "notes", "x.jsonl"), "");
   utimesSync(join(proj, "notes", "x.jsonl"), new Date(20000), new Date(20000));
 
-  // No ~/.claude tree at all: an omp-only machine resolves, it does not error.
+  // No session tree at all yet: resolves cleanly, does not error.
   assert.equal(findSubagentsDir(home, cwd), newer);
   utimesSync(join(older, "impl-1.jsonl"), new Date(30000), new Date(30000));
   assert.equal(findSubagentsDir(home, cwd), older, "the ranking reads member transcripts, so it follows them");
@@ -884,50 +879,30 @@ test("findSubagentsDir on omp follows a NESTED member's mtime, not just the sess
     "the nested member's fresher mtime must win the ranking, not lose to staleSibling's stale top-level file");
 });
 
-test("findSubagentsDir: an EACCES resolving the omp encoding (not ENOENT) surfaces as an error, even with a readable Claude tree beside it", () => {
-  // #1867 review: ompSessionDirs's catch around encodeOmpProjectDir must only
+test("findSubagentsDir: an EACCES resolving the omp encoding (not ENOENT) surfaces as an error", () => {
+  // #1867 review: ompSessionDirs's catch around encodeProjectDir must only
   // swallow ENOENT ("this cwd doesn't exist" — the documented case). Any
   // other error (EACCES on an ancestor, here) is a real fault and must
-  // propagate, never be silently relabelled as "no omp session" while a
-  // readable Claude tree quietly takes over with no signal anything crashed.
+  // propagate, never be silently relabelled as "no omp session".
   const home = mkdtempSync(join(tmpdir(), "spend-eacces-home-"));
   const outer = mkdtempSync(join(tmpdir(), "spend-eacces-outer-"));
   const blocked = join(outer, "blocked");
   mkdirSync(blocked);
   const cwd = join(blocked, "sub", "repo");
   mkdirSync(cwd, { recursive: true });
-  const sub = join(home, ".claude", "projects", encodeProjectDir(cwd), "sess", "subagents");
-  mkdirSync(sub, { recursive: true });
-  writeFileSync(join(sub, "agent-a.jsonl"), "");
   chmodSync(blocked, 0o000);
   try {
     const result = findSubagentsDir(home, cwd);
-    assert.notEqual(result, sub, "an omp-side EACCES must not be silently absorbed into a confident Claude-only answer");
     assert.ok(result && typeof result === "object" && "error" in result, "it must surface as a lookup error, the same as any other real fault");
   } finally {
     chmodSync(blocked, 0o755);
   }
 });
 
-test("both harnesses' trees are one ranking: whichever session wrote last wins", () => {
-  // One cwd used under both harnesses — this machine's own shape — holds both
-  // trees at once. Neither harness is preferred; the live one is the one writing.
-  const { home, cwd, proj } = ompHome();
-  const omp = ompSession(proj, OMP_A, { "impl-1": ompTranscript() }, 9000);
-  const claude = join(home, ".claude", "projects", encodeProjectDir(cwd), "sess", "subagents");
-  mkdirSync(claude, { recursive: true });
-  writeFileSync(join(claude, "agent-a.jsonl"), "");
-  utimesSync(join(claude, "agent-a.jsonl"), new Date(5000), new Date(5000));
-  assert.equal(findSubagentsDir(home, cwd), omp);
-  utimesSync(join(claude, "agent-a.jsonl"), new Date(20000), new Date(20000));
-  assert.equal(findSubagentsDir(home, cwd), claude);
-});
-
-test("with neither harness's tree present the lookup is an error that names both places it looked", () => {
+test("with no session tree present the lookup is an error that names where it looked", () => {
   const home = mkdtempSync(join(tmpdir(), "spend-omp-home-"));
   const r = findSubagentsDir(home, join(home, "dev", "repo"));
-  assert.match(r.error, /\.claude[\\/]projects/);
-  assert.match(r.error, /\.omp[\\/]agent[\\/]sessions/, "an omp operator told only where Claude's tree should be is sent to the wrong place");
+  assert.match(r.error, /\.omp[\\/]agent[\\/]sessions/);
 });
 
 test("the pin's launchMs gate holds on an omp tree: a session predating launch is followed, the first to write on its watch latches", () => {
@@ -984,7 +959,7 @@ test("an omp session's per-member rows carry exactly readOmpMember's totals, mod
   }
 });
 
-test("an omp session's tool table is attributed per member and merged, as a Claude one is (#1717)", () => {
+test("an omp session's tool table is attributed per member and merged (#1717)", () => {
   // Lines in the measured tool shapes member-record.mjs's foldOmpTranscript
   // comment records: a `toolCall` block on the assistant message, and each
   // result a `toolResult` message line of its own.
@@ -1014,7 +989,7 @@ test("an omp session's tool table is attributed per member and merged, as a Clau
 });
 
 test("an omp session's damaged count is real, not a hardcoded 0 (#1717 review)", () => {
-  // Mirrors board.mjs's Claude-side `damaged` block (#916): a mid-file tear
+  // The `damaged` block (#916): a mid-file tear
   // now costs more than its own turn's totals once the same fold also feeds
   // the tool table, so this reader has to count it rather than assume 0.
   const msg = (message) => JSON.stringify({ type: "message", id: "m", parentId: "i1", timestamp: "2026-09-08T15:12:00.000Z", message });
@@ -1038,7 +1013,7 @@ test("an omp session's torn LAST line stays silent — the tear a live write leg
   const TORN = '{"type":"message","message":{"role":"ass';
   const { proj } = ompHome();
   // No trailing newline: the torn write is the final element of the split,
-  // the same discriminator foldClaudeTranscript's own `torn` case relies on.
+  // the same discriminator foldOmpTranscript's own `malformedNonLastLines` relies on.
   const dir = ompSession(proj, OMP_A, { "impl-7": [turn(1000), TORN].join("\n") });
   const s = gatherSpend({ dir });
   assert.equal(s.ok, true);
@@ -1049,7 +1024,7 @@ test("an omp session's torn LAST line stays silent — the tear a live write leg
 test("one bad transcript in an omp session is skipped and named, not a blackout of the members beside it", () => {
   // readOmpSession lets a wrong-harness refusal propagate (a whole-tree scrape
   // must refuse loudly); on the live panel that is one transcript's fault, so
-  // it lands in `skipped` exactly as a broken Claude transcript does.
+  // it lands in `skipped` exactly as a broken transcript does.
   const { proj } = ompHome();
   const dir = ompSession(proj, OMP_A, { "impl-7": ompTranscript({ turns: [{ input: 1, output: 1, cacheRead: 1, cacheWrite: 1000 }] }) });
   writeFileSync(join(dir, "Stray.jsonl"), JSON.stringify({ type: "assistant", sessionId: "x", message: { id: "m", usage: {} } }) + "\n");
@@ -1069,9 +1044,7 @@ test("one bad transcript in an omp session is skipped and named, not a blackout 
 // `!agents.length` branch used to read `skipped` alone: an --spend-dir
 // operator was told the directory "holds no agent transcripts", and the
 // heuristic's panel simply hid — a destroyed session rendered as one that had
-// not started. Claude's side cannot reach that branch this way: readAgent
-// books a wholly-corrupt transcript at zero spend, so its damage already
-// arrives on the success return's note.
+// not started.
 test("an omp session whose only transcript is wholly corrupt reports the damage, not an empty directory (#1894)", () => {
   const { proj } = ompHome();
   // Every line unparseable — the ticket's own reproduction, via --spend-dir.
@@ -1089,6 +1062,23 @@ test("an omp session whose only transcript is wholly corrupt reports the damage,
   const h = gatherSpend({ dir: headerIntact });
   assert.equal(h?.ok, false, JSON.stringify(h));
   assert.match(h.error, /1 damaged transcript line\b/);
+});
+
+test("--spend-dir naming the encoded-cwd PROJECT directory is refused, not silently scraped whole (#1302-style)", () => {
+  // gatherSpend's `explicit` path hands readOmpSpend one directory, which
+  // ompSessionTranscripts then walks recursively with no name check of its
+  // own — so naming the project dir (the parent `-dev-repo` directory
+  // findSubagentsDir resolves FROM, never the thing itself) instead of one
+  // of its `<ISO>_<uuid>` session children used to be silently accepted
+  // whole: every session under it booked as "agents", including the
+  // project's own main-session transcript.
+  const { proj } = ompHome();
+  ompSession(proj, OMP_A, { "impl-1": ompTranscript() });
+  let s;
+  const errs = withStderr(() => { s = gatherSpend({ dir: proj, explicit: true }); });
+  assert.equal(s?.ok, false, JSON.stringify(s));
+  assert.match(s.error, /is not an omp .* session directory/);
+  assert.deepEqual(errs.filter((e) => /is not an omp/.test(e)).length > 0, true, "the refusal must actually reach stderr, not just the return value");
 });
 
 test("an omp session losing one transcript whole and another to damaged lines names both, not 'all 1 unreadable' (#1894)", () => {
@@ -1132,9 +1122,9 @@ test("an omp session whose only transcript is a live write's torn first line is 
 // answer" was always safe to cache.
 test("the pin does not latch a session that predates it — it keeps following the heuristic until one writes on its watch", () => {
   const home = mkdtempSync(join(tmpdir(), "spend-home-"));
-  const proj = join(home, ".claude", "projects", "-x");
-  const mine = join(proj, "sess-a", "subagents");
-  const theirs = join(proj, "sess-b", "subagents");
+  const proj = join(home, ".omp", "agent", "sessions", "-x");
+  const mine = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  const theirs = join(proj, "2026-09-09T02-00-00-000Z_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
   mkdirSync(mine, { recursive: true });
   mkdirSync(theirs, { recursive: true });
   writeFileSync(join(mine, "agent-a.jsonl"), "");
@@ -1144,7 +1134,7 @@ test("the pin does not latch a session that predates it — it keeps following t
   utimesSync(join(mine, "agent-a.jsonl"), new Date(Date.now() - 100000), new Date(Date.now() - 100000));
   utimesSync(join(theirs, "agent-b.jsonl"), new Date(Date.now() - 200000), new Date(Date.now() - 200000));
 
-  const pin = spendDirPin(undefined, home, "/x");
+  const pin = spendDirPin(undefined, home, join(home, "x"));
   assert.equal(pin(), mine, "before anything writes on this pin's watch, it still answers from the heuristic's newest");
 
   // `theirs` writes AFTER the pin exists — real activity "on my watch", the
@@ -1157,7 +1147,7 @@ test("the pin does not latch a session that predates it — it keeps following t
   // the bar and that is what latches, not "whichever is newest this tick".
   utimesSync(join(mine, "agent-a.jsonl"), new Date(Date.now() + 50000), new Date(Date.now() + 50000));
   assert.equal(pin(), theirs, "and now holds, because theirs was first to write on this pin's watch");
-  assert.equal(findSubagentsDir(home, "/x"), mine, "the fixture really did flip — this test proves nothing otherwise");
+  assert.equal(findSubagentsDir(home, join(home, "x")), mine, "the fixture really did flip — this test proves nothing otherwise");
 });
 
 test("no session at launch is not an answer to pin — the first one to write on this pin's watch wins, and then holds", () => {
@@ -1168,12 +1158,12 @@ test("no session at launch is not an answer to pin — the first one to write on
   // agents land", not "hidden for good", and this is the assertion that keeps
   // the pin from being written as "whatever the first call returned".
   const home = mkdtempSync(join(tmpdir(), "spend-home-"));
-  const proj = join(home, ".claude", "projects", "-x");
+  const proj = join(home, ".omp", "agent", "sessions", "-x");
   mkdirSync(proj, { recursive: true });
-  const pin = spendDirPin(undefined, home, "/x");
+  const pin = spendDirPin(undefined, home, join(home, "x"));
   assert.equal(pin(), null, "no session yet is the normal state at run start, not a fault");
 
-  const first = join(proj, "sess-first", "subagents");
+  const first = join(proj, "2026-09-08T13-13-27-300Z_11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   mkdirSync(first, { recursive: true });
   // Written after the pin already exists — this run's own first activity,
   // not a stale fixture mtime from before launch. The mtime is SET, not left
@@ -1187,7 +1177,7 @@ test("no session at launch is not an answer to pin — the first one to write on
   utimesSync(join(first, "agent-a.jsonl"), new Date(), new Date());
   assert.equal(pin(), first, "the first real answer, once it postdates launch, latches");
 
-  const second = join(proj, "sess-second", "subagents");
+  const second = join(proj, "2026-09-09T02-00-00-000Z_22222222-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
   mkdirSync(second, { recursive: true });
   writeFileSync(join(second, "agent-b.jsonl"), "");
   utimesSync(join(second, "agent-b.jsonl"), new Date(Date.now() + 50000), new Date(Date.now() + 50000));
@@ -1218,9 +1208,9 @@ test("a transcript stamped a few ms before launchMs is followed, never latched �
   const launchMs = Date.UTC(2026, 0, 1);
   const stamp = (f, ms) => utimesSync(f, new Date(ms), new Date(ms));
   const home = mkdtempSync(join(tmpdir(), "spend-home-"));
-  const proj = join(home, ".claude", "projects", "-x");
-  const mine = join(proj, "sess-a", "subagents");
-  const theirs = join(proj, "sess-b", "subagents");
+  const proj = join(home, ".omp", "agent", "sessions", "-x");
+  const mine = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  const theirs = join(proj, "2026-09-09T02-00-00-000Z_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
   mkdirSync(mine, { recursive: true });
   mkdirSync(theirs, { recursive: true });
   const mineLog = join(mine, "agent-a.jsonl");
@@ -1231,7 +1221,7 @@ test("a transcript stamped a few ms before launchMs is followed, never latched �
   stamp(theirsLog, launchMs - 60000);
 
   const clock = t.mock.method(Date, "now", () => launchMs);
-  const pin = spendDirPin(undefined, home, "/x");
+  const pin = spendDirPin(undefined, home, join(home, "x"));
   clock.mock.restore();
 
   assert.equal(pin(), mine, "5 ms before launch is still this tick's answer — the panel renders it");
@@ -1253,7 +1243,7 @@ test("a transcript stamped a few ms before launchMs is followed, never latched �
 
   stamp(theirsLog, launchMs + 50000);
   assert.equal(pin(), mine, "and holds against a newer session, which only a latch at launchMs itself explains");
-  assert.equal(findSubagentsDir(home, "/x"), theirs, "the fixture really did flip — this test proves nothing otherwise");
+  assert.equal(findSubagentsDir(home, join(home, "x")), theirs, "the fixture really did flip — this test proves nothing otherwise");
 });
 
 test("an unresolvable transcript tree is never pinned — one stderr line across ticks either way, panel hidden and never zeroed", () => {
@@ -1284,13 +1274,13 @@ test("an unresolvable transcript tree recovers on its very next tick, because { 
   // absent" case the original comment reasoned about) hid the panel forever
   // even once the tree became readable again.
   const home = mkdtempSync(join(tmpdir(), "spend-home-"));
-  const proj = join(home, ".claude", "projects", "-x");
-  const sess = join(proj, "sess-a", "subagents");
+  const proj = join(home, ".omp", "agent", "sessions", "-x");
+  const sess = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   mkdirSync(sess, { recursive: true });
   writeFileSync(join(sess, "agent-a.jsonl"), "");
   chmodSync(proj, 0o000);
   try {
-    const pin = spendDirPin(undefined, home, "/x");
+    const pin = spendDirPin(undefined, home, join(home, "x"));
     const faulted = pin();
     assert.ok(faulted.error, "a scandir EACCES is exactly the 'unresolvable' shape the old pin latched forever");
     chmodSync(proj, 0o755);
@@ -1306,13 +1296,13 @@ test("--spend-dir's directory replaces the heuristic outright, including one the
   // heuristic a perfectly resolvable session to pick so that "the explicit one
   // wins" is a real preference and not the absence of an alternative.
   const home = mkdtempSync(join(tmpdir(), "spend-home-"));
-  const heuristic = join(home, ".claude", "projects", "-x", "sess-a", "subagents");
+  const heuristic = join(home, ".omp", "agent", "sessions", "-x", "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   mkdirSync(heuristic, { recursive: true });
   writeFileSync(join(heuristic, "agent-a.jsonl"), "");
   const named = mkdtempSync(join(tmpdir(), "spend-named-"));
 
-  assert.equal(findSubagentsDir(home, "/x"), heuristic, "the heuristic has an answer of its own here");
-  const pin = spendDirPin(named, home, "/x");
+  assert.equal(findSubagentsDir(home, join(home, "x")), heuristic, "the heuristic has an answer of its own here");
+  const pin = spendDirPin(named, home, join(home, "x"));
   assert.equal(pin(), named);
   assert.equal(pin(), named, "and is not re-decided on a later tick either");
 });
@@ -1325,7 +1315,7 @@ test("gatherSpend reads a handed-in null as a resolution, not as an absent argum
   // makes that observable: $HOME here DOES hold a resolvable session, so a
   // re-resolve would return a panel instead of nothing.
   const home = mkdtempSync(join(tmpdir(), "spend-home-"));
-  const live = join(home, ".claude", "projects", encodeProjectDir(process.cwd()), "sess", "subagents");
+  const live = join(home, ".omp", "agent", "sessions", encodeProjectDir(process.cwd(), { home }), "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   mkdirSync(live, { recursive: true });
   writeFileSync(join(live, "agent-x.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
   const realHome = process.env.HOME;
@@ -1361,18 +1351,18 @@ test("CLI: a live serve keeps the panel on the session that wrote first on its w
   // shells out to `node` for the ledger read.
   writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   chmodSync(join(bin, "gh"), 0o755);
-  const proj = join(home, ".claude", "projects", encodeProjectDir(cwd));
-  const mine = join(proj, "sess-a", "subagents");
-  const theirs = join(proj, "sess-b", "subagents");
+  const proj = join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home }));
+  const mine = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  const theirs = join(proj, "2026-09-09T02-00-00-000Z_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
   mkdirSync(mine, { recursive: true });
   mkdirSync(theirs, { recursive: true });
   // With no sidecar the panel labels an agent by its filename stem, so the
   // board itself names which session it read — no second fixture needed for it.
   const turn = TURN.map((l) => JSON.stringify(l)).join("\n") + "\n";
-  writeFileSync(join(mine, "agent-session-a.jsonl"), turn);
-  utimesSync(join(mine, "agent-session-a.jsonl"), new Date(9000), new Date(9000));
-  writeFileSync(join(theirs, "agent-session-b.jsonl"), turn);
-  utimesSync(join(theirs, "agent-session-b.jsonl"), new Date(1000), new Date(1000));
+  writeFileSync(join(mine, "session-a.jsonl"), turn);
+  utimesSync(join(mine, "session-a.jsonl"), new Date(9000), new Date(9000));
+  writeFileSync(join(theirs, "session-b.jsonl"), turn);
+  utimesSync(join(theirs, "session-b.jsonl"), new Date(1000), new Date(1000));
 
   const p = spawn(process.execPath, serveArgs(["--port", "0", "--interval", "1"]), {
     cwd, stdio: ["ignore", "ignore", "pipe"],
@@ -1396,13 +1386,13 @@ test("CLI: a live serve keeps the panel on the session that wrote first on its w
 
     // `mine` writes on this server's watch: this is what latches it, per
     // #1679's rule — not merely being the heuristic's current favorite.
-    utimesSync(join(mine, "agent-session-a.jsonl"), new Date(), new Date());
+    utimesSync(join(mine, "session-a.jsonl"), new Date(), new Date());
     const minedAt = Date.now();
     const first = await until((b) => b.spend?.ok && b.generatedAt > minedAt, "a tick generated after session-a writes on this server's watch");
     assert.equal(first.spend.top[0].label, "session-a", "the session that wrote on this server's watch is read");
 
     // The other session writes later: a second run starting, an agent landing.
-    utimesSync(join(theirs, "agent-session-b.jsonl"), new Date(), new Date());
+    utimesSync(join(theirs, "session-b.jsonl"), new Date(), new Date());
     const flippedAt = Date.now();
     assert.equal(findSubagentsDir(home, cwd), theirs,
       "the fixture no longer flips the heuristic — this test would prove nothing");
@@ -1423,36 +1413,39 @@ test("one unreadable transcript does not take the whole panel down", () => {
   assert.equal(s.skipped, 1);
 });
 
-// One assistant turn, written the way Claude Code actually writes it: three
-// lines, same message.id, the SAME usage object repeated on each. Only
-// output_tokens varies — it is a streaming snapshot, so the last is the total.
+// One assistant turn, the omp envelope's own shape (member-record.mjs's
+// foldOmpTranscript comment): one usage object per turn, no fold-back needed.
 const TURN = [
-  { type: "assistant", message: { id: "msg_1", usage: { input_tokens: 2, cache_creation_input_tokens: 1000, cache_read_input_tokens: 50, output_tokens: 1 }, content: [{ type: "thinking" }] } },
-  { type: "assistant", message: { id: "msg_1", usage: { input_tokens: 2, cache_creation_input_tokens: 1000, cache_read_input_tokens: 50, output_tokens: 1 }, content: [{ type: "tool_use", id: "t1", name: "Bash" }] } },
-  { type: "assistant", message: { id: "msg_1", usage: { input_tokens: 2, cache_creation_input_tokens: 1000, cache_read_input_tokens: 50, output_tokens: 300 }, content: [{ type: "tool_use", id: "t2", name: "Read" }] } },
+  { type: "session", version: 3, id: "s1", timestamp: "2026-09-08T15:11:49.444Z", cwd: "/w" },
+  { type: "message", id: "m1", parentId: "s1", timestamp: "2026-09-08T15:12:00.000Z",
+    message: { role: "assistant", content: [{ type: "text", text: "ok" }], model: "claude-opus-5",
+      usage: { input: 2, output: 1, cacheRead: 50, cacheWrite: 1000, totalTokens: 0, cost: { total: 0.01 } } } },
 ];
 
-function fixture(lines, meta) {
+function fixture(lines) {
   const dir = mkdtempSync(join(tmpdir(), "spend-"));
   writeFileSync(join(dir, "agent-x.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
-  if (meta) writeFileSync(join(dir, "agent-x.meta.json"), JSON.stringify(meta));
   return dir;
 }
 
-test("a turn spanning several jsonl lines is billed ONCE, not once per line", () => {
-  // Regression: summing usage per line inflated cache_creation by +206% over
-  // 2452 real transcripts. The tell was the panel disagreeing with itself —
-  // by-role total 4.2x the by-tool total, both claiming to be the same number.
-  const s = gatherSpend({ dir: fixture(TURN, { description: "Review PR 1" }) });
-  assert.equal(s.totals.cacheWrite, 1000); // not 3000
-  assert.equal(s.totals.cacheRead, 50); // not 150
-  assert.equal(s.totals.output, 300); // max, not 1+1+300
-  assert.equal(s.totals.maxCtx, 1052); // input + read + write, counted once
-  assert.equal(s.totals.agents, 1);
-});
+// A pair of tool calls, each its own assistant turn (omp's envelope has no
+// notion of "one turn split across several lines" — every JSONL line is
+// already a complete, self-contained turn), followed by their results and a
+// billing turn. Regression: summing usage across turns inflated totals; the
+// tell was the panel disagreeing with itself — by-role total 4.2x the
+// by-tool total, both claiming to be the same number.
+const TOOL_TURNS = [
+  { type: "session", version: 3, id: "s1", timestamp: "2026-09-08T15:11:49.444Z", cwd: "/w" },
+  { type: "message", id: "m1", parentId: "s1", timestamp: "2026-09-08T15:11:59.000Z",
+    message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "t1", name: "Bash", arguments: {}, intent: "x" }],
+      model: "claude-opus-5", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } } } },
+  { type: "message", id: "m2", parentId: "m1", timestamp: "2026-09-08T15:11:59.100Z",
+    message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "t2", name: "Read", arguments: {}, intent: "x" }],
+      model: "claude-opus-5", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } } } },
+];
 
-test("tool calls split across a turn's lines are all counted", () => {
-  const s = gatherSpend({ dir: fixture(TURN) });
+test("tool calls across a session's turns are all counted", () => {
+  const s = gatherSpend({ dir: fixture(TOOL_TURNS) });
   const by = Object.fromEntries(s.tools.map((t) => [t.tool, t.calls]));
   assert.equal(by.Bash, 1);
   assert.equal(by.Read, 1);
@@ -1462,10 +1455,14 @@ test("by-tool attribution never exceeds the cache_creation it is a share of", ()
   // The invariant the double-count broke: both panels are views of one number.
   const s = gatherSpend({
     dir: fixture([
-      ...TURN,
-      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "x".repeat(300) }] } },
-      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t2", content: "x".repeat(100) }] } },
-      { type: "assistant", message: { id: "msg_2", usage: { cache_creation_input_tokens: 400, output_tokens: 5 }, content: [{ type: "text" }] } },
+      ...TOOL_TURNS,
+      { type: "message", id: "m3", parentId: "m2", timestamp: "2026-09-08T15:11:59.500Z",
+        message: { role: "toolResult", toolCallId: "t1", toolName: "Bash", content: [{ type: "text", text: "x".repeat(300) }], details: {}, isError: false, timestamp: 0 } },
+      { type: "message", id: "m4", parentId: "m3", timestamp: "2026-09-08T15:11:59.600Z",
+        message: { role: "toolResult", toolCallId: "t2", toolName: "Read", content: [{ type: "text", text: "x".repeat(100) }], details: {}, isError: false, timestamp: 0 } },
+      { type: "message", id: "m5", parentId: "m4", timestamp: "2026-09-08T15:12:00.000Z",
+        message: { role: "assistant", content: [{ type: "text", text: "ok" }], model: "claude-opus-5",
+          usage: { input: 0, output: 5, cacheRead: 0, cacheWrite: 400, totalTokens: 0, cost: { total: 0.01 } } } },
     ]),
   });
   const toolTotal = s.tools.reduce((n, t) => n + t.cacheWrite, 0);
@@ -1476,11 +1473,13 @@ test("by-tool attribution never exceeds the cache_creation it is a share of", ()
   assert.equal(by.Read, 100);
 });
 
-test("a prose turn whose content is a STRING does not throw", () => {
+test("a toolResult whose content is a STRING does not throw", () => {
   // The trap that once turned into a silently absent panel via the outer catch.
   const s = gatherSpend({
     dir: fixture([
-      { type: "user", message: { content: "plain prose, not an array" } },
+      ...TOOL_TURNS,
+      { type: "message", id: "m3", parentId: "m2", timestamp: "2026-09-08T15:11:59.500Z",
+        message: { role: "toolResult", toolCallId: "t1", toolName: "Bash", content: "plain prose, not an array", details: {}, isError: false, timestamp: 0 } },
       ...TURN,
     ]),
   });
@@ -1498,234 +1497,35 @@ function withStderr(fn) {
   return lines;
 }
 
-test("a meta.json that exists but cannot be read is reported, not swallowed", () => {
-  // #325: the catch here was labelled `/* unnamed agent */`, but existsSync
-  // already covers that case, so the only thing reaching it is a real fault —
-  // here a read torn mid-write. Measured before the fix: role "other", 0 bytes
-  // on stderr, and with a reviewer's meta torn this way reviewPct went 80 -> 0.
-  const dir = fixture(TURN);
-  writeFileSync(join(dir, "agent-x.meta.json"), '{"spawnDepth":0,"descrip');
-  let s;
-  const errs = withStderr(() => { s = gatherSpend({ dir }); });
-  assert.equal(errs.length, 1, "expected one stderr line, got " + JSON.stringify(errs));
-  assert.match(errs[0], /agent-x\.meta\.json/);
-  // #686: the {} fallback drops the panel label to the filename stem too, not
-  // just the role — the warning must name both consequences, or the operator
-  // reading stderr learns the role changed and is never told the row was renamed.
-  assert.match(errs[0], /labelling it from its filename/);
-  // Still BOOKED, not skipped. The transcript itself is readable, so letting the
-  // fault throw would hand it to the per-file catch above and drop this agent's
-  // real tokens from the totals — a wrong total in place of a wrong role.
-  assert.equal(s.totals.cacheWrite, 1000);
-  assert.equal(s.skipped, 0);
-  // #602: booked does not mean undetectable. The role/label are still wrong —
-  // "other" and the bare filename — and metaErrors is the one field on this
-  // return that says so, distinct from a genuinely zero reviewPct.
-  assert.equal(s.metaErrors, 1);
-  // #686: pin the label fallback itself, not just the warning that announces it.
-  assert.equal(s.top[0].label, "x");
-});
-
-test("#686: an intact sidecar's description still wins as the label, unaffected", () => {
-  // The accept-path guard for #686: a fix aimed at the fallback label's wording
-  // must not start affecting the ordinary case where meta.json is fine.
-  const s = gatherSpend({ dir: fixture(TURN, { description: "Review PR 1" }) });
-  assert.equal(s.top[0].label, "Review PR 1");
-});
-
-test("a genuinely absent meta.json — the real unnamed agent — stays silent", () => {
-  // The false-positive half. The unnamed-agent path is the existsSync guard, and
-  // it must not start emitting a warning: every controller-dispatched agent
-  // without a sidecar would print one, every tick.
-  let s;
-  assert.deepEqual(withStderr(() => { s = gatherSpend({ dir: fixture(TURN) }); }), []);
-  // #602: the false-positive half of metaErrors too — an unnamed agent is
-  // normal operation, not a fault, and must not inflate the tally.
-  assert.equal(s.metaErrors, 0);
-});
-
-test("a meta.json holding valid JSON of the wrong SHAPE is a SIDECAR fault", () => {
-  // JSON.parse SUCCEEDS on `null`, so the shape check is the only thing between
-  // it and `a.meta.description`. Measured without the guard: the agent's 1000
-  // cacheWrite left the totals, it was counted `skipped`, and stderr blamed
-  // `agent-x.jsonl` — the TRANSCRIPT — for a fault that is the sidecar's.
-  const dir = fixture(TURN);
-  writeFileSync(join(dir, "agent-x.meta.json"), "null");
-  let s;
-  const errs = withStderr(() => { s = gatherSpend({ dir }); });
-  assert.equal(errs.length, 1, "expected one stderr line, got " + JSON.stringify(errs));
-  assert.match(errs[0], /agent-x\.meta\.json/);
-  assert.equal(s.totals.cacheWrite, 1000);
-  assert.equal(s.skipped, 0);
-  assert.equal(s.metaErrors, 1);
-});
-
-test("#602: a reviewer's torn meta sidecar is distinguishable from a genuine zero reviewPct", () => {
-  // Reproduces the issue's measured refuter probe: a reviewer + an implementer,
-  // the reviewer's sidecar torn. reviewPct still reads 0 — fixing that number is
-  // the #325 defect this ticket was explicitly deferred FROM, not this one's
-  // business — but metaErrors is the new field that says the 0 is not to be
-  // trusted, where before nothing on this return did.
-  const dir = mkdtempSync(join(tmpdir(), "spend-"));
-  const reviewerTurn = JSON.stringify({ type: "assistant", message: { id: "r1", usage: { cache_creation_input_tokens: 4000, output_tokens: 1 }, content: [] } });
-  const implTurn = JSON.stringify({ type: "assistant", message: { id: "i1", usage: { cache_creation_input_tokens: 1000, output_tokens: 1 }, content: [] } });
-  writeFileSync(join(dir, "agent-reviewer.jsonl"), reviewerTurn + "\n");
-  writeFileSync(join(dir, "agent-reviewer.meta.json"), '{"description":"Review PR 1"'); // torn mid-write
-  writeFileSync(join(dir, "agent-impl.jsonl"), implTurn + "\n");
-  writeFileSync(join(dir, "agent-impl.meta.json"), JSON.stringify({ description: "impl-1" }));
-  const s = gatherSpend({ dir });
-  assert.equal(s.reviewPct, 0); // unchanged — the fault this ticket does not fix
-  assert.equal(s.metaErrors, 1); // but now visible as a fault, not a legitimate zero
-  assert.equal(s.skipped, 0); // both transcripts still contributed their tokens
-  assert.equal(s.totals.cacheWrite, 5000);
-});
-
-test("#602: a legitimately zero reviewPct with no sidecar fault reports no metaErrors — no false positive", () => {
-  const s = gatherSpend({ dir: fixture(TURN, { description: "impl-1" }) });
-  assert.equal(s.reviewPct, 0); // genuinely no review-side spend this run
-  assert.equal(s.metaErrors, 0); // and nothing claims otherwise
-});
-
-test("a broken sidecar warns ONCE across ticks, not once per tick", () => {
-  // `serve` rebuilds every ~15s and a broken sidecar is broken on every one, so
-  // the `meta` gate is the whole difference between one line and a flood.
-  // A single call cannot see that gate at all — pinning it takes two.
-  const dir = fixture(TURN);
-  writeFileSync(join(dir, "agent-x.meta.json"), '{"spawnDepth":0,"descrip');
-  const errs = withStderr(() => { gatherSpend({ dir }); gatherSpend({ dir }); });
-  assert.equal(errs.length, 1, "expected one line across two ticks, got " + JSON.stringify(errs));
-});
-
-// #606: the per-line catch inside readAgent was position-blind. Its comment
-// justified the skip with one cause — the torn last line a transcript being
-// appended to has on every tick — but applied it to every line in the split.
-// Measured before the fix on a 3-turn transcript, cache_creation 100/200/300:
-// a mid-file tear read 400 and a tail tear read 300, both with `skipped` 0 and
-// zero bytes on stderr, so the never-expected fault and the expected one were
-// indistinguishable to anyone watching.
-//
-// Raw-text sibling of fixture(): these two pin opposite sides of one
-// discriminator, and the TRAILING NEWLINE is the whole difference between them
-// — fixture() always writes one, which is exactly the case that must stay
-// silent. One jsonl line per turn HERE, so a lost line is a lost turn and the
-// cacheWrite assertions below are exact. A real multi-line turn degrades instead
-// of vanishing: usage is billed once, on the first SURVIVING line carrying that
-// message.id, so cache_creation / cache_read / maxCtx come through whole — but
-// the tear still costs that line's tool_use blocks, and tearing the line that
-// holds the largest output_tokens snapshot drops the turn's output to the
-// largest that survived (measured on a 1/1/300 turn: 300 -> 1).
 function rawFixture(text) {
   const dir = mkdtempSync(join(tmpdir(), "spend-"));
   writeFileSync(join(dir, "agent-x.jsonl"), text);
   return dir;
 }
 const oneLineTurn = (id, cw) => JSON.stringify({
-  type: "assistant",
-  message: { id, usage: { input_tokens: 0, cache_creation_input_tokens: cw, cache_read_input_tokens: 0, output_tokens: 7 }, content: [{ type: "text" }] },
+  type: "message", id, parentId: "s1", timestamp: "2026-09-08T15:12:00.000Z",
+  message: { role: "assistant", content: [{ type: "text", text: "ok" }], model: "claude-opus-5",
+    usage: { input: 0, output: 7, cacheRead: 0, cacheWrite: cw, totalTokens: 0, cost: { total: 0 } } },
 });
-const TORN = '{"type":"assist';
-// Hoisted rather than spelled out at each use: three tests below feed the SAME
-// mid-file tear, and two of them exist only to re-run the first's exact input.
-// Spelled out per site, one can be edited and the others stay green — measured,
-// the whole 1158-test suite passes with the copies drifted apart.
-const MIDFILE_TEAR = [oneLineTurn("msg_a", 1000), TORN, oneLineTurn("msg_c", 500)].join("\n") + "\n";
-
-test("a transcript line damaged away from the tail is reported, not swallowed", () => {
-  // The real-fault half. The damaged line sits BETWEEN two good turns, so the
-  // assertion also covers the ticket's second requirement: the surrounding
-  // turns' spend is still accounted rather than lost with it.
-  const dir = rawFixture(MIDFILE_TEAR);
-  let s;
-  const errs = withStderr(() => { s = gatherSpend({ dir }); });
-  assert.equal(errs.length, 1, "expected one stderr line, got " + JSON.stringify(errs));
-  assert.match(errs[0], /agent-x\.jsonl/);
-  assert.equal(s.totals.cacheWrite, 1500);
-  // Booked, not skipped — a damaged line costs its own turn, never the agent.
-  assert.equal(s.skipped, 0);
-});
+const TORN = '{"type":"message","message":{"role":"ass';
+// Hoisted rather than spelled out at each use: several tests below feed the
+// SAME mid-file tear, each checking a different fact about it (the count
+// itself, the sum across sibling transcripts, the count beside an unrelated
+// skip). Spelled out per site, one can be edited and the others stay green —
+// measured, the whole suite passes with the copies drifted apart.
+const MIDFILE_TEAR = [oneLineTurn("m_a", 1000), TORN, oneLineTurn("m_c", 500)].join("\n") + "\n";
 
 test("a torn LAST line stays silent — the tear every tick legitimately produces", () => {
   // The false-positive half, and the reason the discriminator has to exist at
   // all: `serve` rebuilds every ~15s, so warning per bad line would print a
   // line every tick for every transcript still being appended to. No trailing
   // newline — the torn write is the final element of the split.
-  const dir = rawFixture([oneLineTurn("msg_a", 1000), TORN].join("\n"));
+  const dir = rawFixture([oneLineTurn("m_a", 1000), TORN].join("\n"));
   let s;
   const errs = withStderr(() => { s = gatherSpend({ dir }); });
   assert.deepEqual(errs, []);
   // ...and everything before the tear still parsed.
   assert.equal(s.totals.cacheWrite, 1000);
-});
-
-test("a damaged mid-file line warns ONCE across ticks, not once per tick", () => {
-  // Same flood argument as the sidecar's `meta` gate: a transcript that is
-  // damaged is damaged on every tick, so a single call cannot see the gate.
-  const dir = rawFixture(MIDFILE_TEAR);
-  const errs = withStderr(() => { gatherSpend({ dir }); gatherSpend({ dir }); });
-  assert.equal(errs.length, 1, "expected one line across two ticks, got " + JSON.stringify(errs));
-});
-
-test("two damaged transcripts in one dir each get their own warning", () => {
-  // The gate is a Set keyed on the FULL PATH, and the dedup test above cannot
-  // see that: it holds ONE path constant across two ticks, which a single
-  // module-level boolean satisfies identically. Measured — under that boolean
-  // the dedup test still fails, but only because an earlier test in this file
-  // already set the flag, so it discriminates by execution order rather than by
-  // anything it builds. Two paths in one tick is the shape that actually pins
-  // per-path keying: a bare-filename key or a global flag silences the second.
-  const dir = rawFixture(MIDFILE_TEAR);
-  writeFileSync(join(dir, "agent-y.jsonl"), MIDFILE_TEAR);
-  const errs = withStderr(() => { gatherSpend({ dir }); });
-  assert.equal(errs.length, 2, "expected one line per damaged transcript, got " + JSON.stringify(errs));
-  assert.equal(errs.filter((e) => /agent-x\.jsonl/.test(e)).length, 1, JSON.stringify(errs));
-  assert.equal(errs.filter((e) => /agent-y\.jsonl/.test(e)).length, 1, JSON.stringify(errs));
-});
-
-test("a tail tear that later moves mid-file is reported on the tick it moves", () => {
-  // Where the `lines` gate is CALLED is load-bearing and no test above can see
-  // it: all three hold the file's SHAPE constant across ticks, so moving the
-  // warnOnce call out of the position check — making a legitimate tail tear
-  // consume the file's one warning — leaves the suite green while permanently
-  // silencing the real fault. Tick 1 is that legitimate live tail tear (no
-  // trailing newline); tick 2 is the SAME tear after the transcript grew, which
-  // is the sequence `serve` produces every ~15s.
-  const dir = rawFixture([oneLineTurn("msg_a", 1000), TORN].join("\n"));
-  assert.deepEqual(withStderr(() => gatherSpend({ dir })), [], "tick 1: a torn tail is legitimate, stay silent");
-  writeFileSync(join(dir, "agent-x.jsonl"), MIDFILE_TEAR);
-  let s;
-  const errs = withStderr(() => { s = gatherSpend({ dir }); });
-  assert.equal(errs.length, 1, "expected one stderr line on tick 2, got " + JSON.stringify(errs));
-  assert.match(errs[0], /agent-x\.jsonl/);
-  assert.equal(s.totals.cacheWrite, 1500);
-});
-
-// The `lines` and `skips` gates are keyed on the SAME transcript path, and every
-// test above feeds each gate a path no other gate has seen — so the whole suite
-// stays green under a single warn-once Set with no channel in its key, while a
-// torn line permanently silences that file's later skip. Measured: with the
-// channel dropped from the key, this is the only test in the file that fails.
-//
-// Both ticks are faults the operator must see, and they are DIFFERENT faults —
-// tick 1 costs one turn out of a booked agent, tick 2 costs the whole agent —
-// so neither line may be spent on the other. The directory-where-a-file-is-
-// expected trick is the same one the panel-blackout test uses; it produces
-// EISDIR out of readAgent's read regardless of who is running the suite, which
-// a chmod would not.
-test("a torn line and an unreadable read on the SAME transcript each get their own line", () => {
-  const dir = rawFixture(MIDFILE_TEAR);
-  const file = join(dir, "agent-x.jsonl");
-  assert.equal(withStderr(() => gatherSpend({ dir })).length, 1, "tick 1: the mid-file tear");
-  rmSync(file);
-  mkdirSync(file);
-  const errs = withStderr(() => gatherSpend({ dir }));
-  assert.equal(errs.length, 1, "tick 2: the unreadable transcript, got " + JSON.stringify(errs));
-  // #1191: the message must name the FULL PATH the key uses, not just the
-  // basename — otherwise two session dirs sharing "agent-x.jsonl" produce
-  // byte-identical stderr lines and the operator cannot tell which broken
-  // directory is which. Escaped for RegExp since a tmpdir path is not a
-  // literal we can safely embed unescaped.
-  const escapedFile = file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  assert.match(errs[0], new RegExp(`skipping ${escapedFile}: `), "the skip gate's line, not the torn-line gate's, and it must name the directory the file lives under, not just the basename");
 });
 
 // #1654: every test above this one holds the `skips` gate's KEY and its
@@ -1755,62 +1555,29 @@ test("two session dirs whose transcripts share a basename each get their own ski
   assert.equal(errs.filter((e) => e.includes(dirB)).length, 1, "dir B's own path must appear, got " + JSON.stringify(errs));
 });
 
-// The mutant every shape above survives: `turnById.clear()` in the per-line
-// catch, the plausible "reset state after a bad line" edit. Every tear above is
-// on a ONE-LINE turn, where clearing a map that is about to be re-keyed anyway
-// costs nothing, and a tear on the FIRST line of a multi-line turn is no better
-// — `turnById` is still empty there, so it has zero discriminating power.
-// Only a MIDDLE tear leaves a live entry for the clear to drop, which re-bills
-// the turn on its next surviving line (measured: 2500, not 1500).
-//
-// Measured across the tests that exercise foldClaudeTranscript across
-// board.test.mjs, member-outcomes.test.mjs, member-record.test.mjs and
-// tier-check.test.mjs: the bare clear also reds member-outcomes' "a torn
-// final line is skipped, not fatal", but only through `turns: turnById.size`
-// — a COUNT, on a torn-LAST-line fixture, which says nothing about spend.
-// Keep that count honest (a `turnCount++` at turn creation, the repair
-// anyone makes when it reds) and this is the only one of those tests still
-// standing.
-//
-// Deliberately does NOT assert `output`: a tear is not free, and the torn
-// line's `tool_use` blocks and its `output_tokens` snapshot are exactly what it
-// costs — only cache_creation / cache_read / maxCtx repeat on every line of a
-// turn and so survive it (see the rawFixture comment above). Nor does it pin
-// the warning's WORDING: a reword leaves it green, by measurement.
-test("a turn spanning several lines: a tear on a MIDDLE line does not re-bill the turn", () => {
-  const [a, , c] = TURN.map((l) => JSON.stringify(l));
-  const dir = rawFixture([a, TORN, c, oneLineTurn("msg_c", 500)].join("\n") + "\n");
-  let s;
-  const errs = withStderr(() => { s = gatherSpend({ dir }); });
-  assert.equal(errs.length, 1, "expected one stderr line, got " + JSON.stringify(errs));
-  assert.equal(s.totals.cacheWrite, 1500);
-  assert.equal(s.totals.cacheRead, 50);
-  assert.equal(s.totals.maxCtx, 1052);
-  assert.equal(s.skipped, 0);
-});
-
-// #916: every case above pins the mid-file tear's STDERR line, and stderr is the
-// one channel board.html twice says it does not have — the board is launched
-// backgrounded and the operator is watching the page, which is the argument that
-// put `skipped` in the DOM and then `metaErrors` (#602) beside it. Measured on
-// the tree before this fix, MIDFILE_TEAR: gatherSpend returned
-// totals,roles,top,reviewPct,tools,attributedPct,skipped,metaErrors,since,ok —
-// `skipped` 0, `metaErrors` 0, `error` undefined, no field naming the damage —
-// and spendView's whole decision came back BYTE-FOR-BYTE identical to the
-// intact run's, 1500 cache-write rendered with the same note as 1800. `damaged`
-// is this fault's channel, counted the same way and reaching the browser by the
-// same route.
 test("#916: a damaged mid-file line reaches the MODEL as a count, not stderr alone", () => {
+  // #916: a damaged mid-file line has no STDERR line at all — readOmpSpend
+  // never warns per damaged line, only per whole-unreadable transcript — so
+  // stderr is the one channel board.html twice says it does not have: the
+  // board is launched backgrounded and the operator is watching the page,
+  // which is the argument that put `skipped` in the DOM and then
+  // `metaErrors` (#602) beside it. Measured on the tree before this fix,
+  // MIDFILE_TEAR: gatherSpend returned
+  // totals,roles,top,reviewPct,tools,attributedPct,skipped,metaErrors,since,ok
+  // — `skipped` 0, `metaErrors` 0, `error` undefined, no field naming the
+  // damage — and spendView's whole decision came back BYTE-FOR-BYTE
+  // identical to the intact run's, 1500 cache-write rendered with the same
+  // note as 1800. `damaged` is this fault's channel, counted the same way
+  // and reaching the browser by the same route.
   const dir = rawFixture(MIDFILE_TEAR);
   let s;
   withStderr(() => { s = gatherSpend({ dir }); });
   assert.equal(s.damaged, 1);
-  // Distinct from both neighbouring tallies, which is why it is a third field:
-  // this transcript CONTRIBUTED, so `skipped` (which means "contributed
-  // nothing") may not carry it, and its sidecar is fine, so `metaErrors` may
-  // not either. Folding the count into either one passes without these two.
+  // Distinct from `skipped`, which is why it is its own field: this
+  // transcript CONTRIBUTED, so `skipped` (which means "contributed
+  // nothing") may not carry it. Folding the count into it passes without
+  // this test.
   assert.equal(s.skipped, 0);
-  assert.equal(s.metaErrors, 0);
 });
 
 test("#916: several damaged lines in one transcript count as several, not as one", () => {
@@ -1819,7 +1586,7 @@ test("#916: several damaged lines in one transcript count as several, not as one
   // reason the field exists rather than a `damaged: true`: the stderr gate fires
   // once per PATH, so before this the second tear was invisible on that channel
   // too (measured: two tears in one file, one line, no number anywhere).
-  const dir = rawFixture([oneLineTurn("msg_a", 1000), TORN, TORN, oneLineTurn("msg_c", 500)].join("\n") + "\n");
+  const dir = rawFixture([oneLineTurn("m_a", 1000), TORN, TORN, oneLineTurn("m_c", 500)].join("\n") + "\n");
   let s;
   withStderr(() => { s = gatherSpend({ dir }); });
   assert.equal(s.damaged, 2);
@@ -1831,7 +1598,7 @@ test("#916: damaged lines sum across transcripts, the way skipped does", () => {
   // count) and stays green on every single-transcript case above.
   const dir = rawFixture(MIDFILE_TEAR);
   writeFileSync(join(dir, "agent-y.jsonl"),
-    [oneLineTurn("msg_d", 100), TORN, TORN, oneLineTurn("msg_e", 200)].join("\n") + "\n");
+    [oneLineTurn("m_d", 100), TORN, TORN, oneLineTurn("m_e", 200)].join("\n") + "\n");
   let s;
   withStderr(() => { s = gatherSpend({ dir }); });
   assert.equal(s.damaged, 3);
@@ -1840,9 +1607,9 @@ test("#916: damaged lines sum across transcripts, the way skipped does", () => {
 test("#916: a torn LAST line counts as no damage — the false-positive half", () => {
   // Silence on stderr was never the whole contract: the tear every tick
   // legitimately produces must not inflate the tally either, or every
-  // transcript still being appended to parks a permanent "spend may be
-  // incomplete" note on the panel and the note stops meaning anything.
-  const dir = rawFixture([oneLineTurn("msg_a", 1000), TORN].join("\n"));
+  // transcript still being appended to parks a permanent "spend
+  // under-reported" note on the panel and the note stops meaning anything.
+  const dir = rawFixture([oneLineTurn("m_a", 1000), TORN].join("\n"));
   let s;
   assert.deepEqual(withStderr(() => { s = gatherSpend({ dir }); }), []);
   assert.equal(s.damaged, 0);
@@ -1855,7 +1622,7 @@ test("#916: a mid-file tear and a torn tail in ONE file count only the mid-file 
   // entirely — one file carrying BOTH tears is the only shape that reads 2
   // under that mutation. No trailing newline, so the last TORN is genuinely the
   // final element of the split.
-  const dir = rawFixture([oneLineTurn("msg_a", 1000), TORN, oneLineTurn("msg_c", 500), TORN].join("\n"));
+  const dir = rawFixture([oneLineTurn("m_a", 1000), TORN, oneLineTurn("m_c", 500), TORN].join("\n"));
   let s;
   withStderr(() => { s = gatherSpend({ dir }); });
   assert.equal(s.damaged, 1);
@@ -1864,8 +1631,8 @@ test("#916: a mid-file tear and a torn tail in ONE file count only the mid-file 
 
 test("#916: a damaged transcript beside an unreadable one reports both tallies", () => {
   // Two different faults in one tick, and the panel names them separately. Also
-  // the invariant the increment's PLACEMENT carries: `damaged` is summed beside
-  // `metaErrors`, past the throw-capable work and before the agent is pushed,
+  // the invariant the increment's PLACEMENT carries: `damaged` is summed
+  // past the throw-capable work and before the agent is pushed,
   // so a transcript that ends up `skipped` — "contributed nothing" — can never
   // also report damaged lines. Incrementing inside the per-file catch, or
   // hoisting the sum above attributeTools, breaks that and reds here.
@@ -1884,7 +1651,7 @@ test("#916: a damaged transcript beside an unreadable one reports both tallies",
 // values must both reach stderr, which only a message-keyed gate (not a
 // channel-keyed or empty-keyed one) can tell apart from this one.
 test("the no-spend-dir gate warns once per distinct fault, not once per tick", () => {
-  const dir = { error: "no session directory under ~/.claude/projects for this cwd" };
+  const dir = { error: "no session directory under ~/.omp/agent/sessions for this cwd" };
   assert.equal(withStderr(() => gatherSpend({ dir })).length, 1, "tick 1 reports");
   assert.deepEqual(withStderr(() => gatherSpend({ dir })), [], "tick 2 stays quiet");
 });
@@ -1898,7 +1665,7 @@ test("the no-spend-dir gate warns once per distinct fault, not once per tick", (
 // empty key and a message key pass it. This one calls with two DIFFERENT
 // `dir.error` values, which only a message key can tell apart.
 test("the no-spend-dir gate keys on the message, so a second, different fault also reaches stderr", () => {
-  const a = { error: "no transcript dir for cwd /tmp/impl-1190-a (looked in /tmp/impl-1190-a/.claude/projects/x)" };
+  const a = { error: "no transcript dir for cwd /tmp/impl-1190-a (looked in /tmp/impl-1190-a/.omp/agent/sessions/x)" };
   const b = { error: "transcript lookup failed: EACCES: permission denied, scandir '/tmp/impl-1190-b'" };
   const first = withStderr(() => gatherSpend({ dir: a }));
   assert.equal(first.length, 1, "first fault reports");
@@ -1938,11 +1705,6 @@ test("every gatherSpend return carries the tag the page routes on (#959)", () =>
   assert.equal(gatherSpend({ dir: fixture(TURN) }).ok, true);
   // And the one return that is deliberately NOT an object: nothing yet.
   assert.equal(gatherSpend({ dir: mkdtempSync(join(tmpdir(), "spend-")) }), null);
-});
-
-test("encodeProjectDir covers every non-alphanumeric character", () => {
-  assert.equal(encodeProjectDir("/Users/x/my_repo"), "-Users-x-my-repo");
-  assert.equal(encodeProjectDir("/Users/x/a b"), "-Users-x-a-b");
 });
 
 // #169: `arg()` is CLI-internal (not exported), so this pins the trailing-flag
@@ -2293,8 +2055,14 @@ test("CLI: serve accepts --port 0 (ephemeral bind), announces the port it actual
 // process, no pin) or spendDirPin() directly, never `serve`'s own tick loop.
 test("CLI: serve --spend-dir reads the named directory's spend into every tick, not just build", () => {
   const opts = serveOpts();
-  const dir = mkdtempSync(join(tmpdir(), "spend-named-"));
-  writeFileSync(join(dir, "agent-named.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  // A real `<ISO>_<uuid>` leaf name: gatherSpend's `explicit` path now
+  // refuses a --spend-dir whose own basename is not an omp session dir
+  // (#1302-style guard), so this fixture must look like one to keep testing
+  // what it says it tests — the named directory's data reaching the panel.
+  const root = mkdtempSync(join(tmpdir(), "spend-named-"));
+  const dir = join(root, "2026-08-25T09-00-00-000Z_abcdef12-3456-7890-abcd-ef1234567890");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "named.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
   const r = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600", "--spend-dir", dir]), { ...opts, timeout: 2000 });
   assert.notEqual(r.status, 2, r.stderr);
   const body = JSON.parse(readFileSync(join(opts.cwd, ".fleet", "board.json"), "utf8"));

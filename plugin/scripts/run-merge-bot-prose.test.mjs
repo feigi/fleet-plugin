@@ -12,7 +12,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { between, markedLine, paragraph, phrase } from "./prose-pin.mjs";
+import { between, paragraph, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const DOC = readFileSync(join(REPO, "commands", "run-merge-bot.md"), "utf8");
@@ -1136,9 +1136,9 @@ test("step 1 takes one plain PR-object read wherever the ref did not land, or th
   }
 });
 
-// #1895. The poll outlives a harness deadline on its COMMON path: the PR
-// object's measured 84s-2min lag alone runs past omp's ~60s backgrounding and
-// Claude Code's 120s default Bash timeout, and a deadline kills the poll with
+// #1895. The poll outlives omp's bash-backgrounding deadline on its COMMON
+// path: the PR object's measured 84s-2min lag alone runs past omp's ~60s
+// backgrounding, and a deadline kills the poll with
 // no report line. The recovery the doc names is re-issuing the poll with the
 // fire block's `pre`, and what has to hold is that the recovery reports the
 // rebase as LANDED. Before the split the block could only be re-run whole,
@@ -1168,21 +1168,13 @@ test("step 1's poll, cut off mid-re-poll and re-issued with the fire block's pre
   }
 });
 
-// The deadline half of #1895, split by harness the way step 2's CI wait and
-// the grace wait already are. Each marked line is pinned on what the other
-// cannot carry, so swapping the two lines reds both.
-test("step 1's poll splits by harness: the Bash ceiling and a poll-only re-issue on Claude, one eval cell on omp", () => {
-  const pair = between(DOC, "The poll splits by harness:", "**Poll `git ls-remote`, not", "run-merge-bot.md step 1 poll pair");
-  const claude = markedLine(pair, "CLAUDE", "step 1 poll");
-  assert.match(claude, phrase("`timeout` at 600000"), "the Claude line no longer lifts the poll off the 120s default");
-  assert.match(
-    claude,
-    phrase("re-issue the poll block once with the same `rc` and `pre`, never the fire block"),
-    "the Claude line no longer confines recovery to the poll",
-  );
-  const omp = markedLine(pair, "OMP", "step 1 poll");
-  assert.match(omp, phrase("one Python `eval` cell"));
-  assert.match(omp, phrase("never `bash` plus `wait`"), "the omp line no longer forbids the bash+wait form that backgrounds past ~60s");
+// The deadline half of #1895, the way step 2's CI wait and the grace wait
+// carry theirs.
+test("step 1's poll runs in one eval cell, never bash plus wait", () => {
+  const pair = between(DOC, "The poll:", "**Poll `git ls-remote`, not", "run-merge-bot.md step 1 poll rule");
+  assert.match(pair, phrase("one Python `eval` cell"));
+  assert.match(pair, phrase("its cell `timeout` at 900s or more"));
+  assert.match(pair, phrase("never `bash` plus `wait`"), "the rule no longer forbids the bash+wait form that backgrounds past ~60s");
 });
 
 // #908: a controller brief predicted the merge would be "a fast-forward". True
@@ -1324,12 +1316,11 @@ test("a dispatched bot holds a 15-minute grace, polling every 60s, before its on
   assert.match(s, phrase("**One report, at exit, and none before it**"));
 });
 
-test("the grace wait splits by harness: bounded Bash chunks on Claude, one eval cell on omp", () => {
-  const pair = between(DOC, "The wait itself splits by harness:", "**One report, at exit", "run-merge-bot.md grace wait pair");
-  assert.match(markedLine(pair, "CLAUDE", "grace wait"), phrase("foreground `Bash` calls of at most 4 minutes each"));
-  const omp = markedLine(pair, "OMP", "grace wait");
-  assert.match(omp, phrase("one Python `eval` cell"));
-  assert.match(omp, phrase("never `bash` plus `wait`"), "the omp line no longer forbids the bash+wait form that backgrounds past ~60s");
+test("the grace wait holds in one eval cell, never bash plus wait", () => {
+  const pair = between(DOC, "The wait:", "**One report, at exit", "run-merge-bot.md grace wait rule");
+  assert.match(pair, phrase("hold the whole grace in one Python `eval` cell"));
+  assert.match(pair, phrase("its cell `timeout` at 1000s or more"));
+  assert.match(pair, phrase("never `bash` plus `wait`"), "the rule no longer forbids the bash+wait form that backgrounds past ~60s");
 });
 
 test("the top-level invocation still arms its Monitor, and a dispatched bot still skips it", () => {

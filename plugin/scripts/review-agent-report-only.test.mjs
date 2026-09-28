@@ -24,7 +24,7 @@ for (const key of SPECIALISTS) {
 
 // The snapshot and verifier dispatches are NOT specialists in this sense —
 // snapshot's whole job is a fixed shell script the caller already bounds
-// (`Do not modify ${worktree}` is in review-pr.js's own prompt, not the
+// (`Do not modify ${worktree}` is in review-core.mjs's own prompt, not the
 // agent's), and verifier is a refuter whose job is verification commands in
 // its own scratch directory, never the checkout. Neither belongs in the six
 // above; this documents the exclusion is deliberate rather than an oversight

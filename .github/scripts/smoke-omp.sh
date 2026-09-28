@@ -90,10 +90,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$MKT_DIR/.claude-plugin"
-cat > "$MKT_DIR/.claude-plugin/marketplace.json" <<EOF
+mkdir -p "$MKT_DIR/.omp-plugin"
+cat > "$MKT_DIR/.omp-plugin/marketplace.json" <<EOF
 {
-  "\$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "$MKT_NAME",
   "description": "smoke-omp throwaway catalog (#1347) — never the tracked fleet-plugin marketplace",
   "owner": { "name": "ci" },

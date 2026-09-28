@@ -15,13 +15,13 @@
 // run filed nothing at all over a red they could not attribute.
 //
 // EXECUTED, not text-pinned, and that distinction is the whole point of this
-// file: `review-pr-snapshot-path.test.mjs` pins the block's lines and their
+// file: `review-core-snapshot-path.test.mjs` pins the block's lines and their
 // ORDER as text, which stays green on a sequence that is spelled right and does
 // not work — a `git add` that skips a tracked-but-ignored file, an init that a
 // stale `GIT_DIR` sends elsewhere, a commit an unconfigured identity refuses.
 // Each of those is a real environment an unattended snapshot agent runs in, and
 // none of them is visible in the source text. So every test below RUNS the
-// block's own lines, lifted from each harness's copy, against a fixture
+// block's own lines, lifted from review-core.mjs, against a fixture
 // repository it builds itself.
 //
 // Fixtures only: every test here builds its own repository under `$TMPDIR`, so
@@ -40,10 +40,7 @@ import { between, phrase } from "./prose-pin.mjs";
 import { stripComments } from "./strip-comments.mjs";
 
 const REPO = join(import.meta.dirname, "..");
-const SOURCES = [
-  ["workflows/review-pr.js", join(REPO, "workflows", "review-pr.js")],
-  ["scripts/review-core.mjs", join(REPO, "scripts", "review-core.mjs")],
-];
+const SOURCES = [["scripts/review-core.mjs", join(REPO, "scripts", "review-core.mjs")]];
 
 // Every git identity is scrubbed — both config files and all four `GIT_*` name
 // and email variables — so the commit the block takes can only be the one the
@@ -115,11 +112,11 @@ function reviewedRepo(t, { exportIgnore = false } = {}) {
 }
 
 /**
- * The lines under test, lifted from one harness's snapshot prompt and rendered
+ * The lines under test, lifted from review-core.mjs's snapshot prompt and rendered
  * with the same `${worktree}` interpolation the script performs: the archive,
  * the emptiness probe, the init/commit, the tree compare, the exclude and the
  * symlink. `$SNAP` and `$SHA` are the shell's, supplied by `cut` below — the
- * lines that mint them are pinned by `review-pr-snapshot-path.test.mjs`'s own
+ * lines that mint them are pinned by `review-core-snapshot-path.test.mjs`'s own
  * executed mint test, and repeating that here would test its subject twice
  * while testing this one no better.
  */
@@ -144,7 +141,7 @@ const DAY = 24 * 60 * 60 * 1000;
  * `find` expression that currently implements it. The marker is the line's
  * identity in this block's output vocabulary, so a rewrite of the expression
  * still lifts and only a prune that is GONE reds the assertion here — the
- * distinction `review-pr-snapshot-path.test.mjs`'s own needle comment draws
+ * distinction `review-core-snapshot-path.test.mjs`'s own needle comment draws
  * about pinning "the shape that decides behaviour and nothing else".
  *
  * The line carries no shell variables, only the script's `${runRootParent}`,
@@ -168,7 +165,7 @@ const renderPrune = (path, runRootParent) =>
  * `cutLines`'s slice, prefixed with the block's own ambient-var clearing
  * line — pulled from the source by its literal text rather than assumed, so
  * a rewrap or a dropped var still fails this the same way
- * review-pr-snapshot-path.test.mjs's own sequence pin would. Neither
+ * review-core-snapshot-path.test.mjs's own sequence pin would. Neither
  * `cutLines` nor `render` widen to include it: in the real script the
  * clearing line sits ABOVE `${scratch}`/`${runRootParent}`, and pulling it
  * into `render`'s narrow, worktree-only `new Function` would need those too.
@@ -185,7 +182,7 @@ const renderWithUnset = (path, worktree) => new Function("worktree", "return `" 
 
 /**
  * The ref-selection lines and the line that prints their answer, lifted from
- * one harness's snapshot prompt (#1616). `$branch` and `$crossRepo` are the
+ * review-core.mjs's snapshot prompt (#1616). `$branch` and `$crossRepo` are the
  * shell's, minted by the `gh pr view` lines just above them — supplied by
  * `readRef` below, because `gh` cannot run against a fixture and those two
  * values are the only things these lines take from it.
@@ -364,7 +361,7 @@ for (const [name, path] of SOURCES) {
     );
   });
 
-  // The ordering, executed. `review-pr-snapshot-path.test.mjs` pins that the
+  // The ordering, executed. `review-core-snapshot-path.test.mjs` pins that the
   // probe sits above the init as TEXT; this is why that order is load-bearing.
   // A `git archive` that produced nothing — no auth, a dead HEAD — leaves the
   // directory `mkdir -p` made, and `.git` is enough to make it look populated,
@@ -374,7 +371,7 @@ for (const [name, path] of SOURCES) {
     const lines = render(path, notARepo).split("\n");
     const probeAt = lines.findIndex((l) => /ls -A/.test(l));
     const initAt = lines.findIndex((l) => /git init -q/.test(l));
-    assert.ok(probeAt !== -1 && initAt > probeAt, "the block no longer probes above its init — the text pin in review-pr-snapshot-path.test.mjs is the one to read first");
+    assert.ok(probeAt !== -1 && initAt > probeAt, "the block no longer probes above its init — the text pin in review-core-snapshot-path.test.mjs is the one to read first");
 
     const real = cut(t, lines.join("\n"));
     assert.match(
@@ -678,52 +675,7 @@ for (const [name, path] of SOURCES) {
   });
 }
 
-// One block, two harnesses. The fix that matters is the same four lines in both
-// copies, and a fix applied to one is exactly the shape this repo's own
-// "recurring pin defect" comment describes — with the omp path (review-core.mjs)
-// the one every review in this session actually runs, so a Claude-only fix
-// would leave the live path broken while every pin over review-pr.js passed.
-//
-// Widened past `cutLines`'s own start: the stale-run-root prune (#1083) sits
-// between the run-root echo and the sha capture, above where `cutLines` begins
-// lifting text (at `git archive`) precisely so `render`'s narrow, worktree-only
-// `new Function` never has to interpolate `${scratch}`/`${runRootParent}`/
-// `${runRootPrefix}`/`$RUN`/`$SHA` (see `withUnset`'s own comment on why it
-// does not reach that far either). This test only COMPARES text, never
-// executes it, so it can afford the wider window without touching either
-// helper — and needs it, or a reorder applied to one copy's prune line alone
-// (ahead of its own `mkdir -p`, which fails a parent that does not exist yet
-// on a PR's first review) passes both `cutLines`-based tests and this one
-// unnoticed.
-function fullBlock(path) {
-  const code = stripComments(readFileSync(path, "utf8"));
-  const from = code.search(/^ *unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_TEMPLATE_DIR *$/m);
-  const to = code.search(/^ *if \[ -n "\$SNAP" \] && \[ -d \$\{worktree\}\/node_modules \]/m);
-  assert.ok(
-    from !== -1 && to > from,
-    `${path} no longer runs from the ambient-var clear down to the node_modules symlink — the block was reshaped past what this test lifts; update it or restore the block`,
-  );
-  return code.slice(from, code.indexOf("\n", to));
-}
-
-test("both harnesses cut the snapshot with byte-identical shell", () => {
-  const [claude, omp] = SOURCES.map(([, path]) => fullBlock(path));
-  assert.equal(omp, claude, "the two copies of the snapshot block have diverged — a fix landed on one harness only");
-});
-
-// AC: both harnesses carry the fallback, neither is left on the old single
-// read. Same rule as the cut block above, applied to the lines #1616 touched —
-// and needed separately, because `fullBlock` stops at the node_modules symlink
-// and the ref reads sit well below it, so a fallback landing on one harness
-// only passes that comparison untouched.
-test("both harnesses read the ref operand with byte-identical shell", () => {
-  const [claude, omp] = SOURCES.map(([, path]) => refLines(path));
-  assert.equal(omp, claude, "the two copies of the ref reads have diverged — a fix landed on one harness only, and review-core.mjs is the path every review in this session actually runs");
-});
-
-// `environmentNote`'s two regimes, read as a consumer reads them. The parity
-// test pins that both copies agree; this pins what they agree ON, which no
-// comparison of two identical answers can.
+// `environmentNote`'s two regimes, read as a consumer reads them.
 test("environmentNote says a verified snapshot measures the tree, and an unverified one does not", () => {
   const verified = environmentNote({ repoVerified: true });
   assert.doesNotMatch(verified, /UNVERIFIED/, "a verified environment is reported as unverified — every run now reads as degraded, and a reader who sees that on healthy runs stops reading it");
@@ -775,7 +727,7 @@ test("a snapshot carrying the node_modules symlink still reads clean", (t) => {
   const modules = join(worktree, "node_modules");
   mkdirSync(modules, { recursive: true });
   writeFileSync(join(modules, "marker"), "");
-  const { snap, out } = cut(t, render(SOURCES[1][1], worktree));
+  const { snap, out } = cut(t, render(SOURCES[0][1], worktree));
 
   assert.match(out, /SNAPSHOT_TREE_MATCH/, `the fixture's own cut failed: ${out}`);
   assert.ok(existsSync(join(snap, "node_modules", "marker")), "the symlink is missing — a derived `npm test --` cannot run in there");

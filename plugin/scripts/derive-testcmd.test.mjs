@@ -7,7 +7,7 @@ import { join, dirname } from "node:path";
 
 // derive-testcmd.sh is the ONE place the test-entrypoint inference lives —
 // reused by claim-ticket.sh (ref origin/main, worktree setup) and by
-// review-pr.js's snapshot agent (ref HEAD, the repo under review), so the
+// review-core.mjs's snapshot agent (ref HEAD, the repo under review), so the
 // decision cannot drift between two independently-maintained copies (#142).
 const SCRIPT = join(import.meta.dirname, "derive-testcmd.sh");
 
@@ -234,7 +234,7 @@ test("derives from the given ref, not just the latest commit", () => {
 // tests", and the refusal has to say which. Piped into `grep -q`, a dying
 // `ls-tree` was swallowed — the pipeline reports grep's status — so a repo
 // that demonstrably HAS test files got the vacuous-pass refusal, naming a
-// cause that is not the cause. review-pr.js forwards this stderr verbatim as
+// cause that is not the cause. review-core.mjs forwards this stderr verbatim as
 // `testCmdError`, so the review then refuses for the wrong reason.
 test("a ref that cannot be listed names THAT, not a missing test suite", () => {
   const dir = repo({ "t.test.mjs": PASSES });
@@ -285,7 +285,7 @@ test("a grep scan failure over the file listing refuses distinctly from a genuin
 
 // A manifest that does not parse is not evidence of a manifest without a test
 // script. Swallowed, this repo's real entrypoint (`vitest run`) was silently
-// replaced by `node --test` and reported as a success — review-pr.js has no
+// replaced by `node --test` and reported as a success — review-core.mjs has no
 // install step to trip over the same corruption later, so nothing downstream
 // catches it. claim-ticket.sh already refuses on this same file for the
 // dependency count it reads; both readers now agree.
@@ -319,7 +319,7 @@ test("derive-testcmd.sh and claim-ticket.sh declare the same testfile_re", () =>
 // `2>&1` capture, land on the `*)` arm, and refuse as `could not read
 // <ref>:package.json` — the manifest's name for a fault that is not the
 // manifest's. Two consumers read that refusal: claim-ticket.sh wraps it into
-// its own, and review-pr.js's snapshot agent reads it against a repo under
+// its own, and review-core.mjs's snapshot agent reads it against a repo under
 // review. An absent interpreter is not evidence about the manifest.
 //
 // The repo's PATH-shadow convention: symlinks to the REAL binaries this

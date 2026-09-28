@@ -4,9 +4,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 import { between } from "./prose-pin.mjs";
-import { lift } from "./lift.mjs";
+import { resolveTestCmd, SNAPSHOT_SCHEMA } from "./review-core.mjs";
 
-// review-pr.js used to default `testCmd` to a literal string naming THIS
+// The review host used to default `testCmd` to a literal string naming THIS
 // repo's own test path — silent green everywhere else, since `worktree` is a
 // caller-supplied argument and a glob matching nothing exits 0 reporting
 // `tests 0` (#142). It is now DERIVED from the repo under review by the
@@ -16,27 +16,21 @@ import { lift } from "./lift.mjs";
 // repos that are NOT this one, which is the guard #142's acceptance
 // criteria required and an archive of this repo could not have been.
 //
-// This file covers what remains review-pr.js's own responsibility:
+// This file covers what remains review-core.mjs's own responsibility:
 // resolveTestCmd's resolution order and refusal, the snapshot agent's prompt
 // and schema actually carrying the derivation, and the specialist prompt
 // still handing testCmd over verbatim with the 'tests 0' rule.
 const REPO = join(import.meta.dirname, "..");
-const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
+const SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
 
 // Every pin below runs against CODE, not SOURCE — the same policy, and now the
-// same stripper, as `review-pr-reads.test.mjs`. Written against raw source,
+// same stripper, as `review-core-reads.test.mjs`. Written against raw source,
 // this file's schema-declaration pin was VACUOUS: wrapping the real
 // `testCmd: { type: "string" },` in a `/* */` block left the suite 9 pass / 0
 // fail while `additionalProperties: false` silently dropped the field at
 // runtime, breaking the very derivation #142 adds. The `^\s*` anchor those
 // pins use rejects a leading `//` and nothing else. Measured, #142 review.
 const CODE = stripComments(SOURCE);
-
-// review-pr.js runs a top-level `await pipeline(...)` and cannot be imported,
-// so resolveTestCmd is lifted out of the source text instead — same technique
-// as `select-dimensions.test.mjs` and `review-pr-reads.test.mjs`, via the
-// shared lift() in lift.mjs.
-const resolveTestCmd = lift(CODE, "resolveTestCmd", "explicit, snap");
 
 test("an explicit override always wins, whatever the snapshot derived", () => {
   assert.equal(resolveTestCmd("npm test --", { testCmd: "node --test" }), "npm test --");
@@ -75,10 +69,10 @@ test("an empty-string override is not treated as an explicit command", () => {
 // just the lifted copy. select-dimensions.test.mjs's #118 regression is this
 // exact defect: replacing the call with a bare default left every test above
 // green while the feature disconnected.
-test("review-pr.js actually calls resolveTestCmd once the snapshot is validated", () => {
+test("runReview actually calls resolveTestCmd once the snapshot is validated", () => {
   assert.match(
     CODE,
-    /^const testCmd = resolveTestCmd\(A\.testCmd, snap\);$/m,
+    /^\s*const testCmd = resolveTestCmd\(A\.testCmd, snap\);$/m,
     "the testCmd call site changed — the derivation may be disconnected",
   );
   // Textually after the snapshot's own validity guard, not before — snap must
@@ -115,7 +109,7 @@ test("no hardcoded testCmd default remains", () => {
 // the diff facts AND declares them in its schema" records happening to the
 // diff facts.
 test("the snapshot agent is told to derive testCmd AND the schema declares it", () => {
-  const snapshot = between(CODE, "const snap = await agent(", "if (!snap", "the snapshot agent dispatch");
+  const snapshot = between(CODE, "const snap = await agent(", "if (snap) {", "the snapshot agent dispatch");
 
   assert.match(
     snapshot,
@@ -166,18 +160,14 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
     "testCmdError is not bound to the script's stderr on refusal",
   );
 
-  // Scoped to the `properties` object, not the whole schema: a field declared
-  // ANYWHERE else is undeclared as far as `additionalProperties: false` is
-  // concerned, and an unbounded slice covering the rest of the block passes on
-  // it anyway. `between()` for the end anchor too — measured: move a field out
-  // of `properties` and re-indent the close, and the raw `indexOf` form here
-  // returned -1, widened to nearly the whole block, and stayed green.
-  const props = between(snapshot, "properties: {", "\n      },", "the snapshot schema");
+  // Scoped to `SNAPSHOT_SCHEMA.properties` directly — a real import now,
+  // never a second copy of its JSON re-parsed from source text. A field
+  // declared ANYWHERE else is undeclared as far as
+  // `additionalProperties: false` is concerned.
   for (const field of ["testCmd", "testCmdError"]) {
-    assert.match(
-      props,
-      new RegExp(`^\\s*${field}:\\s*\\{\\s*type:`, "m"),
-      `${field} is not declared in the schema's properties — additionalProperties:false drops it`,
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(SNAPSHOT_SCHEMA.properties, field),
+      `${field} is not declared in SNAPSHOT_SCHEMA.properties — additionalProperties:false drops it`,
     );
   }
   // Both stay OUT of `required`: a network or git failure inside
@@ -193,9 +183,9 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
   // silently drop the field from its structured output — especially under
   // omp's permissive schema-retry-exhaustion mode — and the caller would
   // never find out the measurement was never taken.
-  assert.match(
-    snapshot,
-    /required:\s*\["runRoot",\s*"path",\s*"head",\s*"pathVerified",\s*"repoVerified"\]/,
+  assert.deepEqual(
+    SNAPSHOT_SCHEMA.required,
+    ["runRoot", "path", "head", "pathVerified", "repoVerified"],
     "required must stay path+head+pathVerified+repoVerified only",
   );
 });
@@ -245,7 +235,7 @@ test("the specialist prompt hands the command over verbatim and rules 'tests 0' 
 // compose file, no `globalSetup`, and no vitest — so no teardown can happen,
 // and a specialist that checks the reason it was given finds it false.
 //
-// The rule is still worth carrying, because review-pr.js reviews repos that DO
+// The rule is still worth carrying, because the review host reviews repos that DO
 // have a stack. It has to be stated as a conditional about those repos rather
 // than as a fact about this run.
 test("the anti-substitution rationale is portable, not a present-tense claim about this run", () => {

@@ -1,19 +1,17 @@
 ---
 name: fleet-review-tests
-description: Dispatched by review-pr.js/review-core.mjs's Review phase for the "tests" dimension. Never invoked directly.
-model: sonnet
-effort: medium
-thinking-level: medium
+description: Dispatched by review-core.mjs's Review phase for the "tests" dimension. Never invoked directly.
+model: "@task:medium"
 ---
 
 <!-- Prompt adapted from Anthropic's vendored `pr-test-analyzer`
      agent
      (marketplace plugin `pr-review-toolkit`, agent file `pr-test-analyzer.md`),
      which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
-     `model: sonnet` matches review-pr.js's PREVIOUS per-call override for
+     `model: sonnet` matches the pre-cutover review host's PREVIOUS per-call override for
      this dimension (the vendor's own frontmatter was `model: inherit` with
      no pin to preserve) — this is the "recoverable miss" tier
-     review-pr.js's DEFAULT_DIMENSIONS comment describes: a weak pass here
+     review-core.mjs's DEFAULT_DIMENSIONS comment describes: a weak pass here
      is caught by a later run or a reader. -->
 
 You are a test-coverage analyst focused on whether tests actually

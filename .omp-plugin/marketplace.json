@@ -1,5 +1,4 @@
 {
-  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "fleet-plugin",
   "description": "The agent fleet: a run-team controller, a merge bot, a PR reviewer, and the ticket pipeline they share.",
   "owner": {

@@ -5,7 +5,7 @@
 // The fleet docs already SAY "two or three specialists for annotation-only or
 // single-file, the full set for production code" — in two places — but nothing
 // computes the diff, so the default is the full set every time. This turns that
-// judgement into one deterministic call. `review-pr.js` reads the booleans;
+// judgement into one deterministic call. `review-core.mjs` reads the booleans;
 // a human reads `profile`.
 //
 // Facts only. It does NOT decide which dimensions to run — that policy lives in
@@ -63,7 +63,7 @@ export function classify(p) {
 // with no warning (measured on microsoft/vscode#329568 — `files` 100 against
 // `changedFiles` 124). Every fact below is then computed off a short list with
 // nothing in the blob contradicting it: `loc` under-counts, `docsOnly` can flip
-// because the src files fell off the end, and `paths` is what `review-pr.js`
+// because the src files fell off the end, and `paths` is what `review-core.mjs`
 // puts in front of a specialist under "and no others". `truncated` is set ONLY
 // when the two counts disagree, so it is absent on every normal PR and the
 // caller can treat its presence as "this list is short by construction".
@@ -142,7 +142,7 @@ const { numArg, sweep, stray } = defineFlags(die, { flags: { pr: "value" } });
 // is the one place it differs from ci-state.mjs's `cut` (#1479), whose marker
 // sits past its `n`: `s.slice(0, n)` there appends the marker unconditionally,
 // measuring 133 characters against ci-state.mjs's own 120-char cap — and this
-// script's stderr is read by review-pr.js's snapshot agent, markdown fed to a
+// script's stderr is read by review-core.mjs's snapshot agent, markdown fed to a
 // model, the context budget run()'s comment above measures in bytes. A cap
 // that the marker can push past is not a cap. `Math.max` because a caller
 // passing an `n` under the marker's own width would otherwise hand `slice` a
@@ -158,13 +158,13 @@ function run(cmd, args) {
     return execFileSync(cmd, args, { encoding: "utf8" });
   } catch (e) {
     // Fail closed. A broken query must not read as "empty diff". The harm is not
-    // a trim — computeStats([]) yields profile "empty", which review-pr.js
+    // a trim — computeStats([]) yields profile "empty", which review-core.mjs
     // WIDENS to the full set. It is that a real production PR would be sized
     // from a lie, and the widen only looks safe until the next caller reads
     // these facts for something else.
     // Names the cause, never the child's stderr — execFileSync forwarded it
     // already (no `stdio` above), so interpolating it emits every byte twice:
-    // measured 7,700 B becoming 15,454 B, into review-pr.js's snapshot agent,
+    // measured 7,700 B becoming 15,454 B, into review-core.mjs's snapshot agent,
     // which is markdown read by a model. `e.message` is the same string, not a
     // fallback — Node builds it as `Command failed: <cmd>\n<stderr>`. Three
     // disjoint shapes: Node-aborted (ENOENT/ENOBUFS), signal, exit (#176).

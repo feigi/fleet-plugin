@@ -25,20 +25,21 @@
 // question as "there has to be THIS repository": git's discovery walk answers
 // with whatever working tree it finds first, and nothing about that answer
 // says it is fleet-plugin's own tree rather than an ambient repository the
-// caller's directory happens to nest under (an installed plugin copy under
-// `~/.claude/plugins/cache/...` has no `.git` of its own; the walk keeps going
-// and can land on the operator's dotfiles repo). The old guard against that was
-// non-vacuity — an empty tracked-script list is suspicious — and a wrong root
-// that is non-empty sailed straight through it.
+// caller's directory happens to nest under (an installed plugin copy —
+// pre-cutover, under the harness's own plugin cache — has no `.git` of its
+// own; the walk keeps going and can land on the operator's dotfiles repo).
+// The old guard against that was non-vacuity — an empty tracked-script list
+// is suspicious — and a wrong root that is non-empty sailed straight
+// through it.
 //
 // The first fix here compared the resolved root's OWN `.claude-plugin/
 // plugin.json` name against this file's — and #1354's review measured that a
 // DIFFERENT checkout of this same plugin, sitting above some unrelated caller
 // directory, still passed: same name, wrong tree. The second fix required the
 // running script to be somewhere INSIDE the resolved root — and that review
-// measured it regresses #1339's OWN shape: an installed copy under
-// `~/.claude/plugins/cache/fleet-plugin/...` genuinely sits inside
-// `~/.claude`, which is exactly the ambient repository the bug is about.
+// measured it regresses #1339's OWN shape: pre-cutover, an installed copy
+// under the harness's own plugin cache genuinely sat inside the operator's
+// dotfiles checkout, which was exactly the ambient repository the bug is about.
 // Containment is not identity either. What repoRoot now insists on is
 // TRACKED-NESS: the running script (this very file, realpath'd) and its own
 // manifest (found self-relatively, never by guessing a depth below the root)
@@ -206,15 +207,17 @@ function isTrackedBy(root, path) {
  *
  * Containment (is the running script somewhere INSIDE `root`?) was tried
  * first and is not enough — it regresses #1339's own measured shape. There,
- * self is `~/.claude/plugins/cache/fleet-plugin/fleet/0.1.1/scripts/
- * repo-root.mjs`, and `root` resolves to `~/.claude`, which genuinely
- * CONTAINS self (the installed copy sits inside the operator's dotfiles
- * checkout) — but `~/.claude`'s git does not TRACK that cache directory, so
- * `~/.claude` is not the tree this file ships in. The check is therefore
- * TRACKED-NESS: does `root`'s own git know this file (`git ls-files
- * --error-unmatch`)? An untracked copy lying inside an ambient working tree
- * is exactly as much a stranger as no copy at all. This also accepts every
- * tree that legitimately IS this file's own — this checkout, a worktree, a
+ * pre-cutover, self was under the harness's own plugin cache at
+ * `fleet-plugin/fleet/0.1.1/scripts/repo-root.mjs`, and `root` resolved to
+ * that cache's own parent dotfiles directory, which genuinely CONTAINED self
+ * (the installed copy sat inside the operator's dotfiles checkout) — but
+ * that directory's git did not TRACK the cache subdirectory, so it was not
+ * the tree this file ships in. The check is therefore TRACKED-NESS: does
+ * `root`'s own git know this file (`git
+ * ls-files --error-unmatch`)? An untracked copy lying inside an ambient
+ * working tree is exactly as much a stranger as no copy at all. This also
+ * accepts every tree that legitimately IS this file's own — this checkout, a
+ * worktree, a
  * `plugin/`-nested layout after #1336, even a vendored copy inside a larger
  * monorepo — because in every one of those cases the file is actually
  * COMMITTED to that repository's index, which an ambient-but-unrelated

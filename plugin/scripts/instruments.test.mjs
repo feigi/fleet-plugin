@@ -441,11 +441,10 @@ test("--pin re-baselines after a deliberate edit — the controller's own toolin
 // ---------------------------------------------------------------------------
 
 // A plugin-cache-shaped fixture: instruments.sh nested several directories
-// deep inside a FOREIGN git repository — the shape `~/.claude/plugins/cache/
-// fleet-plugin/fleet-ctl/<version>/scripts/instruments.sh` takes when `~/.claude`
-// is itself the operator's personal dotfiles checkout (#1337's own report).
-// Built with `git init` in a fresh temp dir, never the real checkout or
-// `~/.claude`.
+// deep inside a FOREIGN git repository — the shape a plugin cache directory
+// takes when it is itself nested inside the operator's personal dotfiles
+// checkout (#1337's own report, measured pre-cutover). Built with `git init`
+// in a fresh temp dir, never the real checkout or a real cache directory.
 function foreignAncestorCache(t) {
   const foreign = realpathSync(mkdtempSync(join(tmpdir(), "instruments-foreign-")));
   t.after(() => rmSync(foreign, { recursive: true, force: true }));
@@ -516,10 +515,10 @@ test("(3) --repo audits the named repository regardless of the working directory
 test("(4) --pin from a directory nested inside a foreign git repo never writes into that ancestor", (t) => {
   // The foreign repo is the ANCESTOR directory tree, holding BOTH a
   // plugin-cache-shaped copy of instruments.sh AND, elsewhere under the same
-  // ancestor, a SEPARATE nested git checkout used as cwd — the shape
-  // `~/.claude` takes when it is itself a git repo, the plugin cache sits
-  // under `~/.claude/plugins/cache/...`, and a fleet-plugin checkout is
-  // ALSO nested somewhere under `~/.claude` (e.g. `~/.claude/dev/`). Script
+  // ancestor, a SEPARATE nested git checkout used as cwd — the shape the
+  // operator's dotfiles checkout takes when it is itself a git repo, the
+  // plugin cache sits under one of its subdirectories, and a fleet-plugin
+  // checkout is ALSO nested somewhere under that same dotfiles tree. Script
   // location and cwd deliberately differ here — same discriminating shape as
   // test (1), but with the audited repo an ANCESTOR-DESCENDANT of the
   // foreign repo rather than a disjoint tree, which is what "whose ancestor

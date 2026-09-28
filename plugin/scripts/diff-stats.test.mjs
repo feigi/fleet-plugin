@@ -21,7 +21,7 @@ const CLI = readFileSync(SCRIPT, "utf8");
 test("classifier priority: test > code-ext > docs/config-dir", () => {
   // src is the residue
   assert.equal(classify("src/a.ts"), "src");
-  assert.equal(classify("workflows/review-pr.js"), "src");
+  assert.equal(classify("scripts/review-core.mjs"), "src");
   // test wins even though a .test.ts is also a .ts
   assert.equal(classify("a.test.ts"), "test");
   assert.equal(classify("pkg/__tests__/a.ts"), "test");
@@ -84,7 +84,7 @@ test("computeStats: docsOnly is strict — docs+src keeps the fuller review", ()
 });
 
 test("computeStats: the four routing booleans are pinned together on a production PR", () => {
-  // review-pr.js selectDimensions routes on exactly hasSrc/hasTests/hasConfig/
+  // review-core.mjs selectDimensions routes on exactly hasSrc/hasTests/hasConfig/
   // docsOnly. Assert all four at once so any single one flipping is caught here,
   // not only transitively via the profile-ladder test.
   const prod = computeStats([
@@ -116,7 +116,7 @@ test("computeStats: loc tolerates a file missing additions/deletions", () => {
 // `gh pr view --json files` pages at 100 and exits 0, so a 124-file PR arrives
 // as a fully-formed 100-file measurement with nothing contradicting it —
 // measured on microsoft/vscode#329568. `changedFiles` from the same query is the
-// only disagreement available. Absent on every normal PR: `review-pr.js` reads
+// only disagreement available. Absent on every normal PR: `review-core.mjs` reads
 // its PRESENCE as "widen the fan-out, this list is short", so a flag set when
 // the counts agree would widen every review.
 test("computeStats: truncated is set only when gh's file list is short", () => {
@@ -133,7 +133,7 @@ test("computeStats: truncated is set only when gh's file list is short", () => {
 // ever passes one. Both tokens are needed and each disconnects the whole cap
 // detection alone: drop `changedFiles` from the query and `info.changedFiles` is
 // undefined, drop the second argument and the value never reaches computeStats.
-// Either way every PR reports as complete, `review-pr.js` keeps stamping its
+// Either way every PR reports as complete, `review-core.mjs` keeps stamping its
 // file list "and no others", and the tests above stay green against a copy
 // nothing calls.
 test("the CLI actually asks gh for changedFiles and passes it through", () => {
@@ -190,7 +190,7 @@ test("CLI: --pr given an empty value dies naming the flag", () => {
 // (an unexpected `gh` output shape, or a proxy's JSON error envelope). Before
 // this guard, `info.files` read as `undefined` and computeStats([]) silently
 // reported `profile: "empty"` — exit 0, indistinguishable from a real empty
-// PR, review-pr.js WIDENS that to the full specialist set on the strength of
+// PR, review-core.mjs WIDENS that to the full specialist set on the strength of
 // a lie. The guard must refuse instead.
 test("CLI: gh returning no files array dies (exit 2) rather than reporting a fabricated empty PR", () => {
   const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
@@ -363,7 +363,7 @@ test("CLI: the clip keeps the HEAD of gh's stdout, where this path's cause sits"
 // `s.slice(0, n)` appends the marker unconditionally, so a clipped value
 // there measures 133 characters against its own 120-char cap — a cap the
 // marker can push past is not a cap. This script's stderr is read by
-// review-pr.js's snapshot agent — markdown fed to a model, the same context
+// review-core.mjs's snapshot agent — markdown fed to a model, the same context
 // budget `run()`'s comment measures in bytes — so the cap is the contract
 // and the marker is part of what it bounds.
 test("CLI: the marker lives inside the 120-char cap, not past it", () => {

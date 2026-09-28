@@ -281,7 +281,7 @@ testfile_re='\.(test|spec)\.[cm]?[jt]sx?$'
 # The runner runs the repo's own test entrypoint. The inference itself — a
 # manifest test script, else a direct test-file run, else refuse rather than
 # emit a runner that would pass vacuously — is NOT reimplemented here: it lives
-# once in derive-testcmd.sh, reused by review-pr.js's snapshot agent for the
+# once in derive-testcmd.sh, reused by review-core.mjs's snapshot agent for the
 # same decision against a reviewed repo's HEAD (#142). A second copy is what
 # drifts.
 #
