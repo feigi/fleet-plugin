@@ -3218,16 +3218,23 @@ test("lock: reads take no lock — `check` and `read` answer while a live writer
   assert.match(check.stderr, /ALREADY FILED/);
 });
 
-test("lock: an unparseable holder is a live one — waited on, never signalled, never taken over (#531)", (t) => {
+test("lock: an unparseable holder is a live one — waited on, never signalled, never taken over, and the timeout names the lock file (#531, #2162)", (t) => {
   // O_EXCL create and pid write are two steps, so an empty or partial lock is
   // a normal thing for a waiter to read. process.kill(NaN, 0) throws
-  // ERR_INVALID_ARG_TYPE — a crash where a wait belongs.
-  const { lock, cli } = lockFixture(t);
+  // ERR_INVALID_ARG_TYPE — a crash where a wait belongs. With no pid to name,
+  // the timeout names the lock file itself: an empty lock whose writer died
+  // mid-create never clears, and that path is what the operator removes.
+  const { file, lock, cli } = lockFixture(t);
   for (const content of ["", "12ab", "0", "-5"]) {
     writeFileSync(lock, content);
     const r = cli(["filed", "3", "x"], { LEDGER_LOCK_TIMEOUT_MS: "50" });
     assert.equal(r.status, 2, `${JSON.stringify(content)}: ${r.stderr}`);
-    assert.match(r.stderr, /cannot lock .* held by pid/, `${JSON.stringify(content)}: ${r.stderr}`);
+    assert.ok(
+      r.stderr.includes(`ledger: cannot lock ${file} — ${lock} holds ${JSON.stringify(content)}, not a pid`),
+      `${JSON.stringify(content)}: stderr does not name the lock file: ${r.stderr}`,
+    );
+    assert.match(r.stderr, /remove it by hand/, `${JSON.stringify(content)}: ${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /held by pid/, `${JSON.stringify(content)}: an unparseable holder was reported as a pid: ${r.stderr}`);
     assert.doesNotMatch(r.stderr, /ERR_INVALID_ARG_TYPE/);
     assert.equal(readFileSync(lock, "utf8"), content, `an unparseable holder ${JSON.stringify(content)} was taken over`);
   }
