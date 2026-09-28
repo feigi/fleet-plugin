@@ -3,96 +3,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { computeStats } from "./diff-stats.mjs";
-import { lift } from "./lift.mjs";
 import { stripComments } from "./strip-comments.mjs";
+import { DEFAULT_DIMENSIONS, selectDimensions, resolveDimensions, verifiersFor } from "./review-core.mjs";
 
-// `workflows/review-pr.js` runs a top-level `await pipeline(...)`, so importing it
-// executes the workflow. Every value under test is lifted out of the SOURCE TEXT
-// instead — the same technique as `review-pr-testcmd.test.mjs`'s lift of
-// `resolveTestCmd`, and the
-// reason #118 existed: every count claim about `selectDimensions` had to be
-// hand-derived, and two hand-derived comments were wrong.
-//
-// Extraction is deliberately NOT a module move. That would require `import` to
-// resolve inside the Workflow sandbox, which #538 measured it does not — the
-// verdict and its controls are recorded beside `snapshotMissing` in
-// review-pr.js. A failed import bricks the fleet's DEFAULT review path, so
-// coupling to the literal spelling is the cheaper risk: it breaks loudly, here.
+// The reason #118 existed: every count claim about `selectDimensions` had to
+// be hand-derived, and two hand-derived comments were wrong. Every value
+// under test here is the REAL export now, never a re-derived or lifted copy.
 const REPO = join(import.meta.dirname, "..");
-const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
-
-// Every declaration below ends at a column-0 terminator and is the only
-// top-level declaration of its name — that makes the ANCHOR unique, not the
-// match: a block-commented dead copy is textual too, so a non-global
-// `.match` can still find the wrong one first (#1125). `verifiersFor` below
-// matches STRIPPED text for that reason — it is the repo's only guard on the
-// live `verifiersBySeverity` map. `DEFAULT_DIMENSIONS` and `selectDimensions`
-// still match raw SOURCE.
-//
-// Only `resolveDimensions` routes through the shared lift() in lift.mjs — it
-// is a plain top-level `function name(signature) { ... }` with no free
-// variables, the shape lift() generalizes. The other three stay local,
-// each for a reason lift()'s single-function signature cannot express:
-function liftFromSource(name) {
-  if (name === "DEFAULT_DIMENSIONS") {
-    // An array literal, not a function — there is no signature for lift() to
-    // anchor on.
-    const m = SOURCE.match(/^const DEFAULT_DIMENSIONS = \[[\s\S]*?^\];$/m);
-    assert.ok(m, "review-pr.js no longer declares DEFAULT_DIMENSIONS as a top-level array — update this test");
-    return new Function(`${m[0]}\nreturn DEFAULT_DIMENSIONS;`)();
-  }
-  if (name === "selectDimensions") {
-    // Widened to start at SIZE_TIER_PROFILES, not just `function selectDimensions`:
-    // that Set and SIZE_TIER_DIMS are module-level consts selectDimensions closes
-    // over, declared immediately above it by construction. Lifting the function
-    // alone leaves them out of the `new Function` eval scope — a ReferenceError,
-    // not a wrong answer, so it fails loud rather than pinning a stale result.
-    // lift()'s regex anchors on one `function name(signature)` declaration and
-    // has no way to widen its start to a preceding const.
-    const m = SOURCE.match(/^const SIZE_TIER_PROFILES = new Set[\s\S]*?^function selectDimensions\(all, stats\) \{[\s\S]*?^\}$/m);
-    assert.ok(m, "review-pr.js no longer declares SIZE_TIER_PROFILES/selectDimensions(all, stats) as expected — update this test");
-    return new Function(`${m[0]}\nreturn selectDimensions;`)();
-  }
-  if (name === "verifiersFor") {
-    // Closes over `A` (the workflow args) and `verifiers`, so both are supplied
-    // as `new Function` parameters rather than re-declared — this pins the real
-    // wiring, not a copy of it. `verifiers` gets a SENTINEL: the claim under test
-    // is that the budget is a function of severity, not that the default is 2.
-    // lift() has no parameter channel — it always calls `new Function(body)()`
-    // with zero arguments.
-    //
-    // STRIPPED text, not raw SOURCE (#1125 follow-up): this is the repo's only
-    // guard on the live `verifiersBySeverity` map, so a block-commented correct
-    // copy parked above the mutated live declaration must not be able to
-    // satisfy it. Measured the same way as `resolveDimensions` below: mutate
-    // the live map's `suggestion: 0` to `suggestion: verifiers` and park a
-    // correct decoy above it — against raw SOURCE the mutation ships green
-    // ("the refuter budget is keyed on severity alone" below still asserts
-    // `verifiersFor("suggestion") === 0`), against stripComments(SOURCE) it reds.
-    const CODE = stripComments(SOURCE);
-    const m = CODE.match(/^const verifiersBySeverity = A\.verifiersBySeverity \|\| \{[\s\S]*?^const verifiersFor = .*;$/m);
-    assert.ok(m, "review-pr.js no longer declares verifiersBySeverity then verifiersFor at top level — update this test");
-    return new Function("A", "verifiers", `${m[0]}\nreturn verifiersFor;`)({}, 7);
-  }
-  throw new Error(`liftFromSource: unknown name ${name}`);
-}
-
-const DEFAULT_DIMENSIONS = liftFromSource("DEFAULT_DIMENSIONS");
-const selectDimensions = liftFromSource("selectDimensions");
-// STRIPPED text, not raw SOURCE (#1125). lift() matches with a non-global
-// `.match`, so the FIRST `function resolveDimensions(override, all)` in the
-// text it is given wins — and in raw source a block-commented copy is still
-// text it can match. Measured on a scratch copy of the tree: with the live
-// declaration's `override == null` guard reverted to `!override` AND a correct
-// copy of the whole function parked in a `/* */` block above it, this file ran
-// 40 pass / 0 fail against raw SOURCE — the pin was satisfied by the dead copy
-// while review-pr.js shipped the regression. Passing stripComments(SOURCE)
-// blanks the parked copy, so the same mutation reds "a falsy-but-present
-// override stops the run" below. The other two lifts above (DEFAULT_DIMENSIONS,
-// selectDimensions) are deliberately left on raw SOURCE by this ticket and
-// are unchanged; `verifiersFor` below was moved to stripped text too, for the
-// same reason as this one (see its branch in liftFromSource above).
-const resolveDimensions = lift(stripComments(SOURCE), "resolveDimensions", "override, all");
+const SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
 
 // Drive the matrix from REAL file lists through the real classifier, not from
 // hand-written profile strings. A `diff-stats` classifier change that silently
@@ -100,7 +18,7 @@ const resolveDimensions = lift(stripComments(SOURCE), "resolveDimensions", "over
 const dimensionKeys = (files) => selectDimensions(DEFAULT_DIMENSIONS, computeStats(files)).map((d) => d.key);
 const f = (path, additions = 5, deletions = 5) => ({ path, additions, deletions });
 
-test("the lifted values have the shape the rest of this file assumes", () => {
+test("the imported values have the shape the rest of this file assumes", () => {
   assert.equal(DEFAULT_DIMENSIONS.length, 6);
   assert.deepEqual(
     DEFAULT_DIMENSIONS.map((d) => d.key),
@@ -126,10 +44,10 @@ test("a tests-only diff drops types, silent-failure and simplify", () => {
 });
 
 test("a production diff runs everything, less `tests` when the diff has none", () => {
-  const withTests = [f("workflows/review-pr.js", 100, 50), f("scripts/a.test.mjs", 30, 10)];
+  const withTests = [f("scripts/review-core.mjs", 100, 50), f("scripts/a.test.mjs", 30, 10)];
   assert.equal(dimensionKeys(withTests).length, 6);
 
-  const noTests = [f("workflows/review-pr.js", 100, 50), f("scripts/b.mjs", 40, 20)];
+  const noTests = [f("scripts/review-core.mjs", 100, 50), f("scripts/b.mjs", 40, 20)];
   const keys = dimensionKeys(noTests);
   assert.equal(keys.length, 5);
   assert.ok(!keys.includes("tests"));
@@ -142,7 +60,7 @@ test("a production diff runs everything, less `tests` when the diff has none", (
 // `classify()` returns `src` for any code extension before it checks `isDocs`
 // — one shape of the diffs #218 measured in production (four of them, below).
 test("a single-file source diff trims to correctness + silent-failure + comments", () => {
-  assert.deepEqual(dimensionKeys([f("workflows/review-pr.js", 3, 2)]), [
+  assert.deepEqual(dimensionKeys([f("scripts/review-core.mjs", 3, 2)]), [
     "correctness",
     "silent-failure",
     "comments",
@@ -292,7 +210,7 @@ test("a small diff that adds a test keeps the tests dimension", () => {
   );
 });
 
-// Fail DIRECTION, not a matrix row. The blob reaches review-pr.js relayed by an
+// Fail DIRECTION, not a matrix row. The blob reaches review-core.mjs relayed by an
 // agent, so a field can go missing without failing JSON.parse, and absence must
 // widen rather than narrow — the `=== true` guards elsewhere in selectDimensions
 // exist for that. `comments` no longer reads any field at all since #218, so what
@@ -309,15 +227,16 @@ test("a size-tier stats blob missing `kinds` and `hasTests` still keeps comments
 // #1349 removed the per-call `model` field entirely (per #1303's gap 3): no
 // `agent()` call may carry `model`/`effort`, so DEFAULT_DIMENSIONS carries
 // only `key`/`prompt`/`agentType` now, and tier lives in each fleet-owned
-// `fleet-review-<key>` definition's own frontmatter instead — see
-// review-core-parity.test.mjs for the parity pin between review-pr.js's
-// namespaced copy and review-core.mjs's bare one. This replaces the retired
-// "only the recoverable-miss dimensions carry a model downgrade" test, which
-// pinned a field that no longer exists.
+// `fleet-review-<key>` definition's own frontmatter instead. omp's native
+// `agent()` resolves a bare frontmatter `name:` exactly, so `agentType` is
+// bare here — no namespace prefix to carry (omp's own registry is
+// bare-name/unnamespaced, ADR 0014). This replaces
+// the retired "only the recoverable-miss dimensions carry a model downgrade"
+// test, which pinned a field that no longer exists.
 test("every dimension names a distinct fleet-owned agentType and carries no model field", () => {
   const byKey = Object.fromEntries(DEFAULT_DIMENSIONS.map((d) => [d.key, d]));
   for (const key of ["correctness", "silent-failure", "tests", "comments", "types", "simplify"]) {
-    assert.equal(byKey[key].agentType, `fleet-ctl:fleet-review-${key}`);
+    assert.equal(byKey[key].agentType, `fleet-review-${key}`);
     assert.equal(byKey[key].model, undefined, `${key} still carries a model field`);
   }
   assert.equal(new Set(DEFAULT_DIMENSIONS.map((d) => d.agentType)).size, DEFAULT_DIMENSIONS.length);
@@ -329,19 +248,19 @@ test("every dimension names a distinct fleet-owned agentType and carries no mode
 // able to separate these six (#221). Without this the corrected rationale is
 // prose with nothing under it — which is how the retired one survived.
 test("the refuter budget is keyed on severity alone, never on a dimension", () => {
-  const verifiersFor = liftFromSource("verifiersFor");
+  const forSeverity = verifiersFor({ verifiers: 7 });
   // One parameter, and it is the severity. A dimension-aware budget needs a
   // second one, and passing a dimension anyway must not move the answer.
-  assert.equal(verifiersFor.length, 1);
+  assert.equal(forSeverity.length, 1);
   for (const d of DEFAULT_DIMENSIONS)
-    assert.equal(verifiersFor("critical", d.key), 7, `critical/${d.key}`);
+    assert.equal(forSeverity("critical", d.key), 7, `critical/${d.key}`);
   // `silent-failure` and `tests` are dispatched under different fleet-owned
   // agent tiers (frontmatter, not a per-call field) and still draw the same
   // budget — the whole of why the retired rule did not
   // separate them. `suggestion` is the one band that differs, and it is a
   // SEVERITY, not a dimension.
-  assert.equal(verifiersFor("important"), verifiersFor("critical"));
-  assert.equal(verifiersFor("suggestion"), 0);
+  assert.equal(forSeverity("important"), forSeverity("critical"));
+  assert.equal(forSeverity("suggestion"), 0);
 });
 
 // --- args.dimensions normalization (#113). The "Specialists" section of
@@ -486,7 +405,7 @@ test("a non-object entry is reported as the wrong TYPE, not as an object missing
 // The loop above only ever indexes ONE entry ([0]), so it cannot pin the
 // index for a multi-entry override — and separately from #281's "identifies
 // which entry" test above, which never exercises this branch at all. Dropping
-// `[${i}]` from the type-mismatch throw (workflows/review-pr.js) fails no
+// `[${i}]` from the type-mismatch throw (review-core.mjs) fails no
 // test above. Mutation-verified: reverting the `${i}` in that throw back to a
 // fixed string reds this assertion.
 test("a type-mismatch entry error identifies which entry of a multi-entry override failed", () => {
@@ -570,7 +489,7 @@ test("a non-array override stops the run rather than crashing on .map", () => {
 // been wrong before (#118) — a fifth dereferenced field reds this and forces
 // the prose to be updated with it.
 test("the resolveDimensions header states the dereferenced-field situation correctly", () => {
-  const m = SOURCE.match(/((?:^\/\/.*\n)+)^function resolveDimensions\(/m);
+  const m = SOURCE.match(/((?:^\/\/.*\n)+)^export function resolveDimensions\(/m);
   assert.ok(m, "resolveDimensions no longer carries a header comment block — update this test");
   const header = m[1];
   // Comments stripped BEFORE deriving the dereferenced set: the header's own
@@ -589,7 +508,7 @@ test("the resolveDimensions header states the dereferenced-field situation corre
   assert.doesNotMatch(header, /absent means inherit/i, "the refuted reword is back — see the models-sent log");
 });
 
-// Everything above tests a LIFTED COPY. Nothing above proves review-pr.js
+// Everything above tests a LIFTED COPY. Nothing above proves review-core.mjs
 // wires resolveDimensions AND selectDimensions into the same call site:
 // replacing it with `explicitDimensions || DEFAULT_DIMENSIONS` left this file
 // green before (#118) by disconnecting the size tier, and a version that
@@ -600,15 +519,15 @@ test("the resolveDimensions header states the dereferenced-field situation corre
 // required-args guard), so this pin is TWO pins — one per line. Weakening either
 // to a looser match, or dropping one because the other still passes, restores
 // exactly the hole #118 opened.
-test("review-pr.js actually calls resolveDimensions, then selectDimensions, to pick the fan-out", () => {
+test("runReview actually calls resolveDimensions, then selectDimensions, to pick the fan-out", () => {
   assert.match(
     SOURCE,
-    /^const explicitDimensions = resolveDimensions\(A\.dimensions, DEFAULT_DIMENSIONS\);$/m,
+    /^\s*const explicitDimensions = resolveDimensions\(A\.dimensions, DEFAULT_DIMENSIONS\);$/m,
     "the args.dimensions normalization changed — the override may be passed through unresolved",
   );
   assert.match(
     SOURCE,
-    /^const dimensions = explicitDimensions \|\| selectDimensions\(DEFAULT_DIMENSIONS, stats\);$/m,
+    /^\s*const dimensions = explicitDimensions \|\| selectDimensions\(DEFAULT_DIMENSIONS, stats\);$/m,
     "the dimensions call site changed — override normalization and/or size-tier selection may be disconnected",
   );
 });
@@ -648,8 +567,8 @@ test("an unresolvable override is refused before the snapshot agent is dispatche
 // dispatch. Comment lines are stripped so a commented-out option cannot satisfy
 // it, and the slice is the review dispatch's options object alone.
 function reviewDispatchOptions() {
-  const m = SOURCE.match(/\{\s*\n\s*label: `review:\$\{d\.key\}`[\s\S]*?\n\s*\},/);
-  assert.ok(m, "review-pr.js no longer passes an options object labelled review:${d.key} — update this test");
+  const m = SOURCE.match(/\{ label: `review:\$\{d\.key\}`[^\n]*\},/);
+  assert.ok(m, "review-core.mjs no longer passes an options object labelled review:${d.key} — update this test");
   return m[0]
     .split("\n")
     .filter((l) => !/^\s*\/\//.test(l))
@@ -658,7 +577,7 @@ function reviewDispatchOptions() {
 
 // #1349 (per #1303's gap 3) retired the whole per-call override this test
 // used to pin: `args.specialistModel`/per-dimension `model` are both gone,
-// and no `agent()` call anywhere in review-pr.js may carry a `model` option
+// and no `agent()` call anywhere in review-core.mjs may carry a `model` option
 // at all — review-tier-audit.test.mjs is the general-purpose guard for that;
 // this pin is the SPECIFIC regression check that the review dispatch's own
 // options object never grows one back.
@@ -680,7 +599,7 @@ test("the review dispatch never carries a model option — tier lives only in ag
 // here at all (#1349): it lives in that definition's own frontmatter, read
 // off the definition file or the dispatch transcript, never off this log.
 test("the dispatch log reports the agentType sent for each dimension, not a model tier", () => {
-  const m = SOURCE.match(/^\s*`agents dispatched \$\{dimensions[\s\S]*?\n/m);
+  const m = SOURCE.match(/`agents dispatched \$\{dimensions[\s\S]*?\n/);
   assert.ok(m, "the `agents dispatched` log line is gone — nothing then reports which definition each dimension used");
   assert.match(m[0], /d\.agentType/, "the log no longer names the dispatched agentType");
   assert.doesNotMatch(m[0], /"frontmatter"|"inherit"/, "the log still reasons about a model tier that no agent() call carries anymore");

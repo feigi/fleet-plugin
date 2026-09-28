@@ -2,13 +2,13 @@
 // `stripComments()` before extraction — its own header comment (lines 17-21)
 // documents this as the defense against a block-commented dead `agent()` call
 // being extracted and rendered as live text, the exact vacuity class
-// strip-comments.mjs exists for (measured twice on review-pr.js before this
-// module existed, per the comment above `workflowCode`). Nothing pinned that
-// wrapper: review-pr-refuter-scratch.test.mjs, review-pr-specialist-scratch
-// .test.mjs and injection-control-prose.test.mjs all extract from
-// `workflows/review-pr.js`, which carries no dead duplicate today, so none of
-// them can red if the `stripComments()` call is dropped. This file pins the
-// guard directly with a synthetic fixture, once, for all three consumers.
+// strip-comments.mjs exists for (measured twice on the pre-cutover review
+// host before this module existed, per the comment above `workflowCode`).
+// Nothing pinned that wrapper: review-core-cwd-isolation.test.mjs and
+// injection-control-prose.test.mjs both extract from `review-core.mjs`,
+// which carries no dead duplicate today, so neither can red if the
+// `stripComments()` call is dropped. This file pins the guard directly with
+// a synthetic fixture, once, for both consumers.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";

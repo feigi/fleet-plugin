@@ -34,14 +34,13 @@ import { join, extname, basename } from "node:path";
 
 const DIR = fileURLToPath(new URL(".", import.meta.url));
 const SELF = basename(fileURLToPath(import.meta.url));
-// The CI helpers and the workflow sources carry the same prose and the same
+// The CI helpers carry the same prose and the same
 // rot. Scoping to one directory is what let #769's sites sit outside the
 // previous gate's reach, so DIRS names every directory holding a scannable
 // file — pinned by name in the walk test below, not left to this list.
 const DIRS = [
   DIR,
   fileURLToPath(new URL("../../.github/scripts/", import.meta.url)),
-  fileURLToPath(new URL("../workflows/", import.meta.url)),
 ];
 
 // #1311: COUNT only enumerated single numeral words, so a compound count
@@ -151,9 +150,9 @@ test("no comment locates a construct by a line distance", () => {
 // stayed green — measured, dropping .github/scripts/ moves the count 136 → 134,
 // far above the vacuity floor above. By name, not by count, so landing another
 // file in any of these directories does not red the gate.
-test("the walk reaches the CI helpers and the workflow sources too", () => {
+test("the walk reaches the CI helpers too", () => {
   const { files } = sweep(DIRS);
-  for (const f of ["apply-ruleset.sh", "review-pr.js"]) {
+  for (const f of ["apply-ruleset.sh", "review-core.mjs"]) {
     assert.ok(files.includes(f), `not swept: ${f} — the walk opened ${files.length} files`);
   }
 });

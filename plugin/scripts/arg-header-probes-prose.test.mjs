@@ -40,7 +40,7 @@
 // here demands a paragraph per row; the roster is the grep's output, and the
 // paragraphs are pinned only through the commands they carry.
 //
-// `workflows/review-pr.js` is the site this grep cannot see at all, by the
+// `review-core.mjs` is the site this grep cannot see at all, by the
 // header's own argument, and its copy of the digits rule is already executed by
 // `shared-refusal.test.mjs`. Left there rather than re-pinned here.
 import test from "node:test";

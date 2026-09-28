@@ -1,7 +1,5 @@
 // #1802 (spec docs/specs/2026-09-24-slot-based-fleet-loop-design.md § 3 §2, §6).
-// Two changes to the review's own result, made in BOTH copies of the review
-// body — review-core.mjs (omp, imported) and workflows/review-pr.js (Claude,
-// executed here as the function body the Workflow harness compiles it as):
+// Two changes to the review's own result, in review-core.mjs's own body:
 //
 //   1. Crash repair inside the run. Each crashed specialist is re-dispatched
 //      once, and each refuter pair whose every vote died is re-dispatched once
@@ -9,99 +7,23 @@
 //      `dimensionsUnrun` / `unverified` as before, and `resume` now means
 //      "crashed again after the in-run retry".
 //   2. Digest first. The small fields a controller acts on lead the returned
-//      object and the bulky finding arrays trail it, so the digest survives
-//      Claude's ~8 KB inline `<result>` cut (before this, `resume` was LAST).
+//      object and the bulky finding arrays trail it, so a large review's
+//      digest is available without depending on (or risking truncation from)
+//      the finding arrays that follow it (before this, `resume` was LAST).
 //
-// WHY EXECUTE review-pr.js RATHER THAN LIFT FROM IT. Every other review-pr.js
-// pin lifts a pure declaration out of the source text. The retry is wiring at
-// two dispatch sites inside the top-level script, and a lifted helper proves
-// nothing about whether those sites call it. review-pr.js compiles as an
-// AsyncFunction body (review-pr-reads.test.mjs's parse check uses the same
-// parameter list), so it can be RUN against a scripted host — the harness
-// globals (`agent`, `pipeline`, `parallel`, `phase`, `log`) are exactly the
-// parameters that compile names. Every scenario below runs through both copies
-// with the same script, so the two bodies are held to one behaviour.
+// Driven through a SCRIPTED HOST rather than a mocked runReview: `agent`,
+// `pipeline`, `parallel`, `phase`, `log` are exactly the parameters
+// runReview takes off `host`, so the retry and the digest ordering are
+// exercised as review-core.mjs's own wiring runs them, never a re-derived
+// copy of what that wiring is supposed to do. The fixtures below are shared
+// with review-path-default.test.mjs's own return-shape pin, via
+// review-host-fixture.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { runReview, DIGEST_KEYS, digestOf } from "./review-core.mjs";
+import { pipeline, parallel, ARGS, SNAP, review, finding, vote, scriptedHost } from "./review-host-fixture.mjs";
 
-const REPO = join(import.meta.dirname, "..");
-const WORKFLOW = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8").replace(/^export /m, "");
-const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-const workflowBody = new AsyncFunction("args", "budget", "agent", "parallel", "pipeline", "phase", "log", "workflow", WORKFLOW);
-
-// Claude's pipeline contract as review-pr.js's own comment on `unrunCrashed`
-// states it — a null stage-1 result never reaches stage 2 — with a throw
-// landing in the same null slot, the shape review-eval.mjs's omp pipeline has.
-async function pipeline(items, stage1, stage2) {
-  return Promise.all(
-    items.map(async (item) => {
-      let r1;
-      try {
-        r1 = await stage1(item);
-      } catch {
-        r1 = null;
-      }
-      if (!r1) return null;
-      try {
-        return await stage2(r1, item);
-      } catch {
-        return null;
-      }
-    }),
-  );
-}
-const parallel = (fns) => Promise.all(fns.map((fn) => fn()));
-
-const COPIES = [
-  ["review-core.mjs", (host, args) => runReview({ ...host, pipeline, parallel }, args)],
-  ["review-pr.js", (host, args) => workflowBody(args, undefined, host.agent, parallel, pipeline, host.phase, host.log, undefined)],
-];
-
-const ARGS = { pr: 7, branch: "feature/x", worktree: "/repo/.worktrees/7-x", scratch: "/scr", testCmd: "node --test", dimensions: ["correctness"] };
-const SNAP = {
-  runRoot: "/scr/pr7/run-ab12",
-  path: "/scr/pr7/run-ab12/snapshot-abc123",
-  head: "abc123",
-  pathVerified: true,
-  repoVerified: true,
-  testCmd: "node --test",
-};
-const RAN = { command: "node --test", tests: 5, pass: 5, fail: 0 };
-const review = (findings, testRun = RAN) => ({
-  dimension: "correctness",
-  scope_searched: "CWD-AUDIT: clean /repo",
-  findings,
-  test_run: testRun,
-});
-const finding = (severity) => ({ severity, claim: `a ${severity} claim`, file: "a.js", line: 3, evidence: "line 3 has no else" });
-const vote = (refuted) => ({ refuted, reason: "measured. CWD-AUDIT: clean /repo" });
-
-// A host whose `agent()` answers each dispatch label from a script, one entry
-// per call in dispatch order (the last entry repeats), and counts the calls.
-// An `Error` entry is thrown rather than returned. Counting happens
-// synchronously on the call, so the two refuters of one pair are calls 1 and
-// 2 of their label, and a re-dispatched pair is calls 3 and 4.
-function scriptedHost(script) {
-  const calls = {};
-  return {
-    calls,
-    host: {
-      agent: async (_prompt, opts) => {
-        const n = (calls[opts.label] = (calls[opts.label] ?? 0) + 1);
-        const seq = script[opts.label];
-        if (!seq) throw new Error(`scriptedHost: unexpected dispatch ${opts.label}`);
-        const answer = seq[Math.min(n, seq.length) - 1];
-        if (answer instanceof Error) throw answer;
-        return answer === null ? null : structuredClone(answer);
-      },
-      phase: () => {},
-      log: () => {},
-    },
-  };
-}
+const COPIES = [["review-core.mjs", (host, args) => runReview({ ...host, pipeline, parallel }, args)]];
 
 for (const [name, run] of COPIES) {
   test(`${name}: a specialist that crashes once is re-dispatched, and its review lands`, async () => {
@@ -243,9 +165,10 @@ for (const [name, run] of COPIES) {
     });
     const result = await run(host, ARGS);
     assert.deepEqual(Object.keys(result), [...DIGEST_KEYS, "snapshot", "survived", "refuted", "unverified"]);
-    // The consumer-visible property, not the key list: Claude hands the
-    // controller the FIRST ~8 KB of the serialized result, so every digest
-    // field has to be serialized before the first byte of a finding array.
+    // The consumer-visible property, not the key list: the pre-cutover
+    // harness hands the controller the FIRST ~8 KB of the serialized result,
+    // so every digest field has to be serialized before the first byte of a
+    // finding array.
     const whole = JSON.stringify(result);
     const digest = JSON.stringify(digestOf(result));
     assert.ok(whole.startsWith(digest.slice(0, -1) + ","), "a bulk field is serialized ahead of the digest — a large review truncates it away");

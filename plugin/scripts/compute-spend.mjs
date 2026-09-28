@@ -21,10 +21,10 @@
 // `fleet-review-verifier` — and `""` when it recorded none. `memberName` is
 // what the member was CALLED (`impl-387`, `brain-housekeeping`), `""` for an
 // unnamed dispatch. They used to arrive as ONE `agentType` parameter,
-// documented as "the DISPATCH's identity for the member", which the two
-// harness readers satisfied with different kinds of value — omp's the
-// definition, Claude's the name — so every rule below silently read whichever
-// its own harness happened to supply, and no rule could state which it meant.
+// documented as "the DISPATCH's identity for the member" but sometimes
+// carrying the definition and sometimes the member's own name depending on
+// which was available — so every rule below silently read whichever value
+// happened to be supplied, and no rule could state which it meant.
 // That ambiguity is what booked a memory-system member dispatched as
 // `memory-housekeeper` but NAMED `brain-housekeeping` into the specialist
 // bucket, moving its session's review-spend headline by 22 points (#1505).
@@ -54,13 +54,13 @@ export function classifyRole(signals) {
   // #1505: a dispatch that recorded `memory-housekeeper` books memory whatever
   // it called the member, so the eleven rows that shared one definition across
   // three buckets collapse to one. The NAME stays a signal beside it because a
-  // missing definition is a real category here rather than a hole — an untyped
-  // dispatch records none at all, which is every Claude member before
-  // 2026-08-28 — and the memory members named `memory-proxy-session-review-2-3`
-  // have nothing else to be classified on; drop it and they fall to "other",
-  // which is the same defect wearing the other shoe. `desc` is excluded on
-  // purpose: every memory-adjacent fleet member's own prompt says
-  // "memory-proxy" somewhere, so blending the prose would book them all memory.
+  // missing definition is a real category here rather than a hole — an
+  // untyped `task` dispatch records none at all — and the memory members named
+  // `memory-proxy-session-review-2-3` have nothing else to be classified on;
+  // drop it and they fall to "other", which is the same defect wearing the
+  // other shoe. `desc` is excluded on purpose: every memory-adjacent fleet
+  // member's own prompt says "memory-proxy" somewhere, so blending the prose
+  // would book them all memory.
   if (/memory-proxy|memory-housekeeper/.test(`${def} ${name}`)) return "memory";
 
   // `spawnDepth` does NOT mean "review specialist". Only NAMED team members are
@@ -80,8 +80,8 @@ export function classifyRole(signals) {
   // Then the agent DEFINITION a dispatch named, for the members whose role the
   // two signals above cannot reach. omp is where that happens: its review path
   // runs `review-eval.mjs` inside the CONTROLLER's own session rather than as a
-  // nested Workflow, so its fan-out arrives at depth 0 — measured 2026-09-16 on
-  // the live corpus, 466 of 477 `fleet-review-*` rows — and falls straight
+  // nested review host, so its fan-out arrives at depth 0 — measured 2026-09-16
+  // on the live corpus, 466 of 477 `fleet-review-*` rows — and falls straight
   // through to the description patterns below, which is precisely the
   // "Review PR 539 correctness" misread the depth check above exists to
   // prevent. Before this branch one definition, `fleet-review-verifier`, was
@@ -91,25 +91,24 @@ export function classifyRole(signals) {
   // Matched against `def` ALONE — never the member's name, and never the `hay`
   // blend the patterns below use. A fleet member's own dispatch prompt says what
   // it is, so these names occur in description prose constantly, and a member
-  // that merely mentions a definition was not dispatched as one. `(^|:)`
-  // tolerates the `fleet-ctl:`-prefixed spelling a dispatch may write where the
-  // sidecar records the bare name — the same allowance member-outcomes.tsv's own
-  // deliberate-pair query is written with.
+  // that merely mentions a definition was not dispatched as one. `^`-anchored:
+  // omp's own registry is bare-name/unnamespaced (ADR 0014), so the recorded
+  // definition is always the bare form.
   //
   // The review side is a PREFIX and the implementer side is EXACT, deliberately:
-  // the fan-out's dimensions are an open set that `review-pr.js` sizes per PR, so
-  // a dimension added tomorrow must not silently fall back to prose, while the
-  // implementer definitions are closed at two by the alternate-tier pairing that
-  // depends on exactly those two names existing.
+  // the fan-out's dimensions are an open set that `review-core.mjs` sizes per
+  // PR, so a dimension added tomorrow must not silently fall back to prose,
+  // while the implementer definitions are closed at two by the alternate-tier
+  // pairing that depends on exactly those two names existing.
   //
   // One definition under that prefix is NOT fan-out: `fleet-review-runner`
   // (#1802) is the member that HOLDS an omp review — dispatched as
   // `review-pr-<n>`, the reviewer the name branch below would book — so it is
   // matched EXACTLY, ahead of the prefix. Its own fan-out arrives at depth ≥ 1
   // and is booked "specialist" by the depth check above.
-  if (/(^|:)fleet-review-runner$/.test(def)) return "reviewer";
-  if (/(^|:)fleet-review-/.test(def)) return "specialist";
-  if (/(^|:)fleet-implementer(-alt)?$/.test(def)) return "implementer";
+  if (/^fleet-review-runner$/.test(def)) return "reviewer";
+  if (/^fleet-review-/.test(def)) return "specialist";
+  if (/^fleet-implementer(-alt)?$/.test(def)) return "implementer";
 
   // The dispatch NAME is checked alone, in this same fixed order, before the
   // prose blend below ever runs (#1506). Both readers now hand a canonical
@@ -190,7 +189,7 @@ export const ROLE_ORDER = [
   "specialist", "reviewer", "implementer", "merge-bot", "sizing", "memory", "finisher", "other",
 ];
 
-const empty = () => ({ agents: 0, cacheWrite: 0, output: 0, cacheRead: 0, maxCtx: 0 });
+const empty = () => ({ agents: 0, cacheWrite: 0, output: 0, cacheRead: 0 });
 
 export function computeSpend({ agents = [], topN = 8 } = {}) {
   const byRole = new Map(ROLE_ORDER.map((r) => [r, empty()]));
@@ -205,8 +204,6 @@ export function computeSpend({ agents = [], topN = 8 } = {}) {
     }
     b.agents++;
     totals.agents++;
-    b.maxCtx = Math.max(b.maxCtx, a.maxCtx ?? 0);
-    totals.maxCtx = Math.max(totals.maxCtx, a.maxCtx ?? 0);
   }
 
   // Percentages are of cache_creation only. A zero-total run must not produce
@@ -225,16 +222,16 @@ export function computeSpend({ agents = [], topN = 8 } = {}) {
     .map(([role, b]) => ({ role, ...b, pct: share(b.cacheWrite) }))
     .sort((a, b) => b.cacheWrite - a.cacheWrite);
 
-  // `model` rides along only where the harness reader supplied one — omp's
-  // member record carries it (#1716); Claude's readAgent row does not, and
-  // its payload stays exactly as it was rather than gaining a null column.
+  // `model` rides along only where the caller's agent object supplied one
+  // (#1716) — an agent with no `model` key keeps its payload exactly as it
+  // was rather than gaining a null column.
   const top = [...agents]
     .sort((a, b) => (b.cacheWrite ?? 0) - (a.cacheWrite ?? 0))
     .slice(0, topN)
     .map((a) => ({
       label: a.label ?? "?", role: a.role ?? "other",
       ...(a.model != null && { model: a.model }),
-      cacheWrite: a.cacheWrite ?? 0, maxCtx: a.maxCtx ?? 0, pct: share(a.cacheWrite ?? 0),
+      cacheWrite: a.cacheWrite ?? 0, pct: share(a.cacheWrite ?? 0),
     }));
 
   // The single number worth surfacing: review side is specialists + reviewers.

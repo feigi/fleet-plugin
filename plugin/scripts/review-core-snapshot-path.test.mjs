@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 import { between, phrase } from "./prose-pin.mjs";
-import { lift } from "./lift.mjs";
+import { snapshotMissing as snapshotMissingRaw } from "./review-core.mjs";
 
 // `snap.path` used to reach every specialist prompt and every verifier prompt
 // unchecked: a well-formed string the schema required, but never confirmed to
@@ -19,25 +19,21 @@ import { lift } from "./lift.mjs";
 // schema's own `required` array, so the agent cannot silently omit it — read by
 // the CALLER rather than trusted from the agent's narration of the
 // byte-identity 'Verify it' step in the snapshot prompt.
-//
-// review-pr.js runs a top-level `await pipeline(...)` and cannot be imported,
-// so the function is lifted out of the source text instead — same technique as
-// review-pr-reads.test.mjs and review-pr-testcmd.test.mjs.
 const REPO = join(import.meta.dirname, "..");
-const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
+const SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
 
-// Pins run against CODE, not SOURCE: review-pr-reads.test.mjs and
-// review-pr-testcmd.test.mjs each measured a source-text pin pass vacuously
+// Pins run against CODE, not SOURCE: review-core-reads.test.mjs and
+// review-core-testcmd.test.mjs each measured a source-text pin pass vacuously
 // against a field dead under a comment — same stripper, same policy here.
 const CODE = stripComments(SOURCE);
 
 // #1129 gave the guard a second parameter: the `${scratch}/pr${pr}/run-` prefix
 // the SCRIPT owns, which is what the reported `runRoot` is checked against. The
-// per-run segment itself is minted by the snapshot agent's shell — the Workflow
-// sandbox throws on `Date.now`/`Math.random` (pinned below), so the script
-// cannot mint one — and the check is what keeps that round trip from resting on
-// the agent having obeyed prose.
-const snapshotMissingRaw = lift(CODE, "snapshotMissing", "snap, runRootPrefix");
+// per-run segment itself is minted by the snapshot agent's shell (`mktemp -d`),
+// never by the caller, because two reviews sharing one scratch root must never
+// mint the same one (#1129) — a JS-side `Date.now()`/`Math.random()` in the
+// controller could not provision a directory on the specialist's own
+// filesystem anyway, so the shell was always the only place this could live.
 
 const PREFIX = "/scr/pr7/run-";
 const ROOT = `${PREFIX}ab12cd34`;
@@ -70,7 +66,7 @@ test("a fully verified snapshot is not missing", () => {
 // A falsy `snap` is the agent contract failing — it died, or the harness
 // exhausted structured-output retries and `agent()` returned null — not a
 // claim about the tree on disk, which may be perfectly good. The citation is
-// the `required:` comment inside `FINDINGS_SCHEMA` in review-pr.js, which
+// the `required:` comment inside `FINDINGS_SCHEMA` in review-core.mjs, which
 // records that a schema REJECTION is retried and every observed one recovered:
 // exhaustion is the only one of the two that returns null, so naming rejection
 // as the cause would point an operator at a signature successful runs carry.
@@ -220,7 +216,7 @@ test("a snapshot with no refHead at all still proceeds", () => {
 // rooted under THIS run's own root. Before these three branches that invariant
 // was carried entirely by prompt prose asking the snapshot agent to copy
 // SNAPSHOT_DEST verbatim and not reconstruct it — and a refuter reverted that
-// paragraph and ran all 18 test files that read review-pr.js, 276 tests, with
+// paragraph and ran all 18 test files that read review-core.mjs, 276 tests, with
 // nothing turning red. Prose an agent is asked to obey is not an invariant.
 // These are, because the run root prefix is the caller's own string: a
 // reconstructed, stale, or mistranscribed path now costs the run instead of
@@ -287,7 +283,7 @@ test("a matching head proceeds, abbreviated on either side", () => {
 });
 
 // The head compare now lives in two places — `usableDiff`, which drops the
-// diff, and `snapshotMissing`, which refuses the review — and the Workflow
+// diff, and `snapshotMissing`, which refuses the review — and the omp eval
 // sandbox forbids `import`, so neither can call a shared helper and still be
 // lifted (see lift.mjs). Two copies of one expression is this repo's recurring
 // disconnect defect, so the copies are pinned to each other rather than to the
@@ -391,7 +387,7 @@ test("a relayed head is normalized before the refusal ever sees it", () => {
 // log statement itself, not by matching its source, so a line that stops
 // distinguishing the two reds here.
 test("the snapshot log line says when the head check was skipped", () => {
-  const line = CODE.split("\n").find((l) => l.startsWith("log(`snapshot "));
+  const line = CODE.split("\n").find((l) => l.trim().startsWith("log(`snapshot "));
   assert.ok(line, "the snapshot run-log line is gone — the whole diff decision below it is unobservable without it");
   const say = (snap) => {
     let out;
@@ -439,12 +435,12 @@ test("the snapshot log line says when the head check was skipped", () => {
 // shipped. Same two anchors `review-pr-reads.test.mjs`'s `slice()` and
 // `review-pr-testcmd.test.mjs` already use.
 function snapshotBlock() {
-  return between(CODE, "const snap = await agent(", "if (!snap", "the snapshot agent dispatch");
+  return between(CODE, "const snap = await agent(", "if (snap) {", "the snapshot agent dispatch");
 }
 
 // Every test above runs against the lifted `snapshotMissing`, which decides what
 // to do with `pathVerified` but never produces it. The thing that produces it is
-// two lines of review-pr.js — a shell probe and the sentence binding the field
+// two lines of review-core.mjs — a shell probe and the sentence binding the field
 // to that probe's output — and neither was pinned. Delete either and
 // `required: [..., "pathVerified"]` still passes, all four tests above still
 // pass, and the agent has lost the only instruction saying what value to report:
@@ -478,7 +474,7 @@ test("the snapshot prompt runs the emptiness probe AND binds pathVerified to its
 // place. Delete it and every review still refuses — loudly, and having spent a
 // snapshot agent to get there. Measured on the pre-check version of this
 // paragraph: a refuter reverted it to the pre-#1129 wording and ran all 18 test
-// files that read review-pr.js, and nothing turned red.
+// files that read review-core.mjs, and nothing turned red.
 //
 // So this pins the instruction, and the check pins the outcome. Neither
 // substitutes for the other: prose an agent is asked to obey is not an
@@ -648,7 +644,7 @@ test("the run root and the sha each refuse by name rather than shortening the de
 //
 // The per-run segment is minted by the SHELL, so the AC-1 property — two runs
 // never share a root — is a property of `mktemp -d`, not of any expression in
-// review-pr.js. It is asserted by RUNNING the two lines that mint it, for the
+// review-core.mjs. It is asserted by RUNNING the two lines that mint it, for the
 // reason the executed derivation it replaces gives: a presence pin over
 // `mktemp` would stay green on a block that had stopped varying. Only the lines
 // up to SNAPSHOT_RUN_ROOT are lifted — `mkdir`, `mktemp` and the echo, and the
@@ -668,7 +664,7 @@ function mintScript(scratch) {
   assert.ok(runRootLine > from, "the snapshot block no longer prints SNAPSHOT_RUN_ROOT below the mint — this test lifts lines that are gone");
   const lines = snapshot.slice(from, snapshot.indexOf("\n", runRootLine));
   // Rendered, not string-replaced: the lines carry `${runRootParent}` and
-  // `${runRootPrefix}` exactly as review-pr.js interpolates them, and the two
+  // `${runRootPrefix}` exactly as review-core.mjs interpolates them, and the two
   // are derived here by the same expressions the script uses — lifted below —
   // so a change to either derivation reaches this test instead of being
   // re-spelled in it.
@@ -684,10 +680,10 @@ function mintScript(scratch) {
 // defeats the anchor reds named tests instead of taking the whole file down
 // before any of them registers.
 function deriveRunRoot() {
-  const block = CODE.match(/^const runRootParent = .+\nconst runRootPrefix = .+$/m);
+  const block = CODE.match(/^\s*const runRootParent = .+\n\s*const runRootPrefix = .+$/m);
   assert.ok(
     block,
-    "review-pr.js no longer derives `runRootParent` and `runRootPrefix` as adjacent top-level statements — the run root the caller owns was deleted, or reshaped past what this lifts",
+    "review-core.mjs no longer derives `runRootParent` and `runRootPrefix` as adjacent top-level statements — the run root the caller owns was deleted, or reshaped past what this lifts",
   );
   assert.ok(
     CODE.indexOf(block[0]) < CODE.indexOf("const snap = await agent("),
@@ -749,43 +745,6 @@ test("a run's artefact root stays under the scratch root the caller provisioned"
   }
 });
 
-// THE FATAL ONE. `Date.now()`, `Math.random()` and argless `new Date()` are not
-// merely discouraged in a Workflow script — the harness replaces them with
-// functions that THROW, so a script that calls one at top level dies before a
-// single agent() dispatches. Measured out of the Claude Code 2.1.259 binary,
-// which installs this prelude into the workflow VM context:
-//   Math.random = function random() { throw new Error(RANDOM_ERR) };
-//   RealDate.now = function now() { throw new Error(NOW_ERR) };
-// with the messages "Math.random() is unavailable in workflow scripts (breaks
-// resume)" and "Date.now() / new Date() are unavailable in workflow scripts
-// (breaks resume)". The ban exists to protect the resume this script's own
-// `resumeFor` message promises its caller: a relaunch replays the longest
-// unchanged PREFIX of agent() calls, and a prompt carrying a fresh token every
-// run has no unchanged prefix left to replay.
-//
-// #1129's first attempt minted the per-run token with exactly those two calls.
-// Nothing in the suite caught it, because every other pin reads the script as
-// TEXT and text is all it ever was — so this pin is over the whole `workflows/`
-// directory rather than this one file, and over CODE so a mention inside a
-// comment (there are several, deliberately) cannot satisfy or break it.
-test("no workflow script draws on the clock or the RNG — the sandbox throws on both", () => {
-  const dir = join(REPO, "workflows");
-  for (const file of readdirSync(dir).filter((f) => f.endsWith(".js"))) {
-    const code = stripComments(readFileSync(join(dir, file), "utf8"));
-    for (const [re, what] of [
-      [/\bDate\.now\s*\(/, "Date.now()"],
-      [/\bMath\.random\s*\(/, "Math.random()"],
-      [/\bnew Date\s*\(\s*\)/, "argless new Date()"],
-    ]) {
-      assert.doesNotMatch(
-        code,
-        re,
-        `workflows/${file} calls ${what}, which the Workflow sandbox replaces with a function that THROWS — the script dies at that line before any agent() dispatches. Per-run variation has to come from a process the script dispatches (see the snapshot block's \`mktemp -d\`); a timestamp has to arrive through \`args\`.`,
-      );
-    }
-  }
-});
-
 // AC-6, and the pin that reds on a revert of ANY of the four artefact sites
 // rather than only the snapshot's. `${scratch}` reaching a path directly is the
 // whole defect: the snapshot, the captured diff behind `diffPath`, each
@@ -817,25 +776,25 @@ test("no artefact path is spelled off the bare scratch argument — every one ha
 
 // The function is worthless if nothing calls it, and every test above tests a
 // COPY lifted from the source text: it stays green while the feature
-// disconnects. `review-pr-testcmd.test.mjs`'s "review-pr.js actually calls
+// disconnects. `review-core-testcmd.test.mjs`'s "runReview actually calls
 // resolveTestCmd once the snapshot is validated" records this exact defect for
 // resolveTestCmd, and `select-dimensions.test.mjs`'s "actually calls
 // resolveDimensions" pin does for the fan-out.
-// Delete the `snapshotMissing(snap)` call and its `throw` in review-pr.js and
+// Delete the `snapshotMissing(snap)` call and its `throw` in review-core.mjs and
 // #140's refusal is dead code with this whole file green.
-test("review-pr.js actually calls snapshotMissing and throws on its result", () => {
+test("runReview actually calls snapshotMissing and throws on its result", () => {
   assert.match(
     CODE,
-    /^const missingReason = snapshotMissing\(snap, runRootPrefix\);$/m,
+    /^\s*const missingReason = snapshotMissing\(snap, runRootPrefix\);$/m,
     "the snapshotMissing call site changed — the #140 guard may be disconnected",
   );
   assert.match(
     CODE,
-    /^if \(missingReason\) throw new Error\(/m,
+    /^\s*if \(missingReason\) throw new Error\(/m,
     "snapshotMissing's result is computed but never thrown on — the guard decides nothing",
   );
-  // Ordering, same guardAt/callAt shape as review-pr-testcmd.test.mjs's
-  // "review-pr.js actually calls resolveTestCmd once the snapshot is validated":
+  // Ordering, same guardAt/callAt shape as review-core-testcmd.test.mjs's
+  // "runReview actually calls resolveTestCmd once the snapshot is validated":
   // after the schema that produces `pathVerified`, and before the first thing
   // that reads `snap` — `resolveTestCmd`, which would otherwise derive a command
   // for a tree that was never confirmed to exist.
@@ -846,79 +805,3 @@ test("review-pr.js actually calls snapshotMissing and throws on its result", () 
   assert.ok(schemaAt < callAt, "the guard runs above the schema that produces pathVerified");
   assert.ok(callAt < testCmdAt, "resolveTestCmd reads snap before the guard has cleared it");
 });
-
-// The #538 measurement, pinned because its whole value is that nobody repeats
-// it. The next reader to notice that `pathVerified` is a boolean the agent
-// types will reach for a caller-side `readdirSync` exactly as #538 did, and the
-// reason that cannot work is a property of the Workflow harness that no amount
-// of reading this repo reveals — #538 was filed precisely because the repo's
-// own assertions about the sandbox had never been executed.
-//
-// Runs against SOURCE rather than CODE, the one pin in this file that does: the
-// record is a comment, and CODE has its comments stripped. The usual objection
-// to a source-text pin — that it passes vacuously over a construct sitting dead
-// under a comment — does not apply to prose, which is what this protects and
-// all it claims to.
-//
-// EVIDENCE AND VERDICT ARE PINNED SEPARATELY, because pinning the first never
-// pins the second. With only the three measured facts held down, `It cannot be
-// dropped.` inverted to `It can be dropped.`, `stays` to `goes`, and a softened
-// `It could arguably be dropped, but …` all left this file GREEN — the record
-// telling the next reader the opposite of what was measured, which is the one
-// thing #538 exists to prevent.
-//
-// What these pins do NOT do: a pin is a substring test, so prose CONTRADICTING
-// a fragment, added around it, passes every one of them. That is unreachable by
-// any positive assertion and is not claimed below — hence the messages say the
-// phrase stopped matching rather than that a reader has been misled. They are
-// literal in the repo's usual way too: phrase() escapes metacharacters and
-// joins on `\s+`, so a pin survives re-wrapping and nothing else, and a
-// backtick or a capital changing reds it exactly as a deletion does.
-
-// Hoisted so each generated test re-derives its own slice, and so a broken
-// boundary reds every fragment rather than only the first. The `// ` prefixes
-// come out before matching: a comment marker sitting mid-phrase is not
-// whitespace, so leaving them in would pin the current line breaks instead of
-// the sentence. `^[ \t]*` and not `^\s*`: under `/gm` the latter's `\s` eats the
-// newline of a blank line and glues the paragraphs either side of it. No pin
-// below changes verdict either way — phrase() joins on `\s+`, which already
-// spans a blank line — so this is the sibling spelling from
-// `review-pr-citation-prose.test.mjs`'s `PROSE`, kept as one idiom rather than two.
-const rationale = () =>
-  between(
-    SOURCE,
-    "`pathVerified` closes a narrower gap",
-    "function snapshotMissing(snap",
-    "review-pr.js's snapshotMissing rationale",
-  ).replace(/^[ \t]*\/\/ ?/gm, "");
-
-for (const [fragment, carries] of [
-  [
-    "MEASURED rather than read off the documentation",
-    "it is what tells the reader the verdict was executed rather than read off the docs, which is the whole reason #538 was filed",
-  ],
-  [
-    "refused for ANY specifier",
-    "it is what records that the harness rejects the mechanism, not `node:fs` in particular",
-  ],
-  [
-    "`require` is undefined",
-    "it is what records that require was measured too, not only import",
-  ],
-  [
-    "It cannot be dropped.",
-    "it is the verdict the three fragments above are evidence FOR — without it the record can carry the whole measurement and still read as though the round-trip were removable",
-  ],
-  [
-    "So the round-trip stays,",
-    "it is the same verdict restated where the record acts on it; pinning the evidence alone leaves both statements of the conclusion free to move",
-  ],
-]) {
-  test(`the #538 record still carries "${fragment}"`, () => {
-    assert.match(
-      rationale(),
-      phrase(fragment),
-      `review-pr.js's #538 record no longer matches "${fragment}" — this pin is literal, so a reword or a case change reds it exactly as a deletion does. Restore the wording or re-pin it: ${carries}`,
-    );
-  });
-}

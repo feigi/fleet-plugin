@@ -4,21 +4,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 import { between } from "./prose-pin.mjs";
-import { lift } from "./lift.mjs";
-import { discoverWorkflowFiles, WORKFLOWS } from "./workflow-files.mjs";
+import { usableDiff, readRules, SNAPSHOT_SCHEMA } from "./review-core.mjs";
 
-// `workflows/review-pr.js` runs a top-level `await pipeline(...)`, so importing
-// it executes the workflow. Both functions under test are lifted out of the
-// SOURCE TEXT instead — the same technique as `select-dimensions.test.mjs`'s
-// `liftFromSource` and `review-pr-testcmd.test.mjs`'s lift of `resolveTestCmd`, and for the same
-// reason: extraction to a module would need `import` to resolve inside the
-// Workflow sandbox, and it does not. That was the documented claim until #538
-// executed it — `import()` refused for any specifier and `require` undefined,
-// with the verdict and its controls recorded beside `snapshotMissing` in
-// review-pr.js. Nothing in `workflows/` imports, and a failed import bricks the
-// fleet's DEFAULT review path, so the lift is a constraint, not a preference.
 const REPO = join(import.meta.dirname, "..");
-const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
+const SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
 
 // Every pin below runs against CODE, not SOURCE: a declaration or a paragraph a
 // reader's eye skips must not satisfy an assertion. Stripping once closes the
@@ -26,8 +15,6 @@ const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
 // strip-comments.mjs for the two escapes measured green without it, and for why
 // the stripper is shared rather than copied into each test file.
 const CODE = stripComments(SOURCE);
-
-const usableDiff = lift(CODE, "usableDiff", "snap");
 
 // #1129: `usableDiff` no longer returns the reported `diffPath`, it REBUILDS
 // the path from the run root the caller already checked — the redirect that
@@ -142,11 +129,9 @@ test("usableDiff accepts when refHead is absent or matching", () => {
   );
 });
 
-const readRules = lift(CODE, "readRules", "diffPath, stats, snap");
-
 const PATHS = {
   paths: [
-    { path: "workflows/review-pr.js", kind: "src", loc: 115 },
+    { path: "scripts/review-core.mjs", kind: "src", loc: 115 },
     { path: "docs/specs/a.md", kind: "docs", loc: 393 },
   ],
 };
@@ -174,7 +159,7 @@ test("readRules names the diff and does not also list files", () => {
 test("readRules falls back to the changed-file list with each file's loc", () => {
   const out = readRules(null, PATHS);
   assert.match(out, /No diff file was captured/);
-  assert.match(out, /workflows\/review-pr\.js \(115 changed\)/);
+  assert.match(out, /scripts\/review-core\.mjs \(115 changed\)/);
   assert.match(out, /docs\/specs\/a\.md \(393 changed\)/);
   // The POSITIVE companion the four `doesNotMatch(/touched exactly these files/)`
   // assertions in this file need. Without it, renaming the phrase makes all four
@@ -253,7 +238,7 @@ test("readRules does not claim closure over a list gh truncated", () => {
   assert.match(out, /at\s+least\s+these\s+files/);
   assert.match(out, /capped\s+the\s+list\s+at\s+2\s+of\s+124/, "the cap is not quantified, so it cannot be acted on");
   // Still a usable list — the fix is to stop overclaiming, not to withhold.
-  assert.match(out, /workflows\/review-pr\.js \(115 changed\)/);
+  assert.match(out, /scripts\/review-core\.mjs \(115 changed\)/);
 });
 
 // `gh pr diff > pr.diff` is a shell REDIRECT: the file exists in every run, in
@@ -321,7 +306,7 @@ test("readRules calls a rejected diff empty only when a count measured it", () =
 // fails, so the file a
 // specialist is told not to read may hold the PR's whole change, and "it is
 // empty" is then the silent green of `tests 0` served as a review instruction.
-// review-pr.js's diff-decision log already obeys this rule — the pin named
+// review-core.mjs's diff-decision log already obeys this rule — the pin named
 // "the no-diff log reports the raw fields, not a guard it did not measure"
 // holds it there — and this is the copy every specialist reads.
 test("readRules does not call a rejected diff empty when no count was reported", () => {
@@ -360,14 +345,14 @@ test("every branch carries the bounding rule", () => {
 // EOF where the specialist and refuter prompts satisfy it, the defect
 // `review-pr-testcmd.test.mjs`'s "the specialist prompt hands the command over
 // verbatim and rules 'tests 0' a failure" records.
-const slice = (from, to) => between(CODE, from, to, "review-pr.js");
+const slice = (from, to) => between(CODE, from, to, "review-core.mjs");
 
 // The snapshot schema's `additionalProperties: false` REJECTS an undeclared
 // field, so a prompt that asks for these four while the schema omits them
 // silently yields nothing. Both halves have to be pinned or the feature
 // disconnects in one token.
 test("the snapshot agent asks for the diff facts AND declares them in its schema", () => {
-  const snapshot = slice("const snap = await agent(", "if (!snap");
+  const snapshot = slice("const snap = await agent(", "if (snap) {");
   // Pinned on `"$RUN"` since #1129: the capture is a shell redirect into a
   // directory the snapshot block's own `mkdir -p` created, and both artefacts
   // hang off the same per-run root, which is what keeps `pr.diff` a SIBLING of
@@ -422,18 +407,14 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
     "the resolved ref is never printed — both reads run and the agent has no line to report `refHead` from",
   );
   assert.match(snapshot, /wc -l < "?\$RUN"?\/pr\.diff/, "no line count — a 0-byte diff would pass as usable");
-  // Scoped to the `properties` object, not the whole schema. Declaring a field
-  // ANYWHERE else — beside `required`, in the options bag — leaves it undeclared
-  // as far as `additionalProperties: false` is concerned, and a slice covering
-  // the whole schema passes on it. Measured escape; `required` sits above
-  // `properties` in the source, so this end-anchor excludes it. (Dead text is
-  // already handled globally by CODE.)
-  const props = between(snapshot, "properties: {", "\n      },", "the snapshot schema");
+  // Scoped to `SNAPSHOT_SCHEMA.properties` directly — a real import now,
+  // never a second copy of its JSON re-parsed from source text. Declaring a
+  // field ANYWHERE else — beside `required`, in the options bag — leaves it
+  // undeclared as far as `additionalProperties: false` is concerned.
   for (const field of ["diffPath", "diffLines", "refHead", "prHead"]) {
-    assert.match(
-      props,
-      new RegExp(`^\\s*${field}:\\s*\\{\\s*type:`, "m"),
-      `${field} is not declared in the schema's properties — additionalProperties:false drops it`,
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(SNAPSHOT_SCHEMA.properties, field),
+      `${field} is not declared in SNAPSHOT_SCHEMA.properties — additionalProperties:false drops it`,
     );
   }
   // Declared beside them, but not one of them: `pathVerified` and
@@ -446,10 +427,9 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
   // nothing to say there — but an undeclared field the agent reports anyway is
   // dropped, so it needs the same declaration pin (#1056).
   for (const field of ["pathVerified", "repoVerified", "repoError"]) {
-    assert.match(
-      props,
-      new RegExp(`^\\s*${field}:\\s*\\{\\s*type:`, "m"),
-      `${field} is not declared in the schema's properties — additionalProperties:false drops it`,
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(SNAPSHOT_SCHEMA.properties, field),
+      `${field} is not declared in SNAPSHOT_SCHEMA.properties — additionalProperties:false drops it`,
     );
   }
   // The review must survive a gh failure. Those three stay out of `required`.
@@ -458,9 +438,9 @@ test("the snapshot agent asks for the diff facts AND declares them in its schema
   // `repoVerified` joins them on the same rule (#1056): whether the snapshot is
   // a git repository holding the reviewed tree is a check, not a network fact,
   // and an omitted boolean must not read as a verified measurement environment.
-  assert.match(
-    snapshot,
-    /required:\s*\["runRoot",\s*"path",\s*"head",\s*"pathVerified",\s*"repoVerified"\]/,
+  assert.deepEqual(
+    SNAPSHOT_SCHEMA.required,
+    ["runRoot", "path", "head", "pathVerified", "repoVerified"],
     "required must stay path+head+pathVerified+repoVerified only",
   );
   // Commands pinned, schema pinned — and the INSTRUCTION between them was not.
@@ -537,86 +517,6 @@ test("the refuter prompt interpolates the same read rules", () => {
   assert.match(prompt, /\$\{readRules\(usableDiff\(snap\), stats, snap\)\}/);
 });
 
-// A second declaration would let one call site silently bind a different body.
-// `snapshotMissing` joined the list at #140, where the gap was measured live:
-// a duplicate `function snapshotMissing` placed AFTER the real one left both
-// this file and review-pr-snapshot-path.test.mjs at 22/22 green, because the
-// lift regex's non-global `.match` grabs the FIRST declaration while JS runs
-// the LAST — the tests exercise the real guard while review-pr.js executes the
-// no-op. Only the duplicate-BEFORE case, the harmless one, was ever caught.
-//
-// The names are DERIVED from the source rather than listed here. A hardcoded
-// list protects a function only if someone remembered to add its name, and
-// twice nobody did: #140 shipped with `snapshotMissing` absent from it, and
-// #653 found the list had frozen at exactly the names lifted by the two files
-// that wrote it — this one and review-pr-snapshot-path.test.mjs. Every function
-// a LATER lift file came to depend on was unguarded, so a duplicate placed
-// after the real declaration stayed invisible to the very file lifting it.
-// Deriving covers the next top-level `function` on arrival, in each form one
-// can be written in here: `async`, a generator star, any spacing around the
-// name. Not `export function` — review-pr.js compiles as a function body inside
-// the harness VM, so a second `export` is a syntax error rather than a silent
-// rebind, and the parse test at the bottom of this file is what reds on it.
-//
-// Top-level `function` only. The values other files lift with a `const` regex
-// — `DEFAULT_DIMENSIONS`, `verifiersFor` — are excluded for the same reason: a
-// second `const` of the same name in the same scope is a SyntaxError, so it can
-// never hoist past the real one, and that same parse test catches it.
-//
-// Known ceiling: the `^` anchor is the whole mechanism, so a string literal
-// whose content begins a line with a declaration is counted as one. Whole-line
-// comments cannot reach here, since `CODE` is stripped, but a template
-// literal's interior is real text. Nothing in review-pr.js puts a declaration
-// at the start of a line inside one today, and narrowing further would cost the
-// property that a function nobody thought to list is covered anyway.
-function topLevelFunctionNames(code) {
-  return [...code.matchAll(/^(?:async[ \t]+)?function[ \t*]+(\w+)[ \t]*\(/gm)].map((m) => m[1]);
-}
-
-test("each function is declared exactly once at top level", () => {
-  const names = topLevelFunctionNames(CODE);
-  // A floor, not a count. `matchAll` yields an empty list rather than throwing,
-  // so with nothing here the loop below would inspect no declaration and still
-  // pass. It is a backstop rather than this file's first line of defence — the
-  // module-scope lifts above name the functions they need and throw before any
-  // test registers, so a derivation gutted today reds there first and louder.
-  // A pinned total was rejected on purpose: the count has only ever grown, and
-  // a `>=` decays silently as it does — the hardcoded-list failure above
-  // wearing a different operator.
-  assert.ok(
-    names.length > 0,
-    "no top-level function declarations found in review-pr.js — this guard is not looking at anything",
-  );
-  for (const name of new Set(names)) {
-    const hits = names.filter((n) => n === name).length;
-    assert.equal(hits, 1, `${name} is declared ${hits} times`);
-  }
-});
-
-// The other half of the guard: what it must NOT refuse. A name may legitimately
-// appear more than once — as a shadowing local, a nested declaration, a method
-// on an object literal, or inside a string — and none of those can hoist over
-// the real declaration. If the guard red on them, the next honest edit to
-// review-pr.js would fail a test with no way to satisfy it.
-test("the declared-exactly-once guard accepts the benign repeats of a name", () => {
-  const benign = [
-    "function unrunReason(review) {",
-    '  const unrunReason = "a shadowing local, not a declaration";',
-    "  function unrunReason(nested) { return nested; }",
-    "  const handlers = {",
-    "    unrunReason(review) { return null; },",
-    "  };",
-    "  log(`the text function unrunReason( inside a template literal`);",
-    "  return unrunReason;",
-    "}",
-  ].join("\n");
-  assert.deepEqual(
-    topLevelFunctionNames(benign),
-    ["unrunReason"],
-    "the guard counts a benign repeat as a second declaration — an honest edit to review-pr.js cannot go green",
-  );
-});
-
 // Nothing pinned this line, and its own comment says the feature is unobservable
 // without it: deleting the whole `log()` call left the repo-wide suite at
 // 283/283. That is how it shipped stating a measurement never taken — the clause
@@ -626,7 +526,7 @@ test("the declared-exactly-once guard accepts the benign repeats of a name", () 
 // line for their evidence. Shape from `select-dimensions.test.mjs`'s
 // `reviewDispatchOptions`: match the call, then assert on what it prints.
 test("the no-diff log reports the raw fields, not a guard it did not measure", () => {
-  const m = CODE.match(/^log\(\n\s*usable[\s\S]*?^\);$/m);
+  const m = CODE.match(/^\s*log\(\n\s*usable[\s\S]*?^\s*\);$/m);
   assert.ok(m, "the diff-decision log line is gone — `usableDiff` returning null forever is then invisible");
   for (const field of ["diffPath", "diffLines", "refHead", "prHead"]) {
     assert.match(
@@ -644,53 +544,3 @@ test("the no-diff log reports the raw fields, not a guard it did not measure", (
   assert.match(m[0], /\(absent\)/, "an omitted field prints as empty rather than saying it was omitted");
 });
 
-// Every reader in this repo lifts text by regex or `new Function` over a
-// fragment, so a syntax error anywhere in the fleet's DEFAULT review path ships
-// with all five green — verified by inserting `const = ;`.
-//
-// `node --check` cannot do it: package.json is `commonjs`, and the file is
-// neither a module (top-level `return`, legal only because the Workflow harness
-// wraps the body) nor a script (`export const meta`). AsyncFunction is the one
-// parser that accepts both — and it COMPILES without executing, which matters
-// because importing this file runs the workflow.
-//
-// DERIVED, not named. This check was written against `review-pr.js` alone, so
-// the second workflow to arrive would have been parsed by nothing here — the
-// hardcoded-filename half of #1204, the same failure mode as a hardcoded
-// discovery list one file over. The set comes from workflow-files.mjs, shared
-// with workflow-meta-first.test.mjs, so a workflow is covered on arrival rather
-// than when someone remembers this line. `ci.yml`'s `case plugin/workflows/*)`
-// arm runs the identical AsyncFunction compile in CI and is the reason that gap
-// was not a live hole; this is the copy the local suite runs, which is where a
-// member working in a worktree finds out.
-test("every workflow file parses — no other reader in this repo would notice a syntax error", () => {
-  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  const { registrable } = discoverWorkflowFiles();
-  // The same floor the meta-first guard carries, for the same reason: an empty
-  // set compiles nothing and reports success.
-  assert.ok(
-    registrable.length > 0,
-    "no registrable workflow file found in workflows/ — this parse check verified nothing",
-  );
-  for (const f of registrable) {
-    // Read outside the parse assertion below: a read failure (e.g. a dangling
-    // symlink) must not be reported as "does not parse" — the two are
-    // different faults with different remedies.
-    const source = readFileSync(join(WORKFLOWS, f), "utf8").replace(/^export /m, "");
-    assert.doesNotThrow(
-      () =>
-        new AsyncFunction(
-          "args",
-          "budget",
-          "agent",
-          "parallel",
-          "pipeline",
-          "phase",
-          "log",
-          "workflow",
-          source,
-        ),
-      `workflows/${f} does not parse`,
-    );
-  }
-});

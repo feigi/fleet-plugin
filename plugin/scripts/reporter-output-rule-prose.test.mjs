@@ -29,7 +29,7 @@
 // All THREE live dispatch sites are pinned, not the two the ticket counted:
 // `grep -rn 'Try to REFUTE this finding'` finds the instruction quoted
 // verbatim in run-team/SKILL.md's fix-applier block, in review-and-fix.md
-// step 2, and in the workflow's own prompt in review-pr.js.
+// step 2, and in review-core.mjs's own prompt.
 // refuter-scratch-prose.test.mjs already ruled the reason — "a fix added to
 // only one is the one that does not reach whichever path a given caller
 // takes".
@@ -57,7 +57,7 @@ const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
 
 // Two source shapes reach these regexes. run-team/SKILL.md's copy sits in a
 // nested `> > ` blockquote, so a hard wrap lands with the quote gutter — not
-// whitespace — at the break, and `\s+` does not span `>`. review-pr.js's copy
+// whitespace — at the break, and `\s+` does not span `>`. review-core.mjs's copy
 // is inside a template literal, so every backtick in it is BACKSLASH-ESCAPED
 // in the source text; unescape them or every pin naming a code span fails on
 // that file alone. Both normalizations are harmless on review-and-fix.md.
@@ -94,14 +94,14 @@ const SITES = [
       ),
   ],
   [
-    "review-pr.js",
+    "review-core.mjs",
     () =>
       norm(
         between(
-          read("workflows", "review-pr.js"),
+          read("scripts", "review-core.mjs"),
           "Try to REFUTE this finding",
           "Scratch: ",
-          "review-pr.js",
+          "review-core.mjs",
         ),
       ),
   ],
@@ -191,12 +191,11 @@ for (const [name, getPrompt] of SITES) {
 // catches drift), but a VERBATIM copy of the whole pinned span planted earlier
 // silently retargets every pin at the copy, and real drift in the live prompt
 // goes green on all three sites. The anchor is shared with
-// refuter-scratch-prose.test.mjs and review-pr-reads.test.mjs, so this one
+// refuter-scratch-prose.test.mjs and review-core-reads.test.mjs, so this one
 // guard covers their slices too.
 for (const [name, ...p] of [
   ["run-team/SKILL.md", "skills", "run-team", "SKILL.md"],
   ["review-and-fix.md", "commands", "review-and-fix.md"],
-  ["review-pr.js", "workflows", "review-pr.js"],
   ["review-core.mjs", "scripts", "review-core.mjs"],
 ]) {
   test(`${name}: the refuter-prompt slice anchor occurs exactly once`, () => {

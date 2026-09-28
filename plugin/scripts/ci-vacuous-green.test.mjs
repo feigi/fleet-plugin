@@ -149,31 +149,6 @@ test("every ls-files check in ci.yml goes through check-tracked.sh", () => {
   assert.ok(!/xargs\s+-r\b/.test(ci), "`xargs -r` is back — that is the vacuous-green form #161 removed");
 });
 
-test("the .js step refuses an empty match too", () => {
-  // Strip `#` comments before matching, same as the gojq pin below: a
-  // commented-out `echo "::error::..."` / `exit 1` still CONTAINS the literal
-  // this looks for, so against the raw file a disabled refusal and a live one
-  // read identically. Both comment forms, since killing only whole-line ones
-  // leaves the trailing form as the same hole.
-  const ci = flat(
-    readFileSync(CI_YML, "utf8")
-      .split("\n")
-      .map((l) => l.replace(/(^|\s)#.*$/, ""))
-      .join("\n"),
-  );
-
-  // Not an xargs step — a `for` loop over `git ls-files '*.js'`, which iterates
-  // zero times and exits 0 on an empty match. Same defect, different shape, so
-  // it carries its own guard rather than routing through the script.
-  // The `exit 1` is the half that refuses: an `::error::` annotation does not
-  // fail a step by itself, so pinning the message alone would pin a step that
-  // prints the complaint and goes green anyway.
-  assert.ok(
-    phrase('no tracked file matches *.js — this check verified nothing" exit 1').test(ci),
-    "the .js loop lost its empty-match refusal",
-  );
-});
-
 test("a routed check's own exit status still reaches the job", () => {
   const src = readFileSync(CI_YML, "utf8");
   const routed = src

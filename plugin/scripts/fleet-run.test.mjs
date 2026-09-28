@@ -1,13 +1,10 @@
-// The digest-based immateriality decision in fleet-run's ambiguous
-// both-registries-present branch (#1355 review, round 2): refusing is only
-// right when the pick actually matters. Driven through the real CLI —
-// fleet-run reads `process.env`/`os.homedir()` directly and `process.exit()`s,
-// so it cannot be exercised in-process the way a module-exporting script can.
+// The Resolver's single-registry contract (ADR 0014): fleet-run reads omp's
+// own registry and nothing else. Driven through the real CLI — fleet-run
+// reads `os.homedir()` directly and `process.exit()`s, so it cannot be
+// exercised in-process the way a module-exporting script can.
 //
 // Every fixture's env is built from scratch (never `...process.env`), so
-// these tests are deterministic regardless of the box they run on — in
-// particular regardless of whether OMPCODE/CLAUDECODE happen to be set in
-// the ambient ancestor shell, which is exactly the condition under test.
+// these tests are deterministic regardless of the box they run on.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -18,31 +15,6 @@ import { fileURLToPath } from "node:url";
 
 const FLEET_RUN = fileURLToPath(new URL("./fleet-run", import.meta.url));
 
-// A fake `$HOME` with both harnesses' registries pointing at `scripts/`
-// directories holding one file each with the given content — identical
-// content makes the two installs' digests match, different content makes
-// them diverge.
-function fakeHome(claudeContent, ompContent) {
-  const home = mkdtempSync(join(tmpdir(), "fleet-run-home-"));
-  const claudeRoot = join(home, ".claude", "plugins", "cache", "a");
-  const ompRoot = join(home, ".omp", "plugins", "cache", "b");
-  mkdirSync(join(claudeRoot, "scripts"), { recursive: true });
-  mkdirSync(join(ompRoot, "scripts"), { recursive: true });
-  writeFileSync(join(claudeRoot, "scripts", "probe.mjs"), claudeContent);
-  writeFileSync(join(ompRoot, "scripts", "probe.mjs"), ompContent);
-  mkdirSync(join(home, ".claude", "plugins"), { recursive: true });
-  mkdirSync(join(home, ".omp", "plugins"), { recursive: true });
-  writeFileSync(
-    join(home, ".claude", "plugins", "installed_plugins.json"),
-    JSON.stringify({ version: 2, plugins: { "fleet-ctl@fleet-plugin": [{ scope: "user", installPath: claudeRoot }] } }),
-  );
-  writeFileSync(
-    join(home, ".omp", "plugins", "installed_plugins.json"),
-    JSON.stringify({ version: 2, plugins: { "fleet-ctl@fleet-plugin": [{ scope: "user", installPath: ompRoot }] } }),
-  );
-  return { home, claudeRoot, ompRoot };
-}
-
 function runFleetRun(home, args, extraEnv = {}) {
   return spawnSync(process.execPath, [FLEET_RUN, ...args], {
     encoding: "utf8",
@@ -50,50 +22,54 @@ function runFleetRun(home, args, extraEnv = {}) {
   });
 }
 
-test("both registries present, no positive signal, byte-identical scripts/: picks deterministically and succeeds", () => {
-  const { home, claudeRoot } = fakeHome("same content\n", "same content\n");
+function fakeHome() {
+  const home = mkdtempSync(join(tmpdir(), "fleet-run-home-"));
+  const installPath = join(home, ".omp", "plugins", "cache", "a");
+  mkdirSync(join(installPath, "scripts"), { recursive: true });
+  writeFileSync(join(installPath, "scripts", "probe.mjs"), "content\n");
+  mkdirSync(join(home, ".omp", "plugins"), { recursive: true });
+  writeFileSync(
+    join(home, ".omp", "plugins", "installed_plugins.json"),
+    JSON.stringify({ version: 2, plugins: { "fleet-ctl@fleet-plugin": [{ scope: "user", installPath }] } }),
+  );
+  return { home, installPath };
+}
+
+test("the omp registry present: resolves --root with no notice at all", () => {
+  const { home, installPath } = fakeHome();
   const r = runFleetRun(home, ["--root"]);
   assert.equal(r.status, 0, `expected success, got status ${r.status}: ${r.stderr}`);
-  assert.equal(r.stdout.trim(), claudeRoot, "the documented fallback order is: positive signal, else claude");
-  assert.match(r.stderr, /byte-identical on both/);
-  assert.match(r.stderr, /picking claude/);
+  assert.equal(r.stdout.trim(), installPath);
+  assert.equal(r.stderr, "", "a single present registry needs no notice at all");
 });
 
-test("both registries present, no positive signal, differing scripts/: refuses rather than guess", () => {
-  const { home } = fakeHome("claude content\n", "omp content, different\n");
+test("omp registry missing: exit 2, stderr names ~/.omp/plugins/installed_plugins.json", () => {
+  const home = mkdtempSync(join(tmpdir(), "fleet-run-home-"));
   const r = runFleetRun(home, ["--root"]);
   assert.equal(r.status, 2, `expected a resolver refusal, got status ${r.status}: ${r.stdout}`);
-  assert.match(r.stderr, /digests differ/);
-  assert.match(r.stderr, /FLEET_HARNESS=claude or FLEET_HARNESS=omp/);
+  assert.match(r.stderr, /no registry carries "fleet-ctl@fleet-plugin"/);
+  assert.match(r.stderr, /\.omp[/\\]plugins[/\\]installed_plugins\.json/);
 });
 
-test("both registries present, no positive signal, differing scripts/, FLEET_HARNESS set: obeys the override", () => {
-  const { home, ompRoot } = fakeHome("claude content\n", "omp content, different\n");
-  const r = runFleetRun(home, ["--root"], { FLEET_HARNESS: "omp" });
-  assert.equal(r.status, 0, `expected the override to be obeyed, got status ${r.status}: ${r.stderr}`);
-  assert.equal(r.stdout.trim(), ompRoot);
+test("--path prints the resolved script path without executing it", () => {
+  const { home, installPath } = fakeHome();
+  const r = runFleetRun(home, ["--path", "probe.mjs"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), join(installPath, "scripts", "probe.mjs"));
 });
 
-test("both registries present, a positive signal (CLAUDECODE set, OMPCODE unset): prefers it regardless of digest", () => {
-  const { home, claudeRoot } = fakeHome("claude content\n", "omp content, different\n");
-  const r = runFleetRun(home, ["--root"], { CLAUDECODE: "1" });
-  assert.equal(r.status, 0, `expected success, got status ${r.status}: ${r.stderr}`);
-  assert.equal(r.stdout.trim(), claudeRoot);
-  assert.match(r.stderr, /running harness detected as claude/);
+test("a bare script name execs the resolved file, arguments and exit code passed through", () => {
+  const { home, installPath } = fakeHome();
+  writeFileSync(join(installPath, "scripts", "echo-args.mjs"), "console.log(JSON.stringify(process.argv.slice(2)));\n");
+  const r = runFleetRun(home, ["echo-args.mjs", "a", "b"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout.trim()), ["a", "b"]);
 });
 
-test("only one registry present: no digest check, no ambiguity", () => {
-  const home = mkdtempSync(join(tmpdir(), "fleet-run-home-"));
-  const claudeRoot = join(home, ".claude", "plugins", "cache", "a");
-  mkdirSync(join(claudeRoot, "scripts"), { recursive: true });
-  writeFileSync(join(claudeRoot, "scripts", "probe.mjs"), "content\n");
-  mkdirSync(join(home, ".claude", "plugins"), { recursive: true });
-  writeFileSync(
-    join(home, ".claude", "plugins", "installed_plugins.json"),
-    JSON.stringify({ version: 2, plugins: { "fleet-ctl@fleet-plugin": [{ scope: "user", installPath: claudeRoot }] } }),
-  );
-  const r = runFleetRun(home, ["--root"]);
-  assert.equal(r.status, 0);
-  assert.equal(r.stdout.trim(), claudeRoot);
-  assert.equal(r.stderr, "", "a single present registry needs no notice at all");
+test("a script that does not exist under the resolved install refuses by name", () => {
+  const { home } = fakeHome();
+  const r = runFleetRun(home, ["does-not-exist.mjs"]);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /script not found/);
+  assert.match(r.stderr, /does-not-exist\.mjs/);
 });

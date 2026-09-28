@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-// #1349's own acceptance text: `grep -n 'pr-review-toolkit' workflows/ skills/
+// #1349's own acceptance text: `grep -n 'pr-review-toolkit' skills/
 // commands/` returns nothing — the six vendored names are never DISPATCHED.
-// Scoped to those three directories deliberately, not the whole `plugin/`
+// Scoped to those two directories deliberately, not the whole `plugin/`
 // tree: `agents/fleet-review-*.agent.md`'s credit comments plainly name the
 // vendored source they adapted a prompt from (review finding on #1361 — an
 // earlier revision obfuscated the slug there to satisfy an over-widened
@@ -24,8 +24,8 @@ function allFiles(dir) {
   return out;
 }
 
-test("no file under workflows/, skills/, or commands/ mentions the retired vendor plugin", () => {
-  for (const dir of ["workflows", "skills", "commands"]) {
+test("no file under skills/ or commands/ mentions the retired vendor plugin", () => {
+  for (const dir of ["skills", "commands"]) {
     for (const file of allFiles(join(REPO, dir))) {
       const text = readFileSync(file, "utf8");
       assert.doesNotMatch(text, /pr-review-toolkit/, `${file} still mentions pr-review-toolkit`);

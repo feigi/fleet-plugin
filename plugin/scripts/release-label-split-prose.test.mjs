@@ -28,8 +28,8 @@ const REVIEW_AND_FIX = read("commands", "review-and-fix.md");
 const step7 = () =>
   between(NEXT_TICKET, "## 7. When the superpowers path reports done", "## Red flags", "next-ticket/SKILL.md step 7");
 
-// The member reads the implementer agent body verbatim — its system prompt on
-// both harnesses since #1804 moved the blocks there out of run-team's phase 2
+// The member reads the implementer agent body verbatim — its system prompt
+// since #1804 moved the blocks there out of run-team's phase 2
 // (spec 2026-09-24 § 2 Decision 2); the same slice `member-prompt-prose.test.mjs`
 // takes, for the same reason.
 const memberBlocks = () => read("agents", "fleet-implementer.agent.md").split("---").slice(2).join("---");

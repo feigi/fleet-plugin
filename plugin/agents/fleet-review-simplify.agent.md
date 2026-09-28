@@ -1,9 +1,7 @@
 ---
 name: fleet-review-simplify
-description: Dispatched by review-pr.js/review-core.mjs's Review phase for the "simplify" dimension. Report-only — never edits a file. Never invoked directly.
-model: opus
-effort: high
-thinking-level: high
+description: Dispatched by review-core.mjs's Review phase for the "simplify" dimension. Report-only — never edits a file. Never invoked directly.
+model: "@slow:high"
 ---
 
 <!-- Prompt adapted from Anthropic's vendored `code-simplifier`
@@ -12,7 +10,7 @@ thinking-level: high
      which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
      `model: opus` matches that agent's own frontmatter pin. Unlike the
      vendor original (which edits code directly), this dispatch is
-     REPORT-ONLY: review-pr.js's dispatch prompt already instructs "never
+     REPORT-ONLY: review-core.mjs's dispatch prompt already instructs "never
      edit a file", and every finding here is severity `suggestion` by design
      — this dimension draws 0 refuters via that severity, not via a
      dimension-specific budget (`verifiersFor` takes only a severity). -->

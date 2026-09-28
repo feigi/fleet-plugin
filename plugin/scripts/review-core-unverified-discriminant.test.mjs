@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
-import { lift } from "./lift.mjs";
 import { between, phrase } from "./prose-pin.mjs";
+import { verdictFor, resumeFor } from "./review-core.mjs";
 
 // The band `unverified` had two producers and one shape. A `suggestion` skips
 // the adversarial pass because the workflow budgets that band 0 refuters, and a
@@ -23,18 +23,8 @@ import { between, phrase } from "./prose-pin.mjs";
 // (see strip-comments.mjs), and a pin written against raw source passes with
 // the thing it pins dead.
 const REPO = join(import.meta.dirname, "..");
-const SOURCE = readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8");
+const SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
 const CODE = stripComments(SOURCE);
-
-// review-pr.js runs a top-level `await pipeline(...)` and cannot be imported, so
-// the seam is lifted out of the source text — the convention this repo's test
-// headers call text-lift pinning, and the reason `verdictFor` is a top-level
-// PURE function rather than an expression inline in the closure. A free
-// variable would throw a ReferenceError here on whichever branch read it, which
-// is a property worth having: the verdict decision depends on the dispatched
-// count and the votes and on nothing else in the run.
-const verdictFor = lift(CODE, "verdictFor", "dispatched, votes");
-const resumeFor = lift(CODE, "resumeFor", "unverified");
 
 // --- the discriminant -----------------------------------------------------
 
@@ -124,21 +114,22 @@ test("both producers of the unverified band route through verdictFor", () => {
   // this just as a revert to the old single-argument shape does.
   assert.match(
     CODE,
-    /\.then\(\s*\(votes\) => \{\s*return \{ \.\.\.f, dimension: d\.key, \.\.\.verdictFor\(n, votes\) \};\s*\},\s*\(\) => \(\{ \.\.\.f, dimension: d\.key, \.\.\.verdictFor\(n, \[\]\) \}\),\s*\);/,
+    /\.then\(\s*\(votes\) => \(\{ \.\.\.f, dimension: d\.key, \.\.\.verdictFor\(n, votes\) \}\),\s*\(\) => \(\{ \.\.\.f, dimension: d\.key, \.\.\.verdictFor\(n, \[\]\) \}\),\s*\);/,
     "the post-refuter .then() no longer routes both the fulfilled and the crashed-refuter branch through verdictFor (#591, #1813)",
   );
   // The dispatched count is what the discriminant IS, so a call passing a
   // literal or a re-derived value would pin nothing. `n` is the value the
   // policy-skip branch tests, which is what makes the field free.
-  assert.match(CODE, /const n = verifiersFor\(f\.severity\)/, "the dispatched count is no longer `n` — update this test");
+  assert.match(CODE, /const n = verifiersForRun\(f\.severity\)/, "the dispatched count is no longer `n` — update this test");
 });
 
 // --- the resume path ------------------------------------------------------
 
-// A crash-heavy `unverified` is RESUMABLE: the Workflow tool replays the
-// unchanged prefix of agent() calls from cache and re-runs only the ones that
-// died, so the response is resume, not defer. That was true before this ticket
-// and was written down nowhere a reader of the result would meet it.
+// A crash-heavy `unverified` is DEFERRED: omp's eval has no cached-replay
+// mechanism (ADR 0004/0005, #1349 gap 1), so a relaunch re-dispatches every
+// agent() live rather than resuming only the calls that died — the response
+// is defer, reported and not acted on. That was true before this ticket and
+// was written down nowhere a reader of the result would meet it.
 test("the returned object carries resume alongside the three bands", () => {
   const tail = CODE.slice(CODE.lastIndexOf("return {"));
   for (const key of ["survived", "refuted", "unverified"]) {
@@ -147,8 +138,8 @@ test("the returned object carries resume alongside the three bands", () => {
   assert.match(tail, /\bresume\b/, "the return never surfaces resume — the recovery path dies in the script (#591)");
   assert.match(
     CODE,
-    /resumeFromRunId/,
-    "the resume string no longer names the parameter that performs the resume — a reader is told to resume and not how",
+    /reported, not acted on/,
+    "the resume string no longer tells the reader what to do with a crashed population — omp has no cached-replay mechanism, so the instruction is defer, not relaunch",
   );
 });
 
@@ -170,7 +161,7 @@ test("the crash population is the dispatched-refuter half of unverified, and onl
   assert.deepEqual(armed.crashed, [crashed], "the crash population no longer separates a dead refuter from a policy skip (#591)");
   assert.match(
     armed.resume,
-    /resumeFromRunId/,
+    /reported, not acted on/,
     "refuters died and the payload names no way to recover them — the findings nobody looked at get deferred instead",
   );
 

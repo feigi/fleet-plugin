@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between as section, markedLine, phrase } from "./prose-pin.mjs";
+import { between as section, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -60,20 +60,15 @@ test("the tick block says the tick reads the run itself, and nobody states a cou
   assert.doesNotMatch(s, /refuses rather than\s+defaulting them/, "the block still says the live counts are the controller's to state");
 });
 
-// The Pair itself, bounded to its own paragraph: ADR 0004's marked-line shape,
-// read line by line rather than by a regex over the block.
+// The rule itself, bounded to its own paragraph.
 const maxReviewsPair = () =>
-  section(RUN_TEAM, "**`--max-reviews <n>`", "\n\n", "run-team --max-reviews Pair");
+  section(RUN_TEAM, "**`--max-reviews <n>`", "\n\n", "run-team --max-reviews rule");
 
-test("--max-reviews is a Marked-line Pair: Claude bounds reviews at one, omp runs to the reviewer cap", () => {
+test("--max-reviews defaults to the reviewer cap, and omp leaves it there", () => {
   const region = maxReviewsPair();
-  const claude = markedLine(region, "CLAUDE", "--max-reviews CLAUDE line");
-  const omp = markedLine(region, "OMP", "--max-reviews OMP line");
-  assert.match(claude, phrase("fleet-tick.mjs --max-reviews 1`"));
-  assert.match(omp, /fleet-tick\.mjs`/);
-  assert.doesNotMatch(omp, /--max-reviews/, "the omp line bounds reviews too — the default there is the reviewer cap");
-  // The lift condition is what keeps the Claude bound from reading permanent.
-  assert.match(region, phrase("two concurrent"));
+  assert.match(region, phrase("Leave it at its default"));
+  assert.match(region, phrase("task.maxConcurrency"));
+  assert.doesNotMatch(region, /--max-reviews \d/, "the rule now hard-codes a numeric bound — the point of leaving it at its default is that no caller passes one");
 });
 
 test("the record-before-tick table names every wake, each with what it records", () => {
@@ -245,7 +240,7 @@ test("the event loop tells the controller to arm the beat instead of ending its 
 test("the heartbeat block names the script and the re-issue protocol", () => {
   const s = heartbeatBlock();
   assert.match(s, /fleet-heartbeat\.mjs/);
-  // The partial-hold branch IS the mechanism on both harnesses: no harness lets
+  // The partial-hold branch IS the mechanism: nothing lets
   // one command block a whole interval, so a reader who stops at the first line
   // ends the turn mid-interval and the beat dies there. Prose that names the
   // script without the re-issue rule is a heartbeat with one beat.

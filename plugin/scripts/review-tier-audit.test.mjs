@@ -5,19 +5,18 @@ import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 
 // #1349 (per #1303's gap 3): no `agent()` call anywhere in the review port —
-// Claude's workflows/review-pr.js, the shared scripts/review-core.mjs, or the
-// omp shim scripts/review-eval.mjs — may pass `model` or `effort` directly.
-// Measured on omp: `agent(prompt, {model, effort})` silently resolves to the
-// baseline model, zero effect, no error. Every dispatch instead names a
-// fleet-owned definition whose OWN frontmatter carries the tier. This file is
-// the general-purpose guard review-core-parity.test.mjs and
-// select-dimensions.test.mjs's dispatch-shape pins do not generalize: those
-// pin SPECIFIC call sites; this one finds every `agent(` call in the audited
-// files and inspects its options object directly, so a NEW call site added
-// later is covered without anyone remembering to extend a list.
+// the shared scripts/review-core.mjs or the omp shim scripts/review-eval.mjs
+// — may pass `model` or `effort` directly. Measured on omp:
+// `agent(prompt, {model, effort})` silently resolves to the baseline model,
+// zero effect, no error. Every dispatch instead names a fleet-owned
+// definition whose OWN frontmatter carries the tier. This file is the
+// general-purpose guard select-dimensions.test.mjs's dispatch-shape pins do
+// not generalize: that file pins SPECIFIC call sites; this one finds every
+// `agent(` call in the audited files and inspects its options object
+// directly, so a NEW call site added later is covered without anyone
+// remembering to extend a list.
 const REPO = join(import.meta.dirname, "..");
 const FILES = {
-  "workflows/review-pr.js": readFileSync(join(REPO, "workflows", "review-pr.js"), "utf8"),
   "scripts/review-core.mjs": readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8"),
   "scripts/review-eval.mjs": readFileSync(join(REPO, "scripts", "review-eval.mjs"), "utf8"),
 };
@@ -92,8 +91,8 @@ function hasTierKey(block, name) {
 
 // Mutation-tested: this must RED the moment a `model`/`effort` key is
 // reintroduced anywhere in an audited file's `agent(` call, and must NOT red
-// on a comment mentioning either word (review-pr.js's own removal comments
-// say "model"/"effort" repeatedly, by design).
+// on a comment mentioning either word (review-core.mjs's own removal
+// comments say "model"/"effort" repeatedly, by design).
 for (const [name, source] of Object.entries(FILES)) {
   test(`${name}: no agent() call carries model or effort`, () => {
     const code = stripComments(source);
@@ -134,7 +133,7 @@ test("the checker reds on a synthetic mutation that reintroduces model/effort, b
 // either — tested explicitly since a careless `\b${name}` widening could.
 test("the checker does not false-positive on a legitimate agentType/agent dispatch", () => {
   const clean = agentCallOptionBlocks(stripComments(
-    'agent(prompt, { label: "review:x", agentType: "fleet-ctl:fleet-review-correctness", schema: S });',
+    'agent(prompt, { label: "review:x", agentType: "fleet-review-correctness", schema: S });',
   ))[0];
   assert.ok(!hasTierKey(clean, "model"));
   assert.ok(!hasTierKey(clean, "effort"));

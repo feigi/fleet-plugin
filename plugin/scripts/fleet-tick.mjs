@@ -99,9 +99,9 @@ function implementers(s, left) {
 // Reviewer units (#1773 §3): an in-flight review = 1, each fix-applier = 1.
 // Named in priority order — fix-appliers first, then reviews, oldest first —
 // because finishing what is started beats starting more. Reviews are also
-// bounded by `--max-reviews`: Claude runs at most one review Workflow at a time
-// until two concurrent ones are measured, and the other slots still serve
-// fix-appliers.
+// bounded by `--max-reviews`, left at its default (the reviewer cap) since
+// every review unit already counts against the session's own concurrency
+// semaphore; the other slots still serve fix-appliers.
 function reviewers(s) {
   const detail = `reviews=${s.reviewsLive} fix-pr=${s.fixLive} fix-due=${s.fixDue.length}`
     + ` review-due=${s.reviewDue.length} max-reviews=${s.maxReviews}`;
@@ -393,8 +393,8 @@ const OPTIONS = {
   // 2/6 (#1773): no hard cap on either role, defaults only.
   "implementer-cap": { type: "string", default: "2" },
   "reviewer-cap": { type: "string", default: "6" },
-  // Reviews in flight at once. Default = the reviewer cap; the Claude side
-  // passes `--max-reviews 1` until two concurrent Workflows are measured.
+  // Reviews in flight at once. Default = the reviewer cap; run-team's own
+  // guidance is to leave it there rather than pass a tighter bound.
   "max-reviews": { type: "string" },
   // `--fold-unchanged` prints ONE line instead of the rows when this tick asks
   // for nothing and says exactly what the last one said — what makes an

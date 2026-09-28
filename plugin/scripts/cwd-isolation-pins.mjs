@@ -1,13 +1,10 @@
 import { phrase } from "./prose-pin.mjs";
 
 // The inherited-cwd rule's pinned spans (#1433, #1673), spelled once.
-// review-core-cwd-isolation.test.mjs pins the rule into the omp harness's
-// prompts (scripts/review-core.mjs); review-pr-cwd-isolation.test.mjs pins the
-// Claude harness's copy (workflows/review-pr.js) word-for-word against the
-// omp one. Both files assert the same spans, so each span lives here and
-// neither file carries a transcription of it: a second copy of prose
-// disconnects from the first the way review-core-parity.test.mjs's header
-// says a second copy of code already does in this repo.
+// review-core-cwd-isolation.test.mjs pins the rule into the prompts
+// (scripts/review-core.mjs) against these spans rather than transcribing its
+// own copy of the prose, so the pin and the prompt cannot silently drift
+// apart the way two independent copies of the same wording would.
 //
 // Three spans are TEXT, not RegExps, because at least one caller pins each of
 // them with the sentence that leads into it, passing `${leadIn} ${SPAN}`

@@ -367,10 +367,10 @@ function probe() {
   // reachable from `origin/main` BY CONSTRUCTION and needs no
   // `merge-base --is-ancestor` after the fact. That check belongs to the other
   // shape — a sha quoted in a ticket, which can be a pre-rebase orphan that
-  // `git show` resolves happily. Measured on #199: `git log -S 'decodeArgs'
-  // origin/main -- workflows/review-pr.js` names `b243b4e`, and
-  // `git merge-base --is-ancestor b243b4e origin/main` is true, as it is for
-  // every commit this walk can reach.
+  // `git show` resolves happily. Measured on #199, against a path this repo
+  // no longer tracks: `git log -S 'decodeArgs' origin/main -- <path>` named
+  // `b243b4e`, and `git merge-base --is-ancestor b243b4e origin/main` is true,
+  // as it is for every commit this walk can reach.
   //
   // Newest-first with `-n 1`, never `--reverse`: the oldest count-changing
   // commit is the file's last rename whenever the string predates one, and a

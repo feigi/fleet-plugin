@@ -1,31 +1,28 @@
 // #1550. PR #1084 (implemented as #1530) added two directory-safety rules to
-// the `review-pr` WORKFLOW's specialist prompt — chain the directory change
-// into the command, and bracket a fixture's own git with `git rev-parse
-// --show-toplevel` — mirroring what PR #1082 had already added to that same
-// file's REFUTER prompt (review-pr-refuter-scratch.test.mjs pins that copy).
-// scripts/review-core.mjs carries a second, host-neutral (omp) copy of the same
-// specialist dispatch prompt and carried neither rule, while ordering the same
-// kind of work: "Run any mutation or probe work inside your own copy of the
-// snapshot."
+// the (since-retired) `review-pr` WORKFLOW's specialist prompt — chain the
+// directory change into the command, and bracket a fixture's own git with
+// `git rev-parse --show-toplevel` — mirroring what PR #1082 had already
+// added to that same file's REFUTER prompt. `scripts/review-core.mjs`
+// carried the same specialist dispatch prompt and, at the time, neither
+// rule, while ordering the same kind of work: "Run any mutation or probe
+// work inside your own copy of the snapshot." `review-core.mjs` is now the
+// only surviving copy of this prompt.
 //
 // Naming the write area is not the same rule and does not close either failure
 // mode. The specialist prompt already said scratch files go in its own
 // directory "and nowhere else", and both measured failures happen with that
 // sentence obeyed as written: a `cd` that silently fails leaves the following
 // `;`-separated `git` running in whatever directory the agent was already in —
-// the incident review-pr-refuter-scratch.test.mjs records as commit 020d6ea
-// reaching the checkout during the PR #488 fix-applier run — and an agent that
-// BELIEVES it is already in its scratch copy and is wrong runs `git init` /
-// `git commit` against the repository. A rule about where writes SHOULD go
-// does not detect either.
+// the incident review-core-refuter-scratch.test.mjs records as commit
+// 020d6ea reaching the checkout during the PR #488 fix-applier run — and an
+// agent that BELIEVES it is already in its scratch copy and is wrong runs
+// `git init` / `git commit` against the repository. A rule about where
+// writes SHOULD go does not detect either.
 //
-// INLINED, NOT SHARED, same as workflows/review-pr.js's copy and for the same
-// reason: #496's brief rules the shared-source route out — "the drift hazard
-// is real and is its own ticket, not this one" — and review-core.mjs's own
-// harness is host-neutral (omp) rather than a Claude-hosted workflow script,
-// so it cannot import review-pr.js either. That drift hazard is exactly what
-// this pin exists to convert into a red: it failed to fire once already, which
-// is why this ticket exists at all.
+// INLINED, NOT SHARED: #496's brief rules the shared-source route out — "the
+// drift hazard is real and is its own ticket, not this one." That drift
+// hazard is exactly what this pin exists to convert into a red: it failed to
+// fire once already, which is why this ticket exists at all.
 //
 // WHY THESE PINS RENDER RATHER THAN GREP. Two reasons, and the second is the
 // one a source-text pin cannot reach. The rules live inside a template

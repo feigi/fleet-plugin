@@ -1,30 +1,28 @@
 {
-  "_comment": "The allow-list data (#1314, #1347). Content is #1297's ruling, recorded verbatim on #1314's closing comment: one tree, one manifest, harness dialect carried in frontmatter by KEY NAME — so this is one allow-list per artefact kind (agents, skills, commands), admitting both harnesses' documented keys and requiring one of each harness's required keys, never two per-harness lists. Both directions are enforced by frontmatter-check.mjs: unknown keys are rejected, required keys are enforced, and a third class this ticket's contract did not originally anticipate — `forbidden` — catches a key that IS documented on a harness but silently re-routes a member's tier, tree, or dispatch. Sources: Claude sub-agents/skills docs (2.1.265), omp://task-agent-discovery.md, omp://skills.md, omp://slash-command-internals.md; measurements from #1293, #1297, #1298, #1302, #1303, #1315.",
+  "_comment": "The allow-list data (#1314, #1347, ADR 0014). One allow-list per artefact kind (agents, skills, commands) for omp's documented keys (`omp://task-agent-discovery.md`, `omp://skills.md`). Enforced by frontmatter-check.mjs: unknown keys are rejected, required keys are enforced, and `forbidden` catches a key that reads as configuration but silently reroutes a member's tier, tree, or dispatch.",
 
   "agents": {
-    "required": ["name", "description", "model", "effort", "thinking-level"],
+    "required": ["name", "description", "model"],
     "allowed": [
       "tools", "disallowedTools", "skills", "maxTurns", "background", "color", "memory",
       "spawns", "output", "read-summarize", "blocking", "autoloadSkills"
     ],
     "forbidden": {
-      "thinking": "omp alias of thinking-level — one spelling only",
-      "prewalk": "omp: silent mid-run model hand-off — the tier degradation the map forbids",
-      "advisor": "omp: silent mid-run model hand-off — the tier degradation the map forbids",
-      "isolation": "Claude worktree isolation — #1315 rules members never use harness isolation",
-      "permissionMode": "Claude: documented as ignored for plugin subagents — a key that reads as configuration and does nothing is a silent drop by definition",
-      "mcpServers": "Claude: documented as ignored for plugin subagents — a key that reads as configuration and does nothing is a silent drop by definition",
-      "hooks": "Claude: documented as ignored for plugin subagents — a key that reads as configuration and does nothing is a silent drop by definition",
-      "experimental": "Claude-only prompt-cache tuning (experimental.cacheTtl) — no omp analogue, orthogonal to the tier/dialect keys this list polices",
-      "initialPrompt": "Claude-only: takes effect only when the agent runs as the main session agent (--agent/agent setting), never for a dispatched subagent — silently inert for a fleet member"
+      "thinking-level": "the level rides on model's `@<role>:<level>` suffix — one spelling only",
+      "thinking": "the level rides on model's `@<role>:<level>` suffix — one spelling only",
+      "effort": "retired Claude Code key — silently ignored by omp",
+      "prewalk": "silent mid-run model hand-off — the tier degradation ADR 0005 forbids",
+      "advisor": "silent mid-run model hand-off — the tier degradation ADR 0005 forbids",
+      "isolation": "members never use harness isolation (#1315): omp builds the workspace outside the claimed worktree and patch-applies into the controller's checkout"
     },
     "values": {
-      "model": ["opus", "sonnet", "haiku"],
-      "effort": ["low", "medium", "high", "xhigh", "max"],
-      "thinking-level": ["minimal", "low", "medium", "high", "xhigh", "max"],
+      "model": {
+        "pattern": "^@(slow|task|smol):(minimal|low|medium|high|xhigh|max)$",
+        "message": "must be a fleet tier route `@slow|@task|@smol` with an explicit `:<level>` suffix (ADR 0014)"
+      },
       "name": {
         "pattern": "^fleet-[^:]*$",
-        "message": "must be fleet--prefixed with no ':' — Claude refuses to load a name containing ':' and omp's registry is bare-name/unnamespaced, so the prefix is the only collision guard (#1303)"
+        "message": "must be fleet--prefixed with no ':' — omp's agent registry is bare-name/unnamespaced, so the prefix is the only collision guard (#1303)"
       }
     }
   },
@@ -37,14 +35,9 @@
       "globs", "hide"
     ],
     "forbidden": {
-      "model": "Claude-only per-skill tier override — silent on omp; tier lives in agent definitions only",
-      "effort": "Claude-only per-skill tier override — silent on omp; tier lives in agent definitions only",
-      "context": "Claude fork-mode — a member spawned by a skill bypasses the fleet's dispatch rules",
-      "agent": "Claude fork-mode — a member spawned by a skill bypasses the fleet's dispatch rules",
-      "background": "Claude fork-mode — a member spawned by a skill bypasses the fleet's dispatch rules",
-      "hooks": "no cross-harness meaning documented for skill frontmatter",
-      "shell": "no cross-harness meaning documented for skill frontmatter",
-      "alwaysApply": "omp auto-injection — no Claude analogue, would load prose on one harness only"
+      "hooks": "no documented meaning for fleet skill frontmatter",
+      "shell": "no documented meaning for fleet skill frontmatter",
+      "alwaysApply": "omp auto-injection — fleet skills are invoked, never injected"
     },
     "values": {
       "disable-model-invocation": ["true", "false"]
@@ -58,14 +51,9 @@
       "allowed-tools", "disallowed-tools"
     ],
     "forbidden": {
-      "model": "Claude-only per-skill tier override — silent on omp; tier lives in agent definitions only",
-      "effort": "Claude-only per-skill tier override — silent on omp; tier lives in agent definitions only",
-      "context": "Claude fork-mode — a member spawned by a skill bypasses the fleet's dispatch rules",
-      "agent": "Claude fork-mode — a member spawned by a skill bypasses the fleet's dispatch rules",
-      "background": "Claude fork-mode — a member spawned by a skill bypasses the fleet's dispatch rules",
-      "hooks": "no cross-harness meaning documented for skill frontmatter",
-      "shell": "no cross-harness meaning documented for skill frontmatter",
-      "alwaysApply": "omp auto-injection — no Claude analogue, would load prose on one harness only",
+      "hooks": "no documented meaning for fleet skill frontmatter",
+      "shell": "no documented meaning for fleet skill frontmatter",
+      "alwaysApply": "omp auto-injection — fleet skills are invoked, never injected",
       "globs": "skills-only (omp file-scoping) — no defined meaning for a flat command file",
       "paths": "skills-only — no defined meaning for a flat command file"
     },

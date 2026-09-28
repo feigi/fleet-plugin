@@ -24,23 +24,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeProjectDir } from "./board.mjs";
-import { encodeOmpProjectDir } from "./member-record.mjs";
 
 const BOARD = fileURLToPath(new URL("./board.mjs", import.meta.url));
 const LEDGER = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
 
-// One assistant turn, enough for readAgent to bill an agent. The summation
-// shapes are board.test.mjs's business, not this file's.
-const TURN = [
-  { type: "assistant", message: { id: "msg_1", usage: { input_tokens: 2, cache_creation_input_tokens: 1000, cache_read_input_tokens: 50, output_tokens: 1 }, content: [{ type: "text" }] } },
-];
-
-// The --spend-dir override test's fixture: twice TURN's numbers, so the
-// assertion below cannot pass on the heuristic's own transcript by
-// coincidence.
-const NAMED_TURN = [
-  { type: "assistant", message: { id: "msg_1", usage: { cache_creation_input_tokens: 2000, cache_read_input_tokens: 100, output_tokens: 2 }, content: [{ type: "text" }] } },
-];
+// One assistant turn, enough for readOmpSpend to bill an agent — the omp
+// envelope's own shape (member-record.mjs's foldOmpTranscript comment). The
+// summation shapes are board.test.mjs's business, not this file's.
+const ompTurn = (cacheWrite) => [
+  { type: "session", version: 3, id: "s1", timestamp: "2026-09-08T15:11:49.444Z", cwd: "/w" },
+  { type: "message", id: "m1", parentId: "s1", timestamp: "2026-09-08T15:12:00.000Z",
+    message: { role: "assistant", content: [{ type: "text", text: "ok" }], model: "claude-opus-5",
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite, totalTokens: 0, cost: { total: 0 } } } },
+].map((l) => JSON.stringify(l)).join("\n") + "\n";
 
 // The stub `gh` fails on every call: each gh read goes through tryRun, which
 // catches and degrades, so the board still builds and nothing here touches the
@@ -49,9 +45,8 @@ const NAMED_TURN = [
 // `ledgerFile` overrides the missing-ledger default the --spend-since and
 // --interval cases want: those die before the read matters, while the #807
 // case below needs a real one the read has to carry back whole. `seed` lays
-// the transcript tree into the fake $HOME for the child's cwd — Claude's by
-// default; the #1716 cases lay omp's instead.
-function runBoard(sinceArgs, ledgerFile, seed = seedClaude) {
+// the transcript tree into the fake $HOME for the child's cwd.
+function runBoard(sinceArgs, ledgerFile, seed = seedDefault) {
   const home = mkdtempSync(join(tmpdir(), "since-home-"));
   // realpath, not the bare mkdtemp path: on darwin $TMPDIR is under /var, which
   // is a symlink to /private/var, and the child's process.cwd() reports the
@@ -76,11 +71,14 @@ function runBoard(sinceArgs, ledgerFile, seed = seedClaude) {
 
 // findSubagentsDir() defaults to $HOME and cwd, so the fixture has to sit
 // where the encoding puts it — encodeProjectDir is the real function, not a
-// hand-rolled path, so this cannot drift from it.
-function seedClaude(home, cwd) {
-  const sub = join(home, ".claude", "projects", encodeProjectDir(cwd), "sess", "subagents");
-  mkdirSync(sub, { recursive: true });
-  writeFileSync(join(sub, "agent-a.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
+// hand-rolled path, so this cannot drift from it. Named after an
+// `<ISO>_<uuid>` directory so the heuristic's own directory-name filter
+// finds it.
+function seedDefault(home, cwd) {
+  const dir = join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home }),
+    "2026-08-25T09-00-00-000Z_01a08126-ee04-7095-a695-14e3249f1127");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "default-agent.jsonl"), ompTurn(1000));
 }
 
 test("--spend-since rejects a seconds-magnitude epoch — the mistake its own comment names", () => {
@@ -157,8 +155,10 @@ test("no --spend-since at all is not an error — the panel is simply unscoped",
 // a resolvable session at the encoded cwd, so the heuristic has a real answer
 // of its own and a flag that did nothing would still produce a panel.
 test("build: --spend-dir reads the named directory instead of the session the heuristic picks", () => {
-  const dir = mkdtempSync(join(tmpdir(), "since-named-"));
-  writeFileSync(join(dir, "agent-named.jsonl"), NAMED_TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const root = mkdtempSync(join(tmpdir(), "since-named-"));
+  const dir = join(root, "2026-08-25T09-00-00-000Z_abcdef12-3456-7890-abcd-ef1234567890");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "named.jsonl"), ompTurn(2000));
   const r = runBoard(["--spend-dir", dir]);
   assert.equal(r.status, 0, r.stderr);
   const spend = JSON.parse(r.stdout).spend;
@@ -181,11 +181,11 @@ test("build: with no --spend-dir the panel still comes from the heuristic, uncha
 
 test("build: --spend-dir naming a directory that does not exist yet is accepted, not refused", () => {
   // The invocation this flag exists for, and the one an existence check at the
-  // guard would refuse: a session's `subagents/` directory is not created until
-  // that session's first agent spawns, and the cockpit launches in run-team
-  // phase 0, before it. The operator names the directory; it appears seconds
-  // later. Until then the panel hides — never zeroes, and never a refusal.
-  const r = runBoard(["--spend-dir", join(mkdtempSync(join(tmpdir(), "since-absent-")), "subagents")]);
+  // guard would refuse: a session directory is not created until its own
+  // launch, and the cockpit launches in run-team phase 0, before that. The
+  // operator names the directory; it appears seconds later. Until then the
+  // panel hides — never zeroes, and never a refusal.
+  const r = runBoard(["--spend-dir", join(mkdtempSync(join(tmpdir(), "since-absent-")), "2026-08-26T09-00-00-000Z_01a08126-ee04-7095-a695-14e3249f1128")]);
   assert.equal(r.status, 0, r.stderr);
   const spend = JSON.parse(r.stdout).spend;
   assert.equal(spend.ok, false, "an unreadable named directory must not report spend");
@@ -195,18 +195,15 @@ test("build: --spend-dir naming a directory that does not exist yet is accepted,
   assert.doesNotMatch(r.stdout, /"cacheWrite":1000/);
 });
 
-// ── #1716: the same two paths on an omp tree ─────────────────────────────────
-//
 // One omp member transcript in the measured line shape (member-record.mjs's
-// foldOmpTranscript comment), with numbers no Claude fixture here uses.
-const OMP_SESSION = "2026-09-08T13-13-27-300Z_01a08126-ee04-7095-a695-14e3249f1127";
-// #1717 (tests dimension, board-cli.test.mjs review): a toolCall/toolResult
-// pair ahead of the billing turn, so this is the one place the merged tool
-// table's numbers survive the real CLI subprocess + JSON.stringify/JSON.parse
+// foldOmpTranscript comment). #1717: a toolCall/toolResult pair ahead of the
+// billing turn, so this fixture is the one place the merged tool table's
+// numbers survive the real CLI subprocess + JSON.stringify/JSON.parse
 // boundary — every other assertion on this shape calls gatherSpend()/
 // attributeTools() in-process. The call turn itself bills 0, so `cacheWrite`
 // below still lands whole on the total AND (via the pending result batch)
 // wholly attributed to "read".
+const OMP_SESSION = "2026-09-08T13-13-27-300Z_01a08126-ee04-7095-a695-14e3249f1127";
 const ompMember = (cacheWrite) => [
   { type: "session", version: 3, id: "s1", timestamp: "2026-09-08T15:11:49.444Z", cwd: "/w" },
   { type: "session_init", id: "i1", parentId: null, timestamp: "2026-09-08T15:11:49.495Z", task: "Implement ticket 7", agent: "fleet-implementer" },
@@ -229,12 +226,12 @@ function ompSessionAt(proj) {
   return dir;
 }
 
-test("build: on an omp-only machine the panel comes from this workspace's omp session", () => {
-  // The default path, no flag: HOME holds no ~/.claude tree at all, and the
-  // child's cwd sits OUTSIDE HOME, so this also drives encodeOmpProjectDir's
-  // realpath-wrapped form through the real process.cwd().
+test("build: the panel comes from this workspace's own omp session, with its tool table intact", () => {
+  // The default path, no flag: the child's cwd sits OUTSIDE HOME, so this
+  // also drives encodeProjectDir's realpath-wrapped form through the real
+  // process.cwd().
   const r = runBoard([], undefined, (home, cwd) => {
-    ompSessionAt(join(home, ".omp", "agent", "sessions", encodeOmpProjectDir(cwd, { home })));
+    ompSessionAt(join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home })));
   });
   assert.equal(r.status, 0, r.stderr);
   const spend = JSON.parse(r.stdout).spend;
@@ -245,9 +242,9 @@ test("build: on an omp-only machine the panel comes from this workspace's omp se
   assert.equal(spend.attributedPct, 100);
 });
 
-test("build: --spend-dir accepts an omp session directory over a heuristic that resolves elsewhere", () => {
-  // runBoard's default seed gives the heuristic a Claude session of its own
-  // (1000), so the omp numbers can only arrive through the named directory.
+test("build: --spend-dir accepts a session directory over a heuristic that resolves elsewhere", () => {
+  // runBoard's default seed gives the heuristic a session of its own (1000),
+  // so these numbers can only arrive through the named directory.
   const dir = ompSessionAt(mkdtempSync(join(tmpdir(), "since-omp-")));
   const r = runBoard(["--spend-dir", dir]);
   assert.equal(r.status, 0, r.stderr);
@@ -257,19 +254,6 @@ test("build: --spend-dir accepts an omp session directory over a heuristic that 
   assert.equal(spend.top[0].label, "impl-7");
 });
 
-test("build: --spend-dir naming an omp-shaped directory that does not exist yet is accepted, not refused", () => {
-  // #1867 review (tests dimension): the Claude-side sibling above is not
-  // mirrored for omp — a mutation that silently swallows readOmpSpend's
-  // missing-directory throw (treating it as zero agents instead of letting
-  // it surface) passed every other omp-tagged test in this file. Named after
-  // an `<ISO>_<uuid>` directory so isOmpSessionDirName routes it to
-  // readOmpSpend, not readClaudeSpend.
-  const r = runBoard(["--spend-dir", join(mkdtempSync(join(tmpdir(), "since-omp-absent-")), OMP_SESSION)]);
-  assert.equal(r.status, 0, r.stderr);
-  const spend = JSON.parse(r.stdout).spend;
-  assert.equal(spend.ok, false, "an unreadable named omp directory must not report spend");
-  assert.equal(spend.totals, undefined, "and must not render a zeroed total in its place");
-});
 
 // #366: the SECOND --interval read site. gather()'s own argInterval() fallback
 // — reached only through `build`, after the same gh reads as --spend-since

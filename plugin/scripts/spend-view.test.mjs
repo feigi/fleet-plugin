@@ -7,7 +7,7 @@ import { join } from "node:path";
 // single copyFileSync and createBoardServer routes only `/`, `/board.html` and
 // `/board.json` — so its script is inline and there is nothing to import. The
 // decision under test is lifted out of the SOURCE TEXT and evaluated instead,
-// the same technique select-dimensions.test.mjs uses against workflows/review-pr.js.
+// the same technique select-dimensions.test.mjs uses against scripts/review-core.mjs.
 //
 // Extraction to a module is deliberately NOT the shape here: it would need a
 // second staged file and a fourth route, and a page that renders blank whenever
@@ -238,50 +238,18 @@ test("the tool column is capped and both columns tolerate a missing list", () =>
   assert.deepEqual(bare.tools, []);
 });
 
-test("#602: a metaErrors-only run reports the corruption, not nothing", () => {
-  // Sibling of the #371 case above, one field over: a run whose transcripts all
-  // failed to produce any cache-write, but whose sidecars were corrupt rather
-  // than the transcripts themselves. Before this fix nothing routed metaErrors
-  // to the page at all, so this rendered identically to "nothing happened yet".
-  assert.deepEqual(spendView(ok({ totals: { cacheWrite: 0, cacheRead: 0, output: 0, agents: 0 }, skipped: 0, metaErrors: 2 })),
-    { kind: "note", text: "2 meta sidecars corrupt; no spend recorded yet" });
-  // Singular wording at 1, and combined with a skip in the same tick.
-  assert.deepEqual(spendView(ok({ totals: { cacheWrite: 0, cacheRead: 0, output: 0, agents: 0 }, skipped: 1, metaErrors: 1 })),
-    { kind: "note", text: "1 transcript skipped; 1 meta sidecar corrupt; no spend recorded yet" });
-});
-
-test("#602: a genuinely zero run with metaErrors absent or zero is still the one legitimate hide", () => {
-  // The no-false-positive half: a normal empty run must not start reporting a
-  // corruption note just because `metaErrors` is undefined rather than 0. The
-  // absent case is pinned by "no cache-write and nothing skipped is the one
-  // legitimate hide" above; this pins the explicit-zero case specifically.
-  assert.deepEqual(spendView(ok({ totals: { cacheWrite: 0, cacheRead: 0, output: 0, agents: 0 }, skipped: 0, metaErrors: 0 })),
-    { kind: "hidden" });
-});
-
-test("#602: a funded run's panel note names a corrupt sidecar distinctly from a skip", () => {
-  // The main-line case — reviewPct 0 from a torn reviewer sidecar, reproduced at
-  // the view layer: cache-write is non-zero (the transcript still contributed),
-  // so this is the panel branch, and the note is where the fault has to surface.
-  assert.equal(spendView(ok({ metaErrors: 1 })).note,
-    "1 meta sidecar corrupt — role/label degraded; ranked on cache-creation; tool split is attributed, not billed");
-  assert.equal(spendView(ok({ skipped: 2, metaErrors: 3 })).note,
-    "2 transcripts skipped; 3 meta sidecars corrupt — role/label degraded; ranked on cache-creation; tool split is attributed, not billed");
-});
-
-test("#916: a damaged-line count reaches the panel note, distinctly from both siblings", () => {
-  // Third tally, third phrase. `skipped` means the transcript contributed
-  // nothing; `metaErrors` means it contributed under a degraded role and label;
-  // `damaged` means it contributed but the torn line's own tool_use blocks and
-  // output_tokens snapshot may be missing — cache_creation/cache_read/maxCtx
-  // repeat on every line of a turn and survive a mid-turn tear, so the phrase
-  // hedges rather than asserting the numbers beside it are wrong.
+test("#916: a damaged-line count reaches the panel note, distinctly from a skip", () => {
+  // Second tally, second phrase. `skipped` means the transcript contributed
+  // nothing; `damaged` means it contributed but the torn line's own tool_use
+  // blocks and output_tokens snapshot may be missing — cache_creation/
+  // cache_read repeat on every line of a turn and survive a mid-turn tear,
+  // so the phrase hedges rather than asserting the numbers beside it are wrong.
   assert.equal(spendView(ok({ damaged: 1 })).note,
     "1 damaged transcript line — spend may be incomplete; ranked on cache-creation; tool split is attributed, not billed");
-  // All three in one tick, plural wording, in the order the note lists them:
+  // Both in one tick, plural wording, in the order the note lists them:
   // most spend lost first. A phrase spliced into the wrong slot reds here.
-  assert.equal(spendView(ok({ skipped: 1, metaErrors: 2, damaged: 3 })).note,
-    "1 transcript skipped; 3 damaged transcript lines — spend may be incomplete; 2 meta sidecars corrupt — role/label degraded; ranked on cache-creation; tool split is attributed, not billed");
+  assert.equal(spendView(ok({ skipped: 1, damaged: 3 })).note,
+    "1 transcript skipped; 3 damaged transcript lines — spend may be incomplete; ranked on cache-creation; tool split is attributed, not billed");
 });
 
 test("#916: a run whose only turn WAS the damaged line reports the damage, not nothing", () => {
@@ -290,9 +258,9 @@ test("#916: a run whose only turn WAS the damaged line reports the damage, not n
   // `kind: "hidden"` — the panel rendered NOTHING for a run whose entire spend
   // had been destroyed, a fault presented as an idle run. cacheWrite is 0
   // because the damaged line was the only cache-creation turn there was, so
-  // `skipped` and `metaErrors` are both 0 and this branch is reachable by
-  // `damaged` alone — the same argument the #602 case above makes for itself.
-  assert.deepEqual(spendView(ok({ totals: { cacheWrite: 0, cacheRead: 0, output: 0, agents: 1 }, skipped: 0, metaErrors: 0, damaged: 1 })),
+  // `skipped` is 0 and this branch is reachable by
+  // `damaged` alone.
+  assert.deepEqual(spendView(ok({ totals: { cacheWrite: 0, cacheRead: 0, output: 0, agents: 1 }, skipped: 0, damaged: 1 })),
     { kind: "note", text: "1 damaged transcript line; no spend recorded yet" });
 });
 
@@ -302,7 +270,7 @@ test("#916: a clean empty run with damaged zero is still the one legitimate hide
   // simply not started, which is the reverse of the conflation this panel
   // removes. The funded branch's copy of that mutation reds the plain-note test
   // above; this is the branch that one cannot see.
-  assert.deepEqual(spendView(ok({ totals: { cacheWrite: 0, cacheRead: 0, output: 0, agents: 0 }, skipped: 0, metaErrors: 0, damaged: 0 })),
+  assert.deepEqual(spendView(ok({ totals: { cacheWrite: 0, cacheRead: 0, output: 0, agents: 0 }, skipped: 0, damaged: 0 })),
     { kind: "hidden" });
 });
 

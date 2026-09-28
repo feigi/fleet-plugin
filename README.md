@@ -1,7 +1,7 @@
 # fleet-ctl
 
 The agent fleet: a `run-team` controller, a merge bot, a PR reviewer, and the
-ticket pipeline they share. Ships as the Claude Code / omp plugin
+ticket pipeline they share. Ships as the omp.sh plugin
 `fleet-ctl@fleet-plugin`.
 
 ## Installation
@@ -16,36 +16,20 @@ higher pin, not the floor
 Supported platforms: macOS, Linux, and Windows via WSL. Native Windows is not
 supported ([ADR 0009](docs/adr/0009-supported-platforms-are-macos-linux-wsl.md)).
 
-Claude Code clones the marketplace over SSH; omp clones the marketplace
-shorthand over HTTPS.
-
-**Claude Code**
-
-```
-/plugin marketplace add feigi/fleet-plugin
-/plugin install fleet-ctl@fleet-plugin
-```
-
-**omp**
-
-Two settings are session-wide, install-time preconditions on omp (ADR 0003
-point 8, ADR 0011) — plugin agents are invisible without the first, and the
-fleet's `opus`/`sonnet`/`haiku` tiers resolve to nothing without the second:
+Two install-time preconditions, both operator-set: `enabledProviders`
+(plugin agents are invisible without it, ADR 0003 point 8) and
+`modelRoles.slow|task|smol` pointing at models this install has (the
+fleet's tier routes, ADR 0011/0014).
 
 ```
 omp config get enabledProviders          # inspect first: the next line REPLACES the whole list
 omp config set enabledProviders '["claude-plugins"]'   # merge in any providers you already had enabled
 omp plugin marketplace add feigi/fleet-plugin --scope=user
 omp plugin install fleet-ctl@fleet-plugin --scope=user
-omp config set task.agentModelOverrides "$(~/.fleet/bin/fleet-run tier-roles.mjs --json --merge)"   # set REPLACES the whole record: --merge keeps your own non-fleet overrides; re-run after every plugin update
 ~/.fleet/bin/fleet-run tier-roles.mjs --check
 ```
 
-On omp, `model: opus|sonnet|haiku` in a fleet agent definition is a tier name
-routed to `modelRoles.slow|task|smol` (ADR 0011), never a vendor model
-directly — set those roles to whatever models this install has before a run.
-
-The qualified id (`fleet-ctl@fleet-plugin`) is canonical on both harnesses —
+The qualified id (`fleet-ctl@fleet-plugin`) is canonical —
 an unqualified `fleet-ctl` install is not guaranteed to resolve to this
 plugin. Background: [`docs/adr/0006-rename-to-fleet-ctl.md`](docs/adr/0006-rename-to-fleet-ctl.md).
 
@@ -59,7 +43,7 @@ non-configurable merge bot:
 /fleet-ctl:run-team [implementers] [reviewers]
 ```
 
-`run-team` is invoke-only and hidden from both harnesses' `/` picker — type
+`run-team` is invoke-only and hidden from the `/` picker — type
 the command above exactly rather than selecting it; if it doesn't show up,
 `/fleet-ctl:run-team-help` prints the exact invocation for you.
 

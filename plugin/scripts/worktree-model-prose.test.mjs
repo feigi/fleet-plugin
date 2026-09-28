@@ -1,54 +1,23 @@
-// #1344, ruled on #1315. The worktree/claim model section documents four
-// rulings for both harnesses and one marked pair (per #1299/#1316): claim,
-// release and reap are git-native and unchanged on omp; `isolated: true` is
-// never used for a fleet member, because it patch-applies into the CALLING
-// SESSION's cwd on completion rather than confining a member to its claimed
-// worktree — the precise spill this section exists to prevent; a member
-// addresses its worktree by absolute path on both harnesses, which is one
-// shared invariant with two different recipes for handing a member its cwd;
-// `release-ticket.sh`/`inflight.sh` are unaffected by a live member; and the
-// controller's own cwd stays the main checkout on both harnesses.
+// #1344, ruled on #1315. The worktree/claim model section documents five
+// rulings: claim, release and reap are git-native and unchanged on omp;
+// `isolated: true` is never used for a fleet member, because it
+// patch-applies into the CALLING SESSION's cwd on completion rather than
+// confining a member to its claimed worktree — the precise spill this
+// section exists to prevent; a member addresses its worktree by absolute
+// path — the shared invariant, with a stated recipe for handing a member
+// its cwd; `release-ticket.sh`/`inflight.sh` are unaffected by a live
+// member; and the controller's own cwd stays the main checkout.
 //
 // The one measured gap: whether omp's `task` tool accepts a per-dispatch
 // working directory. It does not — `omp://tools/task.md`'s item schema has no
 // `cwd` field, and a probe subagent dispatched with none of those fields
 // returned the calling session's own `pwd`, not a claimed worktree. So the
-// OMP line of the marked pair states the absolute-path discipline as the
-// recipe, not a translation of a feature that does not exist. `effort` and
+// cwd-recipe paragraph states the absolute-path discipline as the recipe,
+// not a translation of a feature that does not exist. `effort` and
 // `isolated` are themselves conditional fields on that schema (present only
-// when `task.enableEffort`/`task.isolation.enabled` are on), so the OMP line
-// only claims a missing cwd field for the schema as it actually appears, not
-// for a fixed field list.
-//
-// Marked-pair discipline (#1299 ruling on #1316's container): each line is
-// its own one-line slice, pinned exactly, with a `doesNotMatch` for the
-// other harness's tool token — `Agent`/`subagent_type` for Claude, `` `task` ``
-// (the tool, not the generic English word) and `bash` for omp. Each marked
-// line is ALSO a single physical line in SKILL.md itself (CONTEXT.md's own
-// "Dialect" entry: the marker is the line's first token, so a pin addresses
-// exactly one line by `^\s*(CLAUDE|OMP): `) — long, unwrapped, rather than
-// hard-wrapped like the surrounding prose, so no interior newline hides part
-// of the line from that anchor shape.
-//
-// `claudeLine`/`ompLine` slice INSIDE `section()`, never off the file-wide
-// `RUN_TEAM` string: two sibling prose tickets in flight at the same time
-// (#1341, #1349) add their own `OMP: `-prefixed lines earlier in this same
-// file, and a file-wide `indexOf("OMP:")` would silently pin one of theirs
-// instead once either lands first. Nesting is `dispatch-block-pins-prose.
-// test.mjs`'s `block()` pattern: `between(region(), from, to, what)`.
-//
-// Mutation-tested 2026-09-09, four runs per the #1299 procedure, against a
-// scratch copy of this file (never the real checkout): (1) inverting the
-// CLAUDE line's tokens reddened only its own test — the OMP line's tests
-// stayed green; (2) the symmetric mutation on the OMP line reddened only its
-// tests; (3) a benign reword of the shared lead sentence above the pair
-// (whitespace/synonym outside the pinned spans) left every test green; (4)
-// swapping the two lines' tool tokens (`Agent`/`subagent_type` onto the OMP
-// line, `task`/`bash` onto the CLAUDE line) reddened both lines' tests, the
-// two-dialect-specific mutant the procedure exists to catch. No
-// divergence-check instrument exists yet (#1346, open) to assert a third
-// outcome from runs 1/2/4; this file carries the pair discipline on its own
-// until that instrument lands.
+// when `task.enableEffort`/`task.isolation.enabled` are on), so the
+// paragraph only claims a missing cwd field for the schema as it actually
+// appears, not for a fixed field list.
 //
 // CEILING: presence and doesNotMatch pins over bounded slices, one contiguous
 // regex per claim, gaps sized to the actual prose plus a small margin rather
@@ -70,21 +39,16 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 const section = () =>
   between(
     RUN_TEAM,
-    "## Worktree and claim model, on both harnesses",
+    "## Worktree and claim model",
     "## Queue depth",
     "run-team/SKILL.md",
   );
 
 // Nested inside `section()` (never `RUN_TEAM` directly), so a sibling
-// ticket's own `CLAUDE:`/`OMP:` line elsewhere in the file cannot satisfy or
-// break these anchors. Bound to the pair itself: starts where the CLAUDE line
-// opens, ends at the gap paragraph that follows both lines. Neither line's
-// slice can satisfy the other's assertions, and the shared lead sentence
-// above is out of reach.
-const claudeLine = () =>
-  between(section(), "CLAUDE: the `Agent` tool", "\nOMP:", "run-team/SKILL.md CLAUDE line");
-const ompLine = () =>
-  between(section(), "OMP:", "\n\n**The one open gap", "run-team/SKILL.md OMP line");
+// ticket's own prose elsewhere in the file cannot satisfy or break these
+// anchors.
+const cwdRecipe = () =>
+  between(section(), "**A member's tree is the claimed worktree", "\n\n**The one open gap", "run-team/SKILL.md cwd recipe");
 
 test("run-team/SKILL.md: claim, release and reap are named unchanged on omp, with no dialect branch", () => {
   assert.match(
@@ -189,60 +153,31 @@ test("run-team/SKILL.md: the shared eval kernel is measured, with the isolated-b
   );
 });
 
-test("run-team/SKILL.md: absolute-path addressing is stated as the shared contract, not a dialect card", () => {
+test("run-team/SKILL.md: absolute-path addressing is stated as the shared contract", () => {
   assert.match(
     section(),
-    /member's\s+tree\s+is\s+the\s+claimed\s+worktree,\s+addressed\s+by\s+absolute\s+path[\s\S]{0,80}shared\s+contract,\s+true\s+on\s+both\s+harnesses\s+without\s+translation/,
-    "the absolute-path rule no longer reads as one shared invariant true on both harnesses",
+    /member's\s+tree\s+is\s+the\s+claimed\s+worktree,\s+addressed\s+by\s+absolute\s+path/,
+    "the absolute-path rule is no longer stated",
   );
 });
 
-test("run-team/SKILL.md: each marked line is a single physical line in the file", () => {
-  // CONTEXT.md's Dialect entry pins the marker shape to `^\s*(CLAUDE|OMP): `
-  // — a marked line broken across a hard-wrapped newline is invisible to
-  // that anchor past its first physical line.
-  const claudeIdx = section().indexOf("CLAUDE: the `Agent` tool");
-  const claudeEndOfLine = section().indexOf("\n", claudeIdx);
-  const claudeFullLine = section().slice(claudeIdx, claudeEndOfLine);
-  assert.match(claudeFullLine, /addressed there by the absolute path alone\.$/, "the CLAUDE line wraps onto a second physical line");
-
-  const ompIdx = section().indexOf("OMP: the `task` tool");
-  const ompEndOfLine = section().indexOf("\n", ompIdx);
-  const ompFullLine = section().slice(ompIdx, ompEndOfLine);
-  assert.match(ompFullLine, /absolute paths for `write`\/`edit`\.$/, "the OMP line wraps onto a second physical line");
-});
-
-test("run-team/SKILL.md: CLAUDE line names the Agent tool's cwd recipe and not omp's tool tokens", () => {
+test("run-team/SKILL.md: the cwd recipe names the task tool's missing cwd field, its conditional fields, and the measured pwd result", () => {
   assert.match(
-    claudeLine(),
-    /`Agent`\s+tool\s+call\s+this\s+runbook\s+dispatches\s+through[\s\S]{0,60}`subagent_type`,\s+no\s+working-directory\s+field\s+anywhere\s+in\s+this\s+file[\s\S]{0,120}dispatch\s+prompt/,
-    "the CLAUDE line no longer names the Agent tool, subagent_type, or the dispatch-prompt recipe",
+    cwdRecipe(),
+    /`task`\s+tool's\s+item\s+schema[\s\S]{0,250}only\s+when\s+their\s+own\s+settings\s+enable\s+them[\s\S]{0,80}carries\s+no\s+working-directory\s+field[\s\S]{0,250}returned\s+the\s+calling\s+session's\s+own\s+cwd,\s+not\s+the\s+claimed\s+worktree/,
+    "the cwd recipe no longer names the task tool's schema, its conditional fields, or the measured pwd result",
   );
-  // The doesNotMatch half of the pair discipline: a CLAUDE line loose enough
-  // to also match omp's tool tokens is loose enough to match neither claim.
-  assert.doesNotMatch(claudeLine(), /`task`/, "the CLAUDE line names omp's `task` tool — the pair has collapsed into one wording");
-  assert.doesNotMatch(claudeLine(), /\bbash\b/, "the CLAUDE line names omp's bash cwd mechanism — the pair has collapsed into one wording");
-});
-
-test("run-team/SKILL.md: OMP line names the task tool's missing cwd field, its conditional fields, measured, and not Claude's tool tokens", () => {
+  // `effort`/`isolated` are conditional, not always-present fields — the
+  // recipe must say so rather than presenting a fixed field list.
   assert.match(
-    ompLine(),
-    /`task`\s+tool's\s+item\s+schema[\s\S]{0,250}only\s+when\s+their\s+own\s+settings\s+enable\s+them[\s\S]{0,80}carries\s+no\s+working-directory\s+field\s+either[\s\S]{0,250}returned\s+the\s+calling\s+session's\s+own\s+cwd,\s+not\s+the\s+claimed\s+worktree/,
-    "the OMP line no longer names the task tool's schema, its conditional fields, or the measured pwd result",
-  );
-  // `effort`/`isolated` are conditional, not always-present fields — the line
-  // must say so rather than presenting a fixed field list.
-  assert.match(
-    ompLine(),
+    cwdRecipe(),
     phrase("`effort`/`isolated` only when their own settings enable them"),
-    "the OMP line presents effort/isolated as always-present schema fields rather than conditional ones",
+    "the cwd recipe presents effort/isolated as always-present schema fields rather than conditional ones",
   );
   assert.match(
-    ompLine(),
+    cwdRecipe(),
     phrase("`bash`'s own `cwd` parameter set to it on every call and absolute paths for `write`/`edit`"),
   );
-  assert.doesNotMatch(ompLine(), /`Agent`/, "the OMP line names Claude's `Agent` tool — the pair has collapsed into one wording");
-  assert.doesNotMatch(ompLine(), /subagent_type/, "the OMP line names Claude's subagent_type — the pair has collapsed into one wording");
 });
 
 test("run-team/SKILL.md: the measured gap states task has no per-dispatch cwd, quoting the doc", () => {
@@ -275,7 +210,7 @@ test("run-team/SKILL.md: the controller's own cwd staying the main checkout gets
   // release/inflight paragraph above it.
   assert.match(
     section(),
-    phrase("The controller's own cwd stays the main checkout on both harnesses, unchanged"),
+    phrase("The controller's own cwd stays the main checkout, unchanged"),
     "ruling 4 (the controller's own cwd is unchanged) no longer has its own stated sentence",
   );
 });

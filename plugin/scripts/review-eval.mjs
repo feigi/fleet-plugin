@@ -1,8 +1,8 @@
-// review-eval.mjs — the omp shim for the PR review port (#1349, per #1303's
-// ruling on #1296). It is loaded (never review-core.mjs or review-pr.js
-// directly) through the Resolver, from an `eval` cell:
+// review-eval.mjs — the shim for the PR review port (#1349, per #1303's
+// ruling on #1296). It is loaded (never review-core.mjs directly) through
+// the Resolver, from an `eval` cell:
 //
-//   const path = (await Bun.$`FLEET_HARNESS=omp ~/.fleet/bin/fleet-run --path review-eval.mjs`.text()).trim();
+//   const path = (await Bun.$`~/.fleet/bin/fleet-run --path review-eval.mjs`.text()).trim();
 //   const { runReviewOnOmp } = await import(path);
 //   const result = await runReviewOnOmp({ pr, branch, worktree, testCmd, scratch });
 //
@@ -34,23 +34,22 @@ import { digestOf, runReview, runnerPrRefusal } from "./review-core.mjs";
 // opts)` resolves near-instantly to an `AgentHandle` with `.wait()`, and only
 // `.wait()` unwraps the schema-validated `structuredOutput.data`. This
 // wrapper is what makes review-core.mjs's `await host.agent(...)` read like
-// Claude's synchronous, data-returning `agent()` — the ONE piece of
-// harness-specific glue `runReview` needs and cannot see.
+// a synchronous, data-returning call — the ONE piece of host-specific glue
+// `runReview` needs and cannot see.
 //
-// A crashed/rejected dispatch resolves to `null`, matching Claude's own
-// "agent() returns null on exhaustion" contract that every guard in
-// review-core.mjs (`if (snap) {...}`, `unrunCrashed`, `verdictFor`) is written
-// against. eval's DEFAULT `schemaMode` is "permissive": an exhausted
+// A crashed/rejected dispatch resolves to `null`, the contract every guard
+// in review-core.mjs (`if (snap) {...}`, `unrunCrashed`, `verdictFor`) is
+// written against. eval's DEFAULT `schemaMode` is "permissive": an exhausted
 // structured-output retry is ACCEPTED anyway, carrying `schemaOverridden:
-// true` on invalid data (#1296 Q2) rather than nulling out the way Claude
-// Code's exhaustion does. `schemaMode: "strict"` turns that same exhaustion
-// into a thrown/rejected result instead — still not a null — so this wrapper
-// treats a REJECTED `.wait()` as the crash signal (`agent()`'s only way to
-// fail loudly under omp) and maps it to `null` itself; it does not attempt to
-// distinguish an accepted-but-schema-overridden permissive result from a
-// clean one, because review-core.mjs never reads a distinguishing field for
-// that case either — a schema violation the host already retried three times
-// and gave up correcting is not this shim's contract to relitigate.
+// true` on invalid data (#1296 Q2) rather than nulling out. `schemaMode:
+// "strict"` turns that same exhaustion into a thrown/rejected result
+// instead — still not a null — so this wrapper treats a REJECTED `.wait()`
+// as the crash signal (`agent()`'s only way to fail loudly under omp) and
+// maps it to `null` itself; it does not attempt to distinguish an
+// accepted-but-schema-overridden permissive result from a clean one,
+// because review-core.mjs never reads a distinguishing field for that case
+// either — a schema violation the host already retried three times and
+// gave up correcting is not this shim's contract to relitigate.
 //
 // NO PER-CALL WORKING DIRECTORY HERE, AND WHY THE ISOLATION RULE LIVES IN THE
 // PROMPTS INSTEAD (#1433). Three PRs reviewed back-to-back from one eval cell
@@ -131,14 +130,14 @@ function parallel(fns) {
 // cell's scope, exactly like `agent` above; naming them as parameters here
 // would ask the controller's cell to thread through globals it already has.
 export async function runReviewOnOmp(args) {
-  return runReview({ agent: ompAgent, phase, log, pipeline, parallel, harness: "omp" }, args);
+  return runReview({ agent: ompAgent, phase, log, pipeline, parallel }, args);
 }
 
 // #1802 (spec 2026-09-24-slot-based-fleet-loop-design.md § 3 §1, §2, §5, §7).
 // The whole of the omp review runner's job, so the agent's own cell is three
 // lines and this contract can be run (review-runner.test.mjs): the full result
-// object goes to `<scratch>/review-<pr>.json` — the one artefact both harnesses
-// hand the fix-applier — and only the digest comes back, because the digest is
+// object goes to `<scratch>/review-<pr>.json` — the one artefact handed to
+// the fix-applier — and only the digest comes back, because the digest is
 // all the controller reads and a 26–61 KB result is what the file exists to
 // keep out of its context.
 //

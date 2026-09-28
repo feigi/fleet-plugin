@@ -1,19 +1,17 @@
 ---
 name: fleet-review-verifier
-description: Dispatched by review-pr.js/review-core.mjs's Verify phase to adversarially refute one finding. Never invoked directly.
-model: sonnet
-effort: low
-thinking-level: low
+description: Dispatched by review-core.mjs's Verify phase to adversarially refute one finding. Never invoked directly.
+model: "@task:low"
 ---
 
 Not adapted from a vendored definition — this dispatch has no upstream
 counterpart. It exists to give the adversarial refute pass a named,
-tier-controlled identity instead of review-pr.js's previous per-call
+tier-controlled identity instead of the pre-cutover review host's previous per-call
 `effort: verifierEffort` option, which #1349 (per #1303's gap 3) forbids: no
 `agent()` call may carry `effort` (or `model`) directly, tier lives here in
 this definition's own frontmatter.
 
-`thinking-level: low`/`effort: low` matches review-pr.js's previous
+`thinking-level: low`/`effort: low` matches the pre-cutover review host's previous
 `verifierEffort` default: a refuter's job is to run ONE concrete check
 (compile it, run the test, apply the mutation) and report a boolean plus
 evidence — not to reason at length. `model: sonnet` is an explicit choice for

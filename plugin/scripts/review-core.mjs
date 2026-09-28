@@ -1,76 +1,30 @@
-// review-core.mjs — the host-independent half of the PR review port (#1349,
-// per #1303's ruling on #1296). Read that ruling before touching this file.
+// review-core.mjs — the review body for PR review (#1349, per #1303's ruling
+// on #1296). Read that ruling before touching this file.
 //
-// WHY THIS FILE LIVES IN scripts/, NOT workflows/, AND IS NOT `import`ed BY
-// workflows/review-pr.js
-// ---------------------------------------------------------------------------
-// #1296's research (docs/specs/2026-09-08-omp-eval-workflow-host.md, via the
-// `research/omp-eval-workflow-host` branch) measured that review-pr.js
-// touches exactly three host APIs beyond plain JS — `agent()`, `phase()`/
-// `log()`, and the `pipeline()`/`parallel()` orchestration primitives — and
-// that everything else (the two JSON schemas, `usableDiff`, `readRules`,
-// `resolveTestCmd`, `decodeArgs`, `selectDimensions`, `resolveDimensions`,
-// `snapshotMissing`, `unrunReason`/`unrunEntries`/`unrunCrashed`,
-// `verdictFor`, `resumeFor`) is portable verbatim. That is what lives here.
+// This file holds every host-independent declaration PR review needs: the
+// two JSON schemas, `usableDiff`, `readRules`, `resolveTestCmd`,
+// `decodeArgs`, `selectDimensions`, `resolveDimensions`, `snapshotMissing`,
+// `unrunReason`/`unrunEntries`/`unrunCrashed`, `verdictFor`, `resumeFor`,
+// and `runReview(host, args)` — the orchestration function itself.
 //
-// The obvious shape — review-pr.js `import`s this file, omp's eval shim does
-// too — does not work, and it is not a preference, it is a measured fact
-// review-pr.js's own comment records (beside `snapshotMissing`, citing #538):
-// a Claude Code Workflow script's body compiles as a function body inside the
-// harness VM, `import()` is refused for ANY specifier before the name is even
-// resolved, and `require` is undefined. So review-pr.js CANNOT import this
-// file, on either side of the relationship — not "this file cannot be
-// imported", the reverse: review-pr.js cannot perform an import at all. It
-// also means this file is not itself a Workflow — nothing ever loads it that
-// way — so it lives in `scripts/` beside the other shared, plain-importable
-// modules (`lift.mjs`, `strip-comments.mjs`, …), never in `workflows/`:
-// `workflow-meta-first.test.mjs` discovers every file under `workflows/` and
-// asserts each begins `export const meta`, the Claude Workflow contract, and
-// a file that is not a workflow does not belong in a directory whose entire
-// contents that guard asserts are.
+// review-eval.mjs imports this file directly, a RELATIVE specifier: both
+// ship together under the same Install root, so the Resolver is only needed
+// ONCE, to find review-eval.mjs itself — never resolve this file's own path
+// through the Resolver a second time; that would be two doors where
+// CONTEXT.md's Resolver entry says there is exactly one.
 //
-// The choice this ticket makes, per its own instruction to pick a shape and
-// document it: this file is the CANONICAL, tested source of every host-
-// independent declaration. omp's shim (scripts/review-eval.mjs) `import`s it
-// directly — eval's `js` backend is an ordinary Bun VM with no such
-// restriction (#1296, Q6). review-pr.js keeps a text-identical COPY of every
-// pure function and both schemas, because Claude's Workflow sandbox leaves no
-// other option — the same "duplicate, then pin the duplicate" idiom this
-// repo already uses for the `usableDiff`/`snapshotMissing` head-compare
-// (review-pr-snapshot-path.test.mjs's "the head compare in usableDiff and
-// snapshotMissing are the same expression"), now applied at file scope
-// instead of expression scope. review-core-parity.test.mjs is the pin: it
-// runs each shared declaration from BOTH copies through the same fixtures
-// (review-core.mjs's imported normally; review-pr.js's lifted out of its
-// source text, the technique every other review-pr.js test file already
-// uses) and asserts identical OUTPUT — behavior parity, not text identity,
-// since review-core.mjs deliberately drops review-pr.js's historical
-// rationale comments (see this file's own "Pure functions" section header).
-// The one thing ALLOWED to differ in VALUE, not merely in comment, is the
-// `agentType` string on each `DEFAULT_DIMENSIONS` entry, bare here
-// (`fleet-review-<key>`, already omp's native agent-lookup form) versus
-// namespaced in review-pr.js (`fleet-ctl:fleet-review-<key>`, the Task
-// tool's `<plugin>:<agent>` convention). Both spellings live in the same
-// field name so `selectDimensions`/`resolveDimensions`/the dispatch call
-// sites read identically on both sides — "the shim owns the spelling" means
-// exactly this one string, nothing else.
-//
-// `runReview(host, args)` at the bottom is NOT a copy of anything in
-// review-pr.js — it is this file's own rendering of review-pr.js's top-level
-// script body as a callable function, taking an injected `host` object
-// (`agent`, `phase`, `log`, and optionally `pipeline`/`parallel`) instead of
-// reading them as sandbox globals. review-pr.js has no equivalent function:
-// its top-level statements run once, directly, because the Workflow harness
-// executes the whole file as the workflow's body. The two are kept in step
-// by the SAME parity test reading `runReview`'s use of the shared pure
-// functions against review-pr.js's own call sites.
+// `runReview(host, args)` takes an injected `host` object (`agent`, `phase`,
+// `log`, and optionally `pipeline`/`parallel`) rather than reading them as
+// ambient globals: eval's `agent()` returns a HANDLE, not data, so
+// review-eval.mjs's `ompAgent` wrapper adapts it to the synchronous,
+// data-returning shape this file reads throughout (see review-eval.mjs's own
+// header for that contract, and for why a crashed/rejected dispatch maps to
+// `null`, which every guard here — `if (snap) {...}`, `unrunCrashed`,
+// `verdictFor` — is written against).
 //
 // ONE import, added by #878: arg.mjs's isDigits(). This file is an ordinary
-// module — review-eval.mjs imports it — so it consumes the repo's digits
-// rule directly, where review-pr.js has to declare its own copy for the
-// sandbox reason above. That copy is not a copy of anything HERE, so
-// review-core-parity.test.mjs is not its pin; shared-refusal.test.mjs is,
-// running review-pr.js's lifted isDigits and arg.mjs's over the same values.
+// module, so it consumes the repo's digits rule directly rather than
+// declaring its own copy.
 //
 // `.mjs`, not `.js` (#1763): this file was `review-core.js` until then, and
 // nothing that ships declares a `type`, so Node below 20.19.0/22.7.0 —
@@ -81,10 +35,6 @@
 import { isDigits } from "./arg.mjs";
 
 // --- Schemas ----------------------------------------------------------
-// Identical to review-pr.js's copy (`review-core-parity.test.mjs` pins it).
-// See that file for the full rationale on every required/optional field —
-// duplicating that rationale here would be the second copy this repo's own
-// "recurring pin defect" comment warns about.
 export const FINDINGS_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -173,13 +123,10 @@ export const SNAPSHOT_SCHEMA = {
 };
 
 // --- Dimension catalog --------------------------------------------------
-// See review-pr.js's own copy of this comment for the full tier rationale
-// (#1349, per #1303's gap 3): no dimension carries a `model`/`effort` field —
+// #1349, per #1303's gap 3: no dimension carries a `model`/`effort` field —
 // dispatch tier lives ONLY in each fleet-owned agent definition's own
-// frontmatter. `agentType` is bare here (omp's native `agent()` lookup is an
-// exact match on a frontmatter `name:`); review-pr.js's copy namespaces the
-// same field `fleet-ctl:fleet-review-<key>` for the Claude Task tool. That one
-// string is the ONLY difference between the two arrays.
+// frontmatter. `agentType` is a bare frontmatter `name:` (omp's native
+// `agent()` lookup is an exact match on one).
 export const DEFAULT_DIMENSIONS = [
   {
     key: "correctness",
@@ -233,8 +180,8 @@ export const SPAWNED_AGENT_TYPES = [
   VERIFIER_AGENT_TYPE,
 ];
 
-// Unchanged from review-pr.js: `single-file` is `files === 1`, `small` is
-// `loc < 30` (diff-stats.mjs's computeStats owns both thresholds).
+// `single-file` is `files === 1`, `small` is `loc < 30` (diff-stats.mjs's
+// computeStats owns both thresholds).
 export const SIZE_TIER_PROFILES = new Set(["single-file", "small"]);
 // The refuter-budget floor: `correctness`/`silent-failure` miss silently and
 // permanently; `comments` sits beside them for a different reason (#218).
@@ -242,12 +189,23 @@ export const SIZE_TIER_PROFILES = new Set(["single-file", "small"]);
 // severity and nothing else.
 export const SIZE_TIER_DIMS = new Set(["correctness", "silent-failure", "comments"]);
 
+// The refuter budget per severity, derived once per run from the caller's
+// own `A.verifiers`/`A.verifiersBySeverity` overrides (or the defaults) and
+// bound to a `(severity) => count` closure — `select-dimensions.test.mjs`
+// imports this directly rather than re-deriving it from a lifted copy.
+export function verifiersFor(A) {
+  const verifiers = A.verifiers || 2;
+  const by = A.verifiersBySeverity || { critical: verifiers, important: verifiers, suggestion: 0 };
+  return (sev) => by[sev] ?? verifiers;
+}
+
 // --- Pure functions -------------------------------------------------------
-// Every function below is byte-identical (function body) to review-pr.js's
-// own declaration — review-core-parity.test.mjs pins it. See review-pr.js
-// for the full historical rationale on each; it is not repeated here to
-// avoid a second copy of PROSE disconnecting the way this repo's own
-// "recurring pin defect" comment warns a second copy of CODE does.
+// Every function below was ported byte-identical (function body) from this
+// repo's retired pre-cutover review workflow script's own declaration, before
+// ADR 0014 retired that file — see this repo's git history for the full
+// historical rationale on each; it is not repeated here to avoid a second
+// copy of PROSE disconnecting the way this repo's own "recurring pin defect"
+// comment warns a second copy of CODE does.
 
 export function usableDiff(snap) {
   if (!snap.diffPath) return null;
@@ -345,6 +303,21 @@ export function selectDimensions(all, stats) {
   return dims;
 }
 
+// The "Specialists" section of `commands/review-and-fix.md`
+// documents `args.dimensions` as accepting "keys or dimension objects" — but
+// until now only objects worked: a key array passed straight through and
+// every dereference below (`d.key`, `d.prompt`, `d.agentType` — three) came
+// back `undefined`, with no throw and no warning (#113). Resolve strings
+// against the workflow's own catalog, and check every object has the three
+// fields it REQUIRES AND that each of those is a string — presence alone let
+// a non-string field reach the specialist dispatch machinery downstream
+// instead of failing at this validated boundary. `model` is no longer a
+// fourth optional field (#1349): an override entry that still sends one is
+// refused outright, loudly, rather than silently accepted and ignored — see
+// the check below.
+// Anything unresolvable stops the run and names what was not recognised — a
+// misconfigured review is worse than no review, because its findings look like
+// findings.
 export function resolveDimensions(override, all) {
   if (override == null) return null;
   if (!Array.isArray(override))
@@ -499,13 +472,11 @@ export function verdictFor(dispatched, votes) {
 // #1802. One in-run re-dispatch for a crashed dispatch, before the result is
 // assembled — the specialist call and the refuter PAIR are the two units it
 // wraps. `crashed(value)` says whether a settled first attempt counts as a
-// crash; a THROWN first attempt is handed to it as `null`, because a rejection
-// is a crash on either harness (Claude's `agent()` nulls on exhaustion, omp's
-// can reject before its handle exists). A crashed first attempt is dispatched
-// exactly once more and that second answer is final, thrown or not, so the
-// caller's existing crash handling still sees it. Not `async`: review-pr.js's
-// copy is lifted out of its source text by `^function name(`, and the parity
-// test runs both through the same fixtures.
+// crash; a THROWN first attempt is handed to it as `null`, because a
+// rejection is a crash too (omp's `agent()` can reject before its handle
+// exists). A crashed first attempt is dispatched exactly once more and that
+// second answer is final, thrown or not, so the caller's existing crash
+// handling still sees it.
 export function retryCrashed(dispatch, crashed) {
   const again = (first) => (crashed(first) ? dispatch() : first);
   return Promise.resolve()
@@ -513,33 +484,32 @@ export function retryCrashed(dispatch, crashed) {
     .then(again, () => again(null));
 }
 
-// The one function that is NOT byte-identical to review-pr.js's copy, and
-// deliberately so — Gap 1's ruling (no cached replay on omp) is a HARNESS
-// fact, not a portable one. `harness` selects which half of the ruling
-// applies: "claude" returns review-pr.js's own hardcoded message, word for
-// word (review-core-parity.test.mjs pins them identical); "omp" says the crash
-// is reported and not acted on, because nothing in eval/task memoizes a
-// subagent dispatch by run id across separate tool invocations (#1349 gap 1;
-// #1296 Q5#1), and the one re-dispatch this run gets was already spent in-run
-// (#1802).
-export function resumeFor(unverified, harness) {
+// omp has no cached-replay mechanism (ADR 0004/0005, #1349 gap 1): a fresh
+// review re-dispatches every agent() live rather than only the crashed
+// legs, and the one re-dispatch this run gets was already spent in-run
+// (#1802) — a crashed finding is reported and deferred, never resumed.
+export function resumeFor(unverified) {
   const crashed = unverified.filter((f) => f.refutersDispatched > 0);
   if (!crashed.length) return { crashed, resume: null };
   const claim =
     "Findings in `unverified` with `refutersDispatched` above zero and no surviving vote had every refuter die, and die again on the in-run retry — nothing looked at them. ";
   const verb =
-    harness === "claude"
-      ? "Resume before deferring them: relaunch with `Workflow({scriptPath, resumeFromRunId})`, passing the runId this run's tool result reports. The unchanged prefix of agent() calls replays from cache and only the calls that died run live."
-      : "Defer them as crashed — reported, not acted on: omp's eval has no cached-replay mechanism (ADR 0004/0005, #1349 gap 1), so a fresh review re-dispatches every agent() live rather than only the crashed legs, and the in-run retry was this review's one re-dispatch. Re-run nothing for them.";
+    "Defer them as crashed — reported, not acted on: omp's eval has no cached-replay mechanism (ADR 0004/0005, #1349 gap 1), so a fresh review re-dispatches every agent() live rather than only the crashed legs, and the in-run retry was this review's one re-dispatch. Re-run nothing for them.";
   return { crashed, resume: claim + verb };
 }
 
-// #1802. The digest: every field a controller acts on, and nothing bulky. The
-// result object LEADS with exactly these keys, in this order (`runReview`'s
-// return below; review-pr.js's return in the same order), so Claude's ~8 KB
-// inline `<result>` cut lands in the finding arrays, never in the digest —
-// before this, `resume` was the last key and fell past the cut on a large
-// review. `snapshot`, `survived`, `refuted` and `unverified` follow it.
+// #1802. The digest: every field a controller acts on, and nothing bulky.
+// The result object LEADS with exactly these keys, in this order
+// (`runReview`'s return below) — historically so the pre-cutover harness's
+// ~8 KB inline `<result>` cut landed in the finding arrays, never in the
+// digest; before this, `resume` was the last key and fell past the cut on a
+// large review.
+// omp's result goes to a file and the controller reads only named fields
+// out of it with `jq` (review-and-fix.md § The review result file), so
+// nothing here truncates on key order today — the order is kept for the
+// same reason a struct's fields stay ordered: a reader scanning top-down
+// meets the fields that matter first.
+// `snapshot`, `survived`, `refuted` and `unverified` follow it.
 export const DIGEST_KEYS = ["pr", "head", "resume", "testEnvironment", "dimensionsRun", "dimensionsUnrun", "cwdAudit", "counts"];
 
 export function digestOf(result) {
@@ -558,23 +528,20 @@ export function runnerPrRefusal(pr) {
 }
 
 // --- Orchestration ----------------------------------------------------
-// review-pr.js's own top-level script body, as a callable function. `host`
-// supplies `agent(prompt, opts)` (must resolve to PARSED DATA — a rejection
-// or an unresolvable dispatch must resolve to `null`, matching Claude's
-// "agent() returns null on exhaustion" contract that every guard below is
-// written against), `phase(title)`, `log(message)`, and OPTIONALLY
-// `pipeline`/`parallel` (see defaultPipeline/defaultParallel below for the
-// omp shim's implementation of both, built from #1296 Q3's analysis).
+// `host` supplies `agent(prompt, opts)` (must resolve to PARSED DATA — a
+// rejection or an unresolvable dispatch must resolve to `null`, the
+// contract every guard below is written against), `phase(title)`,
+// `log(message)`, and OPTIONALLY `pipeline`/`parallel` (see
+// defaultPipeline/defaultParallel below for the omp shim's implementation
+// of both, built from #1296 Q3's analysis).
 function defaultParallel(fns) {
   return Promise.all(fns.map((fn) => fn()));
 }
 
-// Per-item independence, INCLUDING the null short-circuit review-pr.js's own
-// comment on `unrunCrashed` describes ("the harness runs `if (result ===
-// null) break` before handing a dimension to the next stage"): a stage-1
-// throw or a stage-1 falsy result must land in the SAME null slot a stage-2
-// throw would, so `unrunCrashed`'s index-aligned read of the pipeline result
-// sees one uniform shape for every crash cause (#1296 Q3).
+// Per-item independence, INCLUDING the null short-circuit: a stage-1 throw
+// or a stage-1 falsy result must land in the SAME null slot a stage-2 throw
+// would, so `unrunCrashed`'s index-aligned read of the pipeline result sees
+// one uniform shape for every crash cause (#1296 Q3).
 async function defaultPipeline(items, stage1, stage2) {
   return Promise.all(
     items.map(async (item) => {
@@ -598,14 +565,6 @@ export async function runReview(host, args) {
   const { agent, phase, log } = host;
   const pipeline = host.pipeline ?? defaultPipeline;
   const parallel = host.parallel ?? defaultParallel;
-  // Always "omp" in practice: review-eval.mjs's own harness:"omp" call is the
-  // only caller (its header comment), and this code cannot run at all unless
-  // the omp registry resolved review-eval.mjs's own path in the first place
-  // (fleet-run's Resolver, `fleet-run --path review-eval.mjs`) — so the
-  // FLEET_HARNESS=${harness} prefix below can never name an absent registry.
-  // A future second omp-side caller passing a different harness value would
-  // need this reasoning re-checked, not assumed.
-  const harness = host.harness ?? "omp";
 
   const A = decodeArgs(args);
   const pr = A.pr;
@@ -614,9 +573,7 @@ export async function runReview(host, args) {
   const scratch = A.scratch || `/tmp/review-pr-${pr}`;
   const runRootParent = `${scratch}/pr${pr}`;
   const runRootPrefix = `${runRootParent}/run-`;
-  const verifiers = A.verifiers || 2;
-  const verifiersBySeverity = A.verifiersBySeverity || { critical: verifiers, important: verifiers, suggestion: 0 };
-  const verifiersFor = (sev) => verifiersBySeverity[sev] ?? verifiers;
+  const verifiersForRun = verifiersFor(A);
 
   if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");
 
@@ -726,25 +683,25 @@ a match nor a mismatch. Do not judge whether the diff is usable, and do not
 withhold one field because another failed: report what you got and let the
 caller decide.
 
-Then derive this repository's own test command — FLEET_HARNESS is set
-explicitly because this machine carries both harnesses' registries for this
-plugin, which makes fleet-run's own ambiguity detection refuse without it
-(measured 2026-09-11, PR #1409's first review pass: derive-testcmd.sh died
-with "both registries carry ... refusing to guess" and the review reported
-testCmdError instead of a usable testCmd):
+Then derive this repository's own test command:
 
-    FLEET_HARNESS=${harness} ~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} HEAD
+    ~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} HEAD
 
 Report \`testCmd\` = its stdout ONLY if it exited 0. If it exited non-zero,
 report \`testCmdError\` = its stderr and omit \`testCmd\`.
 
 Then size the diff:
 
-    FLEET_HARNESS=${harness} ~/.fleet/bin/fleet-run diff-stats.mjs --pr ${pr}
+    ~/.fleet/bin/fleet-run diff-stats.mjs --pr ${pr}
 
 Report \`runRoot\` = the SNAPSHOT_RUN_ROOT value and \`path\` = the SNAPSHOT_DEST
-value, both copied verbatim — do not reconstruct either. Report the HEAD sha,
-and — in \`diffStats\` — the SINGLE-LINE JSON object diff-stats.mjs prints to
+value, both copied verbatim. Each ends in a component the shell substituted —
+a 'mktemp' name, and a sha — so neither is readable off this prompt: do not
+reconstruct it, and do not report a path the block did not print. The caller
+checks both against the run root it provisioned and refuses the review when
+they disagree, so a reconstructed path costs the run rather than sending six
+specialists into another run's tree. Report the HEAD sha, and — in
+\`diffStats\` — the SINGLE-LINE JSON object diff-stats.mjs prints to
 STDOUT, copied verbatim. Only runRoot, path, head, pathVerified and repoVerified
 are ever required — diffStats, diffPath, diffLines, refHead and prHead are each
 omitted independently when their command failed, and repoError only accompanies
@@ -802,25 +759,14 @@ a false repoVerified.`,
 
   // #1433. Both prompts below carry the inherited-cwd rule, and it is stated in
   // each rather than shared: review-eval.mjs's own header holds the measurement
-  // and the reason this is prompt prose at all (no dispatch primitive on either
-  // harness takes a per-call cwd), and #496's brief rules the shared-source
-  // route out for exactly these blocks. Three parts, in this order, because the
-  // last two are inert without the first: the cwd the specialist starts in is
-  // NAMED as a tree it must not write to, `pwd` fixes which directory that is,
-  // and the `CWD-AUDIT:` line is what makes a clean run say so — an audit
-  // reported only when dirty is indistinguishable from one never run, the same
-  // reading `unrunReason` applies to a `test_run` that reports nothing.
-  //
-  // The Claude-harness twin of these two dispatches — review-pr.js's own
-  // hardcoded Review/Verify `agent()` calls, not importable from here per
-  // this file's own header rationale — now carries the same three parts
-  // word-for-word (#1673). Its refuter states the cwd clause as its own
-  // sentence rather than as this one's trailing "and your shell does not
-  // start there" clause, because review-pr-refuter-scratch.test.mjs pins
-  // that prompt's scratch-ban run as one unbroken clause and a splice into
-  // it reds there; every load-bearing word is the same. Both copies are
-  // pinned against each other by review-pr-cwd-isolation.test.mjs, so an
-  // edit here that skips review-pr.js reds rather than drifting silently.
+  // and the reason this is prompt prose at all (no dispatch primitive takes a
+  // per-call cwd), and #496's brief rules the shared-source route out for
+  // exactly these blocks. Three parts, in this order, because the last two are
+  // inert without the first: the cwd the specialist starts in is NAMED as a
+  // tree it must not write to, `pwd` fixes which directory that is, and the
+  // `CWD-AUDIT:` line is what makes a clean run say so — an audit reported
+  // only when dirty is indistinguishable from one never run, the same reading
+  // `unrunReason` applies to a `test_run` that reports nothing.
   phase("Review");
   const reviewed = await pipeline(
     dimensions,
@@ -852,9 +798,19 @@ ${readRules(usableDiff(snap), stats, snap)}
 
 Tests: from the snapshot's root, run exactly this — copy it verbatim:
   ${testCmd}
-Do not substitute a command of your own. Whatever you run, report it in
-\`test_run\` — the command verbatim and the counts you saw — even when it
-failed or produced nothing. 'tests 0' is a FAILED run, not a pass.
+Do not substitute a command of your own. In a repo that has a shared test stack,
+a bare runner picks up a default config whose setup can tear a sibling's
+container down mid-run; a guessed glob is worse in every repo, because one
+matching nothing still exits 0 reporting 'tests 0' — a green that ran nothing.
+Whatever you run, report it in \`test_run\` — the command verbatim and the counts
+you saw — even when it failed or produced nothing.
+'tests 0' is a FAILED run, not a pass: \`tests: 0\` is how this dimension gets
+reported unrun, and an empty findings list cannot say it for you. So is a run
+that collected tests and did none of the work — 0 passes with no failures is
+everything skipped. And a count well below what the whole tree reports means you
+ran a PARTIAL copy: nothing downstream can catch that one for you, because only
+your own run knows what the full tree reports. Run from the snapshot's root, and
+report any of these as unrun.
 
 ${environmentNote(snap)}
 
@@ -897,7 +853,7 @@ to name.`,
       phase("Verify");
       return parallel(
         (review && review.findings ? review.findings : []).map((f, fi) => () => {
-          const n = verifiersFor(f.severity);
+          const n = verifiersForRun(f.severity);
           if (n === 0) return Promise.resolve({ ...f, dimension: d.key, ...verdictFor(0, []) });
           // #1802: a pair whose EVERY vote died (or whose dispatch threw) is
           // re-dispatched once, as a pair, before `verdictFor` reads it — one
@@ -914,7 +870,21 @@ to name.`,
   evidence: ${f.evidence}
 
 Verify against the snapshot ${snap.path} by RUNNING something — compile it, run
-the test, apply the mutation. Do not reason your way to agreement.
+the test, apply the mutation. Do not reason your way to agreement. Observe
+that run synchronously — run the command, wait for it, read its exit code.
+Never poll a log file for a completion marker: prefer ONE blocking run to a
+poll loop, and treat its return as permission to look, never as the answer.
+Reading a log the run has already finished writing is fine; waiting on one is
+not. If you match a test reporter's own output, accepting both \`ℹ\` and \`#\`
+is necessary but NOT sufficient — strip SGR escapes first as well. node's
+prefix moves with the node version and with whether stdout is a TTY, and
+color wraps the whole line so it begins with ESC and no prefix anchor matches
+at all, which returns empty at exit 0 — indistinguishable from a hung run and
+from a run of zero tests. For an uncolored baseline use \`env -u FORCE_COLOR\`;
+\`FORCE_COLOR=\` empty still enables color, so it is not a control. State your
+search scope AND what your pattern would have missed. A grep over one ref
+does not support a claim about history; a pattern built from the token a diff
+removed does not support a claim that the category is empty.
 
 Chain the directory change into the command, \`cd "$D" && git …\`, never
 \`cd "$D"; git …\`, so a failed \`cd\` cannot leave a \`git\` command running in the
@@ -998,7 +968,7 @@ how three reviews from one cell left four files modified in that checkout
   const refuted = all.filter((f) => f.verdict === "refuted");
   const unverified = all.filter((f) => f.verdict === "unverified");
 
-  const { crashed, resume } = resumeFor(unverified, harness);
+  const { crashed, resume } = resumeFor(unverified);
 
   log(
     `${survived.length} survived, ${refuted.length} refuted, ${unverified.length} unverified ` +
@@ -1008,6 +978,26 @@ how three reviews from one cell left four files modified in that checkout
   const rank = { critical: 0, important: 1, suggestion: 2 };
   const bySeverity = (a, b) => (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3);
 
+  // Refuted findings are RETURNED, not dropped. A refutation is itself a claim,
+  // and the controller has reversed a refutation on new evidence before.
+  // `unverified` are findings the adversarial pass did not settle — a suggestion
+  // that skipped it by policy, or one whose refuters all crashed — surfaced
+  // separately so the caller never mistakes "not checked" for "survived".
+  // `dimensionsRun` names what was DISPATCHED after the size trim: a trimmed
+  // fan-out must say so, never read as full coverage. It is not a coverage claim
+  // on its own and never was — a specialist can be dispatched and die, or run and
+  // never execute the suite — so `dimensionsUnrun` names which of those keys did
+  // not cover their ground, and why. A key in the first and NOT in the second ran
+  // a suite — not that it is covered (#535). `unrunReason` reads `test_run`'s
+  // counts and quotes `run.command` into its message; it never compares that
+  // command against the one the dispatch handed out, so a specialist that
+  // substituted a narrower runner is not classified unrun.
+  //
+  // The two are siblings rather than one filtered list because they answer
+  // different questions. Subtracting the unrun ones from `dimensionsRun` would
+  // make a crashed dimension indistinguishable from one the size tier never
+  // dispatched — this ticket set's own defect, moved one field over.
+  //
   // #1802. Digest first, in DIGEST_KEYS order, bulk last — see DIGEST_KEYS
   // above for why the order is the contract.
   return {

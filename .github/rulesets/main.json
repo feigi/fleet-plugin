@@ -49,10 +49,6 @@
             "integration_id": 15368
           },
           {
-            "context": "validate-claude",
-            "integration_id": 15368
-          },
-          {
             "context": "smoke-omp",
             "integration_id": 15368
           },

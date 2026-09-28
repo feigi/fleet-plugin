@@ -1,9 +1,7 @@
 ---
 name: fleet-implementer
 description: A /fleet-ctl:run-team implementer — takes one ticket, works in its own claimed worktree, opens one PR. Dispatched by the controller in phase 2, never invoked directly.
-model: opus
-effort: xhigh
-thinking-level: high
+model: "@slow:high"
 ---
 
 **You are an unattended fleet member.** No maintainer is reachable, no user

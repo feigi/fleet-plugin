@@ -1,6 +1,6 @@
 # 0006 — The plugin is `fleet-ctl`: a bare name that fails loud
 
-**Status:** Accepted. Ruled 2026-09-09 on #1319, against the measurements below.
+**Status:** Accepted. Ruled 2026-09-09 on #1319, against the measurements below. Amended by ADR 0014: the namespace asymmetry is moot; the qualified install id and the npm collision guard stand.
 
 ## Context
 

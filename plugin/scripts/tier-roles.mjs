@@ -1,21 +1,27 @@
 #!/usr/bin/env node
-// omp tier routing (ADR 0011). `model: opus|sonnet|haiku` in an agent
-// definition is a bare vendor alias that resolves directly on Claude Code —
-// on omp, the same key is a fuzzy model selector, and an install with no
-// Anthropic model configured fails preflight outright. omp's own lever for
-// this is roles (`modelRoles.slow/task/smol`, `@role` aliases) plus the
-// per-agent setting `task.agentModelOverrides[agentName]`, which is
-// model-precedence #1 for task/eval dispatch. This file is the one place the
-// tier->role map lives, the generator that derives every definition's
-// override from it, and the checker that verifies the operator's
-// `task.agentModelOverrides`/`modelRoles` against what the fleet's
-// definitions actually need — read-only, never `omp config set`.
+// omp tier routing (ADR 0011, ADR 0014). `model: "@<role>:<level>"` in an
+// agent definition is a fleet tier route — never a vendor id — resolved
+// through the operator's `modelRoles.slow|task|smol`, with the explicit
+// `:<level>` suffix on the REFERRING alias winning over the role's own
+// baked one (`modelRoles.<role>` values carry their own baked suffix,
+// measured `smol: anthropic/claude-haiku-4-5:auto` on a real install).
 //
-// The explicit `:<level>` suffix on every generated override is deliberate:
-// `modelRoles.<role>` values carry their own baked suffix (measured
-// `smol: anthropic/claude-haiku-4-5:auto` on a real install) and an explicit
-// suffix on the REFERRING alias wins over the role's own baked one — so
-// `@smol:low` on the override beats the role's `:auto` default.
+// This file is CHECK-ONLY (ADR 0014): there is no generator and no
+// operator-side override record to derive any more — `model:` in the
+// definition IS the route, and omp resolves the `@<role>` alias through
+// `modelRoles` natively (`omp://task-agent-discovery.md`). What is left to
+// verify, read-only, never `omp config set`:
+//   (a) every definition's `model:` is a well-formed route
+//       (`@slow|@task|@smol:<level>`);
+//   (b) every role a definition uses has a `modelRoles.<role>` that
+//       resolves to a model;
+//   (c) no `task.agentModelOverrides` entry shadows a fleet definition —
+//       that config is model-precedence #1 for task/eval dispatch (ADR
+//       0011), so a leftover `fleet-*` key there would silently win over
+//       the definition's own `model:`, which ADR 0014 retires as a lever;
+//   (d) `modelRoles.slow`/`modelRoles.task` resolving to the same model is
+//       flagged as a notice — legal, but the alt-tier comparison
+//       (fleet-implementer-alt) then controls nothing.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -31,57 +37,40 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 // process access below this line until main()
 // ---------------------------------------------------------------------------
 
-// The fixed tier->role map (user-confirmed). An operator wanting a different
-// target model changes `modelRoles`, never this map — this is the only place
-// it lives.
-export const OMP_ROLE_FOR_MODEL = { opus: "slow", sonnet: "task", haiku: "smol" };
+// Role names in print order — a fixed list, not derived from anything: ADR
+// 0014 retired the tier->role map this used to come from (OMP_ROLE_FOR_MODEL
+// with its opus/sonnet/haiku keys), and the fleet only ever names these
+// three roles.
+const ROLE_ORDER = ["slow", "task", "smol"];
 
-// Frontmatter reader — MOVED here (not duplicated) from tier-check.mjs, which
-// now imports it: both the generator here and the dispatch-time compare in
-// tier-check.mjs need the same three fields off the same five-key frontmatter
-// shape implementer-model-tier.test.mjs pins independently for the
-// declaration's own prose-adjacent contract.
+const MODEL_ROUTE_RE = /^@(slow|task|smol):(minimal|low|medium|high|xhigh|max)$/;
+
+// Strips one matching pair of surrounding double or single quotes — YAML's
+// own scalar quoting, needed because `model:` must be quoted in frontmatter
+// (a bare leading `@` is not valid unquoted YAML).
+function unquote(value) {
+  const s = String(value ?? "");
+  const m = /^"(.*)"$/.exec(s) || /^'(.*)'$/.exec(s);
+  return m ? m[1] : s;
+}
+
+// A frontmatter `model:` value -> `{ role, level }`, both `null` when it is
+// not a well-formed `@slow|@task|@smol:<level>` route.
+export function parseModelRoute(value) {
+  const m = MODEL_ROUTE_RE.exec(unquote(value));
+  return m ? { role: m[1], level: m[2] } : { role: null, level: null };
+}
+
+// Reads a definition's frontmatter -> `{ model, role, level }`. `model` is
+// the raw declared value (as written, quotes and all); `role`/`level` are
+// parsed off its unquoted form and both `null` when `model` is missing or
+// does not match `@<role>:<level>` — the shape tier-check.mjs's own
+// dispatch-time compare imports this for.
 export function parseFrontmatter(agentFileText) {
   const fm = String(agentFileText ?? "").split("---")[1] ?? "";
-  const field = (key) => new RegExp(`^${key}:\\s*(\\S+)$`, "m").exec(fm)?.[1] ?? null;
-  return { model: field("model"), effort: field("effort"), thinkingLevel: field("thinking-level") };
-}
-
-function nameField(agentFileText) {
-  const fm = String(agentFileText ?? "").split("---")[1] ?? "";
-  return /^name:\s*(\S+)$/m.exec(fm)?.[1] ?? null;
-}
-
-// One definition's frontmatter -> the omp override string it needs, or
-// `null` when this cannot be routed at all (an unrecognised model, or no
-// `thinking-level:` to carry as the explicit suffix). `null` is a refusal
-// signal for the caller, never a default.
-export function ompOverrideFor(frontmatter) {
-  const role = OMP_ROLE_FOR_MODEL[frontmatter?.model];
-  if (!role || !frontmatter?.thinkingLevel) return null;
-  return `@${role}:${frontmatter.thinkingLevel}`;
-}
-
-// Every `*.agent.md` under `agentsDir` -> `{ [name]: override }`. A
-// definition this cannot route (`ompOverrideFor` returns `null`, or the
-// file's own `name:` is missing) is a refusal, never a skipped file: an
-// operator who read a clean generator output and set exactly that has no way
-// to know a definition was silently dropped.
-export function expectedOverrides(agentsDir) {
-  const files = readdirSync(agentsDir).filter((f) => f.endsWith(".agent.md")).sort();
-  const out = {};
-  for (const file of files) {
-    const text = readFileSync(join(agentsDir, file), "utf8");
-    const name = nameField(text);
-    if (!name) throw new Error(`${file}: missing name: in frontmatter`);
-    const frontmatter = parseFrontmatter(text);
-    const override = ompOverrideFor(frontmatter);
-    if (override === null) {
-      throw new Error(`${file}: model ${JSON.stringify(frontmatter.model)}/thinking-level ${JSON.stringify(frontmatter.thinkingLevel)} cannot be routed to an omp role`);
-    }
-    out[name] = override;
-  }
-  return out;
+  const model = /^model:\s*(.+)$/m.exec(fm)?.[1]?.trim() ?? null;
+  const { role, level } = model ? parseModelRoute(model) : { role: null, level: null };
+  return { model, role, level };
 }
 
 // Removes a trailing `:<level>` (`claude-opus-5:high` -> `claude-opus-5`);
@@ -104,12 +93,13 @@ export function resolveRole(role, modelRoles, depth = 0) {
   return stripLevel(raw);
 }
 
-// A declared alias (`opus`/`sonnet`/`haiku`) -> the role it routes through on
-// omp and the model that role currently resolves to (or `null` for either
-// half when the alias is unrecognised or the role is unset).
+// A declared route (`@slow:xhigh`/…) -> the role/level it carries and the
+// model that role currently resolves to. `role`/`level` are `null` when the
+// value is not a route at all; `model` is `null` when the role is unset (or
+// the value is not a route).
 export function expectedOmpModel(declaredModel, modelRoles) {
-  const role = OMP_ROLE_FOR_MODEL[declaredModel] ?? null;
-  return { role, model: role ? resolveRole(role, modelRoles) : null };
+  const { role, level } = parseModelRoute(declaredModel);
+  return { role, level, model: role ? resolveRole(role, modelRoles) : null };
 }
 
 // Tolerates a role value written without its provider prefix — omp's
@@ -121,21 +111,11 @@ export function modelsEqual(a, b) {
   return sa === sb || sa.endsWith("/" + sb) || sb.endsWith("/" + sa);
 }
 
-// Exact double-quoted YAML block for `task.agentModelOverrides`, sorted by
-// agent name so the output (and any diff against it) is stable.
-export function formatYaml(overrides) {
-  const lines = ["task:", "  agentModelOverrides:"];
-  for (const name of Object.keys(overrides).sort()) {
-    lines.push(`    ${name}: "${overrides[name]}"`);
-  }
-  return lines.join("\n") + "\n";
-}
-
 // `omp config get <key> --json` reads the MERGED effective value (built-in
 // defaults, global config, project settings, `--config` overlays, runtime
-// overrides — measured for the retired pool-preflight.mjs, #1588) — `modelRoles.slow` dotted
-// into a record is `Unknown setting` on this box, so a record-valued key is
-// always read whole. Never writes.
+// overrides — measured for the retired pool-preflight.mjs, #1588) —
+// `modelRoles.slow` dotted into a record is `Unknown setting` on this box,
+// so a record-valued key is always read whole. Never writes.
 export function readOmpConfigValue(key) {
   let out;
   try {
@@ -150,80 +130,59 @@ export function readOmpConfigValue(key) {
   }
 }
 
-// The role names in the order a violation/notice about them should print —
-// derived from the map itself (slow, task, smol), never a second hand-kept
-// list: a role added to `OMP_ROLE_FOR_MODEL` and missing here would drop out
-// of `checkOverrides`'s unset-role loop in silence.
-const ROLE_ORDER = Object.values(OMP_ROLE_FOR_MODEL);
-
 // Every fleet definition's `name:` carries this prefix — enforced in CI by
 // frontmatter-allowlist.json's agents `name` pattern (`^fleet-[^:]*$`,
-// #1303). It is the only way to tell a fleet-owned
-// `task.agentModelOverrides` entry whose definition is GONE (stale, the
-// fleet's to drop) from the operator's own entry (never the fleet's to touch).
+// #1303). It is the only way to tell a fleet-owned `task.agentModelOverrides`
+// entry (a pre-cutover install can still carry one — ADR 0014 retires the
+// config as a lever, it does not clear it) from the operator's own entry,
+// which this check never touches.
 const FLEET_NAME_PREFIX = "fleet-";
 
-// The role an `expectedOverrides` value routes through, parsed back off the
-// override string (`@slow:xhigh` -> `slow`) rather than re-deriving it from
-// a model name, so this stays correct even for a hand-edited `expected` (the
-// CLI's `--overrides`/`--model-roles` test seams pass raw JSON, not agent
-// frontmatter).
-function roleOf(override) {
-  return /^@([a-z]+):/.exec(override)?.[1] ?? null;
+// POSIX single-quoting for a printed command line: the remedy carries the
+// operator's own override values, which this file never chose.
+function shellQuote(s) {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-// The whole `task.agentModelOverrides` value an `omp config set` must carry to
-// fix the fleet's entries WITHOUT deleting the operator's own: `omp config
-// set` on a record key REPLACES the record (measured, omp 18.3.0), so a
-// fleet-only object would silently wipe every non-fleet override. The
-// operator's own entries are kept verbatim, every expected entry is laid
-// over them, and a stale `fleet-` entry (no definition left) is dropped —
-// it is exactly the violation `checkOverrides` names.
-function mergedOverrides({ expected, actual }) {
-  const own = Object.fromEntries(
-    Object.entries(actual ?? {}).filter(([name]) => !name.startsWith(FLEET_NAME_PREFIX)),
-  );
-  return { ...own, ...expected };
-}
-
-// The operator's `task.agentModelOverrides`/`modelRoles` against what the
-// fleet's own definitions need. `violations` stop a run (ADR 0011); `notices`
-// never do — they flag a hazard (the alt-tier pairing controlling nothing)
-// that is legal configuration, just probably not what the operator meant.
-// The two remedies are separate because the two configs are: `overridesRemedy`
-// is the merged `task.agentModelOverrides` value to set, or `null` when every
-// override is already right (setting it again would change nothing);
-// `unresolvedRoles` names each used role whose `modelRoles` entry reaches no
-// model — a fix only the operator can choose a model for.
-export function checkOverrides({ expected, actual, modelRoles, agentsDir }) {
+// The operator's install (`modelRoles`, and any leftover
+// `task.agentModelOverrides`) against what the fleet's own definitions need.
+// `violations` stop a run (ADR 0014); `notices` never do — they flag a
+// hazard (the alt-tier pairing controlling nothing) that is legal
+// configuration, just probably not what the operator meant.
+export function checkRoutes({ agentsDir, modelRoles, overrides }) {
   const violations = [];
   const notices = [];
-  let overridesWrong = false;
+  const usedBy = {}; // role -> [file, ...]
 
-  for (const name of Object.keys(expected)) {
-    if (actual?.[name] !== expected[name]) {
-      overridesWrong = true;
-      const got = actual?.[name] === undefined ? "absent" : JSON.stringify(actual[name]);
-      violations.push(`${name}: expected "${expected[name]}", got ${got}`);
+  const files = readdirSync(agentsDir).filter((f) => f.endsWith(".agent.md")).sort();
+  for (const file of files) {
+    const text = readFileSync(join(agentsDir, file), "utf8");
+    const fm = parseFrontmatter(text);
+    if (!fm.role || !fm.level) {
+      violations.push(`${file}: model ${JSON.stringify(fm.model)} is not @<role>:<level>`);
+      continue;
     }
+    (usedBy[fm.role] ??= []).push(file);
   }
 
-  for (const name of Object.keys(actual ?? {})) {
-    if (name.startsWith(FLEET_NAME_PREFIX) && !(name in expected)) {
-      overridesWrong = true;
-      violations.push(`${name}: stale override ${JSON.stringify(actual[name])} — no such definition under ${agentsDir}`);
-    }
-  }
-
-  const usedRoles = new Set(Object.values(expected).map(roleOf).filter(Boolean));
-  const unresolvedRoles = [];
   for (const role of ROLE_ORDER) {
-    if (usedRoles.has(role) && resolveRole(role, modelRoles) === null) {
-      unresolvedRoles.push(role);
-      const raw = modelRoles?.[role];
-      violations.push(typeof raw === "string" && raw !== ""
-        ? `modelRoles.${role}: ${JSON.stringify(raw)} never reaches a model — its @-alias chain hits an unset role, cycles, or runs past 8 hops`
-        : `modelRoles.${role}: unset — @${role} would fall through to the parent's model`);
+    if (!usedBy[role]) continue;
+    if (resolveRole(role, modelRoles) === null) {
+      violations.push(`modelRoles.${role} is unset — needed by ${usedBy[role].join(", ")}`);
+    }
+  }
+
+  const overrideKeys = Object.keys(overrides ?? {});
+  const fleetKeys = overrideKeys.filter((k) => k.startsWith(FLEET_NAME_PREFIX)).sort();
+  if (fleetKeys.length > 0) {
+    const nonFleet = Object.fromEntries(
+      overrideKeys.filter((k) => !k.startsWith(FLEET_NAME_PREFIX)).map((k) => [k, overrides[k]]),
+    );
+    const remedy = Object.keys(nonFleet).length === 0
+      ? "omp config reset task.agentModelOverrides"
+      : `omp config set task.agentModelOverrides ${shellQuote(JSON.stringify(nonFleet))}`;
+    for (const name of fleetKeys) {
+      violations.push(`task.agentModelOverrides.${name} shadows the definition's own model (precedence #1) — remove it (${remedy})`);
     }
   }
 
@@ -233,14 +192,7 @@ export function checkOverrides({ expected, actual, modelRoles, agentsDir }) {
     notices.push(`modelRoles.slow and modelRoles.task both resolve to ${slowModel} — the alternate-tier comparison controls nothing`);
   }
 
-  const overridesRemedy = overridesWrong ? mergedOverrides({ expected, actual }) : null;
-  return { violations, notices, overridesRemedy, unresolvedRoles };
-}
-
-// POSIX single-quoting for a printed command line: the merged remedy now
-// carries the operator's own override values, which this file never chose.
-function shellQuote(s) {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
+  return { violations, notices };
 }
 
 // ---------------------------------------------------------------------------
@@ -250,8 +202,6 @@ function shellQuote(s) {
 const die = makeDie(NAME);
 const { arg, has, sweep, stray } = defineFlags(die, {
   flags: {
-    json: "bool",
-    merge: "bool",
     check: "bool",
     agents: "value",
     overrides: "value",
@@ -277,64 +227,22 @@ function main() {
   sweep();
   stray();
 
-  const agentsDir = arg("agents") ?? join(SCRIPT_DIR, "..", "agents");
-  const json = has("json");
-  const merge = has("merge");
   const check = has("check");
+  if (!check) die("--check is required (usage: tier-roles.mjs --check [--agents <dir>] [--model-roles <path>] [--overrides <path>])");
 
-  if (json && check) die("--json prints the block; it has no meaning with --check");
-  // `--merge` exists for one consumer, README's `omp config set
-  // task.agentModelOverrides "$(… --json --merge)"`: that set REPLACES the
-  // whole record, so the printed object must already carry the operator's
-  // own entries. The YAML block is pasted under the key by hand, which
-  // merges by construction.
-  if (merge && !json) die("--merge only shapes --json's object for `omp config set`; it has no meaning without --json");
+  const agentsDir = arg("agents") ?? join(SCRIPT_DIR, "..", "agents");
+  const overrides = loadJsonObject(arg("overrides"), "task.agentModelOverrides", "overrides");
+  const modelRoles = loadJsonObject(arg("model-roles"), "modelRoles", "model-roles");
 
-  let expected;
-  try {
-    expected = expectedOverrides(agentsDir);
-  } catch (e) {
-    die(e.message);
-  }
-
-  if (!check) {
-    if (json) {
-      const out = merge
-        ? mergedOverrides({ expected, actual: loadJsonObject(arg("overrides"), "task.agentModelOverrides", "overrides") })
-        : expected;
-      console.log(JSON.stringify(out));
-    } else {
-      process.stdout.write(formatYaml(expected));
-    }
-    process.exit(0);
-  }
-
-  const overridesPath = arg("overrides");
-  const modelRolesPath = arg("model-roles");
-  const actual = loadJsonObject(overridesPath, "task.agentModelOverrides", "overrides");
-  const modelRoles = loadJsonObject(modelRolesPath, "modelRoles", "model-roles");
-
-  const { violations, notices, overridesRemedy, unresolvedRoles } = checkOverrides({ expected, actual, modelRoles, agentsDir });
+  const { violations, notices } = checkRoutes({ agentsDir, modelRoles, overrides });
 
   if (violations.length === 0) {
-    for (const name of Object.keys(expected).sort()) {
-      const role = roleOf(expected[name]);
-      console.log(`tier-roles: ${name} → ${expected[name]} = ${resolveRole(role, modelRoles)}`);
-    }
+    console.log("tier-roles: every definition routes to a resolvable model, no shadowing override");
     for (const n of notices) console.log(`tier-roles: notice: ${n}`);
     process.exit(0);
   }
 
   for (const v of violations) console.error(`tier-roles: ${v}`);
-  if (overridesRemedy) {
-    console.error(`tier-roles: remedy: omp config set task.agentModelOverrides ${shellQuote(JSON.stringify(overridesRemedy))}`);
-  } else {
-    console.error("tier-roles: task.agentModelOverrides already matches every definition — nothing to set there");
-  }
-  if (unresolvedRoles.length) {
-    const roles = unresolvedRoles.map((r) => `modelRoles.${r}`).join(", ");
-    console.error(`tier-roles: remedy: give ${roles} a model this install has — \`omp config set modelRoles\` REPLACES the whole record, so start from \`omp config get modelRoles --json\` and keep every role already there`);
-  }
   for (const n of notices) console.error(`tier-roles: notice: ${n}`);
   process.exit(1);
 }

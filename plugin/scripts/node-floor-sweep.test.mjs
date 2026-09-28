@@ -40,8 +40,6 @@
 // reach above the floor unseen (measured: `Object.groupBy(` appended to
 // `fleet-run` left this suite green). They are CommonJS, so every table entry
 // below that is matched at a module site matches its `require(…)` form too.
-// `plugin/workflows/*.js` stays out: ESM a harness runs and plain node never
-// loads, so no node floor applies to it.
 // Non-vacuity is asserted explicitly, same discipline every other sweep in
 // this directory uses (see repo-root.mjs's own header, `check-tracked.sh`):
 // an empty shipped-file list is a broken glob, not "nothing to check" — and

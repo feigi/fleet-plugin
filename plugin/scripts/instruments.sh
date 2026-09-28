@@ -149,13 +149,12 @@ done
 
 # The repository under audit is the WORKING DIRECTORY's checkout, never the
 # checkout this script happens to ship from. Under the install-only dev loop
-# (ADR 0003) this file runs out of a plugin cache — on a real install,
-# `~/.claude/plugins/cache/fleet-plugin/fleet-ctl/<version>/scripts/
-# instruments.sh` — and the OLD own-location contract (`git -C "$(dirname
-# "$0")" …`) resolved the audited tree to whatever git checkout happens to
-# CONTAIN that cache path. Measured (#1337): on a real box that is the
-# operator's unrelated personal dotfiles checkout, and `--pin` run that way
-# writes `.fleet/instruments.sha` into it. `--repo <path>` is the explicit
+# (ADR 0003) this file runs out of a plugin cache — on a real install, under
+# `~/.omp/plugins/cache/...` — and the OLD own-location contract (`git -C
+# "$(dirname "$0")" …`) resolved the audited tree to whatever git checkout
+# happens to CONTAIN that cache path. Measured (#1337), pre-cutover: on a
+# real box that was the operator's unrelated personal dotfiles checkout, and
+# `--pin` run that way writes `.fleet/instruments.sha` into it. `--repo <path>` is the explicit
 # override for the one legitimate case that needs a tree other than cwd's:
 # auditing a named worktree from elsewhere. Resolution happens before
 # anything is read or written, so a cwd outside any checkout refuses here,

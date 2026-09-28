@@ -154,8 +154,8 @@ function classifyScript(rel, content) {
 const NODE_SHEBANG_ENTRYPOINTS = ["plugin/scripts/fleet-bootstrap", "plugin/scripts/fleet-provenance", "plugin/scripts/fleet-run"];
 
 // Per-kind floors over what classifyScript() returns, at ~60% of each kind's
-// measured baseline — the ratio the #1821 retired-word sweep's own
-// tracked-file floor and marked-pairs.test.mjs's MD_DIR_FLOORS use. Measured
+// measured baseline — the same ratio the #1821 retired-word sweep's own
+// tracked-file floor uses. Measured
 // 2026-09-27 (#2025): 14
 // `sh` (every `.sh`) and 36 `js` (33 `.mjs` plus the three
 // NODE_SHEBANG_ENTRYPOINTS), out of 52 tracked; board.html and the one
@@ -362,13 +362,12 @@ test("jsSelfLocationViolation: does not flag repoRoot's own explicit cwd paramet
 
 // ==================== Rule (b): literal source/harness/registry paths in prose ====================
 
-// The five literal tokens ADR 0003/CONTEXT.md's Resolver entry forbid in a
+// The four literal tokens ADR 0003/CONTEXT.md's Resolver entry forbid in a
 // prose callsite: an absolute source-checkout path, an absolute macOS home
-// path, either harness's cache path, or the registry filename itself.
+// path, omp's cache path, or the registry filename itself.
 const LITERAL_PATTERNS = [
   { name: "home-dev-checkout", re: /~\/dev\// },
   { name: "absolute-Users-path", re: /\/Users\// },
-  { name: "claude-plugin-cache", re: /~\/\.claude\/plugins\/cache/ },
   { name: "omp-plugin-cache", re: /~\/\.omp\/plugins\/cache/ },
   { name: "registry-filename", re: /installed_plugins\.json/ },
 ];
@@ -394,16 +393,16 @@ export function literalPathMatches(text) {
 }
 
 test(
-  "no prose under plugin/skills/ plugin/commands/ plugin/agents/ plugin/workflows/ contains a literal "
+  "no prose under plugin/skills/ plugin/commands/ plugin/agents/ contains a literal "
   + "source/harness/registry path",
   { skip: SKIP_WITHOUT_REPO },
   () => {
-    const files = trackedPaths(ROOT, ["plugin/skills/*", "plugin/commands/*", "plugin/agents/*", "plugin/workflows/*"]);
+    const files = trackedPaths(ROOT, ["plugin/skills/*", "plugin/commands/*", "plugin/agents/*"]);
     assert.ok(
       files.length > 15,
-      `the prose set has only ${files.length} entries — too few to be the real tree across plugin/skills/, plugin/commands/, plugin/agents/ and plugin/workflows/, and the sweep below would pass vacuously over an empty or near-empty list`,
+      `the prose set has only ${files.length} entries — too few to be the real tree across plugin/skills/, plugin/commands/ and plugin/agents/, and the sweep below would pass vacuously over an empty or near-empty list`,
     );
-    for (const d of ["plugin/skills/", "plugin/commands/", "plugin/agents/", "plugin/workflows/"]) {
+    for (const d of ["plugin/skills/", "plugin/commands/", "plugin/agents/"]) {
       assert.ok(
         files.some((f) => f.startsWith(d)),
         `${d} contributed no tracked file to the prose set — an over-narrow pathspec or filter bug can drop one whole directory without the count floor above noticing`,
@@ -438,12 +437,6 @@ test("literalPathMatches: flags a literal absolute /Users/ path", () => {
 test("literalPathMatches: an unrelated sentence with no literal path is clean", () => {
   const r = literalPathMatches("run it via `fleet-run arg.mjs` from anywhere");
   assert.deepEqual(r.violations, []);
-});
-
-test("literalPathMatches: flags the Claude plugin cache path literally", () => {
-  const r = literalPathMatches("the cache lives at ~/.claude/plugins/cache/fleet-plugin/fleet-ctl/0.1.1");
-  assert.equal(r.violations.length, 1);
-  assert.equal(r.violations[0].pattern, "claude-plugin-cache");
 });
 
 test("literalPathMatches: flags the omp plugin cache path literally", () => {

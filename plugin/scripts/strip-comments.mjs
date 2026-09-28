@@ -1,8 +1,9 @@
 // Blank out a JS file's comments so a source-text assertion cannot be
 // satisfied by a declaration or a paragraph a reader's eye skips.
 //
-// Both escapes were MEASURED green on `workflows/review-pr.js` before this
-// existed: the three diff schema fields wrapped in `/* */` (the schema drops
+// Both escapes were MEASURED green pre-cutover, on this repo's then-retired
+// review workflow script, before this existed: the three diff schema fields
+// wrapped in `/* */` (the schema drops
 // them, `usableDiff` returns null forever, 12 pass / 0 fail), and the snapshot
 // agent's `Report \`diffPath\`` paragraph deleted and re-inserted inside a
 // block comment (same, 12 pass / 0 fail). A `^(?!\s*//)` anchor closes
@@ -10,8 +11,8 @@
 // have to be remembered once per pin.
 //
 // It lives here rather than inline in one test file because remembering it is
-// exactly what fails. `review-pr-reads.test.mjs` carried a private copy;
-// `review-pr-testcmd.test.mjs` was then written against raw source and its
+// exactly what fails. `review-core-reads.test.mjs` carried a private copy;
+// `review-core-testcmd.test.mjs` was then written against raw source and its
 // schema-declaration pin was vacuous against a block-commented `testCmd:
 // { type: "string" },` — 9 pass / 0 fail with the field genuinely dead under
 // `additionalProperties: false` (#142 review, measured).

@@ -67,16 +67,6 @@
 // `String(raw).trim()` its input needs and the wording of its refusal, not
 // the rule.
 //
-// workflows/review-pr.js is a second edit site this header's grep CANNOT
-// see, and #878 is where it became one. A Claude Code Workflow script cannot
-// perform an import at all (#538, review-core.mjs's header), so it consumes no
-// symbol from here and no `from "./arg.mjs"` row will ever name it — while
-// its `pr` argument reaches `gh pr diff`, `gh pr view` and `diff-stats.mjs
-// --pr` all the same. Its copy of the digits rule is held in step by
-// shared-refusal.test.mjs, which runs it and isDigits() over the same values;
-// its host-independent twin review-core.mjs is an ordinary module and imports
-// the real thing.
-//
 // candidates.mjs qualifies the other way, which the reach test cannot express:
 // it binds makeArg/makeHas, so arg()'s refusals DO reach it — `node
 // scripts/candidates.mjs --limit` refuses under the generated

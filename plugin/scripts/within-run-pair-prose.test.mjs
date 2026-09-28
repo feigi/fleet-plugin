@@ -94,36 +94,30 @@ test("phase 2 says why the pairing is within-run and not week-by-week", () => {
   );
 });
 
-test("the alternate definition differs from the default in MODEL ONLY", () => {
-  // Varying model and effort at once yields a pair that answers neither
-  // question. The effort comparison is a later, separate experiment.
+test("the alternate definition differs from the default in ROLE ONLY, the level stays shared", () => {
+  // Varying role and level at once yields a pair that answers neither
+  // question. The level rides on the same `model: "@<role>:<level>"` key as
+  // the role now (ADR 0014), so this is the one field left to parse apart.
   const fm = (n) => readFileSync(join(REPO, "agents", `${n}.agent.md`), "utf8").split("---")[1] ?? "";
-  const field = (key, name) => {
-    const hit = new RegExp(`^${key}:\\s*(\\S+)$`, "m").exec(fm(name));
-    assert.ok(hit, `${name}.agent.md declares no ${key}`);
-    return hit[1];
+  const route = (name) => {
+    const hit = /^model:\s*"?@([a-z]+):([a-z]+)"?$/m.exec(fm(name));
+    assert.ok(hit, `${name}.agent.md declares no model: route`);
+    return { role: hit[1], level: hit[2] };
   };
+  const alt = route("fleet-implementer-alt");
+  const base = route("fleet-implementer");
+  // Mutation-tested: setting fleet-implementer-alt.agent.md's level suffix
+  // to `xhigh` (leaving fleet-implementer's `high` alone, #2036) fails this
+  // assertion (`'xhigh' !== 'high'`); reverting the file green again
+  // confirms the pin only fires on the real divergence, not on file-read
+  // noise.
   assert.equal(
-    field("effort", "fleet-implementer-alt"),
-    field("effort", "fleet-implementer"),
-    "the two implementer definitions no longer share one effort — the pair now varies two things",
-  );
-  // #1343: pinned alongside effort, on the same "shared, not varied" side of
-  // the pair — the omp-side key, so a divergence here is the omp analogue of
-  // the effort check above. Mutation-tested: setting
-  // fleet-implementer-alt.agent.md's `thinking-level` to `xhigh` (leaving
-  // fleet-implementer's `high` alone, #2059) fails this assertion (`'xhigh'
-  // !== 'high'`); reverting the file green again confirms the pin only fires
-  // on the real divergence, not on file-read noise.
-  assert.equal(
-    field("thinking-level", "fleet-implementer-alt"),
-    field("thinking-level", "fleet-implementer"),
-    "the two implementer definitions no longer share one thinking-level — the omp-side pin now varies two things",
+    alt.level, base.level,
+    "the two implementer definitions no longer share one level — the pair now varies two things",
   );
   assert.notEqual(
-    field("model", "fleet-implementer-alt"),
-    field("model", "fleet-implementer"),
-    "the alternate definition names the same model as the default — the pair compares nothing",
+    alt.role, base.role,
+    "the alternate definition names the same role as the default — the pair compares nothing",
   );
 });
 

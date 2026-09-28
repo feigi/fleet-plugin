@@ -1,31 +1,27 @@
-// Scraper for per-member model/effort facts. Pure over the harness's own
-// subagent transcripts: no clock, no network, no gh. See
+// Scraper for per-member model/effort facts. Pure over omp's own subagent
+// transcripts: no clock, no network, no gh. See
 // docs/specs/2026-08-27-fleet-member-outcomes-instrumentation-design.md.
 //
-// The Claude-specific parsing (message.id fold-back, model/effort
-// extraction, ticket/pr naming) now lives in member-record.mjs (#1342),
-// shared with board.mjs and with the omp reader. `normalizeModel` and
-// `parseMemberName` are re-exported here verbatim so nothing importing them
-// from this file needs to change.
+// The transcript parsing (fold, model/effort extraction, ticket/pr naming)
+// lives in member-record.mjs (#1342), shared with board.mjs. `normalizeModel`
+// and `parseMemberName` are re-exported here verbatim so nothing importing
+// them from this file needs to change.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, basename, dirname } from "node:path";
+import { join, basename } from "node:path";
 
-import { readClaudeMember, readOmpSession, isOmpSessionDirName, normalizeModel, parseMemberName } from "./member-record.mjs";
+import { readOmpSession, normalizeModel, parseMemberName, isOmpSessionDirName } from "./member-record.mjs";
 
 export { normalizeModel, parseMemberName };
 
-// One row from one Claude member's transcript plus its meta. Takes TEXT
-// rather than a path so it stays pure — the file reading lives in
-// rowsForSession().
-//
-// A thin adapter over member-record.mjs's readClaudeMember(): this file's own
-// row shape stays camelCase (`effort`, `tokensCacheCreate`, `tokensOut`,
+// One row per member, via member-record.mjs's readOmpSession(). This file's
+// own row shape stays camelCase (`effort`, `tokensCacheCreate`, `tokensOut`,
 // `wallS`) so the TSV/FIELD machinery below and every existing consumer are
-// untouched, while the actual transcript parsing — the message.id fold-back,
-// model/effort last-wins, ticket/pr naming — lives in exactly one place and
-// is the same primitive board.mjs's readAgent now calls too, so the two can
-// no longer drift the way they once did.
+// untouched, while the actual transcript parsing — the fold, model/effort
+// last-wins, ticket/pr naming — lives in exactly one place and is the same
+// primitive board.mjs's spend reader calls too, so the two can no longer
+// drift.
+//
 // `effort` reads the record's `thinking` field: #1342 keeps the TSV COLUMN
 // named `effort` rather than renaming it, because every awk one-liner in
 // this file's header and in docs/specs indexes columns by position, and a
@@ -40,32 +36,25 @@ export { normalizeModel, parseMemberName };
 // `""` here, because unlike `effort` it does NOT mean unknown: it means the
 // dispatch named no agent definition, which is the reading the pair query
 // in this file's header depends on.
-export function readMember(jsonlText, meta) {
-  const rec = readClaudeMember(jsonlText, meta);
-  if (!rec) return null;
-  return {
-    harness: rec.harness, role: rec.role, member: rec.member, model: rec.model,
-    effort: rec.thinking === "-" ? "" : rec.thinking, ticket: rec.ticket, pr: rec.pr,
-    tokensCacheCreate: rec.tokens_cache_create, tokensOut: rec.tokens_out,
-    wallS: rec.wall_s, turns: rec.turns, torn: rec.torn,
-    subagentType: rec.subagent_type,
-  };
-}
-
-// One row per omp member, via member-record.mjs's readOmpSession(). Kept
-// beside readMember rather than merged into it: the two harnesses hand this
-// file records shaped identically at the member-record.mjs boundary but with
-// different provenance (a meta.json sidecar vs a session_init/thinking_level
-// walk), and rowsForSession dispatches to whichever this file's own
-// convention — camelCase, `effort` not `thinking`, `torn` present — applies
-// to. omp rows are never torn in the sense this file tracks (no fold-back to
-// tear mid-turn); `false` says so plainly rather than leaving the column
-// blank, which would read as "unmeasured".
 //
-// `-` maps to `""` here too, for the same reason as readMember's `effort` —
-// this TSV's blank convention predates the record's `-` one and the two rows
-// share one column.
-function rowsForOmpSession(sessionDir, stats) {
+// A member is never torn in the sense this file historically tracked (no
+// fold-back to tear mid-turn); `false` says so plainly rather than leaving
+// the column blank, which would read as "unmeasured".
+//
+// The walk is RECURSIVE: a member can itself dispatch further members
+// (measured on disk — a research session held seven more `.jsonl` files one
+// level down), and `agent` is the path-relative stem, so a nested member's
+// row reads `<parent>/<id>` while a flat one is unchanged — which is what
+// lets this widening REPLACE the existing rows rather than duplicate them.
+//
+// `stats` is an optional out-param: callers that omit it behave exactly as
+// before. The CLI needs it because a session where every member dropped was
+// otherwise indistinguishable from a healthy one.
+//
+// run_date comes from the newest transcript's mtime rather than a clock
+// read, so a backfill run in December still dates an August session in
+// August.
+export function rowsForSession(sessionDir, stats = {}) {
   let names;
   try { names = readdirSync(sessionDir, { recursive: true }); }
   catch { names = []; }
@@ -78,79 +67,16 @@ function rowsForOmpSession(sessionDir, stats) {
   stats.seen = jsonlNames.length;
   stats.dropped = jsonlNames.length - recs.length;
   stats.torn = 0;
+  const session = basename(sessionDir);
   const run_date = newest ? new Date(newest).toISOString().slice(0, 10) : "";
   return recs.map((r) => ({
-    session: r.session, run_date,
+    session, run_date,
     harness: r.harness, role: r.role, member: r.member, model: r.model,
     effort: r.thinking === "-" ? "" : r.thinking, ticket: r.ticket, pr: r.pr,
     tokensCacheCreate: r.tokens_cache_create, tokensOut: r.tokens_out,
     wallS: r.wall_s, turns: r.turns, agent: r.agent, torn: false,
     subagentType: r.subagent_type,
   }));
-}
-
-// Walks one session's subagents dir. Every failure is per-member: one unreadable
-// transcript or unparseable meta must not cost the other sixteen members their
-// rows. board.mjs takes the same stance on the same files.
-//
-// The walk is RECURSIVE. Subagent transcripts live at TWO depths: the flat
-// `subagents/agent-*.jsonl` a directly-dispatched member writes, and
-// `subagents/workflows/wf_<id>/agent-*.jsonl` for the fan-out a Workflow
-// dispatches. Measured 2026-08-27: 2,723 flat against 2,894 nested across 37
-// sessions — a one-level readdir saw 48% of the corpus. The nested half is not
-// a fringe: it is `workflows/review-pr.js`'s specialists, and that file pins
-// `model: "sonnet"` on three of its six dimensions, so the half where model is
-// deliberately VARIED was the half being dropped.
-//
-// `agent` is the path-relative stem, so a nested member reads
-// `workflows/wf_<id>/agent-<id>` while a flat one is unchanged — which is what
-// let this widening REPLACE the existing rows rather than duplicate them.
-//
-// `stats` is an optional out-param: callers that omit it behave exactly as
-// before. The CLI needs it because a session where every member dropped was
-// otherwise indistinguishable from a healthy one.
-//
-// run_date comes from the newest transcript's mtime rather than a clock read, so
-// a backfill run in December still dates an August session in August.
-export function rowsForSession(sessionDir, stats = {}) {
-  // Dispatched by NAME, the same structural rule member-record.mjs's own
-  // reader-selection uses, never by content: an omp session directory is
-  // `<ISO>_<uuid>` and holds `.jsonl` files directly, no `subagents/` child.
-  if (isOmpSessionDirName(basename(sessionDir))) return rowsForOmpSession(sessionDir, stats);
-  const dir = join(sessionDir, "subagents");
-  let names;
-  try { names = readdirSync(dir, { recursive: true }); } catch { return []; }
-
-  const rows = [];
-  let newest = 0, seen = 0, torn = 0;
-  for (const f of names.filter((x) => x.endsWith(".jsonl"))) {
-    seen++;
-    try {
-      // Sample the mtime for EVERY transcript, not only the ones that yield a
-      // row: run_date is the newest transcript this session wrote, and a
-      // dropped member (synthetic-only, unreadable meta) still wrote a file.
-      // Sampling only survivors dates the session from an older file, which
-      // across midnight is the wrong day.
-      newest = Math.max(newest, statSync(join(dir, f)).mtimeMs);
-      const jsonl = readFileSync(join(dir, f), "utf8");
-      const meta = JSON.parse(readFileSync(join(dir, f.replace(/\.jsonl$/, ".meta.json")), "utf8"));
-      const row = readMember(jsonl, meta);
-      if (!row) continue;
-      if (row.torn) torn++;
-      // `member` (meta.name ?? meta.agentType) COLLIDES for every unnamed
-      // dispatch — they all fall back to the same agentType ("general-purpose"),
-      // not to blank — so it is not unique within a session. The transcript's
-      // path-relative stem is the only per-member identifier that is.
-      const agent = f.replace(/\.jsonl$/, "");
-      rows.push({ agent, ...row });
-    } catch { /* one member's loss, not the session's */ }
-  }
-  stats.seen = seen;
-  stats.dropped = seen - rows.length;
-  stats.torn = torn;
-  const session = basename(sessionDir);
-  const run_date = newest ? new Date(newest).toISOString().slice(0, 10) : "";
-  return rows.map((r) => ({ session, run_date, ...r }));
 }
 
 // APPENDED TO, never inserted into: every read-out in the file's header and
@@ -251,25 +177,22 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
   // flag the operator typed.
   if (isFlagLike(file)) die("--file needs a path");
 
-  // findSubagentsDir() (board.mjs) returns .../<session>/subagents on Claude
-  // (the omp session dir itself on omp, which needs no unwrapping); a human
-  // types the session dir instead. Accept both rather than making the caller
-  // remember which.
-  const arg = dirs[0].replace(/\/+$/, "");
-  const sessionDir = basename(arg) === "subagents" ? dirname(arg) : arg;
+  const sessionDir = dirs[0].replace(/\/+$/, "");
   // A wrong guess used to exit 0 having scraped and written nothing, because
   // rowsForSession() catches the readdir failure and returns []. Probe with
-  // the SAME call it makes, per harness: an existsSync test closes only the
-  // ENOENT half, and EACCES (an unreadable dir) and ENOTDIR (a regular FILE
-  // named subagents) both walked straight past it back into the silent
-  // exit 0. omp session dirs have no `subagents/` wrapper — rowsForSession
-  // reads the session dir itself — so the probe reads THAT instead.
-  if (isOmpSessionDirName(basename(sessionDir))) {
-    try { readdirSync(sessionDir); }
-    catch (e) { die(`cannot read ${sessionDir}: ${e.code ?? e.message}`); }
-  } else {
-    try { readdirSync(join(sessionDir, "subagents")); }
-    catch (e) { die(`cannot read ${join(sessionDir, "subagents")}: ${e.code ?? e.message}`); }
+  // the SAME call it makes: an existsSync test closes only the ENOENT half,
+  // and EACCES (an unreadable dir) and ENOTDIR (a regular FILE, not a
+  // directory) both walked straight past it back into the silent exit 0.
+  try { readdirSync(sessionDir); }
+  catch (e) { die(`cannot read ${sessionDir}: ${e.code ?? e.message}`); }
+  // #1302's ruling already covers `readMembers`'s tree search (findOmpSessionDirs);
+  // this CLI hands rowsForSession one EXPLICIT directory instead of a tree to
+  // search, which skipped that check entirely — any readable directory (e.g. the
+  // encoded-cwd project dir one level up from a real session) passed the readdirSync
+  // probe above, then had every nested .jsonl folded in and every row stamped with
+  // the PROJECT dir's own name as `session`, never a real omp session id.
+  if (!isOmpSessionDirName(basename(sessionDir))) {
+    die(`${sessionDir} is not an omp <ISO>_<uuid> session directory`);
   }
 
   // Header comments are preserved verbatim across the rewrite: they carry the

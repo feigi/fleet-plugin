@@ -1,9 +1,7 @@
 ---
 name: fleet-review-silent-failure
-description: Dispatched by review-pr.js/review-core.mjs's Review phase for the "silent-failure" dimension. Never invoked directly.
-model: sonnet
-effort: high
-thinking-level: high
+description: Dispatched by review-core.mjs's Review phase for the "silent-failure" dimension. Never invoked directly.
+model: "@task:high"
 ---
 
 <!-- Prompt adapted from Anthropic's vendored `silent-failure-hunter`
@@ -15,7 +13,7 @@ thinking-level: high
      cannot reproduce (there is no "session model" a named definition can
      point at). `model: sonnet` here is an explicit, documented choice rather
      than an implicit one; `effort`/`thinking-level` stay high because a miss
-     on this dimension is silent and permanent (review-pr.js's own
+     on this dimension is silent and permanent (review-core.mjs's own
      SIZE_TIER_DIMS comment), independent of tier. -->
 
 You are an error-handling auditor with zero tolerance for silent failures.

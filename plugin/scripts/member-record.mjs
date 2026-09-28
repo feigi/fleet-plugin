@@ -1,79 +1,55 @@
-// The member-telemetry adapter (#1342, ruled on #1302). ONE per-member record
-// shape, TWO readers chosen by the tree they walk, never by content. Both
-// board.mjs (the live spend panel) and member-outcomes.mjs (the historical TSV
-// scraper) build on the primitives here rather than each inlining Claude's
-// transcript layout, so the fold-back arithmetic and the cwd encoders exist in
-// exactly one place.
+// The member-telemetry adapter (#1342, ruled on #1302). ONE per-member
+// record shape, TWO readers a tree walk chooses by content, never by
+// caller-supplied config: board.mjs (the live spend panel) and
+// member-outcomes.mjs (the scraper) build on the primitives here rather than
+// each inlining a transcript layout, so the fold-back arithmetic, the cwd
+// encoder and the ticket/PR extraction each live in exactly one place.
 //
-// The record: harness, session, agent, role, member, model, thinking,
+// The record: harness, session, role, agent, model, thinking,
 // subagent_type, tokens_in, tokens_cache_create, tokens_cache_read,
-// tokens_out, cost, wall_s, turns, ticket, pr. `harness` is set by which
+// tokens_out, cost, wall_s, turns, ticket, pr. `harness` is set by whichever
 // reader produced the row — structural, decided by which root the transcript
-// lives under, before any byte is parsed. `cost` is omp-real
-// (`usage.cost.total`, summed per member) and null for Claude — no pricing
-// table exists in this repo, and inventing one is not this ticket's
-// business. `thinking` is Claude's `d.effort` / omp's
-// `thinking_level_change.thinkingLevel`, `-` when a harness that could have
-// recorded it did not (never blank, so a hole is visible, per #1302's ruling
-// on `auto`).
+// lives under, before any byte is parsed. `cost` is real (`usage.cost.total`
+// — no pricing table exists in this repo, and inventing one is not this
+// module's business.
 //
-// `subagent_type` (#1066) is what the member was DISPATCHED AS — the agent
-// DEFINITION the dispatch named, never the member's own name: Claude's
-// `meta.customAgentType`, omp's `session_init.agent`. It is the only field
-// that separates a deliberate alternate-tier pair from two members whose
-// models merely happened to differ, and both readers already open the file
-// it lives on, so it is derived rather than authored and survives a
-// regeneration. `""` is NOT the `-` hole the fields above use: it means the
-// dispatch named no agent definition, the ordinary shape of an untyped
-// Claude `Task` call (measured 2026-09-12: 5,997 of 6,136 sidecars on disk
-// carry no `customAgentType` key at all, and none of the typed ones predate
-// 2026-08-28, when typed agent definitions came into use). Absence IS the
-// discrimination — a closed category that can never hold a deliberate pair,
-// not a value worth recovering. omp writes the key on every `session_init`
-// (`task` for the default agent), so a blank on that side means the
-// transcript carries no `session_init` line at all.
-//
-// Row identity is `session\0agent`, unchanged from before this ticket — the
-// ledger has no member concept and gains none here (ledger.mjs is untouched).
-
+// `thinking` is the harness-written level, blank when a hole is visible
+// (#1302's ruling on "auto"). `subagent_type` (#1066) is what the member was
+// DISPATCHED AS — the agent DEFINITION the dispatch named, never the
+// member's own name: it is the only field that separates a deliberate
+// alternate-tier pair from two members whose models already happened to
+// differ, and both readers keep it because it is derived rather than
+// authored and survives a regeneration. `""` is NOT the hole use; it means
+// the dispatch named no agent definition, the ordinary shape of an untyped
+// `task` call.
 import { readdirSync, readFileSync, realpathSync } from "node:fs";
-import { join, basename, dirname, relative, isAbsolute, resolve, sep } from "node:path";
+import { join, basename, relative, isAbsolute, sep } from "node:path";
 
 import { classifyRole, CANONICAL_MEMBER_NAME_PREFIXES } from "./compute-spend.mjs";
 
 // ---------------------------------------------------------------------------
-// cwd encoders — one per harness, because the rules are structurally
-// different, not cosmetically. Claude's is a blind character replace,
-// unchanged from board.mjs's original `encodeProjectDir`. omp's splits on
-// whether the cwd is under $HOME: home-relative paths become `-` + segments
-// joined by `-` with DOTS PRESERVED (`~/.claude` -> `-.claude`); non-home
-// paths are realpath-resolved (so `/tmp/x`, a symlink to `/private/tmp/x` on
-// macOS, encodes under the resolved name) and double-dash-wrapped. Both
-// forms are measured against real `~/.omp/agent/sessions/*` directory names
-// in member-record.test.mjs — `-dev-fleet-plugin`, `-.claude`, and
-// `--private-tmp-fix685-scratch--` all exist on disk today.
+// cwd encoder
 // ---------------------------------------------------------------------------
 
-// The encoding replaces every non-alphanumeric character with `-`, so
-// /Users/x/.claude encodes to `-Users-x--claude` (double dash), not
-// `-Users-x-.claude`. Replacing only slashes silently missed every cwd
-// containing a dot — including this repo, which is what the fleet skills
-// themselves run out of, so the panel never rendered here at all (board.mjs's
-// original #(unnamed) regression). Moved here, verbatim, so board.mjs and any
-// future Claude-side consumer share one definition instead of two that can
-// drift apart.
-export function encodeClaudeProjectDir(cwd) {
-  return cwd.replace(/[^a-zA-Z0-9]/g, "-");
-}
-
 // `realpath` is an injectable seam, not a design nicety: the production
-// default resolves the LIVE filesystem, but a directory a transcript's
-// `session.cwd` names may no longer exist by the time anything reads that
-// value back (a /tmp scratch dir cleaned up weeks later, say), and
-// `fs.realpathSync` throws ENOENT on a path it cannot see. Callers who need to
-// encode a cwd that is not guaranteed to exist — verifying the encoder against
-// a historical transcript, for one — pass their own resolver.
-export function encodeOmpProjectDir(cwd, { home = process.env.HOME, realpath = realpathSync } = {}) {
+// default resolves the LIVE filesystem, but a directory a transcript reads
+// may no longer exist by the time anything reads it — a scratch dir cleaned
+// up weeks later, say — and `fs.realpathSync` throws ENOENT on a path it
+// cannot see. Verifying the encoder against a historical transcript, for one
+// callers who need to encode a cwd that is not guaranteed to exist — every
+// caller but board.mjs's own live panel — pass their own resolver.
+//
+// Encodes the way the fleet's own tooling reads it back: every
+// non-alphanumeric character with `-`, so `-Users-x-claude` decodes to
+// `/Users/x/.claude`, not `-Users-x.claude`. Home-relative paths become
+// `~/...`-style (`-` under $HOME) joined by `-` with DOTS PRESERVED
+// (`.claude` -> `-.claude`); non-home paths are realpath-resolved (so `/tmp/x`,
+// a symlink to `/private/tmp/x` on macOS, encodes under the resolved name)
+// and double-dash-wrapped. Both forms are measured against real
+// `~/.omp/agent/sessions/*` directory names in member-record.test.mjs - a
+// `~/dev/fleet-plugin`, `--private-tmp-fx685-scratch--` all exist on disk
+// today.
+export function encodeProjectDir(cwd, { home = process.env.HOME, realpath = realpathSync } = {}) {
   const rel = relative(home, cwd);
   const isHome = !rel.startsWith("..") && !isAbsolute(rel);
   if (isHome) return "-" + rel.split(sep).filter(Boolean).join("-");
@@ -82,8 +58,8 @@ export function encodeOmpProjectDir(cwd, { home = process.env.HOME, realpath = r
 }
 
 // ---------------------------------------------------------------------------
-// Ticket/PR extraction and model normalisation — shared across harnesses
-// because both readers build the same record fields from a member's naming.
+// Ticket/PR extraction and model normalisation
+// ---------------------------------------------------------------------------
 // Moved here from member-outcomes.mjs (which re-exports both for the callers
 // and tests that already import them from there) so member-record.mjs, the
 // lower-level module, does not depend upward on either script it feeds.
@@ -92,48 +68,41 @@ export function encodeOmpProjectDir(cwd, { home = process.env.HOME, realpath = r
 // `<synthetic>` is not a model — it is the harness labelling a turn it
 // generated itself, and mapping it to anything would invent a data point.
 //
-// The `[1m]` strip is DEFENSIVE, not load-bearing: meta.json carries the
-// context-window variant (`claude-opus-5[1m]`, 395 metas on disk) but this
-// scraper reads `message.model` from the transcript, where measurement found
-// ZERO bracketed spellings across every file. It fires only if the model
-// source ever moves to meta.json — a plausible change, since meta carries the
-// REQUESTED tier and the transcript the EFFECTIVE one.
-//
-// Note what is NOT handled: meta.json also carries bare aliases (`sonnet`
-// 279, `opus` 61, `haiku` 25). Those WOULD collide with the versioned ids and
-// split counts for real. Canonicalising them is only worth writing when
-// something actually reads meta.model.
+// The `[1m]` strip is DEFENSIVE, not load-bearing: it guards a
+// context-window variant spelling (`claude-opus-5[1m]`) this scraper has
+// never actually read from a transcript's `message.model`, where measurement
+// found ZERO bracketed spellings across every file. It fires only if the
+// model spelling ever changes to carry one.
 export function normalizeModel(raw) {
   const s = String(raw ?? "").trim();
   if (!s || s === "<synthetic>") return null;
   return s.replace(/\[[^\]]*\]$/, "");
 }
 
-// A member's name is the only place its unit of work is recorded — nothing
-// writes ticket or PR into meta.json (Claude) or anywhere in the transcript
-// (omp; there is no dispatch sidecar at all — see ompMemberRecord).
+// A member's name is the only place its unit of work is recorded — there is
+// no dispatch sidecar at all (see ompMemberRecord).
 //
 // FOUR finisher spellings are live on disk, measured 2026-08-27 across every
-// meta.json: finisher-pr-<n> 163, finish-pr-<n> 58, finisher-<n> 44,
-// finish-<n> 18. All four book a PR, and matching only the first cost 120 of
-// 283 finisher members their join key to tier-outcomes.tsv. The fix-pr-<n>
-// and review-pr-<n> families share the first pattern only because the infix
-// is the same — they are NOT finisher spellings. `finisher-pr-<n>` is the
+// transcript: finisher-pr-<n>, finish-pr-<n>, finisher-<n>, finish-<n>. All
+// four book a PR, and matching only the first cost 120 of 283 finisher
+// members their join key to tier-outcomes.tsv. The fix-pr-<n> and
+// review-pr-<n> families share the first pattern only because the infix is
+// the same — they are NOT finisher spellings. `finisher-pr-<n>` is the
 // canonical name run-team now fixes (#326); the other three stay matched
 // because the runs that used them are already in the record.
 //
 // merge-bot-<n> is deliberately excluded: its number is a per-run dispatch
 // counter, never a PR, and booking it as a pr would join the row to an
-// unrelated PR's verdict. A
-// single trailing lowercase letter is a retry suffix (-b, -c and -d all
-// observed) and is stripped first, because a re-dispatched member works the
-// same unit. A trailing `-v<n>` (`-v2`, `-v10`, ...) is a DIFFERENT spelling
-// of the same re-dispatch, used when a controller re-dispatches a
-// finisher/reviewer against a PR whose head moved after label (#1482,
-// measured: ~67% of one finisher's tokens fell through to a blank pr column
-// under the old letter-only regex); it is stripped for the same reason, not
-// because it looks like a second-ticket suffix — no naming convention in
-// this repo otherwise uses a literal `-v` + digits tail.
+// unrelated PR's verdict. A single trailing lowercase letter is a retry
+// suffix (-b, -c and -d all observed) and is stripped first, because a
+// re-dispatched member works the same unit. A trailing `-v<n>` (`-v2`,
+// `-v10`, ...) is a DIFFERENT spelling of the same re-dispatch, used when a
+// controller re-dispatches a finisher/reviewer against a PR whose head moved
+// after label (#1482, measured: ~67% of one finisher's tokens fell through
+// to a blank pr column under the old letter-only regex); it is stripped for
+// the same reason, not because it looks like a second-ticket suffix — no
+// naming convention in this repo otherwise uses a literal `-v` + digits
+// tail.
 //
 // The NUMERIC suffix on a TICKET-shaped name (`impl-137-2`) looks like the
 // same retry spelling and is deliberately NOT stripped there. The one real
@@ -157,7 +126,7 @@ export function normalizeModel(raw) {
 //
 // `resolve` joins the `-pr-` alternation for #1250: `resolve-pr-<n>` is a
 // controller-dispatched conflict/rebase resolver against an already-open PR
-// (measured meta.json descriptions: "Resolve conflict on PR 1232", "Rebase
+// (measured session descriptions: "Resolve conflict on PR 1232", "Rebase
 // and resolve conflicts for PR #1310") — the same shape as `fix-pr-<n>`'s
 // applier and `review-pr-<n>`'s reviewer, just not a name run-team's own
 // naming convention fixes, so it stays out of the canonical list in
@@ -177,338 +146,43 @@ export function parseMemberName(name) {
 }
 
 // ---------------------------------------------------------------------------
-// Claude reader
+// transcript reader
 // ---------------------------------------------------------------------------
 
-// Folds one Claude subagent transcript into turns. This is the ONE place the
-// message.id fold-back arithmetic lives now — board.mjs's readAgent (which
-// additionally needs the per-block tool stream for cache-write attribution)
-// and this module's own readClaudeMember (which needs only the per-turn
-// totals) both call it, so the two can no longer drift the way they did
-// before this ticket: readAgent tracked cache_read and raw input tokens,
-// readMember did not, and neither tracked the other's torn-line bookkeeping
-// consistently.
+// An omp transcript line carries no `sessionId`/`parentUuid` — session id
+// lives in the DIRECTORY name, never per line; omp's envelope is
+// `{type,id,parentId,timestamp,message}`. That is the structural signature
+// this reader refuses on if it is ever absent — a validation CHECK inside
+// this reader, per #1302's ruling: every root this module is ever handed is
+// an omp `~/.omp/agent/sessions/**` tree, so a line failing this shape
+// signals a corrupted or foreign file, not a harness to dispatch to.
 //
-// ONE assistant API turn is written as SEVERAL jsonl lines — one per content
-// block (thinking, text, each tool_use) — and every one of those lines
-// repeats the SAME `message.id` and the SAME `message.usage` object. Summing
-// usage per LINE therefore counts each turn's cache_creation once per block:
-// measured across 2452 real transcripts, +206% (535M counted vs 175M actual),
-// and again across 2,723 flat transcripts, +176.0% on cache_creation and
-// +140.9% on turn count, MODEL-DEPENDENT (opus-5 2.81x, sonnet-5 2.39x)
-// because blocks-per-turn tracks how tool-heavy a turn is. So fold lines back
-// into turns on `message.id` and take each turn's usage exactly once.
-//
-// `output_tokens` is a streaming snapshot, so the LARGEST value across a
-// turn's lines is the final one; summing it also overcounts, by ~1.5%.
-//
-// A line with no `message.id` becomes its own turn — the honest reading when
-// the harness gives nothing to fold on (0 of 127,102 real assistant lines
-// lack one; fixtures only).
-//
-// `model`/`effort` are last-wins: a member whose model or effort changed
-// mid-run finished at the later one, and that is the tier its output
-// reflects.
-//
-// Malformed lines are skipped, not fatal — a transcript being appended to
-// while it is read has a torn LAST line on every tick. `torn` reflects only
-// the final line (resets on the next successful parse, so a mid-file tear is
-// a hiccup, not a stall); `malformedNonLastLines`/`malformedNonLastLineError`
-// COUNT the different, real fault of a line that will never complete, for a
-// caller (board.mjs) that surfaces it.
-// omp's envelope always carries a top-level `parentId` key — even a root
-// event writes `parentId: null` rather than omitting it (measured against
-// real `~/.omp/agent/sessions/**/*.jsonl` files). A Claude transcript line
-// never carries that key at all; Claude's own parent reference is spelled
-// `parentUuid`. That makes `parentId`'s presence a safe POSITIVE signature
-// for "this is omp content", the mirror of assertNotClaudeShaped below —
-// and unlike checking for the ABSENCE of Claude's own keys, it never fires
-// on this repo's existing Claude test fixtures, none of which set
-// `sessionId`/`parentUuid`/`parentId` at all (they construct only the
-// fields the fold-back arithmetic reads).
-function assertNotOmpShaped(d, filePath) {
-  if (Object.prototype.hasOwnProperty.call(d, "parentId")) {
-    throw new Error(`member-record: omp-shaped transcript found under the Claude root, refusing to parse it as Claude: ${filePath}`);
+// Both halves of that signature are checked, not just the blocklist half: a
+// line carrying neither Claude's keys NOR omp's own `type` field (e.g. a
+// foreign/corrupted `{"foo":"bar"}`) used to sail past the blocklist-only
+// check below and fold into a fabricated all-null/zero member record instead
+// of the refusal this comment already promised. `type` is the one envelope
+// field foldOmpTranscript's own loop dispatches every branch on below, so
+// requiring it costs nothing a real omp line does not already carry.
+function assertOmpShaped(d, filePath) {
+  const shaped =
+    d !== null &&
+    typeof d === "object" &&
+    typeof d.type === "string" &&
+    d.type !== "" &&
+    !Object.prototype.hasOwnProperty.call(d, "sessionId") &&
+    !Object.prototype.hasOwnProperty.call(d, "parentUuid");
+  if (!shaped) {
+    throw new Error(`member-record: not an omp-shaped transcript line, refusing to parse it: ${filePath}`);
   }
 }
 
-// Folds one Claude subagent transcript into turns. This is the ONE place the
-// message.id fold-back arithmetic lives now — board.mjs's readAgent (which
-// additionally needs the per-block tool stream for cache-write attribution)
-// and this module's own readClaudeMember (which needs only the per-turn
-// totals) both call it, so the two can no longer drift the way they did
-// before this ticket: readAgent tracked cache_read and raw input tokens,
-// readMember did not, and neither tracked the other's torn-line bookkeeping
-// consistently.
-//
-// ONE assistant API turn is written as SEVERAL jsonl lines — one per content
-// block (thinking, text, each tool_use) — and every one of those lines
-// repeats the SAME `message.id` and the SAME `message.usage` object. Summing
-// usage per LINE therefore counts each turn's cache_creation once per block:
-// measured across 2452 real transcripts, +206% (535M counted vs 175M actual),
-// and again across 2,723 flat transcripts, +176.0% on cache_creation and
-// +140.9% on turn count, MODEL-DEPENDENT (opus-5 2.81x, sonnet-5 2.39x)
-// because blocks-per-turn tracks how tool-heavy a turn is. So fold lines back
-// into turns on `message.id` and take each turn's usage exactly once.
-//
-// `output_tokens` is a streaming snapshot, so the LARGEST value across a
-// turn's lines is the final one; summing it also overcounts, by ~1.5%.
-//
-// A line with no `message.id` becomes its own turn — the honest reading when
-// the harness gives nothing to fold on (0 of 127,102 real assistant lines
-// lack one; fixtures only).
-//
-// `model`/`effort` are last-wins: a member whose model or effort changed
-// mid-run finished at the later one, and that is the tier its output
-// reflects.
-//
-// Malformed lines are skipped, not fatal — a transcript being appended to
-// while it is read has a torn LAST line on every tick. `torn` reflects only
-// the final line (resets on the next successful parse, so a mid-file tear is
-// a hiccup, not a stall); `malformedNonLastLines` COUNTS the different, real
-// fault of a line that will never complete, and `malformedNonLastLineError`
-// carries the FIRST such parse error as its representative cause.
-//
-// #916: that count was a boolean until the board needed to put the fault on
-// the page rather than only on stderr. A flag was enough for one warning
-// sentence and is not enough for a number the operator reads every tick, and
-// this loop is the only place in the codebase with a per-line view to count
-// from — board.mjs's readAgent stopped having one when the fold-back
-// arithmetic moved here (#1342). Consumers that only ever asked "any?" read a
-// non-zero count exactly as they read `true`.
-//
-// `filePath` defaults to a placeholder: member-outcomes.mjs's readMember()
-// is documented pure — text in, no path — so it has none to give, and the
-// wrong-root check below still runs; it just names nothing concrete if it
-// fires from that path.
-export function foldClaudeTranscript(jsonlText, filePath = "<transcript>") {
-  let model = null, effort = "";
-  let firstTs = null, lastTs = null;
-  let torn = false, malformedNonLastLines = 0, malformedNonLastLineError = null;
-  const turnById = new Map();
-  const entries = [];
-  let anon = 0;
-  let cacheWrite = 0, cacheRead = 0, input = 0, maxCtx = 0;
-  const lines = String(jsonlText ?? "").split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i];
-    if (!raw.trim()) continue;
-    let d;
-    try { d = JSON.parse(raw); torn = false; }
-    catch (e) {
-      torn = true;
-      if (i !== lines.length - 1) { malformedNonLastLines++; malformedNonLastLineError ??= e.message; }
-      continue;
-    }
-    assertNotOmpShaped(d, filePath);
-    const ts = d.timestamp;
-    if (ts) { firstTs ??= ts; lastTs = ts; }
-    const m = d.message;
-    // `message.content` is an array of blocks on tool-bearing turns but a
-    // plain STRING on ordinary prose turns.
-    const blocks = Array.isArray(m?.content) ? m.content : [];
-    if (m && d.type === "assistant") {
-      const norm = normalizeModel(m.model);
-      if (norm) model = norm;
-      if (typeof d.effort === "string") effort = d.effort;
-      const u = m.usage ?? {};
-      const id = m.id ?? `\0anon${anon++}`;
-      let turn = turnById.get(id);
-      if (!turn) {
-        // First line of this turn — bill its usage now, once.
-        const cw = u.cache_creation_input_tokens ?? 0;
-        const cr = u.cache_read_input_tokens ?? 0;
-        const inp = u.input_tokens ?? 0;
-        cacheWrite += cw; cacheRead += cr; input += inp;
-        maxCtx = Math.max(maxCtx, inp + cr + cw);
-        turn = { kind: "assistant", cacheWrite: cw, tools: [], output: 0 };
-        entries.push(turn);
-        turnById.set(id, turn);
-      }
-      turn.output = Math.max(turn.output, u.output_tokens ?? 0);
-      for (const c of blocks) if (c?.type === "tool_use") turn.tools.push({ id: c.id, name: c.name });
-    } else if (d.type === "user") {
-      const results = blocks
-        .filter((c) => c?.type === "tool_result")
-        .map((c) => ({ id: c.tool_use_id, chars: typeof c.content === "string" ? c.content.length : JSON.stringify(c.content ?? "").length }));
-      if (results.length) entries.push({ kind: "result", results });
-    }
-  }
-  const output = entries.reduce((n, e) => n + (e.output ?? 0), 0);
-  const span = firstTs && lastTs ? (Date.parse(lastTs) - Date.parse(firstTs)) / 1000 : 0;
-  return {
-    model, effort, torn, malformedNonLastLines, malformedNonLastLineError,
-    entries, cacheWrite, cacheRead, input, output, maxCtx,
-    turns: turnById.size,
-    wallS: Number.isFinite(span) ? Math.round(span) : 0,
-  };
-}
-
-// The role signals a Claude dispatch sidecar carries, in the shape
-// classifyRole's contract names (#1505). Exported because board.mjs's live
-// panel classifies from the same sidecar and must read it the same way — one
-// definition of "what did this dispatch record", not two that can drift.
-//
-// `agentType` IS AMBIGUOUS AT SOURCE, and that is the whole reason this
-// function exists. Measured over all 4,574 sidecars on disk: 3,587 name no
-// member, and for those `agentType` is the agent DEFINITION (`memory-proxy`,
-// `general-purpose`, `pr-review-toolkit:code-reviewer`); 849 name one and
-// repeat that name in `agentType`, recording no definition at all; 138 name
-// one and record the definition in `customAgentType`. So the definition is
-// `customAgentType` when the dispatch wrote one, and otherwise `agentType`
-// EXCEPT where it merely echoes the name — which is the untyped dispatch's
-// closed "no definition recorded" category, not a hole to guess at. Reading
-// `agentType` as the definition unconditionally would make 849 member names
-// masquerade as definitions; reading only `customAgentType` would strip the
-// definition off 3,587 rows, including every memory-system member dispatched
-// before typed agents existed, which is the bug #1505 reports in reverse.
-// The 16 sidecars that name a member AND carry a different `agentType`
-// (`housekeeper-startup` dispatched as `memory-housekeeper`, the `fork`
-// dispatches) are real definitions and land on the right side of this rule.
-//
-// Deliberately NOT the same value as the record's `subagent_type` column
-// below, which stays `customAgentType` alone: that column answers #1066's
-// question — did this dispatch deliberately name a definition through the
-// typed-dispatch mechanism, the only thing that can mark an alternate-tier
-// pair — and its blank is a closed category the corpus header and the pairing
-// query both depend on. This function answers a different question, "which
-// agent definition produced this member", for which an unnamed dispatch's
-// `agentType` is a perfectly good answer. Two questions, two answers; do not
-// collapse them.
-export function claudeRoleSignals(meta) {
-  const name = typeof meta?.name === "string" ? meta.name : "";
-  const type = typeof meta?.agentType === "string" ? meta.agentType : "";
-  const custom = typeof meta?.customAgentType === "string" ? meta.customAgentType : "";
-  return {
-    agentDefinition: custom || (type === name ? "" : type),
-    memberName: name,
-    description: meta?.description,
-    spawnDepth: meta?.spawnDepth,
-  };
-}
-
-// One member record from one Claude transcript + its meta.json. `cost` is
-// always null here — Claude Code transcripts carry no dollar figure and no
-// pricing table exists in this repo to derive one; `torn` rides along for
-// rowsForSession() to count, exactly as it did when this lived in
-// member-outcomes.mjs — it is scrape-quality metadata, not part of the
-// canonical record's field list, and only member-outcomes.mjs reads it.
-export function readClaudeMember(jsonlText, meta, filePath = "<transcript>") {
-  const folded = foldClaudeTranscript(jsonlText, filePath);
-  if (!folded.model) return null;
-  const member = String(meta?.name ?? meta?.agentType ?? "");
-  const { ticket, pr } = parseMemberName(member);
-  return {
-    harness: "claude",
-    role: classifyRole(claudeRoleSignals(meta)), member,
-    model: folded.model,
-    // Never blank — a Claude member whose transcript carries no `d.effort`
-    // (haiku models, which have no effort control at all) is a genuine hole,
-    // the same class of thing as omp's missing `thinking_level_change`, and
-    // #1302's ruling says a hole must stay visible rather than read as
-    // though nothing were being asked. member-outcomes.mjs's TSV adapter
-    // maps `-` back to "" for its own legacy `effort` column, which already
-    // spells the same "unknown" concept as blank and predates this ticket.
-    thinking: folded.effort || "-",
-    // Straight off the sidecar this function is already handed — the
-    // dispatch's own record of which agent definition produced this member
-    // (`fleet-implementer` and `fleet-implementer-alt` are the two the tier
-    // pairing turns on). Never `meta.agentType`: that is the member's NAME
-    // for a named dispatch (`impl-387`) and the built-in type otherwise, so
-    // reading it here would fill the column with something that answers a
-    // different question. Absent key -> "", a fact about the dispatch and
-    // not a hole; see this module's header.
-    subagent_type: typeof meta?.customAgentType === "string" ? meta.customAgentType : "",
-    tokens_in: folded.input, tokens_cache_create: folded.cacheWrite,
-    tokens_cache_read: folded.cacheRead, tokens_out: folded.output,
-    cost: null,
-    wall_s: folded.wallS, turns: folded.turns,
-    ticket, pr,
-    torn: folded.torn,
-  };
-}
-
-// Walks one session's `subagents/` dir into records. RECURSIVE: subagent
-// transcripts live at TWO depths, the flat `subagents/agent-*.jsonl` a
-// directly-dispatched member writes and the nested
-// `subagents/workflows/wf_<id>/agent-*.jsonl` a Workflow's fan-out writes
-// (measured 2,723 flat against 2,894 nested across 37 sessions — a
-// one-level readdir saw 48% of the corpus). `agent` is the path-relative
-// stem, so a nested member reads `workflows/wf_<id>/agent-<id>`.
-//
-// Every failure is per-member: one unreadable transcript or unparseable meta
-// (including an ABSENT meta.json — the ordinary shape for an unnamed agent
-// carries one regardless) must not cost the other members their rows. The
-// wrong-root shape check (assertNotOmpShaped, inside foldClaudeTranscript)
-// runs even when meta.json is absent or unreadable: an omp file sitting
-// under a Claude `subagents/` dir never carries a `.meta.json` sidecar
-// either, and reading meta FIRST — the previous ordering — let exactly that
-// file vanish into the ordinary "no sidecar" skip below instead of being
-// refused. readClaudeMember() therefore always runs (its throw propagates
-// uncaught); only the DECISION to keep its row waits on meta.
-export function readClaudeSession(subagentsDir) {
-  let names;
-  try { names = readdirSync(subagentsDir, { recursive: true }); }
-  catch { return []; }
-  const session = basename(dirname(subagentsDir));
-  const rows = [];
-  for (const f of names.filter((x) => x.endsWith(".jsonl"))) {
-    const filePath = join(subagentsDir, f);
-    let jsonl;
-    try { jsonl = readFileSync(filePath, "utf8"); }
-    catch { continue; } // one unreadable transcript, not the session
-    let meta, metaOk = true;
-    try { meta = JSON.parse(readFileSync(filePath.replace(/\.jsonl$/, ".meta.json"), "utf8")); }
-    catch { meta = {}; metaOk = false; }
-    const rec = readClaudeMember(jsonl, meta, filePath); // may throw — see comment above
-    if (!metaOk || !rec) continue;
-    rows.push({ ...rec, session, agent: f.replace(/\.jsonl$/, "") });
-  }
-  return rows;
-}
-
-// Finds every `subagents/` directory reachable under `root`: `root` may
-// already BE a subagents dir, a single session dir (holding `subagents/`
-// directly), an encoded-project dir (holding many session dirs), or the
-// whole `~/.claude/projects` tree. Recursion stops the instant a
-// `subagents/` child is found — readClaudeSession's own recursive walk
-// covers everything beneath it, so descending further here would only
-// re-discover the same files as a second, wrongly-scoped "session".
-function findClaudeSubagentsDirs(root) {
-  if (basename(root) === "subagents") return [root];
-  let ents;
-  try { ents = readdirSync(root, { withFileTypes: true }); }
-  catch { return []; }
-  if (ents.some((e) => e.isDirectory() && e.name === "subagents")) return [join(root, "subagents")];
-  const found = [];
-  for (const e of ents) if (e.isDirectory()) found.push(...findClaudeSubagentsDirs(join(root, e.name)));
-  return found;
-}
-
-// ---------------------------------------------------------------------------
-// omp reader
-// ---------------------------------------------------------------------------
-
-// A Claude transcript line carries `sessionId`/`parentUuid` (and `agentId`,
-// `cwd`, `version`, `gitBranch`) on EVERY line — measured against real
-// `~/.claude/projects/**/subagents/*.jsonl` files. An omp line never carries
-// either key at all: omp's envelope is `{type,id,parentId,timestamp,message}`,
-// session id lives in the DIRECTORY name, not per line. That is the
-// structural signature this reader refuses on — a validation CHECK inside the
-// omp reader, per #1302's ruling, never the signal that chose this reader in
-// the first place (readMembers picks the reader by which ROOT it was asked to
-// walk, before any byte is parsed).
-function assertNotClaudeShaped(d, filePath) {
-  if (Object.prototype.hasOwnProperty.call(d, "sessionId") || Object.prototype.hasOwnProperty.call(d, "parentUuid")) {
-    throw new Error(`member-record: Claude-shaped transcript found under the omp root, refusing to parse it as omp: ${filePath}`);
-  }
-}
-
-// Folds one omp subagent transcript. Structurally simpler than Claude's: one
-// `message.usage` per assistant turn already (no fold-back), a real per-turn
-// dollar cost at `usage.cost.total`, and the declared thinking level on its
-// own `thinking_level_change` event rather than repeated per line. Measured
-// 2026-09-08/09 against real `~/.omp/agent/sessions/**/*.jsonl` files:
+// Folds one omp subagent transcript into per-turn totals. One
+// `message.usage` per assistant turn already (no cross-line fold-back
+// needed), a real per-turn dollar cost at `usage.cost.total`, and the
+// declared thinking level on its own `thinking_level_change` event rather
+// than repeated per line. Measured 2026-09-08/09 against real
+// `~/.omp/agent/sessions/**/*.jsonl` files:
 //   {"type":"session",...,"cwd":"/Users/chris/dev/fleet-plugin"}
 //   {"type":"thinking_level_change",...,"thinkingLevel":"high","configured":null}
 //   {"type":"message","message":{"role":"assistant","model":"claude-sonnet-5",
@@ -516,17 +190,17 @@ function assertNotClaudeShaped(d, filePath) {
 //       "totalTokens":31522,"cost":{"input":4e-6,"output":0.00201,
 //       "cacheRead":0,"cacheWrite":0.0783,"total":0.0803}}}}
 //
-// `thinking` reads the harness-WRITTEN level, never the frontmatter — that is
-// what makes #1298's declared-vs-resolved comparison possible (#1302's
-// ruling). It stays `null` here (ompMemberRecord turns that into the record's
-// `-`) when no `thinking_level_change` line exists, rather than guessing the
-// default: a member that is not a fleet definition genuinely has no recorded
-// level, and the hole must stay visible.
+// `thinking` reads the harness-WRITTEN level, never the frontmatter — that
+// is what makes #1298's declared-vs-resolved comparison possible (#1302's
+// ruling). It stays `null` here (ompMemberRecord turns that into the
+// record's `-`) when no `thinking_level_change` line exists, rather than
+// guessing the default: a member that is not a fleet definition genuinely
+// has no recorded level, and the hole must stay visible.
 //
-// `session_init.task` is carried through as the closest thing omp has to
-// Claude's `meta.description` — there is no dispatch sidecar on this side at
-// all. ompMemberRecord below uses it, together with the transcript's own
-// nesting depth AND the AgentId itself, as REAL classifyRole() signals. A
+// `session_init.task` is the closest thing to a dispatch sidecar this
+// module has — there is no separate description file at all.
+// ompMemberRecord below uses it, together with the transcript's own nesting
+// depth AND the AgentId itself, as REAL classifyRole() signals. A
 // canonically-stemmed AgentId (`impl-<n>`, `fix-pr-<n>`, `finisher-<n>`,
 // `review-pr-<n>`, `merge-bot-<n>`) IS matched against classifyRole, as
 // `memberName`, per #1506; only a non-canonical AgentId — a generated word
@@ -537,28 +211,24 @@ function assertNotClaudeShaped(d, filePath) {
 // makes it different from `model` above: a member still working folds to
 // `model: null` (no assistant turn yet) but already carries
 // `resolvedModelIdentity` (measured `anthropic/claude-opus-5` (61),
-// `anthropic/claude-sonnet-5` (103), `anthropic/claude-haiku-4-5` (68) across
-// real `~/.omp/agent/sessions/**` — always provider-prefixed, never a bare
-// alias). `model` itself is left untouched by this addition: board.mjs and
-// member-outcomes.mjs read `model` for cost/spend attribution, where the
+// `anthropic/claude-sonnet-5` (103), `anthropic/claude-haiku-4-5` (68)
+// across real `~/.omp/agent/sessions/**` — always provider-prefixed, never a
+// bare alias). `model` itself is left untouched by this addition: board.mjs
+// and member-outcomes.mjs read `model` for cost/spend attribution, where the
 // per-turn value (which can in principle change mid-run) is the fact they
 // want, not the dispatch-time identity.
 //
 // `agent` (#1066) is `session_init`'s dispatch-time record of WHICH AGENT
-// DEFINITION this member is — omp's spelling of Claude's
-// `meta.customAgentType`, and the omp arm of the deliberate-pair column.
-// Measured 2026-09-12 across real `~/.omp/agent/sessions/**`: present on
-// every one of the 1,191 transcripts carrying a `session_init` line
-// (`fleet-implementer` 51, `fleet-implementer-alt` 17, the default `task`
-// 220, plus the review fan-out's own definitions), absent only where the
-// line itself is.
+// DEFINITION this member is. Measured 2026-09-12 across real
+// `~/.omp/agent/sessions/**`: present on every one of the 1,191 transcripts
+// carrying a `session_init` line (`fleet-implementer` 51,
+// `fleet-implementer-alt` 17, the default `task` 220, plus the review
+// fan-out's own definitions), absent only where the line itself is.
 //
 // `entries` (#1717) is the per-agent tool stream compute-spend.mjs's
-// attributeTools reads: the same `assistant`/`result` entries
-// foldClaudeTranscript emits, so one attribution serves both harnesses.
-// Measured 2026-09-26 across 5,085 real `~/.omp/agent/sessions/**/*.jsonl`
-// files, the call is a block on the assistant message and the result a line
-// of its own:
+// attributeTools reads: `assistant`/`result` entries. Measured 2026-09-26
+// across 5,085 real `~/.omp/agent/sessions/**/*.jsonl` files, the call is a
+// block on the assistant message and the result a line of its own:
 //   {"type":"message","message":{"role":"assistant","stopReason":"toolUse",
 //     "content":[{"type":"toolCall","id":"toolu_01JV…","name":"bash",
 //       "arguments":{…},"intent":"…"}],"usage":{…}}}
@@ -575,27 +245,21 @@ function assertNotClaudeShaped(d, filePath) {
 // calls-per-turn counts to within one).
 //
 // A result's `chars` sums its text blocks' lengths (`content` was an array
-// every time: 179,380 text blocks, 14 image blocks — an unmeasured non-array
-// `content` would fold to 0 blocks and `chars: 0`, not a fallback to a
-// string length the way foldClaudeTranscript's own string case gets one).
-// That is Claude's measure for the same output, since 95.3% of Claude's
-// tool_result contents are a bare string counted by its length. A non-text
-// block (an image) counts at its JSON length, as in Claude's array case when
-// that array holds a single block — the only shape measured on disk.
-// `prunedAt` (194) holds a placeholder such as "[Uneventful result elided]"
-// instead of the output, so its `chars` is the placeholder's length.
+// every time: 179,380 text blocks, 14 image blocks — an unmeasured
+// non-array `content` folds to 0 blocks and `chars: 0`). A non-text block
+// (an image) counts at its JSON length. `prunedAt` (194) holds a
+// placeholder such as "[Uneventful result elided]" instead of the output,
+// so its `chars` is the placeholder's length.
 //
 // The result line names its tool (`toolName`), but the stream stays
 // id-only, so a result whose id no `toolCall` block carries books as
-// `unknown` on both harnesses. Measured, that is a turn aborted mid-stream
-// (2 results): the tool's "not executed" result is written first, then the
-// assistant message persists with empty content, so the call never lands.
-// That aborted message is still an `assistant` entry, as is every line
-// `turns` counts. 142 aborted or errored turns followed a result batch. When
-// one never reached the API its usage is all zero, and attributeTools books
-// the batch before it at 0. Claude's stream does the same with its
-// `<synthetic>` error turns (30 across this machine's Claude subagent
-// transcripts, every one with zero cache_creation).
+// `unknown`. Measured, that is a turn aborted mid-stream (2 results): the
+// tool's "not executed" result is written first, then the assistant message
+// persists with empty content, so the call never lands. That aborted
+// message is still an `assistant` entry, as is every line `turns` counts.
+// 142 aborted or errored turns followed a result batch. When one never
+// reached the API its usage is all zero, and attributeTools books the batch
+// before it at 0.
 export function foldOmpTranscript(jsonlText, filePath) {
   let model = null, thinking = null, task = null, resolvedModelIdentity = null, agent = null;
   let firstTs = null, lastTs = null;
@@ -608,15 +272,14 @@ export function foldOmpTranscript(jsonlText, filePath) {
     const raw = lines[i];
     if (!raw.trim()) continue;
     let d;
-    // A torn tail (transcript read mid-write) is dropped like Claude's, and
-    // costs at most that one turn either way. A MIDDLE line failing the same
-    // parse is not a live write in progress — it is lost data, and now
-    // (#1717) it can desync a toolCall from its toolResult, not just a
-    // turn's totals, so it is counted the same way foldClaudeTranscript
-    // counts its own non-last parse failures, never for the last line.
+    // A torn tail (transcript read mid-write) is dropped, and costs at most
+    // that one turn either way. A MIDDLE line failing the same parse is not
+    // a live write in progress — it is lost data, and (#1717) it can desync
+    // a toolCall from its toolResult, not just a turn's totals, so it is
+    // counted, never for the last line.
     try { d = JSON.parse(raw); }
     catch { if (i !== lines.length - 1) malformedNonLastLines++; continue; }
-    assertNotClaudeShaped(d, filePath);
+    assertOmpShaped(d, filePath);
     if (typeof d.timestamp === "string") { firstTs ??= d.timestamp; lastTs = d.timestamp; }
     if (d.type === "thinking_level_change" && typeof d.thinkingLevel === "string") thinking = d.thinkingLevel;
     if (d.type === "session_init") {
@@ -660,9 +323,8 @@ export function foldOmpTranscript(jsonlText, filePath) {
 }
 
 // One member record from one omp transcript's fold. `member` is the AgentId
-// (the filename stem, e.g. `InstallVerifySearch`) — omp has no separate
-// display name the way Claude's meta.json does, so `ticket`/`pr` extraction
-// runs against it directly.
+// (the filename stem, e.g. `InstallVerifySearch`) — there is no separate
+// display name, so `ticket`/`pr` extraction runs against it directly.
 //
 // `role` is NEVER guessed off the bare AgentId ALONE — a generated CamelCase
 // word pair names nothing classifyRole can read. FOUR real signals exist:
@@ -671,54 +333,47 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // transcript's own nesting depth, supplied by readOmpSession from the walk —
 // a fact about where the file lives, not a guess about what it is), and —
 // per #1506's ruling below — the AgentId itself, handed to classifyRole as
-// `memberName` exactly the way `claudeRoleSignals` already hands over
-// `meta.name` unconditionally. Depth matters on its own: classifyRole checks
-// depth BEFORE any text match, specifically so a nested member whose task
-// happens to read like a reviewer's ("Review PR 1353 correctness") still
-// books as the fan-out specialist it structurally is, not a reviewer. None
-// present yields `"-"` — the same visible-hole spelling as `thinking`, never
-// a default like "other", which only makes sense where a real dispatch
-// record (Claude's meta.json) backs it.
+// `memberName`. Depth matters on its own: classifyRole checks depth BEFORE
+// any text match, specifically so a nested member whose task happens to
+// read like a reviewer's ("Review PR 1353 correctness") still books as the
+// fan-out specialist it structurally is, not a reviewer. None present
+// yields `"-"` — the same visible-hole spelling as `thinking`, never a
+// default like "other", which only makes sense where a real dispatch record
+// backs it.
 //
-// `agent` reaches classifyRole as its `agentDefinition` (#1486, #1505). It is
-// the same value the `subagent_type` column below already records, and
-// withholding it here made classifyRole's FIRST branch — the one whose comment
-// says memory-system work must "never land in review spend" — structurally
-// unreachable from this harness, leaving every omp row's role decided by
+// `agent` reaches classifyRole as its `agentDefinition` (#1486, #1505). It
+// is the same value the `subagent_type` column below already records, and
+// withholding it here made classifyRole's FIRST branch — the one whose
+// comment says memory-system work must "never land in review spend" —
+// structurally unreachable, leaving every row's role decided by
 // dispatch-prompt prose alone. Measured 2026-09-16 before the fix: 50
 // omp/memory-proxy rows, not one of them `role=memory`, and a single
 // definition (`fleet-review-verifier`) split across four buckets on nothing
 // but how each prompt happened to read.
 //
-// It went in as `agentType` until #1505, when that parameter turned out to be
-// the Claude reader's NAME — one parameter, two meanings, so the memory
-// exclusion decided on a definition here and on a name there. The parameter
-// it fills now says which of the two it is.
-//
-// #1506's gap: `memberName` used to be left unset here on the theory that the
-// AgentId genuinely is not a name — a generated CamelCase word pair
-// (`InstallVerifySearch`) names nothing the classifier can read. True for the
-// ordinary case, but false for members dispatched under run-team's own naming
-// convention: `impl-<n>`, `fix-pr-<n>`, `finisher-<n>`, `finish-<n>`,
+// #1506's gap: `memberName` used to be left unset here on the theory that
+// the AgentId genuinely is not a name — a generated CamelCase word pair
+// (`InstallVerifySearch`) names nothing the classifier can read. True for
+// the ordinary case, but false for members dispatched under run-team's own
+// naming convention: `impl-<n>`, `fix-pr-<n>`, `finisher-<n>`, `finish-<n>`,
 // `review-pr-<n>` and `merge-bot-<n>` ARE the dispatch name — exactly why
 // `parseMemberName` runs against this same stem below. Those members are
 // dispatched under the generic default `task` definition (`folded.agent` is
-// `undefined`), so the definition-based fix above cannot reach them, and they
-// fall through to prose classification of `folded.task` alone. Measured
-// against docs/metrics/member-outcomes.tsv (#1506): 478 omp rows carry such
-// an AgentId, 52 of them booked `other` for want of this signal — 31
-// `fix-pr-*`, 9 `impl-*` and 12 `merge-bot-*` members whose dispatch prompt
-// never happens to name the role.
+// `undefined`), so the definition-based fix above cannot reach them, and
+// they fall through to prose classification of `folded.task` alone.
+// Measured against docs/metrics/member-outcomes.tsv (#1506): 478 omp rows
+// carry such an AgentId, 52 of them booked `other` for want of this signal —
+// 31 `fix-pr-*`, 9 `impl-*` and 12 `merge-bot-*` members whose dispatch
+// prompt never happens to name the role.
 //
-// RULED: pass the AgentId unconditionally, same as Claude's reader passes
-// `meta.name` unconditionally — NOT gated on looking name-shaped first. Every
-// name-driven branch in classifyRole is hyphen-anchored (`^impl-`,
-// `review-pr-`, `fix-pr-`, `^finish-`) or a multi-word phrase ("implement
-// ticket", "review pr"), so a stray generated word pair cannot coincidentally
-// satisfy one; the one bare-word pattern, `finisher`, already carries the
-// same risk on Claude's side today and has not fired on the 4,574 sidecars
-// measured for #1505. `OMP_CANONICAL_STEM_RE` below exists only to widen
-// `hasRoleSignal` itself: a canonically-named member whose transcript
+// RULED: pass the AgentId unconditionally — NOT gated on looking
+// name-shaped first. Every name-driven branch in classifyRole is
+// hyphen-anchored (`^impl-`, `review-pr-`, `fix-pr-`, `^finish-`) or a
+// multi-word phrase ("implement ticket", "review pr"), so a stray generated
+// word pair cannot coincidentally satisfy one; the one bare-word pattern,
+// `finisher`, carries that risk today and has not fired on the 4,574
+// sidecars measured for #1505. `OMP_CANONICAL_STEM_RE` below exists only to
+// widen `hasRoleSignal` itself: a canonically-named member whose transcript
 // predates #1343 (no `session_init` line at all, so neither `task` nor
 // `agent` exist) still holds a readable identity and must not fall back to
 // the "-" hole. Measured 2026-09-16: zero such rows on disk today, but the
@@ -753,9 +408,7 @@ export function ompMemberRecord(folded, agentStem, spawnDepth = 0) {
     resolvedModelIdentity: folded.resolvedModelIdentity ?? null,
     thinking: folded.thinking ?? "-",
     // The dispatch record's own agent definition, `""` when the transcript
-    // carries no `session_init` line to read one from — the same column
-    // Claude fills from `meta.customAgentType`, so a deliberate pair reads
-    // identically on either harness.
+    // carries no `session_init` line to read one from.
     subagent_type: folded.agent ?? "",
     tokens_in: folded.input, tokens_cache_create: folded.cacheWrite,
     tokens_cache_read: folded.cacheRead, tokens_out: folded.output,
@@ -776,14 +429,12 @@ export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
 // One omp session directory's member transcripts, as the walk both readers of
 // that directory need it: readOmpSession below, and board.mjs's live spend
 // panel (#1716), which folds each file itself so it can keep its own
-// per-transcript skip tally. RECURSIVE for the same reason as
-// Claude's reader: a member can itself dispatch further members (measured on
-// disk — a research session's `Facts1303/` held seven more `.jsonl` files one
-// level down), and `agent` is the path-relative stem so those nest instead of
-// colliding. `spawnDepth` is read straight off that path — one `/` per
-// nesting level, the same signal Claude's own reviewer fan-out relies on via
-// `meta.spawnDepth` — and handed to ompMemberRecord as a real fact about the
-// walk, not a guess about the member.
+// per-transcript skip tally. RECURSIVE: a member can itself dispatch further
+// members (measured on disk — a research session's `Facts1303/` held seven
+// more `.jsonl` files one level down), and `agent` is the path-relative stem
+// so those nest instead of colliding. `spawnDepth` is read straight off
+// that path — one `/` per nesting level — and handed to ompMemberRecord as a
+// real fact about the walk, not a guess about the member.
 //
 // Throws when the directory itself cannot be listed; the caller decides what
 // that means.
@@ -800,7 +451,7 @@ export function ompSessionTranscripts(sessionDir) {
 // Walks one omp session directory into records, via the walk above.
 //
 // Deliberately NOT wrapped in a blanket try/catch around readOmpMember: the
-// wrong-root refusal (assertNotClaudeShaped, inside foldOmpTranscript) must
+// wrong-shape refusal (assertOmpShaped, inside foldOmpTranscript) must
 // propagate all the way out of readMembers, uncaught, per #1342's acceptance
 // criterion. Only the directory listing and the raw file read are given the
 // ordinary per-member tolerance.
@@ -836,9 +487,7 @@ export function readOmpSession(sessionDir) {
 const OMP_SESSION_DIR_RE = /^\d{4}-\d{2}-\d{2}T[\d-]+Z_[0-9a-f-]+$/i;
 
 // Exposed for callers that already hold one EXPLICIT directory rather than a
-// tree to search — member-outcomes.mjs's CLI, which is handed a session dir
-// directly the way it is already handed a Claude one — so the pattern is
-// defined once.
+// tree to search — member-outcomes.mjs's CLI, so the pattern is defined once.
 export function isOmpSessionDirName(name) {
   return OMP_SESSION_DIR_RE.test(name);
 }
@@ -854,57 +503,21 @@ function findOmpSessionDirs(root) {
 }
 
 // ---------------------------------------------------------------------------
-// readMembers — the one entry point that owns both roots
+// readMembers — the one entry point
 // ---------------------------------------------------------------------------
 
-// Which harness a root belongs to is a property of the PATH alone: does it
-// sit under a `.claude/projects` tree or a `.omp/agent/sessions` tree.
-// Checked as path SEGMENTS, not a substring match, so a cwd that merely
-// contains the text `.claude/projects` somewhere in an unrelated component
-// cannot be mistaken for the real tree.
-function harnessForRoot(root) {
-  const segs = resolve(String(root)).split(sep);
-  for (let i = 0; i + 1 < segs.length; i++) {
-    if (segs[i] === ".claude" && segs[i + 1] === "projects") return "claude";
-  }
-  for (let i = 0; i + 2 < segs.length; i++) {
-    if (segs[i] === ".omp" && segs[i + 1] === "agent" && segs[i + 2] === "sessions") return "omp";
-  }
-  return null;
-}
-
-// The adapter's public entry point. `roots` may mix Claude and omp trees
-// freely — each element is dispatched to its reader by where it lives, and
-// every record it produces carries the `harness` that decided it. A root
-// under neither tree is refused rather than silently skipped: the module
-// makes it impossible to point a reader at the other's tree, but it cannot
-// make a THIRD tree meaningful, and silently returning no rows for a typo'd
-// path is the same blackout #1302's ruling exists to prevent.
-//
-// A Claude root that resolves to NO `subagents/` directory anywhere gets the
-// same treatment, symmetric with the omp side's content-shape refusal: an
-// omp session directory dropped under `~/.claude/projects/<enc>/` has no
-// `subagents/` child at any depth (it holds `.jsonl` files directly instead),
-// so findClaudeSubagentsDirs legitimately finds none — and a silent empty
-// result here is exactly the blackout this function's own contract refuses
-// everywhere else. The omp side does not need the mirror of THIS check: its
-// wrong-shape refusal already fires from inside foldOmpTranscript on the
-// first line of whatever the misrouted content turns out to be.
+// The adapter's public entry point. A root that resolves to no session
+// directory anywhere is refused rather than silently skipped: silently
+// returning no rows for a typo'd path is the blackout #1302's ruling exists
+// to prevent.
 export function readMembers(roots) {
   const rows = [];
   for (const root of [].concat(roots ?? [])) {
-    const harness = harnessForRoot(root);
-    if (harness === "claude") {
-      const dirs = findClaudeSubagentsDirs(root);
-      if (dirs.length === 0) {
-        throw new Error(`member-record: no subagents/ directory found anywhere under the Claude root, refusing to silently contribute nothing: ${root}`);
-      }
-      for (const dir of dirs) rows.push(...readClaudeSession(dir));
-    } else if (harness === "omp") {
-      for (const dir of findOmpSessionDirs(root)) rows.push(...readOmpSession(dir));
-    } else {
-      throw new Error(`member-record: root is neither a Claude nor an omp telemetry tree: ${root}`);
+    const dirs = findOmpSessionDirs(root);
+    if (dirs.length === 0) {
+      throw new Error(`member-record: no omp session directory found anywhere under this root, refusing to silently contribute nothing: ${root}`);
     }
+    for (const dir of dirs) rows.push(...readOmpSession(dir));
   }
   return rows;
 }

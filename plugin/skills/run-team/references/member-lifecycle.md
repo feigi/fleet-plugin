@@ -2,13 +2,13 @@
 
 Why member name load-bearing, why every member single-use, how killed/idle/truncated member recovered. Assertions these justify live in SKILL.md's "Rules that fail silently", Phase 3, Reviewers, Failure handling sections; evidence here.
 
-## The name is what carries the `Agent` tool
+## Every member is named
 
-Name makes it team member; membership carries `Agent` tool. Omit it → member loses delegation, no error, improvises something worse. `subagent_type` irrelevant — name is mechanism, not label. Names follow unit of work: `impl-<issue#>`, `fix-pr-<pr#>` (default path's applier), `review-pr-<pr#>` (hand-dispatch fallback's reviewer), `finisher-pr-<pr#>` (Phase 3's finisher), `merge-bot-<n>` (one merge pass; `ledger.mjs dispatch merge-bot` numbers it from the ledger's `## Dispatched` list — a per-run counter, never a PR).
+The name is the ledger token and the hub address (`hub send <name>`, `agent://<name>`); omit it and the ledger cannot match the member. Names follow unit of work: `impl-<issue#>`, `fix-pr-<pr#>` (default path's applier), `review-pr-<pr#>` (hand-dispatch fallback's reviewer), `finisher-pr-<pr#>` (Phase 3's finisher), `merge-bot-<n>` (one merge pass; `ledger.mjs dispatch merge-bot` numbers it from the ledger's `## Dispatched` list — a per-run counter, never a PR).
 
-## Members cannot name their children
+## A depth-2 member cannot dispatch further
 
-Named member passing `name` fails with `teammates cannot spawn teammates`, so specialists dispatched **unnamed**. Must state in reviewer prompt — else reviewer hits error, concludes fan-out unavailable, silently downgrades to solo review, no error, no signal.
+`task` is absent at a depth-2 member's depth (`task.maxRecursionDepth: 2`). Must state in reviewer prompt — else reviewer concludes fan-out unavailable, silently downgrades to solo review, no error, no signal; ask the controller to dispatch the specialists and relay their reports instead.
 
 ## Capability is not permission
 
@@ -16,49 +16,47 @@ Members inherit standing *"Do not call the AgentTool unless the user requested i
 
 ## The coordination contract
 
-Same on both harnesses, stated once, in the vocabulary #1316 fixed — *dispatch* (start a member), *send* (message a live one), *wake* (a send that resumes a finished member's transcript), *settle* (a member's job reaching a terminal outcome), *consume* (the controller deliberately taking a settled result):
+Stated once, in the vocabulary #1316 fixed — *dispatch* (start a member),
+*send* (message a live one), *wake* (a send that resumes a finished
+member's transcript), *settle* (a member's job reaching a terminal
+outcome), *consume* (the controller deliberately taking a settled result):
 
 - A refill is a **new** member under a **new** name, never a wake back into the old one — waking a finished member drags its old ticket in.
-- Liveness is not settlement. A member that is not currently executing is not thereby done — the state machine this holds across differs by harness (Settle and liveness, below).
-- A settled result is consumed deliberately, never assumed — the discipline holds on both harnesses even where the *hazard* it guards against does not (Grandchildren, below).
+- Liveness is not settlement. A member that is not currently executing is not thereby done (Settle and liveness, below).
+- A settled result is consumed deliberately, never assumed — the discipline holds even where the *hazard* it guards against does not (Grandchildren, below).
 - Every send is reconciled against its receipt; whoever holds the receipt is the only party that can detect a discrepancy (Grandchildren, below).
 
-`SendMessage` and `hub` are harness terms. They appear only on a `CLAUDE:`/`OMP:` marked line, never in this contract.
+`hub send` is the omp messaging mechanism. It appears in the recipes below, never in this contract's own vocabulary.
 
 ## Fresh context per member
 
 One member, one unit of work, gone. Never re-task a finished member — waking it drags the old ticket back in. Refill = **new** member, **new** name. Sending is still right for pinging a live member for a report it owes, or resuming a truncated reply — never for handing a finished member the next ticket.
 
-CLAUDE: `SendMessage` to a finished agent resumes its transcript and drags the old ticket in — the wake this contract forbids for a refill.
-OMP: `hub send` to an idle peer wakes it into its old transcript the same way; re-dispatching under the same name does not reset it — omp auto-suffixes a fresh peer (`name-2`) instead.
+`hub send` to an idle peer wakes it into its old transcript the same way; re-dispatching under the same name does not reset it — omp auto-suffixes a fresh peer (`name-2`) instead.
 
 ## Grandchildren surface to you, not to the member that spawned them
 
 A specialist's report routes to *you*, the controller.
 
-CLAUDE: a hand-dispatched reviewer has no messaging channel to a grandchild it spawned — `SendMessage` to one returns `had no active task; resumed from transcript` with no report (~15 pinged in one run, 0 retrieved). Retrieve instead: `tail -1 <output-file> | jq -r '.message.content[]?|select(.type=="text").text'` yields the final report, bounded (299 KB transcript → 8 KB last record → 6.6 KB report; never read the whole file).
-OMP: the tail/jq recipe does not apply — a depth-2 helper cannot dispatch further (`task.maxRecursionDepth: 2`); measured 2026-09-09 from an actual controller session: a `hub send` to a depth-2 helper's full dotted id (`<member>.<helper>`) delivered, woke it, and got a reply — the controller reaches a member's helper directly, no transcript workaround needed.
+A depth-2 helper cannot dispatch further (`task.maxRecursionDepth: 2`); measured 2026-09-09 from an actual controller session: a `hub send` to a depth-2 helper's full dotted id (`<member>.<helper>`) delivered, woke it, and got a reply — the controller reaches a member's helper directly, no transcript workaround needed.
 
 Reviewer retrieves first, relay is the backup — duplicate costs nothing, missed report costs a verdict. A completed member's result is consumed deliberately, never assumed silent:
 
-CLAUDE: a completed agent's final text is a return value, **lost if unconsumed**.
-OMP: the lost-if-unconsumed hazard does not apply — results auto-deliver, and a settled `hub jobs`/`wait` snapshot **is** the delivery itself.
+Results auto-deliver, and a settled `hub jobs`/`wait` snapshot **is** the delivery itself.
 
 So relay each: name source, send its *text* (ruling on it as "your finding" makes reviewer verify a report it never sent, or act on one it cannot check). Then **reconcile every verdict against your relay receipts** — verdict claims a dimension undelivered, receipts say relayed → re-send naming the specialist, hold the verdict until it lands. Do not require reviewer-side acknowledgement: compliance depends on the same failure it catches, and the receipt check needs nothing from the reviewer.
 
-CLAUDE: only the controller holds the message id, so only the controller detects the discrepancy — reconciliation is hand-rolled around a bare send.
-OMP: `hub send` returns a structured `delivered`/`failed` receipt inline, replies thread by a 16-hex message id, and `await: true` returns the reply in the same call — the bookkeeping Claude hand-rolls is native.
+`hub send` returns a structured `delivered`/`failed` receipt inline, replies thread by a 16-hex message id, and `await: true` returns the reply in the same call — the bookkeeping is native.
 
-Measured on Claude Code, both halves, with quotes. `review-pr-11` was sent `code-reviewer`'s report, msg `58c6bef2`, before its verdict; verdict read *"`code-reviewer` — dispatched, never delivered. No report reached me and none was relayed. Dimension not covered by a specialist."* — then ruled that dimension solo, headline claim refuted by report already sent to it. `review-pr-12` composed its first verdict *before* relays landed and reported all four as delivering nothing, found same defects in own mutation pass, credited all four by name in second verdict — convergent discovery, not silent application. Naming gap honestly is necessary, not sufficient: relay sent ≠ relay read, and relay can land after verdict composed. Neither reviewer could tell "no report exists" from "one was sent I have not received".
+Measured 2026-09 (pre-cutover), both halves, with quotes. `review-pr-11` was sent `code-reviewer`'s report, msg `58c6bef2`, before its verdict; verdict read *"`code-reviewer` — dispatched, never delivered. No report reached me and none was relayed. Dimension not covered by a specialist."* — then ruled that dimension solo, headline claim refuted by report already sent to it. `review-pr-12` composed its first verdict *before* relays landed and reported all four as delivering nothing, found same defects in own mutation pass, credited all four by name in second verdict — convergent discovery, not silent application. Naming gap honestly is necessary, not sufficient: relay sent ≠ relay read, and relay can land after verdict composed. Neither reviewer could tell "no report" from "not yet relayed" without the receipt check; the second's independent re-derivation is what makes the correction trustworthy, not the naming alone.
 
 Grandchild surfaces as own task-notification; unrecognized task-id not a member reporting done.
 
-## Settle and liveness: two different state machines
+## Settle and liveness are different facts
 
-A member's settle outcome and its liveness are different facts — and a different state machine on each harness, not the same table with two spellings.
+A member's settle outcome and its liveness are different facts, not the same table with two spellings.
 
-CLAUDE: three states on one axis — killed, idle, truncated. `SendMessage` works on idle or truncated; does nothing for dead, and a spend limit kills every member at once, so the temptation to re-task peaks exactly when it cannot work.
-OMP: two axes — job outcome (`completed`/`failed`/`cancelled`) crossed with peer liveness (`running`/`idle`/`parked`). `hub cancel` → `cancelled`, the peer hard-aborted and unmessageable, `history://` still readable. A **`failed` job's peer can stay `idle` and resumable** — a bucket Claude's triad has no slot for. No distinct truncated state exists on omp.
+Two axes — job outcome (`completed`/`failed`/`cancelled`) crossed with peer liveness (`running`/`idle`/`parked`). `hub cancel` → `cancelled`, the peer hard-aborted and unmessageable, `history://` still readable. A **`failed` job's peer can stay `idle` and resumable**. No distinct truncated state exists.
 
 Recovery = fresh member, fresh name (`impl-<N>-b`, `fix-pr-<M>-b`, `review-pr-<M>-b`), whose prompt states what it inherits:
 

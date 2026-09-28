@@ -181,7 +181,7 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   // reds here rather than silently coexisting with this sentence.
   assert.match(
     slice,
-    /omit `model` on the Agent\s+call, whatever the class/,
+    /omit `model` on the `task`\s+call, whatever the class/,
     "phase 2 no longer dispatches every class the same way — a per-class tier branch is back",
   );
   // The revert is dated and attributed, or the next reader takes the missing
@@ -354,21 +354,22 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   // somewhere the reader of this phase can neither find nor audit.
   assert.match(
     slice,
-    /subagent_type: "fleet-ctl:fleet-implementer"/,
-    "phase 2 no longer dispatches the declared subagent type",
+    /agent: "fleet-implementer"/,
+    "phase 2 no longer dispatches the declared agent",
   );
   assert.match(
     slice,
     /agents\/fleet-implementer\.agent\.md/,
     "phase 2 no longer says WHERE the declared tier lives",
   );
-  // `name` is orthogonal to `subagent_type` and is what confers team membership
-  // and the Agent tool; both the spend classifier and member-outcomes.mjs read
-  // it. A rewrite that swaps the name for the type silently unmakes the member.
+  // `name` is orthogonal to `agent` and is what confers team membership —
+  // the ledger token and the hub address; both the spend classifier and
+  // member-outcomes.mjs read it. A rewrite that swaps the name for the
+  // agent silently unmakes the member.
   assert.match(
     slice,
     /Keep `name: impl-<N>`/,
-    "phase 2 no longer keeps the impl-<N> name alongside the subagent type",
+    "phase 2 no longer keeps the impl-<N> name alongside the dispatched agent",
   );
 
   // A lost class no longer misprices anything, but it still costs the correction
@@ -626,53 +627,54 @@ test("phase 3 owns the guard — otherwise nothing in the event loop ever runs i
 const frontmatterOf = (name) =>
   readFileSync(join(REPO, "agents", `${name}.agent.md`), "utf8").split("---")[1] ?? "";
 
-test("the implementer definition declares BOTH a model and an effort", () => {
-  // Declaring one leaves the other inherited from whatever session dispatched
-  // the member, which is the ambiguity the declaration exists to remove — and
-  // frontmatter is the ONLY place the pair can be stated, because the Agent tool
-  // takes `model` and has no effort parameter at all.
+test("the implementer definition declares a model carrying both a role and a level", () => {
+  // The declaration is one key, `model: "@<role>:<level>"` — the level rides
+  // on the model's own suffix (ADR 0014), so there is no second key to omit
+  // independently and leave the level inherited from whatever session
+  // dispatched the member.
   const fm = frontmatterOf("fleet-implementer");
-  assert.match(fm, /^model:\s*\S+$/m, "the implementer definition declares no model");
-  assert.match(fm, /^effort:\s*\S+$/m, "the implementer definition declares no effort");
+  assert.match(fm, /^model:\s*"@(slow|task|smol):(minimal|low|medium|high|xhigh|max)"$/m, "the implementer definition declares no tier route");
 });
 
-test("the declared model is a bare alias, never a pinned version — both definitions", () => {
-  // A pinned id rots into a superseded generation that is weaker AND dearer:
-  // pricing falls with each generation. The alias tracks the newest. Both
-  // definitions, not just the default: #1345's dispatch-time tier check
-  // compares this same field on fleet-implementer-alt, and a pinned version
-  // there would fail the family comparison silently reading as a real
-  // mismatch rather than a declaration defect.
+test("the declared model is a fleet tier route, never a vendor id — both definitions", () => {
+  // A vendor id rots into a superseded generation that is weaker AND
+  // dearer: pricing falls with each generation. The role alias tracks
+  // whatever model the operator's `modelRoles` currently points it at.
+  // Both definitions, not just the default: #1345's dispatch-time tier
+  // check compares this same field on fleet-implementer-alt, and a vendor
+  // id there would fail the role-target comparison silently reading as a
+  // real mismatch rather than a declaration defect.
   for (const name of ["fleet-implementer", "fleet-implementer-alt"]) {
-    const model = /^model:\s*(\S+)$/m.exec(frontmatterOf(name))?.[1];
-    assert.ok(["opus", "sonnet", "haiku"].includes(model), `${name}: pinned version: ${model}`);
+    const model = /^model:\s*"?(\S+?)"?$/m.exec(frontmatterOf(name))?.[1];
+    assert.match(model, /^@(slow|task|smol):(minimal|low|medium|high|xhigh|max)$/, `${name}: not a tier route: ${model}`);
   }
 });
 
-test("the definition lists no tools — a list would drop the Agent tool", () => {
-  // references/member-lifecycle.md's "The name is what carries the `Agent`
-  // tool" — a `tools:` list that omits `Agent` costs
-  // the member its delegation, silently and with no error. Omit the key.
+test("the definition lists no tools — a list would drop dispatch capability", () => {
+  // references/member-lifecycle.md's "Every member is named" section: the
+  // name is the ledger token and the hub address — a `tools:` list that
+  // narrows what the member can call costs it silently, with no error.
+  // Omit the key.
   assert.doesNotMatch(frontmatterOf("fleet-implementer"), /^tools:/m);
 });
 
-// #1298's ruling records the layer-1 (#1314) key set for every fleet agent
-// file: all five of `name`, `description`, `model`, `effort`,
-// `thinking-level`. This file only pins the two implementer definitions
-// #1345's dispatch-time tier check reads — #1314 owns the general checker
-// over every agent file in the tree.
-test("both implementer definitions carry all five required keys", () => {
+// ADR 0014's ruling records the layer-1 (#1314) key set for every fleet
+// agent file: `name`, `description`, `model` — the level no longer rides a
+// separate key. This file only pins the two implementer definitions #1345's
+// dispatch-time tier check reads — #1314 owns the general checker over
+// every agent file in the tree.
+test("both implementer definitions carry all three required keys", () => {
   for (const name of ["fleet-implementer", "fleet-implementer-alt"]) {
     const fm = frontmatterOf(name);
-    for (const key of ["name", "description", "model", "effort", "thinking-level"]) {
+    for (const key of ["name", "description", "model"]) {
       assert.match(fm, new RegExp(`^${key}:\\s*\\S`, "m"), `${name}.agent.md declares no ${key}`);
     }
   }
 });
 
-// The alt definition differing from the default in MODEL ONLY is pinned in
+// The alt definition differing from the default in ROLE ONLY is pinned in
 // within-run-pair-prose.test.mjs's "the alternate definition differs from
-// the default in MODEL ONLY" — not repeated here. That test already asserts
-// `effort` and `thinking-level` are shared and `model` alone diverges;
-// duplicating it here would just be a second copy to keep in sync with the
-// same two files.
+// the default in ROLE ONLY, the level stays shared" — not repeated here.
+// That test already asserts the level suffix is shared and the role alone
+// diverges; duplicating it here would just be a second copy to keep in
+// sync with the same two files.

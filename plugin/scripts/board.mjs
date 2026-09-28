@@ -4,10 +4,10 @@
 // atomic-writes .fleet/board.json, and serves board.html. The board never
 // depends on the controller feeding it.
 //
-// Pipeline state is a pure function of ledger + GitHub. The spend panel adds a
-// THIRD input that is neither — the local member-transcript tree, Claude
-// Code's under ~/.claude/projects or omp's under ~/.omp/agent/sessions — so
-// the "f(ledger, gh)" property no longer covers the whole model. It is
+// Pipeline state is a pure function of ledger + GitHub. The spend panel adds
+// a THIRD input that is neither — the local member-transcript tree, under
+// ~/.omp/agent/sessions — so the "f(ledger, gh)" property no longer covers
+// the whole model. It is
 // telemetry, kept strictly to the side: it can only ever populate or omit
 // `spend`, never change a ticket's stage.
 //
@@ -35,8 +35,7 @@ import { execFile, spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync, writeSync } from "node:fs";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
 import {
-  encodeClaudeProjectDir as encodeProjectDir, foldClaudeTranscript, claudeRoleSignals,
-  encodeOmpProjectDir, isOmpSessionDirName, ompSessionTranscripts, foldOmpTranscript, ompMemberRecord,
+  encodeProjectDir, isOmpSessionDirName, ompSessionTranscripts, foldOmpTranscript, ompMemberRecord,
 } from "./member-record.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
@@ -50,7 +49,7 @@ import { mergedReadPrs } from "./compute-board.mjs";
 // caller takes (#1582), and a second probe could answer differently.
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { fileURLToPath } from "node:url";
-import { basename, dirname, join } from "node:path";
+import { dirname, join, basename } from "node:path";
 import { createServer, request as httpRequest } from "node:http";
 import { inspect } from "node:util";
 
@@ -95,10 +94,9 @@ const { arg, has, sweep, stray } = defineFlags(die, {
 
 // #1546: the "is this a plain JSON object" predicate and its kind word, one
 // copy for the reads in this file that reject a parsed-but-wrong payload
-// WHOLE — readAgent's sidecar-meta read, gather's `--prev` payload, gather's
-// per-entry `tickets[i]` check, and readMerged()'s `data.repository` (#1840).
-// The first three each carried their own inline copy of both halves before,
-// which is three places for one policy to drift in.
+// WHOLE — gather's `--prev` payload, gather's per-entry `tickets[i]` check,
+// and readMerged()'s `data.repository` (#1840). Each carried its own inline
+// copy of both halves before, which is three places for one policy to drift in.
 //
 // TWO functions and not one, because `typeof` alone cannot name the fault the
 // predicate rejects: it answers "object" for `null` and for `[]` alike, and
@@ -197,9 +195,9 @@ function argSpendSince() {
 // the flag is spelled in one place and this reasoning has a home.
 //
 // Existence is deliberately NOT checked, and refusing an absent directory
-// would refuse the one invocation this flag exists for: a session's
-// `subagents/` directory does not exist until that session's first agent
-// spawns, and the cockpit launches in run-team phase 0, BEFORE that. An
+// would refuse the one invocation this flag exists for: a session's own
+// directory does not exist until that session's first agent spawns, and the
+// cockpit launches in run-team phase 0, BEFORE that. An
 // operator pinning THIS run's transcripts therefore names a directory that is
 // not there yet, and it appears seconds later. A directory that never appears
 // degrades per tick through gatherSpend's catch and hides the panel; it never
@@ -315,7 +313,7 @@ async function openBrowser(url) {
 // no caller of this helper can use: every other one boxes and reads, null alone
 // has no properties, whatever shape the caller wanted. Shape is the caller's
 // question and keeps the caller's answer — withNumber below rejects a non-array
-// for the `gh ... list` reads, readAgent parses its own sidecar so it can demand
+// for the `gh ... list` reads, gather()'s `--prev` read demands
 // an object, and gather()'s ledger branch takes any shape ledger.mjs emits,
 // deliberately, for the reason stated there. A shape policy could not be written
 // in here anyway: `fallback` is `[]` where ghRows calls this and null where the
@@ -619,80 +617,60 @@ export function mapCi(ciJson, pr) {
   return "unknown";
 }
 
-// Where this session's member transcripts live. One tree per harness, and the
-// board cannot tell which harness launched it — fleet-run's own header
-// measures why no env probe answers that (omp sets CLAUDECODE too, and
-// OMPCODE is inherited by anything an omp shell starts) — so it looks in both
-// and lets the transcripts say which one is live (#1716):
-//   Claude Code  ~/.claude/projects/<encoded-cwd>/<session-uuid>/subagents/
-//   omp          ~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>/
-// The two encoders differ (member-record.mjs, #1342) and live there, shared
-// with member-outcomes.mjs; the Claude one is re-exported here under its
-// original name so nothing importing `encodeProjectDir` from this file needs
-// to change.
+// Where this session's member transcripts live:
+//   ~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>/
+// The encoder lives in member-record.mjs (#1342), shared with
+// member-outcomes.mjs; it is re-exported here under its original name so
+// nothing importing `encodeProjectDir` from this file needs to change.
 export { encodeProjectDir };
 
-// The session uuid is not knowable from here, so take the most recently active
-// one — across BOTH trees, in one ranking, so a cwd that has run under each
-// harness still resolves to whichever session is writing now. Rank on the
-// newest TRANSCRIPT mtime, not on the session directory's own: a directory's
-// mtime moves when an entry is created or removed, never when a file inside
-// it is appended to. Ranking on the directory therefore tracked the last
-// agent SPAWN rather than the last agent activity — and since the cockpit
-// launches in run-team phase 0, before the first agent spawns, the live
-// session has no transcript yet and a PREVIOUS session won. The board would
-// render a prior run's spend as this run's, then silently switch when the
-// first agent landed. That is the one failure mode here that produces
-// confidently wrong numbers rather than no numbers.
+// The session uuid is not knowable from here, so take the most recently
+// active one. Rank on the newest TRANSCRIPT mtime, not on the session
+// directory's own: a directory's mtime moves when an entry is created or
+// removed, never when a file inside it is appended to. Ranking on the
+// directory therefore tracked the last agent SPAWN rather than the last
+// agent activity — and since the cockpit launches in run-team phase 0,
+// before the first agent spawns, the live session has no transcript yet and
+// a PREVIOUS session won. The board would render a prior run's spend as
+// this run's, then silently switch when the first agent landed. That is the
+// one failure mode here that produces confidently wrong numbers rather than
+// no numbers.
 //
-// Returns { error } when neither harness has a project dir for this cwd — a
-// bug that never fixes itself — and null when one resolves but holds no
-// sessions yet, which is normal at run start. Collapsing those two into one
-// bare null is what hid the encoding bug above. A tree whose listing THROWS is
-// { error } too, even with the other tree readable: the one we cannot read
-// may hold the live session, and ranking only the other would put a stale
-// session's numbers up as this run's — the failure mode above.
+// Returns { error } when there is no project dir for this cwd — a bug that
+// never fixes itself — and null when one resolves but holds no sessions
+// yet, which is normal at run start. Collapsing those two into one bare
+// null is what hid the encoding bug above. A listing that THROWS is
+// { error } too.
 export function findSubagentsDir(home = process.env.HOME, cwd = process.cwd()) {
   try {
-    const trees = [claudeSessionDirs(home, cwd), ompSessionDirs(home, cwd)];
-    if (trees.every((t) => t.dirs === null)) {
-      return { error: `no transcript dir for cwd ${cwd} (looked in ${trees.map((t) => t.root).join(" and ")})` };
+    const tree = sessionDirs(home, cwd);
+    if (tree.dirs === null) {
+      return { error: `no transcript dir for cwd ${cwd} (looked in ${tree.root})` };
     }
-    const cands = trees.flatMap((t) => t.dirs ?? [])
+    const cands = tree.dirs
       .map((d) => ({ d, m: newestTranscriptMs(d) }))
       .sort((a, b) => b.m - a.m);
     return cands.length ? cands[0].d : null;
   } catch (e) { return { error: `transcript lookup failed: ${e.message}` }; }
 }
 
-// Each harness's candidate session directories for this cwd. `dirs: null`
-// means the harness has no project dir here at all; `[]` means it has one
-// holding no session yet. `root` is where it looked, for the error above.
-function claudeSessionDirs(home, cwd) {
-  const root = join(home, ".claude", "projects", encodeProjectDir(cwd));
-  if (!existsSync(root)) return { root, dirs: null };
-  return { root, dirs: readdirSync(root).map((s) => join(root, s, "subagents")).filter((d) => existsSync(d)) };
-}
-
-// Only the `<ISO>_<uuid>` DIRECTORIES are sessions. The project dir also holds
-// each session's MAIN transcript as a plain file sibling to its directory —
-// the controller's own, never a member's, the same way Claude's
-// `<session-uuid>.jsonl` beside its directory is never a candidate either.
+// The candidate session directories for this cwd. `dirs: null` means there
+// is no project dir here at all; `[]` means there is one holding no session
+// yet. `root` is where it looked, for the error above.
 //
-// encodeOmpProjectDir realpath-resolves a cwd outside $HOME, which throws
+// `encodeProjectDir` realpath-resolves a cwd outside $HOME, which throws
 // ENOENT when that cwd does not exist. No omp session can be keyed on such a
-// cwd, so THAT is this tree's absence — not a lookup fault that would also
-// black out a readable Claude tree beside it. Any OTHER error (EACCES on an
-// ancestor directory, say) is a real fault, not an absence, and must not be
-// relabelled as one: swallowing it here would let the omp side crash silently
-// while a readable Claude tree beside it takes over with no signal anything
-// went wrong. It is rethrown, uncaught, into findSubagentsDir's own catch —
-// the same fate a listing failure below already gets, deliberately.
-function ompSessionDirs(home, cwd) {
+// cwd, so THAT is this tree's absence — not a lookup fault. Any OTHER error
+// (EACCES on an ancestor directory, say) is a real fault, not an absence,
+// and must not be relabelled as one: swallowing it here would crash
+// silently with no signal anything went wrong. It is rethrown, uncaught,
+// into findSubagentsDir's own catch — the same fate a listing failure below
+// already gets, deliberately.
+function sessionDirs(home, cwd) {
   const sessions = join(home, ".omp", "agent", "sessions");
   let root;
   try {
-    root = join(sessions, encodeOmpProjectDir(cwd, { home }));
+    root = join(sessions, encodeProjectDir(cwd, { home }));
   } catch (e) {
     if (e.code !== "ENOENT") throw e;
     return { root: sessions, dirs: null };
@@ -708,11 +686,8 @@ function ompSessionDirs(home, cwd) {
 // holds none. Recursive: a nested member (a dispatcher's own further
 // fan-out, one directory level down — the same walk ompSessionTranscripts
 // does to book their spend) can be the only fresh activity in an otherwise
-// idle-looking omp session, and a scan bounded to the top level would score
-// that session 0 and lose it to a genuinely stale sibling. Claude's
-// `subagents/` dirs are flat, so recursion changes nothing there — the same
-// scan now correctly covers both harnesses' shapes instead of assuming
-// Claude's.
+// idle-looking session, and a scan bounded to the top level would score
+// that session 0 and lose it to a genuinely stale sibling.
 //
 // A dir whose transcripts are all unreadable loses to one that is readable,
 // which is the behaviour we want when picking "the live session".
@@ -751,9 +726,9 @@ function newestTranscriptMs(dir) {
 // as easily as it can be the truly unresolvable "bug that never fixes
 // itself" the ticket originally reasoned about. Latching either one turns
 // the self-correcting degradation this file's header describes into a
-// permanent one: measured (#1679), a chmod'd-then-restored projects dir left
+// permanent one: measured (#1679), a chmod'd-then-restored session tree left
 // the OLD `??=` pin stuck on `{ error }` forever while the unpinned lookup
-// recovered on its very next tick, and a prior run's `subagents/` dir
+// recovered on its very next tick, and a prior run's session dir
 // present at launch left the old pin on yesterday's numbers for the whole of
 // today's run, even once today's first agent had written its own transcript.
 //
@@ -792,112 +767,6 @@ export function spendDirPin(explicit, home = process.env.HOME, cwd = process.cwd
   };
 }
 
-// Read one agent transcript into the shape the pure module wants. Single pass —
-// a long review agent's transcript is megabytes and this runs every tick.
-// Malformed lines are skipped rather than fatal: a transcript being appended to
-// WHILE we read it will have a torn last line, every tick. That reason reaches
-// the FINAL element of the split and no other, so only that one is skipped in
-// silence. A line anywhere earlier can never be completed by a later append, so
-// it is still malformed on every tick after — a real fault, and one that costs
-// spend rather than nothing.
-//
-// #916: it costs spend, so stderr was never enough for it. board.html says
-// twice that stderr is not a channel here — the board is launched backgrounded
-// and the operator is watching the page — which is the argument that put
-// `skipped` in the DOM and then `metaErrors` (#602) beside it. So the count
-// comes back as `damaged` and takes that same route, and this warning becomes
-// the SECOND channel rather than the only one. Measured before it did: a
-// mid-file tear billed 1500 where an intact file billed 1800, `skipped` 0,
-// `metaErrors` 0, `error` undefined, and spendView's whole decision identical
-// to the intact run's — and a transcript whose ONLY turn was the torn line
-// hid the panel outright, a destroyed run rendered as an idle one.
-//
-// Warn-once is now safe here for exactly the reason the `skips` gate gives,
-// where before #916 it needed its own: this message carries a COUNT, and a
-// count in a suppressed line can go stale — a second tear on a later tick
-// leaves the printed number one short. What keeps that honest is `damaged`
-// reaching the browser every tick, the same live channel `skipped` relies on.
-// The stderr number is the magnitude at FIRST sighting, deliberately: it tells
-// an operator reading a log how much to care, and the panel owns the live one.
-// Ceiling: a transcript whose writer has already exited has no legitimate torn
-// last line either, but readAgent cannot tell a live writer from a finished one,
-// so that line keeps passing in silence. Strictly better than warning on none.
-//
-// ONE assistant API turn is written as SEVERAL jsonl lines — one per content
-// block (thinking, text, each tool_use) — and every one of those lines repeats
-// the SAME `message.id` and the SAME `message.usage` object. Summing usage per
-// LINE therefore counts each turn's cache_creation once per block: measured
-// across 2452 real transcripts, +206% (535M counted vs 175M actual), with
-// 2445 of them affected. So fold lines back into turns on `message.id` and take
-// each turn's usage exactly once.
-//
-// `output_tokens` is the one field that genuinely differs across a turn's lines:
-// it is a streaming snapshot, so the LARGEST value is the final one. Summing it
-// double-counts too, though only by ~1.5%.
-//
-// The meta read below is guarded by existsSync, so the UNNAMED-AGENT case never
-// runs the guarded read — it simply leaves `meta` at {}. Everything that does
-// reach the catch is a real fault: a sidecar read torn mid-write,
-// EACCES/EISDIR, a delete racing the existsSync, or valid JSON of the wrong
-// SHAPE (guard below). Swallowing those booked the agent's whole spend as
-// `other` with nothing on stderr, which moves reviewPct — the review headline
-// compute-spend.mjs calls the one number anyone acts on. Measured on a
-// two-agent fixture: an intact reviewer sidecar gives reviewPct 80, the same
-// sidecar truncated gives 0, in silence (#325).
-//
-// Keep the {} fallback rather than rethrowing. The TRANSCRIPT is still readable,
-// so a throw would land in gatherSpend's per-file catch and drop this agent's
-// real tokens from the totals — a wrong total in place of a wrong role, and one
-// the panel would then also count as `skipped`. The `meta` gate warns once per
-// PATH, for the reason the `skips` gate gives below: `serve` rebuilds every
-// ~15s, and a broken sidecar is broken on every tick. The `lines` gate is keyed
-// on the transcript's FULL PATH for that same reason.
-function readAgent(file, metaFile) {
-  let meta = {};
-  // Set only inside the catch below — never for the existsSync-false path,
-  // which is the ordinary unnamed agent, not a fault. This is #602's signal:
-  // `meta` staying `{}` already made the fault survive (role "other", label
-  // the bare filename), but nothing carried it past this function, so a
-  // corrupt sidecar and a genuinely absent one were the same return shape.
-  let metaFault = false;
-  try {
-    if (existsSync(metaFile)) {
-      // JSON.parse SUCCEEDS on `null`, a bare number, a string, an array — none
-      // of which classifyRole or `meta.description` can read. Reject the shape
-      // here, so it takes the warn path below like any other sidecar fault. Left
-      // to reach `a.meta.description`, it throws into gatherSpend's per-file
-      // catch instead, which drops this agent's real tokens, counts it
-      // `skipped`, and names the TRANSCRIPT in a fault that is the sidecar's.
-      const m = JSON.parse(readFileSync(metaFile, "utf8"));
-      if (!isJsonObject(m)) throw new TypeError(`expected a JSON object, got ${jsonKind(m)}`);
-      meta = m;
-    }
-  }
-  catch (e) {
-    metaFault = true;
-    warnOnce("meta", metaFile, `${metaFile} unusable, classifying agent as "other" and labelling it from its filename: ${e.message}`);
-  }
-
-  const folded = foldClaudeTranscript(readFileSync(file, "utf8"));
-  const damaged = folded.malformedNonLastLines;
-  if (damaged) {
-    // The position check lives in foldClaudeTranscript now: a legitimate torn
-    // tail must not reach warnOnce at all, or it consumes this file's one
-    // `lines` line and permanently silences the real fault when the tear
-    // later moves. It must not reach `damaged` either — a note reading "spend
-    // may be incomplete" on every transcript still being written to is a note
-    // nobody reads by the second tick.
-    // "first parse error", not "the" one: the count can exceed 1 and only the
-    // first cause is carried, so the line says which number it is quoting.
-    warnOnce("lines", file, `${file} has ${damaged} unparseable line${damaged === 1 ? "" : "s"} away from its tail; that much of its spend may be missing from the panel (first parse error: ${folded.malformedNonLastLineError})`);
-  }
-  return {
-    meta, cacheWrite: folded.cacheWrite, output: folded.output,
-    cacheRead: folded.cacheRead, maxCtx: folded.maxCtx, entries: folded.entries,
-    metaFault, damaged,
-  };
-}
-
 // The `no-spend-dir` gate warns at most once per process PER DISTINCT ERROR.
 // `dir.error` is not constant — findSubagentsDir words an unresolvable project
 // dir differently from a lookup that threw — so it is keyed on the message
@@ -922,11 +791,10 @@ function readAgent(file, metaFile) {
 // count still reaches the browser every tick via `skipped`, which is the route
 // that matters here.
 
-// Scope is the SESSION directory, which is the closest thing to a run boundary
-// that actually exists on disk — one harness session, one folder. Which
-// harness wrote it is read off the directory's own NAME: an omp session dir is
-// `<ISO>_<uuid>` (member-record.mjs's isOmpSessionDirName, the rule its own
-// readers dispatch on), and anything else is read as Claude's `subagents/`.
+// Scope is the SESSION directory, which is the closest thing to a run
+// boundary that actually exists on disk — one session, one folder,
+// identified by its own NAME: `<ISO>_<uuid>` (member-record.mjs's
+// isOmpSessionDirName, the rule its own readers dispatch on).
 //
 // `sinceMs` is opt-in and defaults to no filter. An earlier attempt defaulted it
 // to the ledger's mtime as a "run start" marker; that is wrong and silently
@@ -972,9 +840,23 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
       return { ok: false, error: dirError };
     }
     if (!dir) return null; // resolved, but this session has spawned no agents yet
+    // #1679/#1302: only for an EXPLICIT --spend-dir — the heuristic's own
+    // findSubagentsDir() already dispatches on isOmpSessionDirName, so a
+    // resolved-but-non-heuristic `dir` here only ever arrives from the
+    // operator naming a directory directly. Without this check the
+    // mis-levelled path this same function's comments already name (the
+    // encoded-cwd project dir instead of its own <ISO>_<uuid> child) walked
+    // straight into readOmpSpend below, which recurses over every nested
+    // .jsonl with no name check of its own, and booked every session's
+    // transcripts — including the controller's own main-session one — as
+    // "agents" instead of refusing.
+    if (explicit && !isOmpSessionDirName(basename(dir))) {
+      const error = `${dir} is not an omp <ISO>_<uuid> session directory`;
+      warnOnce("bad-spend-dir", dir, `--spend-dir ${error}`);
+      return { ok: false, error };
+    }
 
-    const { agents, toolTables, skipped, metaErrors, damaged } =
-      isOmpSessionDirName(basename(dir)) ? readOmpSpend(dir, sinceMs) : readClaudeSpend(dir, sinceMs);
+    const { agents, toolTables, skipped, damaged } = readOmpSpend(dir, sinceMs);
     if (!agents.length) {
       // #1894: `damaged` belongs here beside `skipped`. An omp transcript with
       // no parseable assistant-with-usage line folds to no model, so
@@ -984,8 +866,9 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
       // path below: a hidden panel, or an explicit override told the directory
       // "holds no agent transcripts". A torn LAST line never counts as damaged,
       // so a live write's partial first line still takes the empty path.
-      // Claude never reaches this with `damaged` set: readAgent books a
-      // wholly-corrupt transcript at zero spend instead of dropping it.
+      // A wholly-corrupt transcript with a readable "not executed" tool
+      // result but no assistant-with-usage line still drops here rather
+      // than booking at zero spend.
       //
       // `damaged` counts LINES, `skipped` whole transcripts, so each keeps its
       // own clause — the lines one in board.html's damagedPhrase wording. "all
@@ -1002,8 +885,8 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
       // normal state at launch and must stay silent. An operator who named
       // this exact directory has a panel that just went quiet with nothing
       // saying whether that is the normal "not written yet" wait or a typo'd
-      // / mis-levelled path (e.g. the session dir instead of its `subagents/`
-      // child) that will never resolve.
+      // / mis-levelled path (e.g. the encoded-cwd directory instead of its
+      // own `<ISO>_<uuid>` child) that will never resolve.
       if (explicit) warnOnce("empty-spend-dir", dir, `--spend-dir ${dir} exists but holds no agent transcripts`);
       return null;
     }
@@ -1020,7 +903,7 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
     const attributedPct = spend.totals.cacheWrite > 0 ? (attributed / spend.totals.cacheWrite) * 100 : 0;
     // `ok` last, so a future field named `ok` on computeSpend's return cannot
     // silently untag a success (a later spread key always wins over an earlier one).
-    return { ...spend, tools, attributedPct, skipped, metaErrors, damaged, since: sinceMs, ok: true };
+    return { ...spend, tools, attributedPct, skipped, damaged, since: sinceMs, ok: true };
   } catch (e) {
     // A real bug, not an empty run — say so rather than hiding the panel, which
     // is what turned the last type surprise in here into "no panel appeared".
@@ -1038,70 +921,6 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
   }
 }
 
-// Claude's side of gatherSpend: one agent per `subagents/*.jsonl`, through
-// readAgent above, plus the per-agent tool tables the panel's second column is
-// built from.
-function readClaudeSpend(dir, sinceMs) {
-  const agents = [];
-  const toolTables = [];
-  let skipped = 0;
-  // #602: a corrupt meta sidecar does not throw past readAgent — the agent is
-  // still booked, under role "other" and its bare filename as label, which is
-  // indistinguishable on the page from a genuinely unnamed agent. `skipped`
-  // cannot carry this: that count means "contributed nothing", and this agent
-  // still does. A second tally, reaching the browser the same way `skipped`
-  // does — via this return and spendView's note — is the channel #325 shipped
-  // for the transcript half of this exact fault but not the sidecar half.
-  let metaErrors = 0;
-  // #916: the transcript-side sibling of the tally above, and the third
-  // distinct lie this panel can tell. `skipped` means a transcript
-  // contributed NOTHING; `metaErrors` means it contributed under a degraded
-  // role and label; `damaged` means it contributed but part of its spend is
-  // simply gone — the only one of the three that makes the NUMBERS beside it
-  // wrong. Folding it into either of the others would say something false,
-  // so it is its own count, summed over the whole dir per tick exactly as
-  // they are.
-  let damaged = 0;
-  for (const f of readdirSync(dir).filter((x) => x.endsWith(".jsonl"))) {
-    const file = join(dir, f);
-    // One unreadable transcript must not take the whole panel down with it.
-    // The file-level equivalent of the torn-line skip below: a transcript can
-    // vanish between readdir and read while an agent is being cleaned up, and
-    // losing every other agent's numbers over it would be a blackout, not
-    // degradation.
-    try {
-      // Filter on the transcript's own mtime, not on any timestamp inside it —
-      // an agent that ran before this run is simply not this run's cost.
-      if (sinceMs != null && statSync(file).mtimeMs < sinceMs) continue;
-      const a = readAgent(file, join(dir, f.replace(/\.jsonl$/, ".meta.json")));
-      // Both halves computed before either is recorded, so `skipped++` below
-      // always means "this transcript contributed nothing" — which is what the
-      // UI's "N transcripts skipped" claims. Pushing the agent first would let
-      // a throw from the tool half bill the agent AND count it as skipped.
-      // Unreachable today: nothing readAgent emits can make attributeTools
-      // throw, and readAgent's own throws land here before anything is pushed.
-      // Ordering, not a guard — keep it if this block is edited again.
-      const tools = attributeTools(a.entries);
-      if (a.metaFault) metaErrors++;
-      // Beside metaErrors deliberately: past the throw-capable work above and
-      // ahead of the push, so the invariant that comment states keeps holding
-      // — a transcript that ends up `skipped` ("contributed nothing") can
-      // never also report damaged lines on top of it.
-      damaged += a.damaged;
-      agents.push({
-        label: a.meta.description ?? f.replace(/^agent-|\.jsonl$/g, ""),
-        role: classifyRole(claudeRoleSignals(a.meta)),
-        cacheWrite: a.cacheWrite, output: a.output, cacheRead: a.cacheRead, maxCtx: a.maxCtx,
-      });
-      toolTables.push(tools);
-    } catch (e) {
-      skipped++;
-      warnOnce("skips", file, `skipping ${file}: ${e.message}`);
-    }
-  }
-  return { agents, toolTables, skipped, metaErrors, damaged };
-}
-
 // omp's side (#1716): one agent per member transcript anywhere under the
 // session dir — a nested member's too, at its own spawnDepth — read by
 // member-record.mjs's own omp reader over the walk readOmpSession uses:
@@ -1110,25 +929,23 @@ function readClaudeSpend(dir, sinceMs) {
 // are exactly the member record's: role from `session_init`'s agent
 // definition, task and AgentId, label the AgentId itself (the path-relative
 // stem, `review-pr-12/Security` for a nested one). The same fold's `entries`
-// are the tool stream (#1717), so the tool table goes through attributeTools
-// exactly as a Claude agent's does.
+// are the tool stream (#1717), so the tool table goes through attributeTools.
 //
 // Per-transcript tolerance is this file's, not readOmpSession's: readOmpSession
-// (used by the bulk scrape) lets a wrong-harness refusal propagate, and here
-// both — an unreadable file and a wrong-harness refusal — are one transcript's
+// (used by the bulk scrape) lets a wrong-shape refusal propagate, and here
+// both — an unreadable file and a wrong-shape refusal — are one transcript's
 // fault, so readOmpSpend, this file's own reader, instead catches both per-
-// transcript, landing them in `skipped` with a stderr line, the same as a
-// broken Claude transcript. A transcript ompMemberRecord answers null for (no
-// assistant turn yet — a member dispatched this second) has spent nothing, so
-// it is neither booked nor skipped.
+// transcript, landing them in `skipped` with a stderr line. A transcript
+// ompMemberRecord answers null for (no assistant turn yet — a member
+// dispatched this second) has spent nothing, so it is neither booked nor
+// skipped.
 //
-// `metaErrors` is 0 by construction here: omp has no dispatch sidecar to
-// corrupt. `damaged` is not — the tool-attribution stream (#1717) is a join
+// `damaged` is real — the tool-attribution stream (#1717) is a join
 // across lines (a toolCall's id names its tool, a pending result batch bills
 // the next turn), so a dropped MIDDLE line can silently shift spend onto a
-// neighbouring tool instead of just costing its own turn's totals, the same
-// hazard foldClaudeTranscript's `malformedNonLastLines` exists to catch.
-// foldOmpTranscript now counts it the same way; this reader sums it across
+// neighbouring tool instead of just costing its own turn's totals — the
+// hazard foldOmpTranscript's `malformedNonLastLines` counts. This reader
+// sums it across
 // the transcript regardless of whether the file ends up booked as an agent,
 // so a transcript that is corrupt where its assistant-with-usage line should
 // be still surfaces here instead of falling through `if (!m) continue` unseen.
@@ -1144,8 +961,8 @@ function readOmpSpend(dir, sinceMs) {
       damaged += folded.malformedNonLastLines;
       const m = ompMemberRecord(folded, agent, spawnDepth);
       if (!m) continue;
-      // Both halves before either is recorded, for readClaudeSpend's reason:
-      // `skipped++` must keep meaning "contributed nothing".
+      // Both halves before either is recorded, so `skipped++` below always
+      // means "this transcript contributed nothing".
       const tools = attributeTools(folded.entries);
       agents.push({
         label: m.member, role: m.role, model: m.model,
@@ -1157,7 +974,7 @@ function readOmpSpend(dir, sinceMs) {
       warnOnce("skips", file, `skipping ${file}: ${e.message}`);
     }
   }
-  return { agents, toolTables, skipped, metaErrors: 0, damaged };
+  return { agents, toolTables, skipped, damaged };
 }
 
 // `workspace`/`port` are the caller's answers, never read in here (#1584):
@@ -1216,9 +1033,9 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
       // JSON.parse SUCCEEDS on `null`, a bare number, a string and an array,
       // none of which is a board; `null` in particular is absent, not an
       // object, and `typeof null` alone would let it through. Same check and
-      // same wording as readAgent's sidecar-meta read, which is this repo's
-      // precedent for rejecting a parsed-but-wrong payload at its own read —
-      // since #1546 literally the same, both calling the shared predicate.
+      // same wording as readMerged()'s `data.repository` read, which is this
+      // repo's precedent for rejecting a parsed-but-wrong payload at its own
+      // read — since #1546 literally the same, both calling the shared predicate.
       const p = JSON.parse(readFileSync(prevFile, "utf8"));
       if (!isJsonObject(p)) throw new TypeError(`expected a JSON object, got ${jsonKind(p)}`);
       // Nullish `tickets` is ABSENT and stays usable: `|| []` reads it as the
@@ -1235,7 +1052,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
         // (drop the bad entry, keep the rest) would make this a new, fourth policy for
         // one payload class in this file — mapCi's null-only guard and tryParse's
         // unguarded read are the other two — rather than the reject-whole-payload
-        // policy this guard already shares with readAgent's sidecar-meta read.
+        // policy this guard already shares with readMerged()'s own read.
         const bad = p.tickets.findIndex((t) => !isJsonObject(t));
         if (bad !== -1)
           throw new TypeError(`expected tickets[${bad}] to be a JSON object, got ${jsonKind(p.tickets[bad])}`);
@@ -2121,7 +1938,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
 // line and calls process.exit(2) itself (arg.mjs) rather than throwing, so
 // nothing a caller can type unwinds as far as the catch below. Re-checked
 // against the tree rather than taken from the ticket: every `throw` in this
-// file — readAgent's sidecar-shape guard, and the three prev-board shape guards
+// file — readOmpSpend's per-transcript catch, and the three prev-board shape guards
 // gather() gained in #1192 — is caught by the try that raises it, so the whole
 // population reaching this handler is this script breaking. Handing that
 // to die() printed a bug under the wording and the exit code a typo gets — one
