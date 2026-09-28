@@ -1051,9 +1051,8 @@ for arg do
       # What is left is a path that IS there and still will not resolve, or no
       # \`realpath\` at all. Neither is a question this can answer, and the
       # unanswered one used to be silent — the guard disarmed whole, the vendored
-      # file ran, the run exited 0, nothing on stderr. Die instead, as
-      # release-ticket.sh's own \`cd\`+\`pwd -P\` does ("none is guaranteed to
-      # exist"); dropping \`2>/dev/null\` puts \`realpath\`'s own reason on
+      # file ran, the run exited 0, nothing on stderr. Die instead; dropping
+      # \`2>/dev/null\` puts \`realpath\`'s own reason on
       # stderr on the way out, where the discarded status never went.
       # Anchored at the divergence from the runner's own location, as the
       # directory branch is: a \`node_modules\` ABOVE the divergence is an

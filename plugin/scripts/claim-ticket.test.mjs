@@ -1464,9 +1464,9 @@ test("runner: a missing file under a symlinked vendored directory is reported mi
 });
 
 // `realpath` is the one utility this runner reaches for that POSIX does not
-// mandate — release-ticket.sh says so in terms, "none is guaranteed to exist",
-// and dies there rather than guessing. Absent, this guard disarmed whole: the
-// vendored file ran, the run exited 0 reporting `pass 2`, and not one byte
+// mandate, so the runner dies rather than guessing when it is missing. Absent,
+// this guard disarmed whole: the vendored file ran, the run exited 0 reporting
+// `pass 2`, and not one byte
 // reached stderr — #424's own defect restored with no notice. Absence is not a
 // fallback case, it is a question this cannot answer, so it refuses. A stub
 // that exits 127 rather than an emptied PATH, so `sed`, `dirname` and `node`
