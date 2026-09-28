@@ -2641,6 +2641,34 @@ test("filed: identity is the exact issue number — #8 neither dedupes against n
   }
 });
 
+test("filed: identity is matched numerically, so a non-canonical spelling of an already-filed issue is still a repeat (#2087)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  const first = cli(["--file", file, "filed", "8", "subject a"]);
+  assert.equal(first.status, 0, first.stderr);
+  const before = readFileSync(file, "utf8");
+
+  const again = cli(["--file", file, "filed", "08", "different wording"]);
+  assert.equal(again.status, 0, again.stderr);
+  const payload = parsePayload(again, "the leading-zero repeat filing's");
+  assert.equal(payload.alreadyRecorded, true, again.stdout);
+  assert.equal(payload.row, "#8 subject a", "the payload must name the row already on file");
+  assert.deepEqual(filedLines(file), ["- #8 subject a"], "a leading-zero repeat spelling appended a row");
+  assert.equal(readFileSync(file, "utf8"), before, "a leading-zero repeat filing rewrote the ledger");
+});
+
+test("filed: an id that is not all digits is refused, not silently appended (#2087)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  for (const issue of ["abc", "#", "8a", " 8", "8 "]) {
+    const r = cli(["--file", file, "filed", issue, "subject a"]);
+    assert.equal(r.status, 2, `'${issue}': got exit ${r.status}\n${r.stderr}`);
+    assert.match(r.stderr, /is not an issue number/, `'${issue}': ${r.stderr}`);
+    assert.equal(r.stdout, "", `'${issue}': a refusal must not also emit a payload`);
+  }
+  assert.equal(existsSync(file), false, "a refused filing must not create the ledger");
+});
+
 // ── `check` on a pipe (#808) ─────────────────────────────────────────────────
 //
 // The sweep above cannot reach `check`: it drives the three subcommands whose

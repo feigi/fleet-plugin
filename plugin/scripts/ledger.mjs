@@ -814,14 +814,22 @@ if (cmd === "read") {
   refuseStrayInId(issue, "an issue number");
   const subject = subjectParts.join(" ");
   const id = issue.replace(/^#/, "");
+  // isDigits() gates id the same way the sibling ticket/PR check gates key
+  // (line ~1527): left unvalidated, a non-digit id becomes a `#<id> ` prefix
+  // subjectOf()'s digits-only regex (#933) cannot strip, so a near-duplicate
+  // `check` against that row silently degrades from the hard "already
+  // filed" block to a soft near-miss suggestion instead.
+  if (!isDigits(id)) die(`'${issue}' is not an issue number`);
   // Both callers retry once on a failure they observed, and an observed
   // failure is not proof the write failed — a timeout after the row landed
   // reads as one — so a repeat filing of an issue already on file is a no-op
-  // (#2087). Identity is the issue number alone, matched as the exact token
-  // between `#` and the first space: never `check`'s fuzzy subject matcher,
-  // and never a prefix test, which would dedupe #8 against #80. The existing
-  // row wins, subject and all — a retry reworded is still the same filing.
-  const existing = data.filed.find((row) => row.match(/^#(\S+)/)?.[1] === id);
+  // (#2087). Identity is the issue number alone, matched NUMERICALLY — so a
+  // non-canonical spelling (`08`) still dedupes against `8` — as the token
+  // between `#` and the first whitespace: never `check`'s fuzzy subject
+  // matcher, and never a prefix test, which would dedupe #8 against #80.
+  // The existing row wins, subject and all — a retry reworded is still the
+  // same filing.
+  const existing = data.filed.find((row) => Number(row.match(/^#(\S+)/)?.[1]) === Number(id));
   if (existing !== undefined) {
     console.error(`    already recorded: ${existing}`);
     console.log(JSON.stringify({ issue, subject, total: data.filed.length, alreadyRecorded: true, row: existing }));
