@@ -3361,7 +3361,8 @@ taken over, and a leftover `<file>.lock.reap` is never reclaimed. One other
 shape wedges the lock permanently the same way, needing the same fix: an empty
 `<file>.lock` — its writer was killed between creating it and writing its pid
 into it — is unparseable and therefore, by design, always read as live rather
-than handed to the death check. A zombie holder — a pid whose process exited
+than handed to the death check; its timeout names `<file>.lock` itself, since
+there is no pid to name. A zombie holder — a pid whose process exited
 but whose parent never `wait()`-ed on it — also answers a liveness check as
 alive, because the OS keeps a reserved pid until it is reaped, but that is
 transient, not a wedge: once the pid is reaped (the parent's own exit is

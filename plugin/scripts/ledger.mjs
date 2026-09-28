@@ -742,7 +742,14 @@ async function acquireLock() {
       if (dead) {
         die(`cannot lock ${file} — held by pid ${pid}, which is dead; ${REAP} is blocking its takeover — if nothing is currently writing, remove it by hand`);
       }
-      die(`cannot lock ${file} — held by pid ${pid ?? JSON.stringify(holder)}`);
+      // No pid at all is the other permanent wedge the header describes: an
+      // empty or partial `${LOCK}` whose writer died before writing its pid,
+      // read as live forever by design. There is no process to point at, so
+      // name `${LOCK}` itself — the file the same runbook says to remove.
+      if (pid === null) {
+        die(`cannot lock ${file} — ${LOCK} holds ${JSON.stringify(holder)}, not a pid, so it is never taken over — if nothing is currently writing, remove it by hand`);
+      }
+      die(`cannot lock ${file} — held by pid ${pid}`);
     }
     // A timer, not a blocking sleep: a waiter holds no lock, so a SIGTERM
     // that arrives while it waits should end it now, and the handlers above
