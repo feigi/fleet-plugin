@@ -3345,6 +3345,14 @@ test("lock: a zombie holder — exited, never reaped — is live and times out, 
   // both promise this: kill(pid, 0) still succeeds on a zombie, because the OS
   // keeps its pid reserved until reaped, so isDead() reads it as alive — and
   // that clears on its own, with no hand removal, once the pid is reaped.
+  //
+  // A regression that skips isDead() in acquireLock()'s gate — treating any
+  // held lock as dead outright — does not fail this test with a clean
+  // assertion: `dead` is then always true, so the loop takes the
+  // reapDeadHolder() branch and `continue`s past the deadline check every
+  // pass, spinning on openSync(REAP)/closeSync/unlinkSync until something
+  // outside the lock's own 10 s budget kills it. A hang or CI timeout on
+  // this test, not an assertion failure, is that regression's signature.
   const { file, lock, cli, residue } = lockFixture(t);
   const zombie = await zombiePid(t);
   writeFileSync(lock, String(zombie.pid));
