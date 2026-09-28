@@ -3325,6 +3325,11 @@ live count from it, so nobody states one. Write neither by hand:
 - **`ledger.mjs drain "<reason>"`** — the one drain marker per run; supply
   stops, the review and merge sides keep going.
 
+`row` refuses a malformed member token anywhere in its text — one whose outcome
+is outside the vocabulary above, e.g. `merge-bot-1=dispatched` — at exit 2,
+naming the token and writing nothing, because every reader would take it as a
+permanent settle.
+
 `→ PR#M` stays as the human-readable arrow; the tick reads only the `=`
 tokens. `tier=alt` marks the every-5th-Pull member (phase 2), and `excluded ·
 behind-pr:#M | behind-issue:#M` is an Exclusion (phase 1) — a ticket row like

@@ -826,6 +826,13 @@ if (cmd === "read") {
   refuseStrayInId(ticket, "a ticket number");
   const key = ticket.startsWith("#") ? ticket : `#${ticket}`;
   const line = `${key} ${textParts.join(" ")}`;
+  // Every reader parses member tokens anywhere in a row's text, so a token
+  // with an outcome outside its family's vocabulary would land as a permanent
+  // settle — `settle merge-bot-1 done` then refuses as "already settled as
+  // dispatched" (#2139). Refused before anything is written, new row or
+  // rewrite alike; a well-formed token, live or settled, still goes through.
+  const malformed = memberTokens(line).find((t) => t.error !== null);
+  if (malformed) die(`row ${key}: malformed member token '${malformed.name}=${malformed.outcome}' — ${malformed.error}`);
   const i = data.rows.findIndex((r) => r.split(/\s/)[0] === key);
   const created = i === -1;
   if (created) {
