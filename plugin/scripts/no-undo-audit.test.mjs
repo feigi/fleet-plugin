@@ -394,14 +394,21 @@ function unreadTailBytes({ w, branch }) {
  * clean it answers "nothing uncommitted here". A worktree with no repo above it
  * has nothing to walk up to, so git fails there and the script already refuses.
  * `precious.txt` is the uncommitted work that exists nowhere else.
+ *
+ * The directory is made BEFORE `worktree add`, not left for `git` to create
+ * it: a leaf `git` creates itself comes back reprecomposed under
+ * `core.precomposeunicode` even when `name` is passed decomposed (measured),
+ * so a caller wanting an on-disk NFD leaf (#2095) needs the directory to
+ * already exist — `git` then uses it as-is, byte for byte.
  */
-function nestedWorktree(t) {
+function nestedWorktree(t, name = "9-x") {
   const branch = "fix/9-nested";
   const c = repo(t);
   writeFileSync(join(c.w, ".gitignore"), ".worktrees/\n");
   git(c.w, "add", ".gitignore");
   git(c.w, "commit", "-q", "-m", "ignore the nested worktree");
-  const w = join(c.w, ".worktrees", "9-x");
+  const w = join(c.w, ".worktrees", name);
+  mkdirSync(w, { recursive: true });
   git(c.w, "worktree", "add", "-q", "-b", branch, w);
   git(w, "push", "-q", "-u", "origin", branch);
   writeFileSync(join(w, "precious.txt"), "work that exists nowhere else\n");
@@ -2164,6 +2171,50 @@ test("an intact linked worktree, reached through a symlinked path, still passes"
 
   const r = audit({ w: link, branch: c.branch });
   assert.equal(r.status, 0, `a symlinked path to a real worktree must still pass; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+});
+
+// The same worktree, named `cafe` + U+0301 COMBINING ACUTE ACCENT and passed in
+// the spelling `worktree list --porcelain` gives it — reap.sh's `nfd` fixture
+// (#2072), here for the working-tree compare. Where the filesystem also
+// resolves the precomposed spelling to that directory (APFS), the
+// `core.precomposeunicode` `git clone` writes there lists it precomposed while
+// `--show-toplevel` answers the on-disk NFD bytes, so a byte compare refused
+// this healthy worktree at exit 2 (#2095). Where it does not (ext4), both
+// answers are the NFD bytes and this is the plain case.
+test("an intact linked worktree with an NFD name, passed as git lists it, still passes (#2095)", (t) => {
+  const { parent, w: onDisk, branch } = nestedWorktree(t, "cafe\u0301");
+  rmSync(join(onDisk, "precious.txt"));
+
+  const listing = git(parent, "worktree", "list", "--porcelain").split("\n")
+    .filter((l) => l.startsWith("worktree ")).map((l) => l.slice(9));
+  const wt = listing.find((p) => p.normalize("NFC").endsWith("/.worktrees/caf\u00e9"));
+  assert.ok(wt, `fixture: git must list the worktree: ${listing}`);
+  const top = git(onDisk, "rev-parse", "--show-toplevel");
+  assert.ok(top.endsWith("/.worktrees/cafe\u0301"), "fixture: git must answer the on-disk NFD bytes");
+  if (existsSync(onDisk.normalize("NFC"))) {
+    assert.notEqual(wt, top, "fixture: a filesystem that aliases the two spellings must list one git's toplevel answer does not, byte for byte");
+  }
+
+  const r = audit({ w: wt, branch });
+  assert.equal(r.status, 0, `an NFD-named worktree passed as git lists it must still pass; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+});
+
+// The same fixture, `$wt` passed exactly as it sits on disk (NFD) rather than
+// as git lists it. `--show-toplevel` already answers this spelling, so this
+// leaves the test above's working-tree compare a no-op and instead exercises
+// the OWNER compares above it (#2095): `owner` is read back from git's own
+// `gitdir` back-pointer file, spelled however `core.precomposeunicode` wrote
+// it when the linkage was created (measured: precomposed, even though the
+// directory itself stayed decomposed on disk), which can differ — byte for
+// byte, same directory — from `$wt` as passed here.
+test("an intact linked worktree with an NFD name, passed as it sits on disk, still passes (#2095)", (t) => {
+  const c = nestedWorktree(t, "cafe\u0301");
+  rmSync(join(c.w, "precious.txt"));
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `an NFD on-disk worktree path passed as-is must still pass; got ${r.status} ${r.stderr}`);
   assert.equal(r.json.clean, true);
 });
 
