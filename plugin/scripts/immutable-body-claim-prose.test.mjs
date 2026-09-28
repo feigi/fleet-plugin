@@ -274,24 +274,27 @@ test("a settling command over literal text takes -F, and its zero counts only af
     "the -F rule lost the measured case it rests on — the bare grep answering 0 against its own literal line",
   );
   // The positive-control half, which the `-F` half does not imply: a command
-  // with `-F` can still be one that never returns non-zero, and its zero then
+  // with `-F` can still be one that never finds a match, and its zero then
   // settles nothing while reading as a checked absence.
   assert.match(
     r,
-    phrase("A zero or an absence counts only after the same command, with the same flags, returns non-zero on a line known to match"),
-    "the rule no longer requires a settling command to return non-zero on a known match before its zero is trusted",
+    phrase("A zero or an absence counts only after the same command, with the same flags, finds a line known to match"),
+    "the rule no longer requires a settling command to find a known match before its zero is trusted",
   );
   assert.match(
     r,
-    phrase("a command that cannot return non-zero settles nothing"),
-    "the rule no longer says a command incapable of returning non-zero settles nothing",
+    phrase("a command that cannot find a match settles nothing"),
+    "the rule no longer says a command incapable of finding a match settles nothing",
   );
   // #1087's ruling: the trap is harness-independent, so the rule names no
   // grep implementation or harness. A tool-specific warning goes false on the
-  // next harness while reading as the whole of the rule.
+  // next harness while reading as the whole of the rule. Substring match, no
+  // leading `\b` before `bsd` — `\bbsd\b` cannot match inside "FreeBSD" (no
+  // boundary between "ree" and "BSD"), and this repo's own dev grep reports
+  // itself as "2.6.0-FreeBSD" (measured), so that miss is not hypothetical.
   assert.doesNotMatch(
     paragraph(RUN_TEAM, "**A settling command over literal text uses `grep -F`", "the literal-text grep rule"),
-    /ugrep|claude code|\bbsd\b|\bgnu\b/i,
+    /ugrep|ripgrep|claude code|bsd|gnu/i,
     "the literal-text grep rule now names a grep implementation or harness — #1087 ruled it harness-independent",
   );
 });
@@ -362,5 +365,5 @@ test("a rewrapped rule still matches — these pins refuse drift, not reflow", (
   assert.match(flat, phrase("re-run at the commit that ships it, not at the commit that motivated it"));
   assert.match(flat, phrase("the command goes inline, beside the claim"));
   assert.match(flat, phrase("that answers which ones depend on its contents"));
-  assert.match(flat, phrase("A zero or an absence counts only after the same command, with the same flags, returns non-zero on a line known to match"));
+  assert.match(flat, phrase("A zero or an absence counts only after the same command, with the same flags, finds a line known to match"));
 });

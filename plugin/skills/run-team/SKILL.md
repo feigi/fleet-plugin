@@ -2614,15 +2614,15 @@ the question a coverage claim actually needs, and it returns a different set
 from any spelling of the grep.
 
 **A settling command over literal text uses `grep -F`, and its zero counts only
-once the same command has shown it can return non-zero.** Prose fragments and
+after the same command finds a line known to match.** Prose fragments and
 code snippets routinely carry `\`, `.`, `*`, `[` or `$`, and without `-F` those
 are read as a pattern rather than as the text itself, so the command answers
 for a different string from the one the claim names — and a wrong zero is the
 benign-looking answer. Measured on #1087: `grep -c 'settled by:\s+x'` answers
 0 against a file holding that exact line, and `grep -cF` answers 1. A zero or
-an absence counts only after the same command, with the same flags, returns
-non-zero on a line known to match: a command that cannot return non-zero
-settles nothing, and under `Verified:` its zero reads as a checked absence.
+an absence counts only after the same command, with the same flags, finds a
+line known to match: a command that cannot find a match settles nothing, and
+under `Verified:` its zero reads as a checked absence.
 
 #### Fallback: hand-dispatched reviewer member
 
