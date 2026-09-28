@@ -278,7 +278,7 @@ Three dots, never two: a two-dot diff on a stale branch renders `main`'s gains a
 **Only a bot a controller dispatched holds a grace** (`/fleet-ctl:run-team`, or any caller that says it owns the watcher); the top-level invocation arms its Monitor instead (**Then stay armed**). You were dispatched on the first `ready-to-merge` label, never after anyone's report, and a label landing minutes after your last merge is the common case — so the pass does not end the moment the queue empties. It drains, then waits **15 minutes** for late labels, then reports once:
 
 - Grace starts once no labelled PR is actionable — every one merged, skipped or held. Seed the labelled set then, the way **Then stay armed** seeds its Monitor, so a PR you already handled does not re-fire.
-- Every 60s, poll `gh pr list --state open --label ready-to-merge --json number`. A number not in the seed → **re-run selection from the top**, hold rule included, drain what it makes actionable, and restart the grace after that drain. A failed poll is no reading: keep the seed and poll again.
+- Every 60s, poll `gh pr list --state open --label ready-to-merge --limit 200 --json number`. A number not in the seed → **re-run selection from the top**, hold rule included, drain what it makes actionable, and restart the grace after that drain. A failed poll is no reading: keep the seed and poll again. A poll that returns 200 numbers is not a whole reading either — gh stops at `--limit` with exit 0 and no warning, so a label past it is unseen: act on the numbers it did return, and name `poll-capped-at-200` in the report, so the controller knows the grace's silence covered only the first 200.
 - 15 minutes with no new label → report and exit.
 
 The wait:
@@ -300,9 +300,21 @@ top-level invocation.
 The pass ends, the queue does not. Once no labeled PR is actionable, arm a persistent Monitor so a later sign-off restarts the loop without re-running this command:
 
 ```bash
-poll() { gh pr list --state open --label ready-to-merge --json number --jq '.[].number' 2>/dev/null; }
+cap=200                                     # the poll's --limit; gh stops there with exit 0 and no warning
+poll() { gh pr list --state open --label ready-to-merge --limit "$cap" --json number --jq '.[].number' 2>/dev/null; }
+capped=
+capcheck() {                                # a full page may have been cut there: say so once, and once when it clears
+  if [ "$(printf '%s\n' "$1" | grep -c .)" -ge "$cap" ]; then
+    [ -n "$capped" ] || echo "ready-to-merge monitor DEGRADED: labelled-PR list hit its --limit $cap — a label past it fires nothing, silence is NOT an empty queue"
+    capped=1
+  elif [ -n "$capped" ]; then
+    echo "ready-to-merge monitor RECOVERED: labelled-PR list under its --limit $cap — every label watched again"
+    capped=
+  fi
+}
 if seed=$(poll); then
   seen=" $(printf '%s\n' "$seed" | tr '\n' ' ')"
+  capcheck "$seed"
 else
   echo 'ready-to-merge monitor: seed poll failed, not arming'
   exit 1
@@ -310,6 +322,7 @@ fi
 while true; do
   sleep 60
   if cur=$(poll); then
+    capcheck "$cur"
     while IFS= read -r n; do                 # capture-then-loop: heredoc-fed, never `for n in $cur`
       [ -n "$n" ] || continue                # a blank line in OUR OWN list, not a probe that could not look
       case "$seen" in *" $n "*) ;; *) echo "ready-to-merge label added: PR #$n" ;; esac
@@ -325,6 +338,7 @@ Arm with `persistent: true`, description `ready-to-merge label on this repo's PR
 
 - Seed `seen` **before** the loop so PRs already handled — including ones skipped for `CHANGES_REQUESTED` or left on red CI — do not re-fire every minute. Only a label appearing after arming is an event. The seed poll is guarded the same way as every tick: a `gh` call failing on the very first poll must not arm on an empty `seen`, which would replay the whole labeled set as spurious events on tick one.
 - The `if cur=$(poll)` guard — seed and every tick alike — keeps `seen` intact when a `gh` call fails transiently; without it a failed poll reads as an empty labeled set and either arms on nothing (the seed) or wipes `seen` (a tick), both replaying the full labeled set as events on the next successful poll. The guard depends on `poll` ending in the bare `gh` call, not in a pipe: `tr` sits at the call sites (not inside `poll`) precisely so a failing `gh` call's exit status reaches `cur=$(poll)` / `seed=$(poll)` instead of being swallowed by `tr`, which exits 0 regardless of what it reads.
+- **A full page is not a whole reading either.** `gh pr list` stops at its `--limit` — 30 when the flag is absent — with exit 0 and no warning, so `poll` passes an explicit one (`cap`, one variable for the flag and the check), and `capcheck` says once when a poll fills it and once when one comes back under it: the DEGRADED/RECOVERED latch `run-team/SKILL.md`'s CI Monitor uses for the same cause, and never a line per tick. The numbers a capped poll did return are still real events; the line is for the labels past them, which fire nothing while it holds.
 - **The per-PR loop is heredoc-fed on purpose — `for n in $cur` is the one form that cannot work here.** This runs under zsh, which word-splits an unquoted command substitution's result but *not* an unquoted parameter expansion, and `cur` is a parameter. Measured on zsh 5.9 with `seen="849 850 "` and `cur="849 850 852 "`: the bare form runs **one** iteration with the whole list glued into a single value and emits `ready-to-merge label added: PR #849 850 852`, one nonsense event naming no PR, while the real new PR is never reported; the heredoc form emits `PR #852` alone. `run-team/SKILL.md`'s **Shell traps** carries the mechanism, the remedy table and the `</dev/null` trap that bites the next command added inside this loop. Note the contrast with step 1's `for _ in $(seq 1 60)`: that is a command substitution, it splits, and it is correct as written.
 - 60s poll — remote API, stay off rate limits.
 - A held PR stays in `seen`, so its own label will not re-fire. Fine: what unblocks it is the **lower** PR getting labeled, which does fire, and step 4's re-evaluation picks up both in numeric order.

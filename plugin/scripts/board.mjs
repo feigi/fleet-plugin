@@ -316,7 +316,7 @@ async function openBrowser(url) {
 // for the `gh ... list` reads, gather()'s `--prev` read demands
 // an object, and gather()'s ledger branch takes any shape ledger.mjs emits,
 // deliberately, for the reason stated there. A shape policy could not be written
-// in here anyway: `fallback` is `[]` where ghRows calls this and null where the
+// in here anyway: `fallback` is `[]` where the open-PR read calls this and null where the
 // ledger read does, so the helper is never told what its caller wanted — only
 // that null is not it.
 //
@@ -362,10 +362,17 @@ function withNumber(rows, what) {
   return kept;
 }
 
-// tryParse + withNumber are always paired for a `gh ... list` read — one
-// helper rather than the same two-call chain typed twice for issues and PRs.
-function ghRows(json, what) {
-  return withNumber(tryParse(json, [], what), what);
+// #2108: gh stops a `list` read at its `--limit` with exit 0 and no warning, so
+// a read that came back exactly that long may have been cut there — "at least
+// this many", never "this many". candidates.mjs's refuseIfCapped() and
+// fleet-tick.mjs's PR_LIMIT/CLAIMED_LIMIT carry the same rule; this board is a
+// display, so it discloses a capped read (computeBoard's `n+` and capNotice)
+// rather than dying on one. Counted on the raw rows, before withNumber() drops
+// any: gh's cap applies to what it returned, not to what this file kept.
+const POOL_LIMIT = 100;
+const OPEN_PR_LIMIT = 100;
+function hitLimit(parsed, limit) {
+  return Array.isArray(parsed) && parsed.length >= limit;
 }
 
 // #1840: which of `prNums` gh calls MERGED, in ONE `gh api graphql` query —
@@ -1092,7 +1099,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
     : { rows: [], filed: [], ruled: [], state: ledgerJson == null ? "unread" : "unparsed" };
 
   const issuesJson = await tryRun("gh", ["issue", "list", "--label", "ready-for-agent",
-    "--state", "open", "--limit", "100", "--json", "number,title,labels"]);
+    "--state", "open", "--limit", String(POOL_LIMIT), "--json", "number,title,labels"]);
   // title: falls back to the same `#<number>` placeholder titleFor() already
   // uses for an issue it cannot find at all (compute-board.mjs). An unrowed
   // issue becomes a POOL card straight from this array — compute-board.mjs's
@@ -1101,21 +1108,22 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   // but unable to describe itself reads as its number rather than literal
   // `undefined` on the operator's page (#786).
   //
-  // Parsed by hand here rather than through `ghRows` (#1597 follow-up): this
-  // read is the pool's ONLY source, and compute-board.mjs's stall() needs to
-  // tell a genuinely empty pool from a `gh` outage the same way it already
-  // tells an empty ledger from an unread one — `ghRows`'s own `[]` fallback
-  // collapses both to the identical shape before a caller here could split
-  // them back apart.
+  // Its null fallback, not the open-PR read's `[]` below, is deliberate
+  // (#1597 follow-up): this read is the pool's ONLY source, and
+  // compute-board.mjs's stall() needs to tell a genuinely empty pool from a
+  // `gh` outage the same way it already tells an empty ledger from an unread
+  // one — a `[]` fallback collapses both to the identical shape before a
+  // caller here could split them back apart.
   const issuesParsed = tryParse(issuesJson, null, "gh issue list");
   const poolOk = issuesParsed !== null;
+  const poolCapped = hitLimit(issuesParsed, POOL_LIMIT);
   const issues = withNumber(poolOk ? issuesParsed : [], "gh issue list").map((i) => ({
     number: i.number,
     title: typeof i.title === "string" ? i.title : `#${i.number}`,
     labels: labelsOf(i),
   }));
 
-  const prsJson = await tryRun("gh", ["pr", "list", "--state", "open", "--limit", "100",
+  const prsJson = await tryRun("gh", ["pr", "list", "--state", "open", "--limit", String(OPEN_PR_LIMIT),
     "--json", "number,state,labels,title"]);
   // No default for `title` or `state` here, unlike the issue row above — raw
   // passthrough, deliberately. `title`: compute-board.mjs's titleFor() already
@@ -1127,7 +1135,9 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   // only consumer is `pr.state === "OPEN"` (compute-board.mjs), already false
   // for `undefined` exactly as it was for the old "UNKNOWN" sentinel, so the
   // default was inert — pure indirection with no behaviour to show for it.
-  const prs = ghRows(prsJson, "gh pr list").map((p) => ({
+  const prsParsed = tryParse(prsJson, [], "gh pr list");
+  const prsCapped = hitLimit(prsParsed, OPEN_PR_LIMIT);
+  const prs = withNumber(prsParsed, "gh pr list").map((p) => ({
     number: p.number,
     state: p.state,
     title: p.title,
@@ -1197,6 +1207,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   const beat = priorState?.beat ?? null;
   const ticked = priorState?.ticked ?? null;
   return { ledger, issues, prs, merged, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, poolOk,
+    poolCapped, prsCapped,
     now: Date.now(), interval: interval ?? argInterval() ?? 15 };
 }
 

@@ -298,10 +298,14 @@ function render(m) {
   // the old one, a mixed-tick board that could look like a normal render
   // (#1857 review; poll()'s own catch below still banners the failure).
   const board = document.getElementById("board");
+  const q = m.queue || {};
   const next = COLUMNS.map((name) => {
     const inCol = (m.tickets || []).filter((t) => t.column === name);
     const h = el("h2", null, name + " ");
-    h.append(el("span", null, String(inCol.length)));
+    // #2108: POOL's own count is `q.pool` — the same number, except that a
+    // capped pool read makes it `"100+"`, and a header reading a bare 100
+    // beside a footer reading 100+ would be the exact claim the `+` retracts.
+    h.append(el("span", null, name === "POOL" && q.pool != null ? String(q.pool) : String(inCol.length)));
     return [h, ...inCol.map(card)];
   });
   COLUMNS.forEach((name, i) => {
@@ -311,7 +315,6 @@ function render(m) {
   });
   renderSpend(m.spend);
   // footer
-  const q = m.queue || {};
   const foot = document.getElementById("footer");
   foot.innerHTML = "";
   foot.append(el("div", null, `pool ${q.pool ?? 0} · supply ${q.supply ?? 0} · review-backlog ${q.reviewBacklog ?? 0}`));
@@ -331,6 +334,10 @@ function render(m) {
   const banner = document.getElementById("stale-banner");
   const ledgerMsg = ledgerBanner(m.ledgerState);
   const stallMsg = livenessBanner(m.liveness);
+  // #2108: a read that hit its --limit. Ranked last: stale, a stall and an
+  // unread ledger each say the board is wrong wholesale, this that it may be
+  // short at one edge.
+  const capMsg = m.capNotice ? "⚠ " + m.capNotice : null;
   // className reset on EVERY arm, never only on the arm that sets it: this
   // element is reused across ticks, so a `dead` class left behind by an
   // earlier render paints the next tick's ledger or stale message red. One
@@ -347,6 +354,10 @@ function render(m) {
     banner.style.display = "block";
     banner.className = "";
     banner.textContent = ledgerMsg;
+  } else if (capMsg) {
+    banner.style.display = "block";
+    banner.className = "";
+    banner.textContent = capMsg;
   } else { banner.style.display = "none"; banner.className = ""; }
 }
 

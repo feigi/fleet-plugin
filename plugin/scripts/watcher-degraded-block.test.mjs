@@ -56,6 +56,11 @@ const stub = (name, body) => {
 // matching fixed variable is the alternative. `gh` needs this for RL too: a
 // latch is one-shot only if it stays quiet across a SUSTAINED outage and speaks
 // once on recovery, and neither is observable from a single static budget.
+// PRSSEQ is the same for the open-PR list, one space-separated list per line.
+//
+// `pr list` stops at `--limit` — 30 when the flag is absent — the way gh does
+// (#2108): exit 0, no warning, the rest simply not printed. A block that lost
+// its --limit is therefore cut at 30 here exactly as it would be on GitHub.
 stub("gh", `#!/bin/sh
 next() {
   if [ -n "$1" ]; then
@@ -68,7 +73,13 @@ next() {
 case "$2" in
   list)
     if [ "$(next "$LISTSEQ" "\${LISTMODE-ok}")" = err ]; then exit 1; fi
-    for p in $PRS; do echo "$p"; done ;;
+    limit=30
+    while [ $# -gt 0 ]; do [ "$1" = --limit ] && limit=$2; shift; done
+    i=0
+    for p in $(next "$PRSSEQ" "$PRS"); do
+      i=$((i+1)); [ "$i" -le "$limit" ] || break
+      echo "$p"
+    done ;;
   *) next "$RLSEQ" "\${RL-5000}" ;;
 esac
 `);
@@ -282,6 +293,36 @@ test("the open-PR list latch clears once on recovery, not once per tick", () => 
   const out = run({ LISTSEQ: seq, MODE: "normal", PRS: "7" }, 3);
   assert.equal(count(out, "WATCHER DEGRADED"), 1, out);
   assert.equal(count(out, "WATCHER RECOVERED"), 1, `expected exactly one RECOVERED, got:\n${out}`);
+});
+
+// #2108. `n` open PRs, numbered from 1, as the space-separated list $PRS takes.
+const openPrs = (n) => Array.from({ length: n }, (_, i) => i + 1).join(" ");
+const CAPPED = "hit its --limit";
+
+test("#2108: an open-PR list that fills its --limit is a degraded cause, and the PRs it did return are still polled", () => {
+  // Every ci-state read is blind, so each PR the pass reached speaks once: the
+  // count of those lines is the count of PRs the block polled. 200 of 250 is
+  // the explicit limit at work; 30 would be gh's bare default.
+  const out = run({ MODE: "empty", PRS: openPrs(250) }, 1);
+  assert.equal(count(out, CAPPED), 1, `a full page of open PRs went unreported:\n${out}`);
+  assert.equal(count(out, "no usable ci-state reading"), 200, "the block no longer polls the 200 PRs its capped read returned");
+  assert.equal(count(out, "SLEEP"), 1);
+});
+
+test("#2108: the cap latch is one-shot across ticks, and clears once when the list comes back under it", () => {
+  const seq = join(DIR, "seq-prs-cap");
+  writeFileSync(seq, `${openPrs(250)}\n${openPrs(250)}\n7\n7\n`);
+  const out = run({ PRSSEQ: seq, MODE: "normal" }, 4);
+  assert.equal(count(out, CAPPED), 1, `expected one capped DEGRADED across two capped ticks, got:\n${out}`);
+  assert.equal(count(out, "under its --limit"), 1, `expected exactly one RECOVERED for the cap, got:\n${out}`);
+});
+
+test("#2108: a list one short of the cap, and past gh's bare default of 30, is complete and says nothing", () => {
+  // The input the guard must ACCEPT: 199 is a whole answer, not a capped one,
+  // and every one of them is polled — not the 30 a missing --limit yields.
+  const out = run({ MODE: "empty", PRS: openPrs(199) }, 1);
+  assert.equal(count(out, CAPPED), 0, `a list under its limit was reported as capped:\n${out}`);
+  assert.equal(count(out, "no usable ci-state reading"), 199, "the block polled fewer PRs than the list returned");
 });
 
 test("the budget latch is one-shot across a sustained outage", () => {

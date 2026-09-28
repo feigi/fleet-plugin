@@ -326,6 +326,21 @@ function stall(beat, ticked, tickets, pool, { ledgerOk, poolOk }, now) {
   return { ...verdict, claimed, supply, text: stallReport(verdict, { claimed, supply }) };
 }
 
+// #2108: which of gather()'s `gh ... list` reads came back exactly as long as
+// its own `--limit` — and so may have been cut there, gh saying nothing — as
+// one rendered line, or null when neither did. The pool's count carries its
+// own `n+` besides (computeBoard below); this line is for what a count cannot
+// say: a pool card that is not there at all, and an open PR past the cap,
+// which reaches this model only through the ledger row and the merged read,
+// so it renders REVIEW with CI unknown whatever its real label and run say.
+// Rendered here, not on the page, for stall()'s reason just above.
+function capNotice({ poolCapped, prsCapped }) {
+  const parts = [];
+  if (poolCapped) parts.push("the ready-for-agent read hit its --limit, so POOL may be missing tickets");
+  if (prsCapped) parts.push("the open-PR read hit its --limit, so a PR past it shows REVIEW with CI unknown");
+  return parts.length ? parts.join("; ") : null;
+}
+
 // #1841: the previous board already showed this SAME PR MERGED on this
 // ticket. MERGED is terminal, so that verdict stands whatever this run's
 // merged read says. Keyed on the PR, not just the ticket: a ticket retried
@@ -445,7 +460,12 @@ export function computeBoard(inputs) {
     const p = parsedByIssue.get(t.issue);
     return t.column === "REVIEW" && !p.underReview && !p.reviewed;
   }).length;
-  const pool = tickets.filter((t) => t.column === "POOL").length;
+  const cardsInPool = tickets.filter((t) => t.column === "POOL").length;
+  // #2108: a capped pool read makes this count a floor, and it says so the way
+  // fleet-tick.mjs's claimed count does — `"100+"`, never a bare 100 that
+  // reads as exact. stall() below receives the same value, so the stall line
+  // and the footer cannot disagree about it.
+  const pool = inputs.poolCapped ? `${cardsInPool}+` : cardsInPool;
 
   return {
     generatedAt: now,
@@ -463,6 +483,7 @@ export function computeBoard(inputs) {
     workspace: inputs.workspace ?? null,
     port: inputs.port ?? null,
     queue: { pool, supply: pool, reviewBacklog },
+    capNotice: capNotice(inputs),
     tickets,
     filed: (ledger.filed || []).map(splitNumbered),
     // Not derivable from anything else in this model: a ledger that was never
