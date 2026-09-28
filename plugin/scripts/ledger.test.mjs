@@ -15,7 +15,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, existsSync, readFileSync, readdirSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { stripComments } from "./strip-comments.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
@@ -3190,6 +3190,49 @@ test("lock: a holder this process may not signal (EPERM) is live, never taken ov
   assert.ok(r.stderr.includes("held by pid 1"), r.stderr);
   assert.equal(readFileSync(lock, "utf8"), "1", "a live holder's lock was taken over");
   assert.equal(existsSync(file), false, "a write landed without the lock");
+});
+
+test("lock: a dead holder whose pid comes back to life before the unlink is not taken over — liveness is re-checked under the reap lock (#2088)", (t) => {
+  // Real pid reuse inside the microseconds between a waiter's isDead() and its
+  // unlink cannot be forced, and ledger.mjs carries no seam for it. So this
+  // stubs the OS answer itself, from outside, through Node's own --import
+  // preload: kill(pid, 0) reports ESRCH for the first probe of the planted
+  // pid and success for every probe after — exactly what a recycled pid looks
+  // like to the waiter. Each probe also records whether the reap lock existed
+  // at that moment, which is what separates a re-check UNDER the reap lock
+  // from a second probe taken before it (the same window, only narrower).
+  const { dir, file, lock } = lockFixture(t);
+  const dead = deadPid();
+  const probes = join(dir, "probes.log");
+  const preload = join(dir, "reuse-preload.mjs");
+  writeFileSync(
+    preload,
+    `import { appendFileSync, existsSync } from "node:fs";
+const realKill = process.kill.bind(process);
+let calls = 0;
+process.kill = (pid, sig) => {
+  if (pid !== ${dead} || sig !== 0) return realKill(pid, sig);
+  appendFileSync(${JSON.stringify(probes)}, (existsSync(${JSON.stringify(`${lock}.reap`)}) ? "reap" : "free") + "\\n");
+  if (calls++ === 0) throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" });
+  return true;
+};
+`,
+  );
+  writeFileSync(lock, String(dead));
+  const r = spawnSync(process.execPath, ["--import", pathToFileURL(preload).href, SCRIPT, "--file", file, "filed", "11", "x"], {
+    encoding: "utf8",
+    cwd: dir,
+    timeout: 20_000,
+    env: { ...process.env, PATH: join(dir, "bin"), LEDGER_LOCK_TIMEOUT_MS: "150" },
+  });
+  const seen = readFileSync(probes, "utf8").trim().split("\n");
+  assert.equal(seen[0], "free", "the first probe is the waiter's own, outside any reap lock");
+  assert.equal(seen[1], "reap", `the takeover must re-probe the pid while holding the reap lock: ${JSON.stringify(seen)}`);
+  assert.equal(r.status, 2, r.stderr);
+  assert.ok(r.stderr.includes(`held by pid ${dead}`), r.stderr);
+  assert.equal(readFileSync(lock, "utf8"), String(dead), "a holder live again at the re-check had its lock taken over");
+  assert.equal(existsSync(file), false, "a write landed over a live holder's lock");
+  assert.equal(existsSync(`${lock}.reap`), false, "the reap lock outlived a takeover that found its holder live");
 });
 
 test("lock: a dangling symlink at the lock path fails closed within the timeout, not a CPU spin (#531)", (t) => {

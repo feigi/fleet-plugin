@@ -556,13 +556,21 @@ function save(d) {
 // signal this file leaves unhandled (SIGQUIT, SIGABRT, a segfault: only a
 // normal exit and the three catchable signals below run the `exit` event
 // that releases it) — is taken over, but only under a second O_EXCL lock,
-// `<file>.lock.reap`, and only after RE-READING the lock under it and
-// finding the same dead pid. Unlink-then-create, or a bare rename, lets two
-// waiters that both saw the dead pid each remove the other's FRESH lock and
-// write at once; the re-read is what makes the takeover safe. A reap lock is
-// held for one read and one unlink, and one left behind by any of those same
-// abrupt deaths in that window is deliberately NOT reclaimed: waiters time
-// out naming the holder, and the operator removes it. Fail closed.
+// `<file>.lock.reap`, and only after RE-READING the lock under it, finding
+// the same dead pid, and RE-CHECKING that pid is still dead. Unlink-then-
+// create, or a bare rename, lets two waiters that both saw the dead pid each
+// remove the other's FRESH lock and write at once; the re-read is what makes
+// the takeover safe. The re-check closes the one window the re-read leaves
+// (#2088): the waiter's own isDead() ran before it took the reap lock, so a
+// recycled pid that became a new writer in between — dead holder's lock
+// reaped by someone else, then re-created by the new owner of that very pid
+// — writes the same content and would pass the re-read alone. Under the reap
+// lock no other waiter can replace the lock's content, so a pid still dead at
+// that point is the dead holder, and a live one is left alone to be waited
+// on like any live holder. A reap lock is held for one read, one liveness
+// check and one unlink, and one left behind by any of those same abrupt
+// deaths in that window is deliberately NOT reclaimed: waiters time out
+// naming the holder, and the operator removes it. Fail closed.
 //
 // A dead holder whose pid was recycled reads as live until the timeout.
 // Accepted: an mtime/age heuristic instead would take over a live writer on a
@@ -624,8 +632,9 @@ function reapDeadHolder(deadPid) {
   try {
     closeSync(fd);
     // Exact match only — a waiter that got here first may already have
-    // reaped the dead lock and taken a fresh one of its own.
-    if (readLock() === String(deadPid)) {
+    // reaped the dead lock and taken a fresh one of its own. And dead again,
+    // not just when the caller looked: that pid may have been reused since.
+    if (readLock() === String(deadPid) && isDead(deadPid)) {
       // Already gone is already the outcome this call wants: an operator
       // clearing a wedged lock by hand between the read above and here must
       // not turn our own cleanup into an uncaught crash.
