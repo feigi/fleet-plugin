@@ -715,8 +715,21 @@ async function acquireLock() {
       continue;
     }
     const pid = parsePid(holder);
-    if (pid !== null && isDead(pid) && reapDeadHolder(pid)) continue;
-    if (Date.now() >= deadline) die(`cannot lock ${file} — held by pid ${pid ?? JSON.stringify(holder)}`);
+    const dead = pid !== null && isDead(pid);
+    if (dead && reapDeadHolder(pid)) continue;
+    if (Date.now() >= deadline) {
+      // `dead` here but still not taken over means every reap attempt found
+      // `${REAP}` already there and backed off — the shape a reaper
+      // SIGKILLed between its own create and unlink leaves behind forever
+      // (see the comment above `reapDeadHolder`). Naming the pid alone
+      // points an operator at a process that no longer exists; naming
+      // `${REAP}` is what lets them find the file `run-team/SKILL.md`'s
+      // runbook tells them to remove by hand.
+      if (dead) {
+        die(`cannot lock ${file} — held by pid ${pid}, which is dead; ${REAP} is blocking its takeover — remove it by hand`);
+      }
+      die(`cannot lock ${file} — held by pid ${pid ?? JSON.stringify(holder)}`);
+    }
     // A timer, not a blocking sleep: a waiter holds no lock, so a SIGTERM
     // that arrives while it waits should end it now, and the handlers above
     // only run when the event loop is free to run them.

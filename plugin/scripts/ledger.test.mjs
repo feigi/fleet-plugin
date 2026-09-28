@@ -3244,6 +3244,7 @@ test("lock: a reap lock left behind fails closed — the dead holder is named, n
   const r = cli(["filed", "4", "x"], { LEDGER_LOCK_TIMEOUT_MS: "50" });
   assert.equal(r.status, 2, r.stderr);
   assert.ok(r.stderr.includes(`held by pid ${dead}`), r.stderr);
+  assert.ok(r.stderr.includes(`${lock}.reap`), `stderr does not name the stale reap lock: ${r.stderr}`);
   assert.equal(readFileSync(lock, "utf8"), String(dead));
   assert.ok(existsSync(`${lock}.reap`), "a stale reap lock was reclaimed");
   assert.equal(existsSync(file), false, "a write landed without the lock");
