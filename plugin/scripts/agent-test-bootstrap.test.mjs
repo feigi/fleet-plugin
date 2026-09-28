@@ -8,13 +8,15 @@
 // Six properties, each pinning a failure the change would otherwise buy:
 // generate-only must not claim, it must emit the claim path's own bytes, the
 // claim path must not overwrite the tracked bootstrap, the runner must never
-// be written over a path git tracks, an untracked destination outside any
+// be written over a path git tracks — not even through a foreign git dir
+// answering for the destination (#2071), while every destination that check
+// can verify still gets its runner — an untracked destination outside any
 // repo must still get its runner, and the bootstrap must read its isolation
 // issue from the worktree it stands in.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -125,6 +127,63 @@ test("the runner is never written over a path git tracks", () => {
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, /is tracked/);
   assert.equal(readFileSync(dest, "utf8"), committed, "the tracked runner was overwritten");
+});
+
+// #2071. The refusal above asks git, and `git -C` only moves git's cwd:
+// discovery still follows whatever `.git` sits there. A `.git` rewritten to
+// `gitdir: <foreign>/.git`, where the foreign repo does not track the path,
+// answers "did not match" from the FOREIGN index — and the tracked file was
+// overwritten at rc 0. Two rows because two different checks refuse them: with
+// `core.worktree` naming the destination's own directory back (the reported
+// shape), git still answers for that directory, and only the git dir's owner
+// gives it away; with `core.worktree` naming the foreign repo, owner and tree
+// agree and it is the destination's directory sitting OUTSIDE that tree.
+for (const [shape, worktreeOf] of [
+  ["core.worktree naming the destination's own directory", (dir) => dir],
+  ["core.worktree naming the foreign repo, outside which the destination sits", (dir, foreign) => foreign],
+]) {
+  test(`the runner is never written over a tracked path through a foreign git dir (${shape})`, () => {
+    const committed = "#!/bin/sh\n# tracked bootstrap\nexit 7\n";
+    const { dir } = repo({ "agent-test": committed });
+    const foreign = repo().dir;
+    const cwd = repo().dir;
+    const realGit = `${dir}.realgit`;
+    renameSync(join(dir, ".git"), realGit);
+    writeFileSync(join(dir, ".git"), `gitdir: ${join(foreign, ".git")}\n`);
+    execFileSync("git", ["-C", foreign, "config", "core.worktree", worktreeOf(dir, foreign)]);
+    const dest = join(dir, "agent-test");
+    const r = spawnSync("sh", [SCRIPT, "--write-runner", dest, "42"], { cwd, encoding: "utf8" });
+
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /cannot verify .*agent-test is untracked/);
+    assert.equal(readFileSync(dest, "utf8"), committed, "the tracked runner was overwritten through the foreign index");
+    rmSync(join(dir, ".git"));
+    renameSync(realGit, join(dir, ".git"));
+    assert.equal(
+      execFileSync("git", ["status", "--porcelain"], { cwd: dir, encoding: "utf8" }),
+      "",
+      "the real repository sees its tracked runner modified",
+    );
+  });
+}
+
+test("an untracked destination the identity check can verify still gets its runner", () => {
+  // The accept side of the #2071 check. `./agent-test` runs this from every
+  // LINKED worktree, whose git dir is an admin dir named after nothing but the
+  // worktree — owner via its back-pointer — and a subdirectory of the tree or
+  // a submodule (no back-pointer at all, admitted as no-undo-audit.sh admits
+  // it) must pass too. Any of them refused is every bootstrap run refused.
+  const { dir, git } = repo({ "agent-test": "tracked\n" });
+  const linked = `${dir}-linked`;
+  git("worktree", "add", "-q", linked);
+  mkdirSync(join(dir, "sub"));
+  const sub = repo().dir;
+  git("-c", "protocol.file.allow=always", "submodule", "add", "-q", sub, "mod");
+  for (const dest of [join(linked, ".agent-test.sh"), join(dir, "sub", ".agent-test.sh"), join(dir, "mod", ".agent-test.sh")]) {
+    const r = spawnSync("sh", [SCRIPT, "--write-runner", dest, "42"], { cwd: dir, encoding: "utf8" });
+    assert.equal(r.status, 0, `${dest}\n${r.stdout}${r.stderr}`);
+    assert.match(readFileSync(dest, "utf8"), /^#!\/bin\/sh\n/, dest);
+  }
 });
 
 test("an untracked destination outside the repo still gets its runner", () => {
