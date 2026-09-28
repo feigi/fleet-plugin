@@ -1429,16 +1429,16 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   # message, replacing the "Permission denied" the status die below is there
   # to preserve.
   #
-  # `git -C "$wt" rev-parse --show-toplevel` answers with the linkage's own idea
-  # of $wt's working tree. Comparing it against $wt itself refuses every shape
-  # that moves git's WORKING TREE away from $wt while $wt/.git still passes the
-  # `-f` gate above — #74/#115's walk-up (an absent, empty-directory, or
-  # dangling-symlink .git) fails that gate and is
-  # refused there instead, never reaching this compare: #135's own repro, a
-  # hand-written .git naming a gitdir whose core.worktree is elsewhere, whether
-  # or not that gitdir is named `.git`; and core.worktree set in the worktree's
-  # own config.worktree under extensions.worktreeConfig, the .git file
-  # untouched (all measured, git 2.50.1).
+  # `git -C "$wt" rev-parse --show-toplevel` answers with the linkage's own
+  # idea of $wt's working tree. Comparing it against $wt itself refuses every
+  # shape that moves git's WORKING TREE away from $wt while $wt/.git still
+  # passes the `-f` gate above — #74/#115's walk-up (an absent, empty-directory,
+  # or dangling-symlink .git) fails that gate and is refused there instead,
+  # never reaching this compare: #135's own repro, a hand-written .git naming
+  # a gitdir whose core.worktree is elsewhere, whether or not that gitdir is
+  # named `.git`; and core.worktree set in the worktree's own config.worktree
+  # under extensions.worktreeConfig, the .git file untouched (all measured, git
+  # 2.50.1).
   #
   # no-undo-audit.sh calls this "the spelling to avoid". Its three false-refusal
   # classes (a relative $wt, a symlinked path, macOS's /private) cannot arise
