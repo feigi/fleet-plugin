@@ -1,6 +1,6 @@
 # 0013 — Supply is automatic: one Pull per free slot, and a ticket the controller cannot admit is relabelled by cause
 
-**Status:** Accepted. Ruled 2026-09-24 on #1775 (map #1768), against the measurements below. Retires the invariant "exactly one human decision per wave, zero unilateral grabs" (`docs/specs/2026-07-22-run-team-agent-fleet-design.md` § Central conflict) and reverses `run-team/SKILL.md`'s "an unclaimed ticket is not yours to reclassify".
+**Status:** Accepted. Ruled 2026-09-24 on #1775 (map #1768), against the measurements below. Retires the invariant "exactly one human decision per wave, zero unilateral grabs" (`docs/specs/2026-07-22-run-team-agent-fleet-design.md` § Central conflict) and reverses `run-team/SKILL.md`'s "an unclaimed ticket is not yours to reclassify". Amended by ADR 0016: § 6's alt tier is replaced by the exploration draw — see § Amendment (2026-09-28, #2036).
 
 ## Context
 
@@ -186,3 +186,29 @@ decision and carries the same guard.
   the exclusion is a ticket row like any other.
 - **Relabelling forks `needs-triage`** — forks are `ready-for-human`, per
   the 2026-09-21 precedent, re-ruled at Q5.
+
+## Amendment (2026-09-28, #2036)
+
+§ 6 read "Alt-tier: every 5th Pull by ledger count … dispatches
+`fleet-implementer-alt` and records `tier=alt` … rolls to the next Pull
+when the pulled ticket is `class=correction` or another open ticket
+sequences after it." It now reads:
+
+**6. Exploration: every 5th Pull by ledger count.** Count = `impl-` rows
+in `.fleet/ledger.md` at Pull time; the Pull that creates row 5k is an
+Exploration Pull. It dispatches `fleet-implementer-<cell>` for the cell
+drawn by `k = 1 + (sha256("<session>\t<ticket>")[0:8] mod K)` over the
+cells with a definition, minus `policy_cell`, in token order, and records
+`tier=<cell>` in the row; a replacement inherits the row's tier. The
+assignment rolls to the next Pull only when another open ticket sequences
+after the pulled one; `class` is not read. The member is not told. The
+pair query in `member-outcomes.tsv`'s header is retired in favour of the
+per-cell readout script (`plugin/scripts/cell-readout.mjs`).
+
+Consequences: "Ledger rows gain … `tier=alt`" → `tier=<cell>`;
+"`fleet-implementer-alt` is every 5th `impl-` row, rolling past
+corrections and chain heads" → "an exploration cell is every 5th `impl-`
+row, rolling past chain heads". `/run-team` still gains no argument.
+
+Full design: `docs/specs/2026-09-28-model-effort-router-design.md` § 2;
+`docs/adr/0016-per-ticket-model-effort-routing.md`.
