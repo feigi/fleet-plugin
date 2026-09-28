@@ -7,7 +7,7 @@
 > `defineFlags(die, { flags, positionals = [] })`. `flags` maps each name to
 > `"value"` or `"bool"`. The call returns `{ arg, numArg, has, sweep, stray }`,
 > every reader bound to that one table, and a read of the wrong kind or of an
-> undeclared name refuses through `die()` at exit 2. The stanza is now:
+> undeclared name refuses through `die()` at exit 2. Their stanza is now:
 >
 > ```js
 > const die = makeDie(NAME);
@@ -38,8 +38,8 @@
 > back the two-shapes split the first "Why" paragraph refused, with `die` as the
 > split point this time. The pins, churn and header-rationale paragraphs still
 > hold on the current tree: `arg.test.mjs` still pins the import,
-> `const die = makeDie(NAME);` and the `NAME` constant, four of its consumers
-> among the `defineFlags` scripts. The analysis below is left as written, in the
+> `const die = makeDie(NAME);` and the `NAME` constant, and four of the scripts
+> it pins are `defineFlags` scripts. The analysis below is left as written, in the
 > tense it was written in.
 
 `scripts/arg.mjs` exports separate factories — `makeDie(name)`,
