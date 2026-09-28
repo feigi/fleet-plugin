@@ -285,10 +285,10 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   // is rejected on its own mutant regardless of either row: drop "that
   // binding is back in force" from the measured restoration and keep the
   // restoration — "firing; routine members dispatch at `sonnet` again." —
-  // and it goes green where this check reds. Widening it is ruled out for
-  // the same instrument in the guard test below (#1111, #529, #476).
+  // and it goes green where this check reds. Widening it is ruled out by
+  // docs/adr/0017-prose-pins-pin-content-not-modality.md (#529, #476).
   //
-  // RESIDUAL, measured and still open — TWO gaps, not one:
+  // RESIDUAL, measured and still exposed — TWO gaps, not one:
   // (1) a restoration that never re-states the binding at all — "that
   // binding is back in force.", "That revert no longer holds.", "(since
   // undone)." — passes all three checks here, because none of them read for
@@ -302,9 +302,12 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   // 10/10 green on a copy of this tree. Gap (2) is strictly larger than gap
   // (1) — it needs no dateless, wordless restoration trick, just the doc's
   // ordinary vocabulary — and is not fixed here. Catching either is a
-  // question about prose MODALITY, which is #1111's open call for the guard
-  // lead in this same file, and nothing on the grid answered it without
-  // over-firing. Do not close it with a longer word list.
+  // question about prose MODALITY, and that is settled, not open:
+  // docs/adr/0017-prose-pins-pin-content-not-modality.md rules that prose
+  // pins assert content, never modality, and that an obligation which must
+  // not soften gets a code carrier (a script verdict surfaced as a
+  // fleet-tick row), not a prose pin. This residual is a recorded gap under
+  // that ADR. Do not close it with a longer word list.
   assert.deepEqual(
     (revertNote.match(/class=routine|sonnet/gi) ?? []).map((token) => token.toLowerCase()),
     ["class=routine", "sonnet"],
@@ -501,6 +504,9 @@ test("phase 2 runs the tier check after every Pull's dispatch and holds the next
   );
   // Normative, not advisory — the same hedge-word guard the tier guard test
   // below already applies to its own paragraph, applied here to this one.
+  // A literal-word tripwire ONLY: it catches `Optional` and `you may` and
+  // nothing else, so a hedge in any other words passes it. Kept, not
+  // widened, per docs/adr/0017-prose-pins-pin-content-not-modality.md.
   assert.doesNotMatch(
     slice,
     /tier check[\s\S]{0,600}(?:\bOptional\b|\byou may\b)/i,
@@ -560,9 +566,15 @@ test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
   // replace on the tail reds THAT suite, which reads as the deleted pin
   // catching the hedge. Restore with `cp`, never `git checkout --`.
   //
-  // That green is the gap tracked on #1111. The hedges below are enumerated by
-  // word and the reworded lead uses none of them; widening the list is ruled
-  // out there, because that instrument was measured failing (#476).
+  // That green is a recorded gap, not an open question:
+  // docs/adr/0017-prose-pins-pin-content-not-modality.md rules that prose
+  // pins pin content, never modality, and that this guard's obligation gets
+  // a code carrier — a script verdict surfaced as a fleet-tick row — with
+  // #2037's successor guard, not a stronger pin here. Until that lands, the
+  // mutation above stays green. The list below is a literal-word tripwire
+  // ONLY: it catches `Optional` and `you may` and nothing else, and the
+  // reworded lead uses neither. Widening it is ruled out by the same ADR,
+  // because that instrument was measured failing (#476).
   assert.doesNotMatch(
     slice,
     /\bOptional\b|\byou may\b/i,
