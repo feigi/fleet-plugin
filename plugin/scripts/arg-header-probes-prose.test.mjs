@@ -21,14 +21,14 @@
 // reds too.
 //
 // Every expected answer is DERIVED by calling the generator that produces it —
-// `makeSweep`, `makeArg`, `node:util`'s own `parseArgs` — never typed out here.
+// `defineFlags`, `makeArg`, `node:util`'s own `parseArgs` — never typed out here.
 // Rewording a refusal in `arg.mjs` moves this pin with it; rewording it in one
 // place only does not.
 //
 // THE ROSTER. Not a list of filenames: the scripts are read off the header's
 // own anchored grep, and each is then RUN with a flag nothing accepts. The
-// header's mechanism claim — a row binding `makeSweep` has delegated the
-// unknown-flag refusal, so the grep minus `makeSweep` leaves the rows that hold
+// header's mechanism claim — a row binding `defineFlags` has delegated the
+// unknown-flag refusal, so the grep minus `defineFlags` leaves the rows that hold
 // their own — is the two containments asserted below: no row the grep leaves
 // answers in `sweep()`'s generated wording, and no row it removes answers in
 // anything else. A script renamed keeps the pin.
@@ -50,7 +50,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { anchorAt, stripSlashGutter } from "./prose-pin.mjs";
-import { makeArg, makeSweep } from "./arg.mjs";
+import { makeArg, defineFlags } from "./arg.mjs";
 
 // The header's commands are written against the plugin root (`scripts/*.mjs`),
 // so that is where they run. Running them from anywhere else would test a
@@ -86,7 +86,7 @@ const commands = quoted.filter((s) => /^(?:grep|node) /.test(s));
 const PROBES = [
   `grep -ln '^function die(' scripts/*.mjs`,
   `grep -n 'from "./arg.mjs"' scripts/*.mjs | grep -v test`,
-  `grep -n '^import .*makeDie.* from "./arg.mjs"' scripts/*.mjs | grep -v test | grep -v makeSweep`,
+  `grep -n '^import .*makeDie.* from "./arg.mjs"' scripts/*.mjs | grep -v test | grep -v defineFlags`,
   "node scripts/candidates.mjs --limit",
   "node scripts/candidates.mjs --bogus",
 ];
@@ -106,9 +106,12 @@ const sweepWordingFor = (known) => {
   const saved = process.argv;
   process.argv = ["node", "probe", STRAY];
   try {
-    makeSweep((m) => {
-      throw new Error(m);
-    })(known);
+    defineFlags(
+      (m) => {
+        throw new Error(m);
+      },
+      { flags: Object.fromEntries(known.map((k) => [k, "value"])) },
+    ).sweep();
   } catch (e) {
     return e.message;
   } finally {
@@ -292,15 +295,15 @@ const GUARD_FIRST_FIXTURE = {
 
 test("no script the roster grep removes holds an unknown-flag refusal of its own", () => {
   // The removed rows, derived the way the grep removes them: importers that
-  // bind makeSweep.
+  // bind defineFlags.
   const delegators = [
     ...new Set(
       rows(sh(IMPORT_GREP).stdout)
-        .filter((r) => r.text.trimStart().startsWith("import ") && r.text.includes("makeSweep"))
+        .filter((r) => r.text.trimStart().startsWith("import ") && r.text.includes("defineFlags"))
         .map((r) => r.file),
     ),
   ];
-  assert.ok(delegators.length >= 3, `only ${delegators.length} importers bind makeSweep — the grep's -v makeSweep arm has nothing left to remove`);
+  assert.ok(delegators.length >= 3, `only ${delegators.length} importers bind defineFlags — the grep's -v defineFlags arm has nothing left to remove`);
 
   // A guard above the sweep can answer first — a required flag the stray-only
   // probe does not supply — and such a run never names the stray. Only a
@@ -312,7 +315,7 @@ test("no script the roster grep removes holds an unknown-flag refusal of its own
     if (out.includes(STRAY)) {
       assert.ok(
         out.includes(SWEEP_PREFIX),
-        `${file} binds makeSweep, so the roster grep removes it, yet it refuses ${STRAY} in wording of its own: it is a second edit site the header's grep hides`,
+        `${file} binds defineFlags, so the roster grep removes it, yet it refuses ${STRAY} in wording of its own: it is a second edit site the header's grep hides`,
       );
     } else {
       guardFirst.push(file);
@@ -342,7 +345,7 @@ test("no script the roster grep removes holds an unknown-flag refusal of its own
     );
     assert.ok(
       out.includes(SWEEP_PREFIX),
-      `${file} binds makeSweep, so the roster grep removes it, yet — once its own required-arg guard is satisfied — it refuses ${STRAY} outside sweep()'s wording: it is a second edit site the header's grep hides`,
+      `${file} binds defineFlags, so the roster grep removes it, yet — once its own required-arg guard is satisfied — it refuses ${STRAY} outside sweep()'s wording: it is a second edit site the header's grep hides`,
     );
   }
 });
@@ -350,7 +353,7 @@ test("no script the roster grep removes holds an unknown-flag refusal of its own
 // Review finding #3: deleting the exception test that named tier-check.mjs
 // as the roster's one silent row (rather than re-pointing it) removed the
 // suite's only detector of a NEW silent roster row — a future script that
-// imports arg.mjs, is left out of both delegators (no makeSweep) and this
+// imports arg.mjs, is left out of both delegators (no defineFlags) and this
 // file's own per-script prose, and never refuses an unknown flag at all.
 // The "every script the roster grep returns refuses ... not sweep()'s"
 // test above does not catch that shape: a script's own unrelated
@@ -385,6 +388,6 @@ test("candidates.mjs refuses --bogus under its own parseArgs", () => {
   );
   assert.ok(
     !got.stderr.includes(SWEEP_PREFIX),
-    `${BOGUS_PROBE} now answers in sweep()'s wording — candidates.mjs routes through the shared sweep after all, and the header argues at makeSweep() that it deliberately does not`,
+    `${BOGUS_PROBE} now answers in sweep()'s wording — candidates.mjs routes through the shared sweep after all, and the header argues at refuseUnknown() that it deliberately does not`,
   );
 });

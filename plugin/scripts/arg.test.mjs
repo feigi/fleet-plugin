@@ -751,7 +751,7 @@ for (const { script, argv } of GH_FLOOD) {
 // returned a real, wrong verdict at exit 0/1. The fleet gates PR-green on that
 // verdict.
 //
-// Driven per script rather than only against makeSweep, because the unit
+// Driven per script rather than only against sweep(), because the unit
 // contract below passes just as well with the call site missing: what has to
 // hold is that each script REACHES it, with a set that contains the name it
 // misspelled. The matrix is spelled out for the same reason CONSUMERS above is
@@ -994,8 +994,8 @@ test("#878: `--pr 0` reaches gh rather than drawing the usage line for an absent
 // single dash — the likelier typo, since the caller plainly meant a flag —
 // rode through in total silence: `ci-state.mjs --pr 42 basee main` computed
 // a real, wrong verdict at exit 0/1 against the default base, the same
-// fail-open harm as #365 reached from the positional side. makeStray()
-// closes it because it knows which names take a value, so `-1` on
+// fail-open harm as #365 reached from the positional side. stray() closes
+// it because the script's flag table says which names take a value, so `-1` on
 // `--spend-since` is not mistaken for one of these.
 //
 // board.mjs is the one row here with a positional of its own, so its cases
@@ -1046,32 +1046,40 @@ for (const { script, argv, stray } of STRAY_POSITIONALS) {
 // sibling ("CLI: serve refuses a stray positional the same way build does").
 // Neither half names a position in the file, deliberately: the runSweep()
 // half of this sentence used to say "above", and was wrong.
-function runStray(argv, valueFlags, positionals) {
+//
+// `body` is the probe's own statements against the bound readers `f`, so the
+// same harness drives defineFlags()'s wrong-kind refusals further down.
+function runFlags(argv, flags, positionals, body) {
   const dir = mkdtempSync(join(tmpdir(), "arg-stray-unit-"));
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
   writeFileSync(join(dir, "run.mjs"), [
-    'import { makeDie, makeStray } from "./arg.mjs";',
+    'import { makeDie, defineFlags } from "./arg.mjs";',
     'const die = makeDie("probe");',
-    `makeStray(die)(${JSON.stringify(valueFlags)}, ${JSON.stringify(positionals)});`,
+    `const f = defineFlags(die, { flags: ${JSON.stringify(flags)}, positionals: ${JSON.stringify(positionals)} });`,
+    body,
     'console.log("ok");',
     "",
   ].join("\n"));
   return spawnSync(process.execPath, [join(dir, "run.mjs"), ...argv], { encoding: "utf8" });
 }
 
+function runStray(argv, flags, positionals) {
+  return runFlags(argv, flags, positionals, "f.stray();");
+}
+
 // The pin the naive widenings both fail, named in #463's own AC: a value that
 // looks like a flag (`startsWith("-")` would refuse it) on a name stray()
 // was TOLD takes one.
 test("stray() accepts a negative value on a declared value flag", () => {
-  const r = runStray(["--spend-since", "-1"], ["spend-since"], []);
+  const r = runStray(["--spend-since", "-1"], { "spend-since": "value" }, []);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^ok$/m);
 });
 
 test("stray() accepts the one declared positional and refuses an unrelated extra token", () => {
-  const ok = runStray(["build"], [], ["build", "serve"]);
+  const ok = runStray(["build"], {}, ["build", "serve"]);
   assert.equal(ok.status, 0, ok.stderr);
-  const extra = runStray(["build", "junk"], [], ["build", "serve"]);
+  const extra = runStray(["build", "junk"], {}, ["build", "serve"]);
   assert.equal(extra.status, 2, extra.stderr);
   assert.match(extra.stderr, /unexpected argument 'junk'/);
 });
@@ -1079,55 +1087,91 @@ test("stray() accepts the one declared positional and refuses an unrelated extra
 // The case the test above cannot reach, and the only one that exercises the
 // `usedPositional` gate at all: `junk` is refused by the ordinary
 // unknown-token path, which holds just as well with the gate gone. Measured
-// — dropping `!usedPositional` from makeStray() left arg.test.mjs,
+// — dropping `!usedPositional` from stray() left arg.test.mjs,
 // board.test.mjs and board-cli.test.mjs entirely green, while
 // `board.mjs serve --port 0 build` went from exit 2 to exit 0 with the
 // server actually starting and `build` silently swallowed.
 test("stray() refuses a second declared positional, not only an unrelated token", () => {
-  const r = runStray(["build", "serve"], [], ["build", "serve"]);
+  const r = runStray(["build", "serve"], {}, ["build", "serve"]);
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /unexpected argument 'serve'/);
 });
 
-// survived[4]'s gap, at the level it is reachable: `valueFlags` naming exactly
-// the flags that take a value is stated only in prose at each call site, and
-// the dangerous drift — a BOOLEAN flag's name listed there — has no failure of
-// its own. It buys the token after that flag an unconditional skip, so the very
-// stray this guard exists to catch becomes invisible. Both halves are asserted
-// because the hiding half alone stays green under a guard that skips
-// everything.
-test("stray() skips the token after any name in valueFlags — so a boolean flag listed there hides a stray", () => {
-  const hidden = runStray(["--quiet", "junk"], ["quiet"], []);
-  assert.equal(hidden.status, 0, hidden.stderr);
-  const caught = runStray(["--quiet", "junk"], [], []);
+// #1077: `valueFlags` naming exactly the flags that take a value used to be
+// stated only in prose at each call site, and the dangerous drift — a BOOLEAN
+// flag's name listed there — bought the token after it an unconditional skip,
+// hiding the very stray this guard exists to catch. The list is now derived
+// from the script's flag table, so what is pinned here is that a "bool" entry
+// consumes nothing, and — below — that the table cannot disagree with the
+// reads the script makes.
+test("stray() skips only after a \"value\" name — a \"bool\" flag consumes nothing", () => {
+  const skipped = runStray(["--since", "junk"], { since: "value" }, []);
+  assert.equal(skipped.status, 0, skipped.stderr);
+  const caught = runStray(["--quiet", "junk"], { quiet: "bool" }, []);
   assert.equal(caught.status, 2, caught.stderr);
   assert.match(caught.stderr, /unexpected argument 'junk'/);
 });
 
+// The guarantee that replaced the pin above it (#1077): a read that
+// contradicts the table refuses, so a boolean typed as "value" — or the
+// reverse — cannot survive the first run that reaches the read. Exit 2 via
+// die(), never an uncaught Error: exit 1 is a verdict in ci-state.mjs,
+// merge-gate.mjs and tier-roles.mjs.
+const WRONG_KIND = [
+  { read: 'f.has("quiet");', flags: { quiet: "value" }, message: "bug: --quiet read as bool but declared value" },
+  { read: 'f.arg("quiet");', flags: { quiet: "bool" }, message: "bug: --quiet read as value but declared bool" },
+  { read: 'f.numArg("pr");', flags: { pr: "bool" }, message: "bug: --pr read as value but declared bool" },
+  { read: 'f.arg("base");', flags: { quiet: "bool" }, message: "bug: --base read as value but not declared" },
+  { read: 'f.has("toString");', flags: {}, message: "bug: --toString read as bool but not declared" },
+];
+
+for (const { read, flags, message } of WRONG_KIND) {
+  test(`defineFlags(): ${read} against ${JSON.stringify(flags)} exits 2 naming the bug`, () => {
+    const r = runFlags([], flags, [], read);
+    assert.equal(r.status, 2, r.stderr);
+    assert.ok(r.stderr.includes(`\nprobe: ${message}\n`), r.stderr);
+    assert.doesNotMatch(r.stdout, /^ok$/m);
+  });
+}
+
+// The half a new guard can get wrong the other way: refusing a read the
+// table DOES declare. Every reader is driven with its own kind, given and
+// absent, so a check that compared the wrong way round reds here.
+test("defineFlags(): a read of the declared kind answers exactly as before", () => {
+  const flags = { base: "value", pr: "value", quiet: "bool" };
+  const body = 'console.log(JSON.stringify([f.arg("base"), f.numArg("pr"), f.has("quiet")]));';
+  const given = runFlags(["--base", "main", "--pr", "7", "--quiet"], flags, [], body);
+  assert.equal(given.status, 0, given.stderr);
+  assert.match(given.stdout, /^\["main",7,true\]$/m);
+  const absent = runFlags([], flags, [], body);
+  assert.equal(absent.status, 0, absent.stderr);
+  assert.match(absent.stdout, /^\[null,null,false\]$/m);
+});
+
 test("stray() refuses a bare positional on a script that declares none", () => {
-  const r = runStray(["junk"], [], []);
+  const r = runStray(["junk"], {}, []);
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /unexpected argument 'junk'/);
 });
 
 test("stray() refuses a single-dash token the same way as a bare word", () => {
-  const r = runStray(["-basee"], [], []);
+  const r = runStray(["-basee"], {}, []);
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /unexpected argument '-basee'/);
 });
 
 test("stray() refuses a stray that arrives BEFORE a known value flag, not only after", () => {
-  const r = runStray(["junk", "--pr", "42"], ["pr"], []);
+  const r = runStray(["junk", "--pr", "42"], { pr: "value" }, []);
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /unexpected argument 'junk'/);
 });
 
 // `--`-prefixed tokens are never this guard's business, known or not — that
-// is sweep()'s bound, unchanged (#463's own comment on makeStray). Run
+// is sweep()'s bound, unchanged (#463's own comment on refuseStrays()). Run
 // without sweep() ahead of it, same as runSweep()'s own probe convention, so
 // this proves stray()'s OWN bound rather than sweep() having caught it first.
 test("stray() leaves a `--`-prefixed token alone, even an unknown one", () => {
-  const r = runStray(["--bogus"], [], []);
+  const r = runStray(["--bogus"], {}, []);
   assert.equal(r.status, 0, r.stderr);
 });
 
@@ -1155,10 +1199,11 @@ function runSweep(argv) {
   const dir = mkdtempSync(join(tmpdir(), "arg-sweep-unit-"));
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
   writeFileSync(join(dir, "run.mjs"), [
-    'import { makeDie, makeArg, makeSweep } from "./arg.mjs";',
+    'import { makeDie, defineFlags } from "./arg.mjs";',
     'const die = makeDie("probe");',
-    'makeSweep(die)(["base", "quiet"]);',
-    'const value = makeArg(die)("base");',
+    'const f = defineFlags(die, { flags: { base: "value", quiet: "bool" } });',
+    'f.sweep();',
+    'const value = f.arg("base");',
     'console.log(`ok base=${value}`);',
     "",
   ].join("\n"));

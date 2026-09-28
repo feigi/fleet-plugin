@@ -107,18 +107,18 @@ test("--spend-since rejects garbage, zero, negative and a boundary in the future
 test("--spend-since with the value omitted fails, rather than reading as 'no filter at all'", () => {
   // The flag as the last argv: arg() yields undefined and the guard's old
   // `sinceRaw == null` read that as "flag absent" — exit 0, whole session,
-  // no stderr. Gating on has() is what closes it.
+  // no stderr. arg()'s own value guard is what closes it: argSpendSince()
+  // tests `=== null` only on what arg() already accepted.
   const r = runBoard(["--spend-since"]);
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /--spend-since/);
 });
 
-// #364 gave has() a boolean-specific refusal, and gather() calls has() on
-// --spend-since — a flag that TAKES a value. The wording stays correct only
-// because arg("spend-since") runs before it and dies first; swap the two
-// and the operator is told to drop a value the flag requires. Nothing pinned
-// that order, so this does: measured, the reorder turns this message into
-// "--spend-since is a boolean flag" while the rest of the suite stays green.
+// #364 gave has() a boolean-specific refusal, and gather() used to call has()
+// on --spend-since — a flag that TAKES a value — so the wording stayed
+// correct only while arg("spend-since") ran first. #1077 retired that has():
+// the flag table declares --spend-since "value", so a has() read of it would
+// now refuse as a bug. This pins the operator-facing wording either way.
 test("--spend-since=123 is refused as a value flag, not misreported as a boolean one", () => {
   const r = runBoard(["--spend-since=123"]);
   assert.equal(r.status, 2, r.stderr);
