@@ -184,6 +184,20 @@ test("parseFrontmatter: a single-quoted value has its quotes stripped", () => {
   assert.equal(fields[0].value, "@slow:xhigh");
 });
 
+// A mismatched pair is not a quoted value: stripping must require the SAME
+// quote character on both ends, so neither direction may be stripped.
+test("parseFrontmatter: a mismatched pair (opening double, closing single) is left unstripped", () => {
+  const { fields, error } = parseFrontmatter("---\nmodel: \"@slow:xhigh'\n---\n");
+  assert.equal(error, undefined);
+  assert.equal(fields[0].value, "\"@slow:xhigh'");
+});
+
+test("parseFrontmatter: a mismatched pair (opening single, closing double) is left unstripped", () => {
+  const { fields, error } = parseFrontmatter("---\nmodel: '@slow:xhigh\"\n---\n");
+  assert.equal(error, undefined);
+  assert.equal(fields[0].value, "'@slow:xhigh\"");
+});
+
 // ---------------------------------------------------------------------------
 // checkFields — the both-directions contract plus value rules
 // ---------------------------------------------------------------------------
