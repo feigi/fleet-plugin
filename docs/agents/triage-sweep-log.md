@@ -55,3 +55,32 @@ names, so it stays exactly where it was.
 no issue was closed by this sweep, so there is nothing else to undo — this
 entry is independent of #239's filing-bar policy change and of PR #2091's
 unrelated merge.
+
+## 2026-09-28 addendum to the 2026-09-27 sweep (#2106)
+
+Not a new sweep: nothing below was probed, commented or relabelled by #593's
+procedure. It records a state change made *after* the 2026-09-27 entry
+closed, so that entry's "stays `needs-triage`" outcome for #2100 is not read
+as current. The 2026-09-27 entry itself is left unedited, per the rule above.
+
+**As-of 2026-09-28**, read from the issue tracker (`gh issue view 2100`, the
+#2100 timeline, `gh issue list --state open --label needs-triage --limit 500`);
+`origin/main`@`94ce0096`.
+
+**Changed since the 2026-09-27 entry:**
+
+| # | 2026-09-27 outcome | What changed, and by what | State now |
+|---|---|---|---|
+| #2100 | live, defect **not confirmed** → stays `needs-triage` | At 2026-09-28T07:08:08Z an independent triage-verification pass — not #593's sweep, and not a re-run of it — posted a [triage verification](https://github.com/feigi/fleet-plugin/issues/2100#issuecomment-5865145762) that ran `bullet()` against the reference `commonmark` parser and reported "Defect confirmed, but the premise here is wrong": nesting depth alone does not trigger it; the real trigger is a shallower line 4+ columns past its container's content column with no blank line before it, which CommonMark reads as lazy continuation text of the item but `bullet()` treats as ending the item. One second later (07:08:09Z) the same pass removed `needs-triage` and added `bug` + `ready-for-agent` | open; `bug`, `ready-for-agent`, and `in-progress` (added 2026-09-28T17:31:35Z when a fleet run claimed it for implementation) |
+
+**After:** 0 open `needs-triage` issues repo-wide
+(`gh issue list --state open --label needs-triage --limit 500` returns `[]`).
+The other `needs-triage` ticket the 2026-09-27 entry counted, #2097 (no
+deferral marker, so outside #593's scope), was likewise relabelled
+`needs-triage` → `bug` + `ready-for-agent` at 2026-09-28T07:08:12Z, three
+seconds after #2100, and closed 2026-09-28T17:31:00Z. With no open
+`needs-triage` issue left, the `needs-triage`-plus-deferred backlog #593 set
+out to reconcile is empty.
+
+**Revert:** nothing to undo. This entry records changes made elsewhere and
+makes none of its own.
