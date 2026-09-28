@@ -1,4 +1,4 @@
-# 0014 — A consumer repo's Recipe is derived by agent reasoning and cached; fleet-ctl maintains no technology table
+# 0015 — A consumer repo's Recipe is derived by agent reasoning and cached; fleet-ctl maintains no technology table
 
 **Status:** Accepted. Ruled 2026-09-28 by the maintainer while reviewing
 `docs/requirements.md` (PR #2112), against the measurement below.

@@ -73,7 +73,7 @@ definition has no registration to be seen through.
 **Recipe**:
 The pair of commands the fleet needs about the repository it works on — its Install
 step and its Test entrypoint — derived by agent reasoning over that repository, never
-by a table of technologies the plugin knows (ADR 0014).
+by a table of technologies the plugin knows (ADR 0015).
 _Avoid_: config, manifest, detection, project type
 
 **Install step**:
@@ -290,5 +290,5 @@ _Avoid_: effective tier, actual model
 **Tier route**:
 What turns a Declared tier's alias into a model — the operator's
 `modelRoles.<role>` entry (`slow`/`task`/`smol`), never a vendor id in the
-definition; no per-agent override record exists (ADR 0014).
+definition; no per-agent override record exists (ADR 0015).
 _Avoid_: mapping, override, translation

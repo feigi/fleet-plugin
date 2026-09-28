@@ -35,7 +35,6 @@ in both BSD and GNU flavours
 | `jq` | any | runbooks parse `ci-state.mjs` / transcript payloads with `jq -e`, `jq -r` (`plugin/skills/run-team/SKILL.md:1707`) | `jq --version` |
 | `python3` | any 3.x | NUL-safe / UTF-8-strict readers in `inflight.sh`, `json.sh`, `no-undo-audit.sh` — several tests `skip` without it, the scripts `die` | `python3 -c 'import json'` |
 | `shasum` | any | `instruments.sh` digests tracked files (`shasum -a 256`) | `command -v shasum` |
-| `sh` | POSIX | dash on Linux, `/bin/sh` (bash 3.2) on macOS both work; every script pins `LC_ALL=C` and avoids `pipefail` | — |
 
 Not needed: `timeout`/`gtimeout` (`net.sh` hand-rolls a watchdog),
 `docker`, any package manager beyond the one your lockfile implies (§2.3).
@@ -54,25 +53,18 @@ floor ([ADR 0010](adr/0010-the-node-pin-stays-exact-and-a-bot-moves-it.md)).
 - GitHub Enterprise: works, but `ci-state.mjs`'s compare probe needs
   `--hostname`; expect one extra config step. Not exercised in this repo's CI.
 
-### 1.4 Exactly one harness — HARD
+### 1.4 omp, with the fleet plugin installed — HARD
 
-The fleet runs inside **Claude Code** or **omp**, never both at once. With
-one plugin registry populated it uses that one. With *both* populated it
-trusts exactly one environment shape — `CLAUDECODE` set and `OMPCODE` unset
-→ Claude (omp always sets both, so `OMPCODE` present proves nothing) — and
-otherwise **refuses** unless the two installs are byte-identical or you set
-`FLEET_HARNESS=claude|omp` (`plugin/scripts/fleet-run:163-238`). Simplest:
-install on one harness only, or export `FLEET_HARNESS` in the shell that
-launches the harness.
-
-Install exactly as [README → Installation](../README.md#installation) says,
-using the **qualified** id `fleet-ctl@fleet-plugin`. Then:
+The fleet runs inside **omp** only — no other harness is supported
+([ADR 0014](adr/0014-omp-is-the-only-harness.md)). Install exactly as
+[README → Installation](../README.md#installation) says, using the
+**qualified** id `fleet-ctl@fleet-plugin`. Then:
 
 ```
-~/.fleet/bin/fleet-run --root        # prints the installed plugin root, or dies naming which registry is missing / that both are present
+~/.fleet/bin/fleet-run --root        # prints the installed plugin root, or dies naming why (no registry, no entry, more than one ambiguous scope:"user" candidate)
 ```
 
-**omp only — two settings are session-wide preconditions**
+Two settings are session-wide preconditions
 ([ADR 0003](adr/0003-dual-harness-dev-loop-install-is-the-only-path.md),
 [ADR 0011](adr/0011-omp-tier-routes-through-roles.md)):
 
@@ -117,7 +109,7 @@ git remote get-url origin && git rev-parse --verify origin/main
 
 ### 2.3 A repository the fleet can install and test — HARD
 
-**Ruling ([ADR 0014](adr/0014-consumer-recipe-by-agent-reasoning-no-technology-table.md)):
+**Ruling ([ADR 0015](adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md)):
 any technology.** The fleet derives your repo's *Recipe* — an Install step and
 a Test entrypoint — by agent reasoning over the repository (README, build
 files, CI workflow), proves both in a throwaway worktree, and caches the
@@ -236,9 +228,8 @@ comparing its jobs to the jobs declared in the workflow file. It assumes:
   match (`plugin/scripts/ci-state.mjs:441-485`; it dies rather than guess).
   `strategy.matrix` jobs are the known blind spot: avoid them in this workflow.
 - A full cycle completes in **~5–6 minutes**. Every wait budget in the runbook
-  (600 s Claude / 900–1000 s omp per watch, 15-minute merge-bot grace) is
-  sized from that. A 20-minute pipeline will read as "stuck" and be reported,
-  not merged.
+  (900–1000 s per watch, 15-minute merge-bot grace) is sized from that. A
+  20-minute pipeline will read as "stuck" and be reported, not merged.
 - **No CI at all** is a supported verdict (`no-ci`), but only when the caller
   passes `--declare-no-ci`; the merge bot does, gating on the reviewer's own
   suite run instead. A `.github/workflows/` directory with files in it but
