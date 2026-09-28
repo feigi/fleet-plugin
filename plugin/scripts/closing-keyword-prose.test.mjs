@@ -142,3 +142,52 @@ test("a reflowed section still matches", () => {
   assert.notEqual(rewrapped, TRACKER, "the rewrap fixture no longer matches the section — update it");
   assert.match(section(rewrapped), phrase("creates a closing link, and the fix is to insert a word"));
 });
+
+// #1118. The section above is reached only by a skill that says "compose a PR
+// body", and the step that actually opens a PR — `next-ticket` step 7, which
+// every implementer runs — never said it. The ruling put the rule in the step
+// itself instead of a citation, so it is pinned where the PR is opened. Same
+// anchors as force-with-lease-reason-prose.test.mjs's step-7 slice.
+const NEXT_TICKET = readFileSync(join(REPO, "plugin", "skills", "next-ticket", "SKILL.md"), "utf8");
+const step7 = (text = NEXT_TICKET) =>
+  between(text, "## 7. When the superpowers path reports done", "## Red flags", "next-ticket/SKILL.md step 7");
+
+test("next-ticket step 7 says one keyword per intended close, and that several such closes are fine", () => {
+  // The per-issue half and the multi-close example are one span: a rewrite to
+  // "only one closing keyword per body" is the plausible over-correction, and
+  // it forbids the deliberate `Closes #971, closes #864` this sentence allows.
+  assert.match(
+    step7(),
+    phrase("Write one `Closes #M` per issue you mean to close, so `Closes #971, closes #864` closes both"),
+    "step 7 lost the one-keyword-per-intended-close rule, or narrowed it so a deliberate multi-issue close reads as wrong",
+  );
+});
+
+test("next-ticket step 7 says what to do with every OTHER issue mention", () => {
+  assert.match(
+    step7(),
+    phrase("give every other issue mention a word in front of it — `closed issue #M`, or the issue named without the `#`"),
+    "step 7 no longer tells the author to put a word in front of issue mentions it does not mean to close",
+  );
+});
+
+test("next-ticket step 7 says a keyword before a list links only its first reference", () => {
+  assert.match(
+    step7(),
+    phrase("A keyword before a list links only the first reference in that list, never the rest"),
+    "step 7 no longer says one keyword does not chain across a list",
+  );
+});
+
+test("the step-7 pins survive a reflow of the rule", () => {
+  // The ACCEPT direction for the step-7 pins, as the section's reflow test is
+  // for the ones above.
+  const rewrapped = NEXT_TICKET.replace("per issue you mean to close, so", "per issue\nyou mean to close,\nso").replace(
+    "links only the first reference",
+    "links only\nthe first reference",
+  );
+  assert.notEqual(rewrapped, NEXT_TICKET, "the rewrap fixture no longer matches step 7 — update it");
+  const s = step7(rewrapped);
+  assert.match(s, phrase("Write one `Closes #M` per issue you mean to close, so `Closes #971, closes #864` closes both"));
+  assert.match(s, phrase("A keyword before a list links only the first reference in that list, never the rest"));
+});

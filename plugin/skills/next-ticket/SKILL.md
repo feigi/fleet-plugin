@@ -111,7 +111,9 @@ the push above is the correct one.
 
 `--force-with-lease` matters only on a re-push: step 7 rebases immediately before pushing, so re-entering step 7 after an earlier push needs the force to land the rebased commits. On a re-push the force is load-bearing: stop and report the denial, never retry with a plain `--force`; a denial on a branch that has never been pushed is safe to route around with a plain `git push -u origin HEAD` instead.
 
-`Closes #N` closes issue on merge. Repo gating on release label → exactly one of `patch`/`minor`/`major`; `validate-release-label` fails without it.
+`Closes #N` closes issue on merge — as does any closing keyword (`close`, `fixes`, `resolved`, …) sitting directly before an issue reference, wherever it appears in the body. Write one `Closes #M` per issue you mean to close, so `Closes #971, closes #864` closes both; give every other issue mention a word in front of it — `closed issue #M`, or the issue named without the `#`. A keyword before a list links only the first reference in that list, never the rest: `Closes #971, #864` closes only issue 971.
+
+Repo gating on release label → exactly one of `patch`/`minor`/`major`; `validate-release-label` fails without it.
 
 **Never fold `--label` into the create.** A `gh pr create` that outruns the caller's tool timeout is backgrounded with the PR already open and its flags unapplied, and a timeout carries no exit status for anything to react to — so the label goes missing and every later gate reads the PR as correctly opened (#375). Written as its own command it has its own exit status and fails loudly; `gh pr edit` with no PR argument resolves the current branch's PR, so it lands even when the create's own output was lost to the timeout. Failed → run it again before reporting the PR.
 
