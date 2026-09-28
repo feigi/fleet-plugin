@@ -311,6 +311,40 @@ test("bullet ends the item at a spaced thematic break, not only a run-together o
   assert.equal(bullet("- **A** body\n* * *\nafter\nEND", "- **A**", "END", "the fixture"), "- **A** body");
 });
 
+// #2100: a line 4+ columns past the item's marker, with no blank line before
+// it, cannot open a heading, quote, fence, break or list item there — it is
+// lazy continuation of the item's paragraph. Reachable only when the content
+// column is past marker column + 4 (a `100.` marker, or a 4-space gap). Every
+// expected slice here was checked against the `commonmark` npm package (0.31).
+test("bullet keeps a marker or interrupt line 4+ columns past the item's marker as lazy continuation", () => {
+  for (const [text, expected] of [
+    ["100. **Item** body\n    # x\nEND", "**Item** body\n    # x\n"],
+    ["-    **Item** body\n    # x\nEND", "**Item** body\n    # x\n"],
+    ["100. **Item** body\n    ```x\nEND", "**Item** body\n    ```x\n"],
+    ["100. **Item** body\n    > x\nEND", "**Item** body\n    > x\n"],
+    ["1. a\n   100. **Item** body\n       # x\nEND", "**Item** body\n       # x\n"],
+    ["1. a\n\n   100. **Item** body\n       # x\nEND", "**Item** body\n       # x\n"],
+    ["100. **Item** body\n    - x\nEND", "**Item** body\n    - x\n"],
+    ["100. **Item** body\n\t# x\nEND", "**Item** body\n\t# x\n"],
+  ]) {
+    assert.equal(bullet(text, "**Item**", "END", "the fixture"), expected, text);
+  }
+});
+
+// The half the #2100 cap must not wrongly KEEP: short of marker column + 4 the
+// line still ends the item, and a blank line before it ends the item at any
+// depth. Same commonmark check.
+test("bullet still ends the item at a marker or interrupt line short of its marker column + 4, or after a blank line", () => {
+  for (const text of [
+    "100. **Item** body\n   # x\nEND",
+    "1. a\n   - b\n     - **Item** body\n    # x\nEND",
+    "1. a\n\n   100. **Item** body\n      # x\nEND",
+    "100. **Item** body\n\n    # x\nEND",
+  ]) {
+    assert.equal(bullet(text, "**Item**", "END", "the fixture"), "**Item** body", text);
+  }
+});
+
 // A list-item anchor is a start anchor, never a "nearest" bound, so a second
 // copy means the item would be read off whichever comes first.
 test("bullet throws when the item anchor occurs more than once", () => {

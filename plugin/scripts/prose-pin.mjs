@@ -191,9 +191,19 @@ export function paragraph(text, anchor, what, options) {
 // heading, `>`, a fence, a thematic break), or when a blank line precedes it.
 // Only the first ended it before #2077, so a restatement in a paragraph after
 // the item, or under a new heading, stayed inside the slice and held the pin.
+// The marker and interrupt cases count only short of the item's MARKER column
+// + 4: from there on, with no blank line before it, the line is lazy
+// continuation, since 4+ columns past its container a line cannot open a block
+// or a list item and indented code cannot interrupt a paragraph. That zone
+// exists only when the content column is past marker column + 4 — a `100.`
+// marker, or a 4-space gap (#2100); a blank line still ends the item there.
 // Not modelled: which block the previous line was, so a shallower plain line
 // straight after the item's own heading or closing fence reads as lazy and
-// stays in.
+// stays in, as does any shallower line at marker column + 4 or deeper there.
+// Nor the parent's content column: marker column + 4 stands in for it + 4,
+// exact while the marker sits AT that column, as in any normal list. A marker
+// indented 1-3 columns past it (`   100. **Item**` at top level) still ends
+// the item at a heading or marker line CommonMark reads as lazy.
 //
 // Columns are visual, a tab advancing to the next multiple of 4 (CommonMark's
 // tab stop): counted in characters, a one-tab item read a two-space sibling as
@@ -218,16 +228,19 @@ export function bullet(text, from, to, what) {
   const at = text.indexOf(from) + (from.length - from.trimStart().length);
   const lineStart = text.lastIndexOf("\n", at - 1) + 1;
   const lineEnd = text.indexOf("\n", at);
-  const content = contentColumn(text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd));
+  const itemLine = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
+  const content = contentColumn(itemLine);
+  const lazyFrom = columnOf(itemLine.match(/^[ \t]*/)[0]) + 4;
   let kept = slice.indexOf("\n", from.trimEnd().length);
   let blankBefore = false;
   for (let nl = kept; nl !== -1; ) {
     const next = slice.indexOf("\n", nl + 1);
     const line = slice.slice(nl + 1, next === -1 ? slice.length : next);
     const indent = line.match(/^[ \t]*/)[0];
+    const col = columnOf(indent);
     if (indent.length === line.length) {
       blankBefore = true;
-    } else if (columnOf(indent) < content && (blankBefore || ITEM_MARKER.test(line) || PARAGRAPH_INTERRUPT.test(line))) {
+    } else if (col < content && (blankBefore || (col < lazyFrom && (ITEM_MARKER.test(line) || PARAGRAPH_INTERRUPT.test(line))))) {
       return slice.slice(0, Math.max(kept, from.length));
     } else {
       blankBefore = false;
