@@ -68,6 +68,31 @@ A registered worktree matching this claim's directory name but not on the claim'
 branch. A registry-visible condition — never an Orphaned worktree directory, which by
 definition has no registration to be seen through.
 
+### Consumer repo
+
+**Recipe**:
+The pair of commands the fleet needs about the repository it works on — its Install
+step and its Test entrypoint — derived by agent reasoning over that repository, never
+by a table of technologies the plugin knows (ADR 0015).
+_Avoid_: config, manifest, detection, project type
+
+**Install step**:
+The command that materialises the repository's dependencies in a fresh worktree.
+Usable only once it has run there and left every tracked file unchanged.
+_Avoid_: install, setup, bootstrap
+
+**Test entrypoint**:
+The command that runs the repository's own suite. Usable only once it has been run
+and shown to execute real tests — a non-zero count, or a deliberate mutation turning
+it red; `tests 0` is a failed run.
+_Avoid_: test command, runner, testCmd
+
+**Recipe cache**:
+The fleet-state record of a proven Recipe, carrying the commit it was derived at and
+the proof. Read by scripts, written only by the agent that proved it; absent means
+"derive", never "infer". Invalid when a command fails to run, not when tests fail.
+_Avoid_: declaration file, fleet.json, lockfile
+
 ### Release outcome
 
 The state of a claim's worktree after a release attempt. Named states, because the
