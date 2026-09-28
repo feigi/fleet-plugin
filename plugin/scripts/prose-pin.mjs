@@ -198,8 +198,11 @@ export function paragraph(text, anchor, what, options) {
 // exists only when the content column is past marker column + 4 — a `100.`
 // marker, or a 4-space gap (#2100); a blank line still ends the item there.
 // Not modelled: which block the previous line was, so a shallower plain line
-// straight after the item's own heading or closing fence reads as lazy and
-// stays in, as does any shallower line at marker column + 4 or deeper there.
+// straight after the item's own heading, fence, thematic break, indented code
+// or HTML block — none of them a paragraph a lazy line could continue — reads
+// as lazy and stays in; so does a shallower line inside the item's own
+// still-open fence, where CommonMark ends the fence and the item both; and so
+// does any shallower line at marker column + 4 or deeper in that zone.
 // Nor the parent's content column: marker column + 4 stands in for it + 4,
 // exact while the marker sits AT that column, as in any normal list. A marker
 // indented 1-3 columns past it (`   100. **Item**` at top level) still ends
@@ -215,9 +218,11 @@ export function paragraph(text, anchor, what, options) {
 // exactly once: a list-item anchor is a start anchor, and a second copy would
 // silently decide which item is read.
 //
-// Returns raw bytes starting with `from` in full, like `between`, without the
-// blank lines before whatever ended the item; a caller flattens or matches
-// through `phrase()`.
+// Returns raw bytes starting with `from` in full, like `between`. When a line
+// of the text ends the item, the blank lines before that line are dropped;
+// when `to` ends it, the slice comes back as `between` gives it, trailing blank
+// lines and all (run-team's no-ci edge ends in `\n\n`). A caller flattens or
+// matches through `phrase()`.
 //
 // The single definition of a list-item bound in this directory (#491), moved
 // out of no-ci-gate-prose.test.mjs, where #747 had clamped a local copy.
