@@ -198,7 +198,7 @@ Implied only (lives in code/prose, no doc names it as a requirement):
 
 - `origin`/`main` hardcoded (partial `BASE_REF` escape hatch in shell only).
 - Branch/worktree naming `<type>/<issue>-<slug>` / `.worktrees/<issue>-<slug>`.
-- Consumer must be a Node project with `scripts.test` and one of three lockfiles.
+- Consumer must be a Node project with `scripts.test` and one of three lockfiles. **Ruled 2026-09-28: ADR 0014 — any technology, Recipe by agent reasoning; #2117–#2120.**
 - `python3` and `shasum` on PATH.
 - Sub-issues/dependencies enabled on the GitHub plan; `blockedBy` ≤ 50 edges.
 - Auto-delete head branches on.

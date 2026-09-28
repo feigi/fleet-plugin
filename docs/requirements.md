@@ -115,41 +115,48 @@ There is no other tracker and no REST-only path. GitLab, Jira, Linear, a local
 git remote get-url origin && git rev-parse --verify origin/main
 ```
 
-### 2.3 A Node project the fleet can test — HARD
+### 2.3 A repository the fleet can install and test — HARD
 
-`claim-ticket.sh` derives the test command it will hand to members and
-**refuses the claim** when it cannot (`plugin/scripts/derive-testcmd.sh`,
-`claim-ticket.sh:226-229`). It needs **all** of:
+**Ruling ([ADR 0014](adr/0014-consumer-recipe-by-agent-reasoning-no-technology-table.md)):
+any technology.** The fleet derives your repo's *Recipe* — an Install step and
+a Test entrypoint — by agent reasoning over the repository (README, build
+files, CI workflow), proves both in a throwaway worktree, and caches the
+result under `.fleet/`. fleet-ctl keeps no table of supported languages.
 
-1. A `package.json` at the repo root with `scripts.test`, **or** at least one
-   file matching `\.(test|spec)\.[cm]?[jt]sx?$` (then it falls back to
-   `node --test`). A repo with neither is refused — "never pass vacuously".
-2. A lockfile **on `origin/main`** (the claim reads `origin/main:package.json`,
-   not your working tree — `claim-ticket.sh:217-229`) that selects the install
-   command, checked in this order:
+**Shipped state today (until #2117, #2118 land):** the derivation is Node-only
+shell code. `claim-ticket.sh` **refuses the claim** unless `origin/main` has a
+`package.json` with `scripts.test` or a tracked file matching
+`\.(test|spec)\.[cm]?[jt]sx?$` (`plugin/scripts/derive-testcmd.sh:141-194`),
+and an install it can derive from `package-lock.json`/`pnpm-lock.yaml`/`yarn.lock`
+— or no lockfile with zero declared dependencies (`claim-ticket.sh:226-271`).
+A Maven repo is refused outright (measured 2026-09-28); the interim workaround
+is a one-line `package.json` `{"scripts":{"test":"<your command>"}}` with no
+dependencies, which needs `npm` on the fleet machine and is untested.
 
-   | Lockfile | Install command run in each worktree |
-   |---|---|
-   | `package-lock.json` | `npm ci` |
-   | `pnpm-lock.yaml` | `pnpm i --frozen-lockfile` |
-   | `yarn.lock` | `yarn --immutable` |
-   | none, and `package.json` declares **zero** `dependencies`/`devDependencies`/`peerDependencies`/`optionalDependencies`/`workspaces` (or there is no `package.json`) | `true` (nothing to install) |
-   | none, but dependencies declared | **refused**: `declares N dependencies but has no lockfile — refusing to guess an install command` (`claim-ticket.sh:271`) |
+What holds under either state:
 
-   If the install **mutates** the lockfile, the claim dies (`could not verify
-   lockfile state` / `install mutated the lockfile`, `claim-ticket.sh:434-438`).
-   Commit a lockfile that is already frozen.
-3. The test command must be runnable **inside a fresh worktree with no
-   ambient environment**: no reliance on a shared database, a compose stack
-   keyed off the working directory, or env vars only your shell has.
-   Reviewers run it in parallel across several worktrees; a `globalSetup`
-   that tears down shared state will fight its siblings
+1. **The repo must be learnable.** A README or build file that says how to
+   install and run the tests is what the agent reads; a repo where a new
+   engineer could not find the test command is a repo the agent cannot
+   prove, and an unproven Recipe is a refusal, never a guess.
+2. **The test run must not pass vacuously.** The proof requires evidence of
+   real tests (a non-zero count, or a deliberate failing mutation turning it
+   red); `tests 0` is a failed run (`plugin/skills/run-team/SKILL.md:2181`).
+3. **The install must leave the tree clean.** An Install step that modifies
+   any tracked file (a lockfile it rewrites, generated sources it commits) is
+   rejected — commit a frozen lockfile.
+4. **Both commands must run inside a fresh worktree with no ambient
+   environment**: no reliance on a shared database, a compose stack keyed off
+   the working directory, or env vars only your shell has. Reviewers run the
+   suite in parallel across several worktrees; a `globalSetup` that tears
+   down shared state will fight its siblings
    (`plugin/commands/review-and-fix.md:83`).
-
-Non-Node repos (Go, Rust, Python…) are **not** supported today: the runner
-detection is Node-specific.
+5. **The binaries the Recipe runs must be on `PATH`** on the fleet machine
+   (`mvn`, `go`, `cargo`, `pytest`, `npm`, …) — §1.2 lists only what the
+   plugin itself needs.
 
 ```
+# until #2117/#2118: the Node-only derivation, run as the claim would
 { node -e 'process.exit(require("./package.json").scripts?.test?0:1)' 2>/dev/null; } || git ls-files | grep -qE '\.(test|spec)\.[cm]?[jt]sx?$'
 git ls-tree --name-only origin/main package-lock.json pnpm-lock.yaml yarn.lock   # one line, or none if package.json has no deps
 ```
