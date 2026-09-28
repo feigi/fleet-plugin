@@ -479,21 +479,22 @@ function refuseUnknown(die, known) {
 // any positional at all on a script that declares none, is refused by name.
 //
 // Every `--`-prefixed token here is assumed to have already survived sweep()
-// — callers run this after it, same ordering — so a name outside
-// `valueFlags` is a known boolean flag and consumes nothing, and a name
-// inside it takes the next token as its value unconditionally, whatever that
-// token looks like (that unconditional skip is what lets `--spend-since -1`
-// through instead of reading `-1` as a stray positional). An `=`-joined form
-// (`--pr=5`) is never treated as carrying a value to skip over: has()/arg()
-// already refuse that form, by name, for every flag `valueFlags` lists,
-// wherever the script reads it — before or after this call.
-function refuseStrays(die, valueFlags, positionals) {
+// — callers run this after it, same ordering — so a name whose declared kind
+// is not "value" is a known boolean flag and consumes nothing, and a name
+// declared "value" takes the next token as its value unconditionally,
+// whatever that token looks like (that unconditional skip is what lets
+// `--spend-since -1` through instead of reading `-1` as a stray positional).
+// An `=`-joined form (`--pr=5`) is never treated as carrying a value to skip
+// over: has()/arg() already refuse that form, by name, for every flag
+// declared "value", wherever the script reads it — before or after this
+// call.
+function refuseStrays(die, flags, positionals) {
   const argv = process.argv.slice(2);
   let usedPositional = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith("--")) {
-      if (!a.includes("=") && valueFlags.includes(a.slice(2))) i++;
+      if (!a.includes("=") && flags[a.slice(2)] === "value") i++;
       continue;
     }
     if (!usedPositional && positionals.includes(a)) {
@@ -509,20 +510,28 @@ function refuseStrays(die, valueFlags, positionals) {
 // refuseStrays() above accepts ahead of the flags (board.mjs's
 // `build`/`serve`). One key per flag, so a name cannot be declared both ways.
 //
-// The invariant this carries used to be prose at each call site: stray()'s
-// `valueFlags` must name exactly, and only, the flags the script reads with
-// arg(). A name wrongly present buys the token after it an unconditional
-// skip, so the very stray the guard exists to catch becomes invisible; a name
-// wrongly absent turns a legitimate value into a refused stray. Five scripts
-// typed that list twice, once for sweep() and once for stray(), and nothing
-// checked either copy against which reader the script actually called. A
-// bare table would only have moved that risk — a boolean marked "value" is
-// the same typo in new syntax — so the table and the reads are bound
-// instead: sweep() accepts every declared name, stray() skips after the
-// "value" ones, and a read of the wrong KIND refuses the first time it runs.
-// arg()/numArg() accept only a "value" name and has() only a "bool" one, so a
-// presence test on a value flag is refused too: test arg()'s result against
-// null instead.
+// The invariant this carries used to be prose at each call site: the set of
+// flags stray() skips a value for had to name exactly, and only, the flags
+// the script reads with arg(). A name wrongly present buys the token after
+// it an unconditional skip, so the very stray the guard exists to catch
+// becomes invisible; a name wrongly absent turns a legitimate value into a
+// refused stray. Five scripts typed that list twice, once for sweep() and
+// once for stray(), and nothing checked either copy against which reader the
+// script actually called. A bare table would only have moved that risk — a
+// boolean marked "value" is the same typo in new syntax — so the table and
+// the reads are bound instead: sweep() and stray() both read this same
+// `flags` object rather than a copy each, so the two halves cannot drift
+// from each other the way the two lists did; sweep() accepts every declared
+// name, stray() skips after the "value" ones, and a read of the wrong KIND
+// refuses the first time it runs. arg()/numArg() accept only a "value" name
+// and has() only a "bool" one, so a presence test on a value flag is refused
+// too: test arg()'s result against null instead.
+//
+// A declared kind that is itself neither "value" nor "bool" — a typo in the
+// table, not a caller's mistake — is the one drift the read-time guards
+// above cannot catch on their own: a name never read on a given run would
+// carry a bad kind through unnoticed. Refused here, at construction, instead
+// of only at whichever read happens to reach it.
 //
 // That refusal goes through die() at exit 2, never a thrown Error: exit 1 is
 // a verdict in ci-state.mjs (not green), merge-gate.mjs (blocked) and
@@ -531,16 +540,20 @@ function refuseStrays(die, valueFlags, positionals) {
 // source can reach it — no command line can make a correct table disagree
 // with a correct read.
 //
-// Construction runs nothing. sweep() and stray() stay explicit calls the
-// script places, below its own per-flag guards, so the more specific wording
-// still wins where both would refuse (diff-stats.mjs's `--pr --json`,
-// tier-check.mjs's roster flags). And every reader looks at process.argv when
-// CALLED, never at a copy taken here: staleness.mjs splices its `--gone --
-// <needle>` triple out of process.argv before its sweep()/stray() run, and a
-// snapshot would refuse the needle.
+// Construction runs nothing but the kind check above. sweep() and stray()
+// stay explicit calls the script places, below its own per-flag guards, so
+// the more specific wording still wins where both would refuse
+// (diff-stats.mjs's `--pr --json`, tier-check.mjs's roster flags). And every
+// reader looks at process.argv when CALLED, never at a copy taken here:
+// staleness.mjs splices its `--gone -- <needle>` triple out of process.argv
+// before its sweep()/stray() run, and a snapshot would refuse the needle.
 export function defineFlags(die, { flags, positionals = [] }) {
   const names = Object.keys(flags);
-  const valueFlags = names.filter((name) => flags[name] === "value");
+  for (const name of names) {
+    if (flags[name] !== "value" && flags[name] !== "bool") {
+      die(`bug: --${name} declared ${flags[name]}, not "value" or "bool"`);
+    }
+  }
   const rawArg = makeArg(die);
   const rawHas = makeHas(die);
   const expect = (name, kind) => {
@@ -565,7 +578,7 @@ export function defineFlags(die, { flags, positionals = [] }) {
       refuseUnknown(die, names);
     },
     stray() {
-      refuseStrays(die, valueFlags, positionals);
+      refuseStrays(die, flags, positionals);
     },
   };
 }

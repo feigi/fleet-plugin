@@ -1134,6 +1134,19 @@ for (const { read, flags, message } of WRONG_KIND) {
   });
 }
 
+// #1077 follow-up: a declared kind that is neither "value" nor "bool" — an
+// author typo in the table itself, not a caller's mistake — used to
+// construct successfully and surface only the first time (if ever) a reader
+// for that name ran, worded as though the CALLER had misused it rather than
+// pointing at the table that is actually wrong. Refused here, at
+// construction, regardless of which flags a given run happens to touch.
+test("defineFlags(): a declared kind other than \"value\" or \"bool\" refuses at construction", () => {
+  const r = runFlags([], { pr: "number" }, [], "");
+  assert.equal(r.status, 2, r.stderr);
+  assert.ok(r.stderr.includes('\nprobe: bug: --pr declared number, not "value" or "bool"\n'), r.stderr);
+  assert.doesNotMatch(r.stdout, /^ok$/m);
+});
+
 // The half a new guard can get wrong the other way: refusing a read the
 // table DOES declare. Every reader is driven with its own kind, given and
 // absent, so a check that compared the wrong way round reds here.
