@@ -172,6 +172,18 @@ test("parseFrontmatter: an empty value (key: with nothing after it) parses as an
   assert.equal(fields[0].value, "");
 });
 
+test("parseFrontmatter: a double-quoted value has its quotes stripped", () => {
+  const { fields, error } = parseFrontmatter('---\nmodel: "@slow:xhigh"\n---\n');
+  assert.equal(error, undefined);
+  assert.equal(fields[0].value, "@slow:xhigh");
+});
+
+test("parseFrontmatter: a single-quoted value has its quotes stripped", () => {
+  const { fields, error } = parseFrontmatter("---\nmodel: '@slow:xhigh'\n---\n");
+  assert.equal(error, undefined);
+  assert.equal(fields[0].value, "@slow:xhigh");
+});
+
 // ---------------------------------------------------------------------------
 // checkFields — the both-directions contract plus value rules
 // ---------------------------------------------------------------------------
