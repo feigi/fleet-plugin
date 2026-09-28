@@ -29,10 +29,10 @@ in both BSD and GNU flavours
 
 | Binary | Floor | Why | Check |
 |---|---|---|---|
-| `node` | `>=20.11.0` (`package.json` `engines`) | every `.mjs` script; `RegExp.escape` and `readdirSync({recursive})` are used | `node -v` |
-| `git` | `>= 2.36` | `worktree list --porcelain -z`, `merge-tree --write-tree`, pinned error strings; measured baseline 2.50 / Apple Git-155 | `git --version` |
+| `node` | `>=20.11.0` (`package.json` `engines`) | every `.mjs` script; `import.meta.dirname` (`prompt-renderer.mjs`) and `readdirSync({recursive})` are used | `node -v` |
+| `git` | `>= 2.38` | `merge-tree --write-tree` (`no-undo-audit.sh:888`), `worktree list --porcelain -z`, pinned error strings; measured baseline 2.50 / Apple Git-155 | `git --version` |
 | `gh` | `>= 2.94.0` | `gh issue list --json blockedBy` — older `gh` exits `Unknown JSON field`, and the admission gate dies rather than run without blockers (`plugin/scripts/candidates.mjs:343-345`) | `gh --version` |
-| `jq` | any | runbooks parse `ci-state.mjs` / transcript payloads with `jq -e`, `jq -r` (`plugin/skills/run-team/SKILL.md:1707`) | `jq --version` |
+| `jq` | any | runbooks parse `ci-state.mjs` / transcript payloads with `jq -e`, `jq -r` (`plugin/skills/run-team/SKILL.md:1703`) | `jq --version` |
 | `python3` | any 3.x | NUL-safe / UTF-8-strict readers in `inflight.sh`, `json.sh`, `no-undo-audit.sh` — several tests `skip` without it, the scripts `die` | `python3 -c 'import json'` |
 | `shasum` | any | `instruments.sh` digests tracked files (`shasum -a 256`) | `command -v shasum` |
 
@@ -50,8 +50,8 @@ floor ([ADR 0010](adr/0010-the-node-pin-stays-exact-and-a-bot-moves-it.md)).
 - **Every member and the controller share this one identity.** There is no
   per-member attribution; "who claimed #42" means "which worktree", not
   "which user". If you need per-actor audit on GitHub, this is the wrong tool.
-- GitHub Enterprise: works, but `ci-state.mjs`'s compare probe needs
-  `--hostname`; expect one extra config step. Not exercised in this repo's CI.
+- GitHub Enterprise: works — `ci-state.mjs`'s compare probe derives
+  `--hostname` itself from `git remote get-url origin`; no extra config step. Not exercised in this repo's CI.
 
 ### 1.4 omp, with the fleet plugin installed — HARD
 
@@ -64,21 +64,27 @@ The fleet runs inside **omp** only — no other harness is supported
 ~/.fleet/bin/fleet-run --root        # prints the installed plugin root, or dies naming why (no registry, no entry, more than one ambiguous scope:"user" candidate)
 ```
 
+If that command answers "command not found" instead of one of the reasons
+above, the Resolver copy at `~/.fleet/bin/fleet-run` was never placed — that
+is not a side effect of `omp plugin install`. See §1.5.
+
 Two settings are session-wide preconditions
 ([ADR 0003](adr/0003-dual-harness-dev-loop-install-is-the-only-path.md),
-[ADR 0011](adr/0011-omp-tier-routes-through-roles.md)):
+[ADR 0011](adr/0011-omp-tier-routes-through-roles.md),
+[ADR 0014](adr/0014-omp-is-the-only-harness.md)):
 
 | Setting | Must be | Or else |
 |---|---|---|
 | `enabledProviders` | contains `"claude-plugins"` | plugin agents are invisible; `task` dispatch of `fleet-*` fails |
-| `task.agentModelOverrides` | routes `fleet-*` agents → `modelRoles.{slow,task,smol}` (`fleet-run tier-roles.mjs --json --merge`) | `opus`/`sonnet`/`haiku` tiers resolve to nothing |
-| `modelRoles.slow` / `.task` / `.smol` | set to real models on this install | same |
+| `modelRoles.slow` / `.task` / `.smol` | set to real models on this install | an agent's `@slow`/`@task`/`@smol` role alias (its `model:` frontmatter) resolves to nothing |
 
-Check: `~/.fleet/bin/fleet-run tier-roles.mjs --check`.
+Check: `~/.fleet/bin/fleet-run tier-roles.mjs --check` — this also **rejects**
+a leftover `task.agentModelOverrides` entry as a violation; ADR 0014 retired
+it as a precondition, it is not one to set.
 
 ### 1.5 Disk layout the fleet will create — SOFT
 
-- `~/.fleet/bin/fleet-run` — the Resolver copy (installed by the plugin).
+- `~/.fleet/bin/fleet-run` — the Resolver copy, placed once by hand via `fleet-bootstrap` ([ADR 0003](adr/0003-dual-harness-dev-loop-install-is-the-only-path.md) pt. 4); not a side effect of `omp plugin install`.
 - `<repo>/.worktrees/<issue>-<slug>/` — one worktree per claimed ticket.
 - `<repo>/.fleet/` — ledger, heartbeat, shortlist, board, instruments (§2.5).
 - `<scratch>/impl-<N>/`, `review-<pr>.json`, `pr<N>/merge-bot-<n>/ci.json`.
@@ -133,7 +139,7 @@ What holds under either state:
    prove, and an unproven Recipe is a refusal, never a guess.
 2. **The test run must not pass vacuously.** The proof requires evidence of
    real tests (a non-zero count, or a deliberate failing mutation turning it
-   red); `tests 0` is a failed run (`plugin/skills/run-team/SKILL.md:2181`).
+   red); `tests 0` is a failed run (`plugin/skills/run-team/SKILL.md:2171`).
 3. **The install must leave the tree clean.** An Install step that modifies
    any tracked file (a lockfile it rewrites, generated sources it commits) is
    rejected — commit a frozen lockfile.
@@ -142,7 +148,7 @@ What holds under either state:
    the working directory, or env vars only your shell has. Reviewers run the
    suite in parallel across several worktrees; a `globalSetup` that tears
    down shared state will fight its siblings
-   (`plugin/commands/review-and-fix.md:83`).
+   (`plugin/commands/review-and-fix.md:81`).
 5. **The binaries the Recipe runs must be on `PATH`** on the fleet machine
    (`mvn`, `go`, `cargo`, `pytest`, `npm`, …) — §1.2 lists only what the
    plugin itself needs.
@@ -155,9 +161,10 @@ git ls-tree --name-only origin/main package-lock.json pnpm-lock.yaml yarn.lock  
 
 ### 2.4 Labels — HARD
 
-Create these **exact** strings before the first run. `gh` fails the whole
-`issue list` on an unknown label name, and the fleet never creates a label
-except `in-progress` on first claim. See
+Create these **exact** strings before the first run. `gh issue list` does
+not fail on an unknown or missing label — it silently returns zero issues,
+so a missing label yields an empty queue, not an error; the fleet never
+creates a label except `in-progress` on first claim. See
 [`docs/agents/triage-labels.md`](agents/triage-labels.md).
 
 | Label | Meaning to the fleet |
@@ -267,7 +274,8 @@ Write tickets so the member can act without you:
 - **`## Out of scope`** section: the member records what it deliberately left,
   and the reviewer holds it to that. Write it if you have opinions.
 - **One ticket = one PR.** A ticket whose body is a multi-story spec
-  (`## User Stories`, `## Acceptance Criteria` headings) is dropped as a
+  (a `## User Stories` heading — the sole signal `candidates.mjs` checks;
+  `## Acceptance Criteria` alone is not detected) is dropped as a
   spec, not a ticket — split it first.
 - Sizing (`Sizing: light|heavy`) and tier are **not** on the issue; the member
   decides sizing and writes it into the PR body, the tier comes from the agent
@@ -349,7 +357,8 @@ git remote get-url origin; git rev-parse --verify -q origin/main >/dev/null
 { test -f package.json && node -e 'process.exit(require("./package.json").scripts?.test?0:1)'; } || git ls-files | grep -qE '\.(test|spec)\.[cm]?[jt]sx?$'
 git ls-tree --name-only origin/main package-lock.json pnpm-lock.yaml yarn.lock | grep -q . \
   || git show origin/main:package.json | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));process.exit(["dependencies","devDependencies","peerDependencies","optionalDependencies","workspaces"].reduce((n,k)=>n+Object.keys(p[k]||{}).length,0)?1:0)'
-grep -qE '^\.worktrees/?$' .gitignore && grep -qE '^\.fleet/?$' .gitignore
+git check-ignore -q .worktrees/probe
+git check-ignore -q .fleet/probe
 for l in ready-for-agent in-progress ready-to-merge; do gh label list --search "$l" --json name --jq '.[].name' | grep -qx "$l"; done
 gh api "repos/{owner}/{repo}" --jq '[.allow_merge_commit, .delete_branch_on_merge] | @tsv'   # expect: true  true
 gh api "repos/{owner}/{repo}/rulesets" --jq '.[].name'                                        # expect your main ruleset

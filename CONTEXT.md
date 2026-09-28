@@ -290,5 +290,5 @@ _Avoid_: effective tier, actual model
 **Tier route**:
 What turns a Declared tier's alias into a model — the operator's
 `modelRoles.<role>` entry (`slow`/`task`/`smol`), never a vendor id in the
-definition; no per-agent override record exists (ADR 0015).
+definition; no per-agent override record exists (ADR 0014).
 _Avoid_: mapping, override, translation

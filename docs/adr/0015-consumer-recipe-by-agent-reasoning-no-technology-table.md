@@ -56,7 +56,7 @@ exits 0).
    derived Test entrypoint is not usable until it has been executed once and
    shown to run real tests — a non-zero test count, or a deliberate failing
    mutation that turns it red. `tests 0` is already a failed run in the runbook
-   (`plugin/skills/run-team/SKILL.md:2181`); this makes that the *only* guard.
+   (`plugin/skills/run-team/SKILL.md:2171`); this makes that the *only* guard.
    An Install step is not usable until it has been run once in a fresh worktree
    and left every tracked file unchanged — the generalisation of today's
    three-filename lockfile-mutation check (`claim-ticket.sh:435`).
