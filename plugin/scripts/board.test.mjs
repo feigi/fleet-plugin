@@ -2113,9 +2113,9 @@ test("CLI: build refuses a trailing --spend-since ahead of a stray token, naming
 // #1583: the same four spellings for --spend-dir, and the same ordering. A
 // PATH has no range to check, so arg() IS this flag's whole refusal — which
 // makes the two things this ticket wrote the only things standing between an
-// operator and a silent wrong answer: the name in VALUE_FLAGS, and the read
-// hoisted into main(). Drop it from VALUE_FLAGS and sweep() calls the flag
-// unknown; drop the hoisted read and the stray case below blames `x`.
+// operator and a silent wrong answer: the "value" entry in the flag table, and
+// the read hoisted into main(). Drop it from the table and sweep() calls the
+// flag unknown; drop the hoisted read and the stray case below blames `x`.
 test("CLI: every malformed --spend-dir spelling is refused under its own name", () => {
   const cases = [
     [["build", "--spend-dir"], /--spend-dir needs a value/],                                   // trailing

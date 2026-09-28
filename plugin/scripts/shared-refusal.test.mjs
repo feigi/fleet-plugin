@@ -418,7 +418,7 @@ test("#878: every numArg() consumer tests absence with === null, never a bare fa
   const consumers = [];
   for (const file of files) {
     const text = src(file);
-    if (!/^import\s*\{[^}]*\bmakeNumArg\b[^}]*\}\s*from\s*"\.\/arg\.mjs";/m.test(text)) continue;
+    if (!/^import\s*\{[^}]*\bdefineFlags\b[^}]*\}\s*from\s*"\.\/arg\.mjs";/m.test(text) || !/\bnumArg\(/.test(text)) continue;
     consumers.push(file);
     assert.doesNotMatch(text, /!\s*numArg\(/, `${file} tests a numArg() call inline with a bare falsy check instead of === null`);
     for (const [, name] of text.matchAll(/const\s+(\w+)\s*=\s*numArg\(/g)) {

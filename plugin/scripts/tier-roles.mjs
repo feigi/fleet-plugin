@@ -21,7 +21,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { makeDie, makeArg, makeHas, makeSweep, makeStray } from "./arg.mjs";
+import { makeDie, defineFlags } from "./arg.mjs";
 
 const NAME = "tier-roles";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -248,10 +248,16 @@ function shellQuote(s) {
 // ---------------------------------------------------------------------------
 
 const die = makeDie(NAME);
-const arg = makeArg(die);
-const has = makeHas(die);
-const sweep = makeSweep(die);
-const stray = makeStray(die);
+const { arg, has, sweep, stray } = defineFlags(die, {
+  flags: {
+    json: "bool",
+    merge: "bool",
+    check: "bool",
+    agents: "value",
+    overrides: "value",
+    "model-roles": "value",
+  },
+});
 
 function loadJsonObject(path, configKey, flagName) {
   let value;
@@ -268,8 +274,8 @@ function loadJsonObject(path, configKey, flagName) {
 }
 
 function main() {
-  sweep(["json", "merge", "check", "agents", "overrides", "model-roles"]);
-  stray(["agents", "overrides", "model-roles"]);
+  sweep();
+  stray();
 
   const agentsDir = arg("agents") ?? join(SCRIPT_DIR, "..", "agents");
   const json = has("json");

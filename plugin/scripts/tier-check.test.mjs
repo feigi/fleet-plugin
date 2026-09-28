@@ -758,7 +758,7 @@ test("CLI: --repo defaults to the script's own plugin/ root, so a real fleet-imp
 // ---------------------------------------------------------------------------
 // #1669: tier-check bound only makeDie/makeArg, so a stray or misspelled flag
 // was silently ignored and the run computed a real verdict against the
-// DEFAULT ledger/repo instead of refusing. makeSweep closes that gap.
+// DEFAULT ledger/repo instead of refusing. sweep() closes that gap.
 // ---------------------------------------------------------------------------
 
 // No agent/transcript/batch-content fixtures here: sweep() dies on the
@@ -805,8 +805,8 @@ test("CLI: a stray flag riding after a valueless roster flag never pre-empts tha
 // `--`-prefixed tokens, so the ticket's stated harm was only half closed --
 // a single-dash misspelling (`-ledger`) rode through in silence the same
 // way `--ledgerr` used to. Binding stray() alongside sweep(), the same
-// makeSweep+makeStray pairing every sibling CLI (ci-state, diff-stats,
-// board, pr-overlap) already uses, closes the other half.
+// pairing every sibling CLI (ci-state, diff-stats, board, pr-overlap)
+// already uses, closes the other half.
 test("CLI: a single-dash misspelling (`-ledger`) refuses as a stray, not a computed verdict", () => {
   const d = dir();
   writeFileSync(join(d, "fleet-implementer.agent.md"), claudeAgentMd("opus", "xhigh", "xhigh"));

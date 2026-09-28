@@ -18,7 +18,7 @@
 
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { makeDie, makeNumArg, makeSweep, makeStray } from "./arg.mjs";
+import { makeDie, defineFlags } from "./arg.mjs";
 
 const NAME = "diff-stats";
 
@@ -109,9 +109,7 @@ export function computeStats(files, changedFiles) {
 // it resolves as a BRANCH, so the stats underneath were genuine and about
 // whatever PR that branch heads, reported under a null id.
 const die = makeDie(NAME);
-const numArg = makeNumArg(die);
-const sweep = makeSweep(die);
-const stray = makeStray(die);
+const { numArg, sweep, stray } = defineFlags(die, { flags: { pr: "value" } });
 
 // #932. The one truncation rule for the raw gh value this script quotes into a
 // refusal: clip behind a visible marker, and only when the value was really
@@ -193,11 +191,11 @@ function main() {
   // sweep would read the IMPORTER's argv. (review-pr runs this script as a
   // CLI subprocess with its own argv, so it is not one of those importers.)
   // Below the guard above, so `--pr --json` keeps #169's "--pr needs a value".
-  sweep(["pr"]);
+  sweep();
   // #463: sweep() only refuses a `--`-prefixed token; a bare or single-dash
   // one (`--pr 42 basee`) rode along in silence the same way. This file
   // takes no positional, so any leftover token is a stray.
-  stray(["pr"]);
+  stray();
 
   // Parsed through a guard, not bare. gh can exit 0 with a non-JSON body — a
   // proxy's HTML error page is the measured case — and an uncaught SyntaxError

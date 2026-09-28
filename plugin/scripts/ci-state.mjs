@@ -14,7 +14,7 @@
 import { execFileSync } from "node:child_process";
 import { gitEnv } from "./git-env.mjs";
 import { readdirSync, readFileSync } from "node:fs";
-import { makeDie, makeArg, makeNumArg, makeHas, makeSweep, makeStray, writeAll } from "./arg.mjs";
+import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 
 const NAME = "ci-state";
 
@@ -28,11 +28,16 @@ const NAME = "ci-state";
 // is the verdict the fleet gates on. die() also has to survive --quiet,
 // which is the mode the controller's CI Monitor polls in.
 const die = makeDie(NAME);
-const arg = makeArg(die);
-const numArg = makeNumArg(die);
-const has = makeHas(die);
-const sweep = makeSweep(die);
-const stray = makeStray(die);
+const { arg, numArg, has, sweep, stray } = defineFlags(die, {
+  flags: {
+    pr: "value",
+    base: "value",
+    workflow: "value",
+    "workflow-file": "value",
+    "declare-no-ci": "bool",
+    quiet: "bool",
+  },
+});
 
 // `--quiet` suppresses the diagnostic stream (command echoes, per-job/per-field
 // lines) and drops `jobs` and `missing` from the payload. The controller's CI
@@ -268,9 +273,6 @@ const declareNoCi = has("declare-no-ci");
 // arg.mjs, so `--base --quiet` keeps #169's "--base needs a value"; still
 // above the first gh call, which is the next statement.
 //
-// The set is every name this file reads. A name missing here refuses a
-// working invocation, which is worse than the bug being fixed.
-//
 // `--workflow-file` is read here rather than where its value is first needed,
 // which is the whole reason the read is a statement of its own: measured,
 // with it below the guards `--pr 42 --workflow-file --base main` refused with
@@ -280,22 +282,14 @@ const declareNoCi = has("declare-no-ci");
 // words it better.
 const workflowFileArg = arg("workflow-file");
 
-// Split out because stray() must be told which names take a VALUE and the
-// sweep must be told every name at all; the four here are the overlap, and
-// `--declare-no-ci`/`--quiet` are boolean.
-const VALUE_FLAGS = ["pr", "base", "workflow", "workflow-file"];
-sweep([...VALUE_FLAGS, "declare-no-ci", "quiet"]);
+sweep();
 
 // #463: sweep() above only ever refuses a `--`-prefixed token, so a bare or
 // single-dash stray rode along in silence — `--pr 42 basee main` ignored
 // `basee`/`main` and still compared against the default base, the same
 // fail-open harm #365 closed for a misspelled FLAG name. This file takes no
-// positional of its own, so any leftover token is one. `base`/`workflow`/
-// `workflow-file` are named so `--spend-since`-style negative values are not
-// this file's concern, but a value on any of THESE three is still skipped
-// rather than read as a stray — nothing here takes one that looks like `-1`,
-// this just keeps the set exact instead of assuming it.
-stray(VALUE_FLAGS);
+// positional of its own, so any leftover token is one.
+stray();
 
 // --- PR facts -------------------------------------------------------------
 const prInfo = runJson(
