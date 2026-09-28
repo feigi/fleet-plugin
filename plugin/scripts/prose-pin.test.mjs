@@ -285,12 +285,15 @@ test("bullet measures the item from the anchor's text, not its surrounding newli
 
 // #2077: indent is compared in visual columns, a tab advancing to the next
 // multiple of 4 (CommonMark's tab stop). Counted in characters, a one-tab item
-// read a two-space sibling as its own deeper child and kept it.
+// read a two-space sibling as its own deeper child and kept it. The items sit
+// under a parent item so CommonMark reads them as a list: after a plain
+// `intro` line the tab item is that paragraph's lazy continuation, and after a
+// blank line it is indented code.
 test("bullet compares tab and space indentation by column, not by character count", () => {
-  assert.equal(bullet("intro\n\t- **A** body\n  - two-space sibling\n\t- **B**\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+  assert.equal(bullet("- parent\n\t- **A** body\n  - two-space sibling\n\t- **B**\nEND", "- **A**", "END", "the fixture"), "- **A** body");
   // The tab puts this item's text at column 6; four spaces is 3 characters
   // deeper than the tab by count, and still a sibling by column.
-  assert.equal(bullet("intro\n\t- **A** body\n    - four-space sibling\nEND", "- **A**", "END", "the fixture"), "- **A** body");
+  assert.equal(bullet("- parent\n\t- **A** body\n    - four-space sibling\nEND", "- **A**", "END", "the fixture"), "- **A** body");
 });
 
 // #2091 (hand-dispatched review, correctness): a marker with nothing after
