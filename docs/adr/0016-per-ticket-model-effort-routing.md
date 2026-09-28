@@ -90,8 +90,13 @@ real signal. `#2038` amended it before this ADR shipped (see Guard, below).
   constant in `pr-cost.mjs`. Never rolling; reset only by editing the
   constant in a PR.
 - **Trip rule** (amends `#2037`'s first draft): per cell, n≥20 each side,
-  `fail_rate − baseline ≥ 15 pts` **∨** `mean_usd ≥ baseline`. The margin
-  brings false eviction at equal true fail rates from 0.44 down to ≈0.15.
+  `fail_rate − baseline ≥ 15 pts` **∨** `mean_usd ≥ baseline`. At n=20 the
+  15-point margin is exactly a 3-of-20 count difference; the `fail_rate`
+  disjunct alone brings false eviction at equal true fail rates from 0.44
+  down to ≈0.21 (exact binomial for the stated `≥`; ≈0.13 if read as
+  strict `>`). The `mean_usd` disjunct is a second, independent trigger
+  that raises the combined false-eviction rate above whichever of those
+  two figures applies.
   Still point estimates — a bootstrap 95% CI on the $ difference is printed
   beside the verdict for reading, never for judging. Sticky by construction:
   a tripped cell gets no new rows and cannot be adopted by a later fit; the

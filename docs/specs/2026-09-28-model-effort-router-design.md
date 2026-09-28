@@ -53,9 +53,10 @@ the floor failure rate across all of them is 56.7%.
 **Dropped:**
 - `decided/undecided`: always decided among dispatched tickets, because the
   Pull gates on it.
-- `class`: subjective, its value set has drifted (filed `#2116`,
-  needs-triage), and correction covers tests-only and production diffs far
-  more than does routine. It is already stored in `tier-outcomes.tsv` —
+- `class`: subjective, its value set has drifted (`#2116`, resolved
+  2026-09-28: `class` retired), and correction covers tests-only and
+  production diffs far more than does routine. It is already stored in
+  `tier-outcomes.tsv` —
   the eligibility rule below reads it from the ledger row, not from
   `ticket-features.tsv`. Confound: it is not a router input.
 - `Agent Brief Category`: free text, 48% coverage, degenerate (273/282
@@ -186,9 +187,8 @@ Pulls/month, ~8.5 per non-default cell). Every other Pull dispatches
 `fleet-implementer-<policy_cell>`; `policy_cell` is `slow-high` on every
 Pull until the router (§ 4) exists.
 
-**Draw.** Let E be every cell with a definition under `plugin/agents/` at
-dispatch time, minus `policy_cell`, sorted lexicographically by token;
-K = |E|. Then:
+**Draw.** Let E be `router-table.json.cells` at dispatch time, minus
+`policy_cell`, sorted lexicographically by token; K = |E|. Then:
 
 ```
 k = 1 + (parseInt(sha256(`${session}\t${ticket}`).slice(0, 8), 16) % K)
@@ -197,7 +197,7 @@ chosen_cell = E[k − 1]
 
 `session` is the omp session id (the string `ticket-features.tsv` records
 in `session`), `ticket` the issue number. No RNG, no seed token: the draw
-is reproducible from the row's own columns plus the cell definitions
+is reproducible from the row's own columns plus `router-table.json.cells`
 present at that commit, and a re-dispatch of the same ticket in the same
 session (`impl-<N>-2`) lands on the same cell. Propensity is 1/K; the draw
 includes every non-default cell uniformly. The draw lives in the router
@@ -279,13 +279,20 @@ omp's indirection; rows pool across resolved models. Two warnings:
 X, verdicts = admissible `ticket-features.tsv` rows with `chosen_cell = X`
 and `run_date` ≥ the date `fleet-implementer-<cell>.agent.md` was most
 recently added, joined to `tier-outcomes.tsv` on `ticket` (last row per
-ticket). When verdicts ≥ 10 AND floor failures ÷ verdicts ≥ 0.80 (P ≈ 5% at
-the measured ~50% base rate), the hook files one issue: title `Withdraw
+ticket). When verdicts ≥ 10 AND floor failures ÷ verdicts ≥ 0.80 (P ≈ 12%
+on one look, ≈13.5% cumulative across repeated close-out checks, at the
+measured 56.7% base rate — not the ≈5% a 50% assumption gives), the
+hook files one issue: title `Withdraw
 exploration cell <cell>: <failures>/<verdicts> floor failures`, label
 `ready-for-human`, body = the verdict table; deduped on an open issue with
-the same title. **Withdrawal** = a PR deleting the cell's definition (K
-shrinks; draws after that commit use the smaller E). **Reinstatement** =
-the reverse PR, maintainer-only; the date filter above restarts the count.
+the same title. **Withdrawal** = a PR that removes the cell from
+`router-table.json.cells` and deletes its
+`fleet-implementer-<cell>.agent.md` in the same commit (K shrinks;
+draws after that commit use the smaller E; dropping the cell from
+`cells` — not just its file — keeps burn-in's `n≥20` end condition
+reachable and keeps the draw from ever naming a cell with no live
+definition). **Reinstatement** = the reverse PR, maintainer-only; the
+date filter above restarts the count.
 
 **Amendment from `#2038` (Router, resolved 2026-09-28):**
 1. **Burn-in:** while `router-table.json.burn_in` is true, **every** Pull
@@ -499,8 +506,10 @@ rule reads them.
 - **After burn-in:** the every-5th-`impl-`-row draw (§ 2), E = `cells`
   minus `policy_cell`, unchanged.
 - **Stage 1** = model axis at fixed `high`: `{slow-high, task-high,
-  smol-high}` (K=2 during burn-in draws over 3) — exactly the readout's
-  unanswered effort-matched question. **Stage 2** adds the effort cells
+  smol-high}` (K=3 during burn-in, over all three cells; K=2 applies
+  only to the post-burn-in draw, which excludes `policy_cell`) —
+  exactly the readout's unanswered effort-matched question. **Stage 2**
+  adds the effort cells
   (`slow-medium`, `task-max`) on the models that survive stage 1; the fit
   advances `stage` and `cells` when every stage-1 cell has n≥20 and either
   a `*` adoption or an eviction has occurred. Stage-2 definitions may exist
@@ -661,27 +670,32 @@ map's own instruction:
 
 ## 7. Change surface
 
-Compiled from `#2035`, `#2036`, `#2037`, `#2038`'s hand-offs and corrected
+Compiled from `#2035`, `#2036`, `#2037`, `#2038`, `#2116`'s hand-offs and corrected
 against § 6. Grouped by the ticket (§ 8) that owns each file.
 
 **T1 — cell grid, grammar, pins:**
 - `plugin/scripts/ledger-grammar.mjs`: export `CELL`, `drawCell`.
-- `plugin/agents/fleet-implementer-{slow-high,slow-medium,task-high,task-max,smol-high}.agent.md`: new, byte-identical bodies.
+- `plugin/agents/fleet-implementer-{slow-high,slow-medium,task-high,task-max,smol-high}.agent.md`: new, byte-identical bodies, each gaining the correction-discipline block that `#2116` moves from phase-2-only SKILL.md prose into every cell's shared body (settling commands, no unasked-for prose, no positional references, host-qualified cross-repo citations, no present-tense counts, inline re-settled commit/PR-body claims).
 - `plugin/agents/fleet-implementer.agent.md`, `fleet-implementer-alt.agent.md`: deleted.
 - `plugin/scripts/compute-spend.mjs`: `CELL_DEF` regex (currently line 111) replacing the two-name `fleet-implementer(-alt)?` test; comment above it (currently lines 98–102) rewritten from "closed at two by the alternate-tier pairing" to "closed to the `CELL` grammar".
 - `plugin/scripts/tier-roles.mjs`: gains the "level ∈ `thinking.efforts`" validation per cell definition, alongside its existing route/role checks.
 - `plugin/scripts/tier-roles.test.mjs`: route pins rewritten for five cells (real-repo structural pin currently ≈258–261).
 - `plugin/scripts/tier-check.test.mjs`: the `--repo`-default case (currently ≈573–584, see § 6) rewritten to `agents/fleet-implementer-slow-high.agent.md`.
 - `plugin/scripts/within-run-pair-prose.test.mjs`: rate assertion, body-identity assertion (across all five defs), and the `tier=alt`/rollover assertion (→ `tier=<cell>`) rewritten.
-- `plugin/scripts/implementer-model-tier.test.mjs`: name⇒route derivation plus byte-identical-body assertion for every `fleet-implementer-*` file.
+- `plugin/scripts/implementer-model-tier.test.mjs`: name⇒route derivation plus byte-identical-body assertion for every `fleet-implementer-*` file; drops the "class selects discipline, never a model" pin and the `class=routine`↔`sonnet` rebinding scans (`#2116`).
+- `plugin/scripts/immutable-body-claim-prose.test.mjs`: the phase-0 claim-settling pin moves from `run-team/SKILL.md` prose to the shared agent body (`#2116`).
 
 **T2 — router mechanism + dispatch cutover (blocked by T1):**
 - `plugin/scripts/ticket-router.mjs`: new, `route`/`fit`/`--check` (§ 4 R1–R8).
 - `plugin/scripts/router-table.json`: new, checked-in, `burn_in: true`, stage 1, one row `"*": "slow-high"`.
 - `plugin/scripts/ledger.mjs`: writes `tier=<cell>` row token (was `tier=alt`).
 - `docs/metrics/ticket-features.tsv`: new, 18-column header (§ 1/R7), written via `.fleet/ticket-features.pending.tsv`.
-- `plugin/skills/run-team/SKILL.md`: dispatch line (≈831) calls `ticket-router.mjs route`, dispatches the returned `CELL`; every-5th-Pull paragraph (≈960–967) rewritten per ADR 0013 § 6 Amendment (already merged in this PR — SKILL.md prose must match it); body-identity prose (≈840–842/902–908) and pair-gate paragraph (≈1259–1268) rewritten for N cells.
+- `plugin/skills/run-team/SKILL.md`: dispatch line (≈831) calls `ticket-router.mjs route`, dispatches the returned `CELL`; every-5th-Pull paragraph (≈960–967) rewritten per ADR 0013 § 6 Amendment (already merged in this PR — SKILL.md prose must match it); body-identity prose (≈840–842/902–908) and pair-gate paragraph (≈1259–1268) rewritten for N cells; also deletes the `Class?` block (`:587–612`), the discipline clause (`:871–872`), "whatever the class" (`:903`), the tier-guard fired-state account and revert floor/trigger (`:1001–1019`, `:1273–1288`), and `class=unknown` recovery plus its three examples (`:1052–1068`), and collapses `:2525–2600` into one class-free rationale paragraph (`#2116`).
 - `plugin/scripts/fleet-tick.test.mjs`: the ledger-row fixture carrying `tier=alt` (currently ≈385) → `tier=task-high`.
+- `plugin/skills/run-team/references/correction-tickets.md`: drops the class-judgement line (`#2116`).
+- `plugin/scripts/ci-completes-premise-prose.test.mjs`: drops the "repeat `class=`, `ports=` …" phrase from its golden (`#2116`).
+- `plugin/scripts/dispatch-block-golden-prose.test.mjs`: golden gains the new correction-discipline block, loses the `Class?`-block assertion (`#2116`).
+- `plugin/scripts/tier-guard-gate-prose.test.mjs`: drops the revert-floor/trigger pins (`#2116`).
 
 **T3 — cost instrument (blocked by T1):**
 - `plugin/scripts/member-record.mjs`: `tokens_cache_write_1h` field added to `ompMemberRecord()`'s token/cost object (currently ≈413–415, see § 6).
@@ -701,6 +715,8 @@ against § 6. Grouped by the ticket (§ 8) that owns each file.
 
 **T5 — repo-local hook (blocked by T2, T3, T4):**
 - `.omp/skills/run-team-local/SKILL.md`: new (§ 5).
+- `docs/metrics/tier-outcomes.tsv`: repo-local (per `#2089`, the append moves to this hook); re-judges the 6 `risky` rows (`#1053`, `#854`, `#1168` → `correction`; `#1056`, `#1181`, `#1160` → `routine`), adds the provenance and retirement notes to the header, and drops the tier-guard floor bullet — new rows carry an empty `class` (`#2116`).
+- `plugin/scripts/tier-outcomes-header.test.mjs`: drops the tier-guard floor pin (`#2116`).
 
 **Landed by this PR directly (not a `/to-tickets` ticket):**
 - `docs/adr/0016-per-ticket-model-effort-routing.md` (this decision).

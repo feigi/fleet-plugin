@@ -309,19 +309,22 @@ _Avoid_: mapping, override, translation
 **Cell**:
 An implementer routing target, `<role>-<level>` — a Declared tier scoped
 to the exploration grid and the Router below. One definition per cell
-(`plugin/agents/fleet-implementer-<cell>.agent.md`); never a vendor model
-name in any cell token, definition, or prose.
+(`plugin/agents/fleet-implementer-<cell>.agent.md`, five cells — pending
+`#2129`, not yet built); never a vendor model name in any cell token,
+definition, or prose.
 _Avoid_: tier (bare), alt-tier, model
 
 **Router**:
 The checked-in table (`router-table.json`) plus the script that reads and
-fits it (`ticket-router.mjs`), mapping a ticket's stratum to a Cell. Not a
-dispatched member — no `fleet-router` agent definition exists; sizing a
-ticket for the table is one `judge()` call in the controller's own eval.
+fits it (`ticket-router.mjs`) — pending `#2131`, not yet built — mapping a
+ticket's stratum to a Cell. Not a dispatched member — no `fleet-router`
+agent definition exists; sizing a ticket for the table is one `judge()`
+call in the controller's own eval.
 _Avoid_: fleet-router, sizer
 
 **Admissible row**:
 A per-cell readout row whose Resolved tier matched its Declared tier and
 whose recorded effort equals its cell's level — the only rows the
-per-cell stopping rule and readout script count.
+per-cell stopping rule and readout script (`cell-readout.mjs`, pending
+`#2133`/`#2134`, not yet built) count.
 _Avoid_: verified row, valid row

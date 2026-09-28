@@ -197,8 +197,8 @@ sequences after it." It now reads:
 **6. Exploration: every 5th Pull by ledger count.** Count = `impl-` rows
 in `.fleet/ledger.md` at Pull time; the Pull that creates row 5k is an
 Exploration Pull. It dispatches `fleet-implementer-<cell>` for the cell
-drawn by `k = 1 + (sha256("<session>\t<ticket>")[0:8] mod K)` over the
-cells with a definition, minus `policy_cell`, in token order, and records
+drawn by `k = 1 + (sha256("<session>\t<ticket>")[0:8] mod K)` over
+`router-table.json.cells`, minus `policy_cell`, in token order, and records
 `tier=<cell>` in the row; a replacement inherits the row's tier. The
 assignment rolls to the next Pull only when another open ticket sequences
 after the pulled one; `class` is not read. The member is not told. The
