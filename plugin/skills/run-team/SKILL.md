@@ -2298,14 +2298,28 @@ a minute apart showed *different* mutants, so a member's report and any single
 
 1. **Audit the worktree** — run `worktree-audit.sh` (it takes no argument; it
    audits every worktree in one pass, so find this worktree's row in its
-   output) or run `git status --porcelain -unormal` inside the worktree
-   itself — the explicit mode, never bare `--porcelain`, or
-   `status.showUntrackedFiles = no` reads a dirty worktree as clean (#730).
-   Dirty
-   or diverged halts the finisher *here*, before the label: it reports
-   what it found and labels nothing. A finisher that verifies the dirt is
-   harmless and labels anyway has substituted the rule's purpose for the rule,
-   and you find out at merge time. **Give it the cause block below,
+   output). Two checks, each with the instrument that can answer it.
+   **Dirty:** the row's `dirty` field, or `git status --porcelain -unormal`
+   inside the worktree itself — the explicit mode, never bare `--porcelain`, or
+   `status.showUntrackedFiles = no` reads a dirty worktree as clean (#730). The
+   row is the better read: in a worktree whose `.git` linkage is missing,
+   `git status` answers for the enclosing repo at rc 0, where the audit reports
+   the worktree unreadable. **Diverged:** the worktree's `HEAD` against your
+   dispatch pin — the cause block's head-equality check below. Neither
+   instrument above answers it: `git status --porcelain` reports no commits,
+   and the row's `ahead` is counted against `origin/main`, which a PR worktree
+   is always ahead of, so it cannot answer this. Three row shapes halt too,
+   each named in the report with the script's stderr line quoted where it
+   prints one: `readable:false` with `null` counts
+   (`UNREADABLE: <wt> (<cause>)`) is *worktree unreadable*, `readable:false`
+   with zero counts (`MISSING on disk: <wt>`) is *worktree missing*, and no
+   row for this worktree at all is *worktree absent*. `git status` is no
+   substitute for the audit here — it answers the dirty check only, and a
+   finisher that cannot see the tree it labels cannot vouch for it. Dirty,
+   diverged, unreadable, missing or absent halts the finisher *here*, before
+   the label: it reports what it found and labels nothing. A finisher that
+   verifies the dirt is harmless and labels anyway has substituted the rule's
+   purpose for the rule, and you find out at merge time. **Give it the cause block below,
    verbatim** — a bare SHA mismatch names no cause, and the halt report needs
    one. **Give it `<testCmd>` too** — the same string you passed the workflow
    and the fix-applier — because duty 2's mutation gate runs it and nothing
