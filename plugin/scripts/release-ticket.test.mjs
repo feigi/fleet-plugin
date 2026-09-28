@@ -2105,13 +2105,13 @@ test("a symlink standing in for the worktree directory blocks instead of promisi
 // #2073. The `-L` guard above `block`s rather than `die`s, so a symlinked
 // $wt (the shape the previous test drives) still reaches the linkage compare
 // below — it does not stop at "not a directory". When the symlink's real
-// target happens to end in a newline, BOTH `wt_canon` and `--show-toplevel`
-// canonicalise through it to that same real, newline-suffixed directory, so
-// they must compare equal. Stripping the newline on only one side would
-// break that equality and turn the correct, already-blocked "not a
-// directory" verdict into a second, fabricated "does not point at itself"
-// blocker over two identical paths — this is what pins the `wt_canon`-side
-// sentinel as load-bearing rather than mere symmetry with `toplevel`'s.
+// target happens to end in a newline, `--show-toplevel` resolves through it to
+// that same real, newline-suffixed directory, and the compare must see ONE
+// directory: the link itself, followed. Any compare that does not follow it —
+// the listed path's own bytes, or `toplevel` with its trailing newline
+// stripped — turns the correct, already-blocked "not a directory" verdict
+// into a second, fabricated "does not point at itself" blocker over one
+// directory.
 test("a symlink standing in for the worktree directory, whose real target ends in a newline, blocks at exit 1 alone (#2073)", (t) => {
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
@@ -3364,9 +3364,11 @@ test("an unsearchable worktree is not reported as having no .git", (t) => {
   // The positive half. Excluding one wrong wording left every OTHER wrong
   // wording green: the linkage block below the guard was added ungated, so
   // `cd "$wt"` fired first and this path died with "cannot resolve $wt" — the
-  // script's own invention — while the assert above still passed. Pinning WHICH
-  // die fires is what makes the `-f` gate on that block load-bearing, and it is
-  // the only assertion that fails if the gate is removed again.
+  // script's own invention — while the assert above still passed. That block
+  // now opens with `git rev-parse`, which ungated would die with its own
+  // "cannot read the git repository" instead. Pinning WHICH die fires is what
+  // makes the `-f` gate on that block load-bearing, and it is the only
+  // assertion that fails if the gate is removed again.
   assert.match(stderr, /cannot read the status of/, "git's own denial, not one this script invented");
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
   assert.equal(readFileSync(join(c.wt, "precious.txt"), "utf8"), "work that exists nowhere else\n");
@@ -4402,8 +4404,8 @@ test("a healthy worktree reached through a symlinked parent still releases norma
   // recorded path is legitimately non-canonical once a directory that was a
   // plain dir at `worktree add` time is later replaced by a symlink to its own
   // former self — `.worktrees` moved aside, then symlinked back to where it was.
-  // `git rev-parse --show-toplevel` and `cd $wt && pwd -P` both resolve through
-  // the symlink to the same physical place (measured), so this must release
+  // `git rev-parse --show-toplevel` resolves through the symlink and the listed
+  // path reaches the same physical place through it (measured), so this must release
   // exactly as it would without the symlink — not the permanent exit 2 this
   // script has already been fixed twice to stop producing.
   const r = repo(t);
@@ -4418,6 +4420,50 @@ test("a healthy worktree reached through a symlinked parent still releases norma
   assert.equal(json.released, true);
   assert.equal(code, 0);
   assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+});
+
+test("a healthy worktree whose path holds an NFD-composed name still releases normally (#2094)", (t) => {
+  // The same false refusal as the symlinked parent above, through spelling
+  // rather than a symlink: a directory on the worktree's path named `cafe` +
+  // U+0301 COMBINING ACUTE ACCENT. Where the filesystem also resolves the
+  // precomposed spelling to that directory (APFS), the `core.precomposeunicode`
+  // `git clone` writes there makes `worktree list --porcelain` name it
+  // precomposed while `--show-toplevel` answers the on-disk NFD bytes — one
+  // directory, two byte strings, and a byte compare refused it at exit 2
+  // forever, "does not point at" a path printed identically (measured, #2094;
+  // reap.sh's copy of the guard, #2072). Where the filesystem does not alias the
+  // two (ext4), both answers are the NFD bytes and this is the plain case.
+  //
+  // The directory is made BEFORE `worktree add`, and made NFD: git precomposes
+  // its own argv, so a directory it creates itself is spelled precomposed on
+  // disk and the two answers agree byte for byte — no divergence to reach.
+  const r = repo(t);
+  const onDiskParent = join(r.w, ".worktrees", "cafe\u0301");
+  mkdirSync(onDiskParent, { recursive: true });
+  const onDisk = join(onDiskParent, "9-release-ticket");
+  const branch = "fix/9-release-ticket";
+  git(r.w, "worktree", "add", "-q", onDisk, "-b", branch, "origin/main");
+  const listed = git(r.w, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).map((l) => l.slice(9));
+  const wt = listed.find((p) => p.normalize("NFC") === realpathSync(onDisk).normalize("NFC"));
+  assert.ok(wt, `fixture: git must list the worktree: ${listed}`);
+  const toplevel = git(onDisk, "rev-parse", "--show-toplevel");
+  assert.equal(toplevel.normalize("NFC"), wt.normalize("NFC"), "fixture: git answers for the worktree itself");
+  if (existsSync(onDisk.normalize("NFC"))) {
+    assert.notEqual(toplevel, wt, "fixture: a filesystem that aliases the two spellings must list one git does not answer");
+  }
+  const c = { branch, wt, args: ["9", "release-ticket", "fix"] };
+
+  const dry = release(r, c, { apply: false });
+  assert.deepEqual(dry.json?.blockers, [], dry.stderr);
+  assert.equal(dry.json.released, true);
+  assert.equal(dry.code, 0);
+
+  const { code, json, stderr } = release(r, c);
+  assert.deepEqual(json?.blockers, [], stderr);
+  assert.equal(json.released, true);
+  assert.equal(code, 0);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+  assert.equal(existsSync(onDisk), false, "the NFD-spelled directory itself must be gone");
 });
 
 test("an ambient GIT_WORK_TREE does not make the linkage guard blame a healthy worktree (#427)", (t) => {

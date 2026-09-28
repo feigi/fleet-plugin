@@ -1424,15 +1424,16 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
 
   # Now establish the linkage points BACK at $wt, not merely that it exists.
   # Gated on -f rather than "we didn't just die": an unsearchable $wt fails -f
-  # too, and this block must not run for it — `cd "$wt"` would fail differently
-  # from git's own denial, replacing the "Permission denied" the status die
-  # below is there to preserve with a message this script invented instead.
+  # too, and this block must not run for it — `git -C "$wt" rev-parse` would
+  # fail there under this script's own "cannot read the git repository"
+  # message, replacing the "Permission denied" the status die below is there
+  # to preserve.
   #
   # `git -C "$wt" rev-parse --show-toplevel` answers with the linkage's own idea
-  # of $wt's working tree, canonicalised. Comparing it against $wt itself
-  # refuses every shape that moves git's WORKING TREE away from $wt while
-  # $wt/.git still passes the `-f` gate above — #74/#115's walk-up (an
-  # absent, empty-directory, or dangling-symlink .git) fails that gate and is
+  # of $wt's working tree. Comparing it against $wt itself refuses every shape
+  # that moves git's WORKING TREE away from $wt while $wt/.git still passes the
+  # `-f` gate above — #74/#115's walk-up (an absent, empty-directory, or
+  # dangling-symlink .git) fails that gate and is
   # refused there instead, never reaching this compare: #135's own repro, a
   # hand-written .git naming a gitdir whose core.worktree is elsewhere, whether
   # or not that gitdir is named `.git`; and core.worktree set in the worktree's
@@ -1441,10 +1442,10 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   #
   # no-undo-audit.sh calls this "the spelling to avoid". Its three false-refusal
   # classes (a relative $wt, a symlinked path, macOS's /private) cannot arise
-  # here: $wt comes from `worktree list --porcelain`, so it is absolute, and
-  # both sides are canonicalised (below). Measured passing on all three, and
-  # after `git worktree move`. That script's spelling is no substitute either:
-  # `--show-prefix` is empty at rc 0 for both core.worktree shapes above.
+  # here: the two are compared as directories, not strings (below). Measured
+  # passing on all three, and after `git worktree move`. That script's spelling
+  # is no substitute either: `--show-prefix` is empty at rc 0 for both
+  # core.worktree shapes above.
   #
   # What this does NOT cover (#421): shapes that swap which git dir answers
   # while the working tree stays $wt. A .git naming a SIBLING worktree's admin
@@ -1461,44 +1462,51 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   # tampering, `git worktree` never writes one, and #421 ruled a stricter
   # check here not worth its code.
   #
-  # $wt must be canonicalised too, or this false-refuses a HEALTHY worktree:
-  # `worktree list --porcelain` echoes the admin file's recorded path verbatim,
-  # and that path can legitimately be non-canonical — reached through a
-  # directory that was a plain dir at `worktree add` time and is a symlink now
-  # (measured) — while `--show-toplevel` always answers canonical. `cd "$wt" &&
-  # pwd -P` is the POSIX way to the same canonical form; no `realpath` needed,
-  # and none is guaranteed to exist.
+  # Compared as a DIRECTORY (`-ef`, same device and inode), never as a string,
+  # or this false-refuses a HEALTHY worktree: `$wt` is the path `worktree list
+  # --porcelain` echoes and `--show-toplevel` is git's own resolved spelling,
+  # and the two legitimately differ for one and the same directory. A parent
+  # that was a plain dir at `worktree add` time and is a symlink now leaves the
+  # listed path non-canonical while git's answer is resolved (measured). And a
+  # path holding a Unicode NFD-composed name (`cafe` + U+0301) is listed
+  # PRECOMPOSED by the `core.precomposeunicode` git writes into every new repo
+  # on macOS, while `--show-toplevel` answers the on-disk NFD bytes — visually
+  # identical, byte-different, one directory (measured, git 2.50.1, Apple
+  # Git-155, #2094; reap.sh's copy of this compare, #2072). Under bash —
+  # macOS's own `/bin/sh` — `cd "$wt" && pwd -P` canonicalised only the
+  # first: it echoes the spelling it was given, so a byte compare against it
+  # refused every healthy NFD worktree at exit 2 there; dash's own `pwd -P`
+  # resolves through to the on-disk NFD bytes instead, so that shell's old
+  # byte compare would not have refused the same worktree. `-ef`
+  # answers "same directory" for both and for any other spelling the
+  # filesystem aliases, and still refuses every redirect above — each names a
+  # different directory. POSIX.1-2017's `test` does not define `-ef`; it is a
+  # ksh-derived extension bash, dash and BSD sh share, and POSIX.1-2024 adds it.
+  # A `[` that cannot evaluate it fails, and so does a `--show-toplevel` naming
+  # a path that does not exist: both are the refusing direction.
   #
-  # `&& echo x` inside both substitutions, then `%?x`: `$(...)` strips EVERY
+  # `&& echo x` inside the substitution, then `%?x`: `$(...)` strips EVERY
   # trailing newline, so a `core.worktree` naming a sibling directory called
   # `$wt` plus a newline byte — git accepts one as an ordinary path character —
-  # would otherwise compare EQUAL to `$wt` and pass the redirect, the dirty
-  # check then reading that sibling's clean copy over $wt's work (measured,
-  # #2073; the shape no-undo-audit.sh closed the same way, #2040, and reap.sh's
-  # copy of this compare, #2042). The sentinel leaves `$(...)` only pwd's/git's
-  # own terminating newline to strip. The `toplevel` half closes #2073's
-  # redirect: a newline in a LISTED path is encoded to a marker before here
-  # (#551), so `-d` above already refuses that shape, and an ordinary $wt has
-  # none at its own canonical end either.
+  # would otherwise name `$wt` itself and pass the redirect, the dirty check
+  # then reading that sibling's clean copy over $wt's work (measured, #2073;
+  # the shape no-undo-audit.sh closed the same way, #2040, and reap.sh's copy
+  # of this compare, #2042). The sentinel leaves `$(...)` only git's own
+  # terminating newline to strip.
   #
-  # The `wt_canon` half is not mere symmetry — dropping it is not an
-  # equivalent mutation. The `-L` guard just above `block`s rather than
-  # `die`s (see its own comment), so a $wt whose own leaf was replaced by a
-  # symlink — never `git worktree add`'s own shape, hand tampering only —
-  # still reaches this compare, and `pwd -P` canonicalises through it to
-  # whatever real, possibly newline-suffixed, directory it names: the SAME
-  # directory `--show-toplevel` answers for too. Stripping only `toplevel`
-  # there turns an already-blocked "not a directory" verdict (exit 1) into a
-  # fabricated "does not point at itself" mismatch (exit 2) over two
-  # identical paths (measured). Kept on both sides so that case stays
-  # exactly as blocked, never worse.
+  # A $wt whose own leaf was replaced by a symlink — never `git worktree add`'s
+  # own shape, hand tampering only — still reaches this compare, because the
+  # `-L` guard just above `block`s rather than `die`s (see its own comment).
+  # `-ef` follows the link, and `--show-toplevel` resolves through it to the
+  # same real, possibly newline-suffixed, directory, so the two compare equal
+  # and that case stays exactly as blocked — "not a directory" at exit 1 — never
+  # a fabricated "does not point at itself" mismatch at exit 2 (#2073).
   if [ -f "$wt/.git" ]; then
-    wt_canon=$(cd "$wt" && pwd -P && echo x) || die "cannot resolve $wt, so whether it holds uncommitted work is unknown"
-    wt_canon=${wt_canon%?x}
     toplevel=$(git -C "$wt" rev-parse --show-toplevel && echo x) ||
       die "cannot read the git repository at $wt (its .git file or the gitdir it names), so whether it holds uncommitted work is unknown"
     toplevel=${toplevel%?x}
-    [ "$wt_canon" = "$toplevel" ] ||
+    # shellcheck disable=SC3013 # -ef is a ksh-derived extension bash/dash/BSD sh share, base in POSIX.1-2024; this file targets dash too and -ef is verified there
+    [ "$toplevel" -ef "$wt" ] ||
       die "$wt's .git does not point at $wt — it resolves to $toplevel — so whether it holds uncommitted work is unknown"
   fi
 
