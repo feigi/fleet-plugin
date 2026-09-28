@@ -547,7 +547,22 @@ function refuseStrays(die, flags, positionals) {
 // never saw can reach a reader. A copy, not Object.freeze(): the caller's
 // object stays its own, unchanged — the line gitEnv() in git-env.mjs holds
 // for its caller's `base` too.
+//
+// #2172 review: `flags` not being a plain object at all — `null`, or absent
+// because a caller typed `{ flag: {...} }` instead of `{ flags: {...} }` and
+// this destructures it to `undefined` — used to throw a TypeError straight
+// out of `Object.keys(undefined)`, before #2114 introduced the copy below.
+// `{ ...undefined }` and `{ ...null }` both spread to `{}` without
+// complaint, so the copy would otherwise turn a loud construction-time crash
+// into a silently empty flag table whose every read fails later, elsewhere,
+// with no mention of the missing table. Checked here, before the copy, for
+// the same reason the kind loop below runs at construction rather than at
+// whichever read first notices: a table this broken is the script's own
+// mistake, not its caller's.
 export function defineFlags(die, { flags: table, positionals = [] }) {
+  if (table === null || typeof table !== "object") {
+    die(`bug: defineFlags() needs a flags table, got ${table === null ? "null" : typeof table}`);
+  }
   const flags = { ...table };
   const names = Object.keys(flags);
   for (const name of names) {

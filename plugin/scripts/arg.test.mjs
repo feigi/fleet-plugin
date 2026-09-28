@@ -1149,6 +1149,23 @@ test("defineFlags(): a declared kind other than \"value\" or \"bool\" refuses at
   assert.doesNotMatch(r.stdout, /^ok$/m);
 });
 
+// #2172 review: `flags` itself, not just each entry's declared kind, is
+// refused at construction when it is not a plain object — `null`, or
+// `undefined` from a caller typo like `{ flag: {...} }` instead of
+// `{ flags: {...} }`. Before #2172 the copy quietly spread either into `{}`,
+// trading the old `Object.keys(undefined)` TypeError for a silently empty
+// flag table whose reads all fail later with no mention of the table itself.
+test("defineFlags(): a missing or null flags table refuses at construction instead of silently building an empty one", () => {
+  const missing = runFlags([], undefined, [], "");
+  assert.equal(missing.status, 2, missing.stderr);
+  assert.ok(missing.stderr.includes("\nprobe: bug: defineFlags() needs a flags table, got undefined\n"), missing.stderr);
+  assert.doesNotMatch(missing.stdout, /^ok$/m);
+  const nullTable = runFlags([], null, [], "");
+  assert.equal(nullTable.status, 2, nullTable.stderr);
+  assert.ok(nullTable.stderr.includes("\nprobe: bug: defineFlags() needs a flags table, got null\n"), nullTable.stderr);
+  assert.doesNotMatch(nullTable.stdout, /^ok$/m);
+});
+
 // The half a new guard can get wrong the other way: refusing a read the
 // table DOES declare. Every reader is driven with its own kind, given and
 // absent, so a check that compared the wrong way round reds here.
@@ -1164,21 +1181,31 @@ test("defineFlags(): a read of the declared kind answers exactly as before", () 
 });
 
 // #2114: the table is snapshotted at construction, so a caller mutating its own
-// `flags` object afterwards is seen by NO reader. Before the snapshot, sweep()
-// derived its accepted names once at construction while arg()/numArg()/has()
-// and stray() read the caller's object live — so a key added after
-// construction was readable by arg() yet refused by sweep() as unknown, the
-// two halves of one declaration disagreeing. Every reader is driven against
-// the same late addition, each in its own process because each refuses.
+// `flags` object afterwards is seen by NO reader. Before the snapshot,
+// arg()/numArg()/has() and stray() read the caller's object live at call
+// time, so a key added to it after construction was readable by arg() even
+// though sweep() never validated it — the copy closes that gap by binding
+// all four to the same construction-time snapshot. sweep() itself is NOT in
+// this regression matrix: it took its accepted names once at construction,
+// via `Object.keys(flags)`, in both the pre- and post-#2114 code, so that
+// array is a fixed snapshot either way and a later mutation to the caller's
+// table can never reach it — a `f.sweep();` row here passed whether or not
+// the table itself was copied (measured: reverting the copy alone leaves it
+// green while every row below goes red), proving nothing about this fix.
+// The standalone test right after this array pins that existing sweep()
+// invariant on its own terms, as documentation rather than regression.
 const LATE_ADDITION = [
-  { argv: ["--late", "5"], kind: "value", read: "f.sweep();", message: "unknown flag --late — accepted: --base" },
-  { argv: ["--late", "5"], kind: "value", read: "f.stray();", message: "unexpected argument '5'" },
-  { argv: ["--late", "5"], kind: "value", read: 'f.arg("late");', message: "bug: --late read as value but not declared" },
-  { argv: ["--late", "5"], kind: "value", read: 'f.numArg("late");', message: "bug: --late read as value but not declared" },
-  { argv: ["--late"], kind: "bool", read: 'f.has("late");', message: "bug: --late read as bool but not declared" },
+  { kind: "value", read: "f.stray();", message: "unexpected argument '5'" },
+  { kind: "value", read: 'f.arg("late");', message: "bug: --late read as value but not declared" },
+  { kind: "value", read: 'f.numArg("late");', message: "bug: --late read as value but not declared" },
+  { kind: "bool", read: 'f.has("late");', message: "bug: --late read as bool but not declared" },
 ];
 
-for (const { argv, kind, read, message } of LATE_ADDITION) {
+for (const { kind, read, message } of LATE_ADDITION) {
+  // `argv` is fully determined by `kind` — "value" needs the flag AND its
+  // value token, "bool" only the flag itself — so it is derived here rather
+  // than duplicated by hand in every row above.
+  const argv = kind === "value" ? ["--late", "5"] : ["--late"];
   test(`defineFlags(): a ${kind} flag added to the caller's table after construction is unknown to ${read}`, () => {
     const r = runFlags(argv, { base: "value" }, [], `table.late = ${JSON.stringify(kind)};\n${read}`);
     assert.equal(r.status, 2, r.stderr);
@@ -1186,6 +1213,20 @@ for (const { argv, kind, read, message } of LATE_ADDITION) {
     assert.doesNotMatch(r.stdout, /^ok$/m);
   });
 }
+
+// sweep()'s own accepted-name snapshot is unrelated to #2114: it passes
+// identically whether or not the table itself is copied, because
+// `Object.keys(flags)` already returns a fixed array at construction in
+// both versions of the code — a later mutation to the caller's table cannot
+// reach an array that was built before the mutation ran. This documents
+// that existing invariant; it is deliberately NOT part of the LATE_ADDITION
+// matrix above, since it cannot discriminate this fix either way.
+test("defineFlags(): a value flag added to the caller's table after construction stays unknown to f.sweep(), independent of the table copy", () => {
+  const r = runFlags(["--late", "5"], { base: "value" }, [], 'table.late = "value";\nf.sweep();');
+  assert.equal(r.status, 2, r.stderr);
+  assert.ok(r.stderr.includes("\nprobe: unknown flag --late — accepted: --base\n"), r.stderr);
+  assert.doesNotMatch(r.stdout, /^ok$/m);
+});
 
 // The half the snapshot must ACCEPT: every name declared at construction stays
 // readable with its declared kind however the caller's object changes after —
