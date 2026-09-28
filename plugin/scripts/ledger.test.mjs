@@ -3129,6 +3129,75 @@ function deadPid() {
   return pid;
 }
 
+const psStat = (pid) => {
+  const r = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" });
+  assert.ifError(r.error);
+  return r.stdout.trim();
+};
+
+// A zombie, which deadPid() above deliberately is not: a pid whose process has
+// exited but whose parent has not yet wait()-ed on it. The parent here is a
+// node process holding its own event loop blocked in a synchronous read of its
+// stdin. libuv's SIGCHLD handler only queues the child's exit; the waitpid()
+// that reaps it runs on that loop, so the child stays a zombie until reap()
+// closes the stdin — then the parent reaps it and says so. Its own parent does
+// the reaping, not init after an orphaning, so reap() waits on exactly the
+// reap and on nothing the test cannot see. The zombie state is read back from
+// `ps` rather than assumed: a platform that reaped it early would otherwise
+// turn every assertion made against it into one about an ordinary dead pid.
+async function zombiePid(t) {
+  const parent = spawn(process.execPath, ["-e", `
+    const { spawn } = require("node:child_process");
+    const { readFileSync, writeSync } = require("node:fs");
+    const child = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+    child.on("exit", () => writeSync(1, "reaped\\n"));
+    writeSync(1, child.pid + "\\n");
+    readFileSync(0);
+  `], { stdio: ["pipe", "pipe", "inherit"] });
+  // The handle, never the bare pid: once exited, ChildProcess.kill() signals
+  // nothing, so a recycled pid is never hit.
+  t.after(() => parent.kill("SIGKILL"));
+  const lines = [];
+  let partial = "";
+  let closed = false;
+  const waiting = new Set();
+  const wake = () => { for (const w of waiting) w(); };
+  parent.stdout.setEncoding("utf8").on("data", (s) => {
+    const parts = (partial + s).split("\n");
+    partial = parts.pop();
+    lines.push(...parts);
+    wake();
+  });
+  parent.on("close", () => { closed = true; wake(); });
+  const line = (n) => new Promise((resolve, reject) => {
+    const done = (err) => {
+      clearTimeout(timer);
+      waiting.delete(check);
+      if (err) reject(err);
+      else resolve(lines[n - 1]);
+    };
+    const fail = (why) => done(new Error(`zombie fixture: no line ${n} (${why}); got ${JSON.stringify(lines)}`));
+    const timer = setTimeout(() => fail("5 s passed"), 5000);
+    const check = () => {
+      if (lines.length >= n) done();
+      else if (closed) fail("its parent exited");
+    };
+    waiting.add(check);
+    check();
+  });
+  const pid = Number(await line(1));
+  const deadline = Date.now() + 5000;
+  for (let stat; !(stat = psStat(pid)).startsWith("Z"); ) {
+    assert.ok(Date.now() < deadline, `pid ${pid} never became a zombie — ps stat ${JSON.stringify(stat)}`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  const reap = async () => {
+    parent.stdin.end();
+    assert.equal(await line(2), "reaped", "the zombie's parent never reaped it");
+  };
+  return { pid, reap };
+}
+
 const filedRows = (file) => (readFileSync(file, "utf8").match(/^- #\d+ /gm) ?? []).length;
 
 test("lock: 8 concurrent `filed` on a fresh ledger keep all 8 rows and all exit 0 (#531)", async (t) => {
@@ -3269,6 +3338,38 @@ test("lock: a holder this process may not signal (EPERM) is live, never taken ov
   assert.ok(!r.stderr.includes("which is dead"), `a live EPERM holder was reported as dead: ${r.stderr}`);
   assert.equal(readFileSync(lock, "utf8"), "1", "a live holder's lock was taken over");
   assert.equal(existsSync(file), false, "a write landed without the lock");
+});
+
+test("lock: a zombie holder — exited, never reaped — is live and times out, and is taken over once its parent reaps it (#2163)", async (t) => {
+  // run-team/SKILL.md's writer-policy runbook and ledger.mjs's lock header
+  // both promise this: kill(pid, 0) still succeeds on a zombie, because the OS
+  // keeps its pid reserved until reaped, so isDead() reads it as alive — and
+  // that clears on its own, with no hand removal, once the pid is reaped.
+  //
+  // A regression that skips isDead() in acquireLock()'s gate — treating any
+  // held lock as dead outright — does not fail this test with a clean
+  // assertion: `dead` is then always true, so the loop takes the
+  // reapDeadHolder() branch and `continue`s past the deadline check every
+  // pass, spinning on openSync(REAP)/closeSync/unlinkSync until something
+  // outside the lock's own 10 s budget kills it. A hang or CI timeout on
+  // this test, not an assertion failure, is that regression's signature.
+  const { file, lock, cli, residue } = lockFixture(t);
+  const zombie = await zombiePid(t);
+  writeFileSync(lock, String(zombie.pid));
+  const r = cli(["filed", "5", "must not land"], { LEDGER_LOCK_TIMEOUT_MS: "150" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.ok(r.stderr.includes(`held by pid ${zombie.pid}`), r.stderr);
+  assert.ok(!r.stderr.includes("which is dead"), `a zombie holder was reported as dead: ${r.stderr}`);
+  assert.equal(readFileSync(lock, "utf8"), String(zombie.pid), "a zombie holder's lock was taken over before it was reaped");
+  assert.equal(existsSync(file), false, "a write landed under a zombie holder's lock");
+  assert.match(psStat(zombie.pid), /^Z/, "the holder stopped being a zombie during the wait, so the timeout proves nothing about zombies");
+
+  await zombie.reap();
+  assert.throws(() => process.kill(zombie.pid, 0), { code: "ESRCH" }, `pid ${zombie.pid} was recycled before the test could use it`);
+  const after = cli(["filed", "5", "lands once reaped"], { LEDGER_LOCK_TIMEOUT_MS: "2000" });
+  assert.equal(after.status, 0, after.stderr);
+  assert.match(readFileSync(file, "utf8"), /^- #5 lands once reaped$/m);
+  assert.deepEqual(residue(), [], "the reaped holder's lock, the reap lock or a temp file was left behind");
 });
 
 test("lock: a dead holder whose pid comes back to life before the unlink is not taken over — liveness is re-checked under the reap lock (#2088)", (t) => {
