@@ -628,7 +628,7 @@ terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
    brief, is invisible to the dependency scan, and oldest-first order puts a
    chain's members next to each other, where two consecutive numbers read as
    two independent tickets.
-6. **Claim** — `~/.fleet/bin/fleet-run claim-ticket.sh <N> <slug> <type>
+6. **Claim** — `~/.fleet/bin/fleet-run claim-ticket.sh <N> impl-<N> implementer
    --apply` (below). Exit 2 → treat it as taken, next entry.
 7. **Row, then dispatch** — `ledger.mjs row <N> "impl-<N> · class=… [· tier=alt]"`,
    then phase 2 at once: claim what you are about to dispatch;
@@ -699,10 +699,14 @@ each refresh — MERGED or CLOSED lifts a `behind-pr`, CLOSED lifts a
 oldest-first slot; its row is rewritten to `impl-<N> …` when it is pulled,
 because `row` replaces the whole line.
 
-**Claiming.** `~/.fleet/bin/fleet-run claim-ticket.sh <N> <slug> <type> --apply` does
+**Claiming.** `~/.fleet/bin/fleet-run claim-ticket.sh <N> impl-<N> implementer --apply` does
 the label, worktree, branch, frozen install, lockfile-clean assertion, and the
-isolation runner in one serial pass. Infer branch/worktree convention from
-`git worktree list` and `git branch -r` for the `<slug>`/`<type>` arguments.
+isolation runner in one serial pass. The two arguments are always that literal
+pair — `impl-<N>` as `<slug>`, `implementer` as `<type>` — so the claim is
+branch `implementer/<N>-impl-<N>`, worktree `.worktrees/<N>-impl-<N>`. Never
+read them off `git branch -r` or `git worktree list`: human branches on origin
+(`fix/…`, `docs/…`) have another shape, and the script takes both arguments as
+free text, so a pair copied from one claims under that shape at exit 0.
 
 **Infer `<install>` — never default to `npm install`.** A lockfile-mutating
 install in a throwaway worktree corrupts it for everyone; the script derives the
@@ -2826,7 +2830,8 @@ fires after each merge pass and nothing fires at end of run, so the claim surviv
 it and the in-flight probe reads a free ticket as taken next run. Same silent queue
 shrink as a stale merged worktree, from the opposite end.
 
-`~/.fleet/bin/fleet-run release-ticket.sh <N> <slug> <type> --apply` is the
+`~/.fleet/bin/fleet-run release-ticket.sh <N> impl-<N> implementer --apply` —
+the pair the claim took, so the two name the same branch and worktree — is the
 inverse of the claim, and recomputes its preconditions inside the same
 invocation as the delete: 0 commits ahead of `origin/main`, no unique commits
 (`git cherry`), no branch on `origin`, and — whenever the worktree directory is
