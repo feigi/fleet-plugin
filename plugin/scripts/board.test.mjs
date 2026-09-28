@@ -542,6 +542,21 @@ test("#2108: reads one short of their limit, and past gh's bare default of 30, a
   assert.equal(b.capNotice, null, "a read under its limit raised the capped-read notice");
 });
 
+test("#2108: a pool read AND an open-PR read that both fill their --limit are both disclosed", () => {
+  const b = gatherCapped({ issues: 150, prs: 150 });
+  assert.equal(b.queue.pool, "100+", "a simultaneous pool cap was not rendered as a floor");
+  assert.equal(b.prs, 100, "gather() no longer asks for 100 open PRs");
+  assert.match(b.capNotice ?? "", /ready-for-agent read hit its --limit/, "a simultaneous pool cap was not disclosed");
+  assert.match(b.capNotice ?? "", /open-PR read hit its --limit/, "a simultaneous open-PR cap was not disclosed");
+  // The two substring matches above would both still pass if the two phrases
+  // ran together with no separator, or a different one, between them — this
+  // pins the exact joined string so that gap cannot hide behind them.
+  assert.equal(b.capNotice,
+    "the ready-for-agent read hit its --limit, so POOL may be missing tickets" +
+    "; the open-PR read hit its --limit, so a PR past it shows REVIEW with CI unknown",
+    "capNotice must join simultaneous cap messages with '; ', not run them together or use a different separator");
+});
+
 // #1820 read MERGED from gh; #1840 scoped that read to the ledger's own row
 // PRs. One batched `gh api graphql` query asks about exactly the row PRs that
 // need it — absent from the open list, carrying no `MERGED <sha>` token, and

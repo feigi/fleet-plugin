@@ -305,7 +305,7 @@ function render(m) {
     // #2108: POOL's own count is `q.pool` — the same number, except that a
     // capped pool read makes it `"100+"`, and a header reading a bare 100
     // beside a footer reading 100+ would be the exact claim the `+` retracts.
-    h.append(el("span", null, name === "POOL" && q.pool != null ? String(q.pool) : String(inCol.length)));
+    h.append(el("span", null, String(name === "POOL" ? q.pool ?? inCol.length : inCol.length)));
     return [h, ...inCol.map(card)];
   });
   COLUMNS.forEach((name, i) => {
@@ -314,10 +314,22 @@ function render(m) {
     col.replaceChildren(...next[i]);
   });
   renderSpend(m.spend);
+  // #2108: computed here, ahead of the footer, not only inside the banner
+  // arm below. The banner is a single slot behind a stale/stall/ledger
+  // priority chain (next section): whenever any of those also fires on the
+  // same tick, that chain's capMsg arm never runs, and an open-PR cap has no
+  // other surface — unlike the pool cap, which always keeps its `n+` in the
+  // header and footer above regardless of the banner. Appending it to the
+  // footer, which does not compete for that slot, is what stops a
+  // co-occurring higher-priority message from silently swallowing this one
+  // (found by review: capNotice was reachable but unrenderable whenever
+  // ledgerMsg/stallMsg/stale also held).
+  const capMsg = m.capNotice ? "⚠ " + m.capNotice : null;
   // footer
   const foot = document.getElementById("footer");
   foot.innerHTML = "";
   foot.append(el("div", null, `pool ${q.pool ?? 0} · supply ${q.supply ?? 0} · review-backlog ${q.reviewBacklog ?? 0}`));
+  if (capMsg) foot.append(el("div", null, capMsg));
   const filed = el("div", "filed", `filed follow-ups (${(m.filed || []).length}): ` +
     (m.filed || []).map((f) => "#" + f.issue).join(" "));
   foot.append(filed);
@@ -334,10 +346,12 @@ function render(m) {
   const banner = document.getElementById("stale-banner");
   const ledgerMsg = ledgerBanner(m.ledgerState);
   const stallMsg = livenessBanner(m.liveness);
-  // #2108: a read that hit its --limit. Ranked last: stale, a stall and an
-  // unread ledger each say the board is wrong wholesale, this that it may be
-  // short at one edge.
-  const capMsg = m.capNotice ? "⚠ " + m.capNotice : null;
+  // #2108: best-effort placement in the single banner slot when nothing
+  // higher-priority holds it — ranked last, since stale/a stall/an unread
+  // ledger each say the board is wrong wholesale, versus this notice, which
+  // only says it may be short at one edge. The footer append above is what
+  // actually guarantees this notice reaches the operator on a tick where a
+  // higher-priority arm wins the slot instead.
   // className reset on EVERY arm, never only on the arm that sets it: this
   // element is reused across ticks, so a `dead` class left behind by an
   // earlier render paints the next tick's ledger or stale message red. One

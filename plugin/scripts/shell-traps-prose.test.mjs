@@ -477,6 +477,24 @@ test("#2108: a labelled set past gh's bare default of 30 is read whole, and says
   }
 });
 
+test("#2108: a poll one short of its explicit --limit is read whole, and says nothing about a cap", (t) => {
+  if (!SHELLS.length) return t.skip("no shell on PATH");
+  // The input the guard must ACCEPT: 199 is a whole answer, not a capped one,
+  // and every one of them fires its own label event — unlike the 35/36 case
+  // above, which only clears gh's bare default of 30 and never approaches the
+  // 200 this monitor actually asks for.
+  cappingGh([0, 199]);
+  try {
+    for (const shell of SHELLS) {
+      const out = runMonitor(shell, MONITOR, 2);
+      assert.equal(events(out).length, 199, `${shell}: a poll one short of its limit reported fewer label events than PRs returned:\n${out}`);
+      assert.doesNotMatch(out, /--limit/, `${shell}: a poll under its limit reported a cap:\n${out}`);
+    }
+  } finally {
+    restoreGh();
+  }
+});
+
 test("run-merge-bot.md's bounded poll is left alone — it is not an instance", () => {
   // The ticket's filer retracted the claim that step 1's poll was a second
   // instance of this bug, and a later reader "fixing" it would be acting on the
