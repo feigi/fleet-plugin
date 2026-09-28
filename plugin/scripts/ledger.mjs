@@ -213,12 +213,12 @@ const file = fileIdx === -1 ? defaultLedgerPath() : argv[fileIdx + 1];
 // with `--`. That is not a local choice: isFlagLike() below IS arg.mjs's rule,
 // so this reader forfeits exactly what every script routing through arg()
 // forfeits, no more and no less — the set of them being whatever `grep -lE
-// '^const arg = makeArg|^import .*defineFlags' scripts/*.mjs` reports: a
-// makeArg binding, or a defineFlags() table whose arg()/numArg() are built on
-// it. Anchored on the binding and the import, because the unanchored `grep -l
-// makeArg` matched this comment and so listed ledger.mjs, the one script this
-// paragraph says does NOT route through arg(). A single leading `-`, or a `--`
-// anywhere but the front, is still a path.
+// '^const arg = makeArg|^import .*defineFlags' scripts/*.mjs | grep -v test`
+// reports: a makeArg binding, or a defineFlags() table whose arg()/numArg()
+// are built on it. Anchored on the binding and the import, because the
+// unanchored `grep -l makeArg` matched this comment and so listed ledger.mjs,
+// the one script this paragraph says does NOT route through arg(). A single
+// leading `-`, or a `--` anywhere but the front, is still a path.
 //
 // The `file &&` term is load-bearing and must not fold into isFlagLike(),
 // which answers TRUE for an absent value: without it a truly trailing `--file`
