@@ -2599,6 +2599,48 @@ test("an ordinary ledger still round-trips through a pipe, and an unknown subcom
   assert.equal(unknown.stdout, "", "a refusal must not also emit a payload");
 });
 
+// ── `filed` on a repeat call (#2087) ─────────────────────────────────────────
+//
+// Both callers of `filed` retry once on failure, and a failure the CALLER saw
+// is not proof the write failed: a harness timeout after the row landed reads
+// as one. The retry must not append a second row for the same issue. The
+// assertions read the ledger file back, because a payload can claim a no-op
+// that the file does not show.
+const filedLines = (file) => readFileSync(file, "utf8").split("\n").filter((l) => l.startsWith("- #"));
+
+test("filed: a repeat call for an issue already filed writes nothing and says so, at exit 0 (#2087)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  const file = join(dir, "ledger.md");
+  const first = cli(["--file", file, "filed", "8", "subject a"]);
+  assert.equal(first.status, 0, first.stderr);
+  assert.deepEqual(parsePayload(first, "the first filing's"), { issue: "8", subject: "subject a", total: 1 });
+  const before = readFileSync(file, "utf8");
+
+  for (const [issue, subject] of [["8", "subject a"], ["8", "different wording"], ["#8", "subject a"]]) {
+    const again = cli(["--file", file, "filed", issue, subject]);
+    assert.equal(again.status, 0, `${issue} ${subject}: ${again.stderr}`);
+    const payload = parsePayload(again, "the repeat filing's");
+    assert.equal(payload.alreadyRecorded, true, `${issue} ${subject}: ${again.stdout}`);
+    assert.equal(payload.row, "#8 subject a", "the payload must name the row already on file");
+    assert.equal(payload.total, 1);
+    assert.deepEqual(filedLines(file), ["- #8 subject a"], `${issue} ${subject} changed the filed rows`);
+  }
+  assert.equal(readFileSync(file, "utf8"), before, "a repeat filing rewrote the ledger");
+});
+
+test("filed: identity is the exact issue number — #8 neither dedupes against nor is deduped by #80 or #18 (#2087)", (t) => {
+  const { dir, cli } = cliFixture(t);
+  for (const order of [["80", "18", "8"], ["8", "80", "18"]]) {
+    const file = join(dir, `ledger-${order.join("-")}.md`);
+    for (const issue of order) {
+      const r = cli(["--file", file, "filed", issue, `subject for ${issue}`]);
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal("alreadyRecorded" in parsePayload(r, `${issue}'s`), false, `${issue} after ${order.join(",")} was read as a repeat`);
+    }
+    assert.deepEqual(filedLines(file), order.map((n) => `- #${n} subject for ${n}`));
+  }
+});
+
 // ── `check` on a pipe (#808) ─────────────────────────────────────────────────
 //
 // The sweep above cannot reach `check`: it drives the three subcommands whose
