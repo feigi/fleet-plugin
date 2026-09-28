@@ -156,6 +156,9 @@ flowchart TD
 
 ## Documentation
 
+- [`docs/requirements.md`](docs/requirements.md) — trying it on your own
+  repo: what the repo, the machine, and the team's process must satisfy,
+  with a copy-paste pre-flight.
 - [`CONTEXT.md`](CONTEXT.md) — glossary: the vocabulary (claims, worktrees,
   releases, the merge gate, dispatch, tiers) this repo's artefacts share.
 - [`docs/adr/`](docs/adr) — accepted architecture decisions and the
