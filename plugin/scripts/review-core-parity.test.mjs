@@ -285,13 +285,29 @@ test("DEFAULT_DIMENSIONS agrees on key/prompt and differs from review-pr.js's co
 });
 
 // The snapshot and verifier dispatches: review-pr.js's `agentType` literal is
-// the SAME namespacing rule applied to the two agentType strings
-// review-core.mjs's `runReview` hardcodes (not part of DEFAULT_DIMENSIONS).
+// the SAME namespacing rule applied to the two agentType values
+// review-core.mjs exports as SNAPSHOT_AGENT_TYPE/VERIFIER_AGENT_TYPE (#2102 —
+// hoisted out of runReview's own dispatch-site literals so
+// review-runner-spawns.test.mjs can derive the omp runner's spawns
+// allowlist from the same source instead of a hand-copied list). Pinning
+// the constants' own VALUES is not enough by itself: nothing else in this
+// suite reads review-core.mjs's own dispatch-site text, so a dispatch site
+// quietly rewritten back to a hardcoded literal (instead of the constant)
+// would leave SPAWNED_AGENT_TYPES and the runner's spawns pin untouched —
+// both derive from the constant, not from the call site — and this whole
+// suite green, while the runner's real dispatch drifts and omp refuses it
+// again at runtime. That is exactly what the pre-hoist regex assertions
+// here used to catch (#2102 review). The two `CORE_SOURCE` matches below
+// restore it: they fail if either call site stops referencing the constant
+// by name, independent of what the constant is currently defined to equal.
 test("the snapshot and verifier dispatches follow the same fleet-ctl: namespacing rule", () => {
+  const CORE_SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
   assert.match(SOURCE, /agentType:\s*"fleet-ctl:fleet-review-snapshot"/);
-  assert.match(readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8"), /agentType:\s*"fleet-review-snapshot"/);
+  assert.equal(core.SNAPSHOT_AGENT_TYPE, "fleet-review-snapshot");
+  assert.match(CORE_SOURCE, /agentType:\s*SNAPSHOT_AGENT_TYPE\b/);
   assert.match(SOURCE, /agentType:\s*"fleet-ctl:fleet-review-verifier"/);
-  assert.match(readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8"), /agentType:\s*"fleet-review-verifier"/);
+  assert.equal(core.VERIFIER_AGENT_TYPE, "fleet-review-verifier");
+  assert.match(CORE_SOURCE, /agentType:\s*VERIFIER_AGENT_TYPE\b/);
 });
 
 // FINDINGS_SCHEMA/VERDICT_SCHEMA: structurally identical (comments aside).

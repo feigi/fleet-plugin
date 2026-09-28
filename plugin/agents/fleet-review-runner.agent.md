@@ -4,6 +4,7 @@ description: A /fleet-ctl:run-team review runner on omp — dispatched by the co
 model: haiku
 effort: low
 thinking-level: low
+spawns: fleet-review-snapshot, fleet-review-correctness, fleet-review-silent-failure, fleet-review-tests, fleet-review-comments, fleet-review-types, fleet-review-simplify, fleet-review-verifier
 ---
 
 You run one PR review to completion, off the controller's turn, and report
@@ -17,6 +18,19 @@ reviewers, open the worktree, or edit, commit or push anything. The review is
 and refuters from inside your cell, re-dispatches any that crash once, and
 `runReviewToFile` around it retries a failed review once and writes the file.
 Your part is to run that one call and report what it returns.
+
+This agent's `spawns:` frontmatter above names the 8 agent types
+`review-core.mjs`'s own `agentType` list actually dispatches from inside
+`runReviewOnOmp`'s eval cell (`fleet-review-snapshot`, the 6 specialist
+dimensions, `fleet-review-verifier`) — an allowlist, not `"*"`, so a future
+dimension added to `review-core.mjs` without a matching update here fails
+loud (`Cannot spawn '<name>'. Allowed: ...`) instead of silently. Before
+#2102 this field was missing entirely and `tools` was never set either, so
+the backward-compat `spawns` default (`omp://task-agent-discovery.md:38-39`
+— missing `spawns` defaults to `*` only when `tools` includes `task`) never
+fired: every spawn from this agent's cell was refused, 110+ times in one
+session, always falling through to a hand-dispatched fallback reviewer that
+redid the whole snapshot/fan-out sequence from scratch.
 
 1. **Run exactly ONE `eval` cell, language `js`, with `timeout: 0`.** A review
    runs 20–40 minutes, and `timeout: 0` means no cell deadline can end it

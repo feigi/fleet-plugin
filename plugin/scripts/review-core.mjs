@@ -217,6 +217,22 @@ export const DEFAULT_DIMENSIONS = [
   },
 ];
 
+// #2102: the omp `fleet-review-runner` agent definition's `spawns:`
+// frontmatter must allow exactly the agent types dispatched below (the
+// snapshot agent, every DEFAULT_DIMENSIONS entry, and the verifier) — omp
+// denies every spawn by default, and the runner declared no `spawns` at all
+// until this fix. Exporting the two literal-only types (snapshot/verifier
+// have no DEFAULT_DIMENSIONS entry of their own) plus the derived full set
+// lets review-runner-spawns.test.mjs pin the frontmatter against what this
+// file actually dispatches, instead of a hand-copied list that can drift.
+export const SNAPSHOT_AGENT_TYPE = "fleet-review-snapshot";
+export const VERIFIER_AGENT_TYPE = "fleet-review-verifier";
+export const SPAWNED_AGENT_TYPES = [
+  SNAPSHOT_AGENT_TYPE,
+  ...DEFAULT_DIMENSIONS.map((d) => d.agentType),
+  VERIFIER_AGENT_TYPE,
+];
+
 // Unchanged from review-pr.js: `single-file` is `files === 1`, `small` is
 // `loc < 30` (diff-stats.mjs's computeStats owns both thresholds).
 export const SIZE_TIER_PROFILES = new Set(["single-file", "small"]);
@@ -733,7 +749,7 @@ STDOUT, copied verbatim. Only runRoot, path, head, pathVerified and repoVerified
 are ever required — diffStats, diffPath, diffLines, refHead and prHead are each
 omitted independently when their command failed, and repoError only accompanies
 a false repoVerified.`,
-    { label: "snapshot", phase: "Snapshot", agentType: "fleet-review-snapshot", schema: SNAPSHOT_SCHEMA },
+    { label: "snapshot", phase: "Snapshot", agentType: SNAPSHOT_AGENT_TYPE, schema: SNAPSHOT_SCHEMA },
   );
 
   if (snap) {
@@ -948,7 +964,7 @@ git answered \`fatal: not a git repository\` — every run, clean or not: an
 omitted line reads exactly like a check never run, and applying a mutation is
 how three reviews from one cell left four files modified in that checkout
 (#1433).`,
-                    { label: `verify:${d.key}`, phase: "Verify", agentType: "fleet-review-verifier", schema: VERDICT_SCHEMA },
+                    { label: `verify:${d.key}`, phase: "Verify", agentType: VERIFIER_AGENT_TYPE, schema: VERDICT_SCHEMA },
                   ),
                 ),
               ),
