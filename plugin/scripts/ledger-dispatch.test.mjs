@@ -221,6 +221,46 @@ test("settle accepts a live token `row` wrote, and restores a token a later `row
   assert.deepEqual(read().dispatched, ["impl-415=PR#9"]);
 });
 
+// #2139: every reader parses member tokens anywhere in a row, so a malformed
+// one `row` wrote used to land as a permanent settle — `settle merge-bot-1
+// done` then refused as "already settled as dispatched". `row` refuses it
+// instead, new row or rewrite alike, surfacing the grammar's own error.
+test("row refuses a malformed member token anywhere in its text, writing nothing", (t) => {
+  const { ok, read, refused } = fixture(t);
+  ok("dispatch", "merge-bot");
+  refused(
+    ["row", "2136", "merge-bot-1=dispatched · ci=123:1:success"],
+    /malformed member token 'merge-bot-1=dispatched' — 'dispatched' is not an outcome of merge-bot-n — expected done \| killed/,
+  );
+  assert.deepEqual(read().rows, []);
+  // A rewrite of an existing row is refused the same way; the old line stays.
+  ok("row", "412", "impl-412 · class=routine");
+  for (const [text, why] of [
+    ["impl-412=done · class=routine", /'impl-412=done' — 'done' is not an outcome of impl-N — expected PR#M \| bailed/],
+    ["class=routine · impl-412-b=labelled", /'impl-412-b=labelled' — 'labelled' is not an outcome of impl-N/],
+    ["impl-412 · fix-pr-9=applied:not-a-sha", /'fix-pr-9=applied:not-a-sha' — .* expected applied:<head> \| no-op/],
+    ["impl-412=", /'impl-412=' — '' is not an outcome of impl-N/],
+  ]) {
+    refused(["row", "412", text], why);
+  }
+  assert.deepEqual(read().rows, ["#412 impl-412 · class=routine"]);
+  assert.equal(ok("settle", "merge-bot-1", "done").outcome, "done");
+});
+
+// The must-ACCEPT half: every well-formed member token — live or settled —
+// and every non-member key `row` carries today still goes through.
+test("row still writes well-formed member tokens and non-member keys", (t) => {
+  const { ok, read } = fixture(t);
+  ok("dispatch", "merge-bot");
+  const rows = [
+    ["7", "impl-7 · class=routine · ports=16007"],
+    ["8", "impl-8=PR#9 · fix-pr-9=applied:73b356de · review=wf:r1=failed reviewed=abc1234:1/0/0 · ci=123:1:success"],
+    ["10", "held-behind:#9 · merge-bot-1=done · review=member:review-pr-10"],
+  ];
+  for (const [ticket, text] of rows) ok("row", ticket, text);
+  assert.deepEqual(read().rows, rows.map(([n, text]) => `#${n} ${text}`));
+});
+
 // #1876: the tick owes an open PR a review while its implementer is still
 // live, so a PR-bound member can be dispatched before `settle impl-N=PR#M`
 // names the PR on the ticket row. dispatch's fallback then keys a row of its
