@@ -560,17 +560,25 @@ function save(d) {
 // the same dead pid, and RE-CHECKING that pid is still dead. Unlink-then-
 // create, or a bare rename, lets two waiters that both saw the dead pid each
 // remove the other's FRESH lock and write at once; the re-read is what makes
-// the takeover safe. The re-check closes the one window the re-read leaves
-// (#2088): the waiter's own isDead() ran before it took the reap lock, so a
-// recycled pid that became a new writer in between — dead holder's lock
-// reaped by someone else, then re-created by the new owner of that very pid
-// — writes the same content and would pass the re-read alone. Under the reap
-// lock no other waiter can replace the lock's content, so a pid still dead at
-// that point is the dead holder, and a live one is left alone to be waited
-// on like any live holder. A reap lock is held for one read, one liveness
-// check and one unlink, and one left behind by any of those same abrupt
-// deaths in that window is deliberately NOT reclaimed: waiters time out
-// naming the holder, and the operator removes it. Fail closed.
+// the takeover safe. The re-check narrows the one window the re-read leaves
+// (#2088), and the order the two run in is what narrows it: isDead(deadPid)
+// runs before the re-read, not after, so a live writer that takes the lock in
+// the gap between them is caught by the read that follows, not hidden behind
+// one taken before it arrived. Read first, and a recycled pid that came back
+// to life in that same gap would still read back as itself and still check
+// dead — the order this replaces would delete that live holder's fresh lock. A
+// recycled pid that became a new writer this same way — dead holder's lock
+// reaped by someone else, then re-created by the new owner of that very pid —
+// still writes the same content and would still pass the re-read alone, but
+// the isDead() ahead of it now catches that writer live, before the read ever
+// runs. Only that exact pid reused a second time, inside this narrower gap,
+// can still slip through. Under the reap lock no other waiter can replace the
+// lock's content outside that gap, so a pid still dead immediately before the
+// read that follows it is the dead holder, and a live one is left alone to be
+// waited on like any live holder. A reap lock is held for one liveness check,
+// one read and one unlink, and one left behind by any of those same abrupt
+// deaths in that window is deliberately NOT reclaimed: waiters time out naming
+// the holder, and the operator removes it. Fail closed.
 //
 // A dead holder whose pid was recycled reads as live until the timeout.
 // Accepted: an mtime/age heuristic instead would take over a live writer on a
@@ -631,10 +639,12 @@ function reapDeadHolder(deadPid) {
   }
   try {
     closeSync(fd);
-    // Exact match only — a waiter that got here first may already have
-    // reaped the dead lock and taken a fresh one of its own. And dead again,
-    // not just when the caller looked: that pid may have been reused since.
-    if (readLock() === String(deadPid) && isDead(deadPid)) {
+    // Dead again, not just when the caller looked: that pid may have been
+    // reused since, so isDead runs first, fresh, right here — before the
+    // exact-match re-read, not after it. Exact match only: a waiter that
+    // got here first may already have reaped the dead lock and taken a
+    // fresh one of its own.
+    if (isDead(deadPid) && readLock() === String(deadPid)) {
       // Already gone is already the outcome this call wants: an operator
       // clearing a wedged lock by hand between the read above and here must
       // not turn our own cleanup into an uncaught crash.

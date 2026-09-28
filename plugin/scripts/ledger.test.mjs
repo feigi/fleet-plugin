@@ -3201,7 +3201,7 @@ test("lock: a dead holder whose pid comes back to life before the unlink is not 
   // like to the waiter. Each probe also records whether the reap lock existed
   // at that moment, which is what separates a re-check UNDER the reap lock
   // from a second probe taken before it (the same window, only narrower).
-  const { dir, file, lock } = lockFixture(t);
+  const { dir, file, lock, cli } = lockFixture(t);
   const dead = deadPid();
   const probes = join(dir, "probes.log");
   const preload = join(dir, "reuse-preload.mjs");
@@ -3219,12 +3219,7 @@ process.kill = (pid, sig) => {
 `,
   );
   writeFileSync(lock, String(dead));
-  const r = spawnSync(process.execPath, ["--import", pathToFileURL(preload).href, SCRIPT, "--file", file, "filed", "11", "x"], {
-    encoding: "utf8",
-    cwd: dir,
-    timeout: 20_000,
-    env: { ...process.env, PATH: join(dir, "bin"), LEDGER_LOCK_TIMEOUT_MS: "150" },
-  });
+  const r = cli(["filed", "11", "x"], { LEDGER_LOCK_TIMEOUT_MS: "150", NODE_OPTIONS: `--import=${pathToFileURL(preload).href}` });
   const seen = readFileSync(probes, "utf8").trim().split("\n");
   assert.equal(seen[0], "free", "the first probe is the waiter's own, outside any reap lock");
   assert.equal(seen[1], "reap", `the takeover must re-probe the pid while holding the reap lock: ${JSON.stringify(seen)}`);
@@ -3233,6 +3228,43 @@ process.kill = (pid, sig) => {
   assert.equal(readFileSync(lock, "utf8"), String(dead), "a holder live again at the re-check had its lock taken over");
   assert.equal(existsSync(file), false, "a write landed over a live holder's lock");
   assert.equal(existsSync(`${lock}.reap`), false, "the reap lock outlived a takeover that found its holder live");
+});
+
+test("lock: a live writer that takes the lock between the re-check and the re-read is not deleted — liveness is checked before the read, not after (#2088)", (t) => {
+  // The prior test proves the re-check exists; this one proves the ORDER it
+  // runs in matters. Both `isDead(deadPid) && readLock() === String(deadPid)`
+  // and its operands reversed pass a re-check that never races anything, so a
+  // test that only ever changes the pid's liveness — never the lock's content
+  // — cannot tell the two orders apart. This one changes the lock's content
+  // from inside the liveness probe itself, timed to land exactly between the
+  // two calls: read-then-check would already have the stale pid in hand by
+  // then and delete a live writer's fresh lock; check-then-read sees the new
+  // content and backs off instead.
+  const { dir, file, lock, cli } = lockFixture(t);
+  const dead = deadPid();
+  const preload = join(dir, "swap-preload.mjs");
+  writeFileSync(
+    preload,
+    `import { writeFileSync } from "node:fs";
+const realKill = process.kill.bind(process);
+let calls = 0;
+process.kill = (pid, sig) => {
+  if (pid !== ${dead} || sig !== 0) return realKill(pid, sig);
+  // The second liveness probe of the recycled pid is the re-check under the
+  // reap lock (the first is the caller's own, before it took the reap
+  // lock). A fresh writer — this very process — takes the lock in that same
+  // instant, landing on whichever side of the re-check the re-read runs.
+  if (++calls === 2) writeFileSync(${JSON.stringify(lock)}, String(process.pid));
+  throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" });
+};
+`,
+  );
+  writeFileSync(lock, String(dead));
+  const r = cli(["filed", "12", "x"], { LEDGER_LOCK_TIMEOUT_MS: "150", NODE_OPTIONS: `--import=${pathToFileURL(preload).href}` });
+  assert.equal(r.status, 2, r.stderr);
+  assert.ok(r.stderr.includes(`held by pid ${r.pid}`), r.stderr);
+  assert.equal(readFileSync(lock, "utf8"), String(r.pid), "a live writer's lock, taken between the re-check and the re-read, was deleted");
+  assert.equal(existsSync(file), false, "a write landed over a live holder's lock");
 });
 
 test("lock: a dangling symlink at the lock path fails closed within the timeout, not a CPU spin (#531)", (t) => {
