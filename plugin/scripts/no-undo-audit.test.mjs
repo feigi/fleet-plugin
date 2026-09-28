@@ -2167,6 +2167,42 @@ test("an intact linked worktree, reached through a symlinked path, still passes"
   assert.equal(r.json.clean, true);
 });
 
+// The same worktree, named `cafe` + U+0301 COMBINING ACUTE ACCENT and passed in
+// the spelling `worktree list --porcelain` gives it — reap.sh's `nfd` fixture
+// (#2072), here for the working-tree compare. Where the filesystem also
+// resolves the precomposed spelling to that directory (APFS), the
+// `core.precomposeunicode` `git clone` writes there lists it precomposed while
+// `--show-toplevel` answers the on-disk NFD bytes, so a byte compare refused
+// this healthy worktree at exit 2 (#2095). Where it does not (ext4), both
+// answers are the NFD bytes and this is the plain case. The directory is made
+// BEFORE `worktree add`: a leaf git creates itself comes back byte-identical
+// from both, and reproduces nothing.
+test("an intact linked worktree with an NFD name, passed as git lists it, still passes (#2095)", (t) => {
+  const branch = "fix/9-cafe";
+  const c = repo(t);
+  writeFileSync(join(c.w, ".gitignore"), ".worktrees/\n");
+  git(c.w, "add", ".gitignore");
+  git(c.w, "commit", "-q", "-m", "ignore the nested worktree");
+  const onDisk = join(c.w, ".worktrees", "cafe\u0301");
+  mkdirSync(onDisk, { recursive: true });
+  git(c.w, "worktree", "add", "-q", "-b", branch, onDisk);
+  git(onDisk, "push", "-q", "-u", "origin", branch);
+
+  const listing = git(c.w, "worktree", "list", "--porcelain").split("\n")
+    .filter((l) => l.startsWith("worktree ")).map((l) => l.slice(9));
+  const wt = listing.find((p) => p.normalize("NFC").endsWith("/.worktrees/caf\u00e9"));
+  assert.ok(wt, `fixture: git must list the worktree: ${listing}`);
+  const top = git(onDisk, "rev-parse", "--show-toplevel");
+  assert.ok(top.endsWith("/.worktrees/cafe\u0301"), "fixture: git must answer the on-disk NFD bytes");
+  if (existsSync(onDisk.normalize("NFC"))) {
+    assert.notEqual(wt, top, "fixture: a filesystem that aliases the two spellings must list one git's toplevel answer does not, byte for byte");
+  }
+
+  const r = audit({ w: wt, branch });
+  assert.equal(r.status, 0, `an NFD-named worktree passed as git lists it must still pass; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+});
+
 // ---------------------------------------------------------------------------
 // #189: whose ADMIN DIR answered, not just whose ROOT git resolved. A `.git`
 // FILE takes its root from the file's own location, so a `.git` rewritten to
