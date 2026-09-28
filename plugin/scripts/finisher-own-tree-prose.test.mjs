@@ -201,6 +201,55 @@ test("duty 1 says worktree-audit.sh takes no argument and audits every worktree"
   );
 });
 
+// #1106: duty 1 offered the audit and `git status --porcelain -unormal` as
+// equal alternatives, then halted on "dirty or diverged" — and neither can
+// see diverged. Porcelain is empty over a clean tree one commit past the pin,
+// and the audit's `ahead` is counted against `origin/main`
+// (worktree-audit.sh's `base=${BASE_REF:-origin/main}`), which a PR worktree
+// is always ahead of. The only divergence check is the cause block's
+// head-equality against the dispatch pin. And "find this worktree's row" gave
+// no rule for a row that cannot answer, or for no row at all. Each pin below
+// holds ONE sentence (`sentences()`, #1940), so a clause deleted from inside
+// the duty reds its own pin rather than being satisfied by a neighbour.
+test("duty 1 names the instrument for each check, and halts on a row that cannot answer", () => {
+  const said = (re) => sentences(duty1Text()).some((s) => re.test(s));
+  assert.ok(
+    said(/\*\*Dirty:\*\* the row's `dirty` field, or `git status --porcelain -unormal` inside the worktree/),
+    "duty 1 no longer names the dirty check's two instruments — the row's `dirty` field and `git status --porcelain -unormal`",
+  );
+  assert.ok(
+    said(/\*\*Diverged:\*\* the worktree's `HEAD` against your dispatch pin/),
+    "duty 1 no longer says diverged is the worktree's HEAD against the dispatch pin — neither the audit nor git status can see a clean tree that moved past it",
+  );
+  assert.ok(
+    said(/row's `ahead`.*counted against `origin\/main`.*cannot answer/),
+    "duty 1 no longer says the audit's `ahead` is counted against origin/main — a finisher reading it as divergence sees every PR worktree as diverged, or learns to ignore it",
+  );
+  // The three non-clean row shapes, each halting and each named. Unreadable
+  // and missing share `readable:false` and differ only in their counts, so
+  // each is pinned with its count shape and stderr line — dropping one leaves
+  // a finisher to read the other's zero counts as clean.
+  assert.ok(
+    said(/halt.*`readable:false` with `null` counts \(`UNREADABLE: <wt> \(<cause>\)`\) is \*worktree unreadable\*/),
+    "duty 1 no longer halts on an unreadable row (`readable:false`, null counts) — the one state the audit exists never to report as clean",
+  );
+  assert.ok(
+    said(/halt.*`readable:false` with zero counts \(`MISSING on disk: <wt>`\) is \*worktree missing\*/),
+    "duty 1 no longer halts on a missing row (`readable:false`, zero counts) — zero counts read as a clean tree",
+  );
+  assert.ok(
+    said(/halt.*no row for this worktree at all is \*worktree absent\*/),
+    "duty 1 no longer halts when this worktree has no row — a finisher finds nothing wrong in a row it never found",
+  );
+  // `git status` answers the dirty check only. Presented as a full
+  // substitute, it lets a finisher skip the audit and never see the three
+  // shapes above.
+  assert.ok(
+    said(/`git status` is no substitute for the audit here/),
+    "duty 1 no longer says `git status` cannot stand in for the audit on the three row shapes — it is back to reading as an equal alternative",
+  );
+});
+
 test("duty 1's dirty-tree halt survives, and duty 2's own caveats are not clipped", () => {
   // ACCEPT side, and the neighbour check. Duty 1's halt is the guard that
   // caught #389 live; the throwaway tree makes an overlap harmless, which is
@@ -210,8 +259,8 @@ test("duty 1's dirty-tree halt survives, and duty 2's own caveats are not clippe
   // not re-pinned here.)
   assert.match(
     duty1Text(),
-    /Dirty or diverged halts the finisher \*here\*, before the label/,
-    "duty 1's dirty-or-diverged halt no longer reads as before — check it was not weakened while giving the gate its own tree",
+    /Dirty, diverged, unreadable, missing or absent halts the finisher \*here\*, before the label/,
+    "duty 1's halt no longer covers all five causes, or no longer halts *here*, before the label — check it was not weakened",
   );
   // The paragraph the new gate is appended directly after, and the half of
   // duty 2 that dedupe-guard-prose.test.mjs does NOT cover: it pins the
