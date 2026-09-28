@@ -420,9 +420,12 @@ prefix=$(git -C "$wt" rev-parse --show-prefix) \
 # `pwd -P` from `common` alone changes no verdict, git 2.50.1). It is on `$gd`
 # and `common` as insurance, and the reason to apply that insurance to BOTH or
 # neither is that a spelling difference between them is not a false refusal on
-# one shape but on every main checkout. `$wt_real` stays canonical for the two
-# owner compares below, which are byte compares; the `core.worktree` check
-# after them compares directories and needs no canonical spelling.
+# one shape but on every main checkout. `$wt_real` stays canonical only for
+# resolving `$wt` (symlinks, relative paths), not Unicode normalization, so
+# both owner compares below compare as directories (`-ef`) for the same
+# NFC/NFD reason as `$top` below (#2095, detailed there); the `core.worktree`
+# check after them already compares directories, so its own correctness does
+# not depend on `$wt_real`'s spelling either.
 #
 # `--git-common-dir` is what says which shape $gd is. A LINKED worktree gets
 # its own per-worktree admin dir, so $gd differs from the common dir, and every
@@ -497,11 +500,13 @@ if [ "$gd" != "$common" ]; then
   owner=$(cd "$gd" && cd "$(dirname "$back")" && pwd -P && echo x) \
     || die "$gd/gitdir names a directory that does not resolve — cannot verify $wt's linkage"
   owner=${owner%?x}
-  [ "$owner" = "$wt_real" ] \
+  # shellcheck disable=SC3013 # -ef is a ksh-derived extension bash/dash/BSD sh share, base in POSIX.1-2024; this file targets dash too and -ef is verified there
+  [ "$owner" -ef "$wt_real" ] \
     || die "$wt's .git names another worktree's admin dir — cannot tell a clean worktree from a dirty one"
 else
   owner=${gd%/.git}
-  [ "$owner" = "$gd" ] || [ "$owner" = "$wt_real" ] \
+  # shellcheck disable=SC3013 # -ef is a ksh-derived extension bash/dash/BSD sh share, base in POSIX.1-2024; this file targets dash too and -ef is verified there
+  [ "$owner" = "$gd" ] || [ "$owner" -ef "$wt_real" ] \
     || die "$wt's .git names $gd, whose worktree is $owner, not $wt — cannot tell a clean worktree from a dirty one"
 fi
 

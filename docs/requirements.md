@@ -30,7 +30,7 @@ in both BSD and GNU flavours
 | Binary | Floor | Why | Check |
 |---|---|---|---|
 | `node` | `>=20.11.0` (`package.json` `engines`) | every `.mjs` script; `import.meta.dirname` (`prompt-renderer.mjs`) and `readdirSync({recursive})` are used | `node -v` |
-| `git` | `>= 2.38` | `merge-tree --write-tree` (`no-undo-audit.sh:888`), `worktree list --porcelain -z`, pinned error strings; measured baseline 2.50 / Apple Git-155 | `git --version` |
+| `git` | `>= 2.38` | `merge-tree --write-tree` (`no-undo-audit.sh:907`), `worktree list --porcelain -z`, pinned error strings; measured baseline 2.50 / Apple Git-155 | `git --version` |
 | `gh` | `>= 2.94.0` | `gh issue list --json blockedBy` — older `gh` exits `Unknown JSON field`, and the admission gate dies rather than run without blockers (`plugin/scripts/candidates.mjs:343-345`) | `gh --version` |
 | `jq` | any | runbooks parse `ci-state.mjs` / transcript payloads with `jq -e`, `jq -r` (`plugin/skills/run-team/SKILL.md:1703`) | `jq --version` |
 | `python3` | any 3.x | NUL-safe / UTF-8-strict readers in `inflight.sh`, `json.sh`, `no-undo-audit.sh` — several tests `skip` without it, the scripts `die` | `python3 -c 'import json'` |
