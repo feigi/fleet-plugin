@@ -1047,15 +1047,17 @@ for (const { script, argv, stray } of STRAY_POSITIONALS) {
 // Neither half names a position in the file, deliberately: the runSweep()
 // half of this sentence used to say "above", and was wrong.
 //
-// `body` is the probe's own statements against the bound readers `f`, so the
-// same harness drives defineFlags()'s wrong-kind refusals further down.
+// `body` is the probe's own statements against the bound readers `f` and the
+// caller's own `table` object, so the same harness drives defineFlags()'s
+// wrong-kind refusals and its construction-time snapshot further down.
 function runFlags(argv, flags, positionals, body) {
   const dir = mkdtempSync(join(tmpdir(), "arg-stray-unit-"));
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
   writeFileSync(join(dir, "run.mjs"), [
     'import { makeDie, defineFlags } from "./arg.mjs";',
     'const die = makeDie("probe");',
-    `const f = defineFlags(die, { flags: ${JSON.stringify(flags)}, positionals: ${JSON.stringify(positionals)} });`,
+    `const table = ${JSON.stringify(flags)};`,
+    `const f = defineFlags(die, { flags: table, positionals: ${JSON.stringify(positionals)} });`,
     body,
     'console.log("ok");',
     "",
@@ -1147,6 +1149,23 @@ test("defineFlags(): a declared kind other than \"value\" or \"bool\" refuses at
   assert.doesNotMatch(r.stdout, /^ok$/m);
 });
 
+// #2172 review: `flags` itself, not just each entry's declared kind, is
+// refused at construction when it is not a plain object — `null`, or
+// `undefined` from a caller typo like `{ flag: {...} }` instead of
+// `{ flags: {...} }`. Before #2172 the copy quietly spread either into `{}`,
+// trading the old `Object.keys(undefined)` TypeError for a silently empty
+// flag table whose reads all fail later with no mention of the table itself.
+test("defineFlags(): a missing or null flags table refuses at construction instead of silently building an empty one", () => {
+  const missing = runFlags([], undefined, [], "");
+  assert.equal(missing.status, 2, missing.stderr);
+  assert.ok(missing.stderr.includes("\nprobe: bug: defineFlags() needs a flags table, got undefined\n"), missing.stderr);
+  assert.doesNotMatch(missing.stdout, /^ok$/m);
+  const nullTable = runFlags([], null, [], "");
+  assert.equal(nullTable.status, 2, nullTable.stderr);
+  assert.ok(nullTable.stderr.includes("\nprobe: bug: defineFlags() needs a flags table, got null\n"), nullTable.stderr);
+  assert.doesNotMatch(nullTable.stdout, /^ok$/m);
+});
+
 // The half a new guard can get wrong the other way: refusing a read the
 // table DOES declare. Every reader is driven with its own kind, given and
 // absent, so a check that compared the wrong way round reds here.
@@ -1159,6 +1178,74 @@ test("defineFlags(): a read of the declared kind answers exactly as before", () 
   const absent = runFlags([], flags, [], body);
   assert.equal(absent.status, 0, absent.stderr);
   assert.match(absent.stdout, /^\[null,null,false\]$/m);
+});
+
+// #2114: the table is snapshotted at construction, so a caller mutating its own
+// `flags` object afterwards is seen by NO reader. Before the snapshot,
+// arg()/numArg()/has() and stray() read the caller's object live at call
+// time, so a key added to it after construction was readable by arg() even
+// though sweep() never validated it — the copy closes that gap by binding
+// all four to the same construction-time snapshot. sweep() itself is NOT in
+// this regression matrix: it took its accepted names once at construction,
+// via `Object.keys(flags)`, in both the pre- and post-#2114 code, so that
+// array is a fixed snapshot either way and a later mutation to the caller's
+// table can never reach it — a `f.sweep();` row here passed whether or not
+// the table itself was copied (measured: reverting the copy alone leaves it
+// green while every row below goes red), proving nothing about this fix.
+// The standalone test right after this array pins that existing sweep()
+// invariant on its own terms, as documentation rather than regression.
+const LATE_ADDITION = [
+  { kind: "value", read: "f.stray();", message: "unexpected argument '5'" },
+  { kind: "value", read: 'f.arg("late");', message: "bug: --late read as value but not declared" },
+  { kind: "value", read: 'f.numArg("late");', message: "bug: --late read as value but not declared" },
+  { kind: "bool", read: 'f.has("late");', message: "bug: --late read as bool but not declared" },
+];
+
+for (const { kind, read, message } of LATE_ADDITION) {
+  // `argv` is fully determined by `kind` — "value" needs the flag AND its
+  // value token, "bool" only the flag itself — so it is derived here rather
+  // than duplicated by hand in every row above.
+  const argv = kind === "value" ? ["--late", "5"] : ["--late"];
+  test(`defineFlags(): a ${kind} flag added to the caller's table after construction is unknown to ${read}`, () => {
+    const r = runFlags(argv, { base: "value" }, [], `table.late = ${JSON.stringify(kind)};\n${read}`);
+    assert.equal(r.status, 2, r.stderr);
+    assert.ok(r.stderr.includes(`\nprobe: ${message}\n`), r.stderr);
+    assert.doesNotMatch(r.stdout, /^ok$/m);
+  });
+}
+
+// sweep()'s own accepted-name snapshot is unrelated to #2114: it passes
+// identically whether or not the table itself is copied, because
+// `Object.keys(flags)` already returns a fixed array at construction in
+// both versions of the code — a later mutation to the caller's table cannot
+// reach an array that was built before the mutation ran. This documents
+// that existing invariant; it is deliberately NOT part of the LATE_ADDITION
+// matrix above, since it cannot discriminate this fix either way.
+test("defineFlags(): a value flag added to the caller's table after construction stays unknown to f.sweep(), independent of the table copy", () => {
+  const r = runFlags(["--late", "5"], { base: "value" }, [], 'table.late = "value";\nf.sweep();');
+  assert.equal(r.status, 2, r.stderr);
+  assert.ok(r.stderr.includes("\nprobe: unknown flag --late — accepted: --base\n"), r.stderr);
+  assert.doesNotMatch(r.stdout, /^ok$/m);
+});
+
+// The half the snapshot must ACCEPT: every name declared at construction stays
+// readable with its declared kind however the caller's object changes after —
+// deleted, flipped to the other kind, or set to a kind the construction-time
+// check would have refused. Read live, stray() would refuse `main` behind a
+// now-"bool" --base and arg("base") would die on the flipped kind.
+test("defineFlags(): later deletes and kind changes to the caller's table leave every reader on the declared table", () => {
+  const flags = { base: "value", pr: "value", quiet: "bool" };
+  const body = [
+    'table.base = "bool";',
+    "delete table.pr;",
+    'table.quiet = "number";',
+    "f.sweep();",
+    "f.stray();",
+    'console.log(JSON.stringify([f.arg("base"), f.numArg("pr"), f.has("quiet")]));',
+  ].join("\n");
+  const r = runFlags(["--base", "main", "--pr", "7", "--quiet"], flags, [], body);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^\["main",7,true\]$/m);
 });
 
 test("stray() refuses a bare positional on a script that declares none", () => {

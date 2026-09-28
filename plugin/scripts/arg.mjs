@@ -530,14 +530,40 @@ function refuseStrays(die, flags, positionals) {
 // source can reach it — no command line can make a correct table disagree
 // with a correct read.
 //
-// Construction runs nothing but the kind check above. sweep() and stray()
-// stay explicit calls the script places, below its own per-flag guards, so
-// the more specific wording still wins where both would refuse
-// (diff-stats.mjs's `--pr --json`, tier-check.mjs's roster flags). And every
-// reader looks at process.argv when CALLED, never at a copy taken here:
-// staleness.mjs splices its `--gone -- <needle>` triple out of process.argv
-// before its sweep()/stray() run, and a snapshot would refuse the needle.
-export function defineFlags(die, { flags, positionals = [] }) {
+// Construction runs nothing but the kind check above and the table copy
+// below. sweep() and stray() stay explicit calls the script places, below its
+// own per-flag guards, so the more specific wording still wins where both
+// would refuse (diff-stats.mjs's `--pr --json`, tier-check.mjs's roster
+// flags). And every reader looks at process.argv when CALLED, never at a copy
+// taken here: staleness.mjs splices its `--gone -- <needle>` triple out of
+// process.argv before its sweep()/stray() run, and a snapshot would refuse
+// the needle.
+//
+// The TABLE, by contrast, is copied once here, before anything derives from
+// it (#2114): sweep() takes its names at construction while the other readers
+// look a name up per call, so a caller mutating its own `flags` object
+// afterwards would leave arg() accepting a name sweep() refuses. With the
+// copy, no reader sees a later mutation, and no kind the construction check
+// never saw can reach a reader. A copy, not Object.freeze(): the caller's
+// object stays its own, unchanged — the line gitEnv() in git-env.mjs holds
+// for its caller's `base` too.
+//
+// #2172 review: `flags` not being a plain object at all — `null`, or absent
+// because a caller typed `{ flag: {...} }` instead of `{ flags: {...} }` and
+// this destructures it to `undefined` — used to throw a TypeError straight
+// out of `Object.keys(undefined)`, before #2114 introduced the copy below.
+// `{ ...undefined }` and `{ ...null }` both spread to `{}` without
+// complaint, so the copy would otherwise turn a loud construction-time crash
+// into a silently empty flag table whose every read fails later, elsewhere,
+// with no mention of the missing table. Checked here, before the copy, for
+// the same reason the kind loop below runs at construction rather than at
+// whichever read first notices: a table this broken is the script's own
+// mistake, not its caller's.
+export function defineFlags(die, { flags: table, positionals = [] }) {
+  if (table === null || typeof table !== "object") {
+    die(`bug: defineFlags() needs a flags table, got ${table === null ? "null" : typeof table}`);
+  }
+  const flags = { ...table };
   const names = Object.keys(flags);
   for (const name of names) {
     if (flags[name] !== "value" && flags[name] !== "bool") {
