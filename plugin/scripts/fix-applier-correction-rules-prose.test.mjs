@@ -143,6 +143,17 @@ test("the fix-applier prompt's count rule is qualified — a live property is re
   );
 });
 
+test("the fix-applier prompt's settling grep takes -F over literal text and trusts a zero only after a known match", () => {
+  // #1087. One span, both halves: `-F` alone still lets a command that can
+  // never return non-zero write "absent" under `Verified:`, and the positive
+  // control alone leaves the pattern-reading of literal prose as the default.
+  assert.match(
+    flatten(fixApplierPrompt()),
+    phrase("A settling grep over literal text takes `grep -F`, and its zero counts only after the same command finds a line known to match"),
+    "the fix-applier prompt no longer tells a settling grep over literal text to take -F, or dropped the positive control that has to pass before its zero is trusted",
+  );
+});
+
 test("the implementer's own count rule carries the identical past-tense/live-property qualification", () => {
   // #859's ruling is explicit that BOTH seats need this, not only the new
   // copy — this is the pre-existing rule, being re-derived rather than left
@@ -155,7 +166,7 @@ test("the implementer's own count rule carries the identical past-tense/live-pro
   );
 });
 
-test("a rewrapped fix-applier prompt still matches all three rules — these pins refuse drift, not reflow", () => {
+test("a rewrapped fix-applier prompt still matches every pinned rule — these pins refuse drift, not reflow", () => {
   // ACCEPT side. The fixture is DERIVED from the live text, never a quoted
   // line, so a meaning-preserving reword of the surrounding prompt is not
   // what this test measures — only that re-wrapping the pinned paragraph at
@@ -187,4 +198,5 @@ test("a rewrapped fix-applier prompt still matches all three rules — these pin
   assert.match(prompt, phrase("Every factual claim your diff restates needs a settling command run against the tree first"));
   assert.match(prompt, phrase("No positional references"));
   assert.match(prompt, phrase("unless it is a past-tense record of a measurement you performed"));
+  assert.match(prompt, phrase("its zero counts only after the same command finds a line known to match"));
 });

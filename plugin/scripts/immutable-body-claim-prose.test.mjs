@@ -76,7 +76,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./prose-pin.mjs";
+import { between, paragraph, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -258,6 +258,47 @@ test("the literal-path grep is forbidden AND the method that replaces it is give
   );
 });
 
+test("a settling command over literal text takes -F, and its zero counts only after a known match", () => {
+  const r = rule();
+  // #1087. The `-F` half, bound to the measured case that shows why: a
+  // literal line holding `\s+` is read as a pattern and answers 0 against
+  // itself. Without the case the rule reads as style, not as a false zero.
+  assert.match(
+    r,
+    phrase("A settling command over literal text uses `grep -F`"),
+    "the rule no longer tells a settling command over literal text to use grep -F",
+  );
+  assert.match(
+    r,
+    phrase("`grep -c 'settled by:\\s+x'` answers 0 against a file holding that exact line, and `grep -cF` answers 1"),
+    "the -F rule lost the measured case it rests on — the bare grep answering 0 against its own literal line",
+  );
+  // The positive-control half, which the `-F` half does not imply: a command
+  // with `-F` can still be one that never finds a match, and its zero then
+  // settles nothing while reading as a checked absence.
+  assert.match(
+    r,
+    phrase("A zero or an absence counts only after the same command, with the same flags, finds a line known to match"),
+    "the rule no longer requires a settling command to find a known match before its zero is trusted",
+  );
+  assert.match(
+    r,
+    phrase("a command that cannot find a match settles nothing"),
+    "the rule no longer says a command incapable of finding a match settles nothing",
+  );
+  // #1087's ruling: the trap is harness-independent, so the rule names no
+  // grep implementation or harness. A tool-specific warning goes false on the
+  // next harness while reading as the whole of the rule. Substring match, no
+  // leading `\b` before `bsd` — `\bbsd\b` cannot match inside "FreeBSD" (no
+  // boundary between "ree" and "BSD"), and this repo's own dev grep reports
+  // itself as "2.6.0-FreeBSD" (measured), so that miss is not hypothetical.
+  assert.doesNotMatch(
+    paragraph(RUN_TEAM, "**A settling command over literal text uses `grep -F`", "the literal-text grep rule"),
+    /ugrep|ripgrep|claude code|bsd|gnu/i,
+    "the literal-text grep rule now names a grep implementation or harness — #1087 ruled it harness-independent",
+  );
+});
+
 test("both hand-over enumerations name this rule — a relayed list carries only what it names", () => {
   // Delivery here is a controller copying an enumeration, not the block:
   // nothing in this repo renders this block into a member prompt verbatim, so
@@ -324,4 +365,5 @@ test("a rewrapped rule still matches — these pins refuse drift, not reflow", (
   assert.match(flat, phrase("re-run at the commit that ships it, not at the commit that motivated it"));
   assert.match(flat, phrase("the command goes inline, beside the claim"));
   assert.match(flat, phrase("that answers which ones depend on its contents"));
+  assert.match(flat, phrase("A zero or an absence counts only after the same command, with the same flags, finds a line known to match"));
 });

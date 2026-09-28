@@ -2057,7 +2057,8 @@ all.
 > property instead** — unless it is a past-tense record of a measurement you
 > performed, which stays as written; a present-tense claim about a live
 > property must be restated as a property (`every other test in the file`),
-> true at any count.
+> true at any count. **A settling grep over literal text takes `grep -F`, and
+> its zero counts only after the same command finds a line known to match.**
 >
 > **Apply `survived` findings. A finding in `unverified` whose refuters ran and
 > crashed always defers** — and which of the two it is, you read off
@@ -2611,6 +2612,17 @@ Replace the file with `MUTATED` in a throwaway copy, run the suite, and read off
 which suites red: that answers which ones **depend on its contents**, which is
 the question a coverage claim actually needs, and it returns a different set
 from any spelling of the grep.
+
+**A settling command over literal text uses `grep -F`, and its zero counts only
+after the same command finds a line known to match.** Prose fragments and
+code snippets routinely carry `\`, `.`, `*`, `[` or `$`, and without `-F` those
+are read as a pattern rather than as the text itself, so the command answers
+for a different string from the one the claim names — and a wrong zero is the
+benign-looking answer. Measured on #1087: `grep -c 'settled by:\s+x'` answers
+0 against a file holding that exact line, and `grep -cF` answers 1. A zero or
+an absence counts only after the same command, with the same flags, finds a
+line known to match: a command that cannot find a match settles nothing, and
+under `Verified:` its zero reads as a checked absence.
 
 #### Fallback: hand-dispatched reviewer member
 
