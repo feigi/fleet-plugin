@@ -4446,9 +4446,10 @@ test("a healthy worktree whose path holds an NFD-composed name still releases no
   const listed = git(r.w, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).map((l) => l.slice(9));
   const wt = listed.find((p) => p.normalize("NFC") === realpathSync(onDisk).normalize("NFC"));
   assert.ok(wt, `fixture: git must list the worktree: ${listed}`);
-  assert.equal(git(onDisk, "rev-parse", "--show-toplevel").normalize("NFC"), wt.normalize("NFC"), "fixture: git answers for the worktree itself");
+  const toplevel = git(onDisk, "rev-parse", "--show-toplevel");
+  assert.equal(toplevel.normalize("NFC"), wt.normalize("NFC"), "fixture: git answers for the worktree itself");
   if (existsSync(onDisk.normalize("NFC"))) {
-    assert.notEqual(git(onDisk, "rev-parse", "--show-toplevel"), wt, "fixture: a filesystem that aliases the two spellings must list one git does not answer");
+    assert.notEqual(toplevel, wt, "fixture: a filesystem that aliases the two spellings must list one git does not answer");
   }
   const c = { branch, wt, args: ["9", "release-ticket", "fix"] };
 

@@ -1442,11 +1442,10 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   #
   # no-undo-audit.sh calls this "the spelling to avoid". Its three false-refusal
   # classes (a relative $wt, a symlinked path, macOS's /private) cannot arise
-  # here: $wt comes from `worktree list --porcelain`, so it is absolute, and
-  # the two are compared as directories, not strings (below). Measured passing
-  # on all three, and after `git worktree move`. That script's spelling is no
-  # substitute either: `--show-prefix` is empty at rc 0 for both core.worktree
-  # shapes above.
+  # here: the two are compared as directories, not strings (below). Measured
+  # passing on all three, and after `git worktree move`. That script's spelling
+  # is no substitute either: `--show-prefix` is empty at rc 0 for both
+  # core.worktree shapes above.
   #
   # What this does NOT cover (#421): shapes that swap which git dir answers
   # while the working tree stays $wt. A .git naming a SIBLING worktree's admin
@@ -1473,9 +1472,12 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   # PRECOMPOSED by the `core.precomposeunicode` git writes into every new repo
   # on macOS, while `--show-toplevel` answers the on-disk NFD bytes — visually
   # identical, byte-different, one directory (measured, git 2.50.1, Apple
-  # Git-155, #2094; reap.sh's copy of this compare, #2072). `cd "$wt" && pwd -P`
-  # canonicalised only the first: it echoes the spelling it was given, so a
-  # byte compare against it refused every healthy NFD worktree at exit 2. `-ef`
+  # Git-155, #2094; reap.sh's copy of this compare, #2072). Under bash —
+  # macOS's own `/bin/sh` — `cd "$wt" && pwd -P` canonicalised only the
+  # first: it echoes the spelling it was given, so a byte compare against it
+  # refused every healthy NFD worktree at exit 2 there; dash's own `pwd -P`
+  # resolves through to the on-disk NFD bytes instead, so that shell's old
+  # byte compare would not have refused the same worktree. `-ef`
   # answers "same directory" for both and for any other spelling the
   # filesystem aliases, and still refuses every redirect above — each names a
   # different directory. POSIX.1-2017's `test` does not define `-ef`; it is a
