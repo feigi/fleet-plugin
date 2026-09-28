@@ -1047,15 +1047,17 @@ for (const { script, argv, stray } of STRAY_POSITIONALS) {
 // Neither half names a position in the file, deliberately: the runSweep()
 // half of this sentence used to say "above", and was wrong.
 //
-// `body` is the probe's own statements against the bound readers `f`, so the
-// same harness drives defineFlags()'s wrong-kind refusals further down.
+// `body` is the probe's own statements against the bound readers `f` and the
+// caller's own `table` object, so the same harness drives defineFlags()'s
+// wrong-kind refusals and its construction-time snapshot further down.
 function runFlags(argv, flags, positionals, body) {
   const dir = mkdtempSync(join(tmpdir(), "arg-stray-unit-"));
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
   writeFileSync(join(dir, "run.mjs"), [
     'import { makeDie, defineFlags } from "./arg.mjs";',
     'const die = makeDie("probe");',
-    `const f = defineFlags(die, { flags: ${JSON.stringify(flags)}, positionals: ${JSON.stringify(positionals)} });`,
+    `const table = ${JSON.stringify(flags)};`,
+    `const f = defineFlags(die, { flags: table, positionals: ${JSON.stringify(positionals)} });`,
     body,
     'console.log("ok");',
     "",
@@ -1159,6 +1161,50 @@ test("defineFlags(): a read of the declared kind answers exactly as before", () 
   const absent = runFlags([], flags, [], body);
   assert.equal(absent.status, 0, absent.stderr);
   assert.match(absent.stdout, /^\[null,null,false\]$/m);
+});
+
+// #2114: the table is snapshotted at construction, so a caller mutating its own
+// `flags` object afterwards is seen by NO reader. Before the snapshot, sweep()
+// derived its accepted names once at construction while arg()/numArg()/has()
+// and stray() read the caller's object live — so a key added after
+// construction was readable by arg() yet refused by sweep() as unknown, the
+// two halves of one declaration disagreeing. Every reader is driven against
+// the same late addition, each in its own process because each refuses.
+const LATE_ADDITION = [
+  { argv: ["--late", "5"], kind: "value", read: "f.sweep();", message: "unknown flag --late — accepted: --base" },
+  { argv: ["--late", "5"], kind: "value", read: "f.stray();", message: "unexpected argument '5'" },
+  { argv: ["--late", "5"], kind: "value", read: 'f.arg("late");', message: "bug: --late read as value but not declared" },
+  { argv: ["--late", "5"], kind: "value", read: 'f.numArg("late");', message: "bug: --late read as value but not declared" },
+  { argv: ["--late"], kind: "bool", read: 'f.has("late");', message: "bug: --late read as bool but not declared" },
+];
+
+for (const { argv, kind, read, message } of LATE_ADDITION) {
+  test(`defineFlags(): a ${kind} flag added to the caller's table after construction is unknown to ${read}`, () => {
+    const r = runFlags(argv, { base: "value" }, [], `table.late = ${JSON.stringify(kind)};\n${read}`);
+    assert.equal(r.status, 2, r.stderr);
+    assert.ok(r.stderr.includes(`\nprobe: ${message}\n`), r.stderr);
+    assert.doesNotMatch(r.stdout, /^ok$/m);
+  });
+}
+
+// The half the snapshot must ACCEPT: every name declared at construction stays
+// readable with its declared kind however the caller's object changes after —
+// deleted, flipped to the other kind, or set to a kind the construction-time
+// check would have refused. Read live, stray() would refuse `main` behind a
+// now-"bool" --base and arg("base") would die on the flipped kind.
+test("defineFlags(): later deletes and kind changes to the caller's table leave every reader on the declared table", () => {
+  const flags = { base: "value", pr: "value", quiet: "bool" };
+  const body = [
+    'table.base = "bool";',
+    "delete table.pr;",
+    'table.quiet = "number";',
+    "f.sweep();",
+    "f.stray();",
+    'console.log(JSON.stringify([f.arg("base"), f.numArg("pr"), f.has("quiet")]));',
+  ].join("\n");
+  const r = runFlags(["--base", "main", "--pr", "7", "--quiet"], flags, [], body);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^\["main",7,true\]$/m);
 });
 
 test("stray() refuses a bare positional on a script that declares none", () => {
