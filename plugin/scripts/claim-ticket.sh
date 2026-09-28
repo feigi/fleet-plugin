@@ -145,6 +145,16 @@ runner="$wt/agent-test"
 # fresh-linkage argument that closes this for $wt has no equivalent for
 # $dest; the ambient GIT_DIR/GIT_WORK_TREE half is closed for both paths
 # alike, by the same unset above.
+#
+# The one `--write-runner` call that DOES ask git about $dest — the #1262
+# tracked-path guard's `git -C "$runner_dir" ls-files` — is identity-verified
+# (#2071): an "untracked" answer is trusted only once the git dir that gave it
+# is shown to own $dest's working tree, the no-undo-audit.sh owner check, and
+# that is neither guard ruled out above — it catches the `core.worktree`
+# spoof, and it runs only when git has already placed $dest inside a repo, so
+# the never-`git init`'d fixture still writes. The derivation calls stay
+# comment-only (#2046) because they never consult $dest's git dir at all:
+# verifying $dest's linkage would not change which repo they read.
 git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # `-e` alone STATS, so it follows the link and reads a DANGLING symlink as an
 # absent path, while `git worktree add` refuses it on lstat semantics (`fatal:
@@ -469,7 +479,9 @@ else
   # hazard is trackedness. $dest need not sit in the repo the cwd is in, so
   # `git -C` outside one is an ordinary input rather than a fault, and nothing
   # untracked is lost by writing. The refusal fires on trackedness this
-  # established, never on a question it could not put.
+  # established, or on an "untracked" answer from a git dir it could not
+  # verify as $dest's own (#2071, below), never on a question it could not
+  # put.
   if [ "$writeonly" = false ] && [ -e "$runner" ]; then
     printf '    %s already present — tracked runner, checked out with the worktree; left as is\n' "$runner" >&2
   else
@@ -511,8 +523,109 @@ else
         *'not a git repository'*) ;;
         # A real repo, ':(literal)' pathspec, genuinely no match — this is
         # what "untracked" actually looks like once the wildcard hazard above
-        # is closed.
-        *'did not match any file'*) ;;
+        # is closed. But only if the git dir that said so is $runner_dir's
+        # OWN (#2071): see the identity check below, which is what this arm
+        # runs before the write is allowed.
+        *'did not match any file'*)
+          # `-C` moves git's cwd and nothing else — discovery still follows
+          # whatever `.git` it finds, so "did not match" is only as good as
+          # the index that answered. A `.git` rewritten to `gitdir: F/.git`,
+          # where F is a FOREIGN repo that does not track this path and F's
+          # `core.worktree` names $dest's own directory back, answers
+          # self-consistently from F's index: `--show-toplevel` is still
+          # $dest's tree, `ls-files` still says "did not match", and the
+          # tracked file was overwritten at rc 0 (measured, git 2.50.1,
+          # #2071). So the answering git dir's owner is established the way
+          # no-undo-audit.sh establishes it (#189, #2040) — read that
+          # script's comment for the measurements behind each step — and the
+          # verdict above is trusted only when that owner is the working
+          # tree git answers for, and that tree holds $runner_dir.
+          #
+          # Gated to this arm and nothing wider. The "not a git repository"
+          # arm above never reaches it — a $dest outside every repo has no git
+          # dir to verify, and requiring one is what #2067 ruled out, since
+          # the divergence-walk fixtures write a runner into a directory that
+          # is never `git init`'d. And a "tracked" answer already refuses,
+          # whichever index gave it.
+          #
+          # Owner: a LINKED worktree's admin dir differs from the common dir
+          # and carries a `gitdir` back-pointer git itself wrote; resolved
+          # against the admin dir (it is relative under
+          # `worktree.useRelativePaths`), its directory is the owner.
+          # Otherwise the git dir IS the repo, and one named `.git` belongs to
+          # its parent — the spoof above, F/.git, belongs to F, not $dest.
+          # No whitespace trim of the back-pointer, unlike no-undo-audit.sh's
+          # copy: only `dirname` of it is read, which a trailing byte after
+          # `.git` cannot move, and this script carries no locale pin for a
+          # POSIX class to lean on.
+          #
+          # Ceiling, the same one no-undo-audit.sh admits and for its reason:
+          # a git dir that IS the common dir and is NOT named `.git` — a
+          # submodule's `.git/modules/<name>`, a `--separate-git-dir` target —
+          # records nothing naming its worktree, so there is no owner to
+          # compare and only the containment check below stands for it.
+          # Refusing there would refuse every submodule. The residual is a
+          # `.git` redirected at a foreign repo of THAT shape whose
+          # `core.worktree` names $dest's tree, which no `git worktree add`
+          # produces.
+          #
+          # Containment: owner and working tree can agree and still not be
+          # $runner_dir's — F's own `core.worktree` naming F puts $runner_dir
+          # OUTSIDE the tree, and git still answers "did not match" there at
+          # rc 0 (measured). So $runner_dir must be the working tree or sit
+          # under it.
+          #
+          # Directories compared with `-ef` (same device and inode), not as
+          # strings, for reap.sh's reason (#2042, #2072): git's resolved
+          # spelling and a `pwd -P` of the same directory legitimately differ
+          # (a macOS NFD name comes back precomposed from one and not the
+          # other), and a string compare refused every such healthy tree. A
+          # `[` that cannot evaluate `-ef` refuses in both uses below. `echo
+          # x` inside a substitution and `%?x` after it keep a directory name
+          # ending in a newline byte from being stripped into a sibling's
+          # (no-undo-audit.sh, #2040); the walk strips components by
+          # parameter expansion, never `$(dirname …)`, for the same reason.
+          # Every step that cannot answer is a refusal, never a pass — and a
+          # `die`, never a bare `set -e` abort, since this script's refusals
+          # are exit 2 and it has no exit 1 for a caller to read.
+          lk_no="so cannot verify $runner is untracked — refusing rather than risk overwriting a tracked path"
+          lk_gd=$(git -C "$runner_dir" rev-parse --path-format=absolute --git-dir) \
+            || die "git will not name the git dir answering for $runner_dir, $lk_no"
+          lk_common=$(git -C "$runner_dir" rev-parse --path-format=absolute --git-common-dir) \
+            || die "git will not name the common git dir answering for $runner_dir, $lk_no"
+          lk_gd=$(CDPATH='' cd -- "$lk_gd" && pwd -P) \
+            || die "the git dir answering for $runner_dir does not resolve, $lk_no"
+          lk_common=$(CDPATH='' cd -- "$lk_common" && pwd -P) \
+            || die "the common git dir answering for $runner_dir does not resolve, $lk_no"
+          if [ "$lk_gd" != "$lk_common" ]; then
+            lk_back=$(cat "$lk_gd/gitdir" 2>/dev/null) \
+              || die "$lk_gd/gitdir is missing or unreadable — cannot verify the linkage answering for $runner_dir, $lk_no"
+            lk_owner=$(CDPATH='' cd -- "$lk_gd" && CDPATH='' cd -- "$(dirname -- "$lk_back")" && pwd -P && echo x) \
+              || die "$lk_gd/gitdir names a directory that does not resolve — cannot verify the linkage answering for $runner_dir, $lk_no"
+            lk_owner=${lk_owner%?x}
+          elif [ "${lk_gd%/.git}" != "$lk_gd" ]; then
+            lk_owner=${lk_gd%/.git}
+          else
+            lk_owner=
+          fi
+          lk_top=$(git -C "$runner_dir" rev-parse --show-toplevel && echo x) \
+            || die "git will not name the working tree answering for $runner_dir, $lk_no"
+          lk_top=${lk_top%?x}
+          # shellcheck disable=SC3013 # -ef is a ksh-derived extension bash/dash/BSD sh share, base in POSIX.1-2024; reap.sh's copy is verified on dash
+          if [ -n "$lk_owner" ] && ! [ "$lk_top" -ef "$lk_owner" ]; then
+            die "the git dir answering for $runner_dir is $lk_gd, whose worktree is $lk_owner, but git answers for the working tree at $lk_top — cannot verify that linkage, $lk_no"
+          fi
+          lk_dir=$(CDPATH='' cd -- "$runner_dir" && pwd -P && echo x) \
+            || die "$runner_dir does not resolve, $lk_no"
+          lk_dir=${lk_dir%?x}
+          # shellcheck disable=SC3013 # as above
+          until [ "$lk_dir" -ef "$lk_top" ]; do
+            [ "$lk_dir" != / ] \
+              || die "git answers for the working tree at $lk_top, which does not hold $runner_dir — cannot verify the linkage answering for it, $lk_no"
+            lk_dir=${lk_dir%/*}
+            [ -n "$lk_dir" ] || lk_dir=/
+          done
+          ;;
         # Anything else is git unable to answer at all — a corrupted or
         # locked index, a permission fault — and folding that into "untracked"
         # is the exact silent clobber #1262 exists to refuse.
