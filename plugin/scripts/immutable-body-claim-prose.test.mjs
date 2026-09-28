@@ -334,6 +334,44 @@ test("both hand-over enumerations name this rule — a relayed list carries only
   );
 });
 
+test("both hand-over enumerations name the literal-text -F rule too — #1087 earns it the list's own criterion", () => {
+  // #1087, follow-up (#2109). The rule the paragraph below states in full —
+  // "A settling command over literal text uses `grep -F`, and its zero
+  // counts only after the same command finds a line known to match" —
+  // reached neither enumeration when #2104 shipped it: before this test
+  // existed, `grep -ciF -- '-F'` over either slice returned 0.
+  //
+  // The "Two of the rules above" list earns a new member by the SAME
+  // criterion it already states for its other members: a measured incident.
+  // #1087 is that incident here, and it fired TWICE in one run — two
+  // members, two different literal patterns, each read as a regex, each
+  // answering the benign zero — the same shape the list's own opening
+  // paragraph cites for #756/#768.
+  assert.match(
+    rule(),
+    phrase("a settling command over literal text uses `grep -F`"),
+    "the hand-over list no longer tells an implementer that literal text is grepped with -F",
+  );
+  assert.match(
+    rule(),
+    phrase("its zero counts only after the same command, with the same flags, finds a line known to match"),
+    "the hand-over list no longer requires a zero to be checked against a known match before it is trusted",
+  );
+  const phase0 = flatten(
+    between(RUN_TEAM, PHASE0_FROM, PHASE0_TO, "the phase-0 hand-over enumeration"),
+  );
+  assert.match(
+    phase0,
+    phrase("literal text grepped with `-F`"),
+    "the phase-0 summary no longer tells the implementer that literal text is grepped with -F",
+  );
+  assert.match(
+    phase0,
+    phrase("its zero trusted only after the same command, with the same flags, finds a known match"),
+    "the phase-0 summary lost the positive-control half of the -F rule",
+  );
+});
+
 test("a rewrapped rule still matches — these pins refuse drift, not reflow", () => {
   // The ACCEPT side. Re-wrapping this paragraph is not drift, and a pin that
   // reddened on it would be deleted by the next person who reflowed the file.
@@ -366,4 +404,6 @@ test("a rewrapped rule still matches — these pins refuse drift, not reflow", (
   assert.match(flat, phrase("the command goes inline, beside the claim"));
   assert.match(flat, phrase("that answers which ones depend on its contents"));
   assert.match(flat, phrase("A zero or an absence counts only after the same command, with the same flags, finds a line known to match"));
+  assert.match(flat, phrase("a settling command over literal text uses `grep -F`"));
+  assert.match(flat, phrase("its zero counts only after the same command, with the same flags, finds a line known to match"));
 });

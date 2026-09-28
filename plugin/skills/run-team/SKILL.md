@@ -595,8 +595,10 @@ terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
    earns its read: it selects the **correction-ticket discipline** phase 2
    hands the implementer (settle every restated claim against the tree, keep
    the diff to the ticket's stated size, no positional references, never a
-   count in prose, and a settling command re-run and written inline for every
-   claim that goes into the commit or PR body), it partitions
+   count in prose, a settling command re-run and written inline for every
+   claim that goes into the commit or PR body, and literal text grepped with
+   `-F`, its zero trusted only after the same command, with the same flags,
+   finds a known match), it partitions
    `docs/metrics/tier-outcomes.tsv`, and it is what any future tier
    control would be drawn from. A row with no class is still `class=unknown`,
    never a guess.
@@ -2597,9 +2599,13 @@ count is false the moment the next commit lands, and #768 falsified two of them
 of the 85 cases`, measured 81 of 91) in a file whose own header records having
 shipped a stale count once already. The immutable-body rule earns the same
 place: **every claim a commit body or a PR body asserts needs its settling
-command re-run at the commit that ships it, and written inline beside it.** A
-relayed enumeration delivers only what it names, so this list is the whole of
-what a controller hands over, never a preface to it.
+command re-run at the commit that ships it, and written inline beside it.**
+The literal-text `-F` rule earns the same place: **a settling command over
+literal text uses `grep -F`, and its zero counts only after the same
+command, with the same flags, finds a line known to match.** Measured on
+#1087, the same false zero fired twice in one run. A relayed enumeration
+delivers only what it names, so this list is the whole of what a controller
+hands over, never a preface to it.
 
 **One more rule, and the one the diff cannot carry: a claim written into a
 commit body or a PR body needs its settling command re-run at the commit that
