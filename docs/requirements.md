@@ -315,10 +315,13 @@ Write tickets so the member can act without you:
 
 ### 3.4 The one human touchpoint: `ready-to-merge` — HARD
 
-- Only a **maintainer** applies `ready-to-merge`, after reading the fleet's
-  review. `required_approving_review_count: 0` means the label *is* the
-  approval — treat it with that weight. The fleet never adds it and refuses
-  to if asked; it only reports "this PR looks ready".
+- `ready-to-merge` is added by a **reviewer** — a finisher, or a reviewer
+  running `review-and-fix` standalone, once diff-check is green, deferrals
+  are filed, and exactly one release label is present — never by an
+  implementer or fix-applier signing off its own ticket work. A human
+  maintainer may add or remove it directly too, at any time.
+  `required_approving_review_count: 0` means this label *is* the approval —
+  treat it with that weight.
 - The label binds to the **head SHA at the time it was applied**. Any push
   after that — including your own rebase — makes the bot stop with
   `head-moved-after-label-#<pr>` and leave the label in place. Re-review, then
