@@ -478,6 +478,85 @@ test("gather: a PR row with no number is dropped, loudly, not placed as undefine
   assert.match(r.stderr, /gh pr list: dropping row with no usable number/);
 });
 
+// #2108. gh stops a `list` read at `--limit` — 30 when the flag is absent —
+// with exit 0 and no warning, so this stub does the same: it holds `issues`
+// ready-for-agent tickets and `prs` open PRs and hands back at most the limit
+// it was asked for. A gather() that dropped its --limit would be cut at 30
+// here exactly as it would be against GitHub, and one that stopped checking
+// for a full page would render the cut list as the whole one. The driver runs
+// the real computeBoard() over gather()'s answer: the board is the subject.
+function gatherCapped({ issues, prs }) {
+  const cwd = mkdtempSync(join(tmpdir(), "board-gather-capped-"));
+  const bin = mkdtempSync(join(tmpdir(), "board-gather-capped-bin-"));
+  const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-capped-scripts-"));
+  writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
+  writeFileSync(join(scriptDir, "ledger.mjs"),
+    `process.stdout.write(${JSON.stringify(JSON.stringify({ rows: [], filed: [], ruled: [] }))});\n`);
+  writeFileSync(join(bin, "gh"), `#!/usr/bin/env node
+const a = process.argv.slice(2);
+const i = a.indexOf("--limit");
+const limit = i === -1 ? 30 : Number(a[i + 1]);
+const rows = (n, row) => Array.from({ length: Math.min(n, limit) }, (_, k) => row(k + 1));
+if (a[0] === "issue" && a[1] === "list") process.stdout.write(JSON.stringify(rows(${issues}, (n) => ({ number: n, title: "t", labels: [] }))));
+else if (a[0] === "pr" && a[1] === "list") process.stdout.write(JSON.stringify(rows(${prs}, (n) => ({ number: 1000 + n, state: "OPEN", title: "t", labels: [] }))));
+else process.exit(1);
+`);
+  chmodSync(join(bin, "gh"), 0o755);
+  const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
+    const { computeBoard } = await import(${JSON.stringify(fileURLToPath(new URL("./compute-board.mjs", import.meta.url)))});
+    const inputs = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "ledger.md"))},
+                       prevFile: null, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
+    const b = computeBoard(inputs);
+    console.log(JSON.stringify({ prs: inputs.prs.length, poolCards: b.tickets.filter((t) => t.column === "POOL").length,
+      queue: b.queue, capNotice: b.capNotice }));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", driver], {
+    cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  return JSON.parse(r.stdout.trim().split("\n").pop());
+}
+
+test("#2108: a pool read that fills its --limit renders as a floor and says so, never as an exact count", () => {
+  const b = gatherCapped({ issues: 150, prs: 0 });
+  assert.equal(b.poolCards, 100, "gather() no longer asks for 100 ready-for-agent tickets");
+  assert.equal(b.queue.pool, "100+", "a full page of the pool read was rendered as the exact pool size");
+  assert.equal(b.queue.supply, "100+");
+  assert.match(b.capNotice ?? "", /ready-for-agent read hit its --limit/);
+  assert.doesNotMatch(b.capNotice, /open-PR/, "a pool cap was reported as an open-PR cap too");
+});
+
+test("#2108: an open-PR read that fills its --limit is disclosed on the board", () => {
+  const b = gatherCapped({ issues: 0, prs: 150 });
+  assert.equal(b.prs, 100, "gather() no longer asks for 100 open PRs");
+  assert.match(b.capNotice ?? "", /open-PR read hit its --limit/);
+  assert.doesNotMatch(b.capNotice, /ready-for-agent/, "an open-PR cap was reported as a pool cap too");
+  assert.equal(b.queue.pool, 0, "an open-PR cap turned the pool count into a floor");
+});
+
+test("#2108: reads one short of their limit, and past gh's bare default of 30, are exact and silent", () => {
+  // The input the guard must ACCEPT: 99 is a complete answer, not a capped
+  // one, and 35 is more than gh returns when `--limit` goes missing.
+  const b = gatherCapped({ issues: 99, prs: 35 });
+  assert.equal(b.queue.pool, 99);
+  assert.equal(b.prs, 35, "the open-PR read fell back to gh's default of 30");
+  assert.equal(b.capNotice, null, "a read under its limit raised the capped-read notice");
+});
+
+test("#2108: a pool read AND an open-PR read that both fill their --limit are both disclosed", () => {
+  const b = gatherCapped({ issues: 150, prs: 150 });
+  assert.equal(b.queue.pool, "100+", "a simultaneous pool cap was not rendered as a floor");
+  assert.equal(b.prs, 100, "gather() no longer asks for 100 open PRs");
+  assert.match(b.capNotice ?? "", /ready-for-agent read hit its --limit/, "a simultaneous pool cap was not disclosed");
+  assert.match(b.capNotice ?? "", /open-PR read hit its --limit/, "a simultaneous open-PR cap was not disclosed");
+  // The two substring matches above would both still pass if the two phrases
+  // ran together with no separator, or a different one, between them — this
+  // pins the exact joined string so that gap cannot hide behind them.
+  assert.equal(b.capNotice,
+    "the ready-for-agent read hit its --limit, so POOL may be missing tickets" +
+    "; the open-PR read hit its --limit, so a PR past it shows REVIEW with CI unknown",
+    "capNotice must join simultaneous cap messages with '; ', not run them together or use a different separator");
+});
+
 // #1820 read MERGED from gh; #1840 scoped that read to the ledger's own row
 // PRs. One batched `gh api graphql` query asks about exactly the row PRs that
 // need it — absent from the open list, carrying no `MERGED <sha>` token, and

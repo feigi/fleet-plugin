@@ -421,6 +421,80 @@ fi
   }
 });
 
+// #2108. A stub `gh` that stops at `--limit` the way gh does — 30 when the
+// flag is absent, exit 0, no warning — holding `totals[k]` labelled PRs
+// (numbered from 1) on its k-th call and the last entry thereafter.
+const cappingGh = (totals) =>
+  stub(
+    "gh",
+    `#!/bin/sh
+c="$CALLS/n"
+n=$(cat "$c" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" >"$c"
+limit=30
+while [ $# -gt 0 ]; do [ "$1" = --limit ] && limit=$2; shift; done
+total=$(echo "${totals.join(" ")}" | awk -v k="$n" '{ print (k <= NF) ? $k : $NF }')
+i=0; while [ "$i" -lt "$total" ] && [ "$i" -lt "$limit" ]; do i=$((i+1)); echo "$i"; done
+`,
+  );
+
+test("#2108: a poll that fills its --limit says so once, clears once, and fires no label event for it", (t) => {
+  if (!SHELLS.length) return t.skip("no shell on PATH");
+  // Two runs. 250 labelled on the seed and tick 1, then 5: the cap sustained
+  // across polls must still speak once. 250 on the seed alone, then 5: a
+  // monitor that arms on a capped seed must say so at arming, not wait for a
+  // capped tick that never comes. Every one of the 5 is already in `seen`, so
+  // the only lines either run may print are the cap's own pair.
+  for (const [totals, ticks] of [[[250, 250, 5], 3], [[250, 5], 1]]) {
+    cappingGh(totals);
+    try {
+      for (const shell of SHELLS) {
+        const lines = runMonitor(shell, MONITOR, ticks).split("\n");
+        const said = (s) => lines.filter((l) => l.includes(s)).length;
+        const run = `${shell}, totals ${totals.join("/")}`;
+        assert.equal(said("hit its --limit 200"), 1, `${run}: a full page must be reported exactly once:\n${lines.join("\n")}`);
+        assert.equal(said("under its --limit 200"), 1, `${run}: a poll back under the cap must clear the latch exactly once:\n${lines.join("\n")}`);
+        assert.deepEqual(events(lines.join("\n")), [], `${run}: the cap's lines were read as label events`);
+      }
+    } finally {
+      restoreGh();
+    }
+  }
+});
+
+test("#2108: a labelled set past gh's bare default of 30 is read whole, and says nothing about a cap", (t) => {
+  if (!SHELLS.length) return t.skip("no shell on PATH");
+  // The input the guard must ACCEPT. 35 seeded, then #36 labelled: a poll cut
+  // at 30 would never see #36, and 36 is far under the explicit limit.
+  cappingGh([35, 36]);
+  try {
+    for (const shell of SHELLS) {
+      const out = runMonitor(shell, MONITOR, 2);
+      assert.deepEqual(events(out), ["ready-to-merge label added: PR #36"], `${shell}: the poll no longer reads past gh's default of 30:\n${out}`);
+      assert.doesNotMatch(out, /--limit/, `${shell}: a poll under its limit reported a cap:\n${out}`);
+    }
+  } finally {
+    restoreGh();
+  }
+});
+
+test("#2108: a poll one short of its explicit --limit is read whole, and says nothing about a cap", (t) => {
+  if (!SHELLS.length) return t.skip("no shell on PATH");
+  // The input the guard must ACCEPT: 199 is a whole answer, not a capped one,
+  // and every one of them fires its own label event — unlike the 35/36 case
+  // above, which only clears gh's bare default of 30 and never approaches the
+  // 200 this monitor actually asks for.
+  cappingGh([0, 199]);
+  try {
+    for (const shell of SHELLS) {
+      const out = runMonitor(shell, MONITOR, 2);
+      assert.equal(events(out).length, 199, `${shell}: a poll one short of its limit reported fewer label events than PRs returned:\n${out}`);
+      assert.doesNotMatch(out, /--limit/, `${shell}: a poll under its limit reported a cap:\n${out}`);
+    }
+  } finally {
+    restoreGh();
+  }
+});
+
 test("run-merge-bot.md's bounded poll is left alone — it is not an instance", () => {
   // The ticket's filer retracted the claim that step 1's poll was a second
   // instance of this bug, and a later reader "fixing" it would be acting on the

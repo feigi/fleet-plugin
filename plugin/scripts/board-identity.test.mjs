@@ -405,3 +405,25 @@ test("card still builds its PR link from the model's repoUrl, not from the repo 
   assert.match(card[0], /a\.href\s*=\s*\(?\s*repoUrl\s*\)?\s*\?\s*repoUrl\s*\+/,
     "the PR link must be built from repoUrl; the repo name is not a URL");
 });
+
+// #2108 review: capMsg used to be reachable only through the single-slot
+// stale-banner element, behind a stale/stall/ledger priority chain — a
+// co-occurring higher-priority message masked it completely, on a tick that
+// left it exactly as unreported as the pre-#2108 silent truncation it exists
+// to disclose. The footer does not compete for that slot.
+test("#2108: a capped-read notice reaches the footer even when a higher-priority banner wins the single slot", () => {
+  const { document, render } = renderHarness();
+  const banner = document.getElementById("stale-banner");
+  const foot = document.getElementById("footer");
+  const capNotice = "the open-PR read hit its --limit, so a PR past it shows REVIEW with CI unknown";
+
+  render({ ...baseModel(), capNotice });
+  assert.match(banner.textContent, /open-PR read hit its --limit/, "capMsg alone must still win the empty banner slot");
+  assert.ok(foot.children.some((c) => c.textContent?.includes("open-PR read hit its --limit")),
+    "capMsg must also reach the footer when nothing else is competing for the banner");
+
+  render({ ...baseModel(), ledgerState: "unread", capNotice });
+  assert.match(banner.textContent, /ledger not read/, "the higher-priority ledger banner must still win the single slot");
+  assert.ok(foot.children.some((c) => c.textContent?.includes("open-PR read hit its --limit")),
+    "a co-occurring ledger banner must not silently drop the cap notice — it has no other surface once the banner slot is taken");
+});

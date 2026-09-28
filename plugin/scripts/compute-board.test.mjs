@@ -345,6 +345,16 @@ test("computeBoard: a failed ledger or pool read reports `unknown`, never a fals
   assert.equal(emptyOk.liveness.claimed, 0);
 });
 
+test("#2108: a capped pool read reaches the stall line as a floor, the same value the footer shows", () => {
+  // stall() is handed the model's pool, so the line cannot print a bare count
+  // the footer beside it has already retracted with a `+`.
+  const stale = { at: NOW - 90 * 60_000, interval: 1200, stopped: "" };
+  const b = computeBoard({ ...livenessInputs(stale), poolCapped: true });
+  assert.equal(b.queue.pool, "1+");
+  assert.equal(b.liveness.supply, "1+");
+  assert.match(b.liveness.text, /pool supply 1\+/);
+});
+
 test("computeBoard: a healthy or absent beat omits the surface rather than rendering an empty one", () => {
   // Null, not an `{ ok: true }`-shaped nothing: the page hides the banner on
   // null, and a banner that fires on every healthy tick is a banner the

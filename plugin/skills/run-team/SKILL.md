@@ -1673,7 +1673,8 @@ PRs**, because the two causes live at different levels — the budget is one
 account, the payload is one PR:
 
 ```sh
-budget_out= list_out= blind=                 # seed the latches: set -u reads each below before tick 1 ever assigns one
+budget_out= list_out= cap_out= blind=        # seed the latches: set -u reads each below before tick 1 ever assigns one
+pr_cap=200                                   # the open-PR read's --limit; gh stops there with exit 0 and no warning
 while :; do                                   # one tick
   rl=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo ERR)
   case "$rl" in ''|*[!0-9]*) rl=ERR;; esac    # a non-numeric read is an outage, not a budget
@@ -1687,7 +1688,7 @@ while :; do                                   # one tick
       echo "WATCHER RECOVERED: core budget=$rl — CI polling resumed"
       budget_out=
     fi
-    prs=$(gh pr list --state open --json number --jq '.[].number' 2>/dev/null) || prs=ERR
+    prs=$(gh pr list --state open --limit "$pr_cap" --json number --jq '.[].number' 2>/dev/null) || prs=ERR
     if [ "$prs" = ERR ]; then
       if [ -z "$list_out" ]; then             # global latch: this cause is account-level too
         echo "WATCHER DEGRADED: cannot list open PRs — CI polling paused, silence is NOT green"
@@ -1697,6 +1698,15 @@ while :; do                                   # one tick
       if [ -n "$list_out" ]; then
         echo "WATCHER RECOVERED: open-PR list readable again — CI polling resumed"
         list_out=
+      fi
+      if [ "$(printf '%s\n' "$prs" | grep -c .)" -ge "$pr_cap" ]; then
+        if [ -z "$cap_out" ]; then            # global latch: a full page may have been cut there
+          echo "WATCHER DEGRADED: open-PR list hit its --limit $pr_cap — PRs past it are NOT watched, silence on them is NOT green"
+          cap_out=1
+        fi
+      elif [ -n "$cap_out" ]; then
+        echo "WATCHER RECOVERED: open-PR list under its --limit $pr_cap — every open PR watched again"
+        cap_out=
       fi
       for pr in $(printf '%s\n' "$prs"); do   # inline $(...): `for pr in $prs` is ONE iteration under zsh
         st=$(~/.fleet/bin/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
@@ -1737,8 +1747,8 @@ as a CI reading. Require the field, then compare it.
 never one per tick. An unlatched line at a 120s poll gets the Monitor
 auto-stopped for volume during even a two-minute outage, reintroducing the same
 blindness by another route. **Latch each cause at the level its cause lives
-at**: the budget and the open-PR list are one global flag each — both fail at the
-account level — but the payload latch is keyed by PR, and a
+at**: the budget, the open-PR list and that list's cap are one global flag
+each — all three are account-level — but the payload latch is keyed by PR, and a
 shared scalar for those is an unlatched line wearing a latch's clothes — one
 persistently blind PR alongside one healthy PR re-clears the flag on every tick,
 emitting a DEGRADED and a false RECOVERED pair forever. The recovery line is
@@ -1750,8 +1760,8 @@ watcher from a dead one.
 inside the per-PR pass multiplies by the number of open PRs (8 open PRs → 960s
 of pause per tick, against the 24s outage reset measured below), and a degraded
 branch that `continue`s the *outer* loop skips the tail sleep and busy-spins
-probe pairs during exactly the outage it is reporting. All three degraded
-branches above fall through to the same single sleep instead.
+probe pairs during exactly the outage it is reporting. Every degraded
+branch above falls through to the same single sleep instead.
 
 **Guard every probe, not just the ones with a verdict field.** The block makes
 *three* API calls, and the third — `gh pr list` — is the one that looks like
@@ -1768,6 +1778,17 @@ applies to **every** loop in this block, the `blind`-latch removal included:
 under a bare `for b in $blind` a recovered PR never leaves the list and the block
 emits a fresh RECOVERED every tick thereafter — the per-tick volume the latch
 exists to prevent, wearing a latch's clothes again.
+
+**A readable list can still be a short one.** `gh pr list` stops at its
+`--limit` — 30 when the flag is absent — with exit 0 and no warning, so a list
+that fills its limit reads exactly like one that happens to be that long, and
+every open PR past it goes unwatched without a line. Pass an explicit `--limit`
+(`pr_cap`: one variable for the flag and the check, so the two cannot drift)
+and treat a full page as its own degraded cause — the "no silent caps" rule
+`candidates.mjs`'s `refuseIfCapped()` and `fleet-tick.mjs`'s `PR_LIMIT` already
+enforce. It latches globally like the list failure but does not pause polling:
+the PRs it did return are real, so the pass still watches them, and the
+DEGRADED line names the rest as unwatched until a pass comes back under the cap.
 
 **Judge `ci-state` on its payload, never its exit code** — the same rule as
 `merge-gate.mjs` applies on the merge path, applied to the watcher. `not-green` is an

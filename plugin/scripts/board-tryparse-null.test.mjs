@@ -4,7 +4,7 @@
 // answer — the shape #1170 fixed one function over, in `mapCi`.
 //
 // That gap does not crash either of tryParse's two current callers today:
-// withNumber's own array guard already rejects a null `rows` at the ghRows
+// withNumber's own array guard already rejects a null `rows` at the open-PR read's
 // call site, and gather()'s ledger branch already treats a null parse as
 // falsy. This guard is defense in depth, not a crash fix — what it actually
 // changes is (a) one named "payload is JSON null" stderr line in place of a
