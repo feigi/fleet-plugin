@@ -370,9 +370,34 @@ net_git() {
   # split a path containing spaces into a program and its arguments.
   [ -n "$net_base_ssh" ] || net_base_ssh="${GIT_SSH:+\"$GIT_SSH\"}"
   [ -n "$net_base_ssh" ] || net_base_ssh=ssh
+  # `-c maintenance.auto=false`: `git fetch --prune`, once it updates refs,
+  # spawns `git maintenance run --auto --quiet --detach` as a side effect —
+  # measured via `GIT_TRACE=1` (git 2.55.0) on a bare `fetch --prune`, no
+  # wrapper involved. One of that detached run's tasks is `git worktree
+  # prune --expire 3.months.ago`, and a linked worktree whose `gitdir`
+  # pointer FILE is itself missing or unreadable — as opposed to the
+  # worktree directory, HEAD, or anything else in the entry — is pruned on
+  # sight: the 3-month floor bounds staleness git can measure from the
+  # entry's own files, and a missing pointer gives it nothing to measure,
+  # so the floor does not apply. Measured (#2078): a fixture with exactly
+  # that fault, fetched through this function unmodified, loses the
+  # registry entry between the fetch returning and the caller's own next
+  # read of it — a worktree whose fault is seconds old, not months.
+  # reap.sh's registry recount (`count_registry`/`count_linked`,
+  # `wt_registry_why`) reads the very corruption this detached run erases:
+  # with the entry gone, the registry count drops to match the listing's
+  # linked count, in lockstep, and the guard a stray `git worktree add`
+  # mid-run is built to catch sees no mismatch to refuse on — both branches
+  # in that fixture's pass were wrongly reaped. A bare foreground fetch
+  # usually wins this race (the detached child has not run yet by the time
+  # the caller reads the registry); this function's own extra fork/wait
+  # overhead was measured to flip the outcome reliably. `maintenance.auto`
+  # is fetch's own config for the hook that spawns the detached run — the
+  # narrowest knob that stops it without touching `--prune`'s unrelated,
+  # still-wanted job of dropping stale remote-tracking refs.
   GIT_TERMINAL_PROMPT=0 \
   GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-$net_base_ssh} -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2" \
-  git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@" &
+  git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 -c maintenance.auto=false "$@" &
   net_pid=$!
   { sleep "$net_budget_s"; printf 'fired ' >>"$net_wdfile" || :; net_kill_tree "$net_pid"; } >/dev/null 2>&1 &
   net_wd_pid=$!

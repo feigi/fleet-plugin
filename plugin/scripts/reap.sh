@@ -708,6 +708,134 @@ wt_reg_state() {
   fi
 }
 
+# The registry cross-check (#2078). The branch lookup below matches a
+# `branch refs/heads/<b>` line, and an empty match authorizes `git branch -D`.
+# Measured, git 2.50.1 (Apple Git-155): eight real admin-directory faults leave
+# `git worktree list --porcelain -z` at rc 0 — so the #622 guard below never
+# fires — while the held entry either loses its `branch` line or leaves the
+# listing entirely: `HEAD` garbage, empty, missing or chmod 000; `gitdir`
+# missing or chmod 000; the admin directory chmod 000; `.git/worktrees`
+# replaced by a file. `$wt` came back empty and `git branch -D` deleted a
+# branch a live worktree holds, because git's own "used by worktree" refusal
+# reads the same admin state and is fooled the same way. No backstop exists
+# past this point, so the listing has to be checked against the registry
+# before its silence is read as "no worktree".
+#
+# `wt_registry_why` sets `reg_why` and returns 1 when the listing cannot be
+# trusted. Two checks, because the fault families differ in what they leave:
+#
+#   (a) COUNT. The `gitdir`/admin-dir/registry-file faults DROP the entry, so
+#   fewer linked worktrees are listed than are registered under
+#   `<git-common-dir>/worktrees/`. `count_registry` and `count_linked` mirror
+#   inflight.sh's pair of the same names (inflight.sh `count_registry`,
+#   `count_linked`, the recount at `[ "$linked" -eq "$registered" ] || {
+#   count_registry && count_linked; }` and the two direction-named refusals
+#   after it) — the stray-`mkdir` skip, the count-what-`ls`-cannot-read rule
+#   (#697), the `[ -r ] && [ -x ]` unreadable-registry arm and the `-ge 1`
+#   floor (#699) all carry that copy's measurements. One tightening: `-d` joins
+#   the unreadable arm, because a registry replaced by a mode-755 FILE passes
+#   `-r` and `-x`, globs to nothing, counts 0 against git's 0, and agrees.
+#
+#   (b) NULL HEAD. The `HEAD` faults keep the entry, so the counts AGREE and
+#   (a) sees nothing: git lists it with the null object id and no `branch`
+#   line. A LINKED entry in that state is a worktree that held something git
+#   can no longer name. An unborn branch carries a null id too, but WITH its
+#   `branch` line, so it is not this; the main checkout (first record, and
+#   the only one that can be `bare`) is excluded, and a missing `HEAD` line
+#   reads as null, the same rule the branchless sweep's null-object-id arm
+#   applies. That arm stays as it is: it reports the worktree, while this one
+#   protects the branches. No `/^bare$/` rule here, deliberately: the #993
+#   fixture selects that sweep's awk by it, and a second carrier would shim
+#   this one too.
+#
+# Either finding keeps the branch under lookup, whichever it is: a dropped or
+# nameless entry says nothing about WHICH branch it held, so a healthy branch
+# with no worktree is exactly as unclearable as the tampered one. The check
+# runs on the listing each branch's own lookup reads — re-read per branch, as
+# the #622 comment below records — so a standing fault keeps every [gone]
+# branch in the pass, and a transient one keeps only the branches whose
+# listing it touched (the #622 transient fixture pins that granularity for
+# the listing failure; this guard follows it rather than latching).
+#
+# Recount before refusing, exactly as inflight.sh does it (#1408, #1421): the
+# registry scan and git's listing are two reads at two instants, and a
+# sibling's `worktree add`/`remove` landing between them makes the counts
+# disagree with nothing wrong. Same order as that copy, first pair and recount
+# alike: `count_registry` FIRST, git's listing SECOND — the loop takes the
+# first registry count just ahead of the #622 guard's `wt_listing`, which is
+# the first listing, so no extra listing is read per branch. A mutation landing
+# between the first count and the listing is already reflected in the listing,
+# so the recount's registry scan agrees with it; the recount re-takes BOTH, in
+# the same order, and re-reads the listing through `wt_listing`, so `$wt_list`
+# — which the lookup then scans — is the very listing the recount validated.
+# inflight.sh's copy recounts once (its `[ "$linked" -eq "$registered" ] ||
+# { count_registry && count_linked; }`); release-ticket.sh's bounds the same
+# loop at two passes (#1424) for a third-mutation window. This copy takes
+# inflight.sh's single recount: a false refusal here costs one pass's wait,
+# never a deletion, and a genuinely dropped entry is a standing state that
+# survives every recount.
+wtroot=
+count_registry() {
+  registered=0
+  if [ -z "$wtroot" ]; then
+    wt_common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
+      { reg_why="could not resolve the git common directory to read the worktree registry"; return 1; }
+    wtroot="$wt_common/worktrees"
+  fi
+  [ -e "$wtroot" ] || return 0
+  [ -d "$wtroot" ] && [ -r "$wtroot" ] && [ -x "$wtroot" ] ||
+    { reg_why="worktree registry $wtroot could not be read"; return 1; }
+  for entry in "$wtroot"/*; do
+    [ -d "$entry" ] || continue
+    if contents=$(ls -A "$entry" 2>/dev/null) && [ -z "$contents" ]; then continue; fi
+    registered=$((registered + 1))
+  done
+  return 0
+}
+
+# Counts `$wt_list` as it stands; the caller decides whether to re-read it.
+count_linked() {
+  listed=$(printf '%s\n' "$wt_list" | awk '/^worktree /{c++} END{print c+0}') ||
+    { reg_why="could not count the worktrees git listed"; return 1; }
+  [ "$listed" -ge 1 ] ||
+    { reg_why="git listed no worktrees at all — not even the main checkout"; return 1; }
+  linked=$((listed - 1))
+}
+
+# Reads the first `count_registry` the loop took ahead of the listing: an
+# unreadable registry there has already set `reg_why`.
+wt_registry_why() {
+  [ -z "$reg_why" ] || return 1
+  count_linked || return 1
+  if [ "$linked" -ne "$registered" ]; then
+    count_registry || return 1
+    wt_listing ||
+      { reg_why="the recount could not re-read the worktree listing: $(printf '%s' "$wt_err" | tr '\n' ' ')"; return 1; }
+    count_linked || return 1
+  fi
+  if [ "$linked" -lt "$registered" ]; then
+    reg_why="git listed $linked linked worktrees for $registered registry entries in $wtroot — the listing dropped an entry, and a dropped entry names no branch"
+    return 1
+  elif [ "$linked" -gt "$registered" ]; then
+    reg_why="git listed $linked linked worktrees but only $registered registry entries were counted in $wtroot — the registry read missed entries git can see"
+    return 1
+  fi
+  if ! nameless=$(printf '%s\n' "$wt_list" | awk '
+      function flush() { if (n > 1 && !br && h !~ /[^0]/ && hit == "") hit = w }
+      /^worktree /{ flush(); n++; w = substr($0, 10); h = ""; br = 0; next }
+      /^HEAD /{ h = substr($0, 6) }
+      /^branch /{ br = 1 }
+      END{ flush(); print hit }'); then
+    reg_why="could not scan the worktree listing for a linked worktree with a null HEAD"
+    return 1
+  fi
+  if [ -n "$nameless" ]; then
+    reg_why="git listed a linked worktree with a null HEAD and no branch line ($nameless) — the entry no longer says which branch it holds"
+    return 1
+  fi
+  return 0
+}
+
 # %(upstream:track) emits exactly [gone] as its own field — nothing to
 # pattern-match, and no -v/-vv trap.
 #
@@ -834,6 +962,13 @@ for b in $gone_branches; do
     continue
   fi
 
+  # The registry is counted BEFORE the listing below is read — inflight.sh's
+  # order, which `wt_registry_why`'s recount comment explains. A registry that
+  # cannot be read sets `reg_why` here and is refused after the #622 guard, so
+  # a listing failure still reports as one. #2078
+  reg_why=
+  count_registry || :
+
   # The path is the whole rest of the line, never awk's $2: `worktree list
   # --porcelain` prints it raw, so a checkout living under a directory with a
   # space in it — ordinary on macOS — was otherwise truncated at the first
@@ -861,6 +996,13 @@ for b in $gone_branches; do
   # and the same reason the listing failure above keeps. #789
   if ! wt_listing; then
     keep "$b" "worktree lookup failed — cannot tell whether $b has a worktree; kept until a pass that can read the registry: $(printf '%s' "$wt_err" | tr '\n' ' ')"
+    continue
+  fi
+  # A listing that READ is not yet a listing that can be trusted: see
+  # `wt_registry_why` above. After the #622 guard, before the lookup, so the
+  # lookup scans the listing this check validated (a recount re-reads it). #2078
+  if ! wt_registry_why; then
+    keep "$b" "worktree registry inconsistent — $reg_why; every [gone] branch is kept until a pass that reads a consistent registry"
     continue
   fi
   if ! wt=$(printf '%s\n' "$wt_list" |
