@@ -126,7 +126,7 @@ shell code. `claim-ticket.sh` **refuses the claim** unless `origin/main` has a
 `package.json` with `scripts.test` or a tracked file matching
 `\.(test|spec)\.[cm]?[jt]sx?$` (`plugin/scripts/derive-testcmd.sh:141-194`),
 and an install it can derive from `package-lock.json`/`pnpm-lock.yaml`/`yarn.lock`
-— or no lockfile with zero declared dependencies (`claim-ticket.sh:226-271`).
+— or no lockfile with zero declared dependencies (`claim-ticket.sh:244-290`).
 A Maven repo is refused outright (measured 2026-09-28); the interim workaround
 is a one-line `package.json` `{"scripts":{"test":"<your command>"}}` with no
 dependencies, which needs `npm` on the fleet machine and is untested.
