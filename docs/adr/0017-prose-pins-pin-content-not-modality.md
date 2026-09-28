@@ -2,8 +2,9 @@
 
 **Status:** Accepted. Ruled 2026-09-27 on #1111 by the maintainer, from a
 grilling session, against the measurements below. The ruling named this ADR
-"0014"; that number and the two after it were taken by other ADRs before it
-landed, so it is recorded here as 0017.
+"0014"; by the time it landed, 0014 and 0015 had already landed under other
+ADRs and 0016 was reserved by PR #2136, open at the time, so it is recorded
+here as 0017.
 
 ## Context
 
@@ -54,14 +55,24 @@ hedge mutant *and* survive a pure reflow, a rebold and a sentence reorder.
    `advisory|at your discretion|if you like` is the next reword away from
    green, which is exactly what #476 measured.
 3. **An obligation that must not soften into advice gets a code carrier.** A
-   **code carrier** is a script that computes the verdict, plus a
-   `fleet-tick` row the controller acts on when that verdict needs action —
-   the shape `HOLD (tier mismatch …)` already has: `tier-check.mjs --batch`
-   computes the mismatch and exits non-zero, the ledger settles the member
-   `tier-mismatch`, and `plugin/scripts/fleet-tick.mjs` turns that ledger
-   outcome into a row carrying `acts: true`. A prose sentence can be reworded
-   into advice; an exit code and the tick row it drives cannot be reworded at
-   all.
+   **code carrier** is a script whose verdict is consumed as code — an exit
+   code, a written outcome field, or a state file read at dispatch — never
+   relayed onward by a human reading prose. A `fleet-tick` row may display
+   that verdict once it exists, carrying `acts: true` when the row itself is
+   the thing acted on, or `acts: false` when the hardness already fired
+   upstream, before the row was drawn. `tier-check.mjs --batch` computes the
+   mismatch and exits non-zero — that half is hard — but nothing in
+   `tier-check.mjs` writes the verdict onward: it never calls `ledger.mjs
+   settle`, so the `HOLD (tier mismatch …)` row `fleet-tick.mjs` builds from
+   ledger `outcome === "tier-mismatch"` exists only because
+   `plugin/skills/run-team/SKILL.md` instructs the controller to run
+   `ledger.mjs settle impl-<N> tier-mismatch` by hand after the exit code
+   fires. That settle step is itself prose and can be reworded or skipped
+   like any hedge this ADR already measured. The shape this ADR asks for is
+   #2037's successor guard: its router script reads
+   `.fleet/cost-guard.json` at dispatch, so the verdict never leaves code,
+   and the `fleet-tick` `router` row it adds is `acts: false` — a display of
+   a decision already made, not the thing enforcing it.
 
 This ADR chooses a mechanism. It implements none.
 
