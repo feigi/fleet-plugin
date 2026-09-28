@@ -338,8 +338,12 @@ test("both hand-over enumerations name the literal-text -F rule too — #1087 ea
   // #1087, follow-up (#2109). The rule the paragraph below states in full —
   // "A settling command over literal text uses `grep -F`, and its zero
   // counts only after the same command finds a line known to match" —
-  // reached neither enumeration when #2104 shipped it: before this test
-  // existed, `grep -ciF -- '-F'` over either slice returned 0.
+  // reached neither enumeration when #2104 shipped it: #2109's own
+  // `sed -n '598,608p;2565,2579p' SKILL.md | grep -cF -- '-F'` returned 0
+  // against the pre-PR tree, scoped to exactly those two enumerations. The
+  // wider rule() slice below is not 0 there — it already carries the
+  // rule's own pre-existing paragraph further down the same block, which
+  // already said `-F`.
   //
   // The "Two of the rules above" list earns a new member by the SAME
   // criterion it already states for its other members: a measured incident.
