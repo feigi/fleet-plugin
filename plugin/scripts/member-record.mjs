@@ -80,7 +80,10 @@ export function normalizeModel(raw) {
 }
 
 // A member's name is the only place its unit of work is recorded — there is
-// no dispatch sidecar at all (see ompMemberRecord).
+// no dispatch sidecar at all (see ompMemberRecord). The one exception is a
+// PR the member OPENED (#2209): an `impl-<ticket>` name can never carry it,
+// so ompMemberRecord reads it off the member's own `gh pr create` result
+// (createdPrNumbers) — this function still answers `pr: ""` for that name.
 //
 // FOUR finisher spellings are live on disk, measured 2026-08-27 across every
 // transcript: finisher-pr-<n>, finish-pr-<n>, finisher-<n>, finish-<n>. All
