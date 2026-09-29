@@ -186,18 +186,21 @@ function assertOmpShaped(d, filePath) {
 // the ledger's `impl-<N>=PR#M` settle token because that token is written by a
 // live run only: a regeneration over past sessions has the transcript and
 // nothing else, and this module stays pure over transcripts. Measured
-// 2026-09-29 across every real `~/.omp/agent/sessions/**/*.jsonl`: 409
+// 2026-09-29 across every real `~/.omp/agent/sessions/**/*.jsonl`: 443
 // transcripts printed a created PR from a `bash` toolCall whose result held
 // gh's stdout — the URL on a line of its own — then omp's "Wall time"
-// trailer. ONE (impl-1113) created its PR from `eval` instead, through a
-// Python subprocess, and stays blank: `eval` is not read, because a cell that
-// only READS transcripts (or `gh pr view`s) prints the very same URLs.
+// trailer. A create is also sometimes run via `eval` instead of `bash` —
+// measured on impl-1113 (a Python subprocess, `gh pr create` printing PR
+// #1535) — and stays blank there too: `eval` is not read, because a cell
+// that only READS transcripts (or `gh pr view`s) prints the very same URLs.
 //
 // Three filters keep a URL that is NOT a PR this member opened out:
-// - the CALL must invoke `gh pr create` (first in the command or after a
-//   shell separator, optionally through `rtk`) — a `gh pr view`/`gh pr list`
-//   result prints bare PR URLs too, and `gh pr create` quoted as text is no
-//   invocation;
+// - the CALL must invoke `gh pr create` — first in the command, after a
+//   shell separator (`;`, `&`, `|`, `(`, newline) or an `if`/`then`/`do`/`!`
+//   keyword, optionally through `rtk`/`env`/`command`/`timeout <n>`, a
+//   `NAME=value` prefix, or a path-qualified `.../gh` — a `gh pr view`/
+//   `gh pr list` result prints bare PR URLs too, and `gh pr create` quoted
+//   as text is no invocation (measured false-miss shapes: #2213 review);
 // - the URL must be a LINE of its own, the shape gh prints, never a URL
 //   inside prose;
 // - a URL right after gh's "... already exists:" refusal is skipped: that PR
@@ -205,7 +208,22 @@ function assertOmpShaped(d, filePath) {
 // `isError` is deliberately NOT a filter: a create chained before a failing
 // command (`gh pr create ... && gh pr edit --add-label x`) exits non-zero
 // having still opened the PR it printed.
-const GH_PR_CREATE_RE = /(?:^|[;&|(\n])\s*(?:rtk\s+)?gh\s+pr\s+create\b/;
+//
+// This is a text heuristic, not a shell parser, so it can also count a URL
+// that is NOT the member's own opened PR: it does not know quoting, so a
+// separator character reused inside a quoted string right before the
+// literal text `gh pr create` (e.g. `echo "a; gh pr create"`) reads as an
+// invocation too; a `--dry-run` create still counts a URL it merely
+// previews; a `gh pr create` mentioned earlier in the same multi-line
+// command (a heredoc body, a failed retry) can pair with an unrelated
+// later URL in the result; and a `create || gh pr view` fallback's own
+// `view` copy of an "already exists:" URL is not caught by the one-line-back
+// skip above. Measured 0 real occurrences of any of these across the whole
+// local `~/.omp/agent/sessions/**/*.jsonl` corpus and every filled `pr` in
+// the committed TSV (#2213 review); accepted as known gaps rather than
+// hand-rolling shell-quote/heredoc awareness into a single regex.
+const GH_PR_CREATE_RE =
+  /(?:^|[;&|(\n]|\b(?:if|then|do|!)\s)\s*(?:(?:env|command|rtk|timeout\s+\S+)\s+|[A-Za-z_]\w*=\S*\s+)*(?:\S*\/)?gh\s+pr\s+create\b/;
 function createdPrNumbers(text) {
   const out = [];
   const lines = text.split("\n");
@@ -333,27 +351,27 @@ export function foldOmpTranscript(jsonlText, filePath) {
       if (typeof d.agent === "string") agent = d.agent;
     }
     const m = d.message;
-    if (d.type === "message" && m?.role === "assistant" && Array.isArray(m.content)) {
-      for (const c of m.content) {
+    if (d.type === "message" && m?.role === "assistant") {
+      const blocks = Array.isArray(m.content) ? m.content : [];
+      for (const c of blocks) {
         if (c?.type === "toolCall" && c.name === "bash" && typeof c.arguments?.command === "string"
           && GH_PR_CREATE_RE.test(c.arguments.command)) createCallIds.add(c.id);
       }
-    }
-    if (d.type === "message" && m?.role === "assistant" && m.usage) {
-      const u = m.usage;
-      if (typeof m.model === "string" && m.model) model = m.model;
-      const cw = Number(u.cacheWrite ?? 0);
-      input += Number(u.input ?? 0);
-      cacheWrite += cw;
-      cacheRead += Number(u.cacheRead ?? 0);
-      output += Number(u.output ?? 0);
-      if (u.cost && typeof u.cost.total === "number") { cost += u.cost.total; sawCost = true; }
-      turns++;
-      const blocks = Array.isArray(m.content) ? m.content : [];
-      entries.push({
-        kind: "assistant", cacheWrite: cw,
-        tools: blocks.filter((c) => c?.type === "toolCall").map((c) => ({ id: c.id, name: c.name })),
-      });
+      if (m.usage) {
+        const u = m.usage;
+        if (typeof m.model === "string" && m.model) model = m.model;
+        const cw = Number(u.cacheWrite ?? 0);
+        input += Number(u.input ?? 0);
+        cacheWrite += cw;
+        cacheRead += Number(u.cacheRead ?? 0);
+        output += Number(u.output ?? 0);
+        if (u.cost && typeof u.cost.total === "number") { cost += u.cost.total; sawCost = true; }
+        turns++;
+        entries.push({
+          kind: "assistant", cacheWrite: cw,
+          tools: blocks.filter((c) => c?.type === "toolCall").map((c) => ({ id: c.id, name: c.name })),
+        });
+      }
     } else if (d.type === "message" && m?.role === "toolResult") {
       const blocks = Array.isArray(m.content) ? m.content : [];
       const chars = blocks.reduce(
@@ -446,13 +464,14 @@ const OMP_CANONICAL_STEM_RE = new RegExp(`^(?:${CANONICAL_MEMBER_NAME_PREFIXES})
 export function ompMemberRecord(folded, agentStem, spawnDepth = 0) {
   if (!folded.model) return null; // no assistant turn — not a real member transcript
   const member = agentStem;
-  const named = parseMemberName(member);
-  const { ticket } = named;
+  const { ticket, pr: namedPr } = parseMemberName(member);
   // A name-carried PR (`fix-pr-<n>`, `finisher-<n>`, ...) is the member's unit
   // of work by construction and wins. Otherwise (#2209) the one PR its own
   // `gh pr create` printed; none, or more than one (measured: impl-1578 opened
   // its real PR plus a throwaway probe PR), stays blank — never a guess.
-  const pr = named.pr || (folded.openedPrs?.length === 1 ? folded.openedPrs[0] : "");
+  // `folded.openedPrs` is `foldOmpTranscript`'s own unconditional return
+  // shape (always an array, never absent), so no `?.` is needed here.
+  const pr = namedPr || (folded.openedPrs.length === 1 ? folded.openedPrs[0] : "");
   const hasRoleSignal = spawnDepth >= 1 || typeof folded.task === "string" || typeof folded.agent === "string"
     || OMP_CANONICAL_STEM_RE.test(member);
   const role = hasRoleSignal
