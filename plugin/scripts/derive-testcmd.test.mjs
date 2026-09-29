@@ -229,6 +229,18 @@ test("a command of assignments alone names nothing to run and refuses", () => {
   assert.match(r.err, /its test command names no command, only assignments/);
 });
 
+// The assignment-skip loop above only accepts `NAME=value` prefixes whose
+// name is a valid shell identifier (`[A-Za-z0-9_]` only) — a hyphen breaks
+// the inner guard, so `a-b=c` is never skipped as an assignment and is read
+// as the leading command word itself instead.
+test("an assignment-shaped word with an invalid variable name is read as the command, not skipped", () => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head, { test: "a-b=c ./run.sh" }));
+  const r = derive(dir);
+  assert.equal(r.status, 1);
+  assert.match(r.err, /its test command 'a-b=c' is not found or not executable/);
+});
+
 // --- #1020: the ambient GIT_DIR that outranks `-C "$repo"`. Under it,
 // `--git-common-dir` answers for the OTHER repository, and the cache read is
 // that repository's Recipe reported as this one's.

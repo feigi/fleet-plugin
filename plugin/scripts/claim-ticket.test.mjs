@@ -455,6 +455,28 @@ test("an Install step that cannot run is named an invalid cache; one that fails 
   assert.doesNotMatch(failing.r.stderr, /Recipe cache is invalid/, "a failing install is not a stale Recipe");
 });
 
+// The 126 half of the same classification: a script that IS at the resolved
+// path but lacks the execute bit is "found but not executable" — the shell's
+// own exit 126, distinct from 127's "not found" but pinned to the identical
+// invalid-cache wording since both mean the Recipe cannot run, not that it
+// failed. Committed non-executable (default `writeFileSync` mode, never
+// chmod'd before `git add`), so `origin/main`'s tree entry is 100644 and a
+// fresh worktree checks it out that way — but chmod'd +x on disk in the MAIN
+// checkout only, AFTER the commit, so derive-testcmd.sh's own resolvability
+// probe (which reads "." — the main checkout — directly, not through git)
+// still passes and this script gets to run it for real, the same asymmetry
+// the 127 case above exploits in the other direction.
+test("an Install step present but not executable is also named an invalid cache (exit 126)", () => {
+  const dir = repo({ [TESTS]: "", "setup.sh": "#!/bin/sh\n" }, {}, { install: "./setup.sh" });
+  chmodSync(join(dir, "setup.sh"), 0o755);
+  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], { cwd: dir, encoding: "utf8", env });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /the Install step '\.\/setup\.sh' did not run in \.worktrees\/42-slug \(exit 126: not executable or not found\) — the Recipe cache is invalid/);
+});
+
 // #128: the tree-mutation check reads the same worktree-status hole
 // no-undo-audit.sh, reap.sh and worktree-audit.sh share. Delete the
 // worktree's own .git between `worktree add` and this check and `git -C`
