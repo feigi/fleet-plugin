@@ -382,6 +382,23 @@ test("the scratch-discipline block names the shared injected root, the per-membe
     phrase("This is not the worktree isolation rule: `claim-ticket.sh` already gives you your own worktree"),
     "the scratch-discipline block no longer distinguishes itself from worktree isolation",
   );
+  // #1150. The child rule, pinned with the path it names — rule 2 of this
+  // file's header: the instruction together with the command that carries it
+  // out. The parent writes the absolute directory into the child's prompt; the
+  // child never derives one, so a rewording that keeps the path and hands the
+  // derivation back to the child ("a subagent derives its own
+  // `<scratch>/impl-<N>/<childName>/`") breaks the span and reds here.
+  assert.match(
+    b,
+    phrase("A subagent you dispatch gets its own directory under yours, `<scratch>/impl-<N>/<childName>/`, and you write that path, absolute, into its prompt — it writes nowhere else, and never derives a path of its own"),
+    "the child rule no longer binds a dispatched subagent's `<scratch>/impl-<N>/<childName>/` to the parent writing it, absolute, into the child's prompt — a child left to derive its own path collides in the shared root",
+  );
+  // The name the path is keyed on, bound to what makes it collision-free.
+  assert.match(
+    b,
+    phrase("`<childName>` is a slug of the name you dispatch it under (omp's task `name`, Claude Code's `description`) — `[a-z0-9-]` only, never the raw field itself, which can carry spaces and `/` and would split or nest the path in an unquoted shell command — unique among your children and never one of your own entries (`probe`, `mutate`, or any other name you write under `<scratch>/impl-<N>/` yourself), so no child shares a directory with a sibling or with you"),
+    "`<childName>` is no longer defined as a slugged, own-entry-safe dispatch name unique among the parent's children",
+  );
 });
 
 // #1447. Two of this block's three hazards leave NO trace in the repo: a

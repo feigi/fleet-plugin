@@ -78,6 +78,20 @@ test("review-and-fix.md still hands specialists the command both guards point at
   assert.match(bullet, phrase("node --test plugin/scripts/*.test.mjs"));
 });
 
+// #1150: any member that dispatches a child writes the child's absolute scratch
+// path into its prompt, and the child never derives its own. This bullet is the
+// fallback dispatch site — a member hand-dispatching the specialists because the
+// review could not run — so "their own scratch dir" has to name the directory
+// and who resolves it, pinned with its path. Same bullet slice as above.
+test("review-and-fix.md's fallback specialist dispatch assigns each specialist an absolute scratch path", () => {
+  const bullet = between(REVIEW_AND_FIX, "Give specialists a stack-free test command", "\n- **", "review-and-fix.md");
+  assert.match(
+    bullet,
+    phrase("`<scratch>/pr<N>/fleet-review-<key>/`, resolved to an absolute path that you write into that specialist's prompt; a specialist never derives its own"),
+    "the fallback specialist dispatch no longer names the directory each specialist gets, or no longer has the dispatcher write it, absolute, into the specialist's prompt",
+  );
+});
+
 // The same contradiction in the other voice: a test file whose comment tells the
 // reader to run it with the worktree runner. A specialist reads that comment on
 // a snapshot, where the runner is not. `node --test <path>` is what most other
