@@ -186,9 +186,12 @@ function assertOmpShaped(d, filePath) {
 // the ledger's `impl-<N>=PR#M` settle token because that token is written by a
 // live run only: a regeneration over past sessions has the transcript and
 // nothing else, and this module stays pure over transcripts. Measured
-// 2026-09-29 across every real `~/.omp/agent/sessions/**/*.jsonl`: every
-// successful create was a `bash` toolCall whose result line printed gh's
-// stdout — the URL on a line of its own — then omp's "Wall time" trailer.
+// 2026-09-29 across every real `~/.omp/agent/sessions/**/*.jsonl`: 409
+// transcripts printed a created PR from a `bash` toolCall whose result held
+// gh's stdout — the URL on a line of its own — then omp's "Wall time"
+// trailer. ONE (impl-1113) created its PR from `eval` instead, through a
+// Python subprocess, and stays blank: `eval` is not read, because a cell that
+// only READS transcripts (or `gh pr view`s) prints the very same URLs.
 //
 // Three filters keep a URL that is NOT a PR this member opened out:
 // - the CALL must invoke `gh pr create` (first in the command or after a
@@ -377,7 +380,8 @@ export function foldOmpTranscript(jsonlText, filePath) {
 
 // One member record from one omp transcript's fold. `member` is the AgentId
 // (the filename stem, e.g. `InstallVerifySearch`) — there is no separate
-// display name, so `ticket`/`pr` extraction runs against it directly.
+// display name, so `ticket`/`pr` extraction runs against it directly — except
+// a `pr` the name cannot carry, read off the fold's `openedPrs` (#2209).
 //
 // `role` is NEVER guessed off the bare AgentId ALONE — a generated CamelCase
 // word pair names nothing classifyRole can read. FOUR real signals exist:
