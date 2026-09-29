@@ -64,20 +64,11 @@ outside it (`skills/*` is gitignored bar `caveman-compress` and `fleet`, and
 `~/.agents/skills/` is not in this repo at all), sometimes because its acceptance
 criteria are an open blocker's output. It is the fleet's "real, decided, but out of
 reach" marker, which is why `plugin/scripts/candidates.mjs` excludes it too: an agent
-dispatched at one would find nothing it is allowed to edit.
-
-Two properties hold across the whole `onhold` population. Re-run the query rather
-than trusting a roster written here — the population moves:
-
-```
-gh issue list --search label:onhold --state all --json number,labels
-```
-
-- Every issue it returns also carries `ready-for-agent`. So read `onhold` on its own
-  as incomplete — pair it with the triage role beside it.
-- No `wayfinder:*` issue is among them. `onhold` used to double as the stopgap
-  keeping wayfinder issues out of `next-ticket`'s fallback scan; issue #1306 (closed
-  2026-09-08) replaced that co-opt with the direct `wayfinder:*` exclusion now in
-  `EXCLUDE`, and stripped `onhold` from those issues.
-
-Both held on 2026-09-09.
+dispatched at one would find nothing it is allowed to edit. The fleet (`/run-team`)
+only ever works `ready-for-agent` tickets, so that is the only place the fleet reads
+`onhold`. Solo `/next-ticket --allow-fallback` is the one documented exception: it
+reruns unfiltered over the wider `ready-for-human`/untriaged pool when the labeled
+pass is empty, and `candidates.mjs`'s `EXCLUDE` still drops `onhold` tickets from that
+pool too. Outside that one fallback pass — and on `wayfinder:*` or closed tickets
+regardless — the label is the maintainer's own bookkeeping, which nothing in fleet-ctl
+reads.
