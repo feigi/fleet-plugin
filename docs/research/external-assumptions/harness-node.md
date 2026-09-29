@@ -164,24 +164,24 @@ Scope: `plugin/scripts/{board.mjs,board.html,compute-board.mjs,compute-spend.mjs
 
 Scanned in full or via targeted `grep` + follow-up `read` of every matched region (large files were not read byte-for-byte outside grep hit windows, but every hit's surrounding context — including all header/doc comments — was read):
 
-- `plugin/scripts/board.mjs` (2201 lines) — read via multi-pattern grep across the whole file plus targeted range reads (gh/graphql query block, port-derivation block, probe/serve block, ci-state invocation, labelsOf)
-- `plugin/scripts/board.html` (456 lines) — read in full, plus targeted grep for fetch/poll/interval logic in the inline `<script>`
-- `plugin/scripts/compute-board.mjs` (509 lines) — header (1-30), label/column-derivation logic (30-450), end (440-509) read directly
-- `plugin/scripts/compute-spend.mjs` (332 lines) — read in full (header, `classifyRole`, `computeSpend`, `attributeTools`/`mergeTools` headers)
-- `plugin/scripts/ledger.mjs` (1739 lines) — read via multi-pattern grep across the whole file plus targeted range reads (git-common-dir resolution, ledger section grammar, lock timeout, GH_REPO scrub, tracker query)
+- `plugin/scripts/board.mjs` (2032 lines) — read via multi-pattern grep across the whole file plus targeted range reads (gh/graphql query block, port-derivation block, probe/serve block, ci-state invocation, labelsOf)
+- `plugin/scripts/board.html` (471 lines) — read in full, plus targeted grep for fetch/poll/interval logic in the inline `<script>`
+- `plugin/scripts/compute-board.mjs` (530 lines) — header (1-30), label/column-derivation logic (30-450), end (440-509) read directly
+- `plugin/scripts/compute-spend.mjs` (329 lines) — read in full (header, `classifyRole`, `computeSpend`, `attributeTools`/`mergeTools` headers)
+- `plugin/scripts/ledger.mjs` (1753 lines) — read via multi-pattern grep across the whole file plus targeted range reads (git-common-dir resolution, ledger section grammar, lock timeout, GH_REPO scrub, tracker query)
 - `plugin/scripts/ledger-grammar.mjs` (79 lines) — read in full
-- `plugin/scripts/member-record.mjs` (910 lines) — read via multi-pattern grep across the whole file plus targeted range reads (header, cwd encoders, omp envelope shapes, Claude role signals, omp session reader, end/readMembers)
-- `plugin/scripts/member-outcomes.mjs` (307 lines) — read via grep + full first-53-line read plus surrounding context
-- `plugin/scripts/review-core.mjs` (1019 lines) — read via multi-pattern grep plus targeted range reads (header/sandbox-restriction comment, DEFAULT_DIMENSIONS, snapshot shell block, resumeFor/digest, environmentNote/testCmd)
-- `plugin/scripts/review-eval.mjs` (198 lines) — read in full
+- `plugin/scripts/member-record.mjs` (523 lines) — read via multi-pattern grep across the whole file plus targeted range reads (header, cwd encoders, omp envelope shapes, Claude role signals, omp session reader, end/readMembers)
+- `plugin/scripts/member-outcomes.mjs` (230 lines) — read via grep + full first-53-line read plus surrounding context
+- `plugin/scripts/review-core.mjs` (1025 lines) — read via multi-pattern grep plus targeted range reads (header/sandbox-restriction comment, DEFAULT_DIMENSIONS, snapshot shell block, resumeFor/digest, environmentNote/testCmd)
+- `plugin/scripts/review-eval.mjs` (197 lines) — read in full
 - `plugin/scripts/prompt-renderer.mjs` (39 lines) — read in full
 - `plugin/scripts/workflow-files.mjs` (128 lines) — read in full
-- `plugin/scripts/strip-comments.mjs` (43 lines) — read in full
-- `plugin/scripts/frontmatter-check.mjs` (250 lines) — read in full
-- `plugin/scripts/frontmatter-allowlist.json` (76 lines) — read in full
-- `plugin/scripts/prose-pin.mjs` (845 lines) — exports listed via grep, `DIALECT_TOKENS`/gutter-stripping functions read directly; remaining exports are internal prose-pinning machinery with no external-world assumptions beyond the dialect table already captured
+- `plugin/scripts/strip-comments.mjs` (44 lines) — read in full
+- `plugin/scripts/frontmatter-check.mjs` (256 lines) — read in full
+- `plugin/scripts/frontmatter-allowlist.json` (64 lines) — read in full
+- `plugin/scripts/prose-pin.mjs` (765 lines) — exports listed via grep, `DIALECT_TOKENS`/gutter-stripping functions read directly; remaining exports are internal prose-pinning machinery with no external-world assumptions beyond the dialect table already captured
 - `plugin/scripts/marked-pairs.mjs` (523 lines) — header/scope comment (1-83) read in full; `DIALECT_TOKENS` re-export and `KNOWN_EQUALITY_EXCEPTIONS` sample entries read via grep+context
-- `plugin/scripts/cwd-isolation-pins.mjs` (86 lines) — read in full
+- `plugin/scripts/cwd-isolation-pins.mjs` (83 lines) — read in full
 - `plugin/workflows/review-pr.js` (1968 lines) — read via multi-pattern grep across the whole file plus targeted range reads (`meta` export, agent-call globals, resumeFor/Workflow comment, snapshot gh block)
 - `plugin/.claude-plugin/plugin.json` (9 lines) — read in full
 - `.claude-plugin/marketplace.json` (22 lines) — read in full
