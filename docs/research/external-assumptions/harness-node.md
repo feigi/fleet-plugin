@@ -175,16 +175,13 @@ Scanned in full or via targeted `grep` + follow-up `read` of every matched regio
 - `plugin/scripts/review-core.mjs` (1025 lines) — read via multi-pattern grep plus targeted range reads (header/sandbox-restriction comment, DEFAULT_DIMENSIONS, snapshot shell block, resumeFor/digest, environmentNote/testCmd)
 - `plugin/scripts/review-eval.mjs` (197 lines) — read in full
 - `plugin/scripts/prompt-renderer.mjs` (39 lines) — read in full
-- `plugin/scripts/workflow-files.mjs` (128 lines) — read in full
 - `plugin/scripts/strip-comments.mjs` (44 lines) — read in full
 - `plugin/scripts/frontmatter-check.mjs` (256 lines) — read in full
 - `plugin/scripts/frontmatter-allowlist.json` (64 lines) — read in full
 - `plugin/scripts/prose-pin.mjs` (765 lines) — exports listed via grep, `DIALECT_TOKENS`/gutter-stripping functions read directly; remaining exports are internal prose-pinning machinery with no external-world assumptions beyond the dialect table already captured
-- `plugin/scripts/marked-pairs.mjs` (523 lines) — header/scope comment (1-83) read in full; `DIALECT_TOKENS` re-export and `KNOWN_EQUALITY_EXCEPTIONS` sample entries read via grep+context
 - `plugin/scripts/cwd-isolation-pins.mjs` (83 lines) — read in full
-- `plugin/workflows/review-pr.js` (1968 lines) — read via multi-pattern grep across the whole file plus targeted range reads (`meta` export, agent-call globals, resumeFor/Workflow comment, snapshot gh block)
 - `plugin/.claude-plugin/plugin.json` (9 lines) — read in full
-- `.claude-plugin/marketplace.json` (22 lines) — read in full
+- `.omp-plugin/marketplace.json` (21 lines) — read in full
 - `package.json` (5 lines) — read in full
 - `.nvmrc` (1 line) — read in full
 - `renovate.json` (18 lines) — read in full
