@@ -188,7 +188,11 @@ export function paragraph(text, anchor, what, options) {
 // markdown renders inside the item's paragraph. A shallower line ends the item
 // when it opens a list marker (a sibling, whatever its marker: `-`, `*`, `+`,
 // `1.`, `1)`), when it opens a block that interrupts a paragraph (an ATX
-// heading, `>`, a fence, a thematic break), or when a blank line precedes it.
+// heading, `>`, a fence, a thematic break — not an HTML block, which CommonMark
+// also lets interrupt one: a shallower `<div>`, `</div>`, `<!--`, `<script>`,
+// `<?` or `<!DOCTYPE` line ends the item in CommonMark, yet this reads it as
+// lazy and keeps it; a `<span>`-style line interrupts in neither), or when a
+// blank line precedes it.
 // Only the first ended it before #2077, so a restatement in a paragraph after
 // the item, or under a new heading, stayed inside the slice and held the pin.
 // The marker and interrupt cases count only short of the item's MARKER column
