@@ -220,6 +220,14 @@ const COVERED_MJS = {
   // the behind-issue premise probe". Its other children (`gh pr list`,
   // `node ledger.mjs`, `node shortlist.mjs`) are not git-invoking primitives.
   "fleet-tick.mjs": 2,
+  // ONE spawn primitive, `git(args, cwd)`, behind both of the file's git calls
+  // — `resolveMainRoot()`'s `rev-parse --git-common-dir` and `checkIgnored()`'s
+  // `check-ignore` (#1411). An ambient GIT_DIR would answer the first for
+  // another repository, so the guard would compare a member's write against
+  // the wrong checkout and let a main-checkout write through. Measured in
+  // member-write-guard.test.mjs, "an ambient GIT_DIR naming another repository
+  // does not change the answer".
+  "member-write-guard.mjs": 1,
 };
 
 // The two-name-only exemption list #1599's second design question answers
