@@ -24,36 +24,12 @@ handed; the main checkout is the parent of `git rev-parse
 --path-format=absolute --git-common-dir`, which you derive yourself — nothing
 substitutes it for you.
 
-Measured on #1727, four occurrences in one run, none of them caught by any
-fleet mechanism: two members self-caught their own stray edit, and the
-controller caught the other two independently on a routine `git status` of
-the main checkout — one of those was eight program-line edits across two
-calls, into a file the fleet reads as an instrument. Only one of the four was
-a mutation-probe copy; the other three were ordinary first edits, so this is
-not a harness hazard the scratch rule below already covers. It is every
-`edit` and `read` you make.
-
-**The pair of symptoms reads as a TOOL BUG and is not one.** `git diff` in
-your worktree shows nothing — correct, nothing changed there — while `read`
-shows your new content — correct, it is reading the main checkout. Two
-members read that pair as a silent edit no-op or a stale read cache and filed
-`report_issue` against the tools; both entries were retracted. Two trees, two
-honest answers, and the path was the defect.
-
 So: prefix every `edit` and `read` path with an absolute path — the
 worktree `<abs-path>` for repo files, `<scratch>/impl-<N>/` for scratch —
 never a bare relative one, and never `plugin/scripts/foo.mjs` on its own.
-When a diff and a read disagree, and after any edit you are unsure of, run
-`git -C <main-checkout> status --porcelain` — empty is the only clean
-answer. Before you recover anything, run `git -C <main-checkout> diff --
-<path>` and read it: if that diff is ENTIRELY your own stray content, copy
-the last-committed version back over it with `cp` — `git -C
-<main-checkout> show HEAD:<path> > <path>` — never `git restore --
-<path>` and never a bare `git restore .` there, either of which silently
-discards a sibling's or the controller's own uncommitted work sitting at
-that exact path too, and the porcelain check above would then report
-their destroyed work as clean. If the diff shows content you did not
-write, stop: reconcile it by hand instead of reverting the file.
+A `member-write-guard` refusal means the path hit the main checkout — for
+`bash`, a missing or main-checkout `cwd` — so re-issue it absolute, under
+your worktree.
 
 Here is the ticket's distilled brief, already read once at the Pull —
 title, plus whichever of the `## Agent Brief` comment or the issue body
@@ -159,9 +135,9 @@ in a member's cell resolved under the main checkout root, never under that
 member's own worktree — the stray `work/` tree found there has exactly that
 shape — so pass absolute paths rooted at `<scratch>/impl-<N>/` or at your
 worktree, the same discipline the `edit`/`read` block above spells out.
-Treat that as one rule stated twice, never as a habit already in place:
-#1727 records four members who broke it with `edit` alone in one run, which
-is why that block carries its own evidence instead of leaning on this one.
+Treat that as one rule stated twice, with one difference: `member-write-guard`
+refuses a relative `write` or `edit` into the main checkout, and nothing
+refuses one here.
 And **never call
 `eval` with `reset: true`**, which is destructive to every other member
 sharing that backend session, not only to your own state.

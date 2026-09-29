@@ -33,6 +33,12 @@ The qualified id (`fleet-ctl@fleet-plugin`) is canonical —
 an unqualified `fleet-ctl` install is not guaranteed to resolve to this
 plugin. Background: [`docs/adr/0006-rename-to-fleet-ctl.md`](docs/adr/0006-rename-to-fleet-ctl.md).
 
+The plugin also ships an omp extension, `member-write-guard`, which refuses a
+fleet member's write into the main checkout
+([ADR 0020](docs/adr/0020-member-write-boundary-is-enforced-by-a-shipped-omp-extension.md)).
+An existing install picks it up with `omp plugin upgrade fleet-ctl@fleet-plugin`
+followed by a session restart; extensions load only at session start.
+
 ## Quickstart
 
 Start a fleet run over the `ready-for-agent` queue — implementers and reviewers

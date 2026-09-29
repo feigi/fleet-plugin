@@ -2,7 +2,9 @@
 # Did the controller's instrument set change under it? (#436)
 #
 # The controller reads the world through scripts and runbooks that live in the
-# MAIN checkout, and every member can write to that checkout. Worktree isolation
+# MAIN checkout, and every member can write to that checkout — except through a
+# `write`/`edit`/`ast_edit` that member-write-guard.mjs refuses (ADR 0020); a
+# `bash` or `eval` write still lands, the backstop #2210 tracks. Worktree isolation
 # and `./agent-test` port derivation protect members from each other; neither
 # protects the tree the controller measures from. Measured: a member edited two
 # files in the main checkout instead of its worktree while the CI monitor was
