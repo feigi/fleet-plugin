@@ -248,7 +248,9 @@ test("row refuses a malformed member token anywhere in its text, writing nothing
 });
 
 // The must-ACCEPT half: every well-formed member token — live or settled —
-// and every non-member key `row` carries today still goes through.
+// and every non-member key `row` carries today still goes through, including
+// tier-check.mjs's `tier-ok=`/`tier-mismatch=` verdicts (#1398), which name
+// a member but are not member tokens themselves.
 test("row still writes well-formed member tokens and non-member keys", (t) => {
   const { ok, read } = fixture(t);
   ok("dispatch", "merge-bot");
@@ -256,6 +258,8 @@ test("row still writes well-formed member tokens and non-member keys", (t) => {
     ["7", "impl-7 · class=routine · ports=16007"],
     ["8", "impl-8=PR#9 · fix-pr-9=applied:73b356de · review=wf:r1=failed reviewed=abc1234:1/0/0 · ci=123:1:success"],
     ["10", "held-behind:#9 · merge-bot-1=done · review=member:review-pr-10"],
+    ["11", "impl-11 · tier=alt · tier-ok=impl-11:fleet-implementer-alt"],
+    ["12", "impl-12=bailed · tier-mismatch=impl-12:fleet-implementer · impl-12: dispatched task, expected fleet-implementer"],
   ];
   for (const [ticket, text] of rows) ok("row", ticket, text);
   assert.deepEqual(read().rows, rows.map(([n, text]) => `#${n} ${text}`));
