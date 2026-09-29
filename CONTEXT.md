@@ -203,6 +203,18 @@ project-scoped set paths, and the read that verifies it; `tier-roles.mjs
 --check` is the read that verifies the second.
 _Avoid_: requirement, dependency, flag
 
+### Shipped surface
+
+**Shipped surface**:
+Everything under `plugin/` — the marketplace source is `git-subdir` with
+`path: plugin`, so every file there reaches a consumer's install, comments and
+runtime strings included. It names nothing that does not ship: no issue or PR
+number of this repo in any form, no foreign tracker number, no `docs/` path, no
+ADR number, no test-file name — it states the claim instead, and provenance lives
+in git history (ADR 0019). `tests/`, where the suite lives once #2232 moves it out
+of `plugin/`, is not part of it and the rule does not apply there.
+_Avoid_: package, bundle, distribution
+
 ### Coordination
 
 **Dispatch**:
