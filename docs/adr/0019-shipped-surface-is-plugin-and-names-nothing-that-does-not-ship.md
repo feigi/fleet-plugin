@@ -23,9 +23,9 @@ grilling session; the work it orders is tracked as #2230.
   is PR #903 here and on-topic — and #1938 closed not planned. Its lesson
   stands: a stale, qualified self-citation misled a reviewer, and no shipped
   file should carry one at all.
-- **Size, measured 2026-09-29 when #2230 was filed:** 66 shipped files, 1579
-  hits — 1387 bare `#N`, 5 `owner/repo#N`, 8 `PR N`, 54 `ADR NNNN`, 16
-  `docs/` paths, 109 test-file names — by this scan:
+- **Size, measured 2026-09-29:** 71 shipped files, 1643 hits — 1428 bare
+  `#N`, 5 `owner/repo#N`, 8 `PR N`, 56 `ADR NNNN`, 16 `docs/` paths, 130
+  test-file names — by this scan:
 
   ```
   git grep -nP '(?<![\w/&$-])#\d{2,5}(?![0-9a-fA-F])|\b[\w.-]+/[\w.-]+#\d+|\bPR \d{2,5}\b|\bADRs? ?\d{3,4}|\bdocs/(adr|specs|research|agents|requirements)|[\w-]+\.test\.mjs' -- plugin ':!*.test.mjs'
@@ -36,7 +36,9 @@ grilling session; the work it orders is tracked as #2230.
 1. **The shipped surface is `plugin/`, and it names nothing that does not
    ship:** this repo's issue and PR numbers in any form (`#N`, `PR #N`,
    `feigi/fleet-plugin#N`, `feigi/claude-config#N`), foreign tracker
-   numbers, `docs/…` paths, `ADR NNNN`, and `*.test.mjs` names.
+   numbers, repo-internal `docs/` record paths (`docs/adr`, `docs/specs`,
+   `docs/research`, `docs/agents`, `docs/requirements`), `ADR NNNN`, and
+   `*.test.mjs` names.
 2. **Scope: prose, code comments, and runtime strings** — prompt template
    literals and stderr/stdout text included. Dates and run-scoped
    measurements stay.
@@ -46,8 +48,8 @@ grilling session; the work it orders is tracked as #2230.
 4. **Tests leave the shipped surface.** Every `*.test.mjs` moves to a
    top-level `tests/`, and the test-only support modules (`prose-pin.mjs`,
    `strip-comments.mjs`, `prompt-renderer.mjs`, `review-host-fixture.mjs`,
-   `cwd-isolation-pins.mjs`) to `tests/support/`. The rule does not apply to
-   `tests/`.
+   `cwd-isolation-pins.mjs`, `slow-transport.mjs`) to `tests/support/`. The
+   rule does not apply to `tests/`.
 5. **`correction-tickets.md`'s cross-repo citation convention stays.** It is
    runtime guidance for writing in users' repos, not a citation of this one.
    Its examples become placeholders and its evidence sections
