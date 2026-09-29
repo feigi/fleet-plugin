@@ -135,7 +135,14 @@ function fixture(t) {
   // The first exec of a freshly written executable pays an OS scan that
   // ledger.test.mjs measured at seconds under fleet load (#1199); pay it here,
   // outside the bound shortlist.mjs puts on each gh probe.
-  spawnSync(gh, ["--fleet-warm"], { timeout: 30_000 });
+  //
+  // 120 s, not 30 s: a warm-up killed mid-scan leaves the scan unpaid for the
+  // gh probe after it — PR #2224 measured 15-16 s first execs under load ~25,
+  // and a first exec killed at 500 ms still took 14.5-15.0 s next time (#2229).
+  // GH_STUB's `--fleet-warm` arm exits 0 before any other line, so no stub
+  // stall can hide in the longer bound; it only lets the scan finish, and stays
+  // finite so a truly hung exec still ends the case.
+  spawnSync(gh, ["--fleet-warm"], { timeout: 120_000 });
   const issuesFile = join(root, "issues.json");
   const statesFile = join(root, "states.json");
   const shortlistFile = join(repo, ".fleet", "shortlist.json");
