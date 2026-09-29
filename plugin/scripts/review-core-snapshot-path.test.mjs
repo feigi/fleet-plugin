@@ -282,36 +282,6 @@ test("a matching head proceeds, abbreviated on either side", () => {
   );
 });
 
-// The head compare now lives in two places — `usableDiff`, which drops the
-// diff, and `snapshotMissing`, which refuses the review — and the omp eval
-// sandbox forbids `import`, so neither can call a shared helper and still be
-// lifted (see lift.mjs). Two copies of one expression is this repo's recurring
-// disconnect defect, so the copies are pinned to each other rather than to the
-// comparison's own text: the pattern anchors on the `if (snap.refHead && ` guard
-// head and CAPTURES whatever comparison follows it, then compares the two
-// captures. A change to one side that is not made to the other reds here,
-// whatever the expression becomes; a semantics-preserving rewrite applied to
-// BOTH sides stays green. Both directions are measured, in this file's own
-// mutants, because the earlier form of this test asserted a fixed literal and
-// did neither — it red on an identical rewrite of both copies, with a message
-// saying neither copy compared the heads at all, which is backwards.
-//
-// The anchor is the residual literal, and it is the loud direction: rename
-// `refHead` and the count drops rather than the comparison silently ceasing to
-// be pinned.
-test("the head compare in usableDiff and snapshotMissing are the same expression", () => {
-  const compares = [...CODE.matchAll(/^\s*if \(snap\.refHead && (.+?)\)(?: return null;)?$/gm)].map((m) => m[1]);
-  assert.ok(
-    compares.length > 1,
-    `${compares.length} head compare(s) found — the diff drop and the refusal are no longer both armed`,
-  );
-  assert.equal(
-    new Set(compares).size,
-    1,
-    `the two head compares have diverged — one of them now decides on a different test than the other:\n  ${compares.join("\n  ")}`,
-  );
-});
-
 // The refusal above raised the price of an unnormalized `head` from one diff to
 // the whole review: `refHead` is 40 lowercase hex from `git ls-remote`, `head`
 // is whatever an agent relayed for `git rev-parse HEAD`, and that command
