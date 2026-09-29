@@ -1667,16 +1667,19 @@ else
     # a listing-only check let the delete through, and the sibling's `rebase
     # --continue` / `bisect reset` then failed on the missing ref. `wt_holding`
     # reads those detached worktrees' rebase/bisect state out of their admin
-    # dirs, and a detached worktree whose admin dir cannot be read halts here
-    # as unknown, never passes as "not held". #2218, ADR 0018
-    wt_list_before_cas=$wt_list
+    # dirs, and halts here as unknown — never passes as "not held" — on any
+    # of three shapes it cannot resolve: an admin dir it cannot read even
+    # once the worktree's own directory is confirmed gone and it has looked
+    # in this repo's own registry for it (a worktree `rm -rf`'d out from
+    # under git), a listed path it cannot hand back to git byte for byte, or
+    # a porcelain record naming neither `branch` nor `detached` at all — a
+    # worktree whose admin `HEAD` holds garbage, not a ref. #2218, ADR 0018
     wt_listing || halt "cannot re-read the worktree list to check $branch before the delete: $wt_err"
     if wt_holding "refs/heads/$branch"; then cas_rc=0; else cas_rc=$?; fi
-    wt_list=$wt_list_before_cas
     case $cas_rc in
       0) halt "$branch $wt_holder_how in worktree $wt_holder — not deleted" ;;
       1) ;;
-      *) halt "cannot tell whether $branch is held by worktree $wt_holder: its git dir could not be read — not deleted" ;;
+      *) halt "cannot tell whether $branch is held by worktree $wt_holder — not deleted" ;;
     esac
 
     # update-ref, authorized by the `ahead` and `git cherry` guards above,

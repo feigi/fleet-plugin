@@ -255,8 +255,11 @@ gone() {
 # `refs/heads/<b>`, `BISECT_START` holds the SHORT name `<b>` the bisect started
 # from. `MERGE_HEAD`, `CHERRY_PICK_HEAD` and `REVERT_HEAD` leave HEAD on its
 # branch, so the porcelain `branch` line already names what they hold. A
-# head-name of `detached HEAD` or a bisect started from a detached HEAD names
-# no branch and is not collected. #2218
+# head-name of `detached HEAD` names no branch and is not collected. A bisect
+# started from a detached HEAD is different: `BISECT_START` holds that HEAD's
+# full SHA, which the code below still turns into `refs/heads/<sha>` and
+# collects — matching only a branch literally named with that 40-hex string,
+# which nothing in this fleet's naming ever produces. #2218
 #
 # `2>/dev/null` on the admin-dir read, NOT the `2>&1` the fleet's message-text
 # captures fold in, because this capture is used as a PATH. Measured (PR #985
@@ -270,14 +273,47 @@ gone() {
 # `[ -e ]` on the `head-name` inside it fails exactly as it does on a head-name
 # that is not there, and only the second is an answer.
 #
-# `wt_op` and `wt_op_held` are this function's OUTPUT, read by the sourcing
-# script — SC2034, as for `wt_listing`.
+# `wt_op` is this function's OUTPUT, read by the sourcing script; `wt_op_held`
+# is consumed only by `wt_holding` below, in this same file — SC2034, as for
+# `wt_listing`.
+#
+# The admin dir is normally found by asking git FROM $1 (`rev-parse
+# --absolute-git-dir`), which needs nothing but $1's own `.git` pointer file —
+# so a worktree this reader cannot even enter (a bare permission bit on $1
+# itself) answers "cannot read" exactly as intended: nothing about $1 being
+# unreadable says anything about whether its admin dir agrees, and this
+# function must not go looking behind that refusal. Pass a non-empty $2 only
+# when the CALLER has independently established $1 does not exist AT ALL —
+# `[ -e "$1" ]`, never git's own `prunable`: measured, git 2.50.1, a worktree
+# chmod 000'd (still there, merely unreadable) is marked `prunable` in the
+# porcelain too, identically to one `rm -rf`'d out from under git, so
+# `prunable` cannot tell the two apart and a reader keyed on it would reopen
+# the chmod-000 case this function must keep closed. Only once $1 is
+# confirmed gone does this function look for the admin dir a different way:
+# `worktrees/*/gitdir` under THIS repo's own git dir names every admin dir by
+# the worktree path it was registered for, and that registry lives under this
+# repo's `.git`, never under the worktree — a directory `rm -rf`'d out from
+# under git leaves its bookkeeping, and whatever rebase or bisect state it
+# held, untouched. #2218
 # shellcheck disable=SC2034
 wt_op_state() {
   wt_op=
   wt_op_held=
-  wt_op_dir=$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null) || return 1
-  [ -n "$wt_op_dir" ] || return 1
+  if [ -n "${2:-}" ]; then
+    wt_op_dir=
+    wt_op_common=$(git rev-parse --git-common-dir 2>/dev/null) || return 1
+    for wt_op_gitdir in "$wt_op_common"/worktrees/*/gitdir; do
+      [ -e "$wt_op_gitdir" ] || continue
+      wt_op_reg=$(cat "$wt_op_gitdir" 2>/dev/null) || continue
+      [ "$wt_op_reg" = "$1/.git" ] || continue
+      wt_op_dir=${wt_op_gitdir%/gitdir}
+      break
+    done
+    [ -n "$wt_op_dir" ] || return 1
+  else
+    wt_op_dir=$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+    [ -n "$wt_op_dir" ] || return 1
+  fi
   for wt_op_m in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG; do
     if [ -e "$wt_op_dir/$wt_op_m" ]; then wt_op=$wt_op_m; fi
   done
@@ -304,13 +340,43 @@ wt_op_state() {
 # 0: held — `wt_holder` names the worktree and `wt_holder_how` the route, as a
 #    clause (`is checked out`, …) to follow the branch name in a message.
 # 1: no worktree holds it.
-# 2: cannot tell — `wt_holder` names a detached worktree whose admin dir could
-#    not be read, or whose listed path this reader cannot hand back to git.
+# 2: cannot tell — `wt_holder` names a worktree whose record this reader
+#    cannot resolve even through `wt_op_state`'s registry route: its listed
+#    path cannot be handed back to git (`nl_path`), or its admin dir cannot be
+#    found or read there either.
 #
 # Detached records only go to `wt_op_state`, deliberately: a worktree whose
 # record carries a `branch` line is answered by that line, and an unreadable
 # one of those holds nothing a stopped rebase or bisect could add — so it is
 # never allowed to turn into a "cannot tell" that halts every caller.
+#
+# A worktree `rm -rf`'d out from under git keeps its detached record — git
+# marks it `prunable` — and keeps its admin dir, which lives under THIS
+# repo's `.git`, never under the worktree itself. `[ -e ]` on the listed path,
+# not git's own `prunable` (measured: a merely chmod-000'd worktree, still
+# there, is marked `prunable` too — the two are not the same fault), is what
+# tells `wt_op_state` it may look for that admin dir a different way; the
+# ordinary route — asking git FROM the worktree's own directory — cannot,
+# because there is no directory left to ask from. #2218
+#
+# A record naming neither a `branch` nor the literal `detached` line is a HEAD
+# git itself could not classify from the worktree's own directory — measured,
+# git 2.50.1: an admin `HEAD` file holding garbage (not a ref, not a SHA)
+# emits neither line, exactly the shape a corrupted mid-rebase HEAD produces.
+# That corruption is confined to the `HEAD` FILE's bytes; the admin dir
+# holding it, and whatever `rebase-merge`/`BISECT_START` state sits beside it,
+# is untouched — so this case resolves through the SAME registry route as a
+# gone worktree, unconditionally, rather than answering "cannot tell" for a
+# worktree that may hold nothing of this caller's at all. Only once even that
+# route cannot read an admin dir does this fall back to "cannot tell". #2218
+#
+# Each record is read whole before it is judged — `branch`, `detached`, and
+# the boundary that ends it — never decided line by line, because a record's
+# `branch` line can arrive for ANY branch, not just $1, and only the full
+# absence of both `branch` and `detached` means the record itself could not
+# be classified. A record is settled at the next `worktree` line, or after
+# the loop for the last one, since the trailing blank line `wt_listing`'s
+# `$(...)` capture strips is not there to trigger it.
 #
 # A plain line loop, no awk: the listing's records are one attribute per line
 # and `wt_listing` has already swapped any newline inside a path for `$wt_nl`,
@@ -323,30 +389,82 @@ wt_holding() {
   wt_holder=
   wt_holder_how=
   wt_h_path=
+  wt_h_branch=
+  wt_h_detached=
+  wt_h_seen=
   while IFS= read -r wt_h_line; do
     case $wt_h_line in
-      "worktree "*) wt_h_path=${wt_h_line#worktree } ;;
-      "branch $1")
-        wt_holder=$wt_h_path
-        wt_holder_how="is checked out"
-        return 0
-        ;;
-      detached)
-        if nl_path "$wt_h_path" || ! wt_op_state "$wt_h_path"; then
-          wt_holder=$wt_h_path
-          return 2
+      "worktree "*)
+        if [ -n "$wt_h_seen" ]; then
+          wt_h_settle "$1"; wt_h_rc=$?
+          [ "$wt_h_rc" -eq 1 ] || return "$wt_h_rc"
         fi
-        case " $wt_op_held " in
-          *" $1 "*)
-            wt_holder=$wt_h_path
-            wt_holder_how="is held by a rebase or bisect in progress"
-            return 0
-            ;;
-        esac
+        wt_h_path=${wt_h_line#worktree }
+        wt_h_branch=
+        wt_h_detached=
+        wt_h_seen=1
         ;;
+      "branch $1") wt_h_branch=$1 ;;
+      "branch "*) wt_h_branch=${wt_h_line#branch } ;;
+      detached) wt_h_detached=1 ;;
     esac
   done <<EOF
 $wt_list
 EOF
+  if [ -n "$wt_h_seen" ]; then
+    wt_h_settle "$1"; wt_h_rc=$?
+    [ "$wt_h_rc" -eq 1 ] || return "$wt_h_rc"
+  fi
   return 1
+}
+
+# Shared tail for `wt_h_settle`'s `detached` and unclassified-HEAD arms:
+# resolve `$wt_h_path`'s in-progress state — passing $2 through as
+# `wt_op_state`'s registry-route flag — and report whether it holds branch
+# ref $1. Returns 0/1/2 exactly as `wt_h_settle` does, and sets
+# `wt_holder`/`wt_holder_how` the same way.
+# shellcheck disable=SC2034
+wt_h_check_op() {
+  if nl_path "$wt_h_path" || ! wt_op_state "$wt_h_path" "${2:-}"; then
+    wt_holder=$wt_h_path
+    return 2
+  fi
+  case " $wt_op_held " in
+    *" $1 "*)
+      wt_holder=$wt_h_path
+      wt_holder_how="is held by a rebase or bisect in progress"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# Decide whether the worktree record `wt_holding` just finished reading
+# (`$wt_h_path`, `$wt_h_branch`, `$wt_h_detached`) holds branch ref $1.
+# Returns 0 (held — sets `wt_holder`/`wt_holder_how`), 1 (this record does not
+# hold it, keep reading) or 2 (cannot tell — sets `wt_holder`). Never called
+# with `$wt_h_path` empty. Split out of `wt_holding` so a record can be
+# settled from two call sites (mid-loop, and after it for the last record)
+# without duplicating the decision.
+# shellcheck disable=SC2034
+wt_h_settle() {
+  if [ -n "$wt_h_branch" ]; then
+    [ "$wt_h_branch" = "$1" ] || return 1
+    wt_holder=$wt_h_path
+    wt_holder_how="is checked out"
+    return 0
+  fi
+  if [ -n "$wt_h_detached" ]; then
+    wt_h_gone=
+    [ -e "$wt_h_path" ] || wt_h_gone=1
+    wt_h_check_op "$1" "$wt_h_gone"
+    return $?
+  fi
+  # Neither a `branch` line nor the literal `detached` line: git could not
+  # classify this record's HEAD from the worktree's own directory at all (a
+  # corrupted admin HEAD is the shape #2218 measured) — go straight to the
+  # registry route, unconditionally, since the ordinary one already failed by
+  # definition of being here.
+  wt_h_check_op "$1" 1
+  return $?
 }
