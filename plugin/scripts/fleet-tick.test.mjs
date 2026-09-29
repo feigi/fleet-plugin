@@ -17,7 +17,7 @@ const state = (over = {}) => ({
   implLive: 0, draining: null, tierMismatch: [],
   heads: [], supply: 0, shortlistStatus: "ok", refresh: null,
   reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [],
-  mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0,
+  mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeConflictHeld: 0,
   ...over,
 });
 const rowsOf = (s, role) => reconcile(s).filter((r) => r.role === role);
@@ -334,6 +334,54 @@ test("deriveRun: merge holds are held-behind rows whose premise PR is still open
   assert.equal(r.mergeHeld, 1, "#39 is no longer open, so #41's hold has lifted");
 });
 
+// #2064: merge-bot's `conflict-hold:#<pr>` — a conflict its local-rebase
+// fallback would not force — feeds the same fix-due list a review's
+// survivors do, and holds the merge until a fix-applier AFTER it settles.
+const HOLD_ROW = (n, tail) => `#${n - 30} impl-${n - 30}=PR#${n} → PR#${n} · reviewed=abc1234:0/2/0 · ${tail}`;
+
+test("deriveRun: a conflict hold is fix-due until a fix-applier after it lands, whatever settled before it", () => {
+  const r = run({
+    rows: [
+      HOLD_ROW(40, "conflict-hold:#40"),
+      HOLD_ROW(41, "conflict-hold:#41 · fix-pr-41=applied:def5678"),
+      HOLD_ROW(42, "conflict-hold:#42 · fix-pr-42=no-op"),
+      // A settle BEFORE the hold is stale: it cannot clear a newer conflict.
+      HOLD_ROW(43, "fix-pr-43=applied:def5678 · conflict-hold:#43"),
+      // Cleared once, then held again — the second hold is unresolved.
+      HOLD_ROW(44, "conflict-hold:#44 · fix-pr-44=applied:def5678 · conflict-hold:#44"),
+      // A fix-applier that died leaves the conflict where it was.
+      HOLD_ROW(45, "conflict-hold:#45 · fix-pr-45=failed"),
+      // A review after the cleared hold resets fixSince; the hold stays cleared.
+      HOLD_ROW(46, "conflict-hold:#46 · fix-pr-46=applied:def5678 · review=wf:x reviewed=def5678:0/1/0"),
+      // A closed PR is nobody's work.
+      HOLD_ROW(47, "conflict-hold:#47"),
+    ],
+  }, [40, 41, 42, 43, 44, 45, 46].map((n) => pr(n)));
+  assert.deepEqual(r.fixDue, [40, 43, 44, 45]);
+});
+
+test("deriveRun: a queued PR under a conflict hold is merge-held until its fix-applier SETTLES — dispatch alone does not lift it", () => {
+  const at = (tail) => run({ rows: [HOLD_ROW(40, tail)] }, [pr(40, ["ready-to-merge"])]);
+  const held = at("conflict-hold:#40");
+  assert.deepEqual([held.fixDue, held.mergeQueue, held.mergeHeld, held.mergeConflictHeld], [[40], 1, 1, 1]);
+  const working = at("conflict-hold:#40 · fix-pr-40");
+  assert.deepEqual(working.fixDue, [], "a live fix-applier is not re-offered");
+  assert.equal(working.mergeHeld, 1, "…and the merge bot does not re-select a PR still being fixed");
+  const landed = at("conflict-hold:#40 · fix-pr-40=applied:def5678");
+  assert.deepEqual([landed.fixDue, landed.mergeHeld, landed.mergeConflictHeld], [[], 0, 0]);
+  // Both sources on one PR count it once.
+  const both = run({ rows: [HOLD_ROW(40, "held-behind:#38 · conflict-hold:#40")] }, [pr(38), pr(40, ["ready-to-merge"])]);
+  assert.equal(both.mergeHeld, 1);
+});
+
+test("deriveRun: a conflict hold is read in either spelling and on a PR-keyed row", () => {
+  assert.deepEqual(run({ rows: [HOLD_ROW(40, "conflict-hold-#40")] }, [pr(40)]).fixDue, [40]);
+  assert.deepEqual(run({ rows: ["#350 review=wf:x reviewed=abc1234:0/1/0 · conflict-hold:#350"] }, [pr(350)]).fixDue, [350]);
+  // `held-behind` rows and prose that merely mentions a conflict are not holds.
+  const prose = run({ rows: [HOLD_ROW(40, "(conflict vs #38, resolved by rebase-pr-40) merge-conflict-resolved:ef82065a")] }, [pr(40, ["ready-to-merge"])]);
+  assert.deepEqual([prose.fixDue, prose.mergeHeld], [[], 0]);
+});
+
 test("deriveRun: the merge bot is live while its ## Dispatched entry is unsettled", () => {
   assert.equal(run({ dispatched: ["merge-bot-1"] }).mergeBotLive, 1);
   assert.equal(run({ dispatched: ["merge-bot-1=done"] }).mergeBotLive, 0);
@@ -395,6 +443,7 @@ test("deriveRun: a token it cannot read refuses by naming it, never counts it li
     ["a malformed ## Dispatched entry", { dispatched: ["impl-9 oops"] }, /## Dispatched entry 'impl-9 oops'/],
     ["a reviewed= with no counts", { rows: ["#9 review=wf:a reviewed=abc1234"] }, /reviewed=abc1234/],
     ["a review= of no known kind", { rows: ["#9 review=bogus"] }, /review=bogus/],
+    ["a conflict hold naming another PR", { rows: ["#10 impl-10=PR#40 → PR#40 · conflict-hold:#38"] }, /conflict-hold:#38.*PR #40/],
   ]) {
     assert.throws(() => run(ledger), why, what);
   }
@@ -713,6 +762,22 @@ test("CLI: a merge hold accepts both the held-behind:#M and held-behind-#M spell
   });
   assert.match(hyphen.stdout, /^merge-bot {4}0\/1 → HOLD {3}\(merge-queue=1 held=1/m,
     "run-merge-bot.md's own documented report format (#38) must be recognized too");
+});
+
+test("CLI: a conflict hold prints DISPATCH fix-pr and holds the merge bot until the fix-applier settles", () => {
+  const tick = (tail, dispatched) => runCli([], {
+    ledger: { rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:0/2/0 · ${tail}`], dispatched: ["merge-bot-1=done", ...dispatched] },
+    shortlist: shortlistText([]), prs: [pr(40, ["ready-to-merge"])],
+  }).stdout;
+  const held = tick("conflict-hold:#40", []);
+  assert.match(held, /^reviewers +0\/6 → DISPATCH fix-pr PR#40 /m);
+  assert.match(held, /^merge-bot {4}0\/1 → HOLD {3}\(merge-queue=1 held=1 — every queued candidate is held behind a lower PR or on a merge conflict no fix-pr has cleared\)$/m);
+  const working = tick("conflict-hold:#40 · fix-pr-40", ["fix-pr-40"]);
+  assert.doesNotMatch(working, /DISPATCH fix-pr/);
+  assert.match(working, /^merge-bot {4}0\/1 → HOLD {3}\(merge-queue=1 held=1/m);
+  const landed = tick("conflict-hold:#40 · fix-pr-40=applied:def5678", ["fix-pr-40=applied:def5678"]);
+  assert.doesNotMatch(landed, /DISPATCH fix-pr/);
+  assert.match(landed, /^merge-bot {4}0\/1 → DISPATCH merge-bot {3}\(merge-queue=1 held=0\)$/m);
 });
 
 test("CLI: a ledger token outside the grammar refuses the tick, printing no row", () => {
