@@ -2850,7 +2850,7 @@ test("the credential helper's warm-up survives — deleting it would let a cold 
   const src = stripComments(readFileSync(THIS_FILE, "utf8"));
   assert.match(
     src,
-    /^\s*chmodSync\(helper, 0o755\);\s*^\s*git\(repo, env, "config", "credential\.helper", helper\);\s*^\s*spawnSync\(helper, \["--fleet-warm"\][^\n]*\);\s*^\s*const started = Date\.now\(\);[\s\S]*?^\s*assert\.equal\(existsSync\(helperRan\), true,/m,
+    /^\s*chmodSync\(helper, 0o755\);\s*^\s*git\(repo, env, "config", "credential\.helper", helper\);\s*^\s*spawnSync\(helper, \["--fleet-warm"\], \{ timeout: \d{3}_\d{3} \}\);\s*^\s*const started = Date\.now\(\);[\s\S]*?^\s*assert\.equal\(existsSync\(helperRan\), true,/m,
     "the helper must be warmed after it is written and configured and BEFORE the timed spawn, and the vacuity-guard assertion (assert.equal(existsSync(helperRan), true, ...)) must still exist below it — deleting either reopens #1606, and the suite stays green on an idle machine while it does",
   );
   // The arm's POSITION inside the helper body, not merely its presence. Below

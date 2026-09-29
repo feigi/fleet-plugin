@@ -286,7 +286,7 @@ test("run()'s gh-stub warm-up survives — deleting it would let a cold PATH sca
   const src = stripComments(readFileSync(THIS_FILE, "utf8"));
   assert.match(
     src,
-    /^\s*if \(gh\) \{\s*^\s*const ghPath = join\(bin, "gh"\);\s*^\s*writeFileSync\(ghPath, GH_STUB\);\s*^\s*chmodSync\(ghPath, 0o755\);\s*^\s*spawnSync\(ghPath, \["--fleet-warm"\][^\n]*\);\s*^\s*\}/m,
+    /^\s*if \(gh\) \{\s*^\s*const ghPath = join\(bin, "gh"\);\s*^\s*writeFileSync\(ghPath, GH_STUB\);\s*^\s*chmodSync\(ghPath, 0o755\);\s*^\s*spawnSync\(ghPath, \["--fleet-warm"\], \{ env: \{ PATH: bin \}, timeout: \d{3}_\d{3} \}\);\s*^\s*\}/m,
     "run() must warm the freshly-written gh stub (--fleet-warm) before the timed spawn below it — deleting this line reopens #1199 under fleet load",
   );
 });
