@@ -132,14 +132,15 @@ test("the queue-depth table points at the executable reconcile", () => {
   assert.match(s, /computed, not remembered/);
 });
 
-test("the queue-depth table keeps the implementer row's three holds above its rows", () => {
+test("the queue-depth table keeps the implementer row's four holds above its rows", () => {
   // The one ordering the script encodes that the table cannot show: implementers()
-  // returns a HOLD for a drain, a tier mismatch or a saturated review side before
-  // it ever reaches a PULL. A table read as authoritative without them Pulls
-  // under a hold. All three, each by the ACTION string the tick prints.
+  // returns a HOLD for a drain, a tier mismatch, an unchecked tier or a saturated
+  // review side before it ever reaches a PULL. A table read as authoritative
+  // without them Pulls under a hold. All four, each by the ACTION string the tick
+  // prints.
   const s = queueDepthTable();
-  assert.match(s, /Three\s+holds\s+outrank\s+every\s+row/);
-  for (const hold of ["`HOLD (draining)`", "`HOLD (tier mismatch impl-<N>)`", "`HOLD (review side saturated)`"]) {
+  assert.match(s, /Four\s+holds\s+outrank\s+every\s+row/);
+  for (const hold of ["`HOLD (draining)`", "`HOLD (tier mismatch impl-<N>)`", "`HOLD (tier unchecked impl-<N>)`", "`HOLD (review side saturated)`"]) {
     assert.ok(s.includes(hold), `the queue-depth table no longer names ${hold} above its rows`);
   }
 });

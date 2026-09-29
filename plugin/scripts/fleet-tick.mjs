@@ -74,6 +74,11 @@ function implementers(s, left) {
   // Held until a replacement at the right tier is dispatched (§ 6 §6). The
   // controller can fix this unattended, so the row asks it to.
   if (s.tierMismatch.length) return row(`HOLD (tier mismatch ${s.tierMismatch.join(" ")})`, { acts: true });
+  // Held until tier-check.mjs has run on the newest implementer and written
+  // its verdict to the ledger (#1398) — a Pull on top of an unchecked
+  // dispatch repeats whatever it got wrong. Running the check is the
+  // controller's own step, so it is asked to act.
+  if (s.tierUnchecked.length) return row(`HOLD (tier unchecked ${s.tierUnchecked.join(" ")})`, { acts: true });
 
   const deficit = s.implCap - s.implLive;
   if (deficit <= 0) return row("AT CAP");
@@ -209,6 +214,9 @@ const HELD = /^held-behind[:-]#?(\d+)$/;
 // `held-behind` so the two read alike. Distinct from an Exclusion, which
 // gates a ticket's claim; this gates a reviewed PR's merge.
 const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
+// #1398: tier-check.mjs's verdict on an implementer, `tier-ok=<member>:<def>`
+// or `tier-mismatch=<member>:<def>`.
+const TIER_VERDICT = /^tier-(ok|mismatch)=([^:\s]+):\S+$/;
 
 export function deriveRun({ rows, dispatched, drain }, prs) {
   // One entry per member name across `## Dispatched` and every row. A member
@@ -324,13 +332,29 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   const live = (family) => all.filter((m) => m.family === family && m.outcome === null).length;
   const impls = all.filter((m) => m.family === "impl");
   for (const m of impls) claimed.add(m.number);
-  // A mismatch is fixed by dispatching a replacement (`impl-N-b`) at the right
-  // tier; until the LATEST member for that ticket settles at a different
-  // outcome, the row holds — a replacement that is ALSO tier-mismatch keeps
-  // holding, it does not clear the row.
-  const tierMismatch = impls
-    .filter((m, i) => m.outcome === "tier-mismatch" && !impls.some((o, j) => j > i && o.number === m.number))
-    .map((m) => m.name);
+  // tier-check.mjs's verdict tokens (#1398), off any row:
+  // `tier-ok=<member>:<definition>` on a pass, `tier-mismatch=<member>:…` for
+  // a member found mismatched after it had already settled some other way
+  // (a live one is settled `tier-mismatch` instead). Neither is a member
+  // token, so the loop above passed over them.
+  const verdicts = { ok: new Set(), mismatch: new Set() };
+  for (const text of rows) {
+    for (const tok of text.split(/\s+/)) {
+      const v = TIER_VERDICT.exec(tok);
+      if (v) verdicts[v[1]].add(v[2]);
+    }
+  }
+  // Only the LATEST member for a ticket counts. A mismatch is fixed by
+  // dispatching a replacement (`impl-N-b`) at the right tier; until that
+  // replacement's own check passes, the row holds — a replacement that is
+  // ALSO mismatched keeps holding, and one not yet checked holds as
+  // unchecked. A member with no verdict at all holds whether it is live or
+  // settled: its transcript exists from dispatch, so the check can still
+  // run, and the tick never reads a transcript itself.
+  const newest = impls.filter((m, i) => !impls.some((o, j) => j > i && o.number === m.number));
+  const mismatched = (m) => m.outcome === "tier-mismatch" || verdicts.mismatch.has(m.name);
+  const tierMismatch = newest.filter(mismatched).map((m) => m.name);
+  const tierUnchecked = newest.filter((m) => !mismatched(m) && !verdicts.ok.has(m.name)).map((m) => m.name);
   const isQueued = (p) => p.labels.some((l) => l && l.name === "ready-to-merge");
   const queued = prs.filter(isQueued);
   const asc = (a, b) => a - b;
@@ -367,6 +391,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     mergeConflictHeld: queued.filter((p) => conflictHeld(state(p.number))).length,
     draining: drain ?? null,
     tierMismatch,
+    tierUnchecked,
     claimed,
     excluded,
   };

@@ -917,36 +917,49 @@ spend classifier and `member-outcomes.mjs` read it.
 
 **After every Pull's dispatch, run the tier check — a scripted step, never a
 prose reminder.** `~/.fleet/bin/fleet-run tier-check.mjs --batch <path-to-batch.json>`
-compares what each dispatched member's definition declared against what the
-harness actually resolved, and exits 1 naming every mismatched member as
-`member: declared <m>/<l> resolved <m>/<l>`. A non-zero exit **holds the
-next Pull**: dispatching the next member on top of an unresolved tier mismatch
-multiplies whatever silently degraded, so `ledger.mjs settle impl-<N>
-tier-mismatch`, fix the definition or the dispatch, and re-run the check before
-continuing — the tick prints `HOLD (tier mismatch impl-<N>)` until a
-replacement is dispatched at the right tier.
+judges the implementer just dispatched on the ledger's terms. The definition it
+should have run under comes off its ticket row's `tier=` token: none means
+`fleet-implementer`, `tier=<x>` means `fleet-implementer-<x>` (`tier=alt` →
+`fleet-implementer-alt`). It fails the member two ways, one line each —
+`member: dispatched <agent>, expected <definition>` when its transcript says
+it was dispatched as anything else (a generic `task` dispatch fails even when
+its model happens to match), and `member: declared <m>/<l> resolved <m>/<l>`
+when the harness resolved a different model or level than that definition
+declares. The verdict lands on the ledger either way, written by the check
+itself: exit 0 appends `tier-ok=impl-<N>:<definition>` to the row, once
+however often it runs; exit 1 runs `ledger.mjs settle impl-<N> tier-mismatch`
+— or, for a member already settled another way, which `settle` will not
+re-settle, appends `tier-mismatch=impl-<N>:<definition>` instead.
+
+**The tick holds the next Pull until that verdict exists.** Dispatching the
+next member on top of an unchecked or mismatched dispatch multiplies whatever
+silently degraded. The tick prints `HOLD (tier unchecked impl-<N>)` for the
+newest `impl-` member of a ticket whose row carries neither verdict, whether
+that member is still running or already settled `bailed`, `killed` or
+`released`, and `HOLD (tier mismatch impl-<N>)` for a mismatched one. Only the
+newest member counts, so a replacement (`impl-<N>-b`) is what clears a
+mismatch — and is then owed its own check. The tick never reads a
+transcript: clear an unchecked hold by running the check on that member with
+`session`, which works after it has settled too, because its
+`<session>/<member>.jsonl` is written at dispatch. Clear a mismatch by fixing
+the definition or the dispatch and dispatching the replacement at the right
+tier.
 
 **The batch file is a JSON array, one entry per dispatched member** — under
-Pull, a batch of one, the member just dispatched:
-`{member, agentFile, ...}` plus exactly one of the three fields
-below, in the order the controller should prefer them:
-- `resolvedModel` **and** `resolvedThinkingLevel` together — the
-  dispatch's own job record, when the controller already holds both; no
-  file is opened at all. Holding only one of the two does not count: give
-  `session` or `transcript` instead so the missing half is read, never
-  guessed.
-- `session` — a root the controller already knows: the SAME session
-  directory `member-outcomes.mjs`/`board.mjs` are already handed for this
-  run. The check finds the named member under it itself
-  — the member's own `<session>/<member>.jsonl` file directly, so a
-  member with no assistant turn yet still resolves off its dispatch-time
-  record.
-- `transcript` — the member's own transcript file, for a caller that
-  already holds the exact path.
-
-`agentFile` and `transcript`/`session` resolve relative to `--repo`
-(defaults to the plugin's own root). `member` is the AgentId the dispatch
-returns.
+Pull, a batch of one, the member just dispatched: `{member, session}`.
+`member` is the AgentId the dispatch returns (`impl-<N>`). `session` is the
+SAME session directory `member-outcomes.mjs`/`board.mjs` are already handed
+for this run; the check reads the member's own `<session>/<member>.jsonl`
+directly, so a member with no assistant turn yet still resolves off its
+dispatch-time record. A caller already holding the exact transcript path may
+give `transcript` instead. Either one is required: the agent type an
+implementer was dispatched as lives only in its transcript. `resolvedModel`
+**and** `resolvedThinkingLevel` together — the dispatch's own job record —
+may ride beside it and are preferred for the model and level. An `impl-`
+entry carries no `agentFile`: its definition is the row's, never the
+caller's. `transcript`/`session` resolve relative to `--repo` (defaults to
+the plugin's own root), and the check reads and writes the run's own ledger
+unless `--ledger` names another.
 
 **The declaration is `model: "@<role>:<level>"` — a fleet tier route, never
 a vendor id.** `@slow`, `@task`, `@smol` resolve through the operator's
@@ -1533,11 +1546,12 @@ depth** guard table applied in code. Act on each line as it reads:
 - `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn
   (**Reviewers**).
 - `DISPATCH merge-bot` — the next `merge-bot-<n>` (**Merge bot**).
-- `HOLD (…)` — the row is held and says why: draining, a tier mismatch, a
-  saturated review side, `--max-reviews` in flight, or every queued merge
-  candidate held behind a lower PR or on a conflict hold no fix-applier has
-  cleared. The tier mismatch is the one that is yours
-  to clear — dispatch the replacement at the right tier (phase 2).
+- `HOLD (…)` — the row is held and says why: draining, a tier mismatch, an
+  unchecked tier, a saturated review side, `--max-reviews` in flight, or every
+  queued merge candidate held behind a lower PR or on a conflict hold no
+  fix-applier has cleared. The two tier holds are yours to clear — an
+  unchecked tier by running `tier-check.mjs --batch` on the member it names,
+  a mismatch by dispatching the replacement at the right tier (phase 2).
 - `AT CAP`, `IDLE OK` — nothing to do on that row.
 
 **Tier guards under Pull.** An alt Pull — the Pull phase 2 routes to the
@@ -1549,8 +1563,9 @@ the one that governs, and a throttle would need state nothing on disk records
 — a schema change with its own ticket. A floor breach — the guard firing —
 dispatches that Pull at the default tier instead, with no `tier=alt` in its
 row; say why in your report. The per-dispatch `tier-check.mjs --batch` stays
-phase 2's own step, and a mismatch it finds is the
-`HOLD (tier mismatch impl-<N>)` above. Nothing else in the loop owns it.
+phase 2's own step: a mismatch it finds is the
+`HOLD (tier mismatch impl-<N>)` above, and a member it has no verdict on is
+the `HOLD (tier unchecked impl-<N>)`. Nothing else in the loop owns it.
 
 **`--max-reviews <n>`** bounds how many reviews are in flight at once, inside
 the reviewer cap. It defaults to the reviewer cap, and the reviewer slots it
@@ -3050,11 +3065,13 @@ never as a second, hand-run copy of it.
 | below the cap, missing or empty | the tick refreshes first — `REFRESHED shortlist: n entries; k lifted` — and Pulls from what it found |
 | 0 after that refresh | `SUGGEST /triage, hold idle` |
 
-Three holds outrank every row: `HOLD (draining)` once `ledger.mjs drain` has
+Four holds outrank every row: `HOLD (draining)` once `ledger.mjs drain` has
 recorded the drain, `HOLD (tier mismatch impl-<N>)` until a replacement is
-dispatched at the right tier, and `HOLD (review side saturated)` when a PR is
-still owed its review and no reviewer slot is left for it — refreshing to
-enable a Pull you are holding buys nothing.
+dispatched at the right tier, `HOLD (tier unchecked impl-<N>)` until
+`tier-check.mjs` has written its verdict on the newest implementer, and
+`HOLD (review side saturated)` when a PR is still owed its review and no
+reviewer slot is left for it — refreshing to enable a Pull you are holding
+buys nothing.
 
 `/triage` is user-invoked only — suggest, never run. The suggestion is a report,
 not a blocking prompt. Counts come from cheap `gh issue list --search`, no bodies.

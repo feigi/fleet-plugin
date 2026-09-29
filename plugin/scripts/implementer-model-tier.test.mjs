@@ -465,55 +465,6 @@ test("a rebinding glued onto the revert note with no sentence break does not hid
   }
 });
 
-// #1345: the dispatch-time tier check. A scripted step, not a prose
-// reminder — that distinction is the whole point (#1298's ruling: "prose
-// asking a controller to verify the tier is the thing that was measured not
-// to happen"), so this pins the actual invocation and the consequence, not
-// merely that tier-check is mentioned somewhere in the slice.
-test("phase 2 runs the tier check after every Pull's dispatch and holds the next Pull on a mismatch", () => {
-  const slice = dispatch();
-  // The runnable invocation itself — named by NAME, not by a paraphrase a
-  // reader could satisfy without ever running anything real.
-  assert.match(
-    slice,
-    /fleet-run tier-check\.mjs --batch/,
-    "phase 2 no longer names the runnable tier-check invocation",
-  );
-  // The exact failure line the script itself emits (tier-check.mjs's
-  // formatMismatch) — a paraphrase here would leave a reader unable to
-  // recognise the script's real output.
-  assert.match(
-    slice,
-    /`member: declared <m>\/<l> resolved <m>\/<l>`/,
-    "phase 2 no longer states the tier-check failure line's exact shape",
-  );
-  // The consequence, bound adjacent to "holds the" so a rewrite that keeps
-  // the word "holds" elsewhere in the slice does not satisfy this on its own.
-  // Under Pull nothing larger than the one dispatch exists to stop (ADR 0013):
-  // the mismatch holds the next Pull, and the tick's own HOLD row is what
-  // keeps it held.
-  assert.match(
-    slice,
-    /non-zero exit \*\*holds the\s+next Pull\*\*/,
-    "phase 2 no longer says a tier-check failure holds the next Pull",
-  );
-  assert.match(
-    slice,
-    /`ledger\.mjs settle impl-<N>\s+tier-mismatch`[\s\S]{0,200}`HOLD \(tier mismatch impl-<N>\)`/,
-    "phase 2 no longer records the mismatch on the ledger, or no longer names the tick's HOLD row that holds the next Pull on it",
-  );
-  // Normative, not advisory — the same hedge-word guard the tier guard test
-  // below already applies to its own paragraph, applied here to this one.
-  // A literal-word tripwire ONLY: it catches `Optional` and `you may` and
-  // nothing else, so a hedge in any other words passes it. Kept, not
-  // widened, per docs/adr/0017-prose-pins-pin-content-not-modality.md.
-  assert.doesNotMatch(
-    slice,
-    /tier check[\s\S]{0,600}(?:\bOptional\b|\byou may\b)/i,
-    "the tier-check step has been downgraded to advice",
-  );
-});
-
 test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
   const slice = guard();
 

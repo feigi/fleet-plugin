@@ -14,7 +14,7 @@ import { reconcile, formatLines, actionable, deriveRun, parseShortlist, unclaime
 // rest — a defaulted field is a guard nobody is pinning.
 const state = (over = {}) => ({
   implCap: 2, reviewerCap: 6, maxReviews: 6,
-  implLive: 0, draining: null, tierMismatch: [],
+  implLive: 0, draining: null, tierMismatch: [], tierUnchecked: [],
   heads: [], supply: 0, shortlistStatus: "ok", refresh: null,
   reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [],
   mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeConflictHeld: 0,
@@ -90,7 +90,7 @@ test("implementers: --max-reviews leaving a PR owed with slots free does not hol
 });
 
 test("implementers: draining holds the row and outranks every other branch", () => {
-  for (const over of [{}, { implLive: 2 }, { tierMismatch: ["impl-4"] }, { reviewDue: [1], fixLive: 6 }]) {
+  for (const over of [{}, { implLive: 2 }, { tierMismatch: ["impl-4"] }, { tierUnchecked: ["impl-4"] }, { reviewDue: [1], fixLive: 6 }]) {
     const r = row(state({ heads: [7], draining: "maintainer asked", ...over }), "implementers");
     assert.equal(r.action, "HOLD (draining)", JSON.stringify(over));
     assert.equal(r.acts, false);
@@ -101,6 +101,14 @@ test("implementers: a tier mismatch holds the row, names the member, and asks th
   const r = row(state({ heads: [7], tierMismatch: ["impl-412"] }), "implementers");
   assert.equal(r.action, "HOLD (tier mismatch impl-412)");
   assert.equal(r.acts, true, "the controller fixes a mismatch unattended — backing off on it is a stall");
+});
+
+test("implementers: an unchecked implementer holds the row and asks the controller to run the check; a mismatch outranks it", () => {
+  const r = row(state({ heads: [7], tierUnchecked: ["impl-412"] }), "implementers");
+  assert.equal(r.action, "HOLD (tier unchecked impl-412)");
+  assert.equal(r.acts, true, "running tier-check is the controller's own step — backing off on it is a stall");
+  const both = row(state({ heads: [7], tierMismatch: ["impl-9"], tierUnchecked: ["impl-412"] }), "implementers");
+  assert.equal(both.action, "HOLD (tier mismatch impl-9)");
 });
 
 test("implementers: the detail carries the numbers the branch turned on", () => {
@@ -427,6 +435,40 @@ test("deriveRun: tier mismatch holds while the LATEST replacement is also tier-m
   assert.deepEqual(r.tierMismatch, ["impl-8-b"], "a replacement that is ALSO tier-mismatch keeps the row held");
 });
 
+// #1398: tier-check.mjs writes `tier-ok=<member>:<definition>` on a pass;
+// the newest implementer of a ticket with no verdict holds as unchecked,
+// live or settled alike.
+test("deriveRun: the newest implementer with no tier verdict is unchecked, live or settled; tier-ok clears it", () => {
+  assert.deepEqual(run({ rows: ["#7 impl-7 · class=routine"] }).tierUnchecked, ["impl-7"]);
+  assert.deepEqual(run({ rows: ["#7 impl-7=bailed"] }).tierUnchecked, ["impl-7"], "a settled member is still owed its check");
+  const ok = run({ rows: ["#7 impl-7 · class=routine · tier-ok=impl-7:fleet-implementer"] });
+  assert.deepEqual([ok.tierUnchecked, ok.tierMismatch], [[], []]);
+  // A verdict names ITS member: another member's tier-ok clears nothing.
+  assert.deepEqual(run({ rows: ["#7 impl-7 · tier-ok=impl-17:fleet-implementer"] }).tierUnchecked, ["impl-7"]);
+});
+
+test("deriveRun: a settled tier-mismatch keeps its own hold and is never also unchecked", () => {
+  const r = run({ rows: ["#7 impl-7=tier-mismatch"], dispatched: ["impl-7=tier-mismatch"] });
+  assert.deepEqual([r.tierMismatch, r.tierUnchecked], [["impl-7"], []]);
+  // A member settled some other way before its check found the mismatch
+  // carries the verdict as a row token instead.
+  const token = run({ rows: ["#7 impl-7=bailed · tier-mismatch=impl-7:fleet-implementer"] });
+  assert.deepEqual([token.tierMismatch, token.tierUnchecked], [["impl-7"], []]);
+});
+
+test("deriveRun: only the newest member of a ticket counts toward the tier holds", () => {
+  const replaced = run({ rows: ["#8 impl-8=tier-mismatch · impl-8-b"], dispatched: ["impl-8=tier-mismatch", "impl-8-b"] });
+  assert.deepEqual([replaced.tierMismatch, replaced.tierUnchecked], [[], ["impl-8-b"]], "the replacement is what is owed a check now");
+  const checked = run({ rows: ["#8 impl-8=tier-mismatch · impl-8-b · tier-ok=impl-8-b:fleet-implementer"] });
+  assert.deepEqual([checked.tierMismatch, checked.tierUnchecked], [[], []]);
+  // The predecessor's own pass does not stand in for its replacement's.
+  const stale = run({ rows: ["#8 impl-8=killed · tier-ok=impl-8:fleet-implementer · impl-8-b"] });
+  assert.deepEqual(stale.tierUnchecked, ["impl-8-b"]);
+  // Nor does a predecessor killed before it was ever checked hold the row
+  // once its replacement has passed.
+  assert.deepEqual(run({ rows: ["#8 impl-8=killed · impl-8-b · tier-ok=impl-8-b:fleet-implementer"] }).tierUnchecked, []);
+});
+
 test("deriveRun: excluded rows claim their ticket while their premise still holds, and carry their premises", () => {
   const r = run({ rows: ["#50 excluded · behind-pr:#44", "#51 excluded · behind-issue:#9 behind-pr:feat/x"] }, [pr(44)]);
   assert.ok(r.claimed.has(50) && r.claimed.has(51));
@@ -637,7 +679,7 @@ const lineOf = (r, role) => r.stdout.split("\n").filter((l) => l.startsWith(role
 
 test("CLI: the #1692 shape, read off the ledger — two live implementers at cap 2 pull nothing", () => {
   const r = runCli([], {
-    ledger: { rows: ["#412 impl-412", "#415 impl-415"], dispatched: ["impl-412", "impl-415"] },
+    ledger: { rows: ["#412 impl-412 · tier-ok=impl-412:fleet-implementer", "#415 impl-415 · tier-ok=impl-415:fleet-implementer"], dispatched: ["impl-412", "impl-415"] },
     shortlist: shortlistText([412, 415, 420, 421, 422]),
   });
   assert.equal(r.status, 0, r.stderr);
@@ -647,7 +689,7 @@ test("CLI: the #1692 shape, read off the ledger — two live implementers at cap
 
   // One settles: exactly one slot frees, and the next unclaimed head fills it.
   const one = runCli([], {
-    ledger: { rows: ["#412 impl-412=PR#500 → PR#500", "#415 impl-415"], dispatched: ["impl-412=PR#500", "impl-415"] },
+    ledger: { rows: ["#412 impl-412=PR#500 → PR#500 · tier-ok=impl-412:fleet-implementer", "#415 impl-415 · tier-ok=impl-415:fleet-implementer"], dispatched: ["impl-412=PR#500", "impl-415"] },
     shortlist: shortlistText([412, 415, 420, 421, 422]),
   });
   assert.equal(one.status, 0, one.stderr);
@@ -691,7 +733,7 @@ test("CLI: a failed refresh prints REFRESH FAILED and every other row, at exit 0
 
 test("CLI: PULL names unclaimed heads only — claimed, bailed and excluded tickets are skipped", () => {
   const r = runCli(["--implementer-cap", "3"], {
-    ledger: { rows: ["#1 impl-1=bailed", "#2 impl-2", "#3 excluded · behind-pr:#99"], dispatched: ["impl-1=bailed", "impl-2"] },
+    ledger: { rows: ["#1 impl-1=bailed · tier-ok=impl-1:fleet-implementer", "#2 impl-2 · tier-ok=impl-2:fleet-implementer", "#3 excluded · behind-pr:#99"], dispatched: ["impl-1=bailed", "impl-2"] },
     shortlist: shortlistText([1, 2, 3, 4, 5, 6]),
     prs: [pr(99)],
   });
@@ -826,6 +868,16 @@ test("CLI: a ledger ledger.mjs itself refuses is a refusal here too", () => {
 test("CLI: a tier mismatch holds the implementer row until a replacement is dispatched", () => {
   const r = runCli([], { ledger: { rows: ["#7 impl-7=tier-mismatch"], dispatched: ["impl-7=tier-mismatch"] }, shortlist: shortlistText([8, 9]) });
   assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m);
+});
+
+test("CLI: an implementer with no tier verdict on the ledger holds the implementer row until tier-check writes one", () => {
+  const r = runCli([], { ledger: { rows: ["#7 impl-7 · class=routine"], dispatched: ["impl-7"] }, shortlist: shortlistText([8, 9]) });
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier unchecked impl-7\)/m);
+  const ok = runCli([], {
+    ledger: { rows: ["#7 impl-7 · class=routine · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7"] },
+    shortlist: shortlistText([8, 9]),
+  });
+  assert.match(ok.stdout, /^implementers 1\/2 → PULL #8 /m);
 });
 
 test("CLI: a lifted exclusion premise triggers a refresh even with the shortlist full", () => {
@@ -995,7 +1047,7 @@ test("CLI: --fold-unchanged does not fold when the rows change, even with nothin
   runCli(["--fold-unchanged", "--state", path], IDLE);
   // A queued candidate, held behind a lower PR: still nothing to act on.
   const held = {
-    ...IDLE, ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · held-behind:#38"] },
+    ...IDLE, ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · held-behind:#38 · tier-ok=impl-10:fleet-implementer"] },
     prs: [pr(38, [], []), pr(40, ["ready-to-merge"])],
   };
   const second = runCli(["--fold-unchanged", "--state", path], held);
@@ -1144,7 +1196,7 @@ test("CLI: a busy, fully-staffed fleet is not reported STALLED just because the 
     ticked: { at: Date.now() - 2 * 60_000 },
   }));
   const r = runCli(["--state", path], {
-    ledger: { rows: ["#1 impl-1", "#2 impl-2"], dispatched: ["impl-1", "impl-2"] },
+    ledger: { rows: ["#1 impl-1 · tier-ok=impl-1:fleet-implementer", "#2 impl-2 · tier-ok=impl-2:fleet-implementer"], dispatched: ["impl-1", "impl-2"] },
     shortlist: shortlistText([3, 4, 5]), claimed: [{ number: 41 }],
   });
   assert.equal(r.status, 0, r.stderr);

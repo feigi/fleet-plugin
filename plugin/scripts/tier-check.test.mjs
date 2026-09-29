@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,9 +9,10 @@ import { fileURLToPath } from "node:url";
 import {
   declaredPairFor,
   resolveActual, evaluateMember, resolvedPairFromRecord, evaluateMemberFromRecord,
-  formatMismatch, formatOmpExpectation, appendedLedgerText,
+  formatMismatch, formatOmpExpectation, appendedLedgerText, expectedDefinition,
 } from "./tier-check.mjs";
 import { parseFrontmatter } from "./tier-roles.mjs";
+import { deriveRun } from "./fleet-tick.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./tier-check.mjs", import.meta.url));
 const LEDGER_SCRIPT = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
@@ -41,12 +42,14 @@ function agentMd(model) {
 
 // `resolvedModelIdentity` on `session_init` — written at DISPATCH, before any
 // assistant turn — is what makes the fixtures below realistic: a member
-// still working carries it with no assistant line at all.
-function ompTranscript(resolvedModelIdentity, thinkingLevel, { withTurn = true } = {}) {
+// still working carries it with no assistant line at all. `agent` is the
+// same line's record of the definition the dispatch named (a generic
+// dispatch writes `task`).
+function ompTranscript(resolvedModelIdentity, thinkingLevel, { withTurn = true, agent } = {}) {
   const lines = [
     { type: "session", version: 3, id: "s1", timestamp: "2026-09-09T15:11:49.444Z", cwd: "/tmp/x" },
     { type: "thinking_level_change", id: "t1", parentId: null, timestamp: "2026-09-09T15:11:49.494Z", thinkingLevel, configured: null },
-    { type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-09T15:11:49.495Z", task: "fixture", resolvedModelIdentity },
+    { type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-09T15:11:49.495Z", task: "fixture", resolvedModelIdentity, ...(agent ? { agent } : {}) },
   ];
   if (withTurn) {
     lines.push({
@@ -312,11 +315,11 @@ test("AC3 end-to-end via the CLI: a role-target mismatch exits 1", () => {
   const d = dir();
   writeFileSync(join(d, "fleet-implementer.agent.md"), agentMd("@slow:xhigh"));
   writeFileSync(join(d, "omp-impl.jsonl"), ompTranscript("anthropic/claude-sonnet-5", "xhigh"));
-  const batch = [{ member: "impl-4", agentFile: "fleet-implementer.agent.md", transcript: "omp-impl.jsonl" }];
+  const batch = [{ member: "RoleMismatchCli", agentFile: "fleet-implementer.agent.md", transcript: "omp-impl.jsonl" }];
   writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
   const r = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", modelRolesFile(d)]);
   assert.equal(r.status, 1, r.stdout + r.stderr);
-  assert.match(r.stderr, /impl-4: declared @slow:xhigh\/xhigh resolved anthropic\/claude-sonnet-5\/xhigh/);
+  assert.match(r.stderr, /RoleMismatchCli: declared @slow:xhigh\/xhigh resolved anthropic\/claude-sonnet-5\/xhigh/);
 });
 
 // ---------------------------------------------------------------------------
@@ -497,44 +500,127 @@ test("--session: no <member>.jsonl under the session root refuses by name", () =
 });
 
 // ---------------------------------------------------------------------------
-// ledger append — "if the ledger has no per-member field, write the pair
-// into the row's free text" (ledger.mjs's own row is ticket-keyed free text;
-// #1345 does not add a member concept to it), and idempotent on a re-run.
+// #1398 — an implementer is judged on the ledger's terms: its definition
+// derived from the ticket row's `tier=`, its dispatched agent type read off
+// its own transcript, and the verdict written back to the row either way —
+// `tier-ok=impl-<N>:<definition>` on a pass, `settle impl-<N> tier-mismatch`
+// on a failure. fleet-tick.mjs's deriveRun is the reader of both.
 // ---------------------------------------------------------------------------
 
-test("ledger append: a mismatch on impl-<N> appends the pair to that ticket's existing row rather than replacing it", () => {
+const ledgerCli = (file, ...args) => execFileSync(process.execPath, [LEDGER_SCRIPT, "--file", file, ...args], { encoding: "utf8" });
+
+// One implementer's world: its definitions under <d>/agents/, its ticket row
+// on a --file ledger, its transcript at <d>/session/<member>.jsonl — the flat
+// `session` lookup phase 2 hands the check.
+function implWorld({
+  ticket = 7, member = `impl-${ticket}`, row = `${member} · class=routine`,
+  definitions = { "fleet-implementer": "@slow:high" },
+  agent = "fleet-implementer", model = "anthropic/claude-opus-5", level = "high",
+} = {}) {
   const d = dir();
-  execFileSync("git", ["init", "-q"], { cwd: d });
-  const ledgerFile = join(d, ".fleet", "ledger.md");
-  execFileSync(process.execPath, [LEDGER_SCRIPT, "--file", ledgerFile, "row", "77", "impl-77 · class=routine"], { cwd: d, encoding: "utf8" });
-  writeFileSync(join(d, "fleet-implementer.agent.md"), agentMd("@slow:xhigh"));
-  writeFileSync(join(d, "omp-impl.jsonl"), ompTranscript("anthropic/claude-sonnet-5", "xhigh"));
-  const batch = [{ member: "impl-77", agentFile: "fleet-implementer.agent.md", transcript: "omp-impl.jsonl" }];
-  writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
-  const r = runCli(["--batch", "batch.json", "--repo", d, "--ledger", ledgerFile], d, ["--model-roles", modelRolesFile(d)]);
-  assert.equal(r.status, 1, r.stdout + r.stderr);
-  const data = JSON.parse(execFileSync(process.execPath, [LEDGER_SCRIPT, "--file", ledgerFile, "read"], { encoding: "utf8" }));
-  const row = data.rows.find((row) => row.startsWith("#77"));
-  assert.ok(row, "no row for #77 survived the append");
-  assert.match(row, /class=routine/, "the append replaced the existing free text instead of appending to it");
-  assert.match(row, /declared @slow:xhigh\/xhigh resolved anthropic\/claude-sonnet-5\/xhigh/, "the tier-mismatch pair was not written to the ledger row");
+  mkdirSync(join(d, "agents"));
+  for (const [name, route] of Object.entries(definitions)) writeFileSync(join(d, "agents", `${name}.agent.md`), agentMd(route));
+  const ledger = join(d, "ledger.md");
+  ledgerCli(ledger, "row", String(ticket), row);
+  mkdirSync(join(d, "session"));
+  writeFileSync(join(d, "session", `${member}.jsonl`), ompTranscript(model, level, { agent }));
+  writeFileSync(join(d, "batch.json"), JSON.stringify([{ member, session: "session" }]));
+  const read = () => JSON.parse(ledgerCli(ledger, "read"));
+  return {
+    ledger, read,
+    check: () => runCli(["--batch", "batch.json", "--repo", d, "--ledger", ledger, "--model-roles", modelRolesFile(d)], d),
+    row: () => read().rows.find((r) => r.split(/\s/)[0] === `#${ticket}`),
+    tick: () => deriveRun({ ...read(), drain: null }, []),
+  };
+}
+
+test("implementer pass: exit 0 writes tier-ok=impl-<N>:<definition> onto the row exactly once, however often the check re-runs", () => {
+  const w = implWorld();
+  const r = w.check();
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(w.row(), "#7 impl-7 · class=routine · tier-ok=impl-7:fleet-implementer");
+  assert.equal(w.check().status, 0);
+  assert.equal(w.row(), "#7 impl-7 · class=routine · tier-ok=impl-7:fleet-implementer", "a re-run grew the row");
+  // The token is no longer the row's tail once the member settles and the
+  // controller writes past it — a re-run still finds it.
+  ledgerCli(w.ledger, "row", "7", "impl-7 · class=routine · tier-ok=impl-7:fleet-implementer · → PR#9");
+  assert.equal(w.check().status, 0);
+  assert.equal(w.row().split("tier-ok=").length - 1, 1, w.row());
 });
 
-test("ledger append: re-running the check on an unchanged mismatch does not duplicate the note", () => {
-  const d = dir();
-  execFileSync("git", ["init", "-q"], { cwd: d });
-  const ledgerFile = join(d, ".fleet", "ledger.md");
-  writeFileSync(join(d, "fleet-implementer.agent.md"), agentMd("@slow:xhigh"));
-  writeFileSync(join(d, "omp-impl.jsonl"), ompTranscript("anthropic/claude-sonnet-5", "xhigh"));
-  const batch = [{ member: "impl-88", agentFile: "fleet-implementer.agent.md", transcript: "omp-impl.jsonl" }];
-  writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
-  runCli(["--batch", "batch.json", "--repo", d, "--ledger", ledgerFile], d, ["--model-roles", modelRolesFile(d)]);
-  const r2 = runCli(["--batch", "batch.json", "--repo", d, "--ledger", ledgerFile], d, ["--model-roles", modelRolesFile(d)]);
-  assert.equal(r2.status, 1, r2.stdout + r2.stderr);
-  const data = JSON.parse(execFileSync(process.execPath, [LEDGER_SCRIPT, "--file", ledgerFile, "read"], { encoding: "utf8" }));
-  const row = data.rows.find((row) => row.startsWith("#88"));
-  const occurrences = row.split("declared").length - 1;
-  assert.equal(occurrences, 1, "the note appeared ${occurrences} times after two identical runs — it grew on the re-check");
+test("implementer mismatch: exit 1 settles the member tier-mismatch on the ledger and notes why, once", () => {
+  const w = implWorld({ model: "anthropic/claude-sonnet-5" });
+  const r = w.check();
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /impl-7: declared @slow:high\/high resolved anthropic\/claude-sonnet-5\/high/);
+  const row = w.row();
+  assert.equal(row, "#7 impl-7=tier-mismatch · class=routine · impl-7: declared @slow:high/high resolved anthropic/claude-sonnet-5/high");
+  assert.deepEqual(w.tick().tierMismatch, ["impl-7"]);
+  const again = w.check();
+  assert.equal(again.status, 1, again.stdout + again.stderr);
+  assert.equal(w.row(), row, "a re-run on an unchanged mismatch changed the row");
+});
+
+test("implementer: the expected definition follows the row's tier= — none, alt, and any other <cell>", () => {
+  for (const [tier, definition] of [[null, "fleet-implementer"], ["alt", "fleet-implementer-alt"], ["slow-medium", "fleet-implementer-slow-medium"]]) {
+    const w = implWorld({
+      row: `impl-7 · class=routine${tier ? ` · tier=${tier}` : ""}`,
+      definitions: { "fleet-implementer": "@slow:high", "fleet-implementer-alt": "@slow:high", "fleet-implementer-slow-medium": "@slow:high" },
+      agent: definition,
+    });
+    const r = w.check();
+    assert.equal(r.status, 0, `${tier}: ${r.stdout}${r.stderr}`);
+    assert.ok(w.row().endsWith(` · tier-ok=impl-7:${definition}`), `${tier}: ${w.row()}`);
+  }
+  // The row's tier, not the dispatch, names the definition: an alt row whose
+  // member ran the default definition fails even though that definition's
+  // tier resolved exactly.
+  const w = implWorld({ row: "impl-7 · tier=alt", definitions: { "fleet-implementer": "@slow:high", "fleet-implementer-alt": "@task:high" } });
+  const r = w.check();
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /impl-7: dispatched fleet-implementer, expected fleet-implementer-alt/);
+});
+
+test("implementer: a cell with no definition file under agents/ fails as a mismatch rather than crashing the check", () => {
+  const w = implWorld({ row: "impl-7 · tier=slow-medium", agent: "fleet-implementer-slow-medium" });
+  const r = w.check();
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /impl-7: expected fleet-implementer-slow-medium has no agents\/fleet-implementer-slow-medium\.agent\.md/);
+  assert.match(w.row(), /impl-7=tier-mismatch/);
+});
+
+test("implementer: a `task` dispatch fails even when the model and level it resolved match the definition's", () => {
+  const w = implWorld({ agent: "task" });
+  const r = w.check();
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /impl-7: dispatched task, expected fleet-implementer/);
+  assert.doesNotMatch(r.stderr, /declared @slow/, "the model half passed and must not be reported as a mismatch");
+  assert.match(w.row(), /impl-7=tier-mismatch/);
+});
+
+test("implementer: a member already settled another way records tier-mismatch as a row token and holds the tick", () => {
+  const w = implWorld({ row: "impl-7=bailed · class=routine", agent: "task" });
+  assert.deepEqual(w.tick().tierUnchecked, ["impl-7"], "a settled member with no verdict must hold as unchecked");
+  const r = w.check();
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(w.row(), "#7 impl-7=bailed · class=routine · tier-mismatch=impl-7:fleet-implementer · impl-7: dispatched task, expected fleet-implementer");
+  assert.deepEqual([w.tick().tierMismatch, w.tick().tierUnchecked], [["impl-7"], []]);
+  assert.equal(w.check().status, 1);
+  assert.equal(w.row().split("tier-mismatch=").length - 1, 1, "a re-run wrote the token twice");
+});
+
+test("tick: a settled, unchecked implementer holds; a later tier-check writes tier-ok and the hold clears", () => {
+  const w = implWorld({ row: "impl-7=released · class=routine" });
+  assert.deepEqual(w.tick().tierUnchecked, ["impl-7"]);
+  const r = w.check();
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual([w.tick().tierMismatch, w.tick().tierUnchecked], [[], []]);
+});
+
+test("expectedDefinition refuses a tier= it cannot name one definition file by", () => {
+  assert.throws(() => expectedDefinition("impl-7 · tier=alt · tier=slow-high"), /conflicting tier= tokens \(tier=alt, tier=slow-high\)/);
+  assert.throws(() => expectedDefinition("impl-7 · tier=../../etc"), /is not a definition suffix/);
+  assert.equal(expectedDefinition("impl-7 · tier=alt · tier=alt"), "fleet-implementer-alt");
 });
 
 test("ledger append: a mismatch on a member with no derivable ticket (an omp AgentId) still exits 1 but writes no ledger row", () => {
@@ -564,22 +650,32 @@ test("CLI: no --batch at all refuses with the usage line", () => {
 
 test("CLI: a batch entry missing member/agentFile refuses by naming the entry, not a generic parse error", () => {
   const d = dir();
-  writeFileSync(join(d, "batch.json"), JSON.stringify([{ member: "impl-1" }]));
+  writeFileSync(join(d, "batch.json"), JSON.stringify([{ member: "SomeWordPair" }]));
   const r = runCli(["--batch", "batch.json", "--repo", d], d, ["--model-roles", modelRolesFile(d)]);
   assert.equal(r.status, 2, r.stdout + r.stderr);
   assert.match(r.stderr, /missing member\/agentFile/);
 });
 
-test("CLI: --repo defaults to the script's own plugin/ root, so a real fleet-implementer.agent.md is found without --repo", () => {
+test("CLI: an impl- entry carrying agentFile refuses — the definition is the ledger row's, never the caller's", () => {
   const d = dir();
-  writeFileSync(join(d, "omp-impl.jsonl"), ompTranscript("anthropic/claude-opus-5", "high"));
-  const batch = [{ member: "impl-1", agentFile: "agents/fleet-implementer.agent.md", transcript: join(d, "omp-impl.jsonl") }];
+  writeFileSync(join(d, "batch.json"), JSON.stringify([{ member: "impl-1", agentFile: "agents/fleet-implementer-alt.agent.md", session: "s" }]));
+  const r = runCli(["--batch", "batch.json", "--repo", d, "--ledger", join(d, "ledger.md")], d, ["--model-roles", modelRolesFile(d)]);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /impl-1: an impl- entry carries no agentFile/);
+});
+
+test("CLI: --repo defaults to the script's own plugin/ root, so the real agents/fleet-implementer.agent.md is found without --repo", () => {
+  const d = dir();
+  const ledger = join(d, "ledger.md");
+  ledgerCli(ledger, "row", "1", "impl-1");
+  writeFileSync(join(d, "omp-impl.jsonl"), ompTranscript("anthropic/claude-opus-5", "high", { agent: "fleet-implementer" }));
+  const batch = [{ member: "impl-1", transcript: join(d, "omp-impl.jsonl") }];
   writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
-  const r = runCli(["--batch", join(d, "batch.json")], d, ["--model-roles", modelRolesFile(d)]);
+  const r = runCli(["--batch", join(d, "batch.json"), "--ledger", ledger], d, ["--model-roles", modelRolesFile(d)]);
   // The real fleet-implementer declares @slow:high (implementer-model-tier.test.mjs
   // pins this) — this fixture's transcript matches it, so a correctly
-  // resolved --repo default exits 0. A wrong default (or none) would refuse
-  // ENOENT on agents/fleet-implementer.agent.md instead.
+  // resolved --repo default exits 0. A wrong default (or none) finds no
+  // definition file and fails as a mismatch instead.
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
