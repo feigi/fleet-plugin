@@ -1363,7 +1363,7 @@ for a token on a ticket's line — never a hand edit.
 | Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Label seen (persistent Monitor) | nothing to record |
 | CI run terminal | `ci=<run-id>:<attempt>:<conclusion>` on the row; then the finisher gate (below) |
-| Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `reap.sh --apply` |
+| Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `reap.sh --apply` — a `conflict-hold:#<pr>` the bot wrote itself |
 | Drain | `ledger.mjs drain "<reason>"`; release the claims (below); `settle impl-<N>=released` |
 | Heartbeat | nothing to record |
 
@@ -1422,7 +1422,10 @@ owes beyond its row:
   it from — settle `merge-bot-<n>=done`, reap merged branches and worktrees with
   `reap.sh --apply` (below) — always, even when the pass merged nothing — and
   then run the tick. A label that landed at the last moment reads `DISPATCH
-  merge-bot` again: dispatch the next bot straight away.
+  merge-bot` again: dispatch the next bot straight away. A `rebase-fallback-#<pr>`
+  on a conflict needs no record from you — the bot already appended
+  `conflict-hold:#<pr>` to that PR's row, and the tick turns it into `DISPATCH
+  fix-pr PR#<pr>` (**Reviewers**).
 - **The run ends, or the maintainer says drain** → `ledger.mjs drain
   "<reason>"` first, then release every claim that never became a PR (below)
   and settle each `impl-<N>=released`. Nothing else in the loop fires for those
@@ -1524,14 +1527,16 @@ depth** guard table applied in code. Act on each line as it reads:
   blind until it can.
 - `SUGGEST /triage, hold idle` — nothing is admissible after the refresh.
   Suggest, never run (**Queue depth**).
-- `DISPATCH fix-pr PR#<M> …` — a fix-applier per PR (**Reviewers**). Printed
+- `DISPATCH fix-pr PR#<M> …` — a fix-applier per PR, for a review's survivors
+  or a merge bot's `conflict-hold:#<M>` (**Reviewers**). Printed
   ahead of reviews on purpose: finishing what is started beats starting more.
 - `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn
   (**Reviewers**).
 - `DISPATCH merge-bot` — the next `merge-bot-<n>` (**Merge bot**).
 - `HOLD (…)` — the row is held and says why: draining, a tier mismatch, a
   saturated review side, `--max-reviews` in flight, or every queued merge
-  candidate held behind a lower PR. The tier mismatch is the one that is yours
+  candidate held behind a lower PR or on a conflict hold no fix-applier has
+  cleared. The tier mismatch is the one that is yours
   to clear — dispatch the replacement at the right tier (phase 2).
 - `AT CAP`, `IDLE OK` — nothing to do on that row.
 
@@ -1973,6 +1978,21 @@ before dispatch: both mutual-exclusion scans, the suggested-fix re-derivation,
 you hold none, so there is nothing for you to rank, relay or pre-rule — and a
 report from a refuter it spawns that surfaces to you is its to retrieve, never
 yours to scan or pass on.
+
+**A `DISPATCH fix-pr PR#<M>` on a conflict hold** — the row carries the merge
+bot's `conflict-hold:#<M>` (`run-merge-bot.md` step 1's fallback), not
+survivors — is the same slot with a different job, and no review file to hand
+over. Name it `fix-pr-<M>`, or the next suffix (`-b`, `-c` …) when that name is
+already on record — `dispatch` refuses a reused one — and dispatch a
+`fleet-implementer` in the PR's existing worktree with the prompt below's
+worktree, branch and path discipline, but in place of its review paragraphs:
+bring `<branch>` current with `origin/main`, resolving every conflict by
+`run-merge-bot.md`'s **No-undo audit**, run `<testCmd>`, push, report the new
+head. Settle it `applied:<head>` — `no-op` if no conflict was left — which is
+what lifts the tick's merge hold; a dispatched-but-live one does not, and
+`failed`/`killed` leave the PR fix-due for a replacement. The push moves the
+head after `ready-to-merge`, so the next merge bot refuses it
+`head-moved-after-label-#<M>`: a fresh finisher, per **Failure handling**.
 
 **A refutation resting on an injection nothing proved landed is not a refutation
 — it is a cell that never ran.** A mutation test and a finding reproduction are
@@ -3241,7 +3261,7 @@ ADR 0007 records the gate and why it has no exemption.
 | Merge bot hits the hold rule | Report `held-behind-#<lower>`, PR stays queued |
 | Merge bot finds the worktree ahead of the PR head **on the local-rebase fallback** | `worktree-diverged-#<pr>`, PR stays queued. Read the stray commit; push-or-discard is yours, and the maintainer's if the evidence cannot settle it |
 | Merge bot finds the head moved after `ready-to-merge` was applied | `head-moved-after-label-#<pr>`, PR stays queued, label untouched. Dispatch a **fresh** finisher against the new head — the first audit verified a different tree |
-| Merge bot cannot resolve a rebase safely | Stop that PR, report, continue |
+| Merge bot cannot resolve a rebase safely | Stop that PR, report, continue. On a conflict the bot has already appended `conflict-hold:#<pr>` to the PR's row; the tick prints `DISPATCH fix-pr PR#<pr>` and holds the merge until that fix-applier settles |
 | Merge bot's gate refuses on its instrument re-check (`instrument-set-changed` or `instruments-unanswerable`, exit 2) | Report `<reason>-#<pr>` with what it printed, PR stays queued, label untouched. Do not re-run the gate |
 | Member silent or truncated | Send to ping or resume — same unit of work; see the state machine below |
 | Member idle with work outstanding | Read the PR first, *then* ping. Idle ≠ done |
@@ -3346,7 +3366,10 @@ written with `row` (**Reviewers**): `review=wf:<runId>` |
 settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>`
 when the result lands. A row with `review=` and no `reviewed=` is a review in
 flight, and the tick counts it against the reviewer cap. `ci=<run-id>:<attempt>:<conclusion>`
-and `held-behind:#<lower>` are row tokens the same way (Phase 3).
+and `held-behind:#<lower>` are row tokens the same way (Phase 3), and so is
+`conflict-hold:#<pr>` — the one row token the merge bot writes itself, naming
+the row's own PR (`run-merge-bot.md` step 1). It is not an Exclusion: that
+gates a ticket's claim, this a reviewed PR's merge.
 
 Plus two append-only lists:
 
