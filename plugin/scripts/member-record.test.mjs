@@ -338,6 +338,85 @@ test("readOmpMember: a real agent definition still wins over a coincidentally na
   assert.equal(readOmpMember(lines, "/fake/path.jsonl", "review-pr-42", 0).role, "specialist");
 });
 
+// #2209: `pr` for a member whose NAME carries none (every implementer) comes
+// from the transcript's own `gh pr create` result. Shapes measured 2026-09-29
+// across every real ~/.omp/agent/sessions/**/*.jsonl: the call is a `bash`
+// toolCall block, the result its own `toolResult` line whose first text block
+// holds gh's stdout — the PR URL on a line of its own — then omp's
+// "Wall time" trailer, sometimes followed by a second injected text block.
+const USAGE = { input: 1, output: 1, cacheRead: 0, cacheWrite: 10, totalTokens: 12 };
+const bashCallEvt = (id, command) => evt({
+  type: "message", id: `c-${id}`, parentId: "i1", timestamp: "2026-09-08T15:12:00.000Z",
+  message: { role: "assistant", content: [{ type: "toolCall", id, name: "bash", arguments: { command, i: "x" } }], model: "claude-sonnet-5", usage: USAGE },
+});
+const bashResultEvt = (id, text, isError = false) => evt({
+  type: "message", id: `r-${id}`, parentId: `c-${id}`, timestamp: "2026-09-08T15:12:01.000Z",
+  message: {
+    role: "toolResult", toolCallId: id, toolName: "bash",
+    content: [{ type: "text", text }, { type: "text", text: "Memory check: skip if nothing notable." }], isError,
+  },
+});
+const memberWith = (stem, ...calls) => readOmpMember([
+  sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("high"),
+  sessionInitEvt("Implement ticket 7", "anthropic/claude-sonnet-5"),
+  ...calls.flat(),
+].join("\n"), "/fake/path.jsonl", stem, 0);
+const created = (id, command, text) => [bashCallEvt(id, command), bashResultEvt(id, text)];
+const CREATE = 'cd /wt && rtk git push -u origin HEAD && rtk gh pr create --base main --title "t" --body-file /tmp/b.md';
+
+test("readOmpMember: pr is the PR the member's own `gh pr create` printed; the name-carried ticket stays (#2209)", () => {
+  const rec = memberWith("impl-7", created("t1", CREATE, "https://github.com/feigi/fleet-plugin/pull/1528\n\n\nWall time: 2.05 seconds"));
+  assert.equal(rec.pr, "1528");
+  assert.equal(rec.ticket, "7");
+});
+
+test("readOmpMember: the created PR is accepted whatever the member's name shape, host, or chain position (#2209)", () => {
+  // A generated or non-canonical AgentId (`Impl676`, `impl1230`) names no
+  // ticket, yet those members opened PRs too (Impl1335..Impl1349, impl1230, ...).
+  // A GitHub Enterprise host prints the same one-URL line; `gh pr create`
+  // first in the command, after `&&`, or on its own line all invoke it.
+  assert.equal(memberWith("Impl676", created("t1", "gh pr create --fill", "https://bmw.ghe.com/CoCo/agent-brain/pull/688\n\nWall time: 2.06 seconds")).pr, "688");
+  assert.equal(memberWith("impl1230", created("t1", "cat > /tmp/b <<'EOF'\nbody\nEOF\ngh pr create -F /tmp/b", "https://github.com/o/r/pull/1629\n")).pr, "1629");
+  // The same PR printed twice (a retried call) is still one PR.
+  assert.equal(memberWith("impl-7",
+    created("t1", CREATE, "https://github.com/o/r/pull/12\n"),
+    created("t2", CREATE, "https://github.com/o/r/pull/12\n")).pr, "12");
+  // A non-zero exit AFTER the create (`gh pr create ... && gh pr edit
+  // --add-label` where the label write fails) still printed a real, opened PR.
+  assert.equal(memberWith("impl-7", [bashCallEvt("t1", `${CREATE} && gh pr edit --add-label patch`),
+    bashResultEvt("t1", "https://github.com/o/r/pull/31\nfailed to update: label not found\n", true)]).pr, "31");
+});
+
+test("readOmpMember: pr stays blank, never guessed, when no call of the member's own created exactly one PR (#2209)", () => {
+  const cases = {
+    // A URL line from a command that merely READS a PR.
+    "view, not create": created("t1", "gh pr view 5 --json url -q .url", "https://github.com/o/r/pull/5\n"),
+    // `gh pr create` quoted as text is not an invocation of it.
+    "create only quoted": created("t1", 'echo "next: gh pr create"; gh pr view 5 --json url -q .url', "next: gh pr create\nhttps://github.com/o/r/pull/5\n"),
+    // gh's refusal names the PR someone ELSE already opened for the branch.
+    "already exists": created("t1", CREATE, 'a pull request for branch "fix/7" into branch "main" already exists:\nhttps://github.com/o/r/pull/9\n'),
+    // A URL inside prose is not gh's own output line.
+    "url in prose": created("t1", CREATE, "see https://github.com/o/r/pull/9 for context\n"),
+    // A create outrunning the tool timeout — the URL never reaches this result.
+    "backgrounded": created("t1", CREATE, "Backgrounded as job bg_15; result will be delivered automatically."),
+    // Two distinct PRs (a real one plus a throwaway probe, measured on
+    // impl-1578): picking either is a guess.
+    "two distinct PRs": [
+      ...created("t1", CREATE, "https://github.com/o/r/pull/1681\n"),
+      ...created("t2", CREATE, "https://github.com/o/r/pull/1682\n"),
+    ],
+  };
+  for (const [label, lines] of Object.entries(cases)) {
+    assert.equal(memberWith("impl-7", lines).pr, "", label);
+  }
+});
+
+test("readOmpMember: a PR-named member keeps the PR its name carries over any PR it created (#2209)", () => {
+  // `fix-pr-9` works PR 9 by construction; a PR it opened on the side is not
+  // its unit of work and must not repoint its join into tier-outcomes.tsv.
+  assert.equal(memberWith("fix-pr-9", created("t1", CREATE, "https://github.com/o/r/pull/12\n")).pr, "9");
+});
+
 test("readOmpSession: one row per member file, stamped with the session dir name", () => {
   const dir = ompSessionFixture("2026-09-08T13-13-27-300Z_01a08126-ee04-7095-a695-14e3249f1127", {
     Memory1: [sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("high"), assistantEvt("claude-sonnet-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0.001 } })],

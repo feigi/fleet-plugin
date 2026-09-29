@@ -177,6 +177,39 @@ function assertOmpShaped(d, filePath) {
   }
 }
 
+// `openedPrs` (#2209) is every PR number the member's OWN `gh pr create`
+// printed — the source of `pr` for a member whose name carries none, which is
+// every implementer (`impl-<ticket>` names a ticket, never a PR). Chosen over
+// the ledger's `impl-<N>=PR#M` settle token because that token is written by a
+// live run only: a regeneration over past sessions has the transcript and
+// nothing else, and this module stays pure over transcripts. Measured
+// 2026-09-29 across every real `~/.omp/agent/sessions/**/*.jsonl`: every
+// successful create was a `bash` toolCall whose result line printed gh's
+// stdout — the URL on a line of its own — then omp's "Wall time" trailer.
+//
+// Three filters keep a URL that is NOT a PR this member opened out:
+// - the CALL must invoke `gh pr create` (first in the command or after a
+//   shell separator, optionally through `rtk`) — a `gh pr view`/`gh pr list`
+//   result prints bare PR URLs too, and `gh pr create` quoted as text is no
+//   invocation;
+// - the URL must be a LINE of its own, the shape gh prints, never a URL
+//   inside prose;
+// - a URL right after gh's "... already exists:" refusal is skipped: that PR
+//   was opened by someone else for the same branch.
+// `isError` is deliberately NOT a filter: a create chained before a failing
+// command (`gh pr create ... && gh pr edit --add-label x`) exits non-zero
+// having still opened the PR it printed.
+const GH_PR_CREATE_RE = /(?:^|[;&|(\n])\s*(?:rtk\s+)?gh\s+pr\s+create\b/;
+function createdPrNumbers(text) {
+  const out = [];
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^https?:\/\/[^/\s]+\/[^/\s]+\/[^/\s]+\/pull\/(\d+)\s*$/.exec(lines[i]);
+    if (m && !(i > 0 && /already exists:\s*$/.test(lines[i - 1]))) out.push(m[1]);
+  }
+  return out;
+}
+
 // Folds one omp subagent transcript into per-turn totals. One
 // `message.usage` per assistant turn already (no cross-line fold-back
 // needed), a real per-turn dollar cost at `usage.cost.total`, and the
@@ -260,6 +293,10 @@ function assertOmpShaped(d, filePath) {
 // 142 aborted or errored turns followed a result batch. When one never
 // reached the API its usage is all zero, and attributeTools books the batch
 // before it at 0.
+//
+// `openedPrs` (#2209) folds the `bash` calls that invoke `gh pr create`
+// against their own results, via createdPrNumbers above — distinct PR
+// numbers in first-seen order.
 export function foldOmpTranscript(jsonlText, filePath) {
   let model = null, thinking = null, task = null, resolvedModelIdentity = null, agent = null;
   let firstTs = null, lastTs = null;
@@ -267,6 +304,8 @@ export function foldOmpTranscript(jsonlText, filePath) {
   let sawCost = false;
   let malformedNonLastLines = 0;
   const entries = [];
+  const createCallIds = new Set();
+  const openedPrs = new Set();
   const lines = String(jsonlText ?? "").split("\n");
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
@@ -288,6 +327,12 @@ export function foldOmpTranscript(jsonlText, filePath) {
       if (typeof d.agent === "string") agent = d.agent;
     }
     const m = d.message;
+    if (d.type === "message" && m?.role === "assistant" && Array.isArray(m.content)) {
+      for (const c of m.content) {
+        if (c?.type === "toolCall" && c.name === "bash" && typeof c.arguments?.command === "string"
+          && GH_PR_CREATE_RE.test(c.arguments.command)) createCallIds.add(c.id);
+      }
+    }
     if (d.type === "message" && m?.role === "assistant" && m.usage) {
       const u = m.usage;
       if (typeof m.model === "string" && m.model) model = m.model;
@@ -308,6 +353,10 @@ export function foldOmpTranscript(jsonlText, filePath) {
       const chars = blocks.reduce(
         (n, b) => n + (b?.type === "text" && typeof b.text === "string" ? b.text.length : JSON.stringify(b).length), 0);
       entries.push({ kind: "result", results: [{ id: m.toolCallId, chars }] });
+      if (createCallIds.has(m.toolCallId)) {
+        const text = blocks.map((b) => (b?.type === "text" && typeof b.text === "string" ? b.text : "")).join("\n");
+        for (const n of createdPrNumbers(text)) openedPrs.add(n);
+      }
     }
   }
   const span = firstTs && lastTs ? (Date.parse(lastTs) - Date.parse(firstTs)) / 1000 : 0;
@@ -319,6 +368,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
     wallS: Number.isFinite(span) ? Math.round(span) : 0,
     entries,
     malformedNonLastLines,
+    openedPrs: [...openedPrs],
   };
 }
 
@@ -389,7 +439,13 @@ const OMP_CANONICAL_STEM_RE = new RegExp(`^(?:${CANONICAL_MEMBER_NAME_PREFIXES})
 export function ompMemberRecord(folded, agentStem, spawnDepth = 0) {
   if (!folded.model) return null; // no assistant turn — not a real member transcript
   const member = agentStem;
-  const { ticket, pr } = parseMemberName(member);
+  const named = parseMemberName(member);
+  const { ticket } = named;
+  // A name-carried PR (`fix-pr-<n>`, `finisher-<n>`, ...) is the member's unit
+  // of work by construction and wins. Otherwise (#2209) the one PR its own
+  // `gh pr create` printed; none, or more than one (measured: impl-1578 opened
+  // its real PR plus a throwaway probe PR), stays blank — never a guess.
+  const pr = named.pr || (folded.openedPrs?.length === 1 ? folded.openedPrs[0] : "");
   const hasRoleSignal = spawnDepth >= 1 || typeof folded.task === "string" || typeof folded.agent === "string"
     || OMP_CANONICAL_STEM_RE.test(member);
   const role = hasRoleSignal
