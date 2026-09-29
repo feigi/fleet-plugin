@@ -1,6 +1,6 @@
 # 0014 — omp.sh is the only harness
 
-**Status:** Accepted. Ruled 2026-09-27.
+**Status:** Accepted. Ruled 2026-09-27. Amended by #2189: `docs/research/external-assumptions/` is maintained against the live tree, not untouched historical record as the Consequences bullet below states; `docs/specs/` and `.out-of-scope/` still stand as untouched.
 
 ## Context
 
