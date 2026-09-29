@@ -19,7 +19,7 @@
 // held at the mergeable baseline, so deleting a check fails the case named
 // after it, not merely some case somewhere.
 
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, realpathSync } from "node:fs";
@@ -85,6 +85,16 @@ function mktemp(t, prefix) {
   return d;
 }
 
+// One `gh` stub for the whole file, on every fixture's PATH. macOS scans a
+// newly created executable inode on its first direct exec (~1-2s, measured in
+// #2249), so a fresh stub per gate() call cost the file one scan per case. The
+// stub is stateless — CALL_LOG, PR_VIEW_FILE and PR_VIEW_EXIT come from each
+// call's env — so sharing it changes nothing a case asserts; everything else
+// stays per call.
+const BIN = realpathSync(mkdtempSync(join(tmpdir(), "merge-gate-bin-")));
+after(() => rmSync(BIN, { recursive: true, force: true }));
+writeFileSync(join(BIN, "gh"), GH_STUB, { mode: 0o755 });
+
 function git(cwd, ...args) {
   const r = spawnSync("git", args, { cwd, encoding: "utf8", env: cleanEnv() });
   assert.equal(r.status, 0, `fixture: git ${args.join(" ")} failed: ${r.stderr}`);
@@ -121,15 +131,12 @@ function gate(
 ) {
   const root = mktemp(t, "merge-gate-");
   const scripts = join(root, "scripts");
-  const bin = join(root, "bin");
   mkdirSync(scripts);
-  mkdirSync(bin);
   const script = join(scripts, "merge-gate.mjs");
   writeFileSync(script, readFileSync(SCRIPT));
   for (const [name, path] of SIBLING_MODULES) writeFileSync(join(scripts, name), readFileSync(path));
   writeFileSync(join(scripts, "ci-state.mjs"), CI_STATE_STUB);
   writeFileSync(join(scripts, "instruments.sh"), INSTRUMENTS_STUB);
-  writeFileSync(join(bin, "gh"), GH_STUB, { mode: 0o755 });
   const log = join(root, "calls.log");
   writeFileSync(log, "");
   writeFileSync(join(root, "pr-view.json"), prView);
@@ -144,7 +151,7 @@ function gate(
     encoding: "utf8",
     env: {
       ...cleanEnv(),
-      PATH: `${bin}:${process.env.PATH}`,
+      PATH: `${BIN}:${process.env.PATH}`,
       CALL_LOG: log,
       PR_VIEW_FILE: join(root, "pr-view.json"),
       PR_VIEW_EXIT: String(prViewExit),
