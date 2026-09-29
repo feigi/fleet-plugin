@@ -132,6 +132,123 @@ test("a clean readable worktree ahead of base is reported with real counts", (t)
   assert.doesNotMatch(stderr, /UNREADABLE|MISSING/);
 });
 
+// A stopped rebase or bisect DETACHES HEAD, so `git worktree list` gives the
+// worktree a `detached` record instead of its branch — yet the branch is still
+// that worktree's, with commits `origin/main` does not have, and HEAD has
+// moved to wherever the operation took it. Counting `ahead` from HEAD alone
+// read such a worktree as `DETACHED, ahead:0, dirty:0`: the "nothing here"
+// row. The branch comes back through worktree.sh's `wt_op_state` (#2218). #2220
+
+/** Run `git rebase -i <onto>` in `wt` with its todo list rewritten by the sh body `edit` (the todo path is "$1"). */
+function rebaseStopped(wt, onto, edit) {
+  const editor = join(wt, "..", `seq-editor-${process.pid}.sh`);
+  writeFileSync(editor, `${edit}\n`);
+  execFileSync("git", ["rebase", "-q", "-i", onto], {
+    cwd: wt,
+    env: { ...ENV, GIT_SEQUENCE_EDITOR: `sh ${editor}` },
+    stdio: "pipe",
+  });
+  rmSync(editor);
+}
+
+test("a worktree stopped mid-bisect is reported under the branch it holds, and its unpushed commits are counted (#2220)", (t) => {
+  const w = repo(t);
+  for (let i = 1; i <= 5; i++) commit(w, `main ${i}`);
+  git(w, "push", "-q", "origin", "main");
+  const wt = addWorktree(w, "fix/9-x");
+  commit(wt, "work 1");
+  commit(wt, "work 2");
+  git(wt, "bisect", "start", "HEAD", "HEAD~7");
+  assert.equal(git(wt, "rev-list", "--count", "origin/main..HEAD"), "0",
+    "fixture: the bisect must have moved HEAD onto a commit origin/main already has");
+
+  const { code, json, stderr } = runAudit(w);
+  assert.equal(code, 0);
+  assert.deepEqual(entryFor(json, wt),
+    { worktree: wt, branch: "fix/9-x", ahead: 2, dirty: 0, dirtyFiles: [], readable: true });
+  assert.match(stderr, /branch=fix\/9-x .*mid-bisect/, "the operator is told why HEAD and branch differ");
+});
+
+test("a worktree mid-`rebase -i`, stopped before any pick, is reported under its branch with the branch's commits (#2220)", (t) => {
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  commit(wt, "work 1");
+  commit(wt, "work 2");
+  rebaseStopped(wt, "origin/main", `{ echo break; cat "$1"; } > "$1.t" && mv "$1.t" "$1"`);
+  assert.equal(git(wt, "rev-list", "--count", "origin/main..HEAD"), "0",
+    "fixture: the rebase must be stopped at `onto`, before any pick");
+
+  const { code, json, stderr } = runAudit(w);
+  assert.equal(code, 0);
+  assert.deepEqual(entryFor(json, wt),
+    { worktree: wt, branch: "fix/9-x", ahead: 2, dirty: 0, dirtyFiles: [], readable: true });
+  assert.match(stderr, /branch=fix\/9-x .*mid-rebase/, "the operator is told why HEAD and branch differ");
+});
+
+test("a worktree mid-rebase after a pick counts the branch's originals AND the replayed commit, not HEAD alone (#2220)", (t) => {
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  commit(wt, "work 1");
+  commit(wt, "work 2");
+  // origin/main moves on, so the replayed pick is a NEW commit — neither
+  // reachable from the branch nor from the base.
+  commit(w, "main 1");
+  git(w, "push", "-q", "origin", "main");
+  rebaseStopped(wt, "origin/main", `awk 'NR==1{print; print "break"; next} {print}' "$1" > "$1.t" && mv "$1.t" "$1"`);
+  assert.equal(git(wt, "rev-list", "--count", "origin/main..HEAD"), "1",
+    "fixture: the rebase must be stopped after exactly one replayed pick");
+
+  const { code, json } = runAudit(w);
+  assert.equal(code, 0);
+  assert.deepEqual(entryFor(json, wt),
+    { worktree: wt, branch: "fix/9-x", ahead: 3, dirty: 0, dirtyFiles: [], readable: true },
+    "two originals on the branch plus one replayed commit on HEAD");
+});
+
+test("a plain detached worktree, and one bisecting from a detached HEAD, still read DETACHED with HEAD's own count (#2220)", (t) => {
+  // The accept side: no rebase or bisect holds a branch here, so nothing may
+  // be relabelled, and nothing may be refused as unreadable. A bisect started
+  // from a detached HEAD writes that HEAD's SHA into BISECT_START, which
+  // `wt_op_state` still hands back as `refs/heads/<sha>` — a branch that never
+  // existed, and not one this row may go unreadable over.
+  const w = repo(t);
+  const plain = join(w, ".worktrees", "plain");
+  git(w, "worktree", "add", "-q", "--detach", plain, "origin/main");
+  commit(plain, "detached work");
+  const bisecting = join(w, ".worktrees", "bisecting");
+  git(w, "worktree", "add", "-q", "--detach", bisecting, "origin/main");
+  commit(bisecting, "detached work 1");
+  commit(bisecting, "detached work 2");
+  git(bisecting, "bisect", "start", "HEAD", "HEAD~2");
+
+  const { code, json, stderr } = runAudit(w);
+  assert.equal(code, 0);
+  assert.deepEqual(entryFor(json, plain),
+    { worktree: plain, branch: "DETACHED", ahead: 1, dirty: 0, dirtyFiles: [], readable: true });
+  assert.deepEqual(entryFor(json, bisecting),
+    { worktree: bisecting, branch: "DETACHED", ahead: 1, dirty: 0, dirtyFiles: [], readable: true });
+  assert.doesNotMatch(stderr, /UNREADABLE|mid-rebase|mid-bisect/);
+});
+
+test("a held branch whose ref no longer resolves is unreadable, never ahead:0 (#2220)", (t) => {
+  const w = repo(t);
+  const wt = addWorktree(w, "fix/9-x");
+  commit(wt, "work 1");
+  git(wt, "bisect", "start", "HEAD", "HEAD~1");
+  git(wt, "checkout", "-q", "--detach", "origin/main");
+  // `branch -D` refuses a branch a bisect holds; `update-ref -d` is the
+  // route that does not ask.
+  git(w, "update-ref", "-d", "refs/heads/fix/9-x");
+
+  const { code, json, stderr } = runAudit(w);
+  assert.equal(code, 0);
+  const e = entryFor(json, wt);
+  assert.equal(e.readable, false);
+  assert.equal(e.ahead, null);
+  assert.equal(e.dirty, null);
+  assert.match(stderr, /UNREADABLE: /);
+});
+
 test("a local ref shadowing `origin/main` does not read the ahead count as 0 (#1329)", (t) => {
   // release-ticket.sh (#1320) already measured this class: `origin/main` is a
   // SHORTHAND, and git resolves a shorthand through its own disambiguation

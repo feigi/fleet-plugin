@@ -114,6 +114,42 @@ wt_lib="$(dirname "$0")/worktree.sh"
 # it is the one state with non-null counts, and looking different is the point.
 unknown() { readable=false; ahead=null; dirty=null; files=""; printf '    UNREADABLE: %s (%s)\n' "$wt" "$1" >&2; }
 
+# A `detached` record may still be a worktree's own branch, held: a stopped
+# rebase or bisect detaches HEAD and moves it — measured, git 2.50.1, a bisect
+# on a claim branch lands HEAD on a commit `origin/main` already has — so a
+# count from HEAD alone read such a worktree as `ahead:0, dirty:0`, the
+# "nothing here" row, while the branch it holds carries unpushed commits.
+# `wt_op_state` (#2218) reads the held branch out of the admin dir; this sets
+# `held` to those refs, relabels `short` with their short names and `note`
+# with the operation, for the count below to run over HEAD and `held`
+# together: that union is the branch's own commits plus whatever a rebase
+# has replayed so far onto HEAD alone. Attached rows are untouched. 1: the
+# admin dir cannot be read, so whether a branch is held is unknown. #2220
+#
+# A bisect started from a detached HEAD writes that HEAD's SHA, not a branch,
+# into BISECT_START, and `wt_op_state` still returns it as `refs/heads/<sha>`
+# (its own header says why). That names no branch: dropped here, so the row
+# stays today's DETACHED rather than going unreadable over a ref that never
+# existed. A real held branch that no longer resolves is kept, and fails the
+# count below into the unknown state — never a zero.
+op_held() {
+  held=
+  [ "$br" = DETACHED ] || return 0
+  wt_op_state "$wt" || return 1
+  for h in $wt_op_held; do
+    sha=$(git -C "$wt" rev-parse --verify "${h#refs/heads/}^{commit}" 2>/dev/null) || sha=
+    case $sha in "${h#refs/heads/}") continue ;; esac
+    case " $held " in *" $h "*) ;; *) held="${held:+$held }$h" ;; esac
+  done
+  [ -n "$held" ] || return 0
+  short=
+  for h in $held; do short="${short:+$short }${h#refs/heads/}"; done
+  case $wt_op in
+    BISECT_LOG) note="  (mid-bisect: HEAD detached, ahead counts HEAD and the held branch)" ;;
+    *) note="  (mid-rebase: HEAD detached, ahead counts HEAD and the held branch)" ;;
+  esac
+}
+
 base=${BASE_REF:-origin/main}
 # Only a remote-tracking ref is accepted — the accept-list reap.sh:156 (#924)
 # and release-ticket.sh:229 (#1320) both carry, and this script had none of.
@@ -194,6 +230,7 @@ printf '['
 printf '%s\n' "$wt_list" | awk '/^worktree /{w=substr($0,10)} /^branch /{print $2"\t"w} /^detached$/{print "DETACHED\t"w}' |
 while IFS="$(printf '\t')" read -r br wt; do
   short=${br#refs/heads/}
+  note=
   # FIRST, because every arm below stats `$wt` and none of them can: the byte
   # `wt_listing` substituted stands in for a newline, so this path does not name
   # the file git named. Reported rather than skipped — jstr renders the
@@ -226,8 +263,13 @@ while IFS="$(printf '\t')" read -r br wt; do
     # gives its own guard: an unsearchable $wt must not be misread as "no
     # linkage established" — leave it to the git commands below, which fail on
     # their own and land in the existing unreadable branch.
+    # shellcheck disable=SC2086 # `$held` below, split on purpose; see there
     if [ -x "$wt" ] && [ ! -f "$wt/.git" ] && [ ! -f "$wt/.git/HEAD" ]; then
       unknown "no .git linkage — git would answer for the enclosing repo, not this worktree"
+    # Below the linkage guard, never above it: `wt_op_state` asks git FROM
+    # `$wt`, which without a linkage answers for the enclosing repo. #2220
+    elif ! op_held; then
+      unknown "cannot read its admin dir — a rebase or bisect there may hold a branch HEAD no longer points at"
     # Chain on `&&`, not `|| echo 0`: a piped `wc -l` always exits 0 even when
     # the git command feeding it failed, so a fallback tacked onto the pipe
     # never fires and a permissions/corruption failure reads as "0 ahead, 0
@@ -250,7 +292,10 @@ while IFS="$(printf '\t')" read -r br wt; do
     # entry, silently dropping that granularity for whoever reads this
     # array. Proven, not just asserted: see the nested-directory test in
     # worktree-audit.test.mjs.
-    elif ahead=$(git -C "$wt" rev-list --count "$base_rev"..HEAD 2>/dev/null) \
+    #
+    # `$held` unquoted: a space-separated list of full `refs/heads/` names,
+    # empty for every attached row, and a ref name holds no space or glob byte.
+    elif ahead=$(git -C "$wt" rev-list --count "$base_rev"..HEAD $held 2>/dev/null) \
        && status_out=$(git -C "$wt" status --porcelain -uall 2>/dev/null); then
       dirty=$(printf '%s\n' "$status_out" | awk 'NF{c++} END{print c+0}')
       # substr, not $2: a dirty file's own name may hold a space — "XY " is
@@ -393,7 +438,7 @@ while IFS="$(printf '\t')" read -r br wt; do
   else
     unknown "cannot tell whether it exists — an ancestor could not be read"
   fi
-  printf '    %s  branch=%s  ahead=%s  dirty=%s\n' "$wt" "$short" "$ahead" "$dirty" >&2
+  printf '    %s  branch=%s  ahead=%s  dirty=%s%s\n' "$wt" "$short" "$ahead" "$dirty" "$note" >&2
   [ "$first" = 1 ] || printf ','
   first=0
   # `$wt` and `$short` are both reachable, by different routes: a branch name

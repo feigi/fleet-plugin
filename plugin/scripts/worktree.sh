@@ -273,9 +273,9 @@ gone() {
 # `[ -e ]` on the `head-name` inside it fails exactly as it does on a head-name
 # that is not there, and only the second is an answer.
 #
-# `wt_op` is this function's OUTPUT, read by the sourcing script; `wt_op_held`
-# is consumed only by `wt_holding` below, in this same file — SC2034, as for
-# `wt_listing`.
+# `wt_op` is this function's OUTPUT, read by the sourcing script; so is
+# `wt_op_held`, read by `wt_holding` below and by worktree-audit.sh (#2220) —
+# SC2034, as for `wt_listing`.
 #
 # The admin dir is normally found by asking git FROM $1 (`rev-parse
 # --absolute-git-dir`), which needs nothing but $1's own `.git` pointer file —
