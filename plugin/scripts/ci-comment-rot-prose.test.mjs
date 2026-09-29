@@ -43,21 +43,24 @@ const prose = (src) =>
     .replace(/\s+/g, " ");
 
 const CI = prose(read("../../.github/workflows/ci.yml"));
-const CLAIM_TICKET = prose(read("./claim-ticket.sh"));
+// The vendored-tree sentence moved with the runner it describes: the `find`
+// walk left claim-ticket.sh's emitter for the repo-local `agent-test` (ADR
+// 0015), so that file is the one ci.yml has to quote.
+const RUNNER = prose(read("../../agent-test"));
 
 /**
  * The citation rule, as a function so the accept case can be fed input this
  * repo does not contain. Returns null when the pair is sound, else the reason.
  */
 export function citationFault(citing, cited) {
-  if (!citing.includes("claim-ticket.sh")) {
-    return "ci.yml no longer names claim-ticket.sh — the vendored-tree argument lost the source it rests on";
+  if (!citing.includes("agent-test")) {
+    return "ci.yml no longer names agent-test — the vendored-tree argument lost the source it rests on";
   }
   // The citing SENTENCE, and EVERY quoted span in it. Two separate traps.
   // Scanning unbounded (`[^"]*"([^"]+)"`) runs to the next quote anywhere later
   // in the prose, so the moment the citation is paraphrased — one of the two
   // fixes #348 sanctions — the rule re-attaches to an unrelated quoted phrase
-  // further down ci.yml and demands claim-ticket.sh contain that. Taking only
+  // further down ci.yml and demands agent-test contain that. Taking only
   // the FIRST span is the silent direction: an aside that does quote the file
   // stands in front of a misquote and absorbs the whole check.
   //
@@ -76,7 +79,7 @@ export function citationFault(citing, cited) {
   // Parenthesized spans are blanked the same way, after the quoted ones: since
   // #1940 sentences() ends a sentence at a closing mark behind a terminator, so
   // a whole sentence in parentheses between the name and its quotation
-  // (`claim-ticket.sh (as it says.) says "…"`) would otherwise end the citing
+  // (`agent-test (as it says.) says "…"`) would otherwise end the citing
   // sentence at its `.)` and hide the quotation — the short direction here.
   // A bold `.**`, an underscore-italic `._`, or a single-quoted `.'` still
   // ends it unblanked: ci.yml's comments are not markdown, and a straight
@@ -87,7 +90,7 @@ export function citationFault(citing, cited) {
   // quotation — left out of a first pass here would have been the same
   // silent gap the parenthesis fix above closes, just spelled `.”`/`.’`.
   // The early return above is what keeps indexOf off -1.
-  const from = citing.slice(citing.indexOf("claim-ticket.sh"));
+  const from = citing.slice(citing.indexOf("agent-test"));
   const blankQuotes = (s) =>
     s
       .replace(/"[^"]+"/g, (span) => `"${"x".repeat(span.length - 2)}"`)
@@ -171,20 +174,20 @@ export function citationFault(citing, cited) {
           ? 'a mis-paired " (a mark opening or closing a span from the wrong side of its word)'
           : null;
   if (malformed) {
-    return `ci.yml's sentence citing claim-ticket.sh has ${malformed}, so which words it quotes is ambiguous — pair every quotation mark, or paraphrase`;
+    return `ci.yml's sentence citing agent-test has ${malformed}, so which words it quotes is ambiguous — pair every quotation mark, or paraphrase`;
   }
   // No quoted span at all is a paraphrase: nothing claims to be verbatim, and
   // dropping the quotation marks is the other of the two fixes #348 sanctions.
   for (const [, quoted] of spans) {
     if (!cited.includes(quoted)) {
-      return `ci.yml quotes claim-ticket.sh as saying "${quoted}", and that file does not say it`;
+      return `ci.yml quotes agent-test as saying "${quoted}", and that file does not say it`;
     }
   }
   return null;
 }
 
-test("ci.yml's quotation of claim-ticket.sh is that file's own words", () => {
-  assert.equal(citationFault(CI, CLAIM_TICKET), null);
+test("ci.yml's quotation of agent-test is that file's own words", () => {
+  assert.equal(citationFault(CI, RUNNER), null);
 });
 
 // The other half. A guard that only ever sees the one input this tree holds
@@ -195,11 +198,11 @@ test("ci.yml's quotation of claim-ticket.sh is that file's own words", () => {
 test("a paraphrase is accepted; a deleted citation and a misquote are not", () => {
   const cited = "so this walk, not node, is what keeps vendored tests out.";
 
-  assert.equal(citationFault('see claim-ticket.sh, which says so itself: "walk, not node"', cited), null);
-  assert.equal(citationFault("claim-ticket.sh makes the same point about its own walk", cited), null);
+  assert.equal(citationFault('see agent-test, which says so itself: "walk, not node"', cited), null);
+  assert.equal(citationFault("agent-test makes the same point about its own walk", cited), null);
 
   assert.match(citationFault("the find in the emitted runner is what does it", cited), /no longer names/);
-  assert.match(citationFault('claim-ticket.sh says: "this filter, not node"', cited), /does not say it/);
+  assert.match(citationFault('agent-test says: "this filter, not node"', cited), /does not say it/);
 });
 
 // #1898. The citing sentence used to end at the FIRST period after the name, so
@@ -213,14 +216,14 @@ test("an abbreviation sentences() exempts, mid-word, in-quotation, or quote/pare
 
   for (const abbr of ["e.g.", "i.e.", "cf.", "viz.", "vs."]) {
     assert.match(
-      citationFault(`claim-ticket.sh says, ${abbr} "this filter, not node"`, cited),
+      citationFault(`agent-test says, ${abbr} "this filter, not node"`, cited),
       /does not say it/,
       `${abbr} ended the citing sentence before its quotation`,
     );
   }
-  assert.match(citationFault('claim-ticket.sh, unlike ci.yml (v1.2), says "this filter, not node"', cited), /does not say it/);
-  assert.match(citationFault('claim-ticket.sh says "this filter. Not node"', cited), /does not say it/);
-  assert.match(citationFault('claim-ticket.sh says "this filter, not node."', cited), /does not say it/);
+  assert.match(citationFault('agent-test, unlike ci.yml (v1.2), says "this filter, not node"', cited), /does not say it/);
+  assert.match(citationFault('agent-test says "this filter. Not node"', cited), /does not say it/);
+  assert.match(citationFault('agent-test says "this filter, not node."', cited), /does not say it/);
   // A quotation's own closing period is not a stop either: an implementation that
   // ended the sentence right there — reasonable-looking, since the quote already
   // carries its own terminator — would silently let a second, misquoted span right
@@ -228,19 +231,19 @@ test("an abbreviation sentences() exempts, mid-word, in-quotation, or quote/pare
   // says it may not answer for (verified: such an implementation passes every
   // other assertion in this file and still accepts this one).
   assert.match(
-    citationFault('claim-ticket.sh says "is what keeps vendored tests out." and adds "this filter, not node"', cited),
+    citationFault('agent-test says "is what keeps vendored tests out." and adds "this filter, not node"', cited),
     /does not say it/,
   );
   // #1940: sentences() now ends a sentence at `.)`, so a whole sentence in
   // parentheses ahead of the quotation is a stop unless it is blanked too.
-  assert.match(citationFault('claim-ticket.sh (as it says itself.) says "this filter, not node"', cited), /does not say it/);
+  assert.match(citationFault('agent-test (as it says itself.) says "this filter, not node"', cited), /does not say it/);
   // A NESTED parenthetical, one level deep: a single un-repeated blanking pass
   // strips only the inner `(in section 2)`, leaving the outer `.)` — a real,
   // now-unblanked terminator-plus-closing-mark — to end the sentence early and
   // hide the quotation past it exactly as the unnested case above would without
   // any blanking at all.
   assert.match(
-    citationFault('claim-ticket.sh (as it says itself (in section 2).) says "this filter, not node"', cited),
+    citationFault('agent-test (as it says itself (in section 2).) says "this filter, not node"', cited),
     /does not say it/,
   );
   // Curly quotes are a reliably paired delimiter too (opener and closer are
@@ -248,11 +251,11 @@ test("an abbreviation sentences() exempts, mid-word, in-quotation, or quote/pare
   // protection as one set off by straight quotes or parens — a `.”`/`.’`
   // ahead of the real quotation must not cut the sentence short either.
   assert.match(
-    citationFault('claim-ticket.sh \u201cas it says itself.\u201d says "this filter, not node"', cited),
+    citationFault('agent-test \u201cas it says itself.\u201d says "this filter, not node"', cited),
     /does not say it/,
   );
   assert.match(
-    citationFault('claim-ticket.sh \u2018as it says itself.\u2019 says "this filter, not node"', cited),
+    citationFault('agent-test \u2018as it says itself.\u2019 says "this filter, not node"', cited),
     /does not say it/,
   );
   // Deliberately NOT tested here: a NON-EXEMPT abbreviation ("etc.", or any
@@ -261,7 +264,7 @@ test("an abbreviation sentences() exempts, mid-word, in-quotation, or quote/pare
   // ("e. g." — the space keeps sentences() from ever matching the "e.g" it
   // exempts), a mid-sentence ellipsis ("..." — its own last period is a
   // real, unexempted terminator), and a misquote reachable only via a
-  // SECOND, separate mention of claim-ticket.sh (out of scope regardless of
+  // SECOND, separate mention of agent-test (out of scope regardless of
   // sentences(): this function only ever reads the first sentence). Each
   // still lets a misquote read as a paraphrase; none is a regression, and
   // none is a form #1898's own remedy promised to close.
@@ -269,7 +272,7 @@ test("an abbreviation sentences() exempts, mid-word, in-quotation, or quote/pare
 
 // The other half of #1898: the sentence still ends at its REAL end. Once
 // sentences() actually lands a boundary there, a quoted span past it is not
-// claim-ticket.sh's to answer for — reading on past the end is the unbounded
+// agent-test's to answer for — reading on past the end is the unbounded
 // scan citationFault's own comment forbids — and a true quotation reached
 // across "e.g.", or carrying its own period, still passes. A quotation's own
 // closing period is not that boundary, though: the previous test pins the
@@ -277,10 +280,10 @@ test("an abbreviation sentences() exempts, mid-word, in-quotation, or quote/pare
 test("citationFault reads past 'e.g.' but not past the sentence's end (#1898)", () => {
   const cited = "so this walk, not node, is what keeps vendored tests out.";
 
-  assert.equal(citationFault('see claim-ticket.sh, e.g. "walk, not node"', cited), null);
-  assert.equal(citationFault('claim-ticket.sh says "is what keeps vendored tests out."', cited), null);
+  assert.equal(citationFault('see agent-test, e.g. "walk, not node"', cited), null);
+  assert.equal(citationFault('agent-test says "is what keeps vendored tests out."', cited), null);
   assert.equal(
-    citationFault('claim-ticket.sh makes the same point, e.g. about its own walk. The runner\'s "find" was the defect.', cited),
+    citationFault('agent-test makes the same point, e.g. about its own walk. The runner\'s "find" was the defect.', cited),
     null,
   );
   // #1898: sentences() already ends a sentence at a bare `?` or `!`, not
@@ -289,11 +292,11 @@ test("citationFault reads past 'e.g.' but not past the sentence's end (#1898)", 
   // silent for a checker like this one. A quote past either is just as
   // unanswerable as one past a period.
   assert.equal(
-    citationFault('Does claim-ticket.sh agree? It says "this filter, not node".', cited),
+    citationFault('Does agent-test agree? It says "this filter, not node".', cited),
     null,
   );
   assert.equal(
-    citationFault('claim-ticket.sh agrees! It also says "this filter, not node".', cited),
+    citationFault('agent-test agrees! It also says "this filter, not node".', cited),
     null,
   );
 });
@@ -310,16 +313,16 @@ test("citationFault reads past 'e.g.' but not past the sentence's end (#1898)", 
 test("citationFault refuses an empty, unpaired or backslash-escaped straight quote in the citing sentence (#1962)", () => {
   const cited = "so this walk, not node, is what keeps vendored tests out.";
 
-  assert.match(citationFault('claim-ticket.sh says "" "this filter, not node"', cited), /empty ""/);
-  assert.match(citationFault('claim-ticket.sh says "" "walk" "this filter, not node"', cited), /empty ""/);
-  assert.match(citationFault('claim-ticket.sh says ""', cited), /empty ""/);
-  assert.match(citationFault('claim-ticket.sh says "walk, \\"not node"', cited), /backslash-escaped \\"/);
-  assert.match(citationFault('claim-ticket.sh, 6" wide, says "walk, not node"', cited), /unpaired "/);
+  assert.match(citationFault('agent-test says "" "this filter, not node"', cited), /empty ""/);
+  assert.match(citationFault('agent-test says "" "walk" "this filter, not node"', cited), /empty ""/);
+  assert.match(citationFault('agent-test says ""', cited), /empty ""/);
+  assert.match(citationFault('agent-test says "walk, \\"not node"', cited), /backslash-escaped \\"/);
+  assert.match(citationFault('agent-test, 6" wide, says "walk, not node"', cited), /unpaired "/);
   // Precedence, pinned: an empty "" and a backslash-escaped \" can both be
   // true of the same sentence at once (the escape's own closing quote can
   // complete an unrelated empty pair) — the empty check runs first, so that
   // reason wins, not the backslash one.
-  assert.match(citationFault('claim-ticket.sh says "" then "walk, \\"not node"', cited), /empty ""/);
+  assert.match(citationFault('agent-test says "" then "walk, \\"not node"', cited), /empty ""/);
 });
 
 // The other half of #1962: only the citing sentence's own quote marks count.
@@ -330,18 +333,18 @@ test("citationFault refuses an empty, unpaired or backslash-escaped straight quo
 test("citationFault accepts well-paired quotations, and malformed quotes outside the citing sentence (#1962)", () => {
   const cited = "so this walk, not node, is what keeps vendored tests out.";
 
-  assert.equal(citationFault('claim-ticket.sh says "walk, not node". Here "" is an empty string.', cited), null);
-  assert.equal(citationFault('claim-ticket.sh says "walk, not node". The pipe is 6" wide.', cited), null);
-  assert.equal(citationFault('claim-ticket.sh says "walk, not node" and "vendored tests out"', cited), null);
-  assert.equal(citationFault('claim-ticket.sh says \u201c\u201d then "walk, not node"', cited), null);
+  assert.equal(citationFault('agent-test says "walk, not node". Here "" is an empty string.', cited), null);
+  assert.equal(citationFault('agent-test says "walk, not node". The pipe is 6" wide.', cited), null);
+  assert.equal(citationFault('agent-test says "walk, not node" and "vendored tests out"', cited), null);
+  assert.equal(citationFault('agent-test says \u201c\u201d then "walk, not node"', cited), null);
   // A backslash with no quote next to it is not the escape check's target —
   // only a backslash-quote adjacency is (#1962 gap: not pinned by the
   // original two tests, since every backslash they carry sits beside a
   // quote already).
-  assert.equal(citationFault('claim-ticket.sh says the \\d pattern matches "walk, not node"', cited), null);
+  assert.equal(citationFault('agent-test says the \\d pattern matches "walk, not node"', cited), null);
   // A backslash-escaped quote in a LATER sentence is later prose too — only
   // the citing sentence's own malformed check counts.
-  assert.equal(citationFault('claim-ticket.sh says "walk, not node". A shell writes \\" here.', cited), null);
+  assert.equal(citationFault('agent-test says "walk, not node". A shell writes \\" here.', cited), null);
 });
 
 // #2013. The #1962 checks catch a shifted pairing only while the quote count
@@ -362,28 +365,28 @@ test("citationFault refuses a straight-quote pairing that opens or closes a span
 
   assert.match(
     citationFault(
-      'claim-ticket.sh says a" "this filter, not node". The install" step runs later.',
+      'agent-test says a" "this filter, not node". The install" step runs later.',
       `${cited} The install step runs later.`,
     ),
     misPaired,
   );
   assert.match(
-    citationFault('claim-ticket.sh says a" "this filter, not node". The install" rest of the later sentence.', cited),
+    citationFault('agent-test says a" "this filter, not node". The install" rest of the later sentence.', cited),
     misPaired,
   );
-  assert.match(citationFault('claim-ticket.sh says 6" "this filter. Not node"', cited), misPaired);
-  assert.match(citationFault('claim-ticket.sh says "so this "walk" not node"', cited), misPaired);
+  assert.match(citationFault('agent-test says 6" "this filter. Not node"', cited), misPaired);
+  assert.match(citationFault('agent-test says "so this "walk" not node"', cited), misPaired);
   // A span whose closer sits after an opening parenthesis is opener-shaped
   // even with no whitespace beside it: the punctuation half of the rule.
   assert.match(
-    citationFault('claim-ticket.sh says a"b ("this filter, not node"). Later ("x") 6" end.', cited),
+    citationFault('agent-test says a"b ("this filter, not node"). Later ("x") 6" end.', cited),
     misPaired,
   );
   // One half of the rule each, with the other half blind: a mark glued to a
   // word on both sides (`k"b`, `a"l`) passes as either role, so only the
   // stray's own side gives the shift away. Both returned null before #2013.
-  assert.match(citationFault('claim-ticket.sh says a" walk"b "not node"', cited), misPaired);
-  assert.match(citationFault('claim-ticket.sh says "so this "wa"lk, not node"', cited), misPaired);
+  assert.match(citationFault('agent-test says a" walk"b "not node"', cited), misPaired);
+  assert.match(citationFault('agent-test says "so this "wa"lk, not node"', cited), misPaired);
 });
 
 // The other half of #2013: a quotation mark counts as correctly placed from
@@ -393,22 +396,22 @@ test("citationFault refuses a straight-quote pairing that opens or closes a span
 test("citationFault accepts quotation marks set against punctuation (#2013)", () => {
   const cited = "so this walk, not node, is what keeps vendored tests out.";
 
-  assert.equal(citationFault('claim-ticket.sh says ("walk, not node").', cited), null);
-  assert.equal(citationFault('claim-ticket.sh says:"walk, not node"', cited), null);
-  assert.equal(citationFault('claim-ticket.sh says "walk, not node," and more', cited), null);
-  assert.equal(citationFault('claim-ticket.sh\'s "walk, not node"', cited), null);
+  assert.equal(citationFault('agent-test says ("walk, not node").', cited), null);
+  assert.equal(citationFault('agent-test says:"walk, not node"', cited), null);
+  assert.equal(citationFault('agent-test says "walk, not node," and more', cited), null);
+  assert.equal(citationFault('agent-test\'s "walk, not node"', cited), null);
   assert.equal(
-    citationFault('claim-ticket.sh says "is what keeps vendored tests out." and "walk, not node". Later "a" b.', cited),
+    citationFault('agent-test says "is what keeps vendored tests out." and "walk, not node". Later "a" b.', cited),
     null,
   );
   // A backtick is punctuation too (CommonMark counts Unicode symbols), so a
   // quotation set in a code span closes cleanly after its own period.
-  assert.equal(citationFault('claim-ticket.sh says `"is what keeps vendored tests out."`', cited), null);
+  assert.equal(citationFault('agent-test says `"is what keeps vendored tests out."`', cited), null);
   // Every opener above is followed by a word character, so `canOpen` never
   // needs its "or preceded by whitespace" half — the quoted content's own
   // leading mark is punctuation here, so the opener is let through only
   // because ordinary whitespace, not punctuation, precedes it.
-  assert.equal(citationFault('claim-ticket.sh says ", is what keeps vendored tests out."', cited), null);
+  assert.equal(citationFault('agent-test says ", is what keeps vendored tests out."', cited), null);
 });
 
 // #1999. The blanked text has to stay the SAME length as the real text, since
@@ -425,9 +428,9 @@ test("an astral character inside a parenthetical aside does not shorten the citi
   const cited = "so this walk, not node, is what keeps vendored tests out.";
   const aside = "(\u{1F600}\u{1F600}\u{1F600})";
 
-  assert.equal(citationFault(`claim-ticket.sh ${aside} says "walk, not node"`, cited), null);
-  assert.match(citationFault(`claim-ticket.sh ${aside} says "this filter, not node"`, cited), /does not say it/);
-  assert.match(citationFault(`claim-ticket.sh ${aside} says "walk, not node" and "q"`, cited), /saying "q"/);
+  assert.equal(citationFault(`agent-test ${aside} says "walk, not node"`, cited), null);
+  assert.match(citationFault(`agent-test ${aside} says "this filter, not node"`, cited), /does not say it/);
+  assert.match(citationFault(`agent-test ${aside} says "walk, not node" and "q"`, cited), /saying "q"/);
 });
 
 // #1999 follow-up. blankQuotes was never touched by that bug — span.length is
@@ -438,8 +441,8 @@ test("an astral character inside a parenthetical aside does not shorten the citi
 test("an astral character inside a quoted span alone does not affect blankQuotes (#1999)", () => {
   const cited = "so this walk\u{1F600}, not node, is what keeps vendored tests out.";
 
-  assert.equal(citationFault('claim-ticket.sh says "walk\u{1F600}, not node"', cited), null);
-  assert.match(citationFault('claim-ticket.sh says "walk\u{1F600}, not filter"', cited), /does not say it/);
+  assert.equal(citationFault('agent-test says "walk\u{1F600}, not node"', cited), null);
+  assert.match(citationFault('agent-test says "walk\u{1F600}, not filter"', cited), /does not say it/);
 });
 
 test("the Shellcheck comment does not present its examples as the complete set", () => {

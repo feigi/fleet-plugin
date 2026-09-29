@@ -255,11 +255,18 @@ re-billed as cache-read each time. Measured over one run, 88 unpiped whole-file
 reads carried 434 KB.`;
 }
 
+// The step a missing Test entrypoint is derived by, named in the refusal so the
+// caller — a controller or a reviewer — knows what to run rather than what went
+// wrong (ADR 0015). derive-testcmd.sh's own refusals name the same step; this
+// one covers the case where the snapshot agent reported no reason at all.
+export const DERIVATION_STEP =
+  "run the Recipe derivation step (run-team phase 0, before the first claim — ADR 0015) to derive, prove and write the Recipe cache";
+
 export function resolveTestCmd(explicit, snap) {
   if (explicit) return explicit;
   if (snap && snap.testCmd) return snap.testCmd;
   throw new Error(
-    `review-pr: no test command for this repository — ${(snap && snap.testCmdError) || "the snapshot agent did not derive one"}. Pass args.testCmd to override.`,
+    `review-pr: no test command for this repository — ${(snap && snap.testCmdError) || `the snapshot agent read no Recipe cache; ${DERIVATION_STEP}`}. Pass args.testCmd to override.`,
   );
 }
 
@@ -677,12 +684,14 @@ a match nor a mismatch. Do not judge whether the diff is usable, and do not
 withhold one field because another failed: report what you got and let the
 caller decide.
 
-Then derive this repository's own test command:
+Then read this repository's Test entrypoint out of its Recipe cache:
 
-    ~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} HEAD
+    ~/.fleet/bin/fleet-run derive-testcmd.sh ${worktree} test
 
 Report \`testCmd\` = its stdout ONLY if it exited 0. If it exited non-zero,
-report \`testCmdError\` = its stderr and omit \`testCmd\`.
+report \`testCmdError\` = its stderr and omit \`testCmd\`. Never derive or
+guess a command yourself: a refusal names the step that writes the cache, and
+the caller acts on it.
 
 Then size the diff:
 

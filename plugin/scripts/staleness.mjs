@@ -263,10 +263,10 @@ function probe() {
   // track — while the file may sit right there in the working checkout — so
   // reading that failure as "the file is gone, the fix landed" closes a live
   // ticket. And a GENERATED artifact is untracked by construction:
-  // `.agent-test.sh` is claim-ticket.sh's heredoc output, materialized beside
-  // the tracked `agent-test` bootstrap on every run of it, so what is on disk
-  // is whatever the last run produced. Measured 2026-08-22 on `agent-test`
-  // itself, which was the generated one before #55 tracked the bootstrap:
+  // `.agent-test.sh` was claim-ticket.sh's heredoc output, materialized beside
+  // the tracked `agent-test` bootstrap on every run of it until ADR 0015, so
+  // what is on disk is whatever the last run produced. Measured 2026-08-22 on
+  // `agent-test` itself, which was the generated one before #55 tracked it:
   // `git ls-tree origin/main -- <path>` prints nothing at exit 0 and `git show
   // origin/main:<path>` exits 128, while the file sits right there in the
   // checkout. A probe that resolved it by name would

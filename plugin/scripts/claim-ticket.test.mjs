@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync, symlinkSync, copyFileSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync, symlinkSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname, relative } from "node:path";
+import { join, dirname } from "node:path";
 
 const SCRIPT = join(import.meta.dirname, "claim-ticket.sh");
 
@@ -19,13 +19,15 @@ const FIXTURE_ENV = { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefin
 // Build a repo whose origin/main holds `files`. `local` is written to the
 // working tree afterwards WITHOUT committing — that is how a checkout diverges
 // from the ref the worktree is actually built from.
-// `parent` is where the repo itself is created. It matters because the runner
-// judges an argument by where its resolution diverges from the runner's OWN
-// location, so a `node_modules` component in the repo's own ancestry is part of
-// what the guard has to ignore — and only a fixture built under one can pin it.
-function repo(files, local = {}, parent = tmpdir()) {
-  const dir = mkdtempSync(join(parent, "claim-"));
-  const git = (...a) => execFileSync("git", a, { cwd: dir, stdio: "pipe", env: FIXTURE_ENV });
+//
+// `recipe` is the repository's Recipe cache (ADR 0015), written untracked to
+// `.fleet/recipe.json` beside the main checkout's git dir — where
+// derive-testcmd.sh reads it — proven at origin/main. Every field is
+// overridable; `null` writes no cache at all. The default is the smallest
+// Recipe that runs anywhere: nothing to install, nothing to fail.
+function repo(files, local = {}, recipe = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "claim-"));
+  const git = (...a) => execFileSync("git", a, { cwd: dir, stdio: "pipe", env: FIXTURE_ENV, encoding: "utf8" });
   git("init", "-q");
   git("config", "user.email", "t@t");
   git("config", "user.name", "t");
@@ -34,11 +36,22 @@ function repo(files, local = {}, parent = tmpdir()) {
     writeFileSync(join(dir, name), body);
   }
   git("add", "-A");
-  git("commit", "-qm", "x");
+  git("commit", "-q", "--allow-empty", "-m", "x");
   git("update-ref", "refs/remotes/origin/main", "HEAD");
   for (const [name, body] of Object.entries(local)) {
     mkdirSync(dirname(join(dir, name)), { recursive: true });
     writeFileSync(join(dir, name), body);
+  }
+  if (recipe !== null) {
+    mkdirSync(join(dir, ".fleet"), { recursive: true });
+    writeFileSync(join(dir, ".fleet", "recipe.json"), JSON.stringify({
+      install: "true",
+      test: "true",
+      derivedAt: git("rev-parse", "HEAD").trim(),
+      installClean: true,
+      testCount: 1,
+      ...recipe,
+    }));
   }
   return dir;
 }
@@ -49,33 +62,12 @@ function claim(dir) {
   const out = r.stdout + r.stderr;
   if (r.status !== 0) return { err: out };
   return {
-    install: out.match(/install: (.*)/)?.[1],
+    install: out.match(/Install step → (.*)/)?.[1],
     testcmd: out.match(/test entrypoint → (.*)/)?.[1],
   };
 }
 
-const TESTS = "t.test.mjs";
-const pkg = (o) => JSON.stringify(o);
-
-// `node --test` marks the processes it spawns, and an inherited mark makes
-// the runner's own `node --test` report to a parent that is not listening —
-// status 0 and not a byte of stdout. An artifact of testing a test runner
-// from inside one; strip it so these assertions see what a member sees.
-// FORCE_COLOR is stripped for the same reason: it reaches the runner's own
-// `node --test`, which then SGR-wraps its summary even into a pipe
-// (`\x1b[34mℹ pass 3\x1b[39m`), breaking every `run`/`runFrom` assertion
-// that reads that summary literally. A developer with FORCE_COLOR set is
-// exactly what these assertions have to survive, not exercise. Shared by
-// every fixture that spawns an emitted runner directly, not just `apply()` —
-// a `--write-runner` fixture inherits the same three variables and needs the
-// same strip.
-function runnerEnv() {
-  const env = { ...process.env };
-  delete env.NODE_TEST_CONTEXT;
-  delete env.NODE_TEST_WORKER_ID;
-  delete env.FORCE_COLOR;
-  return env;
-}
+const TESTS = "run-tests.sh";
 
 // Runs the script for real and returns the emitted runner plus its worktree.
 // `--apply` labels the issue, so `gh` is stubbed; everything else — the
@@ -83,8 +75,8 @@ function runnerEnv() {
 // The runner is what members actually invoke, so it is what gets asserted on.
 // `script` defaults to the real one; pass a copy to claim from a different
 // template.
-function apply(files, script = SCRIPT, parent = tmpdir()) {
-  const dir = repo(files, {}, parent);
+function apply(files, script = SCRIPT, recipe = {}) {
+  const dir = repo(files, {}, recipe);
   const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
   writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   const r = spawnSync("sh", [script, "42", "slug", "fix", "--apply"], {
@@ -94,16 +86,12 @@ function apply(files, script = SCRIPT, parent = tmpdir()) {
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const wt = join(dir, ".worktrees", "42-slug");
-  const env = runnerEnv();
   return {
+    dir,
     wt,
-    env,
+    receipt: JSON.parse(r.stdout),
     text: readFileSync(join(wt, "agent-test"), "utf8"),
-    run: (...args) => spawnSync(join(wt, "agent-test"), args, { cwd: wt, encoding: "utf8", env }),
-    // The same runner invoked from a subdirectory. Node resolves argv against
-    // the cwd, so where a member stands is part of what an argument means.
-    runFrom: (sub, ...args) =>
-      spawnSync(join(wt, "agent-test"), args, { cwd: join(wt, sub), encoding: "utf8", env }),
+    run: (...args) => spawnSync(join(wt, "agent-test"), args, { cwd: wt, encoding: "utf8" }),
   };
 }
 
@@ -135,22 +123,6 @@ test("a bare 0 clears the numeric guard", () => {
   assert.match(r.stderr, /not inside a git repository/);
 });
 
-const PASSES = 'import { test } from "node:test";\ntest("ok", () => {});\n';
-// `root.test.mjs` exists so no assertion below can be satisfied by the argv
-// being dropped: bare `node --test` discovers the whole fixture, and every
-// count asserted here differs from that. Without it the two-file cases and
-// discovery both landed on `pass 2`, and a test that cannot tell "argv was
-// honoured" from "argv was discarded" pins nothing.
-const SUITE = {
-  "t/a.test.mjs": PASSES,
-  "t/b.test.mjs": PASSES,
-  "t/nested/c.test.mjs": PASSES,
-  "root.test.mjs": PASSES,
-  "with space/s.test.mjs": PASSES,
-  "br[a]cket/g.test.mjs": PASSES,
-  "empty/README.md": "",
-};
-
 // #760 — that a claim carries no upstream, and what that means to reap.sh and
 // release-ticket.sh — is pinned in claim-lifecycle.test.mjs, not here. This
 // file's `repo()` fixture fabricates refs/remotes/origin/main with
@@ -159,1603 +131,81 @@ const SUITE = {
 // whatever `worktree add` was handed. Measured — a config pin in this fixture
 // stayed green with `--no-track` removed.
 
-// `node --test <dir>` resolves the directory as a module specifier and dies
-// with MODULE_NOT_FOUND before a single test runs. A directory is the
-// ergonomic way to say "run this suite", and the red it produced was read as
-// a finding against the diff under review rather than against the invocation.
-// `pass 3` also pins the recursion: `t/` holds two files and `t/nested/` a
-// third, so a `find` capped at one level reads as a red here.
-test("runner: a directory argument runs the test files under it", () => {
-  const r = apply(SUITE).run("t");
+// --- The runner: a thin exec of the Recipe's Test entrypoint (ADR 0015).
+
+// A script that reports exactly what it was handed — its argv one per line,
+// then the isolation triple — so the runner's thinness is measured rather than
+// assumed.
+const ECHO_TESTS = '#!/bin/sh\nfor a do printf "arg:%s\\n" "$a"; done\nprintf "env:%s %s %s\\n" "$TEST_COMPOSE_PROJECT" "$TEST_POSTGRES_PORT" "$TEST_OLLAMA_PORT"\n';
+
+// The ticket's own acceptance row: a repository with NO package.json — nothing
+// any technology table could have recognised — claims on its cache alone, and
+// `./agent-test` runs the Test entrypoint, arguments through verbatim (one
+// holding a space stays one), under the per-claim isolation exports.
+test("runner: a repo with no package.json claims on its Recipe cache and ./agent-test runs the Test entrypoint", () => {
+  const a = apply({ "run-tests.sh": ECHO_TESTS }, SCRIPT, { install: "true", test: "sh ./run-tests.sh" });
+  assert.equal(existsSync(join(a.wt, "package.json")), false, "fixture: nothing Node-shaped in the tree");
+  assert.equal(a.receipt.install, "true");
+  const r = a.run("one", "two words");
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  // Bounded rather than line-anchored: a bare `pass 3` is a substring of
-  // `pass 3<n>` and stops discriminating once a fixture reaches 30, but a
-  // `^…$/m` anchor buys that at the cost of the line's raw edges — under a
-  // colored reporter the summary comes back SGR-wrapped (`\x1b[34mℹ pass 3…`),
-  // so it neither starts with the prefix nor ends with the digit. The reporter
-  // prefix plus a `(?!\d)` lookahead rejects `pass 30`-`pass 39` either way.
-  // Both prefixes because `node --test`'s default reporter is
-  // version-dependent — spec (`ℹ pass 3`) on newer node, tap (`# pass 3`) on
-  // older.
-  assert.match(r.stdout, /(?:ℹ|#) pass 3(?!\d)/);
+  assert.equal(r.stdout, "arg:one\narg:two words\nenv:ab-42 16042 22042\n");
 });
 
-// `set -f` and IFS only settle how the *shell* splits the expansion. Node
-// globs its own argv afterwards, where a literal `[` is a bracket expression
-// that cannot match itself — so an unescaped path matches nothing, node runs
-// nothing, and it exits 0. That is the vacuous pass this shim exists to
-// refuse, reached past the guard because `find` did match the file.
-test("runner: a directory whose path holds a glob character still runs its tests", () => {
-  const r = apply(SUITE).run("br[a]cket");
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  // Bounded, same reason as above: a bare `pass 1` is the worst offender — it
-  // matches every count whose leading digit is 1: `pass 1` itself, 10-19, 100+.
-  assert.match(r.stdout, /(?:ℹ|#) pass 1(?!\d)/);
-});
-
-// The other half of the same claim: IFS pinned to a newline is what keeps a
-// path with a space in it one word. On the default IFS it splits into two
-// words node cannot resolve, and node drops unresolvable arguments silently.
-test("runner: a directory whose path holds a space still runs its tests", () => {
-  const r = apply(SUITE).run("with space");
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  // Bounded, same reason as the glob-character case above.
-  assert.match(r.stdout, /(?:ℹ|#) pass 1(?!\d)/);
-});
-
-// #600: a filename is bytes, and the two tools that read find's output are told
-// which only by the ambient locale. Under en_US.UTF-8 with a name holding \377,
-// measured on macOS: `grep` drops that line silently — a green over a smaller
-// suite, #582's own false-green — and BSD `sed`, fed that byte directly, abandons
-// the whole stream ("RE error: illegal byte sequence", exit 1), which empties
-// $files and refuses a suite that is right there. `LC_ALL=C` on each command is
-// the fix.
-//
-// Two stubs, because neither half of the fixture can be built for real. APFS
-// refuses the name outright (`Illegal byte sequence`), so no filesystem this
-// suite can create holds it — `find` is stubbed to emit what a filesystem that
-// does would. And node cannot be asked what it ran, so it is stubbed to report
-// how many arguments survived discovery: `--test` plus both paths is 3, and the
-// unpinned runner reaches this assertion with one of them (`2` — `--test` plus
-// the one path grep's own silent drop lets through; `sed`'s abort never enters
-// into it, since grep already dropped the bad line before sed would see it).
-//
-// LC_ALL is set on the child rather than inherited: the ambient locale is the
-// hostile input here, so pre-seeding it is what makes the test discriminate at
-// all instead of depending on the operator's environment.
-//
-// THE CEILING, inherited from locale-pin-prose.test.mjs: this kills its mutant
-// on macOS only. GNU grep and sed are byte-oriented and pass every line through
-// whatever the locale says, so on ubuntu-latest — the one platform ci.yml runs —
-// deleting both pins keeps this test green.
-test("runner: an invalid UTF-8 byte in a discovered path does not drop it", () => {
-  const a = apply(SUITE);
-  const bin = mkdtempSync(join(tmpdir(), "claim-locale-"));
-  // The byte cannot be spelled in JS — node re-encodes every string as UTF-8 on
-  // the way to argv, turning `\xFF` into the two valid bytes `\303\277`. POSIX
-  // `printf` interprets the octal escape, so the fixture stays pure ASCII and
-  // the shell makes the byte.
-  writeFileSync(join(bin, "find"), "#!/bin/sh\nprintf 't/b\\377ad.test.mjs\\nt/ok.test.mjs\\n'\n", { mode: 0o755 });
-  writeFileSync(join(bin, "node"), '#!/bin/sh\nprintf %s "$#"\n', { mode: 0o755 });
-  const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
-    cwd: a.wt,
-    encoding: "utf8",
-    env: { ...a.env, PATH: `${bin}:${a.env.PATH}`, LC_ALL: "en_US.UTF-8" },
-  });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.equal(r.stdout, "3", "discovery lost a path holding an invalid UTF-8 byte");
-});
-
-// The source-assertion half of #600, on both pins — same shape as
-// locale-pin-prose.test.mjs (that file's own list deliberately excludes
-// claim-ticket.sh; this is that decision, made here instead, since the emitted
-// runner is generated, not a checked-in script the list's globbing would find).
-//
-// This is the ONLY regression coverage the file-argument branch's own pin gets
-// (`arg=$(printf '%s\n' "$arg" | LC_ALL=C sed …)`, below). A behavioural twin of
-// the test above is not constructable for it, on either platform this suite
-// runs on: `[ -e "$arg" ]` gates that line, and it needs a REAL file — APFS
-// refuses to create one whose name holds an invalid UTF-8 byte at all (measured:
-// `touch` on such a name exits "Illegal byte sequence", not just Node's own
-// fs), and `[` is a shell builtin, not a PATH-resolved command, so it can't be
-// stubbed the way `find` and `node` are above. Where the filesystem WOULD allow
-// the name (ext4, ubuntu-latest — the platform CI actually runs), GNU sed's own
-// byte-orientation makes the pin invisible anyway, same ceiling as the
-// directory branch. Nothing behavioural can fail if this pin goes missing, on
-// any platform available here — only a source check can.
-test("claim-ticket.sh still pins the locale on both find-output commands", () => {
-  const src = readFileSync(SCRIPT, "utf8");
-  assert.equal((src.match(/LC_ALL=C grep\b/g) ?? []).length, 1,
-    "the directory branch's grep pin (find's output, above) went missing or moved");
-  assert.equal((src.match(/LC_ALL=C sed\b/g) ?? []).length, 2,
-    "one of the two sed pins (directory branch above, file-argument branch below) went missing");
-});
-
-// Why the trailing slash, and why not `-L`: claim-ticket.sh, above `found=`.
-// The symlink is written into the worktree rather than through `repo()` because
-// the runner only ever stats a path in its cwd — whether a commit or a local
-// `ln -s` put it there is invisible to it — and keeping it out of the shared
-// fixture leaves every other count assertion in this file measuring what it
-// measured before.
-test("runner: a symlink to a directory runs the test files under it", () => {
-  const a = apply(SUITE);
-  symlinkSync("t", join(a.wt, "tlink"));
-  // `t/vendor` is the shape neither exclusion can see: a symlink into
-  // `node_modules` under another name — `-prune` matches the directory's own
-  // name and this one is called `vendor`, and the `case` guard reads the
-  // argument, which neither spells nor resolves into one. Measured: it
-  // is exactly as blind as the `-not -path` filter it replaced, both legs.
-  // The slash form does not descend it and reads 3; `find -L`
-  // sweeps the vendored test in and reads 4. Without this every test passes
-  // under `-L`, leaving the reasoning in claim-ticket.sh as the only thing
-  // between a future tidy-up and a suite resting on third-party code.
-  mkdirSync(join(a.wt, "node_modules"), { recursive: true });
-  writeFileSync(join(a.wt, "node_modules", "v.test.mjs"), PASSES);
-  symlinkSync("../node_modules", join(a.wt, "t", "vendor"));
-  const r = a.run("tlink");
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  // Anchored for the same reason as the vendored-test count below: bare
-  // `pass 3` is a substring of `pass 3<n>` and stops discriminating once a
-  // fixture grows. 3 is `t/`'s own two files plus the one under `t/nested/`,
-  // so a `find` capped at one level reads as a red here too.
-  assert.match(r.stdout, /^(?:ℹ|#) pass 3$/m);
-});
-
-// #186: the argument itself is a symlink whose TARGET lies inside a vendored
-// tree. Spelling can't see it — `vendlink` carries no `node_modules` in its
-// own name — and `-prune` only fires on a dirent the walk descends THROUGH
-// named `node_modules`; here the walk starts at the symlink's target,
-// already past the vendored component, so neither existing guard sees it.
-// Measured on the unfixed shim: `agent-test vendlink` exits 0 and reports
-// the vendored test as a pass — the same green-over-third-party-code #109's
-// prune exists to refuse, reached by a route neither mechanism covers.
-test("runner: a symlink whose target is inside a vendored tree refuses", () => {
-  const a = apply(SUITE);
-  const vendor = join(a.wt, "node_modules", "pkg");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  symlinkSync(join("node_modules", "pkg"), join(a.wt, "vendlink"));
-  const r = a.run("vendlink");
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /is under node_modules — excluded from the run/);
-});
-
-// The false-positive class of the same fix: a symlink to a directory that
-// merely CONTAINS a vendored tree, rather than one whose own resolution ends
-// inside it, must still run that directory's own tests and still exclude the
-// real `node_modules` beneath it. Already true pre-fix (find's own prune
-// handles it once the walk is inside), and must stay true — a resolved-path
-// guard that widens into refusing every symlinked directory with
-// `node_modules` somewhere underneath would regress this ordinary case.
-test("runner: a symlink to a directory containing a vendored tree still runs its own tests", () => {
-  const a = apply(SUITE);
-  mkdirSync(join(a.wt, "proj"), { recursive: true });
-  writeFileSync(join(a.wt, "proj", "ok.test.mjs"), PASSES);
-  const vendor = join(a.wt, "proj", "node_modules", "pkg");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(
-    join(vendor, "v.test.mjs"),
-    'import { test } from "node:test";\ntest("VENDOR", () => { throw new Error("not ours"); });\n',
-  );
-  symlinkSync("proj", join(a.wt, "projlink"));
-  const r = a.run("projlink");
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^(?:ℹ|#) pass 1$/m);
-});
-
-// The vendored tree the symlink lands in need not be inside the worktree.
-// Judging the resolution RELATIVE TO THE WORKTREE ROOT passes every other test
-// in this file and still runs this one green — the resolution lands outside, so
-// there is nothing left to compare — which is #186's own class one input over.
-// Both directions are here because the cheap over-correction (refuse anything
-// resolving outside) also passes the refusal leg alone.
-test("runner: a symlink to a vendored tree outside the worktree refuses", () => {
-  const a = apply(SUITE);
-  const outside = mkdtempSync(join(tmpdir(), "outside-"));
-  const vendor = join(outside, "node_modules", "pkg");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  symlinkSync(vendor, join(a.wt, "extlink"));
-  const r = a.run("extlink");
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /is under node_modules — excluded from the run/);
-  const plain = join(outside, "lib");
-  mkdirSync(plain, { recursive: true });
-  writeFileSync(join(plain, "o.test.mjs"), PASSES);
-  symlinkSync(plain, join(a.wt, "oklink"));
-  const ok = a.run("oklink");
-  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
-  assert.match(ok.stdout, /^(?:ℹ|#) pass 1$/m);
-});
-
-// The opposite error, and the one that actually shipped: `pwd -P` is absolute,
-// so matching `*/node_modules/*` against it refuses on a `node_modules` in the
-// WORKTREE'S OWN ANCESTRY — which is shared with the runner and says nothing
-// about the argument. Measured on the unfixed shim: a worktree under such a
-// parent refused every directory argument, the bare invocation's implicit `.`
-// included, so the whole suite became unrunnable. No other fixture in this file
-// is built under a `node_modules` parent, so nothing else can see it.
-//
-// The absolute spellings are the half that outlived the first fix (#230). An
-// argument spelled absolutely carries the shared ancestor's `node_modules`
-// inside its own text, so a guard term that reads the caller's spelling
-// unanchored matches on it however the anchored term ruled — and the same
-// directory reached two verdicts depending only on how it was named. Spelled
-// and resolved forms are asserted side by side here because agreement between
-// them, not any single row, is the property.
-test("runner: a node_modules in the worktree's own ancestry refuses nothing", () => {
-  const under = join(mkdtempSync(join(tmpdir(), "anc-")), "node_modules");
-  mkdirSync(under, { recursive: true });
-  const a = apply(SUITE, SCRIPT, under);
-  for (const [args, count] of [
-    [[], 6],
-    [["."], 6],
-    [[a.wt], 6],
-    [["t"], 3],
-    [[join(a.wt, "t")], 3],
-    // File arguments too: the file branch grew its own resolved-path check
-    // (#424), so the ancestor that must stay unread is now read by both arms.
-    [["t/a.test.mjs"], 1],
-    [[join(a.wt, "t", "a.test.mjs")], 1],
-  ]) {
-    const r = a.run(...args);
-    assert.equal(r.status, 0, `${JSON.stringify(args)}: ${r.stdout}${r.stderr}`);
-    assert.match(r.stdout, new RegExp(`^(?:ℹ|#) pass ${count}$`, "m"));
-  }
-  // ...and the guard still bites inside such a worktree.
-  const vendor = join(a.wt, "node_modules", "pkg");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  symlinkSync(join("node_modules", "pkg"), join(a.wt, "vendlink"));
-  const r = a.run("vendlink");
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /is under node_modules — excluded from the run/);
-  // A DIRECTORY argument and a FILE argument in one argv, diverging from the
-  // runner at different depths. Both arms share one `diverge` walk writing one
-  // global `$shared` (POSIX sh has no `local`), so the file arm's verdict must
-  // not inherit the directory's: `t` diverges at the worktree, `outlink`
-  // resolves two levels above it, and reusing the deeper answer strips nothing
-  // — leaving the ANCESTRY's own `node_modules` inside the string the file arm
-  // scans, so the worktree refuses a file that is not vendored at all.
-  // Every other row here passes one argument, where `$shared` is empty before
-  // the call and dropping the call outright still reds. This row is the only
-  // one that catches reusing a STALE value: `[ -n "$shared" ] || diverge …`,
-  // the plausible optimization, left the whole file green before it existed
-  // (measured) and reds here now.
-  symlinkSync(join("..", "..", "root.test.mjs"), join(a.wt, "outlink.test.mjs"));
-  const mixed = a.run("t", "outlink.test.mjs");
-  assert.equal(mixed.status, 0, mixed.stdout + mixed.stderr);
-  assert.match(mixed.stdout, /(?:ℹ|#) pass 4(?!\d)/);
-  // The MIRROR order: a FILE argument first, then a DIRECTORY argument that
-  // diverges ABOVE the worktree, still under this ancestor's own
-  // `node_modules` — the shape the "resolution outside the worktree" test
-  // below proves correct when the directory arm's own `diverge` call runs.
-  // `t/a.test.mjs` diverges no further than the worktree, so the file arm
-  // leaves `$shared` sitting at `$root` itself; if the DIRECTORY arm's own
-  // `diverge` call were skipped in favour of that stale, narrower value,
-  // stripping it from the directory's resolution would strip nothing —
-  // leaving the ancestor's own `node_modules` in the string the directory arm
-  // scans, refusing an ordinary directory outside the worktree that is not
-  // vendored at all. Every row above passes a single argument in this order;
-  // this is the only one that catches the DIRECTORY arm reusing a stale
-  // value left behind by a FILE argument run first.
-  const outside2 = join(mkdtempSync(join(under, "out2-")), "lib");
-  mkdirSync(outside2, { recursive: true });
-  writeFileSync(join(outside2, "o2.test.mjs"), PASSES);
-  symlinkSync(outside2, join(a.wt, "outlink2"));
-  const mixed2 = a.run("t/a.test.mjs", "outlink2");
-  assert.equal(mixed2.status, 0, mixed2.stdout + mixed2.stderr);
-  assert.match(mixed2.stdout, /(?:ℹ|#) pass 2(?!\d)/);
-});
-
-// The spelling term's own reason to exist, and the only input in this repo that
-// isolates it: a cwd OUTSIDE the worktree, from which a relative argument
-// descends through the shared ancestor's `node_modules` and so names it in its
-// own text, while resolving to an ordinary directory the divergence walk has
-// already cleared. Measured: delete `${arg##/*}` from the guard and every other
-// test in the repo stays green, so without this row the term reads as dead code
-// to the next simplifier — and it is not, since node excludes an argv entry
-// whose normalized relative form opens with `node_modules/` and says nothing
-// about it (#100). The message is asserted, not just the status: without the
-// term the argument reaches node, which reports its own `Could not find`, and
-// the two exits are indistinguishable by status alone. The absolute leg is the
-// control — the same directory named absolutely is exempt from that term and
-// must still run, which is #230's property and what separates this test from
-// one that merely refuses everything spelled from outside.
-test("runner: a relative argument through the shared ancestor is refused from outside the worktree", () => {
-  const under = join(mkdtempSync(join(tmpdir(), "anc-")), "node_modules");
-  mkdirSync(under, { recursive: true });
-  const a = apply(SUITE, SCRIPT, under);
-  // Four levels up from the worktree: `42-slug` -> `.worktrees` -> `claim-XXXX`
-  // -> `node_modules` -> the ancestor holding it, so a path relative to that cwd
-  // opens with the `node_modules` segment the guard has to read.
-  const up = join("..", "..", "..", "..");
-  const outside = a.runFrom(up, relative(join(a.wt, up), join(a.wt, "t")));
-  assert.notEqual(outside.status, 0, outside.stdout + outside.stderr);
-  assert.match(outside.stderr, /is under node_modules — excluded from the run/);
-  const ok = a.runFrom(up, join(a.wt, "t"));
-  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
-  assert.match(ok.stdout, /^(?:ℹ|#) pass 3$/m);
-});
-
-// The divergence WALK itself (#797). Every row above names an argument that
-// resolves under the worktree, where `$shared` and `$root` strip the same text
-// and the walk does no work — measured, substituting `$root` for `$shared` in
-// `${resolved#"$shared"}` is green on all 1873 tests. What separates the two is
-// a resolution landing OUTSIDE the runner's own directory while still under the
-// `node_modules` ancestor they share: `$root` is no prefix of it, so nothing is
-// stripped, the ancestor's own `node_modules` stays in the text being matched,
-// and an ordinary directory out there is refused as vendored. That is the
-// "opposite error" the guard's comment names, reached from its false-refusal
-// side rather than its false-green one.
-// One row per guard arm, no absolute spelling of either, and that is measured
-// rather than an omission. Directory: `$resolved` comes from `pwd -P`, which
-// erases the spelling, so an absolute argument reaches the case with
-// `$root`/`$resolved`/`$shared` byte-identical to the relative row's and can
-// differ only in the spelling term `${arg##/*}` — which the test directly above
-// already pins as its control leg, and which the unreadable-directory test below
-// pins again through a symlinked ancestor. Measured over nine mutations of this
-// guard: none reds an absolute row here while leaving the relative row and those
-// two green. File: an absolute `$arg` carrying a `node_modules` segment is
-// exempted from the file arm's resolved check by design (#401), so that row
-// would pin nothing here either.
-// The file arm runs the same walk via `diverge`, writing the shared `$shared`
-// (#424), so the file row here holds that anchor with the same fixture; the
-// vendored legs it must keep refusing are the two tests above, which this one
-// deliberately does not repeat.
-test("runner: a resolution outside the worktree is judged from the divergence, not the runner's own root", () => {
-  const ancestor = join(mkdtempSync(join(tmpdir(), "anc-")), "node_modules");
-  mkdirSync(ancestor, { recursive: true });
-  const a = apply(SUITE, SCRIPT, ancestor);
-  // A sibling of the repo, so the argument diverges ABOVE the worktree while
-  // still sitting under the shared `node_modules` — the one shape that makes
-  // `$root` and `$shared` name different directories.
-  const outside = join(mkdtempSync(join(ancestor, "outside-")), "lib");
-  mkdirSync(outside, { recursive: true });
-  writeFileSync(join(outside, "o.test.mjs"), PASSES);
-  symlinkSync(outside, join(a.wt, "outlink"));
-  symlinkSync(join(outside, "o.test.mjs"), join(a.wt, "outlink.test.mjs"));
-  for (const arg of ["outlink", "outlink.test.mjs"]) {
-    const r = a.run(arg);
-    assert.equal(r.status, 0, `${arg}: ${r.stdout}${r.stderr}`);
-    assert.match(r.stdout, /^(?:ℹ|#) pass 1$/m, arg);
-  }
-});
-
-// The walk's EXACT-MATCH arm, `| "$shared"` (#1327). The test above pins the
-// anchor the walk produces; nothing pinned the arm that ENDS the walk when the
-// argument resolves TO an ancestor rather than under it. Deleting it reads as a
-// no-op — the next iteration's `"$shared"/*` matches the same path — and is not
-// one: it matches against a `$shared` one segment shorter, so
-// `${resolved#"$shared"}` gains a leading `/<basename of $resolved>`, and where
-// that basename is literally `node_modules` the guard refuses the shared
-// ancestor itself. That is the false refusal the walk's own comment already
-// names in prose — "a worktree living under one refused every directory
-// argument, including the bare invocation's implicit `.`" — asserted there and
-// unnoticed here: measured, deleting the arm left the rest of this file green.
-//
-// Two fixtures, because the arm is reached on two different iterations and the
-// mutations that reach them are disjoint. V1 breaks on the FIRST iteration
-// ($resolved IS $root); V2 on a later one ($resolved is a proper ancestor of
-// $root). Measured over five template variants, every cell run against an
-// emitted runner:
-//                                        V1 bare  V1 vendored  V2 ../../..
-//   `| "$shared"` deleted                RED      pass         RED
-//   `case "$1"/ in "$shared"/*`          pass     pass         pass
-//   `shared=${root%/*}`                  RED      pass         pass
-//   `shared=${shared%/*/*}`              pass     pass         RED
-//   guard skipped when $root is vendored pass     RED          pass
-// Row two is the behaviour-preserving rewrite of the same `case` — the equality
-// spelled as a slash-bound subject instead of its own alternative — and it has
-// to stay green, or these rows pin the spelling rather than the behaviour.
-// The vendored row is asserted on the MESSAGE, not the status: under the
-// over-exempt variant it still exits 1, with node's own `Could not find`, so
-// status alone cannot tell a guard that refused from one that was skipped and
-// handed node a path it drops (#100's silent shape — the same reason the
-// relative-spelling test above asserts its message too).
-//
-// The file arm needs no row of its own, and that is measured rather than
-// assumed. #1016 left ONE walk holding ONE such arm: it occurs exactly once in
-// this template, and deleting that occurrence changes exactly one line of the
-// emitted runner, so these rows pin it for both callers — and the mixed-argv
-// rows above already pin that the file arm re-runs the walk rather than reading
-// a stale `$shared`. The file caller cannot reach the arm in any case: it runs
-// only from the `else` of `[ -d "$arg" ]`, over `realpath`'s answer for a path
-// that is NOT a directory, while every value `$shared` can hold is `$root` or
-// one of its ancestors — all directories, so the equality can never hold.
-test("runner: the divergence walk ends on an argument that resolves TO the shared ancestor", () => {
-  // V1 — the runner's own directory is named `node_modules`, so a bare
-  // invocation's implicit `.` resolves to `$root` itself and the walk's first
-  // iteration is the equality. No claim can emit a runner there: the worktree
-  // is always `.worktrees/<issue>-<slug>`, which cannot be that name. So this
-  // uses `--write-runner` (already exercised further down this file) to emit
-  // straight into a `node_modules` destination instead of claiming normally
-  // and relocating the result byte-for-byte — same emitter, same bytes, no
-  // copy step, and no `gh` stub or worktree the assertions below never
-  // inspect.
-  const home = join(mkdtempSync(join(tmpdir(), "nm-")), "node_modules");
-  mkdirSync(home, { recursive: true });
-  const wr = spawnSync("sh", [SCRIPT, "--write-runner", join(home, "agent-test"), "42"], {
-    cwd: repo({ [TESTS]: "" }),
-    encoding: "utf8",
-  });
-  assert.equal(wr.status, 0, wr.stdout + wr.stderr);
-  writeFileSync(join(home, "a.test.mjs"), PASSES);
-  // Vendored content one level in, where the exemption is at its widest: the
-  // runner's own directory name IS the excluded word, and the guard still has
-  // to bite on a path that genuinely descends through another.
-  const vendor = join(home, "node_modules", "pkg");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  const v1 = (...args) =>
-    spawnSync(join(home, "agent-test"), args, { cwd: home, encoding: "utf8", env: runnerEnv() });
-  // `pass 1`, not merely exit 0: the fixture holds two test files and one of
-  // them is vendored, so a count is what says the vendored one stayed out.
-  // It does NOT say the argument was honoured rather than dropped — measured,
-  // discarding the runner's own file-list handoff (`set -- "$@"` in place of
-  // `set -- "$@" $files`, claim-ticket.sh:843) leaves this row byte-identical
-  // at `pass 1`, because node's own default discovery from this cwd
-  // independently excludes the same vendored file too. V2's `pass 12` below
-  // is what pins the argument being honoured; this row does not.
-  const bare = v1();
-  assert.equal(bare.status, 0, bare.stdout + bare.stderr);
-  assert.match(bare.stdout, /^(?:ℹ|#) pass 1$/m);
-  const vendored = v1(join("node_modules", "pkg"));
-  assert.notEqual(vendored.status, 0, vendored.stdout + vendored.stderr);
-  assert.match(vendored.stderr, /is under node_modules — excluded from the run/);
-
-  // V2 — the runner where the claim actually put it, under a `node_modules`
-  // ancestor, with an argument naming that ancestor exactly:
-  // `42-slug` -> `.worktrees` -> `claim-XXXX` -> the `node_modules` itself.
-  // The walk reaches the equality three iterations down rather than on the
-  // first, and the runner is unmoved, so this row cannot be dismissed as an
-  // artifact of relocating one.
-  const under = join(mkdtempSync(join(tmpdir(), "anc-")), "node_modules");
-  mkdirSync(under, { recursive: true });
-  const a = apply(SUITE, SCRIPT, under);
-  // 12: the six test files of the committed fixture, once in the repo's own
-  // checkout and once in the worktree built from it, both under the named
-  // ancestor. Bare discovery from the worktree reports 6, so the count also
-  // says the argument reached node instead of being dropped.
-  const r = a.run(join("..", "..", ".."));
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^(?:ℹ|#) pass 12$/m);
-});
-
-// The guard resolves `$arg` against the process cwd, but `$root` against the
-// runner's own location, so the two are no longer the same anchor and a
-// subdirectory invocation exercises a different path than a root one. Measured:
-// anchoring the argument at `$root` instead (`cd -- "$root/$arg"`, a one-token
-// slip on the argument alone — claim-ticket.sh's `root=` assignment and its
-// `resolved=` one now sit 171 lines apart, not side by side) is green on
-// every OTHER test in this file while reporting
-// the vendored test as a pass from one directory down.
-// Second leg stops the fix degenerating into "refuse everything named from a
-// subdirectory"; the stderr assert is load-bearing, since status alone cannot
-// tell a refusal from a vendored test that threw.
-test("runner: the resolved-path guard resolves against the cwd, from a subdirectory too", () => {
-  const a = apply(SUITE);
-  const vendor = join(a.wt, "node_modules", "pkg");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  symlinkSync(join("..", "node_modules", "pkg"), join(a.wt, "t", "vendlink"));
-  const refused = a.runFrom("t", "vendlink");
-  assert.notEqual(refused.status, 0, refused.stdout + refused.stderr);
-  assert.match(refused.stderr, /is under node_modules — excluded from the run/);
-  const ran = a.runFrom("t", "nested");
-  assert.equal(ran.status, 0, ran.stdout + ran.stderr);
-  assert.match(ran.stdout, /^(?:ℹ|#) pass 1$/m);
-});
-
-// The false-positive leg of the resolved-path guard. The nested-node_modules
-// test below pins `-prune`'s immunity to a `node_modules_old` lookalike, not
-// this guard's: its argument is `t`, so neither half of the composed
-// `"/$arg/ /…/"` string ever carries the lookalike and the `case` never sees
-// one. Here only the RESOLUTION does — `vlink` is clean in spelling — which is
-// the leg #186 added. Measured: relaxing the slash-bounding to `*node_modules*`
-// leaves every other test in this file green and reddens only this one.
-test("runner: a symlink resolving into a node_modules lookalike still runs", () => {
-  const a = apply(SUITE);
-  const lookalike = join(a.wt, "node_modules_old", "pkg");
-  mkdirSync(lookalike, { recursive: true });
-  writeFileSync(join(lookalike, "k.test.mjs"), PASSES);
-  symlinkSync(join("node_modules_old", "pkg"), join(a.wt, "vlink"));
-  const r = a.run("vlink");
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^(?:ℹ|#) pass 1$/m);
-});
-
-// The sharp edge. `node --test` with zero files exits 0, so an expansion that
-// matched nothing and shrugged would smuggle back the vacuous pass the emit
-// guard refuses — this time past it, at run time.
-test("runner: a directory with no test files refuses instead of exiting 0", () => {
-  const r = apply(SUITE).run("empty");
-  assert.notEqual(r.status, 0);
-  assert.match(r.stderr, /no test files under empty/);
-});
-
-// #1628: grep's and sed's own exit codes used to go unread in the
-// directory-scan pipe — only whether `$files` ended up non-empty was
-// checked — so a scan failure inside either tool (rc 2+, distinct from
-// grep's normal rc-1 "no match") read through the emptiness test above as
-// an indistinguishable "no test files", even though real test files sit
-// right there. Stubbing `grep` itself to die outright (rc 2) is the
-// cleanest reproduction of a scan tool breaking mid-run, and must be
-// reported as ITS failure, not folded into the empty-directory message.
-test("runner: a grep failure mid-scan is reported distinctly from an empty result", () => {
-  const a = apply(SUITE);
-  const bin = mkdtempSync(join(tmpdir(), "claim-grepfail-"));
-  writeFileSync(join(bin, "grep"), "#!/bin/sh\nexit 2\n", { mode: 0o755 });
-  const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
-    cwd: a.wt,
-    encoding: "utf8",
-    env: { ...a.env, PATH: `${bin}:${a.env.PATH}` },
-  });
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /could not scan for test files under t \(grep exited 2\)/);
-  assert.doesNotMatch(r.stderr, /no test files under/);
-});
-
-// The other half: sed sits downstream of grep in the same pipe, and its own
-// rc was just as unread. Stubbing `sed` alone (grep runs for real, matches
-// `t`'s two files, then hands them to the dying stub) isolates sed's status
-// from grep's — the failure must still name sed, not grep or "no test files".
-test("runner: a sed failure mid-scan is reported distinctly from an empty result", () => {
-  const a = apply(SUITE);
-  const bin = mkdtempSync(join(tmpdir(), "claim-sedfail-"));
-  writeFileSync(join(bin, "sed"), "#!/bin/sh\nexit 2\n", { mode: 0o755 });
-  const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
-    cwd: a.wt,
-    encoding: "utf8",
-    env: { ...a.env, PATH: `${bin}:${a.env.PATH}` },
-  });
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /could not scan for test files under t \(sed exited 2\)/);
-  assert.doesNotMatch(r.stderr, /no test files under/);
-});
-
-// BSD sed (this machine's actual /usr/bin/sed) exits rc 1 for EVERY error it
-// reports — illegal byte sequence, malformed regex, missing file — there is
-// no BSD sed error path that ever reaches rc 2+. A guard that tolerated
-// `sed_rc -le 1` (mirroring grep's real "no match is rc 1" case) could NEVER
-// catch a genuine BSD sed failure: the stub below reproduces that exact
-// shape — always exit 1, the way real BSD sed does on a bad invocation —
-// and must still be reported as a sed failure, not silently folded into "no
-// test files" the way an unread rc would. (Reverting the guard to
-// `-le 1` reproduces the pre-fix bug: this test goes green on silence,
-// asserting `no test files under t` instead of a reported sed failure.)
-test("runner: a BSD-style sed rc-1 failure is reported, not tolerated as a no-match analog", () => {
-  const a = apply(SUITE);
-  const bin = mkdtempSync(join(tmpdir(), "claim-sedrc1-"));
-  writeFileSync(join(bin, "sed"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
-  const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
-    cwd: a.wt,
-    encoding: "utf8",
-    env: { ...a.env, PATH: `${bin}:${a.env.PATH}` },
-  });
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /could not scan for test files under t \(sed exited 1\)/);
-  assert.doesNotMatch(r.stderr, /no test files under/);
-});
-
-// grep's rc 1 ("no match") must NOT be swept into the same failure this pins
-// above — that is the genuinely-empty case the pre-existing "no test files"
-// test (above) already covers end to end. This is the narrower unit-level
-// half: a stub that always exits 1, never touching `find` or the real test
-// files, pins that a bare "no match" alone still reaches the ORIGINAL
-// "no test files" message, not the new "grep exited" one.
-test("runner: grep's plain no-match rc still reads as no test files, not a grep failure", () => {
-  const a = apply(SUITE);
-  const bin = mkdtempSync(join(tmpdir(), "claim-grepnomatch-"));
-  writeFileSync(join(bin, "grep"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
-  const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
-    cwd: a.wt,
-    encoding: "utf8",
-    env: { ...a.env, PATH: `${bin}:${a.env.PATH}` },
-  });
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /no test files under t/);
-  assert.doesNotMatch(r.stderr, /grep exited/);
-});
-
-test("runner: a file argument still works", () => {
-  const r = apply(SUITE).run("t/a.test.mjs");
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  // Bounded, same reason as the other bare `pass 1` cases above.
-  assert.match(r.stdout, /(?:ℹ|#) pass 1(?!\d)/);
-});
-
-// The shell expands a glob before the runner is entered, so the glob form
-// reaches it as the plain multi-file argv this asserts on. Only the *matching*
-// glob, though: one that matches nothing is handed over unexpanded, is not a
-// directory, and so misses the shim entirely — node globs it, matches nothing
-// and exits 0. That path is #100, not this test.
-test("runner: the expanded glob form still works", () => {
-  const r = apply(SUITE).run("t/a.test.mjs", "t/b.test.mjs");
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  // Bounded, same reason as above: a bare `pass 2` is a substring of
-  // `pass 2<n>` and stops discriminating once a fixture reaches 20.
-  assert.match(r.stdout, /(?:ℹ|#) pass 2(?!\d)/);
-});
-
-// A subtree find cannot descend is the quiet version of the same hazard: find
-// still prints what it reached, grep still matches it, and the count guard
-// still passes — so the suite goes green having silently skipped whatever the
-// unreadable directory held. Root can read anything, so it cannot see this.
-test("runner: a directory it cannot fully read refuses instead of running a partial suite", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root reads every directory");
-  const a = apply({ ...SUITE, "t/locked/z.test.mjs": PASSES });
-  chmodSync(join(a.wt, "t", "locked"), 0o000);
-  try {
-    const r = a.run("t");
-    assert.notEqual(r.status, 0, r.stdout + r.stderr);
-    assert.match(r.stderr, /cannot read every path under t/);
-  } finally {
-    chmodSync(join(a.wt, "t", "locked"), 0o755);
-  }
-});
-
-// #960 case 1: `find "-dir/" ...` — the old spelling — is read by both BSD
-// find (macOS) and GNU find (Linux CI) as the start of an option cluster,
-// trailing slash and all, and dies before reading a single path: measured
-// directly, "illegal option -- i" (BSD) / "unknown predicate `-dir/'"
-// (GNU), neither rescued by a POSIX `--`. The runner used to report that as
-// `cannot read every path under -dir`, blaming the subtree's readability
-// for what was find's own argument parser losing to the caller's spelling.
-// `-dir` is written into the worktree directly rather than through
-// `repo()`: a leading-dash directory NAME is a shell/CLI-argument concern,
-// not something a git commit needs to reproduce.
-// Node's own `--test` CLI turns out to share the same parser confusion one
-// layer down — measured, a relative file spec that starts with `-` after
-// node's own normalisation is read as a bad option too, `./`-prefixed or
-// not — so this fixture cannot be made to actually run without rewriting
-// every file this arm hands to node into an absolute path, a much larger
-// change than this bug. The runner refuses instead, naming ITS cause
-// rather than reporting a suite that never got to node as unreadable.
-test("runner: a dash-named directory refuses naming the parsing hazard, not unreadability", () => {
-  const a = apply(SUITE);
-  mkdirSync(join(a.wt, "-dir"), { recursive: true });
-  writeFileSync(join(a.wt, "-dir", "z.test.mjs"), PASSES);
-  const r = a.run("-dir");
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /holds tests, but node reads a relative dash-led path as an option/);
-  assert.doesNotMatch(r.stderr, /cannot read every path under/);
-});
-
-// The other half of the same fixture: a dash-named directory that is
-// GENUINELY unreadable must still report that real fault, not the parsing
-// refusal's message. `./` only routes the argument around find's OWN
-// parser (pinned above); once find actually descends, a permission denied
-// down there is what `cannot read every path under` is for, and this pins
-// that the parsing fix did not also swallow real unreadability.
-// The wrapper text alone (`cannot read every path under -locked`) does not
-// discriminate: it is byte-identical whether find died on the dash before
-// reading anything, or genuinely hit this fixture's chmod 0 `sub`. find's
-// OWN stderr is never redirected by the runner, so it reaches this test
-// alongside the wrapper — measured, the two causes leave distinct text
-// there: `find: .../sub: Permission denied` for the real fault this test
-// means to pin, versus `find: illegal option -- i` (BSD) / `find: unknown
-// predicate '...'` (GNU) for the argument-parsing failure this PR's `./`
-// routing prevents. Asserting on find's message too, and ruling out the
-// parsing signature, is what makes this test fail if the `./` routing
-// this PR adds is reverted — checked directly: reverting it leaves this
-// test green under the wrapper-only assertion alone.
-test("runner: an unreadable dash-named directory still reports the real read fault", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root reads every directory");
-  const a = apply(SUITE);
-  const locked = join(a.wt, "-locked");
-  mkdirSync(join(locked, "sub"), { recursive: true });
-  writeFileSync(join(locked, "sub", "z.test.mjs"), PASSES);
-  chmodSync(join(locked, "sub"), 0o000);
-  try {
-    const r = a.run("-locked");
-    assert.notEqual(r.status, 0, r.stdout + r.stderr);
-    assert.match(r.stderr, /cannot read every path under -locked/);
-    assert.doesNotMatch(r.stderr, /holds tests, but node reads/);
-    assert.match(r.stderr, /Permission denied/, `find must have actually descended into -locked rather than dying on its dash: ${r.stderr}`);
-    assert.doesNotMatch(r.stderr, /illegal option|unknown predicate/i,
-      `find's own argument-parsing failure text must not be present, or this is the parsing hazard, not the read fault: ${r.stderr}`);
-  } finally {
-    chmodSync(join(locked, "sub"), 0o755);
-  }
-});
-
-// Node's own discovery excludes `node_modules`; `find` does not, so a vendored
-// test ran and the suite's result hung on third-party code passing. The live
-// shape is a *real* nested `node_modules` — an install that did not hoist, or
-// a bundled dependency. Not pnpm's: its per-package `node_modules` is a
-// symlink farm, and `find` without `-L` never descends it.
-// The vendor test fails on purpose: the count alone cannot tell "vendor was
-// pruned" from "vendor ran and failed", and the exit status alone cannot tell
-// "pruned" from "the expansion dropped some of ours" — losing all of them
-// refuses with `no test files`, losing a few still exits 0. Both, or neither.
-// `node_modules_old/` pins the other direction. Over-pruning is the worse
-// bug — it deletes real tests and still exits 0 — and this is its only
-// coverage in the fleet suite: an over-broad `*node_modules*` passes every
-// other test in this file.
-// It is written into the worktree rather than through `repo()` because that is
-// where `node_modules` actually comes from — the install step, not a commit —
-// and committing it would rest this test on whatever `core.excludesFile` the
-// machine happens to have.
-test("runner: a vendored test under a nested node_modules does not run", () => {
-  const a = apply(SUITE);
-  const vendor = join(a.wt, "t", "node_modules", "vendor");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(
-    join(vendor, "v.test.mjs"),
-    'import { test } from "node:test";\ntest("VENDOR", () => { throw new Error("not ours"); });\n',
-  );
-  const lookalike = join(a.wt, "t", "node_modules_old");
-  mkdirSync(lookalike, { recursive: true });
-  writeFileSync(join(lookalike, "k.test.mjs"), PASSES);
-  const r = a.run("t");
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  // Anchored: a bare `pass 4` is a substring and matches `pass 41`, so the pin
-  // would dissolve the moment the fixture grows past 40. Both prefixes because
-  // `node --test`'s default reporter is version- and TTY-dependent — spec
-  // (`ℹ pass 4`) on a terminal and on newer node, tap (`# pass 4`) when older
-  // node writes to a pipe, which is every CI run.
-  assert.match(r.stdout, /^(?:ℹ|#) pass 4$/m);
-});
-
-// The point of `-prune` over a path filter: content under `node_modules` is
-// excluded from the run either way, so its readability cannot change the
-// verdict. An unreadable directory *in* it used to still fail `find` and trip
-// the guard above — a loud but pointless stall. Pruning skips descending
-// `node_modules` entirely, so this directory's permissions are never even
-// read. `pass 3` — the same count as the bare "t" case — pins that: the
-// locked directory is empty and is never descended, so nothing about it can
-// move the count or the status. Mutation-checked: reverting the walk to the
-// `-not -path` filter, or typoing the prune's name, fails this test.
-test("runner: an unreadable directory under node_modules no longer refuses the suite", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root reads every directory");
-  const a = apply(SUITE);
-  const locked = join(a.wt, "t", "node_modules", "locked");
-  mkdirSync(locked, { recursive: true });
-  chmodSync(locked, 0o000);
-  try {
-    const r = a.run("t");
-    assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.match(r.stdout, /^(?:ℹ|#) pass 3$/m);
-  } finally {
-    chmodSync(locked, 0o755);
-  }
-});
-
-// Same directories, six spellings of the argument. The top-level pair alone
-// is not coverage of "a vendored argument": `-prune` fires only where the
-// walk DESCENDS through a `node_modules` dirent, so an argument at or under
-// one prunes nothing and prints every file beneath it. Measured against the
-// prune alone, the four spellings below the top level all ran their vendored
-// test and exited 0 — the vacuous vendored green this shim exists to refuse.
-// Only the `case` guard covers them, which is why every spelling is here.
-// The message is asserted too, not just the status: falling through to the
-// emptiness guard would report a deliberate exclusion as an absence and send
-// a reader after a discovery bug that does not exist.
-test("runner: a vendored directory argument refuses however it is spelled", () => {
-  const a = apply(SUITE);
-  mkdirSync(join(a.wt, "node_modules", "pkg"), { recursive: true });
-  mkdirSync(join(a.wt, "t", "node_modules", "pkg"), { recursive: true });
-  writeFileSync(join(a.wt, "node_modules", "v.test.mjs"), PASSES);
-  writeFileSync(join(a.wt, "node_modules", "pkg", "v.test.mjs"), PASSES);
-  writeFileSync(join(a.wt, "t", "node_modules", "v.test.mjs"), PASSES);
-  writeFileSync(join(a.wt, "t", "node_modules", "pkg", "v.test.mjs"), PASSES);
-  for (const spelling of [
-    "node_modules",
-    "./node_modules",
-    "node_modules/pkg",
-    "t/node_modules",
-    "t/node_modules/pkg",
-    join(a.wt, "node_modules", "pkg"),
-  ]) {
-    const r = a.run(spelling);
-    assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
-    assert.match(r.stderr, /is under node_modules — excluded from the run/, spelling);
-    assert.doesNotMatch(r.stderr, /no test files under/, spelling);
-  }
-});
-
-// The vendored half of the no-search-bit case: `cd` fails on a directory
-// `[ -d ]` admits but that carries no search bit, so unless the resolution is
-// recovered from somewhere the divergence walk has nothing to measure and this
-// argument stops being refused as vendored at all. Measured against this file:
-// remove the recovery entirely and this is the one test that reds. What the
-// recovery is ANCHORED on is a separate property and this test is blind to it —
-// give it back the argument's raw text and this row stays green — which is why
-// the ancestor-spelling test below exists as well as this one.
-// One spelling, not two. The relative one was measured redundant across every
-// mutation of both halves of the guard: with a recovery in place the resolved
-// term reaches it unaided, and with none the spelling term does, so no mutation
-// moves it. The absolute spelling is the row that carries this test.
-// The readability message is asserted absent — `find` refuses a starting point
-// it cannot open as well, so a bare non-zero cannot tell the guard's refusal
-// from find's, and which cause the reader is sent after is the point.
-// Root can read anything, so it cannot see this.
-test("runner: a vendored directory with no search bit is refused as vendored, not as unreadable", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root searches every directory");
-  const a = apply(SUITE);
-  const vendor = join(a.wt, "node_modules", "pkg");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  chmodSync(vendor, 0o000);
-  try {
-    const r = a.run(vendor);
-    assert.notEqual(r.status, 0, r.stdout + r.stderr);
-    assert.match(r.stderr, /is under node_modules — excluded from the run/);
-    assert.doesNotMatch(r.stderr, /cannot read every path under/);
-  } finally {
-    chmodSync(vendor, 0o755);
-  }
-});
-
-// #230's own criterion in the one case the spelling exemption does not reach: a
-// directory `[ -d ]` admits but that carries no search bit resolves to nothing,
-// so what the guard falls back to is what decides the verdict. Anchored on the
-// parent, every spelling of the directory agrees; anchored on the argument's raw
-// text it did not — `$root` comes from `pwd -P`, so an absolute spelling routed
-// through a symlinked ancestor shares no literal prefix with it, `$shared` walks
-// down to empty, and the ancestor's own `node_modules` is left sitting in the
-// text being matched. One directory, two absolute names, opposite verdicts.
-// The symlinked ancestor is built here rather than borrowed from `$TMPDIR`:
-// macOS resolves `/var/folders/...` to `/private/var/...` and would supply one
-// for free, Linux would not, and a fixture that reproduces on one platform only
-// stops discriminating on the other without saying so.
-// NON-vendored on purpose. A vendored directory has to keep being refused (the
-// test above pins that), so only a directory the guard has no business refusing
-// can tell an anchored fallback from an unanchored one.
-// Root can read anything, so it cannot see this.
-test("runner: an unreadable directory under a node_modules ancestor names the read fault in every spelling", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root searches every directory");
-  const real = mkdtempSync(join(tmpdir(), "anc-"));
-  const spelled = `${real}-link`;
-  symlinkSync(real, spelled);
-  mkdirSync(join(real, "node_modules"), { recursive: true });
-  const a = apply(SUITE, SCRIPT, join(spelled, "node_modules"));
-  const locked = join(a.wt, "t");
-  chmodSync(locked, 0o000);
-  try {
-    for (const spelling of ["t", locked, join(realpathSync(a.wt), "t")]) {
-      const r = a.run(spelling);
-      assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
-      assert.match(r.stderr, /cannot read every path under/, spelling);
-      assert.doesNotMatch(r.stderr, /is under node_modules/, spelling);
-    }
-  } finally {
-    chmodSync(locked, 0o755);
-  }
-});
-
-// #100: node counts argv separately from the runner's own `find`, and a file
-// or glob argument reaches node with no check of its own. Node drops an
-// argument it cannot resolve and exits non-zero only when it refuses every
-// argument in argv — mixed with anything valid, the discard is silent and
-// the runner used to exit 0 having run less than it was asked. These pin the
-// shapes node discards: a typo, a file under `node_modules` however it is
-// spelled, a path holding a `[`, and (the one deliberately left alone) an
-// unmatched glob — plus the two it does NOT discard, a flag and a vendored
-// spelling node runs anyway, which the guard must not refuse in their place.
-
-// The repro from the issue itself: alone a typo is loud (node's own
-// `Could not find`, exit 1) — mixed with a real file, node ran the one file
-// and exited 0, and the runner reported a pass for a suite that only half
-// ran. Named, not just refused: `no test files under` or a bare non-zero
-// would both send a reader after the wrong bug.
-test("runner: a typo'd path mixed with a valid one refuses and names the typo", () => {
-  const r = apply(SUITE).run("t/a.test.mjs", "t/typo.test.mjs");
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /t\/typo\.test\.mjs does not exist/);
-});
-
-test("runner: a typo'd path alone still refuses", () => {
-  const r = apply(SUITE).run("t/typo.test.mjs");
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /t\/typo\.test\.mjs does not exist/);
-});
-
-// #960 case 2: `[ -e "$arg" ]` cannot tell "not there" from "could not
-// look" — stat() answers the same false whether $arg is genuinely absent
-// or a directory in its path lacks the search bit needed to resolve the
-// rest. A file behind an unsearchable parent used to fall straight through
-// to the typo arm above and get called missing, though it is right there.
-// The directory arm already gets the IDENTICAL fixture right (see "a
-// directory it cannot fully read refuses instead of running a partial
-// suite" above): both arms are run here on one `locked` directory to pin
-// the asymmetry the ticket names directly — same cause, and now the same
-// kind of answer from both, not just the directory arm's.
-// Root can search anything, so it cannot see this.
-test("runner: a file behind an unsearchable parent refuses naming the permission fault, not a typo", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root searches every directory");
-  const a = apply({ ...SUITE, "locked/a.test.mjs": PASSES });
-  const locked = join(a.wt, "locked");
-  chmodSync(locked, 0o600);
-  try {
-    const asFile = a.run("locked/a.test.mjs");
-    assert.notEqual(asFile.status, 0, asFile.stdout + asFile.stderr);
-    assert.match(asFile.stderr, /cannot read locked\/a\.test\.mjs — locked is not searchable/);
-    assert.doesNotMatch(asFile.stderr, /does not exist/);
-
-    const asDir = a.run("locked");
-    assert.notEqual(asDir.status, 0, asDir.stdout + asDir.stderr);
-    assert.match(asDir.stderr, /cannot read every path under locked/);
-  } finally {
-    chmodSync(locked, 0o755);
-  }
-});
-
-// The fix above checks $fparent alone, which is the immediate parent —
-// an unsearchable GRANDparent leaves `[ -d $fparent ]` itself false
-// (resolving `t/u` needs search on `t`, the bit actually missing), so a
-// single-level check falls through to "does not exist" one level further
-// up than the fixture above pins. This walks the fixture one directory
-// deeper: `t` (not `u`) is chmod'd 0600, so `t/u` can never be
-// resolved at all, and the ancestor actually blocking it — `t`, not
-// `t/u` — is what the message must name.
-test("runner: a file behind an unsearchable grandparent refuses naming that ancestor, not a typo", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root searches every directory");
-  const a = apply({ ...SUITE, "t/u/a.test.mjs": PASSES });
-  const tdir = join(a.wt, "t");
-  chmodSync(tdir, 0o600);
-  try {
-    const r = a.run("t/u/a.test.mjs");
-    assert.notEqual(r.status, 0, r.stdout + r.stderr);
-    assert.match(r.stderr, /cannot read t\/u\/a\.test\.mjs — t is not searchable/);
-    assert.doesNotMatch(r.stderr, /does not exist/);
-  } finally {
-    chmodSync(tdir, 0o755);
-  }
-});
-
-// The bound on the fix above: a PARENT that is simply missing
-// (`nosuchdir/x.test.mjs`) is the ordinary typo this arm already reported
-// correctly, and the permission-fault check must not swallow it — `-x` on
-// a nonexistent parent is false too, so without the `-d` term this input
-// would misreport as a permission fault it does not have.
-test("runner: a typo'd path with a missing parent still says it does not exist", () => {
-  const r = apply(SUITE).run("nosuchdir/x.test.mjs");
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /nosuchdir\/x\.test\.mjs does not exist/);
-  assert.doesNotMatch(r.stderr, /cannot read/);
-});
-
-// #125's surviving case, per the issue's "Agent Brief": a vendored *file*
-// argument bypasses the directory branch entirely (that guard only ever sees
-// what `[ -d ]` is true for), so node — not this shim — is what would drop
-// it, and only when something else in argv resolves. Written into the
-// worktree rather than through `repo()` for the same reason as the nested
-// node_modules test above: this is what an unhoisted install produces, not
-// something anyone commits.
-// Four spellings, because one is not the class. `./` is the second literal
-// form, and dropping either alternative from a prefix match would go
-// uncaught with only the first pinned. `t/../node_modules/…` is why the
-// guard resolves the argument's own directory rather than matching a prefix
-// at all: node normalizes before applying its rule, so that spelling is
-// excluded too (measured directly against node v26.5.0 — `tests 1` for a
-// two-file argv) and a literal prefix misses it. And the `*` spelling is why
-// the vendored check runs BEFORE the glob classification: a metacharacter
-// anywhere in a vendored path used to route it into the passthrough arm and
-// out of this refusal entirely.
-test("runner: a vendored file argument refuses however it is spelled", () => {
-  const a = apply(SUITE);
-  const vendor = join(a.wt, "node_modules", "pkg");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  for (const spelling of [
-    "node_modules/pkg/v.test.mjs",
-    "./node_modules/pkg/v.test.mjs",
-    "t/../node_modules/pkg/v.test.mjs",
-    "node_modules/pkg/*.test.mjs",
-  ]) {
-    const r = a.run("t/a.test.mjs", spelling);
-    assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
-    assert.match(r.stderr, /is under node_modules — node discards it silently/, spelling);
-  }
-});
-
-// The same guard under an inherited CDPATH, which nothing else in this suite
-// varies. `cd` consults CDPATH before the cwd, so with a decoy on it that
-// holds a same-named `node_modules/plain`, a bare `cd "$argdir"` resolves
-// into the DECOY: the guard's `"$PWD"/node_modules/*` pattern misses, it
-// falls through without refusing, and the vendored file reaches node — which
-// drops it silently at exit 0, #100 back with the refusal removed. `apply()`
-// hands the runner `{...process.env}`, so a developer's CDPATH reaches it.
-// The decoy shape is deliberate over a bare `CDPATH=/tmp`: /bin/sh on macOS
-// (bash 3.2) fails the `cd` outright when no CDPATH entry matches, while
-// /bin/dash falls back to the cwd per POSIX and stays immune — so a
-// non-matching decoy would pin this on the dev platform only. A MATCHING
-// entry diverts both shells, which is what makes this row portable.
-// The sibling directory branch already carries `CDPATH=` for this reason
-// (see claim-ticket.sh, above `root=`); this pins the file branch's copy.
-// Mutation-tested both ways: dropping `CDPATH= ` from the file branch's `cd`
-// reds this row alone, and adding `-P` to it — the mutation the #401 row
-// below pins — leaves this one green.
-// Re-measured after #1005 collapsed that branch's unreachable `argdir` arm,
-// because the collapse is exactly the edit that could drop the `CDPATH= `
-// silently: stripping it from the collapsed line still reds this row and only
-// it (17/18 of the vendored rows green), and forcing `argdir` back to the
-// removed arm's `.` value reds five rows including this one — so the pin
-// discriminates the guard's behaviour, not the shape it is written in.
-test("runner: a vendored file argument refuses under an inherited CDPATH", () => {
-  const a = apply(SUITE);
-  const vendor = join(a.wt, "node_modules", "plain");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  const decoy = mkdtempSync(join(tmpdir(), "cdpath-decoy-"));
-  mkdirSync(join(decoy, "node_modules", "plain"), { recursive: true });
-  const r = spawnSync(join(a.wt, "agent-test"), ["t/a.test.mjs", "node_modules/plain/v.test.mjs"], {
-    cwd: a.wt,
-    encoding: "utf8",
-    env: { ...a.env, CDPATH: decoy },
-  });
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /is under node_modules — node discards it silently/);
-});
-
-// The file-branch counterpart of the no-search-bit case pinned above for the
-// directory branch: `arg` here is a FILE, so `[ -d $arg ]` never runs at
-// all — this guard reads $argdir, the file's own parent, and it is $argdir
-// that loses its search bit. Before the fix, `cd`'s failure on $argdir was
-// discarded outright (`2>/dev/null`, nothing read from the pipeline), the
-// vendored `case` fell through unrefused, `[ -e $arg ]` downstream read
-// false because the parent could not be traversed, and the typo arm far
-// below reported a permission fault as `does not exist` — measured directly
-// against the unfixed shim. Root can read anything, so it cannot see this.
-test("runner: a vendored file behind an unreadable directory names the permission fault, not a typo", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root reads every directory");
-  const a = apply(SUITE);
-  const vendor = join(a.wt, "node_modules", "pkg");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  chmodSync(vendor, 0o000);
-  try {
-    const r = a.run("t/a.test.mjs", "node_modules/pkg/v.test.mjs");
-    assert.notEqual(r.status, 0, r.stdout + r.stderr);
-    assert.match(r.stderr, /cannot read node_modules\/pkg — check its permissions/);
-    assert.doesNotMatch(r.stderr, /does not exist/);
-    assert.doesNotMatch(r.stderr, /is under node_modules — node discards it silently/);
-  } finally {
-    chmodSync(vendor, 0o755);
-  }
-});
-
-// #1006's own warning about its remedy sketch: `[ -d $argdir ]` reads false
-// not only when $argdir is missing, but also whenever $argdir's OWN PARENT
-// is unreadable — so the guard above must not fire the permission message on
-// a fixture it cannot actually back up. Here `node_modules` (the file's
-// GRANDparent) loses its search bit, not `pkg` (the immediate parent): the
-// guard can no longer even confirm `pkg` exists, so it has to stay silent
-// and let the argument fall through exactly as an unmeasured path already
-// did, rather than assert a fault it cannot name. Measured directly: `-d`
-// reads false here where it read true in the row above, on the same
-// $argdir. The downstream message this falls through to belongs to the
-// general typo arm (#960/PR #1387), not this guard, and is deliberately
-// left unpinned here — its exact wording is that ticket's to change; this
-// row only pins that THIS guard neither over-fires nor claims the wrong
-// verdict. Root can read anything, so it cannot see this.
-test("runner: a vendored file whose ancestor is unreadable does not claim a permission fault it cannot confirm", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root reads every directory");
-  const a = apply(SUITE);
-  const vendor = join(a.wt, "node_modules", "pkg");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  const modules = join(a.wt, "node_modules");
-  chmodSync(modules, 0o000);
-  try {
-    const r = a.run("t/a.test.mjs", "node_modules/pkg/v.test.mjs");
-    assert.notEqual(r.status, 0, r.stdout + r.stderr);
-    assert.doesNotMatch(r.stderr, /cannot read node_modules\/pkg — check its permissions/);
-    assert.doesNotMatch(r.stderr, /is under node_modules — node discards it silently/);
-  } finally {
-    chmodSync(modules, 0o755);
-  }
-});
-
-// #401: nothing above pins the RESOLUTION MODE this guard uses, only its
-// spelling coverage. `cd`/`pwd` without `-P` is logical — it never resolves a
-// symlinked path component — and that is deliberate: it is the same textual
-// resolution node applies to its own argv, so the guard and node agree on
-// which files count as vendored. The ordinary npm/pnpm workspace shape is
-// where the two resolution modes diverge: `node_modules/pkg` is itself a
-// symlink to a sibling real directory (`pkg` hoisted or linked from
-// `packages/`). `pwd -P` there resolves `pkg` OUT of `node_modules`, so the
-// pattern below stops matching, this guard falls through without refusing,
-// and the argument reaches node unrefused — where it is excluded anyway, on
-// its own unresolved spelling, silently, at exit 0. That is #100's silent
-// drop back, minus the loud refusal that is supposed to catch it first.
-// Measured against a scratch copy of this script with `cd`/`pwd` mutated to
-// `cd -P`/`pwd -P` on this guard alone: this is the row that reds, and it
-// stayed red for both `/bin/sh` (bash on macOS) and `/bin/dash` — the two
-// disagree on many things but not on this.
-test("runner: a vendored file behind a symlinked node_modules entry refuses", () => {
-  const a = apply(SUITE);
-  const real = join(a.wt, "packages", "pkg");
-  mkdirSync(real, { recursive: true });
-  writeFileSync(join(real, "v.test.mjs"), PASSES);
-  mkdirSync(join(a.wt, "node_modules"), { recursive: true });
-  symlinkSync(join("..", "packages", "pkg"), join(a.wt, "node_modules", "pkg"));
-  const r = a.run("t/a.test.mjs", "node_modules/pkg/v.test.mjs");
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /is under node_modules — node discards it silently/);
-});
-
-// The other half of the same rule, and the guard against over-widening it.
-// Node's exclusion fires only when the argument's normalized RELATIVE form
-// starts with `node_modules/`: a deeper segment and an absolute path are NOT
-// excluded — node runs both and counts them, so there is no silent drop to
-// refuse and refusing them would reject argv node handles fine. `pass 2` is
-// what says the vendored file ran rather than being dropped, so borrowing
-// the directory branch's own `*/node_modules/*` pattern here reddens this.
-test("runner: the vendored file spellings node runs are not refused", () => {
-  const a = apply(SUITE);
-  const vendor = join(a.wt, "node_modules", "pkg");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  const nested = join(a.wt, "t", "node_modules", "pkg");
-  mkdirSync(nested, { recursive: true });
-  writeFileSync(join(nested, "n.test.mjs"), PASSES);
-  for (const spelling of [
-    "t/node_modules/pkg/n.test.mjs",
-    join(a.wt, "node_modules", "pkg", "v.test.mjs"),
-  ]) {
-    const r = a.run("t/a.test.mjs", spelling);
-    assert.equal(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
-    assert.match(r.stdout, /^(?:ℹ|#) pass 2$/m, spelling);
-  }
-});
-
-// Node's exclusion is anchored at the cwd its arguments are relative to —
-// that is what "relative form" means, and it is what separates mirroring the
-// rule from matching a prefix. The two fixture files below swap verdicts on
-// nothing but where the runner is invoked from: at the worktree root
-// `node_modules/pkg/v.test.mjs` is the dropped one and `t/node_modules/…`
-// runs, while from inside `t/` the polarity inverts — `node_modules/pkg/…`
-// now names the nested file and is dropped, `../node_modules/pkg/…` names
-// the root one and runs. Measured against node itself, both ways. A guard
-// anchored at the worktree root rather than the cwd gets both backwards and
-// no other test in this file would see it.
-test("runner: the vendored rule is anchored at the cwd, as node's is", () => {
-  const a = apply(SUITE);
-  for (const p of ["node_modules/pkg", "t/node_modules/pkg"]) {
-    mkdirSync(join(a.wt, p), { recursive: true });
-    writeFileSync(join(a.wt, p, "v.test.mjs"), PASSES);
-  }
-  const refused = a.runFrom("t", "a.test.mjs", "node_modules/pkg/v.test.mjs");
-  assert.notEqual(refused.status, 0, refused.stdout + refused.stderr);
-  assert.match(refused.stderr, /is under node_modules — node discards it silently/);
-  const ran = a.runFrom("t", "a.test.mjs", "../node_modules/pkg/v.test.mjs");
-  assert.equal(ran.status, 0, ran.stdout + ran.stderr);
-  assert.match(ran.stdout, /^(?:ℹ|#) pass 2$/m);
-});
-
-// #424: the file-branch sibling of #186. The guard above judges the argument's
-// own SPELLING, and the logical directory that spelling names — which is what
-// node's silent-discard rule reads. A symlink whose name carries no
-// `node_modules` but whose TARGET is vendored passes it untouched, and node
-// then RUNS the vendored file rather than discarding it. So the hazard here is
-// not #100's: there is no silent drop left to make loud. It is #186's —
-// third-party code deciding this suite's result — one `-d` away, and it takes
-// #186's remedy: judge where the argument RESOLVES.
-//
-// Physical resolution, and only where the spelling does not already name
-// `node_modules`. Those spellings are the guard above's own input, the two it
-// deliberately lets run included, and re-judging them from a second place would
-// overturn that ruling; the two checks cover disjoint arguments instead, which
-// is what lets this one be physical while #401's stays logical.
-//
-// Anchored at the divergence from the runner's own location, as the directory
-// branch is: a `node_modules` ABOVE that point is an ancestor of the runner too
-// and says nothing about the argument. The absolute spelling is here because
-// resolution, unlike the directory branch's lexical spelling term, is immune to
-// how the caller named the file — a macOS $TMPDIR reaches the worktree through
-// a symlinked ancestor, so the two spellings share no literal prefix and only
-// the resolved form puts them on the same footing. The outside-the-worktree
-// target is the leg that separates anchoring at the divergence from anchoring
-// at the worktree root: its resolution lands outside the worktree entirely, so
-// a root-anchored guard has nothing left to compare and runs it green — #186's
-// own class, one input over.
-test("runner: a symlink to a vendored file refuses however it is spelled", () => {
-  const a = apply(SUITE);
-  const vendor = join(a.wt, "node_modules", "pkg");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  symlinkSync(join("node_modules", "pkg", "v.test.mjs"), join(a.wt, "vendlink.test.mjs"));
-  // A chain of file symlinks: node follows it to the vendored file, so a guard
-  // that resolves only one hop reports a clean path node never used.
-  symlinkSync("vendlink.test.mjs", join(a.wt, "chainlink.test.mjs"));
-  // The vendored component reached through a symlinked DIRECTORY, with a real
-  // file as the final component — the half `cd`/`pwd -P` on the argument's own
-  // directory would already have caught, kept so the fix is not narrowed to
-  // final-component links alone.
-  symlinkSync(join("node_modules", "pkg"), join(a.wt, "dirlink"));
-  const outside = mkdtempSync(join(tmpdir(), "outside-"));
-  mkdirSync(join(outside, "node_modules", "pkg"), { recursive: true });
-  writeFileSync(join(outside, "node_modules", "pkg", "o.test.mjs"), PASSES);
-  symlinkSync(join(outside, "node_modules", "pkg", "o.test.mjs"), join(a.wt, "extlink.test.mjs"));
-  // A directory whose name merely ENDS in the word, spelled both ways — the
-  // merged `case` judges the two on different arms. The relative spelling is
-  // held out of the logical arm by that arm's own segment bound. The absolute
-  // one is held out by the FIRST arm, whose job is the single shape both
-  // guards decline (absolute AND naming a real `node_modules` segment) and
-  // which therefore has to carry the bound too: written as the one glob that
-  // looks equivalent, `/*node_modules/*`, it swallows this spelling into the
-  // skip and node runs the vendored file. Measured — that collapse reds this
-  // row and nothing else in the file, so the relative row alone did not pin
-  // it. Unbounded, `*node_modules/*` claimed the argument for the logical
-  // guard instead, whose own inner test is anchored at `$PWD/node_modules/`
-  // and never fired: the argument left both guards unjudged, same result.
-  mkdirSync(join(a.wt, "vendor_node_modules"), { recursive: true });
-  symlinkSync(join("..", "node_modules", "pkg", "v.test.mjs"), join(a.wt, "vendor_node_modules", "link.test.mjs"));
-  for (const spelling of [
-    "vendlink.test.mjs",
-    "./vendlink.test.mjs",
-    join(a.wt, "vendlink.test.mjs"),
-    "chainlink.test.mjs",
-    "dirlink/v.test.mjs",
-    "extlink.test.mjs",
-    "vendor_node_modules/link.test.mjs",
-    join(a.wt, "vendor_node_modules", "link.test.mjs"),
-  ]) {
-    const r = a.run("t/a.test.mjs", spelling);
-    assert.notEqual(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
-    // The resolved target is named, not just the argument: the refusal states
-    // what was applied to THIS path — a caller who spelled a name carrying no
-    // `node_modules` otherwise has to re-run `realpath` to see which link went
-    // where, and reads the bare clause as a rule the runner does not apply to
-    // every spelling (a literal `t/node_modules/pkg/x.test.mjs` still runs,
-    // #401's ruling, deliberately).
-    assert.match(r.stderr, /resolves to \S+, inside node_modules — excluded from the run/, spelling);
-  }
-});
-
-// The control, and what stops the fix above becoming a blanket refusal of
-// symlinks: the refusal leg alone passes just as well under a guard that
-// refuses every symlinked argument, or every argument with `node_modules`
-// anywhere in its resolution.
-//
-// `sidelink` is the second half: a target that merely SITS BESIDE a vendored
-// tree rather than inside one. `packages/pkg/w.test.mjs` is the ordinary
-// npm/pnpm workspace shape, named by its REAL path — there is no symlinked
-// spelling of it to grep for, because that is the point: `node_modules/pkg`
-// is a symlink OUT to `packages/pkg`, so a caller naming `packages/pkg/…`
-// names a file that is not vendored at all, and physical resolution is
-// exactly what has to agree. The
-// same tree spelled `node_modules/pkg/…` is #401's row above, refused by the
-// logical guard this one is deliberately blind to.
-test("runner: a symlink to a non-vendored file still runs", () => {
-  const a = apply(SUITE);
-  symlinkSync(join("t", "b.test.mjs"), join(a.wt, "oklink.test.mjs"));
-  const outside = mkdtempSync(join(tmpdir(), "outside-ok-"));
-  mkdirSync(join(outside, "lib", "node_modules"), { recursive: true });
-  writeFileSync(join(outside, "lib", "o.test.mjs"), PASSES);
-  symlinkSync(join(outside, "lib", "o.test.mjs"), join(a.wt, "sidelink.test.mjs"));
-  const real = join(a.wt, "packages", "pkg");
-  mkdirSync(real, { recursive: true });
-  writeFileSync(join(real, "w.test.mjs"), PASSES);
-  mkdirSync(join(a.wt, "node_modules"), { recursive: true });
-  symlinkSync(join("..", "packages", "pkg"), join(a.wt, "node_modules", "pkg"));
-  for (const spelling of [
-    "oklink.test.mjs",
-    "sidelink.test.mjs",
-    "packages/pkg/w.test.mjs",
-  ]) {
-    const r = a.run("t/a.test.mjs", spelling);
-    assert.equal(r.status, 0, `${spelling}: ${r.stdout}${r.stderr}`);
-    assert.match(r.stdout, /^(?:ℹ|#) pass 2$/m, spelling);
-  }
-});
-
-// The resolved check is asked only of an argument that EXISTS, and that gate is
-// the whole platform pin. BSD `realpath` fails on a nonexistent final component
-// and GNU's succeeds on it, so one input drew opposite verdicts: this spelling
-// reported `does not exist` on macOS and `resolves inside node_modules — not
-// missing` on ubuntu-latest, asserting a missing file was not missing and
-// pre-empting the arm that names it. The whole file ran 77/77 under both
-// semantics, so nothing discriminated them — measured. This row does: green on
-// BSD with the gate or without it, red on GNU without it.
-test("runner: a missing file under a symlinked vendored directory is reported missing", () => {
-  const a = apply(SUITE);
-  const vendor = join(a.wt, "node_modules", "pkg");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  symlinkSync(join("node_modules", "pkg"), join(a.wt, "dirlink"));
-  const r = a.run("t/a.test.mjs", "dirlink/nope.test.mjs");
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /dirlink\/nope\.test\.mjs does not exist/);
-  assert.doesNotMatch(r.stderr, /node_modules/);
-});
-
-// `realpath` is the one utility this runner reaches for that POSIX does not
-// mandate, so the runner dies rather than guessing when it is missing. Absent,
-// this guard disarmed whole: the vendored file ran, the run exited 0 reporting
-// `pass 2`, and not one byte reached stderr — #424's own defect restored with no
-// notice. Absence is not a fallback case, it is a question this cannot answer,
-// so it refuses. A stub that exits 127 rather than an emptied PATH, so `sed`,
-// `dirname` and `node` still work and the resolver is the only thing missing.
-test("runner: an unresolvable argument refuses rather than running unchecked", () => {
-  const a = apply(SUITE);
-  const vendor = join(a.wt, "node_modules", "pkg");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  symlinkSync(join("node_modules", "pkg", "v.test.mjs"), join(a.wt, "vendlink.test.mjs"));
-  const bin = mkdtempSync(join(tmpdir(), "no-realpath-"));
-  writeFileSync(join(bin, "realpath"), "#!/bin/sh\nexit 127\n", { mode: 0o755 });
-  // The vendored spelling goes FIRST: every file argument is judged, so the
-  // refusal names whichever one the loop reaches first, and naming this one is
-  // what shows the guard is still armed rather than merely dying early.
-  const r = spawnSync(join(a.wt, "agent-test"), ["vendlink.test.mjs", "t/a.test.mjs"], {
-    cwd: a.wt,
-    encoding: "utf8",
-    env: { ...a.env, PATH: `${bin}:${a.env.PATH}` },
-  });
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /cannot resolve vendlink\.test\.mjs — refusing rather than running it unchecked/);
-  assert.doesNotMatch(r.stdout, /(?:ℹ|#) pass/);
-});
-
-// The issue's own second case, verbatim: "and, before PR #75's escape,
-// bracketed paths". Node globs its own argv, where a literal `[` is a bracket
-// expression that cannot match itself — so the path matches nothing, node
-// drops it, and mixed with a resolvable file that drop is silent: the runner
-// reported `pass 1` for a two-file argv and exited 0. The escape is the same
-// `sed 's/\[/[[]/g'` the directory branch already applies to find's output,
-// and asking whether the path EXISTS before reading it as a glob is what
-// gets the argument to it. Both invocations are here because they fail
-// differently without the escape: mixed goes quiet, alone exits 1 because
-// node then has nothing left to run.
-test("runner: a bracketed file argument runs, alone and mixed with a valid one", () => {
-  const a = apply(SUITE);
-  const mixed = a.run("t/a.test.mjs", "br[a]cket/g.test.mjs");
-  assert.equal(mixed.status, 0, mixed.stdout + mixed.stderr);
-  assert.match(mixed.stdout, /^(?:ℹ|#) pass 2$/m);
-  const alone = a.run("br[a]cket/g.test.mjs");
-  assert.equal(alone.status, 0, alone.stdout + alone.stderr);
-  assert.match(alone.stdout, /^(?:ℹ|#) pass 1$/m);
-});
-
-// A flag is not a path, and only node can judge one. Reading an argument
-// that does not exist as a typo refused every documented `node --test` flag
-// as a missing file — argv that ran fine before this guard existed, and
-// nothing else in this suite passes a flag. Node takes flag values with `=`
-// (measured: the space-separated form exits 9 at node itself), so a flag is
-// always one argv entry and passing it through cannot swallow a path. A
-// typo'd flag stays loud without this runner's help: node rejects it and
-// exits 9, which is why the last assertion insists the refusal is NOT
-// `agent-test:`-prefixed.
-test("runner: a node --test flag reaches node instead of being read as a path", () => {
-  const a = apply(SUITE);
-  for (const flag of [
-    "--test-name-pattern=ok",
-    "--test-only",
-    "--test-reporter=tap",
-    "--test-concurrency=1",
-    "--",
-  ]) {
-    const r = a.run(flag, "t/a.test.mjs");
-    assert.equal(r.status, 0, `${flag}: ${r.stdout}${r.stderr}`);
-    assert.doesNotMatch(r.stderr, /does not exist/, flag);
-  }
-  const typo = a.run("--test-nmae-pattern=ok", "t/a.test.mjs");
-  assert.notEqual(typo.status, 0, typo.stdout + typo.stderr);
-  assert.doesNotMatch(typo.stderr, /agent-test:/, typo.stdout + typo.stderr);
-});
-
-// #352: a flag counts toward `$#`, so an argv of flags alone cleared the
-// bare-form default, contributed no path operand, and reached node holding
-// only flags. That is node's own default discovery — which does not recognise
-// the `.spec.` form — so this fixture reported zero tests run at exit 0, the
-// vacuous pass this runner exists to refuse. It refuses here too rather
-// than defaulting: prepending the default AHEAD of node's own flags reorders
-// argv, and no briefed workflow passes flags alone.
-//
-// `--` is in the list because POSIX's end-of-options marker reaches the same
-// pass-through arm as a flag, and is no more a path than one.
-//
-// `-v` is in the list because a corpus spelled entirely with double dashes
-// cannot tell the classification pattern `-*` from `--*`. That classification
-// now lives in the dispatch's own arm order (the flag-detection arm, `-*) ;;`):
-// narrow it to `--*` and every double-dash entry here is still refused
-// exactly as before, while a lone `-v` no longer matches that arm and falls
-// through to the default/typo arm instead, refused there as `-v does not
-// exist` (exit 1) rather than reaching node. The row still discriminates the
-// mutation — it pins the refusal's wording now, not a vacuous exit 0 — but
-// the exit-0-after-printing-its-version failure mode this paragraph used to
-// describe no longer applies to this code shape.
-// Measured in both directions against that one-token mutation.
-//
-// Both directions, because a suite that only feeds a new refusal invalid input
-// pins neither: the ACCEPT case below rides the same flag alongside a real
-// operand, on the same fixture, so a refusal that swallowed the flag
-// pass-through would be red here rather than invisible. The bare form — the
-// other thing this guard could wrongly refuse — is pinned by the `.spec.`
-// cases below.
-//
-// The fixture is the issue's own repro, and it is what discriminates: under
-// node's discovery a `.spec.` file is not a test, so the pre-fix runner exited
-// 0. A `.test.mjs` fixture would have run green both ways and pinned nothing.
-test("runner: an argv of flags alone refuses instead of reaching node's own discovery", () => {
-  const a = apply({ "t/a.spec.mjs": PASSES });
-  for (const argv of [["--test-concurrency=1"], ["-v"], ["--"], ["--test-only", "--test-reporter=tap"]]) {
-    const r = a.run(...argv);
-    assert.notEqual(r.status, 0, `${argv.join(" ")}: ${r.stdout}${r.stderr}`);
-    assert.match(r.stderr, /agent-test: no test file or directory/, argv.join(" "));
-  }
-  const ok = a.run("--test-concurrency=1", "t/a.spec.mjs");
-  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
-  assert.match(ok.stdout, /^(?:ℹ|#) pass 1$/m);
-});
-
-// #961. The corpus above is spelled entirely with arguments that do not
-// exist, so it pins one row of the classification and leaves the rule that
-// produces it unpinned: a dash-led argument is an operand where it EXISTS,
-// and a flag otherwise. Both rows below are dash-led, and they answer
-// oppositely — which is what makes the rule, rather than the shape, the
-// thing being pinned. Measured on a runner built from this emitter.
-//
-// `-dash.test.mjs` exists, so it is an operand. The runner never gets it to
-// run — node reads a relative dash-led spec as an option and dies in ITS own
-// voice, the same ceiling the dash-named directory test above already
-// carries one level up (measured on node v26.8.1 and on the v26.5.0 the
-// `.nvmrc` pins; `./`-prefixing does not escape it, node strips that
-// prefix first). Which refusal a caller sees is the whole of what the
-// classification buys here, and it is exactly what discriminates: classify
-// this argument as a flag instead and the runner refuses in its own voice,
-// at exit 1, before node is reached. The positive `node:` match is
-// load-bearing beside the negative — a nonzero exit with nothing on stderr
-// satisfies the negative on its own.
-//
-// `-t/*.test.mjs` does not exist and holds a glob metacharacter, so it
-// reaches the arm order where dash-ness is read BEFORE glob-ness: a flag,
-// not a glob, contributing no operand. Read it the other way round — "a
-// glob is a glob whatever it starts with" — and this argv reaches node,
-// which drops the unmatched pattern silently and exits 0 having run
-// nothing: the vacuous pass the guard exists to refuse, one argv shape past
-// the corpus above. The dash-led file is written straight into the worktree
-// rather than through `repo()`, for the reason the dash-named directory
-// test above gives.
-test("runner: a dash-led argument counts as an operand only where it exists", () => {
-  const a = apply(SUITE);
-  writeFileSync(join(a.wt, "-dash.test.mjs"), PASSES);
-
-  const exists = a.run("-dash.test.mjs");
-  assert.notEqual(exists.status, 0, exists.stdout + exists.stderr);
-  assert.doesNotMatch(exists.stderr, /agent-test: no test file or directory/, exists.stdout + exists.stderr);
-  assert.match(exists.stderr, /node: bad option/, exists.stdout + exists.stderr);
-
-  const missing = a.run("-t/*.test.mjs");
-  assert.notEqual(missing.status, 0, missing.stdout + missing.stderr);
-  assert.match(missing.stderr, /agent-test: no test file or directory/, missing.stdout + missing.stderr);
-});
-
-// The deliberately preserved escape hatch: `set -f` above stops the *shell*
-// from touching this, so a literal `*` reaches the runner exactly as the
-// glob-detection guard requires — spawnSync never invokes a shell, so this
-// is the same argv a member's own shell produces for a quoted glob. Only
-// node can expand it, and here it matches real files, so it must still run
-// them rather than being refused as "does not exist".
-test("runner: a quoted glob argument still runs, unexpanded by the shell", () => {
-  const r = apply(SUITE).run("t/*.test.mjs");
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^(?:ℹ|#) pass 2$/m);
-});
-
-// A valid mix of both argument shapes the passthrough branch and the
-// directory branch each handle — neither new guard may refuse an argument
-// that was never in question.
-test("runner: a mixed argv of files and directories still runs everything", () => {
-  const r = apply(SUITE).run("t/a.test.mjs", "t/nested");
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^(?:ℹ|#) pass 2$/m);
-});
-
-// #97: a bare invocation must go through the same expansion as an explicit
-// ".", not fall through to node's own default discovery. `for arg do` with no
-// `in` clause iterates "$@", so on an empty argv the loop body never ran and
-// the runner fell straight to bare `node --test`. Mixing a `.spec.` file into
-// the plain SUITE is what makes `pass 7` discriminate: SUITE alone is *not* a
-// counter-example, since node's own default discovery happens to match every
-// `.test.mjs` name in it too — a fixture that pinned "6" against SUITE would
-// stay green under the pre-fix bare `node --test` and prove nothing.
-test("runner: a bare invocation runs the same suite as an explicit \".\"", () => {
-  const a = apply({ ...SUITE, "t/d.spec.mjs": PASSES });
-  const dot = a.run(".");
-  assert.equal(dot.status, 0, dot.stdout + dot.stderr);
-  assert.match(dot.stdout, /^(?:ℹ|#) pass 7$/m);
-  const bare = a.run();
-  assert.equal(bare.status, 0, bare.stdout + bare.stderr);
-  assert.match(bare.stdout, /^(?:ℹ|#) pass 7$/m);
-});
-
-// The sharpest edge of #97: node's own default discovery does not recognise
-// the `.spec.` form, so a repo whose only test file uses it went green over
-// zero tests run under the pre-fix bare invocation. This is the exact
-// fixture from the issue's own repro.
-test("runner: a bare invocation runs .spec. files, which node's own discovery does not", () => {
-  const r = apply({ "t/a.spec.mjs": PASSES }).run();
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^(?:ℹ|#) pass 1$/m);
-});
-
-// A repo with zero test files anywhere never reaches this runner at all —
-// derive-testcmd.sh refuses at emit time before a runner is written, pinned
-// by "runner: no scripts.test and no test files refuses rather than passing
-// vacuously" below. Nothing about that guard changes here — and where the two
-// disagree, they disagree safely: the emit guard greps `git ls-tree`, which
-// excludes neither `node_modules` nor symlinks, while this walk prunes the
-// first and `-type f` drops the second. A repo whose only committed test files
-// are vendored or symlinked therefore does reach the runner, and gets the
-// emptiness guard's `no test files under .` at exit 1 — a loud refusal, never
-// a vacuous pass. Pinned here rather than asserted: the block above used to
-// claim this state was unreachable, and the only `no test files under` pins in
-// the file were an explicit directory argument and two `doesNotMatch`. Vendored
-// is the cheaper of the two shapes to build — the symlink one needs a mode
-// 120000 entry that `apply()` cannot express — and both end in the same guard.
-// Pre-fix this is the vacuous green #97 exists to refuse: node's own discovery
-// skips `node_modules`, finds nothing, and exits 0 over `tests 0`.
-test("runner: a bare invocation refuses a repo whose only test files are vendored", () => {
-  const r = apply({ "node_modules/pkg/v.test.mjs": PASSES }).run();
-  assert.notEqual(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stderr, /no test files under \./);
-});
-
-// The blocker named in the issue body (defaulting to "." would sweep vendored
-// tests) was discharged by #109's node_modules exclusion before this landed.
-// Confirm the defaulted path actually goes through that prune rather than
-// bypassing it some other way.
-// Both fixture choices carry the pin; neither is decoration. The `.spec.`
-// file is what makes the count discriminate #97 — SUITE alone reads `pass 6`
-// under the pre-fix bare `node --test` too, since node's own discovery
-// matches every `.test.mjs` name in it and already skips node_modules, so a
-// fixture pinning "6" here is exactly the hollow one the comment above
-// warns about. And the vendored file is NESTED rather than sitting at the
-// worktree root because node refuses an argv entry whose relative path
-// starts with `node_modules/`, dropping it silently while the rest of argv
-// resolves (#100). At the root that refusal stands in for the prune:
-// measured with the prune deleted, a root-level fixture still reads
-// `pass 7` and still exits 0, so the assertion cannot tell this shim's walk
-// from node's own behaviour. Nested, only the prune keeps the file out.
-// `pass 7` rather than `pass 8`, over a vendored test that fails on
-// purpose, is what says it ran.
-test("runner: a bare invocation excludes vendored tests under node_modules", () => {
-  const a = apply({ ...SUITE, "t/d.spec.mjs": PASSES });
-  const vendor = join(a.wt, "t", "node_modules");
-  mkdirSync(vendor, { recursive: true });
-  writeFileSync(join(vendor, "v.test.mjs"), 'import { test } from "node:test";\ntest("VENDOR", () => { throw new Error("not ours"); });\n');
+// Thin means the runner adds no verdict of its own: the suite's exit status
+// IS the runner's. A red suite is a finding, and must reach the caller as red.
+test("runner: the Test entrypoint's own exit status is the runner's", () => {
+  const a = apply({ "run-tests.sh": "#!/bin/sh\necho red\nexit 3\n" }, SCRIPT, { test: "sh ./run-tests.sh" });
   const r = a.run();
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^(?:ℹ|#) pass 7$/m);
+  assert.equal(r.status, 3);
+  assert.equal(r.stdout, "red\n");
 });
 
-// Directories are only rewritten for `node --test`. Every other entrypoint is
-// somebody else's runner, and vitest and jest take a directory as a filter
-// against their own naming conventions, which need not be this regex.
-test("runner: the npm entrypoint is emitted without the directory shim", () => {
-  const { text } = apply({ "package.json": pkg({ scripts: { test: "vitest" } }) });
-  assert.match(text, /^exec npm test -- "\$@"$/m);
-  assert.doesNotMatch(text, /no test files under/);
+// The Test entrypoint is a shell command, and the runner must not reinterpret
+// it: a single quote survives the runner's own quoting, nothing in it expands
+// at write time, and a compound command keeps its meaning with the runner's
+// arguments appended to its last simple command.
+test("runner: a quoted or compound Test entrypoint runs exactly as written", () => {
+  const quoted = apply({}, SCRIPT, { test: `echo "it's \\$HOME's"` });
+  assert.match(quoted.text, /^exec sh -c '/m);
+  const q = quoted.run("x");
+  assert.equal(q.status, 0, q.stderr);
+  assert.equal(q.stdout, "it's $HOME's x\n");
+
+  const compound = apply({ "sub/t.sh": ECHO_TESTS }, SCRIPT, { test: "cd sub && sh ./t.sh" });
+  const c = compound.run("y");
+  assert.equal(c.status, 0, c.stderr);
+  assert.match(c.stdout, /^arg:y\n/);
+});
+
+// A repository that tracks its own `agent-test` keeps it — the repo-local
+// runner ADR 0015 sends any convenience beyond the thin exec to (this repo's
+// own node --test shim is one). Written over, it would be a modified TRACKED
+// path every release then strands on (#1262), so it is left byte-identical and
+// not added to the exclude list.
+test("runner: a tracked repo-local agent-test is left as is", () => {
+  const own = "#!/bin/sh\necho repo-local\n";
+  const a = apply({ "agent-test": own }, SCRIPT, { test: "sh ./run-tests.sh" });
+  assert.equal(a.text, own);
+  const status = execFileSync("git", ["-C", a.wt, "status", "--porcelain"], { encoding: "utf8", env: FIXTURE_ENV });
+  assert.equal(status, "", "the tracked runner must not show as modified");
 });
 
 // #124: the runner is written once at claim time and never rewritten, so an
 // old worktree can hold a runner a later template fix never reached. Nothing
-// in the file said which template produced it — this pins the fix, on both
-// entrypoint forms, since the stamp line is emitted before the branch that
-// tells them apart.
+// in the file said which template produced it — this pins the fix.
 const STAMP_RE = /^# agent-test template: (\S+)$/m;
 
-test("runner: carries a template stamp on the npm entrypoint", () => {
-  const { text } = apply({ "package.json": pkg({ scripts: { test: "vitest" } }) });
-  assert.match(text, STAMP_RE);
-});
-
-test("runner: carries a template stamp on the node --test entrypoint", () => {
-  const { text } = apply(SUITE);
+test("runner: carries a template stamp", () => {
+  const { text } = apply({});
   assert.match(text, STAMP_RE);
 });
 
 // Same script, two claims — the stamp is a property of this script's own
 // bytes, not of the claim, so it must not vary with the issue number, ports,
-// or install command baked into the rest of the file.
+// or the Recipe baked into the rest of the file.
 test("runner: the stamp is stable across claims of the same template", () => {
-  const a = apply(SUITE).text.match(STAMP_RE)[1];
-  const b = apply(SUITE).text.match(STAMP_RE)[1];
+  const a = apply({}, SCRIPT, { test: "true" }).text.match(STAMP_RE)[1];
+  const b = apply({}, SCRIPT, { test: "false" }).text.match(STAMP_RE)[1];
   assert.equal(a, b);
 });
 
@@ -1779,8 +229,8 @@ test("runner: the stamp changes when the script's content changes", () => {
     copyFileSync(join(import.meta.dirname, lib), join(scriptDir, lib));
   }
 
-  const after = apply(SUITE, editedScript).text.match(STAMP_RE)[1];
-  const before = apply(SUITE).text.match(STAMP_RE)[1];
+  const after = apply({}, editedScript).text.match(STAMP_RE)[1];
+  const before = apply({}).text.match(STAMP_RE)[1];
 
   assert.notEqual(after, before);
 });
@@ -1887,159 +337,119 @@ for (const [what, stub] of [
   });
 }
 
-// Every row of the install matrix. `true` is the no-op: nothing to install.
-for (const [name, files, want] of [
-  ["lockfile wins", { "package-lock.json": "{}", "package.json": pkg({ dependencies: { a: "1" } }), [TESTS]: "" }, "npm ci"],
-  ["pnpm lockfile", { "pnpm-lock.yaml": "{}", [TESTS]: "" }, "pnpm i --frozen-lockfile"],
-  ["yarn lockfile", { "yarn.lock": "{}", [TESTS]: "" }, "yarn --immutable"],
-  ["no manifest at all", { [TESTS]: "" }, "true"],
-  ["empty dependencies object", { "package.json": pkg({ dependencies: {} }), [TESTS]: "" }, "true"],
-  ["null dependencies", { "package.json": pkg({ dependencies: null }), [TESTS]: "" }, "true"],
-  ["all four fields empty", { "package.json": pkg({ dependencies: {}, devDependencies: {}, peerDependencies: {}, optionalDependencies: {} }), [TESTS]: "" }, "true"],
-  ["empty workspaces array", { "package.json": pkg({ workspaces: [] }), [TESTS]: "" }, "true"],
-]) {
-  test(`install: ${name} → ${want}`, () => {
-    assert.equal(claim(repo(files)).install, want);
-  });
-}
+// --- The Recipe (ADR 0015): both commands are READ from the cache through
+// derive-testcmd.sh, never inferred from the tree.
 
-// No lockfile + anything declared anywhere = refuse. Guessing corrupts the tree.
-for (const [name, manifest] of [
-  ["dependencies", { dependencies: { a: "1" } }],
-  ["devDependencies", { devDependencies: { a: "1" } }],
-  ["peerDependencies", { peerDependencies: { a: "1" } }],
-  ["optionalDependencies", { optionalDependencies: { a: "1" } }],
-  ["workspaces array", { workspaces: ["p/*"] }],
-  ["workspaces object", { workspaces: { packages: ["p/*"] } }],
-]) {
-  test(`install: ${name} without a lockfile refuses`, () => {
-    const { err } = claim(repo({ "package.json": pkg(manifest), [TESTS]: "" }));
-    assert.match(err, /refusing to guess an install command/);
-  });
-}
-
-test("install: an unparseable manifest refuses, and says so", () => {
-  const { err } = claim(repo({ "package.json": "{,,broken", [TESTS]: "" }));
-  assert.match(err, /could not read origin\/main:package\.json/);
-  assert.doesNotMatch(err, /refusing to guess an install command/);
+test("the Install step and the Test entrypoint come from the Recipe cache, verbatim", () => {
+  const { install, testcmd, err } = claim(repo({ [TESTS]: "" }, {}, { install: "exit 0", test: "sh ./run-tests.sh --all" }));
+  assert.equal(err, undefined);
+  assert.equal(install, "exit 0");
+  assert.equal(testcmd, "sh ./run-tests.sh --all");
 });
 
-// Regression control for the ndeps fix above (String(…) around the reduce in
-// claim-ticket.sh): Node's console.log SGR-wraps a bare number whenever
-// FORCE_COLOR is set (`\x1b[33m0\x1b[39m`), and `[ "$ndeps" = 0 ]` in the
-// script does not match that. Forced into THIS spawn's own env, not
-// process.env, so apply()/claim()'s scrubbing elsewhere is irrelevant here —
-// this pins the script's own robustness, not an absence of FORCE_COLOR in
-// whatever ran the suite.
-test("a FORCE_COLOR'd caller still resolves a dependency-free manifest", () => {
-  const dir = repo({ "package.json": pkg({}), [TESTS]: "" });
-  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], {
-    cwd: dir,
-    encoding: "utf8",
-    env: { ...process.env, FORCE_COLOR: "1" },
+// Absent means "derive", never "infer" — and the refusal must say which step
+// derives it, in claim-ticket's own voice so a reader sees whose claim failed.
+// Both modes, before anything exists: the dry run is where a controller learns
+// it, and --apply must not have labelled the issue first.
+test("an absent Recipe cache refuses the claim before anything is claimed, naming the derivation step", () => {
+  const dir = repo({ [TESTS]: "" }, {}, null);
+  const dry = claim(dir);
+  assert.match(dry.err, /claim-ticket: derive-testcmd: no Recipe cache at .*\/\.fleet\/recipe\.json/);
+  assert.match(dry.err, /run the Recipe derivation step \(run-team phase 0/);
+
+  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
+  const ghLog = join(bin, "gh.log");
+  writeFileSync(join(bin, "gh"), '#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n', { mode: 0o755 });
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_LOG: ghLog },
   });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout, "", "no receipt for a claim that was never made");
+  assert.equal(existsSync(ghLog), false, "the issue was never labelled");
+  assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false, "and no worktree exists");
+});
+
+// The acceptance row: a Test entrypoint naming a binary that does not exist
+// is a Recipe that cannot RUN — an invalid cache, refused with the invalidation
+// message rather than handed to a runner that would die on every invocation.
+test("a Recipe whose Test entrypoint names a missing binary refuses as an invalid cache", () => {
+  const { err } = claim(repo({ [TESTS]: "" }, {}, { test: "no-such-runner-2117 --all" }));
+  assert.match(err, /^claim-ticket: derive-testcmd: the Recipe cache at .* is invalid: its test command 'no-such-runner-2117' is not found or not executable/m);
+  assert.match(err, /run the Recipe derivation step/);
+});
+
+// The worktree is built from origin/main, and the cache read no longer reads
+// any ref — so the precondition is asked directly, in the dry run too, where
+// nothing downstream would otherwise refuse before `worktree add`.
+test("a repo with no origin/main refuses before anything is claimed", () => {
+  const dir = repo({ [TESTS]: "" });
+  execFileSync("git", ["update-ref", "-d", "refs/remotes/origin/main"], { cwd: dir, env: FIXTURE_ENV });
+  const { err } = claim(dir);
+  assert.match(err, /claim-ticket: origin\/main does not resolve to a commit/);
+});
+
+// Installs a claim with the given Recipe and returns the spawn result — the
+// Install step only runs under --apply.
+function applyRecipe(recipe, files = { [TESTS]: "" }, local = {}) {
+  const dir = repo(files, local, recipe);
+  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
+    cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  return { dir, r };
+}
+
+// The acceptance row for the Install step: modifying ANY tracked file — not a
+// lockfile by name, fleet-ctl keeps no list of those — is a Recipe that no
+// longer holds, refused with the invalidation message and the file named.
+test("an Install step that modifies a tracked file refuses as an invalid cache", () => {
+  const { r } = applyRecipe({ install: "echo drift >> run-tests.sh" });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /the Install step 'echo drift >> run-tests\.sh' changed the tree in \.worktrees\/42-slug \(first: +M run-tests\.sh\) — the Recipe cache is invalid; run the Recipe derivation step/);
+  assert.doesNotMatch(r.stdout, /"applied":true/);
+});
+
+// The must-ACCEPT half of the whole-tree guard, which is where it can go
+// wrong: an install writing only what the repository IGNORES (a dependency
+// directory, a build output) leaves `git status --porcelain` empty — the proof
+// the deriving agent ran — and must claim.
+test("an Install step that writes only ignored files claims cleanly", () => {
+  const { r } = applyRecipe({ install: "mkdir -p deps && touch deps/x" }, { ".gitignore": "deps/\n", [TESTS]: "" });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout + r.stderr, /install: true/);
+  assert.match(r.stderr, /tree clean after the Install step/);
+  assert.match(r.stdout, /"applied":true/);
 });
 
-// #752: the `2>&1` on the ndeps capture merges node's stderr into $ndeps on
-// the success path too (needed so the failure path keeps its reason — see
-// the comment at the capture site), so anything that writes to node's stderr
-// and still exits 0 reads as part of the "dependency count". A `node` stub
-// stands in for that chatter instead of relying on NODE_DEBUG's actual
-// output, which is unpinned across node versions — this asserts the shape
-// guard, not node's debug format. What this fixture pins is the non-numeric
-// case; digit-only chatter merges into a plausible count that the shape
-// guard cannot catch.
-test("install: non-numeric node stderr merged via 2>&1 refuses by shape, not misread as a dependency count", () => {
-  const dir = repo({ "package.json": pkg({}), [TESTS]: "" });
-  const bin = mkdtempSync(join(tmpdir(), "claim-node-"));
-  writeFileSync(join(bin, "node"), '#!/bin/sh\necho "MODULE 12345: chatter" >&2\necho 0\n', { mode: 0o755 });
-  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], {
-    cwd: dir,
-    encoding: "utf8",
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-  });
-  assert.equal(r.status, 2, `non-numeric chatter refuses\n${r.stdout}${r.stderr}`);
-  assert.match(r.stderr, /unexpected output/, "names the shape refusal");
-  assert.doesNotMatch(r.stderr, /dependencies but has no lockfile/,
-    "non-numeric chatter must not be misread as a dependency count");
+// Failure to RUN versus failure: 127 is the shell's own "not found" — an
+// invalid Recipe — while any other non-zero is the install failing, named as
+// that. The unrunnable one gets past derive-testcmd.sh's probe the realistic
+// way: the script exists (executable) in the main checkout the probe reads
+// from, but not at origin/main, which the worktree is built from.
+test("an Install step that cannot run is named an invalid cache; one that fails is named failing", () => {
+  const dir = repo({ [TESTS]: "" }, { "setup.sh": "#!/bin/sh\n" }, { install: "./setup.sh" });
+  chmodSync(join(dir, "setup.sh"), 0o755);
+  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
+  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], { cwd: dir, encoding: "utf8", env });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /the Install step '\.\/setup\.sh' did not run in \.worktrees\/42-slug \(exit 127: not executable or not found\) — the Recipe cache is invalid/);
+
+  const failing = applyRecipe({ install: "exit 4" });
+  assert.equal(failing.r.status, 2);
+  assert.match(failing.r.stderr, /install failed in \.worktrees\/42-slug \(exit 4\)/);
+  assert.doesNotMatch(failing.r.stderr, /Recipe cache is invalid/, "a failing install is not a stale Recipe");
 });
 
-// The other half of the same guard: a `node` that exits 0 having written
-// nothing to either stream — a broken or no-op shim earlier on PATH — leaves
-// $ndeps empty, which is not a count either. Empty matches neither `*[!0-9]*`
-// nor a digit, so without the `''` arm it falls past the guard to
-// `[ "$ndeps" = 0 ]`, fails that, and refuses with `declares  dependencies`.
-// Both refusals exit 2, so the status does not discriminate — the stated
-// cause does, which is what a reader of the refusal acts on.
-test("install: a node that prints nothing refuses by shape, not as a dependency count", () => {
-  const dir = repo({ "package.json": pkg({}), [TESTS]: "" });
-  const bin = mkdtempSync(join(tmpdir(), "claim-node-"));
-  writeFileSync(join(bin, "node"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], {
-    cwd: dir,
-    encoding: "utf8",
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-  });
-  assert.equal(r.status, 2, `an empty capture refuses\n${r.stdout}${r.stderr}`);
-  assert.match(r.stderr, /unexpected output/, "names the shape refusal");
-  assert.doesNotMatch(r.stderr, /dependencies but has no lockfile/,
-    "an empty capture must not be misread as a dependency count");
-});
-
-test("runner: scripts.test wins", () => {
-  assert.equal(claim(repo({ "package.json": pkg({ scripts: { test: "vitest" } }) })).testcmd, "npm test --");
-});
-
-test("runner: no scripts.test but test files present falls back to node --test", () => {
-  assert.equal(claim(repo({ [TESTS]: "" })).testcmd, "node --test");
-});
-
-// `node --test` with zero test files exits 0. A runner that passes vacuously is
-// worse than a dead one — the review fan-out consumes it as a green suite.
-// Anchored on THIS script's own prefix, not on `pass vacuously` alone: the
-// nested derive-testcmd.sh writes its reason to a stderr that claim-ticket.sh
-// does not redirect, so the loose form is satisfied by the child's line and
-// stays green while claim-ticket's own `die` prints a bare `claim-ticket: `
-// with nothing after the colon. Anchoring is what makes the capture's `2>&1`
-// a pinned invariant rather than a promise. `.` does not cross a newline, so
-// this matches only when one line carries both.
-test("runner: no scripts.test and no test files refuses rather than passing vacuously", () => {
-  const { err } = claim(repo({ "README.md": "" }));
-  assert.match(err, /claim-ticket: .*pass vacuously/);
-});
-
-// The worktree is built from origin/main, so every probe must read origin/main.
-// Probing $PWD announced "no lockfile" and then built a worktree holding one.
-test("origin/main beats the local checkout for the install probe", () => {
-  const dir = repo(
-    { "package-lock.json": "{}", "package.json": pkg({ dependencies: { a: "1" } }), [TESTS]: "" },
-    { "package.json": pkg({ name: "stripped" }) },
-  );
-  execFileSync("rm", ["-f", join(dir, "package-lock.json")]);
-  assert.equal(claim(dir).install, "npm ci");
-});
-
-test("a gitignored local package.json cannot influence the probe", () => {
-  const dir = repo({ ".gitignore": "package.json\n", [TESTS]: "" }, { "package.json": pkg({ dependencies: { a: "1" } }) });
-  assert.equal(claim(dir).install, "true");
-});
-
-test("origin/main beats the local checkout for the runner probe", () => {
-  const dir = repo({ "package.json": pkg({ scripts: { test: "vitest" } }) }, { "package.json": pkg({ name: "stripped" }) });
-  assert.equal(claim(dir).testcmd, "npm test --");
-});
-
-// #128: the lockfile-mutation check reads the same worktree-status hole
+// #128: the tree-mutation check reads the same worktree-status hole
 // no-undo-audit.sh, reap.sh and worktree-audit.sh share. Delete the
 // worktree's own .git between `worktree add` and this check and `git -C`
 // does not fail — it walks UP to the enclosing repo and answers about THAT
-// at rc 0, which the old check would read as an untouched lockfile it never
-// actually looked at. Simulated with a shimmed `npm` standing in for an
-// install that corrupts the worktree's own linkage, whatever a real cause for
-// that would be — this guard does not get to assume a cause, only detect the
-// hole.
+// at rc 0, which the old check would read as an untouched tree it never
+// actually looked at. Simulated with an Install step that corrupts the
+// worktree's own linkage, whatever a real cause for that would be — this
+// guard does not get to assume a cause, only detect the hole.
 // The other half of the same guard: `-f` is false for a `.git` that is absent
 // AND for one this process may not stat, so an install that leaves $wt
 // unsearchable was reported as a deletion — sending whoever cleans up (a
@@ -2048,42 +458,29 @@ test("origin/main beats the local checkout for the runner probe", () => {
 // the stated cause differs, which is exactly what triage reads.
 test("an unsearchable worktree refuses with git's own denial, never an absence nothing established", (t) => {
   if (process.getuid?.() === 0) return t.skip("root searches every directory");
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
-  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   // Runs with cwd=$wt, so this strips the search bit off the worktree itself
   // and leaves .git entirely intact — the discriminating input.
-  writeFileSync(join(bin, "npm"), "#!/bin/sh\nchmod 000 .\nexit 0\n", { mode: 0o755 });
-
-  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
-    cwd: dir,
-    encoding: "utf8",
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-  });
+  const { dir, r } = applyRecipe({ install: "chmod 000 ." });
   // Before the first assert: a red must not strand a directory nothing can
   // remove.
   chmodSync(join(dir, ".worktrees", "42-slug"), 0o755);
 
   assert.equal(r.status, 2);
   assert.doesNotMatch(r.stderr, /has no \.git file/, "the .git file was never deleted, only made unreachable");
-  assert.match(r.stderr, /could not verify lockfile state/);
+  assert.match(r.stderr, /could not verify the tree state/);
   assert.match(r.stderr, /Permission denied/, "git's own denial, not one this script invented");
   assert.equal(existsSync(join(dir, ".worktrees", "42-slug", ".git")), true);
 });
 
-// #730, the pathspec'd member of the same family (see reap.sh's branch sweep
-// for the full explanation) — the untracked mode is CONFIG and governs a
-// pathspec'd scan too, so an install that CREATES a lockfile the tree does
-// not track is invisible at rc 0 unpinned.
-test("an install that creates an UNTRACKED lockfile is caught under status.showUntrackedFiles=no (#730)", () => {
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+// #730 (see reap.sh's branch sweep for the full explanation) — the untracked
+// mode is CONFIG, so an install that CREATES a file the tree neither tracks
+// nor ignores is invisible at rc 0 unpinned.
+test("an install that creates an UNTRACKED file is caught under status.showUntrackedFiles=no (#730)", () => {
+  const dir = repo({ [TESTS]: "" }, {}, { install: "printf '{}' > yarn.lock" });
   // On the repo's own config, so the linked worktree the check runs in shares it.
   execFileSync("git", ["config", "status.showUntrackedFiles", "no"], { cwd: dir, stdio: "pipe" });
   const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
   writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-  // Runs with cwd=$wt, so the stray lockfile lands in the worktree under check.
-  writeFileSync(join(bin, "npm"), "#!/bin/sh\nprintf '{}' > yarn.lock\nexit 0\n", { mode: 0o755 });
-
   const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
     cwd: dir,
     encoding: "utf8",
@@ -2093,23 +490,13 @@ test("an install that creates an UNTRACKED lockfile is caught under status.showU
   assert.equal(r.status, 2, r.stdout + r.stderr);
   // The stated cause, not merely a refusal: several guards in this chain exit 2,
   // and triage reads the reason.
-  assert.match(r.stderr, /install mutated the lockfile/);
+  assert.match(r.stderr, /changed the tree in \.worktrees\/42-slug \(first: \?\? yarn\.lock\)/);
 });
 
 test("a worktree whose .git vanishes during install refuses instead of trusting a leaked parent status", () => {
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
-  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-  writeFileSync(join(bin, "npm"), "#!/bin/sh\nrm -rf .git\nexit 0\n", { mode: 0o755 });
-
-  const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
-    cwd: dir,
-    encoding: "utf8",
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
-  });
-
+  const { r } = applyRecipe({ install: "rm -rf .git" });
   assert.equal(r.status, 2);
-  assert.match(r.stderr, /has no \.git file — cannot verify the lockfile was not mutated/);
+  assert.match(r.stderr, /has no \.git file — cannot verify the Install step left the tree clean/);
 });
 
 // #188: `[ -e ]` stats, so it FOLLOWS symlinks, while `git worktree add` refuses
@@ -2148,7 +535,7 @@ test("a worktree whose .git vanishes during install refuses instead of trusting 
 // newly refuses (dangling link, symlink loop) is a path `git worktree add`
 // refuses too, and an unoccupied path must still claim.
 test("a dangling symlink and a real directory are both refused, and a free path still claims", () => {
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const dir = repo({ [TESTS]: "" });
   mkdirSync(join(dir, ".worktrees"), { recursive: true });
   symlinkSync("/nonexistent-target", join(dir, ".worktrees", "42-slug"));
 
@@ -2159,7 +546,7 @@ test("a dangling symlink and a real directory are both refused, and a free path 
   assert.equal(r.stdout, "", "and no receipt: nothing here is claimable, so there is nothing to predict");
 
   // The `-e` half of the same line — a REAL directory at $wt, no symlink.
-  const occupied = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const occupied = repo({ [TESTS]: "" });
   mkdirSync(join(occupied, ".worktrees", "42-slug"), { recursive: true });
   const d = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: occupied, encoding: "utf8" });
   assert.equal(d.status, 2, "an occupied directory is a refusal too, in the mode with no downstream net");
@@ -2167,7 +554,7 @@ test("a dangling symlink and a real directory are both refused, and a free path 
   assert.equal(d.stdout, "", "and no receipt: an unguarded real directory is exit 0 and a claim prediction");
 
   // The input the guard must ACCEPT — same script, same mode, nothing at $wt.
-  const free = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const free = repo({ [TESTS]: "" });
   const ok = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: free, encoding: "utf8" });
   assert.equal(ok.status, 0, "`-L` must not refuse a path that is simply not there");
   assert.match(ok.stdout, /"worktree":"\.worktrees\/42-slug"/);
@@ -2194,7 +581,7 @@ test("a dangling symlink and a real directory are both refused, and a free path 
 // answers cannot distinguish.
 test("an unreadable ancestor refuses rather than predicting a claim", (t) => {
   if (process.getuid?.() === 0) return t.skip("root searches every directory");
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const dir = repo({ [TESTS]: "" });
   mkdirSync(join(dir, ".worktrees", "42-slug"), { recursive: true });
   chmodSync(join(dir, ".worktrees"), 0o000);
   t.after(() => chmodSync(join(dir, ".worktrees"), 0o755));
@@ -2210,7 +597,7 @@ test("an unreadable ancestor refuses rather than predicting a claim", (t) => {
 
 test("--apply refuses an unreadable ancestor BEFORE the in-progress label", (t) => {
   if (process.getuid?.() === 0) return t.skip("root searches every directory");
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const dir = repo({ [TESTS]: "" });
   mkdirSync(join(dir, ".worktrees", "42-slug"), { recursive: true });
   chmodSync(join(dir, ".worktrees"), 0o000);
   t.after(() => chmodSync(join(dir, ".worktrees"), 0o755));
@@ -2258,7 +645,7 @@ test("--apply refuses an unreadable ancestor BEFORE the in-progress label", (t) 
 // answers "not established absent" — turning every first claim in a repo
 // into a refusal. The absolute path is what keeps the accept case an accept.
 test("a free path still claims, with the worktrees directory present", () => {
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const dir = repo({ [TESTS]: "" });
   mkdirSync(join(dir, ".worktrees"), { recursive: true });
   const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: dir, encoding: "utf8" });
   assert.equal(r.status, 0, r.stdout + r.stderr);
@@ -2274,7 +661,7 @@ test("a free path still claims, with the worktrees directory present", () => {
 // payload no parser accepts — at exit 0, and under `--apply` after the worktree
 // and the label had already been created.
 test("a quote in the slug still emits parseable JSON", () => {
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const dir = repo({ [TESTS]: "" });
 
   const r = spawnSync("sh", [SCRIPT, "42", 'sl"ug', "fix"], { cwd: dir, encoding: "utf8" });
 
@@ -2290,7 +677,7 @@ test("a backslash in the slug is escaped too", () => {
   // The worktree path is a filename and carries `\` fine, where a ref could
   // not; `branch` and `worktree` are built from the same argument, so one
   // argument exercises both the ref-legal and the path-only vector.
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const dir = repo({ [TESTS]: "" });
 
   const r = spawnSync("sh", [SCRIPT, "42", "sl\\ug", "fix"], { cwd: dir, encoding: "utf8" });
 
@@ -2301,14 +688,14 @@ test("a backslash in the slug is escaped too", () => {
 test("an ordinary slug is byte-identical — the escaping accepts what it should", () => {
   // The false-positive half: nothing here has anything to escape, so the
   // payload must be exactly what this script has always emitted.
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const dir = repo({ [TESTS]: "" });
 
   const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: dir, encoding: "utf8" });
 
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(
     r.stdout,
-    '{"issue":42,"branch":"fix/42-slug","worktree":".worktrees/42-slug","install":"npm ci","ports":{"postgres":16042,"ollama":22042},"runner":".worktrees/42-slug/agent-test","applied":false}\n',
+    '{"issue":42,"branch":"fix/42-slug","worktree":".worktrees/42-slug","install":"true","ports":{"postgres":16042,"ollama":22042},"runner":".worktrees/42-slug/agent-test","applied":false}\n',
   );
 });
 
@@ -2318,7 +705,7 @@ test("an ordinary slug is byte-identical — the escaping accepts what it should
 // and the guard sits ahead of every mutation, so a missing library refuses
 // before a worktree, a label or a runner exists.
 test("a missing json.sh is exit 2, before anything is created", () => {
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const dir = repo({ [TESTS]: "" });
   const lone = mkdtempSync(join(tmpdir(), "claim-nolib-"));
   copyFileSync(SCRIPT, join(lone, "claim-ticket.sh"));
   const bin = mkdtempSync(join(tmpdir(), "claim-nolib-bin-"));
@@ -2329,7 +716,7 @@ test("a missing json.sh is exit 2, before anything is created", () => {
   });
 
   assert.equal(r.status, 2, "a missing library is a refusal — this script's only failure code");
-  assert.match(r.stderr, /json\.sh/, "and it names the file rather than blaming the lockfile probe");
+  assert.match(r.stderr, /json\.sh/, "and it names the file rather than blaming the Recipe read");
   assert.equal(r.stdout, "", "no payload: this refusal fires before the claim exists, so there is nothing to report");
   assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false,
     "and no worktree — the guard fires ahead of every mutation, so this is a clean refusal and not a half-claim");
@@ -2338,7 +725,7 @@ test("a missing json.sh is exit 2, before anything is created", () => {
 // The twin of the json.sh test above, for worktree.sh's own `[ -r ]` guard
 // (#727's fourth caller of `gone()`) — json.sh present, worktree.sh absent.
 test("a missing worktree.sh is exit 2, before anything is created", () => {
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const dir = repo({ [TESTS]: "" });
   const lone = mkdtempSync(join(tmpdir(), "claim-nowt-"));
   copyFileSync(SCRIPT, join(lone, "claim-ticket.sh"));
   copyFileSync(join(dirname(SCRIPT), "json.sh"), join(lone, "json.sh"));
@@ -2350,7 +737,7 @@ test("a missing worktree.sh is exit 2, before anything is created", () => {
   });
 
   assert.equal(r.status, 2, "a missing library is a refusal — this script's only failure code");
-  assert.match(r.stderr, /worktree\.sh/, "and it names the file rather than blaming the lockfile probe");
+  assert.match(r.stderr, /worktree\.sh/, "and it names the file rather than blaming the Recipe read");
   assert.equal(r.stdout, "", "no payload: this refusal fires before the claim exists, so there is nothing to report");
   assert.equal(existsSync(join(dir, ".worktrees", "42-slug")), false,
     "and no worktree — the guard fires ahead of every mutation, so this is a clean refusal and not a half-claim");
@@ -2384,8 +771,8 @@ test("a missing worktree.sh is exit 2, before anything is created", () => {
 // and it reaches stderr only from that nounset abort.
 //
 // The shim is selected on CONTENT rather than argv. Only the slug reaches
-// `jstr` here, `$install` is this script's own `npm ci` literal, and a `sed`
-// that failed unconditionally could not say which stage it broke.
+// `jstr` here, `$install` is the fixture Recipe's `true`, and a `sed` that
+// failed unconditionally could not say which stage it broke.
 
 const REAL_SED = execFileSync("sh", ["-c", "command -v sed"], { encoding: "utf8" }).trim();
 
@@ -2406,7 +793,7 @@ esac
 exec ${REAL_SED} "$@"`;
 
 test("an escaper that cannot run is exit 2 — this script has no other failure code", () => {
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const dir = repo({ [TESTS]: "" });
 
   const r = spawnSync("sh", [SCRIPT, "42", "esc-boom", "fix"], {
     cwd: dir, encoding: "utf8", env: { ...process.env, PATH: sedShim(FAILS_ON_SLUG) },
@@ -2433,7 +820,7 @@ test("a shadowed `sed` that works claims normally — the guard refuses only a r
   // same shadowed name, a passthrough body — so the exit 2 up there is the
   // escaper failing, not the shim's mere presence. Without this, that case
   // could be measuring a PATH it broke wholesale and still read green.
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({}), [TESTS]: "" });
+  const dir = repo({ [TESTS]: "" });
 
   const r = spawnSync("sh", [SCRIPT, "42", "esc-boom", "fix"], {
     cwd: dir, encoding: "utf8", env: { ...process.env, PATH: sedShim(`exec ${REAL_SED} "$@"`) },
@@ -2442,20 +829,15 @@ test("a shadowed `sed` that works claims normally — the guard refuses only a r
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(
     r.stdout,
-    '{"issue":42,"branch":"fix/42-esc-boom","worktree":".worktrees/42-esc-boom","install":"npm ci","ports":{"postgres":16042,"ollama":22042},"runner":".worktrees/42-esc-boom/agent-test","applied":false}\n',
+    '{"issue":42,"branch":"fix/42-esc-boom","worktree":".worktrees/42-esc-boom","install":"true","ports":{"postgres":16042,"ollama":22042},"runner":".worktrees/42-esc-boom/agent-test","applied":false}\n',
     "byte-identical to the receipt this script emits with no shim in the way",
   );
 });
 
-// #1141: the interpreter this script reads the manifest with is resolved by
-// NAME, so a `PATH` that cannot resolve it makes the shell emit `node:
-// command not found` — into the `2>&1` capture, where it was reported as
-// `could not read origin/main:package.json — <that line>`. An absent
-// interpreter is not evidence about the manifest, and while it was reported
-// as such the case headed `install: an unparseable manifest refuses, and
-// says so` was satisfied by it: measured on this tree before the guard, that case
-// PASSES with the interpreter unresolvable. It is the assertion this guard
-// exists to make discriminate.
+// #1141, delegated: this script reads no JSON itself — derive-testcmd.sh does,
+// and it is where the interpreter first has to resolve. Its refusal travels
+// back through the `2>&1` capture, and what arrives must still name the
+// interpreter rather than the Recipe cache.
 //
 // The fixture is the repo's PATH-shadow convention: a directory of symlinks
 // to the REAL binaries the script reaches for, resolved from the ambient PATH
@@ -2469,14 +851,9 @@ test("a shadowed `sed` that works claims normally — the guard refuses only a r
 //
 // The list is closed over what a dry run reaches, transitive calls included:
 // `sed`, `tr` and `python3` are json.sh's `jstr` (the UTF-8 repair stage
-// added for #613 is a new call site of its own), which the receipt goes
-// through, and `cksum` is the runner's hash. `mktemp`, `cat` and `rm` joined
-// it for #614: derive-testcmd.sh's own `git ls-tree -r -z` listing now writes
-// to a temp file rather than a variable (a NUL terminator cannot survive
-// `$()`), and claim-ticket.sh calls that script directly. A name absent here
-// is one no path under test invokes — a wrapper that logged every exec under
-// each of these fixtures named no others — so adding one back needs a call
-// site, not a hunch.
+// added for #613 is a new call site of its own) and the Test entrypoint's
+// quoting, `cksum` is the runner's hash, and `mktemp`, `cat` and `rm` are
+// derive-testcmd.sh's stderr capture.
 const SHIMMED = ["sh", "git", "sed", "tr", "python3", "dirname", "cksum", "grep", "mktemp", "cat", "rm"];
 function shimPath({ node }) {
   const bin = mkdtempSync(join(tmpdir(), "claim-path-"));
@@ -2490,72 +867,23 @@ function shimPath({ node }) {
 const onShimmedPath = (dir, bin) =>
   spawnSync("sh", [SCRIPT, "42", "slug", "fix"], { cwd: dir, encoding: "utf8", env: { ...process.env, PATH: bin } });
 
-test("install: an unresolvable interpreter refuses in this script's own voice, never the manifest's", () => {
-  const dir = repo({ "package.json": "{,,broken", [TESTS]: "" });
-
-  const absent = onShimmedPath(dir, shimPath({ node: false }));
-  assert.equal(absent.status, 2, `an unavailable interpreter is a refusal — this script's only failure code\n${absent.stderr}`);
-  assert.match(absent.stderr, /^claim-ticket: node is unusable/, "this script's own voice, naming the interpreter as the unusable thing");
-  assert.doesNotMatch(absent.stderr, /could not read origin\/main:package\.json/,
-    "an interpreter that never ran establishes nothing about the manifest, so it must not claim to");
-  // And the refusal is FATAL, which is a separate claim from its wording:
-  // derive-testcmd.sh carries the same guard and is delegated to moments
-  // later, so a downgraded die here still lands exit 2 carrying a refusal
-  // that names the interpreter. Only stopping AT the refusal tells them
-  // apart, so the refusal has to be the last thing on stderr.
-  assert.equal(absent.stderr.trimEnd().split("\n").length, 1,
-    `the guard aborts rather than warning — anything after it is the delegate refusing in this one's place\n${absent.stderr}`);
-
-  // The must-ACCEPT half, on the discriminating input: the SAME unparseable
-  // manifest with the interpreter resolvable still earns the manifest refusal
-  // word for word. A guard that refused this too would satisfy every
-  // assertion above and have destroyed the case it was added to sharpen.
-  const present = onShimmedPath(dir, shimPath({ node: true }));
-  assert.equal(present.status, 2, `an unparseable manifest still refuses\n${present.stderr}`);
-  assert.match(present.stderr, /could not read origin\/main:package\.json/, "the manifest refusal is unchanged");
-  assert.doesNotMatch(present.stderr, /node is unusable/, "and does not blame an interpreter that ran");
+test("an unresolvable interpreter in the delegated Recipe read carries that cause through", () => {
+  const r = onShimmedPath(repo({ [TESTS]: "" }), shimPath({ node: false }));
+  assert.equal(r.status, 2, `the wrapping refusal keeps this script's only failure code\n${r.stderr}`);
+  assert.match(r.stderr, /claim-ticket: derive-testcmd: node is unusable/, "the delegate's own voice, naming the interpreter");
+  assert.doesNotMatch(r.stderr, /Recipe cache at .* is unusable/, "an interpreter that never ran establishes nothing about the cache");
 });
 
-// The false-positive control for the shim dir itself: everything the two
-// refusals above rest on is a stripped PATH, and a PATH too thin for the
-// script to work at all would produce them for a reason that is not the
-// interpreter. This drives a claim to completion under exactly that PATH.
-test("install: a resolvable interpreter on the shimmed PATH still derives the install command and the entrypoint", () => {
-  const r = onShimmedPath(repo({ "package.json": pkg({}), [TESTS]: "" }), shimPath({ node: true }));
+// The false-positive control for the shim dir itself: the refusal above rests
+// on a stripped PATH, and a PATH too thin for the script to work at all would
+// produce it for a reason that is not the interpreter. This drives a claim to
+// completion under exactly that PATH.
+test("a resolvable interpreter on the shimmed PATH still reads both Recipe commands", () => {
+  const r = onShimmedPath(repo({ [TESTS]: "" }), shimPath({ node: true }));
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const out = r.stdout + r.stderr;
-  assert.match(out, /install: true/);
-  assert.match(out, /test entrypoint → node --test/);
-});
-
-// The silence half of the same guard, on the input that needs no interpreter
-// at all: no manifest. The install settles on the `[ -z "$pkg" ]` arm ahead of
-// the guard, and the entrypoint on derive-testcmd.sh's test-file fallback,
-// which its own `[ -n "$pkg" ]` gate keeps the interpreter out of — so a claim
-// that resolves nothing named `node` must still succeed. Nothing but that
-// placement holds this: hoisting either guard above its gate refuses every
-// manifest-less repo wherever an interpreter happens to be missing, and every
-// refusal assertion in this file stays green while it does.
-test("install: with no manifest at all the claim needs no interpreter, and neither guard fires", () => {
-  const r = onShimmedPath(repo({ [TESTS]: "" }), shimPath({ node: false }));
-  assert.equal(r.status, 0, `nothing here reads a manifest, so an unusable interpreter is not this claim's problem\n${r.stdout}${r.stderr}`);
-  const out = r.stdout + r.stderr;
-  assert.match(out, /install: true/, "the no-manifest arm settles the install without an interpreter");
-  assert.match(out, /test entrypoint → node --test/, "and the delegate's test-file fallback settles the entrypoint without one");
-  assert.doesNotMatch(out, /node is unusable/, "so neither this script's guard nor the delegate's may speak here");
-});
-
-// The delegated cause. A lockfile settles the install without this script
-// reading the manifest at all, so its own interpreter guard is never reached
-// and `derive-testcmd.sh` is where the interpreter first has to resolve. Its
-// refusal travels back through the `2>&1` capture, and what arrives must
-// still name the interpreter rather than the manifest.
-test("runner: an unresolvable interpreter in the delegated derivation carries that cause through", () => {
-  const dir = repo({ "package-lock.json": "{}", "package.json": pkg({ dependencies: { a: "1" } }), [TESTS]: "" });
-  const r = onShimmedPath(dir, shimPath({ node: false }));
-  assert.equal(r.status, 2, `the wrapping refusal keeps this script's only failure code\n${r.stderr}`);
-  assert.match(r.stderr, /derive-testcmd: node is unusable/, "the delegate's own voice, naming the interpreter");
-  assert.doesNotMatch(r.stderr, /could not read origin\/main:package\.json/);
+  assert.match(out, /Install step → true/);
+  assert.match(out, /test entrypoint → true/);
 });
 
 // ---------------------------------------------------------------------------
@@ -2640,23 +968,6 @@ test("#804: a trailing argument is refused on both entry paths, before the track
     assert.equal(r.stdout.trim(), "", `${args.join(" ")} must not emit a receipt: ${r.stdout}`);
     assert.equal(spy.ran(), false, `${args.join(" ")} reached the tracker before refusing`);
   }
-
-  // `--write-runner` needs its own bound and cannot borrow the claim path's.
-  // Its positional rewrite collapses argv to exactly four before that check
-  // runs, so a trailing argument arriving HERE is structurally invisible
-  // there — measured on the unguarded script, `--write-runner <dest> 42 EXTRA
-  // --junk` dropped both extras, exited 0 and wrote the runner.
-  const dir = mkdtempSync(join(tmpdir(), "claim-wr-"));
-  for (const args of [
-    ["--write-runner", join(dir, "r1"), "42", "EXTRA"],
-    ["--write-runner", join(dir, "r2"), "42", "EXTRA", "--junk"],
-  ]) {
-    const r = spawnSync("sh", [SCRIPT, ...args], { cwd: tmpdir(), encoding: "utf8" });
-    assert.equal(r.status, 2, `${args.join(" ")} must be refused: ${r.stdout}${r.stderr}`);
-    assert.match(r.stderr, /usage: claim-ticket\.sh --write-runner/, `${args.join(" ")} must refuse on the write-runner arity`);
-  }
-  assert.equal(existsSync(join(dir, "r1")), false, "a refused --write-runner must not have written a runner");
-  assert.equal(existsSync(join(dir, "r2")), false, "a refused --write-runner must not have written a runner");
 });
 
 test("#804: the slot rule accepts every argv it must — the false-positive half", () => {
@@ -2686,16 +997,6 @@ test("#804: the slot rule accepts every argv it must — the false-positive half
   assert.equal(empty.status, 0, `${empty.stdout}${empty.stderr}`);
   assert.match(empty.stdout, /"applied":false/, "an empty flag slot reads as absent, as it does in the siblings");
 
-  // Both `--write-runner` arities, since the bound is a RANGE and a test of
-  // one end pins neither. `<issue>` is optional and defaults to 0.
-  const wr = mkdtempSync(join(tmpdir(), "claim-wrok-"));
-  for (const args of [["--write-runner", join(wr, "a")], ["--write-runner", join(wr, "b"), "42"]]) {
-    const r = spawnSync("sh", [SCRIPT, ...args], { cwd: repo({ [TESTS]: "" }), encoding: "utf8" });
-    assert.equal(r.status, 0, `${args.join(" ")} must be accepted\n${r.stdout}${r.stderr}`);
-  }
-  assert.equal(existsSync(join(wr, "a")), true, "--write-runner <dest> must still write");
-  assert.equal(existsSync(join(wr, "b")), true, "--write-runner <dest> <issue> must still write");
-
   // The neighbours the slot rule is not allowed to cost. It reads argument
   // four and no other position, so a <slug> or <type> that merely LOOKS like a
   // flag is none of its business — and neither is refused anywhere else.
@@ -2711,7 +1012,7 @@ test("#804: the slot rule accepts every argv it must — the false-positive half
 // other half of `unset GIT_DIR GIT_WORK_TREE` unpinned and green. Here the
 // two halves do not even defeat the same guard — GIT_DIR walks past the
 // branch-collision check before anything is created, GIT_WORK_TREE walks past
-// the lockfile-mutation check after the install has already run — so one
+// the tree-mutation check after the install has already run — so one
 // detector could not see both.
 
 test("an ambient GIT_DIR does not look for the claim's branch in another repository (#1020)", () => {
@@ -2744,48 +1045,42 @@ test("an ambient GIT_DIR does not look for the claim's branch in another reposit
   assert.equal(r.stdout, "", "a refusal emits no receipt — a receipt here is a claim the caller would act on");
 });
 
-test("an ambient GIT_WORK_TREE does not make a mutated lockfile look clean (#1020)", () => {
-  // GIT_WORK_TREE outranks `-C`, so `git -C "$wt" status --porcelain -uall
-  // package-lock.json …` reads the ambient tree against $wt's index. Pointed
-  // at the repo root — where the lockfile is untouched — it answers EMPTY at
-  // rc 0 while the fresh worktree's copy has been rewritten.
+test("an ambient GIT_WORK_TREE does not make a mutated tree look clean (#1020)", () => {
+  // GIT_WORK_TREE outranks `-C`, so `git -C "$wt" status --porcelain -uall`
+  // reads the ambient tree against $wt's index. Pointed at the repo root —
+  // where the tracked file is untouched, and the Recipe cache and the
+  // worktrees are ignored — it answers EMPTY at rc 0 while the fresh
+  // worktree's copy has been rewritten.
   //
-  // The install really does mutate, through a shimmed `npm` rather than a
-  // hand-edit after the fact: this guard runs immediately after the install
-  // and there is no seam between them to write a file into. The shim IS the
-  // hazard the guard exists for — npm@11 pruning cross-platform optional deps
-  // is the header's own example.
-  const files = {
-    [TESTS]: "",
-    "package.json": pkg({ name: "x", scripts: { test: "true" } }),
-    "package-lock.json": '{"lockfileVersion":3}\n',
-  };
-  const bin = mkdtempSync(join(tmpdir(), "claim-mutating-npm-"));
+  // The install really does mutate: this guard runs immediately after the
+  // install and there is no seam between them to write a file into. The
+  // mutating Install step IS the hazard the guard exists for — npm@11 pruning
+  // cross-platform optional deps out of a lockfile is the header's own example.
+  const files = { [TESTS]: "", ".gitignore": ".fleet/\n.worktrees/\n" };
+  const recipe = { install: "echo MUTATED >> run-tests.sh" };
+  const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
   writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-  writeFileSync(join(bin, "npm"),
-    '#!/bin/sh\nprintf \'{"lockfileVersion":3,"MUTATED":true}\\n\' > package-lock.json\nexit 0\n',
-    { mode: 0o755 });
   const env = (extra) => ({ ...FIXTURE_ENV, PATH: `${bin}:${process.env.PATH}`, ...extra });
 
-  // The control, and it is not optional: it proves the shim really mutates and
-  // the guard really fires on it. Without it a shim that silently did nothing
-  // would leave the poisoned run exiting 0 for an innocent reason, and the
-  // assertion below would be measuring the absence of a hazard rather than its
-  // containment.
+  // The control, and it is not optional: it proves the install really mutates
+  // and the guard really fires on it. Without it an install that silently did
+  // nothing would leave the poisoned run exiting 0 for an innocent reason, and
+  // the assertion below would be measuring the absence of a hazard rather than
+  // its containment.
   const control = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
-    cwd: repo(files), encoding: "utf8", env: env(),
+    cwd: repo(files, {}, recipe), encoding: "utf8", env: env(),
   });
   assert.equal(control.status, 2, `fixture: the unpoisoned run must refuse\n${control.stdout}${control.stderr}`);
-  assert.match(control.stderr, /install mutated the lockfile/);
+  assert.match(control.stderr, /changed the tree/);
 
-  const dir = repo(files);
+  const dir = repo(files, {}, recipe);
   const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
     cwd: dir, encoding: "utf8", env: env({ GIT_WORK_TREE: dir }),
   });
 
   assert.equal(r.status, 2,
-    `an ambient GIT_WORK_TREE must not make the lockfile guard answer about the repo root; got\n${r.stdout}${r.stderr}`);
-  assert.match(r.stderr, /install mutated the lockfile/,
-    "and for the real reason — this guard is the only thing between a wrong install command and a lockfile corrupted for everyone");
-  assert.doesNotMatch(r.stdout, /"applied":true/, "a claim must not be handed out over an unverified lockfile");
+    `an ambient GIT_WORK_TREE must not make the tree guard answer about the repo root; got\n${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /changed the tree in \.worktrees\/42-slug \(first: +M run-tests\.sh\)/,
+    "and for the real reason — this guard is the only thing between a wrong Install step and a worktree corrupted for everyone");
+  assert.doesNotMatch(r.stdout, /"applied":true/, "a claim must not be handed out over an unverified tree");
 });

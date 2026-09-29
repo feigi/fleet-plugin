@@ -9,12 +9,12 @@ import { resolveTestCmd, SNAPSHOT_SCHEMA } from "./review-core.mjs";
 // The review host used to default `testCmd` to a literal string naming THIS
 // repo's own test path — silent green everywhere else, since `worktree` is a
 // caller-supplied argument and a glob matching nothing exits 0 reporting
-// `tests 0` (#142). It is now DERIVED from the repo under review by the
-// snapshot agent (see the "derives this repository's own test command"
-// paragraph below), reusing derive-testcmd.sh — see
-// derive-testcmd.test.mjs for that script's own coverage, exercised against
-// repos that are NOT this one, which is the guard #142's acceptance
-// criteria required and an archive of this repo could not have been.
+// `tests 0` (#142). It is now READ from the repo under review's Recipe cache by
+// the snapshot agent (see the "derives this repository's own test command"
+// paragraph below), through derive-testcmd.sh — see derive-testcmd.test.mjs
+// for that script's own coverage, exercised against fixture repos that are
+// NOT this one, which is the guard #142's acceptance criteria required and an
+// archive of this repo could not have been.
 //
 // This file covers what remains review-core.mjs's own responsibility:
 // resolveTestCmd's resolution order and refusal, the snapshot agent's prompt
@@ -44,17 +44,25 @@ test("no override falls back to the snapshot agent's derivation", () => {
 });
 
 // The whole point of #142: neither an override nor a derivation must REFUSE
-// the review, never fall back to a guessed default.
+// the review, never fall back to a guessed default. The reason passed through
+// is derive-testcmd.sh's own, which names the derivation step (ADR 0015).
 test("no override and no derivation refuses, naming the snapshot agent's reason", () => {
   assert.throws(
-    () => resolveTestCmd(undefined, { testCmdError: "HEAD has no scripts.test and no test files" }),
-    /no test command for this repository — HEAD has no scripts\.test and no test files/,
+    () => resolveTestCmd(undefined, { testCmdError: "derive-testcmd: no Recipe cache at /r/.fleet/recipe.json" }),
+    /no test command for this repository — derive-testcmd: no Recipe cache at \/r\/\.fleet\/recipe\.json/,
   );
 });
 
-test("no override, no snapshot at all, and no testCmdError still refuses rather than crashing", () => {
-  assert.throws(() => resolveTestCmd(undefined, null), /no test command for this repository/);
-  assert.throws(() => resolveTestCmd(undefined, {}), /the snapshot agent did not derive one/);
+// With no reason from the snapshot agent, the refusal still has to tell its
+// reader what to RUN — the derivation step — rather than only that nothing
+// was derived: a controller or reviewer reading it has no other pointer.
+test("no override, no snapshot at all, and no testCmdError still refuses, naming the derivation step", () => {
+  for (const snap of [null, {}]) {
+    assert.throws(
+      () => resolveTestCmd(undefined, snap),
+      /no test command for this repository — the snapshot agent read no Recipe cache; run the Recipe derivation step \(run-team phase 0/,
+    );
+  }
 });
 
 // A falsy-but-present override (`""`) is caller error, not "no override" —
@@ -113,8 +121,8 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
 
   assert.match(
     snapshot,
-    /~\/\.fleet\/bin\/fleet-run derive-testcmd\.sh \$\{worktree\} HEAD/,
-    "the snapshot agent no longer runs derive-testcmd.sh through the Resolver",
+    /~\/\.fleet\/bin\/fleet-run derive-testcmd\.sh \$\{worktree\} test/,
+    "the snapshot agent no longer reads the Test entrypoint through derive-testcmd.sh via the Resolver",
   );
   // Deriving the command is half the job — it also has to RUN where the
   // specialists are told to run it. `git archive` carries tracked files only,
@@ -230,7 +238,7 @@ test("the specialist prompt hands the command over verbatim and rules 'tests 0' 
 // #143's second correction. The rationale above asserted, present tense and as
 // fact about the run being described, that a bare runner "tears down a shared
 // container mid-run for every sibling". Measured against this repo:
-// `derive-testcmd.sh` resolves `node --test` here and
+// this repo's Test entrypoint is a plain `node --test` run and
 // `commands/review-and-fix.md` records that this repo has no
 // compose file, no `globalSetup`, and no vitest — so no teardown can happen,
 // and a specialist that checks the reason it was given finds it false.
