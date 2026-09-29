@@ -1402,6 +1402,7 @@ for a token on a ticket's line — never a hand edit.
 | Review workflow notification / `review-pr-<n>` report | write `<scratch>/review-<pr>.json`; `reviewed=<head>:<survived>/<refuted>/<unverified>` on the PR's row (**Reviewers**) |
 | Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; copy the refutations it reversed to `ruled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
+| Finisher report (halted) | `ledger.mjs settle finisher-pr-<M>=halted:<cause>`; `gh pr comment <M>` with the finisher's halt report, cause and evidence; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line; then the per-cause rule (**Resolving a finisher halt**, below) |
 | Label seen (persistent Monitor) | nothing to record |
 | CI run terminal | `ci=<run-id>:<attempt>:<conclusion>` on the row; then the finisher gate (below) |
 | Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `reap.sh --apply`. (The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in this same pass, before reporting — that token is the bot's, never `reap.sh`'s.) |
@@ -2500,7 +2501,14 @@ a minute apart showed *different* mutants, so a member's report and any single
 4. Report you the label, the deferral issue numbers — a
    `filed: #N <subject>` line for every issue duty 2 created, and
    `unrecorded: #N <subject>` for one whose `filed` failed twice — and anything
-   it halted on — cause and evidence, below, never a bare "head moved".
+   it halted on — cause and evidence, below, never a bare "head moved". The
+   cause is one word of the ledger's `halted:<cause>` vocabulary:
+   `live-editor`, `rebase` or `past-pin` from the cause block below,
+   `unreadable`, `missing` or `absent` from duty 1's row shapes, and `other`
+   for every other halt — the block's *anything else*, and a halt at duty 2,
+   duty 3, the instrument re-check or the CI gate. A `rebase` halt's report
+   carries the output of `git cherry <pin> HEAD origin/main`, run in the
+   worktree.
 
 **Give the finisher the instrument re-check verbatim too.** Duty 1 and duty 2
 each run a script the digest covers — `worktree-audit.sh` and `ledger.mjs`,
@@ -2558,20 +2566,21 @@ finisher this verbatim, so it derives the cause itself instead of asking anyone:
 >
 > - **Live editor.** `git status --porcelain -unormal` is dirty. Sample
 >   `git diff --stat` twice, a minute apart — diffstat growing means someone
->   is still writing. Halt, name `live editor`, report both samples.
+>   is still writing. Halt, name `live-editor`, report both samples.
 > - **Rebase.** `git status --porcelain -unormal` is clean, head still differs
 >   from your pin. `git reflog` in the worktree: a `reset`/rebase entry near
 >   the move, not a plain `commit`, means the branch replayed onto a new
 >   base — its own commits on a new parent, content-identical only on a
 >   conflict-free replay.
->   Halt, name `rebase`, report the reflog line.
+>   Halt, name `rebase`, report the reflog line and the output of
+>   `git cherry <pin> HEAD origin/main`, run in the worktree.
 > - **Work past the pin.** `git status --porcelain -unormal` is clean, head
 >   still differs from your pin, and `git reflog` in the worktree reads a plain
 >   `commit` at the move — no `reset`/rebase entry there, any of those sitting
 >   at or behind the pin as provenance. A member kept working and committed
 >   after you were dispatched. Measured 2026-08-28 on #983, where the finisher
 >   matched neither cause above and halted on its own judgement (#997).
->   Halt, name `commit past the pin`, and report **the commit, and whether it
+>   Halt, name `past-pin`, and report **the commit, and whether it
 >   is pushed, unpushed, or unknown**: `git log -1 --format='%h %s'` names it,
 >   and `git ls-remote origin <branch>` answers the rest — a non-zero exit or
 >   any other failed read is **unknown**, never folded into "unpushed": the
@@ -2589,7 +2598,7 @@ finisher this verbatim, so it derives the cause itself instead of asking anyone:
 > - **Anything else.** Matching none of the above is not a licence to report
 >   the mismatch as unexplained — that report is the one this block exists to
 >   make unnecessary, and it is where labelling over a moved head starts
->   looking reasonable. Halt, and name what you did find: both
+>   looking reasonable. Halt, name `other`, and name what you did find: both
 >   `git status --porcelain -unormal` samples, the `git reflog` line at the
 >   move, and both SHAs. A cause nobody has named yet is still a cause you
 >   observed, and your report is what gets it named.
@@ -2599,6 +2608,30 @@ finisher this verbatim, so it derives the cause itself instead of asking anyone:
 > a commit past the pin is not one either, and a cause you could not name is
 > the least settled of the lot. Naming the cause makes the halt cheap to
 > resolve, never a reason to skip it.
+
+**Resolving a finisher halt.** A halt is the finisher working correctly — it
+refused to label — so it is never `failed`, which stays for a finisher that
+crashed or gave up. Record it `ledger.mjs settle finisher-pr-<M>=halted:<cause>`,
+`<cause>` the word the report names; the ledger refuses any other. Every halt
+escalates two ways: the cockpit flags the PR `halted:<cause>` at severity 4 off
+that token, and you post the finisher's halt report — cause and evidence — with
+`gh pr comment <M>`, so it outlives the run. **No label**: the missing
+`ready-to-merge` already keeps the PR out of the merge queue. Then the cause
+decides the rest — two resolve automatically, every other one escalates:
+
+| Cause | Resolution |
+|---|---|
+| `live-editor` | **Automatic.** Ask the live member **by name** for its report, wait for it, then dispatch `finisher-pr-<M>-b` at the current head. If the head moved in the meantime, resolve it as `past-pin` instead. |
+| `past-pin` | **Automatic, through the tick: re-review.** The head carries commits no reviewer read. The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's tokens as any review's, and its result reaches a fresh finisher through the same gate. |
+| `rebase` | **Escalate** — comment and flag, nothing more. Read the report's `git cherry <pin> HEAD origin/main`: only `-` lines is a clean rebase, and a `+` line is a conflict resolution that changed content or a commit past the pin. No automatic rule until a live halt shows the case recurring. |
+| `unreadable`, `missing`, `absent`, `other` | **Escalate** — comment and flag, no automatic retry. |
+
+`past-pin` needs the tick because the dead-review path cannot reach it: once a
+review has **returned**, its `reviewed=` token holds the PR out of `review-due=`,
+and settling that review `=failed` re-queues nothing — that path covers only a
+review that died before returning. A head that moved past `reviewed=` with no
+such halt — a fix-applier's push — stays not due: duty 2 verifies what it
+applied.
 
 Gate on the `check` job, **not** on `ci-state --quiet` exit 0: a behind PR never
 reaches full green, so an exit-0 gate strands it unlabelled. The finisher reads
@@ -3030,7 +3063,9 @@ where the controller itself runs from.
   relabels away — and relabelling is what stops it being counted next scan.
 - **review backlog** — PRs owed a review. `fleet-tick.mjs` counts every
   open PR without `ready-to-merge` **that closes an issue** and carries no `review=`
-  token on the ledger — one settled `=failed` is owed a review again — and it
+  token on the ledger — one settled `=failed` is owed a review again, and so is
+  one whose latest finisher halted `past-pin` past its latest `reviewed=` head
+  (**Resolving a finisher halt**) — and it
   prints them as `review-due=`. Exact, not a wider read: the ledger records
   which PRs are under review or reviewed, so nothing about it is guesswork. The
   closing-issue test is what keeps it from widening: a chore PR you author
@@ -3400,7 +3435,9 @@ live count from it, so nobody states one. Write neither by hand:
 - **`ledger.mjs settle <member> <outcome>`** — rewrites the token to
   `<member>=<outcome>` in both places. Outcomes: `impl-N` = `PR#M | bailed |
   released | killed | tier-mismatch`; `fix-pr-M` = `applied:<head> | no-op |
-  failed | killed`; `finisher-pr-M` = `labelled | failed | killed`;
+  failed | killed`; `finisher-pr-M` = `labelled | failed | killed |
+  halted:<cause>`, `<cause>` one of `live-editor | rebase | past-pin |
+  unreadable | missing | absent | other` (**Resolving a finisher halt**);
   `merge-bot-n` = `done | killed`. A settled member stays settled. `settle
   impl-N=PR#M` also folds a `#M` row a PR-bound dispatch made before the settle
   into `#N`'s row, so one row names each PR from then on — but only when `#N`'s

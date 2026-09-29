@@ -247,9 +247,12 @@ test("actionable: exactly the rows that name work the controller can do unattend
 // Reading the run: deriveRun() over `ledger.mjs read`'s payload and the open
 // PR list. Rows are spelled the way ledger.mjs dispatch/settle write them.
 
-const pr = (number, labels = [], closes = [number + 1000]) => ({
+const HEAD_A = "abc1234" + "0".repeat(33);
+const HEAD_B = "def5678" + "0".repeat(33);
+const pr = (number, labels = [], closes = [number + 1000], headRefOid = HEAD_B) => ({
   number, labels: labels.map((name) => ({ name })),
   closingIssuesReferences: closes.map((n) => ({ number: n })),
+  headRefOid,
 });
 const run = (ledger, prs = []) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs);
 
@@ -329,6 +332,56 @@ test("deriveRun: a PR row keyed by the PR's own number is read as that PR's", ()
   const r = run({ rows: ["#350 review=wf:x reviewed=abc1234:1/0/0"] }, [pr(350)]);
   assert.deepEqual(r.fixDue, [350]);
   assert.deepEqual(r.reviewDue, []);
+});
+
+// #2083: a finisher that halts `past-pin` found commits past the head the
+// review read. Once a review has RETURNED, `reviewedAny` holds it out of
+// review-due for good, so marking the review failed cannot re-queue it —
+// the halt itself does, until a new review is running or has returned.
+test("deriveRun: a finisher halted past-pin re-queues the review while the head is past the reviewed one", () => {
+  const row = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0 · finisher-pr-40=halted:past-pin";
+  assert.deepEqual(run({ rows: [row] }, [pr(40, [], [10], HEAD_B)]).reviewDue, [40]);
+  // Settled only in `## Dispatched`, a bare copy on the row: settled anywhere is settled.
+  assert.deepEqual(run({
+    rows: ["#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0 · finisher-pr-40"],
+    dispatched: ["finisher-pr-40=halted:past-pin"],
+  }, [pr(40, [], [10], HEAD_B)]).reviewDue, [40]);
+  // A re-review that died before returning leaves it owed.
+  assert.deepEqual(run({ rows: [`${row} review=wf:b=failed`] }, [pr(40, [], [10], HEAD_B)]).reviewDue, [40]);
+});
+
+test("deriveRun: a head past reviewed= with no past-pin halt stays not due — a fix-applier's push is finisher duty 2's", () => {
+  const base = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:1/0/0 · fix-pr-40=applied:def5678";
+  for (const row of [
+    base,
+    `${base} · finisher-pr-40=labelled`,
+    `${base} · finisher-pr-40`,
+    `${base} · finisher-pr-40=failed`,
+    // Every other halt cause escalates to a human; none re-queues a review.
+    `${base} · finisher-pr-40=halted:live-editor`,
+    `${base} · finisher-pr-40=halted:rebase`,
+    `${base} · finisher-pr-40=halted:other`,
+    // A later finisher attempt replaces the halted one, live or settled.
+    `${base} · finisher-pr-40=halted:past-pin · finisher-pr-40-b`,
+    `${base} · finisher-pr-40=halted:past-pin · finisher-pr-40-b=halted:live-editor`,
+    // Another PR's finisher on the row is not this PR's halt.
+    `${base} · finisher-pr-41=halted:past-pin`,
+  ]) {
+    assert.deepEqual(run({ rows: [row] }, [pr(40, [], [10], HEAD_B)]).reviewDue, [], row);
+  }
+});
+
+test("deriveRun: a past-pin halt is answered once the head is the reviewed one, or a review is running or returned after it", () => {
+  const halted = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0 · finisher-pr-40=halted:past-pin";
+  const not = (row, head) => assert.deepEqual(run({ rows: [row] }, [pr(40, [], [10], head)]).reviewDue, [], `${row} @ ${head}`);
+  not(halted, HEAD_A); // the reviewed head IS the PR head — nothing unread
+  not(halted, HEAD_A.toUpperCase());
+  not(`${halted} review=wf:b`, HEAD_B); // the re-review is in flight
+  not(`${halted} review=wf:b reviewed=def5678:0/0/0`, HEAD_B); // and returned
+  // A fix-applier's push after that re-review is duty 2's again, not a second re-review.
+  not(`${halted} review=wf:b reviewed=def5678:1/0/0 · fix-pr-40=applied:0123456`, "0123456" + "0".repeat(33));
+  // Signed off, or closing no issue, is no review work whatever the halt says.
+  assert.deepEqual(run({ rows: [halted] }, [pr(40, ["ready-to-merge"], [10], HEAD_B), pr(41, [], [], HEAD_B)]).reviewDue, []);
 });
 
 test("deriveRun: merge holds are held-behind rows whose premise PR is still open", () => {
@@ -973,6 +1026,23 @@ test("CLI: a gh row missing closingIssuesReferences refuses rather than counting
   assert.equal(r.status, 2);
   assert.equal(r.stdout.trim(), "");
   assert.match(r.stderr, /closingIssuesReferences/);
+});
+
+test("CLI: a gh row missing headRefOid refuses rather than reading every past-pin halt as moved", () => {
+  const { headRefOid, ...headless } = pr(1);
+  const r = runCli([], { prs: [headless], shortlist: shortlistText([]) });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /headRefOid/);
+});
+
+test("CLI: a past-pin halt prints DISPATCH review for its PR (#2083)", () => {
+  const r = runCli([], {
+    ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0 · finisher-pr-40=halted:past-pin"] },
+    shortlist: shortlistText([]), prs: [pr(40, [], [10], HEAD_B)],
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^reviewers {4}0\/6 → DISPATCH review PR#40 /m);
 });
 
 test("CLI: an ambient GIT_DIR naming another repository cannot move the shortlist read", () => {

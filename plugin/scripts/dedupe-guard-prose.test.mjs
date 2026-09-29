@@ -220,7 +220,7 @@ test("the controller records every filing a filer reported unrecorded", () => {
   // line nobody turns into a `filed` row leaves the arm exactly as blind as
   // before, one filing at a time.
   const table = between(RUN_TEAM, "| Wake | Record, then tick |", "\n\n", "record-before-tick table");
-  for (const wake of ["Fix-applier report", "Finisher report"]) {
+  for (const wake of ["Fix-applier report", "Finisher report", "Finisher report (halted)"]) {
     const row = table.split("\n").find((r) => r.startsWith(`| ${wake} |`)) ?? "";
     assert.match(row, /`ledger\.mjs filed <N> "<subject>"` for each `unrecorded:` line/, `the "${wake}" wake no longer records unrecorded filings`);
   }

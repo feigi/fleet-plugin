@@ -82,6 +82,8 @@ test("the record-before-tick table names every wake, each with what it records",
     ["Review workflow notification / `review-pr-<n>` report", ["<scratch>/review-<pr>.json", "reviewed=<head>:"]],
     ["Fix-applier report", ["settle fix-pr-<M>=", "ruled"]],
     ["Finisher report", ["settle finisher-pr-<M>=labelled"]],
+    // #2083: a halt is its own outcome, escalated on the PR itself, then resolved by cause.
+    ["Finisher report (halted)", ["settle finisher-pr-<M>=halted:<cause>", "gh pr comment <M>", "**Resolving a finisher halt**"]],
     ["Label seen (persistent Monitor)", ["nothing to record"]],
     ["CI run terminal", ["ci=<run-id>:<attempt>:<conclusion>", "finisher gate"]],
     ["Merge-bot pass report", ["held-behind:#<lower>", "settle merge-bot-<n>=done", "reap.sh --apply"]],
