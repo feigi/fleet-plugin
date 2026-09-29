@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { between, phrase, sentences, stripHashGutter, unemphasized } from "./prose-pin.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "./member-outcomes.mjs";
+import { COLUMNS } from "./tier-outcomes.mjs";
 
 // #472: this file's header has never been pinned, while SKILL.md's guard tells
 // the controller that "that file's header carries the column meanings" — so the
@@ -12,9 +13,9 @@ import { COLUMNS as MEMBER_COLUMNS } from "./member-outcomes.mjs";
 // four difficulty columns are that consumer's arrival: they are appended AFTER
 // a free-text `note`, which is a shift nobody would see.
 //
-// No COLUMNS export to compare against, unlike member-outcomes.tsv — no script
-// reads this file, it is ruled by hand. Restating the list here IS the pin, and
-// the header/SKILL.md agreement below is what keeps the restatement honest.
+// The column list is tier-outcomes.mjs's own COLUMNS (#2207), the order its
+// `append` writes in — so the header's column line is pinned against the
+// writer, the way member-outcomes.tsv's is against its scraper.
 const REPO = join(import.meta.dirname, "..", "..");
 const TSV = readFileSync(join(REPO, "docs", "metrics", "tier-outcomes.tsv"), "utf8");
 const RUN_TEAM = readFileSync(join(REPO, "plugin", "skills", "run-team", "SKILL.md"), "utf8");
@@ -29,21 +30,6 @@ for (const l of TSV.split("\n")) {
   headerLines.push(l);
 }
 const HEADER = headerLines.join("\n");
-
-const COLUMNS = [
-  "run_date",
-  "pr",
-  "ticket",
-  "class",
-  "tier",
-  "closed_own_ticket",
-  "minted_false_claim",
-  "note",
-  "sizing",
-  "profile",
-  "loc",
-  "files",
-];
 
 // The ruling step, and no more of SKILL.md than that — the same reason
 // `prose-pin.mjs`'s own slicers give: a positive regex over the whole file is
@@ -395,7 +381,7 @@ test("the ruling step refuses to record a sizing verdict it cannot date", () => 
 });
 
 // #1071: `run_date` is DERIVED in `member-outcomes.tsv` (a transcript mtime)
-// and RULED BY HAND here, and phase 2 states TWO floors that each count
+// and STAMPED AT RULING here, and phase 2 states TWO floors that each count
 // distinct `run_date`s — three PRs across two dates over this file, ten pairs
 // across five dates over the other. The ticket's filer read the ten/five floor
 // as a count over THIS file. It is not one, and nothing in this header said so.
@@ -446,8 +432,13 @@ test("the header says which file each distinct-`run_date` count is read from, an
   // reader told only that the two are "different" still has to guess which way.
   assert.match(
     block,
-    phrase("Here it is RULED BY HAND — the controller writes it when it rules a PR's review, never a script — so it records WHICH RUN THE PR BELONGS TO"),
-    "the header no longer says this file's `run_date` is hand-ruled and records which run the PR belongs to",
+    phrase("Here it is STAMPED AT RULING — `tier-outcomes.mjs append` reads the clock when the controller rules a PR's review"),
+    "the header no longer says this file's `run_date` is stamped when the PR is ruled",
+  );
+  assert.match(
+    block,
+    phrase("— so it records WHICH RUN THE PR BELONGS TO"),
+    "the header no longer says this file's `run_date` records which run the PR belongs to",
   );
   assert.match(
     block,
@@ -567,13 +558,9 @@ test("the header's `run_date` source claims still hold against the query, the sc
     "member-outcomes.mjs's rowsForSession no longer stamps `run_date` from that mtime",
   );
 
-  // The RULED-BY-HAND half as SKILL.md's stated duty. If this file ever becomes
-  // script-generated, the paragraph's "never a script" is the first thing false.
-  assert.match(
-    unemphasized(RUN_TEAM),
-    phrase("Append one row to `docs/metrics/tier-outcomes.tsv` when you rule each PR's review"),
-    "SKILL.md no longer makes this file's rows a hand-authored ruling artifact",
-  );
+  // The STAMPED-AT-RULING half is the writer's behaviour since #2207, not a
+  // SKILL.md duty: tier-outcomes.test.mjs runs `append` and pins the date it
+  // writes to the day it ran.
 
   // Both floors' numbers, as the paragraph quotes them. It names four figures
   // it does not own; a threshold changed in SKILL.md alone leaves this header

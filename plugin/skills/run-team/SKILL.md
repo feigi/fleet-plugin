@@ -1126,8 +1126,14 @@ on the cockpit are not yet proof the pipeline is idle.
 
 **Guard: accumulate per PR, never conclude inside one run.** The unit is the PR —
 supply is one Pull per free slot, so there are no implementer batches. **Append one row to
-`docs/metrics/tier-outcomes.tsv` when you rule each PR's review** (that file's
-header carries the column meanings). That append is the whole duty; the guard
+`docs/metrics/tier-outcomes.tsv` when you rule each PR's review, with
+`~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr> --class <class> --closed-own-ticket yes|no --minted-false-claim yes|no --note "<text>"`,
+never by hand** (that file's header carries the column meanings). The script
+fills `run_date`, `pr`, `ticket` and `tier` itself — `tier` from what actually
+ran, off the implementer's `tier-ok=` ledger verdict or else its one
+member-outcomes row, and BLANK with a WARNING naming why when neither settles
+it; never type a tier in over that. A PR that already has a row is left
+untouched, so re-running it is safe. That append is the whole duty; the guard
 fires on the accumulated file, across runs, not on the run in front of you.
 
 The row's last four fields are the ticket's difficulty, and they are what lets a
@@ -1153,11 +1159,12 @@ re-derive the verdict from the diff to fill the gap: `sizing-a-ticket` weighs
 more than file count, and a substituted proxy reads as measured too. **A value
 not in hand is left BLANK, never estimated** — blank reads as unknown and drops
 the row from a stratified comparison, while a guess reads as measured and
-poisons one. Blank still means the field is WRITTEN and empty: append all
-twelve fields on every new row, because a row of some in-between width cannot be
-told apart from a shifted one. The `note` field is free text and now sits before
-those four, so write it with spaces: one tab inside it shifts all four for that
-row alone, and the suite reds on the field count when it does.
+poisons one. Blank still means the field is WRITTEN and empty: omit the flag
+(`--sizing`, `--profile`, `--loc`, `--files`) and the script writes that field
+empty at full width, because a row of some in-between width cannot be told
+apart from a shifted one. The `note` field is free text and sits before those
+four, so the script refuses a tab or newline in it: one tab would shift all
+four for that row alone.
 
 **Then record the run's member facts — do not author them.** Scrape EVERY session
 directory for this cwd, not one:
@@ -1202,7 +1209,14 @@ second run over the same session changes nothing and a re-run after a member is
 re-dispatched picks the new transcript up. **Never hand-edit
 `docs/metrics/member-outcomes.tsv`** — it is regenerated wholesale whenever the
 role classifier changes, and a hand-entered value would not survive that. The
-verdict for a PR still goes to `tier-outcomes.tsv`, by hand, as before.
+verdict for a PR goes to `tier-outcomes.tsv` through `tier-outcomes.mjs
+append`, as above. Once both files hold this run's rows, and before either is
+committed, run `~/.fleet/bin/fleet-run tier-outcomes.mjs check --live`. Exit 1
+names each row whose `tier` disagrees with the one implementer the member facts
+say ran for its ticket: correct that row's `tier` to the short name it prints,
+or blank it and say why in `note`. Each WARNING names a PR this run's ledger
+marks `reviewed=` that has no row yet — append it before committing if it is
+an implementer PR.
 
 Both files are the run's own artifacts and neither commits itself. Carry them to
 main the same way the run carries any other controller-authored change; leaving a

@@ -1,3 +1,33 @@
+# 2026-09-29 (#2207): `tier` IS SCRIPT-WRITTEN AND NAMES A DEFINITION, NOT A
+# MODEL. From this date `tier-outcomes.mjs append <pr>` writes every row and
+# fills `tier` itself: the `tier-ok=impl-<N>:<definition>` verdict
+# tier-check.mjs left on the run's ledger, else the ticket's single
+# implementer row in member-outcomes.tsv when that row is a
+# `fleet-implementer*` definition, else BLANK with a warning saying why. The
+# value is the definition's short name: `default` (fleet-implementer), `alt`
+# (fleet-implementer-alt), or a per-cell `<cell>` (fleet-implementer-<cell>).
+# `tier-outcomes.mjs check` fails a filled row dated from here on whose
+# ticket's one implementer row ran under another definition, or under none.
+# Rows dated BEFORE 2026-09-29 keep the hand-typed vendor family and are never
+# checked. `opus` was the default definition's model and `sonnet` the alt
+# one's, but the old column recorded the MODEL THAT RAN, not the definition
+# dispatched: before the 2026-08-16 revert `sonnet` also meant the
+# class=routine binding, and on 2026-09-10 every member ran sonnet whatever
+# was dispatched (note below). So an old row maps to a new name only through
+# its ticket's `subagent_type` in member-outcomes.tsv, never by the word —
+# compare the two eras separately.
+#
+# 2026-09-29 (#2207): ONE-OFF AUDIT of the hand-typed `tier` against
+# member-outcomes.tsv's implementer rows, over this file's rows keyed by PR:
+# 283 rows. 273 agree (269 with one implementer row, 4 whose several rows all
+# agree); 3 blank; 1 with no member row (PR #466, ticket "82+83+128"); 4 PRs
+# (#464, #1147, #1208, #1241) whose tickets (367, 581, 570, 805) were
+# dispatched more than once under different tiers, all confirmed correct; 2
+# corrected — PRs #1445 and #1446, now BLANK with a note: both implementers
+# were dispatched as a generic `task` and ran sonnet/high, which is neither
+# tier arm. The audit script is not committed; `check` covers every row from
+# the switch on.
+#
 # 2026-09-10: EVERY member dispatched this session — implementers declared
 # opus AND sonnet alike, plus every fix-applier/finisher/merge-bot dispatched
 # with no model declared at all — ran on claude-sonnet-5. Verified directly
@@ -14,7 +44,8 @@
 # could not distinguish those from inside the session. Needs a human or a
 # harness-level check, not a repeat of this file's own probe.
 #
-# One row per implementer PR, appended when the controller rules its review.
+# One row per implementer PR, appended by `tier-outcomes.mjs append <pr>` when
+# the controller rules its review.
 # Purpose: the tier guard cannot be answered inside one run — n is 2-3 PRs, ticket
 # difficulty swamps the tier effect, and finding-counts are not comparable across
 # PRs because selectDimensions trims the fan-out by diff profile. So accumulate
@@ -137,11 +168,13 @@
 #     itself: the two numbers it prints are "exactly what run-team's gate
 #     reads". Recounting it over this file answers a different question.
 #
-# AND THE TWO `run_date` COLUMNS DO NOT MEAN THE SAME THING. Here it is RULED BY
-# HAND — the controller writes it when it rules a PR's review, never a script —
-# so it records WHICH RUN THE PR BELONGS TO. In `member-outcomes.tsv` it is
-# DERIVED in code: `member-outcomes.mjs` stamps every row of a session from the
-# NEWEST TRANSCRIPT MTIME in that session directory rather than a clock read, so
+# AND THE TWO `run_date` COLUMNS DO NOT MEAN THE SAME THING. Here it is STAMPED
+# AT RULING — `tier-outcomes.mjs append` reads the clock when the controller
+# rules a PR's review, where before 2026-09-29 the controller typed it at that
+# same moment — so it records WHICH RUN THE PR BELONGS TO. In
+# `member-outcomes.tsv` it is DERIVED in code: `member-outcomes.mjs` stamps
+# every row of a session from the NEWEST TRANSCRIPT MTIME in that session
+# directory rather than a clock read, so
 # it records WHEN THE SESSION LAST WROTE. It moves only when the session WRITES
 # AGAIN — a member re-dispatched after midnight, picked up by the next scrape —
 # never because the file was merely re-scraped: a backfill scrape in December
@@ -393,8 +426,8 @@
 2026-09-12	1442	1040	routine	sonnet	yes	no	impl-1040 (ALT TIER): reap.sh's fetch_budget was hardcoded to 300s regardless of net conditions, with no override. Added `net_fetch_budget` extraction and a `FLEET_NET_TIMEOUT` env override, plumbed through prove-merge.sh and reap.sh. Review found 0 defects, fully clean.		production	42	4
 2026-09-12	1443	1005	routine	opus	yes	no	impl-1005: claim-ticket.sh's CDPATH pin only guarded one of the two shell forms the script's own heredoc could run under. Widened the pin to cover both. Review found 0 defects, fully clean.		small	19	2
 2026-09-12	1444	1019	routine	opus	yes	yes	impl-1019: inflight.sh's `find` probe for a stray worktree returned false-healthy when the branch itself no longer existed (a different failure shape than the ref-lookup case the ticket described). Added the missing branch-existence check. Review's one survived finding (comments, important): the new comment claimed a `find`-based shim could redden the added guard, which measured false -- the shim never reaches that code path. Fixed before merge.		tests-only	138	1
-2026-09-12	1445	1025	correction	opus	yes	no	impl-1025 (deferred from PR #1023 review, issue #431): the fix-applier's original null-field docs used wrong wording for the `add_field` worktree/branch parameter pair (said "either can come back null" when only one can). Corrected the wording. Review found 0 defects; 3 informational suggestion-band notes, none touching correctness.		tests-only	8	3
-2026-09-12	1446	1049	correction	opus	yes	no	impl-1049: the `git push --force` ban regex in next-ticket/SKILL.md missed the long-flag spelling (`--force-with-lease` without `--force`) and a bare `--force` with no `=`/space before a following token, both reverting to the plain force push the rule exists to forbid. Widened the regex to cover both spellings. Review found 0 defects, fully clean.		tests-only	72	2
+2026-09-12	1445	1025	correction		yes	no	impl-1025 (deferred from PR #1023 review, issue #431): the fix-applier's original null-field docs used wrong wording for the `add_field` worktree/branch parameter pair (said "either can come back null" when only one can). Corrected the wording. Review found 0 defects; 3 informational suggestion-band notes, none touching correctness. TIER BLANKED 2026-09-29 (#2207): was hand-typed `opus`, but impl-1025 was dispatched as a generic `task` and ran claude-sonnet-5/high (member-outcomes.tsv), which is neither tier arm.		tests-only	8	3
+2026-09-12	1446	1049	correction		yes	no	impl-1049: the `git push --force` ban regex in next-ticket/SKILL.md missed the long-flag spelling (`--force-with-lease` without `--force`) and a bare `--force` with no `=`/space before a following token, both reverting to the plain force push the rule exists to forbid. Widened the regex to cover both spellings. Review found 0 defects, fully clean. TIER BLANKED 2026-09-29 (#2207): was hand-typed `opus`, but impl-1049 was dispatched as a generic `task` and ran claude-sonnet-5/high (member-outcomes.tsv), which is neither tier arm.		tests-only	72	2
 2026-09-12	1449	1031	routine	opus	yes	no	impl-1031: candidates.mjs's dependency-heading gate was regex-blind to bolded/emphasized heading text. Widened the gate regex to tolerate leading/trailing emphasis while keeping the end-anchor that guards against "Dependency injection" false-arming. Review found 0 defects, fully clean.		production	95	2
 2026-09-12	1450	1020	routine	opus	yes	no	impl-1020: six plugin/scripts/*.sh files answered wrongly under ambient GIT_DIR/GIT_WORK_TREE env vars (worktree-audit.sh, reap.sh, no-undo-audit.sh, claim-ticket.sh, inflight.sh, derive-testcmd.sh), plus instruments.sh had a distinct GIT_WORK_TREE tamper-certification defect. Added `unset GIT_DIR GIT_WORK_TREE` to all seven and a new prose-pin census test. Review found 0 defects; independently re-derived the same vulnerability census and reproduced both highlighted findings end-to-end.	heavy	production	876	15
 2026-09-12	1451	1016	routine	opus	yes	yes	impl-1016: claim-ticket.sh's emitted runner duplicated the anchor/walk/dispatch across its two vendored guards. Shared them via a hoisted root and a common diverge() helper; also re-derived a stale ticket-era regex against the current bounded-path shape. Review's 4 survived findings (2 important: a new mixed-argv regression test only covered one of two call-site orderings, and a new comment's "hundred lines apart" measured false at 276; 2 minor stale-variable-name comments). All 4 fixed before merge, independently re-verified.		production	316	2

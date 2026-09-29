@@ -77,6 +77,9 @@ const col = (name) => COLUMNS.indexOf(name);
 // append
 // ---------------------------------------------------------------------------
 
+const localDate = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
 test("append: the ledger's tier-ok token wins over member-outcomes.tsv", (t) => {
   const f = fixture(t, {
     ledger: { rows: ["#10 impl-10=PR#20 · class=routine · tier=alt · tier-ok=impl-10:fleet-implementer-alt"], dispatched: ["impl-10=PR#20"] },
@@ -84,7 +87,9 @@ test("append: the ledger's tier-ok token wins over member-outcomes.tsv", (t) => 
     // alone would read `default`.
     members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
   });
+  const before = localDate();
   const r = f.append();
+  const after = localDate();
   assert.equal(r.code, 0, r.stderr);
   const rows = f.dataRows();
   assert.equal(rows.length, 1);
@@ -92,7 +97,9 @@ test("append: the ledger's tier-ok token wins over member-outcomes.tsv", (t) => 
   assert.equal(rows[0][col("pr")], "20");
   assert.equal(rows[0][col("ticket")], "10", "the ticket comes from gh's closingIssuesReferences");
   assert.equal(rows[0][col("tier")], "alt");
-  assert.match(rows[0][col("run_date")], /^\d{4}-\d{2}-\d{2}$/);
+  // Stamped at ruling: the day `append` ran, in local time — either side of a
+  // midnight the run straddled.
+  assert.ok([before, after].includes(rows[0][col("run_date")]), `run_date ${rows[0][col("run_date")]} is not the day append ran`);
   assert.equal(rows[0][col("note")], "a note with spaces");
   assert.match(r.stderr, /tier-ok=impl-10:fleet-implementer-alt/);
   assert.deepEqual(f.ghCalls(), ["pr view 20 --json closingIssuesReferences"]);
