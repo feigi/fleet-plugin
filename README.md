@@ -82,8 +82,13 @@ the loop's current slot-based shape, drawn below, is
 (ADR 0012/0013).
 
 Every box below is documented on its own page under
-[`docs/components/`](docs/components/README.md) — the scripts, labels, and
-opinionated design choices live there, not here.
+[`docs/components/`](docs/components/README.md). Solid arrows are work
+flowing forward; dashed arrows are wakes or feedback; an edge labelled
+`tick:` is the action `fleet-tick.mjs` prints after every wake, which the
+controller then executes. An edge labelled `controller:` is the
+controller's own direct decision off a gate condition — dispatching the
+finisher and splitting on the CI check job's result are both this kind,
+never a `tick:`-printed row.
 
 ```mermaid
 flowchart TD
@@ -93,7 +98,7 @@ flowchart TD
         SL["Shortlist<br/>.fleet/shortlist.json"]
     end
 
-    SL -->|"implementer slot free → Pull"| JUDGE{"Pull &amp; Claim<br/>judge one ticket"}
+    SL -->|"tick: PULL #N<br/>(implementer slot free)"| JUDGE{"Pull &amp; Claim<br/>judge one ticket"}
     JUDGE -->|"relabel: needs-triage /<br/>ready-for-human"| OUT(["leaves the loop,<br/>needs a human"])
     JUDGE -->|"exclude: behind-pr#N /<br/>behind-issue#N"| SL
     JUDGE -->|"claim: worktree + branch +<br/>in-progress (claim-ticket.sh)"| IMPL
@@ -104,18 +109,21 @@ flowchart TD
     IMPL -.->|"slot frees on report"| SL
     IMPL -->|"reports PR # + head SHA"| PR(["PR open, closes the issue"])
 
-    PR -->|"free reviewer slot →<br/>DISPATCH review PR#N"| REVIEW
+    PR -->|"tick: DISPATCH review PR#N<br/>(reviewer slot free)"| REVIEW
 
     subgraph REVIEWSUB["Reviewer — fleet-review-runner"]
         REVIEW["snapshot → specialists → verifier<br/>→ fix-applier"]
     end
-    REVIEW -.->|"slot frees on report"| SL
-    REVIEW -->|"CI green + fix-applier reported"| FINISH
+    REVIEW -.->|"reviewer slot frees:<br/>next queued PR"| PR
+    REVIEW -->|"push"| CI{"CI check job"}
+    CI -->|"tick: DISPATCH fix-pr PR#N<br/>(check job failure)"| REVIEW
+    CI -->|"controller: check green,<br/>review + fix-applier done<br/>→ dispatch finisher"| FINISH
 
     subgraph FINISHSUB["Finisher — fleet-finisher"]
         FINISH["audit worktree, confirm deferrals,<br/>re-run acceptance mutation"]
     end
-    FINISH -->|"exactly one release label present →<br/>add ready-to-merge"| MB
+    FINISH -->|"exactly one release<br/>label present"| RTM(["ready-to-merge label"])
+    RTM -->|"tick: DISPATCH merge-bot<br/>(first label seen)"| MB
 
     subgraph MERGEBOTSUB["Merge bot — run-merge-bot, one Pass"]
         MB["dispatched on first<br/>ready-to-merge label"]
@@ -124,13 +132,15 @@ flowchart TD
         HOLD -->|"unrelated"| REBASE["rebase onto main"] --> GATE["merge-gate.mjs<br/>green twice"] --> MERGE["gh pr merge"]
         HOLD -->|"related"| WAIT["held-behind:#lower"]
         WAIT -.->|"lower PR merges,<br/>re-evaluated"| HOLD
+        REBASE -.->|"conflict"| CONFLICT["conflict-hold:#pr"]
+        CONFLICT -.->|"tick: DISPATCH fix-pr PR#pr<br/>(rebase via implementer)"| HOLD
     end
     MERGE --> MERGED(["PR merged"])
 
     MERGED -->|"reap.sh after<br/>each merge pass"| REAP["Reaping &amp; Liveness"]
     REAP -.->|"worktree/branch freed"| SL
 
-    HEART["Heartbeat<br/>fleet-heartbeat.mjs"] -.->|"queue drained,<br/>no event fires:<br/>level-check wakes tick"| SL
+    HEART["Heartbeat<br/>fleet-heartbeat.mjs"] -.->|"no wake fires:<br/>level-check wakes the tick"| JUDGE
 
     CORR(["reviewer/finisher files a<br/>correction ticket"]) -.->|"class=correction,<br/>ready-for-agent"| ISSUE
 ```
@@ -147,12 +157,11 @@ rather than waits on
 ([Reviewer](docs/components/reviewer.md),
 [Finisher](docs/components/finisher.md),
 [Merge bot](docs/components/merge-bot.md)). One `fleet-tick.mjs` call per
-wake records what happened, recomputes every role's deficit against
-`.fleet/ledger.md`, and acts — the same reconcile a drained queue's own
-heartbeat re-triggers when no event would otherwise fire
+wake records what happened and recomputes every role's deficit against
+`.fleet/ledger.md` — the same reconcile a drained Shortlist's own heartbeat
+re-triggers when no event would otherwise fire
 ([Ledger & Cockpit](docs/components/ledger-and-cockpit.md),
 [Reaping & Liveness](docs/components/reaping-and-liveness.md)).
-
 
 ## Documentation
 
