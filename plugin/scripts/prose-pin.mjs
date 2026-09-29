@@ -447,8 +447,7 @@ export function betweenPhrases(text, from, to, what, { bound } = {}) {
   // cut — a hit ending inside it would have matched `scope` — so this also
   // catches a bound that cuts through the middle of `to`.
   if (hits.length === 0 && bound && toPhrase.test(rest)) {
-    const lead = rest.slice(boundEnd).search(/[^\n]/);
-    const cut = at + boundEnd + Math.max(lead, 0);
+    const cut = at + boundEnd + rest.slice(boundEnd).search(/[^\n]/);
     const lineStart = text.lastIndexOf("\n", cut - 1) + 1;
     const lineEnd = text.indexOf("\n", cut);
     const line = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);

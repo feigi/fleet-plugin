@@ -667,6 +667,21 @@ test("betweenPhrases names the bound's line, not a moved anchor, when the bound 
   );
 });
 
+// The excerpt truncates a long bound-matched line rather than dumping it
+// whole — every existing fixture in this bound-scoped family is short enough
+// to pass through `line.length > 72` untouched, so nothing else in this
+// suite would catch the threshold, or the truncate-with-ellipsis format,
+// silently drifting or being dropped.
+test("betweenPhrases truncates a long bound-matched line in its excerpt", () => {
+  const line2 =
+    "3. then CUT it here, followed by enough filler words to push this line well past seventy two characters total.";
+  const doc = `1. START here, fix it and repeat from\n${line2}\n4. the next item.\n`;
+  assert.throws(
+    () => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound: /\n\d+\.\s/ }),
+    /the fixture: slice end anchor "CUT it" lies past the end bound, which first matched at line 2 \("3\. then CUT it here, followed by enough filler words to push this line w…"\)/,
+  );
+});
+
 // A `bound` that never matches the remaining text is a caller error, not an
 // invitation to fall back to an unbounded search — that fallback is exactly
 // the false green `bound` exists to prevent: a `to` reworded away could still
