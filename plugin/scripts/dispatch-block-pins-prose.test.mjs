@@ -152,7 +152,7 @@ test("the worktree block forbids a second worktree and carries the check that se
   );
 });
 
-// #1727. The block above settles where the member's SHELL is, and that is the
+// #1727. The block above settles where the member's `bash` cwd is, and that is the
 // whole reason this one exists: `edit`/`read` resolve their own paths against
 // the session root, so a member can pass every `rev-parse` check the worktree
 // block prescribes and still aim a write at the main checkout. Since #1411 the
