@@ -166,7 +166,7 @@ Scanned in full or via targeted `grep` + follow-up `read` of every matched regio
 
 - `plugin/scripts/board.mjs` (2032 lines) — read via multi-pattern grep across the whole file plus targeted range reads (gh/graphql query block, port-derivation block, probe/serve block, ci-state invocation, labelsOf)
 - `plugin/scripts/board.html` (471 lines) — read in full, plus targeted grep for fetch/poll/interval logic in the inline `<script>`
-- `plugin/scripts/compute-board.mjs` (530 lines) — header (1-30), label/column-derivation logic (30-450), end (440-509) read directly
+- `plugin/scripts/compute-board.mjs` (530 lines) — header (1-30), label/column-derivation logic (30-450), end (440-530) read directly
 - `plugin/scripts/compute-spend.mjs` (329 lines) — read in full (header, `classifyRole`, `computeSpend`, `attributeTools`/`mergeTools` headers)
 - `plugin/scripts/ledger.mjs` (1753 lines) — read via multi-pattern grep across the whole file plus targeted range reads (git-common-dir resolution, ledger section grammar, lock timeout, GH_REPO scrub, tracker query)
 - `plugin/scripts/ledger-grammar.mjs` (79 lines) — read in full
