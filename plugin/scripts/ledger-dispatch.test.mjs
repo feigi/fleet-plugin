@@ -303,6 +303,30 @@ test("settle impl-N=PR#M folds the PR-keyed row a pre-settle dispatch created in
   assert.equal(read().rows.length, 1);
 });
 
+// #2064: merge-bot records a conflict its local-rebase fallback would not
+// force with `row`, and the fix-applier is recorded with the ordinary
+// `dispatch`/`settle`. The tick clears the hold only on a settle positioned
+// AFTER the hold token, so the writers must put it there — including when
+// the PR's review-fix `fix-pr-<M>` already settled earlier on the same row.
+test("a conflict hold written by row is cleared by a later dispatch + settle, in the order the tick reads", (t) => {
+  const { ok, read } = fixture(t);
+  const before = "impl-10=PR#40 · reviewed=abc1234:1/0/0 · fix-pr-40=applied:73b356de";
+  ok("row", "10", before);
+  ok("row", "10", `${before} · conflict-hold:#40`);
+  const tick = () => {
+    const l = read();
+    return deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null },
+      [{ number: 40, labels: [{ name: "ready-to-merge" }], closingIssuesReferences: [{ number: 10 }] }]);
+  };
+  assert.deepEqual([tick().fixDue, tick().mergeHeld], [[40], 1], "the earlier settle cannot clear the newer hold");
+
+  assert.equal(ok("dispatch", "40", "fix-pr-40-b").line, `#10 ${before} · conflict-hold:#40 · fix-pr-40-b`);
+  assert.deepEqual([tick().fixDue, tick().mergeHeld], [[], 1], "dispatched is not settled");
+
+  assert.equal(ok("settle", "fix-pr-40-b", "applied:def5678").line, `#10 ${before} · conflict-hold:#40 · fix-pr-40-b=applied:def5678`);
+  assert.deepEqual([tick().fixDue, tick().mergeHeld], [[], 0]);
+});
+
 test("the fold takes the PR row's settled tokens in order, under the two-argument spelling, wherever the PR row sits", (t) => {
   const { ok, read } = fixture(t);
   // The PR's row comes first here, and a third row follows the ticket's.

@@ -87,13 +87,14 @@ test("an outcome from another family's vocabulary, or none at all, is refused by
 });
 
 // The other `=`-tokens a real row carries (`class=`, `ports=`, `ci=`, and
-// #1773's `review=`/`reviewed=` pair) are not members, and neither is
-// anything that only resembles one. Claiming any of them would count a
-// phantom member live.
+// #1773's `review=`/`reviewed=` pair) are not members, and neither are the
+// merge bot's holds nor anything that only resembles one. Claiming any of
+// them would count a phantom member live.
 test("tokens that are not members are not claimed", () => {
   for (const token of [
     "#412", "→", "·", "PR#344", "MERGED", "73b356de", "class=routine", "ports=16324", "ci=123:1:success",
     "review=wf:abc123", "review=member:review-pr-346", "reviewed=73b356de:3/1/0", "held-behind:#313",
+    "conflict-hold:#346", "conflict-hold-#346",
     "ruled:6-applies", "review-pr-346", "impl", "impl-", "impl-0", "impl-0412", "impl-412x", "impl-412-bb",
     "impl-412-B", "merge-bot", "merge-bot-3-b", "fix-pr-", "finisher-346",
   ]) {
