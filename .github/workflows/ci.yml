@@ -164,6 +164,13 @@ jobs:
       - name: Allow-list check — commands
         run: .github/scripts/check-tracked.sh 'plugin/commands/*.md' node plugin/scripts/frontmatter-check.mjs
 
+      # #2207: every tier-outcomes.tsv row dated from the tier switch on must
+      # name the definition its ticket's implementer actually ran under, per
+      # the committed member-outcomes.tsv. No `--live`: the run ledger's
+      # missing-row warning belongs to a run in progress, and CI has no run.
+      - name: Tier-outcomes check
+        run: node plugin/scripts/tier-outcomes.mjs check --file docs/metrics/tier-outcomes.tsv --member-outcomes docs/metrics/member-outcomes.tsv
+
       # -S warning, not the default: the default adds info-level hits that are
       # noise here — SC2016 where a single-quoted `python3 -c` script is meant
       # not to expand, SC1003 on an OSC-8 escape, SC2015 on the
