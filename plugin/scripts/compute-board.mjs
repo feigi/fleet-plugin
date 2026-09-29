@@ -25,7 +25,7 @@
 // here, main() being guarded on argv[1].
 import { assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
 import { parseToken, HALT_CAUSES } from "./ledger-grammar.mjs";
-import { PR_MENTION } from "./fleet-tick.mjs";
+import { PR_MENTION, REVIEWED } from "./fleet-tick.mjs";
 
 // A ledger row is freeform, controller-authored text. Two real examples:
 //   #332 impl-332=PR#344 → PR#344 → MERGED 73b356de
@@ -146,6 +146,7 @@ export function parseRow(row) {
   let review = false; // any review= token: a PR-bound signal (amendment 2a)
   let reviewLive = false; // one not settled `=failed` (amendment 5a)
   let reviewed = false;
+  let reviewedHead = null;
   let runners = [];
   let malformed = false;
   for (const tok of row.split(/\s+/).filter(Boolean)) {
@@ -178,6 +179,12 @@ export function parseRow(row) {
       }
     } else if (tok.startsWith("reviewed=")) {
       reviewed = true;
+      // (#2083) The head that review actually read — the cockpit's own copy
+      // of fleet-tick.mjs's `reviewedHead`, needed below to tell a past-pin
+      // halt already answered by this review apart from one still owed a
+      // fresh one.
+      const m = REVIEWED.exec(tok);
+      if (m) reviewedHead = m[1].toLowerCase();
       for (const r of runners) settled.add(r);
       runners = [];
     }
@@ -218,6 +225,7 @@ export function parseRow(row) {
     causes,
     malformed,
     reviewed,
+    reviewedHead,
     underReview: reviewLive || alive.some((e) => e.kind === "member" && (e.token.family === "fix-pr" || e.token.family === "finisher-pr")),
   };
 }
@@ -271,6 +279,14 @@ export function deriveFlags(parsed, ctx) {
   if ((o === "killed" || o === "tier-mismatch") && !flags.includes(o)) flags.push(o);
   // Only while the halt still parks the PR: once a human resolves an
   // escalated halt by labelling or merging it, the flag has nothing to ask.
+  // `past-pin`'s own automatic resolution (SKILL.md "Resolving a finisher
+  // halt") re-reviews the PR through fleet-tick.mjs, but a returned
+  // `reviewed=` does not itself clear `finisherOutcome` here — the halt is
+  // answered only once "its result reaches a fresh finisher through the
+  // same gate" (ibid.), so the card stays flagged, same as any other halt
+  // cause, until that finisher settles. reviewBacklog below reads the same
+  // gap the other way: still counted due for a fresh review while this flag
+  // is up and the head has not caught up to what was reviewed.
   if (parsed.finisherOutcome?.startsWith("halted:") && ctx.column === "REVIEW") flags.push(parsed.finisherOutcome);
   const limit = STALE_MS[ctx.column];
   if (limit != null && ctx.sinceEnteredStage != null && ctx.now - ctx.sinceEnteredStage > limit) {
@@ -480,11 +496,18 @@ export function computeBoard(inputs) {
 
   // Backlog is a PR nobody has reviewed and nobody is reviewing: no live
   // `review=` (#1820 amendment 5a — a settled `=failed` one is no review), no
-  // `reviewed=`, and no live fix-applier or finisher on the row.
+  // `reviewed=`, and no live fix-applier or finisher on the row — or (#2083)
+  // a returned review whose finisher halted `past-pin` against a head it
+  // never read: owed again until the head catches up to what `reviewed=`
+  // recorded, the same rule fleet-tick.mjs's reviewDue reads off headRefOid
+  // (pastPinDue). A PR absent from the open list (closed, not yet MERGED)
+  // reads as an unmatched head, never as answered — silence is not review.
   const parsedByIssue = new Map(parsed.map((p) => [p.issue, p]));
+  const pastPinBacklog = (p) => p.finisherOutcome === "halted:past-pin" && p.reviewedHead !== null
+    && !String(prByNum.get(p.pr)?.headRefOid ?? "").toLowerCase().startsWith(p.reviewedHead);
   const reviewBacklog = tickets.filter((t) => {
     const p = parsedByIssue.get(t.issue);
-    return t.column === "REVIEW" && !p.underReview && !p.reviewed;
+    return t.column === "REVIEW" && !p.underReview && (!p.reviewed || pastPinBacklog(p));
   }).length;
   const cardsInPool = tickets.filter((t) => t.column === "POOL").length;
   // #2108: a capped pool read makes this count a floor, and it says so the way

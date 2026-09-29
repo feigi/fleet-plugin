@@ -361,9 +361,14 @@ test("deriveRun: a head past reviewed= with no past-pin halt stays not due — a
     `${base} · finisher-pr-40=halted:live-editor`,
     `${base} · finisher-pr-40=halted:rebase`,
     `${base} · finisher-pr-40=halted:other`,
-    // A later finisher attempt replaces the halted one, live or settled.
+    // A later finisher attempt replaces the halted one, live or settled —
+    // by retry suffix (compute-board.mjs's laterAttempt ordering), never by
+    // row-text position: a row rewrite can leave `-b` sitting BEFORE the
+    // older halted token (#2083).
     `${base} · finisher-pr-40=halted:past-pin · finisher-pr-40-b`,
     `${base} · finisher-pr-40=halted:past-pin · finisher-pr-40-b=halted:live-editor`,
+    `${base} · finisher-pr-40-b · finisher-pr-40=halted:past-pin`,
+    `${base} · finisher-pr-40-b=halted:live-editor · finisher-pr-40=halted:past-pin`,
     // Another PR's finisher on the row is not this PR's halt.
     `${base} · finisher-pr-41=halted:past-pin`,
   ]) {

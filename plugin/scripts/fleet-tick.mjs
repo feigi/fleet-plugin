@@ -206,7 +206,7 @@ const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
 // `review=fallback:review-pr-<n>[-b]`, settled dead as `…=failed`; the result
 // is `reviewed=<head>:<survived>/<refuted>/<unverified>`.
 const REVIEW = /^review=(?:wf|member|fallback):[^=\s]+(=failed)?$/;
-const REVIEWED = /^reviewed=([0-9a-f]{7,40}):(\d+)\/(\d+)\/(\d+)$/i;
+export const REVIEWED = /^reviewed=([0-9a-f]{7,40}):(\d+)\/(\d+)\/(\d+)$/i;
 const HELD = /^held-behind[:-]#?(\d+)$/;
 // #2064: merge-bot's durable record that its local-rebase fallback hit a
 // conflict it would not force — written onto the held PR's own row at the
@@ -262,9 +262,17 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // later finisher attempt, live or settled, replaces it, and a later
     // returned review answers it.
     const st = {
-      inFlight: false, reviewed: false, reviewedAny: false, survived: 0, fixSince: false, held: [],
+      inFlight: false, reviewedAny: false, survived: 0, fixSince: false, held: [],
       conflictHold: false, conflictCleared: false, reviewedHead: null, pastPinHalt: false,
     };
+    // The finisher-pr token currently deciding `pastPinHalt`, picked by
+    // retry suffix ("" < "b" < "c" …) the same way compute-board.mjs's
+    // laterAttempt does — never by row-text position (#2083 correction). A
+    // `-b` retry can sit before an older `halted:past-pin` token after a row
+    // rewrite, and text order must not read the stale one as the live
+    // finisher's replacement. Reset at each `reviewed=`, since `pastPinHalt`
+    // is defined relative to the latest one (see the comment above `st`).
+    let latestFinisher = null;
     for (const tok of text.split(/\s+/).filter(Boolean)) {
       const t = parseToken(tok);
       if (t) {
@@ -279,15 +287,21 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
         // later, unrelated `row` rewrite that drops the `=outcome` suffix and
         // puts back a bare copy must not un-settle what actually landed. A
         // landed one also clears a conflict hold; a hold resets this below,
-        // so only a fix-applier after the latest hold ever counts.
+        // so only a fix-applier after the latest hold ever counts. `note`
+        // above has just recorded this exact token, so the lookup below is
+        // never absent, and its outcome is this token's own unless an
+        // earlier row already settled it — never a reason to fall back to
+        // the row's own copy.
         if (t.family === "fix-pr") {
-          const o = members.get(t.name)?.outcome ?? t.outcome;
+          const o = members.get(t.name).outcome;
           const landed = o === "no-op" || /^applied:/.test(o);
           if (o === null || landed) st.fixSince = true;
           if (landed) st.conflictCleared = true;
         }
-        if (t.family === "finisher-pr" && t.number === pr) {
-          st.pastPinHalt = (members.get(t.name)?.outcome ?? t.outcome) === "halted:past-pin";
+        if (t.family === "finisher-pr" && t.number === pr
+          && (!latestFinisher || (t.retry ?? "") > (latestFinisher.retry ?? ""))) {
+          latestFinisher = t;
+          st.pastPinHalt = members.get(t.name).outcome === "halted:past-pin";
         }
         continue;
       }
@@ -299,8 +313,9 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
       } else if (tok.startsWith("reviewed=")) {
         const m = REVIEWED.exec(tok);
         if (!m) throw new LedgerError(`${where}: '${tok}' is not reviewed=<head>:<survived>/<refuted>/<unverified>`);
+        latestFinisher = null;
         Object.assign(st, {
-          inFlight: false, reviewed: true, reviewedAny: true, survived: Number(m[2]), fixSince: false,
+          inFlight: false, reviewedAny: true, survived: Number(m[2]), fixSince: false,
           reviewedHead: m[1].toLowerCase(), pastPinHalt: false,
         });
       } else {
@@ -372,8 +387,8 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   // The halt holds only while the head is still past what was reviewed: a
   // `reviewed=` head (7-40 hex) prefix-matching gh's full headRefOid is the
   // head that review read, and there is nothing more to review.
-  const pastPinDue = (st, head) => st.pastPinHalt && !st.inFlight && st.reviewedHead !== null
-    && !String(head ?? "").toLowerCase().startsWith(st.reviewedHead);
+  const pastPinDue = (st, head) => st !== undefined && st.pastPinHalt && !st.inFlight && st.reviewedHead !== null
+    && !String(head).toLowerCase().startsWith(st.reviewedHead);
   return {
     implLive: live("impl"),
     fixLive: live("fix-pr"),
@@ -385,7 +400,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // a later `reviewed=` resets `fixSince`, and a hold already cleared must
     // not come back due with it.
     fixDue: [...byPr.entries()]
-      .filter(([n, st]) => open.has(n) && ((st.reviewed && st.survived > 0) || conflictHeld(st))
+      .filter(([n, st]) => open.has(n) && ((st.reviewedHead !== null && st.survived > 0) || conflictHeld(st))
         && !st.fixSince && !st.inFlight)
       .map(([n]) => n).sort(asc),
     // Open, not signed off, closing an issue (GitHub's own linked set — a

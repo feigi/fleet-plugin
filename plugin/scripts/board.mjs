@@ -1124,7 +1124,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   }));
 
   const prsJson = await tryRun("gh", ["pr", "list", "--state", "open", "--limit", String(OPEN_PR_LIMIT),
-    "--json", "number,state,labels,title"]);
+    "--json", "number,state,labels,title,headRefOid"]);
   // No default for `title` or `state` here, unlike the issue row above — raw
   // passthrough, deliberately. `title`: compute-board.mjs's titleFor() already
   // falls through a falsy `pr.title` to the real issue title (`if (pr &&
@@ -1142,6 +1142,11 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
     state: p.state,
     title: p.title,
     labels: labelsOf(p),
+    // (#2083) compute-board.mjs's reviewBacklog needs it to tell a
+    // past-pin halt already answered by the automatic re-review apart from
+    // one still owed a fresh one — the same field fleet-tick.mjs's
+    // openPrs() already requires.
+    headRefOid: p.headRefOid,
   }));
 
   // #1820: MERGED is gh's answer, not a ledger token — no rule writes `MERGED

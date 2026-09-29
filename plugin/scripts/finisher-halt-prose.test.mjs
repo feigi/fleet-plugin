@@ -26,19 +26,23 @@ const resolutionRows = () => {
   const table = between(RUN_TEAM, "| Cause | Resolution |", "\n\n", "halt resolution table");
   return table.split("\n").filter((l) => l.startsWith("| `"));
 };
+// A row's first-cell backticked causes, in order — shared by rowFor's
+// lookup and the coverage test below so the two cannot read the table's
+// cells differently.
+const causesIn = (row) => [...row.split("|")[1].matchAll(/`([^`]+)`/g)].map((m) => m[1]);
 // The row whose first cell names exactly these causes.
 const rowFor = (causes) => {
-  const rows = resolutionRows().filter((r) => {
-    const cell = r.split("|")[1];
-    return [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]).join(",") === causes.join(",");
-  });
+  const rows = resolutionRows().filter((r) => causesIn(r).join(",") === causes.join(","));
   assert.equal(rows.length, 1, `the resolution table has ${rows.length} rows for ${causes.join(", ")}`);
   return rows[0].split("|")[2];
 };
 
 test("the resolution table resolves every cause the grammar accepts, each exactly once", () => {
-  const named = resolutionRows().flatMap((r) => [...r.split("|")[1].matchAll(/`([^`]+)`/g)].map((m) => m[1]));
-  assert.deepEqual([...named].sort(), [...HALT_CAUSES].sort());
+  // HALT_CAUSES is the exported, shared array parseToken's own grammar
+  // validates against — copy it before sorting, since sort mutates in
+  // place. resolutionRows().flatMap(causesIn) is a fresh array every call,
+  // needing no copy of its own.
+  assert.deepEqual(resolutionRows().flatMap(causesIn).sort(), [...HALT_CAUSES].sort());
 });
 
 test("live-editor resolves automatically: ask the member by name, wait, re-finish at the current head — past-pin if it moved", () => {

@@ -410,7 +410,7 @@ const REPRO_ROWS = [
   "#908 impl-908=PR#931 · review=wf:r123",
   "#909 impl-909=PR#932 · review=member:review-pr-932",
 ];
-const openPr = (number, labels = []) => ({ number, state: "OPEN", labels, title: `pr ${number}` });
+const openPr = (number, labels = [], headRefOid = null) => ({ number, state: "OPEN", labels, title: `pr ${number}`, headRefOid });
 const HOUR = 60 * MIN;
 // A prior stage entry 1 h old for every row, in the column each row showed on
 // main — the measurement's setup, so every non-terminal card is past its
@@ -877,8 +877,12 @@ test("#1820: a bare `review-pr-<n>` token (no `review=` prefix) names nobody —
 
 // fleet-tick.mjs's review-due for the same rows, observed through deriveRun
 // rather than restated: every PR open, unlabelled and closing an issue.
-const tickReviewDue = (rows, prs) => deriveRun({ rows, dispatched: [], drain: null },
-  prs.map((number) => ({ number, labels: [], closingIssuesReferences: [{ number }] }))).reviewDue;
+// `headRefOid` defaults to a fixed placeholder, never absent — (#2083) a
+// genuinely missing head reads as "moved past reviewed=" in deriveRun, so
+// an omitted-by-accident fixture would silently exercise past-pin's
+// redispatch path instead of refusing the way production's openPrs() does.
+const tickReviewDue = (rows, prs, headRefOid = "abc1234abc1234abc1234abc1234abc1234abcd") => deriveRun({ rows, dispatched: [], drain: null },
+  prs.map((number) => ({ number, labels: [], closingIssuesReferences: [{ number }], headRefOid }))).reviewDue;
 
 test("#1820 amendment 5a: a settled `review=...=failed` with no redispatch is owed a review — reviewBacklog agrees with fleet-tick.mjs's reviewDue", () => {
   const row = "#961 impl-961=PR#961 · review=member:review-pr-961=failed";
@@ -941,6 +945,25 @@ test("#1820 amendment 5a: on the same ledger and PR list, the cockpit's backlog 
   const b = computeBoard(reproInputs({ rows, prs: prs.map((n) => openPr(n)) }));
   assert.equal(b.queue.reviewBacklog, tickReviewDue(rows, prs).length);
   assert.equal(b.queue.reviewBacklog, cases.filter(([, , owed]) => owed).length);
+});
+
+test("#2083: a returned review whose finisher halted past-pin against a head it never read is owed a review again — cockpit and tick agree", () => {
+  // reviewed= first, then a fresher finisher discovers the head moved past
+  // it and halts — the same chronology the fleet-tick.test.mjs fixture
+  // above uses, so the halt is the row's freshest event.
+  const row = "#972 impl-972=PR#972 · reviewed=abc1234:0/0/0 · finisher-pr-972=halted:past-pin";
+  const staleHead = "def5678def5678def5678def5678def5678def";
+  const b = computeBoard(reproInputs({ rows: [row], prs: [openPr(972, [], staleHead)] }));
+  assert.equal(card(b, 972).column, "REVIEW");
+  assert.equal(b.queue.reviewBacklog, 1, "the halt's automatic re-review has not happened at this head yet");
+  assert.deepEqual(tickReviewDue([row], [972], staleHead), [972], "the tick agrees");
+});
+
+test("#2083: once the head matches the reviewed= that answered a past-pin halt, neither counts it owed", () => {
+  const row = "#973 impl-973=PR#973 · finisher-pr-973=halted:past-pin · reviewed=abc1234:0/0/0";
+  const b = computeBoard(reproInputs({ rows: [row], prs: [openPr(973, [], "ABC1234")] }));
+  assert.equal(b.queue.reviewBacklog, 0, "the automatic re-review already answered the halt");
+  assert.deepEqual(tickReviewDue([row], [973], "ABC1234"), [], "the tick agrees");
 });
 
 // #1926: a `review=` token outside the wf/member/fallback grammar is still
