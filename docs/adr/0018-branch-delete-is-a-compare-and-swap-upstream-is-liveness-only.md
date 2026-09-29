@@ -29,20 +29,26 @@ The invariant is **never destroy a commit that exists nowhere else**.
 ## Decision
 
 1. **A branch delete is a compare-and-swap on a tip read once.** Read `$tip`
-   once. Every guard (commits ahead, `git cherry`, the delete-time recount)
-   measures `$tip`, not the live ref. Delete with `git update-ref -d
-   refs/heads/<b> <tip>`, which refuses unless the ref still equals `$tip`.
-   Plain `-d` stays retired (#760). `-D` is retired as each script migrates.
+   once. The delete-time recount and the delete itself measure `$tip`, not
+   the live ref — the earlier guards (commits ahead, `git cherry`) still run
+   against the live branch; the recount is what the compare-and-swap
+   actually depends on. Delete with `git update-ref -d refs/heads/<b>
+   <tip>`, which refuses unless the ref still equals `$tip`. Plain `-d`
+   stays retired (#760). `-D` is retired as each script migrates.
 2. **The base is always measured by its fully qualified name.** `$base_rev`
    is `refs/remotes/…`, never a shorthand that git's disambiguation order can
    resolve to a tag or branch. It never names the branch being deleted.
-3. **What the compare-and-swap gives up is restored explicitly.**
-   `update-ref` does not check worktrees, so the script refuses when **any**
-   worktree holds the branch: by its porcelain `branch` line, or while
-   detached mid-rebase (`rebase-merge/head-name`, `rebase-apply/head-name`) or
-   mid-bisect (`BISECT_START`). `-D` refused all of these (measured, git
-   2.50.1). One shared reader in `plugin/scripts/worktree.sh` answers this,
-   and it also holds the in-progress marker list `reap.sh` uses (#2218).
+3. **What the compare-and-swap gives up is restored explicitly, as far as
+   `release-ticket.sh` restores it today.** `update-ref` does not check
+   worktrees, so the script refuses when a worktree holds the branch on its
+   porcelain `branch` line — the only case it checks today. `-D` also
+   refused two cases this listing-based check does not yet reach: a
+   worktree detached mid-rebase (`rebase-merge/head-name`,
+   `rebase-apply/head-name`) or mid-bisect (`BISECT_START`) (measured, git
+   2.50.1). Closing that gap is #2218: a shared reader in
+   `plugin/scripts/worktree.sh` that will answer both questions and
+   reconcile with `reap.sh`'s own in-progress marker list, which today
+   checks `BISECT_LOG`, not `BISECT_START`.
 4. **The compare-and-swap is the second mechanism, and one enforcement point
    is not accepted.** It closes the check-then-act class: a commit that
    lands after the checks moves the ref, and the delete refuses. It does
@@ -51,9 +57,10 @@ The invariant is **never destroy a commit that exists nowhere else**.
    `$base_rev`. The one route left is deliberately rewriting
    `refs/remotes/origin/main` by hand, which is accepted. Rejected: a
    server-side check (`git ls-remote origin refs/heads/main` plus
-   `merge-base --is-ancestor`). It closes that class too, but it puts a
-   network dependency and a new failure mode on the path that releases
-   claims.
+   `merge-base --is-ancestor`). It closes that class too, but ancestry
+   against the server SHA needs its objects locally — unlike the
+   `ls-remote` the release path already runs, `merge-base --is-ancestor`
+   adds a fetch and its failure modes to the path that releases claims.
 5. **Upstream config decides liveness only.** No delete guard reads `@{u}` or
    `branch.<b>.merge`. The only reader is `reap.sh`'s candidate selection,
    `%(upstream:track)` = `[gone]`. A branch pushed without `-u` is never
@@ -62,13 +69,18 @@ The invariant is **never destroy a commit that exists nowhere else**.
 
 ## Consequences
 
-- **Accepted residual window:** between the fresh worktree re-read and the
-  `update-ref` call, a concurrent checkout can end up holding a deleted
-  branch. A commit made there before the delete moves the ref, and the
-  compare-and-swap refuses. So the window can break a worktree but cannot
-  lose a commit. This is reasoned, not measured. Git has no lock that stops a
-  `worktree add` of an existing branch, so this script cannot close the
-  window.
+- **Accepted residual window, measured:** between the fresh worktree re-read
+  and the `update-ref` call, a concurrent checkout can end up holding a
+  deleted branch. Measured (git 2.50.1): the worktree's branch goes unborn
+  (`git status -sb` reads "No commits yet"), and a commit made there before
+  the delete becomes a parentless root — history is severed, but the
+  original commit is not lost, only unreachable from the new branch. Git has
+  no lock that stops a `worktree add` of an existing branch, so this script
+  cannot close the window.
+- **`release-ticket.sh` does not conform to point 3 yet either.** Its
+  worktree check reads only the porcelain `branch` line; a worktree
+  detached mid-rebase or mid-bisect holding the branch is missed until
+  #2218 lands.
 - **`reap.sh` does not conform yet.** Until #2219 lands it authorizes `git
   branch -D` with `git cherry` on the live ref alone, and the gap between the
   two calls stays open.
