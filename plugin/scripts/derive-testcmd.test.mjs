@@ -45,7 +45,7 @@ function cache(dir, body) {
 }
 
 function derive(dir, field = "test", env = process.env, cwd = tmpdir()) {
-  const r = spawnSync("sh", [SCRIPT, dir, field], { encoding: "utf8", env, cwd });
+  const r = spawnSync("sh", [SCRIPT, dir, field], { encoding: "utf8", env, cwd, timeout: 30_000 });
   return { status: r.status, out: r.stdout.replace(/\n$/, ""), err: r.stderr };
 }
 
@@ -306,4 +306,52 @@ test("an unusable interpreter refuses in this script's own voice, never the cach
   const present = derive(dir, "test", { ...process.env, PATH: shimPath({ node: true }) });
   assert.equal(present.status, 0, present.err);
   assert.equal(present.out, "true");
+});
+
+// --- #2217: node's STDOUT is the capture itself, so the stream split above
+// does nothing for it. A version-manager or proxy shim prints before exec'ing
+// the real node, or — not exec'ing — after it exits, and unframed that chatter
+// became part of the command: refused as a stale cache when its first word
+// did not resolve, handed on when it did. Every stub runs the real interpreter
+// by ABSOLUTE path: re-running `node` through PATH would find the stub again.
+function nodeStub(body) {
+  const bin = mkdtempSync(join(tmpdir(), "derive-stub-"));
+  writeFileSync(join(bin, "node"), `#!/bin/sh\n${body.replaceAll("NODE", `'${process.execPath}'`)}\n`);
+  chmodSync(join(bin, "node"), 0o755);
+  return { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+}
+
+test("stdout chatter around the Recipe value refuses, blaming node's output and never the cache (#2217)", (t) => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head));
+  const stubs = {
+    "a banner before exec": ['echo "Now using node v22.0.0"; exec NODE "$@"', "Now using node v22.0.0"],
+    "a digit prefix with no newline": ['printf 1; exec NODE "$@"', "1recipe<"],
+    "trailing output from a shim that does not exec": ['NODE "$@"; st=$?; printf done; exit $st', ">recipedone"],
+  };
+  for (const [name, [body, shown]] of Object.entries(stubs)) {
+    for (const field of ["install", "test"]) {
+      t.diagnostic(`${name}, ${field}`);
+      const r = derive(dir, field, nodeStub(body));
+      assert.equal(r.status, 1, `${name}/${field}: ${r.err}`);
+      assert.equal(r.out, "", `${name}/${field}: nothing may reach the caller`);
+      assert.match(r.err, /^derive-testcmd: node's stdout carried more than the framed Recipe value/);
+      assert.ok(r.err.includes(shown), `${name}/${field}: the refusal shows the capture: ${r.err}`);
+      assert.doesNotMatch(r.err, /Recipe cache .* is invalid/);
+      assert.doesNotMatch(r.err, /Recipe derivation step/);
+    }
+  }
+});
+
+// The must-ACCEPT half: with no stub the frame is invisible, and a value with
+// an embedded newline crosses it byte for byte.
+test("the framed read hands on the exact value, an embedded newline included (#2217)", () => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head, { install: "true\ntrue", test: "sh ./run-tests.sh\n: second line" }));
+  const i = derive(dir, "install");
+  assert.equal(i.status, 0, i.err);
+  assert.equal(i.out, "true\ntrue");
+  const t = derive(dir, "test");
+  assert.equal(t.status, 0, t.err);
+  assert.equal(t.out, "sh ./run-tests.sh\n: second line");
 });
