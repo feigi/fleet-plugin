@@ -109,16 +109,7 @@ export function resolveActual({ transcriptText, resolvedModel, resolvedThinkingL
   };
 }
 
-// The resolved pair off an already-computed member-record.mjs RECORD
-// (readOmpSession's own row shape), for the `--session` lookup path. The
-// row carries `resolvedModelIdentity` as an additive field (#1345's
-// extension to readOmpMember) alongside the historical per-turn `model` —
-// prefer it for the same reason resolveActual does.
-export function resolvedPairFromRecord(record) {
-  return { model: record.resolvedModelIdentity ?? record.model, level: record.thinking ?? "-" };
-}
-
-// The comparison itself, shared by both resolution paths below. The declared
+// The comparison itself, called only from evaluateMember below. The declared
 // alias is a fleet tier name (ADR 0011/0014): `ok` requires the role it
 // names to resolve to a model (`expected.model !== null`), that resolved
 // model to match what the dispatched member actually ran under, and an
@@ -138,15 +129,6 @@ export function evaluateMember(entry) {
   const declared = declaredPairFor(entry.frontmatter);
   const resolved = resolveActual(entry);
   return { ...compare(entry.member, declared, resolved, entry.modelRoles), viaJobRecord: resolved.viaJobRecord };
-}
-
-// One member, declared vs a member-record.mjs record already resolved via
-// `--session`. `viaJobRecord` is always false here — reaching a record at
-// all means a transcript was read to build it.
-export function evaluateMemberFromRecord({ member, frontmatter, record, modelRoles }) {
-  const declared = declaredPairFor(frontmatter);
-  const resolved = resolvedPairFromRecord(record);
-  return { ...compare(member, declared, resolved, modelRoles), viaJobRecord: false };
 }
 
 // The one-line failure shape the ticket's contract spells verbatim.
@@ -294,7 +276,7 @@ function resolveViaSession(repoRoot, sessionPath, member) {
   const root = resolvePath(repoRoot, sessionPath);
   const flat = join(root, `${member}.jsonl`);
   if (!existsSync(flat)) throw new Error(`no ${member}.jsonl found under --session ${sessionPath}`);
-  return { transcriptText: readFileSync(flat, "utf8") };
+  return readFileSync(flat, "utf8");
 }
 
 function runLedger(ledgerFile, args, what) {
@@ -306,7 +288,12 @@ function runLedger(ledgerFile, args, what) {
 }
 
 function readLedger(ledgerFile) {
-  return JSON.parse(runLedger(ledgerFile, ["read"], "read the ledger"));
+  const raw = runLedger(ledgerFile, ["read"], "read the ledger");
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    die(`could not read the ledger: ${e.message}`);
+  }
 }
 
 function writeLedgerRow(ledgerFile, ticket, text) {
@@ -401,7 +388,8 @@ function main() {
   // writes a `tier=` token.
   let ledgerData = null;
   const results = entries.map((raw) => {
-    const impl = parseMember(String(raw.member ?? ""))?.family === "impl";
+    const parsed = parseMember(String(raw.member ?? ""));
+    const impl = parsed?.family === "impl";
     if (!raw.member || (!impl && !raw.agentFile)) {
       die(`batch entry missing member/agentFile: ${JSON.stringify(raw)}`);
     }
@@ -412,7 +400,7 @@ function main() {
     let frontmatter = null, transcriptText = null, ticket = null, definition = null;
     try {
       if (impl) {
-        ticket = parseMember(raw.member).number;
+        ticket = parsed.number;
         ledgerData ??= readLedger(ledgerFile);
         definition = expectedDefinition(rowText(ledgerData, ticket));
         const definitionFile = join(repoRoot, "agents", `${definition}.agent.md`);
@@ -424,7 +412,7 @@ function main() {
       // the agent type it was dispatched as lives only there.
       if (impl || !hasJobRecord) {
         if (raw.session) {
-          transcriptText = resolveViaSession(repoRoot, raw.session, raw.member).transcriptText;
+          transcriptText = resolveViaSession(repoRoot, raw.session, raw.member);
         } else if (raw.transcript) {
           transcriptText = readFileSync(resolvePath(repoRoot, raw.transcript), "utf8");
         } else if (impl) {

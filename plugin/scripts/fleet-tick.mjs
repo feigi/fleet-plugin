@@ -239,6 +239,14 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   const claimed = new Set();
   const excluded = [];
   const byPr = new Map();
+  // tier-check.mjs's verdict tokens (#1398), read off whichever row carries
+  // them: `tier-ok=<member>:<definition>` on a pass, `tier-mismatch=<member>:…`
+  // for a member found mismatched after it had already settled some other way
+  // (a live one is settled `tier-mismatch` instead). Neither parses as a member
+  // token nor as `review=`/`reviewed=`, so both always reach this loop's own
+  // `else` branch below, alongside HELD/CONFLICT_HOLD — one pass over every
+  // row's tokens covers all four.
+  const verdicts = { ok: new Set(), mismatch: new Set() };
   for (const text of rows) {
     const key = text.split(/\s/)[0];
     const keyNum = /^#[0-9]+$/.test(key) ? Number(key.slice(1)) : null;
@@ -308,6 +316,8 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
             ...(alreadyUnresolved ? null : { fixSince: false }),
           });
         }
+        const v = TIER_VERDICT.exec(tok);
+        if (v) verdicts[v[1]].add(v[2]);
       }
     }
     const ex = EXCLUDED_ROW.exec(text);
@@ -332,18 +342,6 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   const live = (family) => all.filter((m) => m.family === family && m.outcome === null).length;
   const impls = all.filter((m) => m.family === "impl");
   for (const m of impls) claimed.add(m.number);
-  // tier-check.mjs's verdict tokens (#1398), off any row:
-  // `tier-ok=<member>:<definition>` on a pass, `tier-mismatch=<member>:…` for
-  // a member found mismatched after it had already settled some other way
-  // (a live one is settled `tier-mismatch` instead). Neither is a member
-  // token, so the loop above passed over them.
-  const verdicts = { ok: new Set(), mismatch: new Set() };
-  for (const text of rows) {
-    for (const tok of text.split(/\s+/)) {
-      const v = TIER_VERDICT.exec(tok);
-      if (v) verdicts[v[1]].add(v[2]);
-    }
-  }
   // Only the LATEST member for a ticket counts. A mismatch is fixed by
   // dispatching a replacement (`impl-N-b`) at the right tier; until that
   // replacement's own check passes, the row holds — a replacement that is

@@ -8,8 +8,8 @@ import { fileURLToPath } from "node:url";
 
 import {
   declaredPairFor,
-  resolveActual, evaluateMember, resolvedPairFromRecord, evaluateMemberFromRecord,
-  formatMismatch, formatOmpExpectation, appendedLedgerText, expectedDefinition,
+  resolveActual, evaluateMember,
+  formatMismatch, formatOmpExpectation, appendedLedgerText, expectedDefinition, withToken,
 } from "./tier-check.mjs";
 import { parseFrontmatter } from "./tier-roles.mjs";
 import { deriveRun } from "./fleet-tick.mjs";
@@ -140,6 +140,19 @@ test("appendedLedgerText's idempotency is anchored to the trailing ` · ` segmen
   );
 });
 
+// The idempotency guard is on the token's EXACT presence, not a substring: a
+// row already carrying a LONGER token that merely starts with a SHORTER one
+// (two definitions sharing a name prefix, `fleet-implementer` vs
+// `fleet-implementer-alt`) must still gain the shorter token — `.includes`
+// would treat it as already present and silently drop it.
+test("withToken's idempotency is exact-token, never a substring match on a token sharing a prefix", () => {
+  const existing = "impl-7 · class=routine · tier-ok=impl-7:fleet-implementer-alt";
+  assert.equal(
+    withToken(existing, "tier-ok=impl-7:fleet-implementer"),
+    "impl-7 · class=routine · tier-ok=impl-7:fleet-implementer-alt · tier-ok=impl-7:fleet-implementer",
+  );
+});
+
 test("formatMismatch is the ticket's exact line shape", () => {
   const line = formatMismatch({
     member: "impl-9",
@@ -197,36 +210,6 @@ test("evaluateMember: a still-running member (no assistant turn) at its declared
     modelRoles: MODEL_ROLES,
   });
   assert.equal(r.ok, true, JSON.stringify(r));
-});
-
-// ---------------------------------------------------------------------------
-// resolvedPairFromRecord / evaluateMemberFromRecord — the `--session` path's
-// pure core, over an already-resolved member-record.mjs row.
-// ---------------------------------------------------------------------------
-
-test("resolvedPairFromRecord: prefers resolvedModelIdentity over the per-turn model", () => {
-  assert.deepEqual(
-    resolvedPairFromRecord({ model: "claude-opus-5", resolvedModelIdentity: "anthropic/claude-opus-5", thinking: "xhigh" }),
-    { model: "anthropic/claude-opus-5", level: "xhigh" },
-  );
-});
-
-test("resolvedPairFromRecord: falls back to the record's own model when resolvedModelIdentity is absent", () => {
-  assert.deepEqual(
-    resolvedPairFromRecord({ model: "anthropic/claude-sonnet-5", thinking: "high" }),
-    { model: "anthropic/claude-sonnet-5", level: "high" },
-  );
-});
-
-test("evaluateMemberFromRecord: viaJobRecord is always false — reaching a record at all means a transcript was read", () => {
-  const r = evaluateMemberFromRecord({
-    member: "impl-1",
-    frontmatter: parseFrontmatter(agentMd("@slow:xhigh")),
-    record: { model: "anthropic/claude-opus-5", thinking: "xhigh" },
-    modelRoles: MODEL_ROLES,
-  });
-  assert.equal(r.viaJobRecord, false);
-  assert.equal(r.ok, true);
 });
 
 // ---------------------------------------------------------------------------
