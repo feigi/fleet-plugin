@@ -20,7 +20,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { slowTransport, SSH_URL, warmStub } from "./slow-transport.mjs";
+import { slowTransport, SSH_URL } from "./slow-transport.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./release-ticket.sh", import.meta.url));
 const INFLIGHT = fileURLToPath(new URL("./inflight.sh", import.meta.url));
@@ -4892,13 +4892,12 @@ test("a slow but working ls-remote still releases the claim — the budget is no
   // from a ref the clone already has, but every push the fixture makes needs
   // `receive-pack` and the stub serves `upload-pack` alone.
   const origin = git(r.w, "remote", "get-url", "origin");
-  const stub = slowTransport(origin);
+  const sshCommand = slowTransport(origin);
   git(r.w, "remote", "set-url", "origin", SSH_URL);
-  warmStub(stub, r.env());
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "fixture");
 
   const { code, json, stderr, error } = release(r, c, {
-    env: { GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "20" },
+    env: { GIT_SSH_COMMAND: sshCommand, FLEET_NET_TIMEOUT: "20" },
     timeout: 60_000,
   });
 
@@ -4916,11 +4915,11 @@ test("an ls-remote killed by its budget leaves the claim alone, in this script's
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   const origin = git(r.w, "remote", "get-url", "origin");
-  const stub = slowTransport(origin);
+  const sshCommand = slowTransport(origin);
   git(r.w, "remote", "set-url", "origin", SSH_URL);
 
   const { code, stderr, error } = release(r, c, {
-    env: { GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "1" },
+    env: { GIT_SSH_COMMAND: sshCommand, FLEET_NET_TIMEOUT: "1" },
     timeout: 60_000,
   });
 

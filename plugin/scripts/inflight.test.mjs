@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { createServer } from "node:net";
 import { stripComments } from "./strip-comments.mjs";
+import { slowTransport, SSH_URL } from "./slow-transport.mjs";
 
 const SCRIPT = join(import.meta.dirname, "inflight.sh");
 const THIS_FILE = import.meta.filename;
@@ -2666,23 +2667,20 @@ test("probe 2: a budget too large for the shell's integer is ignored, and says n
 // Paired with its own sensitivity control below, and neither is worth much
 // alone: an accept-only case passes just as well against a watchdog that never
 // fires at all, which is to say against no watchdog, and would have passed
-// before this change existed. The stub delays 3s, which is the constant the
-// pair's two budgets — 20 above it, 1 below it — are chosen against.
-const slowSsh = (repo) => {
-  const stub = join(repo, "slow-ssh.sh");
-  writeFileSync(stub, `#!/bin/sh\nsleep 3\nexec git upload-pack '${join(repo, "..", "remote.git")}'\n`);
-  chmodSync(stub, 0o755);
-  return stub;
-};
+// before this change existed. The stub is slow-transport.mjs's, shared with
+// every other bounded-fetch pair: its delay is the constant the pair's two
+// budgets — 20 above it, 1 below it — are chosen against, and it runs no
+// freshly written executable inside the region the budget bounds (#2221).
+// This file's own copy of it did, and paid macOS's first-exec scan in there.
 
 test("probe 2: a slow but working link keeps its ordinary verdict, budget or no budget", (t) => {
   const { repo, env } = fixture(t, 41, { remoteBranches: ["main", "fix/41-thing"] });
-  const stub = slowSsh(repo);
-  git(repo, env, "remote", "set-url", "origin", "ssh://git@example.invalid/x/y.git");
+  const sshCommand = slowTransport(join(repo, "..", "remote.git"));
+  git(repo, env, "remote", "set-url", "origin", SSH_URL);
 
   const r = spawnSync("sh", [SCRIPT, "41"], {
     cwd: repo, encoding: "utf8", timeout: 60_000,
-    env: { ...env, GIT_SSH_COMMAND: stub, INFLIGHT_LS_REMOTE_TIMEOUT: "20" },
+    env: { ...env, GIT_SSH_COMMAND: sshCommand, INFLIGHT_LS_REMOTE_TIMEOUT: "20" },
   });
 
   assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r)}`);
@@ -2697,12 +2695,12 @@ test("probe 2: a slow but working link keeps its ordinary verdict, budget or no 
 // links from one that was never armed.
 test("probe 2: the budget is what spares the slow link, not the absence of a watchdog", (t) => {
   const { repo, env } = fixture(t, 41, { remoteBranches: ["main", "fix/41-thing"] });
-  const stub = slowSsh(repo);
-  git(repo, env, "remote", "set-url", "origin", "ssh://git@example.invalid/x/y.git");
+  const sshCommand = slowTransport(join(repo, "..", "remote.git"));
+  git(repo, env, "remote", "set-url", "origin", SSH_URL);
 
   const r = spawnSync("sh", [SCRIPT, "41"], {
     cwd: repo, encoding: "utf8", timeout: 60_000,
-    env: { ...env, GIT_SSH_COMMAND: stub, INFLIGHT_LS_REMOTE_TIMEOUT: "1" },
+    env: { ...env, GIT_SSH_COMMAND: sshCommand, INFLIGHT_LS_REMOTE_TIMEOUT: "1" },
   });
 
   assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r)}`);

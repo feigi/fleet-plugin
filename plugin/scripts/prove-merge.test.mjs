@@ -18,7 +18,7 @@ import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { slowTransport, SSH_URL, warmStub } from "./slow-transport.mjs";
+import { slowTransport, SSH_URL } from "./slow-transport.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./prove-merge.sh", import.meta.url));
 
@@ -947,13 +947,12 @@ test("a slow but working fetch still proves the merge — the budget is not a st
   // second spelling of the origin path is a fixture that can point the stub at
   // a repo the clone never used.
   const origin = git(w, "remote", "get-url", "origin");
-  const stub = slowTransport(origin);
+  const sshCommand = slowTransport(origin);
   git(w, "remote", "set-url", "origin", SSH_URL);
-  warmStub(stub, ENV);
 
   const r = spawnSync("sh", [SCRIPT, head, head, merge], {
     cwd: w,
-    env: { ...ENV, GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "20" },
+    env: { ...ENV, GIT_SSH_COMMAND: sshCommand, FLEET_NET_TIMEOUT: "20" },
     encoding: "utf8",
     timeout: 60_000,
   });
@@ -972,12 +971,12 @@ test("a slow but working fetch still proves the merge — the budget is not a st
 test("a fetch killed by its budget refuses to prove a merge on stale refs, in this script's own words", (t) => {
   const { w, head, merge } = provenMerge(t);
   const origin = git(w, "remote", "get-url", "origin");
-  const stub = slowTransport(origin);
+  const sshCommand = slowTransport(origin);
   git(w, "remote", "set-url", "origin", SSH_URL);
 
   const r = spawnSync("sh", [SCRIPT, head, head, merge], {
     cwd: w,
-    env: { ...ENV, GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "1" },
+    env: { ...ENV, GIT_SSH_COMMAND: sshCommand, FLEET_NET_TIMEOUT: "1" },
     encoding: "utf8",
     timeout: 60_000,
   });
