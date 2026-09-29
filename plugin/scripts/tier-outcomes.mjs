@@ -14,8 +14,9 @@
 //     Post-switch rows only: a filled `tier` must equal the short name of the
 //     ticket's single implementer row in member-outcomes.tsv, and that row
 //     must be a `fleet-implementer*` definition — exit 1 otherwise. `--live`
-//     adds a WARNING (never a failure) per PR whose run-ledger row carries
-//     `reviewed=` but which has no row here.
+//     (a run in progress; CI never passes it) adds a WARNING, never a
+//     failure, per PR whose run-ledger row carries `reviewed=` but which has
+//     no row here. `--ledger <path>` names another ledger than the run's own.
 //
 // `tier` resolution, in order (never tie-broken by `run_date`: the two files'
 // `run_date`s mean different things — this file's header measures 92 of 267
@@ -366,7 +367,7 @@ function check(paths) {
   const memberRows = readMemberRows(paths.members);
   const { failures, skipped, checked } = checkRows(rows, memberRows);
 
-  if (has("live") || paths.ledger) {
+  if (has("live")) {
     const ledger = readLedger(paths.ledger, true);
     for (const pr of unrecordedReviewedPrs(ledger, rows)) {
       console.error(`${NAME}: WARNING PR #${pr} carries reviewed= on the ledger but has no row in ${paths.file} — run \`tier-outcomes.mjs append ${pr}\` if it is an implementer PR`);
