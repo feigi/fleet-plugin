@@ -1,6 +1,7 @@
 # Requirements: fleet-ctl setup and constraints
 
-**Platform:** Current macOS or current Ubuntu LTS. All scripts are POSIX `sh`.
+**Platform:** macOS, Linux, or Windows via WSL. Native Windows is not
+supported ([ADR 0009](adr/0009-supported-platforms-are-macos-linux-wsl.md)). All scripts are POSIX `sh`.
 **Evidence trail:** See [`docs/research/external-assumptions.md`](research/external-assumptions.md). 
 **Legend:** **HARD** = fleet refuses or silently fails. **SOFT** = degrades or affects one path only.
 
@@ -27,6 +28,10 @@
 ### 1.3 omp with fleet plugin — HARD
 Install: `omp plugin install fleet-ctl@fleet-plugin` per [README → Installation](../README.md#installation).
 Check: `~/.fleet/bin/fleet-run --root` prints the plugin root or fails naming why.
+
+If that command answers "command not found" instead of one of the
+reasons above, the Resolver copy at `~/.fleet/bin/fleet-run` was never
+placed — that is not a side effect of `omp plugin install`.
 
 Settings ([ADR 0011](adr/0011-omp-tier-routes-through-roles.md), [ADR 0014](adr/0014-omp-is-the-only-harness.md)):
 - `enabledProviders`: contains `"claude-plugins"`
@@ -55,6 +60,11 @@ Check: `git remote get-url origin && git rev-parse --verify origin/main`
 **[ADR 0015](adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md):** Any technology. Fleet derives your repo's Recipe (Install + Test entrypoint) by agent reasoning, proves both in a throwaway worktree, caches under `.fleet/`.
 
 **Shipped state (until #2117, #2118 land):** Node-only derivation. `claim-ticket.sh` refuses unless `origin/main` has `package.json` with `scripts.test` or tracked files matching `\.(test|spec)\.[cm]?[jt]sx?$` and an install from `package-lock.json`/`pnpm-lock.yaml`/`yarn.lock` or zero dependencies.
+
+A Maven repo is refused outright (measured 2026-09-28); the interim
+workaround is a one-line `package.json`
+`{"scripts":{"test":"<your command>"}}` with no dependencies, which
+needs `npm` on the fleet machine and is untested.
 
 Hard rules for any technology:
 1. Repo is learnable (README or build file documents install + test).
@@ -151,7 +161,7 @@ Admitted: open, labelled `ready-for-agent`, no excluded labels (§2.4), unassign
 ### 3.3 PRs — HARD
 - Exactly one `Closes #N` per PR (other references: `Refs #N`).
 - Head branch pushed to `origin` (fork PRs use `refs/pull/<n>/head`).
-- Release-label check: exactly one of `patch` / `minor` / `major` if enabled; finisher applies `patch` if none and halts on multiple.
+- Release-label check: exactly one of `patch` / `minor` / `major` if enabled; zero or more than one halts the finisher before the label, naming what was found.
 - `release-label.yml` (if copied) auto-applies `patch` to bot PRs.
 - Members write PR bodies; humans may comment or request changes. `CHANGES_REQUESTED` blocks merge bot until re-reviewed.
 

@@ -4,9 +4,12 @@
 
 The pair of commands the fleet needs to work in any consumer repo: an
 **Install step** that materializes dependencies, and a **Test
-entrypoint** that runs the repo's own suite. Derived by agent reasoning
-over the repo, never guessed from a hardcoded table of technologies
-([ADR 0015](../adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md)).
+entrypoint** that runs the repo's own suite. The target design derives
+both by agent reasoning over the repo, never guessing from a hardcoded
+table of technologies
+([ADR 0015](../adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md));
+today's shipped derivation is Node-only, keyed on a lockfile table (see
+**Opinionated choices** below).
 
 ## How it works
 1. **Derive.** [`derive-testcmd.sh`](../../plugin/scripts/derive-testcmd.sh)
@@ -20,18 +23,21 @@ over the repo, never guessed from a hardcoded table of technologies
    tracked file unchanged; the Test entrypoint is usable only once it
    has actually run and shown to execute real tests — a non-zero test
    count, or a deliberate mutation turning red, is what "passed" means.
-3. **Cache.** A proven Recipe is written to the **Recipe cache** under
-   `.fleet/`, carrying the commit it was derived at and the proof.
-   Scripts read it; only the agent that proved it writes it. A missing
-   cache means "derive," never "infer."
+3. **Cache (planned, #2117/#2118).** Once landed, a proven Recipe will
+   be written to a **Recipe cache** under `.fleet/`, carrying the
+   commit it was derived at and the proof, with scripts reading it and
+   only the proving agent writing it — a missing cache meaning
+   "derive," never "infer." Not shipped today: every claim and review
+   re-derives directly.
 
 ## Opinionated choices
 
-- **No table of supported technologies exists anywhere in this repo.**
-  `claim-ticket.sh` and `derive-testcmd.sh` carry no lockfile regex, no
-  per-language branch — a consumer repo's Recipe is derived "the way a
-  new engineer would," not matched against a maintained inventory that
-  inevitably lags what repos actually use
+- **Today's derivation is Node-only, keyed on a hard-coded lockfile
+  table.** `claim-ticket.sh` and `derive-testcmd.sh` branch on
+  `package-lock.json`/`pnpm-lock.yaml`/`yarn.lock` and a manifest
+  `scripts.test`/test-file regex; the "no technology table" design
+  above is the planned successor once #2117/#2118 land, not the
+  current mechanism
   ([ADR 0015](../adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md)).
 - **The vacuity guard is a hard refusal, not a warning.** `node --test`
   with no test files exits 0, and a runner that passes vacuously is

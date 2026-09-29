@@ -19,8 +19,10 @@ Follows [`plugin/skills/run-team/SKILL.md`](../../plugin/skills/run-team/SKILL.m
    or the [heartbeat](reaping-and-liveness.md)'s level-check — with one
    `fleet-tick.mjs` call: it reconciles `.fleet/ledger.md` and prints
    one action per role — `PULL #N`, `REFRESHED`, `DISPATCH review`/
-   `DISPATCH fix-pr`/`DISPATCH merge-bot`, or a `HOLD` (draining, tier
-   mismatch, review saturated) that outranks every row.
+   `DISPATCH fix-pr`/`DISPATCH merge-bot`, or a `HOLD` on the
+   implementer row (draining, tier mismatch, review saturated) that
+   outranks that row's `PULL`; the reviewer and merge-bot rows act
+   independently of it.
 3. **Dispatch exactly what the tick printed:**
    [Pull & Claim](pull-and-claim.md) for admission,
    [Implementer](implementer.md) to build a ticket,

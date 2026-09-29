@@ -20,8 +20,9 @@ durable, and applies the label the merge bot waits on.
    `--declare-no-ci`.
 2. **Audit the worktree** via
    [`worktree-audit.sh`](../../plugin/scripts/worktree-audit.sh) for
-   dirty, diverged, unreadable, missing, or absent state — any of the
-   five halts before the label.
+   dirty, unreadable, missing, or absent state, and check the
+   worktree's `HEAD` against the dispatch pin for divergence — any of
+   the five halts before the label.
 3. **Confirm durable homes.** Every deferral and claimed apply needs a
    tracker issue or in-tree comment (via `ledger.mjs check`, filing what
    isn't found), and every "applied" claim is re-verified against `git
@@ -44,6 +45,7 @@ durable, and applies the label the merge bot waits on.
   owns** — an add-detach, mutate, remove cycle in its own scratch
   worktree, never the PR's own, because two members writing the same
   tree at once was measured to silently destroy uncommitted work.
-- **A deliberately cheap tier (haiku)** is acceptable for the same
-  reason it is on the [Merge bot](merge-bot.md): the merge gate
-  downstream still catches whatever the finisher gets wrong.
+- **A deliberately cheap tier** ([Tier routing](tier-routing.md)) is
+  acceptable for the same reason it is on the [Merge bot](merge-bot.md):
+  the merge gate downstream still catches whatever the finisher gets
+  wrong.

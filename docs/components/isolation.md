@@ -25,12 +25,13 @@ store.
    copy with a mutating refuter even by accident; a refuter gets its
    own throwaway `git worktree add --detach` copy, mutated and
    discarded.
-4. **The main checkout is enforced by prompt and by harness.** No
-   per-call `cwd` exists in eval's `agent()`, so every specialist/
-   refuter prompt names the inherited cwd a no-run zone and requires a
-   `CWD-AUDIT:` line back; an omp `tool_call` extension backstops this
-   independently, blocking a member's write into a main checkout it
-   did not claim.
+4. **The main checkout is enforced by prompt today, not yet by
+   harness.** No per-call `cwd` exists in eval's `agent()`, so every
+   specialist/refuter prompt names the inherited cwd a no-run zone and
+   requires a `CWD-AUDIT:` line back; a harness-level backstop — an
+   omp `tool_call` extension preventing the write (#1411) plus
+   main-checkout dirty detection in `fleet-tick.mjs` (#2210) — is
+   planned, not shipped.
 
 ## Opinionated choices
 
@@ -41,4 +42,5 @@ store.
 - **The write-guard backstop exists because prompt discipline alone
   isn't enough for an unattended fleet.** A member briefed correctly
   can still be wrong under pressure, so isolation is enforced once in
-  the prompt and once again, independently, by the harness.
+  the prompt today, and will be enforced again, independently, by the
+  harness once #1411/#2210 land.

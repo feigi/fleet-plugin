@@ -68,7 +68,8 @@ flowchart TD
 - **`--merge`, never `--squash`/`--rebase`.**
   [`prove-merge.sh`](../../plugin/scripts/prove-merge.sh) can only
   verify a two-parent commit landed, and that proof is load-bearing.
-- **A deliberately low tier (haiku).** The job is checklist work, and
+- **A deliberately low tier** ([Tier routing](tier-routing.md)). The
+  job is checklist work, and
   [`no-undo-audit.sh`](../../plugin/scripts/no-undo-audit.sh), run
   before every rebase, is the deterministic backstop that catches a
   wrongly-resolved conflict regardless of tier.
