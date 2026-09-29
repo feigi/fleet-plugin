@@ -27,14 +27,14 @@ const ROOT = "/s/pr7/run-ab12cd34";
 // A diff that is empty, or whose line count was never measured, is worse than
 // no diff: the specialist reads it as authoritative.
 test("usableDiff rejects a diff that would lie about the snapshot", () => {
-  assert.equal(usableDiff({ head: "aaa" }), null, "no diffPath");
+  assert.equal(usableDiff({}), null, "no diffPath");
   assert.equal(
-    usableDiff({ head: "aaa", diffLines: 40 }),
+    usableDiff({ diffLines: 40 }),
     null,
     "diffPath absent but diffLines truthy — isolates the diffPath guard from the diffLines guard",
   );
   assert.equal(
-    usableDiff({ head: "aaa", diffPath: "/s/pr.diff", diffLines: 0 }),
+    usableDiff({ diffPath: "/s/pr.diff", diffLines: 0 }),
     null,
     "0-byte diff — `gh pr diff` exits 1 and still leaves the file",
   );
@@ -43,7 +43,7 @@ test("usableDiff rejects a diff that would lie about the snapshot", () => {
   // so an unreported count leaves "usable" a guess. Pinned because it reads like
   // the inversion bug.
   assert.equal(
-    usableDiff({ head: "aaa", diffPath: "/s/pr.diff" }),
+    usableDiff({ diffPath: "/s/pr.diff" }),
     null,
     "diffLines absent — no count means the 0-byte case cannot be ruled out",
   );
@@ -57,6 +57,11 @@ test("usableDiff accepts a counted diff and derives its path from runRoot", () =
     usableDiff({ runRoot: ROOT, head: "aaa", diffPath: "/s/pr.diff", diffLines: 40, refHead: "bbb" }),
     `${ROOT}/pr.diff`,
     "usableDiff judged the heads again — the compare belongs to snapshotMissing alone",
+  );
+  assert.equal(
+    usableDiff({ runRoot: ROOT, head: "a".repeat(40), diffPath: "/s/pr.diff", diffLines: 40, refHead: "z".repeat(7) }),
+    `${ROOT}/pr.diff`,
+    "unconditionally blind to refHead, not merely permissive of one mismatch shape — an abbreviated mismatch must not cost the diff either",
   );
 });
 
@@ -178,11 +183,32 @@ test("readRules does not claim closure over a list gh truncated", () => {
 // diff file was captured" is then false in the one way that matters: the
 // specialist can find the file and has been given no reason not to trust it.
 test("readRules names a rejected diff rather than denying a file that exists", () => {
-  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", head: "aaa" });
+  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff" });
   assert.doesNotMatch(out, /No diff file was captured/, "the diff file exists — the redirect always creates it");
   assert.match(out, /REJECTED/);
   assert.match(out, /\/s\/pr\.diff/, "the rejected file is not named, so the specialist cannot know which one to skip");
   assert.match(out, /Do not read it/);
+});
+
+// #1132 review: readRules() lost its `skew` binding, but nothing above
+// proves it BY BEHAVIOR — reinserting the deleted head-skew branch verbatim
+// passes every test in this file unchanged, because none of them call
+// readRules() with a rejected diff AND a present refHead together. Pin the
+// combination directly, not just the absence of `refHead` from the source.
+test("readRules ignores refHead even when a rejected diff and a head mismatch are both present", () => {
+  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", head: "aaa", diffLines: 40, refHead: "bbb" });
+  assert.match(out, /REJECTED — its\s+line\s+count\s+was\s+never\s+reported/);
+  assert.doesNotMatch(
+    out,
+    /describes\s+the\s+PR's\s+head/i,
+    "readRules must not attribute the rejection to a head mismatch — that compare belongs to snapshotMissing alone",
+  );
+  assert.doesNotMatch(out, /\bbbb\b/, "refHead never surfaces in the reason readRules hands to a specialist");
+  assert.match(
+    out,
+    /touched exactly these files and no others/,
+    "no skew wording survives — the header is unconditional now",
+  );
 });
 
 // Two rejections with nothing in common but the verdict — and the snapshot
@@ -202,7 +228,7 @@ test("readRules names a rejected diff rather than denying a file that exists", (
 // empty rejected'` — so the empty case went unexercised under its own name,
 // and the label it pinned was the conflation (#1131).
 test("readRules calls a rejected diff empty only when a count measured it", () => {
-  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", head: "aaa", diffLines: 0 });
+  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", diffLines: 0 });
   assert.match(out, /REJECTED — it is empty/);
   // A complete list — closure is TRUE here and must still be claimed.
   assert.match(out, /touched exactly these files and no others/);
@@ -217,7 +243,7 @@ test("readRules calls a rejected diff empty only when a count measured it", () =
 // "the no-diff log reports the raw fields, not a guard it did not measure"
 // holds it there — and this is the copy every specialist reads.
 test("readRules does not call a rejected diff empty when no count was reported", () => {
-  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", head: "aaa" });
+  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff" });
   assert.match(out, /REJECTED — its\s+line\s+count\s+was\s+never\s+reported/);
   assert.doesNotMatch(
     out,
@@ -232,7 +258,7 @@ test("readRules does not call a rejected diff empty when no count was reported",
 // A run with no diffPath at all is not a rejection: nothing was captured, and
 // saying "a diff was captured and rejected" would be a fresh false claim.
 test("readRules reports no capture when the snapshot agent reported no diffPath", () => {
-  const out = readRules(null, PATHS, { head: "aaa" });
+  const out = readRules(null, PATHS, {});
   assert.match(out, /No diff file was captured/);
   assert.doesNotMatch(out, /REJECTED/);
 });
