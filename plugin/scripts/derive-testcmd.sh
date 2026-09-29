@@ -114,22 +114,31 @@ nodeerr=$(node -e 0 </dev/null 2>&1) || die "node is unusable, refusing to read 
 #   NODE_OPTIONS or NODE_DEBUG chatter lands there (#752, #1175).
 #
 #   stdout carries the value FRAMED, `recipe<` before it and `>recipe` after,
-#   and the WHOLE capture must be exactly that frame (#2217). A version-manager
-#   or proxy shim prints to stdout before exec'ing the real node (`Now using
-#   node v22.0.0`), and one that does not exec can print after node exits; the
-#   anchored match refuses both, and the refusal names node's output, never
-#   the cache — the cache passed. Refused, never recovered: no value is cut
-#   out of chatter. The end sentinel also stops `$(…)` stripping a trailing
-#   newline off a value; the one thing the capture cannot show is bare
-#   newlines after the frame, which that same stripping drops before the
-#   match and which carry nothing into the value.
+#   and the WHOLE capture must be exactly that frame, byte for byte (#2217):
+#   the anchored match alone only proves the ends line up, so a shim whose
+#   own chatter happens to spell out `recipe<`/`>recipe` around the real
+#   frame would still pass it and splice that chatter into the value — node
+#   writes the frame's own byte length to a second temp file ($lenf) before
+#   writing the frame itself, and the capture is refused unless its length
+#   matches that count exactly, closing the gap no anchor check alone can
+#   close. A version-manager or proxy shim prints to stdout before exec'ing
+#   the real node (`Now using node v22.0.0`), and one that does not exec can
+#   print after node exits; the anchor and the length check both refuse it,
+#   and the refusal names node's output, never the cache — the cache passed.
+#   Refused, never recovered: no value is cut out of chatter. The end
+#   sentinel also stops `$(…)` stripping a trailing newline off a value the
+#   way an unframed capture always did — a value that itself ends in a
+#   newline now survives inside the frame, and the trailing-operator check
+#   below treats it exactly like a trailing `;` or `&`: refused, not
+#   silently accepted.
 errf=$(mktemp) || die "cannot create a temporary file to read the Recipe cache"
-trap 'rm -f "$errf"' EXIT
+lenf=$(mktemp) || die "cannot create a temporary file to read the Recipe cache"
+trap 'rm -f "$errf" "$lenf"' EXIT
 
 open='recipe<' close='>recipe'
 framed=$(node -e '
 const fs = require("fs");
-const [file, field, open, close] = process.argv.slice(1);
+const [file, field, open, close, lenFile] = process.argv.slice(1);
 const bad = (why) => { console.error(why); process.exit(2); };
 let r;
 try { r = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { bad(`it does not parse: ${e.message}`); }
@@ -142,27 +151,40 @@ if (r.installClean !== true) bad("`installClean` is not true — the Install ste
 const counted = Number.isInteger(r.testCount) && r.testCount > 0;
 const mutated = typeof r.mutation === "string" && r.mutation.trim() !== "";
 if (!counted && !mutated) bad("it carries no proof of real tests — neither a positive `testCount` nor a `mutation`");
-process.stdout.write(open + r[field] + close);
-' "$cache" "$field" "$open" "$close" 2>"$errf") || die "the Recipe cache at $cache is unusable: $(cat "$errf") — $derive"
+const value = r[field];
+fs.writeFileSync(lenFile, String(Buffer.byteLength(open + value + close)));
+process.stdout.write(open + value + close);
+' "$cache" "$field" "$open" "$close" "$lenf" 2>"$errf") || die "the Recipe cache at $cache is unusable: $(cat "$errf") — $derive"
+carriedmsg="node's stdout carried more than the framed Recipe value — expected exactly the value between '$open' and '$close', got '$framed'. The cache at $cache passed validation; the extra output comes from how node is launched here (a version-manager or proxy shim, a preload), and is refused rather than cut out of the command"
 case $framed in
   "$open"*"$close") ;;
-  *) die "node's stdout carried more than the framed Recipe value — expected exactly the value between '$open' and '$close', got '$framed'. The cache at $cache passed validation; the extra output comes from how node is launched here (a version-manager or proxy shim, a preload), and is refused rather than cut out of the command" ;;
+  *) die "$carriedmsg" ;;
 esac
+framedlen=$(cat "$lenf")
+case $framedlen in
+  ''|*[!0-9]*) die "the Recipe cache at $cache is unusable: node's byte-count file is missing or corrupt — $derive" ;;
+esac
+[ "${#framed}" -eq "$framedlen" ] || die "$carriedmsg"
 value=${framed#"$open"}
 value=${value%"$close"}
 
 # Both consumers append the runner's own arguments after this string
 # textually (claim-ticket.sh's `exec sh -c '<cmd> "$@"' agent-test "$@"`), so
-# a command ending in `;` or `&` lets a real shell read the caller's "$@" as
-# an unrelated top-level command instead of args reaching the Test
-# entrypoint, and one containing a `#`-led word swallows everything after it,
-# "$@" included, as a comment — measured on both. Checked on the raw string
-# for the trailing operator (adjacency to whitespace is not what makes `;`/`&`
-# a shell operator) and on the same naive field split the leading-word check
-# below already trusts for the comment word, since neither hazard is about
-# whether the command resolves.
+# a command ending in `;`, `&`, or a newline lets a real shell read the
+# caller's "$@" as an unrelated top-level command instead of args reaching
+# the Test entrypoint, and one containing a `#`-led word swallows everything
+# after it, "$@" included, as a comment — measured on both. A trailing
+# newline is checked here too (#2217): the frame above lets a value keep one
+# where an unframed `$(…)` capture always dropped it silently, so a value
+# that used to read as `true;` now reads as `true;\n` and would otherwise
+# slip past a check written for the no-newline case. Checked on the raw
+# string for the trailing operator (adjacency to whitespace is not what
+# makes `;`/`&` a shell operator) and on the same naive field split the
+# leading-word check below already trusts for the comment word, since
+# neither hazard is about whether the command resolves.
 case $value in
-  *';'|*'&') die "the Recipe cache at $cache is invalid: its $field command '$value' ends in ';' or '&' — a runner-appended argument after it would run as an unrelated command instead of reaching the Test entrypoint; $derive" ;;
+  *';'|*'&'|*'
+') die "the Recipe cache at $cache is invalid: its $field command '$value' ends in ';', '&', or a newline — a runner-appended argument after it would run as an unrelated command instead of reaching the Test entrypoint; $derive" ;;
 esac
 set -f
 IFS=' 	

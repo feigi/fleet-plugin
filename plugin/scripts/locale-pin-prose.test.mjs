@@ -133,15 +133,18 @@ export function localeSensitive(source) {
 // nothing else — superscript `²`, Arabic-Indic digits and `½` are excluded in
 // all four, so no locale reachable here reads the guard differently.
 //
-// derive-testcmd.sh's three are the reason its pin exists (ADR 0015's cache
+// derive-testcmd.sh's four are the reason its pin exists (ADR 0015's cache
 // reader): two shell `case` ranges that pick a Recipe command's leading word
 // apart past `NAME=value` prefixes — ASCII-only by intent, which `C` is what
-// guarantees — and one range inside the inline `node -e` validator, which the
+// guarantees — one range inside the inline `node -e` validator, which the
 // shell locale cannot reach at all (JS regex classes are code-point ranges)
-// and is listed only because this scan is line-based.
+// and is listed only because this scan is line-based, and one more of the
+// same digit-only shape as inflight.sh's and release-ticket.sh's own
+// issue-number guards below (#2217's byte-count-from-node check).
 const ALLOWED = {
   "derive-testcmd.sh": [
     'if (typeof r.derivedAt !== "string" || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(r.derivedAt))',
+    `''|*[!0-9]*) die "the Recipe cache at $cache is unusable: node's byte-count file is missing or corrupt — $derive" ;;`,
     "[A-Za-z_]*=*)",
     "case ${1%%=*} in *[!A-Za-z0-9_]*) break ;; esac",
   ],
