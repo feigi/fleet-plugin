@@ -27,9 +27,13 @@
 //      its `subagent_type` is a `fleet-implementer*` definition — the PR ruled
 //      in a later run than the one that dispatched it;
 //   3. else blank, with a WARNING naming why.
-// A `tier-mismatch=impl-<N>:…` verdict on the ledger row is positive evidence
-// the implementer did NOT run under its definition, so it blanks the tier
-// rather than letting step 2 reach an older dispatch of the same ticket.
+// A ledger mismatch is positive evidence the implementer did NOT run under
+// its definition, so it blanks the tier rather than letting step 2 reach an
+// older dispatch of the same ticket — read from either the free-text
+// `tier-mismatch=impl-<N>:<definition>` token tier-check.mjs writes when the
+// member is already settled some other way, or the member's own settled
+// `impl-<N>=tier-mismatch` outcome, tier-check.mjs's main path for a mismatch
+// caught while the member is still live.
 //
 // Values are definition SHORT NAMES (ADR 0011: never a vendor family):
 // `fleet-implementer` is `default`, `fleet-implementer-<x>` is `<x>` (`alt`,
@@ -54,15 +58,16 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
 
 // ---------------------------------------------------------------------------
-// pure core — unit-tested directly (tier-outcomes.test.mjs)
+// pure core — exercised through the CLI by tier-outcomes.test.mjs; only
+// COLUMNS and TIER_SWITCH_DATE are imported directly, the rest through argv
 // ---------------------------------------------------------------------------
 
 // APPENDED TO, never inserted into: every awk read-out in the file's header
 // and in run-team/SKILL.md indexes by position.
-export const COLUMNS = [
+export const COLUMNS = Object.freeze([
   "run_date", "pr", "ticket", "class", "tier", "closed_own_ticket",
   "minted_false_claim", "note", "sizing", "profile", "loc", "files",
-];
+]);
 // Rows predating the four difficulty covariates are SHORT on purpose.
 export const LEGACY_WIDTH = COLUMNS.length - 4;
 
@@ -114,10 +119,24 @@ export function implementerRows(memberRows, ticket) {
 // ticket's implementers.
 const TIER_VERDICT = /^tier-(ok|mismatch)=([^:\s]+):(\S+)$/;
 
-// Step 1. Returns `{tier, source}`, `{tier: "", warning}` on a recorded
-// mismatch, or null to fall through to member-outcomes.tsv. The implementer
-// whose settled outcome is `PR#<pr>` owns the verdict when the ledger says who
-// that is; otherwise the row must carry verdicts for exactly one member.
+// A `{tier, source}` on success or `{tier: "", warning}` when the tier must
+// stay blank — built ONLY through these two constructors, so a return site
+// cannot pair a non-empty tier with a warning, or the reverse, by drifting
+// out of convention (four independent literal object constructions used to
+// enforce this by hand across tierFromLedger and tierFromMembers).
+const ok = (tier, source) => ({ tier, source, warning: null });
+const blocked = (warning) => ({ tier: "", source: null, warning });
+
+// Step 1. Returns `ok(...)`, `blocked(...)` on a recorded mismatch, or null
+// to fall through to member-outcomes.tsv. The implementer whose settled
+// outcome is `PR#<pr>` owns the verdict when the ledger says who that is;
+// otherwise the row must carry verdicts for exactly one member. A mismatch is
+// read from EITHER of two ledger shapes: the free-text `tier-mismatch=impl-
+// <N>:<definition>` token tier-check.mjs writes when the member is already
+// settled some other way, or the member's own settled outcome
+// `impl-<N>=tier-mismatch` — tier-check.mjs's main path, a mismatch caught
+// while the member is still live, writes only that settled outcome and no
+// free-text token (tier-check.mjs's recordImplementer).
 export function tierFromLedger(ledger, ticket, pr) {
   const text = rowText(ledger ?? {}, ticket);
   if (!text) return null;
@@ -125,43 +144,59 @@ export function tierFromLedger(ledger, ticket, pr) {
     const m = parseMember(name);
     return m?.family === "impl" && m.number === Number(ticket);
   };
-  const verdicts = text.split(/\s+/)
-    .map((t) => TIER_VERDICT.exec(t))
-    .filter(Boolean)
-    .map((m) => ({ kind: m[1], member: m[2], definition: m[3] }))
-    .filter((v) => ours(v.member));
+  const tokens = [...(ledger.dispatched ?? []).map(parseToken), ...memberTokens(text)].filter((t) => t && ours(t.name));
+
+  const verdicts = [
+    ...text.split(/\s+/)
+      .map((t) => TIER_VERDICT.exec(t))
+      .filter(Boolean)
+      .map((m) => ({ kind: m[1], member: m[2], definition: m[3] }))
+      .filter((v) => ours(v.member)),
+    ...tokens.filter((t) => t.outcome === "tier-mismatch").map((t) => ({ kind: "mismatch", member: t.name, definition: null })),
+  ];
   if (verdicts.length === 0) return null;
 
-  const owners = new Set([...(ledger.dispatched ?? []).map(parseToken), ...memberTokens(text)]
-    .filter((t) => t && ours(t.name) && t.outcome === `PR#${pr}`)
-    .map((t) => t.name));
-  const mine = owners.size === 1 ? verdicts.filter((v) => owners.has(v.member)) : verdicts;
+  const owners = new Set(tokens.filter((t) => t.outcome === `PR#${pr}`).map((t) => t.name));
+  // A member settled to anything else terminal (released, bailed, killed) is
+  // positive evidence it did NOT open this PR, so its stale tier-ok verdict
+  // never wins the no-owner fallback below — but `tier-mismatch` itself is
+  // exempt: that outcome IS the mismatch verdict this function reports, not
+  // evidence of a different owner.
+  const disqualified = new Set(tokens.filter((t) => t.outcome !== null && t.outcome !== `PR#${pr}` && t.outcome !== "tier-mismatch").map((t) => t.name));
+  const mine = owners.size === 1 ? verdicts.filter((v) => owners.has(v.member)) : verdicts.filter((v) => !disqualified.has(v.member));
   const members = new Set(mine.map((v) => v.member));
   if (members.size !== 1) return null;
   const [member] = members;
 
   const mismatch = mine.find((v) => v.kind === "mismatch");
-  if (mismatch) return { tier: "", warning: `the ledger records tier-mismatch=${member}:${mismatch.definition} — it did not run under its definition` };
+  if (mismatch) {
+    return blocked(mismatch.definition
+      ? `the ledger records tier-mismatch=${member}:${mismatch.definition} — it did not run under its definition`
+      : `the ledger settled ${member}=tier-mismatch — it did not run under its definition`);
+  }
   const definitions = new Set(mine.map((v) => v.definition));
   if (definitions.size !== 1) return null;
   const [definition] = definitions;
   const tier = shortName(definition);
-  return tier ? { tier, source: `ledger tier-ok=${member}:${definition}` } : null;
+  return tier ? ok(tier, `ledger tier-ok=${member}:${definition}`) : null;
 }
+
+// The member did not run a `fleet-implementer*` definition — shared between
+// append's WARNING (tierFromMembers) and check's FAIL (checkRows) so the two
+// wordings cannot drift apart.
+const notADefinition = (m) => `${m.member} ran as ${m.subagentType ? `'${m.subagentType}'` : "no recorded agent type"}, not a ${BASE_DEFINITION}* definition`;
 
 // Step 2, and step 3's reasons.
 export function tierFromMembers(memberRows, ticket) {
   const rows = implementerRows(memberRows, ticket);
-  if (rows.length === 0) return { tier: "", warning: `no implementer row for #${ticket} in member-outcomes.tsv` };
+  if (rows.length === 0) return blocked(`no implementer row for #${ticket} in member-outcomes.tsv`);
   if (rows.length > 1) {
-    return { tier: "", warning: `${rows.length} implementer rows for #${ticket} in member-outcomes.tsv (${rows.map((r) => r.member).join(", ")}) — never tie-broken by run_date` };
+    return blocked(`${rows.length} implementer rows for #${ticket} in member-outcomes.tsv (${rows.map((r) => r.member).join(", ")}) — never tie-broken by run_date`);
   }
   const [row] = rows;
   const tier = shortName(row.subagentType);
-  if (!tier) {
-    return { tier: "", warning: `${row.member} ran as ${row.subagentType ? `'${row.subagentType}'` : "no recorded agent type"}, not a ${BASE_DEFINITION}* definition` };
-  }
-  return { tier, source: `member-outcomes.tsv ${row.member} (${row.subagentType})` };
+  if (!tier) return blocked(notADefinition(row));
+  return ok(tier, `member-outcomes.tsv ${row.member} (${row.subagentType})`);
 }
 
 export function resolveTier({ ledger, memberRows, ticket, pr }) {
@@ -187,7 +222,7 @@ export function checkRows(rows, memberRows) {
     const [m] = members;
     const actual = shortName(m.subagentType);
     if (actual === null) {
-      failures.push(`PR #${row.pr} (ticket #${row.ticket}): tier=${row.tier}, but ${m.member} ran as ${m.subagentType ? `'${m.subagentType}'` : "no recorded agent type"}, not a ${BASE_DEFINITION}* definition`);
+      failures.push(`PR #${row.pr} (ticket #${row.ticket}): tier=${row.tier}, but ${notADefinition(m)}`);
     } else if (actual !== row.tier) {
       failures.push(`PR #${row.pr} (ticket #${row.ticket}): tier=${row.tier}, but ${m.member} ran as ${m.subagentType} (${actual})`);
     }
@@ -220,11 +255,11 @@ const USAGE = "usage: tier-outcomes.mjs append <pr> --class <c> --closed-own-tic
   + "       tier-outcomes.mjs check [--live] [--file <tsv>] [--member-outcomes <tsv>] [--ledger <path>]";
 
 const die = makeDie(NAME);
-const FLAGS = {
+const APPEND_FLAGS = {
   class: "value", "closed-own-ticket": "value", "minted-false-claim": "value", note: "value",
   sizing: "value", profile: "value", loc: "value", files: "value",
-  file: "value", "member-outcomes": "value", ledger: "value", live: "bool",
 };
+const FLAGS = { ...APPEND_FLAGS, file: "value", "member-outcomes": "value", ledger: "value", live: "bool" };
 const { arg, has, sweep } = defineFlags(die, { flags: FLAGS });
 
 // The positionals — a subcommand and, for `append`, the PR — skipping every
@@ -318,13 +353,14 @@ function today() {
 
 function append(pr, paths) {
   if (!isDigits(pr) || Number(pr) === 0) die(`append needs a PR number, got '${pr}'`);
+  pr = String(Number(pr));
   if (has("live")) die("--live is a check flag");
   const fields = {
     class: arg("class"), closed_own_ticket: arg("closed-own-ticket"), minted_false_claim: arg("minted-false-claim"),
     note: arg("note"), sizing: arg("sizing") ?? "", profile: arg("profile") ?? "", loc: arg("loc") ?? "", files: arg("files") ?? "",
   };
-  for (const [col, flag] of [["class", "class"], ["closed_own_ticket", "closed-own-ticket"], ["minted_false_claim", "minted-false-claim"], ["note", "note"]]) {
-    if (fields[col] === null) die(`append needs --${flag}\n${USAGE}`);
+  for (const col of ["class", "closed_own_ticket", "minted_false_claim", "note"]) {
+    if (fields[col] === null) die(`append needs --${col.replaceAll("_", "-")}\n${USAGE}`);
   }
   for (const [col, value] of Object.entries(fields)) {
     if (/[\t\r\n]/.test(value)) die(`--${col.replaceAll("_", "-")} holds a tab or newline — it would shift every field after it`);
@@ -359,11 +395,11 @@ function append(pr, paths) {
 }
 
 function check(paths) {
-  for (const flag of ["class", "closed-own-ticket", "minted-false-claim", "note", "sizing", "profile", "loc", "files"]) {
+  for (const flag of Object.keys(APPEND_FLAGS)) {
     if (arg(flag) !== null) die(`--${flag} is an append flag`);
   }
   const { text, rows } = readRows(paths.file);
-  if (text === null) console.error(`${NAME}: no ${paths.file} — no rows to check`);
+  if (text === null) die(`no ${paths.file} — no rows to check`);
   const memberRows = readMemberRows(paths.members);
   const { failures, skipped, checked } = checkRows(rows, memberRows);
 

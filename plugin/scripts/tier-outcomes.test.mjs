@@ -17,7 +17,7 @@ const SCRIPT = fileURLToPath(new URL("./tier-outcomes.mjs", import.meta.url));
 const PRE_SWITCH = "2026-09-17";
 assert.ok(PRE_SWITCH < TIER_SWITCH_DATE);
 
-const HEADER = `# run_date\t${COLUMNS.slice(1).join("\t")}\n`;
+const HEADER = `# ${COLUMNS.join("\t")}\n`;
 
 // One member-outcomes.tsv row, every column present so parseTsv accepts it.
 function memberRow({ member, ticket, type, role = "implementer" }) {
@@ -42,7 +42,6 @@ function fixture(t, { members = [], tierRows = [], ledger = null, closes = [10] 
   writeFileSync(join(bin, "gh"), '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$GH_LOG"\nprintf \'%s\\n\' "$GH_JSON"\n');
   chmodSync(join(bin, "gh"), 0o755);
   const f = {
-    dir,
     tier: join(dir, "tier-outcomes.tsv"),
     members: join(dir, "member-outcomes.tsv"),
     ledger: join(dir, "ledger.md"),
@@ -116,6 +115,16 @@ test("append: the verdict of the member that opened the PR, not a replaced attem
   assert.equal(f.dataRows()[0][col("tier")], "alt");
 });
 
+test("append: a stale tier-ok from a member who released the ticket is not used when nobody owns this PR", (t) => {
+  const f = fixture(t, {
+    ledger: { rows: ["#10 impl-10=released · tier-ok=impl-10:fleet-implementer-alt"], dispatched: ["impl-10=released"] },
+  });
+  const r = f.append();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(f.dataRows()[0][col("tier")], "");
+  assert.match(r.stderr, /WARNING tier left blank for PR #20 \(ticket #10\): no implementer row for #10/);
+});
+
 test("append: with no ledger verdict, the ticket's single fleet-implementer* row in member-outcomes.tsv supplies it", (t) => {
   // The PR ruled in a later run than the one that dispatched it: this run's
   // ledger has no row for the ticket at all.
@@ -165,6 +174,20 @@ test("append: a tier-mismatch verdict blanks the tier instead of falling back to
   assert.match(r.stderr, /tier-mismatch=impl-10:fleet-implementer/);
 });
 
+test("append: a member settled tier-mismatch on the ledger blanks the tier even with no free-text tier-mismatch= token", (t) => {
+  // tier-check.mjs's main path (a mismatch caught while the member is still
+  // live) settles the member as `tier-mismatch` directly and writes no
+  // free-text token — see tier-check.mjs's recordImplementer.
+  const f = fixture(t, {
+    ledger: { rows: ["#10 impl-10=tier-mismatch"], dispatched: ["impl-10=tier-mismatch"] },
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+  });
+  const r = f.append();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(f.dataRows()[0][col("tier")], "");
+  assert.match(r.stderr, /the ledger settled impl-10=tier-mismatch/);
+});
+
 test("append: running it twice is a no-op that names the existing row and never asks gh", (t) => {
   const f = fixture(t, { members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }] });
   assert.equal(f.append().code, 0);
@@ -177,11 +200,31 @@ test("append: running it twice is a no-op that names the existing row and never 
   assert.equal(f.ghCalls().length, 1, "the second run asked gh again");
 });
 
+test("append: a leading zero in the PR argument is normalized, not treated as a different PR", (t) => {
+  const f = fixture(t, { members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }] });
+  assert.equal(f.append("020").code, 0);
+  assert.equal(f.dataRows().length, 1);
+  assert.equal(f.dataRows()[0][col("pr")], "20", "the stored PR is normalized, not the raw '020' argument");
+  const again = f.append("20", { note: "a different note" });
+  assert.equal(again.code, 0, again.stderr);
+  assert.equal(f.dataRows().length, 1, "the normalized PR is recognized as already having a row, not duplicated");
+});
+
 test("append: a tab in --note is refused before anything is written", (t) => {
   const f = fixture(t, { members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }] });
   const before = readFileSync(f.tier, "utf8");
   const r = f.append("20", { note: "shifted\tfields" });
   assert.equal(r.code, 2);
+  assert.equal(readFileSync(f.tier, "utf8"), before);
+});
+
+test("append: a newline or carriage return in a flag value is refused, the same as a tab", (t) => {
+  const f = fixture(t, { members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }] });
+  const before = readFileSync(f.tier, "utf8");
+  for (const bad of ["shifted\nfields", "shifted\rfields"]) {
+    const r = f.append("20", { note: bad });
+    assert.equal(r.code, 2, `note ${JSON.stringify(bad)} was not refused`);
+  }
   assert.equal(readFileSync(f.tier, "utf8"), before);
 });
 
@@ -234,16 +277,20 @@ test("check: blank, several-row and no-row rows are skipped, not failed", (t) =>
       { member: "impl-10", ticket: 10, type: "task" },
       { member: "impl-11", ticket: 11, type: "fleet-implementer" },
       { member: "impl-11-b", ticket: 11, type: "task" },
+      // A single-member row (ticket 13) is CHECKED, not skipped — closes the
+      // boundary between this and the several-member-rows case above.
+      { member: "impl-13", ticket: 13, type: "fleet-implementer" },
     ],
     tierRows: [
       tierRow({ pr: 20, ticket: 10, tier: "" }),
       tierRow({ pr: 21, ticket: 11, tier: "default" }),
       tierRow({ pr: 22, ticket: 12, tier: "default" }),
+      tierRow({ pr: 23, ticket: 13, tier: "default" }),
     ],
   });
   const r = f.run("check");
   assert.equal(r.code, 0, r.stderr);
-  assert.match(r.stdout, /0 checked, 0 failed; skipped 0 before \S+, 1 blank, 1 with no member row, 1 with several member rows/);
+  assert.match(r.stdout, /1 checked, 0 failed; skipped 0 before \S+, 1 blank, 1 with no member row, 1 with several member rows/);
 });
 
 test("check: rows dated before the switch are skipped, whatever they say", (t) => {
@@ -254,6 +301,17 @@ test("check: rows dated before the switch are skipped, whatever they say", (t) =
   const r = f.run("check");
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /skipped 1 before/);
+});
+
+test("check: a missing tier-outcomes.tsv file fails loudly instead of passing 0 checked", (t) => {
+  const f = fixture(t, {
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+    tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" })],
+  });
+  rmSync(f.tier);
+  const r = f.run("check");
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /no .*tier-outcomes\.tsv — no rows to check/);
 });
 
 test("check --live: warns on each reviewed PR with no row, and the warning alone never fails", (t) => {

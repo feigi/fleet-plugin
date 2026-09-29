@@ -432,13 +432,10 @@ test("the header says which file each distinct-`run_date` count is read from, an
   // reader told only that the two are "different" still has to guess which way.
   assert.match(
     block,
-    phrase("Here it is STAMPED AT RULING — `tier-outcomes.mjs append` reads the clock when the controller rules a PR's review"),
-    "the header no longer says this file's `run_date` is stamped when the PR is ruled",
-  );
-  assert.match(
-    block,
-    phrase("— so it records WHICH RUN THE PR BELONGS TO"),
-    "the header no longer says this file's `run_date` records which run the PR belongs to",
+    phrase(
+      "Here it is STAMPED AT RULING — `tier-outcomes.mjs append` reads the clock when the controller rules a PR's review, where before 2026-09-29 the controller typed it at that same moment — so it records WHICH RUN THE PR BELONGS TO",
+    ),
+    "the header no longer says this file's `run_date` is stamped at ruling and records which run the PR belongs to, as one contiguous claim",
   );
   assert.match(
     block,
