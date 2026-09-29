@@ -59,10 +59,13 @@ const FINISHER = { kind: "sub", id: "finisher-pr-9", name: "fleet-finisher", dep
 const CHILD = { kind: "sub", id: "impl-42.Probe", name: "task", depth: 2, parentId: "impl-42" };
 const UNRELATED = { kind: "sub", id: "0-Explore", name: "explore", depth: 1, parentId: "Main" };
 const MAIN = { kind: "main", id: "Main", name: "main", depth: 0 };
+// A fix-applier: dispatched under the generic `task` definition (no `fleet-`
+// prefix) directly by the controller, so only its own id names it.
+const FIX_APPLIER = { kind: "sub", id: "fix-pr-2246", name: "task", depth: 0, parentId: "Main" };
 
 let handler;
 memberWriteGuard({ on: (event, fn) => { if (event === "tool_call") handler = fn; } });
-const call = (agent, toolName, input, cwd = ROOT) => handler({ type: "tool_call", toolCallId: "t", toolName, input }, { cwd, agent });
+const call = (agent, toolName, input, cwd) => handler({ type: "tool_call", toolCallId: "t", toolName, input }, { cwd, agent });
 
 async function refused(agent, toolName, input, cwd, what) {
   const r = await call(agent, toolName, input, cwd);
@@ -90,6 +93,8 @@ test("edit is refused on any target in the main checkout — header, omp's deriv
   await refused(IMPL, "edit", { input: "…", path: "plugin/tool.mjs", paths: ["plugin/tool.mjs"] }, ROOT, "omp-normalised path");
   await refused(IMPL, "edit", { input: `[${join(WT, "plugin", "tool.mjs")}#ABCD]\nMV "plugin/moved.mjs"\n` }, ROOT, "a worktree file moved into the main checkout");
   await refused(IMPL, "edit", { input: "*** Begin Patch\n*** Update File: plugin/tool.mjs\n*** End Patch\n" }, ROOT, "apply_patch-mode header");
+  await refused(IMPL, "edit", { _path: join(ROOT, "plugin", "tool.mjs") }, ROOT, "a host-added _path key, un-normalised");
+  await refused(IMPL, "edit", { _input: `[${join(ROOT, "plugin", "tool.mjs")}#ABCD]\nPUT 1.=1:\n+x\n` }, ROOT, "a host-added _input key, un-normalised");
   await allowed(IMPL, "edit", { input: `[${join(WT, "plugin", "tool.mjs")}#ABCD]\nPUT 1.=1:\n+x\n` }, ROOT, "a worktree edit");
 });
 
@@ -127,12 +132,25 @@ test("only fleet members and their children are guarded — nothing else in the 
   }
 });
 
+test("a fix-applier dispatched under the generic `task` definition is guarded by its own id, not its definition name", async () => {
+  await refused(FIX_APPLIER, "write", { path: "plugin/tool.mjs" }, ROOT, "a fix-applier's relative write");
+  await refused(FIX_APPLIER, "edit", { input: "[plugin/tool.mjs#ABCD]\nPUT 1.=1:\n+x\n" }, ROOT, "a fix-applier's edit");
+  await refused(FIX_APPLIER, "bash", { command: "true" }, ROOT, "a fix-applier's bash with no cwd");
+  await refused(FIX_APPLIER, "bash", { command: "true", cwd: ROOT }, WT, "a fix-applier's bash at the main checkout root");
+  await allowed(FIX_APPLIER, "write", { path: "plugin/tool.mjs" }, WT, "a fix-applier's write from its worktree");
+  await allowed(FIX_APPLIER, "bash", { command: "true", cwd: WT }, ROOT, "a fix-applier's bash cwd set to its worktree");
+  // The pattern is anchored: a generic `task` agent whose own id does not
+  // match `fix-pr-<n>` is nobody's fix-applier and stays unguarded — the
+  // existing UNRELATED/CHILD near-miss rows above already cover this shape.
+});
+
 test("bash: an implementer is refused from the main checkout, never from its worktree; nobody else is", async () => {
   const r = await refused(IMPL, "bash", { command: "git status" }, ROOT, "implementer bash with no cwd");
   assert.ok(r.includes(REAL_ROOT), `the bash refusal does not name the cwd it resolved: ${r}`);
   await refused(ALT, "bash", { command: "true" }, ROOT, "implementer-alt bash with no cwd");
   await refused(IMPL, "bash", { command: "true", cwd: "plugin" }, ROOT, "a relative cwd inside the main checkout");
   await refused(IMPL, "bash", { command: "true", cwd: ROOT }, WT, "an explicit cwd at the main checkout root");
+  await refused(IMPL, "bash", { command: "true", cwd: join(ROOT, ".worktrees") }, ROOT, "cwd at the bare .worktrees directory itself, not a worktree under it");
   await allowed(IMPL, "bash", { command: "true", cwd: WT }, ROOT, "cwd set to the worktree");
   await allowed(IMPL, "bash", { command: "true", cwd: SCRATCH }, ROOT, "cwd set to scratch");
   await allowed(IMPL, "bash", { command: "true" }, WT, "no cwd, session already in the worktree");
@@ -154,13 +172,21 @@ test("when git cannot answer, the guard refuses; when there is no repository at 
   assert.match(r, /git rev-parse --git-common-dir exited/, `the refusal does not name the git failure: ${r}`);
   await refused(IMPL, "write", { path: "x.txt" }, join(BASE, "no-such-dir"), "a session cwd that does not exist");
 
-  const agent = IMPL;
   const failing = await decide({
-    toolName: "write", input: { path: "plugin/tool.mjs" }, cwd: REAL_ROOT, agent, mainRoot: REAL_ROOT,
+    toolName: "write", input: { path: "plugin/tool.mjs" }, cwd: REAL_ROOT, agent: IMPL, mainRoot: REAL_ROOT,
     isIgnored: async () => { throw new Error("git check-ignore exited 128: fatal: boom"); },
   });
   assert.equal(failing?.block, true, "a check-ignore failure let the write through");
   assert.match(failing.reason, /fatal: boom/, "the refusal does not carry the check-ignore failure");
+
+  // decide() is exported and callable directly (as this test does), so a
+  // mainRoot outside its null/Error/non-empty-string contract must fail
+  // closed rather than let `within()`'s empty-prefix match everything.
+  const emptyRoot = await decide({
+    toolName: "write", input: { path: "/etc/passwd" }, cwd: "/tmp", agent: IMPL, mainRoot: "",
+    isIgnored: async () => false,
+  });
+  assert.equal(emptyRoot?.block, true, "an empty-string mainRoot let an arbitrary absolute path through");
 });
 
 test("an ambient GIT_DIR naming another repository does not change the answer", async () => {

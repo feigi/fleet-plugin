@@ -15,10 +15,13 @@
 //
 // WHO IS GUARDED — nothing else, because this loads in every session:
 //   - any subagent whose definition name starts with `fleet-`;
+//   - any subagent whose own id is a fleet member's task name (`impl-1411`,
+//     `fix-pr-88`, `review-pr-2245`, `finisher-pr-7`, with an optional `-b`
+//     recovery suffix): this is how a fix-applier is caught, since it is
+//     dispatched under a generic `task` definition with no `fleet-` prefix;
 //   - any subagent spawned BY a fleet member: its `parentId` is the member's
-//     task name (`impl-1411`, `fix-pr-88`, `review-pr-2245`, `finisher-pr-7`,
-//     with an optional `-b` recovery suffix), while its own definition name is
-//     a generic one no prefix check could see.
+//     task name, while its own definition name is a generic one no prefix
+//     check could see.
 // A top-level (`kind: "main"`) session is never guarded: that is the
 // controller, whose own writes into its checkout are its job.
 //
@@ -29,13 +32,15 @@
 //     ignored in a fleet repo, so worktrees, run state and agent-brain's cache
 //     stay writable, and what is protected is exactly what the main
 //     checkout's `git status` would show dirty (#2210 watches the same set).
-//   - `bash` cwd, for `fleet-implementer`/`fleet-implementer-alt` only (a
-//     fix-applier is dispatched as one): refuse when `input.cwd ?? ctx.cwd`
-//     lies inside the main checkout outside `.worktrees/`. Command text is
-//     never parsed. Review specialists and refuters are REQUIRED to start from
-//     the inherited cwd (`pwd` first, then `cd` inside the command), the
-//     finisher runs its audit and `git worktree add` from there, and children
-//     follow ad-hoc briefs — so none of them gets this rule.
+//   - `bash` cwd, for `fleet-implementer`/`fleet-implementer-alt`, and for a
+//     fix-applier's own id (`fix-pr-<n>`) directly, since a fix-applier is
+//     NOT dispatched as `fleet-implementer` today: refuse when
+//     `input.cwd ?? ctx.cwd` lies inside the main checkout outside
+//     `.worktrees/`. Command text is never parsed. Review specialists and
+//     refuters are REQUIRED to start from the inherited cwd (`pwd` first,
+//     then `cd` inside the command), the finisher runs its audit and
+//     `git worktree add` from there, and children follow ad-hoc briefs — so
+//     none of them gets this rule.
 // Never a rewrite: a refusal names the resolved path and tells the member to
 // re-issue it absolute under its worktree. Relative READS and `eval` are not
 // guarded here; #2210's detection covers `eval`.
@@ -63,25 +68,23 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 
-/** The task names the controller gives fleet members; a subagent whose parent carries one is a member's child. */
-export const MEMBER_TASK_NAME = /^(impl|fix-pr|review-pr|finisher-pr)-\d+(-[a-z])?$/;
+/** The task names the controller gives fleet members; a subagent whose parent carries one is a member's child, and a fix-applier — dispatched under a generic `task` definition with no `fleet-` prefix — is caught by its own id matching this directly. */
+const MEMBER_TASK_NAME = /^(impl|fix-pr|review-pr|finisher-pr)-\d+(-[a-z])?$/;
+const FIX_APPLIER_ID = /^fix-pr-\d+(-[a-z])?$/;
 const BASH_CWD_AGENTS = new Set(["fleet-implementer", "fleet-implementer-alt"]);
 const PATH_WRITERS = new Set(["write", "edit", "ast_edit"]);
 const GIT_TIMEOUT_MS = 10_000;
 const REISSUE = "Re-issue it with an absolute path under your worktree `.worktrees/<n>-<slug>/`.";
 
-/** Which of the two rules bind `agent`. Never throws: it runs for every tool call in every session. */
-export function guardScope(agent) {
-  if (!agent || agent.kind !== "sub") return { paths: false, bashCwd: false };
+/** Whether `decide()` could refuse this call — the handler's cheap gate before it spends a git call. Never throws: it runs for every tool call in every session. */
+function applies(agent, toolName) {
+  if (agent?.kind !== "sub") return false;
   const name = typeof agent.name === "string" ? agent.name : "";
-  const memberChild = typeof agent.parentId === "string" && MEMBER_TASK_NAME.test(agent.parentId);
-  return { paths: name.startsWith("fleet-") || memberChild, bashCwd: BASH_CWD_AGENTS.has(name) };
-}
-
-/** Whether `decide()` could refuse this call — the handler's cheap gate before it spends a git call. */
-export function applies(agent, toolName) {
-  const scope = guardScope(agent);
-  return toolName === "bash" ? scope.bashCwd : PATH_WRITERS.has(toolName) && scope.paths;
+  const id = typeof agent.id === "string" ? agent.id : "";
+  if (toolName === "bash") return BASH_CWD_AGENTS.has(name) || FIX_APPLIER_ID.test(id);
+  return PATH_WRITERS.has(toolName)
+    && (name.startsWith("fleet-") || MEMBER_TASK_NAME.test(id)
+      || (typeof agent.parentId === "string" && MEMBER_TASK_NAME.test(agent.parentId)));
 }
 
 // The textual shapes an `edit` payload names its files in. omp adds `path` /
@@ -106,7 +109,7 @@ function editPayloadPaths(text) {
 }
 
 /** Every raw target path a path-writer call names, as the model wrote it. */
-export function targets(toolName, input) {
+function targets(toolName, input) {
   const i = input && typeof input === "object" ? input : {};
   const found = [];
   const add = (v) => { if (typeof v === "string" && v.trim() !== "") found.push(v.trim()); };
@@ -162,11 +165,14 @@ export async function decide({ toolName, input, cwd, agent, mainRoot, isIgnored,
   if (mainRoot instanceof Error) {
     return { block: true, reason: `member-write-guard: refused ${toolName} — could not resolve the main checkout from ${cwd} (${mainRoot.message}), and a guard that cannot look does not let the call through. ${REISSUE}` };
   }
+  if (typeof mainRoot !== "string" || mainRoot === "") {
+    return { block: true, reason: `member-write-guard: refused ${toolName} — the main checkout resolved to an unusable value, and a guard that cannot look does not let the call through. ${REISSUE}` };
+  }
 
   if (toolName === "bash") {
     const asked = typeof input?.cwd === "string" && input.cwd.trim() !== "" ? input.cwd : cwd;
     const at = canonical(fsPath(asked, cwd) ?? resolve(cwd, asked));
-    if (within(mainRoot, at) && !within(join(mainRoot, ".worktrees"), at)) {
+    if (within(mainRoot, at) && !at.startsWith(join(mainRoot, ".worktrees") + sep)) {
       return { block: true, reason: `member-write-guard: refused bash — its cwd ${at} is inside the main checkout ${mainRoot}, outside \`.worktrees/\`. Re-issue it with \`cwd\` set to the absolute path of your worktree \`.worktrees/<n>-<slug>/\`.` };
     }
     return undefined;
@@ -200,8 +206,7 @@ function git(args, cwd) {
   return new Promise((done) => {
     let stdout = "";
     let stderr = "";
-    let settled = false;
-    const finish = (r) => { if (!settled) { settled = true; done({ stdout, stderr, ...r }); } };
+    const finish = (r) => done({ stdout, stderr, ...r });
     let child;
     try {
       child = spawn("git", args, { cwd, env: gitEnv({ LC_ALL: "C" }), stdio: ["ignore", "pipe", "pipe"], timeout: GIT_TIMEOUT_MS });
@@ -223,7 +228,7 @@ function failure(r, what) {
 }
 
 /** The main checkout `cwd` belongs to: a path, `null` outside any repository, or an `Error`. */
-export async function resolveMainRoot(cwd) {
+async function resolveMainRoot(cwd) {
   const r = await git(["rev-parse", "--git-common-dir"], cwd);
   // Only git's no-repository-anywhere answer is "no main checkout". A gitfile
   // pointing at a missing git dir also says "not a git repository", followed
@@ -235,7 +240,7 @@ export async function resolveMainRoot(cwd) {
 }
 
 /** `git check-ignore` from `mainRoot`: true ignored, false not; rejects on anything else. */
-export async function checkIgnored(mainRoot, absPath) {
+async function checkIgnored(mainRoot, absPath) {
   const r = await git(["check-ignore", "-q", "--", absPath], mainRoot);
   if (!r.error && r.status === 0) return true;
   if (!r.error && r.status === 1) return false;
@@ -243,10 +248,11 @@ export async function checkIgnored(mainRoot, absPath) {
 }
 
 /** The symlink-free spelling of `p`, whose tail need not exist yet. */
-export function canonicalPath(p) {
+function canonicalPath(p) {
   try {
     return realpathSync(p);
-  } catch {
+  } catch (e) {
+    if (e?.code !== "ENOENT") throw e;
     const parent = dirname(p);
     return parent === p ? p : join(canonicalPath(parent), basename(p));
   }

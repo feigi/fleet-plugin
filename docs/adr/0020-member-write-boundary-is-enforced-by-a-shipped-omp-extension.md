@@ -82,10 +82,17 @@ Three routes were weighed.
 7. **Distribution.** `plugin/package.json` carries `"name": "fleet-ctl"`,
    `"version": "0.0.0"` and `"omp": {"extensions":
    ["scripts/member-write-guard.mjs"]}`. A marketplace install symlinks the
-   cached plugin into the scope's `plugins/node_modules/fleet-ctl` and loads
-   `package.json#omp.extensions`. Install checks that the entry initialises,
-   and rolls back if it does not. There is no semver, no catalog version, and
-   no project-scoped `.omp/extensions/` copy. Rollout is
+   cached plugin into the scope's `plugins/node_modules/fleet-ctl`, and the
+   extension loader imports it from `package.json#omp.extensions` (omp's
+   `docs/plugin-manager-installer-plumbing.md`: this is the
+   `MarketplaceManager` install path, distinct from `PluginManager.install()`'s
+   npm/git/link path — the one that validates a declared extension
+   initialises and rolls back the install on failure). A marketplace install
+   carries no such check: a load failure is instead captured per-path at
+   runtime (`docs/extension-loading.md`) and does not stop other extensions
+   or abort the session — the guard simply does not load, silently, which is
+   part of why #2210's detection backstop exists. There is no semver, no
+   catalog version, and no project-scoped `.omp/extensions/` copy. Rollout is
    `omp plugin upgrade fleet-ctl@fleet-plugin` and a session restart (README,
    Installation).
 
