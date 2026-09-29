@@ -34,6 +34,7 @@ in both BSD and GNU flavours
 | `gh` | `>= 2.94.0` | `gh issue list --json blockedBy` — older `gh` exits `Unknown JSON field`, and the admission gate dies rather than run without blockers (`plugin/scripts/candidates.mjs:343-345`) | `gh --version` |
 | `jq` | any | runbooks parse `ci-state.mjs` / transcript payloads with `jq -e`, `jq -r` (`plugin/skills/run-team/SKILL.md:1703`) | `jq --version` |
 | `python3` | any 3.x | NUL-safe / UTF-8-strict readers in `inflight.sh`, `json.sh`, `no-undo-audit.sh` — several tests `skip` without it, the scripts `die` | `python3 -c 'import json'` |
+| `shasum` | any | `instruments.sh` digests tracked files (`shasum -a 256`) | `command -v shasum` |
 
 Not needed: `timeout`/`gtimeout` (`net.sh` hand-rolls a watchdog),
 `docker`, any package manager beyond the one your lockfile implies (§2.3).
@@ -49,6 +50,8 @@ floor ([ADR 0010](adr/0010-the-node-pin-stays-exact-and-a-bot-moves-it.md)).
 - **Every member and the controller share this one identity.** There is no
   per-member attribution; "who claimed #42" means "which worktree", not
   "which user". If you need per-actor audit on GitHub, this is the wrong tool.
+- GitHub Enterprise: works — `ci-state.mjs`'s compare probe derives
+  `--hostname` itself from `git remote get-url origin`; no extra config step (`plugin/scripts/ci-state.test.mjs:358`).
 
 ### 1.4 omp, with the fleet plugin installed — HARD
 
@@ -168,7 +171,7 @@ creates a label except `in-progress` on first claim. See
 |---|---|
 | `ready-for-agent` | the Shortlist source. Only issues carrying this are ever considered |
 | `in-progress` | claimed; set by the fleet, excluded from the Shortlist |
-| `ready-to-merge` | **merge-gate approval** — set by a reviewer/finisher on green, a human may too (§3.4) |
+| `ready-to-merge` | **merge-gate approval** — set by a reviewer/finisher once diff-check is green, deferrals are filed, and one release label is present; a human may add or remove it directly at any time, independent of green (§3.4) |
 | `needs-triage`, `needs-info`, `ready-for-human`, `wontfix` | triage roles; excluded from the Shortlist; written back by relabel-by-cause ([ADR 0013](adr/0013-automatic-supply-relabel-by-cause.md)) |
 | `onhold` | excluded from the Shortlist |
 | `wayfinder:map`, `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling`, `wayfinder:task` | wayfinder children; excluded |
@@ -188,7 +191,7 @@ done
 ```
 
 Add these two lines yourself — no fleet script writes to `.gitignore`; the
-pre-flight check in §4 only verifies they're present, it doesn't add them.
+pre-flight check in §4 only verifies both paths are ignored (`git check-ignore`), it doesn't add them.
 
 `.fleet/` state lives in the **main checkout** (git common dir), never in a
 worktree; if it is tracked, every member's ledger write shows up as a dirty
@@ -313,7 +316,7 @@ Write tickets so the member can act without you:
   changes. A `CHANGES_REQUESTED` review blocks the merge bot (`merge-gate.mjs:205`)
   until re-reviewed — that is the intended way to veto.
 
-### 3.4 The one human touchpoint: `ready-to-merge` — HARD
+### 3.4 `ready-to-merge`: the merge-gate approval — HARD
 
 - `ready-to-merge` is added by a **reviewer** — a finisher, or a reviewer
   running `review-and-fix` standalone, once diff-check is green, deferrals
