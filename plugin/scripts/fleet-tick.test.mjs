@@ -374,6 +374,27 @@ test("deriveRun: a queued PR under a conflict hold is merge-held until its fix-a
   assert.equal(both.mergeHeld, 1);
 });
 
+test("deriveRun: a conflict hold with a live review= in flight is not re-offered either — the merge hold still counts it", () => {
+  const r = run({ rows: ["#10 impl-10=PR#350 → PR#350 · conflict-hold:#350 review=wf:x"] }, [pr(350, ["ready-to-merge"])]);
+  assert.deepEqual(r.fixDue, [], "a review already running claims the row the same as a live fix-applier does");
+  assert.deepEqual([r.mergeQueue, r.mergeHeld, r.mergeConflictHeld], [1, 1, 1]);
+});
+
+test("deriveRun: a fix-applier settled in ## Dispatched clears a conflict hold even if a later row rewrite drops the =outcome suffix back to bare", () => {
+  const r = run({
+    rows: [HOLD_ROW(40, "conflict-hold:#40 · fix-pr-40")],
+    dispatched: ["fix-pr-40=applied:def5678"],
+  }, [pr(40, ["ready-to-merge"])]);
+  assert.deepEqual([r.fixDue, r.mergeHeld, r.mergeConflictHeld], [[], 0, 0],
+    "the member settled in ## Dispatched, not the row's own stale bare copy");
+});
+
+test("deriveRun: a redundant re-hold on an already-unresolved conflict does not reset a live fix-applier's fixSince", () => {
+  const r = run({ rows: [HOLD_ROW(40, "conflict-hold:#40 · fix-pr-40 · conflict-hold:#40")] }, [pr(40, ["ready-to-merge"])]);
+  assert.deepEqual(r.fixDue, [], "a live fix-applier working the first hold is not re-offered by a duplicate hold token");
+  assert.deepEqual([r.mergeHeld, r.mergeConflictHeld], [1, 1], "still held — the duplicate hold changes nothing about the merge gate");
+});
+
 test("deriveRun: a conflict hold is read in either spelling and on a PR-keyed row", () => {
   assert.deepEqual(run({ rows: [HOLD_ROW(40, "conflict-hold-#40")] }, [pr(40)]).fixDue, [40]);
   assert.deepEqual(run({ rows: ["#350 review=wf:x reviewed=abc1234:0/1/0 · conflict-hold:#350"] }, [pr(350)]).fixDue, [350]);
@@ -444,6 +465,7 @@ test("deriveRun: a token it cannot read refuses by naming it, never counts it li
     ["a reviewed= with no counts", { rows: ["#9 review=wf:a reviewed=abc1234"] }, /reviewed=abc1234/],
     ["a review= of no known kind", { rows: ["#9 review=bogus"] }, /review=bogus/],
     ["a conflict hold naming another PR", { rows: ["#10 impl-10=PR#40 → PR#40 · conflict-hold:#38"] }, /conflict-hold:#38.*PR #40/],
+    ["a conflict hold on a row with no PR mention or PR-keyed impl token at all", { rows: ["conflict-hold:#40"] }, /no PR's/],
   ]) {
     assert.throws(() => run(ledger), why, what);
   }

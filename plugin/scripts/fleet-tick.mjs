@@ -252,12 +252,20 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
         // A settled `failed`/`killed` fix-applier leaves survivors unfixed and
         // no successor dispatched — the PR stays fix-due for a `-b`
         // replacement. Only a live attempt, or one that actually landed
-        // (`applied:`/`no-op`), clears it.
-        const landed = t.family === "fix-pr" && (t.outcome === "no-op" || /^applied:/.test(t.outcome));
-        if (t.family === "fix-pr" && (t.outcome === null || landed)) st.fixSince = true;
-        // A landed one clears a conflict hold; a hold resets this below, so
-        // only a fix-applier after the latest hold ever counts.
-        if (landed) st.conflictCleared = true;
+        // (`applied:`/`no-op`), clears it. Read the outcome off the MERGED
+        // member record (`members`, built above) rather than this row's own
+        // copy of the token: `members` already implements "a member settled
+        // ANYWHERE is settled" for `implLive`/`fixLive`/etc. below, and a
+        // later, unrelated `row` rewrite that drops the `=outcome` suffix and
+        // puts back a bare copy must not un-settle what actually landed. A
+        // landed one also clears a conflict hold; a hold resets this below,
+        // so only a fix-applier after the latest hold ever counts.
+        if (t.family === "fix-pr") {
+          const o = members.get(t.name)?.outcome ?? t.outcome;
+          const landed = o === "no-op" || /^applied:/.test(o);
+          if (o === null || landed) st.fixSince = true;
+          if (landed) st.conflictCleared = true;
+        }
         continue;
       }
       if (tok.startsWith("review=")) {
@@ -281,8 +289,16 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
             throw new LedgerError(`${where}: '${tok}' names PR #${c[1]}, but this row is ${pr === null ? "no PR's" : `PR #${pr}'s`} — a conflict hold goes on the held PR's own row`);
           }
           // A fresh hold is unresolved whatever settled before it, the way
-          // a fresh `reviewed=` resets `fixSince` above.
-          Object.assign(st, { conflictHold: true, conflictCleared: false, fixSince: false });
+          // a fresh `reviewed=` resets `fixSince` above — UNLESS the row
+          // already carries an unresolved hold with nothing having cleared
+          // it since: a redundant re-hold (merge-bot retrying a PR it has
+          // already held, #2064) must not disturb a live fix-applier's
+          // `fixSince`, or a still-in-progress fix reappears in `fixDue`.
+          const alreadyUnresolved = st.conflictHold && !st.conflictCleared;
+          Object.assign(st, {
+            conflictHold: true, conflictCleared: false,
+            ...(alreadyUnresolved ? null : { fixSince: false }),
+          });
         }
       }
     }

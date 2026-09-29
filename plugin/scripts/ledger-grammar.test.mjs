@@ -94,7 +94,13 @@ test("tokens that are not members are not claimed", () => {
   for (const token of [
     "#412", "→", "·", "PR#344", "MERGED", "73b356de", "class=routine", "ports=16324", "ci=123:1:success",
     "review=wf:abc123", "review=member:review-pr-346", "reviewed=73b356de:3/1/0", "held-behind:#313",
-    "conflict-hold:#346", "conflict-hold-#346",
+    // `conflict-hold-346` — no `#` — is the fixture that actually matters:
+    // it is a real CONFLICT_HOLD spelling (`#?` is optional there) AND the
+    // exact shape MEMBER would also accept if its family alternation ever
+    // grew a careless `conflict-hold` entry. The other two spellings below
+    // carry a literal `#` where MEMBER wants a digit, so they would stay
+    // unclaimed even under that mutation — this one does not.
+    "conflict-hold:#346", "conflict-hold-#346", "conflict-hold-346",
     "ruled:6-applies", "review-pr-346", "impl", "impl-", "impl-0", "impl-0412", "impl-412x", "impl-412-bb",
     "impl-412-B", "merge-bot", "merge-bot-3-b", "fix-pr-", "finisher-346",
   ]) {

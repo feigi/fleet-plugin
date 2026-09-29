@@ -1363,7 +1363,7 @@ for a token on a ticket's line — never a hand edit.
 | Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Label seen (persistent Monitor) | nothing to record |
 | CI run terminal | `ci=<run-id>:<attempt>:<conclusion>` on the row; then the finisher gate (below) |
-| Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `reap.sh --apply` — a `conflict-hold:#<pr>` the bot wrote itself |
+| Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `reap.sh --apply`. (The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in this same pass, before reporting — that token is the bot's, never `reap.sh`'s.) |
 | Drain | `ledger.mjs drain "<reason>"`; release the claims (below); `settle impl-<N>=released` |
 | Heartbeat | nothing to record |
 
