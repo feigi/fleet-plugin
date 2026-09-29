@@ -71,88 +71,88 @@ node --test plugin/scripts/*.test.mjs
 ## How it works
 
 `/fleet-ctl:run-team` is a **controller** running in your own main thread —
-never a subagent — that drives three short-lived, fresh-context member roles
-over one repo's ticket queue. Standalone commands (`review-and-fix`,
-`run-merge-bot`, the `next-ticket` skill) are the same roles run one
-ticket/PR at a time, with no controller above them. Full design rationale:
-[`docs/specs/2026-07-22-run-team-agent-fleet-design.md`](docs/specs/2026-07-22-run-team-agent-fleet-design.md).
+never a subagent — that turns one repo's `ready-for-agent` issues into
+merged PRs by dispatching fresh, short-lived members: implementer, reviewer,
+finisher, merge bot. Standalone commands (`review-and-fix`, `run-merge-bot`,
+the `next-ticket` skill) run the same roles one ticket/PR at a time, with no
+controller above them. Full design rationale:
+[`docs/specs/2026-07-22-run-team-agent-fleet-design.md`](docs/specs/2026-07-22-run-team-agent-fleet-design.md);
+the loop's current slot-based shape, drawn below, is
+[`docs/specs/2026-09-24-slot-based-fleet-loop-design.md`](docs/specs/2026-09-24-slot-based-fleet-loop-design.md)
+(ADR 0012/0013).
 
-**Controller loop** (phase 0 → 3, repeating until the queue drains):
-
-1. **Shortlist** — `shortlist.mjs` scans `ready-for-agent` issues oldest
-   first and drops anything with an unresolved dependency, already in flight
-   (open PR, remote branch, or local worktree), or excluded behind an open PR
-   or issue. No human approves it: supply is automatic. The fleet never
-   touches `ready-for-human` work — there's no channel back to a human
-   mid-run.
-2. **Pull** — each free implementer slot admits the shortlist's head the
-   moment it frees: one full read of the ticket, then either a relabel by
-   cause (`needs-triage`, `ready-for-human`), an exclusion behind the PR or
-   issue it collides with, or a claim — serially, in the main checkout: label
-   the issue `in-progress`, `git worktree add` a dedicated tree.
-3. **Dispatch** — each Pull dispatches one implementer in the background, a
-   brand-new agent (never a resumed one — that would drag the previous
-   ticket's context into this one); every 5th Pull runs at the alternate
-   tier.
-4. **Event loop** — react without blocking: an implementer's PR gets queued
-   for review; a free review slot picks up the next queued PR; a reviewer
-   that lands the `ready-to-merge` label dispatches a merge-bot pass; the tick
-   refreshes the shortlist as it runs low.
-
-**Reviewer fan-out** — each reviewer cuts a read-only snapshot, sizes the PR,
-and dispatches the applicable subset of six specialist agents in parallel
-(`fleet-review-correctness`, `-comments`, `-silent-failure`, `-tests`,
-`-types`, `-simplify` — correctness always runs, the rest scale to what the
-diff actually touches). A verifier adversarially tries to refute every
-`critical`/`important` finding before it's trusted; `suggestion`-severity
-findings get no verifier by policy and are the reviewer's own job to check.
-Confirmed findings in scope get applied, pushed, and waited to CI-green
-before the PR is labelled `ready-to-merge`.
-
-**Merge bot** — one pass, at most one bot at a time: for each
-`ready-to-merge` PR in numeric order, hold if a lower-numbered open PR
-touches related work, otherwise rebase onto `main`, wait for CI green, merge
-only on `merge-gate.mjs`'s second exit 0; then a 15-minute grace for late
-labels and one report.
+Every box below is documented on its own page under
+[`docs/components/`](docs/components/README.md) — the scripts, labels, and
+opinionated design choices live there, not here.
 
 ```mermaid
 flowchart TD
-    subgraph CTL["Controller — main thread, /fleet-ctl:run-team"]
-        P0["Phase 0: shortlist.mjs<br/>candidate scan, dependency scan,<br/>in-flight check, minus exclusions"]
-        P1["Phase 1: Pull<br/>read, judge, relabel or exclude or claim"]
-        P2["Phase 2: dispatch one implementer<br/>(fresh context, per Pull)"]
-        P3{"Phase 3: event loop"}
-        P0 --> P1 --> P2 --> P3
-        P3 -->|"slot free"| P1
-        P3 -->|"shortlist low: tick refreshes"| P0
+    ISSUE(["GitHub issue<br/>label: ready-for-agent"]) -->|"candidates.mjs scan,<br/>oldest first"| SL
+
+    subgraph SUPPLY["Supply &amp; Shortlist — shortlist.mjs"]
+        SL["Shortlist<br/>.fleet/shortlist.json"]
     end
 
-    P2 --> IMPL["Implementer<br/>size + implement ticket, push, gh pr create"]
-    IMPL -->|"reports PR + head SHA"| P3
-    P3 -->|"PR queued, review slot free"| REV
+    SL -->|"implementer slot free → Pull"| JUDGE{"Pull &amp; Claim<br/>judge one ticket"}
+    JUDGE -->|"relabel: needs-triage /<br/>ready-for-human"| OUT(["leaves the loop,<br/>needs a human"])
+    JUDGE -->|"exclude: behind-pr#N /<br/>behind-issue#N"| SL
+    JUDGE -->|"claim: worktree + branch +<br/>in-progress (claim-ticket.sh)"| IMPL
 
-    subgraph REVFAN["Reviewer — up to M, fresh context each"]
-        REV["Snapshot: diff-stats.mjs<br/>selects applicable specialist dimensions"]
-        SPEC["Specialists, parallel:<br/>correctness / comments / silent-failure<br/>tests / types / simplify"]
-        VERI["Verifier: refutes every<br/>critical / important finding"]
-        FIX["Apply in-scope fixes, push,<br/>wait CI green, label ready-to-merge"]
-        REV --> SPEC --> VERI --> FIX
+    subgraph IMPLSUB["Implementer — fleet-implementer / -alt"]
+        IMPL["build the ticket<br/>tier-check.mjs verifies dispatch"]
     end
-    FIX -->|"ready-to-merge label"| P3
-    P3 -->|"label seen"| MB["Merge-bot pass dispatched"]
+    IMPL -.->|"slot frees on report"| SL
+    IMPL -->|"reports PR # + head SHA"| PR(["PR open, closes the issue"])
 
-    subgraph MERGEBOT["Merge bot — at most 1, one pass"]
-        HOLD["Hold rule: pr-overlap.mjs vs<br/>every lower-numbered open PR"]
-        REBASE["Rebase onto main"]
-        GREEN["Wait CI green, merge-gate.mjs twice"]
-        MERGE["Merge"]
-        WAIT["Hold behind #lower PR,<br/>watcher retries later"]
-        HOLD -->|"unrelated"| REBASE --> GREEN --> MERGE
-        HOLD -->|"related"| WAIT
+    PR -->|"free reviewer slot →<br/>DISPATCH review PR#N"| REVIEW
+
+    subgraph REVIEWSUB["Reviewer — fleet-review-runner"]
+        REVIEW["snapshot → specialists → verifier<br/>→ fix-applier"]
     end
-    MB --> HOLD
-    MERGE --> P3
+    REVIEW -.->|"slot frees on report"| SL
+    REVIEW -->|"CI green + fix-applier reported"| FINISH
+
+    subgraph FINISHSUB["Finisher — fleet-finisher"]
+        FINISH["audit worktree, confirm deferrals,<br/>re-run acceptance mutation"]
+    end
+    FINISH -->|"exactly one release label present →<br/>add ready-to-merge"| MB
+
+    subgraph MERGEBOTSUB["Merge bot — run-merge-bot, one Pass"]
+        MB["dispatched on first<br/>ready-to-merge label"]
+        HOLD{"pr-overlap.mjs<br/>hold rule vs lower PRs"}
+        MB --> HOLD
+        HOLD -->|"unrelated"| REBASE["rebase onto main"] --> GATE["merge-gate.mjs<br/>green twice"] --> MERGE["gh pr merge"]
+        HOLD -->|"related"| WAIT["held-behind:#lower"]
+        WAIT -.->|"lower PR merges,<br/>re-evaluated"| HOLD
+    end
+    MERGE --> MERGED(["PR merged"])
+
+    MERGED -->|"reap.sh after<br/>each merge pass"| REAP["Reaping &amp; Liveness"]
+    REAP -.->|"worktree/branch freed"| SL
+
+    HEART["Heartbeat<br/>fleet-heartbeat.mjs"] -.->|"queue drained,<br/>no event fires:<br/>level-check wakes tick"| SL
+
+    CORR(["reviewer/finisher files a<br/>correction ticket"]) -.->|"class=correction,<br/>ready-for-agent"| ISSUE
 ```
+
+No batching and no maintainer queue: the controller keeps an ordered
+**Shortlist** and performs a **Pull** the instant an implementer slot frees —
+one ticket judged, then claimed, relabelled by cause, or excluded
+([Supply & Shortlist](docs/components/supply-and-shortlist.md),
+[Pull & Claim](docs/components/pull-and-claim.md)). Every 5th Pull dispatches
+at the alternate tier as a running comparison
+([Tier routing](docs/components/tier-routing.md)). Reviews and the merge bot
+run off the controller's own turn, as background members it reacts to
+rather than waits on
+([Reviewer](docs/components/reviewer.md),
+[Finisher](docs/components/finisher.md),
+[Merge bot](docs/components/merge-bot.md)). One `fleet-tick.mjs` call per
+wake records what happened, recomputes every role's deficit against
+`.fleet/ledger.md`, and acts — the same reconcile a drained queue's own
+heartbeat re-triggers when no event would otherwise fire
+([Ledger & Cockpit](docs/components/ledger-and-cockpit.md),
+[Reaping & Liveness](docs/components/reaping-and-liveness.md)).
+
 
 ## Documentation
 
@@ -161,6 +161,9 @@ flowchart TD
   with a copy-paste pre-flight.
 - [`CONTEXT.md`](CONTEXT.md) — glossary: the vocabulary (claims, worktrees,
   releases, the merge gate, dispatch, tiers) this repo's artefacts share.
+- [`docs/components/`](docs/components/README.md) — one page per
+  fleet-ctl component: what it's for, how it works, and the opinionated
+  design choices behind it.
 - [`docs/adr/`](docs/adr) — accepted architecture decisions and the
   measurements behind each one.
 - [`docs/specs/`](docs/specs) — design docs including the fleet, the
