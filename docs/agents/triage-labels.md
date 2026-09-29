@@ -64,7 +64,11 @@ outside it (`skills/*` is gitignored bar `caveman-compress` and `fleet`, and
 `~/.agents/skills/` is not in this repo at all), sometimes because its acceptance
 criteria are an open blocker's output. It is the fleet's "real, decided, but out of
 reach" marker, which is why `plugin/scripts/candidates.mjs` excludes it too: an agent
-dispatched at one would find nothing it is allowed to edit. fleet-ctl only ever works
-`ready-for-agent` tickets, so that is the only place it reads `onhold`. On any other
-ticket (`ready-for-human`, `wayfinder:*`, closed) the label is the maintainer's own
-bookkeeping, which nothing in fleet-ctl reads.
+dispatched at one would find nothing it is allowed to edit. The fleet (`/run-team`)
+only ever works `ready-for-agent` tickets, so that is the only place the fleet reads
+`onhold`. Solo `/next-ticket --allow-fallback` is the one documented exception: it
+reruns unfiltered over the wider `ready-for-human`/untriaged pool when the labeled
+pass is empty, and `candidates.mjs`'s `EXCLUDE` still drops `onhold` tickets from that
+pool too. Outside that one fallback pass — and on `wayfinder:*` or closed tickets
+regardless — the label is the maintainer's own bookkeeping, which nothing in fleet-ctl
+reads.
