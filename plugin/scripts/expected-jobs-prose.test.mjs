@@ -51,9 +51,12 @@ function derivationComment() {
  * not contain. Returns null when the comment is sound, else the reason.
  */
 export function derivationCommentFault(comment) {
-  // The NEGATED form, not the bare word: `hardcoded` alone is polarity-blind, and
-  // a comment asserting the list IS hardcoded is the exact fault this refuses.
-  if (!/\bderiv|\b(?:never|not) hardcoded/i.test(comment)) {
+  // The NEGATED form, not the bare word, on BOTH sides: `hardcoded` alone is
+  // polarity-blind, and so is `deriv` alone — a comment asserting the list IS
+  // hardcoded, or that it is NOT derived, is the exact fault this refuses.
+  const derivedSound = /\bderiv/i.test(comment) && !/\b(?:never|not)\s+deriv/i.test(comment);
+  const hardcodedSound = /\b(?:never|not)\s+hardcoded/i.test(comment);
+  if (!derivedSound && !hardcodedSound) {
     return "the expected-job comment no longer says the list is derived from the workflow rather than hardcoded — the one thing a reader checking whether an empty `missing` is vacuous needs from it";
   }
   return null;
@@ -71,4 +74,7 @@ test("a comment that drops or reverses the derivation claim is refused", () => {
   assert.match(derivationCommentFault("The list tracks the workflow file automatically."), /no longer says the list is derived/);
   // Polarity: asserting the list IS hardcoded must refuse, not satisfy.
   assert.match(derivationCommentFault("The expected job list is hardcoded below because the workflow never changes."), /no longer says the list is derived/);
+  // Polarity, the other direction: asserting the list is NOT derived must
+  // refuse too, not slip through on the bare `deriv` substring match.
+  assert.match(derivationCommentFault("This list is not derived from anything; it is fully hardcoded for performance."), /no longer says the list is derived/);
 });
