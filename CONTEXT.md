@@ -53,6 +53,12 @@ Distinct from Release: a reap follows a merged PR, a release follows a claim tha
 became one.
 _Avoid_: prune, cleanup
 
+**Upstream**:
+The remote-tracking ref a claim's branch tracks. There is none at claim time
+(`--no-track`); the member's first `git push -u` sets it. It decides liveness only:
+Reap selects a branch whose upstream reads `[gone]`. It is never a delete-safety input;
+every branch-delete guard measures against the fully qualified base (ADR 0018).
+
 **Registration**:
 Git's record that a directory is a worktree of this repo. Independent of whether the
 directory itself exists — either can outlive the other.
