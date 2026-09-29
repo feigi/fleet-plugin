@@ -120,7 +120,7 @@ for (const [name, getPrompt] of [
 // instruction, so it is sliced from the dispatch line to the instruction's
 // opening words — both copies, one phrase, for this file's two-copies reason.
 const SUBSTITUTION =
-  "with one substitution: resolve `<scratch>/pr<N>/<finding>/` in it to an absolute path, your own `pr<N>` and this finding's id, and write that absolute path into the refuter's prompt in its place; a refuter never derives its own path";
+  "with one substitution: resolve `<scratch>/pr<N>/<finding>/` in it to an absolute path under your own run root — `mktemp -d` once per round for `<scratch>/pr<N>/fix-XXXXXXXX/`, never bare `pr<N>`, since finding ids restart at 1 each round too — and write that absolute path into the refuter's prompt in its place; a refuter never derives its own path";
 for (const [name, getLeadIn] of [
   ["run-team/SKILL.md", () => stripQuoteGutter(between(RUN_TEAM, "In scope → dispatch ONE refuter", "Try to REFUTE this finding", "run-team/SKILL.md"))],
   ["review-and-fix.md", () => between(REVIEW_AND_FIX, "In scope → dispatch one refuter", "Try to REFUTE this finding", "review-and-fix.md")],

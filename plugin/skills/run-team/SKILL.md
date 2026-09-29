@@ -2115,8 +2115,10 @@ all.
 > ticket, or a different piece of work? **Out of scope → defer and file, never
 > apply.** **In scope → dispatch ONE refuter** against the finding before
 > touching the tree, biased to refuse, and hand it the prompt below with one
-> substitution: resolve `<scratch>/pr<N>/<finding>/` in it to an absolute path,
-> your own `pr<N>` and this finding's id, and write that absolute path into the
+> substitution: resolve `<scratch>/pr<N>/<finding>/` in it to an absolute path
+> under your own run root — `mktemp -d` once per round for
+> `<scratch>/pr<N>/fix-XXXXXXXX/`, never bare `pr<N>`, since finding ids
+> restart at 1 each round too — and write that absolute path into the
 > refuter's prompt in its place; a refuter never derives its own path:
 >
 > > Try to REFUTE this finding. Default to refuted=true if uncertain. Verify by
@@ -3281,10 +3283,12 @@ discriminator is its scratch dir.** A member wedged on a blocked tool call
 emits the whole signature of a dead one: record counts unchanged from one poll
 of its transcript to the next. So read the mtimes of the files anywhere under
 the scratch directory its own dispatch prompt assigned it, subdirectories
-included — `<scratch>/impl-<N>/` for an implementer, `<scratch>/pr<N>/...` on
-the review side — since a member waiting on a child it dispatched writes
-nothing itself while that child writes below it. Read them at two observations
-a poll apart — `touch` a marker file outside that directory at the first, and
+included — `<scratch>/impl-<N>/` for an implementer, that member's own
+run-scoped subdirectory under `<scratch>/pr<N>/` on the review side, never
+the bare `pr<N>/` tree those siblings share — since a member waiting on a
+child it dispatched writes nothing itself while that child writes below it.
+Read them at two observations a poll apart — `touch` a marker file outside
+that directory at the first, and
 `find <dir> -type f -newer <marker>` at the second lists every file that
 moved: **mtimes that moved between the two mean BLOCKED, a live member
 still holding its claim and its worktree, so the killed row above does not

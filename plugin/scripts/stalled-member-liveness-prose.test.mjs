@@ -65,8 +65,10 @@ discriminator is its scratch dir.** A member wedged on a blocked tool call
 emits the whole signature of a dead one: record counts unchanged from one poll
 of its transcript to the next. So read the mtimes of the files anywhere under
 the scratch directory its own dispatch prompt assigned it, subdirectories
-included — \`<scratch>/impl-<N>/\` for an implementer, \`<scratch>/pr<N>/...\` on
-the review side — since a member waiting on a child it dispatched writes
+included — \`<scratch>/impl-<N>/\` for an implementer, that member's own
+run-scoped subdirectory under \`<scratch>/pr<N>/\` on the review side, never
+the bare \`pr<N>/\` tree those siblings share — since a member waiting on a
+child it dispatched writes
 nothing itself while that child writes below it. Read them at two observations
 a poll apart — \`touch\` a marker file outside that directory at the first, and
 \`find <dir> -type f -newer <marker>\` at the second lists every file that

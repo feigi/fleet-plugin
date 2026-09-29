@@ -119,12 +119,16 @@ itself but this rule.
 **A subagent you dispatch gets its own directory under yours,
 `<scratch>/impl-<N>/<childName>/`, and you write that path, absolute, into its
 prompt — it writes nowhere else, and never derives a path of its own.**
-`<childName>` is the name you dispatch it under (omp's task `name`, Claude
-Code's `description`), unique among your children, so no two of them share a
-directory. A child left to derive its own path has only the injected root
-above to derive it from, which is this block's collision one level down — and
-its files under your partition are what show the controller you are alive
-while you wait on it.
+`<childName>` is a slug of the name you dispatch it under (omp's task `name`,
+Claude Code's `description`) — `[a-z0-9-]` only, never the raw field itself,
+which can carry spaces and `/` and would split or nest the path in an
+unquoted shell command — unique among your children and never one of your
+own entries (`probe`, `mutate`, or any other name you write under
+`<scratch>/impl-<N>/` yourself), so no child shares a directory with a
+sibling or with you. A child left to derive its own path has only the
+injected root above to derive it from, which is this block's collision one
+level down — and its files under your partition are what show the controller
+you are alive while you wait on it.
 
 **The `eval` kernel is shared with every sibling member and with the
 controller that dispatched you — namespace every binding you make in it, and
