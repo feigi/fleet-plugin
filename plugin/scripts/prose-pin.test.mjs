@@ -640,11 +640,30 @@ test("betweenPhrases: a bound stops the search there, rather than reaching a lat
   const doc = "START here.\nreal middle before bound.\n---\nCUT it after the bound.\n";
   assert.throws(
     () => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound: /\n---\n/ }),
-    /the fixture: slice end anchor "CUT it" moved — re-anchor this test, never widen it to the whole file/,
+    /the fixture: slice end anchor "CUT it" lies past the end bound, which first matched at line 3 \("---"\)/,
   );
   assert.equal(
     betweenPhrases(doc, "START here", "CUT it", "the fixture"),
     "START here.\nreal middle before bound.\n---\n",
+  );
+});
+
+// #1697: a bound that matches BEFORE an intact `to` — here a wrap that put
+// `3.` at column 0, which CommonMark renders as a new list item — used to
+// report `slice end anchor "…" moved`, sending a reader after an edit to an
+// anchor nobody touched. The anchor did not move; the bound did. Still a
+// throw either way, so the message is the whole of the change: it names the
+// line the bound first matched. A `to` found NOWHERE after `from` keeps
+// "moved", and a `to` the bound cuts through the middle of counts as past it.
+test("betweenPhrases names the bound's line, not a moved anchor, when the bound matches before an intact `to`", () => {
+  const doc = "1. START here, fix it and repeat from\n3. then CUT it here.\n4. the next item.\n";
+  const bound = /\n\d+\.\s/;
+  const pastBound = /the fixture: slice end anchor "(CUT it|from 3\. then)" lies past the end bound, which first matched at line 2 \("3\. then CUT it here\."\)/;
+  assert.throws(() => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound }), pastBound);
+  assert.throws(() => betweenPhrases(doc, "START here", "from 3. then", "the fixture", { bound }), pastBound);
+  assert.throws(
+    () => betweenPhrases(doc.replace("CUT it", "SNIP it"), "START here", "CUT it", "the fixture", { bound }),
+    /the fixture: slice end anchor "CUT it" moved — re-anchor this test, never widen it to the whole file/,
   );
 });
 

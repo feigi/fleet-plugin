@@ -412,15 +412,29 @@ export const sentences = (block) =>
 // not count, or a pin could never pass once any later, unrelated copy of
 // the same phrase exists anywhere below it.
 //
+// A bound can also match BEFORE an intact `to` — #1697: a reflow that puts
+// `3.` at column 0 mid-step, which the `\n\d+\.\s` list-item bound reads as the
+// next item, and CommonMark renders as one too, so the red is real. Reporting
+// that as `to` having "moved" sends the reader after an edit to an anchor
+// nobody touched, so a zero-hit scope looks past the cut before choosing the
+// message: a `to` still found there names the line the bound first matched
+// instead. That also covers a `to` reworded away with a later copy left past
+// the bound — the helper cannot tell the two apart, so the message names both.
+// A `to` found nowhere after `from` keeps "moved". Every one of these throws;
+// only which message a red carries changes.
+//
 // Extracted (#1611) from `finisher-dispatch-premise-prose.test.mjs`'s
 // `dispatchPremise`, which hand-rolled this exact shape locally — `paragraph`'s
 // own header above names the class: a local copy is the defect, not a style
 // choice.
 export function betweenPhrases(text, from, to, what, { bound } = {}) {
-  const rest = text.slice(anchorAt(text, from, what));
+  const at = anchorAt(text, from, what);
+  const rest = text.slice(at);
+  const toPhrase = phrase(to);
   let scope = rest;
+  let boundEnd = -1;
   if (bound) {
-    const boundEnd = rest.search(bound);
+    boundEnd = rest.search(bound);
     assert.notEqual(
       boundEnd,
       -1,
@@ -428,7 +442,22 @@ export function betweenPhrases(text, from, to, what, { bound } = {}) {
     );
     scope = rest.slice(0, boundEnd);
   }
-  const hits = [...scope.matchAll(new RegExp(phrase(to).source, "g"))];
+  const hits = [...scope.matchAll(new RegExp(toPhrase.source, "g"))];
+  // Zero hits inside the bound but one in `rest` means that hit ends past the
+  // cut — a hit ending inside it would have matched `scope` — so this also
+  // catches a bound that cuts through the middle of `to`.
+  if (hits.length === 0 && bound && toPhrase.test(rest)) {
+    const lead = rest.slice(boundEnd).search(/[^\n]/);
+    const cut = at + boundEnd + Math.max(lead, 0);
+    const lineStart = text.lastIndexOf("\n", cut - 1) + 1;
+    const lineEnd = text.indexOf("\n", cut);
+    const line = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
+    const excerpt = line.length > 72 ? `${line.slice(0, 72)}…` : line;
+    const lineNo = text.slice(0, lineStart).split("\n").length;
+    assert.fail(
+      `${what}: slice end anchor "${to}" lies past the end bound, which first matched at line ${lineNo} ("${excerpt}") — an edit put a block boundary inside the slice, or reworded the anchor away and left a later copy past the bound; fix whichever it is, never widen the bound`,
+    );
+  }
   assert.notEqual(
     hits.length,
     0,
