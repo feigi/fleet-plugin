@@ -92,7 +92,9 @@ See references/member-lifecycle.md.
 **You read your instruments out of a tree every member can write to — re-check
 them before every gate decision.** Per-member worktrees and `./agent-test`'s port
 derivation protect members from each other; neither protects the main checkout,
-which you run every gate probe out of and which any member can edit. Measured: a
+which you run every gate probe out of and which any member can edit — except
+through a `write`/`edit`/`ast_edit` the `member-write-guard` extension refuses
+(ADR 0020); a `bash` or `eval` write still lands (#2210). Measured: a
 member edited two files there instead of in its worktree while the CI monitor was
 polling one of them every 120s and a live finisher was using it to decide a
 label. It caught itself; nothing in the fleet would have. That is the silent
@@ -2067,24 +2069,10 @@ all.
 > the controller's own main checkout — not against that worktree and not
 > against your `bash` cwd, which they share no `cwd` parameter with. Give them
 > the absolute worktree path on every call, mutation-probe copies included.**
-> Measured on #1727, four occurrences in one run, and the one that reached a
-> report was a fix-applier's: its mutation probe rewrote a file in the main
-> checkout, and it reported success and a clean diff, because its own
-> worktree's `git diff` WAS clean — correctly, nothing had changed there. That
-> pair — a clean worktree diff beside a `read` showing your new content — is
-> the signature, and it is not a tool bug: two members filed `report_issue`
-> against `edit`/`read` for it and both entries were retracted. On seeing it,
-> or after any edit you are unsure of, run `git -C <main-checkout> status
-> --porcelain`, the main checkout being the parent of `git rev-parse
-> --path-format=absolute --git-common-dir`; empty is the only clean answer.
-> Before you recover anything, run `git -C <main-checkout> diff -- <path>`
-> and read it: if that diff is ENTIRELY your own stray content, copy the
-> last-committed version back over it with `cp` — `git -C <main-checkout>
-> show HEAD:<path> > <path>` — never `git restore -- <path>` and never a
-> bare `git restore .` there, either of which silently discards a
-> sibling's or the controller's own uncommitted work sitting at that exact
-> path too. If the diff shows content you did not write, stop: reconcile
-> it by hand instead of reverting the file.
+> The main checkout is the parent of `git rev-parse --path-format=absolute
+> --git-common-dir`. A `member-write-guard` refusal means the path hit the
+> main checkout — for `bash`, a missing or main-checkout `cwd` — so re-issue
+> it absolute, under your worktree.
 >
 > Read `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` and run **steps 2, 3
 > and 5 only**: split apply-now/defer, commit, push, file every deferral as its
@@ -2929,8 +2917,9 @@ silent-spill hazard this section exists to guard against, on by default, so
 off.
 
 **A member's tree is the claimed worktree, addressed by absolute path.** An
-`edit` header without the worktree prefix lands in the main checkout (**You
-read your instruments out of a tree every member can write to** above). How a
+`edit` header without the worktree prefix resolves into the main checkout,
+where `member-write-guard` refuses it (**You read your instruments out of a
+tree every member can write to** above). How a
 member gets its cwd: the `task` tool's item schema — `name`/`agent`/`task`/
 `outputSchema`/`schemaMode` always, `effort`/`isolated` only when their own
 settings enable them — carries no working-directory field; measured
@@ -2946,7 +2935,11 @@ working directory.** `omp://tools/task.md` documents non-isolated spawns as
 running `runSubprocess(...)` "directly with parent cwd" — no `cwd` field
 appears anywhere in the item schema — and the probe above confirms it in
 practice: the recipe is the absolute-path discipline above, not a placeholder
-for a `cwd` field that does not exist.
+for a `cwd` field that does not exist. The gap is now enforced rather than only
+written down: the plugin's `member-write-guard` omp extension (ADR 0020)
+refuses a fleet member's `write`/`edit`/`ast_edit` into the main checkout's
+non-ignored tree and an implementer's `bash` from a main-checkout cwd, and the
+missing field itself is requested upstream as can1357/oh-my-pi#13754.
 
 **The same gap reaches past the filesystem: `task`-dispatched members share one
 `eval` kernel.** Measured 2026-09-21 on #1447, in a live run rather than a
@@ -2972,8 +2965,9 @@ shape carries no kernel, executor or cwd field, and `python.kernelMode` set to
 `"per-call"` — the one documented lever that would hand every call a fresh
 kernel — is a session setting a child inherits, not something one dispatch can
 set for one member. Isolating a member's kernel is an omp-side change, so
-discipline is the whole of the remedy here, exactly as it is for the missing
-`cwd` field above. **Phase 2** carries all three rules to every member.
+discipline is the whole of the remedy here — unlike the missing `cwd` field
+above, which `member-write-guard` enforces for `write`/`edit`/`ast_edit` and
+`eval` bypasses. **Phase 2** carries all three rules to every member.
 
 **`release-ticket.sh` is not a no-op on omp, and `inflight.sh`'s probes are
 unaffected by a running member.** Measured against a hand-built claim (a

@@ -15,21 +15,21 @@
 // inside the fix-applier's own prompt slice either; the two files that pin
 // this text (`immutable-body-claim-prose.test.mjs`,
 // `cross-repo-citation-prose.test.mjs`) both scope to the IMPLEMENTER'S copy,
-// which sits under the same `### Reviewers` heading, further down it, after
-// the fix-applier prompt's own close (`grep -n '### Reviewers\|You are
-// ALREADY in worktree\|Put the standing CI facts\|Two of the rules above are
-// what caught both\|Fallback: hand-dispatched' skills/run-team/SKILL.md`
-// against this tree: `### Reviewers` opens at :1304, the fix-applier prompt
-// runs :1483-:1642, the implementer's copy opens at :1886, and
-// `#### Fallback` closes the section at :1937).
+// which lives in `plugin/agents/fleet-implementer.agent.md`, not in this
+// section of SKILL.md. `grep -n '### Reviewers\|You are ALREADY in
+// worktree\|Put the standing CI facts\|Two of the rules above are what
+// caught both\|Fallback: hand-dispatched' skills/run-team/SKILL.md` against
+// this tree finds `You are ALREADY in worktree` exactly ONCE, opening the
+// fix-applier's own prompt this file pins below — it does not recur
+// anywhere else in SKILL.md.
 //
 // SHAPE, matching the convention every file beside this one uses. Each rule
 // gets its own ordered-span assertion, gaps sized to the punctuation that
 // actually separates the anchors today (a handful of characters) so a
 // deletion of the connecting clause reds without a loose `.{0,N}?` papering
 // over it. A positive regex over the whole fix-applier prompt — 1200+ chars —
-// would be satisfied by the SAME wording surviving in the implementer's copy
-// further down the section; these slices are bounded to the fix-applier
+// would be satisfied by equivalent wording anywhere else in the Reviewers
+// section it happened to also match; these slices are bounded to the fix-applier
 // prompt specifically (`reviewersSection()` below, mirroring
 // `review-path-default.test.mjs`'s `fixApplierPrompt()`, duplicated rather
 // than imported for the reason `implementer-model-tier.test.mjs` gives for
@@ -70,10 +70,9 @@ import { between, phrase } from "./prose-pin.mjs";
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
 
-// Scoped to the Reviewers section first, for the reason `indexOf` demands it:
-// "You are ALREADY in worktree" also opens phase 2's implementer worktree
-// block earlier in the file, and a file-wide anchor would silently pin that
-// one instead of the fix-applier's own prompt.
+// Scoped to the Reviewers section first, so an `indexOf`-based anchor search
+// starts inside the fix-applier's own prompt rather than risking a match
+// against equivalent wording elsewhere in the file, present or future.
 const reviewersSection = () =>
   between(RUN_TEAM, "### Reviewers", "#### Fallback: hand-dispatched reviewer", "run-team Reviewers section");
 

@@ -1,0 +1,7 @@
+{
+  "name": "fleet-ctl",
+  "version": "0.0.0",
+  "omp": {
+    "extensions": ["scripts/member-write-guard.mjs"]
+  }
+}

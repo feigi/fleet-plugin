@@ -155,11 +155,12 @@ test("the worktree block forbids a second worktree and carries the check that se
 // #1727. The block above settles where the member's SHELL is, and that is the
 // whole reason this one exists: `edit`/`read` resolve their own paths against
 // the session root, so a member can pass every `rev-parse` check the worktree
-// block prescribes and still write into the main checkout. Four members did,
-// in one run, after the eval-kernel block below had already stated the
-// absolute-path rule — which is why the rule is carried here as its own block
-// with its own evidence rather than as a clause inside that one.
-test("the edit/read block binds the session-root mechanism to the discipline that does NOT cover it, and to the check that catches a leak", () => {
+// block prescribes and still aim a write at the main checkout. Since #1411 the
+// `member-write-guard` extension refuses that write, so the block no longer
+// carries the incident evidence or the by-hand detection and recovery steps
+// that stood in for a gate; what it keeps is the rule, the fact behind it, and
+// what a refusal means.
+test("the edit/read block binds the session-root mechanism to the discipline that does NOT cover it, and a guard refusal to its remedy", () => {
   const b = editReadBlock();
   // The resolution fact bound to BOTH trees it is not. "Use absolute paths"
   // alone is advice a member already believes it is following; what makes it
@@ -181,49 +182,25 @@ test("the edit/read block binds the session-root mechanism to the discipline tha
     /take no `cwd` parameter.{0,140}?still leaks through `edit`\/`read` alone/,
     "the absent cwd parameter is no longer bound to the leak it permits despite correct bash scoping",
   );
-  // The evidence bound to its detection split. A count alone reads as a
-  // hypothetical; "two self-caught, two caught by the controller" is what says
-  // no fleet mechanism sees this, which is the reason the rule has to reach the
-  // member as text.
+  // The refusal bound to what it means and what to do about it. A member that
+  // meets a refused `write` with no such line reads it as a tool fault or a
+  // permission problem and works around it; the pin keeps the cause (the path
+  // hit the main checkout) and the remedy (re-issue it absolute) in one span,
+  // with the bash case between them.
   assert.match(
     b,
     phrase(
-      "two members self-caught their own stray edit, and the controller caught the other two independently on a routine `git status` of the main checkout",
+      "A `member-write-guard` refusal means the path hit the main checkout — for `bash`, a missing or main-checkout `cwd` — so re-issue it absolute, under your worktree",
     ),
-    "the #1727 evidence no longer carries its detection split, so nothing in the block says every occurrence was caught by hand rather than by a gate",
+    "the block no longer tells the member what a member-write-guard refusal means and that the remedy is to re-issue the path absolute under its worktree",
   );
-  // The misdiagnosis, bound to both readings that produce it. This pair is why
-  // the hazard survived two prior members: each observation is individually
-  // correct, and a member holding only one of them concludes the tool is
-  // broken. Pinned with the retraction so the block cannot decay into
-  // documenting a tool bug.
-  assert.match(
-    b,
-    phrase(
-      "`git diff` in your worktree shows nothing — correct, nothing changed there — while `read` shows your new content — correct, it is reading the main checkout",
-    ),
-    "the two-trees-two-honest-answers symptom is gone, or no longer shows both halves — which is the pair that reads as a tool bug when only one is held",
-  );
-  assert.match(
-    b,
-    /filed `report_issue` against the tools; both entries were retracted/,
-    "the block no longer records that this symptom was twice misfiled as a tool bug and retracted, so a member meeting it is free to file the third",
-  );
-  // The rule bound to the shape it excludes, and the check bound to its pass
-  // condition. `git status --porcelain` without "empty is the only clean
-  // answer" is a command whose output a member has to interpret, which is the
-  // interpretation step every one of the four got wrong.
+  // The rule bound to the shape it excludes.
   assert.match(
     b,
     phrase(
       "prefix every `edit` and `read` path with an absolute path — the worktree `<abs-path>` for repo files, `<scratch>/impl-<N>/` for scratch — never a bare relative one, and never `plugin/scripts/foo.mjs` on its own",
     ),
     "the absolute-path rule no longer shows the bare relative path it excludes, so it states a preference rather than a prohibition",
-  );
-  assert.match(
-    b,
-    phrase("run `git -C <main-checkout> status --porcelain` — empty is the only clean answer"),
-    "the main-checkout status check is gone, or no longer states what a clean answer looks like",
   );
 });
 
