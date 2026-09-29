@@ -190,6 +190,19 @@ test("runner: a tracked repo-local agent-test is left as is", () => {
   assert.equal(status, "", "the tracked runner must not show as modified");
 });
 
+// regardless of whether the runner branch above actually exported it. A
+// tracked repo-local agent-test never receives those exports (previous
+// test), so a receipt claiming them would tell a caller to trust isolation
+// that is not there (measured: the echoed env was empty against a real
+// tracked runner). `null` is the honest value — the object appears only when
+// this script wrote the exports itself.
+test("runner: a tracked repo-local agent-test's receipt does not claim ports it never exported", () => {
+  const own = "#!/bin/sh\necho repo-local\n";
+  const a = apply({ "agent-test": own }, SCRIPT, { test: "sh ./run-tests.sh" });
+  assert.equal(a.receipt.ports, null, "isolation was never exported into the tracked runner");
+  assert.equal(a.receipt.applied, true, "the claim itself still went through");
+});
+
 // #124: the runner is written once at claim time and never rewritten, so an
 // old worktree can hold a runner a later template fix never reached. Nothing
 // in the file said which template produced it — this pins the fix.

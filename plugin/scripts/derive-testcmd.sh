@@ -111,7 +111,7 @@ nodeerr=$(node -e 0 </dev/null 2>&1) || die "node is unusable, refusing to read 
 # the command this script hands claim-ticket.sh to run.
 errf=$(mktemp) || die "cannot create a temporary file to read the Recipe cache"
 trap 'rm -f "$errf"' EXIT
-st=0
+
 value=$(node -e '
 const fs = require("fs");
 const [file, field] = process.argv.slice(1);
@@ -128,8 +128,31 @@ const counted = Number.isInteger(r.testCount) && r.testCount > 0;
 const mutated = typeof r.mutation === "string" && r.mutation.trim() !== "";
 if (!counted && !mutated) bad("it carries no proof of real tests — neither a positive `testCount` nor a `mutation`");
 process.stdout.write(r[field]);
-' "$cache" "$field" 2>"$errf") || st=$?
-[ "$st" -eq 0 ] || die "the Recipe cache at $cache is unusable: $(cat "$errf") — $derive"
+' "$cache" "$field" 2>"$errf") || die "the Recipe cache at $cache is unusable: $(cat "$errf") — $derive"
+
+# Both consumers append the runner's own arguments after this string
+# textually (claim-ticket.sh's `exec sh -c '<cmd> "$@"' agent-test "$@"`), so
+# a command ending in `;` or `&` lets a real shell read the caller's "$@" as
+# an unrelated top-level command instead of args reaching the Test
+# entrypoint, and one containing a `#`-led word swallows everything after it,
+# "$@" included, as a comment — measured on both. Checked on the raw string
+# for the trailing operator (adjacency to whitespace is not what makes `;`/`&`
+# a shell operator) and on the same naive field split the leading-word check
+# below already trusts for the comment word, since neither hazard is about
+# whether the command resolves.
+case $value in
+  *';'|*'&') die "the Recipe cache at $cache is invalid: its $field command '$value' ends in ';' or '&' — a runner-appended argument after it would run as an unrelated command instead of reaching the Test entrypoint; $derive" ;;
+esac
+set -f
+IFS=' 	
+'
+# shellcheck disable=SC2086 # field splitting is the point: scanning every word
+for word in $value; do
+  case $word in
+    '#'*) set +f; die "the Recipe cache at $cache is invalid: its $field command '$value' contains a '#' word — a runner-appended argument would be swallowed as a comment rather than reaching the Test entrypoint; $derive" ;;
+  esac
+done
+set +f
 
 # The failure-to-run probe. The leading word is found by the shell's own field
 # splitting with globbing off, past any `NAME=value` prefix assignments. A word

@@ -204,6 +204,23 @@ test("a runnable command is accepted, however it is spelled — and a failing su
   }
 });
 
+// Both consumers append the runner's own arguments after this string
+// textually (`exec sh -c '<cmd> "$@"' agent-test "$@"`), so a command ending
+// in `;` or `&` lets a real shell read those arguments as an unrelated
+// top-level command, and a `#`-led word swallows everything after it,
+// arguments included, as a comment — neither failure is about whether the
+// command runs, so it is refused here rather than left to fail at claim time.
+test("a command ending in ';' or '&', or carrying a '#' word, refuses — a runner-appended argument would never reach it", () => {
+  const { dir, head } = repo({ "run.sh": "#!/bin/sh\nexit 0\n" });
+  chmodSync(join(dir, "run.sh"), 0o755);
+  for (const cmd of ["sh ./run-tests.sh;", "sh ./run-tests.sh &", "sh ./run-tests.sh # all suites"]) {
+    cache(dir, recipe(head, { test: cmd }));
+    const r = derive(dir, "test", process.env, tmpdir());
+    assert.equal(r.status, 1, `${cmd} must refuse: ${r.out}`);
+    assert.match(r.err, /a runner-appended argument/, `${cmd}: ${r.err}`);
+  }
+});
+
 test("a command of assignments alone names nothing to run and refuses", () => {
   const { dir, head } = repo();
   cache(dir, recipe(head, { test: "CI=1 FOO=2" }));

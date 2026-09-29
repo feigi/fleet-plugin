@@ -259,7 +259,7 @@ reads carried 434 KB.`;
 // caller — a controller or a reviewer — knows what to run rather than what went
 // wrong (ADR 0015). derive-testcmd.sh's own refusals name the same step; this
 // one covers the case where the snapshot agent reported no reason at all.
-export const DERIVATION_STEP =
+const DERIVATION_STEP =
   "run the Recipe derivation step (run-team phase 0, before the first claim — ADR 0015) to derive, prove and write the Recipe cache";
 
 export function resolveTestCmd(explicit, snap) {

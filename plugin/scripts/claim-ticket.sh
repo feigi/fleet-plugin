@@ -180,6 +180,10 @@ git rev-parse --verify "origin/main^{commit}" >/dev/null \
 # lives. The sibling is found beside this script (`dirname -- "$0"`), never on
 # PATH, for the reason json.sh and worktree.sh are.
 script_dir=$(dirname -- "$0")
+# Held in one variable, not repeated as a literal at each die below — the two
+# copies could drift apart, and derive-testcmd.sh already keeps its own
+# version the same way (`$derive`).
+rederive="the Recipe cache is invalid; run the Recipe derivation step (run-team phase 0, before the first claim — ADR 0015) to re-derive it"
 install=$("$script_dir/derive-testcmd.sh" . install 2>&1) || die "$install"
 echo "    Install step → $install" >&2
 testcmd=$("$script_dir/derive-testcmd.sh" . test 2>&1) || die "$testcmd"
@@ -198,6 +202,13 @@ quoted=$(printf '%s\n' "$testcmd" | LC_ALL=C sed "s/'/'\\\\''/g") \
 pg=$((16000 + issue))
 ollama=$((22000 + issue))
 echo "    ports derive from the issue number: postgres=$pg ollama=$ollama" >&2
+
+# Ports above are only ever exported into a FRESH runner this script writes
+# (below): a tracked repo-local agent-test is left byte-identical (#1262), so
+# it never carries them. Starts true and flips to false in that branch, so
+# the receipt can report which happened instead of asserting exports that
+# never reached the runner.
+runner_ports_applied=true
 
 # The stamp the runner carries. The runner is written once at claim time and
 # never rewritten (#124), so an old worktree can be sitting on a runner a later
@@ -287,7 +298,7 @@ else
   (cd "$wt" && sh -c "$install" >/dev/null 2>&1) || irc=$?
   case $irc in
     0) ;;
-    126|127) die "the Install step '$install' did not run in $wt (exit $irc: not executable or not found) — the Recipe cache is invalid; run the Recipe derivation step (run-team phase 0, before the first claim — ADR 0015) to re-derive it" ;;
+    126|127) die "the Install step '$install' did not run in $wt (exit $irc: not executable or not found) — $rederive" ;;
     *) die "install failed in $wt (exit $irc)" ;;
   esac
 
@@ -341,7 +352,7 @@ else
   elif [ -n "$dirty" ]; then
     nl='
 '
-    die "the Install step '$install' changed the tree in $wt (first: ${dirty%%"$nl"*}) — the Recipe cache is invalid; run the Recipe derivation step (run-team phase 0, before the first claim — ADR 0015) to re-derive it"
+    die "the Install step '$install' changed the tree in $wt (first: ${dirty%%"$nl"*}) — $rederive"
   fi
   echo "    tree clean after the Install step" >&2
 
@@ -357,7 +368,8 @@ else
   # `agent-test`, so existence IS trackedness: nothing else could have put a
   # file there between `worktree add` and here.
   if [ -e "$runner" ]; then
-    printf '    %s already present — a repo-local runner, checked out with the worktree; left as is\n' "$runner" >&2
+    runner_ports_applied=false
+    printf '    %s already present — a repo-local runner, checked out with the worktree; left as is (its own script owns isolation — the ports below were not exported into it)\n' "$runner" >&2
   else
   # Isolation as a file, not a briefing. Env vars in a prompt were missed five
   # times in one run — including by an agent whose parent was briefed but did
@@ -393,5 +405,13 @@ fi
 issue_branch=$(jstr "$branch") && issue_wt=$(jstr "$wt") \
   && issue_install=$(jstr "$install") && issue_runner=$(jstr "$runner") \
   || die "could not escape the receipt fields for #$issue"
-printf '{"issue":%s,"branch":"%s","worktree":"%s","install":"%s","ports":{"postgres":%s,"ollama":%s},"runner":"%s","applied":%s}\n' \
-  "$issue" "$issue_branch" "$issue_wt" "$issue_install" "$pg" "$ollama" "$issue_runner" "$apply"
+# `null`, not the arithmetic object, when a tracked runner kept its own
+# isolation and never received these exports — a receipt claiming ports were
+# applied to a script that does not carry them would be false.
+if [ "$runner_ports_applied" = true ]; then
+  ports_json="{\"postgres\":$pg,\"ollama\":$ollama}"
+else
+  ports_json=null
+fi
+printf '{"issue":%s,"branch":"%s","worktree":"%s","install":"%s","ports":%s,"runner":"%s","applied":%s}\n' \
+  "$issue" "$issue_branch" "$issue_wt" "$issue_install" "$ports_json" "$issue_runner" "$apply"
