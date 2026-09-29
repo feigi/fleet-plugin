@@ -26,10 +26,11 @@ Follows [`plugin/skills/run-team/SKILL.md`](../../plugin/skills/run-team/SKILL.m
    [Implementer](implementer.md) to build a ticket,
    [Reviewer](reviewer.md) to review it,
    [Merge bot](merge-bot.md) to merge it.
-4. **The Finisher is the one exception** — never a tick-printed row. The
-   controller dispatches it directly once CI is green, the review has
-   returned, and its fix-applier (if any) has reported — see
-   [Finisher](finisher.md).
+4. **The Finisher is the one exception — a controller rule, not a
+   tick row.** Check green only makes a PR a candidate; the controller
+   dispatches it directly once the review has returned and its
+   fix-applier (if any) has reported — a `no-op` report clears that
+   gate immediately, with no new CI run — see [Finisher](finisher.md).
 5. **Phase 1 (Pull) is strictly serial**; everything else may run
    concurrently, bounded by the implementer/reviewer caps.
 

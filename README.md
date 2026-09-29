@@ -117,7 +117,8 @@ flowchart TD
     REVIEW -.->|"reviewer slot frees:<br/>next queued PR"| PR
     REVIEW -->|"push"| CI{"CI check job"}
     CI -->|"tick: DISPATCH fix-pr PR#N<br/>(check job failure)"| REVIEW
-    CI -->|"controller: check green,<br/>review + fix-applier done<br/>→ dispatch finisher"| FINISH
+    CI -->|"controller: check green necessary,<br/>not sufficient — gate is review<br/>returned + fix-applier reported"| FINISH
+    REVIEW -->|"controller: fix-applier reports<br/>no-op → dispatch finisher<br/>(no new CI run)"| FINISH
 
     subgraph FINISHSUB["Finisher — fleet-finisher"]
         FINISH["audit worktree, confirm deferrals,<br/>re-run acceptance mutation"]

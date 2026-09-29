@@ -7,12 +7,17 @@ a fixed PR's worktree, confirms every review finding landed somewhere
 durable, and applies the label the merge bot waits on.
 
 ## How it works
-1. **Dispatch trigger.** The controller dispatches
+1. **Dispatch trigger — a controller rule, not a tick row.** The
+   controller dispatches
    [`fleet-finisher`](../../plugin/agents/fleet-finisher.agent.md) — a
    7-line stub whose duty list lives in
    [`plugin/skills/run-team/SKILL.md`](../../plugin/skills/run-team/SKILL.md)
-   — directly, once CI is green, the review has returned, and its
-   fix-applier (if dispatched) has reported. Never a tick-printed row.
+   — directly. Check green only makes a PR a *candidate*; the gate is
+   the review has returned and its fix-applier, if dispatched, has
+   reported — a `no-op` report clears it immediately, against the
+   existing head, with no new CI run. With `verdict: "no-ci"`, it
+   dispatches off the reviewer's final verdict instead, gated on
+   `--declare-no-ci`.
 2. **Audit the worktree** via
    [`worktree-audit.sh`](../../plugin/scripts/worktree-audit.sh) for
    dirty, diverged, unreadable, missing, or absent state — any of the

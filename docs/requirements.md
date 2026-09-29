@@ -28,14 +28,14 @@
 Install: `omp plugin install fleet-ctl@fleet-plugin` per [README → Installation](../README.md#installation).
 Check: `~/.fleet/bin/fleet-run --root` prints the plugin root or fails naming why.
 
-Settings (ADR 0011, 0014):
+Settings ([ADR 0011](adr/0011-omp-tier-routes-through-roles.md), [ADR 0014](adr/0014-omp-is-the-only-harness.md)):
 - `enabledProviders`: contains `"claude-plugins"`
 - `modelRoles.slow`, `.task`, `.smol`: set to real models
 
 Check: `~/.fleet/bin/fleet-run tier-roles.mjs --check`
 
 ### 1.4 Disk layout — SOFT
-- `~/.fleet/bin/fleet-run` — placed once by hand via `fleet-bootstrap` (ADR 0003)
+- `~/.fleet/bin/fleet-run` — placed once by hand via `fleet-bootstrap` ([ADR 0003](adr/0003-dual-harness-dev-loop-install-is-the-only-path.md))
 - `<repo>/.worktrees/<issue>-<slug>/` — one worktree per claimed ticket
 - `<repo>/.fleet/` — ledger, heartbeat, shortlist, board, instruments
 - `.worktrees/` and `.fleet/` must be writable and git-ignored (§2.5)
@@ -52,7 +52,7 @@ Remote: `origin`. Integration branch: `main` (all rebases, cherry-picks, stalene
 Check: `git remote get-url origin && git rev-parse --verify origin/main`
 
 ### 2.3 Installable and testable — HARD
-**ADR 0015:** Any technology. Fleet derives your repo's Recipe (Install + Test entrypoint) by agent reasoning, proves both in a throwaway worktree, caches under `.fleet/`.
+**[ADR 0015](adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md):** Any technology. Fleet derives your repo's Recipe (Install + Test entrypoint) by agent reasoning, proves both in a throwaway worktree, caches under `.fleet/`.
 
 **Shipped state (until #2117, #2118 land):** Node-only derivation. `claim-ticket.sh` refuses unless `origin/main` has `package.json` with `scripts.test` or tracked files matching `\.(test|spec)\.[cm]?[jt]sx?$` and an install from `package-lock.json`/`pnpm-lock.yaml`/`yarn.lock` or zero dependencies.
 
@@ -105,7 +105,7 @@ Fleet scripts don't write `.gitignore`; verify with `git check-ignore .worktrees
 | Auto-delete head branches | on | Fleet never passes `--delete-branch`; without this, branches accumulate |
 | Sub-issues and issue dependencies | enabled | `blockedBy` is read; ≤50 blockers per issue (GitHub's cap) |
 
-Branch protection: repository ruleset on `main` (ADR 0007), modelled on [`.github/rulesets/main.json`](../.github/rulesets/main.json):
+Branch protection: repository ruleset on `main` ([ADR 0007](adr/0007-main-ruleset-is-the-merge-gate.md)), modelled on [`.github/rulesets/main.json`](../.github/rulesets/main.json):
 - `required_status_checks` by job name; `strict_required_status_checks_policy: true`
 - `pull_request`: `allowed_merge_methods: ["merge"]`, `required_approving_review_count: 0`
 - `bypass_actors: []`
@@ -139,8 +139,9 @@ Admitted: open, labelled `ready-for-agent`, no excluded labels (§2.4), unassign
 - **`## Out of scope`:** record what you deliberately left.
 - **One PR per ticket.** Multi-story specs (detected by `## User Stories` heading) are dropped; split first. (`## Acceptance Criteria` alone is not detected as multi-story.)
 - **`Part of #<map>` and sub-issue parent/child relations are hierarchy, not blocking.**
-- **Sizing & tier** not on issue; member writes into PR body; tier from agent definition (ADR 0005).
-- **Filing bar:** issue reaches `ready-for-agent` only once defect is confirmed and worth a claim (ADR 0001, 0002).
+- **Sizing & tier** not on issue; member writes into PR body; tier from agent definition ([ADR 0005](adr/0005-tier-declared-per-harness-verified-at-dispatch.md)).
+- **Filing bar:** issue reaches `ready-for-agent` only once defect is confirmed and worth a claim ([ADR 0001](adr/0001-filing-label-bar-is-defect-confirmed.md), [ADR 0002](adr/0002-filing-second-bar-worth-a-claim.md)).
+- **Triage is a human job:** the fleet never promotes `needs-triage` → `ready-for-agent`.
 
 ### 3.2 Claims and branches — HARD
 - Fleet marks claim: `in-progress` + assignee + worktree `.worktrees/<issue>-<slug>` on branch `<type>/<issue>-<slug>`.
@@ -164,7 +165,7 @@ Admitted: open, labelled `ready-for-agent`, no excluded labels (§2.4), unassign
 ### 3.5 Running it — SOFT
 - One controller per repo at a time (`.fleet/` has no locking).
 - Run ends on your decision, budget, or context exhaustion—never because Shortlist is empty.
-- Sit near the terminal first run: controller is turn-based (ADR 0008).
+- Sit near the terminal first run: controller is turn-based ([ADR 0008](adr/0008-a-turn-based-fleet-holds-its-own-turn.md)).
 - Rate limits: `gh` calls + one `ci-state` read per in-flight PR; merge bot polls every 60 s. `rate-limited` verdicts count as unknown, never green.
 
 ---
@@ -196,6 +197,6 @@ Then: `/fleet-ctl:run-team 1 1` with one `ready-for-agent` ticket, watch a full 
 ---
 
 ## See also
-- Cost & tier: ADR 0005, 0011
+- Cost & tier: [ADR 0005](adr/0005-tier-declared-per-harness-verified-at-dispatch.md), [ADR 0011](adr/0011-omp-tier-routes-through-roles.md)
 - Wayfinder: [`agents/issue-tracker.md`](agents/issue-tracker.md)
 - Why each requirement exists: [`docs/research/external-assumptions.md`](research/external-assumptions.md) §9

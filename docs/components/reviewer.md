@@ -31,11 +31,14 @@ PR, off the controller's own turn.
    the controller reads only a digest and dispatches a **fix-applier**
    (`fix-pr-<pr#>`, never the implementer) that applies survived
    in-scope findings, defers and files the rest, commits, and pushes.
-5. **CI, then the Finisher.** A red check job re-dispatches the
-   fix-applier (`tick: DISPATCH fix-pr`); a green one, once the review
-   and fix-applier have both reported, is the controller's own direct
-   cue to dispatch the [Finisher](finisher.md) — never a tick-printed
-   row.
+5. **CI, then the Finisher — or `no-op`, then the Finisher.** A red
+   check job re-dispatches the fix-applier (`tick: DISPATCH fix-pr`).
+   Check green makes the PR a finisher *candidate*, not the gate: once
+   the review has returned and its fix-applier (if any) has reported,
+   that is the controller's own direct cue to dispatch the
+   [Finisher](finisher.md) — never a tick-printed row. A fix-applier
+   reporting `no-op` satisfies that gate immediately, against the
+   existing head, with no new CI run to wait for.
 
 Where the review unit is unavailable or has failed its one retry, the
 controller falls back to hand-dispatching the snapshot and specialists
@@ -62,7 +65,8 @@ flowchart TD
 
     FIX -->|"push"| CIJOB{"CI check job"}
     CIJOB -->|"tick: DISPATCH fix-pr PR#N<br/>(check job failure)"| FIX
-    CIJOB -->|"controller: check green,<br/>review + fix-applier done<br/>→ dispatch finisher"| FINISH(["Finisher"])
+    CIJOB -->|"controller: check green necessary,<br/>not sufficient — gate is review<br/>returned + fix-applier reported"| FINISH(["Finisher"])
+    FIX -->|"controller: reports no-op<br/>→ dispatch finisher<br/>(no new CI run)"| FINISH
 ```
 
 ## Opinionated choices
