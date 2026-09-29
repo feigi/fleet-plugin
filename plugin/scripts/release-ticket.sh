@@ -25,10 +25,10 @@
 # than an independent one, and the guard at the dirty check below is left as
 # sole arbiter — which is why it establishes absence instead of inferring it.
 #
-# The commit check's is this script's own: `-D` refuses nothing, so the `ahead`
-# count is re-run against $base immediately before it. Why `-D` and not `-d`,
-# and what that recount does and does not cover, is argued once at the delete
-# site below — don't restate it here.
+# The commit check's is this script's own: the compare-and-swap delete refuses
+# only a ref that moved, so the `ahead` count is re-run against $base right
+# before it. Why not `-d`, and what that recount does and does not cover, is
+# argued once at the delete site below — don't restate it here.
 set -eu
 
 # Byte semantics for the `awk`, `grep`, `sed` and `tr` below — all four really
@@ -233,9 +233,9 @@ esac
 # The accept-list alone does not deliver that: `origin/$branch` IS a
 # remote-tracking ref and passes it, while making both guards vacuous in exactly
 # the way described above — ahead 0 and cherry empty against the branch's own
-# upstream, whatever it carries. `-D` then deletes a commit that exists nowhere
-# else at exit 0. Name-based, not a rev-parse comparison: a pristine claim's tip
-# legitimately equals origin/main's, so equal SHAs are the normal case.
+# upstream, whatever it carries. The compare-and-swap delete then removes a
+# commit that exists nowhere else at exit 0. Name-based, not a rev-parse
+# comparison: a pristine claim's tip equals origin/main's — the normal case.
 case "$base" in
   */"$branch") die "BASE_REF must not name the claim's own branch, got '$base'";;
 esac
@@ -248,8 +248,8 @@ esac
 # — `git tag origin/main refs/heads/$branch` — outranks the remote-tracking ref
 # and every measurement against $base then answers about the claim's own tip:
 # ahead 0, cherry empty, and the delete-time recount 0 as well. All three guards
-# vacuous at once, and `-D` refuses nothing, so the branch and its unpushed
-# commit are destroyed at exit 0 with "released":true and an empty blocker list.
+# vacuous at once, the compare-and-swap delete refuses nothing, and the branch
+# and its unpushed commit go at exit 0, "released":true, no blockers.
 # Measured on a real bare-origin fixture; `git rev-parse origin/main` prints the
 # tag's OID under git's own `refname 'origin/main' is ambiguous` warning, which
 # nothing here reads. Pre-#760 `-d` refused this ("not fully merged") — the
@@ -1638,40 +1638,46 @@ else
 
     # What the CAS does not give back: `git update-ref` is ref-only plumbing
     # and, unlike `-D`, consults no worktree at all — so the one guard the CAS
-    # trades away is `-D`'s own delete-time refusal on a branch checked out
-    # anywhere. Replaced here with the same listing lookup the script already
-    # runs to compute `$wt` above (and the main-checkout guard beside it),
-    # re-read fresh rather than trusted from that early scan: both of those
-    # answered this question before the `gh issue view` call, and a `git
-    # worktree add` for this exact branch landing after that scan and before
-    # this line checks it out somewhere neither one ever saw. This still
-    # leaves its own, smaller, check-then-act window between the re-read below
-    # and the `update-ref` call itself — narrower than the one it replaces,
-    # for the same reason the recount above narrows rather than closes: it is
-    # a separate git invocation, and nothing here can ask `update-ref` to
-    # verify it atomically with the delete the way `-D` verified its own.
+    # trades away is `-D`'s own delete-time refusal on a branch a worktree
+    # holds. Replaced here with worktree.sh's `wt_holding` over the listing,
+    # re-read fresh rather than trusted from the scan that computed `$wt`
+    # above (and the main-checkout guard beside it): both of those answered
+    # this question before the `gh issue view` call, and a `git worktree add`
+    # for this exact branch landing after that scan and before this line
+    # checks it out somewhere neither one ever saw. This still leaves its own,
+    # smaller, check-then-act window between the re-read below and the
+    # `update-ref` call itself — narrower than the one it replaces, for the
+    # same reason the recount above narrows rather than closes: it is a
+    # separate git invocation, and nothing here can ask `update-ref` to verify
+    # it atomically with the delete the way `-D` verified its own.
     #
-    # Narrower still in WHAT it looks for, not just WHEN: `$2==b` below only
-    # matches a worktree's `branch refs/heads/…` line, and `git worktree list
-    # --porcelain` prints no such line for a worktree whose HEAD is detached —
-    # `detached` instead. A worktree mid `rebase -i` stopped at an `edit` step,
-    # or mid `git bisect`, has this branch checked out for the run's duration
-    # with HEAD sitting exactly there (measured: a sibling worktree stopped
-    # mid-rebase makes `-D` refuse "used by worktree"; this listing-based
-    # check misses it entirely and lets the delete through). Closing that
-    # needs reading each worktree's rebase/bisect admin state —
-    # `rebase-merge/head-name`, `rebase-apply/head-name`, `BISECT_START` — not
-    # the porcelain listing alone, and is left open here rather than reached
-    # for: the same judgment call as the check-then-act window above,
-    # narrowed rather than closed.
+    # What that window can cost, per the ruling on #1330 (Q2): a checkout
+    # landing in it leaves that worktree holding a deleted branch, which
+    # breaks the worktree. It cannot lose a commit. A commit made there before
+    # the delete moves the ref off $tip, and the compare-and-swap below then
+    # refuses. Measured, git 2.50.1: with a commit made in the window,
+    # `update-ref -d` exits 1 on `is at <new> but expected <tip>` and the
+    # branch keeps the commit; with none, the delete lands and that worktree
+    # reads `No commits yet` on its branch.
+    #
+    # Held by either route `-D` refused on, not only the porcelain `branch`
+    # line: a worktree stopped mid `rebase -i` or mid `git bisect` on this
+    # branch is listed `detached`, with no `branch` line, while git still
+    # counts the branch as its own. Measured, git 2.50.1: `-D` refused both,
+    # a listing-only check let the delete through, and the sibling's `rebase
+    # --continue` / `bisect reset` then failed on the missing ref. `wt_holding`
+    # reads those detached worktrees' rebase/bisect state out of their admin
+    # dirs, and a detached worktree whose admin dir cannot be read halts here
+    # as unknown, never passes as "not held". #2218, ADR 0018
     wt_list_before_cas=$wt_list
     wt_listing || halt "cannot re-read the worktree list to check $branch before the delete: $wt_err"
-    cas_wt=$(printf '%s\n' "$wt_list" |
-             awk -v b="refs/heads/$branch" '/^worktree /{w=substr($0,10)} /^branch /&&$2==b{print w; exit}') ||
-      halt "could not check whether $branch is checked out before the delete"
+    if wt_holding "refs/heads/$branch"; then cas_rc=0; else cas_rc=$?; fi
     wt_list=$wt_list_before_cas
-    [ -z "$cas_wt" ] ||
-      halt "$branch is checked out in worktree $cas_wt — not deleted"
+    case $cas_rc in
+      0) halt "$branch $wt_holder_how in worktree $wt_holder — not deleted" ;;
+      1) ;;
+      *) halt "cannot tell whether $branch is held by worktree $wt_holder: its git dir could not be read — not deleted" ;;
+    esac
 
     # update-ref, authorized by the `ahead` and `git cherry` guards above,
     # this recount, and the worktree check above — and carrying its own

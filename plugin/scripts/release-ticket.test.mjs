@@ -2678,7 +2678,6 @@ test("a detached worktree whose git dir cannot be read halts the delete as unkno
   const sib = join(r.w, "..", "sealed-wt");
   git(r.w, "worktree", "add", "-q", "--detach", sib, "origin/main");
   chmodSync(sib, 0o000);
-  t.after(() => chmodSync(sib, 0o755));
 
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 2, stderr);

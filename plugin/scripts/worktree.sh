@@ -1,6 +1,6 @@
 # shellcheck shell=sh
 # Reading worktree state for the fleet's shell scripts: the porcelain listing,
-# and the two predicates over a worktree path that more than one script asks.
+# path predicates more than one script asks, and in-progress operation state.
 # Sourced, never executed — no shebang, and the `shell=sh` directive above is
 # what tells shellcheck what to check it as.
 #
@@ -225,4 +225,128 @@ gone() {
     look=${look:-/}
   done
   [ ! -e "$1" ] && [ -x "$look" ]
+}
+
+# Which git operation does the worktree at $1 have in progress, and which
+# branch does that operation hold?
+#
+# Sets `wt_op` to the in-progress marker found in its admin dir (empty: none),
+# and `wt_op_held` to the space-separated `refs/heads/<b>` a stopped rebase or
+# bisect holds (empty: none). Returns 1 when the admin dir cannot be read —
+# "cannot tell", never "nothing in progress" — and every caller fails closed on
+# it. Condition context only, like `gone`.
+#
+# The in-progress markers are the states git records while an operation runs.
+# Measured, git 2.50.1 (Apple Git-155): `git worktree remove` WITHOUT `--force`
+# removes a worktree holding an interrupted rebase, and one holding a bisect, at
+# exit 0 — both leave `git status --porcelain` empty, so the sequencer state,
+# the todo list and the original head go with the directory. The remaining
+# sequencer states leave staged or unmerged paths behind, so a dirty check
+# already answers for them; they are listed anyway because a state git records
+# is cheaper to test than to argue about.
+#
+# The held branch is the half `git worktree list --porcelain` cannot give.
+# Only a rebase and a bisect DETACH HEAD, and a detached worktree's porcelain
+# record carries `detached` instead of a `branch refs/heads/<b>` line — yet git
+# still counts the branch as that worktree's: measured, git 2.50.1, `git branch
+# -D` refuses "used by worktree" for a sibling stopped at a `rebase -i` edit
+# step and for one mid-bisect, both listed `detached`. git answers out of the
+# admin dir: `rebase-merge/head-name` or `rebase-apply/head-name` hold the full
+# `refs/heads/<b>`, `BISECT_START` holds the SHORT name `<b>` the bisect started
+# from. `MERGE_HEAD`, `CHERRY_PICK_HEAD` and `REVERT_HEAD` leave HEAD on its
+# branch, so the porcelain `branch` line already names what they hold. A
+# head-name of `detached HEAD` or a bisect started from a detached HEAD names
+# no branch and is not collected. #2218
+#
+# `2>/dev/null` on the admin-dir read, NOT the `2>&1` the fleet's message-text
+# captures fold in, because this capture is used as a PATH. Measured (PR #985
+# review): a `~/.gitconfig` with a key outside any section makes every git
+# command print `error: key does not contain a section: …` to stderr AT EXIT 0,
+# so `2>&1` returns that line glued in front of the git dir, every `[ -e ]`
+# below then matches nothing, and a worktree holding an interrupted rebase reads
+# as holding nothing at all.
+#
+# A rebase state dir that exists but cannot be searched is "cannot tell" too:
+# `[ -e ]` on the `head-name` inside it fails exactly as it does on a head-name
+# that is not there, and only the second is an answer.
+#
+# `wt_op` and `wt_op_held` are this function's OUTPUT, read by the sourcing
+# script — SC2034, as for `wt_listing`.
+# shellcheck disable=SC2034
+wt_op_state() {
+  wt_op=
+  wt_op_held=
+  wt_op_dir=$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+  [ -n "$wt_op_dir" ] || return 1
+  for wt_op_m in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG; do
+    if [ -e "$wt_op_dir/$wt_op_m" ]; then wt_op=$wt_op_m; fi
+  done
+  for wt_op_m in rebase-merge rebase-apply; do
+    if [ -d "$wt_op_dir/$wt_op_m" ] && [ ! -x "$wt_op_dir/$wt_op_m" ]; then return 1; fi
+  done
+  for wt_op_f in rebase-merge/head-name rebase-apply/head-name BISECT_START; do
+    [ -e "$wt_op_dir/$wt_op_f" ] || continue
+    wt_op_ref=$(cat "$wt_op_dir/$wt_op_f") || return 1
+    case $wt_op_f in BISECT_START) wt_op_ref=refs/heads/$wt_op_ref ;; esac
+    case $wt_op_ref in
+      refs/heads/?*) wt_op_held="${wt_op_held:+$wt_op_held }$wt_op_ref" ;;
+    esac
+  done
+  return 0
+}
+
+# Which registered worktree holds branch ref $1 (`refs/heads/<b>`), by either
+# route git itself counts: checked out, per its porcelain `branch` line, or held
+# by a rebase or bisect stopped in a detached worktree, per `wt_op_state`. Reads
+# `$wt_list` as `wt_listing` last left it, so a caller wanting a fresh answer
+# re-reads the listing first.
+#
+# 0: held — `wt_holder` names the worktree and `wt_holder_how` the route, as a
+#    clause (`is checked out`, …) to follow the branch name in a message.
+# 1: no worktree holds it.
+# 2: cannot tell — `wt_holder` names a detached worktree whose admin dir could
+#    not be read, or whose listed path this reader cannot hand back to git.
+#
+# Detached records only go to `wt_op_state`, deliberately: a worktree whose
+# record carries a `branch` line is answered by that line, and an unreadable
+# one of those holds nothing a stopped rebase or bisect could add — so it is
+# never allowed to turn into a "cannot tell" that halts every caller.
+#
+# A plain line loop, no awk: the listing's records are one attribute per line
+# and `wt_listing` has already swapped any newline inside a path for `$wt_nl`,
+# so `read -r` sees one attribute at a time. The heredoc keeps the loop in this
+# shell, so its `return` answers for the function.
+#
+# Condition context only: 1 and 2 would exit a `set -e` caller.
+# shellcheck disable=SC2034
+wt_holding() {
+  wt_holder=
+  wt_holder_how=
+  wt_h_path=
+  while IFS= read -r wt_h_line; do
+    case $wt_h_line in
+      "worktree "*) wt_h_path=${wt_h_line#worktree } ;;
+      "branch $1")
+        wt_holder=$wt_h_path
+        wt_holder_how="is checked out"
+        return 0
+        ;;
+      detached)
+        if nl_path "$wt_h_path" || ! wt_op_state "$wt_h_path"; then
+          wt_holder=$wt_h_path
+          return 2
+        fi
+        case " $wt_op_held " in
+          *" $1 "*)
+            wt_holder=$wt_h_path
+            wt_holder_how="is held by a rebase or bisect in progress"
+            return 0
+            ;;
+        esac
+        ;;
+    esac
+  done <<EOF
+$wt_list
+EOF
+  return 1
 }
