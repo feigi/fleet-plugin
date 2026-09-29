@@ -165,16 +165,16 @@ function slowRepo(t) {
   git(w, "push", "-q", "-u", "origin", "main");
   const head = git(w, "rev-parse", "HEAD");
 
-  const stub = slowTransport(origin);
+  const sshCommand = slowTransport(origin);
   git(w, "remote", "set-url", "origin", SSH_URL);
-  return { w, head, stub };
+  return { w, head, sshCommand };
 }
 
 test("a fetch that is slow but WORKING keeps its ordinary verdict — the budget is not a stopwatch on success", (t) => {
-  const { w, head, stub } = slowRepo(t);
+  const { w, head, sshCommand } = slowRepo(t);
   const r = spawnSync("sh", [join(import.meta.dirname, "verify-sha.sh"), "main", head], {
     cwd: w, encoding: "utf8", timeout: 60_000,
-    env: { ...ENV, GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "20" },
+    env: { ...ENV, GIT_SSH_COMMAND: sshCommand, FLEET_NET_TIMEOUT: "20" },
   });
 
   assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r)}`);
@@ -187,10 +187,10 @@ test("a fetch that is slow but WORKING keeps its ordinary verdict — the budget
 });
 
 test("the budget is what spares the slow fetch, not the absence of a watchdog", (t) => {
-  const { w, head, stub } = slowRepo(t);
+  const { w, head, sshCommand } = slowRepo(t);
   const r = spawnSync("sh", [join(import.meta.dirname, "verify-sha.sh"), "main", head], {
     cwd: w, encoding: "utf8", timeout: 60_000,
-    env: { ...ENV, GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "1" },
+    env: { ...ENV, GIT_SSH_COMMAND: sshCommand, FLEET_NET_TIMEOUT: "1" },
   });
 
   assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r)}`);

@@ -3932,13 +3932,13 @@ test("a slow but working fetch still reaps the merged [gone] branch — the budg
   // Rewired only now: every push this fixture makes needs `receive-pack`, and
   // the stub serves `upload-pack` alone.
   const origin = git(w, "remote", "get-url", "origin");
-  const stub = slowTransport(origin);
+  const sshCommand = slowTransport(origin);
   git(w, "remote", "set-url", "origin", SSH_URL);
 
   const { code, json, stderr, error } = runReap(
     w,
     ["--apply"],
-    { GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "20" },
+    { GIT_SSH_COMMAND: sshCommand, FLEET_NET_TIMEOUT: "20" },
     60_000,
   );
 
@@ -3955,13 +3955,13 @@ test("a fetch killed by its budget refuses to reap on stale refs, in this script
   const w = repo(t);
   mergedGoneBranch(w, "feature/merged", "merged work");
   const origin = git(w, "remote", "get-url", "origin");
-  const stub = slowTransport(origin);
+  const sshCommand = slowTransport(origin);
   git(w, "remote", "set-url", "origin", SSH_URL);
 
   const { code, json, stderr, error } = runReap(
     w,
     ["--apply"],
-    { GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "1" },
+    { GIT_SSH_COMMAND: sshCommand, FLEET_NET_TIMEOUT: "1" },
     60_000,
   );
 

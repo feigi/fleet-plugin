@@ -2672,16 +2672,15 @@ test("probe 2: a budget too large for the shell's integer is ignored, and says n
 // budgets — 20 above it, 1 below it — are chosen against, and it runs no
 // freshly written executable inside the region the budget bounds (#2221).
 // This file's own copy of it did, and paid macOS's first-exec scan in there.
-const slowSsh = (repo) => slowTransport(join(repo, "..", "remote.git"));
 
 test("probe 2: a slow but working link keeps its ordinary verdict, budget or no budget", (t) => {
   const { repo, env } = fixture(t, 41, { remoteBranches: ["main", "fix/41-thing"] });
-  const stub = slowSsh(repo);
+  const sshCommand = slowTransport(join(repo, "..", "remote.git"));
   git(repo, env, "remote", "set-url", "origin", SSH_URL);
 
   const r = spawnSync("sh", [SCRIPT, "41"], {
     cwd: repo, encoding: "utf8", timeout: 60_000,
-    env: { ...env, GIT_SSH_COMMAND: stub, INFLIGHT_LS_REMOTE_TIMEOUT: "20" },
+    env: { ...env, GIT_SSH_COMMAND: sshCommand, INFLIGHT_LS_REMOTE_TIMEOUT: "20" },
   });
 
   assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r)}`);
@@ -2696,12 +2695,12 @@ test("probe 2: a slow but working link keeps its ordinary verdict, budget or no 
 // links from one that was never armed.
 test("probe 2: the budget is what spares the slow link, not the absence of a watchdog", (t) => {
   const { repo, env } = fixture(t, 41, { remoteBranches: ["main", "fix/41-thing"] });
-  const stub = slowSsh(repo);
+  const sshCommand = slowTransport(join(repo, "..", "remote.git"));
   git(repo, env, "remote", "set-url", "origin", SSH_URL);
 
   const r = spawnSync("sh", [SCRIPT, "41"], {
     cwd: repo, encoding: "utf8", timeout: 60_000,
-    env: { ...env, GIT_SSH_COMMAND: stub, INFLIGHT_LS_REMOTE_TIMEOUT: "1" },
+    env: { ...env, GIT_SSH_COMMAND: sshCommand, INFLIGHT_LS_REMOTE_TIMEOUT: "1" },
   });
 
   assert.equal(r.error, undefined, `the run did not come back: ${JSON.stringify(r)}`);

@@ -62,8 +62,11 @@ export const SSH_URL = "ssh://git@example.invalid/x/y.git";
  * `sh`, `sleep` and `git`, none of them freshly written (see the header). git
  * runs the value through a shell and appends its own arguments — `-G`, the
  * host, the remote command, and whatever `-o` options the caller under test
- * adds — which land after `$0` and are ignored; `$0` is `origin`.
+ * adds — which land after `$0` and are ignored; `$0` is `origin`, single-
+ * quote-escaped before interpolation so an origin containing `'` cannot
+ * break out of the quoted argument.
  */
 export function slowTransport(origin) {
-  return `sh -c 'sleep ${SLOW_DELAY_S}; exec git upload-pack "$0"' '${origin}'`;
+  const safeOrigin = origin.replace(/'/g, "'\\''");
+  return `sh -c 'sleep ${SLOW_DELAY_S}; exec git upload-pack "$0"' '${safeOrigin}'`;
 }
