@@ -12,8 +12,9 @@
 //
 // Rows stay freeform text. Only a token whose name part is a member name is
 // claimed here; everything else a row carries (`class=routine`, `ports=`,
-// `ci=`, `held-behind:#M`, #1773's `review=`/`reviewed=` pair, the `→ PR#M`
-// arrow) is not a member and is left alone.
+// `ci=`, `held-behind:#M`, merge-bot's `conflict-hold:#<pr>`, #1773's
+// `review=`/`reviewed=` pair, the `→ PR#M` arrow) is not a member and is left
+// alone.
 
 // The outcome vocabulary, verbatim from the spec. A word is matched exactly,
 // except the two that carry a value, which match OUTCOME_PATTERNS below.

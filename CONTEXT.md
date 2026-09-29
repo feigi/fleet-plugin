@@ -271,6 +271,14 @@ labels, reports once and exits. A label seen after the exit starts a new Pass un
 fresh name.
 _Avoid_: wave, batch, cycle, round
 
+**Conflict hold**:
+A reviewed, queued PR a Pass would not merge because its rebase conflicted and the
+merge bot will not force a resolution — recorded by that bot as `conflict-hold:#<pr>` on
+the PR's own row, and cleared only when a fix-applier dispatched after it settles as
+landed. Merge-time, never claim-time: distinct from an Exclusion, and from a
+`held-behind` hold, which waits on a lower PR rather than on a fix.
+_Avoid_: exclusion, held-behind, blocked
+
 **Exploration Pull**:
 A Pull whose implementer cell is drawn rather than dispatched at the
 policy cell — every 5th `impl-` row by ledger count (every Pull, during
