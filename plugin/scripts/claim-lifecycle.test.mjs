@@ -56,12 +56,18 @@ function fixture(t) {
   writeFileSync(join(bin, "gh"), '#!/bin/sh\ncase "$*" in *"issue view"*) echo in-progress;; esac\nexit 0\n', { mode: 0o755 });
   const env = { ...BASE_ENV, PATH: `${bin}:${process.env.PATH}` };
   const git = (cwd, ...a) => execFileSync("git", a, { cwd, env, encoding: "utf8" }).trim();
-  // claim-ticket.sh refuses to emit a runner for a repo with no test files.
-  writeFileSync(join(w, "t.test.mjs"), 'import { test } from "node:test";\ntest("ok", () => {});\n');
+  writeFileSync(join(w, "README.md"), "fixture\n");
   git(w, "add", "-A");
   git(w, "commit", "-q", "-m", "root");
   git(w, "branch", "-M", "main");
   git(w, "push", "-q", "-u", "origin", "main");
+  // claim-ticket.sh refuses a repo with no Recipe cache (ADR 0015). The
+  // smallest proven one: nothing to install, nothing to fail. Untracked, in
+  // the checkout's own `.fleet/`, which is where derive-testcmd.sh reads it.
+  execFileSync("mkdir", ["-p", join(w, ".fleet")]);
+  writeFileSync(join(w, ".fleet", "recipe.json"), JSON.stringify({
+    install: "true", test: "true", derivedAt: git(w, "rev-parse", "HEAD"), installClean: true, testCount: 1,
+  }));
   return { root, origin, w, env, git };
 }
 

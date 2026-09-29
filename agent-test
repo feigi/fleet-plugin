@@ -1,44 +1,677 @@
 #!/bin/sh
-# The fleet's test runner, tracked — so a checkout nobody claimed can run the
-# suite. `./agent-test` used to exist only inside a worktree `claim-ticket.sh`
-# had freshly claimed, and everywhere else it answered `no such file or
-# directory`: not a red, but shaped like one, arriving exactly when someone is
-# deciding whether a diff is broken. #55
+# fleet-plugin's own test runner — a `node --test` argument shim, tracked here
+# because it is THIS repository's convenience, not the plugin's (ADR 0015).
 #
-# This is a BOOTSTRAP, not the runner. The runner is 24 KB of measured
-# guards — the directory-expansion shim, the node_modules refusals, the
-# zero-match refusal that stops a green over a suite nobody ran — and it is
-# EMITTED by scripts/claim-ticket.sh. Committing a copy of it here
-# would make this file the same decoy every `.worktrees/*/agent-test` already
-# is, frozen at the commit that added it while the emitter moved on, and
-# tracked, so it would read as the authoritative one. Ask the emitter instead:
-# a run can then only ever get the current runner.
-set -eu
-
-# `$0`'s directory, not `$PWD`: the runner judges an argument's node_modules
-# divergence from `dirname "$0"`, and the arguments themselves are the caller's
-# to resolve, so the runner is materialized HERE and executed with the caller's
-# cwd untouched. A generated runner sitting in $TMPDIR would answer the
-# divergence question about the wrong tree entirely.
-here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-
-# The isolation triple is per-worktree, and a worktree already carries its
-# issue number in its own directory name — `.worktrees/<N>-<slug>`, the shape
-# claim-ticket.sh builds. Everything else (the main checkout, a clone, a
-# snapshot) is 0, which shares a stack with no claim. Derived rather than
-# written in at claim time, which is what lets the tracked file be identical in
-# every worktree and so never a modified path `git worktree remove` refuses.
-issue=${here##*/}
-issue=${issue%%-*}
-# claim-ticket.sh refuses a leading zero and anything non-numeric, and its
-# refusal would arrive here as a materialization failure rather than as the
-# "this checkout is not a claimed worktree" it actually means. Answer that
-# question here, where it is cheap.
-case $issue in ''|*[!0-9]*|0?*) issue=0 ;; esac
-
-gen=$here/.agent-test.sh
-if ! materialize=$(cd "$here" && ./plugin/scripts/claim-ticket.sh --write-runner "$gen" "$issue" 2>&1); then
-  printf 'agent-test: could not materialize the runner from plugin/scripts/claim-ticket.sh\n%s\n' "$materialize" >&2
-  exit 1
-fi
-exec "$gen" "$@"
+# The fleet runs a repository through its Recipe: the Test entrypoint the
+# Recipe cache records, which the runner claim-ticket.sh writes into a claimed
+# worktree simply execs. A repository that tracks its own `agent-test` keeps
+# it — claim-ticket.sh never writes over a tracked runner — so this file is
+# what every checkout of this repository runs. Before ADR 0015 it was a
+# bootstrap asking claim-ticket.sh to emit the shim below (#55); the shim was
+# the plugin's one technology-specific runner and left the plugin with the
+# other Node arms, so it lives here now, whole, with no emitter to ask.
+#
+# What it adds over the Test entrypoint (`node --test plugin/scripts/*.test.mjs`):
+# `./agent-test <file-or-dir>…` runs just those, a directory expanding to the
+# test files under it; a bare `./agent-test` runs every test file under this
+# checkout; anything that would pass vacuously — a directory holding no tests,
+# a typo'd path, a test under a vendored node_modules — refuses instead.
+# agent-test.test.mjs is its suite.
+# A directory is the ergonomic way to say "run this suite", but node resolves
+# it as a module specifier and dies with MODULE_NOT_FOUND before a test runs.
+# Expand it to the test files underneath instead. IFS and -f settle only how
+# the *shell* splits that expansion: a newline IFS keeps a path with a space
+# in it one word, and -f stops the shell re-globbing the result.
+IFS='
+'
+set -f
+# A bare invocation (zero arguments) must run the same test-file shape every
+# other invocation does, not node's own default discovery. `for arg do` with no
+# `in` clause iterates "$@" — on an empty argv the loop body never runs, so
+# both the expansion and its zero-match refusal are skipped and the runner
+# falls straight through to `exec node --test "$@"` below with an empty
+# "$@": node's own discovery, which does not recognise the `.spec.` form
+# or the `x` variants of the extensions this shim matches. Routing it
+# through "." here gives it the same expansion, the same test-file shape, and
+# the same node_modules prune as every other invocation. (#97)
+[ $# -gt 0 ] || set -- .
+# A flag counts toward $#, so an argv of flags alone clears the bare-form
+# default and then contributes nothing for the loop to expand: argv reached
+# `exec node --test` holding only flags, which is node's own discovery and the
+# same vacuous pass the bare-form default exists to refuse. $operand records
+# whether any argument named something to run, so the flags-only refusal can
+# tell that argv from a bare one, which the bare-form default has already
+# turned into ".". Assigned rather than assumed empty, because an exported
+# $operand in the caller's environment would otherwise disarm the refusal.
+# Refusing rather than defaulting: prepending "." ahead of node's own flags
+# reorders argv, which needs its own measurement, and no briefed workflow
+# passes flags alone. (#352)
+operand=
+# Where this runner itself lives, resolved physically. Both vendored guards
+# below judge an argument by where it DIVERGES from here, and each used to
+# derive that for itself from the same `dirname "$0"` — byte-identical
+# commands 276 lines apart, re-run once per argument.
+# Once, above the loop, is value-identical and not merely cheaper: every `cd`
+# in this runner is inside a `$( )` and so cannot move this process's cwd
+# between iterations, `$0` is never reassigned, and `CDPATH=` pins the one
+# lookup an inherited CDPATH could otherwise answer differently per argument.
+root=$(CDPATH= cd -- "$(dirname "$0")" 2>/dev/null && pwd -P)
+# The deepest ancestor of $root that also contains $1, left in $shared. Both
+# vendored guards judge an argument from that point down, because a
+# `node_modules` segment ABOVE it is an ancestor of the runner itself and says
+# nothing about the argument — and both walked the identical loop to find it.
+# It takes an ALREADY-RESOLVED path and resolves nothing itself, which is the
+# whole of what makes it shareable. The two callers deliberately resolve
+# differently — the directory branch `cd`+`pwd -P` (#186), the file branch
+# `realpath` (#424), one logical guard away from each other by #401's
+# ruling — and a helper that picked either mode for both would reinstate the
+# defect #424 closed. Pass the resolution in; never derive it here.
+# $shared is a global because POSIX `sh` has no `local`, and it is rewritten
+# on every call — read it in the same breath, as both callers do. The `|
+# "$shared"` alternative is the equality case: an argument resolving TO the
+# ancestor, not under it, must still terminate the walk there.
+diverge() {
+  shared=$root
+  while [ -n "$shared" ]; do
+    case "$1" in "$shared"/* | "$shared") break ;; esac
+    shared=${shared%/*}
+  done
+}
+for arg do
+  shift
+  # Judged on the argument's shape, not on what that shape resolves to: a
+  # directory expands, an existing file passes through escaped, a quoted glob is
+  # node's to expand whether or not it matches anything, and a typo is refused
+  # outright. A flag is the one shape that can name nothing at all.
+  # $operand is recorded by the dispatch itself rather than derived a second
+  # time ahead of it (#961). The branch below already settles `-d`, then
+  # `-e`, then the argument's shape — the same three questions a standalone
+  # classification had to ask again, in another shape, with nothing but a
+  # comment keeping the two answers in agreement. Each arm that names
+  # something to run says so; the flag arm names nothing and stays silent.
+  # Existence, not spelling, is what settles a dash-led argument, and the arm
+  # ORDER is what carries that: an existing dash-named path reaches `-d` or
+  # `-e` before anything can read it as a flag, while a dash-led glob that
+  # does not exist meets `-*` ahead of the glob arm and stays a flag.
+  # Agreement is the whole of what this buys, never a working invocation: a
+  # dash-spelled path is refused either way, and the classification settles
+  # only WHICH refusal a caller sees. Measured on this runner, with a file
+  # named `-dash.test.mjs` present and named as the sole
+  # argument: as an operand, node reads it as an option and exits 9 with
+  # `node: bad option`; as a flag, the refusal below exits 1 in this runner's
+  # own voice. Both rows are pinned in agent-test.test.mjs.
+  # The arms that refuse an argument outright — every vendored spelling, the
+  # unreadable directory, the typo — used to run after the classification and
+  # now run before any arm records one. Nothing observable rides on that,
+  # because each of the nine exits inside this loop is `exit 1`: an argument
+  # they refuse leaves the process there, and $operand is never read again.
+  if [ -d "$arg" ]; then
+    operand=1
+    # Zero matches must refuse. Appending nothing does not run nothing — it
+    # leaves argv empty, and bare `node --test` then discovers the whole
+    # worktree: a green for a suite nobody asked for. Shrugging instead, when
+    # something else is on the line, runs a subset and still exits 0. Both are
+    # the vacuous pass this script exists to refuse.
+    # Node globs its own argv, downstream of anything the shell settled. A
+    # literal `[` there is a bracket expression that cannot match itself, so
+    # an unescaped path matches nothing — and node runs nothing and exits 0,
+    # the same vacuous pass, reached past this guard because find did match.
+    # `[[]` is the bracket idiom for a literal `[`; `*` and `?` need no
+    # escape, since a path holding one still matches itself.
+    # find's own status has to be read before grep overwrites it. A subtree it
+    # cannot descend still yields the part it reached, grep still matches, and
+    # the guard below still passes — a green over a suite that silently lost
+    # whatever was under the unreadable directory.
+    # Node's own discovery excludes `node_modules`; find does not, so without
+    # this a vendored test runs and the suite's result hangs on third-party
+    # code passing. Node refuses an argv path only when its relative form
+    # starts with `node_modules/` — a deeper segment or an absolute path runs,
+    # and in a mixed argv the refused ones are dropped silently — so this
+    # walk, not node, is what keeps vendored tests out.
+    # It takes two mechanisms, because they cover disjoint cases. `-prune`
+    # fires only where the walk DESCENDS through a dirent named
+    # `node_modules`; where the argument is itself at or under one, find
+    # starts inside it, prunes nothing, and prints every file. Measured under
+    # the prune alone: `t/node_modules/pkg` and every absolute spelling ran
+    # their vendored tests and exited 0. So the `case` refuses a vendored
+    # argument up front, and the prune covers vendored directories met during
+    # a walk that started outside one.
+    # The `case` also has to be the thing that reports it. Falling through to
+    # the emptiness guard below prints `no test files under $arg` — false,
+    # since the files are there and deliberately excluded — sending a reader
+    # after a discovery bug that does not exist.
+    # Pruning rather than filtering the walk's output after the fact is what
+    # buys the readability property: an unreadable directory under
+    # `node_modules` can no longer flip find's exit status, so the check
+    # above stops refusing a whole suite over content that was excluded
+    # regardless. The previously-shipped `-not -path '*/node_modules/*'` still
+    # descended, so it did not.
+    # The trailing slash is what lets a symlinked directory through. `[ -d ]`
+    # above follows symlinks and find does not descend a symlinked *argument*,
+    # so without it the two disagree on one target: the branch admits the
+    # symlink, find matches nothing under it, and the guard below refuses a
+    # suite that is right there. `find -L` would agree with `[ -d ]` too, but
+    # by following symlinks *inside* the tree as well — sweeping in vendored
+    # code reached through a symlink named anything other than
+    # `node_modules`, which neither guard catches: the `case` reads the
+    # argument itself — its spelling and where it resolves to — and
+    # `-prune` the directory's own name, and a symlink met INSIDE the walk
+    # under another name carries `node_modules` in neither. On a
+    # cycle the platforms then disagree: GNU find exits 1,
+    # which the `||` below reports as an unreadable directory, while BSD find
+    # skips it silently. The slash settles the argument alone.
+    # Judged by the argument's spelling OR its RESOLVED directory (#186).
+    # Spelling alone missed a symlink whose target lies inside a vendored
+    # tree — its own name carries no `node_modules`, and `-prune` below
+    # only fires on a dirent NAMED `node_modules` met during the walk:
+    # traversal starts at the symlink's target, so the vendored component is
+    # already behind the walk's starting point and neither mechanism ever
+    # sees it. `cd`+`pwd -P` follows the argument's own symlink (and any
+    # inside its path) to the real directory, so the test also becomes
+    # "resolves inside a vendored tree" however the caller spelled it.
+    # BOTH, because they cover disjoint inputs. `cd` fails on a directory
+    # `[ -d ]` admits but that carries no search bit, and the resolution is
+    # then empty. Its PARENT is still enterable — only the directory itself
+    # lost the bit, and `[ -d ]` above had to traverse the parent to answer —
+    # so resolving that and re-appending the basename hands the walk below a
+    # `pwd -P` path for this input too, and the `case` stays what reports it
+    # (see above) rather than the readability message from `find`. Falling
+    # `$resolved` back to the argument's own text instead is what left #230
+    # half-open: an absolute spelling through a symlinked ancestor (a macOS
+    # $TMPDIR is one) shares no literal prefix with $root, so $shared empties,
+    # `${resolved#"$shared"}` is the whole spelling, and a NON-vendored
+    # directory was refused as vendored under its own absolute name while the
+    # relative and realpath spellings of it reported the permission fault.
+    # The last resort is the fail-safe for a parent that will not resolve
+    # either: it restores the older behaviour rather than leave $resolved
+    # empty. `[ -d ]` above already traversed the parent, so no input
+    # is known to reach it and no test does — kept because a guard whose
+    # recovery can leave nothing to measure is the wrong way to be wrong.
+    # Judged from where the argument DIVERGES from the runner's own location,
+    # because `pwd -P` is absolute and a `node_modules` segment ABOVE the
+    # divergence is an ancestor of the runner itself — shared with it, so it
+    # says nothing about the argument. Matched absolutely, a worktree living
+    # under one refused every directory argument, including the bare
+    # invocation's implicit `.`. Anchoring at the worktree root instead is
+    # the opposite error: it discards every resolution that lands outside, so
+    # a symlink to a vendored tree elsewhere on disk ran green — #186's own
+    # class, one input over.
+    # The SPELLING is read only where it is anchored at all, which is why
+    # `${arg##/*}` empties an absolute one (#230). A relative spelling is
+    # anchored at the cwd and means something there; an absolute spelling
+    # names the whole path from the root, so it necessarily carries the
+    # ancestor shared with the runner inside its own text and matched on the
+    # `node_modules` the divergence walk had just ruled irrelevant. One
+    # directory then drew opposite verdicts under two names — the same
+    # directory that ran as `t` refused as its own absolute path. Exempting
+    # it is the rule the file branch below already applies, and stripping
+    # $shared off the spelling instead is not equivalent: that is lexical,
+    # while $shared comes from `pwd -P`, so a caller naming a path through a
+    # symlinked ancestor (a macOS $TMPDIR is one) shares no literal prefix
+    # with it and nothing is stripped. Both sides of that comparison are
+    # `pwd -P`-derived wherever the argument or its parent resolves, which is
+    # what makes the resolved term immune to the spelling; the one input that
+    # escapes is the last resort above, where neither did.
+    # The spelling term's own remaining input is a cwd OUTSIDE the worktree,
+    # from which a relative argument descending through the shared ancestor
+    # does name that `node_modules` and is refused — measured, and node reads
+    # the file branch's arguments the same way. Nothing else in the suite
+    # reaches the term, so that input is what pins it.
+    # `CDPATH=` on each `cd` here, and on $root above: an inherited CDPATH
+    # resolves a bare relative name against a same-named directory somewhere
+    # else entirely, so the guard would judge one directory while `find`
+    # below — which never consults CDPATH — walks another, and the vendored
+    # suite runs green. It also stops `cd` echoing its target into the
+    # substitution.
+    # A symlink to a directory that merely CONTAINS a vendored tree resolves
+    # outside `node_modules` and passes here untouched; `-prune` below
+    # still excludes its vendored contents once the walk reaches them.
+    resolved=$(CDPATH= cd -- "$arg" 2>/dev/null && pwd -P)
+    if [ -z "$resolved" ]; then
+      parent=$(CDPATH= cd -- "$(dirname -- "$arg")" 2>/dev/null && pwd -P)
+      [ -z "$parent" ] || resolved=${parent%/}/$(basename -- "$arg")
+      [ -n "$resolved" ] || resolved=$arg
+    fi
+    diverge "$resolved"
+    case "/${arg##/*}/ /${resolved#"$shared"}/" in
+      */node_modules/*) printf 'agent-test: %s is under node_modules — excluded from the run, not missing\n' "$arg" >&2; exit 1 ;;
+    esac
+    # BSD find (macOS's /usr/bin/find) and GNU find (ubuntu-latest CI's)
+    # both read a leading `-` in $arg as the start of an option cluster,
+    # trailing slash and all, and neither is rescued by a POSIX `--`:
+    # measured directly on this machine and inside an ubuntu:latest
+    # container, `find "-dir/" ...` and `find -- "-dir/" ...` both die
+    # before reading a single path — "illegal option -- i" (BSD) /
+    # "unknown predicate `-dir/'" (GNU), rc 1 either way — for a directory
+    # that holds tests and is otherwise perfectly readable. That refusal
+    # used to fall into the `||` below and report it as an unreadable
+    # subtree, which is not what happened: find never got far enough to
+    # try reading anything.
+    # `./$arg/` is not a workaround for that refusal, it is a spelling
+    # that never triggers it — measured the same two ways, `find
+    # "./-dir/" ...` runs clean (rc 0) on both finds, and still follows a
+    # dash-led SYMLINK argument exactly as the trailing slash already does
+    # for every other spelling (measured against a symlink named
+    # `-slink`). So a dash-led $arg is routed through `./` before it
+    # ever reaches find, and the `||` below is left with only its own
+    # job: whatever non-zero status find returns from here on is a genuine
+    # read fault, not its argument parser losing a fight with the caller's
+    # spelling.
+    case "$arg" in
+      -*) findarg="./$arg/" ;;
+      *) findarg="$arg/" ;;
+    esac
+    # GNU find (ubuntu-latest CI) answers `-type f` straight from the
+    # dirent's own `d_type` field when the filesystem provides one (ext4
+    # does) — no `stat`/`lstat` at all — and `-print` only ever needs the
+    # name, so the pair together can name a file behind a directory that is
+    # READABLE but not SEARCHABLE (chmod 600: `r` present, `x` missing)
+    # without ever touching it. BSD find (macOS's /usr/bin/find) carries no
+    # such shortcut and always stats, so the identical fixture that finds
+    # here in one process EACCESes there, and the divergence reaches all
+    # the way to node: the $arg this runner handed it looked found, and
+    # node then fails to actually open it, misreporting the runner's own
+    # permission fault as node's "Could not find". Measured directly:
+    # inside an ubuntu:latest container, as a non-root user, `find
+    # locked/ -type f -print` on a `chmod 600 locked` directory prints
+    # `locked/a.test.mjs` and exits 0 — strace shows find never calls
+    # `stat`/`lstat` on that path at all, only `getdents64` on `locked`
+    # itself, which the missing search bit does not gate.
+    # `-perm` cannot be answered from a dirent — it needs the file's real
+    # mode bits, which only `stat` carries — so adding it to the SAME
+    # `-type f` test forces the very stat the shortcut above was skipping,
+    # surfacing the same EACCES BSD find already hits (measured, same
+    # container) and reaching the existing `||` below exactly as BSD's own
+    # failure does. `-400` ("owner-read set"), not GNU's `/444`
+    # ("any of owner/group/other read"): measured directly on this
+    # machine, this BSD find rejects `/444` outright ("illegal mode
+    # string") — the GNU any-bits spelling is not the portable one here,
+    # `-N` ("these bits, at minimum") is. Owner-read is what every fixture
+    # and every real worktree in this repo actually has: files this runner
+    # discovers are created and chmod'd by the one user running it, never
+    # handed over from another owner, so the narrower bit costs nothing a
+    # real invocation would ever hit.
+    # A second, distinct `find` invocation was tried here first, auditing
+    # `-type d ! -perm -u+x` on its own — it works standalone, but this
+    # arm's own stub-based tests (e.g. "an invalid UTF-8 byte in a
+    # discovered path does not drop it") replace `find` on $PATH with a
+    # single canned script answering whatever it is asked, and a SECOND
+    # invocation gets the identical canned output as the first, corrupting
+    # a check that was never meant to see it. One call, on the existing
+    # `-type f` term, is what stays inside every fixture's contract that
+    # this runner calls `find` exactly once per directory argument.
+    found=$(find "$findarg" -name node_modules -prune -o -type f -perm -400 -print) || { printf 'agent-test: cannot read every path under %s\n' "$arg" >&2; exit 1; }
+    # Byte semantics for the two tools that read find's output, because a
+    # filename is bytes and neither tool is told which. Measured on macOS with
+    # a name holding \377, under en_US.UTF-8: `grep` drops that line silently
+    # (#582's own false-green shape — a green over a smaller suite). Measured
+    # with `sed` fed that byte directly, BSD `sed` gives up on the whole
+    # stream ("RE error: illegal byte sequence", exit 1) — but in THIS pipeline
+    # grep's own drop reaches the byte first, so sed never sees it here and its
+    # pin is defense in depth, not a live defect in this ordering. It stays: if
+    # sed ever is reached, it empties $files outright, which is worse than
+    # grep's silent shrink. Under LC_ALL=C both pass every line through. GNU is
+    # byte-oriented and already does, so this changes nothing on Linux — the
+    # platform CI runs, which is why no behavioural test here can fail on CI.
+    # (#600)
+    # A per-command prefix, not `export LC_ALL=C` in this runner's prologue,
+    # which is the form the six fleet scripts use. This runner `exec`s the
+    # suite: an exported pin would reach node and every process the tests spawn,
+    # so the fleet's OWN locale fixtures — which need a UTF-8 ambient locale to
+    # discriminate — would go green with their scripts' pins deleted. The pin
+    # belongs to these two commands, not to the suite they discover.
+    # grep's and sed's own exit codes were never read here — only whether
+    # $files ended up non-empty — so a scan failure inside either (rc 2+: an
+    # OOM'd grep, an interpreter that chokes on the input) read through the
+    # emptiness check below exactly like a worktree with no test files. Same
+    # defect class #1543 fixed in derive-testcmd.sh's `tf_rc`, but a
+    # DIFFERENT shape: a command substitution reports only its LAST
+    # command's exit status, so piping grep straight into sed threw grep's
+    # own rc away unread — one substitution can carry only one tool's status
+    # out, so grep and sed each need to be the last command in their OWN
+    # substitution to be read at all. Splitting the pipe there does not
+    # change $files: the same LC_ALL=C-pinned grep and sed above still run
+    # on the same bytes (#582, #600), just with grep's matched lines landing
+    # in $grepped between them instead of flowing straight through one pipe.
+    grepped=$(printf '%s\n' "$found" | LC_ALL=C grep -E '\.(test|spec)\.[cm]?[jt]sx?$')
+    grep_rc=$?
+    # rc 1 is grep's normal "no line matched", and — per the corrupt-byte
+    # comment above — also this file's own accepted signature for a line
+    # grep silently dropped. Neither is a tool failure; only 2+ is.
+    [ "$grep_rc" -le 1 ] || { printf 'agent-test: could not scan for test files under %s (grep exited %s)\n' "$arg" "$grep_rc" >&2; exit 1; }
+    files=$(printf '%s\n' "$grepped" | LC_ALL=C sed 's/\[/[[]/g')
+    sed_rc=$?
+    # Unlike grep, sed has no legitimate non-zero outcome to tolerate here:
+    # the LC_ALL=C pin above already keeps sed from ever seeing the
+    # illegal-byte case BSD sed would otherwise raise on this input, and sed
+    # has no rc-1 "no match" analog to grep's — any non-zero rc reaching
+    # here is a genuine tool failure, not an accepted outcome.
+    [ "$sed_rc" -eq 0 ] || { printf 'agent-test: could not scan for test files under %s (sed exited %s)\n' "$arg" "$sed_rc" >&2; exit 1; }
+    # No `set -e` in this runner, and that is load-bearing: grep exits 1 on no
+    # match, so under -e the shell would abort here (both above and in the
+    # emptiness check below) and none of these refusals would ever print.
+    # Read every status you care about explicitly, as find does above.
+    [ -n "$files" ] || { printf 'agent-test: no test files under %s\n' "$arg" >&2; exit 1; }
+    # Even where find now succeeds, node's own `--test` CLI still cannot
+    # take what it just found: measured directly (node v26.8.1 here; CI's
+    # .nvmrc pins v26.5.0), a relative file spec that starts with `-`
+    # AFTER node's own internal normalisation is read as an unrecognised
+    # option, not a path — true of every file find just printed under a
+    # dash-led $arg, whether or not it carries the `./` this arm routed
+    # it through: node strips that prefix before making the judgment, so
+    # `node --test ./-dir/a.test.mjs` still dies "bad option:
+    # -dir/a.test.mjs", the same as the unprefixed form. Only an absolute
+    # spelling escapes it, and rewriting every file this arm hands to node
+    # into one is a far larger change than this bug — it would touch what
+    # EVERY invocation passes through, not just a dash-led one.
+    # So refuse rather than `exec`. Letting it through trades one
+    # misdiagnosis for a worse one: node's own "bad option" prints as a
+    # FAILING TEST — exit 1, a summary that reads like a suite ran and one
+    # of its tests broke — for an argument this runner never got node to
+    # attempt. Gated on $files being non-empty (checked above): an empty
+    # or genuinely unreadable dash-led directory keeps reporting that,
+    # unchanged, since this hazard only exists for files this arm would
+    # otherwise actually hand to node.
+    case "$arg" in
+      -*) printf 'agent-test: %s holds tests, but node reads a relative dash-led path as an option, not a file — refusing rather than letting it run as a false failure\n' "$arg" >&2; exit 1 ;;
+    esac
+    set -- "$@" $files
+  else
+    # find only ever sees what a directory argument expanded to; a bare file
+    # or glob argument reaches here unchecked, and node decides on its own
+    # whether to run it. The two disagree, and node's discard is silent
+    # whenever anything else in argv resolves (#100) — so each one is
+    # validated here before it can pass through, or refused loudly.
+    #
+    # The order below is the guard: existence is settled BEFORE an argument
+    # is read as a glob, and vendoredness before either. Classifying first
+    # let one property of a path defeat the check meant for another — a real
+    # file whose name holds a `[` was read as a glob and passed through
+    # unescaped, and a vendored path with a `*` in it skipped the vendored
+    # refusal outright.
+    #
+    # One `case`, three arms. The two this replaces judged the same $arg a
+    # hundred lines apart and had to stay disjoint, with nothing but prose in
+    # between saying so; every spelling now lands in exactly one arm by
+    # construction (#1016). Each guard's own comment block moved with its code,
+    # so the `-P` defence below still sits above the guard that omits it.
+    case "$arg" in
+      # Absolute AND already naming a `node_modules` SEGMENT — the one shape
+      # both guards below decline, so nothing judges it, deliberately. The
+      # logical guard declines every ABSOLUTE spelling: node runs and counts
+      # an absolute vendored path rather than dropping it, so there is no
+      # silent drop to refuse (#401's ruling, measured on Node v26.5.0). The
+      # physical guard declines every SEGMENT-naming spelling, because
+      # re-judging one would overturn that ruling from a second place. This
+      # arm is where the two declinations meet, and it is the merge that makes
+      # it visible: before, the overlap was a gap between two `case`s.
+      # Two alternatives because a `case` pattern cannot spell a conjunction:
+      # an absolute path carrying the segment either opens with it or reaches
+      # it later. The one-glob spelling (`/*node_modules/*`) is not the same
+      # test — it drops the segment bound the other two arms carry, and
+      # `/x_node_modules/f` is not vendored and must reach the physical guard.
+      /node_modules/*|/*/node_modules/*) ;;
+      # Vendored, on the argument's own spelling: node excludes an argv entry
+      # when its NORMALIZED relative form starts with `node_modules/`, so
+      # `t/../node_modules/pkg/x.test.mjs` is excluded too and a literal prefix
+      # match misses it. A deeper segment (`t/node_modules/pkg/x.test.mjs`) and
+      # an absolute path are NOT excluded — node runs both, and counts them, so
+      # there is no silent drop to guard and the arm above keeps an absolute
+      # spelling out of this one (measured, Node v26.5.0). Resolving the
+      # argument's own directory is what separates those cases; `cd`/`pwd`
+      # without `-P` is the logical form, the same textual resolution node
+      # applies. `..` only ever removes segments, so an argument that does
+      # not mention `node_modules` cannot normalize into one — the outer
+      # pattern keeps the subshell off every other path. Passing an excluded
+      # spelling through would be the same silent drop as the typo case below,
+      # for a different reason.
+      # `-P` here is not a hardening opportunity, and the omission is not an
+      # oversight (#401). The ordinary npm/pnpm workspace shape is where the two
+      # resolution modes diverge: `node_modules/pkg` is itself a symlink to a
+      # sibling real directory (a hoisted or linked workspace package). Physical
+      # resolution follows `pkg` OUT of `node_modules`, so the pattern below
+      # stops matching, this guard falls through without refusing, and the
+      # argument reaches node unrefused — where it is excluded anyway, on its
+      # own unresolved spelling, silently, at exit 0. That reintroduces #100's
+      # silent drop, minus the loud refusal this guard exists to give it first.
+      # Bounded to a path SEGMENT, as the resolved arm below now is. No verdict
+      # moves here — this arm's own test is already anchored at
+      # `"$PWD"/node_modules/*`, so a directory whose name merely ENDS in the
+      # word (`vendor_node_modules/`) reached this arm and fell straight back
+      # out of it. The bound is what keeps the three arms reading disjoint
+      # arguments, which is the property the arm below rests on; the verdict it
+      # changes is down there, where the same unbounded pattern was a skip.
+      */node_modules/*|node_modules/*)
+        # Unconditional, because the `*/*` test this used to make could not
+        # lose: both alternatives of the arm above spell a literal `/`
+        # (`*/node_modules/*` and `node_modules/*`), and a glob only matches
+        # a string carrying every literal character in its pattern — so an
+        # argument without a `/` never reaches here and the `argdir="."`
+        # fallback was unreachable. Dropped rather than kept as cover (#1005).
+        # The `CDPATH= ` on the `cd` below is NOT part of that collapse and
+        # must survive any further one: a bare `cd` lets an inherited CDPATH
+        # resolve $argdir into a same-named decoy, so the vendored match
+        # misses, the guard falls through, and node drops the file silently at
+        # exit 0 (41d7743, #401) — its own suite row pins that.
+        argdir="${arg%/*}"
+        # `cd`'s own status used to be discarded outright (`2>/dev/null`,
+        # nothing read from the pipeline afterwards), so an $argdir that
+        # EXISTS but has lost its own search bit (`chmod 000`) failed `cd`
+        # exactly as a typo'd one does, fell through this `case` unrefused,
+        # and reached the `does not exist` arm far below — a permission
+        # fault reported as a spelling mistake. The directory branch's own
+        # $resolved fallback above already reads `cd`'s status for the same
+        # fault one arm over, but only to keep a fallback path flowing into
+        # the node_modules match — its own unreadable-$arg case surfaces
+        # later, off `find`'s failure far below, a different mechanism from
+        # this branch's own immediate report. (#1006)
+        # `[ -d $argdir ]` is what keeps this from reporting a permission
+        # fault it cannot actually back up, and the two fixtures that decide
+        # it are not one and the same — measured, not assumed. `stat` on a
+        # directory needs search only on ITS OWN PARENT, so `chmod 000` on
+        # $argdir itself still leaves `-d` true while `cd` fails: the
+        # shape this guard exists for. `chmod 000` on $argdir's PARENT
+        # instead leaves `-d` false too, since resolving $argdir at all now
+        # needs the very search bit that was removed — so the term does not
+        # fire there, and an argument this guard genuinely cannot vouch for
+        # keeps falling through to whatever the missing-path arms below
+        # already do with it, unchanged.
+        argpwd=$(CDPATH= cd -- "$argdir" 2>/dev/null && pwd)
+        if [ -z "$argpwd" ] && [ -d "$argdir" ]; then
+          printf 'agent-test: cannot read %s — check its permissions\n' "$argdir" >&2
+          exit 1
+        fi
+        case "$argpwd/" in
+          "$PWD"/node_modules/*)
+            printf 'agent-test: %s is under node_modules — node discards it silently, not a test failure\n' "$arg" >&2
+            exit 1
+            ;;
+        esac
+        ;;
+      # Judged on the argument's RESOLVED path as well (#424) — #186's
+      # directory-branch rule applied to the file arm. A symlink whose own name
+      # carries no `node_modules` but whose target is vendored defeats every
+      # term above, and node does not discard it: node RUNS it, so the suite's
+      # result comes to hang on third-party code passing. That is #186's hazard,
+      # not #100's, and it takes #186's remedy rather than another spelling.
+      # Reached only where the spelling does not already name a `node_modules`
+      # SEGMENT — the two arms above take every spelling that does.
+      # Unbounded, that skip also swallowed a directory whose name merely ENDS in
+      # the word: `vendor_node_modules/link.test.mjs` was handed to the guard
+      # above as already-judged, and that guard's own test is anchored and never
+      # fired — so a symlink under such a name to a vendored file was judged by
+      # neither, and node ran it and counted it (measured). Every arm carries the
+      # bound, so they still partition the arguments with nothing in the gap.
+      # The arguments the arms above hold back are the logical guard's own input
+      # — the deeper-segment and absolute spellings it deliberately lets through
+      # because node runs and counts them included — and re-judging them here
+      # would overturn that ruling from a second place. Disjointness is what lets
+      # this check be physical while the one above stays logical (#401): the two
+      # never see the same argument, so neither can undo the other's resolution
+      # mode. As arms of one `case` that is structural — an argument matched
+      # above cannot reach here at all — where two separate `case`s held it
+      # only for as long as their pattern lists stayed in agreement (#1016).
+      # `realpath` rather than `cd`+`pwd -P`: `cd` resolves symlinked
+      # DIRECTORY components, but a symlink whose own target is a FILE is this
+      # ticket's input and `cd` never reaches it. It also follows a chain of
+      # them, and reports a cycle as a failure instead of looping.
+      # Asked only of an argument that EXISTS, and that gate is what makes the
+      # answer the same on both platforms: BSD `realpath` fails on a
+      # nonexistent final component and GNU's succeeds on it, so one quoted glob
+      # spelled through a symlinked vendored directory was refused on CI and run
+      # green on macOS. Nothing absent can be vendored, so a glob and a typo keep
+      # exactly today's treatment in the arms below — the typo refused as
+      # missing, the glob handed to node unexpanded, this guard's documented
+      # ceiling — which is what those arms depend on, now held by the `-e` test
+      # rather than by a resolver that disagrees with itself. Refusing the glob
+      # was never the design: GNU only reached that verdict by reading `*` as an
+      # ordinary character, and it charged for it in the same breath by reporting
+      # a typo under a vendored symlink as "not missing".
+      # An argument that DOES exist is still judged before it is read as a glob,
+      # which is the order the block above depends on: a real file whose name
+      # holds a `*` still reaches this check, not the glob arm.
+      # What is left is a path that IS there and still will not resolve, or no
+      # `realpath` at all. Neither is a question this can answer, and the
+      # unanswered one used to be silent — the guard disarmed whole, the vendored
+      # file ran, the run exited 0, nothing on stderr. Die instead; dropping
+      # `2>/dev/null` puts `realpath`'s own reason on
+      # stderr on the way out, where the discarded status never went.
+      # Anchored at the divergence from the runner's own location, as the
+      # directory branch is: a `node_modules` ABOVE the divergence is an
+      # ancestor of the runner too and says nothing about the argument.
+      # Matched absolutely instead, a worktree living under one refused
+      # every file argument as vendored.
+      # $root is that location, derived once above the loop rather than a
+      # second time here, and `diverge` is the walk down from it — the same
+      # one the directory branch runs, over a resolution this branch derived
+      # its own way. What is shared is the anchor and the walk, never the
+      # resolution mode: that stays disjoint (#401, #424).
+      *)
+        if [ -e "$arg" ]; then
+          fresolved=$(realpath -- "$arg") || { printf 'agent-test: cannot resolve %s — refusing rather than running it unchecked\n' "$arg" >&2; exit 1; }
+          diverge "$fresolved"
+          case "${fresolved#"$shared"}" in
+            */node_modules/*)
+              printf 'agent-test: %s resolves to %s, inside node_modules — excluded from the run, not missing\n' "$arg" "$fresolved" >&2
+              exit 1
+              ;;
+          esac
+        fi
+        ;;
+    esac
+    if [ -e "$arg" ]; then
+      operand=1
+      # An existing path is a path, whatever characters it holds. Node globs
+      # its own argv, where a literal `[` is a bracket expression that cannot
+      # match itself — so the file matches nothing, node drops it, and mixed
+      # with anything resolvable that drop is silent. Escaping it is what the
+      # directory branch already does to find's output (`sed 's/\[/[[]/g'`);
+      # a file named directly needs the same escape or #100's own bracketed
+      # case survives the fix meant to close it.
+      # Same failure the directory branch's own sed pin guards against (#600) —
+      # but no grep runs ahead of this $arg to drop the byte first, so this pin
+      # is the only guard here, not defense in depth: sed emits nothing, $arg
+      # empties, and node runs one path fewer than it was given, silently
+      # (#100's own drop).
+      arg=$(printf '%s\n' "$arg" | LC_ALL=C sed 's/\[/[[]/g')
+    else
+      case "$arg" in
+        # Only node can judge its own flags. Read as paths, every documented
+        # `node --test` flag (`--test-name-pattern=x`, `--test-only`,
+        # `--test-reporter=tap`) and POSIX's own `--` refused as a missing
+        # file. A typo'd flag stays loud: node rejects it itself.
+        -*) ;;
+        # Shell globbing is off (`set -f` above), so an argument like this
+        # reached the shell unexpanded on purpose — the deliberately
+        # supported quoted-glob form (`./agent-test 't/*.test.mjs'`). Only
+        # node can expand it, so it passes through unvalidated. The residual:
+        # a glob matching nothing and a typo holding a metacharacter are the
+        # same string to this runner, so that one drop stays silent — node
+        # does not report what it ran and this runner cannot expand the glob
+        # to check. That is this guard's honest ceiling, not a gap in it.
+        # An *existing* path is not part of it: it never reaches here.
+        *[*?[]*) operand=1 ;;
+        # [ -e ] above cannot tell "not there" from "could not look": stat()
+        # answers the same false whether $arg is genuinely absent or a
+        # directory earlier in its path lacks the search bit needed to
+        # resolve the rest — POSIX gives EACCES and ENOENT no separate
+        # channel through `[ -e ]`, and the builtin keeps nothing past
+        # that bare result. The directory branch above already answers the
+        # identical fixture correctly one level up: `agent-test t` on a
+        # `t` chmod'd 0600 names find's own Permission denied rather than
+        # calling the suite missing; this file arm used to fall straight
+        # through to the typo case below on the same fixture, naming a
+        # permission fault as a spelling mistake.
+        # `[ -x $fparent ]` is what separates them, not `cd`'s own text:
+        # measured inside an ubuntu:latest container running dash (the
+        # shell ubuntu-latest's `#!/bin/sh` actually runs), `cd`'s
+        # failure message is identical for both causes — "can't cd to sub"
+        # whether $fparent is unsearchable or does not exist at all — so
+        # parsing it could not have told them apart. `stat` on a directory
+        # needs a search bit on ITS OWN parent, not on itself, so `[ -d ]`
+        # still answers true for a directory that exists but cannot be
+        # entered; `-x` then asks the one question `[ -e $arg ]` above
+        # could not get past.
+        # Checking $fparent alone is not enough: an unsearchable GRANDparent
+        # or higher ancestor (`t/u/a.test.mjs` with `t`, not `u`, chmod'd
+        # 0600) leaves `[ -d $fparent ]` itself false — resolving `t/u`
+        # needs search on `t`, which is exactly the bit missing — so the
+        # single-level check fell through to the same "does not exist"
+        # misreport this whole guard exists to fix, one level further up.
+        # The loop below walks from $fparent toward the root, stopping at
+        # the first ancestor that STATS at all (`[ -d $p ]` true, which
+        # needs search only on THAT ancestor's own parent) and reporting
+        # unsearchable only if that one lacks `-x`. An ancestor closer to
+        # the root than the block cannot be reached by the walk, but it
+        # does not need to be: the first one the walk DOES reach is the one
+        # blocking resolution of everything below it.
+        # Bounded the same way the single-level check was: a chain that
+        # never resolves any existing directory (`nosuchdir/x.test.mjs`,
+        # walked up to a bare relative name with nothing left to check) is
+        # the ordinary typo this arm already reported correctly, not a
+        # permission fault — `faultparent` stays empty and the loop ends
+        # having found nothing to blame.
+        *)
+          case "$arg" in
+            */*) fparent=${arg%/*} ;;
+            *) fparent=. ;;
+          esac
+          faultparent=
+          p=$fparent
+          while [ -n "$p" ]; do
+            if [ -d "$p" ]; then
+              [ -x "$p" ] || faultparent=$p
+              break
+            fi
+            case "$p" in
+              */*) p=${p%/*} ;;
+              *) p= ;;
+            esac
+          done
+          if [ -n "$faultparent" ]; then
+            printf 'agent-test: cannot read %s — %s is not searchable, refusing rather than reporting it missing\n' "$arg" "$faultparent" >&2
+          else
+            printf 'agent-test: %s does not exist\n' "$arg" >&2
+          fi
+          exit 1
+          ;;
+      esac
+    fi
+    set -- "$@" "$arg"
+  fi
+done
+# Argv holding no path is what node answers with its own discovery, and that is
+# the vacuous pass this runner exists to refuse — a path that does not exist and
+# an underivable test command both refuse rather than guess. POSIX's `--` is
+# refused by the same rule: it reaches the flag pass-through and is no more a
+# path than a flag is.
+# The quoted-glob arm is the one deliberate exemption, not an oversight, and
+# this guard does not close it. The shell is not expanding that argument
+# (`set -f` above), node is, and this runner never learns the match count: it
+# hands argv to node through `exec`, which has no return path. So a glob
+# matching nothing still classifies as an operand here, reaches node, and exits
+# 0 having run nothing — measured. That is the ceiling the file branch already
+# states above, and closing it would mean running node rather than `exec`ing
+# it, so that it could read the summary back. Separate change.
+[ -n "$operand" ] || { printf "agent-test: no test file or directory in the arguments — refusing rather than falling through to node's own discovery\n" >&2; exit 1; }
+exec node --test "$@"

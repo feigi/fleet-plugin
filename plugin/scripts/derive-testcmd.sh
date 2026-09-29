@@ -1,67 +1,50 @@
 #!/bin/sh
-# Derive a repository's test entrypoint at a git ref: a manifest test script,
-# else a direct test-file run, else refuse rather than emit a command that
-# could pass vacuously.
+# Read one command of a repository's proven Recipe out of its Recipe cache:
+# `install` (the Install step) or `test` (the Test entrypoint). ADR 0015.
 #
-# Both guesses are unsafe when wrong: `npm test` with no `test` script fails
-# with an npm error that reads like a broken tree, and `node --test` with no
-# test files exits 0 — a runner that passes vacuously is worse than one that
-# is dead, because a consumer (a review fan-out, a claimed worktree) reads the
-# silence as a green suite. Refuse rather than guess.
+# The fleet keeps no table of technologies. A Recipe is DERIVED by an agent
+# reasoning over the repository and PROVEN before it is written — the Install
+# step ran in a fresh worktree and left the tree clean, the Test entrypoint ran
+# and showed real tests — so this script infers nothing. A missing cache is a
+# refusal naming the step that derives one, never a guess: a guessed command
+# that passes vacuously reads as a green suite to every consumer, which is the
+# #142 hazard the old inference already refused over.
 #
-# The ONE place this inference lives — reused, not reimplemented, by
-# claim-ticket.sh (worktree setup, ref origin/main) and by review-core.mjs's
-# snapshot agent (review fan-out, ref HEAD of the repo under review). Two
-# independent copies is what drifts; see #142.
+# The ONE reader of the cache — reused, not reimplemented, by claim-ticket.sh
+# (the Install step it runs and the Test entrypoint it bakes into the runner)
+# and by review-core.mjs's snapshot agent (the Test entrypoint handed to the
+# specialists). Two independent readers is what drifts; see #142.
+#
+# THE CACHE is `<workspace>/.fleet/recipe.json`, where <workspace> is the
+# directory holding the repository's COMMON git dir — the main checkout, the
+# same place the ledger and the heartbeat live — so a claimed worktree and a
+# review worktree read the one cache the main checkout holds rather than a
+# private copy each. A single JSON object:
+#
+#   install       string  the Install step, a shell command run from the root
+#   test          string  the Test entrypoint, a shell command run from the root
+#   derivedAt     string  the full commit id (40 or 64 hex) it was proven at
+#   installClean  true    the Install step left `git status --porcelain` empty
+#   testCount     integer >0, the test count the proving run reported, and/or
+#   mutation      string  the deliberate failing mutation that turned it red
+#
+# At least one of testCount/mutation is the proof; a cache carrying neither,
+# or `installClean` anything but `true`, is an UNPROVEN Recipe and refused like
+# an absent one. Written only by the deriving agent; no script writes it.
+#
+# INVALID on failure to RUN, never on failing tests: the command this script
+# is asked for must name something that resolves from <repo> (a builtin, a
+# PATH entry, an executable path). A red suite is a finding, not a stale
+# Recipe, so nothing here ever runs the command.
 set -eu
 
-# Byte semantics for the one byte-sensitive call below: `grep -qE
-# "$testfile_re"` over the listed file paths. There is no `sed` or plain `awk`
-# in this script; `tr` joined it below.
-#
-# #614 measured the earlier claim here FALSE: git C-quotes a path holding a
-# high-bit byte only under the DEFAULT `core.quotePath true` — with
-# `core.quotePath false` set, `git ls-tree -r --name-only` emits the raw byte
-# UNQUOTED, and that raw byte is exactly what makes grep locale-sensitive
-# (#582's own hazard). Measured on a repo whose one test file is named
-# `b\377ad.test.mjs`: with the pin's `LC_ALL=C`, `core.quotePath false` finds
-# it (exit 0, `node --test`); with an ambient `en_US.UTF-8` and the pin
-# deleted, the identical repo is refused as having no tests at all — so the
-# byte-reaches-grep behaviour DID depend on an operator's git config, not on
-# anything this script controls.
-#
-# Fixed by listing with `-z`: `git ls-tree -r -z --name-only` always emits the
-# raw byte, unquoted, regardless of `core.quotePath` — the config dependence
-# above is closed outright rather than argued into never mattering. As a side
-# effect it also fixes a second, unrelated bug the C-quoted form carried: a
-# quoted name never matched `$testfile_re` at all, because the closing `"`
-# defeats the `$` anchor — so a repo whose test files carry non-ASCII names
-# under the (default) quoted form was refused as having none.
-#
-# Two separate fixtures in derive-testcmd.test.mjs, because one config does
-# not exercise the other bug: "...under core.quotePath's default true" pins
-# the C-quoting/`$`-anchor defect this comment just described — mutation-
-# verified, it goes red if `-z` is reverted. "...with core.quotePath false
-# survives an ambient UTF-8 locale" pins the separate, locale-dependent hazard
-# from #582 (an unquoted byte only surviving `tr`/`grep` under `LC_ALL=C`) —
-# `-z` is not load-bearing for that one, since plain `--name-only` already
-# emits the byte unquoted when `core.quotePath` is false.
-#
-# `-z` terminates each entry with NUL, and a shell variable cannot hold an
-# embedded NUL — POSIX `$()` strips it, silently concatenating every entry
-# after the first bad byte into one unmatchable blob. So the raw listing is
-# captured to a FILE, never a variable, and translated to newlines only once
-# every NUL is already gone from the stream. `git`'s own exit status is still
-# checked directly against that write, never through a pipe whose status would
-# belong to `tr` instead — the same swallow the comment below still guards
-# against for `grep`.
-#
-# Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
-# range or a POSIX class, so collation and case-folding — the two things
-# `LC_ALL=C` otherwise changes — have nothing here to act on. "Nothing" is an
-# inventory, not a hope: locale-pin-prose.test.mjs enforces it (#612), because
-# this sentence shipped false in no-undo-audit.sh and a `sort` added below
-# would otherwise leave every test in this suite green.
+# Byte semantics for the one byte-sensitive construct below: the `case`
+# patterns that pick the command's leading word apart (`[A-Za-z_]` ranges and
+# `*` over an arbitrary byte string from the cache). Under an ambient UTF-8
+# locale a range is collation-ordered and `*` refuses to match across an
+# invalid byte (#582's hazard). Nothing here sorts or folds case, so pinning
+# the locale changes nothing else — locale-pin-prose.test.mjs enforces the
+# placement (#612).
 export LC_ALL=C
 
 # Below the locale pin, not above it with `set -eu`: `unset` touches no
@@ -70,125 +53,145 @@ export LC_ALL=C
 # and refuses on principle rather than on this line's own behaviour. Same
 # placement, same reason, as release-ticket.sh's copy.
 #
-# GIT_DIR outranks the `-C "$repo"` on all three calls below, so an ambient
-# one answers about the WRONG repository while still being handed `$repo`.
-# Measured: asked for a checkout whose `package.json` declares `scripts.test`,
-# with `GIT_DIR` naming a clone whose manifest does not, this script emits
-# `node --test` at rc 0 — the other repository's entrypoint, reported as this
-# one's, with no cue anywhere that the question asked was not the question
-# answered. Both consumers act on that string: claim-ticket.sh bakes it into
-# the runner it materialises, and review-core.mjs's snapshot agent runs it
-# against the repo under review. A silently wrong entrypoint passes
-# vacuously, which is the one outcome the refusal at the foot of this file
-# exists to rule out.
+# GIT_DIR outranks the `-C "$repo"` on the git calls below, so an ambient one
+# answers `--git-common-dir` for the WRONG repository while still being handed
+# `$repo` — and the cache it then reads is another repository's Recipe,
+# reported as this one's. Both consumers act on that string: claim-ticket.sh
+# runs it in a fresh worktree and bakes it into the runner, and review-core.mjs's
+# snapshot agent hands it to every specialist.
 #
-# GIT_WORK_TREE is unset alongside it and is measured INERT here: every call
-# is an object-database read — `rev-parse --git-dir`, `ls-tree`, `show` —
-# and none of the three consults a work tree, so no target changes the
-# output. It stays on the line because the pair is one hazard with one
-# remedy, and because "inert today" is a measurement of the current call set,
-# not a property of the script: the first `git -C "$repo" status` or
-# `diff --quiet` added below would reintroduce the half nothing here can see.
-# ambient-git-vars-prose.test.mjs pins the line itself, which is what keeps
-# that half from being quietly dropped.
+# GIT_WORK_TREE is unset alongside it and is INERT here: `rev-parse --git-dir`
+# and `--git-common-dir` consult no work tree. It stays on the line because the
+# pair is one hazard with one remedy, and "inert today" is a measurement of the
+# current call set, not a property of the script.
+# ambient-git-vars-prose.test.mjs pins the line itself.
 unset GIT_DIR GIT_WORK_TREE
 
+# shellcheck disable=SC2100 # literal name "derive-testcmd", not arithmetic — the unrelated $derive var assigned below is what the heuristic collides on, not this line
 NAME=derive-testcmd
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 1; }
 
-[ $# -eq 2 ] || die "usage: derive-testcmd.sh <repo> <ref>"
+# Named once: every refusal that sends the caller to re-derive names the same
+# step, so a controller or reviewer reading any of them knows what to run.
+derive="run the Recipe derivation step (run-team phase 0, before the first claim — ADR 0015) to derive, prove and write it"
+
+[ $# -eq 2 ] || die "usage: derive-testcmd.sh <repo> <install|test>"
 repo=$1
-ref=$2
+field=$2
 
 git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || die "$repo is not a git repository"
 
-# Materialize the listing instead of piping ls-tree straight into grep: a
-# pipeline's status is the LAST command's, so an ls-tree that DIES (unknown
-# ref, unborn HEAD, unreadable object DB) is indistinguishable from "no
-# matches" and the refusal below would name a cause that is not the cause —
-# on a repo that demonstrably HAS test files. Same class as reap.sh's
-# `git cherry ... | grep -q`, which cost a branch deletion.
-#
-# A FILE, not a variable: `-z`'s NUL terminators cannot survive `$()` (see the
-# header comment), so git's raw output is written to disk first — where an
-# embedded NUL is just a byte — and only translated to newlines by the `tr`
-# below, after which nothing downstream ever sees one again.
-ls_tmp=$(mktemp) || die "cannot create a temporary file to list $ref"
-trap 'rm -f "$ls_tmp"' EXIT
-if ! git -C "$repo" ls-tree -r -z --name-only "$ref" >"$ls_tmp" 2>&1; then
-  ls_err=$(cat "$ls_tmp")
-  die "cannot list $ref — $ls_err"
-fi
-files=$(tr '\0' '\n' <"$ls_tmp")
-
-pkg=$(git -C "$repo" show "$ref:package.json" 2>/dev/null) || pkg=
-
-# Kept in sync with claim-ticket.sh's own `testfile_re` by hand: that copy
-# feeds the runner heredoc it writes at RUN time (a shell string, not a git
-# query), so it cannot simply call this script for its value. Same pattern,
-# same regex, two necessarily separate homes — derive-testcmd.test.mjs asserts
-# the two literals are byte-identical, so the sync is checked, not promised.
-testfile_re='\.(test|spec)\.[cm]?[jt]sx?$'
-
-# THREE outcomes from the manifest, not two: it declares scripts.test (0), it
-# parses and declares none (1), or it does not parse at all (2). Folding 2
-# into 1 is what let a corrupt package.json that DOES declare `scripts.test`
-# degrade silently to `node --test` — the wrong entrypoint, reported as a
-# success. An unparseable manifest is not evidence of an absent test script,
-# which is the same policy claim-ticket.sh already applies to the dependency
-# count it reads out of this same file. Anything other than 0 or 1 (unreadable
-# stdin) refuses too, rather than being read as an answer.
-if [ -n "$pkg" ]; then
-  # An unavailable interpreter is the one such status that is not about the
-  # manifest at all, so it does not reach the arm above. The capture merges
-  # stderr, so unguarded the shell's own `node: command not found` arrives
-  # inside $pkgerr and the refusal reports it as `could not read
-  # <ref>:package.json` — indistinguishable by message from a manifest that
-  # genuinely does not parse, which is the very distinction the three-outcome
-  # split exists to keep. Two consumers read this refusal: claim-ticket.sh
-  # wraps it into its own, and review-core.mjs's snapshot agent reads it against
-  # the repo under review. The probe is an INVOCATION rather than a name
-  # lookup, because those are not the same question: `command -v` answers only
-  # that a PATH entry named `node` exists and is executable, which a
-  # version-manager shim that resolves and then fails satisfies — and that
-  # shim's own stderr then arrives under the manifest's name, which is this
-  # defect itself rather than a narrower cousin of it. Running the interpreter
-  # asks what the capture below asks, so this refuses exactly where that one
-  # would have, and reports the interpreter's own words rather than a cause
-  # inferred from a name. #1141
-  nodeerr=$(node -e 0 </dev/null 2>&1) || die "node is unusable, refusing to derive a test entrypoint without the interpreter — $nodeerr"
-  st=0
-  pkgerr=$(printf '%s' "$pkg" | node -e 'const fs=require("fs");let p;try{p=JSON.parse(fs.readFileSync(0,"utf8"))}catch(e){console.error(e.message);process.exit(2)}process.exit((p.scripts||{}).test?0:1)' 2>&1) || st=$?
-  case $st in
-    0) echo "npm test --"; exit 0 ;;
-    1) : ;;
-    *) die "could not read $ref:package.json — $pkgerr" ;;
-  esac
-fi
-
-# grep's OWN scan failing (rc 2+) must not read as "no test files": the same
-# defect PR #1519 fixed in reap.sh's grep_probe. `grep -q` has THREE outcomes
-# and a bare `if … grep -q …; then` has room for only two — rc 0 a line
-# matched, rc 1 none did, rc 2+ the scan itself broke — so folding 2 into 1
-# lets grep's own failure reach this refusal indistinguishable from a repo
-# that genuinely carries no test files, handing claim-ticket.sh and
-# review-core.mjs's snapshot agent the wrong cause for a listing nothing
-# actually read. #1543, independently reported as #1230, whose two open
-# questions this fix already settles: the grep-died arm below exits 1 like
-# every other refusal in this script — `die` enforces that unconditionally,
-# so there is no separate code to carve out for it — and claim-ticket.sh
-# does NOT duplicate this scan; it shells out to this very script for the
-# same decision (see its own comment above `script_dir=$(dirname -- "$0")`)
-# rather than reimplementing the logic, so this fix already covers that
-# caller too. claim-ticket.sh does carry a differently-shaped instance of
-# the same failure class in its generated `agent-test` runner (a
-# `grep -E … | sed …` step gated on output emptiness rather than a captured
-# exit status) — that one trades against byte-safety constraints this file
-# does not have (#582, #600) and is tracked as its own issue rather than
-# folded in here.
-if printf '%s\n' "$files" | grep -qE "$testfile_re"; then tf_rc=0; else tf_rc=$?; fi
-case $tf_rc in
-  0) echo "node --test" ;;
-  1) die "$ref has no scripts.test and no test files — refusing to emit a command that would pass vacuously" ;;
-  *) die "could not scan $ref's file listing for test files (grep exited $tf_rc) — refusing to guess" ;;
+case $field in
+  install|test) ;;
+  *) die "unknown Recipe field '$field' — expected install or test" ;;
 esac
+
+# `--path-format=absolute` so the workspace is a real directory whatever the
+# caller's cwd; the workspace is the common dir's parent, the same rule
+# git-env.mjs's workspaceDirFromGitCommonDir() applies for the ledger.
+common=$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>&1) \
+  || die "cannot resolve the common git dir of $repo — $common"
+cache="${common%/*}/.fleet/recipe.json"
+
+# Absent is its own refusal, ahead of the interpreter probe: it is the one
+# state every fresh repository starts in, and its message must name the step
+# that ends it rather than anything about a parser.
+[ -e "$cache" ] || die "no Recipe cache at $cache — refusing to infer an Install step or a Test entrypoint; $derive"
+
+# An INVOCATION, not a name lookup (#1141): a version-manager shim satisfies
+# `command -v node` and then fails, and its stderr would arrive below under the
+# cache's name — a corrupt-cache refusal for a cache nobody read.
+nodeerr=$(node -e 0 </dev/null 2>&1) || die "node is unusable, refusing to read the Recipe cache without the interpreter — $nodeerr"
+
+# Validation and extraction in one pass, so a field is never printed out of a
+# cache the checks did not pass. rc 0 prints the value; anything else carries
+# the reason on stderr. The two streams are kept APART — stderr to a file, never
+# merged into the capture — because an interpreter made chatty by the caller's
+# environment (NODE_OPTIONS, a version-manager banner: #752, #1175) writes to
+# stderr on the SUCCESS path too, and merged, that chatter would arrive inside
+# the command this script hands claim-ticket.sh to run.
+errf=$(mktemp) || die "cannot create a temporary file to read the Recipe cache"
+trap 'rm -f "$errf"' EXIT
+
+value=$(node -e '
+const fs = require("fs");
+const [file, field] = process.argv.slice(1);
+const bad = (why) => { console.error(why); process.exit(2); };
+let r;
+try { r = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { bad(`it does not parse: ${e.message}`); }
+if (r === null || typeof r !== "object" || Array.isArray(r)) bad("it is not a JSON object");
+for (const k of ["install", "test"])
+  if (typeof r[k] !== "string" || !r[k].trim() || r[k].includes("\0")) bad(`\`${k}\` is not a non-empty command string`);
+if (typeof r.derivedAt !== "string" || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(r.derivedAt))
+  bad("`derivedAt` is not a full commit id");
+if (r.installClean !== true) bad("`installClean` is not true — the Install step was never proven to leave the tree clean");
+const counted = Number.isInteger(r.testCount) && r.testCount > 0;
+const mutated = typeof r.mutation === "string" && r.mutation.trim() !== "";
+if (!counted && !mutated) bad("it carries no proof of real tests — neither a positive `testCount` nor a `mutation`");
+process.stdout.write(r[field]);
+' "$cache" "$field" 2>"$errf") || die "the Recipe cache at $cache is unusable: $(cat "$errf") — $derive"
+
+# Both consumers append the runner's own arguments after this string
+# textually (claim-ticket.sh's `exec sh -c '<cmd> "$@"' agent-test "$@"`), so
+# a command ending in `;` or `&` lets a real shell read the caller's "$@" as
+# an unrelated top-level command instead of args reaching the Test
+# entrypoint, and one containing a `#`-led word swallows everything after it,
+# "$@" included, as a comment — measured on both. Checked on the raw string
+# for the trailing operator (adjacency to whitespace is not what makes `;`/`&`
+# a shell operator) and on the same naive field split the leading-word check
+# below already trusts for the comment word, since neither hazard is about
+# whether the command resolves.
+case $value in
+  *';'|*'&') die "the Recipe cache at $cache is invalid: its $field command '$value' ends in ';' or '&' — a runner-appended argument after it would run as an unrelated command instead of reaching the Test entrypoint; $derive" ;;
+esac
+set -f
+IFS=' 	
+'
+# shellcheck disable=SC2086 # field splitting is the point: scanning every word
+for word in $value; do
+  case $word in
+    '#'*) set +f; die "the Recipe cache at $cache is invalid: its $field command '$value' contains a '#' word — a runner-appended argument would be swallowed as a comment rather than reaching the Test entrypoint; $derive" ;;
+  esac
+done
+set +f
+
+# The failure-to-run probe. The leading word is found by the shell's own field
+# splitting with globbing off, past any `NAME=value` prefix assignments. A word
+# carrying quoting or an expansion cannot be settled without running the
+# command, and running it is exactly what this script never does, so such a
+# word is accepted unprobed rather than refused on a split it cannot trust —
+# the runner then fails loudly at run time, which is where it would anyway.
+# IFS is set, not inherited, so the split is the default one whatever the
+# caller exported.
+set -f
+IFS=' 	
+'
+# shellcheck disable=SC2086 # field splitting is the point: the leading word
+set -- $value
+set +f
+while [ $# -gt 0 ]; do
+  case $1 in
+    [A-Za-z_]*=*)
+      case ${1%%=*} in *[!A-Za-z0-9_]*) break ;; esac
+      shift ;;
+    *) break ;;
+  esac
+done
+[ $# -gt 0 ] || die "the Recipe cache at $cache is invalid: its $field command names no command, only assignments — $derive"
+case $1 in
+  *[\'\"\\\$\`\(\)\{\}\<\>\|\&\;\*\?\[\~]*) ;;
+  *)
+    # In <repo>, so a relative `./run-tests.sh` resolves where the command
+    # itself will run from. `command -v` alone is not exec-bit-aware for a
+    # `/`-containing word under dash (Ubuntu's default /bin/sh): it only
+    # stat()s the path there, never checking execute permission — measured:
+    # `dash -c 'command -v ./run.sh'` on a chmod 0644 file exits 0. `[ -x ]`
+    # is the exec-bit-aware check that closes the gap; a bare name (builtin
+    # or a PATH match) has no path to test and is left to `command -v`.
+    (cd "$repo" && command -v -- "$1" || exit 1
+      case $1 in */*) [ -x "$1" ] || exit 1 ;; esac) >/dev/null 2>&1 \
+      || die "the Recipe cache at $cache is invalid: its $field command '$1' is not found or not executable from $repo — a Recipe that cannot run is stale, not a finding; $derive"
+    ;;
+esac
+
+printf '%s\n' "$value"

@@ -230,7 +230,7 @@ jobs:
       # NOT because node would otherwise walk into a vendored tree: node's own
       # discovery excludes `node_modules` (measured), and the defect behind
       # 'the runner's directory expansion ran vendored tests' was a `find` in
-      # the emitted runner — see claim-ticket.sh, which says so itself: "this
+      # the runner — see agent-test, which says so itself: "this
       # walk, not node, is what keeps vendored tests out". There is no
       # vendored tree under plugin/scripts/ anyway.
       # The suite stubs `gh` and sets its own git identity, so it needs no auth

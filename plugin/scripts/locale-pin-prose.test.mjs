@@ -12,8 +12,7 @@
 // the obvious cleanup — "a redundant export, drop it" — ships green.
 //
 // Hence a source assertion, which this repo already uses for exactly this shape
-// (no-undo-audit.test.mjs pins a phrase in its own script's comment, and
-// derive-testcmd.test.mjs pins that two regex literals stay byte-identical).
+// (no-undo-audit.test.mjs pins a phrase in its own script's comment).
 //
 // What it pins and what it does not. PRESENCE: `\b` after `LC_ALL=C`, not `$`,
 // so `export LC_ALL=C LANG=C` — strictly stronger — does not read as a
@@ -133,7 +132,19 @@ export function localeSensitive(source) {
 // `de_DE.UTF-8` and `tr_TR.UTF-8` the range matches the ASCII digits and
 // nothing else — superscript `²`, Arabic-Indic digits and `½` are excluded in
 // all four, so no locale reachable here reads the guard differently.
+//
+// derive-testcmd.sh's three are the reason its pin exists (ADR 0015's cache
+// reader): two shell `case` ranges that pick a Recipe command's leading word
+// apart past `NAME=value` prefixes — ASCII-only by intent, which `C` is what
+// guarantees — and one range inside the inline `node -e` validator, which the
+// shell locale cannot reach at all (JS regex classes are code-point ranges)
+// and is listed only because this scan is line-based.
 const ALLOWED = {
+  "derive-testcmd.sh": [
+    'if (typeof r.derivedAt !== "string" || !/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(r.derivedAt))',
+    "[A-Za-z_]*=*)",
+    "case ${1%%=*} in *[!A-Za-z0-9_]*) break ;; esac",
+  ],
   "inflight.sh": [
     `case "$n" in ''|*[!0-9]*|0?*) die "issue must be a number, got '$n'";; esac`,
   ],

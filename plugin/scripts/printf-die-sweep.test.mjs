@@ -152,7 +152,7 @@ const CASES = [
   {
     // The one script that refuses at 1, not 2.
     script: "derive-testcmd.sh",
-    args: ["back\\clue-nope", "main"],
+    args: ["back\\clue-nope", "test"],
     exit: 1,
     line: "derive-testcmd: back\\clue-nope is not a git repository",
   },
@@ -301,12 +301,12 @@ test("reap: a KEEP reason holding a backslashed path reaches the operator whole"
 
 test("claim-ticket: the dry-run plan names a backslashed worktree path verbatim", (t) => {
   const w = repo(t);
-  writeFileSync(join(w, "package.json"), '{"name":"t","scripts":{"test":"true"}}\n');
-  mkdirSync(join(w, "t"), { recursive: true });
-  writeFileSync(join(w, "t", "a.test.mjs"), "\n");
-  git(w, "add", "-A");
-  git(w, "commit", "-q", "-m", "pkg");
-  git(w, "push", "-q", "origin", "main");
+  // A claim needs the repository's Recipe cache (ADR 0015); the smallest
+  // proven one, untracked in the checkout's own `.fleet/`.
+  mkdirSync(join(w, ".fleet"), { recursive: true });
+  writeFileSync(join(w, ".fleet", "recipe.json"), JSON.stringify({
+    install: "true", test: "true", derivedAt: git(w, "rev-parse", "HEAD").trim(), installClean: true, testCount: 1,
+  }));
   const r = run(w, "claim-ticket.sh", ["7", "back\\clue", "fix"]);
   assert.equal(r.status, 0, `stderr: ${r.stderr}`);
   assert.ok(

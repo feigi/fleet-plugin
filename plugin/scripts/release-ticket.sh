@@ -1521,9 +1521,10 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   if ! dirty=$(git -C "$wt" status --porcelain -uall); then
     die "cannot read the status of $wt, so whether it holds uncommitted work is unknown"
   fi
-  # Ignored files are deliberately not a blocker: the tracked `agent-test`
-  # bootstrap (#55) materializes `.agent-test.sh`, .gitignore'd, on every run,
-  # so every checkout can have one, and blocking on it would strand every
+  # Ignored files are deliberately not a blocker: the runner claim-ticket.sh
+  # writes into a claimed worktree is excluded (ignored) there, and older
+  # checkouts hold a `.gitignore`'d `.agent-test.sh` from the pre-ADR-0015
+  # bootstrap, so blocking on ignored files would strand every
   # claim. `git worktree remove` deletes ignored files
   # silently and refuses on modified and untracked ones (verified, git 2.50.1) —
   # which is this same check, recomputed by git at the moment of the delete, and
