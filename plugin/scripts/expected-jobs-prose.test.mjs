@@ -1,27 +1,21 @@
 // #847. The comment introducing ci-state.mjs's expected-job derivation carried
 // figures — how many jobs "the fleet's prose" names, how many "the workflow"
-// defines. A figure for a file that comment does not own is false the next commit
-// that changes that file.
+// defines. What a reader checking whether an empty `missing` is vacuous needs
+// from that comment is the PROPERTY: the list is derived from the workflow this
+// run resolved, never hardcoded. This file pins that claim, with its polarity.
 //
-// The durable fix is the one #348 already established for
-// `.github/workflows/ci.yml` in ci-comment-rot-prose.test.mjs: prose pinning a
-// measurable property of a file it does not own states the PROPERTY, never the
-// measurement. This file keeps the derivation comment that way.
+// It does not ban a job count. The ban it once carried refused every cardinal
+// sharing a sentence with "job" — "3 workers", "job 2 of a matrix build" (#1194)
+// — and still let a count spelled above ten through (#1193). The list is
+// derived, so a stale count in this comment misleads a reader and changes no
+// behaviour, and the comment itself says why it names no set. A pin that reds
+// on legitimate prose to police a figure that moves nothing costs more than the
+// figure.
 //
-// It bans a TALLY, not a number — the distinction #348 drew and PR #554 paid
-// for. A pin coupling prose to a moving figure reds on every legitimate edit and
-// gets deleted or routed around, so a cardinal only offends here when it sits in
-// the same sentence as "job". "read the workflow, not this one" has to stay
-// green, which the accept cases in the "a tally is refused…" test pin.
-//
-// THE CEILING: this reds when no comment introduces expectedJobs(), when the
-// comment stops claiming the list is derived or never hardcoded, and when a digit
-// or a zero–ten cardinal shares a sentence with the word "job". A tally phrased
-// without that word, split across a sentence boundary from it, or spelled above
-// ten walks through — the vocabulary limit is #1193, and #1194 is the converse,
-// a cardinal counting something else refused anyway. It cannot prove the
-// surrounding argument sound, and it never runs ci-state.mjs — ci-state.test.mjs
-// owns the derivation's behavior.
+// THE CEILING: this reds when no comment introduces expectedJobs(), and when the
+// comment stops claiming the list is derived or never hardcoded. It cannot prove
+// the surrounding argument sound, and it never runs ci-state.mjs —
+// ci-state.test.mjs owns the derivation's behavior.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -52,55 +46,28 @@ function derivationComment() {
   return block.join(" ").replace(/\s+/g, " ");
 }
 
-const CARDINAL = /\b(?:\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/i;
-
 /**
- * The rule, as a function so the accept case can be fed prose this repo does not
- * contain. Returns null when the comment is sound, else the reason.
+ * The rule, as a function so the refuse cases can be fed prose this repo does
+ * not contain. Returns null when the comment is sound, else the reason.
  */
 export function derivationCommentFault(comment) {
-  // An issue citation is a pointer, not a tally, so `#847` must not read as one.
-  const claims = comment.replace(/#\d+/g, "");
-  // A tally is a number sharing a SENTENCE with the jobs it counts, which is the
-  // shape both stale figures took ("names four jobs", "defines five").
-  // Sentence-scoped rather than comment-scoped so an unrelated cardinal elsewhere
-  // in the block is not collateral.
-  for (const sentence of claims.split(/(?<=\.)\s+/)) {
-    if (!/\bjobs?\b/i.test(sentence)) continue;
-    const n = sentence.match(CARDINAL);
-    if (n) {
-      return `the expected-job comment tallies jobs ("${n[0]}"), and a count is false the next commit that adds one: "${sentence.trim()}"`;
-    }
-  }
   // The NEGATED form, not the bare word: `hardcoded` alone is polarity-blind, and
   // a comment asserting the list IS hardcoded is the exact fault this refuses.
-  if (!/\bderiv|\b(?:never|not) hardcoded/i.test(claims)) {
+  if (!/\bderiv|\b(?:never|not) hardcoded/i.test(comment)) {
     return "the expected-job comment no longer says the list is derived from the workflow rather than hardcoded — the one thing a reader checking whether an empty `missing` is vacuous needs from it";
   }
   return null;
 }
 
-test("the expected-job comment states the property, not a job count", () => {
+test("the expected-job comment says the list is derived, never hardcoded", () => {
   assert.equal(derivationCommentFault(derivationComment()), null);
 });
 
-// What the rule REFUSES, which the test above cannot show. A guard that only ever
-// sees the one input this tree holds pins nothing about its own refusals — and a
-// rule this blunt can refuse a legitimate reword, which is how a prose pin earns
-// its own deletion. So: prose that talks about jobs without counting them, and a
-// cardinal that is not a tally, both stay green.
-test("a tally is refused; job prose without a count, and a non-counting cardinal, are accepted", () => {
-  const ok = "Never hardcoded: expectedJobs() parses the `jobs:` block of the workflow file this run resolved. Read that workflow for the current set, not this one.";
-  assert.equal(derivationCommentFault(ok), null);
-  assert.equal(derivationCommentFault("Derived. A job the prose never names is still expected. See #847 and #927."), null);
-  // An issue number beside the word "job" — the case that makes the `#\d+` strip
-  // load-bearing rather than incidental.
-  assert.equal(derivationCommentFault("Derived. See #847 for why job counts are not listed."), null);
-
-  assert.match(derivationCommentFault("Never hardcoded. The fleet's prose names four jobs; the workflow defines five."), /tallies jobs \("four"\)/);
-  assert.match(derivationCommentFault("Derived from the workflow, which defines two jobs."), /tallies jobs \("two"\)/);
-  // The digit branch of CARDINAL, which no spelled fixture reaches.
-  assert.match(derivationCommentFault("Derived from the workflow, which defines 5 jobs."), /tallies jobs \("5"\)/);
+// What the rule REFUSES, which the test above cannot show: a comment that drops
+// the claim, and one that reverses it.
+test("a comment that drops or reverses the derivation claim is refused", () => {
+  assert.equal(derivationCommentFault("Never hardcoded: expectedJobs() parses the `jobs:` block of the workflow file this run resolved."), null);
+  assert.equal(derivationCommentFault("Derived from the workflow, which defines 5 jobs."), null);
   assert.match(derivationCommentFault("The list tracks the workflow file automatically."), /no longer says the list is derived/);
   // Polarity: asserting the list IS hardcoded must refuse, not satisfy.
   assert.match(derivationCommentFault("The expected job list is hardcoded below because the workflow never changes."), /no longer says the list is derived/);
