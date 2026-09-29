@@ -116,6 +116,16 @@ your own worktree, and the scratch root sits deliberately outside every
 worktree so a harness never dirties one — nothing partitions the scratch root
 itself but this rule.
 
+**A subagent you dispatch gets its own directory under yours,
+`<scratch>/impl-<N>/<childName>/`, and you write that path, absolute, into its
+prompt — it writes nowhere else, and never derives a path of its own.**
+`<childName>` is the name you dispatch it under (omp's task `name`, Claude
+Code's `description`), unique among your children, so no two of them share a
+directory. A child left to derive its own path has only the injected root
+above to derive it from, which is this block's collision one level down — and
+its files under your partition are what show the controller you are alive
+while you wait on it.
+
 **The `eval` kernel is shared with every sibling member and with the
 controller that dispatched you — namespace every binding you make in it, and
 never hand it a relative path.** Measured on #1447, live, three ways in one

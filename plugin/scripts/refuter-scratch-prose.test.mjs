@@ -30,7 +30,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between } from "./prose-pin.mjs";
+import { between, phrase } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -107,6 +107,29 @@ for (const [name, getPrompt] of [
       getPrompt(),
       /`git\s+rev-parse\s+--show-toplevel`.{0,40}before\s+`git\s+init`\s+it\s+must\s+NOT\s+resolve\s+to\s+the\s+repository.{0,40}`fatal:\s+not\s+a\s+git\s+repository`.{0,40}is\s+the\s+pass.{0,40}before\s+any\s+`git\s+commit`\s+it\s+must\s+resolve\s+to\s+your\s+scratch\s+path.{0,80}compare\s+resolved\s+forms.{0,60}realpath/s,
       "no toplevel assertion around git init/commit, or the realpath remedy for macOS's /private/tmp symlink is gone — the observed failure is the agent BELIEVING it is already in scratch and being wrong, which naming a path alone does not catch. Both halves are pinned because they have OPPOSITE expected outcomes: a single `resolves to your scratch path` guard is unsatisfiable before `git init` (a fresh scratch dir has no toplevel and exits 128), and a guard that cannot pass on the clean path gets ignored",
+    );
+  });
+}
+
+// #1150. The clause above names `<scratch>/pr<N>/<finding>/` inside the
+// instruction the REFUTER reads, which left the refuter to resolve it — a
+// child deriving its own path. The ruling is that the parent assigns it: the
+// fix-applier resolves the placeholder to an absolute path (its own `pr<N>`,
+// the finding's id) and writes that path into the refuter's prompt. That
+// clause sits in the lead-in the FIX-APPLIER reads, ahead of the quoted
+// instruction, so it is sliced from the dispatch line to the instruction's
+// opening words — both copies, one phrase, for this file's two-copies reason.
+const SUBSTITUTION =
+  "with one substitution: resolve `<scratch>/pr<N>/<finding>/` in it to an absolute path, your own `pr<N>` and this finding's id, and write that absolute path into the refuter's prompt in its place; a refuter never derives its own path";
+for (const [name, getLeadIn] of [
+  ["run-team/SKILL.md", () => stripQuoteGutter(between(RUN_TEAM, "In scope → dispatch ONE refuter", "Try to REFUTE this finding", "run-team/SKILL.md"))],
+  ["review-and-fix.md", () => between(REVIEW_AND_FIX, "In scope → dispatch one refuter", "Try to REFUTE this finding", "review-and-fix.md")],
+]) {
+  test(`${name}: the fix-applier resolves the refuter's scratch path to an absolute one and writes it into the refuter's prompt`, () => {
+    assert.match(
+      getLeadIn(),
+      phrase(SUBSTITUTION),
+      "the fix-applier is no longer told to resolve `<scratch>/pr<N>/<finding>/` to an absolute path of its own and write it into the refuter's prompt — the refuter is back to deriving its own path from a placeholder",
     );
   });
 }

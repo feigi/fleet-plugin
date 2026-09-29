@@ -2114,7 +2114,10 @@ all.
 > it.** For each one, first decide scope: is it inside the scope of the PR's own
 > ticket, or a different piece of work? **Out of scope → defer and file, never
 > apply.** **In scope → dispatch ONE refuter** against the finding before
-> touching the tree, biased to refuse:
+> touching the tree, biased to refuse, and hand it the prompt below with one
+> substitution: resolve `<scratch>/pr<N>/<finding>/` in it to an absolute path,
+> your own `pr<N>` and this finding's id, and write that absolute path into the
+> refuter's prompt in its place; a refuter never derives its own path:
 >
 > > Try to REFUTE this finding. Default to refuted=true if uncertain. Verify by
 > > RUNNING something — compile it, run the test, apply the mutation. Do not
@@ -3197,12 +3200,16 @@ failures arrive as *wrong findings*, not errors:
   SUCCEEDS there (the snapshot is a git repository since #1056), which is why
   the reason to hand out a different command is the stack and not a
   materialization failure. See references/isolation.md.
-- **Scratchpad paths need two levels, `<scratch>/pr<N>/<finding>/`, and nothing
-  outside them.** Finding ids restart at 1 every review, so two fix-appliers on
-  different PRs both reach for `unv1`; one agent overwrote a sibling's
-  `package.json`, and a probe built a git repo at the *checkout root*. Read from
-  the object store at a pinned ref, write only under your own path.
-  See references/isolation.md.
+- **Scratchpad paths need two levels — the member's own partition, then one
+  directory per child it dispatches — and nothing outside them.** An
+  implementer partitions at `<scratch>/impl-<N>/`, the review side at
+  `<scratch>/pr<N>/…`; any member that dispatches a child writes an absolute
+  directory under its own partition into that child's prompt, one per child
+  and never shared, and a child never derives its own. Finding ids restart at 1
+  every review, so two fix-appliers on different PRs both reach for `unv1`; one
+  agent overwrote a sibling's `package.json`, and a probe built a git repo at
+  the *checkout root*. Read from the object store at a pinned ref, write only
+  under your own path. See references/isolation.md.
 - **IDE/harness diagnostics attribute by bare filename, with no path.** **Never
   relay a diagnostic without reproducing it in that member's specific worktree**
   (`npx tsc --noEmit` from there): probe copies carry the real tree's filenames,
@@ -3272,10 +3279,14 @@ A red PR never silently becomes `ready-to-merge`.
 **A frozen transcript does not establish that a member is dead — the
 discriminator is its scratch dir.** A member wedged on a blocked tool call
 emits the whole signature of a dead one: record counts unchanged from one poll
-of its transcript to the next. So read the mtimes of the files in the scratch
-subdirectory its own dispatch prompt assigned it — `<scratch>/impl-<N>/` for an
-implementer, `<scratch>/pr<N>/...` on the review side — at two observations a
-poll apart: **mtimes that moved between the two mean BLOCKED, a live member
+of its transcript to the next. So read the mtimes of the files anywhere under
+the scratch directory its own dispatch prompt assigned it, subdirectories
+included — `<scratch>/impl-<N>/` for an implementer, `<scratch>/pr<N>/...` on
+the review side — since a member waiting on a child it dispatched writes
+nothing itself while that child writes below it. Read them at two observations
+a poll apart — `touch` a marker file outside that directory at the first, and
+`find <dir> -type f -newer <marker>` at the second lists every file that
+moved: **mtimes that moved between the two mean BLOCKED, a live member
 still holding its claim and its worktree, so the killed row above does not
 apply to it; mtimes unchanged at both are the dead signature.** Only the first
 of those two verdicts is conclusive — a member wedged on a call that writes
