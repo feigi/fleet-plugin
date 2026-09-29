@@ -648,7 +648,7 @@ test("betweenPhrases: a bound stops the search there, rather than reaching a lat
   );
 });
 
-// #1697: a bound that matches BEFORE an intact `to` — here a wrap that put
+// A bound that matches BEFORE an intact `to` — here a wrap that put
 // `3.` at column 0, which CommonMark renders as a new list item — used to
 // report `slice end anchor "…" moved`, sending a reader after an edit to an
 // anchor nobody touched. The anchor did not move; the bound did. Still a

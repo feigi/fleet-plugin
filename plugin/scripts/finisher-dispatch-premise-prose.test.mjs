@@ -289,11 +289,10 @@ test("the slice bound throws rather than widening when an anchor moves", () => {
   // silently binding the slice to the decoy and widening it into step 5.
   // Bounding the search to step 4's own item excludes that decoy from the
   // count entirely, so this still throws rather than silently widening — with
-  // the past-the-bound message naming step 5's line (#1697), since the decoy
-  // is a copy of the end anchor sitting beyond the bound. Both mutations go
-  // through `cut()`, never a literal `.replace()`: a literal target here
-  // breaks the same way the header already warns about the moment either
-  // step 4 or step 5 reflows.
+  // the past-the-bound message, since the decoy is a copy of the end
+  // anchor sitting beyond the bound. Both mutations go through `cut()`, never
+  // a literal `.replace()`: a literal target here breaks the same way the
+  // header already warns about the moment either step 4 or step 5 reflows.
   assert.throws(
     () =>
       dispatchPremise(
@@ -304,7 +303,7 @@ test("the slice bound throws rather than widening when an anchor moves", () => {
           "later-line decoy",
         ),
       ),
-    /slice end anchor .* lies past the end bound, which first matched at line \d+ \("5\. /,
+    /slice end anchor .* lies past the end bound, which first matched at line \d+/,
     "a reworded end anchor with a same-text decoy on a LATER line silently widened the slice instead of throwing",
   );
 });

@@ -412,7 +412,7 @@ export const sentences = (block) =>
 // not count, or a pin could never pass once any later, unrelated copy of
 // the same phrase exists anywhere below it.
 //
-// A bound can also match BEFORE an intact `to` — #1697: a reflow that puts
+// A bound can also match BEFORE an intact `to` — e.g. a reflow that puts
 // `3.` at column 0 mid-step, which the `\n\d+\.\s` list-item bound reads as the
 // next item, and CommonMark renders as one too, so the red is real. Reporting
 // that as `to` having "moved" sends the reader after an edit to an anchor
