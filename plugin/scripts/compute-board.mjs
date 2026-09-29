@@ -24,7 +24,7 @@
 // regex is all this file takes from it: the tick's I/O and main() never run
 // here, main() being guarded on argv[1].
 import { assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
-import { parseToken } from "./ledger-grammar.mjs";
+import { parseToken, HALT_CAUSES } from "./ledger-grammar.mjs";
 import { PR_MENTION } from "./fleet-tick.mjs";
 
 // A ledger row is freeform, controller-authored text. Two real examples:
@@ -56,6 +56,14 @@ import { PR_MENTION } from "./fleet-tick.mjs";
 //
 // A member settled anywhere on the row is settled — a bare copy beside
 // `<member>=<outcome>` is what a whole-line `row` rewrite leaves.
+//
+// #2083: a PR whose latest finisher attempt settled `halted:<cause>` carries
+// that outcome as a severity-4 flag while the PR sits in REVIEW. The halt is
+// the finisher working correctly — it refused to label — so the PR has no
+// `ready-to-merge` until the controller resolves the cause; the flag is what
+// puts it in front of a human. "Latest" is laterAttempt's reading, among the
+// finisher tokens bound to the row's own PR: a live `-b` after the halt
+// clears it.
 //
 // A PR's review is not a member (#1773 §7): `review=wf:<runId>` is a Workflow
 // with nobody to name, while `review=member:<name>` and
@@ -129,8 +137,10 @@ export function parseRow(row) {
   // exists for.
   const live = [];
   const implOutcomes = new Map();
+  const finisherOutcomes = new Map();
   const settled = new Set();
   let lastImpl = null; // the latest well-formed impl token (laterAttempt)
+  const finishers = []; // well-formed finisher tokens, for the row's PR below
   let anyImpl = false;
   let prMember = false;
   let review = false; // any review= token: a PR-bound signal (amendment 2a)
@@ -150,6 +160,10 @@ export function parseRow(row) {
           if (t.outcome !== null) implOutcomes.set(t.name, t.outcome);
           if (!lastImpl || laterAttempt(t, lastImpl, ticket)) lastImpl = t;
         }
+      }
+      if (t.family === "finisher-pr" && !t.error) {
+        if (t.outcome !== null) finisherOutcomes.set(t.name, t.outcome);
+        finishers.push(t);
       }
       if (t.bound === "pr") prMember = true;
       continue;
@@ -186,11 +200,16 @@ export function parseRow(row) {
     if (mention) pr = Number(mention[1]);
     else if ((prMember || review || reviewed) && row.split(/\s/)[0] === issueM[0]) pr = Number(issueM[1]);
   }
+  let lastFinisher = null;
+  for (const t of finishers) {
+    if (t.number === pr && (!lastFinisher || laterAttempt(t, lastFinisher, pr))) lastFinisher = t;
+  }
   return {
     issue: Number(issueM[1]),
     excluded: ex ? [...ex[1].matchAll(PREMISE)].map(([, kind, target]) => ({ kind, target })) : null,
     impl: lastImpl?.name ?? null,
     implOutcome,
+    finisherOutcome: lastFinisher ? (finisherOutcomes.get(lastFinisher.name) ?? null) : null,
     agent: alive.length ? alive[alive.length - 1].name : null,
     pr,
     merged: !!mergedM,
@@ -250,6 +269,9 @@ export function deriveFlags(parsed, ctx) {
   for (const c of parsed.causes) flags.push(c); // killed | blocked | sha-off-branch
   const o = parsed.implOutcome;
   if ((o === "killed" || o === "tier-mismatch") && !flags.includes(o)) flags.push(o);
+  // Only while the halt still parks the PR: once a human resolves an
+  // escalated halt by labelling or merging it, the flag has nothing to ask.
+  if (parsed.finisherOutcome?.startsWith("halted:") && ctx.column === "REVIEW") flags.push(parsed.finisherOutcome);
   const limit = STALE_MS[ctx.column];
   if (limit != null && ctx.sinceEnteredStage != null && ctx.now - ctx.sinceEnteredStage > limit) {
     flags.push("stale");
@@ -277,7 +299,11 @@ function titleFor(issue, pr, issues) {
   return i ? i.title : `#${issue}`;
 }
 
-const FLAG_SEVERITY = { "red-ci": 5, "ledger-error": 5, killed: 4, "tier-mismatch": 4, blocked: 4, "sha-off-branch": 4, stale: 1 };
+const FLAG_SEVERITY = {
+  "red-ci": 5, "ledger-error": 5, killed: 4, "tier-mismatch": 4, blocked: 4, "sha-off-branch": 4,
+  ...Object.fromEntries(HALT_CAUSES.map((c) => [`halted:${c}`, 4])),
+  stale: 1,
+};
 function severity(flags) {
   let s = 0;
   for (const f of flags) {

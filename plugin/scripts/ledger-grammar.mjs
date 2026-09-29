@@ -17,16 +17,21 @@
 // alone.
 
 // The outcome vocabulary, verbatim from the spec. A word is matched exactly,
-// except the two that carry a value, which match OUTCOME_PATTERNS below.
+// except the three that carry a value, which match OUTCOME_PATTERNS below.
 const FAMILIES = {
   impl: { label: "impl-N", bound: "ticket", outcomes: ["PR#M", "bailed", "released", "killed", "tier-mismatch"] },
   "fix-pr": { label: "fix-pr-M", bound: "pr", outcomes: ["applied:<head>", "no-op", "failed", "killed"] },
-  "finisher-pr": { label: "finisher-pr-M", bound: "pr", outcomes: ["labelled", "failed", "killed"] },
+  "finisher-pr": { label: "finisher-pr-M", bound: "pr", outcomes: ["labelled", "failed", "killed", "halted:<cause>"] },
   "merge-bot": { label: "merge-bot-n", bound: null, outcomes: ["done", "killed"] },
 };
+// A finisher halt's causes (#2083): the finisher worked correctly and refused
+// to label, which `failed` (it crashed or gave up) does not say. `unreadable`,
+// `missing` and `absent` are duty 1's audit-read halts (#1106).
+export const HALT_CAUSES = ["live-editor", "rebase", "past-pin", "unreadable", "missing", "absent", "other"];
 const OUTCOME_PATTERNS = {
   "PR#M": /^PR#[1-9][0-9]*$/,
   "applied:<head>": /^applied:[0-9a-f]{7,40}$/i,
+  "halted:<cause>": new RegExp(`^halted:(?:${HALT_CAUSES.join("|")})$`),
 };
 
 // A number with no leading zero, so `impl-0412` cannot be a second name for
