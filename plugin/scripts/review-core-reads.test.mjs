@@ -24,108 +24,44 @@ const CODE = stripComments(SOURCE);
 // while the accepted RESULT is always derived from `runRoot`.
 const ROOT = "/s/pr7/run-ab12cd34";
 
-// A diff that is empty, or that describes a commit other than the snapshot's,
-// is worse than no diff: the specialist reads it as authoritative.
+// A diff that is empty, or whose line count was never measured, is worse than
+// no diff: the specialist reads it as authoritative.
 test("usableDiff rejects a diff that would lie about the snapshot", () => {
-  assert.equal(usableDiff({ head: "aaa" }), null, "no diffPath");
+  assert.equal(usableDiff({}), null, "no diffPath");
   assert.equal(
-    usableDiff({ head: "aaa", diffLines: 40 }),
+    usableDiff({ diffLines: 40 }),
     null,
     "diffPath absent but diffLines truthy — isolates the diffPath guard from the diffLines guard",
   );
   assert.equal(
-    usableDiff({ head: "aaa", diffPath: "/s/pr.diff", diffLines: 0 }),
+    usableDiff({ diffPath: "/s/pr.diff", diffLines: 0 }),
     null,
     "0-byte diff — `gh pr diff` exits 1 and still leaves the file",
   );
-  // The one guard where ABSENT and 0 mean the same thing, against the rule the
-  // refHead clause follows. Deliberate: the count is not a cross-check, it is the
-  // only thing that rules out that 0-byte file, so an unreported count leaves
-  // "usable" a guess. Pinned because it reads like the inversion bug.
+  // The one guard where ABSENT and 0 mean the same thing. Deliberate: the count
+  // is not a cross-check, it is the only thing that rules out that 0-byte file,
+  // so an unreported count leaves "usable" a guess. Pinned because it reads like
+  // the inversion bug.
   assert.equal(
-    usableDiff({ head: "aaa", diffPath: "/s/pr.diff" }),
+    usableDiff({ diffPath: "/s/pr.diff" }),
     null,
     "diffLines absent — no count means the 0-byte case cannot be ruled out",
   );
-  assert.equal(
-    usableDiff({ head: "aaa", diffPath: "/s/pr.diff", diffLines: 40, refHead: "bbb" }),
-    null,
-    "refHead present and unequal — the diff describes another commit",
-  );
 });
 
-// #1513, the OPERAND. `prHead` is the PR object's `headRefOid`, which LAGS a ref
-// move: `gh pr update-branch --rebase` returns rc=0 and that field sits on the
-// pre-rebase sha for minutes (~2 min in one merge-bot run, ~84s in the next, measured in
-// `run-merge-bot.md`'s step 1). A snapshot cut from the rebased tree inside that
-// window matches the branch ref exactly and the old compare threw its diff away.
-// The ref answers "is this tree the PR's head"; `headRefOid` answers "has
-// GitHub's PR object caught up", which is a different question and not this one.
-test("usableDiff judges against the branch ref, not the lagging PR object", () => {
-  const rebased = "62ba798" + "0".repeat(33);
-  const stale = "c774756" + "0".repeat(33);
+// The accept half. Heads are `snapshotMissing`'s to judge, before this runs, so
+// a present `refHead` — matching or not — must not cost a counted diff here.
+test("usableDiff accepts a counted diff and derives its path from runRoot", () => {
+  assert.equal(usableDiff({ runRoot: ROOT, head: "aaa", diffPath: "/s/pr.diff", diffLines: 40 }), `${ROOT}/pr.diff`);
   assert.equal(
-    usableDiff({ runRoot: ROOT, head: rebased, diffPath: "/s/pr.diff", diffLines: 40, refHead: rebased, prHead: stale }),
+    usableDiff({ runRoot: ROOT, head: "aaa", diffPath: "/s/pr.diff", diffLines: 40, refHead: "bbb" }),
     `${ROOT}/pr.diff`,
-    "a tree matching the branch ref lost its diff because the PR object had not caught up yet",
+    "usableDiff judged the heads again — the compare belongs to snapshotMissing alone",
   );
-  // The half that keeps the guard worth having, and the direction #1168
-  // measured: a worktree cut from a stale remote-tracking ref leaves BOTH the
-  // tree and the PR object on the superseded sha, so a `prHead` compare reads
-  // EQUAL and passes exactly the tree this guard exists to refuse.
   assert.equal(
-    usableDiff({ runRoot: ROOT, head: stale, diffPath: "/s/pr.diff", diffLines: 40, refHead: rebased, prHead: stale }),
-    null,
-    "a tree matching only the lagging PR object is accepted — #1168's false pass, reintroduced here",
-  );
-});
-
-// The inversion this guard is most likely to get wrong. The ref read can still
-// come back empty on its own — an unreachable `origin`, or a read that failed —
-// so dropping a good diff over a MISSING cross-check lets absent input narrow
-// coverage: the `=== true` guards in `selectDimensions`, inverted. A fork PR is
-// no longer one of those empties (#1616): its branch resolves nowhere on
-// `origin`, but the snapshot block falls back to `refs/pull/<number>/head`, so
-// a fork now arrives here carrying an operand rather than none.
-test("usableDiff accepts when refHead is absent or matching", () => {
-  assert.equal(
-    usableDiff({ runRoot: ROOT, head: "aaa", diffPath: "/s/pr.diff", diffLines: 40 }),
+    usableDiff({ runRoot: ROOT, head: "a".repeat(40), diffPath: "/s/pr.diff", diffLines: 40, refHead: "z".repeat(7) }),
     `${ROOT}/pr.diff`,
-    "missing refHead must not suppress an otherwise good diff",
-  );
-  assert.equal(
-    usableDiff({ runRoot: ROOT, head: "aaa", diffPath: "/s/pr.diff", diffLines: 40, refHead: "aaa" }),
-    `${ROOT}/pr.diff`,
-  );
-  // A present and MISMATCHING `prHead` must not disqualify either. It is not an
-  // operand any more, and re-admitting it as a second one — under any wording —
-  // is #1513 back.
-  assert.equal(
-    usableDiff({ runRoot: ROOT, head: "aaa", diffPath: "/s/pr.diff", diffLines: 40, refHead: "aaa", prHead: "zzz" }),
-    `${ROOT}/pr.diff`,
-    "the PR object's head is still being consulted — a lagging headRefOid costs the diff again",
-  );
-  // `refHead` is 40 chars from `git ls-remote`; `head` is whatever the snapshot
-  // agent relayed for "the HEAD sha", which an agent may abbreviate. Under a raw
-  // `!==` these two matching shas compare unequal and the good diff is dropped.
-  // Both directions, because either side can be the short one.
-  const full = "a".repeat(40);
-  assert.equal(
-    usableDiff({ runRoot: ROOT, head: full.slice(0, 7), diffPath: "/s/pr.diff", diffLines: 40, refHead: full }),
-    `${ROOT}/pr.diff`,
-    "abbreviated head against the full refHead is the same commit, not a divergence",
-  );
-  assert.equal(
-    usableDiff({ runRoot: ROOT, head: full, diffPath: "/s/pr.diff", diffLines: 40, refHead: full.slice(0, 7) }),
-    `${ROOT}/pr.diff`,
-    "and the same the other way round",
-  );
-  // The prefix tolerance must not swallow the case it exists beside: a genuinely
-  // different sha still reds, at short length too.
-  assert.equal(
-    usableDiff({ head: "abc1234", diffPath: "/s/pr.diff", diffLines: 40, refHead: "abd" + "9".repeat(37) }),
-    null,
-    "a different sha stays disqualifying however short the compare",
+    "unconditionally blind to refHead, not merely permissive of one mismatch shape — an abbreviated mismatch must not cost the diff either",
   );
 });
 
@@ -242,35 +178,37 @@ test("readRules does not claim closure over a list gh truncated", () => {
 });
 
 // `gh pr diff > pr.diff` is a shell REDIRECT: the file exists in every run, in
-// the same ${scratch} tree the specialist is pointed at for its own work. On
-// head skew it is non-empty and describes another commit, and "No diff file was
-// captured" is then false in the one way that matters — the specialist can find
-// the file and has been given no reason not to trust it.
+// the same ${scratch} tree the specialist is pointed at for its own work. A
+// rejected diff is still on disk — non-empty when only `wc -l` failed — and "No
+// diff file was captured" is then false in the one way that matters: the
+// specialist can find the file and has been given no reason not to trust it.
 test("readRules names a rejected diff rather than denying a file that exists", () => {
-  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", diffLines: 500, refHead: "bbb", head: "aaa" });
+  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff" });
   assert.doesNotMatch(out, /No diff file was captured/, "the diff file exists — the redirect always creates it");
   assert.match(out, /REJECTED/);
   assert.match(out, /\/s\/pr\.diff/, "the rejected file is not named, so the specialist cannot know which one to skip");
   assert.match(out, /Do not read it/);
-  // `refHead`, not `prHead`: the rejection turned on the branch ref (#1513), so
-  // naming the PR object's head here would attribute the refusal to a value
-  // nothing compared — and would render `undefined` on the routine shape where
-  // `ls-remote` answered and `gh pr view` did not.
-  assert.match(
-    out,
-    /describes\s+the\s+PR's\s+head\s+at\s+bbb/,
-    "the rejection reason is not carried, only the rejection",
-  );
-  // And the file list inherits the defect the diff was rejected FOR: it comes
-  // from `gh pr view <pr> --json files`, which describes that same rejected
-  // commit. Dropping the diff for the wrong tree and then serving that tree's
-  // file list stamped "and no others" is the same error with the evidence gone.
+});
+
+// #1132 review: readRules() lost its `skew` binding, but nothing above
+// proves it BY BEHAVIOR — reinserting the deleted head-skew branch verbatim
+// passes every test in this file unchanged, because none of them call
+// readRules() with a rejected diff AND a present refHead together. Pin the
+// combination directly, not just the absence of `refHead` from the source.
+test("readRules ignores refHead even when a rejected diff and a head mismatch are both present", () => {
+  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", head: "aaa", diffLines: 40, refHead: "bbb" });
+  assert.match(out, /REJECTED — its\s+line\s+count\s+was\s+never\s+reported/);
   assert.doesNotMatch(
     out,
-    /touched exactly these files and no others/,
-    "the file list is from the rejected commit and is still stamped as closed over this snapshot",
+    /describes\s+the\s+PR's\s+head/i,
+    "readRules must not attribute the rejection to a head mismatch — that compare belongs to snapshotMissing alone",
   );
-  assert.match(out, /NOT\s+this\s+snapshot's\s+commit/);
+  assert.doesNotMatch(out, /\bbbb\b/, "refHead never surfaces in the reason readRules hands to a specialist");
+  assert.match(
+    out,
+    /touched exactly these files and no others/,
+    "no skew wording survives — the header is unconditional now",
+  );
 });
 
 // Two rejections with nothing in common but the verdict — and the snapshot
@@ -290,14 +228,9 @@ test("readRules names a rejected diff rather than denying a file that exists", (
 // empty rejected'` — so the empty case went unexercised under its own name,
 // and the label it pinned was the conflation (#1131).
 test("readRules calls a rejected diff empty only when a count measured it", () => {
-  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", head: "aaa", diffLines: 0 });
+  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", diffLines: 0 });
   assert.match(out, /REJECTED — it is empty/);
-  assert.doesNotMatch(
-    out,
-    /describes commit/,
-    "the empty case borrows the head-skew wording — `gh pr diff 999999` leaves a 0-byte file with no commit to name",
-  );
-  // No skew, complete list — closure is TRUE here and must still be claimed.
+  // A complete list — closure is TRUE here and must still be claimed.
   assert.match(out, /touched exactly these files and no others/);
 });
 
@@ -310,14 +243,13 @@ test("readRules calls a rejected diff empty only when a count measured it", () =
 // "the no-diff log reports the raw fields, not a guard it did not measure"
 // holds it there — and this is the copy every specialist reads.
 test("readRules does not call a rejected diff empty when no count was reported", () => {
-  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff", head: "aaa" });
+  const out = readRules(null, PATHS, { diffPath: "/s/pr.diff" });
   assert.match(out, /REJECTED — its\s+line\s+count\s+was\s+never\s+reported/);
   assert.doesNotMatch(
     out,
     /it is empty/,
     "an unreported count is served as a measured emptiness — every specialist reads that the PR changed nothing",
   );
-  assert.doesNotMatch(out, /describes commit/, "nothing measured a head skew here either");
   // Still rejected: `usableDiff`'s guard is unchanged, and a diff no count
   // measured is still the one file not to read.
   assert.match(out, /Do not read it/);
@@ -326,7 +258,7 @@ test("readRules does not call a rejected diff empty when no count was reported",
 // A run with no diffPath at all is not a rejection: nothing was captured, and
 // saying "a diff was captured and rejected" would be a fresh false claim.
 test("readRules reports no capture when the snapshot agent reported no diffPath", () => {
-  const out = readRules(null, PATHS, { head: "aaa" });
+  const out = readRules(null, PATHS, {});
   assert.match(out, /No diff file was captured/);
   assert.doesNotMatch(out, /REJECTED/);
 });

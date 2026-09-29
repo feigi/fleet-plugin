@@ -210,42 +210,36 @@ export function verifiersFor(A) {
 export function usableDiff(snap) {
   if (!snap.diffPath) return null;
   if (!snap.diffLines) return null;
-  if (snap.refHead && !snap.refHead.startsWith(snap.head) && !snap.head.startsWith(snap.refHead)) return null;
+  // No head check here: `snapshotMissing` owns it and runs first in `runReview`.
   return `${snap.runRoot}/pr.diff`;
 }
 
 export function readRules(diffPath, stats, snap) {
-  const rejected = !diffPath && snap && snap.diffPath ? snap.diffPath : null;
-  const skew = !!(rejected && snap.diffLines && snap.refHead);
-  const listed = stats && stats.paths ? stats.paths.length : 0;
-  const header =
-    stats && stats.truncated
-      ? `The PR touched at least these files — GitHub capped the list at ${listed} of
+  let change;
+  if (diffPath) {
+    change = `The PR's whole diff is at ${diffPath}. Read it FIRST, bounded — it is the
+change you are reviewing, and the snapshot around it is context.`;
+  } else if (stats && stats.paths && stats.paths.length) {
+    const rejected = snap && snap.diffPath ? snap.diffPath : null;
+    const header = stats.truncated
+      ? `The PR touched at least these files — GitHub capped the list at ${stats.paths.length} of
 ${stats.truncated}, so there are more it does not name:`
-      : skew
-        ? `The PR touched these files as of its own head, which is NOT this snapshot's
-commit — treat the list as approximate:`
-        : `The PR touched exactly these files and no others:`;
-
-  const change = diffPath
-    ? `The PR's whole diff is at ${diffPath}. Read it FIRST, bounded — it is the
-change you are reviewing, and the snapshot around it is context.`
-    : stats && stats.paths && stats.paths.length
-      ? `${
-          rejected
-            ? `A diff was captured at ${rejected} and REJECTED — ${
-                skew
-                  ? `it describes the PR's head at ${snap.refHead}, not this snapshot`
-                  : snap.diffLines === 0
-                    ? "it is empty"
-                    : "its line count was never reported, so nothing measured whether it holds the PR's whole change or nothing at all"
-              }. Do not read it.`
-            : "No diff file was captured."
-        } ${header}
-${stats.paths.map((p) => `  ${p.path} (${p.loc} changed)`).join("\n")}`
-      : `No diff file and no file list were captured. Locate the files your
+      : `The PR touched exactly these files and no others:`;
+    change = `${
+      rejected
+        ? `A diff was captured at ${rejected} and REJECTED — ${
+            snap.diffLines === 0
+              ? "it is empty"
+              : "its line count was never reported, so nothing measured whether it holds the PR's whole change or nothing at all"
+          }. Do not read it.`
+        : "No diff file was captured."
+    } ${header}
+${stats.paths.map((p) => `  ${p.path} (${p.loc} changed)`).join("\n")}`;
+  } else {
+    change = `No diff file and no file list were captured. Locate the files your
 dimension covers by searching the snapshot ('grep -rn', 'ls -R'), then read
 them under the bounding rule below: 'wc -l' first.`;
+  }
 
   return `${change}
 
