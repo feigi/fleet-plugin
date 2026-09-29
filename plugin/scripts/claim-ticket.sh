@@ -4,6 +4,14 @@
 #
 # Dry-run by default; --apply mutates the tracker and the filesystem.
 #
+# The claim is branch `<type>/<issue>-<slug>` and worktree
+# `.worktrees/<issue>-<slug>`. The fleet always calls it as
+# `claim-ticket.sh <N> impl-<N> implementer` (run-team SKILL.md, **Claiming**),
+# giving `implementer/<N>-impl-<N>` and `.worktrees/<N>-impl-<N>`, and releases
+# with the same pair through release-ticket.sh. <slug> and <type> are
+# free text — neither derived nor validated here — so a caller outside the fleet
+# can pass its own shape, e.g. next-ticket's human-facing `fix/<N>-<slug>`.
+#
 # The install command is DERIVED from the lockfile, never defaulted. A
 # lockfile-mutating install in a throwaway worktree corrupts it for everyone:
 # npm@11 prunes cross-platform @esbuild optional deps and breaks CI and the

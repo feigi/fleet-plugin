@@ -14,11 +14,11 @@ code that knows exactly one ecosystem:
 - `plugin/scripts/derive-testcmd.sh:141-194` emits `npm test --` when
   `package.json` declares `scripts.test`, else `node --test` when a tracked file
   matches `\.(test|spec)\.[cm]?[jt]sx?$`, else refuses.
-- `plugin/scripts/claim-ticket.sh:226-271` maps `package-lock.json` /
+- `plugin/scripts/claim-ticket.sh:244-290` maps `package-lock.json` /
   `pnpm-lock.yaml` / `yarn.lock` to `npm ci` / `pnpm i --frozen-lockfile` /
   `yarn --immutable`, accepts "no lockfile" only when `package.json` declares
   zero dependencies, and refuses otherwise.
-- `claim-ticket.sh:527-1196` emits a runner, `agent-test`, whose ~600-line body
+- `claim-ticket.sh:647-1322` emits a runner, `agent-test`, whose ~600-line body
   is a `node --test` argument shim (`node_modules` exclusion, node's dash-path
   quirk, directory expansion).
 - `plugin/scripts/diff-stats.mjs:26-36` sizes a review fan-out by classifying
@@ -26,7 +26,7 @@ code that knows exactly one ecosystem:
 
 Measured 2026-09-28: a Maven repo (`pom.xml` + `src/test/java/x/FooTest.java`)
 is refused at `derive-testcmd.sh` with `refusing to emit a command that would
-pass vacuously`, so `claim-ticket.sh:301-302` dies before a worktree or label
+pass vacuously`, so `claim-ticket.sh:319-320` dies before a worktree or label
 exists and `review-pr.js:393-397` throws on every PR. Adding a one-line
 `package.json` `{"scripts":{"test":"mvn -q test"}}` makes it pass — the check is
 "is there a `scripts.test`", not "is this Node" — but that path needs `npm` on
@@ -59,7 +59,7 @@ exits 0).
    (`plugin/skills/run-team/SKILL.md:2171`); this makes that the *only* guard.
    An Install step is not usable until it has been run once in a fresh worktree
    and left every tracked file unchanged — the generalisation of today's
-   three-filename lockfile-mutation check (`claim-ticket.sh:435`).
+   three-filename lockfile-mutation check (`claim-ticket.sh:453`).
 5. **The Recipe is cached as fleet state, not committed as a consumer-facing
    format.** It lives under `.fleet/`, written by the agent that derived and
    proved it, carrying the commit it was derived at and the proof. Scripts read
