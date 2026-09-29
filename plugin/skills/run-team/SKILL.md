@@ -2350,7 +2350,12 @@ a minute apart showed *different* mutants, so a member's report and any single
 
 1. **Audit the worktree** — run `worktree-audit.sh` (it takes no argument; it
    audits every worktree in one pass, so find this worktree's row in its
-   output). Two checks, each with the instrument that can answer it.
+   output). Match the row by the resolved form of the worktree path you were
+   dispatched with — `realpath <abs-path>`, or `cd <abs-path> && pwd -P` —
+   never by that path as written: the row's `worktree` field is the physical
+   path `git worktree list` reports, so a spelling reached through a symlink
+   (macOS's `/tmp` and `/var/folders` are symlinks too) matches no row on a
+   healthy worktree. Two checks, each with the instrument that can answer it.
    **Dirty:** the row's `dirty` field, or `git status --porcelain -unormal`
    inside the worktree itself — the explicit mode, never bare `--porcelain`, or
    `status.showUntrackedFiles = no` reads a dirty worktree as clean (#730). The
