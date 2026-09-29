@@ -241,6 +241,16 @@ test("duty 1 names the instrument for each check, and halts on a row that cannot
     said(/halt.*no row for this worktree at all is \*worktree absent\*/),
     "duty 1 no longer halts when this worktree has no row — a finisher finds nothing wrong in a row it never found",
   );
+  // #2141: the row's `worktree` field is `git worktree list`'s, which always
+  // reports the resolved physical path — worktree-audit.sh resolves nothing
+  // itself. A finisher dispatched with a symlinked spelling (macOS's `/tmp`
+  // and `/var/folders` are symlinks too) finds no row for the path as
+  // written and halts a healthy tree as *worktree absent*. Its own sentence,
+  // so deleting the clause reds here and nowhere else.
+  assert.ok(
+    said(/Match the row by the resolved form of the worktree path you were dispatched with.*`realpath <abs-path>`.*`cd <abs-path> && pwd -P`.*never by that path as written/),
+    "duty 1 no longer tells the finisher to match its row by the resolved (`realpath` / `pwd -P`) form of its dispatched worktree path — a symlinked spelling finds no row and halts a healthy tree as *worktree absent*",
+  );
   // `git status` answers the dirty check only. Presented as a full
   // substitute, it lets a finisher skip the audit and never see the three
   // shapes above.
