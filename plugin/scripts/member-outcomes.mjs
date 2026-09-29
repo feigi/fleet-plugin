@@ -2,7 +2,8 @@
 // transcripts: no clock, no network, no gh. See
 // docs/specs/2026-08-27-fleet-member-outcomes-instrumentation-design.md.
 //
-// The transcript parsing (fold, model/effort extraction, ticket/pr naming)
+// The transcript parsing (fold, model/effort extraction, ticket/pr naming,
+// and the `gh pr create` result an implementer's `pr` comes from, #2209)
 // lives in member-record.mjs (#1342), shared with board.mjs. `normalizeModel`
 // and `parseMemberName` are re-exported here verbatim so nothing importing
 // them from this file needs to change.
