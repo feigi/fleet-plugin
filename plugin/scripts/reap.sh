@@ -1559,37 +1559,21 @@ else
       fi
 
       # A guard the branch sweep needs no copy of, and the one thing on this
-      # path git is no backstop for. Measured here, git 2.50.1 (Apple Git-155):
-      # `git worktree remove` WITHOUT `--force` removes a worktree holding an
-      # interrupted rebase, and one holding a bisect, at exit 0 — both leave
-      # `git status --porcelain` empty, so every check above passes and the
-      # sequencer state, the todo list and the original head go with the
-      # directory. Both operations also DETACH, which is precisely how they
-      # arrive in this sweep and nowhere else: release-ticket.sh's prose already
-      # names the interrupted rebase as the way a fleet worktree wanders off its
-      # branch. The remaining sequencer states leave staged or unmerged paths
-      # behind, so the dirty check above already answers for them; they are
-      # listed anyway because a state git records is cheaper to test than to
-      # argue about.
-      # `2>/dev/null`, NOT the `2>&1` the reasons above fold in, because this
-      # capture is used as a PATH and theirs are used as message text. Measured
-      # (PR #985 review): a `~/.gitconfig` with a key outside any section makes
-      # every git command print `error: key does not contain a section: …` to
-      # stderr AT EXIT 0, so `2>&1` returns that line glued in front of the git
-      # dir, `[ -e "$gitdir/$op" ]` then matches nothing, and this very guard
-      # lets through a worktree holding an interrupted rebase — removed, state
-      # and all. The same change on the status probe reads every clean worktree
-      # as dirty forever.
-      if ! gitdir=$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null); then
+      # path git is no backstop for: `git worktree remove` WITHOUT `--force`
+      # removes a worktree holding an interrupted rebase or a bisect at exit 0,
+      # sequencer state and all, with `git status --porcelain` empty. Both
+      # operations also DETACH, which is precisely how they arrive in this
+      # sweep and nowhere else: release-ticket.sh's prose already names the
+      # interrupted rebase as the way a fleet worktree wanders off its branch.
+      # worktree.sh's `wt_op_state` holds the marker list, the measurements
+      # and why its admin-dir read is `2>/dev/null` rather than `2>&1`; a
+      # worktree it cannot read is kept, never removed.
+      if ! wt_op_state "$wt"; then
         keep "" "worktree $wt could not be read"
         continue
       fi
-      busy=
-      for op in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG; do
-        if [ -e "$gitdir/$op" ]; then busy=$op; fi
-      done
-      if [ -n "$busy" ]; then
-        keep "" "worktree $wt has a git operation in progress ($busy) — removing it discards state no commit holds"
+      if [ -n "$wt_op" ]; then
+        keep "" "worktree $wt has a git operation in progress ($wt_op) — removing it discards state no commit holds"
         continue
       fi
 

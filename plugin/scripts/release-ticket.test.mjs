@@ -2383,17 +2383,6 @@ test("the script carries no escape hatch", () => {
   // the guard, and a revert to `"$base.."` here is the edit this pins.
   assert.doesNotMatch(src, /git rev-list --count "\$base\./, "no guard measures against the ambiguous shorthand");
   assert.doesNotMatch(src, /git cherry "\$base"/, "and neither does cherry");
-
-  // The guard `update-ref` cannot offer on its own: it is ref-only plumbing
-  // and consults no worktree, so `-D`'s delete-time refusal on a branch
-  // checked out anywhere is replaced with an explicit re-read of the
-  // worktree listing, immediately before the CAS, rather than trusting the
-  // scan taken before the `gh issue view` call earlier in the run.
-  assert.match(
-    src,
-    /wt_listing \|\| halt[\s\S]{0,400}?awk -v b="refs\/heads\/\$branch"[\s\S]{0,150}?\) \|\|\s*\n\s*halt[\s\S]{0,200}?\[ -z "\$cas_wt" \] \|\|\s*\n\s*halt/,
-    "and an explicit checked-out-worktree guard, itself guarded against a failed lookup, stands immediately before the CAS delete",
-  );
 });
 
 test("usage errors exit 2", (t) => {
@@ -2586,37 +2575,217 @@ fi`,
   );
 });
 
-test("a CAS worktree-check LOOKUP that could not run halts mid-release, never silently completes", (t) => {
-  // Every other lookup over `$wt_list` in this script is guarded with
-  // `|| die`/`|| halt` — this one, computing `cas_wt` just above the delete,
-  // was the sole exception. Unguarded, an awk failure here would abort under
-  // `set -eu` AFTER `git worktree remove` already landed, with 0 bytes on
-  // stdout and no `release-ticket:` line on stderr at all: a silent
-  // half-released state, worse than the loud HALTED this halt() now gives.
-  // `$2==b{print w; exit}` is this program's own body: the earlier `$wt`
-  // lookup shares `$2==b` but pairs it with `&&n>1{print w}`, no `; exit}`,
-  // so only this lookup fails (`grep -cF` confirms the string is unique).
+/**
+ * Stop a git operation that DETACHES HEAD in a sibling worktree holding the
+ * claim's branch, the claim's own worktree already gone. `git worktree list
+ * --porcelain` then prints `detached` for that sibling and no `branch` line at
+ * all — while `git branch -D` would still refuse "used by worktree", because
+ * git reads the operation's own state out of the sibling's admin dir. #2218
+ *
+ * main is deepened first so the claim, cut from origin/main, has history to
+ * rebase or bisect over without being one commit ahead of it — ahead is a
+ * precondition blocker of its own, and would answer before the delete does.
+ */
+function heldSibling(t, stop) {
   const r = repo(t);
+  for (const n of [1, 2]) commit(r.w, `main ${n}`, `main ${n}\n`);
+  git(r.w, "push", "-q", "origin", "main");
   const c = claim(r.w, 9, "release-ticket");
-  awkShim(r, "$2==b{print w; exit}");
+  git(r.w, "worktree", "remove", c.wt);
+  const sib = join(r.w, "..", "held-wt");
+  git(r.w, "worktree", "add", "-q", sib, c.branch);
+  stop(sib);
+  assert.match(
+    git(r.w, "worktree", "list", "--porcelain"),
+    /held-wt\nHEAD [0-9a-f]+\ndetached$/m,
+    "fixture: the sibling must be detached, or the porcelain `branch` line already answers",
+  );
+  return { r, c, sib };
+}
+
+/** Real git with stdio captured, so a rebase's `Stopped at` prose stays out of the test output. */
+const quietGit = (cwd, ...args) => execFileSync("git", args, { cwd, env: ENV, stdio: "pipe" });
+
+/** What a halted release must leave: the branch, and the sibling still registered. */
+function assertHeldSurvives(r, c, sib) {
+  assert.ok(
+    git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch),
+    "the claim branch survives",
+  );
+  assert.match(git(r.w, "worktree", "list", "--porcelain"), /held-wt\n/, "and the sibling that holds it is still registered");
+  assert.ok(existsSync(sib), "with its directory");
+}
+
+test("a sibling worktree stopped mid-`rebase -i` on the claim branch halts the delete (#2218)", (t) => {
+  // Measured on the unfixed script: the listing-only check saw no `branch`
+  // line, `update-ref -d` went through at exit 0, and the sibling's `git
+  // rebase --continue` then failed on `cannot lock ref`, the work left on a
+  // detached HEAD with no branch.
+  const { r, c, sib } = heldSibling(t, (sib) =>
+    quietGit(sib, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1"),
+  );
 
   const { code, json, stderr } = release(r, c);
-  assert.equal(code, 2, "unanswerable is exit 2, not a silent set -eu abort");
-  assert.equal(json.released, false, "halt's own receipt carries released:false");
-  assert.match(
-    stderr,
-    /#9 PARTIALLY RELEASED — could not check whether fix\/9-release-ticket is checked out before the delete/,
-    "the worktree removal already landed by the time this lookup runs, so halt must say so",
-  );
+  assert.equal(code, 2, stderr);
+  assert.equal(json.released, false);
+  assert.match(stderr, /fix\/9-release-ticket is held by a rebase or bisect in progress in worktree \S*held-wt — not deleted/);
+  assertHeldSurvives(r, c, sib);
+  quietGit(sib, "rebase", "--continue");
+  assert.equal(git(sib, "symbolic-ref", "HEAD"), `refs/heads/${c.branch}`, "the rebase can still finish onto its branch");
+});
+
+test("a sibling worktree mid-`bisect` started from the claim branch halts the delete (#2218)", (t) => {
+  // `BISECT_START` holds the SHORT name the bisect started from, unlike a
+  // rebase's `head-name`, which holds the full ref. Unfixed, `git bisect
+  // reset` then failed on `invalid reference` and left the worktree detached.
+  const { r, c, sib } = heldSibling(t, (sib) => quietGit(sib, "bisect", "start", "HEAD", "HEAD~2"));
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, stderr);
+  assert.equal(json.released, false);
+  assert.match(stderr, /fix\/9-release-ticket is held by a rebase or bisect in progress in worktree \S*held-wt — not deleted/);
+  assertHeldSurvives(r, c, sib);
+  quietGit(sib, "bisect", "reset");
+  assert.equal(git(sib, "symbolic-ref", "HEAD"), `refs/heads/${c.branch}`, "the bisect can still reset onto its branch");
+});
+
+test("a sibling mid-rebase of a DIFFERENT branch does not hold this claim's release (#2218)", (t) => {
+  // The false-refusal half: an operation in progress is not by itself a hold.
+  // Only the branch that operation names blocks the delete, so a sibling
+  // rebasing unrelated work must leave this claim free to release in full.
+  const r = repo(t);
+  for (const n of [1, 2]) commit(r.w, `main ${n}`, `main ${n}\n`);
+  git(r.w, "push", "-q", "origin", "main");
+  const c = claim(r.w, 9, "release-ticket");
+  const sib = join(r.w, "..", "other-wt");
+  git(r.w, "worktree", "add", "-q", sib, "-b", "other", "origin/main");
+  quietGit(sib, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 0, stderr);
+  assert.equal(json.released, true);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+});
+
+test("a detached worktree whose git dir cannot be read halts the delete as unknown, never as free (#2218)", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
+  // A detached worktree can hold a branch only through its admin state, and
+  // one that cannot be read answers nothing — so the delete refuses rather
+  // than reading silence as "not held". It halts even though this sibling
+  // holds nothing, which is the price of failing closed.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const sib = join(r.w, "..", "sealed-wt");
+  git(r.w, "worktree", "add", "-q", "--detach", sib, "origin/main");
+  chmodSync(sib, 0o000);
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, stderr);
+  assert.equal(json.released, false);
+  assert.match(stderr, /cannot tell whether fix\/9-release-ticket is held by worktree \S*sealed-wt/);
   assert.ok(
-    stderr.includes("is Released — registration and directory both gone"),
-    `the worktree report line confirms the removal really did land first: ${stderr}`,
+    git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch),
+    "the branch survives an unanswerable check",
   );
-  assert.deepEqual(
-    artefacts(r, c),
-    { dir: false, worktree: false, branch: true },
-    "the worktree really did go; the branch must survive an unanswerable check rather than being force-deleted blind",
+});
+
+test("a sibling stopped mid-rebase whose admin HEAD is corrupted still halts the delete, resolved as held (#2218)", (t) => {
+  // Measured on the unfixed script: `git worktree list --porcelain` for a
+  // worktree whose admin `HEAD` holds garbage (not a ref, not a SHA) emits
+  // NEITHER a `branch` line nor the literal `detached` line — the
+  // listing-only loop matched neither case, fell through the record without
+  // acting, and read a worktree still mid-rebase on this branch as "not
+  // held" at all. The fix resolves this record through the same registry
+  // route a gone worktree uses — the corruption is confined to that one
+  // HEAD file, and the admin dir's rebase-merge state beside it is
+  // untouched — so the delete halts on a DEFINITE answer, not merely
+  // "unknown".
+  const { r, c, sib } = heldSibling(t, (sib) =>
+    quietGit(sib, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1"),
   );
+  const admin = join(r.w, ".git", "worktrees");
+  const name = readdirSync(admin).find(
+    (n) => readFileSync(join(admin, n, "gitdir"), "utf8").trim() === join(realpathSync(sib), ".git"),
+  );
+  assert.ok(name, "fixture: no registry entry points at the sibling");
+  writeFileSync(join(admin, name, "HEAD"), "garbage not a ref\n");
+  assert.doesNotMatch(
+    git(r.w, "worktree", "list", "--porcelain"),
+    /held-wt\nHEAD [0-9a-f]+\ndetached/m,
+    "fixture: the corrupted HEAD must drop the `detached` line, or this is not the shape being tested",
+  );
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, stderr);
+  assert.equal(json.released, false);
+  assert.match(stderr, /fix\/9-release-ticket is held by a rebase or bisect in progress in worktree \S*held-wt — not deleted/);
+  assertHeldSurvives(r, c, sib);
+});
+
+test("an unrelated prunable worktree does not block release of a branch it never held (#2218)", (t) => {
+  // The false-refusal half of the prunable case: one leftover worktree
+  // anywhere in the repo, its directory `rm -rf`'d without `git worktree
+  // remove`, used to make every release halt as "cannot tell" regardless of
+  // whether that worktree ever held the branch being released. `git branch
+  // -D` itself never refuses here — nothing holds this claim at all.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const stale = join(r.w, "..", "stale-wt");
+  git(r.w, "worktree", "add", "-q", "--detach", stale, "origin/main");
+  rmSync(stale, { recursive: true, force: true });
+  assert.match(git(r.w, "worktree", "list", "--porcelain"), /prunable/, "fixture: the stale registration must still be listed");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 0, stderr);
+  assert.equal(json.released, true);
+  assert.deepEqual(artefacts(r, c), { dir: false, worktree: false, branch: false });
+});
+
+test("a prunable sibling that genuinely holds the claim via a stopped rebase still halts the delete (#2218)", (t) => {
+  // The other half of the prunable case, and the one that must NOT regress:
+  // if the worktree's directory is gone but its admin dir still shows a
+  // stopped rebase naming this branch, `git branch -D` itself still refuses
+  // — measured — so the delete must too, even though the worktree behind it
+  // no longer exists to be entered.
+  const { r, c, sib } = heldSibling(t, (sib) =>
+    quietGit(sib, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1"),
+  );
+  rmSync(sib, { recursive: true, force: true });
+  assert.match(git(r.w, "worktree", "list", "--porcelain"), /prunable/, "fixture: the sibling's directory must be gone, its registration still there");
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, stderr);
+  assert.equal(json.released, false);
+  assert.match(stderr, /is held by a rebase or bisect in progress in worktree \S*held-wt — not deleted/);
+  assert.ok(
+    git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch),
+    "the claim branch survives",
+  );
+});
+
+test("a sibling's rebase-merge admin subdirectory unsearchable halts the delete as unknown, too (#2218)", (t) => {
+  if (EUID0) return t.skip(NO_DENIAL);
+  // Distinct from the whole-admin-dir-unreadable case above: here the admin
+  // dir itself is fine — `git -C <worktree> rev-parse --absolute-git-dir`
+  // succeeds — and only the rebase-merge subdirectory this function has to
+  // read INTO is chmod'd unsearchable: the second, narrower readability
+  // guard `wt_op_state` carries for exactly this shape, untested until now.
+  const { r, c, sib } = heldSibling(t, (sib) =>
+    quietGit(sib, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1"),
+  );
+  const admin = join(r.w, ".git", "worktrees");
+  const name = readdirSync(admin).find(
+    (n) => readFileSync(join(admin, n, "gitdir"), "utf8").trim() === join(realpathSync(sib), ".git"),
+  );
+  assert.ok(name, "fixture: no registry entry points at the sibling");
+  const rebaseMerge = join(admin, name, "rebase-merge");
+  chmodSync(rebaseMerge, 0o000);
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, stderr);
+  assert.equal(json.released, false);
+  assert.match(stderr, /cannot tell whether fix\/9-release-ticket is held by worktree \S*held-wt/);
+  assertHeldSurvives(r, c, sib);
 });
 
 test("BASE_REF must not name the claim's own branch", (t) => {

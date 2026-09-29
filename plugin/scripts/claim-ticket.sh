@@ -282,9 +282,9 @@ else
   # push, `git push --force-with-lease -u origin HEAD` (skills/next-ticket/SKILL.md
   # step 7; its no-lease fallback carries `-u` too), and only then can be `[gone]`.
   #
-  # release-ticket.sh's branch delete is `-D` because of this line: `-d` measures
-  # an upstream-less branch against local HEAD and refuses a pristine claim
-  # whenever local main is behind origin/main.
+  # `--no-track` is also why no branch delete uses `-d` (#760): `-d` measures an
+  # upstream-less branch against local HEAD, refusing a pristine claim behind
+  # origin/main. release-ticket.sh's is `git update-ref -d` on a tip read once.
   printf '$ git worktree add --no-track %s -b %s origin/main\n' "$wt" "$branch" >&2
   git worktree add --no-track "$wt" -b "$branch" origin/main >/dev/null || die "worktree add failed"
 
