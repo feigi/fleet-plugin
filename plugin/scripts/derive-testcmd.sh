@@ -182,8 +182,14 @@ case $1 in
   *[\'\"\\\$\`\(\)\{\}\<\>\|\&\;\*\?\[\~]*) ;;
   *)
     # In <repo>, so a relative `./run-tests.sh` resolves where the command
-    # itself will run from.
-    (cd "$repo" && command -v -- "$1") >/dev/null 2>&1 \
+    # itself will run from. `command -v` alone is not exec-bit-aware for a
+    # `/`-containing word under dash (Ubuntu's default /bin/sh): it only
+    # stat()s the path there, never checking execute permission — measured:
+    # `dash -c 'command -v ./run.sh'` on a chmod 0644 file exits 0. `[ -x ]`
+    # is the exec-bit-aware check that closes the gap; a bare name (builtin
+    # or a PATH match) has no path to test and is left to `command -v`.
+    (cd "$repo" && command -v -- "$1" || exit 1
+      case $1 in */*) [ -x "$1" ] || exit 1 ;; esac) >/dev/null 2>&1 \
       || die "the Recipe cache at $cache is invalid: its $field command '$1' is not found or not executable from $repo — a Recipe that cannot run is stale, not a finding; $derive"
     ;;
 esac
