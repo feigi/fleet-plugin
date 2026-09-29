@@ -12,7 +12,7 @@ the map. 480 rows total, deduplicated within slice, not across:
 |---|---|---|---|
 | shell | [`external-assumptions/shell.md`](external-assumptions/shell.md) | 129 | `plugin/scripts/*.sh`, `fleet-bootstrap`/`fleet-run`/`fleet-provenance`, all of `.github/` |
 | tracker-node | [`external-assumptions/tracker-node.md`](external-assumptions/tracker-node.md) | 71 | `candidates`, `shortlist`, `ci-state`, `merge-gate`, `staleness`, `pr-overlap`, `diff-stats`, `fleet-tick`/`state`/`heartbeat`, `repo-root`, `git-env`, `tier-*`, `arg`, `slow-transport`, `lift` |
-| harness-node | [`external-assumptions/harness-node.md`](external-assumptions/harness-node.md) | 113 | `board.*`, `compute-*`, `ledger*`, `member-*`, `review-*`, `prompt-renderer`, `workflow-files`, `frontmatter-*`, `prose-pin`, `marked-pairs`, `workflows/review-pr.js`, manifests, `package.json`, `.nvmrc`, `renovate.json` |
+| harness-node | [`external-assumptions/harness-node.md`](external-assumptions/harness-node.md) | 113 | `board.*`, `compute-*`, `ledger*`, `member-*`, `review-*`, `prompt-renderer`, `frontmatter-*`, `prose-pin`, manifests, `package.json`, `.nvmrc`, `renovate.json` |
 | prose | [`external-assumptions/prose.md`](external-assumptions/prose.md) | 167 | skills, commands, agents, `docs/agents/*`, `README.md`, `CONTEXT.md` glossary, ADR decisions |
 
 Row references below are `slice#N`. Twelve rows sampled across all four slices
