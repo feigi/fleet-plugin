@@ -67,6 +67,7 @@ export LC_ALL=C
 # ambient-git-vars-prose.test.mjs pins the line itself.
 unset GIT_DIR GIT_WORK_TREE
 
+# shellcheck disable=SC2100 # literal name "derive-testcmd", not arithmetic — the unrelated $derive var assigned below is what the heuristic collides on, not this line
 NAME=derive-testcmd
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 1; }
 
