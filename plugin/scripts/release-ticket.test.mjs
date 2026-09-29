@@ -20,7 +20,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { slowTransport, SSH_URL, warmStub } from "./slow-transport.mjs";
+import { slowTransport, SSH_URL } from "./slow-transport.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./release-ticket.sh", import.meta.url));
 const INFLIGHT = fileURLToPath(new URL("./inflight.sh", import.meta.url));
@@ -4894,7 +4894,6 @@ test("a slow but working ls-remote still releases the claim — the budget is no
   const origin = git(r.w, "remote", "get-url", "origin");
   const stub = slowTransport(origin);
   git(r.w, "remote", "set-url", "origin", SSH_URL);
-  warmStub(stub, r.env());
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "fixture");
 
   const { code, json, stderr, error } = release(r, c, {

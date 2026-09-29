@@ -15,7 +15,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { slowTransport, SSH_URL, warmStub } from "./slow-transport.mjs";
+import { slowTransport, SSH_URL } from "./slow-transport.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./reap.sh", import.meta.url));
 
@@ -3934,7 +3934,6 @@ test("a slow but working fetch still reaps the merged [gone] branch — the budg
   const origin = git(w, "remote", "get-url", "origin");
   const stub = slowTransport(origin);
   git(w, "remote", "set-url", "origin", SSH_URL);
-  warmStub(stub, ENV);
 
   const { code, json, stderr, error } = runReap(
     w,

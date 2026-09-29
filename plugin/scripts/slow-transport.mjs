@@ -19,9 +19,18 @@
 // it would register that file's own tests a second time in whichever suite
 // imported it.
 
-import { spawnSync } from "node:child_process";
-import { chmodSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+// No executable is written here, and that is the load-bearing part (#2221).
+// macOS scans a freshly written executable on its FIRST exec, and that scan is
+// a system-daemon latency with no bound under load — measured at 15.0-16.0s
+// per fresh file at load average ~25 on 14 cores, against 1.0s for the same
+// one-second script exec'd a second time, run as `sh <file>`, or run as
+// `sh -c` with no file at all. The stub used to be such a file, exec'd from
+// INSIDE the region each caller's budget bounds. #1099 moved that scan out
+// with a warm-up exec under a 10s timeout, but the scan outgrew the timeout
+// under load, and a first exec killed before it finishes leaves the scan
+// unpaid: the next exec of that file measured 14.5-15.0s again. So the
+// bounded call paid it anyway, and a ~6s transport crossed a 20s budget — the
+// two slow-but-working failures #2221 reports, from a full-suite run.
 
 // Seconds the stub sleeps before it serves anything. Module-internal on
 // purpose: no consumer computes a budget from it, so exporting it would only
@@ -37,8 +46,8 @@ const SLOW_DELAY_S = 3;
 export const SSH_URL = "ssh://git@example.invalid/x/y.git";
 
 /**
- * An ssh stub that sleeps `SLOW_DELAY_S` before it serves the bare repo at
- * `origin` through `git upload-pack`. Returns its path, for GIT_SSH_COMMAND.
+ * A GIT_SSH_COMMAND value for an ssh stub that sleeps `SLOW_DELAY_S` before it
+ * serves the bare repo at `origin` through `git upload-pack`.
  *
  * `SLOW_DELAY_S` (3s) is the sleep PER INVOCATION, not the cost a bounded
  * caller actually pays: git's ssh transport invokes this stub TWICE for
@@ -49,28 +58,12 @@ export const SSH_URL = "ssh://git@example.invalid/x/y.git";
  * doubled number, not the 3s constant alone, is what each caller's pair is
  * chosen against: one budget above it, one under.
  *
- * Written beside `origin` unless `dir` names somewhere else — a fixture whose
- * origin sits outside the tree under test needs the stub where its own cleanup
- * will reach it.
+ * A command line rather than a script path, so the only programs it execs are
+ * `sh`, `sleep` and `git`, none of them freshly written (see the header). git
+ * runs the value through a shell and appends its own arguments — `-G`, the
+ * host, the remote command, and whatever `-o` options the caller under test
+ * adds — which land after `$0` and are ignored; `$0` is `origin`.
  */
-export function slowTransport(origin, dir = dirname(origin)) {
-  const stub = join(dir, "slow-ssh.sh");
-  writeFileSync(stub, `#!/bin/sh\nsleep ${SLOW_DELAY_S}\nexec git upload-pack '${origin}'\n`);
-  chmodSync(stub, 0o755);
-  return stub;
-}
-
-/**
- * Exec the stub once and discard the result, so the bounded call that follows
- * never pays a freshly written executable's FIRST-execution OS scan cost
- * inside the region the budget bounds (#1099) — measured at ~7s of the 13-14s
- * such a call took while the stub was still cold. Same file, same bytes, so
- * the bounded call only ever execs an already-scanned stub. Exit status is
- * whatever an unfed `git upload-pack` returns and is irrelevant here.
- *
- * Only the over-budget half of a pair needs this: a budget under the delay
- * kills the call at the budget however warm the stub is.
- */
-export function warmStub(stub, env) {
-  spawnSync(stub, [], { env, input: "", timeout: 10_000 });
+export function slowTransport(origin) {
+  return `sh -c 'sleep ${SLOW_DELAY_S}; exec git upload-pack "$0"' '${origin}'`;
 }

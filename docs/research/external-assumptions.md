@@ -6,12 +6,12 @@ humans — to look like?
 
 Method: four parallel code-and-prose censuses, one per slice, each row citing
 `path:line` plus a verbatim fragment. The slices are the evidence; this file is
-the map. 480 rows total, deduplicated within slice, not across:
+the map. 481 rows total, deduplicated within slice, not across:
 
 | Slice | File | Rows | Scope |
 |---|---|---|---|
 | shell | [`external-assumptions/shell.md`](external-assumptions/shell.md) | 129 | `plugin/scripts/*.sh`, `fleet-bootstrap`/`fleet-run`/`fleet-provenance`, all of `.github/` |
-| tracker-node | [`external-assumptions/tracker-node.md`](external-assumptions/tracker-node.md) | 71 | `candidates`, `shortlist`, `ci-state`, `merge-gate`, `staleness`, `pr-overlap`, `diff-stats`, `fleet-tick`/`state`/`heartbeat`, `repo-root`, `git-env`, `tier-*`, `arg`, `slow-transport`, `lift` |
+| tracker-node | [`external-assumptions/tracker-node.md`](external-assumptions/tracker-node.md) | 72 | `candidates`, `shortlist`, `ci-state`, `merge-gate`, `staleness`, `pr-overlap`, `diff-stats`, `fleet-tick`/`state`/`heartbeat`, `repo-root`, `git-env`, `tier-*`, `arg`, `slow-transport`, `lift` |
 | harness-node | [`external-assumptions/harness-node.md`](external-assumptions/harness-node.md) | 113 | `board.*`, `compute-*`, `ledger*`, `member-*`, `review-*`, `prompt-renderer`, `frontmatter-*`, `prose-pin`, manifests, `package.json`, `.nvmrc`, `renovate.json` |
 | prose | [`external-assumptions/prose.md`](external-assumptions/prose.md) | 167 | skills, commands, agents, `docs/agents/*`, `README.md`, `CONTEXT.md` glossary, ADR decisions |
 

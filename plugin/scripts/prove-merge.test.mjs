@@ -18,7 +18,7 @@ import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { slowTransport, SSH_URL, warmStub } from "./slow-transport.mjs";
+import { slowTransport, SSH_URL } from "./slow-transport.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./prove-merge.sh", import.meta.url));
 
@@ -949,7 +949,6 @@ test("a slow but working fetch still proves the merge — the budget is not a st
   const origin = git(w, "remote", "get-url", "origin");
   const stub = slowTransport(origin);
   git(w, "remote", "set-url", "origin", SSH_URL);
-  warmStub(stub, ENV);
 
   const r = spawnSync("sh", [SCRIPT, head, head, merge], {
     cwd: w,

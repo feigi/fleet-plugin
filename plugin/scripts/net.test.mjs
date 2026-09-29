@@ -15,7 +15,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { slowTransport, SSH_URL, warmStub } from "./slow-transport.mjs";
+import { slowTransport, SSH_URL } from "./slow-transport.mjs";
 
 const SCRIPT = join(import.meta.dirname, "net.sh");
 
@@ -165,16 +165,13 @@ function slowRepo(t) {
   git(w, "push", "-q", "-u", "origin", "main");
   const head = git(w, "rev-parse", "HEAD");
 
-  const stub = slowTransport(origin, root);
+  const stub = slowTransport(origin);
   git(w, "remote", "set-url", "origin", SSH_URL);
   return { w, head, stub };
 }
 
 test("a fetch that is slow but WORKING keeps its ordinary verdict — the budget is not a stopwatch on success", (t) => {
   const { w, head, stub } = slowRepo(t);
-  // Pay the stub's first-exec OS scan cost HERE, outside the region
-  // FLEET_NET_TIMEOUT bounds — slow-transport.mjs holds the measurement.
-  warmStub(stub, ENV);
   const r = spawnSync("sh", [join(import.meta.dirname, "verify-sha.sh"), "main", head], {
     cwd: w, encoding: "utf8", timeout: 60_000,
     env: { ...ENV, GIT_SSH_COMMAND: stub, FLEET_NET_TIMEOUT: "20" },
