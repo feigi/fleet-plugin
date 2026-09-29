@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, chmodSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,13 @@ import { join } from "node:path";
 // infers nothing: no fixture here carries a package.json, a lockfile or a
 // test-file naming convention, because none of them can change its answer.
 const SCRIPT = join(import.meta.dirname, "derive-testcmd.sh");
+
+// The frame markers, read from the script itself rather than copied here: a
+// behavior-preserving rename of derive-testcmd.sh's `open`/`close` values
+// must not break a test whose only job is to prove the guard around them.
+const FRAME_MATCH = readFileSync(SCRIPT, "utf8").match(/^open='([^']*)' close='([^']*)'/m);
+if (!FRAME_MATCH) throw new Error("could not find the open/close frame markers in derive-testcmd.sh");
+const [, FRAME_OPEN, FRAME_CLOSE] = FRAME_MATCH;
 
 // Fixture construction must not inherit an ambient GIT_DIR (the #1020 case
 // below sets one deliberately, for the SCRIPT only): under one, `git init`
@@ -45,7 +52,7 @@ function cache(dir, body) {
 }
 
 function derive(dir, field = "test", env = process.env, cwd = tmpdir()) {
-  const r = spawnSync("sh", [SCRIPT, dir, field], { encoding: "utf8", env, cwd });
+  const r = spawnSync("sh", [SCRIPT, dir, field], { encoding: "utf8", env, cwd, timeout: 30_000 });
   return { status: r.status, out: r.stdout.replace(/\n$/, ""), err: r.stderr };
 }
 
@@ -221,6 +228,20 @@ test("a command ending in ';' or '&', or carrying a '#' word, refuses — a runn
   }
 });
 
+// --- #2217: the frame above lets a value keep a trailing newline that an
+// unframed `$(…)` capture always stripped silently, so a command that used
+// to read as `true;` (caught above) now reads as `true;\n` inside the
+// frame and must still be caught the same way.
+test("a command ending in ';' or '&' followed by a newline still refuses (#2217)", () => {
+  const { dir, head } = repo();
+  for (const cmd of ["true;\n", "true &\n"]) {
+    cache(dir, recipe(head, { test: cmd }));
+    const r = derive(dir, "test", process.env, tmpdir());
+    assert.equal(r.status, 1, `${JSON.stringify(cmd)} must refuse: ${r.out}`);
+    assert.match(r.err, /a runner-appended argument/, `${JSON.stringify(cmd)}: ${r.err}`);
+  }
+});
+
 test("a command of assignments alone names nothing to run and refuses", () => {
   const { dir, head } = repo();
   cache(dir, recipe(head, { test: "CI=1 FOO=2" }));
@@ -306,4 +327,54 @@ test("an unusable interpreter refuses in this script's own voice, never the cach
   const present = derive(dir, "test", { ...process.env, PATH: shimPath({ node: true }) });
   assert.equal(present.status, 0, present.err);
   assert.equal(present.out, "true");
+});
+
+// --- #2217: node's STDOUT is the capture itself, so the stream split above
+// does nothing for it. A version-manager or proxy shim prints before exec'ing
+// the real node, or — not exec'ing — after it exits, and unframed that chatter
+// became part of the command: refused as a stale cache when its first word
+// did not resolve, handed on when it did. Every stub runs the real interpreter
+// by ABSOLUTE path: re-running `node` through PATH would find the stub again.
+function nodeStub(body) {
+  const bin = mkdtempSync(join(tmpdir(), "derive-stub-"));
+  writeFileSync(join(bin, "node"), `#!/bin/sh\n${body.replaceAll("NODE", `'${process.execPath}'`)}\n`);
+  chmodSync(join(bin, "node"), 0o755);
+  return { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+}
+
+test("stdout chatter around the Recipe value refuses, blaming node's output and never the cache (#2217)", (t) => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head));
+  const stubs = {
+    "a banner before exec": ['echo "Now using node v22.0.0"; exec NODE "$@"', "Now using node v22.0.0"],
+    "a digit prefix with no newline": ['printf 1; exec NODE "$@"', `1${FRAME_OPEN}`],
+    "trailing output from a shim that does not exec": ['NODE "$@"; st=$?; printf done; exit $st', `${FRAME_CLOSE}done`],
+    "a shim whose own chatter spells out the sentinel": [`printf "${FRAME_OPEN}SNEAKY-INJECTED"; exec NODE "$@"`, `${FRAME_OPEN}SNEAKY-INJECTED${FRAME_OPEN}`],
+  };
+  for (const [name, [body, shown]] of Object.entries(stubs)) {
+    const env = nodeStub(body);
+    for (const field of ["install", "test"]) {
+      t.diagnostic(`${name}, ${field}`);
+      const r = derive(dir, field, env);
+      assert.equal(r.status, 1, `${name}/${field}: ${r.err}`);
+      assert.equal(r.out, "", `${name}/${field}: nothing may reach the caller`);
+      assert.match(r.err, /^derive-testcmd: node's stdout carried more than the framed Recipe value/);
+      assert.ok(r.err.includes(shown), `${name}/${field}: the refusal shows the capture: ${r.err}`);
+      assert.doesNotMatch(r.err, /Recipe cache .* is invalid/);
+      assert.doesNotMatch(r.err, /Recipe derivation step/);
+    }
+  }
+});
+
+// The must-ACCEPT half: with no stub the frame is invisible, and a value with
+// an embedded newline crosses it byte for byte.
+test("the framed read hands on the exact value, an embedded newline included (#2217)", () => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head, { install: "true\ntrue", test: "sh ./run-tests.sh\n: second line" }));
+  const i = derive(dir, "install");
+  assert.equal(i.status, 0, i.err);
+  assert.equal(i.out, "true\ntrue");
+  const t = derive(dir, "test");
+  assert.equal(t.status, 0, t.err);
+  assert.equal(t.out, "sh ./run-tests.sh\n: second line");
 });
