@@ -105,17 +105,31 @@ nodeerr=$(node -e 0 </dev/null 2>&1) || die "node is unusable, refusing to read 
 
 # Validation and extraction in one pass, so a field is never printed out of a
 # cache the checks did not pass. rc 0 prints the value; anything else carries
-# the reason on stderr. The two streams are kept APART — stderr to a file, never
-# merged into the capture — because an interpreter made chatty by the caller's
-# environment (NODE_OPTIONS, a version-manager banner: #752, #1175) writes to
-# stderr on the SUCCESS path too, and merged, that chatter would arrive inside
-# the command this script hands claim-ticket.sh to run.
+# the reason on stderr. An interpreter made chatty by the caller's environment
+# writes on the SUCCESS path too, and whatever reaches the capture arrives
+# inside the command this script hands claim-ticket.sh to run — so each stream
+# is guarded on its own:
+#
+#   stderr is kept APART — to a file, never merged into the capture — because
+#   NODE_OPTIONS or NODE_DEBUG chatter lands there (#752, #1175).
+#
+#   stdout carries the value FRAMED, `recipe<` before it and `>recipe` after,
+#   and the WHOLE capture must be exactly that frame (#2217). A version-manager
+#   or proxy shim prints to stdout before exec'ing the real node (`Now using
+#   node v22.0.0`), and one that does not exec can print after node exits; the
+#   anchored match refuses both, and the refusal names node's output, never
+#   the cache — the cache passed. Refused, never recovered: no value is cut
+#   out of chatter. The end sentinel also stops `$(…)` stripping a trailing
+#   newline off a value; the one thing the capture cannot show is bare
+#   newlines after the frame, which that same stripping drops before the
+#   match and which carry nothing into the value.
 errf=$(mktemp) || die "cannot create a temporary file to read the Recipe cache"
 trap 'rm -f "$errf"' EXIT
 
-value=$(node -e '
+open='recipe<' close='>recipe'
+framed=$(node -e '
 const fs = require("fs");
-const [file, field] = process.argv.slice(1);
+const [file, field, open, close] = process.argv.slice(1);
 const bad = (why) => { console.error(why); process.exit(2); };
 let r;
 try { r = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { bad(`it does not parse: ${e.message}`); }
@@ -128,8 +142,14 @@ if (r.installClean !== true) bad("`installClean` is not true — the Install ste
 const counted = Number.isInteger(r.testCount) && r.testCount > 0;
 const mutated = typeof r.mutation === "string" && r.mutation.trim() !== "";
 if (!counted && !mutated) bad("it carries no proof of real tests — neither a positive `testCount` nor a `mutation`");
-process.stdout.write(r[field]);
-' "$cache" "$field" 2>"$errf") || die "the Recipe cache at $cache is unusable: $(cat "$errf") — $derive"
+process.stdout.write(open + r[field] + close);
+' "$cache" "$field" "$open" "$close" 2>"$errf") || die "the Recipe cache at $cache is unusable: $(cat "$errf") — $derive"
+case $framed in
+  "$open"*"$close") ;;
+  *) die "node's stdout carried more than the framed Recipe value — expected exactly the value between '$open' and '$close', got '$framed'. The cache at $cache passed validation; the extra output comes from how node is launched here (a version-manager or proxy shim, a preload), and is refused rather than cut out of the command" ;;
+esac
+value=${framed#"$open"}
+value=${value%"$close"}
 
 # Both consumers append the runner's own arguments after this string
 # textually (claim-ticket.sh's `exec sh -c '<cmd> "$@"' agent-test "$@"`), so
