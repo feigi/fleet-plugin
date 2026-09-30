@@ -8,12 +8,15 @@
 The fleet works on a *consumer* repository it does not own. Two commands about
 that repository are load-bearing for every claim and every review: how to
 materialise its dependencies in a fresh worktree (the **Install step**) and how
-to run its suite (the **Test entrypoint**). Today both are inferred by shell
-code that knows exactly one ecosystem:
+to run its suite (the **Test entrypoint**). When this was ruled, both were
+inferred by shell code that knew exactly one ecosystem (cited at `83cb3eb8`,
+`main` just before #2212 landed the #2117 cache reader):
 
 - `plugin/scripts/derive-testcmd.sh:141-194` emits `npm test --` when
   `package.json` declares `scripts.test`, else `node --test` when a tracked file
-  matches `\.(test|spec)\.[cm]?[jt]sx?$`, else refuses.
+  matches `\.(test|spec)\.[cm]?[jt]sx?$`, else refuses. That script is now the
+  cache reader under Consequences: it reads `.fleet/recipe.json`, and never
+  reads `package.json` or lists files.
 - `plugin/scripts/claim-ticket.sh:244-290` maps `package-lock.json` /
   `pnpm-lock.yaml` / `yarn.lock` to `npm ci` / `pnpm i --frozen-lockfile` /
   `yarn --immutable`, accepts "no lockfile" only when `package.json` declares
