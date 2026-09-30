@@ -682,6 +682,22 @@ test("betweenPhrases truncates a long bound-matched line in its excerpt", () => 
   );
 });
 
+// Every bound above opens with `\n` and then a content character, so the
+// named line is where that content sits. A bound made of line breaks — a
+// blank line (`\n\n`), a whitespace-only line (`\n\s*\n`), a zero-width
+// `^$` — has no content character to land on, and #2268 measured the message
+// skipping past every blank line to the next paragraph's text, a line the
+// bound never touched. The line named is the blank line itself: the match's
+// leading `\n` ends the line above and is skipped, but only that one.
+test("betweenPhrases names the blank line a line-break bound matched, not the next paragraph's text", () => {
+  const pastBound = (line, excerpt) =>
+    new RegExp(`the fixture: slice end anchor "CUT it" lies past the end bound, which first matched at line ${line} \\("${excerpt}"\\)`);
+  const run = (doc, bound) => () => betweenPhrases(doc, "START here", "CUT it", "the fixture", { bound });
+  assert.throws(run("START here.\nmiddle.\n\n\n\nnext para, CUT it here.\n", /\n\n/), pastBound(3, ""));
+  assert.throws(run("START here.\nmiddle.\n   \nnext para, CUT it here.\n", /\n\s*\n/), pastBound(3, "   "));
+  assert.throws(run("START here.\nmiddle.\n\nnext para, CUT it here.\n", /^$/m), pastBound(3, ""));
+});
+
 // A `bound` that never matches the remaining text is a caller error, not an
 // invitation to fall back to an unbounded search — that fallback is exactly
 // the false green `bound` exists to prevent: a `to` reworded away could still
