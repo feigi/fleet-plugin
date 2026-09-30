@@ -89,8 +89,10 @@
 # Sweeping for unexpected refs is a drain-cadence question, not a gate one, and
 # it is not what #436's acceptance criteria ask for.
 #
-# COST: one `git ls-files` and one pass of `shasum` over those files. No
-# network, no `gh`, no fetch, no subprocess per file. It is meant to be run
+# COST: two `git ls-files` (the state home's own set, which decides whether a
+# recorded root may be followed at all, and the audited tree's set) and one
+# pass of `shasum` over those files. No network, no `gh`, no fetch, no
+# subprocess per file. It is meant to be run
 # before every gate decision and it has to be cheap enough that nobody is
 # tempted to skip it.
 set -eu
@@ -198,36 +200,47 @@ else
     || die "the working directory is not inside a git checkout — cannot identify the instrument set (pass --repo <path> to audit a tree other than cwd's)"
 fi
 
-# The audited tree starts as the state home. `--pin --audit <path>` names it
-# explicitly; a bare `--pin` over a baseline that already records one keeps
-# certifying THAT tree — the controller's tooling-fix re-pin changes the
-# instruments the run actually reads, and a re-pin that silently re-based onto
-# this workspace's tree would certify a set the run never measured (on a
-# plugin-less workspace, certify nothing at all: the empty-set refusal). A
-# check follows the recorded root below, from the same rule.
-target=$root
-if [ -n "$audit" ]; then
-  target=$(git -C "$audit" rev-parse --show-toplevel) \
-    || die "$audit is not inside a git checkout — cannot identify the instrument set to pin"
-fi
-
+# `root` is the STATE HOME (the baseline's checkout, the run's own tree);
+# `target` is the AUDITED TREE the digest covers. They are the same tree in
+# every ordinary run.
 set='plugin/commands plugin/scripts plugin/skills plugin/agents plugin/workflows'
-
 base="$root/.fleet/instruments.sha"
 
-# A re-pin with no `--audit` re-certifies the tree the existing baseline
-# names, when it names one: the controller's tooling-fix path stays the bare
-# `--pin` it already spells, and silently re-basing onto this workspace's own
-# tree would certify a set the run never reads. A FIRST pin in a plugin-less
-# workspace has no baseline to carry a root, names no `--audit`, and so dies
-# on the empty-set refusal below — which is the refusal that says WHICH flag
-# to pass, not the per-member halt this whole shape exists to prevent. The
-# reuse needs no re-verification the digest does not: a writer who could forge
-# `root=` here could as easily forge the digest line beside it, and the check
-# re-verifies the pair every time it answers.
-if [ "$pin" = true ] && [ -z "$audit" ] && [ -r "$base" ]; then
-  prior=$(sed -n '/^root=/{s/^root=//;p;q;}' "$base")
-  [ -n "$prior" ] && target=$prior
+# Whether the state home tracks an instrument set OF ITS OWN decides if a
+# second tree may be named at all — and it is what closes the door a recorded
+# root would otherwise open: measured, a member who can write `.fleet/`
+# (member-write-guard does not stop `bash`, #2210) can keep the honest
+# run-start digest on line 1 and move `root=` to a pristine clone of the
+# workspace whose bytes match it — the old script hashed the tampered tree and
+# refused; a check that trusted the pointer would certify the clone and pass.
+# The pointer therefore rides on the SAME trust the digest has: honoured only
+# where the state home tracks no set of its own (the cross-workspace shape,
+# where the pointer is the only tree the check CAN audit), and `--audit` is
+# refused at the pin on a checkout that does track the set — so a forged pair
+# can only ever aim at a tree whose own audit stays intact.
+# shellcheck disable=SC2086 # $set is a deliberate list of pathspecs, not one path
+home=$(git -C "$root" ls-files -- $set) \
+  || die "git ls-files failed under $root for: $set"
+
+target=$root
+if [ -n "$audit" ]; then
+  [ -z "$home" ] || die "--audit names a tree outside this checkout only when this checkout tracks no instrument set; it tracks one — drop --audit and the pin audits its own tree"
+  target=$(git -C "$audit" rev-parse --show-toplevel) \
+    || die "$audit is not inside a git checkout — cannot identify the instrument set to pin"
+elif [ "$pin" = true ] && [ -z "$home" ]; then
+  # #1058's refusals mirrored on this path: a baseline that EXISTS but cannot
+  # be read names the tree this re-pin is supposed to keep certifying, and
+  # overwriting it blind would discard the pointer with no record that it was
+  # ever there.
+  basedir="$(dirname "$base")"
+  [ -d "$basedir" ] && [ ! -x "$basedir" ] \
+    && die "$basedir exists but is unreadable — fix its permissions; do NOT --pin over it, --pin overwrites rather than compares"
+  { [ -e "$base" ] || [ -L "$base" ]; } && [ ! -r "$base" ] \
+    && die "$base exists but is unreadable — fix its permissions; do NOT --pin over it, --pin overwrites rather than compares"
+  if [ -r "$base" ]; then
+    prior=$(sed -n '/^root=/{s/^root=//;p;q;}' "$base") || die "cannot read $base"
+    [ -n "$prior" ] && target=$prior
+  fi
 fi
 
 if [ "$pin" != true ]; then
@@ -269,17 +282,37 @@ if [ "$pin" != true ]; then
   [ -n "$want" ] || die "$base is empty — re-pin, do not guess"
 
   # The recorded root, if this baseline carries one. Absent — every baseline
-  # pinned before the audited tree could live apart from the state home — the
-  # audited tree IS the state home, the shape that digest was made over.
+  # pinned before the audited tree could live apart from the state home, and
+  # every pin that CERTIFIED the state home itself — the audited tree IS the
+  # state home, the shape that digest was made over.
+  #
+  # Honoured only where a foreign pointer is admissible at all: this
+  # checkout's own recorded root is the shape every ordinary pin writes beside
+  # its own digest and means nothing — hashing `rec` here is hashing `root`.
+  # A FOREIGN pointer while the state home tracks a set of its own is the
+  # alarm: a member who could rewrite `root=`, keeping the honest line-1
+  # digest, would move the gate to a pristine clone whose bytes match it and
+  # watch the check exit 0 over a tree nobody read. No legitimate pin of this
+  # script can write that pair — the pin refuses `--audit` on a checkout that
+  # tracks the set — so it is a baseline that does not belong to this home (a
+  # moved or copied `.fleet/`, a clone that arrived carrying another
+  # workspace's baseline) or a forgery. Both refuse; re-pin here fixes the
+  # first and the second is the finding.
   rec=$(sed -n '/^root=/{s/^root=//;p;q;}' "$base")
-  if [ -n "$rec" ]; then
-    # Re-verified, not trusted: a `root=` line pointing at a directory that is
-    # no longer a checkout, or at a DIFFERENT checkout (moved, deleted,
-    # replaced, re-cloned elsewhere), refuses. This is the one authenticated
-    # channel the pointer has — the file is written by this script and read
-    # back here, and the tree it names must still BE that tree for the
-    # comparison to mean anything. A writable `.fleet/` that could rewrite
-    # `root=` could otherwise move the gate to a tree the writer controls.
+  if [ -n "$home" ] && [ -n "$rec" ] && [ "$rec" != "$root" ]; then
+    die "baseline in $base certifies a foreign audited tree ($rec) while $root tracks its own instrument set — the baseline does not belong to this checkout, or was tampered with; refuse, do not re-read"
+  fi
+  if [ -n "$rec" ] && [ "$rec" != "$root" ]; then
+    # Re-verified, not trusted. What this catches: the tree moved (the path
+    # is now inside a DIFFERENT checkout, so `--show-toplevel` answers another
+    # name), or stopped being one (deleted, de-repo'd) — both refuse, because
+    # comparing a digest made over one tree against the bytes of nothing (or
+    # of a parent repo's tree) is not an answer. What it cannot catch is a
+    # REPLACEMENT: a checkout placed at the recorded path is audited by
+    # content, and content matching line 1 is exactly as indistinguishable
+    # from the pinned tree as a forged digest line is — no new power, and the
+    # foreign-pointer guard above already refuses this whole channel for any
+    # home that tracks a set of its own.
     again=$(git -C "$rec" rev-parse --show-toplevel 2>/dev/null) \
       || die "audited tree $rec (pinned in $base) is not a git checkout — the tree moved; refuse, do not re-read"
     [ "$again" = "$rec" ] \

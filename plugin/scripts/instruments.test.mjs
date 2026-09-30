@@ -677,7 +677,9 @@ test("a bare --pin in a plugin-less workspace still refuses — naming the tree 
 test("--audit without --pin refuses: a check audits the tree its baseline names, never one its caller names", (t) => {
   const plugin = repo(t);
   const ws = wsRepo(t);
-  run(plugin, ["--pin", "--audit", plugin], { cwd: ws });
+  const pinned = run(plugin, ["--pin", "--audit", plugin], { cwd: ws });
+  assert.equal(pinned.status, 0, pinned.stderr);
+  const baseline = readFileSync(join(ws, ".fleet", "instruments.sha"), "utf8");
   // If a check accepted `--audit`, whoever can spell a path could move the
   // gate onto a tree they control — the same repointing power a writable
   // `.fleet/` must not additionally buy.
@@ -687,7 +689,11 @@ test("--audit without --pin refuses: a check audits the tree its baseline names,
   const empty = run(plugin, ["--pin", "--audit", ""], { cwd: ws });
   assert.equal(empty.status, 2, empty.stdout + empty.stderr);
   assert.match(empty.stderr, /--audit requires a non-empty path/);
-  assert.deepEqual(findFleetDirs(ws), [join(ws, ".fleet")], "only the earlier pin wrote state");
+  // Content, not directory presence: an empty-string `--pin --audit` that
+  // got far enough to truncate the baseline before refusing would leave the
+  // .fleet directory standing and read as untouched here.
+  assert.equal(readFileSync(join(ws, ".fleet", "instruments.sha"), "utf8"), baseline,
+    "neither refusal rewrote the baseline");
 });
 
 test("a recorded root that is no longer a checkout, or no longer THAT checkout, refuses with exit 2 — never a verdict about a different tree", (t) => {
@@ -738,4 +744,44 @@ test("a bare re-pin after a --audit pin re-certifies the RECORDED tree, not cwd'
   const lines = readFileSync(join(ws, ".fleet", "instruments.sha"), "utf8").split("\n");
   assert.equal(lines[1], `root=${plugin}`, "the re-pin must keep certifying the plugin tree");
   assert.equal(run(plugin, [], { cwd: ws }).status, 0, "and the check now passes over the fixed text");
+});
+
+test("--audit on a checkout that tracks its own set is refused — the pointer exists for set-less homes only", (t) => {
+  const home = repo(t);
+  const decoy = repo(t); // byte-identical, so its digest would MATCH a home pin
+  const r = run(home, ["--pin", "--audit", decoy]);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /tracks no instrument set/);
+  assert.deepEqual(findFleetDirs(home), [], "a refused pin writes no baseline");
+});
+
+test("a forged baseline pointing a set-tracking home at a matching clone alarms exit 2 — the #1020 twin through the file", (t) => {
+  // The attack review measured: tamper the workspace's instrument (uncommitted),
+  // keep the HONEST run-start digest on line 1, set root= to a pristine clone
+  // whose bytes hash to exactly that digest. A check that trusted the pointer
+  // exits 0 over a tree nobody read; the old script, hashing cwd, exited 1.
+  const home = repo(t);
+  const digest = pin(home);
+  const clone = repo(t);
+  assert.equal(digest, pin(clone), "fixture: the clone must really match line 1");
+  writeFileSync(join(home, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
+  writeFileSync(join(home, ".fleet", "instruments.sha"), `${digest}\nroot=${clone}\n`);
+  const r = run(home);
+  assert.equal(r.status, 2, `a foreign root on a set-tracking home must alarm, not certify the clone\n${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /foreign audited tree/);
+});
+
+test("a bare --pin over an unreadable baseline in a set-less workspace refuses rather than overwrite the recorded root blind", (t) => {
+  const plugin = repo(t);
+  const ws = wsRepo(t);
+  run(plugin, ["--pin", "--audit", plugin], { cwd: ws });
+  const base = join(ws, ".fleet", "instruments.sha");
+  const before = readFileSync(base, "utf8");
+  chmodSync(base, 0o000);
+  const r = run(plugin, ["--pin"], { cwd: ws });
+  chmodSync(base, 0o644);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /exists but is unreadable/);
+  assert.equal(readFileSync(base, "utf8"), before,
+    "the refusal must leave the pointer it could not read intact");
 });

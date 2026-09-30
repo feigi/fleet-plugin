@@ -22,7 +22,10 @@ member can write to that same checkout.
    workspace that does not track `plugin/…`,
    `--pin --audit <plugin-checkout>` names the tree once and every
    later check, `merge-gate.mjs`'s leg included, follows it with no
-   further flag.
+   further flag. The pointer is honoured only in that shape: a
+   recorded FOREIGN root in a home that tracks its own set, or an
+   `--audit` naming one, refuses — a writable `.fleet/` must not
+   become a way to move the gate onto a tree its writer controls.
 3. **Exit.** 0 = unchanged; 1 = the tree changed under the pin (finding
    named on stderr, with `git status` for the uncommitted half); 2 =
    the question couldn't be answered (no baseline, or an unreadable
