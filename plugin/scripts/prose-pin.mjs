@@ -424,10 +424,10 @@ export const sentences = (block) =>
 // only which message a red carries changes.
 //
 // The line named is the one the bound's match starts on, past one leading
-// `\n` the match itself consumed — that newline ends the line above, which is
-// how a bound says "at the start of a line". Only one: a blank-line bound
-// (`\n\n`, `\n\s*\n`, a zero-width `^$` with `m`) names the blank line it
-// matched, never the next paragraph's text past it (#2268).
+// `\n` the match itself consumed — that newline terminates the text before
+// the match, which is how a bound says "at the start of a line". Only one: a
+// blank-line bound (`\n\n`, `\n\s*\n`, a zero-width `^$` with `m`) names the
+// blank line it matched, never the next paragraph's text past it (#2268).
 //
 // Extracted (#1611) from `finisher-dispatch-premise-prose.test.mjs`'s
 // `dispatchPremise`, which hand-rolled this exact shape locally — `paragraph`'s

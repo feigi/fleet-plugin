@@ -688,7 +688,8 @@ test("betweenPhrases truncates a long bound-matched line in its excerpt", () => 
 // `^$` — has no content character to land on, and #2268 measured the message
 // skipping past every blank line to the next paragraph's text, a line the
 // bound never touched. The line named is the blank line itself: the match's
-// leading `\n` ends the line above and is skipped, but only that one.
+// leading `\n` terminates the text before the match and is skipped, but only
+// that one.
 test("betweenPhrases names the blank line a line-break bound matched, not the next paragraph's text", () => {
   const pastBound = (line, excerpt) =>
     new RegExp(`the fixture: slice end anchor "CUT it" lies past the end bound, which first matched at line ${line} \\("${excerpt}"\\)`);
