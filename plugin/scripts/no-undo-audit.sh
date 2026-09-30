@@ -253,11 +253,11 @@ branch=$2
 base=${BASE_REF:-origin/main}
 # Only a remote-tracking ref is accepted — the accept-list release-ticket.sh:229
 # and reap.sh:156 carry, and the one this script had none of. worktree-audit.sh
-# is NOT a precedent for it: that script still measures the bare shorthand
-# (worktree-audit.sh:117 reads BASE_REF, :119 rev-parses `$base` and :211
-# rev-lists it), so the fix is not yet applied there — #1329 is where that half
-# is tracked, and it is closed with nothing in the tree to show for it. Being
-# audit-only is what lets worktree-audit.sh wait — it only ever prints a
+# carries the same accept-list (worktree-audit.sh:131) and already applies the
+# #1329 shorthand fix: :156-159 qualify `$base` into `$base_rev`, and both its
+# rev-parse (:161) and its rev-list (:253) read `$base_rev`, never the bare
+# shorthand. Its stake is smaller, though: being audit-only,
+# worktree-audit.sh only ever prints a
 # report, while this script GATES something consequential: the comment below
 # (see "the merge bot leans on this audit to authorize a REBASE") says a caller
 # uses this audit's exit status to decide whether to replay unpushed work. A
