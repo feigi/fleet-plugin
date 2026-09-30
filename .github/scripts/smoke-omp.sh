@@ -305,15 +305,16 @@ HOME="$SCRATCH_HOME" ANTHROPIC_API_KEY="sk-ant-omp-smoke-dummy-not-real" ANTHROP
 cd "$OLDPWD"
 
 CHILD_JSONL=""
-for f in $(find "$TIER_RUN_DIR" -name '*.jsonl' -newer "$SCRATCH/mock.py" 2>/dev/null); do
-  # for-loop, not `find | while | head`: head closing the pipe SIGPIPEs the
-  # while under `set -o pipefail` and the script died BEFORE the error line
-  # could print (measured: exit 1, zero diagnostics).
-  if jq -e -s 'any(.[]; .type=="session_init" and .agent=="fleet-finisher")' "$f" >/dev/null 2>&1; then
+# while-read over process substitution, not `find | while | head`: `head`
+# closing the pipe SIGPIPEs the while under `set -o pipefail` and the script
+# died BEFORE the error line could print (measured: exit 1, no diagnostic).
+# The loop therefore drains the whole find (keep-going flag, no break), and
+# avoids the fragile `for f in $(find)` form (SC2044).
+while IFS= read -r f; do
+  if [ -z "$CHILD_JSONL" ] && jq -e -s 'any(.[]; .type=="session_init" and .agent=="fleet-finisher")' "$f" >/dev/null 2>&1; then
     CHILD_JSONL="$f"
-    break
   fi
-done
+done < <(find "$TIER_RUN_DIR" -name '*.jsonl' -newer "$SCRATCH/mock.py" 2>/dev/null)
 if [ -z "$CHILD_JSONL" ]; then
   echo "::error::smoke-omp: tier probe produced no fleet-finisher child session record (mock log: $(tr '\n' ';' < "$MOCK_LOG" 2>/dev/null | cut -c1-200); parent tail: $(tail -c 200 "$SCRATCH/parent.out" | tr '\n' ' '))"
   fail=1
