@@ -257,8 +257,8 @@ base=${BASE_REF:-origin/main}
 # #1329 shorthand fix: :156-159 qualify `$base` into `$base_rev`, and both its
 # rev-parse (:161) and its rev-list (:253) read `$base_rev`, never the bare
 # shorthand. Its stake is smaller, though: being audit-only,
-# worktree-audit.sh only ever prints a
-# report, while this script GATES something consequential: the comment below
+# worktree-audit.sh only ever prints a report, while this
+# script GATES something consequential: the comment below
 # (see "the merge bot leans on this audit to authorize a REBASE") says a caller
 # uses this audit's exit status to decide whether to replay unpushed work. A
 # wrong BASE_REF here does not just make a report wrong, it can feed that
