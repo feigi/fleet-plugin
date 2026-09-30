@@ -324,6 +324,7 @@ git rev-parse --verify "$base_rev" >/dev/null || die "$base does not resolve"
 
 reaped=""
 kept=""
+warnings=""
 # Every worktree this run removed, by path, whether a branch accounted for it or
 # not. One meaning, so the key needs no qualifier: the sweep below reaps
 # worktrees no `reaped` branch names, and a payload that recorded only those
@@ -1384,7 +1385,14 @@ for b in $gone_branches; do
     # Under --apply only, like the delete it guards: in the dry run the
     # worktree the `$wt` lookup found is still registered, and would read as a
     # holder of the very branch it pairs with. The dry run therefore cannot
-    # predict this refusal, exactly as it could not predict `-D`'s (#391).
+    # predict THIS branch's own refusal — but not "exactly as it could not
+    # predict `-D`'s" (#391): `-D`'s blind spot here was only ever this
+    # branch's own paired worktree. A registry read that fails closed for an
+    # UNRELATED worktree elsewhere in the listing (reaping.md) keeps every
+    # `[gone]` branch in the pass, a repo-wide case `-D` had no equivalent of
+    # — it needed no registry answer at all and failed OPEN on one it could
+    # not read (#622). The dry run — printing `would reap` unconditionally
+    # here — cannot predict any of those keeps either.
     #
     # A window remains between this re-read and the delete, per the ruling on
     # #1330 (Q2, ADR 0018): a checkout landing in it breaks that worktree but
@@ -1430,10 +1438,13 @@ for b in $gone_branches; do
     # ref-only `update-ref` leaves behind. Measured, git 2.50.1: a later
     # `git branch --no-track <b>` inherits the stale upstream and reads
     # `[gone]` at once, so the next pass would select it. The branch is
-    # already deleted, so a failure here is reported on stderr rather than
-    # turned into a keep.
+    # already deleted, so a failure here is never a keep — but it is not
+    # stderr-only either: an unattended caller reading only stdout JSON must
+    # still learn the stale upstream was left, so it lands in `warnings` too.
     if ! err=$(git config --remove-section "branch.$b" 2>&1); then
-      printf '    note: %s deleted, but its branch config section was left: %s\n' "$b" "$(printf '%s' "$err" | tr '\n' ' ')" >&2
+      errflat=$(printf '%s' "$err" | tr '\n' ' ')
+      printf '    note: %s deleted, but its branch config section was left: %s\n' "$b" "$errflat" >&2
+      warnings="${warnings}{\"branch\":$(jfield "$b"),\"note\":$(jfield "branch config section was left: $errflat")},"
     fi
     echo "    REAPED $b" >&2
   else
@@ -1730,8 +1741,8 @@ fi
 # script before this printf ever ran, after the branches above were already
 # deleted. The caller lost the only record of what happened. Printing first
 # means that record survives regardless of what the prune does.
-printf '{"applied":%s,"reaped":[%s],"worktreesRemoved":[%s],"kept":[%s]}\n' \
-  "$apply" "${reaped%,}" "${removed%,}" "${kept%,}"
+printf '{"applied":%s,"reaped":[%s],"worktreesRemoved":[%s],"kept":[%s],"warnings":[%s]}\n' \
+  "$apply" "${reaped%,}" "${removed%,}" "${kept%,}" "${warnings%,}"
 
 # An `if`, not `[ ... ] && { ... }`: with the printf moved above it this guard
 # is the script's LAST command, and an AND-OR list whose test is false has

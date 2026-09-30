@@ -267,6 +267,27 @@ function cherryShim(t) {
 }
 
 /**
+ * A PATH dir whose `git worktree list` fails on exactly the Nth call this
+ * shim sees (`cmp` is the shell comparison against that count, e.g. `-eq 2`
+ * or `-ge 2`); every other call, and every other subcommand, execs the real
+ * git. Built once per counted `git worktree list` fault-injection site so the
+ * counter's own tmpdir is not duplicated at each call.
+ */
+function worktreeListFailsOnCall(t, cmp) {
+  const countDir = mkdtempSync(join(tmpdir(), "reap-count-"));
+  t.after(() => rmSync(countDir, { recursive: true, force: true }));
+  const counter = join(countDir, "n");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = worktree ] && [ "$2" = list ] && ` +
+      `{ n=$(( $(cat "${counter}" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "${counter}"; [ "$n" ${cmp} ]; }`,
+    ["fatal: worktree list exploded"],
+    128,
+  );
+  return { bin, counter };
+}
+
+/**
  * A `failOnlyShim` match selecting the `--ignored` probe and nothing else.
  *
  * Selected on CONTENT, never on argv POSITION. It was `[ "$5" = --ignored ]`,
@@ -1829,6 +1850,7 @@ test("an ordinary branch name is untouched — the escaping accepts what it shou
     reaped: [],
     worktreesRemoved: [],
     kept: [{ branch: "fix/119-json-sh-extract", reason: "unmerged commits" }],
+    warnings: [],
   });
 });
 
@@ -2104,6 +2126,32 @@ test("a branch delete failure carries git's own message, not just the label (#39
   assert.equal(branchExists(w, "feature/b-healthy"), false, "reached only by continuing past the failure");
 });
 
+test("a branch-config removal failure after a successful delete is not lost — it reaches warnings, not just stderr (#2219)", (t) => {
+  // `git update-ref -d` only touches the ref DB; the `[branch "<b>"]` config
+  // section it leaves behind is removed by a SEPARATE `git config
+  // --remove-section` call that can fail on its own (here, a stale
+  // `.git/config.lock`). The branch is already gone by then, so this is
+  // never a `keep` — but an unattended caller reading only stdout JSON must
+  // still learn the leftover section was left, or a later `git branch
+  // --no-track` of the same name silently inherits the dead upstream and
+  // reads `[gone]` at once (the leak the success-path test above pins).
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/leak", "merged work");
+  writeFileSync(join(w, ".git", "config.lock"), "");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/leak"], "the branch is genuinely gone — this is never a keep");
+  assert.deepEqual(json.kept, []);
+  assert.equal(json.warnings.length, 1);
+  assert.equal(json.warnings[0].branch, "feature/leak");
+  assert.match(json.warnings[0].note, /^branch config section was left: /);
+  assert.match(json.warnings[0].note, /could not lock config file/, "git's own diagnosis must reach the payload");
+  assert.match(stderr, /note: feature\/leak deleted, but its branch config section was left/);
+  assert.equal(branchExists(w, "feature/leak"), false);
+});
+
 test("a [gone] branch that gains a commit after its tip is read is kept, and the commit survives (#2219)", (t) => {
   // `git branch -D` deleted whatever the ref held when it ran, in a call
   // separate from the `git cherry` that authorized it, so a commit landing
@@ -2371,16 +2419,7 @@ test("a transient `git worktree list` failure keeps only the branch it hit — n
   mergedGoneBranch(w, "feature/b-second", "b work");
   mergedGoneBranch(w, "feature/c-third", "c work");
 
-  const countDir = mkdtempSync(join(tmpdir(), "reap-count-"));
-  t.after(() => rmSync(countDir, { recursive: true, force: true }));
-  const counter = join(countDir, "n");
-  const bin = failOnlyShim(
-    t,
-    `[ "$1" = worktree ] && [ "$2" = list ] && ` +
-      `{ n=$(( $(cat "${counter}" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "${counter}"; [ "$n" -eq 3 ]; }`,
-    ["fatal: worktree list exploded"],
-    128,
-  );
+  const { bin } = worktreeListFailsOnCall(t, "-eq 3");
 
   const { code, json } = runReap(w, ["--apply"], withShim(bin));
 
@@ -2407,16 +2446,7 @@ test("a `git worktree list` that fails at the holder check before the delete kee
   mergedGoneBranch(w, "feature/a-first", "a work");
   mergedGoneBranch(w, "feature/b-second", "b work");
 
-  const countDir = mkdtempSync(join(tmpdir(), "reap-count-"));
-  t.after(() => rmSync(countDir, { recursive: true, force: true }));
-  const counter = join(countDir, "n");
-  const bin = failOnlyShim(
-    t,
-    `[ "$1" = worktree ] && [ "$2" = list ] && ` +
-      `{ n=$(( $(cat "${counter}" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "${counter}"; [ "$n" -eq 2 ]; }`,
-    ["fatal: worktree list exploded"],
-    128,
-  );
+  const { bin } = worktreeListFailsOnCall(t, "-eq 2");
 
   const { code, json } = runReap(w, ["--apply"], withShim(bin));
 
@@ -2466,7 +2496,7 @@ test("an ordinary run's payload is byte-for-byte what it has always been (#391)"
   const { code, json, stderr } = runReap(w, ["--apply"]);
 
   assert.equal(code, 0);
-  assert.deepEqual(json, { applied: true, reaped: ["feature/merged"], worktreesRemoved: [wt], kept: [] });
+  assert.deepEqual(json, { applied: true, reaped: ["feature/merged"], worktreesRemoved: [wt], kept: [], warnings: [] });
   assert.doesNotMatch(stderr, /KEEP/);
   assert.doesNotMatch(stderr, /registration/, "a successful removal says nothing about registrations");
   assert.equal(existsSync(wt), false);
@@ -2500,6 +2530,7 @@ test("the dry run removes nothing, and still cannot predict a refusal (#391)", (
       reaped: ["feature/a-healthy", "feature/b-locked"],
       worktreesRemoved: [healthy, locked],
       kept: [],
+      warnings: [],
     },
     "the dry run still promises the reap it cannot know will be refused",
   );
@@ -2541,16 +2572,7 @@ test("a registry probe that itself fails is reported as unknown, never as 'clear
   // can be built. Putting the count in the match is what lets this reuse the
   // helper — the match runs exactly once per `git`, ahead of the shim's single
   // `exec`.
-  const countDir = mkdtempSync(join(tmpdir(), "reap-count-"));
-  t.after(() => rmSync(countDir, { recursive: true, force: true }));
-  const counter = join(countDir, "n");
-  const bin = failOnlyShim(
-    t,
-    `[ "$1" = worktree ] && [ "$2" = list ] && ` +
-      `{ n=$(( $(cat "${counter}" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "${counter}"; [ "$n" -ge 2 ]; }`,
-    ["fatal: worktree list exploded"],
-    128,
-  );
+  const { bin, counter } = worktreeListFailsOnCall(t, "-ge 2");
 
   const { code, json } = runReap(w, ["--apply"], withShim(bin));
 
@@ -3040,7 +3062,7 @@ test("an attached worktree is never touched by the branchless sweep (#381)", (t)
   const { code, json, stderr } = runReap(w, ["--apply"]);
 
   assert.equal(code, 0);
-  assert.deepEqual(json, { applied: true, reaped: [], worktreesRemoved: [], kept: [] });
+  assert.deepEqual(json, { applied: true, reaped: [], worktreesRemoved: [], kept: [], warnings: [] });
   assert.doesNotMatch(stderr, /KEEP/, "a worktree on a live branch is not a finding");
   assert.equal(existsSync(live), true);
   assert.equal(branchExists(w, "feature/live"), true);
@@ -3152,13 +3174,10 @@ test("a `+` inside a cherry diagnostic does not strand a detached worktree (#381
   // very commit this worktree's HEAD sits on, so the two argvs are identical.
   // The COUNT is what proves THIS sweep's own probe fired too: one line is the
   // branch sweep's alone. #759
-  assertShimFired(
-    bin,
-    "no `+` ever reached this sweep's cherry probe — the rest of this arm passes on any fixture",
-    /^cherry \S+ [0-9a-f]{40}$/m,
-  );
+  const CHERRY_SHA = /^cherry \S+ [0-9a-f]{40}$/;
+  assertShimFired(bin, "no `+` ever reached this sweep's cherry probe — the rest of this arm passes on any fixture");
   assert.equal(
-    readFileSync(join(bin, "git.fired"), "utf8").split("\n").filter((l) => /^cherry \S+ [0-9a-f]{40}$/.test(l)).length,
+    readFileSync(join(bin, "git.fired"), "utf8").split("\n").filter((l) => CHERRY_SHA.test(l)).length,
     2,
     "both sweeps' cherry probes fired — the branch sweep's and this one's",
   );
