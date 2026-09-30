@@ -127,6 +127,8 @@ function gate(
     instrExit = 0,
     cwd = null,
     env = {},
+    realInstruments = false,
+    instrPre = null,
   } = {},
 ) {
   const root = mktemp(t, "merge-gate-");
@@ -136,7 +138,17 @@ function gate(
   writeFileSync(script, readFileSync(SCRIPT));
   for (const [name, path] of SIBLING_MODULES) writeFileSync(join(scripts, name), readFileSync(path));
   writeFileSync(join(scripts, "ci-state.mjs"), CI_STATE_STUB);
-  writeFileSync(join(scripts, "instruments.sh"), INSTRUMENTS_STUB);
+  // The cross-workspace cases run the REAL instruments.sh beside the copied
+  // gate — the two-tree contract lives in that script, and a stub can only
+  // echo a verdict, never produce one. The stub stays the default: every
+  // other case here holds the instruments leg at mergeable and varies one
+  // input.
+  writeFileSync(
+    join(scripts, "instruments.sh"),
+    realInstruments
+      ? readFileSync(fileURLToPath(new URL("./instruments.sh", import.meta.url)))
+      : INSTRUMENTS_STUB,
+  );
   const log = join(root, "calls.log");
   writeFileSync(log, "");
   writeFileSync(join(root, "pr-view.json"), prView);
@@ -145,6 +157,10 @@ function gate(
   const repo = join(root, "repo");
   mkdirSync(repo);
   git(repo, "init", "-q");
+  // A hook for the real-instruments cases: run before the gate, with the
+  // fixture's workspace repo and scripts dir in hand — this is where a
+  // baseline gets pinned over a tree the workspace does not carry.
+  if (instrPre) instrPre({ repo, scripts, root });
 
   const res = spawnSync(process.execPath, [script, ...argv], {
     cwd: cwd ?? repo,
@@ -515,4 +531,83 @@ test("--out that cannot be written → 2, and no verdict on stdout the file does
   assert.equal(r.code, 2);
   assert.equal(r.stdout, "");
   assert.match(r.stderr, /cannot write --out/);
+});
+
+// --- #2284: the instruments root and the gh root are different checkouts ----
+//
+// The live incident: a fleet running in a consumer repo that does not track
+// `plugin/…`. Every leg but instruments was green; instruments.sh hashed the
+// workspace tree, found no tracked instrument, refused on the empty set, and
+// the gate exited 2 `instruments-unanswerable` forever — labelled PRs that
+// could never merge. The fix records the audited root inside the baseline at
+// pin time, so the SAME `--repo <workspace>` call the gate already makes
+// reads one tree's home and another tree's bytes. These cases run the REAL
+// instruments.sh beside the copied gate: the contract being proven is the two
+// scripts' handoff across that seam, and a stubbed child proves only the row
+// table — it can echo an exit code, never derive one from two trees.
+
+// A checkout that carries the instrument set — the plugin's own repo, or an
+// install's cache — separate from every gate fixture's workspace repo.
+function pluginTree(t) {
+  const dir = mktemp(t, "merge-gate-plugin-");
+  git(dir, "init", "-q", "-b", "main");
+  mkdirSync(join(dir, "plugin", "scripts"), { recursive: true });
+  writeFileSync(join(dir, "plugin", "scripts", "probe.sh"), "echo probe\n");
+  git(dir, "-c", "user.email=t@example.com", "-c", "user.name=t", "add", "-A");
+  git(dir, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "fixture");
+  return dir;
+}
+
+// The phase-0 pin a controller runs from the plugin-less workspace: the
+// baseline lands in the WORKSPACE's .fleet/, the digest covers the PLUGIN's
+// tree, and the second line records which tree that was.
+function pinAcrossSeam({ repo, scripts }, plugin) {
+  const r = spawnSync("sh", [join(scripts, "instruments.sh"), "--pin", "--audit", plugin], {
+    cwd: repo,
+    encoding: "utf8",
+    env: cleanEnv(),
+  });
+  assert.equal(r.status, 0, `fixture pin failed: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+test("a plugin-less workspace reaches a verdict: the gate audits the root the baseline records, gh legs on the workspace", (t) => {
+  const plugin = pluginTree(t);
+  let digest = null;
+  const r = gate(t, {
+    realInstruments: true,
+    instrPre: (ws) => {
+      digest = pinAcrossSeam(ws, plugin);
+    },
+  });
+  assertRow(r, 0, "mergeable", null);
+  assert.equal(
+    r.json.instruments,
+    digest,
+    "the JSON carries the digest of the plugin tree — the workspace has no instruments to digest",
+  );
+});
+
+test("tampering the recorded plugin tree still closes the gate across the seam: 2 instrument-set-changed", (t) => {
+  const plugin = pluginTree(t);
+  const r = gate(t, {
+    realInstruments: true,
+    instrPre: (ws) => {
+      pinAcrossSeam(ws, plugin);
+      writeFileSync(join(plugin, "plugin", "scripts", "probe.sh"), "echo TAMPERED\n");
+    },
+  });
+  assertRow(r, 2, "unknown", "instrument-set-changed");
+});
+
+test("a plugin-less workspace with NO pin of any kind keeps its exit 2 — the refusal that says WHICH flag to pass", (t) => {
+  // The incident shape stays a refusal, never a silent pass: with no
+  // baseline there is no recorded root, the instruments leg answers nothing,
+  // and the gate lands on instruments-unanswerable. What changed is WHERE a
+  // run discovers this: the SKILL's phase-0 pin refuses once and names the
+  // empty tree, instead of dispatching finishers and merge bots into this
+  // leg forever.
+  const r = gate(t, { realInstruments: true });
+  assertRow(r, 2, "unknown", "instruments-unanswerable");
+  assert.equal(r.json.instruments, null);
 });

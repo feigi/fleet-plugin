@@ -720,7 +720,11 @@ const REVIEWER_BLOCKS = [
       "a missing baseline instead of comparing anything. The `env -u GIT_DIR -u",
       "GIT_WORK_TREE` wrapper guards against an ambient `GIT_DIR` in your own shell",
       "pointing this check at the wrong tree — the script's own internal unset",
-      "cannot reach back and fix a path you already resolved wrong.",
+      "cannot reach back and fix a path you already resolved wrong. The baseline",
+      "itself names the tree to audit: a cross-workspace run pinned it once at",
+      "phase 0, and your `--repo` only locates that baseline, never the audited",
+      "tree — so an exit 2 naming a moved or unreadable audited tree is a halt",
+      "like every other, not a spelling for you to correct.",
     ],
   },
   {

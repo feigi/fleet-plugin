@@ -113,6 +113,9 @@ const CHILD = { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] };
 // exits 2 on a missing baseline instead of comparing anything. gitEnv():
 // an ambient GIT_DIR would otherwise answer `--git-common-dir` for a
 // different repository, and the gate would certify that tree's instruments.
+// `--repo` locates the baseline only; the baseline itself names the tree to
+// audit, so a workspace that does not track `plugin/…` still reaches a
+// verdict over the checkout its run pinned — no flag here repoints it.
 function readInstruments() {
   const common = spawnSync("git", ["rev-parse", "--git-common-dir"], { ...CHILD, env: gitEnv() });
   const root = common.error || common.status !== 0 ? null : workspaceDirFromGitCommonDir(common.stdout);

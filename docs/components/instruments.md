@@ -11,11 +11,21 @@ member can write to that same checkout.
 1. **Scope.** [`instruments.sh`](../../plugin/scripts/instruments.sh)
    hashes the content of every tracked file under the plugin's own
    component directories (`plugin/commands/ plugin/scripts/
-   plugin/skills/ plugin/agents/ plugin/workflows/`) in the working
+   plugin/skills/ plugin/agents/ plugin/workflows/`) in the AUDITED
+   tree: the checkout the baseline records (see 2), else the working
    directory's checkout (or `--repo <path>` for a named worktree).
-2. **Pin and compare.** `--pin` writes the digest to
-   `.fleet/instruments.sha`; a bare run compares the live digest
-   against it.
+2. **Pin and compare.** `--pin` writes the digest to the STATE HOME's
+   `.fleet/instruments.sha` (the cwd checkout, or `--repo`'s) beside a
+   `root=` line naming the audited tree; a bare run reads the baseline
+   first, audits the recorded tree — re-verifying it is still that
+   checkout and refusing (2) if it moved — then compares. On a
+   workspace that does not track `plugin/…`,
+   `--pin --audit <plugin-checkout>` names the tree once and every
+   later check, `merge-gate.mjs`'s leg included, follows it with no
+   further flag. The pointer is honoured only in that shape: a
+   recorded FOREIGN root in a home that tracks its own set, or an
+   `--audit` naming one, refuses — a writable `.fleet/` must not
+   become a way to move the gate onto a tree its writer controls.
 3. **Exit.** 0 = unchanged; 1 = the tree changed under the pin (finding
    named on stderr, with `git status` for the uncommitted half); 2 =
    the question couldn't be answered (no baseline, or an unreadable
