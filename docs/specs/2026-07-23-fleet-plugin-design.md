@@ -271,7 +271,7 @@ table. Every rule with a story keeps its one-line assertion and gains a pointer.
 | `ci-and-staleness.md` | run-binding, rerun-in-place, `skipped`≠`passed`, `--limit 1`, stale-green mechanics, why the behind-count is the only honest signal |
 | `isolation.md` | filesystem vs stack isolation, `agent-test` rationale, scratchpad namespacing, IDE diagnostics attributing by bare filename |
 | `member-lifecycle.md` | why the name carries the `Agent` tool, fresh context, killed vs idle vs truncated, grandchild notifications, authorizing the fan-out |
-| `reaping.md` | why not `/clean_gone`, `for-each-ref` over `branch\|grep`, the `git cherry` justification for `-D`, per-branch recompute |
+| `reaping.md` | why not `/clean_gone`, `for-each-ref` over `branch\|grep`, the `git cherry` justification for the branch delete, per-branch recompute |
 | `correction-tickets.md` | why a correction ticket ships a fresh wrong claim — inherited from the ticket, and minted in prose the ticket never asked for — and why the check belongs on the implementer as much as the reviewer |
 
 Stories live beside the rule they justify. There is no separate war-stories
