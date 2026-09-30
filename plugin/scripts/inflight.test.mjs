@@ -2805,7 +2805,18 @@ test("probe 2: a credential helper that never answers is bounded like any other 
   // raising it would only widen the window a helper can hide in. Warming, not a
   // shared helper, because credential.helper takes a path and the per-case temp
   // root is what keeps these fixtures isolated.
-  spawnSync(helper, ["--fleet-warm"], { timeout: 30_000 });
+  //
+  // "Warming, not a longer bound" is about the timed spawn's 30 s backstop
+  // below, not about this warm-up's own bound, which is 120 s. The warm-up
+  // runs the helper's `--fleet-warm` arm, which exits 0 above the marker write
+  // and the `sleep 300`, so no helper stall can hide in a longer warm-up
+  // bound: the only thing it can extend is the first-exec scan, and letting
+  // that finish is the whole point of warming. Killing it early is worse than
+  // useless — a warm-up killed mid-scan leaves the scan unpaid for the timed
+  // spawn, as PR #2224 measured (first execs 15-16 s under load ~25; one
+  // killed at 500 ms still took 14.5-15.0 s next time) (#2229). It stays
+  // finite only so a truly hung exec still ends the case.
+  spawnSync(helper, ["--fleet-warm"], { timeout: 120_000 });
 
   const started = Date.now();
   const r = spawnSync("sh", [SCRIPT, "8"],
@@ -2839,7 +2850,7 @@ test("the credential helper's warm-up survives — deleting it would let a cold 
   const src = stripComments(readFileSync(THIS_FILE, "utf8"));
   assert.match(
     src,
-    /^\s*chmodSync\(helper, 0o755\);\s*^\s*git\(repo, env, "config", "credential\.helper", helper\);\s*^\s*spawnSync\(helper, \["--fleet-warm"\], \{ timeout: 30_000 \}\);\s*^\s*const started = Date\.now\(\);[\s\S]*?^\s*assert\.equal\(existsSync\(helperRan\), true,/m,
+    /^\s*chmodSync\(helper, 0o755\);\s*^\s*git\(repo, env, "config", "credential\.helper", helper\);\s*^\s*spawnSync\(helper, \["--fleet-warm"\], \{ timeout: \d{3}_\d{3} \}\);\s*^\s*const started = Date\.now\(\);[\s\S]*?^\s*assert\.equal\(existsSync\(helperRan\), true,/m,
     "the helper must be warmed after it is written and configured and BEFORE the timed spawn, and the vacuity-guard assertion (assert.equal(existsSync(helperRan), true, ...)) must still exist below it — deleting either reopens #1606, and the suite stays green on an idle machine while it does",
   );
   // The arm's POSITION inside the helper body, not merely its presence. Below

@@ -197,7 +197,16 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
       // budget here is untouched. Warming, not a shared stub, because PATH
       // lookup from execFileSync needs a real file per fixture and the sentinel
       // paths are what keep the cases isolated.
-      spawnSync(ghPath, ["--fleet-warm"], { env: { PATH: bin }, timeout: 30_000 });
+      //
+      // The warm-up's own bound is not that budget, and it is 120 s rather than
+      // 30 s because a warm-up killed before the scan finishes leaves the scan
+      // unpaid: PR #2224 measured a first exec at 15-16 s under load ~25, and one
+      // killed at 500 ms still took 14.5-15.0 s on its next run — which here
+      // would be the bounded call below (#2229). The `--fleet-warm` arm exits 0
+      // before any other line, so no stub stall can hide in a longer bound; the
+      // only thing it can extend is the scan warming exists to pay. It stays
+      // finite only so a truly hung exec still ends the case.
+      spawnSync(ghPath, ["--fleet-warm"], { env: { PATH: bin }, timeout: 120_000 });
     }
     // No `stdio` override on purpose: the default pipe is what makes `r.stderr`
     // readable at all. spawnSync drains stdout and stderr concurrently, so the
@@ -277,7 +286,7 @@ test("run()'s gh-stub warm-up survives — deleting it would let a cold PATH sca
   const src = stripComments(readFileSync(THIS_FILE, "utf8"));
   assert.match(
     src,
-    /^\s*if \(gh\) \{\s*^\s*const ghPath = join\(bin, "gh"\);\s*^\s*writeFileSync\(ghPath, GH_STUB\);\s*^\s*chmodSync\(ghPath, 0o755\);\s*^\s*spawnSync\(ghPath, \["--fleet-warm"\], \{ env: \{ PATH: bin \}, timeout: 30_000 \}\);\s*^\s*\}/m,
+    /^\s*if \(gh\) \{\s*^\s*const ghPath = join\(bin, "gh"\);\s*^\s*writeFileSync\(ghPath, GH_STUB\);\s*^\s*chmodSync\(ghPath, 0o755\);\s*^\s*spawnSync\(ghPath, \["--fleet-warm"\], \{ env: \{ PATH: bin \}, timeout: \d{3}_\d{3} \}\);\s*^\s*\}/m,
     "run() must warm the freshly-written gh stub (--fleet-warm) before the timed spawn below it — deleting this line reopens #1199 under fleet load",
   );
 });
@@ -2949,7 +2958,14 @@ function gitFixture(t, gitBody) {
   // budgets of seconds. Left inside the bounded region it is indistinguishable
   // from the stall these cases exist to detect, and the verdicts below would
   // ride on machine load — #1099's finding, and its remedy.
-  for (const p of [gitPath, ghPath]) spawnSync(p, ["--fleet-warm"], { env: { PATH: bin }, timeout: 30_000 });
+  //
+  // 120 s, not 30 s: a warm-up killed mid-scan leaves the scan unpaid for the
+  // bounded call after it — PR #2224 measured 15-16 s first execs under load
+  // ~25, and a first exec killed at 500 ms still took 14.5-15.0 s next time
+  // (#2229). Both `--fleet-warm` arms exit 0 before any other line, so no stub
+  // stall can hide in the longer bound; it only lets the scan finish, and
+  // stays finite so a truly hung exec still ends the case.
+  for (const p of [gitPath, ghPath]) spawnSync(p, ["--fleet-warm"], { env: { PATH: bin }, timeout: 120_000 });
 
   const env = { ...process.env, PATH: bin };
   delete env.GIT_DIR;
