@@ -11,23 +11,26 @@ through an install, never a source path.
 1. **Call by name.** Every prose callsite names a script, never a path:
    `~/.fleet/bin/fleet-run <script> [args...]`.
 2. **Resolve.** [`fleet-run`](../../plugin/scripts/fleet-run) — the
-   **Resolver** — reads omp's own registry for the
-   `fleet-ctl@fleet-plugin` entry's `installPath`, and execs the named
-   script from there (`.mjs` via `node`, `.sh` via `sh`), passing argv
-   and cwd through untouched.
+   **Resolver** — takes the realpath of omp's extension package entry
+   `~/.omp/plugins/node_modules/fleet-ctl`, the one path every install
+   kind places, and execs the named script from its `scripts/`
+   (`.mjs` via `node`, `.sh` via `sh`), passing argv and cwd through
+   untouched.
 3. **Bootstrap once.** The Resolver ships *inside* the plugin, so it
    can't resolve itself the first time.
    [`fleet-bootstrap`](../../plugin/scripts/fleet-bootstrap) places one
    copy at `~/.fleet/bin/fleet-run` — the one artefact this repo owns
    outside the plugin, since nothing survives between an agent's tool
    calls. Idempotent and self-limiting: it only overwrites the placed
-   copy when its own directory resolves to a registered install path,
+   copy when its own directory resolves to omp's Install root,
    refusing on a stray checkout run unless `--from-checkout` explicitly
    takes ADR 0003's one-time exception.
 4. **Prove provenance.** A **provenance check** hashes the placed
    Resolver copy against the installed one and refuses on drift, naming
    the **Install root** — the directory omp actually loaded the plugin
-   from, never a path any script may write to.
+   from, never a path any script may write to — with its install
+   `kind` and a NOTICE when that root is a linked checkout, since then
+   every answer came from the dev tree.
 
 ## Opinionated choices
 
@@ -40,7 +43,10 @@ through an install, never a source path.
 - **Code comes from the Install root; data comes from the working
   directory** — one invariant applied to every script.
 - **omp is now the only harness this repo targets**
-  ([ADR 0014](../adr/0014-omp-is-the-only-harness.md)) — the qualified
-  marketplace id `fleet-ctl@fleet-plugin` makes an install unambiguous,
-  chosen after a bare-name collision was measured resolving silently
-  wrong ([ADR 0006](../adr/0006-rename-to-fleet-ctl.md)).
+  ([ADR 0014](../adr/0014-omp-is-the-only-harness.md)) and the install
+  is its **native extension package**
+  ([ADR 0021](../adr/0021-omp-native-install-route-replaces-the-marketplace.md))
+  — the Claude-marketplace route a bare-name collision shaped
+  ([ADR 0006](../adr/0006-rename-to-fleet-ctl.md)) discards each agent's
+  declared model tier by upstream design, so the plugin ships to npm
+  instead, where the tier lands as declared.

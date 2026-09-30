@@ -1,6 +1,6 @@
 # 0012 — The fleet loop is slot-based: no waves, reviews off the controller's turn, one merge pass per label
 
-**Status:** Accepted. Ruled 2026-09-24 on #1773, #1774, #1776, #1777, #1778 (map #1768), against the measurements below. Amends ADR 0003 (point 9), ADR 0005 (floor placement), ADR 0007 (guard 1 trigger), ADR 0008 (§1).
+**Status:** Accepted. Ruled 2026-09-24 on #1773, #1774, #1776, #1777, #1778 (map #1768), against the measurements below. Amends ADR 0003 (point 9), ADR 0005 (floor placement), ADR 0007 (guard 1 trigger), ADR 0008 (§1). (ADR 0021 later retires the `enabledProviders` precondition this ADR's Consequences kept.)
 
 ## Context
 

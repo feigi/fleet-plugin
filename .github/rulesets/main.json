@@ -53,10 +53,6 @@
             "integration_id": 15368
           },
           {
-            "context": "npm-name-gate",
-            "integration_id": 15368
-          },
-          {
             "context": "install-and-smoke",
             "integration_id": 15368
           }

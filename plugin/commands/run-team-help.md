@@ -12,6 +12,6 @@ there.
 
 To start the fleet, type this exactly — don't pick it from a list, type it:
 
-    /fleet-ctl:run-team [implementers] [reviewers]
+    /skill:run-team [implementers] [reviewers]
 
-Both arguments are optional, default 2 implementers and 6 reviewers, with no hard cap. Example: `/fleet-ctl:run-team 3 2`.
+Both arguments are optional, default 2 implementers and 6 reviewers, with no hard cap. Example: `/skill:run-team 3 2`.

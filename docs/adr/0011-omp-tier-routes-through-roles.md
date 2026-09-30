@@ -1,6 +1,6 @@
 # 0011 — On omp the tier alias routes through a role, never a vendor model
 
-**Status:** Accepted. Ruled 2026-09-24, against the measurements below. Amended by ADR 0014: the route lives in the definition's own `model:` alias; `task.agentModelOverrides` is retired as a precondition and `tier-roles.mjs --check` refuses a fleet entry there.
+**Status:** Accepted. Ruled 2026-09-24, against the measurements below. Amended by ADR 0014: the route lives in the definition's own `model:` alias; `task.agentModelOverrides` is retired as a precondition and `tier-roles.mjs --check` refuses a fleet entry there. (ADR 0021 later moved the CI omp pin this ADR's Consequences flagged as unmeasured — install-and-smoke now pins 18.4.4, where the alias route is measured to work.)
 
 ## Context
 

@@ -1,7 +1,9 @@
 # 0019 — The shipped surface is `plugin/`; it names nothing that does not ship, and tests live outside it
 
 **Status:** Accepted. Ruled 2026-09-29 on #1938 by the maintainer, from a
-grilling session; the work it orders is tracked as #2230.
+grilling session; the work it orders is tracked as #2230. Amended by ADR 0021
+only in mechanism: what ships `plugin/` is now the npm package's `files` list
+instead of a `git-subdir` marketplace entry — the rule stands untouched.
 
 ## Context
 

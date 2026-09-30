@@ -1,7 +1,7 @@
 # 0007 — `main`'s ruleset is the merge gate, ratified field by field
 
 **Status:** Accepted. Ruled 2026-09-18, on the measurements below. Supersedes the
-premises of #164, all three of which were stale when it was picked up. Amended by ADR 0012: guard 1's trigger reads "a single pass in which the last PR waits more than 3 h"; threshold unchanged.
+premises of #164, all three of which were stale when it was picked up. Amended by ADR 0012: guard 1's trigger reads "a single pass in which the last PR waits more than 3 h"; threshold unchanged. Amended by ADR 0021: the §table's required set loses `npm-name-gate` (deleted with the marketplace route) — `validate-claude` had already died with ADR 0014 — leaving `rebase-check`, `check`, `validate-release-label`, `smoke-omp`, `install-and-smoke`; every other rule, and the gate-is-the-ruleset premise, stands.
 
 ## Context
 

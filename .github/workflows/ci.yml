@@ -259,23 +259,23 @@ jobs:
           shopt -s failglob
           node --test plugin/scripts/*.test.mjs
 
-  # #1314's ruling, #1293's findings on what "loaded" can mean headlessly.
-  # Registers this checkout as a throwaway `file://` git-subdir catalog
-  # (never the tracked marketplace, never a directory source — ADR 0003) and
-  # asserts commands via substitution, agents and skills by presence in the
-  # installed copy. See .github/scripts/smoke-omp.sh's header for the full
-  # reasoning, including why agents are presence-only here (no API key in
-  # CI, and this job must never reach for a non-configured provider).
+  # #1314's ruling, #1293's findings on what "loaded" can mean headlessly,
+  # ADR 0021's native route: links this checkout with `omp plugin link` and
+  # asserts commands via substitution (bare names), agents and skills by
+  # presence, and one real dispatch of `fleet-finisher` whose child session
+  # record must show the declared @smol:low tier — the #1430 regression
+  # gate. The parent turn runs against a scripted local mock (no API key in
+  # CI, no outbound provider request anywhere in the job). See
+  # .github/scripts/smoke-omp.sh's header for the full reasoning.
   smoke-omp:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
         with:
-          # A real local branch, not detached HEAD — the dev catalog's
-          # `file://` git-subdir source clones by BRANCH NAME
-          # (`git clone --branch`), which cannot resolve a bare SHA or the
-          # literal `HEAD` a detached checkout leaves behind (measured).
+          # A real local branch, not detached HEAD — the fleet's own gh and
+          # git callsites assume a named ref (ADR 0003's checkout shape is
+          # unchanged by ADR 0021; the link route itself takes a path).
           ref: ${{ github.head_ref || github.ref_name }}
 
       - uses: oven-sh/setup-bun@v2
@@ -286,25 +286,11 @@ jobs:
       # (`@oh-my-pi/pi-coding-agent`), not `omp`/`omp.sh` — measured: neither
       # of those npm names is this package (#1319's own collision class).
       - name: Install pinned omp
-        run: bun install -g @oh-my-pi/pi-coding-agent@18.1.15
+        run: bun install -g @oh-my-pi/pi-coding-agent@18.4.4
 
       - name: smoke-omp
         run: .github/scripts/smoke-omp.sh
 
-  # #1347's second comment (2026-09-09): a permanent npm-availability gate,
-  # added to this ticket's scope by the maintainer after `fleetctl` — picked
-  # unverified — turned out to be a real npm package and
-  # `omp plugin install fleetctl` silently installed IT. See
-  # .github/scripts/npm-name-gate.sh for the full reasoning and its
-  # false-negative caveat (a 404 today is not a guarantee for tomorrow).
-  npm-name-gate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: npm-name-gate
-        run: .github/scripts/npm-name-gate.sh
 
   # #1294 hand-off §2, #1339, #1347 — REWORKED per PR #1365's review from an
   # earlier design that ran the whole test suite from an installed copy
@@ -337,7 +323,7 @@ jobs:
           bun-version: "1.4.0"
 
       - name: Install pinned omp
-        run: bun install -g @oh-my-pi/pi-coding-agent@18.1.15
+        run: bun install -g @oh-my-pi/pi-coding-agent@18.4.4
 
       - name: install-and-smoke
         run: .github/scripts/install-and-smoke.sh

@@ -2,7 +2,10 @@
 
 **Status:** Accepted. Ruled 2026-09-29 on #1411 by the maintainer, from a
 grilling session. Implemented in `plugin/scripts/member-write-guard.mjs`,
-loaded through `plugin/package.json#omp.extensions`.
+loaded through `plugin/package.json#omp.extensions`. (ADR 0021: the load
+itself is measured fail-open on both install routes — `omp plugin doctor`
+never imports an extension module — which is why §7's silent-failure finding
+stands under the native route too.)
 
 ## Context
 

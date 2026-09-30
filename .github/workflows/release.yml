@@ -7,6 +7,8 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # npm provenance attestation (ADR 0021: the package IS the install route)
+  id-token: write
 
 concurrency:
   group: release-${{ github.event.pull_request.base.ref }}
@@ -121,6 +123,11 @@ jobs:
             git push origin "$NEXT"
           fi
 
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+
       - name: Create GitHub release (idempotent)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -135,6 +142,30 @@ jobs:
             echo "Release $NEXT already exists — skipping."
           else
             gh release create "$NEXT" --target "$SHA" --generate-notes --title "$NEXT"
+          fi
+
+      - name: Publish to npm (idempotent)
+        # ADR 0021: consumers install `omp plugin install fleet-ctl`, the npm
+        # package published here. The version is the tag this job just
+        # minted — plugin/package.json keeps its placeholder and the tree is
+        # still never written: the version edit lives only in this runner's
+        # working copy, discarded uncommitted. "Already published" skips
+        # (re-runs after a partial failure are the norm); a THIRD party
+        # owning the name fails loud here (403), which is the collision gate
+        # the old pre-occupancy npm-name-gate could never be.
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          VER="${NEXT#v}"
+          PUBLISHED="$(npm view fleet-ctl@"$VER" version 2>/dev/null || true)"
+          if [ "$PUBLISHED" = "$VER" ]; then
+            echo "fleet-ctl@$VER already on npm — skipping."
+          else
+            cd plugin
+            npm --no-git-tag-version version "$VER"
+            npm publish --provenance --access public
           fi
 
       - name: Notify on failure

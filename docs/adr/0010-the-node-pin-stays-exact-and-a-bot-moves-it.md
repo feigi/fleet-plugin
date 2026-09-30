@@ -2,6 +2,14 @@
 
 **Status:** Accepted. Ruled 2026-09-23 on #354, against the measurements below. Amended by #1752: point 3's automerge stays the default for minor and patch bumps only — a major waits for a human — and each bump carries its own release label from `renovate.json`'s `packageRules`, so `release-label.yml`'s blind `patch` fallback stands down once the bot's own label is present rather than being guaranteed never to fire — the write order between Renovate's label and the fallback's read on the same `opened` event is runtime behaviour this repo does not record; `plugin/scripts/renovate-release-contract.test.mjs` pins the config/workflow contract itself, across the bot config and both release workflows. Amended by #1753: point 3's window is now the first three days of the month, all day, in a `timezone` stated as `UTC` rather than inherited, and a release must be three days past its date before the bot acts on it (`minimumReleaseAge`, with `internalChecksFilter: "strict"` stated so a too-young release opens no PR at all — Renovate's pending `renovate/stability-days` status is not a required check, so `platformAutomerge` could otherwise merge straight past it). Past its date, not its publish: the `node-version` datasource reads `nodejs.org/dist/index.json`'s day-only `date` as that day's UTC midnight, and across all 15 v26.x releases, measured 2026-09-26 against each one's GitHub release, that midnight sat 12 to 38.5 hours before publish — v26.8.0, dated 2026-08-25 and published the next afternoon, cleared the age gate 33.5 hours after it went out. A Node release dated the day the window opens therefore cannot be pinned inside that window, and an age equal to the window's width keeps the worst-case drift at about one month. The hour limit went too: Mend schedules a repo whose bot has not yet had a PR merged only daily, so a five-hour slot on one day could miss every run and silently cost the month. Monthly holds in effect, not absolutely — a release dated in the two days before the window opens ages in on its second or third day and, if the first bump has already merged, opens a second PR that month. The window bounds when the bot opens a PR, not when it merges; the comment above the `check` job's `setup-node` step in `ci.yml` says so. Points 1–8 otherwise stand.
 
+> Amended by ADR 0021: one Consequences sentence is superseded —
+> `marketplace.json`'s `ref: "main"` install tracking ends with the
+> marketplace route; installs now track the published npm version each
+> release mints. The pin's own mechanics (exact `.nvmrc`, bot-moved,
+> drift-checked) are untouched, and "the tree is never written" survives
+> unchanged: the release workflow publishes the version `release.yml`
+> already computes, it never edits a manifest.
+
 ## Context
 
 `.nvmrc` holds an exact version and is the single source of truth for the target

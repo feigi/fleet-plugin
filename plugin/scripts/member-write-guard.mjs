@@ -1,6 +1,7 @@
 // The fleet's member write boundary, enforced (#1411, ADR 0020). An omp
 // extension: `plugin/package.json#omp.extensions` names this file, and a
-// marketplace install loads it into every omp session on the box — the
+// native install (link/npm — ADR 0021; a marketplace cache install loads it
+// the same way) loads it into every omp session on the box — the
 // controller's, every member's, and every unrelated session's — rebinding the
 // factory below into each subagent session the `task` tool spawns.
 //

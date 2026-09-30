@@ -26,16 +26,15 @@ supported ([ADR 0009](adr/0009-supported-platforms-are-macos-linux-wsl.md)). All
 - GitHub Enterprise: works; `ci-state.mjs` derives `--hostname` from `git remote get-url origin`.
 
 ### 1.3 omp with fleet plugin — HARD
-Install: `omp plugin install fleet-ctl@fleet-plugin` per [README → Installation](../README.md#installation).
+Install: `omp plugin install fleet-ctl` per [README → Installation](../README.md#installation).
 Check: `~/.fleet/bin/fleet-run --root` prints the plugin root or fails naming why.
 
 If that command answers "command not found" instead of one of the
 reasons above, the Resolver copy at `~/.fleet/bin/fleet-run` was never
 placed — that is not a side effect of `omp plugin install`.
 
-Settings ([ADR 0011](adr/0011-omp-tier-routes-through-roles.md), [ADR 0014](adr/0014-omp-is-the-only-harness.md)):
-- `enabledProviders`: contains `"claude-plugins"`
-- `modelRoles.slow`, `.task`, `.smol`: set to real models
+Settings ([ADR 0011](adr/0011-omp-tier-routes-through-roles.md), [ADR 0014](adr/0014-omp-is-the-only-harness.md), [ADR 0021](adr/0021-omp-native-install-route-replaces-the-marketplace.md)):
+- `modelRoles.slow`, `.task`, `.smol`: set to real models — the only install-time setting the fleet needs
 
 Check: `~/.fleet/bin/fleet-run tier-roles.mjs --check`
 

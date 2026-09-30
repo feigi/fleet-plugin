@@ -1,17 +1,23 @@
 #!/usr/bin/env node
-// The Resolver (#1335, ADR 0003, ADR 0014, CONTEXT.md § Install "Resolver").
-// The single door between prose and an installed script: a prose callsite
-// names a SCRIPT, never a path, and this reads omp's own registry to find
-// where that script actually lives right now.
+// The Resolver (#1335, ADR 0003, ADR 0014, ADR 0021, CONTEXT.md § Install
+// "Resolver"). The single door between prose and an installed script: a prose
+// callsite names a SCRIPT, never a path, and this reads omp's own extension
+// package layout to find where that script actually lives right now.
+//
+// RESOLUTION POINT (ADR 0021): `~/.omp/plugins/node_modules/fleet-ctl`. Every
+// omp install kind — marketplace, `omp plugin link`, npm — places an entry
+// there (a symlink for marketplace/link, a real directory for npm), and it is
+// the only path common to all three. Its realpath IS the Install root. The
+// marketplace-only `installed_plugins.json` registry is no longer read, so the
+// old multi-entry / scope-ambiguity selection it needed is gone: a
+// node_modules package dir is exactly one path.
 //
 // LANGUAGE CHOICE: node, not POSIX sh. Every other fleet script written in
 // sh sources `json.sh` for JSON escaping because sh has no JSON support of
-// its own; the registry this file reads IS JSON (`installed_plugins.json`),
-// and `jq` is not a guaranteed CI dependency — node is (the whole test suite
-// is `node --test`). Parsing a small JSON file by hand in POSIX sh would
-// need either a `jq` dependency this repo cannot assume or a hand-rolled
-// parser riskier than the file it replaces. node's `JSON.parse` is exact and
-// already required.
+// its own; the resolution this file does is a symlink realpath plus (for
+// callers that want the version) one small JSON, and `jq` is not a guaranteed
+// CI dependency — node is (the whole test suite is `node --test`). node's
+// `realpathSync` is exact and already required.
 //
 // SINGLE FILE, ON PURPOSE. `fleet-bootstrap` places a copy of exactly this
 // file at `~/.fleet/bin/fleet-run`, OUTSIDE the plugin (CONTEXT.md's
@@ -20,9 +26,9 @@
 // in this directory are unreachable from that path. So this file requires
 // nothing from the rest of the plugin (CommonJS, core `node:*` modules
 // only) even though `scripts/fleet-provenance` duplicates a couple of lines
-// of its registry-reading logic rather than sharing a module with it, for
-// the same reason: a module this file `require()`s would need to travel
-// with it, and nothing else does.
+// of its resolution logic rather than sharing a module with it, for the same
+// reason: a module this file `require()`s would need to travel with it, and
+// nothing else does.
 "use strict";
 
 const fs = require("node:fs");
@@ -31,73 +37,36 @@ const os = require("node:os");
 const { spawnSync } = require("node:child_process");
 
 const NAME = "fleet-run";
-const PLUGIN_KEY = "fleet-ctl@fleet-plugin"; // ADR 0006 — the registry key since #1348.
+const PLUGIN_KEY = "fleet-ctl"; // ADR 0006 name; ADR 0021 — the node_modules package dir, no longer a qualified registry key.
 
 function die(message) {
   process.stderr.write(`${NAME}: ${message}\n`);
   process.exit(2);
 }
 
-// Reads omp's registry for PLUGIN_KEY's installPath. Never throws — every
-// failure mode (file missing, bad JSON, key absent, no installPath,
-// ambiguous entry) is an ordinary "not resolvable" result, reported in
-// `reason` so a resolver failure can name the exact path it looked at.
-function readRegistry(registryPath) {
-  let raw;
-  try {
-    raw = fs.readFileSync(registryPath, "utf8");
-  } catch (e) {
-    return { present: false, registryPath, reason: `no registry at ${registryPath} (${e.code || e.message})` };
-  }
-  let json;
-  try {
-    json = JSON.parse(raw);
-  } catch (e) {
-    return { present: false, registryPath, reason: `${registryPath} is not valid JSON (${e.message})` };
-  }
-  const entries = json && json.plugins && json.plugins[PLUGIN_KEY];
-  if (!Array.isArray(entries) || entries.length === 0) {
-    return { present: false, registryPath, reason: `${registryPath} has no "${PLUGIN_KEY}" entry` };
-  }
-  const selected = selectEntry(entries);
-  if (selected.error) {
-    return { present: false, registryPath, reason: `${registryPath}'s "${PLUGIN_KEY}": ${selected.error}` };
-  }
-  const installPath = selected.entry.installPath;
-  if (typeof installPath !== "string" || installPath === "") {
-    return { present: false, registryPath, reason: `${registryPath}'s "${PLUGIN_KEY}" entry has no installPath` };
-  }
-  return { present: true, registryPath, installPath };
-}
-
-// One registry key can carry MULTIPLE entries — a `--scope=project` install
-// adds an entry to the SAME user-global registry this reads, alongside any
-// `--scope=user` entry, and `entries[0]` picks whichever happened to install
-// first with no regard for which is live from the caller's own cwd. A
-// single entry is never ambiguous regardless of its scope. With more than
-// one, prefer the single `scope: "user"` entry — the one that answers
-// regardless of cwd, which is what a Resolver with no cwd scoping of its own
-// needs — and refuse, naming every candidate, if zero or more than one entry
-// qualifies.
-function selectEntry(entries) {
-  if (entries.length === 1) return { entry: entries[0] };
-  const userScoped = entries.filter((e) => e && e.scope === "user");
-  if (userScoped.length === 1) return { entry: userScoped[0] };
-  const describe = (e, i) => `#${i} scope=${(e && e.scope) || "(none)"} installPath=${e && e.installPath}`
-    + (e && e.projectPath ? ` projectPath=${e.projectPath}` : "");
-  return {
-    error: `${entries.length} entries and no single scope:"user" one to prefer: ${entries.map(describe).join("; ")}`,
-  };
-}
-
-// The resolved { registryPath, installPath }, or a die() naming the
-// registry this looked at.
+// The Install root: realpath of `~/.omp/plugins/node_modules/fleet-ctl`. Never
+// throws — every failure mode (no entry, dangling symlink) is a die() naming
+// the exact path it looked at, so a resolver failure is diagnosable from its
+// own message.
 function resolveInstall() {
-  const reg = readRegistry(path.join(os.homedir(), ".omp", "plugins", "installed_plugins.json"));
-  if (!reg.present) {
-    die(`no registry carries "${PLUGIN_KEY}" — ${reg.reason}`);
+  const packagePath = path.join(os.homedir(), ".omp", "plugins", "node_modules", PLUGIN_KEY);
+  let isLink = false;
+  try {
+    isLink = fs.lstatSync(packagePath).isSymbolicLink();
+  } catch (e) {
+    die(`no omp plugin "${PLUGIN_KEY}" at ${packagePath} (${e.code || e.message})`);
   }
-  return reg;
+  let installPath;
+  try {
+    installPath = fs.realpathSync(packagePath);
+  } catch (e) {
+    die(
+      isLink
+        ? `omp plugin "${PLUGIN_KEY}" link ${packagePath} is dangling (${e.code || e.message})`
+        : `cannot resolve omp plugin "${PLUGIN_KEY}" at ${packagePath} (${e.code || e.message})`,
+    );
+  }
+  return { packagePath, installPath };
 }
 
 function scriptPathFor(installPath, script) {
@@ -139,7 +108,7 @@ function main() {
   const scriptPath = scriptPathFor(r.installPath, script);
 
   if (!fs.existsSync(scriptPath)) {
-    die(`script not found: ${scriptPath} (resolved via registry ${r.registryPath})`);
+    die(`script not found: ${scriptPath} (resolved via ${r.packagePath})`);
   }
 
   // `.mjs` scripts run via node, `.sh` via sh, anything else execs directly
