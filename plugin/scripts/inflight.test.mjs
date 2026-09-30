@@ -2846,12 +2846,37 @@ test("probe 2: a credential helper that never answers is bounded like any other 
 // So the SHAPE is pinned as well, read back through stripComments() so a
 // comment alone cannot satisfy it, and anchored at line starts under `/m` so an
 // unrelated line inserted between the steps cannot still match.
+//
+// Anchored per STATEMENT, not per line (#2265): inside the warm-up call and
+// the writeFileSync() call every token boundary is `\s*`, and a trailing comma
+// is allowed wherever JS allows one, so wrapping either call across lines — a
+// behavior-neutral reformat a formatter makes on its own — cannot red this pin
+// the way deleting the call does. Only whitespace is free: every token, the
+// timeout's floor included, is still literal and in order.
 test("the credential helper's warm-up survives — deleting it would let a cold exec scan empty the case again (structural pin, #1606)", () => {
   const src = stripComments(readFileSync(THIS_FILE, "utf8"));
+  const warmUp = /^\s*chmodSync\(helper, 0o755\);\s*^\s*git\(repo, env, "config", "credential\.helper", helper\);\s*^\s*spawnSync\(\s*helper,\s*\[\s*"--fleet-warm",?\s*\],\s*\{\s*timeout:\s*\d{3}_\d{3},?\s*\},?\s*\);\s*^\s*const started = Date\.now\(\);[\s\S]*?^\s*assert\.equal\(existsSync\(helperRan\), true,/m;
   assert.match(
     src,
-    /^\s*chmodSync\(helper, 0o755\);\s*^\s*git\(repo, env, "config", "credential\.helper", helper\);\s*^\s*spawnSync\(helper, \["--fleet-warm"\], \{ timeout: \d{3}_\d{3} \}\);\s*^\s*const started = Date\.now\(\);[\s\S]*?^\s*assert\.equal\(existsSync\(helperRan\), true,/m,
+    warmUp,
     "the helper must be warmed after it is written and configured and BEFORE the timed spawn, and the vacuity-guard assertion (assert.equal(existsSync(helperRan), true, ...)) must still exist below it — deleting either reopens #1606, and the suite stays green on an idle machine while it does",
+  );
+  // The input the pin must ACCEPT: the same four statements with the warm-up
+  // wrapped the way a formatter wraps it. Quoted lines joined, never a template
+  // literal — a template's lines would sit at line starts in THIS file's own
+  // source and satisfy the pin above with the real warm-up deleted.
+  assert.match(
+    [
+      "  chmodSync(helper, 0o755);",
+      '  git(repo, env, "config", "credential.helper", helper);',
+      '  spawnSync(helper, ["--fleet-warm"], {',
+      "    timeout: 120_000,",
+      "  });",
+      "  const started = Date.now();",
+      "  assert.equal(existsSync(helperRan), true,",
+    ].join("\n"),
+    warmUp,
+    "wrapping the warm-up call across lines changes neither its order nor its presence, so the pin must not read it as deleted (#2265)",
   );
   // The arm's POSITION inside the helper body, not merely its presence. Below
   // the marker write, the warm-up call itself would create `helper-ran` before
@@ -2862,7 +2887,7 @@ test("the credential helper's warm-up survives — deleting it would let a cold 
   // learned once already.
   assert.match(
     src,
-    /^\s*writeFileSync\(helper,\s*^\s*`#!\/bin\/sh\\ncase " \$\* " in \*" --fleet-warm "\*\) exit 0 ;; esac\\n: > '\$\{helperRan\}'\\nsleep 300\\n`\);/m,
+    /^\s*writeFileSync\(\s*helper,\s*`#!\/bin\/sh\\ncase " \$\* " in \*" --fleet-warm "\*\) exit 0 ;; esac\\n: > '\$\{helperRan\}'\\nsleep 300\\n`,?\s*\);/m,
     "the --fleet-warm arm must sit ABOVE the marker write, or warming writes the marker itself and the vacuity guard above goes blind — anchored at line starts under `/m` so a coincidental match elsewhere in the file cannot satisfy it",
   );
 });
