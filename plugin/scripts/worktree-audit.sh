@@ -107,12 +107,13 @@ wt_lib="$(dirname "$0")/worktree.sh"
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=worktree.sh
 . "$wt_lib" || die "$wt_lib failed to load"
-# One unknown state, one place: null counts, readable:false, one reason. Four
-# branches below reach it and differ in nothing but that reason, so a fifth
-# added later cannot half-set the quadruple and emit a record whose counts
+# One unknown state, one place: null counts, readable:false, one reason. Seven
+# call sites below reach this function — #2220's admin-dir-unreadable arm
+# among them — and differ in nothing but that reason, so one more added
+# later cannot half-set the quadruple and emit a record whose counts
 # contradict its own `readable` field. The MISSING branch stays spelled out —
 # it is the one state with non-null counts, and looking different is the point.
-unknown() { readable=false; ahead=null; dirty=null; files=""; printf '    UNREADABLE: %s (%s)\n' "$wt" "$1" >&2; }
+unknown() { readable=false; ahead=null; dirty=null; files=""; note=; printf '    UNREADABLE: %s (%s)\n' "$wt" "$1" >&2; }
 
 # A `detached` record may still be a worktree's own branch, held: a stopped
 # rebase or bisect detaches HEAD and moves it — measured, git 2.50.1, a bisect
@@ -138,15 +139,39 @@ op_held() {
   wt_op_state "$wt" || return 1
   for h in $wt_op_held; do
     sha=$(git -C "$wt" rev-parse --verify "${h#refs/heads/}^{commit}" 2>/dev/null) || sha=
-    case $sha in "${h#refs/heads/}") continue ;; esac
+    # A bisect-from-detached-HEAD write drops here because `$h` never names a
+    # real ref (#2218: it is HEAD's own SHA reread as `refs/heads/<sha>`). The
+    # sha=name match alone cannot tell that case apart from a real branch that
+    # happens to be NAMED as the 40-hex string it also resolves to — so the
+    # second, structural check is what actually distinguishes them: a real
+    # `refs/heads/<name>` ref resolves here, a phantom one does not.
+    if [ "$sha" = "${h#refs/heads/}" ] && ! git -C "$wt" rev-parse --verify --quiet "$h" >/dev/null 2>&1; then
+      continue
+    fi
     case " $held " in *" $h "*) ;; *) held="${held:+$held }$h" ;; esac
   done
   [ -n "$held" ] || return 0
   short=
   for h in $held; do short="${short:+$short }${h#refs/heads/}"; done
-  case $wt_op in
-    BISECT_LOG) note="  (mid-bisect: HEAD detached, ahead counts HEAD and the held branch)" ;;
-    *) note="  (mid-rebase: HEAD detached, ahead counts HEAD and the held branch)" ;;
+  # `$wt_op` names only the LAST admin marker `wt_op_state` found (#2218's own
+  # last-wins scan), so it cannot tell a worktree with ONE operation from one
+  # with a rebase stopped and a bisect then started on top of it — both leave
+  # BISECT_LOG present and `wt_op=BISECT_LOG`, even though the branch actually
+  # kept in `$held` came from the rebase. `$wt_op_held` (raw, pre-filter) is
+  # the signal that does not collapse: more than one entry means more than
+  # one admin source contributed, which `wt_op` alone cannot say. Measured,
+  # git 2.50.1: a stopped rebase with a bisect started on the resulting
+  # detached HEAD leaves rebase-merge/head-name AND BISECT_START both
+  # present, `wt_op_held` two entries wide, `wt_op` still `BISECT_LOG`.
+  case $wt_op_held in
+    *" "*) note="  (rebase and bisect both in progress: HEAD detached, ahead counts HEAD and the held branch)" ;;
+    *)
+      case $wt_op in
+        BISECT_LOG) op=bisect ;;
+        *) op=rebase ;;
+      esac
+      note="  (mid-$op: HEAD detached, ahead counts HEAD and the held branch)"
+      ;;
   esac
 }
 
