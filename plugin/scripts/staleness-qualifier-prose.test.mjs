@@ -48,7 +48,10 @@
 // Reflow-safe by construction, against WHITESPACE reflow: `phrase()` joins
 // the words on `\s+`, so SKILL.md (hard-wrapped ~80 cols) and
 // review-and-fix.md (one long line per numbered step) take the identical
-// regex, and a rewrap of either is a no-op. The slice anchors go through
+// regex, and a rewrap of either is a no-op for the clauses — unless a wrap
+// lands a continuation at column 0 in list-marker shape (`3. `), which
+// CommonMark renders as a new list item: a structure change, not a rewrap
+// (see the DIGIT-FREE note under THE FOURTH PIN). The slice anchors go through
 // `phrase()` for that same reason — a literal `indexOf` anchor would break on
 // a rewrap the clause itself survives, turning a reflow into a red — but that
 // protection stops exactly where the pinned clauses' does too: see THE REFLOW
@@ -143,21 +146,23 @@
 //
 // Both are also DIGIT-FREE, and that is load-bearing rather than incidental —
 // it is the one thing measured here that the sibling's note does not already
-// cover. This bound reads `\n\d+\.\s` as "the next ordered-list item", which is
-// true of the document as authored and FALSE of a reflowed copy: a wrap point
-// landing before any `<digit>.` puts that digit at column 0, where the bound
-// cannot tell a wrapped continuation from a new list item and cuts the scope
-// there. Step 4's prose is full of them — it says "repeat from 3", "go to 6",
-// "straight to 6". Measured, the first anchors tried here were `fix a
-// **genuine** failure and repeat from 3` and `Stop watching and go to 6`: a
-// plain WHITESPACE-only rewrap at 80 cols (`break_on_hyphens=False`, the wrap
-// this file's header promises is a no-op) pushed `3.` to column 0, the bound
-// cut immediately after the start anchor, and the pin reddened with `slice end
-// anchor "…" moved` — a false red, wearing the exact misattributing message
-// THE REFLOW CEILING above warns a reader about. The anchors below span the
-// stretch of step 4 that contains no digit at all, so no wrap point inside this
-// slice can manufacture a list marker. Verified green under whitespace-only
-// rewraps at 60/72/80/100/140/200/400 cols.
+// cover. This bound reads `\n\d+\.\s` as "the next ordered-list item", and
+// under CommonMark that reading is exact: a column-0 `N.` inside an open
+// ordered list is a sibling item, whatever the wrap meant it as. So a wrap
+// point landing before any `<digit>.` does not fool the bound, it changes the
+// document — step 4 renders as two items — and a pin whose slice spans that
+// point reds correctly. Step 4's prose is full of such digits — it
+// says "repeat from 3", "go to 6", "straight to 6". Measured, the first anchors
+// tried here were `fix a **genuine** failure and repeat from 3` and `Stop
+// watching and go to 6`: a WHITESPACE-only rewrap at 80 cols (`textwrap.fill`
+// per source line, `break_on_hyphens=False`) pushed `3.` to column 0 between
+// them and split step 4 there. `betweenPhrases` reports that as the end anchor
+// lying past the bound, naming the line the bound first matched — not as
+// `slice end anchor "…" moved`, which would send a reader after an anchor
+// nobody touched. The anchors below span the stretch of step 4 that contains
+// no digit at all, so such a split ELSEWHERE in step 4 never reaches this pin,
+// whose clause it leaves intact, while one INSIDE this slice still reds.
+// Verified green under whitespace-only rewraps at 60/72/80/100/140/200/400 cols.
 //
 // THE REFLOW CEILING above reaches this pin too, through its CLAUSE half only:
 // QUALIFIER carries three hyphenated tokens (`rebase-check`, `non-zero`,

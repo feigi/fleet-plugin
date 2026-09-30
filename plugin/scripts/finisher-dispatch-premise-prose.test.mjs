@@ -288,21 +288,25 @@ test("the slice bound throws rather than widening when an anchor moves", () => {
   // the rest of the document sees exactly 1 hit and lets it through,
   // silently binding the slice to the decoy and widening it into step 5.
   // Bounding the search to step 4's own item excludes that decoy from the
-  // count entirely, so this still throws "moved" rather than silently
-  // widening. Both mutations go through `cut()`, never a literal
-  // `.replace()`: a literal target here breaks the same way the header
-  // already warns about the moment either step 4 or step 5 reflows.
+  // count entirely, so this still throws rather than silently widening — with
+  // the past-the-bound message, since the decoy is a copy of the end anchor
+  // sitting beyond the bound. Both mutations go through `cut()`, never a
+  // literal `.replace()`: a literal target here breaks the same way the
+  // header already warns for step 4, and the same mechanism applies here to
+  // step 5.
+  const decoyDoc = cut(
+    cut(live, "so push, then report to the controller a", "so push and then report a", "moved end anchor"),
+    "File each deferred finding",
+    "so push, then report to the controller a decoy on step 5's own line. File each deferred finding",
+    "later-line decoy",
+  );
+  const decoyAt = decoyDoc.indexOf("so push, then report to the controller a decoy");
+  const decoyLineNo = decoyDoc.slice(0, decoyDoc.lastIndexOf("\n", decoyAt) + 1).split("\n").length;
   assert.throws(
-    () =>
-      dispatchPremise(
-        cut(
-          cut(live, "so push, then report to the controller a", "so push and then report a", "moved end anchor"),
-          "File each deferred finding",
-          "so push, then report to the controller a decoy on step 5's own line. File each deferred finding",
-          "later-line decoy",
-        ),
-      ),
-    /slice end anchor .* moved — re-anchor this test, never widen it/,
+    () => dispatchPremise(decoyDoc),
+    new RegExp(
+      `slice end anchor .* lies past the end bound, which first matched at line ${decoyLineNo} \\("5\\. so push, then report to the controller a decoy`,
+    ),
     "a reworded end anchor with a same-text decoy on a LATER line silently widened the slice instead of throwing",
   );
 });
