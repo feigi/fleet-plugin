@@ -154,7 +154,7 @@ silently dropped. This is why `review-core.mjs` is a hand-synced copy pinned by
 | `.fleet/heartbeat.json` | `fleet-heartbeat.mjs` (`elapsed`,`beat`) + `fleet-tick.mjs` (`quiet`,`digest`) | one writer per key, no lock, patch-merge; absent file = fresh run; stale = `interval × 2` | tracker#57–59, prose#140 |
 | `.fleet/shortlist.json` | `shortlist.mjs` | `{scanned, shortlist:[{n,t}]}`, temp+rename | tracker#56 |
 | `.fleet/board.json` / `board.html` | `board.mjs serve` | atomic write; page fetches relative `/board.json` every 15 s — `file://` never works; port `8123 + fnv1a(workspace) % 512` | harness#92–100 |
-| `.fleet/instruments.sha` | `instruments.sh` | 64-hex digest of tracked file *contents* (modes excluded); lives in the main checkout, never a worktree | shell#91–92, tracker#62 |
+| `.fleet/instruments.sha` | `instruments.sh` | line 1: 64-hex digest of tracked file *contents* (modes excluded); line 2 (since the cross-workspace pin): `root=<toplevel>` of the audited tree, which may be a different checkout than the state home; state lives in the main checkout, never a worktree | shell#91–92, tracker#62 |
 | `.worktrees/<issue>-<slug>/` | `claim-ticket.sh` | fresh from `origin/main` with `--no-track`; `agent-test` runner generated inside; ports `postgres=16000+issue`, `ollama=22000+issue` | shell#43, shell#86 |
 | `<scratch>/impl-<N>/`, `review-<pr>.json`, `pr<N>/merge-bot-<n>/ci.json` | members | two-level namespace; root writes collide | prose#143, tracker#61 |
 | `docs/metrics/*.tsv`, `chore/run-artifacts-<date>[a-z]` branches | scrapers | regenerated wholesale; date collision gets a letter suffix | prose#148–149 |

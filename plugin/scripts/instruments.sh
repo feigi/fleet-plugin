@@ -32,8 +32,9 @@
 # WHAT IS IN THE SET: every tracked file under the plugin's own component
 # directories — `plugin/commands/ plugin/scripts/ plugin/skills/
 # plugin/agents/ plugin/workflows/` — contents read from the AUDITED
-# repository: the working directory's checkout, or the tree named by
-# `--repo` (see below). Not a written list of instrument names — the
+# repository: the tree the baseline names (its recorded root, else the working
+# directory's checkout), or for a pin the tree named by `--audit` (see below).
+# Not a written list of instrument names — the
 # ticket named six and the class is larger (the supply scan, the liveness
 # probe, the shared `arg.mjs`/`json.sh`/`net.sh` libraries that a single edit
 # mutates every node instrument through, and the runbooks, which the
@@ -131,11 +132,24 @@ die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
 pin=false
 repo=""
+# The tree `--pin` certifies when it is NOT the state home's own checkout —
+# the cross-workspace case: a fleet running in a repo that does not track
+# `plugin/…` pins the marketplace/clone checkout that does, and the check
+# later follows THAT pointer, recorded beside the digest. Pin-only: a check
+# that let its caller repoint the tree would turn the baseline into a
+# suggestion.
+audit=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --pin) pin=true; shift ;;
+    --audit)
+      [ $# -ge 2 ] || die "usage: instruments.sh [--pin] [--repo <path>] [--audit <path>]"
+      audit=$2
+      [ -n "$audit" ] || die "--audit requires a non-empty path"
+      shift 2
+      ;;
     --repo)
-      [ $# -ge 2 ] || die "usage: instruments.sh [--pin] [--repo <path>]"
+      [ $# -ge 2 ] || die "usage: instruments.sh [--pin] [--repo <path>] [--audit <path>]"
       repo=$2
       # An empty value falls through the `[ -n "$repo" ]` branch below and
       # silently re-derives from cwd — measured (#1350 review): `--repo ""`
@@ -145,22 +159,37 @@ while [ $# -gt 0 ]; do
       [ -n "$repo" ] || die "--repo requires a non-empty path"
       shift 2
       ;;
-    *) die "usage: instruments.sh [--pin] [--repo <path>]" ;;
+    *) die "usage: instruments.sh [--pin] [--repo <path>] [--audit <path>]" ;;
   esac
 done
+[ -n "$audit" ] && [ "$pin" != true ] \
+  && die "--audit is only accepted with --pin — a check audits the tree its baseline names, never one its caller names"
 
-# The repository under audit is the WORKING DIRECTORY's checkout, never the
+# Two trees, named apart:
+#
+# `root` — the STATE HOME — is the WORKING DIRECTORY's checkout, never the
 # checkout this script happens to ship from. Under the install-only dev loop
 # (ADR 0003) this file runs out of a plugin cache — on a real install, under
 # `~/.omp/plugins/cache/...` — and the OLD own-location contract (`git -C
-# "$(dirname "$0")" …`) resolved the audited tree to whatever git checkout
-# happens to CONTAIN that cache path. Measured (#1337), pre-cutover: on a
-# real box that was the operator's unrelated personal dotfiles checkout, and
-# `--pin` run that way writes `.fleet/instruments.sha` into it. `--repo <path>` is the explicit
-# override for the one legitimate case that needs a tree other than cwd's:
-# auditing a named worktree from elsewhere. Resolution happens before
+# "$(dirname "$0")" …`) resolved it to whatever git checkout happens to
+# CONTAIN that cache path. Measured (#1337), pre-cutover: on a real box that
+# was the operator's unrelated personal dotfiles checkout, and `--pin` run
+# that way writes `.fleet/instruments.sha` into it. `--repo <path>` is the
+# explicit override for the one legitimate case that needs a home other than
+# cwd's: auditing a named worktree from elsewhere. Resolution happens before
 # anything is read or written, so a cwd outside any checkout refuses here,
-# not partway through.
+# not partway through. The baseline lives here, so every reader that knows
+# only the run's workspace finds it without configuration.
+#
+# `target` — the AUDITED TREE — is the checkout whose `plugin/…` files are
+# hashed. `--pin --audit <path>` names it for the cross-workspace case: a
+# fleet running in a repo that does not track `plugin/…` has no instrument
+# set to certify of its own (that empty set is exactly the refusal below),
+# so the pin certifies the plugin checkout that DOES and records its toplevel
+# beside the digest. A plain check then follows the RECORDED root, not cwd:
+# the pointer travels inside the baseline, from the same write as the digest,
+# so no later caller can repoint it. Absent a recorded root, target == root:
+# the shape every existing baseline was made over, byte-for-byte.
 if [ -n "$repo" ]; then
   root=$(git -C "$repo" rev-parse --show-toplevel) \
     || die "$repo is not inside a git checkout — cannot identify the instrument set"
@@ -169,8 +198,100 @@ else
     || die "the working directory is not inside a git checkout — cannot identify the instrument set (pass --repo <path> to audit a tree other than cwd's)"
 fi
 
+# The audited tree starts as the state home. `--pin --audit <path>` names it
+# explicitly; a bare `--pin` over a baseline that already records one keeps
+# certifying THAT tree — the controller's tooling-fix re-pin changes the
+# instruments the run actually reads, and a re-pin that silently re-based onto
+# this workspace's tree would certify a set the run never measured (on a
+# plugin-less workspace, certify nothing at all: the empty-set refusal). A
+# check follows the recorded root below, from the same rule.
+target=$root
+if [ -n "$audit" ]; then
+  target=$(git -C "$audit" rev-parse --show-toplevel) \
+    || die "$audit is not inside a git checkout — cannot identify the instrument set to pin"
+fi
+
 set='plugin/commands plugin/scripts plugin/skills plugin/agents plugin/workflows'
 
+base="$root/.fleet/instruments.sha"
+
+# A re-pin with no `--audit` re-certifies the tree the existing baseline
+# names, when it names one: the controller's tooling-fix path stays the bare
+# `--pin` it already spells, and silently re-basing onto this workspace's own
+# tree would certify a set the run never reads. A FIRST pin in a plugin-less
+# workspace has no baseline to carry a root, names no `--audit`, and so dies
+# on the empty-set refusal below — which is the refusal that says WHICH flag
+# to pass, not the per-member halt this whole shape exists to prevent. The
+# reuse needs no re-verification the digest does not: a writer who could forge
+# `root=` here could as easily forge the digest line beside it, and the check
+# re-verifies the pair every time it answers.
+if [ "$pin" = true ] && [ -z "$audit" ] && [ -r "$base" ]; then
+  prior=$(sed -n '/^root=/{s/^root=//;p;q;}' "$base")
+  [ -n "$prior" ] && target=$prior
+fi
+
+if [ "$pin" != true ]; then
+  # A check reads its baseline BEFORE it hashes anything, because the baseline
+  # names the tree to hash. A run pinned with `--audit` certified a checkout
+  # other than this workspace's; standing here, the only honest comparison is
+  # against THAT tree, and there is no cwd, flag, or config that says
+  # otherwise — `--repo` moves the state home, never the audited tree.
+  #
+  # No baseline is not "nothing has changed" — it is a run that never pinned,
+  # and the check has nothing to compare against. Refusing is the whole
+  # contract.
+  #
+  # EXISTS-but-unreadable is a different state than ABSENT, and it needs a
+  # different message: `--pin` never compares against the existing baseline,
+  # it just overwrites it with whatever the tree looks like now. Labeling this
+  # case "no baseline" and prescribing `--pin` would walk a controller from
+  # "the check could not look" to "certified clean" in one step, discarding
+  # evidence it never read — the exact anti-pattern run-team/SKILL.md forbids.
+  # (#1058)
+  basedir="$(dirname "$base")"
+
+  # A directory that exists but cannot be searched (missing +x) hides
+  # everything under it from stat(2) — `[ -e "$base" ]` below reads FALSE for
+  # every file underneath, so without this check the run falls through to the
+  # "no baseline" message one level up: the exact mislabel this refusal exists
+  # to prevent, just moved from the file to its containing directory. (#1058)
+  [ -d "$basedir" ] && [ ! -x "$basedir" ] \
+    && die "$basedir exists but is unreadable — fix its permissions; do NOT --pin over it, --pin overwrites rather than compares"
+
+  # `-L` catches a dangling symlink: the link entry is present but its target
+  # is gone, so `-e` (which dereferences) reads FALSE and the run would
+  # otherwise fall through to the same "no baseline" message for a baseline
+  # that is very much present, just broken. (#1058)
+  { [ -e "$base" ] || [ -L "$base" ]; } && [ ! -r "$base" ] \
+    && die "$base exists but is unreadable — fix its permissions; do NOT --pin over it, --pin overwrites rather than compares"
+  [ -r "$base" ] || die "no baseline at $base — run instruments.sh --pin once at run start"
+  want=$(sed -n '1p' "$base") || die "cannot read $base"
+  [ -n "$want" ] || die "$base is empty — re-pin, do not guess"
+
+  # The recorded root, if this baseline carries one. Absent — every baseline
+  # pinned before the audited tree could live apart from the state home — the
+  # audited tree IS the state home, the shape that digest was made over.
+  rec=$(sed -n '/^root=/{s/^root=//;p;q;}' "$base")
+  if [ -n "$rec" ]; then
+    # Re-verified, not trusted: a `root=` line pointing at a directory that is
+    # no longer a checkout, or at a DIFFERENT checkout (moved, deleted,
+    # replaced, re-cloned elsewhere), refuses. This is the one authenticated
+    # channel the pointer has — the file is written by this script and read
+    # back here, and the tree it names must still BE that tree for the
+    # comparison to mean anything. A writable `.fleet/` that could rewrite
+    # `root=` could otherwise move the gate to a tree the writer controls.
+    again=$(git -C "$rec" rev-parse --show-toplevel 2>/dev/null) \
+      || die "audited tree $rec (pinned in $base) is not a git checkout — the tree moved; refuse, do not re-read"
+    [ "$again" = "$rec" ] \
+      || die "audited tree moved: $rec now resolves to $again — refusing to certify a tree other than the one pinned"
+    target=$rec
+  fi
+fi
+
+# Hash the AUDITED tree — `$target`, which a baseline's recorded root may have
+# repointed above.
+#
+# shellcheck disable=SC2086 # $set is a deliberate list of pathspecs, not one path
 files=$(mktemp) || die "cannot create a temp file"
 # INT/HUP/TERM as well as EXIT: a controller that kills a stalled gate check
 # should not leave the temp file behind on a shared machine.
@@ -178,12 +299,13 @@ trap 'rm -f "$files"' EXIT
 trap 'rm -f "$files"; exit 2' INT HUP TERM
 
 # shellcheck disable=SC2086 # $set is a deliberate list of pathspecs, not one path
-git -C "$root" ls-files -z -- $set > "$files" \
-  || die "git ls-files failed under $root for: $set"
+git -C "$target" ls-files -z -- $set > "$files" \
+  || die "git ls-files failed under $target for: $set"
 # An empty listing is the shape a wrong root produces — a symlinked skills dir
-# resolving to a different repository, most plausibly. Certifying it would hand
-# back "unchanged" for a set that was never read.
-[ -s "$files" ] || die "no tracked file under $root for: $set — refusing to certify an empty instrument set"
+# resolving to a different repository, most plausibly, or a workspace that
+# simply does not vendor the plugin. Certifying it would hand back "unchanged"
+# for a set that was never read.
+[ -s "$files" ] || die "no tracked file under $target for: $set — refusing to certify an empty instrument set"
 
 # Two steps, each with its own status check, because a pipeline reports only its
 # LAST command: with `xargs … | shasum` as one pipeline, a `shasum` that cannot
@@ -195,50 +317,30 @@ git -C "$root" ls-files -z -- $set > "$files" \
 # `xargs` exits 123 when `shasum` failed on any file, which is how a tracked
 # file deleted from the worktree arrives: as exit 2 naming it, not as a digest
 # quietly missing a line. Both refuse; only one of them is honest about why.
-per_file=$(cd "$root" && xargs -0 shasum -a 256 < "$files") \
+per_file=$(cd "$target" && xargs -0 shasum -a 256 < "$files") \
   || die "could not hash every tracked file under $set — see the errors above"
 digest=$(printf '%s\n' "$per_file" | shasum -a 256 | cut -d' ' -f1) \
   || die "could not digest the instrument set"
-[ -n "$digest" ] || die "empty digest for $root ($set)"
-
-base="$root/.fleet/instruments.sha"
+[ -n "$digest" ] || die "empty digest for $target ($set)"
 
 if [ "$pin" = true ]; then
   mkdir -p "$root/.fleet" || die "cannot create $root/.fleet"
-  printf '%s\n' "$digest" > "$base" || die "cannot write $base"
+  # Two lines, order fixed: the digest first, the audited tree's toplevel
+  # second. A reader that only knows the old one-line shape — merge-gate.mjs's
+  # `readInstruments`, which takes the FIRST stdout line as the digest — keeps
+  # working, and a check from this script reads both. The root rides in the
+  # same write as the digest because it is not a suggestion: a pointer an
+  # attacker with a writable `.fleet/` could repoint at will would move the
+  # gate to a tree they control, so the check trusts nothing else, re-verifies
+  # the tree at check time, and refuses if it moved.
+  {
+    printf '%s\n' "$digest"
+    printf 'root=%s\n' "$target"
+  } > "$base" || die "cannot write $base"
   printf '%s\n' "$digest"
-  printf '%s: pinned %s over %s\n' "$NAME" "$digest" "$root ($set)" >&2
+  printf '%s: pinned %s over %s\n' "$NAME" "$digest" "$target ($set)" >&2
   exit 0
 fi
-
-# No baseline is not "nothing has changed" — it is a run that never pinned, and
-# the check has nothing to compare against. Refusing is the whole contract.
-#
-# EXISTS-but-unreadable is a different state than ABSENT, and it needs a
-# different message: `--pin` never compares against the existing baseline, it
-# just overwrites it with whatever the tree looks like now. Labeling this case
-# "no baseline" and prescribing `--pin` would walk a controller from "the check
-# could not look" to "certified clean" in one step, discarding evidence it
-# never read — the exact anti-pattern run-team/SKILL.md forbids. (#1058)
-basedir="$(dirname "$base")"
-
-# A directory that exists but cannot be searched (missing +x) hides
-# everything under it from stat(2) — `[ -e "$base" ]` below reads FALSE for
-# every file underneath, so without this check the run falls through to the
-# "no baseline" message one level up: the exact mislabel this refusal exists
-# to prevent, just moved from the file to its containing directory. (#1058)
-[ -d "$basedir" ] && [ ! -x "$basedir" ] \
-  && die "$basedir exists but is unreadable — fix its permissions; do NOT --pin over it, --pin overwrites rather than compares"
-
-# `-L` catches a dangling symlink: the link entry is present but its target
-# is gone, so `-e` (which dereferences) reads FALSE and the run would
-# otherwise fall through to the same "no baseline" message for a baseline
-# that is very much present, just broken. (#1058)
-{ [ -e "$base" ] || [ -L "$base" ]; } && [ ! -r "$base" ] \
-  && die "$base exists but is unreadable — fix its permissions; do NOT --pin over it, --pin overwrites rather than compares"
-[ -r "$base" ] || die "no baseline at $base — run instruments.sh --pin once at run start"
-want=$(cat "$base") || die "cannot read $base"
-[ -n "$want" ] || die "$base is empty — re-pin, do not guess"
 
 printf '%s\n' "$digest"
 if [ "$digest" = "$want" ]; then
@@ -249,10 +351,11 @@ fi
 # report WHAT changed, and neither digest says. `git status` names the
 # uncommitted half, which is the shape the near-miss on #436 actually took; a
 # checked-out branch that moved shows as nothing here and the HEAD line is what
-# names it.
+# names it. Both are read from the AUDITED tree, which is the one the verdict
+# is about — not the state home the baseline was found in.
 printf '%s: instrument set CHANGED under this run — expected %s\n' "$NAME" "$want" >&2
 printf '%s: refuse the gate and report. Do NOT re-read the instrument.\n' "$NAME" >&2
-printf '%s: HEAD %s\n' "$NAME" "$(git -C "$root" rev-parse HEAD 2>/dev/null || printf '?')" >&2
+printf '%s: HEAD %s\n' "$NAME" "$(git -C "$target" rev-parse HEAD 2>/dev/null || printf '?')" >&2
 # shellcheck disable=SC2086 # $set is a deliberate list of pathspecs, not one path
-git -C "$root" status --porcelain -- $set >&2 || true
+git -C "$target" status --porcelain -- $set >&2 || true
 exit 1

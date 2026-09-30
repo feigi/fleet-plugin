@@ -44,6 +44,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
@@ -600,4 +601,141 @@ test("(5) an ambient GIT_WORK_TREE cannot certify a tampered tree from a clean t
     `an ambient GIT_WORK_TREE must not let a tampered checkout be certified from a clean one — a gate that passes on a tree nobody looked at is worse than no gate; got ${r.stdout}${r.stderr}`);
   assert.match(r.stderr, /instrument set CHANGED/,
     "and it must refuse for the real reason rather than tripping over the variable");
+});
+
+// --- #2284: the audited tree and the state home may be different checkouts ---
+//
+// A fleet running in a workspace that does not track `plugin/…` (installed
+// plugin, not vendored) has no instrument set of its own: every gate leg that
+// hashed cwd died on the empty-set refusal, and a correctly-labelled PR could
+// never merge because `merge-gate.mjs`'s instruments leg could only ever read
+// the workspace tree. The fix names both trees: `--pin --audit <path>`
+// certifies a checkout that DOES track the set and records its toplevel beside
+// the digest, in the workspace's own `.fleet/`; a check reads the baseline
+// first and audits the RECORDED tree, never cwd's.
+
+// A consumer workspace: a real git checkout with no plugin/ tree at all.
+function wsRepo(t) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "instruments-ws-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  git(root, "init", "-q", "-b", "main");
+  writeFileSync(join(root, "README.md"), "consumer workspace — no plugin/ tree\n");
+  git(root, "add", "-A");
+  git(root, "commit", "-qm", "fixture");
+  return root;
+}
+
+test("--pin --audit certifies another checkout, records its root beside the digest, and a later check follows it", (t) => {
+  const plugin = repo(t);
+  const ws = wsRepo(t);
+
+  const r = run(plugin, ["--pin", "--audit", plugin], { cwd: ws });
+  assert.equal(r.status, 0, r.stderr);
+  const digest = r.stdout.trim();
+  assert.match(digest, /^[0-9a-f]{64}$/);
+  assert.match(r.stderr, new RegExp(`pinned ${digest} over`));
+
+  // The STATE lives in the workspace — every later reader finds it without
+  // configuration — and it is two lines: the digest first (a reader that knows
+  // only the old shape still gets it), the audited root second.
+  const lines = readFileSync(join(ws, ".fleet", "instruments.sha"), "utf8").split("\n");
+  assert.equal(lines[0], digest);
+  assert.equal(lines[1], `root=${plugin}`);
+  // The audited tree gains no state of its own; a `--pin` is not allowed to
+  // write into the tree it merely reads.
+  assert.deepEqual(findFleetDirs(plugin), []);
+
+  // A bare check from the workspace audits the RECORDED tree, not cwd's:
+  // identical bytes elsewhere make no difference — the verdict travels with
+  // the digest.
+  const ok = run(plugin, [], { cwd: ws });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(ok.stdout.trim(), digest);
+
+  // Tampering the plugin tree is what the gate exists to catch, and now the
+  // catch reaches across workspaces: exit 1, the refusal naming the change.
+  writeFileSync(join(plugin, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
+  const hit = run(plugin, [], { cwd: ws });
+  assert.equal(hit.status, 1, `a tampered instrument must still refuse across the seam\n${hit.stdout}${hit.stderr}`);
+  assert.match(hit.stderr, /instrument set CHANGED/);
+  // The cold-path diagnostics name the AUDITED tree, which is the one the
+  // verdict is about — `git status` here must show the tampered file.
+  assert.match(hit.stderr, new RegExp(` M ${SET}/scripts/ci-state\\.mjs`));
+});
+
+test("a bare --pin in a plugin-less workspace still refuses — naming the tree once is the only way through", (t) => {
+  const plugin = repo(t);
+  const ws = wsRepo(t);
+  const r = run(plugin, ["--pin"], { cwd: ws });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /empty instrument set/);
+  assert.match(r.stderr, new RegExp(`under ${ws} for`),
+    "the refusal names the workspace tree it found empty, which is what tells the operator to pass --audit");
+  assert.deepEqual(findFleetDirs(ws), []);
+});
+
+test("--audit without --pin refuses: a check audits the tree its baseline names, never one its caller names", (t) => {
+  const plugin = repo(t);
+  const ws = wsRepo(t);
+  run(plugin, ["--pin", "--audit", plugin], { cwd: ws });
+  // If a check accepted `--audit`, whoever can spell a path could move the
+  // gate onto a tree they control — the same repointing power a writable
+  // `.fleet/` must not additionally buy.
+  const r = run(plugin, ["--audit", plugin], { cwd: ws });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /only accepted with --pin/);
+  const empty = run(plugin, ["--pin", "--audit", ""], { cwd: ws });
+  assert.equal(empty.status, 2, empty.stdout + empty.stderr);
+  assert.match(empty.stderr, /--audit requires a non-empty path/);
+  assert.deepEqual(findFleetDirs(ws), [join(ws, ".fleet")], "only the earlier pin wrote state");
+});
+
+test("a recorded root that is no longer a checkout, or no longer THAT checkout, refuses with exit 2 — never a verdict about a different tree", (t) => {
+  const plugin = repo(t);
+  const ws = wsRepo(t);
+  const digest = run(plugin, ["--pin", "--audit", plugin], { cwd: ws }).stdout.trim();
+
+  // Deleted or de-repo'd: the pinned tree is simply gone.
+  rmSync(join(plugin, ".git"), { recursive: true, force: true });
+  const gone = run(plugin, [], { cwd: ws });
+  assert.equal(gone.status, 2, gone.stdout + gone.stderr);
+  assert.match(gone.stderr, /is not a git checkout/);
+
+  // Moved: the recorded path now sits INSIDE another checkout, so
+  // `--show-toplevel` answers with a different tree than the one pinned. An
+  // attacker repointing root= at one of their own checkouts gets the same
+  // door: to certify a decoy they must make it resolve to the recorded path.
+  const outer = repo(t);
+  const sub = join(outer, "sub");
+  mkdirSync(sub);
+  writeFileSync(join(ws, ".fleet", "instruments.sha"), `${digest}\nroot=${sub}\n`);
+  const moved = run(outer, [], { cwd: ws });
+  assert.equal(moved.status, 2, moved.stdout + moved.stderr);
+  assert.match(moved.stderr, /audited tree moved/);
+});
+
+test("a legacy one-line baseline still audits the state home — the recorded root is an addition, not a requirement", (t) => {
+  const root = repo(t);
+  const digest = pin(root);
+  // Rewrite the baseline into the pre-cross-workspace shape: one line.
+  writeFileSync(join(root, ".fleet", "instruments.sha"), `${digest}\n`);
+  assert.equal(run(root).status, 0, "the check must not start refusing baselines it used to read");
+  writeFileSync(join(root, SET, "scripts", "ci-state.mjs"), "console.log('TAMPERED');\n");
+  assert.equal(run(root).status, 1, "and it must still catch the tamper it caught before");
+});
+
+test("a bare re-pin after a --audit pin re-certifies the RECORDED tree, not cwd's — the controller's tooling-fix path", (t) => {
+  const plugin = repo(t);
+  const ws = wsRepo(t);
+  run(plugin, ["--pin", "--audit", plugin], { cwd: ws });
+  writeFileSync(join(plugin, SET, "skills", "run-team", "SKILL.md"), "# fixed mid-run\n");
+  // The SKILL says: fix the tooling, then re-pin with the same bare
+  // `instruments.sh --pin`. If the re-pin hashed cwd instead, this would die
+  // on the empty-set refusal in the workspace — the controller could not
+  // complete its one legitimate re-pin, and the run would strand.
+  const again = run(plugin, ["--pin"], { cwd: ws });
+  assert.equal(again.status, 0, again.stdout + again.stderr);
+  const lines = readFileSync(join(ws, ".fleet", "instruments.sha"), "utf8").split("\n");
+  assert.equal(lines[1], `root=${plugin}`, "the re-pin must keep certifying the plugin tree");
+  assert.equal(run(plugin, [], { cwd: ws }).status, 0, "and the check now passes over the fixed text");
 });

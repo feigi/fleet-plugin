@@ -106,7 +106,9 @@ changed.
 - **Pin once**, at phase 0 step 0 below, from the main checkout you are
   running this from — never from a member's worktree, which is gitignored
   and carries no baseline:
-  `~/.fleet/bin/fleet-run instruments.sh --pin`.
+  `~/.fleet/bin/fleet-run instruments.sh --pin`. On a workspace that does not
+  track `plugin/…`, the pin names the plugin checkout once — `--pin --audit
+  <plugin-checkout>` — and every check after it follows the recorded tree.
 - **Re-check before you act on any instrument reading** — a SHA acceptance, a CI
   verdict, the reconcile, a reap, a label gate — from that same main checkout:
   `~/.fleet/bin/fleet-run instruments.sh`. **Exit 0 is the only code that
@@ -255,6 +257,16 @@ phase, or in any later one, asks the maintainer which tickets to take.
    what every later gate compares against; the rule above says what its exit
    codes mean. Pinning before that fast-forward would instead pin the
    superseded text and certify it for the rest of the run.
+   **When this workspace does not track `plugin/…`** — fleets run here on an
+   installed plugin rather than a vendored tree — the bare pin refuses on an
+   empty instrument set, because this checkout holds no instruments to certify.
+   Name the plugin checkout to the pin instead:
+   `~/.fleet/bin/fleet-run instruments.sh --pin --audit <plugin-checkout>`.
+   The baseline records the audited tree beside the digest, and every later
+   check — yours, a finisher's, the merge gate's own leg — follows that
+   recorded root without being told twice. Refusing the bare pin and naming
+   the tree once is the whole cross-workspace contract; never dispatch a
+   member into a run whose phase-0 pin refused.
 
    **Check the merge gate against its spec, once the fast-forward has put the
    ratified spec in front of you.** Where the workspace checks a ruleset spec
@@ -2508,7 +2520,11 @@ is dispatched to read, so it reaches one through this block or not at all:
 > a missing baseline instead of comparing anything. The `env -u GIT_DIR -u
 > GIT_WORK_TREE` wrapper guards against an ambient `GIT_DIR` in your own shell
 > pointing this check at the wrong tree — the script's own internal unset
-> cannot reach back and fix a path you already resolved wrong.
+> cannot reach back and fix a path you already resolved wrong. The baseline
+> itself names the tree to audit: a cross-workspace run pinned it once at
+> phase 0, and your `--repo` only locates that baseline, never the audited
+> tree — so an exit 2 naming a moved or unreadable audited tree is a halt
+> like every other, not a spelling for you to correct.
 
 **Once the label is on, take it off before you approve any push.** The label is a
 verdict on the tree the finisher read, and a GitHub label does not follow the
