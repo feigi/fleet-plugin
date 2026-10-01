@@ -282,12 +282,39 @@ function queryOf(r) {
 // is written and made executable and before the block closes — anchored at
 // line starts under `/m` so an unrelated line inserted between them cannot
 // still match.
+//
+// Anchored per STATEMENT, not per line (#2265): inside the warm-up call every
+// token boundary is `\s*`, and a trailing comma is allowed wherever JS allows
+// one, so wrapping that call across lines — behavior-neutral, and at 85
+// columns the reformat a formatter makes on its own — cannot red this pin the
+// way deleting the call does. Only whitespace is free: every token, the
+// timeout's floor included, is still literal and in order.
 test("run()'s gh-stub warm-up survives — deleting it would let a cold PATH scan spend #1199's budget again (structural pin)", () => {
   const src = stripComments(readFileSync(THIS_FILE, "utf8"));
+  const warmUp = /^\s*if \(gh\) \{\s*^\s*const ghPath = join\(bin, "gh"\);\s*^\s*writeFileSync\(ghPath, GH_STUB\);\s*^\s*chmodSync\(ghPath, 0o755\);\s*^\s*spawnSync\(\s*ghPath,\s*\[\s*"--fleet-warm",?\s*\],\s*\{\s*env:\s*\{\s*PATH:\s*bin,?\s*\},\s*timeout:\s*\d{3}_\d{3},?\s*\},?\s*\);\s*^\s*\}/m;
   assert.match(
     src,
-    /^\s*if \(gh\) \{\s*^\s*const ghPath = join\(bin, "gh"\);\s*^\s*writeFileSync\(ghPath, GH_STUB\);\s*^\s*chmodSync\(ghPath, 0o755\);\s*^\s*spawnSync\(ghPath, \["--fleet-warm"\], \{ env: \{ PATH: bin \}, timeout: \d{3}_\d{3} \}\);\s*^\s*\}/m,
+    warmUp,
     "run() must warm the freshly-written gh stub (--fleet-warm) before the timed spawn below it — deleting this line reopens #1199 under fleet load",
+  );
+  // The input the pin must ACCEPT: the same block with the warm-up wrapped the
+  // way a formatter wraps it. Quoted lines joined, never a template literal —
+  // a template's lines would sit at line starts in THIS file's own source and
+  // satisfy the pin above with the real warm-up deleted.
+  assert.match(
+    [
+      "    if (gh) {",
+      '      const ghPath = join(bin, "gh");',
+      "      writeFileSync(ghPath, GH_STUB);",
+      "      chmodSync(ghPath, 0o755);",
+      '      spawnSync(ghPath, ["--fleet-warm"], {',
+      "        env: { PATH: bin },",
+      "        timeout: 120_000,",
+      "      });",
+      "    }",
+    ].join("\n"),
+    warmUp,
+    "wrapping the warm-up call across lines changes neither its place nor its presence, so the pin must not read it as deleted (#2265)",
   );
 });
 
