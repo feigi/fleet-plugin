@@ -356,8 +356,8 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   // The dispatch rule has to name WHERE the definition comes from, or the
   // tier is declared somewhere the reader of this phase can neither find nor
   // audit. Since #2208 that is the `agent` `ledger.mjs dispatch` prints — a
-  // name recalled from this prose is exactly what a compaction dropped, 11
-  // implementers dispatched as generic `task`.
+  // name recalled from this prose is exactly what a compaction dropped (#2208
+  // counts 11 implementers dispatched as generic `task`).
   assert.match(
     slice,
     /Dispatch every implementer with the `agent` that `ledger\.mjs dispatch`\s+printed/,

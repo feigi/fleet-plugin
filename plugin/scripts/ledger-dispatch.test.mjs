@@ -157,8 +157,6 @@ test("dispatch prints the agent definition the call names: the row's tier for an
   assert.equal(ok("dispatch", "7", "impl-7").agent, "fleet-implementer");
   ok("row", "8", "impl-8 · class=routine · tier=alt");
   assert.equal(ok("dispatch", "8", "impl-8").agent, "fleet-implementer-alt");
-  ok("row", "9", "class=routine · tier=slow-high");
-  assert.equal(ok("dispatch", "9", "impl-9").agent, "fleet-implementer-slow-high");
   // A replacement inherits the row's tier, because it reads the same row.
   ok("settle", "impl-8", "killed");
   assert.equal(ok("dispatch", "8", "impl-8-b").agent, "fleet-implementer-alt");
@@ -171,14 +169,19 @@ test("dispatch prints the agent definition the call names: the row's tier for an
   assert.equal(ok("dispatch", "merge-bot").agent, "fleet-merge-bot");
 });
 
-test("dispatch refuses an implementer whose row names no single definition, before marking it live", (t) => {
+// A `tier=` of the right shape whose definition has no file (`slow-high`, a
+// #2030 cell that has not shipped) is refused the same way: a `task` call
+// naming it cannot resolve.
+test("dispatch refuses an implementer whose row names no single definition, or one with no file, before marking it live", (t) => {
   const { ok, read, refused } = fixture(t);
   ok("row", "7", "class=routine · tier=alt · tier=slow-high");
-  refused(["dispatch", "7", "impl-7"], /row #7: row carries conflicting tier= tokens \(tier=alt, tier=slow-high\)/);
+  refused(["dispatch", "7", "impl-7"], /row #7: row carries conflicting tier= tokens \(tier=alt, tier=slow-high\) — fix the row's tier= with `ledger\.mjs row` before dispatching impl-7/);
   ok("row", "8", "class=routine · tier=../../etc");
   refused(["dispatch", "8", "impl-8"], /row #8: tier=\.\.\/\.\.\/etc is not a definition suffix/);
   ok("row", "9", "class=routine · tier=");
   refused(["dispatch", "9", "impl-9"], /row #9: tier= is not a definition suffix/);
+  ok("row", "10", "class=routine · tier=slow-high");
+  refused(["dispatch", "10", "impl-10"], /row #10: fleet-implementer-slow-high has no agents\/fleet-implementer-slow-high\.agent\.md — fix the row's tier= with `ledger\.mjs row` before dispatching impl-10/);
   assert.deepEqual(read().dispatched, []);
 });
 

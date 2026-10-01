@@ -144,5 +144,9 @@ test("nextMergeBot counts every merge-bot entry, live or settled, and nothing el
 test("expectedDefinition refuses a tier= it cannot name one definition file by", () => {
   assert.throws(() => expectedDefinition("impl-7 · tier=alt · tier=slow-high"), /conflicting tier= tokens \(tier=alt, tier=slow-high\)/);
   assert.throws(() => expectedDefinition("impl-7 · tier=../../etc"), /is not a definition suffix/);
+  // Lowercase only: on a case-insensitive filesystem `tier=Alt` would find
+  // fleet-implementer-alt.agent.md, so the existence check `ledger.mjs
+  // dispatch` adds cannot refuse a name no definition carries.
+  assert.throws(() => expectedDefinition("impl-7 · tier=Alt"), /tier=Alt is not a definition suffix/);
   assert.equal(expectedDefinition("impl-7 · tier=alt · tier=alt"), "fleet-implementer-alt");
 });

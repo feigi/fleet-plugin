@@ -29,12 +29,16 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition } from "./ledger-grammar.mjs";
 
 const NAME = "ledger";
+// The plugin's own agent definitions — the directory tier-check.mjs reads
+// with its default `--repo`, so the two agree on which definitions exist.
+const AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "agents");
 
 // die() shared with the other fleet scripts (writeSync-based, pipe-safe —
 // see arg.mjs for the #176/#328/#363 rationale). arg()/has() themselves are
@@ -1643,12 +1647,17 @@ function runDispatch() {
   // The definition the `task` call names, printed so the controller reads it
   // off this output rather than recalling it from prose a compaction drops
   // (#2208). An implementer's comes off its row's `tier=`, the same function
-  // tier-check.mjs judges it by — so a row that names no single definition is
+  // tier-check.mjs judges it by — so a row that names no single definition,
+  // or names one with no file under `agents/` (a well-formed `tier=` whose
+  // definition has not shipped: a `task` call naming it cannot resolve), is
   // refused here, before the member is live, not discovered by the check
   // after the call.
   let agent;
   try {
     agent = agentDefinition(member, i === -1 ? "" : data.rows[i]);
+    if (member.family === "impl" && !existsSync(join(AGENTS_DIR, `${agent}.agent.md`))) {
+      throw new Error(`${agent} has no agents/${agent}.agent.md`);
+    }
   } catch (e) {
     die(`row #${member.number}: ${e.message} — fix the row's tier= with \`ledger.mjs row\` before dispatching ${member.name}`);
   }

@@ -876,7 +876,8 @@ output, never recall it. Live implementers are the `impl-` tokens with no
 it. `dispatch` refuses once the
 run is draining: drain stops supply. It also refuses a row whose `tier=`
 names no single definition — two different values, or one that is not a
-definition suffix — before the member is live; fix the row with `row` first.
+definition suffix — or names one with no `agents/<definition>.agent.md`,
+before the member is live; fix the row with `row` first.
 
 **The prompt carries only what varies.** Everything shared — the
 unattended-member block, the `edit`/`read` absolute-path rule (#1727), the
@@ -3445,7 +3446,8 @@ live count from it, so nobody states one. Write neither by hand:
   fix-applier's is `null`: its own section says how it is dispatched. It
   refuses a name this run already used (a replacement takes `-b`, `-c` …), a
   second live member on one ticket or PR, any implementer once the run is
-  draining, and an implementer whose row's `tier=` names no single definition.
+  draining, and an implementer whose row's `tier=` names no single definition
+  or one with no file under `agents/`.
 - **`ledger.mjs settle <member> <outcome>`** — rewrites the token to
   `<member>=<outcome>` in both places. Outcomes: `impl-N` = `PR#M | bailed |
   released | killed | tier-mismatch`; `fix-pr-M` = `applied:<head> | no-op |
