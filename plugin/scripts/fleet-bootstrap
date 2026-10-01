@@ -51,24 +51,6 @@ function sha256(buf) {
   return crypto.createHash("sha256").update(buf).digest("hex");
 }
 
-// Both sides of the checkout-vs-install comparison, normalized the same
-// way: `ownDir`'s parent may have been reached through a symlinked path
-// (macOS resolves `/tmp` through `/private/tmp`, measured), and nothing
-// forbids a resolved install root from carrying a trailing separator.
-// `fs.realpathSync` where the path exists; a plain
-// `path.normalize` with the trailing separator stripped otherwise (an
-// absent/`null` install path, or one this process cannot stat) — either way
-// the two sides are compared in the same shape rather than raw strings from
-// two different sources.
-function canonical(p) {
-  if (typeof p !== "string" || p === "") return p;
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    return path.normalize(p).replace(/[\\/]+$/, "");
-  }
-}
-
 function main() {
   const argv = process.argv.slice(2);
   const fromCheckoutFlag = argv.includes("--from-checkout");
@@ -86,8 +68,11 @@ function main() {
   const home = os.homedir();
   const PLUGIN_KEY = "@feigi/fleet-ctl"; // ADR 0006 name; ADR 0021 — the node_modules package dir.
   const ompInstall = readInstallPath(path.join(home, ".omp", "plugins", "node_modules", PLUGIN_KEY));
-  const parent = canonical(path.dirname(ownDir));
-  const runningFromInstall = parent === canonical(ompInstall);
+  // Both sides are realpaths — readInstallPath() already resolved the install,
+  // and this file's own directory exists, so its parent resolves too — so a
+  // path reached through a symlink (macOS /tmp → /private/tmp) compares equal.
+  const parent = fs.realpathSync(path.dirname(ownDir));
+  const runningFromInstall = parent === ompInstall;
 
   const target = path.join(home, ".fleet", "bin", "fleet-run");
 
