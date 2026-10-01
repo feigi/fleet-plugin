@@ -66,9 +66,8 @@ if [ -z "$PLUGIN_NAME" ] || [ "$PLUGIN_NAME" = "null" ]; then
 fi
 
 REPO_ROOT="$(pwd)"
-# HOME nested inside the checkout for the same reason smoke-omp.sh's sibling
-# design note gives: every mutation (registries, the placed Resolver) is
-# then scoped to a scratch tree this script owns and deletes, never the
+# A scratch HOME this script owns and deletes: every mutation (the link's
+# node_modules entry and lock, the placed Resolver) lands there, never in the
 # caller's real state.
 SCRATCH_HOME="$REPO_ROOT/.install-and-smoke-home"
 
