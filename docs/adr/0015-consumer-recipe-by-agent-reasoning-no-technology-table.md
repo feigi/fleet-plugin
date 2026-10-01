@@ -62,7 +62,7 @@ exits 0).
    (`plugin/skills/run-team/SKILL.md:2171`); this makes that the *only* guard.
    An Install step is not usable until it has been run once in a fresh worktree
    and left every tracked file unchanged — the generalisation of today's
-   three-filename lockfile-mutation check (`claim-ticket.sh:453`).
+   three-filename lockfile-mutation check (`claim-ticket.sh:453` at `83cb3eb8`).
 5. **The Recipe is cached as fleet state, not committed as a consumer-facing
    format.** It lives under `.fleet/`, written by the agent that derived and
    proved it, carrying the commit it was derived at and the proof. Scripts read
