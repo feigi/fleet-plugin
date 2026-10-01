@@ -291,7 +291,6 @@ jobs:
       - name: smoke-omp
         run: .github/scripts/smoke-omp.sh
 
-
   # #1294 hand-off §2, #1339, #1347 — REWORKED per PR #1365's review from an
   # earlier design that ran the whole test suite from an installed copy
   # (cannot pass: a git-subdir install carries `plugin/` alone, and ~30 test

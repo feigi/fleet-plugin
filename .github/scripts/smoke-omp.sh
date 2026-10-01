@@ -124,13 +124,16 @@ probe_substitution() {
          HOME="$SCRATCH_HOME" \
          omp -p "/$cmd" --no-tools --mode json --no-session > "$fifo" 2>&1
   ) &
-  local pid=$! substituted="" deadline=$(( $(date +%s) + 60 )) line
-  while IFS= read -r line; do
+  local pid=$! substituted="" deadline=$(( $(date +%s) + 60 )) line remaining
+  # The deadline bounds each read itself (`read -t`): a wedged omp that
+  # prints nothing never returns a line, so a check placed after `read`
+  # alone would never run and only the job timeout would end the probe.
+  while remaining=$(( deadline - $(date +%s) )); [ "$remaining" -gt 0 ] \
+    && IFS= read -r -t "$remaining" line; do
     if [ "$(printf '%s' "$line" | jq -r 'select(.type=="message_start" and .message.role=="user") | .message.content[0].text // empty' 2>/dev/null || true)" != "" ]; then
       substituted="$(printf '%s' "$line" | jq -r '.message.content[0].text // empty')"
       break
     fi
-    [ "$(date +%s)" -ge "$deadline" ] && break
   done < "$fifo"
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
@@ -274,7 +277,6 @@ if __name__ == "__main__":
             fh.write(str(srv.server_address[1]) + "\n")
     srv.serve_forever()
 PY
-MOCK_PID=""
 MOCK_PORT_FILE="$MOCK_PORT_FILE" MOCK_LOG="$MOCK_LOG" python3 "$SCRATCH/mock.py" >/dev/null 2>&1 &
 MOCK_PID=$!
 MOCK_PORT=""
@@ -284,9 +286,7 @@ for _ in $(seq 50); do
 done
 [ -n "$MOCK_PORT" ] || { echo "::error::smoke-omp: scripted mock never reported a bound port"; exit 1; }
 for cmd in run-team-help review-and-fix run-merge-bot; do
-  if probe_substitution "$cmd"; then
-    :
-  else
+  if ! probe_substitution "$cmd"; then
     echo "::error::smoke-omp: commands: /$cmd did not substitute its body — either command discovery or the extension provider that carries it failed to load (measured: --no-extensions keeps /<name> raw)"
     fail=1
   fi
