@@ -26,9 +26,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SKILLS = join(import.meta.dirname, "..", "skills");
 const SKILL = readFileSync(join(SKILLS, "run-team", "SKILL.md"), "utf8");
@@ -38,11 +39,7 @@ const DIR = mkdtempSync(join(tmpdir(), "shell-traps-"));
 const BIN = join(DIR, "bin");
 mkdirSync(BIN);
 
-const stub = (name, body) => {
-  const p = join(BIN, name);
-  writeFileSync(p, body);
-  chmodSync(p, 0o755);
-};
+const stub = (name, body) => writeExecStub(join(BIN, name), body);
 
 const hasShell = (s) => {
   try {

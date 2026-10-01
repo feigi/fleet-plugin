@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { slowTransport, SSH_URL } from "./slow-transport.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./release-ticket.sh", import.meta.url));
 const INFLIGHT = fileURLToPath(new URL("./inflight.sh", import.meta.url));
@@ -134,7 +135,7 @@ function repo(t, dir = "w") {
   const bin = join(root, "bin");
   execFileSync("mkdir", ["-p", bin]);
   const log = join(root, "gh.log");
-  writeFileSync(
+  writeExecStub(
     join(bin, "gh"),
     `#!/bin/sh
 printf '%s\\n' "$*" >> "${log}"
@@ -165,7 +166,6 @@ case "$*" in
 esac
 exit 0
 `,
-    { mode: 0o755 },
   );
   writeFileSync(log, "");
 
@@ -241,7 +241,7 @@ function claim(w, issue, slug, type = "fix") {
  * binary and then keep going (the #395 case appends a line to its listing).
  */
 function gitShim(r, body) {
-  writeFileSync(join(r.w, "..", "bin", "git"), `#!/bin/sh\n${body}\nexec '${REAL_GIT}' "$@"\n`, { mode: 0o755 });
+  writeExecStub(join(r.w, "..", "bin", "git"), `#!/bin/sh\n${body}\nexec '${REAL_GIT}' "$@"\n`);
 }
 
 /**
@@ -251,10 +251,9 @@ function gitShim(r, body) {
  * several awks over the same listing and only the program text tells them apart.
  */
 function awkShim(r, marker) {
-  writeFileSync(
+  writeExecStub(
     join(r.w, "..", "bin", "awk"),
     `#!/bin/sh\ncase "$*" in *'${marker}'*) echo "awk: simulated failure" >&2; exit 2 ;; esac\nexec '${REAL_AWK}' "$@"\n`,
-    { mode: 0o755 },
   );
 }
 
@@ -646,7 +645,7 @@ test("a blocker that cannot be escaped is exit 2 with a cause, never the blocked
   const bin = mkdtempSync(join(tmpdir(), "release-ticket-esc-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
   const realSed = execFileSync("sh", ["-c", "command -v sed"], { encoding: "utf8" }).trim();
-  writeFileSync(join(bin, "sed"), `#!/bin/sh
+  writeExecStub(join(bin, "sed"), `#!/bin/sh
 case " $* " in
   *:a*)
     in=$(cat)
@@ -654,7 +653,7 @@ case " $* " in
     printf '%s\\n' "$in" | exec ${realSed} "$@" ;;
 esac
 exec ${realSed} "$@"
-`, { mode: 0o755 });
+`);
 
   const res = release(r, c, { env: { PATH: `${bin}:${r.env().PATH}` } });
 
@@ -710,7 +709,7 @@ const REAL_SED = execFileSync("sh", ["-c", "command -v sed"], { encoding: "utf8"
 function sedShim(t, body) {
   const bin = mkdtempSync(join(tmpdir(), "release-ticket-sed-shim-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(join(bin, "sed"), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  writeExecStub(join(bin, "sed"), `#!/bin/sh\n${body}\n`);
   return bin;
 }
 
@@ -721,7 +720,7 @@ const REAL_GREP = execFileSync("sh", ["-c", "command -v grep"], { encoding: "utf
 function grepShim(t, body) {
   const bin = mkdtempSync(join(tmpdir(), "release-ticket-grep-shim-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(join(bin, "grep"), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  writeExecStub(join(bin, "grep"), `#!/bin/sh\n${body}\n`);
   return bin;
 }
 
@@ -4267,10 +4266,9 @@ test("a worktree COUNT that could not run refuses, never a bogus tally (#395)", 
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   const realAwk = execFileSync("/bin/sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
-  writeFileSync(
+  writeExecStub(
     join(r.w, "..", "bin", "awk"),
     `#!/bin/sh\ncase "$*" in *'{c++}'*) exit 1 ;; esac\nexec '${realAwk}' "$@"\n`,
-    { mode: 0o755 },
   );
 
   const { code, json, stderr } = release(r, c);

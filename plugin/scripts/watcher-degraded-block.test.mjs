@@ -18,9 +18,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeExecStub } from "./exec-stub.mjs";
 
 // The stubs shell out to jq, and so does the block under test. Without it every
 // gate would fail identically and the suite would go green on a block that
@@ -45,11 +46,7 @@ const DIR = mkdtempSync(join(tmpdir(), "watcher-block-"));
 const BIN = join(DIR, "bin");
 mkdirSync(BIN);
 
-const stub = (name, body) => {
-  const p = join(BIN, name);
-  writeFileSync(p, body);
-  chmodSync(p, 0o755);
-};
+const stub = (name, body) => writeExecStub(join(BIN, name), body);
 
 // Every *SEQ variable names a file of one value per line, consumed one per
 // invocation, so a scenario can change what a probe returns between ticks. The

@@ -12,10 +12,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./pr-overlap.mjs", import.meta.url));
 
@@ -57,11 +58,10 @@ test("CLI: well-formed --a/--b values are accepted and the CLI reports a verdict
   const gh = join(bin, "gh");
   const log = join(bin, "calls");
   // `$3` is the PR number pr-overlap.mjs passes as `gh pr diff <pr> --name-only`.
-  writeFileSync(
+  writeExecStub(
     gh,
     `#!/bin/sh\nprintf '%s\\n' "$*" >> ${log}\ncase "$3" in\n  1) echo src/shared.ts ;;\n  2) echo src/shared.ts ;;\nesac\n`,
   );
-  chmodSync(gh, 0o755);
   const r = spawnSync(process.execPath, [SCRIPT, "--a", "1", "--b", "2"], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
@@ -107,7 +107,7 @@ function fixture({ prs, tracked = [] }) {
     if (diff !== undefined) writeFileSync(join(data, `${pr}.diff`), diff);
   }
   const gh = join(bin, "gh");
-  writeFileSync(
+  writeExecStub(
     gh,
     "#!/bin/sh\n" +
       `case "$4" in\n` +
@@ -115,7 +115,6 @@ function fixture({ prs, tracked = [] }) {
       `  *) cat ${data}/"$3".diff ;;\n` +
       "esac\n",
   );
-  chmodSync(gh, 0o755);
   execFileSync("git", ["init", "-q"], { cwd: repo });
   for (const f of tracked) {
     mkdirSync(join(repo, dirname(f)), { recursive: true });
@@ -489,8 +488,7 @@ test("prose: a full-diff read that fails names itself and leaves the other three
 test("#878: --a 0/--b 0 reach gh rather than drawing the usage line for an absent flag", () => {
   const bin = mkdtempSync(join(tmpdir(), "pr-overlap-bin-"));
   const gh = join(bin, "gh");
-  writeFileSync(gh, '#!/bin/sh\ncase "$3" in\n  0) echo src/shared.ts ;;\nesac\n');
-  chmodSync(gh, 0o755);
+  writeExecStub(gh, '#!/bin/sh\ncase "$3" in\n  0) echo src/shared.ts ;;\nesac\n');
   const r = spawnSync(process.execPath, [SCRIPT, "--a", "0", "--b", "0"], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
@@ -551,8 +549,7 @@ test("prose: a git ls-files failure names its cause instead of vanishing into a 
     },
   });
   const git = join(fx.bin, "git");
-  writeFileSync(git, "#!/bin/sh\nexit 1\n");
-  chmodSync(git, 0o755);
+  writeExecStub(git, "#!/bin/sh\nexit 1\n");
   const r = spawnSync(process.execPath, [SCRIPT, "--a", "1", "--b", "2"], {
     encoding: "utf8",
     cwd: fx.repo,

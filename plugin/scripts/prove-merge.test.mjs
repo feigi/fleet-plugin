@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { slowTransport, SSH_URL } from "./slow-transport.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./prove-merge.sh", import.meta.url));
 
@@ -395,10 +396,9 @@ test("a git failure reading the parents is an error, never a silent disproof", (
   // DIRECTORY — "Permission denied", the fetch fails first, and the parents are
   // never read, so this test measures the wrong failure. Resolved out here,
   // where PATH is still the real one; inside the shim, `git` is the shim.
-  writeFileSync(
+  writeExecStub(
     join(bin, "git"),
     `#!/bin/sh\n[ "$1" = rev-list ] && exit 128\nexec ${REAL_GIT} "$@"\n`,
-    { mode: 0o755 },
   );
 
   const r = spawnSync("sh", [SCRIPT, head, head, merge], {
@@ -856,7 +856,7 @@ test("a missing json.sh is exit 2, never the exit 1 that means `not proved`", (t
 function sedShim(t, body) {
   const bin = mkdtempSync(join(tmpdir(), "prove-merge-sed-shim-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(join(bin, "sed"), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  writeExecStub(join(bin, "sed"), `#!/bin/sh\n${body}\n`);
   return `${bin}:${ENV.PATH ?? process.env.PATH}`;
 }
 
