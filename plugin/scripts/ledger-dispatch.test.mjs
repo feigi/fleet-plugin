@@ -57,7 +57,7 @@ function fixture(t, body = null) {
 test("dispatch appends a live member row and records the dispatch in ## Dispatched", (t) => {
   const { ok, read, bytes } = fixture(t);
   assert.deepEqual(ok("dispatch", "412", "impl-412"), {
-    member: "impl-412", ticket: "#412", line: "#412 impl-412", created: true, total: 1,
+    member: "impl-412", agent: "fleet-implementer", ticket: "#412", line: "#412 impl-412", created: true, total: 1,
   });
   const l = read();
   assert.deepEqual(l.rows, ["#412 impl-412"]);
@@ -73,7 +73,7 @@ test("dispatch keeps an existing row's text, appending the token only where it i
   ok("row", "412", "impl-412 · class=routine");
   ok("row", "415", "claimed · class=correction");
   assert.deepEqual(ok("dispatch", "412", "impl-412"), {
-    member: "impl-412", ticket: "#412", line: "#412 impl-412 · class=routine", created: false, total: 1,
+    member: "impl-412", agent: "fleet-implementer", ticket: "#412", line: "#412 impl-412 · class=routine", created: false, total: 1,
   });
   assert.equal(ok("dispatch", "#415", "impl-415").line, "#415 claimed · class=correction · impl-415");
   assert.deepEqual(read().dispatched, ["impl-412", "impl-415"]);
@@ -85,7 +85,7 @@ test("a PR-bound member lands on the row carrying its PR, named by PR or by tick
   ok("settle", "impl-324", "PR#346");
   // By the PR number: found through the implementer's own settled token.
   assert.deepEqual(ok("dispatch", "346", "fix-pr-346"), {
-    member: "fix-pr-346", ticket: "#324", line: "#324 impl-324=PR#346 · fix-pr-346", created: false, total: 2,
+    member: "fix-pr-346", agent: null, ticket: "#324", line: "#324 impl-324=PR#346 · fix-pr-346", created: false, total: 2,
   });
   // By the ticket number whose row carries that PR.
   assert.equal(ok("dispatch", "324", "finisher-pr-346").line, "#324 impl-324=PR#346 · fix-pr-346 · finisher-pr-346");
@@ -94,7 +94,7 @@ test("a PR-bound member lands on the row carrying its PR, named by PR or by tick
   assert.equal(ok("dispatch", "350", "fix-pr-350").ticket, "#330");
   // A PR no row carries gets a row of its own.
   assert.deepEqual(ok("dispatch", "777", "fix-pr-777"), {
-    member: "fix-pr-777", ticket: "#777", line: "#777 fix-pr-777", created: true, total: 5,
+    member: "fix-pr-777", agent: null, ticket: "#777", line: "#777 fix-pr-777", created: true, total: 5,
   });
   assert.equal(read().rows.length, 3);
 });
@@ -132,7 +132,7 @@ test("a member is dispatched once; its replacement takes a name of its own", (t)
 
 test("merge-bot-<n> counts the ## Dispatched merge-bot entries, and a new ledger starts again at 1", (t) => {
   const { ok, read, refused } = fixture(t);
-  assert.deepEqual(ok("dispatch", "merge-bot"), { member: "merge-bot-1", ticket: null, line: null, created: false, total: 1 });
+  assert.deepEqual(ok("dispatch", "merge-bot"), { member: "merge-bot-1", agent: "fleet-merge-bot", ticket: null, line: null, created: false, total: 1 });
   ok("dispatch", "412", "impl-412");
   ok("settle", "merge-bot-1", "done");
   // A settled bot still counts: its replacement gets a new n.
@@ -147,6 +147,52 @@ test("merge-bot-<n> counts the ## Dispatched merge-bot entries, and a new ledger
 
   const fresh = fixture(t);
   assert.equal(fresh.ok("dispatch", "merge-bot").member, "merge-bot-1");
+});
+
+// #2208: the controller names the `task` call's `agent` off this output, not
+// off prose a compaction drops — so every family's definition is printed, and
+// an implementer's follows its row's `tier=` the way tier-check.mjs reads it.
+test("dispatch prints the agent definition the call names: the row's tier for an implementer, fixed for finisher and merge bot, null for a fix-applier", (t) => {
+  const { ok } = fixture(t);
+  assert.equal(ok("dispatch", "7", "impl-7").agent, "fleet-implementer");
+  ok("row", "8", "impl-8 · class=routine · tier=alt");
+  assert.equal(ok("dispatch", "8", "impl-8").agent, "fleet-implementer-alt");
+  // A replacement inherits the row's tier, because it reads the same row.
+  ok("settle", "impl-8", "killed");
+  assert.equal(ok("dispatch", "8", "impl-8-b").agent, "fleet-implementer-alt");
+  // Neither verdict token is a `tier=` token.
+  ok("row", "10", "impl-10 · tier-ok=impl-10:fleet-implementer-alt · tier-mismatch=impl-10:fleet-implementer-alt");
+  assert.equal(ok("dispatch", "10", "impl-10").agent, "fleet-implementer");
+  ok("settle", "impl-7", "PR#70");
+  assert.equal(ok("dispatch", "70", "finisher-pr-70").agent, "fleet-finisher");
+  assert.equal(ok("dispatch", "70", "fix-pr-70").agent, null);
+  assert.equal(ok("dispatch", "merge-bot").agent, "fleet-merge-bot");
+});
+
+// A `tier=` of the right shape whose definition has no file (`slow-high`, a
+// #2030 cell that has not shipped) is refused the same way: a `task` call
+// naming it cannot resolve.
+test("dispatch refuses an implementer whose row names no single definition, or one with no file, before marking it live", (t) => {
+  const { ok, read, refused } = fixture(t);
+  ok("row", "7", "class=routine · tier=alt · tier=slow-high");
+  refused(["dispatch", "7", "impl-7"], /row #7: row carries conflicting tier= tokens \(tier=alt, tier=slow-high\) — fix the row's tier= with `ledger\.mjs row` before dispatching impl-7/);
+  ok("row", "8", "class=routine · tier=../../etc");
+  refused(["dispatch", "8", "impl-8"], /row #8: tier=\.\.\/\.\.\/etc is not a definition suffix/);
+  ok("row", "9", "class=routine · tier=");
+  refused(["dispatch", "9", "impl-9"], /row #9: tier= is not a definition suffix/);
+  ok("row", "10", "class=routine · tier=slow-high");
+  refused(["dispatch", "10", "impl-10"], /row #10: fleet-implementer-slow-high has no agents\/fleet-implementer-slow-high\.agent\.md — fix the row's tier= with `ledger\.mjs row` before dispatching impl-10/);
+  assert.deepEqual(read().dispatched, []);
+});
+
+// The refusal is about the implementer's own definition: a member whose
+// definition does not come off `tier=` must still be dispatchable on such a
+// row, or one bad token would strand the PR's finisher and fix-applier.
+test("a malformed tier= on a row does not refuse a member whose definition ignores it", (t) => {
+  const { ok } = fixture(t);
+  ok("row", "7", "impl-7=PR#70 · tier=alt · tier=slow-high");
+  assert.equal(ok("dispatch", "70", "fix-pr-70").agent, null);
+  assert.equal(ok("dispatch", "7", "finisher-pr-70").agent, "fleet-finisher");
 });
 
 test("settle rewrites the member's token in its row and in ## Dispatched, and nothing else", (t) => {

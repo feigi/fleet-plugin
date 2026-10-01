@@ -16,7 +16,10 @@ finished work. The ledger exists so it never has to.
    append-only, outliving the reasoning that produced them.
 2. **Track.** `dispatch` writes a member's live token (e.g. `impl-412`)
    onto its row and appends it to `## Dispatched`; `settle` rewrites it
-   to `<member>=<outcome>` in both places. Token grammar lives in
+   to `<member>=<outcome>` in both places. `dispatch` also prints the
+   agent definition the `task` call names (`agent`), so it survives a
+   compaction that drops the prose naming it (#2208). Token grammar and
+   that definition mapping live in
    [`ledger-grammar.mjs`](../../plugin/scripts/ledger-grammar.mjs),
    shared by every reader.
 3. **Derive.** This one file lets

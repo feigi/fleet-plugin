@@ -83,3 +83,42 @@ export function memberTokens(text) {
 export function nextMergeBot(dispatched) {
   return `merge-bot-${dispatched.map(parseToken).filter((t) => t?.family === "merge-bot").length + 1}`;
 }
+
+// #1398: the definition an implementer should run under, off its ticket
+// row's `tier=` token — none means `fleet-implementer`, `tier=<x>` means
+// `fleet-implementer-<x>`: `alt` (phase 2's every-5th-Pull alternate) and
+// every #2030 per-cell name (`slow-high`) alike. The value becomes a file
+// name under `agents/`, so it is held to `[a-z0-9]` words joined by `-`
+// rather than joined into a path as written, and two different `tier=`
+// values on one row name no single definition — refused, never resolved by
+// position.
+//
+// Here, not in tier-check.mjs, because two readers must agree on it (#2208):
+// `ledger.mjs dispatch` prints the definition before the call, and
+// tier-check.mjs judges the member against it after. Two copies could name
+// different definitions for one row and fail a dispatch made exactly as
+// printed.
+const TIER_SUFFIX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export function expectedDefinition(rowText) {
+  const values = [...new Set(String(rowText ?? "").split(/\s+/)
+    .filter((t) => t.startsWith("tier=")).map((t) => t.slice("tier=".length)))];
+  if (values.length === 0) return "fleet-implementer";
+  if (values.length > 1) throw new Error(`row carries conflicting tier= tokens (${values.map((v) => `tier=${v}`).join(", ")})`);
+  if (!TIER_SUFFIX.test(values[0])) throw new Error(`tier=${values[0]} is not a definition suffix — expected [a-z0-9] words joined by '-'`);
+  return `fleet-implementer-${values[0]}`;
+}
+
+// The agent definition a member is dispatched as (#2208), for a parsed member
+// and the text of the row it works: `ledger.mjs dispatch` prints it so the
+// `task` call that follows names it off a script's output, not off prose a
+// compaction drops. A fix-applier gets null: a review fix-applier is a generic
+// `task` by design, and a conflict-hold one is rare and named by its own
+// section of run-team/SKILL.md. Throws whatever expectedDefinition throws.
+export function agentDefinition(member, rowText) {
+  switch (member.family) {
+    case "impl": return expectedDefinition(rowText);
+    case "finisher-pr": return "fleet-finisher";
+    case "merge-bot": return "fleet-merge-bot";
+    default: return null;
+  }
+}
