@@ -42,7 +42,7 @@
 // the ledger; main() does the I/O. Split so the guard table and the reading are
 // both unit-testable without a network — fleet-tick.test.mjs.
 
-import { parseToken } from "./ledger-grammar.mjs";
+import { parseMember, parseToken } from "./ledger-grammar.mjs";
 
 // Every role's TARGET is its configured cap. Availability of work belongs in
 // the ACTION, not the target: a reviewer target that shrank to the backlog
@@ -63,6 +63,35 @@ const mkRow = (role, actual, target, detail) => (action, { acts = false, extra =
   role, actual, target, action, acts, detail: extra ? `${detail} — ${extra}` : detail,
 });
 
+// The clearing step a tier hold names in its detail (#2255). The tick reads no
+// transcript and so does not know the session directory: `<session>` stays a
+// placeholder the controller fills in, as `<file>` does — one batch file, one
+// entry per held member (SKILL.md's phase-2 tier check).
+const tierCheckStep = (members) => "run ~/.fleet/bin/fleet-run tier-check.mjs --batch <file> with "
+  + JSON.stringify(members.map((member) => ({ member, session: "<session>" })));
+
+// A mismatch clears when the next attempt on the ticket is dispatched at its
+// row's tier: one retry letter past the HIGHEST any impl member of that ticket
+// has used, not past the held member's own — a controller can dispatch `-c`
+// before `-b`, ledger.mjs refuses a name already dispatched, and the highest
+// letter is what compute-board.mjs's laterAttempt reads as the latest attempt.
+// No suffix is the `a` attempt (ledger-grammar.mjs orders it first). `-z` is
+// the grammar's last, so past it there is no legal name to print.
+function replaceStep(held, implNames) {
+  const named = [], stuck = [];
+  for (const name of held) {
+    const { family, number } = parseMember(name);
+    const top = [name, ...implNames].map(parseMember).filter((m) => m.number === number)
+      .map((m) => m.retry ?? "a").sort().at(-1);
+    if (top === "z") stuck.push(name);
+    else named.push(`${family}-${number}-${String.fromCharCode(top.charCodeAt(0) + 1)}`);
+  }
+  return [
+    named.length ? `dispatch ${named.join(", ")} ${named.length > 1 ? "each " : ""}at its row's tier` : "",
+    stuck.length ? `${stuck.join(", ")} ${stuck.length > 1 ? "have" : "has"} no retry letter left` : "",
+  ].filter(Boolean).join("; ");
+}
+
 function implementers(s, left) {
   const row = mkRow("implementers", s.implLive, s.implCap,
     `unclaimed=${s.heads.length} supply=${s.supply ?? "?"} unreviewed=${left.unreviewed}`
@@ -72,13 +101,20 @@ function implementers(s, left) {
   // a replacement controller that never saw the drain is held by it too.
   if (s.draining !== null) return row("HOLD (draining)");
   // Held until a replacement at the right tier is dispatched (§ 6 §6). The
-  // controller can fix this unattended, so the row asks it to.
-  if (s.tierMismatch.length) return row(`HOLD (tier mismatch ${s.tierMismatch.join(" ")})`, { acts: true });
+  // controller can fix this unattended, so the row asks it to — and names the
+  // replacement in its detail (#2255), since the step lives otherwise only in
+  // SKILL.md prose, which is what a compaction loses.
+  if (s.tierMismatch.length) {
+    return row(`HOLD (tier mismatch ${s.tierMismatch.join(" ")})`, { acts: true, extra: replaceStep(s.tierMismatch, s.implNames) });
+  }
   // Held until tier-check.mjs has run on the newest implementer and written
   // its verdict to the ledger (#1398) — a Pull on top of an unchecked
   // dispatch repeats whatever it got wrong. Running the check is the
-  // controller's own step, so it is asked to act.
-  if (s.tierUnchecked.length) return row(`HOLD (tier unchecked ${s.tierUnchecked.join(" ")})`, { acts: true });
+  // controller's own step, so it is asked to act, with the command in the
+  // detail (#2255).
+  if (s.tierUnchecked.length) {
+    return row(`HOLD (tier unchecked ${s.tierUnchecked.join(" ")})`, { acts: true, extra: tierCheckStep(s.tierUnchecked) });
+  }
 
   const deficit = s.implCap - s.implLive;
   if (deficit <= 0) return row("AT CAP");
@@ -425,6 +461,9 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     mergeConflictHeld: queued.filter((p) => conflictHeld(state(p.number))).length,
     draining: drain ?? null,
     tierMismatch,
+    // Every impl member the ledger names, settled or live: the retry letters
+    // a mismatch's replacement must climb past (replaceStep).
+    implNames: impls.map((m) => m.name),
     tierUnchecked,
     claimed,
     excluded,
