@@ -5,7 +5,7 @@
 The `run-team` controller is the orchestrator: a single, long-running
 session — never a dispatched subagent — that owns the main checkout and
 drives every other role over one repo's `ready-for-agent` queue until it
-drains. Invoked as `/fleet-ctl:run-team [implementers] [reviewers]`
+drains. Invoked as `/skill:run-team [implementers] [reviewers]`
 (defaults 2 and 6, no hard cap; the merge bot is always at most 1).
 Follows [`plugin/skills/run-team/SKILL.md`](../../plugin/skills/run-team/SKILL.md).
 

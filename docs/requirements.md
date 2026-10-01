@@ -201,7 +201,7 @@ grep -l '^name: *CI *$' .github/workflows/*.y*ml 2>/dev/null || echo "no CI work
 echo PREFLIGHT OK
 ```
 
-Then: `/fleet-ctl:run-team 1 1` with one `ready-for-agent` ticket, watch a full cycle.
+Then: `/skill:run-team 1 1` with one `ready-for-agent` ticket, watch a full cycle.
 
 ---
 

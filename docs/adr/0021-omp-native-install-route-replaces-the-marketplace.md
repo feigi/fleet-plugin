@@ -42,7 +42,7 @@ ADR 0020:
 | skills on the link route | surfaced (`omp skill list` → bare `run-team`, source `omp-plugins:user`); the hidden entry skill remains `/skill:run-team`-invocable (`skills.enableSkillCommands`, default true) |
 | `member-write-guard` on the link route | loads and refuses (verbatim guard text observed) |
 | `plugin/.claude-plugin/plugin.json` on the link route | not load-bearing (removing it from a copy changes nothing) — but `scripts/repo-root.mjs` keys its self-identity read on that path, so the file stays |
-| `omp plugin install <name>@<marketplace>` vs native | native installs (`link`, npm) register in `~/.omp/plugins/node_modules/<name>` (+ `omp-plugins.lock.json` for the version, written by marketplace/npm installs, not by link); `installed_plugins.json` is marketplace-only |
+| `omp plugin install <name>@<marketplace>` vs native | native installs (`link`, npm) register in `~/.omp/plugins/node_modules/<name>` (+ `omp-plugins.lock.json` for the version, written by every install kind — a link records the manifest's `package.json` version, re-measured 2026-10-01 on 18.4.8: `0.0.0`; see Decision 4); `installed_plugins.json` is marketplace-only |
 | `omp plugin doctor` on either route | never imports/validates `omp.extensions`: a syntax-error module links and doctors clean, failing open at runtime |
 | unmapped role alias | hard child-spawn failure ("No model selected.", exit 1), never a silent parent fall-through — the #1430 silent-wrong-tier shape cannot recur through a missing role |
 | npm registry | `fleet-ctl` free (404), kept so by the `npm-name-gate` since #1347 |
