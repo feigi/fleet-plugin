@@ -23,12 +23,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveCockpitInstance } from "./board.mjs";
 import { gitEnv } from "./git-env.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./board.mjs", import.meta.url));
 const HTML = readFileSync(new URL("./board.html", import.meta.url), "utf8");
@@ -48,8 +49,7 @@ function shimPath(ghBody) {
   const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" });
   assert.equal(real.status, 0, "test setup: no git on PATH to shim, so the resolved arm cannot be reached");
   symlinkSync(real.stdout.trim(), join(bin, "git"));
-  writeFileSync(join(bin, "gh"), ghBody);
-  chmodSync(join(bin, "gh"), 0o755);
+  writeExecStub(join(bin, "gh"), ghBody);
   return bin;
 }
 

@@ -29,10 +29,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const BOARD = fileURLToPath(new URL("./board.mjs", import.meta.url));
 
@@ -66,9 +67,8 @@ function gathered(prevBody) {
   // under test — the assertions below count lines.
   writeFileSync(join(scriptDir, "ledger.mjs"),
     `console.log(JSON.stringify({ rows: [], filed: [], ruled: [] }));`);
-  writeFileSync(join(bin, "gh"),
+  writeExecStub(join(bin, "gh"),
     '#!/bin/sh\ncase "$1 $2" in\n"pr list") echo \'[{"number":42,"state":"OPEN","labels":[],"title":"t"}]\' ;;\n*) exit 1 ;;\nesac\n');
-  chmodSync(join(bin, "gh"), 0o755);
 
   const prevFile = join(cwd, "prev.json");
   writeFileSync(prevFile, prevBody);
@@ -196,8 +196,7 @@ function runBuild(prevArgs) {
   const cwd = mkdtempSync(join(tmpdir(), "board-prevshape-cli-"));
   const home = mkdtempSync(join(tmpdir(), "board-prevshape-home-"));
   const bin = mkdtempSync(join(tmpdir(), "board-prevshape-cli-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
-  chmodSync(join(bin, "gh"), 0o755);
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   return spawnSync(process.execPath, [BOARD, "build", "--ledger", join(cwd, "nope.md"), ...prevArgs], {
     cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },

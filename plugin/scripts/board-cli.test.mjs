@@ -19,11 +19,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, spawn, execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeProjectDir } from "./board.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const BOARD = fileURLToPath(new URL("./board.mjs", import.meta.url));
 const LEDGER = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
@@ -54,8 +55,7 @@ function runBoard(sinceArgs, ledgerFile, seed = seedDefault) {
   // findSubagentsDir never looks in, and the panel comes back { error }.
   const cwd = realpathSync(mkdtempSync(join(tmpdir(), "since-cwd-")));
   const bin = mkdtempSync(join(tmpdir(), "since-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
-  chmodSync(join(bin, "gh"), 0o755);
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   seed(home, cwd);
   return spawnSync(process.execPath, [BOARD, "build", "--ledger", ledgerFile ?? join(cwd, "nope.md"), ...sinceArgs], {
     cwd, encoding: "utf8",
@@ -393,8 +393,7 @@ assert.ok(
 function runBoardFlooded() {
   const cwd = mkdtempSync(join(tmpdir(), "since-flood-cwd-"));
   const bin = mkdtempSync(join(tmpdir(), "since-flood-bin-"));
-  writeFileSync(join(bin, "gh"), FLOOD_GH_STUB);
-  chmodSync(join(bin, "gh"), 0o755);
+  writeExecStub(join(bin, "gh"), FLOOD_GH_STUB);
   return new Promise((resolve) => {
     const child = spawn(
       process.execPath,
@@ -570,12 +569,10 @@ test("build: a ledger read past node's default stdout cap arrives whole, not as 
 function boardFaultFixture() {
   const cwd = realpathSync(mkdtempSync(join(tmpdir(), "board-fault-cwd-")));
   const bin = mkdtempSync(join(tmpdir(), "board-fault-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
-  chmodSync(join(bin, "gh"), 0o755);
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   // Valid JSON, wrong shape: `rows` is an object where every consumer wants an
   // array. Answers any argv, which is all gather()'s single `node` read needs.
-  writeFileSync(join(bin, "node"), `#!/bin/sh\necho '{"rows":{},"filed":[],"ruled":[]}'\n`);
-  chmodSync(join(bin, "node"), 0o755);
+  writeExecStub(join(bin, "node"), `#!/bin/sh\necho '{"rows":{},"filed":[],"ruled":[]}'\n`);
   return {
     cwd,
     argv: [BOARD, "build", "--ledger", join(cwd, "nope.md")],

@@ -33,10 +33,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const BOARD = fileURLToPath(new URL("./board.mjs", import.meta.url));
 
@@ -56,13 +57,12 @@ function gatherWith({ issuesJson = "[]", prsJson = "[]", ledgerBody = null } = {
   writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
   writeFileSync(join(scriptDir, "ledger.mjs"),
     ledgerBody ?? `console.log(JSON.stringify({ rows: [], filed: [], ruled: [] }));`);
-  writeFileSync(join(bin, "gh"),
+  writeExecStub(join(bin, "gh"),
     `#!/bin/sh\ncase "$1 $2" in\n` +
     `"issue list") echo '${issuesJson}' ;;\n` +
     `"pr list") echo '${prsJson}' ;;\n` +
     `"repo view") echo '${REPO_JSON}' ;;\n` +
     `*) exit 1 ;;\nesac\n`);
-  chmodSync(join(bin, "gh"), 0o755);
 
   const driver = `const { gather } = await import(${JSON.stringify(BOARD)});
     const r = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "ledger.md"))},
