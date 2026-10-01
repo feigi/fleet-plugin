@@ -38,13 +38,24 @@
 # Recipe, so nothing here ever runs the command.
 set -eu
 
-# Byte semantics for the one byte-sensitive construct below: the `case`
-# patterns that pick the command's leading word apart (`[A-Za-z_]` ranges and
-# `*` over an arbitrary byte string from the cache). Under an ambient UTF-8
-# locale a range is collation-ordered and `*` refuses to match across an
-# invalid byte (#582's hazard). Nothing here sorts or folds case, so pinning
-# the locale changes nothing else — locale-pin-prose.test.mjs enforces the
-# placement (#612).
+# Byte semantics for every construct below that reads a string by bytes:
+#
+#   the `case` patterns that pick the command's leading word apart past
+#   `NAME=value` prefixes — `[A-Za-z_]` ranges, ASCII by intent, and `*` over
+#   an arbitrary byte string from the cache. Under an ambient UTF-8 locale a
+#   range is collation-ordered and `*` refuses to match across an invalid byte.
+#
+#   the digit-only guard on node's byte-count file (`*[!0-9]*`), ASCII digits
+#   by intent like the ranges above.
+#
+#   the `${#framed}` length compare, which must count BYTES to equal the byte
+#   count node writes. Under a UTF-8 locale `${#…}` counts characters, so a
+#   valid cache whose command holds a multi-byte character would be refused
+#   as chatter on node's stdout.
+#
+# The hex range in the inline `node -e` validator is JavaScript and out of the
+# shell locale's reach. Nothing here sorts or folds case. The pin sits ahead of
+# every line that does work, so it covers all of the above.
 export LC_ALL=C
 
 # Below the locale pin, not above it with `set -eu`: `unset` touches no
