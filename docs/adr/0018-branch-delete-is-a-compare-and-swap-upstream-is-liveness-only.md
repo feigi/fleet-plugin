@@ -89,8 +89,8 @@ The invariant is **never destroy a commit that exists nowhere else**.
   authorized by `git cherry` on the live ref alone to `git update-ref -d`'s
   compare-and-swap on the tip `git cherry` read once, closing the gap between
   the two calls.
-- **`worktree-audit.sh` is out of scope.** It reports a mid-rebase/bisect
-  worktree as `DETACHED`. It deletes nothing; whether that misleads its
-  consumer is #2220.
+- **`worktree-audit.sh` is out of scope.** It deletes nothing. A `detached`
+  worktree whose rebase or bisect holds a branch is reported under that
+  branch, with `ahead` counted over HEAD and the held branch (#2220).
 - **Any future script that deletes a branch** follows points 1–3, and treats
   upstream config as liveness only (point 5).
