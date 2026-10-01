@@ -268,6 +268,28 @@ phase, or in any later one, asks the maintainer which tickets to take.
    the tree once is the whole cross-workspace contract; never dispatch a
    member into a run whose phase-0 pin refused.
 
+   **Record the main-checkout baseline in the same step, right after the
+   pin.** `~/.fleet/bin/fleet-run main-checkout.mjs --record` writes
+   `.fleet/main-checkout.sha`: the main checkout's `git status --porcelain
+   -uall` entries plus a content hash of every path they name. Your own
+   uncommitted work is fine — it is in the baseline and holds nothing. From
+   then on every `fleet-tick.mjs` compares the main checkout against it and
+   holds dispatch on any change (#2210): the backstop for the stray member
+   writes `member-write-guard` cannot see — an `eval` cell, a `bash` that
+   `cd`s or `git -C`s into this checkout. `.fleet/`, `.worktrees/` and
+   `.agent-brain/` are gitignored and never trip it. Nor does this run's own
+   bookkeeping: `docs/metrics/tier-outcomes.tsv` and
+   `docs/metrics/member-outcomes.tsv`, which you write mid-run, are left out
+   by name — anything else under `docs/metrics/` still trips it. **The same
+   command is the clear, and it overwrites; it never compares.** On `MAIN-CHECKOUT-DIRTY`
+   the maintainer resolves the stray paths FIRST — inspect, keep or remove
+   them — and only then re-runs `--record`; re-recording over unresolved paths
+   certifies them. **Never re-record over `MAIN-CHECKOUT-UNKNOWN`**: that
+   walks the run from "could not look" to "certified clean" in one step, so
+   `--record` itself refuses over a baseline it cannot read and on any git
+   read that fails. `main-checkout.mjs --check` prints the same answer
+   without a tick.
+
    **Check the merge gate against its spec, once the fast-forward has put the
    ratified spec in front of you.** Where the workspace checks a ruleset spec
    in, `.github/scripts/apply-ruleset.sh --check` compares it to the live gate
@@ -1595,6 +1617,26 @@ depth** guard table applied in code. Act on each line as it reads:
   or the replacement's name — `impl-<N>-b` on a first retry, else one letter
   past the highest the ticket has used, or that no retry letter is left.
 - `AT CAP`, `IDLE OK` — nothing to do on that row.
+- `MAIN-CHECKOUT-DIRTY <paths> …`, printed above the rows, with every
+  dispatching row (implementers, reviewers, merge-bot) reading
+  `HOLD (main checkout dirty)` — the main checkout changed since the Phase 0
+  baseline. The line names the changed paths and every live member; it
+  attributes nothing, because concurrent members make that a guess. Dispatch
+  nothing new and tell the maintainer: they resolve the stray paths FIRST,
+  then re-baseline with `~/.fleet/bin/fleet-run main-checkout.mjs --record`.
+  The hold lasts until that re-baseline, tick after tick. Never revert the
+  paths yourself, and never re-baseline over paths nobody has resolved. The
+  one change of yours that trips it is a mid-run tooling fix edited in this
+  checkout; **Fix the tooling mid-run** says how that one is cleared.
+- `MAIN-CHECKOUT-UNKNOWN …` with `HOLD (main checkout unknown)` — the tick
+  could not look: a git or hash read failed (`could not look:`), or the
+  baseline exists but cannot be read (`baseline unreadable:`). Never clean,
+  and **never re-baseline over it** — `--record` overwrites, so that certifies
+  a tree nobody read. Fix what the line names and tick again.
+- `MAIN-CHECKOUT-NO-BASELINE …` with `HOLD (main checkout no baseline)` — no
+  baseline was recorded. Yours to fix: run Phase 0's `--record`. A baseline
+  that vanished mid-run is not a fresh run — report it to the maintainer
+  before recording over whatever the tree now holds.
 
 **Tier guards under Pull.** An alt Pull — the Pull phase 2 routes to the
 alternate tier — is where the tier floor is read. Run phase 2's tier guard
@@ -3142,6 +3184,12 @@ dispatched at the right tier, `HOLD (tier unchecked impl-<N>)` until
 reviewer slot is left for it — refreshing to enable a Pull you are holding
 buys nothing.
 
+A main checkout that is not `clean` against its Phase 0 baseline outranks all
+of them, and every dispatching row besides: `HOLD (main checkout dirty)`,
+`HOLD (main checkout unknown)` or `HOLD (main checkout no baseline)` on the
+implementer, reviewer and merge-bot rows alike, beside the `MAIN-CHECKOUT-*`
+line that says why (#2210).
+
 `/triage` is user-invoked only — suggest, never run. The suggestion is a report,
 not a blocking prompt. Counts come from cheap `gh issue list --search`, no bodies.
 A starved implementer queue never stalls the review or merge side.
@@ -3336,8 +3384,13 @@ the step. Cut before you append.
 --pin`. You just changed the instrument set under your own check, and this is the
 only edit that legitimately does; skip it and the next gate refuses on your own
 fix, which teaches you to ignore the refusal. Then the ledger line, save the
-rationale, one line to the maintainer. Live members hold the old text — re-brief
-only if it changes what they do *now*.
+rationale, one line to the maintainer. **Then re-baseline the main checkout,
+if the fix was edited in it** — the next tick reads `MAIN-CHECKOUT-DIRTY`
+naming your own paths. Run `~/.fleet/bin/fleet-run main-checkout.mjs --check`
+first, and only when the paths it names are exactly the ones you just edited,
+run `--record`. Any other path on that line is a stray write — leave the hold for
+the maintainer, because `--record` would certify it with yours. Live members
+hold the old text — re-brief only if it changes what they do *now*.
 
 **Landing it.** The file being right is not the end of it. `main` carries a
 ruleset with no bypass actors, so a direct `git push origin main` is **refused** —
