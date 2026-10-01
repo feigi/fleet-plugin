@@ -71,19 +71,24 @@ const tierCheckStep = (members) => "run ~/.fleet/bin/fleet-run tier-check.mjs --
   + JSON.stringify(members.map((member) => ({ member, session: "<session>" })));
 
 // A mismatch clears when the next attempt on the ticket is dispatched at its
-// row's tier: the member's name with the next retry letter. `-z` is the
-// grammar's last (ledger-grammar.mjs), so there is no legal name to print.
-function replaceStep(members) {
-  const next = members.map((name) => {
-    const m = parseMember(name);
-    if (m.retry === "z") return null;
-    return `${m.family}-${m.number}-${m.retry ? String.fromCharCode(m.retry.charCodeAt(0) + 1) : "b"}`;
-  });
-  const stuck = members.filter((_, i) => next[i] === null);
-  const named = next.filter(Boolean);
+// row's tier: one retry letter past the HIGHEST any impl member of that ticket
+// has used, not past the held member's own — a controller can dispatch `-c`
+// before `-b`, ledger.mjs refuses a name already dispatched, and the highest
+// letter is what compute-board.mjs's laterAttempt reads as the latest attempt.
+// No suffix is the `a` attempt (ledger-grammar.mjs orders it first). `-z` is
+// the grammar's last, so past it there is no legal name to print.
+function replaceStep(held, implNames) {
+  const named = [], stuck = [];
+  for (const name of held) {
+    const { family, number } = parseMember(name);
+    const top = [name, ...implNames].map(parseMember).filter((m) => m.number === number)
+      .map((m) => m.retry ?? "a").sort().at(-1);
+    if (top === "z") stuck.push(name);
+    else named.push(`${family}-${number}-${String.fromCharCode(top.charCodeAt(0) + 1)}`);
+  }
   return [
-    named.length ? `dispatch ${named.join(", ")} at its row's tier` : "",
-    stuck.length ? `${stuck.join(", ")} has no retry letter left` : "",
+    named.length ? `dispatch ${named.join(", ")} ${named.length > 1 ? "each " : ""}at its row's tier` : "",
+    stuck.length ? `${stuck.join(", ")} ${stuck.length > 1 ? "have" : "has"} no retry letter left` : "",
   ].filter(Boolean).join("; ");
 }
 
@@ -100,7 +105,7 @@ function implementers(s, left) {
   // replacement in its detail (#2255), since the step lives otherwise only in
   // SKILL.md prose, which is what a compaction loses.
   if (s.tierMismatch.length) {
-    return row(`HOLD (tier mismatch ${s.tierMismatch.join(" ")})`, { acts: true, extra: replaceStep(s.tierMismatch) });
+    return row(`HOLD (tier mismatch ${s.tierMismatch.join(" ")})`, { acts: true, extra: replaceStep(s.tierMismatch, s.implNames) });
   }
   // Held until tier-check.mjs has run on the newest implementer and written
   // its verdict to the ledger (#1398) — a Pull on top of an unchecked
@@ -456,6 +461,9 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     mergeConflictHeld: queued.filter((p) => conflictHeld(state(p.number))).length,
     draining: drain ?? null,
     tierMismatch,
+    // Every impl member the ledger names, settled or live: the retry letters
+    // a mismatch's replacement must climb past (replaceStep).
+    implNames: impls.map((m) => m.name),
     tierUnchecked,
     claimed,
     excluded,

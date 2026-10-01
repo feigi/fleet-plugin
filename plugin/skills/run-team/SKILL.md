@@ -1583,7 +1583,8 @@ depth** guard table applied in code. Act on each line as it reads:
   a mismatch by dispatching the replacement at the right tier (phase 2). Each
   prints its clearing step in the row's detail: the `tier-check.mjs` command
   with a batch entry per member it names (fill in `<file>` and `<session>`),
-  or the replacement's name (`impl-<N>-b`).
+  or the replacement's name — `impl-<N>-b` on a first retry, else one letter
+  past the highest the ticket has used, or that no retry letter is left.
 - `AT CAP`, `IDLE OK` — nothing to do on that row.
 
 **Tier guards under Pull.** An alt Pull — the Pull phase 2 routes to the
