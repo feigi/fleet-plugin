@@ -147,17 +147,23 @@ ADR 0020:
 - **Version semantics change**: installs track published semver, not the
   `main` branch tip; every merged PR still mints a release, and now also
   a package version. `marketplace.autoUpdate` is gone with the route.
-- **Publishing needs a credential the repo does not hold yet.**
-  `release.yml`'s publish step authenticates with the `NPM_TOKEN`
-  repository secret; when this ADR landed the repo had no Actions secrets
-  and `fleet-ctl` had never been published (`npm view fleet-ctl` → 404,
-  2026-10-01). Until the operator stores an npm token with publish rights
-  for `fleet-ctl` as `NPM_TOKEN` (or publishes once by hand and switches
-  the package to npm trusted publishing from this workflow), every release
-  run tags and creates the GitHub release, then fails at the publish step,
-  and `omp plugin install fleet-ctl` keeps answering 404. A re-run after
-  the secret exists reuses the tag already on the merge commit rather
-  than minting a new one, so the missed version is the one published.
+- **Publishing authenticates via npm trusted publishing (OIDC), not a
+  stored secret.** `release.yml` requests a short-lived OIDC token
+  (`permissions: id-token: write`) and runs `npm publish --provenance`;
+  there is no `NPM_TOKEN` in the repo and none is needed going forward.
+  This has one bootstrap requirement npm cannot skip: a package with zero
+  published versions has no npmjs.com settings page, so there is nowhere
+  to configure a Trusted Publisher yet (`fleet-ctl` had never been
+  published — `npm view fleet-ctl` → 404, 2026-10-01). The operator must
+  publish once by hand (`npm publish --access public` from a local
+  checkout, normal interactive 2FA OTP, not a CI credential) to reserve
+  the name, then add this repo's `release.yml` as `fleet-ctl`'s Trusted
+  Publisher on npmjs.com. Until that's done, every release run tags and
+  creates the GitHub release, then fails at the publish step, and
+  `omp plugin install fleet-ctl` keeps answering 404. A re-run after the
+  Trusted Publisher is configured reuses the tag already on the merge
+  commit rather than minting a new one, so the missed version is the one
+  published.
 - CI retargets: `smoke-omp.sh` links the checkout instead of building a
   dev catalog, asserts the three bare commands by the same `--no-tools`
   substitution probe (measured live on the link route), and adds the

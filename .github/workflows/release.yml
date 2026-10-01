@@ -140,7 +140,7 @@ jobs:
             git push origin "$NEXT"
           fi
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .nvmrc
           registry-url: https://registry.npmjs.org
@@ -172,7 +172,6 @@ jobs:
         # the old pre-occupancy npm-name-gate could never be.
         env:
           NEXT: ${{ steps.version.outputs.next }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           VER="${NEXT#v}"
