@@ -237,8 +237,7 @@ test("runner: the stamp changes when the script's content changes", () => {
   // edited copy or the script refuses before it emits anything — which is the
   // guard working, not a regression.
   const sibling = join(scriptDir, "derive-testcmd.sh");
-  copyFileSync(join(import.meta.dirname, "derive-testcmd.sh"), sibling);
-  chmodSync(sibling, 0o755);
+  writeExecStub(sibling, readFileSync(join(import.meta.dirname, "derive-testcmd.sh"), "utf8"));
   for (const lib of ["json.sh", "worktree.sh"]) {
     copyFileSync(join(import.meta.dirname, lib), join(scriptDir, lib));
   }
