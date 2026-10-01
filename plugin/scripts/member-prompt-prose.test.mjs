@@ -9,8 +9,8 @@ import { anchorAt, phrase, stripQuoteGutter } from "./prose-pin.mjs";
 // controller-facing prose the member sees only if the controller paraphrases it
 // — and `sizing-a-ticket`'s fleet entry point is CONDITIONED on the reader being
 // an unattended fleet member. Take that condition's evidence away and the member
-// reads itself as a solo session, takes `superpowers:brainstorming`, and parks on
-// its <HARD-GATE> waiting for an approval no unattended member can ever obtain.
+// reads itself as a solo session, waits on a user to settle the open design
+// choices before planning, and parks on an answer no unattended member can obtain.
 //
 // So the pin is on LOCATION, not vocabulary. Moving these words back out into
 // prose IS the defect, and every word would still be somewhere in the file — a
@@ -80,7 +80,7 @@ test("every member-facing rule sits in the agent body the harness injects, not i
 test("the member is told it is unattended, in text it receives verbatim", () => {
   const prose = memberProse();
 
-  // Without this, `sizing-a-ticket:18`'s `**Fleet member on heavy:**` condition
+  // Without this, `sizing-a-ticket`'s `**Fleet member on heavy:**` condition
   // cannot fire. The only prior signal was the incidental word "controller".
   assert.match(
     prose,
@@ -120,11 +120,10 @@ test("the handoff names its destination, and a light-row member cannot read it a
   );
   // The wrong binding, and the one that bites: the nearest place-like phrase was
   // the heavy-row entry point, which would send a LIGHT-row member to plan-writing.
-  // Stays a literal regex — one token, so there is no inter-word space for a
-  // wrap to land in and nothing for `phrase()` to tolerate.
+  // So the member prompt must not carry the heavy row's own first action.
   assert.doesNotMatch(
     prose,
-    /superpowers:writing-plans/,
+    phrase("write the plan under your own scratch path"),
     "the member prompt names the heavy-row entry point, which a light-row member would follow",
   );
 });
@@ -150,12 +149,17 @@ test("the sizing skill stays conditioned — a solo session still runs the inter
   // because it correctly serves solo sessions, which do have a user to approve.
   assert.match(
     SIZING,
-    phrase("**Fleet member on heavy: enter at `superpowers:writing-plans`.**"),
-    "the fleet heavy-row entry is no longer conditioned — solo sessions now skip brainstorming too",
+    phrase("**Fleet member on heavy: write the plan under your own scratch path"),
+    "the fleet heavy-row branch is gone — sizing no longer tells a member from a solo session",
   );
   assert.match(
     SIZING,
-    phrase("Solo session has a user: run full path"),
-    "a solo session no longer runs the full interactive path",
+    phrase("Heavy is never a reason to give up"),
+    "the fleet heavy-row branch no longer says heavy is never a reason to give up",
+  );
+  assert.match(
+    SIZING,
+    phrase("Solo session has a user: settle the open design choices with them before planning"),
+    "a solo session no longer settles design with its user before planning",
   );
 });

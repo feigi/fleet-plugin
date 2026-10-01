@@ -84,9 +84,9 @@ Abandoned before PR opens → remove `in-progress`.
 
 Run `sizing-a-ticket`, follow path it returns. Both rows work solo — heavy row means more process, not blocked ticket.
 
-## 7. When the superpowers path reports done — open the PR
+## 7. When the sizing-a-ticket path reports done — open the PR
 
-Come back here. Implementation skill hands off; this step always follows.
+Come back here. The sizing path hands off; this step always follows.
 
 ```bash
 git fetch origin && git rebase origin/main   # rebase, never merge main in

@@ -12,15 +12,15 @@ Read first: `gh issue view <N> --json title,body,comments --jq '.title, .body, (
 
 | Row | Signal | Path |
 |---|---|---|
-| **light** | States exactly what to change, one-two files, no design choice open | `superpowers:test-driven-development` |
-| **heavy** | Ambiguity in *what* to build, >~3 files, new API/schema/UX, or several viable approaches | `superpowers:brainstorming` → `superpowers:writing-plans` → `superpowers:subagent-driven-development` |
+| **light** | States exactly what to change, one-two files, no design choice open | Test first, make the one change, run it with the repo's test runner |
+| **heavy** | Ambiguity in *what* to build, >~3 files, new API/schema/UX, or several viable approaches | Write a short plan, then carry it out inline, test first |
 
-**Fleet member on heavy: enter at `superpowers:writing-plans`.**
-`superpowers:brainstorming` is the maintainer-present step — its `<HARD-GATE>`
-waits on user approval no unattended member gets, and a `ready-for-agent`
-ticket's `## Agent Brief` already is that output. Solo session has a user: run full path.
+**Fleet member on heavy: write the plan under your own scratch path, `<scratch>/impl-<N>/`, then carry it out inline, test first.**
+Heavy is never a reason to give up: a `ready-for-agent` ticket's `## Agent Brief`
+already settles the open design choices, so plan from it. Solo session has a user:
+settle the open design choices with them before planning.
 
-Bug reports: `superpowers:systematic-debugging` first, either row.
+Bug reports, either row: reproduce with a failing test before fixing.
 
 Report row, path, one-line why. **Process depth only** — no admissibility call
 here, for anyone. Both rows workable, solo and in fleet; heavy means more process,
@@ -33,7 +33,7 @@ questions, two biases. Never carry this one across.
 ## Red flags
 
 - "Body is short, so it's simple" → short bodies hide most design ambiguity. Size by unknowns, not word count.
-- "Brainstorming is overkill here" → that thought is heavy row.
+- "A plan is overkill here" → that thought is heavy row.
 - "The Agent Brief is thorough, so it's light now" → brief quality never promotes
   a heavy row *for process depth*. Says nothing about admissibility — thorough
   brief is exactly what makes big ticket safe to run unattended.
