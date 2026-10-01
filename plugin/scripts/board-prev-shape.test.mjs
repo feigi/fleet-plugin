@@ -31,6 +31,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./exec-stub.mjs";
@@ -58,9 +59,9 @@ process.exit(2);`;
 // below would read `undefined` from a parse of nothing. Asserting status here
 // keeps that failure legible at the one place it can happen.
 function gathered(prevBody) {
-  const cwd = mkdtempSync(join(tmpdir(), "board-prevshape-"));
-  const bin = mkdtempSync(join(tmpdir(), "board-prevshape-bin-"));
-  const scriptDir = mkdtempSync(join(tmpdir(), "board-prevshape-scripts-"));
+  const cwd = tempDir("board-prevshape-");
+  const bin = tempDir("board-prevshape-bin-");
+  const scriptDir = tempDir("board-prevshape-scripts-");
 
   writeFileSync(join(scriptDir, "ci-state.mjs"), CI_READ_FAILS);
   // A real ledger answer, so the only unusual read on this stderr is the one
@@ -193,9 +194,9 @@ for (const body of ACCEPTED) {
 // read degrades through tryRun — so the board still builds with no network and
 // no read of this repo's live issue list.
 function runBuild(prevArgs) {
-  const cwd = mkdtempSync(join(tmpdir(), "board-prevshape-cli-"));
-  const home = mkdtempSync(join(tmpdir(), "board-prevshape-home-"));
-  const bin = mkdtempSync(join(tmpdir(), "board-prevshape-cli-bin-"));
+  const cwd = tempDir("board-prevshape-cli-");
+  const home = tempDir("board-prevshape-home-");
+  const bin = tempDir("board-prevshape-cli-bin-");
   writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   return spawnSync(process.execPath, [BOARD, "build", "--ledger", join(cwd, "nope.md"), ...prevArgs], {
     cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
@@ -204,7 +205,7 @@ function runBuild(prevArgs) {
 }
 
 test("build: an ignored previous board changes neither the exit code nor stdout (#1192)", () => {
-  const prevFile = join(mkdtempSync(join(tmpdir(), "board-prevshape-file-")), "prev.json");
+  const prevFile = join(tempDir("board-prevshape-file-"), "prev.json");
   writeFileSync(prevFile, '{"tickets": 5}');
   const withPrev = runBuild(["--prev", prevFile]);
   // The baseline is measured in the same run rather than asserted as a

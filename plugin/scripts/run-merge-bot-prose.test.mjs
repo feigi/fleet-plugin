@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { between, paragraph, phrase } from "./prose-pin.mjs";
 
@@ -1008,7 +1009,7 @@ const STEP1_FIRE_SCRIPT = STEP1_STUBS + STEP1_FIRE[0].replaceAll("<pr>", "42");
 const step1PollScript = ({ rc, branch, pre }) =>
   STEP1_STUBS + STEP1_POLL[0].replaceAll("<pr>", "42").replaceAll("<rc>", rc).replaceAll("<branch>", branch).replaceAll("<pre>", pre);
 
-const STEP1_DIR = mkdtempSync(join(tmpdir(), "merge-bot-step1-"));
+const STEP1_DIR = tempDir("merge-bot-step1-");
 
 const step1HasShell = (s) => {
   try {

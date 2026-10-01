@@ -32,9 +32,9 @@
 // Deliberately not a `.test.mjs`, so `node --test` never loads it as a suite.
 
 import { spawnSync } from "node:child_process";
-import { linkSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { linkSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { tempDir } from "./temp-dir.mjs";
 
 // `__stub`/`__stub_l` rather than short names: a sourced body shares this
 // shell's variables, and one that tests `$s` or `$l` must not find them set.
@@ -54,8 +54,7 @@ esac
 // rest of the file. Unbounded on purpose: a first exec killed before the scan
 // finishes leaves it unpaid.
 const trampoline = (() => {
-  const dir = mkdtempSync(join(tmpdir(), "exec-stub-"));
-  process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
+  const dir = tempDir("exec-stub-");
   const path = join(dir, "trampoline");
   writeFileSync(path, TRAMPOLINE, { mode: 0o555 });
   writeFileSync(join(dir, ".warm.stub"), "#!/bin/sh\nexit 0\n");

@@ -5,6 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, statSync, chmodSync, rmSync, readFileSync, existsSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { dirname, join } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
@@ -176,9 +177,9 @@ test("an unparseable payload warns ONCE per PR across ticks, and a second PR is 
 // that spends one line per process and one that spends one per tick are
 // indistinguishable inside a single-tick, single-PR run.
 function gatherCi({ ciStateBody, prevCi, prs = [42], ticks = 1 }) {
-  const cwd = mkdtempSync(join(tmpdir(), "board-gather-"));
-  const bin = mkdtempSync(join(tmpdir(), "board-gather-bin-"));
-  const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-scripts-"));
+  const cwd = tempDir("board-gather-");
+  const bin = tempDir("board-gather-bin-");
+  const scriptDir = tempDir("board-gather-scripts-");
   writeFileSync(join(scriptDir, "ci-state.mjs"), ciStateBody);
   const rows = JSON.stringify(prs.map((n) => ({ number: n, state: "OPEN", labels: [], title: "t" })));
   writeExecStub(join(bin, "gh"),
@@ -390,7 +391,7 @@ test("gather: the real call site still hands mapCi the PR number, not just the p
 // its first invocation and exit-0-truncated on its second, for the SAME PR —
 // both warnings must print.
 test("gather: a PR that hits the exit-1 salvage then the exit-0 guard gets BOTH warnings, not just the first", () => {
-  const markerDir = mkdtempSync(join(tmpdir(), "board-dualarm-"));
+  const markerDir = tempDir("board-dualarm-");
   const marker = join(markerDir, "tick");
   const DUAL_ARM = `import { writeSync, existsSync, writeFileSync } from "node:fs";
 const marker = ${JSON.stringify(marker)};
@@ -422,9 +423,9 @@ process.exit(first ? 1 : 0);`;
 // tests pin. Out of process for the same reason as gatherCi: gather() reads
 // process.argv and would otherwise read the test runner's.
 function gatherRows({ issuesJson, prsJson }) {
-  const cwd = mkdtempSync(join(tmpdir(), "board-gather-rows-"));
-  const bin = mkdtempSync(join(tmpdir(), "board-gather-rows-bin-"));
-  const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-rows-scripts-"));
+  const cwd = tempDir("board-gather-rows-");
+  const bin = tempDir("board-gather-rows-bin-");
+  const scriptDir = tempDir("board-gather-rows-scripts-");
   writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
   writeExecStub(join(bin, "gh"),
     `#!/bin/sh\ncase "$1 $2" in\n"issue list") echo '${issuesJson}' ;;\n"pr list") echo '${prsJson}' ;;\n*) exit 1 ;;\nesac\n`);
@@ -485,9 +486,9 @@ test("gather: a PR row with no number is dropped, loudly, not placed as undefine
 // for a full page would render the cut list as the whole one. The driver runs
 // the real computeBoard() over gather()'s answer: the board is the subject.
 function gatherCapped({ issues, prs }) {
-  const cwd = mkdtempSync(join(tmpdir(), "board-gather-capped-"));
-  const bin = mkdtempSync(join(tmpdir(), "board-gather-capped-bin-"));
-  const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-capped-scripts-"));
+  const cwd = tempDir("board-gather-capped-");
+  const bin = tempDir("board-gather-capped-bin-");
+  const scriptDir = tempDir("board-gather-capped-scripts-");
   writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
   writeFileSync(join(scriptDir, "ledger.mjs"),
     `process.stdout.write(${JSON.stringify(JSON.stringify({ rows: [], filed: [], ruled: [] }))});\n`);
@@ -573,9 +574,9 @@ test("#2108: a pool read AND an open-PR read that both fill their --limit are bo
 // argv is logged, so a test can count merged reads. The driver runs the real
 // computeBoard() over gather()'s answer: the card's column is the subject.
 function gatherMerged({ rows, prs = [], prev = null, states = {}, fail = false, emptyRepo = false }) {
-  const cwd = mkdtempSync(join(tmpdir(), "board-gather-merged-"));
-  const bin = mkdtempSync(join(tmpdir(), "board-gather-merged-bin-"));
-  const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-merged-scripts-"));
+  const cwd = tempDir("board-gather-merged-");
+  const bin = tempDir("board-gather-merged-bin-");
+  const scriptDir = tempDir("board-gather-merged-scripts-");
   const log = join(cwd, "gh-calls.jsonl");
   writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
   writeFileSync(join(scriptDir, "ledger.mjs"),
@@ -769,7 +770,7 @@ test("gather: a malformed element inside labels is dropped, not the whole row", 
 });
 
 test("createBoardServer serves board.json and the page", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "board-"));
+  const dir = tempDir("board-");
   writeFileSync(join(dir, "board.json"), JSON.stringify({ generatedAt: 1, tickets: [], attention: [] }));
   writeFileSync(join(dir, "board.html"), "<!doctype html><title>cockpit</title>");
   const server = createBoardServer(dir);
@@ -796,7 +797,7 @@ test("createBoardServer serves board.json and the page", async () => {
 // failed silently as "panel hidden" or "plausible but 3x too big".
 
 test("findSubagentsDir picks the session with the newest transcript", () => {
-  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const home = tempDir("spend-home-");
   const proj = join(home, ".omp", "agent", "sessions", "-x");
   const older = join(proj, "2026-09-08T13-13-27-300Z_11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   const newer = join(proj, "2026-09-09T02-00-00-000Z_22222222-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
@@ -832,7 +833,7 @@ test("session ranking uses transcript mtime, not directory mtime", () => {
   // with the fix fully reverted. Stamp all four times explicitly, files before
   // dirs: creating a file is the one operation that moves its parent's mtime,
   // and rewriting an existing file's mtime does not.
-  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const home = tempDir("spend-home-");
   const proj = join(home, ".omp", "agent", "sessions", "-x");
   const busy = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");   // spawned its agents early, still appending
   const idle = join(proj, "2026-09-09T02-00-00-000Z_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");   // spawned one last agent, then went quiet
@@ -858,7 +859,7 @@ test("one unreadable session directory loses the ranking instead of sinking the 
   // The bad sibling is a regular FILE where a directory is expected: EISDIR/
   // ENOTDIR is the same uncaught throw and, unlike a permission bit, it still
   // throws when the suite runs as root.
-  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const home = tempDir("spend-home-");
   const proj = join(home, ".omp", "agent", "sessions", "-x");
   const good = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   mkdirSync(good, { recursive: true });
@@ -899,7 +900,7 @@ function ompTranscript({ agent, task, model = "claude-opus-5", turns = [] } = {}
 // home-relative form (`-dev-repo`) and needs no realpath of a cwd that does
 // not exist. encodeProjectDir is the real encoder, not a hand-rolled path.
 function ompHome() {
-  const home = mkdtempSync(join(tmpdir(), "spend-omp-home-"));
+  const home = tempDir("spend-omp-home-");
   const cwd = join(home, "dev", "repo");
   const proj = join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home }));
   mkdirSync(proj, { recursive: true });
@@ -960,8 +961,8 @@ test("findSubagentsDir: an EACCES resolving the omp encoding (not ENOENT) surfac
   // swallow ENOENT ("this cwd doesn't exist" — the documented case). Any
   // other error (EACCES on an ancestor, here) is a real fault and must
   // propagate, never be silently relabelled as "no omp session".
-  const home = mkdtempSync(join(tmpdir(), "spend-eacces-home-"));
-  const outer = mkdtempSync(join(tmpdir(), "spend-eacces-outer-"));
+  const home = tempDir("spend-eacces-home-");
+  const outer = tempDir("spend-eacces-outer-");
   const blocked = join(outer, "blocked");
   mkdirSync(blocked);
   const cwd = join(blocked, "sub", "repo");
@@ -976,7 +977,7 @@ test("findSubagentsDir: an EACCES resolving the omp encoding (not ENOENT) surfac
 });
 
 test("with no session tree present the lookup is an error that names where it looked", () => {
-  const home = mkdtempSync(join(tmpdir(), "spend-omp-home-"));
+  const home = tempDir("spend-omp-home-");
   const r = findSubagentsDir(home, join(home, "dev", "repo"));
   assert.match(r.error, /\.omp[\\/]agent[\\/]sessions/);
 });
@@ -1197,7 +1198,7 @@ test("an omp session whose only transcript is a live write's torn first line is 
 // drive that distinction directly instead of assuming "the first non-null
 // answer" was always safe to cache.
 test("the pin does not latch a session that predates it — it keeps following the heuristic until one writes on its watch", () => {
-  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const home = tempDir("spend-home-");
   const proj = join(home, ".omp", "agent", "sessions", "-x");
   const mine = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   const theirs = join(proj, "2026-09-09T02-00-00-000Z_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
@@ -1233,7 +1234,7 @@ test("no session at launch is not an answer to pin — the first one to write on
   // spend panel for the entire run — the existing degradation is "hidden until
   // agents land", not "hidden for good", and this is the assertion that keeps
   // the pin from being written as "whatever the first call returned".
-  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const home = tempDir("spend-home-");
   const proj = join(home, ".omp", "agent", "sessions", "-x");
   mkdirSync(proj, { recursive: true });
   const pin = spendDirPin(undefined, home, join(home, "x"));
@@ -1283,7 +1284,7 @@ test("a transcript stamped a few ms before launchMs is followed, never latched �
   // free hedge, leaving no fractional part for a seconds conversion to lose.
   const launchMs = Date.UTC(2026, 0, 1);
   const stamp = (f, ms) => utimesSync(f, new Date(ms), new Date(ms));
-  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const home = tempDir("spend-home-");
   const proj = join(home, ".omp", "agent", "sessions", "-x");
   const mine = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   const theirs = join(proj, "2026-09-09T02-00-00-000Z_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
@@ -1327,7 +1328,7 @@ test("an unresolvable transcript tree is never pinned — one stderr line across
   // the one-line-per-fault promise can no longer come from caching upstream —
   // it comes from gatherSpend's own warnOnce gate, keyed on the message,
   // which needs nothing cached above it to hold.
-  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const home = tempDir("spend-home-");
   const pin = spendDirPin(undefined, home, "/nonexistent");
 
   let first, second;
@@ -1349,7 +1350,7 @@ test("an unresolvable transcript tree recovers on its very next tick, because { 
   // directory mid permission-change, EMFILE, EIO — not just the "project dir
   // absent" case the original comment reasoned about) hid the panel forever
   // even once the tree became readable again.
-  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const home = tempDir("spend-home-");
   const proj = join(home, ".omp", "agent", "sessions", "-x");
   const sess = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   mkdirSync(sess, { recursive: true });
@@ -1371,11 +1372,11 @@ test("--spend-dir's directory replaces the heuristic outright, including one the
   // a tie-breaker, a fallback, or a second opinion. The fixture gives the
   // heuristic a perfectly resolvable session to pick so that "the explicit one
   // wins" is a real preference and not the absence of an alternative.
-  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const home = tempDir("spend-home-");
   const heuristic = join(home, ".omp", "agent", "sessions", "-x", "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   mkdirSync(heuristic, { recursive: true });
   writeFileSync(join(heuristic, "agent-a.jsonl"), "");
-  const named = mkdtempSync(join(tmpdir(), "spend-named-"));
+  const named = tempDir("spend-named-");
 
   assert.equal(findSubagentsDir(home, join(home, "x")), heuristic, "the heuristic has an answer of its own here");
   const pin = spendDirPin(named, home, join(home, "x"));
@@ -1390,7 +1391,7 @@ test("gatherSpend reads a handed-in null as a resolution, not as an absent argum
   // which is the unpinned source this ticket exists to remove. The fixture
   // makes that observable: $HOME here DOES hold a resolvable session, so a
   // re-resolve would return a panel instead of nothing.
-  const home = mkdtempSync(join(tmpdir(), "spend-home-"));
+  const home = tempDir("spend-home-");
   const live = join(home, ".omp", "agent", "sessions", encodeProjectDir(process.cwd(), { home }), "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   mkdirSync(live, { recursive: true });
   writeFileSync(join(live, "agent-x.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
@@ -1419,9 +1420,9 @@ test("CLI: a live serve keeps the panel on the session that wrote first on its w
   // realpath, not the bare mkdtemp path: on darwin $TMPDIR is under /var, a
   // symlink to /private/var, and the child's process.cwd() reports the RESOLVED
   // form — encoding the unresolved one puts the fixture where nothing looks.
-  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "spend-pin-cwd-")));
-  const home = mkdtempSync(join(tmpdir(), "spend-pin-home-"));
-  const bin = mkdtempSync(join(tmpdir(), "spend-pin-bin-"));
+  const cwd = realpathSync(tempDir("spend-pin-cwd-"));
+  const home = tempDir("spend-pin-home-");
+  const bin = tempDir("spend-pin-bin-");
   // gh fails on every call and the reads degrade, so this stays offline and off
   // this repo's live issue list. Prepended rather than replacing PATH: gather()
   // shells out to `node` for the ledger read.
@@ -1498,7 +1499,7 @@ const TURN = [
 ];
 
 function fixture(lines) {
-  const dir = mkdtempSync(join(tmpdir(), "spend-"));
+  const dir = tempDir("spend-");
   writeFileSync(join(dir, "agent-x.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
   return dir;
 }
@@ -1573,7 +1574,7 @@ function withStderr(fn) {
 }
 
 function rawFixture(text) {
-  const dir = mkdtempSync(join(tmpdir(), "spend-"));
+  const dir = tempDir("spend-");
   writeFileSync(join(dir, "agent-x.jsonl"), text);
   return dir;
 }
@@ -1617,8 +1618,8 @@ test("a torn LAST line stays silent — the tear every tick legitimately produce
 // this is the only test in the file that fails — dir B's line never prints,
 // because dir A's identical-basename skip already claimed the (mutated) key.
 test("two session dirs whose transcripts share a basename each get their own skip line", () => {
-  const dirA = mkdtempSync(join(tmpdir(), "spend-collide-a-"));
-  const dirB = mkdtempSync(join(tmpdir(), "spend-collide-b-"));
+  const dirA = tempDir("spend-collide-a-");
+  const dirB = tempDir("spend-collide-b-");
   mkdirSync(join(dirA, "agent-x.jsonl")); // directory where a file is expected -> EISDIR, unreadable
   mkdirSync(join(dirB, "agent-x.jsonl")); // same basename, different session dir
   const errs = withStderr(() => {
@@ -1770,7 +1771,7 @@ test("every gatherSpend return carries the tag the page routes on (#959)", () =>
   // The unresolvable-dir return.
   assert.equal(gatherSpend({ dir: { error: "no session directory for this cwd" } }).ok, false);
   // The all-unreadable return: a dir holding only a transcript that cannot be read.
-  const allBad = mkdtempSync(join(tmpdir(), "spend-"));
+  const allBad = tempDir("spend-");
   mkdirSync(join(allBad, "agent-trap.jsonl")); // a directory where a file is expected
   let bad;
   withStderr(() => { bad = gatherSpend({ dir: allBad }); }); // it warns; the warning is not what is under test
@@ -1779,7 +1780,7 @@ test("every gatherSpend return carries the tag the page routes on (#959)", () =>
   // The success return.
   assert.equal(gatherSpend({ dir: fixture(TURN) }).ok, true);
   // And the one return that is deliberately NOT an object: nothing yet.
-  assert.equal(gatherSpend({ dir: mkdtempSync(join(tmpdir(), "spend-")) }), null);
+  assert.equal(gatherSpend({ dir: tempDir("spend-") }), null);
 });
 
 // #169: `arg()` is CLI-internal (not exported), so this pins the trailing-flag
@@ -2005,8 +2006,8 @@ test("CLI: a malformed --port with no subcommand names the flag, not the usage l
 // fresh mkdtemp cwd what keeps them from sharing a state directory.
 const serveArgs = (args) => [SCRIPT, "serve", ...args];
 const serveOpts = () => ({
-  cwd: mkdtempSync(join(tmpdir(), "board-serve-")),
-  env: { ...process.env, PATH: mkdtempSync(join(tmpdir(), "board-nobin-")) },
+  cwd: tempDir("board-serve-"),
+  env: { ...process.env, PATH: tempDir("board-nobin-") },
   encoding: "utf8",
   timeout: 20000,
 });
@@ -2049,8 +2050,8 @@ function muteHolder() {
 test("CLI: a derived port held by anything is fatal on the degrade arm — there is no identity to scan for", async () => {
   const blocker = createServer();
   await new Promise((res) => { blocker.once("error", res); blocker.listen(8123, res); });
-  const nobin = mkdtempSync(join(tmpdir(), "board-nobin-"));
-  const cwd = mkdtempSync(join(tmpdir(), "board-serve-"));
+  const nobin = tempDir("board-nobin-");
+  const cwd = tempDir("board-serve-");
   try {
     const r = serveSync(cwd, nobin, ["--interval", "3600"]);
     assert.equal(r.status, 2, `a held derived port on the degrade arm must refuse, not scan past it: ${r.stderr}`);
@@ -2134,7 +2135,7 @@ test("CLI: serve --spend-dir reads the named directory's spend into every tick, 
   // refuses a --spend-dir whose own basename is not an omp session dir
   // (#1302-style guard), so this fixture must look like one to keep testing
   // what it says it tests — the named directory's data reaching the panel.
-  const root = mkdtempSync(join(tmpdir(), "spend-named-"));
+  const root = tempDir("spend-named-");
   const dir = join(root, "2026-08-25T09-00-00-000Z_abcdef12-3456-7890-abcd-ef1234567890");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "named.jsonl"), TURN.map((l) => JSON.stringify(l)).join("\n") + "\n");
@@ -2348,7 +2349,7 @@ test("resolveCockpitInstance: a fixed workspace pins the FNV-1a-with-Math.imul p
 // SECOND port and a second state directory for a workspace already being
 // served, which is the collision this ticket exists to prevent.
 test("resolveCockpitInstance: a symlinked route to one workspace derives the canonical form's port", () => {
-  const root = mkdtempSync(join(tmpdir(), "board-ws-link-"));
+  const root = tempDir("board-ws-link-");
   try {
     const real = join(root, "repo");
     mkdirSync(join(real, ".git"), { recursive: true });
@@ -2421,7 +2422,7 @@ test("resolveCockpitInstance: an explicit port survives the degrade path too", (
 // `git rev-parse`, while gh and node must stay unreachable so these spawns
 // remain offline and fast — the same intent serveOpts()'s empty PATH has.
 function gitOnlyPath() {
-  const bin = mkdtempSync(join(tmpdir(), "board-gitbin-"));
+  const bin = tempDir("board-gitbin-");
   const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" });
   assert.equal(real.status, 0, "test setup: no git on PATH to shim, so the resolved arm cannot be reached");
   symlinkSync(real.stdout.trim(), join(bin, "git"));
@@ -2429,7 +2430,7 @@ function gitOnlyPath() {
 }
 
 function gitRepo(prefix) {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const dir = tempDir(prefix);
   // GIT_DIR/GIT_WORK_TREE scrubbed off the FIXTURE too: under an ambient one
   // `git init` exits 0 having re-inited whichever directory the variable
   // names, leaving this one silently not a repository (ledger.test.mjs hit
@@ -2628,7 +2629,7 @@ async function holderOn(dir, port = 0) {
 }
 
 const boardDir = (payload) => {
-  const dir = mkdtempSync(join(tmpdir(), "board-holder-"));
+  const dir = tempDir("board-holder-");
   if (payload !== undefined) writeFileSync(join(dir, "board.json"), payload);
   return dir;
 };
@@ -2877,7 +2878,7 @@ for (const [platform, launchers, ran, warns] of [
 ]) {
   const onPath = Object.entries(launchers).map(([n, c]) => (c ? `${n} (exit ${c})` : n)).join(", ");
   test(`CLI: a fresh --open launch on ${platform} with ${onPath} on PATH runs ${ran.join(" ") || "no launcher"}${warns ? " and warns with the URL" : ""}`, async () => {
-    const rig = launcherBin(launchers), cwd = mkdtempSync(join(tmpdir(), "board-open-"));
+    const rig = launcherBin(launchers), cwd = tempDir("board-open-");
     const launch = serveOn(platform, cwd, rig.bin);
     const exited = new Promise((res) => launch.p.on("exit", (code, signal) => res({ code, signal })));
     try {

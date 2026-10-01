@@ -19,6 +19,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { runReviewToFile } from "./review-eval.mjs";
 import { DIGEST_KEYS } from "./review-core.mjs";
@@ -38,7 +39,7 @@ const RESULT = {
   unverified: [{ claim: "u1" }, { claim: "u2" }, { claim: "u3" }],
 };
 
-const scratch = () => mkdtempSync(join(tmpdir(), "review-runner-"));
+const scratch = () => tempDir("review-runner-");
 
 // A `run` that answers from a script, one entry per call; an `Error` entry is
 // thrown. Counts calls so a test can say how many reviews it cost.

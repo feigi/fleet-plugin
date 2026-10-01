@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./exec-stub.mjs";
@@ -83,9 +84,9 @@ test("livenessBanner stays silent for a run with nothing to report", () => {
 // their own default path resolution, in a throwaway repository, and asserts
 // the mark one wrote reaches the board the other built.
 test("a mark written by the real heartbeat reaches the real board (#1597)", () => {
-  const repo = mkdtempSync(join(tmpdir(), "board-liveness-e2e-"));
+  const repo = tempDir("board-liveness-e2e-");
   assert.equal(spawnSync("git", ["init", "-q", repo], { encoding: "utf8" }).status, 0);
-  const bin = mkdtempSync(join(tmpdir(), "board-liveness-bin-"));
+  const bin = tempDir("board-liveness-bin-");
   writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
 

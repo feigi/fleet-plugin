@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { join, dirname } from "node:path";
 
 import {
@@ -55,7 +56,7 @@ const assistantEvt = (model, usage, ts = "2026-09-08T15:12:00.000Z") => evt({
 });
 
 function ompSessionFixture(sessionName, files) {
-  const root = mkdtempSync(join(tmpdir(), "mr-omp-home-"));
+  const root = tempDir("mr-omp-home-");
   const sessionsRoot = join(root, ".omp", "agent", "sessions", "-x");
   const sessionDir = join(sessionsRoot, sessionName);
   mkdirSync(sessionDir, { recursive: true });
@@ -466,7 +467,7 @@ test("readMembers: a loose top-level session .jsonl FILE beside session director
   // encoded-cwd directory itself for that reason, stamping every row
   // `session=-dev-fleet-plugin` instead of the `<ISO>_<uuid>` name and
   // booking the loose top-level file as a member.
-  const root = mkdtempSync(join(tmpdir(), "mr-omp-realshape-"));
+  const root = tempDir("mr-omp-realshape-");
   const encDir = join(root, ".omp", "agent", "sessions", "-dev-fleet-plugin");
   const sessionName = "2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55";
   const sessionDir = join(encDir, sessionName);
@@ -511,6 +512,6 @@ test("readMembers: a line matching NEITHER shape (no `type`, no Claude keys) is 
 });
 
 test("readMembers: a root holding no omp session directory anywhere is refused, not silently empty", () => {
-  const stray = mkdtempSync(join(tmpdir(), "mr-stray-"));
+  const stray = tempDir("mr-stray-");
   assert.throws(() => readMembers([stray]), /no omp session directory/);
 });

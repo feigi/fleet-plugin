@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./exec-stub.mjs";
@@ -41,8 +42,8 @@ const EMPTY_LEDGER = "# Fleet run ledger\n\n## Rows\n\n\n## Filed\n\n\n## Ruled\
 // script ignores — which is the whole defect — so the two arms that decide
 // whether the fix works must not use one.
 function gatherLedger({ ledgerBody = null, scriptDir = REAL_SCRIPTS } = {}) {
-  const cwd = mkdtempSync(join(tmpdir(), "board-ledger-"));
-  const bin = mkdtempSync(join(tmpdir(), "board-ledger-bin-"));
+  const cwd = tempDir("board-ledger-");
+  const bin = tempDir("board-ledger-bin-");
   writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   const ledgerFile = join(cwd, "ledger.md");
   if (ledgerBody !== null) writeFileSync(ledgerFile, ledgerBody);
@@ -61,7 +62,7 @@ function gatherLedger({ ledgerBody = null, scriptDir = REAL_SCRIPTS } = {}) {
 // A stub ledger.mjs whose body is supplied per test, plus an argv sentinel so a
 // test can assert what board.mjs actually spawned rather than inferring it.
 function stubScripts(body) {
-  const dir = mkdtempSync(join(tmpdir(), "board-ledger-stub-"));
+  const dir = tempDir("board-ledger-stub-");
   const argvFile = join(dir, "argv.txt");
   writeFileSync(join(dir, "ledger.mjs"),
     `import { writeFileSync } from "node:fs";\n` +

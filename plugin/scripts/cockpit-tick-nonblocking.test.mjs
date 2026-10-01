@@ -28,6 +28,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, symlinkSync, rmSync, realpathSync, existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "./board.mjs";
@@ -62,7 +63,7 @@ const slowGh = (mark) => "#!/bin/sh\ncase \"$1 $2\" in\n"
 // ledger.mjs — the same shim board-identity.test.mjs uses, and no row here
 // asserts a ticket.
 function shimPath(mark) {
-  const bin = mkdtempSync(join(tmpdir(), "tick-bin-"));
+  const bin = tempDir("tick-bin-");
   const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" });
   assert.equal(real.status, 0, "test setup: no git on PATH to shim, so the derived-port arm cannot be reached");
   symlinkSync(real.stdout.trim(), join(bin, "git"));
@@ -74,7 +75,7 @@ function shimPath(mark) {
 // which is a symlink to /private/var, and resolveCockpitInstance canonicalises
 // the workspace it derives.
 function gitRepo(prefix) {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  const dir = realpathSync(tempDir(prefix));
   // GIT_DIR/GIT_WORK_TREE scrubbed off the fixture: under an ambient one `git
   // init` exits 0 having re-inited whichever directory the variable names.
   const init = spawnSync("git", ["init", "-q"], { cwd: dir, stdio: "ignore", env: gitEnv() });
@@ -148,9 +149,9 @@ const boardJson = async (port) => {
 // candidate and never exits, so spawnSync reports the timeout instead of 0.
 test("CLI: a relaunch that lands mid-gather() is answered within 1s and reuses the live cockpit", async () => {
   const repo = gitRepo("tick-block-");
-  const mark = join(mkdtempSync(join(tmpdir(), "tick-mark-")), "gathering");
+  const mark = join(tempDir("tick-mark-"), "gathering");
   const bin = shimPath(mark);
-  const home = mkdtempSync(join(tmpdir(), "tick-home-"));
+  const home = tempDir("tick-home-");
   const instance = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
   const expected = await firstFreePort(cockpitPorts(instance));
   const first = serveProcess(repo, bin, home);

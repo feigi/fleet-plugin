@@ -35,6 +35,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./exec-stub.mjs";
@@ -50,9 +51,9 @@ const REPO_JSON = '{"nameWithOwner":"o/r","url":"https://example.invalid/o/r"}';
 // `node <scriptDir>/ledger.mjs`, and only a stub can hand it stdout that
 // arrives at exit 0 and parses to something no real ledger.mjs emits.
 function gatherWith({ issuesJson = "[]", prsJson = "[]", ledgerBody = null } = {}) {
-  const cwd = mkdtempSync(join(tmpdir(), "board-tpnull-"));
-  const bin = mkdtempSync(join(tmpdir(), "board-tpnull-bin-"));
-  const scriptDir = mkdtempSync(join(tmpdir(), "board-tpnull-scripts-"));
+  const cwd = tempDir("board-tpnull-");
+  const bin = tempDir("board-tpnull-bin-");
+  const scriptDir = tempDir("board-tpnull-scripts-");
 
   writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
   writeFileSync(join(scriptDir, "ledger.mjs"),

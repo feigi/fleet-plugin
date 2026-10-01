@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -61,7 +62,7 @@ function ompTranscript(resolvedModelIdentity, thinkingLevel, { withTurn = true, 
 }
 
 function dir() {
-  return mkdtempSync(join(tmpdir(), "tier-check-"));
+  return tempDir("tier-check-");
 }
 
 // The measured real `modelRoles` shape (ADR 0011/0014) used by every fixture
@@ -432,7 +433,7 @@ test("CLI: no --model-roles and no `omp` on PATH refuses naming the config read"
   writeFileSync(join(d, "omp-impl.jsonl"), ompTranscript("anthropic/claude-opus-5", "xhigh"));
   const batch = [{ member: "NoPathOmp", agentFile: "fleet-implementer.agent.md", transcript: "omp-impl.jsonl" }];
   writeFileSync(join(d, "batch.json"), JSON.stringify(batch));
-  const emptyPath = mkdtempSync(join(tmpdir(), "tier-check-empty-path-"));
+  const emptyPath = tempDir("tier-check-empty-path-");
   const r = spawnSync(process.execPath, [SCRIPT, "--batch", "batch.json", "--repo", d], {
     cwd: d, encoding: "utf8", env: { ...process.env, PATH: emptyPath },
   });

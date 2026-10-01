@@ -21,6 +21,7 @@ import assert from "node:assert/strict";
 import { spawnSync, spawn, execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeProjectDir } from "./board.mjs";
@@ -48,13 +49,13 @@ const ompTurn = (cacheWrite) => [
 // case below needs a real one the read has to carry back whole. `seed` lays
 // the transcript tree into the fake $HOME for the child's cwd.
 function runBoard(sinceArgs, ledgerFile, seed = seedDefault) {
-  const home = mkdtempSync(join(tmpdir(), "since-home-"));
+  const home = tempDir("since-home-");
   // realpath, not the bare mkdtemp path: on darwin $TMPDIR is under /var, which
   // is a symlink to /private/var, and the child's process.cwd() reports the
   // RESOLVED form. Encoding the unresolved one puts the fixture at a path
   // findSubagentsDir never looks in, and the panel comes back { error }.
-  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "since-cwd-")));
-  const bin = mkdtempSync(join(tmpdir(), "since-bin-"));
+  const cwd = realpathSync(tempDir("since-cwd-"));
+  const bin = tempDir("since-bin-");
   writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   seed(home, cwd);
   return spawnSync(process.execPath, [BOARD, "build", "--ledger", ledgerFile ?? join(cwd, "nope.md"), ...sinceArgs], {
@@ -155,7 +156,7 @@ test("no --spend-since at all is not an error — the panel is simply unscoped",
 // a resolvable session at the encoded cwd, so the heuristic has a real answer
 // of its own and a flag that did nothing would still produce a panel.
 test("build: --spend-dir reads the named directory instead of the session the heuristic picks", () => {
-  const root = mkdtempSync(join(tmpdir(), "since-named-"));
+  const root = tempDir("since-named-");
   const dir = join(root, "2026-08-25T09-00-00-000Z_abcdef12-3456-7890-abcd-ef1234567890");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "named.jsonl"), ompTurn(2000));
@@ -185,7 +186,7 @@ test("build: --spend-dir naming a directory that does not exist yet is accepted,
   // launch, and the cockpit launches in run-team phase 0, before that. The
   // operator names the directory; it appears seconds later. Until then the
   // panel hides — never zeroes, and never a refusal.
-  const r = runBoard(["--spend-dir", join(mkdtempSync(join(tmpdir(), "since-absent-")), "2026-08-26T09-00-00-000Z_01a08126-ee04-7095-a695-14e3249f1128")]);
+  const r = runBoard(["--spend-dir", join(tempDir("since-absent-"), "2026-08-26T09-00-00-000Z_01a08126-ee04-7095-a695-14e3249f1128")]);
   assert.equal(r.status, 0, r.stderr);
   const spend = JSON.parse(r.stdout).spend;
   assert.equal(spend.ok, false, "an unreadable named directory must not report spend");
@@ -245,7 +246,7 @@ test("build: the panel comes from this workspace's own omp session, with its too
 test("build: --spend-dir accepts a session directory over a heuristic that resolves elsewhere", () => {
   // runBoard's default seed gives the heuristic a session of its own (1000),
   // so these numbers can only arrive through the named directory.
-  const dir = ompSessionAt(mkdtempSync(join(tmpdir(), "since-omp-")));
+  const dir = ompSessionAt(tempDir("since-omp-"));
   const r = runBoard(["--spend-dir", dir]);
   assert.equal(r.status, 0, r.stderr);
   const spend = JSON.parse(r.stdout).spend;
@@ -391,8 +392,8 @@ assert.ok(
 // rather than piped — nothing here asserts on it, and an unread pipe is one
 // more thing that can stall the child.
 function runBoardFlooded() {
-  const cwd = mkdtempSync(join(tmpdir(), "since-flood-cwd-"));
-  const bin = mkdtempSync(join(tmpdir(), "since-flood-bin-"));
+  const cwd = tempDir("since-flood-cwd-");
+  const bin = tempDir("since-flood-bin-");
   writeExecStub(join(bin, "gh"), FLOOD_GH_STUB);
   return new Promise((resolve) => {
     const child = spawn(
@@ -516,7 +517,7 @@ function oversizedLedger() {
 }
 
 test("build: a ledger read past node's default stdout cap arrives whole, not as an empty board", () => {
-  const dir = mkdtempSync(join(tmpdir(), "board-big-ledger-"));
+  const dir = tempDir("board-big-ledger-");
   const ledger = join(dir, "ledger.md");
   writeFileSync(ledger, oversizedLedger());
 
@@ -567,8 +568,8 @@ test("build: a ledger read past node's default stdout cap arrives whole, not as 
 // Split from the spawn itself so the timing test below can drive the same
 // fixture through python3's saturated-pipe rig instead of spawnSync.
 function boardFaultFixture() {
-  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "board-fault-cwd-")));
-  const bin = mkdtempSync(join(tmpdir(), "board-fault-bin-"));
+  const cwd = realpathSync(tempDir("board-fault-cwd-"));
+  const bin = tempDir("board-fault-bin-");
   writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   // Valid JSON, wrong shape: `rows` is an object where every consumer wants an
   // array. Answers any argv, which is all gather()'s single `node` read needs.

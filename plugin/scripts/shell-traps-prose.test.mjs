@@ -28,6 +28,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { writeExecStub } from "./exec-stub.mjs";
 
@@ -35,7 +36,7 @@ const SKILLS = join(import.meta.dirname, "..", "skills");
 const SKILL = readFileSync(join(SKILLS, "run-team", "SKILL.md"), "utf8");
 const MERGE_BOT = readFileSync(join(import.meta.dirname, "..", "commands", "run-merge-bot.md"), "utf8");
 
-const DIR = mkdtempSync(join(tmpdir(), "shell-traps-"));
+const DIR = tempDir("shell-traps-");
 const BIN = join(DIR, "bin");
 mkdirSync(BIN);
 
@@ -272,7 +273,7 @@ if [ "$n" -le 1 ]; then printf '849\\n850\\n'; else printf '849\\n850\\n852\\n';
 stub("sleep", "#!/bin/sh\nexit 0\n");
 
 const runMonitor = (shell, body, ticks = 2) => {
-  const calls = mkdtempSync(join(tmpdir(), "shell-traps-calls-"));
+  const calls = tempDir("shell-traps-calls-");
   const capped = body.replace(WATCH_LOOP, `tick=0\nwhile tick=$((tick+1)); [ "$tick" -le ${ticks} ]; do`);
   return sh(shell, capped, { CALLS: calls });
 };

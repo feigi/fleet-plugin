@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { writeExecStub } from "./exec-stub.mjs";
 
@@ -42,7 +43,7 @@ const blocks = [...SKILL.matchAll(/```sh\n([\s\S]*?)```/g)]
 assert.equal(blocks.length, 1, `expected exactly one sh block emitting WATCHER DEGRADED, found ${blocks.length} — update this test`);
 const BLOCK = blocks[0];
 
-const DIR = mkdtempSync(join(tmpdir(), "watcher-block-"));
+const DIR = tempDir("watcher-block-");
 const BIN = join(DIR, "bin");
 mkdirSync(BIN);
 
