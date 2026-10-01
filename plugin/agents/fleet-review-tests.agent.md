@@ -8,9 +8,10 @@ model: "@task:medium"
      agent
      (marketplace plugin `pr-review-toolkit`, agent file `pr-test-analyzer.md`),
      which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
-     `model: sonnet` matches the pre-cutover review host's PREVIOUS per-call override for
-     this dimension (the vendor's own frontmatter was `model: inherit` with
-     no pin to preserve) — this is the "recoverable miss" tier
+     Its `model:` is the `@task:medium` route, which resolves through the
+     operator's `modelRoles`. The pre-cutover review host's PREVIOUS per-call
+     override for this dimension was `sonnet` (the vendor's own frontmatter
+     was `model: inherit` with no pin to preserve) — this is the "recoverable miss" tier
      review-core.mjs's DEFAULT_DIMENSIONS comment describes: a weak pass here
      is caught by a later run or a reader. -->
 

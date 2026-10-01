@@ -8,7 +8,8 @@ model: "@slow:high"
      agent
      (marketplace plugin `pr-review-toolkit`, agent file `code-simplifier.md`),
      which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
-     `model: opus` matches that agent's own frontmatter pin. Unlike the
+     Its `model:` is the `@slow:high` route, which resolves through the
+     operator's `modelRoles`; that agent's own frontmatter pinned `opus`. Unlike the
      vendor original (which edits code directly), this dispatch is
      REPORT-ONLY: review-core.mjs's dispatch prompt already instructs "never
      edit a file", and every finding here is severity `suggestion` by design

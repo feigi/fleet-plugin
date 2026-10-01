@@ -7,7 +7,8 @@ model: "@slow:high"
 <!-- Prompt adapted from Anthropic's vendored `code-reviewer` agent
      (marketplace plugin `pr-review-toolkit`, agent file `code-reviewer.md`),
      which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
-     `model: opus` matches that agent's own frontmatter pin. Adapted, not
+     Its `model:` is the `@slow:high` route, which resolves through the
+     operator's `modelRoles`; that agent's own frontmatter pinned `opus`. Adapted, not
      copied verbatim: the vendor's freeform "Output Format"/confidence-score
      prose is dropped because the dispatcher already enforces FINDINGS_SCHEMA
      via structured output — a second, contradictory output contract would

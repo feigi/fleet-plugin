@@ -10,7 +10,8 @@ tier-controlled identity instead of falling through
 to a session default; #1349 (per #1303's gap 3) forbids sending `model` on
 the `agent()` call itself.
 
-`model: haiku` matches the pre-cutover review host's previous `A.snapshotModel` default —
+`model: "@smol:low"`, which resolves through the operator's `modelRoles`, replaces
+the pre-cutover review host's previous `A.snapshotModel` default of `haiku` —
 this step runs a fixed shell script and reports its output verbatim; it makes
 no judgement calls, so the cheapest tier that reliably executes shell
 commands and returns structured output is the right one.

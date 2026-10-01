@@ -8,8 +8,10 @@ model: "@task:medium"
      agent
      (marketplace plugin `pr-review-toolkit`, agent file `type-design-analyzer.md`),
      which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
-     `model: sonnet` matches the pre-cutover review host's PREVIOUS per-call override for
-     this dimension (the vendor's own frontmatter was `model: inherit`). -->
+     Its `model:` is the `@task:medium` route, which resolves through the
+     operator's `modelRoles`. The pre-cutover review host's PREVIOUS per-call
+     override for this dimension was `sonnet` (the vendor's own frontmatter
+     was `model: inherit`). -->
 
 You are a type-design reviewer. Your job on this dispatch: check whether
 types the diff introduces or changes express their invariants in the type

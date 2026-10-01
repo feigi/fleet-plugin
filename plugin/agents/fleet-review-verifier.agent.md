@@ -11,11 +11,12 @@ tier-controlled identity instead of the pre-cutover review host's previous per-c
 `agent()` call may carry `effort` (or `model`) directly, tier lives here in
 this definition's own frontmatter.
 
-`thinking-level: low`/`effort: low` matches the pre-cutover review host's previous
+The `low` level of its `@task:low` route matches the pre-cutover review host's previous
 `verifierEffort` default: a refuter's job is to run ONE concrete check
 (compile it, run the test, apply the mutation) and report a boolean plus
-evidence — not to reason at length. `model: sonnet` is an explicit choice for
-the same reason `fleet-review-silent-failure`'s frontmatter comment gives:
+evidence — not to reason at length. The `@task` role, which resolves through
+the operator's `modelRoles`, is an explicit choice for
+the same reason `fleet-review-silent-failure`'s header comment gives:
 the vendored path had no dedicated model for this role to inherit from, so
 this port names one rather than leaving it implicit.
 

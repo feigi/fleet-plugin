@@ -1323,8 +1323,8 @@ awk -F'\t' '!/^#/ && $4=="routine" {t[$5]++; if($6=="no") f[$5]++} \
 
 **These rows are the historical corpus, and nothing appended to them fixes the
 confound.** What fixes it is the within-run pairing in the dispatch rule above:
-from now on one implementer in every five runs at `sonnet` beside the `opus`
-ones, against the same prompts on the same day, so the comparison stops depending on
+from now on one implementer in every five runs at the alternate tier beside the
+top-tier ones, against the same prompts on the same day, so the comparison stops depending on
 which tier history happened to leave in which week. Read the pairs, not the
 whole-file split, once there are enough of them.
 
@@ -2396,8 +2396,8 @@ which the CI-completes edge above states in full** — dispatch a
 **finisher** — a fresh small agent, not the fix-applier resumed. Record it with
 `ledger.mjs dispatch <pr#> finisher-pr-<pr#>` before the call, then **dispatch
 it with the `agent` that command printed and omit `model` on the call** — the
-tier (`haiku`) lives in that definition's frontmatter,
-`agents/fleet-finisher.agent.md`.
+tier lives in that definition's frontmatter, `agents/fleet-finisher.agent.md`,
+as the `@smol:low` route, which resolves through the operator's `modelRoles`.
 Its four duties are a checklist — audit the
 worktree, confirm every deferral has a tracker home and re-run the acceptance
 mutation, apply one release label, report — and the
@@ -2889,8 +2889,9 @@ pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace
 for late labels, then report once and exit — and say that you dispatched it,
 which is what makes it hold that grace instead of arming its own watcher. **Dispatch
 it with the `agent` that `ledger.mjs dispatch merge-bot` printed and omit
-`model` on the call** — the tier (`haiku`) lives in that definition's
-frontmatter, `agents/fleet-merge-bot.agent.md`.
+`model` on the call** — the tier lives in that definition's frontmatter,
+`agents/fleet-merge-bot.agent.md`, as the `@smol:low` route, which resolves
+through the operator's `modelRoles`.
 
 Rebase, wait for green, check the
 label, merge is checklist work, and a bad merge still needs the label and the
