@@ -175,7 +175,7 @@ jobs:
         run: |
           set -euo pipefail
           VER="${NEXT#v}"
-          PUBLISHED="$(npm view @feigi/@feigi/fleet-ctl@"$VER" version 2>/dev/null || true)"
+          PUBLISHED="$(npm view "@feigi/fleet-ctl@$VER" version 2>/dev/null || true)"
           if [ "$PUBLISHED" = "$VER" ]; then
             echo "@feigi/fleet-ctl@$VER already on npm — skipping."
           else
