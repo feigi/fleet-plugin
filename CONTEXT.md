@@ -168,7 +168,7 @@ _Avoid_: undecided, unclear
 
 **Install root**:
 The directory omp actually loaded the plugin from — the realpath of its
-`node_modules/fleet-ctl` package entry, the one path every install kind
+`node_modules/@feigi/fleet-ctl` package entry, the one path every install kind
 (marketplace, link, npm) places. Never a path any artefact may write down:
 it is version- or checkout-dependent and changes across install kinds.
 _Avoid_: cache dir, plugin dir, install path

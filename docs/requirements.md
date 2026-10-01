@@ -26,7 +26,7 @@ supported ([ADR 0009](adr/0009-supported-platforms-are-macos-linux-wsl.md)). All
 - GitHub Enterprise: works; `ci-state.mjs` derives `--hostname` from `git remote get-url origin`.
 
 ### 1.3 omp with fleet plugin — HARD
-Install: `omp plugin install fleet-ctl` per [README → Installation](../README.md#installation).
+Install: `omp plugin install @feigi/fleet-ctl` per [README → Installation](../README.md#installation).
 Check: `~/.fleet/bin/fleet-run --root` prints the plugin root or fails naming why.
 
 If that command answers "command not found" instead of one of the

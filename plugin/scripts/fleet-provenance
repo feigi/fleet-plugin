@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The Provenance check (#1335, ADR 0003 point 4, ADR 0021, CONTEXT.md § Install
 // "Provenance check"). Names the live Install root — the realpath of omp's
-// `node_modules/fleet-ctl` package entry, the one path every install kind
+// `node_modules/@feigi/fleet-ctl` package entry, the one path every install kind
 // places (ADR 0021) — its kind and recorded version, and hashes the placed
 // Resolver (`~/.fleet/bin/fleet-run`) against each install's own copy and
 // refuses on drift. Writes nothing, mutates no config — every path below is
@@ -27,7 +27,7 @@ const os = require("node:os");
 const crypto = require("node:crypto");
 
 const NAME = "fleet-provenance";
-const PLUGIN_KEY = "fleet-ctl"; // ADR 0006 name; ADR 0021 — the node_modules package dir.
+const PLUGIN_KEY = "@feigi/fleet-ctl"; // ADR 0006 name; ADR 0021 — the node_modules package dir.
 
 // Same resolution point as scripts/fleet-run (its header names the shape of
 // each install kind). Duplicated rather than shared because a module the

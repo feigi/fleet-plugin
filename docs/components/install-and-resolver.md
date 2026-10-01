@@ -12,7 +12,7 @@ through an install, never a source path.
    `~/.fleet/bin/fleet-run <script> [args...]`.
 2. **Resolve.** [`fleet-run`](../../plugin/scripts/fleet-run) — the
    **Resolver** — takes the realpath of omp's extension package entry
-   `~/.omp/plugins/node_modules/fleet-ctl`, the one path every install
+   `~/.omp/plugins/node_modules/@feigi/fleet-ctl`, the one path every install
    kind places, and execs the named script from its `scripts/`
    (`.mjs` via `node`, `.sh` via `sh`), passing argv and cwd through
    untouched.

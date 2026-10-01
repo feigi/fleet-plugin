@@ -51,7 +51,7 @@ ADR 0020:
 
 1. **The marketplace install route is retired.** The tracked catalog
    `.omp-plugin/marketplace.json` is deleted. The consumer install is the
-   npm package: `omp plugin install fleet-ctl`. The dev loop is the link:
+   npm package: `omp plugin install @feigi/fleet-ctl`. The dev loop is the link:
    `omp plugin link <checkout>/plugin` — edits to agent definitions reach
    the next session with no reinstall, which is what the deleted
    `~/.omp/agent/agents/` mirror (#1430's original workaround) was
@@ -75,7 +75,7 @@ ADR 0020:
    divergence kept only for a prefix.
 4. **One resolution point.** `fleet-run`, `fleet-provenance`, and
    `fleet-bootstrap` resolve the Install root as the realpath of
-   `~/.omp/plugins/node_modules/fleet-ctl` — the single path every omp
+   `~/.omp/plugins/node_modules/@feigi/fleet-ctl` — the single path every omp
    install kind places (link: symlink to the checkout; marketplace:
    symlink into the cache; npm: a real directory) — and nothing else. The
    multi-entry `installed_plugins.json` selection and its scope-ambiguity
@@ -154,16 +154,25 @@ ADR 0020:
   This has one bootstrap requirement npm cannot skip: a package with zero
   published versions has no npmjs.com settings page, so there is nowhere
   to configure a Trusted Publisher yet (`fleet-ctl` had never been
-  published — `npm view fleet-ctl` → 404, 2026-10-01). The operator must
+  published — `npm view @feigi/fleet-ctl` → 404, 2026-10-01). The operator must
   publish once by hand (`npm publish --access public` from a local
   checkout, normal interactive 2FA OTP, not a CI credential) to reserve
   the name, then add this repo's `release.yml` as `fleet-ctl`'s Trusted
   Publisher on npmjs.com. Until that's done, every release run tags and
   creates the GitHub release, then fails at the publish step, and
-  `omp plugin install fleet-ctl` keeps answering 404. A re-run after the
+  `omp plugin install @feigi/fleet-ctl` keeps answering 404. A re-run after the
   Trusted Publisher is configured reuses the tag already on the merge
   commit rather than minting a new one, so the missed version is the one
   published.
+- **The package is scoped: `@feigi/fleet-ctl`.** The first publish of the
+  unscoped `fleet-ctl` was refused by npm's name-similarity check against
+  the existing `fleetctl` (403, "Package name too similar"), the same
+  collision class ADR 0006 renamed away from; a scope is exempt from that
+  check. The install root is `~/.omp/plugins/node_modules/@feigi/fleet-ctl`
+  (measured on omp 18.4.9: `omp plugin link` places the scoped entry there
+  and keys the lock file `@feigi/fleet-ctl`). Command stems, the
+  `plugin.json` name and the `/fleet-ctl:` marketplace-era prefix are
+  unchanged.
 - CI retargets: `smoke-omp.sh` links the checkout instead of building a
   dev catalog, asserts the three bare commands by the same `--no-tools`
   substitution probe (measured live on the link route), and adds the

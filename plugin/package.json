@@ -1,5 +1,5 @@
 {
-  "name": "fleet-ctl",
+  "name": "@feigi/fleet-ctl",
   "version": "0.0.0",
   "description": "Agent fleet: run-team controller, merge bot, PR reviewer, and the ticket pipeline they share",
   "license": "Apache-2.0",

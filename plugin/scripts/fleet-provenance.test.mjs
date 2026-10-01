@@ -33,8 +33,8 @@ function fakeInstall() {
   writeFileSync(join(payload, "scripts", "fleet-run"), "resolver\n");
   writeFileSync(join(sub, "hidden.mjs"), "nested\n");
   const nm = join(home, ".omp", "plugins", "node_modules");
-  mkdirSync(nm, { recursive: true });
-  symlinkSync(payload, join(nm, "fleet-ctl"));
+  mkdirSync(join(nm, "@feigi"), { recursive: true });
+  symlinkSync(payload, join(nm, "@feigi", "fleet-ctl"));
   mkdirSync(join(home, ".fleet", "bin"), { recursive: true });
   writeFileSync(join(home, ".fleet", "bin", "fleet-run"), "resolver\n");
   return { home, sub };

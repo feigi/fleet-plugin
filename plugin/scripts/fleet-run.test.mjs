@@ -1,6 +1,6 @@
 // The Resolver's single-resolution-point contract (ADR 0014, ADR 0021):
 // fleet-run resolves the Install root as the realpath of
-// `~/.omp/plugins/node_modules/fleet-ctl` — the one path every omp install
+// `~/.omp/plugins/node_modules/@feigi/fleet-ctl` — the one path every omp install
 // kind (marketplace/link/npm) places — and nothing else. Driven through the
 // real CLI — fleet-run reads `os.homedir()` directly and `process.exit()`s,
 // so it cannot be exercised in-process the way a module-exporting script can.
@@ -25,7 +25,7 @@ function runFleetRun(home, args, extraEnv = {}) {
 }
 
 // A marketplace/link-shaped install: a real payload dir with a scripts/
-// subtree, symlinked into node_modules/fleet-ctl — the shape omp's own
+// subtree, symlinked into node_modules/@feigi/fleet-ctl — the shape omp's own
 // installers place. The Install root the resolver reports is the payload's
 // realpath (macOS resolves tmpdir through /private, and the resolver applies
 // realpathSync, so expectations must too).
@@ -35,12 +35,12 @@ function fakeInstall() {
   mkdirSync(join(payload, "scripts"), { recursive: true });
   writeFileSync(join(payload, "scripts", "probe.mjs"), "content\n");
   const nm = join(home, ".omp", "plugins", "node_modules");
-  mkdirSync(nm, { recursive: true });
-  symlinkSync(payload, join(nm, "fleet-ctl"));
+  mkdirSync(join(nm, "@feigi"), { recursive: true });
+  symlinkSync(payload, join(nm, "@feigi", "fleet-ctl"));
   return { home, payload };
 }
 
-test("node_modules/fleet-ctl present: --root prints its realpath, no notice", () => {
+test("node_modules/@feigi/fleet-ctl present: --root prints its realpath, no notice", () => {
   const { home, payload } = fakeInstall();
   const r = runFleetRun(home, ["--root"]);
   assert.equal(r.status, 0, `expected success, got status ${r.status}: ${r.stderr}`);
@@ -48,19 +48,19 @@ test("node_modules/fleet-ctl present: --root prints its realpath, no notice", ()
   assert.equal(r.stderr, "", "a single present package dir needs no notice at all");
 });
 
-test("node_modules/fleet-ctl absent: exit 2, stderr names ~/.omp/plugins/node_modules/fleet-ctl", () => {
+test("node_modules/@feigi/fleet-ctl absent: exit 2, stderr names ~/.omp/plugins/node_modules/@feigi/fleet-ctl", () => {
   const home = mkdtempSync(join(tmpdir(), "fleet-run-home-"));
   const r = runFleetRun(home, ["--root"]);
   assert.equal(r.status, 2, `expected a resolver refusal, got status ${r.status}: ${r.stdout}`);
-  assert.match(r.stderr, /no omp plugin "fleet-ctl"/);
-  assert.match(r.stderr, /\.omp[/\\]plugins[/\\]node_modules[/\\]fleet-ctl/);
+  assert.match(r.stderr, /no omp plugin "@feigi\/fleet-ctl"/);
+  assert.match(r.stderr, /\.omp[/\\]plugins[/\\]node_modules[/\\]@feigi[/\\]fleet-ctl/);
 });
 
 test("a dangling link is named as dangling, not as a missing entry", () => {
   const home = mkdtempSync(join(tmpdir(), "fleet-run-home-"));
   const nm = join(home, ".omp", "plugins", "node_modules");
-  mkdirSync(nm, { recursive: true });
-  symlinkSync(join(home, "does", "not", "exist"), join(nm, "fleet-ctl"));
+  mkdirSync(join(nm, "@feigi"), { recursive: true });
+  symlinkSync(join(home, "does", "not", "exist"), join(nm, "@feigi", "fleet-ctl"));
   const r = runFleetRun(home, ["--root"]);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /dangling/);

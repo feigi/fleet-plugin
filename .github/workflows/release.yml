@@ -162,7 +162,7 @@ jobs:
           fi
 
       - name: Publish to npm (idempotent)
-        # ADR 0021: consumers install `omp plugin install fleet-ctl`, the npm
+        # ADR 0021: consumers install `omp plugin install @feigi/fleet-ctl`, the npm
         # package published here. The version is the tag this job just
         # minted — plugin/package.json keeps its placeholder and the tree is
         # still never written: the version edit lives only in this runner's
@@ -175,9 +175,9 @@ jobs:
         run: |
           set -euo pipefail
           VER="${NEXT#v}"
-          PUBLISHED="$(npm view fleet-ctl@"$VER" version 2>/dev/null || true)"
+          PUBLISHED="$(npm view @feigi/@feigi/fleet-ctl@"$VER" version 2>/dev/null || true)"
           if [ "$PUBLISHED" = "$VER" ]; then
-            echo "fleet-ctl@$VER already on npm — skipping."
+            echo "@feigi/fleet-ctl@$VER already on npm — skipping."
           else
             cd plugin
             npm --no-git-tag-version version "$VER"

@@ -37,7 +37,7 @@ function die(message) {
 }
 
 // The Install root, same resolution point as scripts/fleet-run (ADR 0021):
-// the realpath of `~/.omp/plugins/node_modules/fleet-ctl`. Absent or
+// the realpath of `~/.omp/plugins/node_modules/@feigi/fleet-ctl`. Absent or
 // dangling answers null, which the caller reports as "omp: not installed".
 function readInstallPath(packagePath) {
   try {
@@ -84,7 +84,7 @@ function main() {
   }
 
   const home = os.homedir();
-  const PLUGIN_KEY = "fleet-ctl"; // ADR 0006 name; ADR 0021 — the node_modules package dir.
+  const PLUGIN_KEY = "@feigi/fleet-ctl"; // ADR 0006 name; ADR 0021 — the node_modules package dir.
   const ompInstall = readInstallPath(path.join(home, ".omp", "plugins", "node_modules", PLUGIN_KEY));
   const parent = canonical(path.dirname(ownDir));
   const runningFromInstall = parent === canonical(ompInstall);

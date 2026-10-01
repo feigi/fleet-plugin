@@ -1,6 +1,6 @@
 # 0014 — omp.sh is the only harness
 
-**Status:** Accepted. Ruled 2026-09-27. Amended by #2189: `docs/research/external-assumptions/` is maintained against the live tree, not untouched historical record as the Consequences bullet below states; `docs/specs/` and `.out-of-scope/` still stand as untouched. Amended by ADR 0021: §5's one registry is now omp's extension package layout (`node_modules/fleet-ctl`, not `installed_plugins.json`), §6's root catalog is deleted with the marketplace route while `plugin/.claude-plugin/plugin.json` stays for repo-internal identity only, and §7's `enabledProviders` precondition is retired — omp exempts its own installs from that gate since 18.2.1, and the native package route never used it.
+**Status:** Accepted. Ruled 2026-09-27. Amended by #2189: `docs/research/external-assumptions/` is maintained against the live tree, not untouched historical record as the Consequences bullet below states; `docs/specs/` and `.out-of-scope/` still stand as untouched. Amended by ADR 0021: §5's one registry is now omp's extension package layout (`node_modules/@feigi/fleet-ctl`, not `installed_plugins.json`), §6's root catalog is deleted with the marketplace route while `plugin/.claude-plugin/plugin.json` stays for repo-internal identity only, and §7's `enabledProviders` precondition is retired — omp exempts its own installs from that gate since 18.2.1, and the native package route never used it.
 
 ## Context
 

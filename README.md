@@ -2,7 +2,7 @@
 
 The agent fleet: a `run-team` controller, a merge bot, a PR reviewer, and the
 ticket pipeline they share. Ships as the omp.sh extension package
-`fleet-ctl`.
+`@feigi/fleet-ctl`.
 
 ## Installation
 
@@ -21,20 +21,20 @@ pointing at models this install has — the fleet's tier routes (ADR 0011,
 ADR 0014, ADR 0021).
 
 ```
-omp plugin install fleet-ctl
+omp plugin install @feigi/fleet-ctl
 ~/.fleet/bin/fleet-run tier-roles.mjs --check
 ```
 
 Working on the plugin itself (this checkout): link the package instead, so
 agent and command edits take effect without a reinstall —
 `omp plugin link <checkout>/plugin`. A linked root outranks every installed
-copy of the same names until you `omp plugin uninstall fleet-ctl`, so keep
+copy of the same names until you `omp plugin uninstall @feigi/fleet-ctl`, so keep
 it to the box you develop on.
 
-`fleet-ctl` is the npm package the fleet publishes on every release —
+`@feigi/fleet-ctl` is the npm package the fleet publishes on every release —
 publishing the name is the collision guard (a squatted name fails the
 release). Publishing authenticates via [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
-(OIDC, no stored token): `fleet-ctl` must exist on the registry and have
+(OIDC, no stored token): `@feigi/fleet-ctl` must exist on the registry and have
 this repo's `release.yml` configured as its Trusted Publisher before the
 first automated release — see ADR 0021, Consequences, for the one-time
 bootstrap. Until then the release job fails at its publish step and the
@@ -45,7 +45,7 @@ The plugin also ships an omp extension, `member-write-guard`, which refuses a
 fleet member's write into the main checkout
 ([ADR 0020](docs/adr/0020-member-write-boundary-is-enforced-by-a-shipped-omp-extension.md)).
 An existing install picks up a new release with `omp plugin install
-fleet-ctl@latest` followed by a session restart; extensions load only at
+@feigi/fleet-ctl@latest` followed by a session restart; extensions load only at
 session start.
 
 ## Quickstart

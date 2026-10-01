@@ -85,7 +85,7 @@ Three routes were weighed.
 7. **Distribution.** `plugin/package.json` carries `"name": "fleet-ctl"`,
    `"version": "0.0.0"` and `"omp": {"extensions":
    ["scripts/member-write-guard.mjs"]}`. A marketplace install symlinks the
-   cached plugin into the scope's `plugins/node_modules/fleet-ctl`, and the
+   cached plugin into the scope's `plugins/node_modules/@feigi/fleet-ctl`, and the
    extension loader imports it from `package.json#omp.extensions` (omp's
    `docs/plugin-manager-installer-plumbing.md`: this is the
    `MarketplaceManager` install path, distinct from `PluginManager.install()`'s
