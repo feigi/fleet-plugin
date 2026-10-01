@@ -127,6 +127,27 @@ test("a write under a gitignored directory is clean — run state, agent-brain's
   assert.equal(check(dir).state, "clean");
 });
 
+test("the run's own bookkeeping is not a stray write: the controller's metrics appends stay clean, anything beside them does not", (t) => {
+  const dir = repo(t);
+  mkdirSync(join(dir, "docs", "metrics"), { recursive: true });
+  writeFileSync(join(dir, "docs", "metrics", "tier-outcomes.tsv"), "# header\n");
+  writeFileSync(join(dir, "docs", "metrics", "member-outcomes.tsv"), "# header\n");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-qm", "metrics");
+  record(dir);
+  // What the controller does mid-run: `tier-outcomes.mjs append` per ruled
+  // PR, the member-facts scrape rewriting its file. Twice, as a run does.
+  for (const row of ["2026-10-01\t2298\n", "2026-10-01\t2302\n"]) {
+    appendFileSync(join(dir, "docs", "metrics", "tier-outcomes.tsv"), row);
+    writeFileSync(join(dir, "docs", "metrics", "member-outcomes.tsv"), `# header\n${row}`);
+    assert.equal(check(dir).state, "clean", "the controller's own append held the run");
+  }
+  // Two named files, never the directory, and a stray beside them is named alone.
+  writeFileSync(join(dir, "docs", "metrics", "stray.tsv"), "x\n");
+  writeFileSync(join(dir, "tracked.txt"), "a member's\n");
+  assert.deepEqual(check(dir).changed, ["docs/metrics/stray.tsv", "tracked.txt"]);
+});
+
 test("a write inside .worktrees/<x>/ is clean, and the check run from that worktree still answers for the main checkout", (t) => {
   const dir = repo(t);
   git(dir, "worktree", "add", "-q", "-b", "impl/1", join(dir, ".worktrees", "1-x"));
@@ -142,13 +163,20 @@ test("a write inside .worktrees/<x>/ is clean, and the check run from that workt
   assert.deepEqual(check(wt).changed, ["stray.txt"], "a stray write is invisible from a member's worktree");
 });
 
-test("paths that would split the line are quoted in it", (t) => {
+test("paths that would split or blur the line are quoted in it", (t) => {
   const dir = repo(t);
   record(dir);
+  writeFileSync(join(dir, "plain.txt"), "x\n");
   writeFileSync(join(dir, "a b.txt"), "x\n");
+  writeFileSync(join(dir, 'q"uote.txt'), "x\n");
+  writeFileSync(join(dir, "back\\slash.txt"), "x\n");
+  writeFileSync(join(dir, "ctl\x01.txt"), "x\n");
+  writeFileSync(join(dir, "new\nline.txt"), "x\n");
   const c = check(dir);
-  assert.deepEqual(c.changed, ["a b.txt"]);
-  assert.match(describe(c, ["impl-7"]), /^MAIN-CHECKOUT-DIRTY "a b\.txt" — /);
+  assert.deepEqual(c.changed, ["a b.txt", "back\\slash.txt", "ctl\x01.txt", "new\nline.txt", "plain.txt", 'q"uote.txt']);
+  const said = describe(c, ["impl-7"]);
+  assert.ok(said.startsWith(`MAIN-CHECKOUT-DIRTY "a b.txt" "back\\\\slash.txt" "ctl\\u0001.txt" "new\\nline.txt" plain.txt "q\\"uote.txt" — `), said);
+  assert.doesNotMatch(said, /[\x00-\x1f]/, "a raw control byte reached the printed line");
 });
 
 test("a git that fails is unknown, never clean", (t) => {

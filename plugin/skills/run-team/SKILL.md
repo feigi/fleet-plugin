@@ -277,8 +277,11 @@ phase, or in any later one, asks the maintainer which tickets to take.
    holds dispatch on any change (#2210): the backstop for the stray member
    writes `member-write-guard` cannot see — an `eval` cell, a `bash` that
    `cd`s or `git -C`s into this checkout. `.fleet/`, `.worktrees/` and
-   `.agent-brain/` are gitignored and never trip it. **The same command is
-   the clear, and it overwrites; it never compares.** On `MAIN-CHECKOUT-DIRTY`
+   `.agent-brain/` are gitignored and never trip it. Nor does this run's own
+   bookkeeping: `docs/metrics/tier-outcomes.tsv` and
+   `docs/metrics/member-outcomes.tsv`, which you write mid-run, are left out
+   by name — anything else under `docs/metrics/` still trips it. **The same
+   command is the clear, and it overwrites; it never compares.** On `MAIN-CHECKOUT-DIRTY`
    the maintainer resolves the stray paths FIRST — inspect, keep or remove
    them — and only then re-runs `--record`; re-recording over unresolved paths
    certifies them. **Never re-record over `MAIN-CHECKOUT-UNKNOWN`**: that
@@ -1622,7 +1625,9 @@ depth** guard table applied in code. Act on each line as it reads:
   nothing new and tell the maintainer: they resolve the stray paths FIRST,
   then re-baseline with `~/.fleet/bin/fleet-run main-checkout.mjs --record`.
   The hold lasts until that re-baseline, tick after tick. Never revert the
-  paths yourself, and never re-baseline over paths nobody has resolved.
+  paths yourself, and never re-baseline over paths nobody has resolved. The
+  one change of yours that trips it is a mid-run tooling fix edited in this
+  checkout; **Fix the tooling mid-run** says how that one is cleared.
 - `MAIN-CHECKOUT-UNKNOWN …` with `HOLD (main checkout unknown)` — the tick
   could not look: a git or hash read failed (`could not look:`), or the
   baseline exists but cannot be read (`baseline unreadable:`). Never clean,
@@ -3379,8 +3384,13 @@ the step. Cut before you append.
 --pin`. You just changed the instrument set under your own check, and this is the
 only edit that legitimately does; skip it and the next gate refuses on your own
 fix, which teaches you to ignore the refusal. Then the ledger line, save the
-rationale, one line to the maintainer. Live members hold the old text — re-brief
-only if it changes what they do *now*.
+rationale, one line to the maintainer. **Then re-baseline the main checkout,
+if the fix was edited in it** — the next tick reads `MAIN-CHECKOUT-DIRTY`
+naming your own paths. Run `~/.fleet/bin/fleet-run main-checkout.mjs --check`
+first, and only when the paths it names are exactly the ones you just edited,
+run `--record`. Any other path on that line is a stray write — leave the hold for
+the maintainer, because `--record` would certify it with yours. Live members
+hold the old text — re-brief only if it changes what they do *now*.
 
 **Landing it.** The file being right is not the end of it. `main` carries a
 ruleset with no bypass actors, so a direct `git push origin main` is **refused** —

@@ -25,6 +25,19 @@
 // Explicit `-uall`, never bare `--porcelain`: `status.showUntrackedFiles=no`
 // silences untracked files otherwise (#730).
 //
+// THE RUN'S OWN BOOKKEEPING IS NOT A STRAY WRITE. Two tracked files in the
+// main checkout are written by the controller itself mid-run:
+// `docs/metrics/tier-outcomes.tsv`, appended each time it rules a PR's review
+// (run-team/SKILL.md, `tier-outcomes.mjs append`), and
+// `docs/metrics/member-outcomes.tsv`, rewritten by the member-facts scrape.
+// Compared like any other path, the first append would hold every
+// dispatching row for the rest of the run, and clearing it with `--record`
+// after every ruling would certify whatever stray write landed beside it.
+// So `snapshot()` leaves exactly those two paths out, for the reason
+// instruments.sh leaves `docs/metrics/` out of its pin. Two named files, not
+// the directory: anything else under `docs/metrics/` is still a stray write.
+// The price: a member's leaked write to one of those two files goes unseen.
+//
 // FOUR ANSWERS, worktree-audit.sh's three plus the baseline's own refusal:
 //   clean    — the porcelain entries and hashes equal the baseline's.
 //   dirty    — they do not; `changed` names every path that differs.
@@ -67,6 +80,7 @@ import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 
 export const BASELINE_FILE = "main-checkout.sha";
 export const RECORD_COMMAND = "~/.fleet/bin/fleet-run main-checkout.mjs --record";
+const RUN_BOOKKEEPING = new Set(["docs/metrics/tier-outcomes.tsv", "docs/metrics/member-outcomes.tsv"]);
 const HEADER = "fleet main-checkout baseline v1";
 const GIT_TIMEOUT_MS = 30_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -119,7 +133,8 @@ function hashPath(root, rel) {
 
 /**
  * The main checkout as it stands: `{ok, entries}` — a Map from each porcelain
- * entry (`XY path`) to its path's hash — or `{ok: false, why}`.
+ * entry (`XY path`) to its path's hash, the run's own bookkeeping left out
+ * (header) — or `{ok: false, why}`.
  * `--no-optional-locks` so a read never takes the main index's lock out from
  * under the controller's own git; `-z` so no path is quoted or split;
  * `--no-renames` so every entry names exactly one path.
@@ -131,10 +146,12 @@ export function snapshot(root, env = process.env) {
   for (const line of r.stdout.split("\0")) {
     if (!line) continue;
     if (line.length < 4 || line[2] !== " ") return { ok: false, why: `git status printed an entry it does not document: ${JSON.stringify(line)}` };
+    const rel = line.slice(3);
+    if (RUN_BOOKKEEPING.has(rel)) continue;
     try {
-      entries.set(line, hashPath(root, line.slice(3)));
+      entries.set(line, hashPath(root, rel));
     } catch (e) {
-      return { ok: false, why: `cannot hash ${line.slice(3)}: ${e?.code ?? e?.message ?? e}` };
+      return { ok: false, why: `cannot hash ${rel}: ${e?.code ?? e?.message ?? e}` };
     }
   }
   return { ok: true, entries };

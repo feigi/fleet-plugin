@@ -34,9 +34,13 @@ store.
    and [`main-checkout.mjs`](../../plugin/scripts/main-checkout.mjs)
    catches what it cannot see (#2210): Phase 0 records a baseline of the
    main checkout's porcelain entries and their content hashes, and every
-   `fleet-tick.mjs` compares against it, holding all dispatch on
-   `MAIN-CHECKOUT-DIRTY`/`-UNKNOWN` until the maintainer resolves the
-   stray paths and re-baselines.
+   `fleet-tick.mjs` compares against it and holds all dispatch on any
+   answer but clean. `MAIN-CHECKOUT-DIRTY` holds until the maintainer
+   resolves the stray paths and re-baselines; `MAIN-CHECKOUT-UNKNOWN`
+   until whatever stopped the tick looking is fixed, never by
+   re-baselining over it; `MAIN-CHECKOUT-NO-BASELINE` until the
+   controller records a baseline. The two `docs/metrics/` files the
+   controller itself writes mid-run are left out of the comparison.
 
 ## Opinionated choices
 
