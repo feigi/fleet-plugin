@@ -90,8 +90,18 @@ fi
 # ---- place the Resolver, then run the Provenance check ----
 HOME="$SCRATCH_HOME" node plugin/scripts/fleet-bootstrap --from-checkout
 echo "== fleet-provenance =="
-if ! HOME="$SCRATCH_HOME" node plugin/scripts/fleet-provenance; then
-  echo "::error::install-and-smoke: fleet-provenance failed — see output above"
+prov_rc=0
+provenance="$(HOME="$SCRATCH_HOME" node plugin/scripts/fleet-provenance)" || prov_rc=$?
+printf '%s\n' "$provenance"
+if [ "$prov_rc" -ne 0 ]; then
+  echo "::error::install-and-smoke: fleet-provenance failed (exit $prov_rc) — see output above"
+  fail=1
+fi
+# This script installs by link, so the Provenance check must classify the
+# root as one (ADR 0021) — a misclassification still exits 0, so only the
+# printed kind line can catch it.
+if ! grep -qxF 'fleet-provenance: kind: linked-checkout' <<<"$provenance"; then
+  echo "::error::install-and-smoke: fleet-provenance did not report 'kind: linked-checkout' for the linked checkout"
   fail=1
 fi
 
@@ -110,11 +120,12 @@ if [ -z "$SCRIPT_NAMES" ]; then
 fi
 
 RESOLVER="$SCRATCH_HOME/.fleet/bin/fleet-run"
+RESOLVE_ERR="$SCRATCH_HOME/resolve.err"
 echo "== resolving every fleet-run callsite target =="
 count=0
 while IFS= read -r script; do
   [ -n "$script" ] || continue
-  if resolved="$(HOME="$SCRATCH_HOME" node "$RESOLVER" --path "$script" 2>/dev/null)"; then
+  if resolved="$(HOME="$SCRATCH_HOME" node "$RESOLVER" --path "$script" 2>"$RESOLVE_ERR")"; then
     if [ -f "$resolved" ]; then
       count=$((count + 1))
     else
@@ -122,7 +133,7 @@ while IFS= read -r script; do
       fail=1
     fi
   else
-    echo "::error::install-and-smoke: $script did not resolve through the Resolver"
+    echo "::error::install-and-smoke: $script did not resolve through the Resolver: $(cat "$RESOLVE_ERR")"
     fail=1
   fi
 done <<<"$SCRIPT_NAMES"

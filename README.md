@@ -33,7 +33,9 @@ it to the box you develop on.
 
 `fleet-ctl` is the npm package the fleet publishes on every release —
 publishing the name is the collision guard (a squatted name fails the
-release). Background:
+release). Publishing needs an `NPM_TOKEN` repository secret with publish
+rights for `fleet-ctl`; without it the release job fails at its publish
+step and the install above answers 404 (ADR 0021, Consequences). Background:
 [`docs/adr/0006-rename-to-fleet-ctl.md`](docs/adr/0006-rename-to-fleet-ctl.md).
 
 The plugin also ships an omp extension, `member-write-guard`, which refuses a

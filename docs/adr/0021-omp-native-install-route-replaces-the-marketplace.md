@@ -147,6 +147,17 @@ ADR 0020:
 - **Version semantics change**: installs track published semver, not the
   `main` branch tip; every merged PR still mints a release, and now also
   a package version. `marketplace.autoUpdate` is gone with the route.
+- **Publishing needs a credential the repo does not hold yet.**
+  `release.yml`'s publish step authenticates with the `NPM_TOKEN`
+  repository secret; when this ADR landed the repo had no Actions secrets
+  and `fleet-ctl` had never been published (`npm view fleet-ctl` → 404,
+  2026-10-01). Until the operator stores an npm token with publish rights
+  for `fleet-ctl` as `NPM_TOKEN` (or publishes once by hand and switches
+  the package to npm trusted publishing from this workflow), every release
+  run tags and creates the GitHub release, then fails at the publish step,
+  and `omp plugin install fleet-ctl` keeps answering 404. A re-run after
+  the secret exists reuses the tag already on the merge commit rather
+  than minting a new one, so the missed version is the one published.
 - CI retargets: `smoke-omp.sh` links the checkout instead of building a
   dev catalog, asserts the three bare commands by the same `--no-tools`
   substitution probe (measured live on the link route), and adds the

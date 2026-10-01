@@ -49,11 +49,28 @@ jobs:
         id: version
         env:
           SEGMENT: ${{ steps.segment.outputs.segment }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           set -euo pipefail
           # --force overwrites local tags that diverged from remote.
           # Safe on a fresh CI checkout; would be destructive locally.
           git fetch --tags --force
+
+          # A re-run of this job (e.g. after the npm publish step failed)
+          # must finish the release it already started, not mint another:
+          # the tag pushed by the first attempt now IS the latest, so a fresh
+          # bump would tag+release one version higher and leave the first
+          # version tagged but never published. A semver tag already on this
+          # merge commit is that earlier attempt's version — reuse it.
+          EXISTING=$(git tag --points-at "$SHA" --list 'v[0-9]*.[0-9]*.[0-9]*' \
+            | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
+            | sort -V \
+            | tail -1)
+          if [ -n "$EXISTING" ]; then
+            echo "next=$EXISTING" >> "$GITHUB_OUTPUT"
+            echo "Merge commit $SHA already tagged $EXISTING (re-run) — reusing it."
+            exit 0
+          fi
 
           # Detect "tags exist" independently of the regex used to pick
           # LATEST, so a regex drift cannot silently re-seed the repo.
