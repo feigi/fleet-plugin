@@ -1391,10 +1391,11 @@ what decides whether a replacement redoes or destroys work. Observed twice in
 one run.
 
 **The identity block is what makes `sizing-a-ticket`'s fleet entry reachable.**
-That skill conditions its heavy-row entry on the reader being a fleet member; a
-reader that takes itself for a solo session gets `superpowers:brainstorming`
-instead, whose `<HARD-GATE>` withholds every implementation action until a human
-partner approves — approval no unattended member can obtain, so it parks rather
+That skill conditions its heavy-row process on the reader being a fleet member;
+a solo reader settles the open design choices with its user before planning,
+while a fleet member's `## Agent Brief` already is that settlement. A member
+that takes itself for a solo session waits on a user to settle design — a user
+no unattended member has, so it parks rather
 than fails. Nothing else you carry says what the member is — an incidental
 mention of the controller is not a statement that the reader is one of its
 members. That skill keeps its condition, so a solo session still runs the

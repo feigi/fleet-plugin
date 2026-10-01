@@ -29,7 +29,7 @@ const REPO = join(import.meta.dirname, "..");
 const NEXT_TICKET = readFileSync(join(REPO, "skills", "next-ticket", "SKILL.md"), "utf8");
 
 const step7 = () =>
-  between(NEXT_TICKET, "## 7. When the superpowers path reports done", "## Red flags", "next-ticket/SKILL.md step 7");
+  between(NEXT_TICKET, "## 7. When the sizing-a-ticket path reports done", "## Red flags", "next-ticket/SKILL.md step 7");
 
 // Narrow to the note itself before pinning anything, the way
 // candidates-exit3-prose.test.mjs narrows to one table row. A positive

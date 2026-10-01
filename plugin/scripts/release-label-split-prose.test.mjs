@@ -26,7 +26,7 @@ const RUN_TEAM = read("skills", "run-team", "SKILL.md");
 const REVIEW_AND_FIX = read("commands", "review-and-fix.md");
 
 const step7 = () =>
-  between(NEXT_TICKET, "## 7. When the superpowers path reports done", "## Red flags", "next-ticket/SKILL.md step 7");
+  between(NEXT_TICKET, "## 7. When the sizing-a-ticket path reports done", "## Red flags", "next-ticket/SKILL.md step 7");
 
 // The member reads the implementer agent body verbatim — its system prompt
 // since #1804 moved the blocks there out of run-team's phase 2

@@ -150,7 +150,7 @@ test("a reflowed section still matches", () => {
 // anchors as force-with-lease-reason-prose.test.mjs's step-7 slice.
 const NEXT_TICKET = readFileSync(join(REPO, "plugin", "skills", "next-ticket", "SKILL.md"), "utf8");
 const step7 = (text = NEXT_TICKET) =>
-  between(text, "## 7. When the superpowers path reports done", "## Red flags", "next-ticket/SKILL.md step 7");
+  between(text, "## 7. When the sizing-a-ticket path reports done", "## Red flags", "next-ticket/SKILL.md step 7");
 
 test("next-ticket step 7 says one keyword per intended close, and that several such closes are fine", () => {
   // The per-issue half and the multi-close example are one span: a rewrite to
