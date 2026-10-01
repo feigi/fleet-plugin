@@ -13,6 +13,7 @@ import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, spendDirP
 import { readOmpMember } from "./member-record.mjs";
 import { stripComments } from "./strip-comments.mjs";
 import { gitEnv } from "./git-env.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./board.mjs", import.meta.url));
 
@@ -180,9 +181,8 @@ function gatherCi({ ciStateBody, prevCi, prs = [42], ticks = 1 }) {
   const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-scripts-"));
   writeFileSync(join(scriptDir, "ci-state.mjs"), ciStateBody);
   const rows = JSON.stringify(prs.map((n) => ({ number: n, state: "OPEN", labels: [], title: "t" })));
-  writeFileSync(join(bin, "gh"),
+  writeExecStub(join(bin, "gh"),
     `#!/bin/sh\ncase "$1 $2" in\n"pr list") echo '${rows}' ;;\n*) exit 1 ;;\nesac\n`);
-  chmodSync(join(bin, "gh"), 0o755);
   writeFileSync(join(cwd, "prev.json"), JSON.stringify({ tickets: prs.map((n) => ({ pr: n, ci: prevCi })) }));
   // serve()'s shape, not a loop for its own sake: one process, gather() called
   // again per tick, which is the only place a warn-once gate is observable.
@@ -426,9 +426,8 @@ function gatherRows({ issuesJson, prsJson }) {
   const bin = mkdtempSync(join(tmpdir(), "board-gather-rows-bin-"));
   const scriptDir = mkdtempSync(join(tmpdir(), "board-gather-rows-scripts-"));
   writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
-  writeFileSync(join(bin, "gh"),
+  writeExecStub(join(bin, "gh"),
     `#!/bin/sh\ncase "$1 $2" in\n"issue list") echo '${issuesJson}' ;;\n"pr list") echo '${prsJson}' ;;\n*) exit 1 ;;\nesac\n`);
-  chmodSync(join(bin, "gh"), 0o755);
   const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
     const r = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "nope.md"))},
                        prevFile: null, scriptDir: ${JSON.stringify(scriptDir)}, interval: 15 });
@@ -492,7 +491,7 @@ function gatherCapped({ issues, prs }) {
   writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
   writeFileSync(join(scriptDir, "ledger.mjs"),
     `process.stdout.write(${JSON.stringify(JSON.stringify({ rows: [], filed: [], ruled: [] }))});\n`);
-  writeFileSync(join(bin, "gh"), `#!/usr/bin/env node
+  writeExecStub(join(bin, "gh"), `#!/usr/bin/env node
 const a = process.argv.slice(2);
 const i = a.indexOf("--limit");
 const limit = i === -1 ? 30 : Number(a[i + 1]);
@@ -501,7 +500,6 @@ if (a[0] === "issue" && a[1] === "list") process.stdout.write(JSON.stringify(row
 else if (a[0] === "pr" && a[1] === "list") process.stdout.write(JSON.stringify(rows(${prs}, (n) => ({ number: 1000 + n, state: "OPEN", title: "t", labels: [] }))));
 else process.exit(1);
 `);
-  chmodSync(join(bin, "gh"), 0o755);
   const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
     const { computeBoard } = await import(${JSON.stringify(fileURLToPath(new URL("./compute-board.mjs", import.meta.url)))});
     const inputs = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "ledger.md"))},
@@ -584,7 +582,7 @@ function gatherMerged({ rows, prs = [], prev = null, states = {}, fail = false, 
     `process.stdout.write(${JSON.stringify(JSON.stringify({ rows, filed: [], ruled: [] }))});\n`);
   const window = Array.from({ length: 100 }, (_, i) => ({ number: 5000 + i, state: "MERGED" }));
   const config = { prs: prs.map((n) => ({ number: n, state: "OPEN", title: "t", labels: [] })), window, states, fail, emptyRepo, log };
-  writeFileSync(join(bin, "gh"), `#!/usr/bin/env node
+  writeExecStub(join(bin, "gh"), `#!/usr/bin/env node
 const fs = require("node:fs");
 const c = ${JSON.stringify(config)};
 const a = process.argv.slice(2);
@@ -608,7 +606,6 @@ else if (a[0] === "api" && a[1] === "graphql") {
 }
 else process.exit(1);
 `);
-  chmodSync(join(bin, "gh"), 0o755);
   const prevFile = join(cwd, "prev.json");
   if (prev) writeFileSync(prevFile, JSON.stringify(prev));
   const driver = `const { gather } = await import(${JSON.stringify(SCRIPT)});
@@ -1428,8 +1425,7 @@ test("CLI: a live serve keeps the panel on the session that wrote first on its w
   // gh fails on every call and the reads degrade, so this stays offline and off
   // this repo's live issue list. Prepended rather than replacing PATH: gather()
   // shells out to `node` for the ledger read.
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
-  chmodSync(join(bin, "gh"), 0o755);
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   const proj = join(home, ".omp", "agent", "sessions", encodeProjectDir(cwd, { home }));
   const mine = join(proj, "2026-09-08T13-13-27-300Z_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   const theirs = join(proj, "2026-09-09T02-00-00-000Z_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
@@ -2741,8 +2737,7 @@ function launcherBin(launchers) {
   const bin = gitOnlyPath();
   const log = join(bin, "launched.log");
   for (const [name, code] of Object.entries(launchers)) {
-    writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $*" >> '${log}'\nexit ${code}\n`);
-    chmodSync(join(bin, name), 0o755);
+    writeExecStub(join(bin, name), `#!/bin/sh\necho "${name} $*" >> '${log}'\nexit ${code}\n`);
   }
   return { bin, launched: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []) };
 }
