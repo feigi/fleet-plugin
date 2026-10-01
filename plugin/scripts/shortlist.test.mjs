@@ -42,7 +42,9 @@ const HERE = fileURLToPath(new URL(".", import.meta.url));
 // Every file the copied shortlist.mjs reaches at run time: its own imports,
 // and the two sibling scripts it spawns for real. A missing import is a
 // MODULE_NOT_FOUND at startup, so add a row whenever any of these gains one.
-const COPIED = ["shortlist.mjs", "candidates.mjs", "ledger.mjs", "ledger-grammar.mjs", "arg.mjs", "git-env.mjs"];
+const COPIED = ["shortlist.mjs", "candidates.mjs", "ledger.mjs", "ledger-grammar.mjs", "arg.mjs", "git-env.mjs",
+  // ledger.mjs reads a fix-applier's conflict hold off fleet-tick.mjs's deriveRun (#2299).
+  "fleet-tick.mjs", "fleet-state.mjs", "main-checkout.mjs"];
 
 const GH_STUB = `#!/bin/sh
 case "$1 $2" in
