@@ -426,6 +426,23 @@ test("deriveRun: a past-pin halt is answered once the head is the reviewed one, 
   assert.deepEqual(run({ rows: [halted] }, [pr(40, ["ready-to-merge"], [10], HEAD_B), pr(41, [], [], HEAD_B)]).reviewDue, []);
 });
 
+test("deriveRun: a ticket row settled =PR#M shares PR M's state with M's own row, in either order (#2283)", () => {
+  // ledger.mjs's `settle impl-658-c=PR#724` names PR 724 on the ticket row, and
+  // a `#724` row can carry that PR's tokens beside it. Both rows are PR 724's:
+  // whichever sorts first must not swallow what the other records.
+  const prs = [pr(724, [], [658])];
+  const ticket = "#658 impl-658-c=PR#724";
+  for (const rows of [[ticket, "#724 review=member:review-pr-724"], ["#724 review=member:review-pr-724", ticket]]) {
+    const r = run({ rows }, prs);
+    assert.equal(r.reviewsLive, 1, `the live review is counted: ${rows}`);
+    assert.deepEqual(r.reviewDue, [], `a reviewed PR is not re-offered: ${rows}`);
+  }
+  for (const rows of [[ticket, "#724 review=member:review-pr-724 reviewed=abc1234:2/1/0"], ["#724 review=member:review-pr-724 reviewed=abc1234:2/1/0", ticket]]) {
+    const r = run({ rows }, prs);
+    assert.deepEqual([r.reviewsLive, r.fixDue, r.reviewDue], [0, [724], []], `${rows}`);
+    assert.ok(r.claimed.has(658), "the ticket row still reads as claimed");
+  }
+});
 test("deriveRun: merge holds are held-behind rows whose premise PR is still open", () => {
   const r = run({
     rows: [

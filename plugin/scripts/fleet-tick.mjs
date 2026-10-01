@@ -289,6 +289,12 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     const where = `row '${text}'`;
     const mention = PR_MENTION.exec(text);
     const pr = mention ? Number(mention[1]) : keyNum;
+    // One state per PR, shared by every row that resolves to it (#2283): a
+    // ticket row settled `impl-658=PR#724` sorts above PR 724's own `#724` row
+    // whenever both exist, and either may carry that PR's tokens — ledger.mjs's
+    // memberRowIndex() writes a PR-bound member onto the first row mentioning
+    // its PR and onto `#<pr>` only when none does — so the second row continues
+    // the first's state rather than losing to it.
     // `conflictHold`: the row carries a conflict hold. `conflictCleared`: a
     // fix-applier SETTLED (`applied:`/`no-op`) after the latest one — never
     // merely dispatched, which is `fixSince`'s bar and too low for the merge
@@ -297,7 +303,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // finisher since that review settled `halted:past-pin` (#2083) — any
     // later finisher attempt, live or settled, replaces it, and a later
     // returned review answers it.
-    const st = {
+    const st = (pr !== null && byPr.get(pr)) || {
       inFlight: false, reviewedAny: false, survived: 0, fixSince: false, held: [],
       conflictHold: false, conflictCleared: false, reviewedHead: null, pastPinHalt: false,
     };
@@ -396,7 +402,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
       if (!prLifted) claimed.add(keyNum);
       excluded.push({ n: keyNum, premises });
     }
-    if (pr !== null && !byPr.has(pr)) byPr.set(pr, st);
+    if (pr !== null) byPr.set(pr, st);
   }
 
   const all = [...members.values()];
