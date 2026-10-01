@@ -125,7 +125,7 @@ probe_substitution() {
   : >"$log"
   (
     cd "$PROBE_DIR" \
-      && ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-sk-ant-omp-smoke-dummy-not-real}" \
+      && ANTHROPIC_API_KEY="sk-ant-omp-smoke-dummy-not-real" \
          ANTHROPIC_BASE_URL="http://127.0.0.1:$MOCK_PORT" \
          HOME="$SCRATCH_HOME" \
          omp -p "/$cmd" --no-tools --mode json --no-session > "$fifo" 2>&1
@@ -217,7 +217,6 @@ TASK_INPUT = {
     "tasks": [{"agent": "fleet-finisher", "task": "Reply with exactly OK and stop.",
                "solutionSpace": "one action: reply OK"}],
 }
-PORT = int(os.environ.get("MOCK_PORT", "0"))  # 0 = ephemeral; the bound port is written to MOCK_PORT_FILE
 LOG = open(os.environ["MOCK_LOG"], "a")
 
 
@@ -298,21 +297,21 @@ class H(http.server.BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     socketserver.TCPServer.allow_reuse_address = True
-    srv = socketserver.TCPServer(("127.0.0.1", PORT), H)
-    port_file = os.environ.get("MOCK_PORT_FILE", "")
-    if port_file:
-        with open(port_file, "w") as fh:
-            fh.write(str(srv.server_address[1]) + "\n")
+    srv = socketserver.TCPServer(("127.0.0.1", 0), H)  # ephemeral; the bound port goes to MOCK_PORT_FILE
+    with open(os.environ["MOCK_PORT_FILE"], "w") as fh:
+        fh.write(str(srv.server_address[1]) + "\n")
     srv.serve_forever()
 PY
-MOCK_PORT_FILE="$MOCK_PORT_FILE" MOCK_LOG="$MOCK_LOG" python3 "$SCRATCH/mock.py" >/dev/null 2>&1 &
+# The mock's own output goes to a file, not /dev/null: a mock that dies at
+# startup (or raises mid-run) otherwise leaves only a cause-less timeout.
+MOCK_PORT_FILE="$MOCK_PORT_FILE" MOCK_LOG="$MOCK_LOG" python3 "$SCRATCH/mock.py" >"$SCRATCH/mock.err" 2>&1 &
 MOCK_PID=$!
 MOCK_PORT=""
 for _ in $(seq 50); do
   if [ -s "$MOCK_PORT_FILE" ]; then MOCK_PORT="$(cat "$MOCK_PORT_FILE")"; break; fi
   sleep 0.2
 done
-[ -n "$MOCK_PORT" ] || { echo "::error::smoke-omp: scripted mock never reported a bound port"; exit 1; }
+[ -n "$MOCK_PORT" ] || { echo "::error::smoke-omp: scripted mock never reported a bound port — mock output: $(tail -n 5 "$SCRATCH/mock.err" | tr '\n' ' ')"; exit 1; }
 for cmd in run-team-help review-and-fix run-merge-bot; do
   # probe_substitution prints its own cause-specific ::error:: line.
   probe_substitution "$cmd" || fail=1
@@ -331,18 +330,30 @@ HOME="$SCRATCH_HOME" ANTHROPIC_API_KEY="sk-ant-omp-smoke-dummy-not-real" ANTHROP
 cd "$OLDPWD"
 
 CHILD_JSONL=""
+SCANNED=0
+UNPARSED=""
 # while-read over process substitution, not `find | while | head`: `head`
 # closing the pipe SIGPIPEs the while under `set -o pipefail` and the script
 # died BEFORE the error line could print (measured: exit 1, no diagnostic).
 # The loop therefore drains the whole find (keep-going flag, no break), and
-# avoids the fragile `for f in $(find)` form (SC2044).
+# avoids the fragile `for f in $(find)` form (SC2044). jq -e answers 1 for a
+# file with no fleet-finisher record and above 1 for one it cannot parse
+# (measured: truncated JSONL → 5) — kept apart so a parse failure is never
+# reported as a missing record.
 while IFS= read -r f; do
-  if [ -z "$CHILD_JSONL" ] && jq -e -s 'any(.[]; .type=="session_init" and .agent=="fleet-finisher")' "$f" >/dev/null 2>&1; then
-    CHILD_JSONL="$f"
-  fi
+  SCANNED=$((SCANNED + 1))
+  [ -z "$CHILD_JSONL" ] || continue
+  jq_rc=0
+  jq -e -s 'any(.[]; .type=="session_init" and .agent=="fleet-finisher")' "$f" >/dev/null 2>&1 || jq_rc=$?
+  case "$jq_rc" in
+    0) CHILD_JSONL="$f" ;;
+    1) ;;
+    *) UNPARSED="$UNPARSED $(basename "$f") (jq rc $jq_rc)" ;;
+  esac
 done < <(find "$TIER_RUN_DIR" -name '*.jsonl' -newer "$SCRATCH/mock.py" 2>/dev/null)
 if [ -z "$CHILD_JSONL" ]; then
-  echo "::error::smoke-omp: tier probe produced no fleet-finisher child session record (mock log: $(tr '\n' ';' < "$MOCK_LOG" 2>/dev/null | cut -c1-200); parent tail: $(tail -c 200 "$SCRATCH/parent.out" | tr '\n' ' '))"
+  [ -d "$TIER_RUN_DIR" ] || UNPARSED="$UNPARSED (no $TIER_RUN_DIR at all)"
+  echo "::error::smoke-omp: tier probe produced no fleet-finisher child session record ($SCANNED session file(s) scanned${UNPARSED:+; unreadable:$UNPARSED}; mock log: $(tr '\n' ';' < "$MOCK_LOG" 2>/dev/null | cut -c1-200); parent tail: $(tail -c 200 "$SCRATCH/parent.out" | tr '\n' ' '))"
   fail=1
 else
   CHILD_MODEL="$(jq -rs '[.[] | select(.type=="model_change") | .model] | last // empty' "$CHILD_JSONL")"
