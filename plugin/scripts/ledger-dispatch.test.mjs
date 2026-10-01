@@ -269,8 +269,8 @@ test("row still writes well-formed member tokens and non-member keys", (t) => {
 // live, so a PR-bound member can be dispatched before `settle impl-N=PR#M`
 // names the PR on the ticket row. dispatch's fallback then keys a row of its
 // own to the PR — truthful until the settle, when two rows would name one PR:
-// the cockpit drew two REVIEW cards and the tick's first-row-wins `byPr` lost
-// the live review. The settle folds the PR-keyed row into the ticket row.
+// the cockpit drew two REVIEW cards and the tick's `byPr`, first-row-wins until
+// #2283, lost the live review. The settle folds the PR-keyed row into the ticket row.
 test("settle impl-N=PR#M folds the PR-keyed row a pre-settle dispatch created into the ticket row", (t) => {
   const { ok, read } = fixture(t);
   ok("dispatch", "1300", "impl-1300");

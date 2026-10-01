@@ -1718,9 +1718,10 @@ function runSettle() {
   // live, so a PR-bound member can be dispatched before this settle names the
   // PR here — and memberRowIndex() then finds no row naming it, so
   // runDispatch() keys a row of its own to the PR. Once this row names the PR
-  // too, two rows would: the cockpit draws two cards and the tick's
-  // first-row-wins `byPr` reads one. Fold that row's tokens onto this one, in
-  // order, so later PR-bound writes find the one row through rowPr(). Only
+  // too, two rows would: the cockpit draws two cards and the tick merges the
+  // two rows' tokens in row order (#2283), not in the order they were written.
+  // Fold that row's tokens onto this one, in order, so later PR-bound writes
+  // find the one row through rowPr(). Only
   // an implementer settles to `PR#M` (ledger-grammar.mjs), and only when the
   // settling row named NO PR before this write: `rowPr()` and the tick's
   // `PR_MENTION` both read the FIRST `PR#` mention on a row, so a row that
