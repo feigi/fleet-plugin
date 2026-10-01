@@ -62,7 +62,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { makeDie } from "./arg.mjs";
+import { makeDie, defineFlags } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 
 export const BASELINE_FILE = "main-checkout.sha";
@@ -270,9 +270,14 @@ export function recordBaseline({ cwd = process.cwd(), env = process.env } = {}) 
 }
 
 function main() {
-  const [flag, ...rest] = process.argv.slice(2);
-  if (rest.length || (flag !== "--record" && flag !== "--check")) die("usage: main-checkout.mjs --record | --check");
-  if (flag === "--record") {
+  // sweep()/stray() first, so an unknown flag or a stray positional is
+  // refused in arg.mjs's one wording before the usage guard can answer.
+  const { has, sweep, stray } = defineFlags(die, { flags: { record: "bool", check: "bool" } });
+  sweep();
+  stray();
+  const record = has("record");
+  if (record === has("check")) die("usage: main-checkout.mjs --record | --check");
+  if (record) {
     const r = recordBaseline();
     if (!r.ok) die(r.why);
     console.log(`main-checkout: recorded ${r.entries} porcelain entr${r.entries === 1 ? "y" : "ies"} at ${r.path}`);

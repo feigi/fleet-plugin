@@ -295,4 +295,10 @@ test("CLI: --record then --check, with the exit codes the header names", (t) => 
   r = run();
   assert.equal(r.status, 2);
   assert.match(r.stderr, /usage: main-checkout\.mjs --record \| --check/);
+  r = run("--record", "--check");
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /usage: main-checkout\.mjs --record \| --check/);
+  r = run("--recrod");
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--recrod/, "a misspelt flag must be refused by name, never run as a check");
 });
