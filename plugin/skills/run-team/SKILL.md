@@ -2936,7 +2936,8 @@ ancestry proof, post-rebase red triage. Do not restate them here.
 
 ### Reap after each merge pass
 
-A merge deletes the remote branch and leaves the local branch `[gone]` with its
+The merge bot deletes the remote branch after each merge (`delete-merged-branch.sh`,
+in `run-merge-bot.md` step 4), leaving the local branch `[gone]` with its
 worktree — and its `node_modules` — still on disk. Reap after **each** merge pass,
 not once at the end: a stale worktree still answers `git worktree list`, so the
 in-flight probe (`inflight.sh`, run by the Shortlist and by every Pull) reads an
@@ -3236,9 +3237,12 @@ as a stray commit — the flag and the maintainer's ruling above are what exit 1
 earns, and spending them on a probe that never answered costs a member its
 ticket over a failure a re-run would have cleared.
 
-**Never `--delete-branch`.** It errors on a `main` held by another worktree, or
-strands the feature worktree on `main`. `gh pr merge <n> --merge` alone; GitHub
-deletes the remote branch anyway.
+**Never `--delete-branch` — the merge bot deletes the head branch itself.**
+`gh pr merge <n> --merge` alone: the flag's local cleanup errors on a `main`
+held by another worktree, or strands the feature worktree on `main`. After the
+merge, `delete-merged-branch.sh <pr>` deletes the branch from `origin` and reads
+the deletion back; `reap.sh` takes the `[gone]` local branch and its worktree.
+No repo setting is relied on to do it (#2196).
 
 **Never force a rebase to start.** No `git clean`, `git checkout .`,
 `git reset --hard`, `git stash`. Uncommitted changes may exist nowhere else.

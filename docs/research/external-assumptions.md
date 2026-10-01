@@ -35,7 +35,7 @@ refuses, misreads, or silently does nothing.
 - Issues and PRs share one number space (`#42` may be either). — prose#27
 - Native sub-issues and issue dependencies are enabled (`--parent`, `sub_issues`, `dependencies/blocked_by`, `issue_dependencies_summary`); otherwise the body-line fallbacks `Blocked by: #n` / `Part of #n` are used. — prose#16–20
 - Merge method is **merge commit only**; squash and fast-forward are disabled at the ruleset and refused by `prove-merge.sh` ("has no second parent"). — shell#18, prose#31, shell#126
-- Repo-level "auto-delete head branches" is on; the bot never passes `--delete-branch`. — prose#32
+- ~~Repo-level "auto-delete head branches" is on; the bot never passes `--delete-branch`.~~ **Retired 2026-10-01: #2196 — the merge bot deletes the head branch from `origin` itself (`delete-merged-branch.sh`), so the setting is no longer required.** — prose#32
 
 **git**
 
@@ -200,7 +200,7 @@ Implied only (lives in code/prose, no doc names it as a requirement):
 - Consumer must be a Node project with `scripts.test` and one of three lockfiles. **Ruled 2026-09-28: ADR 0014 — any technology, Recipe by agent reasoning; #2117–#2120.**
 - `python3` and `shasum` on PATH.
 - Sub-issues/dependencies enabled on the GitHub plan; `blockedBy` ≤ 50 edges.
-- Auto-delete head branches on.
+- ~~Auto-delete head branches on.~~ **Retired 2026-10-01: #2196 — the merge bot deletes merged branches itself.**
 - `gh` ≥ 2.94.0; GHE needs `--hostname` in exactly one place (`ci-state.mjs` compare).
 - Required-check names and integration id 15368 in `main.json`.
 - CI cycle ≈ 5–6 min underpinning every timeout constant.
