@@ -25,10 +25,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const LIB = fileURLToPath(new URL("./json.sh", import.meta.url));
 
@@ -57,8 +58,7 @@ function drive(body, { args = [], input, break: broken, raw = false } = {}) {
       const stub = join(dir, broken);
       // Exit 1 and emit nothing — how BSD `tr` behaves on a byte that is not
       // valid UTF-8, the real-world failure this stands in for (#582).
-      writeFileSync(stub, "#!/bin/sh\nexit 1\n");
-      chmodSync(stub, 0o755);
+      writeExecStub(stub, "#!/bin/sh\nexit 1\n");
       env.PATH = `${dir}:${process.env.PATH}`;
     }
     const f = join(dir, "drive.sh");

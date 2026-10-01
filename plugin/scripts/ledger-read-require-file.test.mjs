@@ -18,10 +18,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const BOARD = fileURLToPath(new URL("./board.mjs", import.meta.url));
 const REAL_SCRIPTS = fileURLToPath(new URL("./", import.meta.url));
@@ -42,8 +43,7 @@ const EMPTY_LEDGER = "# Fleet run ledger\n\n## Rows\n\n\n## Filed\n\n\n## Ruled\
 function gatherLedger({ ledgerBody = null, scriptDir = REAL_SCRIPTS } = {}) {
   const cwd = mkdtempSync(join(tmpdir(), "board-ledger-"));
   const bin = mkdtempSync(join(tmpdir(), "board-ledger-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
-  chmodSync(join(bin, "gh"), 0o755);
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   const ledgerFile = join(cwd, "ledger.md");
   if (ledgerBody !== null) writeFileSync(ledgerFile, ledgerBody);
 

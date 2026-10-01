@@ -25,6 +25,7 @@ import { join, dirname } from "node:path";
 import { createServer } from "node:net";
 import { stripComments } from "./strip-comments.mjs";
 import { slowTransport, SSH_URL } from "./slow-transport.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = join(import.meta.dirname, "inflight.sh");
 const THIS_FILE = import.meta.filename;
@@ -101,8 +102,7 @@ const REAL_HEAD = execFileSync("/bin/sh", ["-c", "command -v head"], { encoding:
  * not the shim itself.
  */
 function gitShim(bin, body) {
-  writeFileSync(join(bin, "git"), `#!/bin/sh\n${body}\nexec '${REAL_GIT}' "$@"\n`);
-  chmodSync(join(bin, "git"), 0o755);
+  writeExecStub(join(bin, "git"), `#!/bin/sh\n${body}\nexec '${REAL_GIT}' "$@"\n`);
 }
 
 // Every chmod-denial fixture below rests on the mode being ENFORCED, and root
@@ -159,8 +159,7 @@ function fixture(t, n, { linked = [], prs = [], issueErr = null, prErr = null, o
 
   const bin = join(root, "bin");
   mkdirSync(bin);
-  writeFileSync(join(bin, "gh"), GH_STUB);
-  chmodSync(join(bin, "gh"), 0o755);
+  writeExecStub(join(bin, "gh"), GH_STUB);
 
   // A filter that could not run at all. Written only when a case asks for it,
   // so every other case forks the real awk directly.
@@ -178,11 +177,10 @@ function fixture(t, n, { linked = [], prs = [], issueErr = null, prErr = null, o
   // `exit`, so they return 0 whether or not anything matched, which is what
   // makes any non-zero status readable as a failure.
   if (awkFailWhenProgramHas !== null) {
-    writeFileSync(join(bin, "awk"), `#!/bin/sh
+    writeExecStub(join(bin, "awk"), `#!/bin/sh
 case "$*" in *'${awkFailWhenProgramHas}'*) exit 1 ;; esac
 exec '${REAL_AWK}' "$@"
 `);
-    chmodSync(join(bin, "awk"), 0o755);
   }
 
   // The same shim shape for `tr`. `-d` addresses jrewritten and nothing else:
@@ -205,11 +203,10 @@ exec '${REAL_AWK}' "$@"
   // it into json.sh behind its own capture and `|| return 1`, and json.test.mjs
   // pins it there.)
   if (trFailWhenArgsHave !== null) {
-    writeFileSync(join(bin, "tr"), `#!/bin/sh
+    writeExecStub(join(bin, "tr"), `#!/bin/sh
 case "$*" in *'${trFailWhenArgsHave}'*) exit 1 ;; esac
 exec '${REAL_TR}' "$@"
 `);
-    chmodSync(join(bin, "tr"), 0o755);
   }
 
   // The same shim shape for `python3`, selected by program text. Probe 1 forks
@@ -222,11 +219,10 @@ exec '${REAL_TR}' "$@"
   // Exits 1 for the reason the awk shim does: it stands in for a fork that
   // could not happen, not for a program that ran and disagreed.
   if (python3FailWhenProgramHas !== null) {
-    writeFileSync(join(bin, "python3"), `#!/bin/sh
+    writeExecStub(join(bin, "python3"), `#!/bin/sh
 case "$*" in *'${python3FailWhenProgramHas}'*) exit 1 ;; esac
 exec '${REAL_PYTHON3}' "$@"
 `);
-    chmodSync(join(bin, "python3"), 0o755);
   }
 
   const repo = join(root, "repo");
@@ -1851,8 +1847,7 @@ test("probe 3: a refs-subdirectory walk whose `head` cannot run is unknown, neve
   //
   // Selected by the first argument for the reason the git shims are, and
   // `head -1` is the only `head` the script runs.
-  writeFileSync(join(bin, "head"), `#!/bin/sh\ncase "$1" in -1) exit 1 ;; esac\nexec '${REAL_HEAD}' "$@"\n`);
-  chmodSync(join(bin, "head"), 0o755);
+  writeExecStub(join(bin, "head"), `#!/bin/sh\ncase "$1" in -1) exit 1 ;; esac\nexec '${REAL_HEAD}' "$@"\n`);
 
   // Measured with the guard deleted: exit 0, `taken:false`, `unknown:[]`, "no
   // local branch or worktree for #77". `$bad` takes the empty string the walk
@@ -1886,8 +1881,7 @@ test("probe 3: a refs-subdirectory find that cannot run at all is unknown, never
   // whether `find` printed a permission-denied hit or never ran at all, so a
   // crashed `find` and a clean tree left the same empty `$bad` and were
   // indistinguishable at the guard below.
-  writeFileSync(join(bin, "find"), "#!/bin/sh\nexit 127\n");
-  chmodSync(join(bin, "find"), 0o755);
+  writeExecStub(join(bin, "find"), "#!/bin/sh\nexit 127\n");
 
   // Measured before the fix: exit 0, `taken:false`, `unknown:[]`, "no local
   // branch or worktree for #77" — a `find` that never ran reported a definite
@@ -2047,8 +2041,7 @@ test("probe 2: a transport that connects and then never answers still terminates
 const sshStub = (dir, name = "user-ssh-stub.sh") => {
   const log = join(dir, `${name}.log`);
   const stub = join(dir, name);
-  writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexit 1\n`);
-  chmodSync(stub, 0o755);
+  writeExecStub(stub, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexit 1\n`);
   return { stub, log };
 };
 
@@ -2476,8 +2469,7 @@ test("mktemp failing leaves probe 2 to answer, rather than abandoning the run", 
   const { repo, env, bin } = fixture(t, 8, {
     remoteBranches: ["fix/8-thing"], detachedWorktreeUnder: "nospace",
   });
-  writeFileSync(join(bin, "mktemp"), "#!/bin/sh\nexit 1\n");
-  chmodSync(join(bin, "mktemp"), 0o755);
+  writeExecStub(join(bin, "mktemp"), "#!/bin/sh\nexit 1\n");
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
   assert.equal(r.status, 1, "the probe that could still look found the ticket taken");
   const json = JSON.parse(r.stdout);
@@ -2504,14 +2496,13 @@ test("cleanup that cannot remove the capture file never rewrites the verdict", (
   // unremovable, which is what `rm -f` fails on (a read-only mount, perms
   // changed under the run). Writing the capture is unaffected: `2>` needs
   // permission on the file, not on the directory.
-  writeFileSync(join(bin, "mktemp"), `#!/bin/sh
+  writeExecStub(join(bin, "mktemp"), `#!/bin/sh
 mkdir -p '${cap}' && chmod 755 '${cap}'
 f='${cap}'/cap.$$
 (umask 077; : > "$f") || exit 1
 chmod 555 '${cap}'
 printf '%s\\n' "$f"
 `);
-  chmodSync(join(bin, "mktemp"), 0o755);
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
   // Restored before the first assert, or a failure here leaves a fixture the
   // suite's own cleanup cannot remove.
