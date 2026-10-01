@@ -111,11 +111,21 @@ fi
 # Extracted fresh, never hardcoded: a prose edit that adds or renames a
 # callsite is covered on arrival, and a stale list here could not go
 # unnoticed the way a hardcoded one could.
+# The grep runs outside any pipeline so `set -euo pipefail` cannot abort the
+# script on its status before the checks below name the cause: rc 1 is "no
+# match" and lands in the empty-set check, rc 2+ is grep itself failing.
+grep_rc=0
 # shellcheck disable=SC2088 # literal grep PATTERN text, not a path to expand
-SCRIPT_NAMES="$(grep -rhoE '~/\.fleet/bin/fleet-run[[:space:]]+[A-Za-z][A-Za-z0-9_.-]*\.(mjs|sh)' \
-  plugin/skills plugin/commands plugin/scripts \
-  | sed -E 's#^~/\.fleet/bin/fleet-run[[:space:]]+##' \
-  | sort -u)"
+CALLSITES="$(grep -rhoE '~/\.fleet/bin/fleet-run[[:space:]]+[A-Za-z][A-Za-z0-9_.-]*\.(mjs|sh)' \
+  plugin/skills plugin/commands plugin/scripts)" || grep_rc=$?
+if [ "$grep_rc" -gt 1 ]; then
+  echo "::error::install-and-smoke: the callsite grep itself failed (rc $grep_rc) — its stderr is above"
+  fail=1
+fi
+SCRIPT_NAMES=""
+if [ -n "$CALLSITES" ]; then
+  SCRIPT_NAMES="$(sed -E 's#^~/\.fleet/bin/fleet-run[[:space:]]+##' <<<"$CALLSITES" | sort -u)"
+fi
 if [ -z "$SCRIPT_NAMES" ]; then
   echo "::error::install-and-smoke: no fleet-run callsites found — the grep itself broke, not the callsites"
   fail=1
