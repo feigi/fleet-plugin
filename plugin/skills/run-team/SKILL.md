@@ -2085,9 +2085,10 @@ survivors — is the same slot with a different job, and no review file to hand
 over. Name it `fix-pr-<M>`, or the next suffix (`-b`, `-c` …) when that name is
 already on record — `dispatch` refuses a reused one — and dispatch it with the
 `agent` that `ledger.mjs dispatch` printed, in the PR's existing worktree.
-`dispatch` reads the unresolved hold off the row and prints this member's own
-definition, whatever the row's `tier=` — read it off that output, never recall
-it; a review fix-applier's is `null`. Its prompt takes the prompt below's
+`dispatch` reads the unresolved hold off the tick's own per-PR state — every
+row naming the PR, not one — and prints this member's own definition, whatever
+the row's `tier=` — read it off that output, never recall it; a review
+fix-applier's is `null`. Its prompt takes the prompt below's
 worktree, branch and path discipline, but in place of its review paragraphs:
 bring `<branch>` current with `origin/main`, resolving every conflict by
 `run-merge-bot.md`'s **No-undo audit**, run `<testCmd>`, push, report the new
@@ -3504,12 +3505,14 @@ live count from it, so nobody states one. Write neither by hand:
   merge-bot` names the next bot itself. It prints `{member, agent, ticket,
   line, created, total}`; `agent` is the definition the `task` call names — an
   implementer's comes off its row's `tier=` (phase 2's tier check states the
-  mapping), a finisher's and a merge bot's are their own definitions, and a
-  fix-applier's is `null`: its own section says how it is dispatched. It
+  mapping), a finisher's and a merge bot's are their own definitions, a
+  review fix-applier's is `null`, and a conflict-hold fix-applier's is
+  `fleet-implementer`: its own section says how it is dispatched. It
   refuses a name this run already used (a replacement takes `-b`, `-c` …), a
   second live member on one ticket or PR, any implementer once the run is
-  draining, and an implementer whose row's `tier=` names no single definition
-  or one with no file under `agents/`.
+  draining, an implementer whose row's `tier=` names no single definition
+  or one with no file under `agents/`, and a fix-applier on a ledger the tick
+  itself refuses.
 - **`ledger.mjs settle <member> <outcome>`** — rewrites the token to
   `<member>=<outcome>` in both places. Outcomes: `impl-N` = `PR#M | bailed |
   released | killed | tier-mismatch`; `fix-pr-M` = `applied:<head> | no-op |
