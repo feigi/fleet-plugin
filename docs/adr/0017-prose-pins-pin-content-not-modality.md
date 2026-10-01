@@ -4,7 +4,14 @@
 grilling session, against the measurements below. The ruling named this ADR
 "0014"; by the time it landed, 0014 and 0015 had already landed under other
 ADRs and 0016 was reserved by PR #2136, open at the time, so it is recorded
-here as 0017.
+here as 0017. Amended by #1398: the tier check is now the code carrier
+Decision 3 asks for — `tier-check.mjs` writes its own verdict to the ledger
+(`tier-ok=impl-<N>:<definition>` on a pass; on a mismatch, `ledger.mjs settle
+impl-<N> tier-mismatch`, or a `tier-mismatch=impl-<N>:<definition>` row token
+for a member `settle` will not re-settle), and `fleet-tick.mjs` holds the next
+Pull on `HOLD (tier mismatch …)` / `HOLD (tier unchecked …)`, both
+`acts: true`. Decision 3's account of it as relying on a hand-run settle no
+longer holds; the decision itself stands.
 
 ## Context
 
