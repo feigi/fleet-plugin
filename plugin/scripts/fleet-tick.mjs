@@ -206,7 +206,7 @@ const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
 // `review=fallback:review-pr-<n>[-b]`, settled dead as `…=failed`; the result
 // is `reviewed=<head>:<survived>/<refuted>/<unverified>`.
 const REVIEW = /^review=(?:wf|member|fallback):[^=\s]+(=failed)?$/;
-const REVIEWED = /^reviewed=[0-9a-f]{7,40}:(\d+)\/(\d+)\/(\d+)$/i;
+export const REVIEWED = /^reviewed=([0-9a-f]{7,40}):(\d+)\/(\d+)\/(\d+)$/i;
 const HELD = /^held-behind[:-]#?(\d+)$/;
 // #2064: merge-bot's durable record that its local-rebase fallback hit a
 // conflict it would not force — written onto the held PR's own row at the
@@ -257,10 +257,22 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // fix-applier SETTLED (`applied:`/`no-op`) after the latest one — never
     // merely dispatched, which is `fixSince`'s bar and too low for the merge
     // hold: a live fix-applier is still working the conflict.
+    // `reviewedHead`: the latest `reviewed=<head>`. `pastPinHalt`: the latest
+    // finisher since that review settled `halted:past-pin` (#2083) — any
+    // later finisher attempt, live or settled, replaces it, and a later
+    // returned review answers it.
     const st = {
-      inFlight: false, reviewed: false, reviewedAny: false, survived: 0, fixSince: false, held: [],
-      conflictHold: false, conflictCleared: false,
+      inFlight: false, reviewedAny: false, survived: 0, fixSince: false, held: [],
+      conflictHold: false, conflictCleared: false, reviewedHead: null, pastPinHalt: false,
     };
+    // The finisher-pr token currently deciding `pastPinHalt`, picked by
+    // retry suffix ("" < "b" < "c" …) the same way compute-board.mjs's
+    // laterAttempt does — never by row-text position (#2083 correction). A
+    // `-b` retry can sit before an older `halted:past-pin` token after a row
+    // rewrite, and text order must not read the stale one as the live
+    // finisher's replacement. Reset at each `reviewed=`, since `pastPinHalt`
+    // is defined relative to the latest one (see the comment above `st`).
+    let latestFinisher = null;
     for (const tok of text.split(/\s+/).filter(Boolean)) {
       const t = parseToken(tok);
       if (t) {
@@ -275,12 +287,21 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
         // later, unrelated `row` rewrite that drops the `=outcome` suffix and
         // puts back a bare copy must not un-settle what actually landed. A
         // landed one also clears a conflict hold; a hold resets this below,
-        // so only a fix-applier after the latest hold ever counts.
+        // so only a fix-applier after the latest hold ever counts. `note`
+        // above has just recorded this exact token, so the lookup below is
+        // never absent, and its outcome is this token's own unless an
+        // earlier row already settled it — never a reason to fall back to
+        // the row's own copy.
         if (t.family === "fix-pr") {
-          const o = members.get(t.name)?.outcome ?? t.outcome;
+          const o = members.get(t.name).outcome;
           const landed = o === "no-op" || /^applied:/.test(o);
           if (o === null || landed) st.fixSince = true;
           if (landed) st.conflictCleared = true;
+        }
+        if (t.family === "finisher-pr" && t.number === pr
+          && (!latestFinisher || (t.retry ?? "") > (latestFinisher.retry ?? ""))) {
+          latestFinisher = t;
+          st.pastPinHalt = members.get(t.name).outcome === "halted:past-pin";
         }
         continue;
       }
@@ -292,7 +313,11 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
       } else if (tok.startsWith("reviewed=")) {
         const m = REVIEWED.exec(tok);
         if (!m) throw new LedgerError(`${where}: '${tok}' is not reviewed=<head>:<survived>/<refuted>/<unverified>`);
-        Object.assign(st, { inFlight: false, reviewed: true, reviewedAny: true, survived: Number(m[1]), fixSince: false });
+        latestFinisher = null;
+        Object.assign(st, {
+          inFlight: false, reviewedAny: true, survived: Number(m[2]), fixSince: false,
+          reviewedHead: m[1].toLowerCase(), pastPinHalt: false,
+        });
       } else {
         const h = HELD.exec(tok);
         if (h) st.held.push(Number(h[1]));
@@ -359,6 +384,11 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   const state = (n) => byPr.get(n);
   const heldBehind = (st) => (st?.held ?? []).some((n) => open.has(n));
   const conflictHeld = (st) => st !== undefined && st.conflictHold && !st.conflictCleared;
+  // The halt holds only while the head is still past what was reviewed: a
+  // `reviewed=` head (7-40 hex) prefix-matching gh's full headRefOid is the
+  // head that review read, and there is nothing more to review.
+  const pastPinDue = (st, head) => st !== undefined && st.pastPinHalt && !st.inFlight && st.reviewedHead !== null
+    && !String(head).toLowerCase().startsWith(st.reviewedHead);
   return {
     implLive: live("impl"),
     fixLive: live("fix-pr"),
@@ -370,14 +400,20 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // a later `reviewed=` resets `fixSince`, and a hold already cleared must
     // not come back due with it.
     fixDue: [...byPr.entries()]
-      .filter(([n, st]) => open.has(n) && ((st.reviewed && st.survived > 0) || conflictHeld(st))
+      .filter(([n, st]) => open.has(n) && ((st.reviewedHead !== null && st.survived > 0) || conflictHeld(st))
         && !st.fixSince && !st.inFlight)
       .map(([n]) => n).sort(asc),
     // Open, not signed off, closing an issue (GitHub's own linked set — a
     // chore PR closing nothing is review work nobody in the run will ever be
-    // dispatched against, #590), with no live or returned review on record.
+    // dispatched against, #590), with no live or returned review on record —
+    // or (#2083) a returned review its finisher halted `past-pin` against: the
+    // head carries commits no reviewer read, so it is owed a review again
+    // until one is running or has returned. A head that moved past
+    // `reviewed=` with no such halt — a fix-applier's push — stays not due:
+    // finisher duty 2 verifies what it applied.
     reviewDue: prs
-      .filter((p) => !isQueued(p) && p.closingIssuesReferences.length > 0 && !state(p.number)?.reviewedAny)
+      .filter((p) => !isQueued(p) && p.closingIssuesReferences.length > 0
+        && (!state(p.number)?.reviewedAny || pastPinDue(state(p.number), p.headRefOid)))
       .map((p) => p.number).sort(asc),
     mergeQueue: queued.length,
     // A `held-behind` hold lifts once its premise PR has left the open list —
@@ -528,7 +564,7 @@ function openPrs() {
   let out;
   try {
     out = execFileSync("gh", ["pr", "list", "--state", "open", "--limit", String(PR_LIMIT),
-      "--json", "number,labels,closingIssuesReferences"], { encoding: "utf8" });
+      "--json", "number,labels,closingIssuesReferences,headRefOid"], { encoding: "utf8" });
   } catch (e) {
     // Never interpolates e.stderr or e.message: execFileSync already forwarded
     // the child's stderr to ours, and Node builds e.message out of it, so
@@ -542,10 +578,12 @@ function openPrs() {
     die(`could not parse gh pr list output as JSON: ${e.message}`);
   }
   // closingIssuesReferences is checked, not defaulted: absent, it would read as
-  // an empty list and drop every open PR from review work.
+  // an empty list and drop every open PR from review work. headRefOid likewise
+  // (#2083): absent, a `halted:past-pin` PR would read as moved forever.
   if (!Array.isArray(prs) || prs.some((p) => !p || typeof p.number !== "number"
-    || !Array.isArray(p.labels) || !Array.isArray(p.closingIssuesReferences))) {
-    die("gh pr list did not return {number,labels,closingIssuesReferences} rows");
+    || !Array.isArray(p.labels) || !Array.isArray(p.closingIssuesReferences)
+    || typeof p.headRefOid !== "string")) {
+    die("gh pr list did not return {number,labels,closingIssuesReferences,headRefOid} rows");
   }
   if (prs.length === PR_LIMIT) {
     die(`exactly ${PR_LIMIT} open PRs — the list is capped and may be truncated. Raise PR_LIMIT; a backlog that silently drops PRs is not a reconcile.`);

@@ -13,7 +13,10 @@ import { parseToken, memberTokens, nextMergeBot } from "./ledger-grammar.mjs";
 const VOCABULARY = [
   ["impl-412", ["PR#420", "bailed", "released", "killed", "tier-mismatch"]],
   ["fix-pr-346", ["applied:73b356de", "applied:73b356de0123456789abcdef0123456789abcdef", "no-op", "failed", "killed"]],
-  ["finisher-pr-346", ["labelled", "failed", "killed"]],
+  ["finisher-pr-346", [
+    "labelled", "failed", "killed",
+    "halted:live-editor", "halted:rebase", "halted:past-pin", "halted:unreadable", "halted:missing", "halted:absent", "halted:other",
+  ]],
   ["merge-bot-2", ["done", "killed"]],
 ];
 
@@ -75,7 +78,16 @@ test("an outcome from another family's vocabulary, or none at all, is refused by
     ["fix-pr-346=applied:abc123", /not an outcome of fix-pr-M/],
     ["fix-pr-346=applied:73b356de0123456789abcdef0123456789abcdef0", /not an outcome of fix-pr-M/],
     ["fix-pr-346=bailed", /not an outcome of fix-pr-M/],
-    ["finisher-pr-346=done", /expected labelled \| failed \| killed/],
+    ["finisher-pr-346=done", /expected labelled \| failed \| killed \| halted:<cause>/],
+    // #2083: a halt names one of the seven causes — a bare `halted`, an
+    // unknown cause, a cause with trailing text, or a cause in another case
+    // is not a halt the controller has a rule for.
+    ["finisher-pr-346=halted", /expected labelled \| failed \| killed \| halted:<cause>/],
+    ["finisher-pr-346=halted:", /not an outcome of finisher-pr-M/],
+    ["finisher-pr-346=halted:bogus", /expected labelled \| failed \| killed \| halted:<cause>/],
+    ["finisher-pr-346=halted:past-pin:x", /not an outcome of finisher-pr-M/],
+    ["finisher-pr-346=halted:Rebase", /not an outcome of finisher-pr-M/],
+    ["fix-pr-346=halted:rebase", /not an outcome of fix-pr-M/],
     ["merge-bot-2=labelled", /expected done \| killed/],
     ["merge-bot-2=PR#5", /not an outcome of merge-bot-n/],
   ];

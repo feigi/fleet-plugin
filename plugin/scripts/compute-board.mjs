@@ -24,8 +24,8 @@
 // regex is all this file takes from it: the tick's I/O and main() never run
 // here, main() being guarded on argv[1].
 import { assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
-import { parseToken } from "./ledger-grammar.mjs";
-import { PR_MENTION } from "./fleet-tick.mjs";
+import { parseToken, HALT_CAUSES } from "./ledger-grammar.mjs";
+import { PR_MENTION, REVIEWED } from "./fleet-tick.mjs";
 
 // A ledger row is freeform, controller-authored text. Two real examples:
 //   #332 impl-332=PR#344 → PR#344 → MERGED 73b356de
@@ -56,6 +56,14 @@ import { PR_MENTION } from "./fleet-tick.mjs";
 //
 // A member settled anywhere on the row is settled — a bare copy beside
 // `<member>=<outcome>` is what a whole-line `row` rewrite leaves.
+//
+// #2083: a PR whose latest finisher attempt settled `halted:<cause>` carries
+// that outcome as a severity-4 flag while the PR sits in REVIEW. The halt is
+// the finisher working correctly — it refused to label — so the PR has no
+// `ready-to-merge` until the controller resolves the cause; the flag is what
+// puts it in front of a human. "Latest" is laterAttempt's reading, among the
+// finisher tokens bound to the row's own PR: a live `-b` after the halt
+// clears it.
 //
 // A PR's review is not a member (#1773 §7): `review=wf:<runId>` is a Workflow
 // with nobody to name, while `review=member:<name>` and
@@ -129,13 +137,16 @@ export function parseRow(row) {
   // exists for.
   const live = [];
   const implOutcomes = new Map();
+  const finisherOutcomes = new Map();
   const settled = new Set();
   let lastImpl = null; // the latest well-formed impl token (laterAttempt)
+  const finishers = []; // well-formed finisher tokens, for the row's PR below
   let anyImpl = false;
   let prMember = false;
   let review = false; // any review= token: a PR-bound signal (amendment 2a)
   let reviewLive = false; // one not settled `=failed` (amendment 5a)
   let reviewed = false;
+  let reviewedHead = null;
   let runners = [];
   let malformed = false;
   for (const tok of row.split(/\s+/).filter(Boolean)) {
@@ -151,6 +162,10 @@ export function parseRow(row) {
           if (!lastImpl || laterAttempt(t, lastImpl, ticket)) lastImpl = t;
         }
       }
+      if (t.family === "finisher-pr" && !t.error) {
+        if (t.outcome !== null) finisherOutcomes.set(t.name, t.outcome);
+        finishers.push(t);
+      }
       if (t.bound === "pr") prMember = true;
       continue;
     }
@@ -164,6 +179,12 @@ export function parseRow(row) {
       }
     } else if (tok.startsWith("reviewed=")) {
       reviewed = true;
+      // (#2083) The head that review actually read — the cockpit's own copy
+      // of fleet-tick.mjs's `reviewedHead`, needed below to tell a past-pin
+      // halt already answered by this review apart from one still owed a
+      // fresh one.
+      const m = REVIEWED.exec(tok);
+      if (m) reviewedHead = m[1].toLowerCase();
       for (const r of runners) settled.add(r);
       runners = [];
     }
@@ -186,11 +207,16 @@ export function parseRow(row) {
     if (mention) pr = Number(mention[1]);
     else if ((prMember || review || reviewed) && row.split(/\s/)[0] === issueM[0]) pr = Number(issueM[1]);
   }
+  let lastFinisher = null;
+  for (const t of finishers) {
+    if (t.number === pr && (!lastFinisher || laterAttempt(t, lastFinisher, pr))) lastFinisher = t;
+  }
   return {
     issue: Number(issueM[1]),
     excluded: ex ? [...ex[1].matchAll(PREMISE)].map(([, kind, target]) => ({ kind, target })) : null,
     impl: lastImpl?.name ?? null,
     implOutcome,
+    finisherOutcome: lastFinisher ? (finisherOutcomes.get(lastFinisher.name) ?? null) : null,
     agent: alive.length ? alive[alive.length - 1].name : null,
     pr,
     merged: !!mergedM,
@@ -199,6 +225,7 @@ export function parseRow(row) {
     causes,
     malformed,
     reviewed,
+    reviewedHead,
     underReview: reviewLive || alive.some((e) => e.kind === "member" && (e.token.family === "fix-pr" || e.token.family === "finisher-pr")),
   };
 }
@@ -250,6 +277,17 @@ export function deriveFlags(parsed, ctx) {
   for (const c of parsed.causes) flags.push(c); // killed | blocked | sha-off-branch
   const o = parsed.implOutcome;
   if ((o === "killed" || o === "tier-mismatch") && !flags.includes(o)) flags.push(o);
+  // Only while the halt still parks the PR: once a human resolves an
+  // escalated halt by labelling or merging it, the flag has nothing to ask.
+  // `past-pin`'s own automatic resolution (SKILL.md "Resolving a finisher
+  // halt") re-reviews the PR through fleet-tick.mjs, but a returned
+  // `reviewed=` does not itself clear `finisherOutcome` here — the halt is
+  // answered only once "its result reaches a fresh finisher through the
+  // same gate" (ibid.), so the card stays flagged, same as any other halt
+  // cause, until that finisher settles. reviewBacklog below reads the same
+  // gap the other way: still counted due for a fresh review while this flag
+  // is up and the head has not caught up to what was reviewed.
+  if (parsed.finisherOutcome?.startsWith("halted:") && ctx.column === "REVIEW") flags.push(parsed.finisherOutcome);
   const limit = STALE_MS[ctx.column];
   if (limit != null && ctx.sinceEnteredStage != null && ctx.now - ctx.sinceEnteredStage > limit) {
     flags.push("stale");
@@ -277,7 +315,11 @@ function titleFor(issue, pr, issues) {
   return i ? i.title : `#${issue}`;
 }
 
-const FLAG_SEVERITY = { "red-ci": 5, "ledger-error": 5, killed: 4, "tier-mismatch": 4, blocked: 4, "sha-off-branch": 4, stale: 1 };
+const FLAG_SEVERITY = {
+  "red-ci": 5, "ledger-error": 5, killed: 4, "tier-mismatch": 4, blocked: 4, "sha-off-branch": 4,
+  ...Object.fromEntries(HALT_CAUSES.map((c) => [`halted:${c}`, 4])),
+  stale: 1,
+};
 function severity(flags) {
   let s = 0;
   for (const f of flags) {
@@ -454,11 +496,18 @@ export function computeBoard(inputs) {
 
   // Backlog is a PR nobody has reviewed and nobody is reviewing: no live
   // `review=` (#1820 amendment 5a — a settled `=failed` one is no review), no
-  // `reviewed=`, and no live fix-applier or finisher on the row.
+  // `reviewed=`, and no live fix-applier or finisher on the row — or (#2083)
+  // a returned review whose finisher halted `past-pin` against a head it
+  // never read: owed again until the head catches up to what `reviewed=`
+  // recorded, the same rule fleet-tick.mjs's reviewDue reads off headRefOid
+  // (pastPinDue). A PR absent from the open list (closed, not yet MERGED)
+  // reads as an unmatched head, never as answered — silence is not review.
   const parsedByIssue = new Map(parsed.map((p) => [p.issue, p]));
+  const pastPinBacklog = (p) => p.finisherOutcome === "halted:past-pin" && p.reviewedHead !== null
+    && !String(prByNum.get(p.pr)?.headRefOid ?? "").toLowerCase().startsWith(p.reviewedHead);
   const reviewBacklog = tickets.filter((t) => {
     const p = parsedByIssue.get(t.issue);
-    return t.column === "REVIEW" && !p.underReview && !p.reviewed;
+    return t.column === "REVIEW" && !p.underReview && (!p.reviewed || pastPinBacklog(p));
   }).length;
   const cardsInPool = tickets.filter((t) => t.column === "POOL").length;
   // #2108: a capped pool read makes this count a floor, and it says so the way

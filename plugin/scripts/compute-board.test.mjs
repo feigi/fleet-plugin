@@ -410,7 +410,7 @@ const REPRO_ROWS = [
   "#908 impl-908=PR#931 · review=wf:r123",
   "#909 impl-909=PR#932 · review=member:review-pr-932",
 ];
-const openPr = (number, labels = []) => ({ number, state: "OPEN", labels, title: `pr ${number}` });
+const openPr = (number, labels = [], headRefOid = null) => ({ number, state: "OPEN", labels, title: `pr ${number}`, headRefOid });
 const HOUR = 60 * MIN;
 // A prior stage entry 1 h old for every row, in the column each row showed on
 // main — the measurement's setup, so every non-terminal card is past its
@@ -572,6 +572,52 @@ test("review-1912-b: a foreign ticket's impl token never outranks this row's own
     assert.equal(c.column, "IMPLEMENTING", row);
     assert.deepEqual(c.flags, [], `${row}: ticket 5 is live, not killed — impl-3-z is ticket 3's token`);
   }
+});
+
+// #2083: a finisher halt is the finisher working correctly — it refused to
+// label — so the PR parks in REVIEW with no `ready-to-merge`. The cockpit's
+// severity-4 flag is what puts it in front of a human.
+const HALTED = "#941 impl-941=PR#931 · reviewed=abc1234:0/0/0 · finisher-pr-931=halted:unreadable";
+
+test("#2083: a PR whose latest finisher halted carries the cause as a flag, ranked exactly at severity 4", () => {
+  // Two killed (severity 4) rows around the halted one: attention sorts by
+  // severity and is otherwise stable, so the halted card stays between them
+  // only at exactly 4 — at 5 it would lead, at 3 or below it would trail.
+  const b = computeBoard(reproInputs({
+    rows: ["#904 impl-904=killed", HALTED, "#942 impl-942=killed", "#943 impl-943=PR#932 · held-behind:#931"],
+    prev: { tickets: [] },
+  }));
+  assert.equal(card(b, 941).column, "REVIEW");
+  assert.deepEqual(card(b, 941).flags, ["halted:unreadable"]);
+  assert.deepEqual(b.attention.map((t) => t.issue), [904, 941, 942, 943]);
+});
+
+test("#2083: a later finisher attempt decides — a live or labelled `-b` clears the halt, in any token order", () => {
+  for (const [row, flags] of [
+    ["#941 impl-941=PR#931 · finisher-pr-931=halted:past-pin · finisher-pr-931-b", []],
+    ["#941 impl-941=PR#931 · finisher-pr-931-b · finisher-pr-931=halted:past-pin", []],
+    ["#941 impl-941=PR#931 · finisher-pr-931=halted:live-editor · finisher-pr-931-b=labelled", []],
+    ["#941 impl-941=PR#931 · finisher-pr-931=failed · finisher-pr-931-b=halted:rebase", ["halted:rebase"]],
+    // A bare copy beside the settled token is what a whole-line rewrite
+    // leaves; the member is still settled halted.
+    ["#941 impl-941=PR#931 · finisher-pr-931 · finisher-pr-931=halted:other", ["halted:other"]],
+    // Another PR's finisher is not this PR's latest attempt.
+    ["#941 impl-941=PR#931 · finisher-pr-931=halted:missing · finisher-pr-950-b=labelled", ["halted:missing"]],
+    ["#941 impl-941=PR#931 · finisher-pr-950=halted:missing", []],
+  ]) {
+    const { card: c } = cardFor(row, 941);
+    assert.equal(c.column, "REVIEW", row);
+    assert.deepEqual(c.flags, flags, row);
+  }
+});
+
+test("#2083: a halt a human already resolved — PR labelled or merged — flags nothing", () => {
+  const ready = computeBoard(reproInputs({ rows: [HALTED], prs: [openPr(931, ["ready-to-merge"])], prev: { tickets: [] } }));
+  assert.equal(card(ready, 941).column, "READY");
+  assert.deepEqual(card(ready, 941).flags, []);
+  const merged = computeBoard(reproInputs({ rows: [HALTED], prs: [], merged: [931], prev: { tickets: [] } }));
+  assert.equal(card(merged, 941).column, "MERGED");
+  assert.deepEqual(card(merged, 941).flags, []);
 });
 
 test("#1820: a live implementer is IMPLEMENTING, and still earns stale", () => {
@@ -831,8 +877,12 @@ test("#1820: a bare `review-pr-<n>` token (no `review=` prefix) names nobody —
 
 // fleet-tick.mjs's review-due for the same rows, observed through deriveRun
 // rather than restated: every PR open, unlabelled and closing an issue.
-const tickReviewDue = (rows, prs) => deriveRun({ rows, dispatched: [], drain: null },
-  prs.map((number) => ({ number, labels: [], closingIssuesReferences: [{ number }] }))).reviewDue;
+// `headRefOid` defaults to a fixed placeholder, never absent — (#2083) a
+// genuinely missing head reads as "moved past reviewed=" in deriveRun, so
+// an omitted-by-accident fixture would silently exercise past-pin's
+// redispatch path instead of refusing the way production's openPrs() does.
+const tickReviewDue = (rows, prs, headRefOid = "abc1234abc1234abc1234abc1234abc1234abcd") => deriveRun({ rows, dispatched: [], drain: null },
+  prs.map((number) => ({ number, labels: [], closingIssuesReferences: [{ number }], headRefOid }))).reviewDue;
 
 test("#1820 amendment 5a: a settled `review=...=failed` with no redispatch is owed a review — reviewBacklog agrees with fleet-tick.mjs's reviewDue", () => {
   const row = "#961 impl-961=PR#961 · review=member:review-pr-961=failed";
@@ -895,6 +945,25 @@ test("#1820 amendment 5a: on the same ledger and PR list, the cockpit's backlog 
   const b = computeBoard(reproInputs({ rows, prs: prs.map((n) => openPr(n)) }));
   assert.equal(b.queue.reviewBacklog, tickReviewDue(rows, prs).length);
   assert.equal(b.queue.reviewBacklog, cases.filter(([, , owed]) => owed).length);
+});
+
+test("#2083: a returned review whose finisher halted past-pin against a head it never read is owed a review again — cockpit and tick agree", () => {
+  // reviewed= first, then a fresher finisher discovers the head moved past
+  // it and halts — the same chronology the fleet-tick.test.mjs fixture
+  // above uses, so the halt is the row's freshest event.
+  const row = "#972 impl-972=PR#972 · reviewed=abc1234:0/0/0 · finisher-pr-972=halted:past-pin";
+  const staleHead = "def5678def5678def5678def5678def5678def";
+  const b = computeBoard(reproInputs({ rows: [row], prs: [openPr(972, [], staleHead)] }));
+  assert.equal(card(b, 972).column, "REVIEW");
+  assert.equal(b.queue.reviewBacklog, 1, "the halt's automatic re-review has not happened at this head yet");
+  assert.deepEqual(tickReviewDue([row], [972], staleHead), [972], "the tick agrees");
+});
+
+test("#2083: once the head matches the reviewed= that answered a past-pin halt, neither counts it owed", () => {
+  const row = "#973 impl-973=PR#973 · finisher-pr-973=halted:past-pin · reviewed=abc1234:0/0/0";
+  const b = computeBoard(reproInputs({ rows: [row], prs: [openPr(973, [], "ABC1234")] }));
+  assert.equal(b.queue.reviewBacklog, 0, "the automatic re-review already answered the halt");
+  assert.deepEqual(tickReviewDue([row], [973], "ABC1234"), [], "the tick agrees");
 });
 
 // #1926: a `review=` token outside the wf/member/fallback grammar is still

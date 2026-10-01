@@ -32,7 +32,9 @@ const FALLBACK_END = "### Merge bot";
 const fallbackSection = () => between(RUN_TEAM, FALLBACK_START, FALLBACK_END, "run-team fallback section");
 
 const CAUSE_BLOCK_START = "instead of asking anyone:";
-const CAUSE_BLOCK_END = "Gate on the `check` job";
+// The controller-facing resolution table (#2083) follows the block directly;
+// it is no part of what the finisher is handed.
+const CAUSE_BLOCK_END = "**Resolving a finisher halt.**";
 
 // Raw slice: keeps the `>` prefixes, needed by the structural (every-line-quoted)
 // test below.
@@ -40,7 +42,7 @@ function causeBlock() {
   const at = RUN_TEAM.indexOf(CAUSE_BLOCK_START);
   assert.notEqual(at, -1, `cause-block anchor ('${CAUSE_BLOCK_START}') moved — update this test`);
   const end = RUN_TEAM.indexOf(CAUSE_BLOCK_END, at);
-  assert.notEqual(end, -1, `the CI-gate paragraph that follows ('${CAUSE_BLOCK_END}') moved — update this test`);
+  assert.notEqual(end, -1, `the resolution paragraph that follows ('${CAUSE_BLOCK_END}') moved — update this test`);
   return RUN_TEAM.slice(at + CAUSE_BLOCK_START.length, end);
 }
 
@@ -167,7 +169,7 @@ test("the commit-past-the-pin report names the commit and whether it is pushed, 
   // while dropping what the halt is worth.
   assert.match(
     text,
-    /Halt, name `commit past the pin`, and report \*\*the commit, and whether it is pushed, unpushed, or unknown\*\*/,
+    /Halt, name `past-pin`, and report \*\*the commit, and whether it is pushed, unpushed, or unknown\*\*/,
     "the report shape no longer owes all three facts — a halt naming the commit without saying pushed/unpushed/unknown leaves the controller unable to tell an unreviewed push from a commit no reviewer can even fetch, or from a check that never got an answer",
   );
   // Both commands, because "whether it is pushed" is only self-checkable if the
