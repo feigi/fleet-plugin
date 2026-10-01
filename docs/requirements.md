@@ -111,7 +111,6 @@ Fleet scripts don't write `.gitignore`; verify with `git check-ignore .worktrees
 |---|---|---|
 | Allow merge commits | on | `gh pr merge --merge` is the only merge method |
 | Allow squash / rebase merging | off | Ruleset disables them; maintainer squash breaks audit |
-| Auto-delete head branches | on | Fleet never passes `--delete-branch`; without this, branches accumulate |
 | Sub-issues and issue dependencies | enabled | `blockedBy` is read; ≤50 blockers per issue (GitHub's cap) |
 
 Branch protection: repository ruleset on `main` ([ADR 0007](adr/0007-main-ruleset-is-the-merge-gate.md)), modelled on [`.github/rulesets/main.json`](../.github/rulesets/main.json):
@@ -194,7 +193,7 @@ git ls-tree --name-only origin/main package-lock.json pnpm-lock.yaml yarn.lock |
 git check-ignore -q .worktrees/probe
 git check-ignore -q .fleet/probe
 for l in ready-for-agent in-progress ready-to-merge; do gh label list --search "$l" --json name --jq '.[].name' | grep -qx "$l"; done
-gh api "repos/{owner}/{repo}" --jq '[.allow_merge_commit, .delete_branch_on_merge] | @tsv'
+gh api "repos/{owner}/{repo}" --jq '.allow_merge_commit'
 gh api "repos/{owner}/{repo}/rulesets" --jq '.[].name'
 grep -l '^name: *CI *$' .github/workflows/*.y*ml 2>/dev/null || echo "no CI workflow named CI"
 ~/.fleet/bin/fleet-run --root

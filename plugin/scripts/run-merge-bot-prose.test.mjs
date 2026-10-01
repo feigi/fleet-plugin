@@ -39,6 +39,15 @@ test("step 4 says a failed removal must be reported, never swallowed", () => {
   assert.match(step4(), /a removal failed — report it as `label-drop-failed-#<issue>`, never swallow it/);
 });
 
+// #2196: the bot deletes the merged head branch itself rather than leaning on
+// the repo's auto-delete setting, and a branch left behind is a report, not a
+// silence — reap.sh only ever reaps a `[gone]` branch.
+test("step 4 deletes the head branch itself and reports a failed delete", () => {
+  assert.match(step4(), /delete-merged-branch\.sh <pr>/);
+  assert.match(step4(), /report it as `branch-delete-failed-#<pr>`, never swallow it/);
+  assert.doesNotMatch(step4(), /GitHub removes the remote branch anyway/);
+});
+
 test("the drop runs only after the merge is confirmed, never before", () => {
   assert.match(step4(), /call this only after the merge is confirmed/);
 });
@@ -308,9 +317,9 @@ test("step 1 names the correct upstream for proving a post-rebase worktree stale
 // separate rots follow from that, and each is pinned to its own contiguous
 // string rather than to a word appearing somewhere in step 1.
 //
-// (a) The ORDERING must ride in the same sentence as the command. GitHub
-// deletes the remote branch when the PR lands, so `origin/<branch>` stops
-// existing at the merge and a probe run afterwards dies on a missing ref —
+// (a) The ORDERING must ride in the same sentence as the command. Step 4
+// deletes the remote branch once the PR lands (#2196), so `origin/<branch>`
+// stops existing at the merge and a probe run afterwards dies on a missing ref —
 // which reads like the divergence it was meant to rule out. A constraint
 // parked in a later paragraph is one a reader can reach the command without
 // having read, so the assertion below spans command and constraint as one
@@ -321,7 +330,7 @@ test("step 1's staleness probe carries its ordering constraint in the same sente
     /run `git cherry origin\/<branch> HEAD` from the worktree \*\*before the merge, never after\*\*/,
   );
   // the reason, without which the constraint is an unexplained rule
-  assert.match(step1(), /GitHub deletes the remote branch when the PR lands/);
+  assert.match(step1(), /step 4 deletes the remote branch once the PR lands/);
   assert.match(step1(), /fails on a missing ref/);
 });
 
