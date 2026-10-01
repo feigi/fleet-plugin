@@ -42,7 +42,7 @@
 // the ledger; main() does the I/O. Split so the guard table and the reading are
 // both unit-testable without a network — fleet-tick.test.mjs.
 
-import { parseToken } from "./ledger-grammar.mjs";
+import { parseMember, parseToken } from "./ledger-grammar.mjs";
 
 // Every role's TARGET is its configured cap. Availability of work belongs in
 // the ACTION, not the target: a reviewer target that shrank to the backlog
@@ -63,6 +63,30 @@ const mkRow = (role, actual, target, detail) => (action, { acts = false, extra =
   role, actual, target, action, acts, detail: extra ? `${detail} — ${extra}` : detail,
 });
 
+// The clearing step a tier hold names in its detail (#2255). The tick reads no
+// transcript and so does not know the session directory: `<session>` stays a
+// placeholder the controller fills in, as `<file>` does — one batch file, one
+// entry per held member (SKILL.md's phase-2 tier check).
+const tierCheckStep = (members) => "run ~/.fleet/bin/fleet-run tier-check.mjs --batch <file> with "
+  + JSON.stringify(members.map((member) => ({ member, session: "<session>" })));
+
+// A mismatch clears when the next attempt on the ticket is dispatched at its
+// row's tier: the member's name with the next retry letter. `-z` is the
+// grammar's last (ledger-grammar.mjs), so there is no legal name to print.
+function replaceStep(members) {
+  const next = members.map((name) => {
+    const m = parseMember(name);
+    if (m.retry === "z") return null;
+    return `${m.family}-${m.number}-${m.retry ? String.fromCharCode(m.retry.charCodeAt(0) + 1) : "b"}`;
+  });
+  const stuck = members.filter((_, i) => next[i] === null);
+  const named = next.filter(Boolean);
+  return [
+    named.length ? `dispatch ${named.join(", ")} at its row's tier` : "",
+    stuck.length ? `${stuck.join(", ")} has no retry letter left` : "",
+  ].filter(Boolean).join("; ");
+}
+
 function implementers(s, left) {
   const row = mkRow("implementers", s.implLive, s.implCap,
     `unclaimed=${s.heads.length} supply=${s.supply ?? "?"} unreviewed=${left.unreviewed}`
@@ -72,13 +96,20 @@ function implementers(s, left) {
   // a replacement controller that never saw the drain is held by it too.
   if (s.draining !== null) return row("HOLD (draining)");
   // Held until a replacement at the right tier is dispatched (§ 6 §6). The
-  // controller can fix this unattended, so the row asks it to.
-  if (s.tierMismatch.length) return row(`HOLD (tier mismatch ${s.tierMismatch.join(" ")})`, { acts: true });
+  // controller can fix this unattended, so the row asks it to — and names the
+  // replacement in its detail (#2255), since the step lives otherwise only in
+  // SKILL.md prose, which is what a compaction loses.
+  if (s.tierMismatch.length) {
+    return row(`HOLD (tier mismatch ${s.tierMismatch.join(" ")})`, { acts: true, extra: replaceStep(s.tierMismatch) });
+  }
   // Held until tier-check.mjs has run on the newest implementer and written
   // its verdict to the ledger (#1398) — a Pull on top of an unchecked
   // dispatch repeats whatever it got wrong. Running the check is the
-  // controller's own step, so it is asked to act.
-  if (s.tierUnchecked.length) return row(`HOLD (tier unchecked ${s.tierUnchecked.join(" ")})`, { acts: true });
+  // controller's own step, so it is asked to act, with the command in the
+  // detail (#2255).
+  if (s.tierUnchecked.length) {
+    return row(`HOLD (tier unchecked ${s.tierUnchecked.join(" ")})`, { acts: true, extra: tierCheckStep(s.tierUnchecked) });
+  }
 
   const deficit = s.implCap - s.implLive;
   if (deficit <= 0) return row("AT CAP");

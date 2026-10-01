@@ -97,18 +97,47 @@ test("implementers: draining holds the row and outranks every other branch", () 
   }
 });
 
-test("implementers: a tier mismatch holds the row, names the member, and asks the controller to act", () => {
+// #2255: a tier hold's detail names the step that clears it, so the row
+// carries its own command when SKILL.md's prose is gone from context.
+test("implementers: a tier mismatch holds the row, names the member, asks the controller to act, and names the replacement", () => {
   const r = row(state({ heads: [7], tierMismatch: ["impl-412"] }), "implementers");
   assert.equal(r.action, "HOLD (tier mismatch impl-412)");
   assert.equal(r.acts, true, "the controller fixes a mismatch unattended — backing off on it is a stall");
+  assert.match(r.detail, /^unclaimed=1 supply=0 unreviewed=0 — /, "the counts stay in front of the clearing step");
+  assert.match(r.detail, /dispatch impl-412-b at its row's tier/);
+});
+
+test("implementers: a mismatched replacement names the NEXT retry letter, one per held member", () => {
+  const r = row(state({ tierMismatch: ["impl-8-b", "impl-9"] }), "implementers");
+  assert.equal(r.action, "HOLD (tier mismatch impl-8-b impl-9)");
+  assert.match(r.detail, /dispatch impl-8-c, impl-9-b at its row's tier/);
+  assert.doesNotMatch(r.detail, /impl-8-b-b|impl-9-c/);
+  // `-z` is the grammar's last letter: no legal replacement name to print, so
+  // the row says so instead of naming one ledger.mjs would refuse.
+  assert.match(row(state({ tierMismatch: ["impl-8-z"] }), "implementers").detail, /impl-8-z has no retry letter left/);
 });
 
 test("implementers: an unchecked implementer holds the row and asks the controller to run the check; a mismatch outranks it", () => {
   const r = row(state({ heads: [7], tierUnchecked: ["impl-412"] }), "implementers");
   assert.equal(r.action, "HOLD (tier unchecked impl-412)");
   assert.equal(r.acts, true, "running tier-check is the controller's own step — backing off on it is a stall");
+  assert.ok(r.detail.includes(
+    `run ~/.fleet/bin/fleet-run tier-check.mjs --batch <file> with [{"member":"impl-412","session":"<session>"}]`), r.detail);
   const both = row(state({ heads: [7], tierMismatch: ["impl-9"], tierUnchecked: ["impl-412"] }), "implementers");
   assert.equal(both.action, "HOLD (tier mismatch impl-9)");
+  assert.doesNotMatch(both.detail, /tier-check/, "the detail names the step for the hold the row prints, not the one it outranks");
+});
+
+test("implementers: several unchecked members share one batch file, one entry each", () => {
+  const r = row(state({ tierUnchecked: ["impl-7", "impl-8-b"] }), "implementers");
+  assert.ok(r.detail.includes(
+    `[{"member":"impl-7","session":"<session>"},{"member":"impl-8-b","session":"<session>"}]`), r.detail);
+});
+
+test("implementers: no tier hold, no clearing step in the detail", () => {
+  for (const over of [{ heads: [7] }, { draining: "x", tierUnchecked: ["impl-4"] }, {}]) {
+    assert.doesNotMatch(row(state(over), "implementers").detail, /—/, JSON.stringify(over));
+  }
 });
 
 test("implementers: the detail carries the numbers the branch turned on", () => {
@@ -925,12 +954,12 @@ test("CLI: a ledger ledger.mjs itself refuses is a refusal here too", () => {
 
 test("CLI: a tier mismatch holds the implementer row until a replacement is dispatched", () => {
   const r = runCli([], { ledger: { rows: ["#7 impl-7=tier-mismatch"], dispatched: ["impl-7=tier-mismatch"] }, shortlist: shortlistText([8, 9]) });
-  assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m);
+  assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\) +\(.* — dispatch impl-7-b at its row's tier\)$/m);
 });
 
 test("CLI: an implementer with no tier verdict on the ledger holds the implementer row until tier-check writes one", () => {
   const r = runCli([], { ledger: { rows: ["#7 impl-7 · class=routine"], dispatched: ["impl-7"] }, shortlist: shortlistText([8, 9]) });
-  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier unchecked impl-7\)/m);
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier unchecked impl-7\) +\(.* — run ~\/\.fleet\/bin\/fleet-run tier-check\.mjs --batch <file> with \[\{"member":"impl-7","session":"<session>"\}\]\)$/m);
   const ok = runCli([], {
     ledger: { rows: ["#7 impl-7 · class=routine · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7"] },
     shortlist: shortlistText([8, 9]),
