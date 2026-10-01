@@ -36,44 +36,19 @@ function die(message) {
   process.exit(2);
 }
 
-function readInstallPath(registryPath, pluginKey) {
-  let raw;
+// The Install root, same resolution point as scripts/fleet-run (ADR 0021):
+// the realpath of `~/.omp/plugins/node_modules/@feigi/fleet-ctl`. Absent or
+// dangling answers null, which the caller reports as "omp: not installed".
+function readInstallPath(packagePath) {
   try {
-    raw = fs.readFileSync(registryPath, "utf8");
+    return fs.realpathSync(packagePath);
   } catch {
     return null;
   }
-  let json;
-  try {
-    json = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  const entries = json && json.plugins && json.plugins[pluginKey];
-  const installPath = entries && entries[0] && entries[0].installPath;
-  return typeof installPath === "string" && installPath !== "" ? installPath : null;
 }
 
 function sha256(buf) {
   return crypto.createHash("sha256").update(buf).digest("hex");
-}
-
-// Both sides of the checkout-vs-install comparison, normalized the same
-// way: `ownDir`'s parent may have been reached through a symlinked path
-// (macOS resolves `/tmp` through `/private/tmp`, measured), and nothing
-// forbids a registry's recorded `installPath` from carrying a trailing
-// separator. `fs.realpathSync` where the path exists; a plain
-// `path.normalize` with the trailing separator stripped otherwise (an
-// absent/`null` install path, or one this process cannot stat) — either way
-// the two sides are compared in the same shape rather than raw strings from
-// two different sources.
-function canonical(p) {
-  if (typeof p !== "string" || p === "") return p;
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    return path.normalize(p).replace(/[\\/]+$/, "");
-  }
 }
 
 function main() {
@@ -91,10 +66,13 @@ function main() {
   }
 
   const home = os.homedir();
-  const PLUGIN_KEY = "fleet-ctl@fleet-plugin";
-  const ompInstall = readInstallPath(path.join(home, ".omp", "plugins", "installed_plugins.json"), PLUGIN_KEY);
-  const parent = canonical(path.dirname(ownDir));
-  const runningFromInstall = parent === canonical(ompInstall);
+  const PLUGIN_KEY = "@feigi/fleet-ctl"; // ADR 0006 name; ADR 0021 — the node_modules package dir.
+  const ompInstall = readInstallPath(path.join(home, ".omp", "plugins", "node_modules", PLUGIN_KEY));
+  // Both sides are realpaths — readInstallPath() already resolved the install,
+  // and this file's own directory exists, so its parent resolves too — so a
+  // path reached through a symlink (macOS /tmp → /private/tmp) compares equal.
+  const parent = fs.realpathSync(path.dirname(ownDir));
+  const runningFromInstall = parent === ompInstall;
 
   const target = path.join(home, ".fleet", "bin", "fleet-run");
 
@@ -105,7 +83,7 @@ function main() {
   // this flag at all.
   if (!runningFromInstall && !fromCheckoutFlag) {
     die(
-      `refusing to place ${target} from ${ownDir}, which is not a registry-resolved install (looked at `
+      `refusing to place ${target} from ${ownDir}, which is not omp's resolved install root (looked at `
       + `${ompInstall ? `omp: ${ompInstall}` : "omp: not installed"}) — re-run with --from-checkout to take `
       + "ADR 0003's one-time bootstrap exception explicitly",
     );
@@ -113,11 +91,11 @@ function main() {
 
   if (!runningFromInstall) {
     process.stderr.write(
-      `${NAME}: BOOTSTRAP EXCEPTION — running from a source checkout (${ownDir}), not a registry-resolved `
-      + "install (looked at "
+      `${NAME}: BOOTSTRAP EXCEPTION — running from a source checkout (${ownDir}), not omp's resolved `
+      + "install root (looked at "
       + `${ompInstall ? `omp: ${ompInstall}` : "omp: not installed"}). `
       + "ADR 0003 licenses this ONCE, as the Resolver's own bootstrap, because no install anywhere yet carries "
-      + "scripts/fleet-run for a registry-driven copy to come from. Every other fleet script must run through "
+      + "scripts/fleet-run for an install-root-driven copy to come from. Every other fleet script must run through "
       + "the Resolver once it exists.\n",
     );
   }

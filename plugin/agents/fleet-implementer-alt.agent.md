@@ -1,6 +1,6 @@
 ---
 name: fleet-implementer-alt
-description: A /fleet-ctl:run-team implementer dispatched at the ALTERNATE tier, so every run carries its own unconfounded comparison. Identical to fleet-implementer except for the tier.
+description: A `/skill:run-team` implementer dispatched at the ALTERNATE tier, so every run carries its own unconfounded comparison. Identical to fleet-implementer except for the tier.
 model: "@task:high"
 ---
 

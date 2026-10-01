@@ -286,7 +286,7 @@ Three dots, never two: a two-dot diff on a stale branch renders `main`'s gains a
 
 ## Grace, then one report
 
-**Only a bot a controller dispatched holds a grace** (`/fleet-ctl:run-team`, or any caller that says it owns the watcher); the top-level invocation arms its Monitor instead (**Then stay armed**). You were dispatched on the first `ready-to-merge` label, never after anyone's report, and a label landing minutes after your last merge is the common case — so the pass does not end the moment the queue empties. It drains, then waits **15 minutes** for late labels, then reports once:
+**Only a bot a controller dispatched holds a grace** (`/skill:run-team`, or any caller that says it owns the watcher); the top-level invocation arms its Monitor instead (**Then stay armed**). You were dispatched on the first `ready-to-merge` label, never after anyone's report, and a label landing minutes after your last merge is the common case — so the pass does not end the moment the queue empties. It drains, then waits **15 minutes** for late labels, then reports once:
 
 - Grace starts once no labelled PR is actionable — every one merged, skipped or held. Seed the labelled set then, the way **Then stay armed** seeds its Monitor, so a PR you already handled does not re-fire.
 - Every 60s, poll `gh pr list --state open --label ready-to-merge --limit 200 --json number`. A number not in the seed → **re-run selection from the top**, hold rule included, drain what it makes actionable, and restart the grace after that drain. A failed poll is no reading: keep the seed and poll again. A poll that returns 200 numbers is not a whole reading either — gh stops at `--limit` with exit 0 and no warning, so a label past it is unseen: act on the numbers it did return, and name `poll-capped-at-200` in the report, so the controller knows the grace's silence covered only the first 200.
@@ -302,7 +302,7 @@ Your `task` result is the report, delivered when you exit.
 
 ## Then stay armed
 
-**Skip this whole section if a controller dispatched you** (`/fleet-ctl:run-team`, or any
+**Skip this whole section if a controller dispatched you** (`/skill:run-team`, or any
 caller that says it owns the watcher) — hold the grace above instead. A
 monitor armed by a member dies with that member and the queue stops silently, so
 the watcher belongs to whoever outlives the pass. Only arm one when you are the

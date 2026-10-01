@@ -1,11 +1,16 @@
 #!/usr/bin/env node
-// The Provenance check (#1335, ADR 0003 point 4, CONTEXT.md § Install
-// "Provenance check"). Names the live Install root and its recorded
-// version/commit for every harness present, hashes the placed Resolver
-// (`~/.fleet/bin/fleet-run`) against each install's own copy and refuses on
-// drift, and asserts omp's `enabledProviders: ["claude-plugins"]`
-// precondition (ADR 0003 point 8). Writes nothing, mutates no config — every
-// path below is read-only.
+// The Provenance check (#1335, ADR 0003 point 4, ADR 0021, CONTEXT.md § Install
+// "Provenance check"). Names the live Install root — the realpath of omp's
+// `node_modules/@feigi/fleet-ctl` package entry, the one path every install kind
+// places (ADR 0021) — its kind and recorded version, and hashes the placed
+// Resolver (`~/.fleet/bin/fleet-run`) against the Install root's own copy and
+// refuses on drift. Writes nothing, mutates no config — every path below is
+// read-only.
+//
+// The `enabledProviders: ["claude-plugins"]` assertion retired here (ADR
+// 0021): omp's #11362 fix (shipped 18.2.1) exempts omp-origin installs from
+// that provider gate, and the native package route never depended on it.
+// Asserting it refused correct setups.
 //
 // SEPARATE FILE, not `fleet-run --check`. `fleet-run` is deliberately a
 // single self-contained file because it alone gets copied to
@@ -22,63 +27,48 @@ const os = require("node:os");
 const crypto = require("node:crypto");
 
 const NAME = "fleet-provenance";
-const PLUGIN_KEY = "fleet-ctl@fleet-plugin";
+const PLUGIN_KEY = "@feigi/fleet-ctl"; // ADR 0006 name; ADR 0021 — the node_modules package dir.
 
-function readRegistry(registryPath) {
-  let raw;
+// Same resolution point as scripts/fleet-run (its header names the shape of
+// each install kind). Duplicated rather than shared because a module the
+// Resolver requires would have to travel with its placed copy — see
+// fleet-run's own header.
+function resolveInstall(home) {
+  const packagePath = path.join(home, ".omp", "plugins", "node_modules", PLUGIN_KEY);
+  let stat;
   try {
-    raw = fs.readFileSync(registryPath, "utf8");
+    stat = fs.lstatSync(packagePath);
   } catch (e) {
-    return { present: false, registryPath, reason: `no registry at ${registryPath} (${e.code || e.message})` };
+    return { present: false, packagePath, reason: `no omp plugin "${PLUGIN_KEY}" at ${packagePath} (${e.code || e.message})` };
   }
-  let json;
   try {
-    json = JSON.parse(raw);
+    return { present: true, packagePath, isLink: stat.isSymbolicLink(), installPath: fs.realpathSync(packagePath) };
   } catch (e) {
-    return { present: false, registryPath, reason: `${registryPath} is not valid JSON (${e.message})` };
+    return { present: false, packagePath, reason: `omp plugin "${PLUGIN_KEY}" at ${packagePath} does not resolve (${e.code || e.message})` };
   }
-  const entries = json && json.plugins && json.plugins[PLUGIN_KEY];
-  if (!Array.isArray(entries) || entries.length === 0) {
-    return { present: false, registryPath, reason: `${registryPath} has no "${PLUGIN_KEY}" entry` };
-  }
-  const selected = selectEntry(entries);
-  if (selected.error) {
-    return { present: false, registryPath, reason: `${registryPath}'s "${PLUGIN_KEY}": ${selected.error}` };
-  }
-  const entry = selected.entry;
-  if (typeof entry.installPath !== "string" || entry.installPath === "") {
-    return { present: false, registryPath, reason: `${registryPath}'s "${PLUGIN_KEY}" entry has no installPath` };
-  }
-  return {
-    present: true,
-    registryPath,
-    installPath: entry.installPath,
-    version: typeof entry.version === "string" ? entry.version : null,
-    gitCommitSha: typeof entry.gitCommitSha === "string" ? entry.gitCommitSha : null,
-  };
 }
 
-// See scripts/fleet-run's own selectEntry for the full measurement (a
-// `--scope=project` install adds an entry alongside any `--scope=user`
-// one in the SAME registry this reads) — duplicated rather than shared for
-// the same "this file has no siblings once it matters" reasoning fleet-run's
-// header gives for its own duplication.
-function selectEntry(entries) {
-  if (entries.length === 1) return { entry: entries[0] };
-  const userScoped = entries.filter((e) => e && e.scope === "user");
-  if (userScoped.length === 1) return { entry: userScoped[0] };
-  const describe = (e, i) => `#${i} scope=${(e && e.scope) || "(none)"} installPath=${e && e.installPath}`
-    + (e && e.projectPath ? ` projectPath=${e.projectPath}` : "");
-  return {
-    error: `${entries.length} entries and no single scope:"user" one to prefer: ${entries.map(describe).join("; ")}`,
-  };
+// Version lives in omp's runtime plugin lock, which every install kind writes
+// (ADR 0021 point 4) — a link records the manifest's own `package.json`
+// version (measured on 18.4.8: `0.0.0`, the placeholder), so the number never
+// identifies a link; `kind:` does. Read tolerantly: any shape problem degrades
+// to null, it never fails the check, because the version is informational.
+function readLockVersion(home) {
+  const lockPath = path.join(home, ".omp", "plugins", "omp-plugins.lock.json");
+  let json;
+  try {
+    json = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+  } catch {
+    return null;
+  }
+  const entry = json && json.plugins && json.plugins[PLUGIN_KEY];
+  return entry && typeof entry.version === "string" ? entry.version : null;
 }
 
 // Every regular file under `<root>/scripts`, repo-relative, sorted — a
 // filesystem walk rather than `git ls-files`: an installed copy need not
-// carry `.git` at all (a directory-source install can exclude it, ADR
-// 0003), so git is not an instrument this check can rely on being present
-// in the tree it is reading.
+// carry a .git at all (a directory-source install can exclude it, ADR 0003),
+// so git is not an instrument this check can rely on being present.
 function walkFiles(dir, base = dir, out = []) {
   let entries;
   try {
@@ -89,11 +79,11 @@ function walkFiles(dir, base = dir, out = []) {
   for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      const r = walkFiles(full, base, out);
-      if (r && r.error) return r;
-    } else if (entry.isFile()) {
-      out.push(path.relative(base, full));
-    }
+      // A subtree that cannot be listed must fail the digest, never shrink it:
+      // a partial file set would certify as complete.
+      const sub = walkFiles(full, base, out);
+      if (sub.error) return sub;
+    } else if (entry.isFile()) out.push({ rel: path.relative(base, full), full });
   }
   return { files: out };
 }
@@ -109,66 +99,36 @@ function digestScriptsDir(root) {
   const listed = walkFiles(scriptsDir);
   if (listed.error) return { error: listed.error };
   if (listed.files.length === 0) return { error: `no files under ${scriptsDir} — refusing to certify an empty set` };
-  const lines = listed.files.map((rel) => {
-    const buf = fs.readFileSync(path.join(scriptsDir, rel));
-    return `${sha256(buf)}  ${rel}`;
-  });
+  const lines = listed.files.map((f) => `${sha256(fs.readFileSync(f.full))}  ${f.rel}`);
   return { digest: sha256(Buffer.from(lines.join("\n") + "\n", "utf8")), fileCount: listed.files.length };
 }
 
-function kindOf(installPath) {
-  if (installPath.includes(`${path.sep}.omp${path.sep}plugins${path.sep}cache${path.sep}`)) return "omp-install";
-  return "unrecognized-install-shape";
-}
-
-// Minimal top-level YAML read for exactly the one key this checks. Not a
-// general YAML parser — no nesting under other keys, no quoting rules
-// beyond a bare `"…"`/`'…'` strip. `~/.omp/agent/config.yml` in the wild
-// (this box, 2026-09-09) is a flat top-level map, block-list style
-// (`enabledProviders:` then `  - foo` lines); the REMEDY this same check
-// prints instructs the flow form (`enabledProviders: ["claude-plugins"]`),
-// which omp itself also accepts — so both forms are read here, or an
-// operator who follows the printed remedy verbatim is told the key it just
-// added is absent (measured, #1355 review).
-function enabledProvidersFromYaml(text) {
-  const flow = text.match(/^enabledProviders:\s*\[([^\]]*)\]\s*$/m);
-  if (flow) {
-    return flow[1].split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
-  }
-  const lines = text.split("\n");
-  const headerIdx = lines.findIndex((l) => /^enabledProviders:\s*$/.test(l));
-  if (headerIdx === -1) return [];
-  const values = [];
-  for (let i = headerIdx + 1; i < lines.length; i++) {
-    const m = lines[i].match(/^\s*-\s*(\S+)\s*$/);
-    if (!m) break;
-    values.push(m[1]);
-  }
-  return values;
+// Which install kind produced this root, read off the package entry itself:
+// a real directory (not a symlink) → an npm install, which unpacks into
+// node_modules; a symlink resolving inside omp's plugin cache → a
+// marketplace install; a symlink pointing anywhere else → a linked checkout.
+// No path-prefix test decides the npm case: a non-link entry's realpath is
+// always its own parent's realpath plus its name, so every non-link shape is
+// that one kind.
+function kindOf({ installPath, isLink }) {
+  if (!isLink) return "npm-install";
+  return installPath.includes(`${path.sep}.omp${path.sep}plugins${path.sep}cache${path.sep}`)
+    ? "marketplace-install"
+    : "linked-checkout";
 }
 
 function main() {
   const argv = process.argv.slice(2);
-  let ompConfigPath = path.join(os.homedir(), ".omp", "agent", "config.yml");
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--omp-config") {
-      if (i + 1 >= argv.length) {
-        process.stderr.write(`${NAME}: --omp-config needs a path\n`);
-        process.exit(2);
-      }
-      ompConfigPath = argv[i + 1];
-      i++;
-    } else {
-      process.stderr.write(`${NAME}: unrecognized argument ${argv[i]}\n`);
-      process.exit(2);
-    }
+  if (argv.length > 0) {
+    process.stderr.write(`${NAME}: unrecognized argument ${argv[0]}\n`);
+    process.exit(2);
   }
 
   const home = os.homedir();
-  const reg = readRegistry(path.join(home, ".omp", "plugins", "installed_plugins.json"));
+  const reg = resolveInstall(home);
 
   if (!reg.present) {
-    process.stderr.write(`${NAME}: no registry carries "${PLUGIN_KEY}" — ${reg.reason}\n`);
+    process.stderr.write(`${NAME}: ${reg.reason}\n`);
     process.exit(2);
   }
 
@@ -183,11 +143,11 @@ function main() {
 
   let failed = false;
 
-  const kind = kindOf(reg.installPath);
+  const kind = kindOf(reg);
+  const version = readLockVersion(home);
   process.stdout.write(`${NAME}: Install root: ${reg.installPath}\n`);
   process.stdout.write(`${NAME}: kind: ${kind}\n`);
-  process.stdout.write(`${NAME}: version: ${reg.version ?? "(none recorded)"}\n`);
-  process.stdout.write(`${NAME}: gitCommitSha: ${reg.gitCommitSha ?? "(none recorded)"}\n`);
+  process.stdout.write(`${NAME}: version: ${version ?? "(none recorded)"}\n`);
 
   const digest = digestScriptsDir(reg.installPath);
   if (digest.error) {
@@ -221,31 +181,15 @@ function main() {
     process.stdout.write(`${NAME}: Resolver drift: none — ${placedPath} matches ${installedRunPath}\n`);
   }
 
-  let ompConfigText = null;
-  let ompConfigError = null;
-  try {
-    ompConfigText = fs.readFileSync(ompConfigPath, "utf8");
-  } catch (e) {
-    ompConfigError = `${e.code || e.message}`;
-  }
-  const remedy = `add \`enabledProviders: ["claude-plugins"]\` to ${ompConfigPath} — plugin agents are `
-    + "invisible on omp without it (measured, can1357/oh-my-pi#11362); this check never writes it for you";
-  if (ompConfigError) {
-    process.stdout.write(`${NAME}: enabledProviders: REFUSED — cannot read ${ompConfigPath} (${ompConfigError})\n`);
-    process.stdout.write(`${NAME}: remedy: ${remedy}\n`);
-    failed = true;
-  } else {
-    const providers = enabledProvidersFromYaml(ompConfigText);
-    if (providers.includes("claude-plugins")) {
-      process.stdout.write(`${NAME}: enabledProviders: includes claude-plugins (${ompConfigPath})\n`);
-    } else {
-      process.stdout.write(
-        `${NAME}: enabledProviders: REFUSED — ${ompConfigPath} does not list claude-plugins `
-        + `(found: ${providers.length ? providers.join(", ") : "(no enabledProviders key)"})\n`,
-      );
-      process.stdout.write(`${NAME}: remedy: ${remedy}\n`);
-      failed = true;
-    }
+  if (kind === "linked-checkout") {
+    // Not a failure: a link is the dev loop (ADR 0021). It is a NOTICE on
+    // every other install's answer, because a linked root outranks an
+    // installed copy of the same names in omp's own discovery — the check
+    // above certified the LINK, not what a session without the link runs.
+    process.stdout.write(
+      `${NAME}: NOTICE: Install root is a linked checkout (${reg.installPath}) — this box develops the plugin; `
+      + "every fleet-run answer above came from that checkout, not from an installed release.\n",
+    );
   }
 
   process.exit(failed ? 1 : 0);

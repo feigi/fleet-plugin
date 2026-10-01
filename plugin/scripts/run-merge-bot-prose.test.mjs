@@ -1327,7 +1327,7 @@ test("the grace wait holds in one eval cell, never bash plus wait", () => {
 test("the top-level invocation still arms its Monitor, and a dispatched bot still skips it", () => {
   assert.match(
     DOC,
-    phrase("**Skip this whole section if a controller dispatched you** (`/fleet-ctl:run-team`, or any caller that says it owns the watcher) — hold the grace above instead."),
+    phrase("**Skip this whole section if a controller dispatched you** (`/skill:run-team`, or any caller that says it owns the watcher) — hold the grace above instead."),
   );
 });
 

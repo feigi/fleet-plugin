@@ -46,7 +46,7 @@ refuses, misreads, or silently does nothing.
 
 **CI / merge gate**
 
-- The repository ruleset on the default branch *is* the gate (ADR 0007): `strict_required_status_checks_policy: true`, `required_approving_review_count: 0`, `bypass_actors: []`, required contexts `rebase-check`, `check`, `validate-release-label`, `validate-claude`, `smoke-omp`, `npm-name-gate`, `install-and-smoke`, each pinned to integration id 15368 (GitHub Actions). Renaming a job strands PRs. — shell#13–19, prose#51–55
+- The repository ruleset on the default branch *is* the gate (ADR 0007): `strict_required_status_checks_policy: true`, `required_approving_review_count: 0`, `bypass_actors: []`, required contexts `rebase-check`, `check`, `validate-release-label`, `smoke-omp`, `install-and-smoke`, each pinned to integration id 15368 (GitHub Actions). Renaming a job strands PRs. — shell#13–19, prose#51–55
 - A full CI cycle is ~5–6 minutes; every wait-cell timeout in the runbook (600 s Claude / 900–1000 s omp) is sized from that. — prose#61, prose#158
 
 **Consumer repo**
@@ -57,9 +57,8 @@ refuses, misreads, or silently does nothing.
 
 **Harness**
 
-- Exactly one of Claude Code or omp, selected by `FLEET_HARNESS=claude|omp` or auto-detected from `CLAUDECODE`/`OMPCODE`; a box carrying both registries refuses without the override. — shell#42, shell#100, prose#130–131
-- Registry at `~/.claude/plugins/installed_plugins.json` or `~/.omp/agent/config.yml`, keyed `fleet-ctl@fleet-plugin`, install layout `<installPath>/scripts/<script>`; Resolver copy placed at `~/.fleet/bin/fleet-run`. — shell#94–101, prose#144
-- omp only: `enabledProviders` contains `"claude-plugins"` (or plugin agents are invisible), `eval.workpool.freshAgents: true`, `task.agentModelOverrides` mapping `fleet-*` → `modelRoles.{slow,task,smol}`. — prose#127–128, prose#173–176
+- omp alone (ADR 0014); the install is the native extension package (ADR 0021): `node_modules/@feigi/fleet-ctl` + `omp-plugins.lock.json` resolution, install layout `<installPath>/scripts/<script>`; Resolver copy placed at `~/.fleet/bin/fleet-run`. — shell#94–101, prose#144
+- The only omp settings a fleet run depends on: `modelRoles.slow|task|smol` set to real models (ADR 0011/0014/0021). The `enabledProviders` gate retired with the marketplace route (18.2.1 origin exemption); `eval.workpool.freshAgents` and `task.agentModelOverrides` retired earlier (ADR 0012, ADR 0014). — prose#127–128
 - Supported platforms: macOS, Linux, WSL. Native Windows unsupported by ADR 0009. — prose#83
 
 **Humans**

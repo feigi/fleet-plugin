@@ -1,6 +1,22 @@
 {
-  "name": "fleet-ctl",
+  "name": "@feigi/fleet-ctl",
   "version": "0.0.0",
+  "description": "Agent fleet: run-team controller, merge bot, PR reviewer, and the ticket pipeline they share",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/feigi/fleet-plugin.git",
+    "directory": "plugin"
+  },
+  "files": [
+    "agents",
+    "commands",
+    "skills",
+    "scripts",
+    ".claude-plugin",
+    "LICENSE",
+    "NOTICE"
+  ],
   "omp": {
     "extensions": ["scripts/member-write-guard.mjs"]
   }

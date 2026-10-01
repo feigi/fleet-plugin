@@ -2,7 +2,10 @@
 
 **Status:** Accepted. Ruled 2026-09-29 on #1411 by the maintainer, from a
 grilling session. Implemented in `plugin/scripts/member-write-guard.mjs`,
-loaded through `plugin/package.json#omp.extensions`.
+loaded through `plugin/package.json#omp.extensions`. (ADR 0021: the load
+itself is measured fail-open on both install routes — `omp plugin doctor`
+never imports an extension module — which is why §7's silent-failure finding
+stands under the native route too.)
 
 ## Context
 
@@ -79,22 +82,24 @@ Three routes were weighed.
    workspace. It is never `--show-toplevel`, which answers a worktree's own
    root from inside one, and never an unscrubbed env (#1599). Paths are
    compared after symlink resolution.
-7. **Distribution.** `plugin/package.json` carries `"name": "fleet-ctl"`,
-   `"version": "0.0.0"` and `"omp": {"extensions":
-   ["scripts/member-write-guard.mjs"]}`. A marketplace install symlinks the
-   cached plugin into the scope's `plugins/node_modules/fleet-ctl`, and the
-   extension loader imports it from `package.json#omp.extensions` (omp's
-   `docs/plugin-manager-installer-plumbing.md`: this is the
-   `MarketplaceManager` install path, distinct from `PluginManager.install()`'s
-   npm/git/link path — the one that validates a declared extension
-   initialises and rolls back the install on failure). A marketplace install
-   carries no such check: a load failure is instead captured per-path at
-   runtime (`docs/extension-loading.md`) and does not stop other extensions
-   or abort the session — the guard simply does not load, silently, which is
-   part of why #2210's detection backstop exists. There is no semver, no
-   catalog version, and no project-scoped `.omp/extensions/` copy. Rollout is
-   `omp plugin upgrade fleet-ctl@fleet-plugin` and a session restart (README,
-   Installation).
+7. **Distribution.** `plugin/package.json` carries `"name": "@feigi/fleet-ctl"`
+   and `"omp": {"extensions": ["scripts/member-write-guard.mjs"]}`. Every
+   install places the plugin at the scope's
+   `plugins/node_modules/@feigi/fleet-ctl`, and the extension loader imports
+   it from `package.json#omp.extensions`. As ruled, the route was the
+   marketplace install (omp's `docs/plugin-manager-installer-plumbing.md`:
+   the `MarketplaceManager` install path, distinct from
+   `PluginManager.install()`'s npm/git/link path — the one that validates a
+   declared extension initialises and rolls back the install on failure), and
+   a marketplace install carries no such check: a load failure is instead
+   captured per-path at runtime (`docs/extension-loading.md`) and does not
+   stop other extensions or abort the session — the guard simply does not
+   load, silently, which is part of why #2210's detection backstop exists.
+   ADR 0021 replaced that route with the npm package and `omp plugin link`,
+   and measured the load fail-open there too (Status). There is no
+   project-scoped `.omp/extensions/` copy. The version is the release tag's
+   published semver (ADR 0021 §Decision 6); rollout is `omp plugin install
+   @feigi/fleet-ctl@latest` and a session restart (README, Installation).
 
 ## Consequences
 

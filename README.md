@@ -1,8 +1,8 @@
 # fleet-ctl
 
 The agent fleet: a `run-team` controller, a merge bot, a PR reviewer, and the
-ticket pipeline they share. Ships as the omp.sh plugin
-`fleet-ctl@fleet-plugin`.
+ticket pipeline they share. Ships as the omp.sh extension package
+`@feigi/fleet-ctl`.
 
 ## Installation
 
@@ -16,28 +16,37 @@ higher pin, not the floor
 Supported platforms: macOS, Linux, and Windows via WSL. Native Windows is not
 supported ([ADR 0009](docs/adr/0009-supported-platforms-are-macos-linux-wsl.md)).
 
-Two install-time preconditions, both operator-set: `enabledProviders`
-(plugin agents are invisible without it, ADR 0003 point 8) and
-`modelRoles.slow|task|smol` pointing at models this install has (the
-fleet's tier routes, ADR 0011/0014).
+One install-time precondition, operator-set: `modelRoles.slow|task|smol`
+pointing at models this install has — the fleet's tier routes (ADR 0011,
+ADR 0014, ADR 0021).
 
 ```
-omp config get enabledProviders          # inspect first: the next line REPLACES the whole list
-omp config set enabledProviders '["claude-plugins"]'   # merge in any providers you already had enabled
-omp plugin marketplace add feigi/fleet-plugin --scope=user
-omp plugin install fleet-ctl@fleet-plugin --scope=user
+omp plugin install @feigi/fleet-ctl
 ~/.fleet/bin/fleet-run tier-roles.mjs --check
 ```
 
-The qualified id (`fleet-ctl@fleet-plugin`) is canonical —
-an unqualified `fleet-ctl` install is not guaranteed to resolve to this
-plugin. Background: [`docs/adr/0006-rename-to-fleet-ctl.md`](docs/adr/0006-rename-to-fleet-ctl.md).
+Working on the plugin itself (this checkout): link the package instead, so
+agent and command edits take effect without a reinstall —
+`omp plugin link <checkout>/plugin`. A linked root outranks every installed
+copy of the same names until you `omp plugin uninstall @feigi/fleet-ctl`, so keep
+it to the box you develop on.
+
+`@feigi/fleet-ctl` is the npm package the fleet publishes on every release —
+the `@feigi` scope is the collision guard (only its owner can publish under
+it). Publishing authenticates via [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
+(OIDC, no stored token): `@feigi/fleet-ctl` must exist on the registry and have
+this repo's `release.yml` configured as its Trusted Publisher before the
+first automated release — see ADR 0021, Consequences, for the one-time
+bootstrap. Until then the release job fails at its publish step and the
+install above answers 404. Background:
+[`docs/adr/0006-rename-to-fleet-ctl.md`](docs/adr/0006-rename-to-fleet-ctl.md).
 
 The plugin also ships an omp extension, `member-write-guard`, which refuses a
 fleet member's write into the main checkout
 ([ADR 0020](docs/adr/0020-member-write-boundary-is-enforced-by-a-shipped-omp-extension.md)).
-An existing install picks it up with `omp plugin upgrade fleet-ctl@fleet-plugin`
-followed by a session restart; extensions load only at session start.
+An existing install picks up a new release with `omp plugin install
+@feigi/fleet-ctl@latest` followed by a session restart; extensions load only at
+session start.
 
 ## Quickstart
 
@@ -46,21 +55,21 @@ Start a fleet run over the `ready-for-agent` queue — implementers and reviewer
 non-configurable merge bot:
 
 ```
-/fleet-ctl:run-team [implementers] [reviewers]
+/skill:run-team [implementers] [reviewers]
 ```
 
 `run-team` is invoke-only and hidden from the `/` picker — type
 the command above exactly rather than selecting it; if it doesn't show up,
-`/fleet-ctl:run-team-help` prints the exact invocation for you.
+`/run-team-help` prints the exact invocation for you.
 
 This runs `next-ticket` (claim and size a ticket), `review-and-fix` (review a
 PR, apply recommended actions, push, watch checks), and `run-merge-bot`
 (rebase, wait green, merge) as one coordinated fleet. Each is also invocable
 on its own:
 
-- `/fleet-ctl:review-and-fix [pr-number]` — review a PR, apply recommended
+- `/review-and-fix [pr-number]` — review a PR, apply recommended
   actions, push, watch checks until green.
-- `/fleet-ctl:run-merge-bot` — merge every `ready-to-merge` open PR in
+- `/run-merge-bot` — merge every `ready-to-merge` open PR in
   numeric order.
 - `next-ticket` skill — pick a ready ticket by intent rather than number,
   implement it, and open a PR rebased on `origin/main`.
@@ -76,7 +85,7 @@ node --test plugin/scripts/*.test.mjs
 
 ## How it works
 
-`/fleet-ctl:run-team` is a **controller** running in your own main thread —
+`/skill:run-team` is a **controller** running in your own main thread —
 never a subagent — that turns one repo's `ready-for-agent` issues into
 merged PRs by dispatching fresh, short-lived members: implementer, reviewer,
 finisher, merge bot. Standalone commands (`review-and-fix`, `run-merge-bot`,

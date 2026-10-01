@@ -1,6 +1,6 @@
 # 0003 — Installation is the only path: the dual-harness dev loop
 
-**Status:** Accepted. Ruled 2026-09-09 on #1294, against the measurements below. Amended by ADR 0012: point 9's `eval.workpool.freshAgents` precondition is retired with the omp workpool; points 1–8 stand. Amended by ADR 0014: the Claude half of every point is retired; the Resolver reads omp's registry only; points 3–5 and 8 stand.
+**Status:** Accepted. Ruled 2026-09-09 on #1294, against the measurements below. Amended by ADR 0012: point 9's `eval.workpool.freshAgents` precondition is retired with the omp workpool; points 1–8 stand. Amended by ADR 0014: the Claude half of every point is retired; the Resolver reads omp's registry only; points 3–5 and 8 stand. Amended by ADR 0021: the marketplace route every point installs through is retired for the native package route — point 8's `enabledProviders` precondition is retired outright (omp exempts its own installs since 18.2.1), points 1–2 (branch-pinned catalog, dev catalog) and point 7's `git-subdir` mechanism are superseded by the npm package + link loop, and the Registry/Resolver reads of points 3–4 now resolve omp's `node_modules/<name>` package entry instead of `installed_plugins.json`. The rule itself — installation is the only path, the Resolver the single door, provenance refuses on drift — stands untouched.
 
 ## Context
 

@@ -167,48 +167,50 @@ _Avoid_: undecided, unclear
 ### Install
 
 **Install root**:
-The directory omp actually loaded the plugin from, as recorded in its own
-registry. Never the checkout, and never a path any artefact may write down: it
-is version- or commit-stamped and changes on every install.
+The directory omp actually loaded the plugin from — the realpath of its
+`node_modules/@feigi/fleet-ctl` package entry, the one path every install kind
+(marketplace, link, npm) places. Never a path any artefact may write down:
+it is version- or checkout-dependent and changes across install kinds.
 _Avoid_: cache dir, plugin dir, install path
 
 **Resolver**:
 The shipped executable that maps a script name to the Install root and execs it there.
 The single door between prose and code — a callsite naming any other path is a defect.
 Placed once by hand outside the plugin, because it cannot resolve itself. Reads
-omp's own registry and nothing else.
+omp's extension package layout and nothing else.
 _Avoid_: shim, wrapper, launcher
 
 **Provenance check**:
-The assertion naming the live Install root, its recorded version or commit, the
-Resolver's own drift against the installed copy, and the `enabledProviders`
-precondition. Refuses loudly; writes nothing.
+The assertion naming the live Install root, its install kind and recorded version,
+and the Resolver's own drift against the installed copy — with a NOTICE when the
+root is a linked checkout, since then every answer came from the dev tree.
+Refuses loudly; writes nothing.
 _Avoid_: doctor, healthcheck, preflight
 
-**Dev catalog**:
-The untracked marketplace outside the repo that pins a local branch of the working
-checkout, so pre-merge iteration never edits the tracked catalog. Distinct from the
-tracked catalog, which names the shipped branch and nothing else.
-_Avoid_: local marketplace, dev source
+**Dev link**:
+`omp plugin link <checkout>/plugin` — the working checkout registered as the
+box's live plugin, so pre-merge iteration edits reach a fresh session with no
+reinstall. It outranks every installed copy of the same names until
+uninstalled, so it belongs on the dev box only.
+_Avoid_: dev catalog, local marketplace, dev source
 
 **Install-time precondition**:
 An omp setting the fleet depends on, set once by the operator at install and never
 written by a run — a run that wrote one would be changing every other session on the
-machine to dispatch its own members. Two exist, both session-wide:
-`enabledProviders: ["claude-plugins"]` (omp's provider name for marketplace
-plugins — not a Claude artefact), and `modelRoles.slow|task|smol` pointing at
-models this install has, the fleet's tier routes (ADR 0011, ADR 0014). ADR
-0003 point 8 carries the first's required value, its global and
-project-scoped set paths, and the read that verifies it; `tier-roles.mjs
---check` is the read that verifies the second.
+machine to dispatch its own members. One exists, session-wide:
+`modelRoles.slow|task|smol` pointing at models this install has, the fleet's tier
+routes (ADR 0011, ADR 0014, ADR 0021). The former `enabledProviders` gate retired
+with the marketplace install route: omp exempts its own installs from it since
+18.2.1, and the native package route never used it. `tier-roles.mjs --check` is
+the read that verifies the one that remains.
 _Avoid_: requirement, dependency, flag
 
 ### Shipped surface
 
 **Shipped surface**:
-Everything under `plugin/` — the marketplace source is `git-subdir` with
-`path: plugin`, so every file there reaches a consumer's install, comments and
-runtime strings included. It names nothing that does not ship: no issue or PR
+Everything under `plugin/` — the package `files` list ships it whole, so every
+file there reaches a consumer's install, comments and runtime strings included.
+It names nothing that does not ship: no issue or PR
 number of this repo in any form, no foreign tracker number, no repo-internal
 `docs/adr`, `docs/specs`, `docs/research`, `docs/agents` or `docs/requirements`
 path, no ADR number, no test-file name — it states the claim instead, and

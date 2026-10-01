@@ -7,6 +7,8 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # npm provenance attestation (ADR 0021: the package IS the install route)
+  id-token: write
 
 concurrency:
   group: release-${{ github.event.pull_request.base.ref }}
@@ -47,11 +49,28 @@ jobs:
         id: version
         env:
           SEGMENT: ${{ steps.segment.outputs.segment }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           set -euo pipefail
           # --force overwrites local tags that diverged from remote.
           # Safe on a fresh CI checkout; would be destructive locally.
           git fetch --tags --force
+
+          # A re-run of this job (e.g. after the npm publish step failed)
+          # must finish the release it already started, not mint another:
+          # the tag pushed by the first attempt now IS the latest, so a fresh
+          # bump would tag+release one version higher and leave the first
+          # version tagged but never published. A semver tag already on this
+          # merge commit is that earlier attempt's version — reuse it.
+          EXISTING=$(git tag --points-at "$SHA" --list 'v[0-9]*.[0-9]*.[0-9]*' \
+            | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } \
+            | sort -V \
+            | tail -1)
+          if [ -n "$EXISTING" ]; then
+            echo "next=$EXISTING" >> "$GITHUB_OUTPUT"
+            echo "Merge commit $SHA already tagged $EXISTING (re-run) — reusing it."
+            exit 0
+          fi
 
           # Detect "tags exist" independently of the regex used to pick
           # LATEST, so a regex drift cannot silently re-seed the repo.
@@ -121,6 +140,11 @@ jobs:
             git push origin "$NEXT"
           fi
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+
       - name: Create GitHub release (idempotent)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -135,6 +159,29 @@ jobs:
             echo "Release $NEXT already exists — skipping."
           else
             gh release create "$NEXT" --target "$SHA" --generate-notes --title "$NEXT"
+          fi
+
+      - name: Publish to npm (idempotent)
+        # ADR 0021: consumers install `omp plugin install @feigi/fleet-ctl`, the npm
+        # package published here. The version is the tag this job just
+        # minted — plugin/package.json keeps its placeholder and the tree is
+        # still never written: the version edit lives only in this runner's
+        # working copy, discarded uncommitted. "Already published" skips
+        # (re-runs after a partial failure are the norm). The package is
+        # scoped, so only the @feigi scope owner can publish the name the
+        # install resolves, which closes the collision npm-name-gate guarded.
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+        run: |
+          set -euo pipefail
+          VER="${NEXT#v}"
+          PUBLISHED="$(npm view "@feigi/fleet-ctl@$VER" version 2>/dev/null || true)"
+          if [ "$PUBLISHED" = "$VER" ]; then
+            echo "@feigi/fleet-ctl@$VER already on npm — skipping."
+          else
+            cd plugin
+            npm --no-git-tag-version version "$VER"
+            npm publish --provenance --access public
           fi
 
       - name: Notify on failure

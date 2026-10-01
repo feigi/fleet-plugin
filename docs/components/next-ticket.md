@@ -23,7 +23,7 @@ to review and merge later, out of session.
    much process the ticket needs.
 6. **Implement, rebase, open the PR** with `Closes #N`. The session
    ends there: it never merges, adds `ready-to-merge`, or waits on CI —
-   that's `/fleet-ctl:review-and-fix` and `/fleet-ctl:run-merge-bot`'s
+   that's `/review-and-fix` and `/run-merge-bot`'s
    job, invoked later, outside this session.
 
 ## Opinionated choices

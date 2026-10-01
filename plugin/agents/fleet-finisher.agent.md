@@ -1,6 +1,6 @@
 ---
 name: fleet-finisher
-description: A /fleet-ctl:run-team finisher — dispatched by the controller in phase 3 once a PR's review has returned and CI is green; audits the worktree, re-runs the acceptance mutation, applies one release label, reports. Never invoked directly.
+description: A `/skill:run-team` finisher — dispatched by the controller in phase 3 once a PR's review has returned and CI is green; audits the worktree, re-runs the acceptance mutation, applies one release label, reports. Never invoked directly.
 model: "@smol:low"
 ---
 
