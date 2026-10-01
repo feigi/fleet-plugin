@@ -1,6 +1,6 @@
 # 0006 — The plugin is `fleet-ctl`: a bare name that fails loud
 
-**Status:** Accepted. Ruled 2026-09-09 on #1319, against the measurements below. Amended by ADR 0014: the namespace asymmetry is moot; the qualified install id and the npm collision guard stand. Amended by ADR 0021: the qualified id retires with the marketplace route — the install is now the bare npm package `fleet-ctl` itself, which inverts the collision logic (the name being TAKEN is now the requirement, enforced by the publish failing loud, so the `npm-name-gate` CI job is deleted); `fleet-ctl` remains canonical.
+**Status:** Accepted. Ruled 2026-09-09 on #1319, against the measurements below. Amended by ADR 0014: the namespace asymmetry is moot; the qualified install id and the npm collision guard stand. Amended by ADR 0021: the qualified id retires with the marketplace route — the install is now the scoped npm package `@feigi/fleet-ctl` (npm refused the unscoped `fleet-ctl` as too similar to `fleetctl`, this ADR's own collision class), and only the `@feigi` scope owner can publish under that scope, so the squatted-name hazard the `npm-name-gate` CI job guarded cannot reach the install and the job is deleted; `fleet-ctl` remains canonical.
 
 ## Context
 

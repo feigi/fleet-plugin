@@ -167,9 +167,9 @@ jobs:
         # minted — plugin/package.json keeps its placeholder and the tree is
         # still never written: the version edit lives only in this runner's
         # working copy, discarded uncommitted. "Already published" skips
-        # (re-runs after a partial failure are the norm); a THIRD party
-        # owning the name fails loud here (403), which is the collision gate
-        # the old pre-occupancy npm-name-gate could never be.
+        # (re-runs after a partial failure are the norm). The package is
+        # scoped, so only the @feigi scope owner can publish the name the
+        # install resolves, which closes the collision npm-name-gate guarded.
         env:
           NEXT: ${{ steps.version.outputs.next }}
         run: |
