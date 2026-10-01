@@ -423,6 +423,12 @@ export const sentences = (block) =>
 // A `to` found nowhere after `from` keeps "moved". Every one of these throws;
 // only which message a red carries changes.
 //
+// The line named is the one the bound's match starts on, past one leading
+// `\n` the match itself consumed — that newline terminates the text before
+// the match, which is how a bound says "at the start of a line". Only one: a
+// blank-line bound (`\n\n`, `\n\s*\n`, a zero-width `^$` with `m`) names the
+// blank line it matched, never the next paragraph's text past it (#2268).
+//
 // Extracted (#1611) from `finisher-dispatch-premise-prose.test.mjs`'s
 // `dispatchPremise`, which hand-rolled this exact shape locally — `paragraph`'s
 // own header above names the class: a local copy is the defect, not a style
@@ -433,8 +439,13 @@ export function betweenPhrases(text, from, to, what, { bound } = {}) {
   const toPhrase = phrase(to);
   let scope = rest;
   let boundEnd = -1;
+  let boundLead = 0;
   if (bound) {
-    boundEnd = rest.search(bound);
+    // `exec` rather than `search` for the match text too; a copy without `g`
+    // so it starts at index 0 the way `search` does.
+    const boundMatch = new RegExp(bound, bound.flags.replace("g", "")).exec(rest);
+    boundEnd = boundMatch ? boundMatch.index : -1;
+    boundLead = boundMatch?.[0].startsWith("\n") ? 1 : 0;
     assert.notEqual(
       boundEnd,
       -1,
@@ -447,7 +458,7 @@ export function betweenPhrases(text, from, to, what, { bound } = {}) {
   // cut — a hit ending inside it would have matched `scope` — so this also
   // catches a bound that cuts through the middle of `to`.
   if (hits.length === 0 && bound && toPhrase.test(rest)) {
-    const cut = at + boundEnd + rest.slice(boundEnd).search(/[^\n]/);
+    const cut = at + boundEnd + boundLead;
     const lineStart = text.lastIndexOf("\n", cut - 1) + 1;
     const lineEnd = text.indexOf("\n", cut);
     const line = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
