@@ -848,7 +848,7 @@ fresh and never a wake of one that already ran. Admission is per slot and
 never batched, so there is nothing to hand a freed slot its next ticket but
 the next Pull.
 
-a Pull dispatches its member with one more `task` call — definition `fleet-implementer`, or `fleet-implementer-alt` on every 5th Pull; name `impl-<N>`; in the background, so its report arrives on its own.
+a Pull dispatches its member with one more `task` call — `agent` the definition `ledger.mjs dispatch` printed for it (below); name `impl-<N>`; in the background, so its report arrives on its own.
 
 **No workpool, and no kernel-resident handle.** A pool's only refill virtue —
 handing a queued item to a freed worker without a controller turn — is exactly
@@ -870,9 +870,13 @@ released by the end-of-run sweep rather than by a member that did the work.
 **Record the dispatch before you make it.** `ledger.mjs row` wrote the row at
 the Pull's step 7; `~/.fleet/bin/fleet-run ledger.mjs dispatch <N> impl-<N>`
 then marks `impl-<N>` live on it and in `## Dispatched`, and the call follows.
-Live implementers are the `impl-` tokens with no `=<outcome>` — the tick reads
-that count off the ledger, and nobody states it. `dispatch` refuses once the
-run is draining: drain stops supply.
+Its JSON carries `agent`, the definition that call names — read it off that
+output, never recall it. Live implementers are the `impl-` tokens with no
+`=<outcome>` — the tick reads that count off the ledger, and nobody states
+it. `dispatch` refuses once the
+run is draining: drain stops supply. It also refuses a row whose `tier=`
+names no single definition — two different values, or one that is not a
+definition suffix — before the member is live; fix the row with `row` first.
 
 **The prompt carries only what varies.** Everything shared — the
 unattended-member block, the `edit`/`read` absolute-path rule (#1727), the
@@ -919,9 +923,10 @@ merely-quiet member's silence never does. A confirmed-dead member recovers
 exactly as the Member-killed row says — new member, new name, the SAME ticket —
 never a demotion.
 
-**Dispatch every implementer as `agent: "fleet-implementer"`, and still
-omit `model` on the `task` call, whatever the class.** The tier now lives in that
-definition's frontmatter (`agents/fleet-implementer.agent.md`), which is what an
+**Dispatch every implementer with the `agent` that `ledger.mjs dispatch`
+printed, and still omit `model` on the `task` call, whatever the class.** The
+tier lives in that definition's frontmatter (`agents/fleet-implementer.agent.md`
+for a row with no `tier=`), which is what an
 omitted `model` takes first — the session's tier applies only when the definition
 names none, and a member dispatched with `model` set does not get the declared
 tier back. Omitting `model` is therefore still the mechanism; what changed is
@@ -934,7 +939,9 @@ prose reminder.** `~/.fleet/bin/fleet-run tier-check.mjs --batch <path-to-batch.
 judges the implementer just dispatched on the ledger's terms. The definition it
 should have run under comes off its ticket row's `tier=` token: none means
 `fleet-implementer`, `tier=<x>` means `fleet-implementer-<x>` (`tier=alt` →
-`fleet-implementer-alt`). It fails the member two ways, one line each —
+`fleet-implementer-alt`) — the same mapping `ledger.mjs dispatch` prints its
+`agent` from, so a call that names the printed `agent` passes this half. It
+fails the member two ways, one line each —
 `member: dispatched <agent>, expected <definition>` when its transcript says
 it was dispatched as anything else (a generic `task` dispatch fails even when
 its model happens to match), and `member: declared <m>/<l> resolved <m>/<l>`
@@ -992,8 +999,9 @@ dispatched — the fleet reads that config and never writes it (ADR 0003).
 
 **Every 5th Pull by ledger count goes at the alternate tier.** Count the `impl-`
 rows in `.fleet/ledger.md` at Pull time; the Pull that creates row 5, 10, 15 …
-dispatches `agent: "fleet-implementer-alt"` and records
-`tier=alt` in the row, and a replacement inherits the row's tier. The
+records `tier=alt` in the row, and a replacement inherits the row's tier —
+written at the Pull's step 7, ahead of `ledger.mjs dispatch`, which reads it
+and prints `fleet-implementer-alt` as the `agent` to dispatch. The
 assignment rolls to the next Pull when the pulled ticket is `class=correction`
 or another open ticket sequences after it — a ticket the rest of the run
 depends on. Do not tell the member it is a control: a member that
@@ -2341,13 +2349,11 @@ infer, see the five-condition note in the fix-applier block above) — or
 `ci-state.mjs` reads `verdict: "no-ci"`, see below — **and once the PR's review
 has returned and its fix-applier, if one was dispatched, has sent its report,
 which the CI-completes edge above states in full** — dispatch a
-**finisher** — a fresh small agent, not the fix-applier resumed. **Dispatch it
-by its own definition and omit `model` on the call** — the tier (`haiku`)
-lives in `agents/fleet-finisher.agent.md`:
-
-`fleet-finisher`.
-
-Record it with `ledger.mjs dispatch <pr#> finisher-pr-<pr#>` before the call.
+**finisher** — a fresh small agent, not the fix-applier resumed. Record it with
+`ledger.mjs dispatch <pr#> finisher-pr-<pr#>` before the call, then **dispatch
+it with the `agent` that command printed and omit `model` on the call** — the
+tier (`haiku`) lives in that definition's frontmatter,
+`agents/fleet-finisher.agent.md`.
 Its four duties are a checklist — audit the
 worktree, confirm every deferral has a tracker home and re-run the acceptance
 mutation, apply one release label, report — and the
@@ -2838,10 +2844,9 @@ enough, and it never waits for the finisher's report. Tell it to read
 pass — drain the queue, re-evaluating after each merge, hold a 15-minute grace
 for late labels, then report once and exit — and say that you dispatched it,
 which is what makes it hold that grace instead of arming its own watcher. **Dispatch
-it by its own definition and omit `model` on the call** — the tier (`haiku`)
-lives in `agents/fleet-merge-bot.agent.md`:
-
-`fleet-merge-bot`.
+it with the `agent` that `ledger.mjs dispatch merge-bot` printed and omit
+`model` on the call** — the tier (`haiku`) lives in that definition's
+frontmatter, `agents/fleet-merge-bot.agent.md`.
 
 Rebase, wait for green, check the
 label, merge is checklist work, and a bad merge still needs the label and the
@@ -3433,9 +3438,14 @@ live count from it, so nobody states one. Write neither by hand:
 
 - **`ledger.mjs dispatch <ticket|pr> <member>`** — before the dispatch call,
   marks the member live on its row and appends it to `## Dispatched`. `dispatch
-  merge-bot` names the next bot itself. It refuses a name this run already
-  used (a replacement takes `-b`, `-c` …), a second live member on one ticket
-  or PR, and any implementer once the run is draining.
+  merge-bot` names the next bot itself. It prints `{member, agent, ticket,
+  line, created, total}`; `agent` is the definition the `task` call names — an
+  implementer's comes off its row's `tier=` (phase 2's tier check states the
+  mapping), a finisher's and a merge bot's are their own definitions, and a
+  fix-applier's is `null`: its own section says how it is dispatched. It
+  refuses a name this run already used (a replacement takes `-b`, `-c` …), a
+  second live member on one ticket or PR, any implementer once the run is
+  draining, and an implementer whose row's `tier=` names no single definition.
 - **`ledger.mjs settle <member> <outcome>`** — rewrites the token to
   `<member>=<outcome>` in both places. Outcomes: `impl-N` = `PR#M | bailed |
   released | killed | tier-mismatch`; `fix-pr-M` = `applied:<head> | no-op |

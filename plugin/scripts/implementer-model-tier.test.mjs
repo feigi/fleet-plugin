@@ -353,12 +353,15 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
     /session's tier applies only when the definition\s+names none/,
     "phase 2 states the omission mechanism without saying the definition's tier wins first",
   );
-  // The dispatch rule has to NAME the definition, or the tier is declared
-  // somewhere the reader of this phase can neither find nor audit.
+  // The dispatch rule has to name WHERE the definition comes from, or the
+  // tier is declared somewhere the reader of this phase can neither find nor
+  // audit. Since #2208 that is the `agent` `ledger.mjs dispatch` prints — a
+  // name recalled from this prose is exactly what a compaction dropped, 11
+  // implementers dispatched as generic `task`.
   assert.match(
     slice,
-    /agent: "fleet-implementer"/,
-    "phase 2 no longer dispatches the declared agent",
+    /Dispatch every implementer with the `agent` that `ledger\.mjs dispatch`\s+printed/,
+    "phase 2 no longer dispatches the agent ledger.mjs dispatch printed",
   );
   assert.match(
     slice,
