@@ -32,7 +32,7 @@ import { dirname, resolve, join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition } from "./ledger-grammar.mjs";
 
 const NAME = "ledger";
 
@@ -1640,6 +1640,19 @@ function runDispatch() {
     }
   }
 
+  // The definition the `task` call names, printed so the controller reads it
+  // off this output rather than recalling it from prose a compaction drops
+  // (#2208). An implementer's comes off its row's `tier=`, the same function
+  // tier-check.mjs judges it by — so a row that names no single definition is
+  // refused here, before the member is live, not discovered by the check
+  // after the call.
+  let agent;
+  try {
+    agent = agentDefinition(member, i === -1 ? "" : data.rows[i]);
+  } catch (e) {
+    die(`row #${member.number}: ${e.message} — fix the row's tier= with \`ledger.mjs row\` before dispatching ${member.name}`);
+  }
+
   let line = null;
   const created = member.bound !== null && i === -1;
   if (created) {
@@ -1656,7 +1669,7 @@ function runDispatch() {
   save(data);
   console.error(`    dispatched ${member.name}`);
   console.log(JSON.stringify({
-    member: member.name, ticket: line === null ? null : rowKey(line), line, created, total: data.dispatched.length,
+    member: member.name, agent, ticket: line === null ? null : rowKey(line), line, created, total: data.dispatched.length,
   }));
 }
 

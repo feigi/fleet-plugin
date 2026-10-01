@@ -48,7 +48,9 @@
 // An implementer (`impl-<N>`, ledger-grammar.mjs's name) is judged on the
 // ledger's terms, not the caller's (#1398): the definition it should have
 // run under is derived from its ticket row's `tier=` token
-// (`expectedDefinition`), the agent type it was actually dispatched as is
+// (ledger-grammar.mjs's `expectedDefinition` — the same function
+// `ledger.mjs dispatch` prints the definition from, #2208), the agent type
+// it was actually dispatched as is
 // read off its own transcript and must BE that definition — a generic `task`
 // dispatch fails even when its model happens to match — and the verdict
 // lands on the ledger either way: `tier-ok=impl-<N>:<definition>` on the
@@ -63,7 +65,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { foldOmpTranscript, parseMemberName } from "./member-record.mjs";
 import { parseFrontmatter, expectedOmpModel, modelsEqual, readOmpConfigValue } from "./tier-roles.mjs";
-import { parseMember, parseToken, memberTokens } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, expectedDefinition } from "./ledger-grammar.mjs";
 
 const NAME = "tier-check";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -166,24 +168,6 @@ export function appendedLedgerText(existingText, mismatchNote) {
   if (!trimmed) return mismatchNote;
   if (trimmed === mismatchNote || trimmed.endsWith(` · ${mismatchNote}`)) return trimmed;
   return `${trimmed} · ${mismatchNote}`;
-}
-
-// #1398: the definition an implementer should have run under, off its
-// ticket row's `tier=` token — none means `fleet-implementer`, `tier=<x>`
-// means `fleet-implementer-<x>`: `alt` (phase 2's every-5th-Pull alternate)
-// and every #2030 per-cell name (`slow-high`) alike. The value becomes a
-// file name under `agents/`, so it is held to `[a-z0-9]` words joined by
-// `-` rather than joined into a path as written, and two different `tier=`
-// values on one row name no single definition — refused, never resolved by
-// position.
-const TIER_SUFFIX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-export function expectedDefinition(rowText) {
-  const values = [...new Set(String(rowText ?? "").split(/\s+/)
-    .filter((t) => t.startsWith("tier=")).map((t) => t.slice("tier=".length)))];
-  if (values.length === 0) return "fleet-implementer";
-  if (values.length > 1) throw new Error(`row carries conflicting tier= tokens (${values.map((v) => `tier=${v}`).join(", ")})`);
-  if (!TIER_SUFFIX.test(values[0])) throw new Error(`tier=${values[0]} is not a definition suffix — expected [a-z0-9] words joined by '-'`);
-  return `fleet-implementer-${values[0]}`;
 }
 
 // The agent-type half of an implementer's verdict: the definition the

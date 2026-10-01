@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   declaredPairFor,
   resolveActual, evaluateMember,
-  formatMismatch, formatOmpExpectation, appendedLedgerText, expectedDefinition, withToken,
+  formatMismatch, formatOmpExpectation, appendedLedgerText, withToken,
 } from "./tier-check.mjs";
 import { parseFrontmatter } from "./tier-roles.mjs";
 import { deriveRun } from "./fleet-tick.mjs";
@@ -598,12 +598,6 @@ test("tick: a settled, unchecked implementer holds; a later tier-check writes ti
   const r = w.check();
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.deepEqual([w.tick().tierMismatch, w.tick().tierUnchecked], [[], []]);
-});
-
-test("expectedDefinition refuses a tier= it cannot name one definition file by", () => {
-  assert.throws(() => expectedDefinition("impl-7 · tier=alt · tier=slow-high"), /conflicting tier= tokens \(tier=alt, tier=slow-high\)/);
-  assert.throws(() => expectedDefinition("impl-7 · tier=../../etc"), /is not a definition suffix/);
-  assert.equal(expectedDefinition("impl-7 · tier=alt · tier=alt"), "fleet-implementer-alt");
 });
 
 test("ledger append: a mismatch on a member with no derivable ticket (an omp AgentId) still exits 1 but writes no ledger row", () => {

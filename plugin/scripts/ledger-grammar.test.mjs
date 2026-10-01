@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseToken, memberTokens, nextMergeBot } from "./ledger-grammar.mjs";
+import { parseToken, memberTokens, nextMergeBot, expectedDefinition } from "./ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -139,4 +139,10 @@ test("nextMergeBot counts every merge-bot entry, live or settled, and nothing el
   // one: counting by prefix instead of by parseToken() inflated n past what
   // ## Dispatched's real entries justify (measured: merge-bot-3, not -2).
   assert.equal(nextMergeBot(["merge-bot-1=done", "merge-bot-2x-garbage"]), "merge-bot-2");
+});
+
+test("expectedDefinition refuses a tier= it cannot name one definition file by", () => {
+  assert.throws(() => expectedDefinition("impl-7 · tier=alt · tier=slow-high"), /conflicting tier= tokens \(tier=alt, tier=slow-high\)/);
+  assert.throws(() => expectedDefinition("impl-7 · tier=../../etc"), /is not a definition suffix/);
+  assert.equal(expectedDefinition("impl-7 · tier=alt · tier=alt"), "fleet-implementer-alt");
 });
