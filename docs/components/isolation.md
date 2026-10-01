@@ -25,13 +25,18 @@ store.
    copy with a mutating refuter even by accident; a refuter gets its
    own throwaway `git worktree add --detach` copy, mutated and
    discarded.
-4. **The main checkout is enforced by prompt today, not yet by
-   harness.** No per-call `cwd` exists in eval's `agent()`, so every
+4. **The main checkout is enforced by prompt and by harness.** No
+   per-call `cwd` exists in eval's `agent()`, so every
    specialist/refuter prompt names the inherited cwd a no-run zone and
-   requires a `CWD-AUDIT:` line back; a harness-level backstop — an
-   omp `tool_call` extension preventing the write (#1411) plus
-   main-checkout dirty detection in `fleet-tick.mjs` (#2210) — is
-   planned, not shipped.
+   requires a `CWD-AUDIT:` line back. Behind that, an omp `tool_call`
+   extension refuses the write (#1411,
+   [`member-write-guard.mjs`](../../plugin/scripts/member-write-guard.mjs)),
+   and [`main-checkout.mjs`](../../plugin/scripts/main-checkout.mjs)
+   catches what it cannot see (#2210): Phase 0 records a baseline of the
+   main checkout's porcelain entries and their content hashes, and every
+   `fleet-tick.mjs` compares against it, holding all dispatch on
+   `MAIN-CHECKOUT-DIRTY`/`-UNKNOWN` until the maintainer resolves the
+   stray paths and re-baselines.
 
 ## Opinionated choices
 
@@ -42,5 +47,9 @@ store.
 - **The write-guard backstop exists because prompt discipline alone
   isn't enough for an unattended fleet.** A member briefed correctly
   can still be wrong under pressure, so isolation is enforced once in
-  the prompt today, and will be enforced again, independently, by the
-  harness once #1411/#2210 land.
+  the prompt and again, independently, by the harness: #1411 prevents,
+  #2210 detects.
+- **Detection holds; it never reverts.** Concurrent members make a
+  stray change impossible to attribute, and re-baselining overwrites
+  rather than compares, so clearing the hold is the maintainer's call —
+  never over an `unknown` the tick could not look past.
