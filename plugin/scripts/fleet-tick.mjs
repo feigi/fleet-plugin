@@ -37,6 +37,11 @@
 //             downward.
 //   gh        The open PRs, by label and by whether they close an issue — the
 //             merge queue, and which PRs are owed a review.
+//   main      The main checkout against the run-start baseline
+//             `.fleet/main-checkout.sha`, through main-checkout.mjs (#2210).
+//             Anything but `clean` — dirty, unknown, no baseline — prints one
+//             MAIN-CHECKOUT-* line and holds every dispatching row until the
+//             maintainer clears it; it never refuses the tick.
 //
 // The pure half below is `reconcile()` over the counts `deriveRun()` reads off
 // the ledger; main() does the I/O. Split so the guard table and the reading are
@@ -53,7 +58,29 @@ import { parseMember, parseToken } from "./ledger-grammar.mjs";
 // reads what they leave: the slots this tick's own dispatches fill.
 export function reconcile(s) {
   const rev = reviewers(s);
-  return [implementers(s, rev.left), ...rev.rows, mergeBot(s), ...shortlistRows(s)];
+  return [...mainCheckoutHold(s, [implementers(s, rev.left), ...rev.rows, mergeBot(s)]), ...shortlistRows(s)];
+}
+
+// #2210: a main checkout changed since the run's baseline — or one the tick
+// could not compare — holds every DISPATCHING row: one HOLD per role,
+// keeping its counts, in place of whatever it would have dispatched. Placed
+// over the computed rows rather than inside each role, so no role's own
+// guards can outrank it. Anything but an explicit `clean` holds: a missing
+// answer is not a clean one. Dirty and unknown are the maintainer's to clear
+// (main-checkout.mjs's header), so they are not actionable — the same reason
+// `SUGGEST /triage` is not. A missing baseline is the controller's own
+// Phase 0 step, so that one asks it to act.
+const MAIN_CHECKOUT_HOLD = { dirty: "main checkout dirty", absent: "main checkout no baseline" };
+function mainCheckoutHold(s, rows) {
+  const state = s.mainCheckout?.state ?? "unknown";
+  if (state === "clean") return rows;
+  const why = MAIN_CHECKOUT_HOLD[state] ?? "main checkout unknown";
+  const held = [];
+  for (const r of rows) {
+    if (held.some((h) => h.role === r.role)) continue;
+    held.push({ ...r, action: `HOLD (${why})`, acts: state === "absent" });
+  }
+  return held;
 }
 
 // `acts` is on the row, set where the ACTION is chosen: the heartbeat backs off
@@ -473,6 +500,13 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     tierUnchecked,
     claimed,
     excluded,
+    // Who is live, by name, for a MAIN-CHECKOUT line (#2210): every unsettled
+    // member token, then each in-flight review by its PR — a `review=wf:`
+    // run carries no member token of its own.
+    live: [
+      ...all.filter((m) => m.outcome === null).map((m) => m.name),
+      ...[...byPr.entries()].filter(([, st]) => st.inFlight).map(([n]) => `review:PR#${n}`),
+    ],
   };
 }
 
@@ -528,6 +562,7 @@ import { parseArgs } from "node:util";
 import { makeDie, isDigits } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 import { statePath, readState, writeState, assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
+import { checkMainCheckout, describe } from "./main-checkout.mjs";
 
 const NAME = "fleet-tick";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -810,10 +845,17 @@ function main() {
     }
   }
 
+  // #2210: the main checkout against the run's baseline, on every tick — the
+  // backstop for what #1411's guard cannot see. Never a refusal of the tick:
+  // every answer but `clean` is a hold on the dispatching rows plus one line
+  // saying why, so the rest of the run keeps reporting.
+  const mainCheckout = checkMainCheckout();
+
   const rows = reconcile({
-    ...caps, ...run, heads, supply, shortlistStatus: current.status, refresh: fresh,
+    ...caps, ...run, heads, supply, shortlistStatus: current.status, refresh: fresh, mainCheckout,
   });
-  const lines = formatLines(rows);
+  const said = describe(mainCheckout, run.live);
+  const lines = [...(said === null ? [] : [said]), ...formatLines(rows)];
 
   // The back-off streak and the fold digest, written on EVERY tick: an edge
   // tick that dispatched is the clearest possible "there is work here". Digest,

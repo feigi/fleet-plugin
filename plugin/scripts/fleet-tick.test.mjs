@@ -18,6 +18,7 @@ const state = (over = {}) => ({
   heads: [], supply: 0, shortlistStatus: "ok", refresh: null,
   reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [],
   mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeConflictHeld: 0,
+  mainCheckout: { state: "clean" },
   ...over,
 });
 const rowsOf = (s, role) => reconcile(s).filter((r) => r.role === role);
@@ -700,7 +701,7 @@ const SCRIPT = fileURLToPath(new URL("./fleet-tick.mjs", import.meta.url));
 // or transitive — and ledger.mjs with its own, because the tick reads the
 // ledger through `ledger.mjs read`. An unlisted sibling is a module-not-found
 // at startup: exit 1, a shape no case below expects.
-const SIBLING_MODULES = ["arg.mjs", "fleet-state.mjs", "git-env.mjs", "ledger.mjs", "ledger-grammar.mjs"].map(
+const SIBLING_MODULES = ["arg.mjs", "fleet-state.mjs", "git-env.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs"].map(
   (m) => [m, fileURLToPath(new URL(`./${m}`, import.meta.url))],
 );
 
@@ -751,9 +752,14 @@ const ledgerText = ({ rows = [], dispatched = [], drain = null } = {}) => {
 };
 const shortlistText = (ns, scanned = ns.length) => JSON.stringify({ scanned, shortlist: ns.map((n) => ({ n, t: `t${n}` })) });
 
+// `baseline` records the run's main-checkout baseline the way Phase 0 does,
+// after `beforeRun`; `afterBaseline` is a stray write landing mid-run. The
+// repo ignores `.fleet/` and `.worktrees/` as a fleet repo's .gitignore does,
+// through info/exclude so no tracked file says so.
 function runCli(args = [], {
   prs = [], ledger, shortlist, refresh = shortlistText([]), refreshFail = false,
   issueStates = {}, claimed = [], env: extraEnv = {}, defaultState = false, keep = false, beforeRun = () => {},
+  baseline = true, afterBaseline = () => {},
 } = {}) {
   // realpath, because on macOS tmpdir() is /var -> /private/var: a script COPY
   // under the unresolved path never runs its own main(), since import.meta.url
@@ -764,6 +770,7 @@ function runCli(args = [], {
   mkdirSync(bin);
   mkdirSync(join(repo, ".fleet"), { recursive: true });
   assert.equal(spawnSync("git", ["init", "-q", repo], { encoding: "utf8" }).status, 0);
+  writeFileSync(join(repo, ".git", "info", "exclude"), ".fleet/\n.worktrees/\n");
   writeFileSync(join(bin, "gh"), GH_STUB);
   chmodSync(join(bin, "gh"), 0o755);
   const script = join(bin, "fleet-tick.mjs");
@@ -774,6 +781,11 @@ function runCli(args = [], {
   if (ledger !== undefined) writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText(ledger));
   if (shortlist !== undefined) writeFileSync(join(repo, ".fleet", "shortlist.json"), shortlist);
   beforeRun(repo);
+  if (baseline) {
+    const rec = spawnSync(process.execPath, [join(bin, "main-checkout.mjs"), "--record"], { cwd: repo, encoding: "utf8" });
+    assert.equal(rec.status, 0, rec.stderr);
+  }
+  afterBaseline(repo);
   const refreshLog = fx("refresh.log", "");
   const issueViewLog = fx("issue-view.log", "");
   // Every case gets its own state file unless it names one: the default path

@@ -70,6 +70,8 @@ export const RECORD_COMMAND = "~/.fleet/bin/fleet-run main-checkout.mjs --record
 const HEADER = "fleet main-checkout baseline v1";
 const GIT_TIMEOUT_MS = 30_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
+const NAME = "main-checkout";
+const die = makeDie(NAME);
 
 // The one git primitive. `gitEnv()` drops an ambient GIT_DIR/GIT_WORK_TREE
 // (#1599); LC_ALL=C keeps a failure's last line readable as git wrote it.
@@ -268,7 +270,6 @@ export function recordBaseline({ cwd = process.cwd(), env = process.env } = {}) 
 }
 
 function main() {
-  const die = makeDie("main-checkout");
   const [flag, ...rest] = process.argv.slice(2);
   if (rest.length || (flag !== "--record" && flag !== "--check")) die("usage: main-checkout.mjs --record | --check");
   if (flag === "--record") {
