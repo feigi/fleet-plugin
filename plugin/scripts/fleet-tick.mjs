@@ -47,7 +47,7 @@
 // the ledger; main() does the I/O. Split so the guard table and the reading are
 // both unit-testable without a network — fleet-tick.test.mjs.
 
-import { parseMember, parseToken, CONFLICT_HOLD } from "./ledger-grammar.mjs";
+import { parseMember, parseToken } from "./ledger-grammar.mjs";
 
 // Every role's TARGET is its configured cap. Availability of work belongs in
 // the ACTION, not the target: a reviewer target that shrank to the backlog
@@ -271,6 +271,12 @@ const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
 const REVIEW = /^review=(?:wf|member|fallback):[^=\s]+(=failed)?$/;
 export const REVIEWED = /^reviewed=([0-9a-f]{7,40}):(\d+)\/(\d+)\/(\d+)$/i;
 const HELD = /^held-behind[:-]#?(\d+)$/;
+// #2064: merge-bot's durable record that its local-rebase fallback hit a
+// conflict it would not force — written onto the held PR's own row at the
+// point run-merge-bot.md says to report and halt, and spelled like
+// `held-behind` so the two read alike. Distinct from an Exclusion, which
+// gates a ticket's claim; this gates a reviewed PR's merge.
+const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
 // #1398: tier-check.mjs's verdict on an implementer, `tier-ok=<member>:<def>`
 // or `tier-mismatch=<member>:<def>`.
 const TIER_VERDICT = /^tier-(ok|mismatch)=([^:\s]+):\S+$/;
@@ -486,6 +492,12 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     mergeHeld: queued.filter((p) => heldBehind(state(p.number)) || conflictHeld(state(p.number))).length,
     // How many of those are conflict holds — the HOLD row's wording, no field.
     mergeConflictHeld: queued.filter((p) => conflictHeld(state(p.number))).length,
+    // Every PR, open or not, on a conflict hold no fix-applier has cleared —
+    // the one reading of a hold (#2299): `ledger.mjs dispatch` names a
+    // fix-applier's definition off this list, so it answers the same per-PR
+    // fold this tick holds the merge on, split rows (#2283) and a settle made
+    // anywhere included, rather than re-deriving it from one row's text.
+    conflictHeld: [...byPr.entries()].filter(([, st]) => conflictHeld(st)).map(([n]) => n).sort(asc),
     draining: drain ?? null,
     tierMismatch,
     // Every impl member the ledger names, settled or live: the retry letters

@@ -34,6 +34,7 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition } from "./ledger-grammar.mjs";
+import { deriveRun, LedgerError } from "./fleet-tick.mjs";
 
 const NAME = "ledger";
 // The plugin's own agent definitions — the directory tier-check.mjs reads
@@ -1652,9 +1653,26 @@ function runDispatch() {
   // definition has not shipped: a `task` call naming it cannot resolve), is
   // refused here, before the member is live, not discovered by the check
   // after the call.
+  //
+  // A fix-applier's turns on whether its PR sits on an unresolved conflict
+  // hold (#2299), and that is the tick's own verdict, not a second reading
+  // of row `i`: a PR's tokens can be split across its ticket row and its own
+  // `#<pr>` row (#2283), and a settle can live in `## Dispatched` alone, so
+  // one row's text can read held where the tick reads cleared, and the
+  // reverse. A ledger the tick refuses is refused here too, before the member
+  // is live, rather than named a definition off a reading the tick rejects.
+  let held = false;
+  if (member.family === "fix-pr") {
+    try {
+      held = deriveRun({ rows: data.rows, dispatched: data.dispatched, drain: data.drain }, []).conflictHeld.includes(member.number);
+    } catch (e) {
+      if (!(e instanceof LedgerError)) throw e;
+      die(`${e.message} — fleet-tick.mjs refuses this ledger, so ${member.name}'s definition cannot be read off it; fix it with \`ledger.mjs row\` before dispatching`);
+    }
+  }
   let agent;
   try {
-    agent = agentDefinition(member, i === -1 ? "" : data.rows[i]);
+    agent = agentDefinition(member, i === -1 ? "" : data.rows[i], held);
     if (member.family === "impl" && !existsSync(join(AGENTS_DIR, `${agent}.agent.md`))) {
       throw new Error(`${agent} has no agents/${agent}.agent.md`);
     }
