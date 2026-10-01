@@ -19,6 +19,7 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./drop-merged-label.sh", import.meta.url));
 
@@ -33,7 +34,7 @@ function stub(t) {
   mkdirSync(bin);
   const log = join(root, "gh.log");
   writeFileSync(log, "");
-  writeFileSync(
+  writeExecStub(
     join(bin, "gh"),
     `#!/bin/sh
 printf '%s\\n' "$*" >> "${log}"
@@ -74,7 +75,6 @@ case "$1 $2" in
 esac
 exit 0
 `,
-    { mode: 0o755 },
   );
   return {
     log,
@@ -222,10 +222,9 @@ function grepFailShim(t, trigger) {
   const bin = mkdtempSync(join(tmpdir(), "drop-merged-label-grep-shim-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
   const realGrep = execFileSync("/bin/sh", ["-c", "command -v grep"], { encoding: "utf8" }).trim();
-  writeFileSync(
+  writeExecStub(
     join(bin, "grep"),
     `#!/bin/sh\ncase "$*" in\n  *${trigger}*) echo "grep: illegal byte sequence" >&2; exit 2 ;;\nesac\nexec ${realGrep} "$@"\n`,
-    { mode: 0o755 },
   );
   return bin;
 }

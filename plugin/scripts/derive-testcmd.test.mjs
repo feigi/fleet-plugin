@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, chmodSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeExecStub } from "./exec-stub.mjs";
 
 // derive-testcmd.sh is the ONE reader of a repository's Recipe cache (ADR
 // 0015) — reused by claim-ticket.sh and review-core.mjs's snapshot agent. It
@@ -337,8 +338,7 @@ test("an unusable interpreter refuses in this script's own voice, never the cach
 // by ABSOLUTE path: re-running `node` through PATH would find the stub again.
 function nodeStub(body) {
   const bin = mkdtempSync(join(tmpdir(), "derive-stub-"));
-  writeFileSync(join(bin, "node"), `#!/bin/sh\n${body.replaceAll("NODE", `'${process.execPath}'`)}\n`);
-  chmodSync(join(bin, "node"), 0o755);
+  writeExecStub(join(bin, "node"), `#!/bin/sh\n${body.replaceAll("NODE", `'${process.execPath}'`)}\n`);
   return { ...process.env, PATH: `${bin}:${process.env.PATH}` };
 }
 
