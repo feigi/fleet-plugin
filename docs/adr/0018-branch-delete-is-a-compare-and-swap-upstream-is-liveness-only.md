@@ -85,9 +85,10 @@ The invariant is **never destroy a commit that exists nowhere else**.
   that has since checked out a different branch mid-bisect. Neither worktree
   is `detached` with the claim branch in its head-name or `BISECT_START`, so
   `wt_holding` does not read them.
-- **`reap.sh` does not conform yet.** Until #2219 lands it authorizes `git
-  branch -D` with `git cherry` on the live ref alone, and the gap between the
-  two calls stays open.
+- **`reap.sh` now conforms (#2219).** The delete moved from `git branch -D`
+  authorized by `git cherry` on the live ref alone to `git update-ref -d`'s
+  compare-and-swap on the tip `git cherry` read once, closing the gap between
+  the two calls.
 - **`worktree-audit.sh` is out of scope.** It reports a mid-rebase/bisect
   worktree as `DETACHED`. It deletes nothing; whether that misleads its
   consumer is #2220.

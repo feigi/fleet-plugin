@@ -144,8 +144,9 @@ base=${BASE_REF:-origin/main}
 # taken at face value in both directions: a local `main` never fast-forwarded
 # reads every merged branch as unmerged (strand everything), and
 # `refs/heads/<a branch this run is about to sweep>` reads that branch's own
-# commits as already upstream — `git cherry` empty, `git branch -D` authorized,
-# and `-D` refuses nothing.
+# commits as already upstream — `git cherry` empty, the delete authorized,
+# and nothing at the delete refuses it: the compare-and-swap there refuses
+# only a ref that moved, and the holder check only a branch a worktree holds.
 #
 # It is also what makes the qualification below sound rather than a guess. #924
 # recorded qualifying as unavailable here precisely because BASE_REF might name
@@ -245,7 +246,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # every removal proceeds as though this run were standing in no worktree at
 # all, reproducing #992's own defect signature. Fail closed instead: die,
 # naming the probe that broke, so an operator chasing a downstream failure (a
-# prune refusal, a `git branch -D` dying on
+# prune refusal, a branch delete dying on
 # "Unable to read current working directory") lands on the real cause here
 # rather than the symptom.
 #
@@ -323,6 +324,7 @@ git rev-parse --verify "$base_rev" >/dev/null || die "$base does not resolve"
 
 reaped=""
 kept=""
+warnings=""
 # Every worktree this run removed, by path, whether a branch accounted for it or
 # not. One meaning, so the key needs no qualifier: the sweep below reaps
 # worktrees no `reaped` branch names, and a payload that recorded only those
@@ -435,7 +437,11 @@ keep() {
 # refs/heads/"$(printf 'a\002b')" HEAD` — `refusing to update ref with bad
 # name`. `%(refname)` and `%(upstream:track)` can only ever answer with
 # bytes that already survived `check-ref-format` on the way in, so a raw
-# 0x02 can never reach either field to begin with.
+# 0x02 can never reach either field to begin with. A fifth call site, added
+# by #2219, joins this ref group: `rev-parse --verify refs/heads/<b>`, where
+# `<b>` is a name the `for-each-ref` call site produced. Its stdout is an
+# object id in hex, and what it can put on stderr is git's own fixed prose
+# around that same validated refname.
 #
 # SO DO NOT POINT `git_probe` AT A COMMAND WHOSE OUTPUT CARRIES NEITHER
 # GUARANTEE. It takes `git "$@"`, so the invariant is the CALLER's to keep
@@ -613,7 +619,7 @@ wt_linkage_why() {
 # broke". Tested two ways, that 2 lands in the NO-MATCH arm — a scanner that
 # could not look reads exactly like a measurement that looked and found
 # nothing. At the two merged-commit checks below, the no-match arm is what
-# authorizes `git branch -D` and `git worktree remove`, so this swallow spends
+# authorizes the branch delete and `git worktree remove`, so this swallow spends
 # commits rather than merely miswording a reason: #1419 is the same
 # misattribution as #789 and #1413 one tool further down the pipeline, a
 # tool's own failure reported as a clean verdict about the thing it was
@@ -709,17 +715,21 @@ wt_reg_state() {
 }
 
 # The registry cross-check (#2078). The branch lookup below matches a
-# `branch refs/heads/<b>` line, and an empty match authorizes `git branch -D`.
-# Measured, git 2.50.1 (Apple Git-155): eight real admin-directory faults leave
-# `git worktree list --porcelain -z` at rc 0 — so the #622 guard below never
-# fires — while the held entry either loses its `branch` line or leaves the
-# listing entirely: `HEAD` garbage, empty, missing or chmod 000; `gitdir`
-# missing or chmod 000; the admin directory chmod 000; `.git/worktrees`
-# replaced by a file. `$wt` came back empty and `git branch -D` deleted a
-# branch a live worktree holds, because git's own "used by worktree" refusal
-# reads the same admin state and is fooled the same way. No backstop exists
-# past this point, so the listing has to be checked against the registry
-# before its silence is read as "no worktree".
+# `branch refs/heads/<b>` line, and an empty match lets the branch through to
+# the delete. Measured, git 2.50.1 (Apple Git-155): eight real admin-directory
+# faults leave `git worktree list --porcelain -z` at rc 0 — so the #622 guard
+# below never fires — while the held entry either loses its `branch` line or
+# leaves the listing entirely: `HEAD` garbage, empty, missing or chmod 000;
+# `gitdir` missing or chmod 000; the admin directory chmod 000; `.git/worktrees`
+# replaced by a file. `$wt` came back empty and `git branch -D` — the delete
+# then — deleted a branch a live worktree holds in all eight, its own "used by
+# worktree" refusal fooled by the same admin state. The delete is now
+# `git update-ref -d`, which consults no worktree at all, and the holder check
+# ahead of it (`wt_holding`) reads that same listing: measured against the
+# same eight, it answers "not held" for seven and "cannot tell" only for
+# `HEAD` missing, the one fault that leaves a `detached` line behind. No
+# backstop exists past this point, so the listing has to be checked against
+# the registry before its silence is read as "no worktree".
 #
 # `wt_registry_why` sets `reg_why` and returns 1 when the listing cannot be
 # trusted. Two checks, because the fault families differ in what they leave:
@@ -842,7 +852,8 @@ wt_registry_why() {
 # %(refname) and a strip, never %(refname:short): the short form is
 # ambiguity-aware, and where a TAG shares a branch's name it stops shortening
 # and emits `heads/<name>` instead (measured, git 2.50.1 Apple Git-155). That
-# string names no branch — `git branch -D` answers "branch not found" — and it
+# string names no branch — `git branch -D`, the delete then, answered "branch
+# not found" — and it
 # does not build the `refs/heads/$b` key the worktree lookup below matches on
 # either, so $wt comes back empty and the main-checkout, .git-linkage, dirty and
 # ignored-files guards all stand down for precisely the branch whose name got
@@ -899,6 +910,25 @@ else
 fi
 for b in $gone_branches; do
 
+  # The tip is read ONCE, here, and everything after it measures that frozen
+  # SHA rather than the live ref: the cherry below runs against `$tip`, and
+  # the delete at the foot of this loop is `git update-ref -d refs/heads/$b
+  # $tip`, which refuses unless the ref STILL equals `$tip` at that instant.
+  # Before #2219 the cherry read `refs/heads/$b` and the delete was
+  # `git branch -D "$b"`, a separate call that deletes whatever the ref holds
+  # when it runs — so a commit landing between the two was force-deleted at
+  # rc 0: the check-then-delete gap release-ticket.sh closed in #1325
+  # (ADR 0018). A tip that cannot be read is a keep, never a delete.
+  #
+  # `git_probe`, never `2>&1` into the capture: `$tip` is used as a SHA, and a
+  # stray `~/.gitconfig` warning git prints at rc 0 (#985) would arrive glued
+  # onto it. git's own words still reach the reason, through `gp_why`.
+  if ! git_probe rev-parse --verify "refs/heads/$b"; then
+    keep "$b" "cannot read the branch tip — not deleted$(gp_why)"
+    continue
+  fi
+  tip=$gp_out
+
   # git cherry against origin/main, not a local main: a local main never
   # fast-forwarded reads every merged branch as unmerged. Any + line is a commit
   # that exists nowhere else.
@@ -908,33 +938,36 @@ for b in $gone_branches; do
   # enough) prints nothing, grep sees empty input and exits 1 — the identical
   # verdict a genuinely clean cherry produces, so "merged" is indistinguishable
   # from "the probe could not answer". An unmerged branch is never the ambiguous
-  # one: its `+` line makes grep exit 0 and always keeps. -D is authorized by
-  # this check and by nothing else, so an unanswerable probe must KEEP, the
-  # same fail-closed shape the worktree `status` check below already uses.
-  # `refs/heads/$b`, never a bare `$b`. Restoring the bare name above makes a
-  # branch that shares its name with a tag ambiguous AS A REV again, and git
-  # resolves an ambiguous one by preferring refs/tags/ over refs/heads/
-  # (measured, git 2.50.1 Apple Git-155). This probe would then answer about the
-  # TAG's commit while `git branch -D` below deletes the BRANCH — and a tag
-  # sitting on a merged commit reports clean for a branch whose commits exist
-  # nowhere else. -D is authorized by this check and by nothing else, so that
-  # reads straight through to destroying them: measured on a fixture, the
-  # enumeration fix alone turned a branch this script currently KEEPS into
-  # `REAPED`, at exit 0, with an empty kept[]. Qualifying changes nothing for an
-  # ordinary branch — both spellings name the same commit — and it is the same
-  # key the worktree lookup below already builds.
+  # one: its `+` line makes grep exit 0 and always keeps. The delete is
+  # authorized by this check and by nothing else — its compare-and-swap refuses
+  # a ref that moved off `$tip`, never a `$tip` that is unmerged — so an
+  # unanswerable probe must KEEP, the same fail-closed shape the worktree
+  # `status` check below already uses.
+  # `refs/heads/$b`, never a bare `$b`, where the tip is read above. Restoring
+  # the bare name makes a branch that shares its name with a tag ambiguous AS A
+  # REV again, and git resolves an ambiguous one by preferring refs/tags/ over
+  # refs/heads/ (measured, git 2.50.1 Apple Git-155). This probe would then
+  # answer about the TAG's commit while the delete below removes the BRANCH —
+  # and a tag sitting on a merged commit reports clean for a branch whose
+  # commits exist nowhere else. The delete is authorized by this check and by
+  # nothing else, so that reads straight through to destroying them: measured
+  # on a fixture, the enumeration fix alone turned a branch this script
+  # currently KEEPS into `REAPED`, at exit 0, with an empty kept[]. Qualifying
+  # changes nothing for an ordinary branch — both spellings name the same
+  # commit — and it is the same key the worktree lookup below already builds.
   #
   # `$base_rev` is the other side of the same rule, and it was missing until
   # #924: `$base` reached this `git cherry` exactly as BASE_REF spelled it, so a
   # local tag named `origin/main` outranked refs/remotes/origin/main and the
-  # probe answered about the TAG while `git branch -D` below deleted the BRANCH
-  # — measured, an unmerged [gone] branch whose commit existed nowhere else
-  # REAPED at exit 0 with an empty kept[]. The qualification is built at the top
-  # of the file, where its own comment records why the accept-list beside it is
-  # what makes prefixing sound. "By nothing else" bounds what ELSE authorizes
-  # -D, not whether this check itself can be wrong — which is why BOTH revs it
-  # consumes are qualified. #634
-  if ! cherry=$(git cherry "$base_rev" "refs/heads/$b" 2>&1); then
+  # probe answered about the TAG while `git branch -D`, the delete then,
+  # deleted the BRANCH — measured, an unmerged [gone] branch whose commit
+  # existed nowhere else REAPED at exit 0 with an empty kept[]. The
+  # qualification is built at the top of the file, where its own comment
+  # records why the accept-list beside it is what makes prefixing sound. "By
+  # nothing else" bounds what ELSE authorizes the delete, not whether this
+  # check itself can be wrong — which is why BOTH revs it consumes are
+  # qualified. #634
+  if ! cherry=$(git cherry "$base_rev" "$tip" 2>&1); then
     keep "$b" "cherry probe failed — cannot tell if merged: $(printf '%s' "$cherry" | tr '\n' ' ')"
     continue
   fi
@@ -948,7 +981,7 @@ for b in $gone_branches; do
   # What "grep's is the only status left to take" missed, and what this shape
   # exists for: taking it is not the same as READING it. grep answers three
   # ways, and until #1419 the `if` had two arms — an rc 2 scan that never
-  # examined `$cherry` fell into the merged arm, and `git branch -D` below is
+  # examined `$cherry` fell into the merged arm, and the delete below is
   # authorized by this check and by nothing else. So the deletion went ahead on
   # a merge status no tool had established. `grep_probe` splits the two
   # questions; the answers are ruled on here, in the order that makes the
@@ -976,12 +1009,16 @@ for b in $gone_branches; do
   #
   # A listing that cannot be read fails CLOSED, like every other could-not-check
   # in this file: `$wt` would be empty, every guard under `[ -n "$wt" ]` below
-  # skipped, and `git branch -D` needs no answer from the registry to delete a
-  # branch with no worktree — so a merged [gone] branch was force-deleted while
-  # the sweep could not see the registry at all. Keeping it strands every [gone]
-  # branch in this pass on one repo-level failure, since the listing is re-read
-  # per branch (header: every precondition is recomputed); reap runs after every
-  # merge pass, so each waits one pass with the cause named. #622
+  # skipped, and `git branch -D`, the delete then, needed no answer from the
+  # registry to delete a branch with no worktree — so a merged [gone] branch was
+  # force-deleted while the sweep could not see the registry at all. The holder
+  # check at the delete re-reads the listing and keeps on a failed read too, but
+  # it answers one question — does a worktree hold this branch — and every guard
+  # under `[ -n "$wt" ]` asks others, so this lookup still fails closed on its
+  # own. Keeping it strands every [gone] branch in this pass on one repo-level
+  # failure, since the listing is re-read per branch (header: every
+  # precondition is recomputed); reap runs after every merge pass, so each waits
+  # one pass with the cause named. #622
   #
   # A genuine awk failure is a DIFFERENT fault from the listing failing, and is
   # guarded separately: it fires only when `wt_listing` itself succeeded — a
@@ -1068,9 +1105,10 @@ for b in $gone_branches; do
       # `git worktree add` writes, so the `-f` guard below would call it "no
       # .git linkage" — measurably false, git answers about that repo
       # correctly through it. A reap is impossible here either way
-      # (`git worktree remove` refuses a main worktree, `git branch -D`
-      # refuses a checked-out branch), so keep and say which, in the dry run
-      # and under --apply alike — the plain `-f` guard printed a false cause,
+      # (`git worktree remove` refuses a main worktree, and the holder check
+      # before the delete refuses a branch its `branch` line names), so keep
+      # and say which, in the dry run and under --apply alike — the plain `-f`
+      # guard printed a false cause,
       # and dropping it entirely leaves the dry run promising a reap that can
       # never happen (#82).
       if [ -d "$wt/.git" ] && [ -f "$wt/.git/HEAD" ]; then
@@ -1242,8 +1280,9 @@ for b in $gone_branches; do
     # guard the removal is refused by.
     #
     # `continue`, so the branch is kept with its worktree — the pairing the
-    # main-checkout reason already states, and `git branch -D` would refuse a
-    # branch checked out in a surviving worktree anyway. #992
+    # main-checkout reason already states, and the holder check before the
+    # delete would refuse a branch checked out in a surviving worktree anyway.
+    # #992
     #
     # Ancestor match, not exact equality: a worktree nested inside `$wt`
     # (a real, documented shape — SKILL.md names a member committing from a
@@ -1328,19 +1367,84 @@ for b in $gone_branches; do
   fi
 
   if [ "$apply" = true ]; then
-    # -D is authorized by the cherry check above and by nothing else. -d would
-    # refuse everything here: upstream is gone, so it compares against a
-    # possibly-behind local HEAD.
+    # What the compare-and-swap below does not give back: `git update-ref` is
+    # ref-only plumbing and, unlike `git branch -D` (the delete here until
+    # #2219), consults no worktree at all. `-D`'s own delete-time refusal on a
+    # branch a worktree holds is replaced by worktree.sh's `wt_holding`, over
+    # the listing re-read here rather than the one the `$wt` lookup above
+    # read: the `worktree remove` above has changed it since, and a
+    # `git worktree add` for this branch can land after that lookup. Held by
+    # either route `-D` refused on — a `branch` line, or a detached worktree
+    # stopped mid `rebase -i` or mid `git bisect` on this branch, which the
+    # `$wt` lookup never binds because the listing prints no `branch` line for
+    # it. Measured, git 2.50.1: `-D` refuses both, `update-ref -d` deletes
+    # both, and the sibling's `rebase --continue` then fails on `cannot lock
+    # ref` (#1330, #2218). A worktree the reader cannot resolve is a keep,
+    # never "not held".
     #
-    # `2>&1 >/dev/null`, in that order: redirections apply left to right, so
-    # stderr is bound to the capture and stdout is then dropped — git's
-    # diagnosis is kept and its confirmation line discarded. A bare "branch
-    # delete failed" names the step, never the fault; git names it outright
-    # (`error: cannot delete branch 'x' used by worktree at '…'`), and that
-    # message is the only thing that tells an operator which remedy applies.
-    if ! err=$(git branch -D "$b" 2>&1 >/dev/null); then
+    # Under --apply only, like the delete it guards: in the dry run the
+    # worktree the `$wt` lookup found is still registered, and would read as a
+    # holder of the very branch it pairs with. The dry run therefore cannot
+    # predict THIS branch's own refusal — but not "exactly as it could not
+    # predict `-D`'s" (#391): `-D`'s blind spot here was only ever this
+    # branch's own paired worktree. A registry read that fails closed for an
+    # UNRELATED worktree elsewhere in the listing (reaping.md) keeps every
+    # `[gone]` branch in the pass, a repo-wide case `-D` had no equivalent of
+    # — it needed no registry answer at all and failed OPEN on one it could
+    # not read (#622). The dry run — printing `would reap` unconditionally
+    # here — cannot predict any of those keeps either.
+    #
+    # A window remains between this re-read and the delete, per the ruling on
+    # #1330 (Q2, ADR 0018): a checkout landing in it breaks that worktree but
+    # cannot lose a commit — a commit made there moves the ref off `$tip`, and
+    # the compare-and-swap refuses.
+    if ! wt_listing; then
+      keep "$b" "cannot re-read the worktree list to check $b before the delete — not deleted: $(printf '%s' "$wt_err" | tr '\n' ' ')"
+      continue
+    fi
+    if wt_holding "refs/heads/$b"; then held_rc=0; else held_rc=$?; fi
+    case $held_rc in
+      0)
+        keep "$b" "$b $wt_holder_how in worktree $wt_holder — not deleted"
+        continue
+        ;;
+      1) ;;
+      *)
+        keep "$b" "cannot tell whether $b is held by worktree $wt_holder — not deleted"
+        continue
+        ;;
+    esac
+
+    # The compare-and-swap: `update-ref -d <ref> <tip>` deletes only while the
+    # ref still equals the `$tip` the cherry check measured, so a commit
+    # landing since is refused with git's `cannot lock ref … is at <new> but
+    # expected <tip>`, branch and commit intact. Never plain `git branch -d`:
+    # upstream is gone, so it compares against a possibly-behind local HEAD
+    # and refuses everything here (#760).
+    #
+    # `--no-deref`: measured, git 2.50.1, `update-ref -d` on a branch that is
+    # a symbolic ref deletes the branch it POINTS AT and leaves the symref
+    # dangling. `-D` deleted the symref itself, and so does this.
+    #
+    # `2>&1` into the capture, and update-ref prints nothing on stdout: a bare
+    # "branch delete failed" names the step, never the fault, and git's own
+    # diagnosis is the only thing that tells an operator which remedy applies
+    # (#391).
+    if ! err=$(git update-ref --no-deref -d "refs/heads/$b" "$tip" 2>&1); then
       keep "$b" "branch delete failed: $(printf '%s' "$err" | tr '\n' ' ')"
       continue
+    fi
+    # The `[branch "<b>"]` config section, which `-D` removed with the ref and
+    # ref-only `update-ref` leaves behind. Measured, git 2.50.1: a later
+    # `git branch --no-track <b>` inherits the stale upstream and reads
+    # `[gone]` at once, so the next pass would select it. The branch is
+    # already deleted, so a failure here is never a keep — but it is not
+    # stderr-only either: an unattended caller reading only stdout JSON must
+    # still learn the stale upstream was left, so it lands in `warnings` too.
+    if ! err=$(git config --remove-section "branch.$b" 2>&1); then
+      errflat=$(printf '%s' "$err" | tr '\n' ' ')
+      printf '    note: %s deleted, but its branch config section was left: %s\n' "$b" "$errflat" >&2
+      warnings="${warnings}{\"branch\":$(jfield "$b"),\"note\":$(jfield "branch config section was left: $errflat")},"
     fi
     echo "    REAPED $b" >&2
   else
@@ -1637,8 +1741,8 @@ fi
 # script before this printf ever ran, after the branches above were already
 # deleted. The caller lost the only record of what happened. Printing first
 # means that record survives regardless of what the prune does.
-printf '{"applied":%s,"reaped":[%s],"worktreesRemoved":[%s],"kept":[%s]}\n' \
-  "$apply" "${reaped%,}" "${removed%,}" "${kept%,}"
+printf '{"applied":%s,"reaped":[%s],"worktreesRemoved":[%s],"kept":[%s],"warnings":[%s]}\n' \
+  "$apply" "${reaped%,}" "${removed%,}" "${kept%,}" "${warnings%,}"
 
 # An `if`, not `[ ... ] && { ... }`: with the printf moved above it this guard
 # is the script's LAST command, and an AND-OR list whose test is false has

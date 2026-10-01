@@ -267,6 +267,27 @@ function cherryShim(t) {
 }
 
 /**
+ * A PATH dir whose `git worktree list` fails on exactly the Nth call this
+ * shim sees (`cmp` is the shell comparison against that count, e.g. `-eq 2`
+ * or `-ge 2`); every other call, and every other subcommand, execs the real
+ * git. Built once per counted `git worktree list` fault-injection site so the
+ * counter's own tmpdir is not duplicated at each call.
+ */
+function worktreeListFailsOnCall(t, cmp) {
+  const countDir = mkdtempSync(join(tmpdir(), "reap-count-"));
+  t.after(() => rmSync(countDir, { recursive: true, force: true }));
+  const counter = join(countDir, "n");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = worktree ] && [ "$2" = list ] && ` +
+      `{ n=$(( $(cat "${counter}" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "${counter}"; [ "$n" ${cmp} ]; }`,
+    ["fatal: worktree list exploded"],
+    128,
+  );
+  return { bin, counter };
+}
+
+/**
  * A `failOnlyShim` match selecting the `--ignored` probe and nothing else.
  *
  * Selected on CONTENT, never on argv POSITION. It was `[ "$5" = --ignored ]`,
@@ -616,6 +637,7 @@ test("a git cherry that dies is KEPT, never reaped — an unanswerable probe aut
 test("a `+` inside git's stderr is not a commit line — a merged branch is still reaped", (t) => {
   const w = repo(t);
   mergedGoneBranch(w, "feature/merged", "merged work");
+  const tip = git(w, "rev-parse", "refs/heads/feature/merged");
 
   // The warning goes in the `match`, not the stderr array: a false match falls
   // THROUGH to `exec ${REAL_GIT}`, so the shim warns and the merge check still
@@ -632,10 +654,12 @@ test("a `+` inside git's stderr is not a commit line — a merged branch is stil
   // with the shim argument replaced by `{}` (measured, #759): the arm could not
   // tell an absent anchoring bug from an absent fault. This is what makes it a
   // test of the anchoring rather than of the fixture.
+  // The branch sweep's cherry targets the tip SHA it read once (#2219), not
+  // `refs/heads/<b>`, so the argv pin is that SHA.
   assertShimFired(
     bin,
     "no `+` ever reached the merge check — the rest of this arm passes on any fixture",
-    /^cherry \S+ refs\/heads\//m,
+    new RegExp(`^cherry \\S+ ${tip}$`, "m"),
   );
   assert.equal(code, 0);
   assert.deepEqual(json.kept, [], "a `+` inside a diagnostic is not an unmerged commit");
@@ -1826,6 +1850,7 @@ test("an ordinary branch name is untouched — the escaping accepts what it shou
     reaped: [],
     worktreesRemoved: [],
     kept: [{ branch: "fix/119-json-sh-extract", reason: "unmerged commits" }],
+    warnings: [],
   });
 });
 
@@ -2072,36 +2097,259 @@ test("the sweep continues past a worktree-removal refusal and still reaps the br
   assert.equal(branchExists(w, "feature/a-locked"), true);
 });
 
-test("a `git branch -D` failure carries git's own message, not just the label (#391)", (t) => {
+test("a branch delete failure carries git's own message, not just the label (#391)", (t) => {
   // `>/dev/null 2>&1` sent the cause to the void and reported "branch delete
-  // failed". The real message names the fault outright — the shim reproduces
-  // the one measured in the wild, plus a second line, since the reason has to
-  // survive as a single JSON string.
+  // failed". The real message names the fault outright. No shim: a stale
+  // `.lock` beside the ref makes the real `git update-ref -d` refuse (#2219
+  // moved the delete off `git branch -D`), with git's multi-line "Another
+  // git process" prose — and the reason has to survive as a single JSON string.
   //
-  // The shim is scoped to one branch, and a healthy branch sorts after it, so
-  // this also pins the other half of "the sweep continues past EITHER failure".
+  // Scoped to one branch, and a healthy branch sorts after it, so this also
+  // pins the other half of "the sweep continues past EITHER failure".
   const w = repo(t);
   mergedGoneBranch(w, "feature/a-broken", "merged work");
   mergedGoneBranch(w, "feature/b-healthy", "work that landed");
-  const bin = failOnlyShim(
-    t,
-    `[ "$1" = branch ] && [ "$2" = -D ] && [ "$3" = feature/a-broken ]`,
-    [`error: cannot delete branch 'feature/a-broken' used by worktree at '/some/where'`, "fatal: could not update ref"],
-  );
+  writeFileSync(join(w, ".git", "refs", "heads", "feature", "a-broken.lock"), "");
 
-  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+  const { code, json, stderr } = runReap(w, ["--apply"]);
 
   assert.equal(code, 0);
   assert.deepEqual(json.reaped, ["feature/b-healthy"], "a branch that was not deleted must not be reported as reaped, and the sweep goes on");
   assert.equal(json.kept.length, 1);
   assert.equal(json.kept[0].branch, "feature/a-broken");
   assert.match(json.kept[0].reason, /^branch delete failed: /, "the label stays — it is the reason that gains a cause");
-  assert.match(json.kept[0].reason, /used by worktree at/, "git's diagnosis must reach the payload");
-  assert.match(json.kept[0].reason, /could not update ref/, "both lines, not just the first");
+  assert.match(json.kept[0].reason, /cannot lock ref 'refs\/heads\/feature\/a-broken'/, "git's diagnosis must reach the payload");
+  assert.match(json.kept[0].reason, /Another git process/, "every line, not just the first");
   assert.doesNotMatch(json.kept[0].reason, /\n/, "flattened into one JSON string");
   assert.match(stderr, /KEEP feature\/a-broken — branch delete failed/);
   assert.equal(branchExists(w, "feature/a-broken"), true);
   assert.equal(branchExists(w, "feature/b-healthy"), false, "reached only by continuing past the failure");
+});
+
+test("a branch-config removal failure after a successful delete is not lost — it reaches warnings, not just stderr (#2219)", (t) => {
+  // `git update-ref -d` only touches the ref DB; the `[branch "<b>"]` config
+  // section it leaves behind is removed by a SEPARATE `git config
+  // --remove-section` call that can fail on its own (here, a stale
+  // `.git/config.lock`). The branch is already gone by then, so this is
+  // never a `keep` — but an unattended caller reading only stdout JSON must
+  // still learn the leftover section was left, or a later `git branch
+  // --no-track` of the same name silently inherits the dead upstream and
+  // reads `[gone]` at once (the leak the success-path test above pins).
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/leak", "merged work");
+  writeFileSync(join(w, ".git", "config.lock"), "");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/leak"], "the branch is genuinely gone — this is never a keep");
+  assert.deepEqual(json.kept, []);
+  assert.equal(json.warnings.length, 1);
+  assert.equal(json.warnings[0].branch, "feature/leak");
+  assert.match(json.warnings[0].note, /^branch config section was left: /);
+  assert.match(json.warnings[0].note, /could not lock config file/, "git's own diagnosis must reach the payload");
+  assert.match(stderr, /note: feature\/leak deleted, but its branch config section was left/);
+  assert.equal(branchExists(w, "feature/leak"), false);
+});
+
+test("a [gone] branch that gains a commit after its tip is read is kept, and the commit survives (#2219)", (t) => {
+  // `git branch -D` deleted whatever the ref held when it ran, in a call
+  // separate from the `git cherry` that authorized it, so a commit landing
+  // between the two was force-deleted at exit 0 — release-ticket.sh's gap
+  // before #1325. The shim lands that commit the moment the real `git cherry`
+  // has answered, which is inside the window under the `-D` delete and the
+  // compare-and-swap alike: red on the first, green on the second.
+  // `git update-ref -d refs/heads/<b> <tip>` refuses the moved ref, and git's
+  // own `cannot lock ref` reaches the reason (#391).
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/raced", "merged work");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = cherry ] && {
+  out=$("${REAL_GIT}" "$@"); rc=$?
+  ${SHIM_FIRED}
+  old=$("${REAL_GIT}" rev-parse refs/heads/feature/raced) &&
+    newc=$("${REAL_GIT}" commit-tree "$old^{tree}" -p "$old" -m race) &&
+    "${REAL_GIT}" update-ref refs/heads/feature/raced "$newc"
+  [ -z "$out" ] || printf '%s\\n' "$out"
+  exit $rc
+}`,
+    [],
+  );
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assertShimFired(bin, "the commit must land inside the cherry-to-delete window", /^cherry /m);
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, [], "a branch that moved after its tip was read is never deleted");
+  const kept = json.kept.filter((k) => k.branch === "feature/raced");
+  assert.equal(kept.length, 1, JSON.stringify(json.kept));
+  assert.match(kept[0].reason, /^branch delete failed: .*cannot lock ref 'refs\/heads\/feature\/raced'/, "git's own compare-and-swap refusal, quoted");
+  assert.equal(git(w, "log", "-1", "--format=%s", "refs/heads/feature/raced"), "race", "the commit that landed in the window is still the branch's tip");
+});
+
+/** Real git with stdio captured, so a rebase's `Stopped at` prose stays out of the test output. */
+const quietGit = (cwd, ...args) => execFileSync("git", args, { cwd, env: ENV, stdio: "pipe" });
+
+/**
+ * A merged `[gone]` branch whose linked worktree `stop` leaves mid-operation
+ * and DETACHED: the listing prints no `branch` line for it, so the `$wt`
+ * lookup never binds it and the branch reaches the delete with nothing
+ * matched. `git branch -D` refused it there all the same ("used by
+ * worktree"), because git reads the operation's own state out of the admin
+ * dir; after #2219 the delete is `update-ref -d`, which reads none, and
+ * worktree.sh's `wt_holding` (#2218) has to. Two real-content commits, so a
+ * rebase has something to stop on and a bisect has a midpoint to detach at.
+ */
+function heldMidOperation(t, name, stop) {
+  const w = repo(t);
+  const wt = join(w, ".worktrees", "held");
+  git(w, "worktree", "add", "-q", wt, "-b", name, "main");
+  for (const n of [1, 2]) {
+    writeFileSync(join(wt, `work-${n}.txt`), `work ${n}\n`);
+    git(wt, "add", `work-${n}.txt`);
+    git(wt, "commit", "-q", "-m", `work ${n}`);
+  }
+  git(wt, "push", "-q", "-u", "origin", name);
+  git(w, "merge", "-q", "--no-ff", "-m", `merge ${name}`, name);
+  git(w, "push", "-q", "origin", "main");
+  git(w, "push", "-q", "origin", "--delete", name);
+  git(w, "fetch", "-q", "--prune", "origin");
+  stop(wt);
+  assert.match(
+    git(w, "worktree", "list", "--porcelain"),
+    /\/held\nHEAD [0-9a-f]+\ndetached$/m,
+    "fixture: the worktree must be detached, or the porcelain `branch` line already answers",
+  );
+  return { w, wt };
+}
+
+for (const [what, stop, finish] of [
+  ["stopped mid-`rebase -i`", (wt) => quietGit(wt, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1"), (wt) => quietGit(wt, "rebase", "--continue")],
+  ["mid-`bisect`", (wt) => quietGit(wt, "bisect", "start", "HEAD", "HEAD~2"), (wt) => quietGit(wt, "bisect", "reset")],
+]) {
+  test(`a [gone] branch held by a worktree ${what} is kept (#2219)`, (t) => {
+    // Green before #2219 and after, by different mechanisms: `-D`'s own
+    // refusal then, `wt_holding` now. What it protects: the operation can
+    // still finish onto its branch.
+    const name = "feature/held";
+    const { w, wt } = heldMidOperation(t, name, stop);
+
+    const { code, json, stderr } = runReap(w, ["--apply"]);
+
+    assert.equal(code, 0, stderr);
+    assert.deepEqual(json.reaped, []);
+    const kept = json.kept.filter((k) => k.branch === name);
+    assert.equal(kept.length, 1, JSON.stringify(json.kept));
+    assert.ok(kept[0].reason.includes(wt), `the reason names the worktree that holds it: ${kept[0].reason}`);
+    assert.equal(branchExists(w, name), true);
+    finish(wt);
+    assert.equal(git(wt, "symbolic-ref", "HEAD"), `refs/heads/${name}`, "the operation can still finish onto its branch");
+  });
+}
+
+test("a [gone] branch whose holder check cannot read a worktree's rebase state is kept as unknown (#2219)", (t) => {
+  // `wt_holding` answers "cannot tell" when a detached worktree's
+  // `rebase-merge` dir exists but cannot be searched, so its `head-name` —
+  // which branch the rebase holds — is unreadable. Nothing earlier refuses
+  // this shape: the HEAD is a real commit, so the registry cross-check
+  // passes, and the listing names no branch, so the `$wt` lookup binds
+  // nothing. Unknown is a keep, never "not held".
+  if (process.getuid?.() === 0) return t.skip("root reads every file");
+  const name = "feature/held";
+  const { w, wt } = heldMidOperation(t, name, (wt) =>
+    quietGit(wt, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1"),
+  );
+  const rebaseMerge = join(adminEntry(w, wt), "rebase-merge");
+  chmodSync(rebaseMerge, 0o000);
+  let r;
+  try {
+    r = runReap(w, ["--apply"]);
+  } finally {
+    chmodSync(rebaseMerge, 0o755);
+  }
+  const { code, json, stderr } = r;
+
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, []);
+  const kept = json.kept.filter((k) => k.branch === name);
+  assert.equal(kept.length, 1, JSON.stringify(json.kept));
+  assert.match(kept[0].reason, /^cannot tell whether feature\/held is held by worktree .* — not deleted$/);
+  assert.equal(branchExists(w, name), true);
+});
+
+test("a [gone] branch whose tip cannot be read is kept with git's cause, never deleted (#2219)", (t) => {
+  // The tip is what the cherry measures and what the compare-and-swap
+  // compares against, so a read that fails authorizes nothing.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/a-unread", "merged work");
+  mergedGoneBranch(w, "feature/b-healthy", "work that landed");
+  const bin = failOnlyShim(
+    t,
+    `[ "$1" = rev-parse ] && [ "$2" = --verify ] && [ "$3" = refs/heads/feature/a-unread ]`,
+    ["fatal: unable to read tree deadbeef"],
+    128,
+  );
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assertShimFired(bin, "the tip read must be the call that failed", /^rev-parse --verify refs\/heads\/feature\/a-unread$/m);
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/b-healthy"], "the sweep goes on past it");
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].reason, "cannot read the branch tip — not deleted: fatal: unable to read tree deadbeef");
+  assert.equal(branchExists(w, "feature/a-unread"), true);
+});
+
+test("a worktree mid-rebase of a DIFFERENT branch does not hold a [gone] branch's delete (#2219)", (t) => {
+  // The false-refusal half: an operation in progress is not by itself a hold.
+  // Only the branch it names blocks the delete.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const sib = join(w, ".worktrees", "other");
+  git(w, "worktree", "add", "-q", sib, "-b", "other", "main");
+  writeFileSync(join(sib, "other.txt"), "other work\n");
+  git(sib, "add", "other.txt");
+  git(sib, "commit", "-q", "-m", "other work");
+  quietGit(sib, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1");
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, ["feature/merged"], JSON.stringify(json.kept));
+  assert.equal(branchExists(w, "feature/merged"), false);
+});
+
+test("a reaped branch leaves no upstream behind for a re-created branch of the same name (#2219)", (t) => {
+  // `git branch -D` removed the `[branch "<b>"]` config section with the ref;
+  // ref-only `update-ref -d` does not. Left behind, a later `git branch
+  // --no-track <b>` inherits the dead upstream and reads `[gone]` at once —
+  // selected by the very next pass.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+
+  const { json } = runReap(w, ["--apply"]);
+  assert.deepEqual(json.reaped, ["feature/merged"]);
+
+  git(w, "branch", "--no-track", "feature/merged", "main");
+  assert.equal(git(w, "for-each-ref", "--format=%(upstream)%(upstream:track)", "refs/heads/feature/merged"), "");
+});
+
+test("a [gone] branch that is a symbolic ref is deleted itself, never the branch it points at (#2219)", (t) => {
+  // `git update-ref -d` dereferences by default: on a symref branch it
+  // deletes the TARGET and leaves the symref dangling (measured, git 2.50.1).
+  // `git branch -D` deleted the symref itself, which `--no-deref` keeps.
+  const w = repo(t);
+  git(w, "branch", "target", "main");
+  git(w, "symbolic-ref", "refs/heads/feature/alias", "refs/heads/target");
+  git(w, "config", "branch.feature/alias.remote", "origin");
+  git(w, "config", "branch.feature/alias.merge", "refs/heads/feature/alias");
+
+  const { json, stderr } = runReap(w, ["--apply"]);
+
+  assert.deepEqual(json.reaped, ["feature/alias"], stderr);
+  assert.equal(branchExists(w, "target"), true, "the branch the symref pointed at was never selected, and survives");
+  assert.equal(existsSync(join(w, ".git", "refs", "heads", "feature", "alias")), false, "the symref itself is what was deleted");
 });
 
 test("a dying `git worktree list` keeps every [gone] branch and names git's cause (#622)", (t) => {
@@ -2160,25 +2408,18 @@ test("a transient `git worktree list` failure keeps only the branch it hit — n
   // pass exactly as well as a genuine per-iteration re-read.
   //
   // Three branches, alphabetical so `for-each-ref`'s default refname sort
-  // fixes the iteration order; the shim fails ONLY the SECOND `worktree list`
-  // call. If the guard truly re-reads per branch, the first and third
-  // branches see a healthy listing and reap normally — only the second, the
-  // one whose own call hit the fault, is kept.
+  // fixes the iteration order; the shim fails ONLY the THIRD `worktree list`
+  // call — the second branch's lookup, since under --apply each reaped
+  // branch reads the listing twice, at the lookup and again at the holder
+  // check before its delete (#2219). If the guard truly re-reads per branch,
+  // the first and third branches see a healthy listing and reap normally —
+  // only the second, the one whose own call hit the fault, is kept.
   const w = repo(t);
   mergedGoneBranch(w, "feature/a-first", "a work");
   mergedGoneBranch(w, "feature/b-second", "b work");
   mergedGoneBranch(w, "feature/c-third", "c work");
 
-  const countDir = mkdtempSync(join(tmpdir(), "reap-count-"));
-  t.after(() => rmSync(countDir, { recursive: true, force: true }));
-  const counter = join(countDir, "n");
-  const bin = failOnlyShim(
-    t,
-    `[ "$1" = worktree ] && [ "$2" = list ] && ` +
-      `{ n=$(( $(cat "${counter}" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "${counter}"; [ "$n" -eq 2 ]; }`,
-    ["fatal: worktree list exploded"],
-    128,
-  );
+  const { bin } = worktreeListFailsOnCall(t, "-eq 3");
 
   const { code, json } = runReap(w, ["--apply"], withShim(bin));
 
@@ -2196,6 +2437,27 @@ test("a transient `git worktree list` failure keeps only the branch it hit — n
   assert.equal(branchExists(w, "feature/c-third"), false);
 });
 
+test("a `git worktree list` that fails at the holder check before the delete keeps that branch (#2219)", (t) => {
+  // The delete's own re-read of the listing, which `wt_holding` needs because
+  // `update-ref -d` consults no worktree. A read that fails there is a keep,
+  // never a delete on a holder check that never ran. The second call is the
+  // first branch's re-read: its lookup (call 1) was healthy.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/a-first", "a work");
+  mergedGoneBranch(w, "feature/b-second", "b work");
+
+  const { bin } = worktreeListFailsOnCall(t, "-eq 2");
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, ["feature/b-second"]);
+  assert.equal(json.kept.length, 1);
+  assert.equal(json.kept[0].branch, "feature/a-first");
+  assert.match(json.kept[0].reason, /^cannot re-read the worktree list .* not deleted: fatal: worktree list exploded/);
+  assert.equal(branchExists(w, "feature/a-first"), true);
+});
+
 test("quotes and backslashes in git's stderr still round-trip through the new reasons (#391, #119)", (t) => {
   // These three reasons now carry text neither this repo nor its operator
   // chose. `keep()` escapes through json.sh, which landed in #119 — before it,
@@ -2204,8 +2466,8 @@ test("quotes and backslashes in git's stderr still round-trip through the new re
   mergedGoneBranch(w, "feature/merged", "merged work");
   const bin = failOnlyShim(
     t,
-    `[ "$1" = branch ] && [ "$2" = -D ]`,
-    [`error: cannot delete branch "feat" used by worktree at 'C:\\path\\to\\wt'`],
+    `[ "$1" = update-ref ] && case " $* " in *" -d "*) : ;; *) false ;; esac`,
+    [`error: cannot lock ref "feat": Unable to create 'C:\\path\\to\\feat.lock'`],
   );
 
   const { code, json } = runReap(w, ["--apply"], withShim(bin));
@@ -2213,7 +2475,7 @@ test("quotes and backslashes in git's stderr still round-trip through the new re
   assert.equal(code, 0);
   assert.equal(
     json.kept[0].reason,
-    `branch delete failed: error: cannot delete branch "feat" used by worktree at 'C:\\path\\to\\wt'`,
+    `branch delete failed: error: cannot lock ref "feat": Unable to create 'C:\\path\\to\\feat.lock'`,
     "the quotes and backslashes survive as data — runReap JSON.parses stdout, so a raw splice fails before this assert",
   );
 });
@@ -2234,7 +2496,7 @@ test("an ordinary run's payload is byte-for-byte what it has always been (#391)"
   const { code, json, stderr } = runReap(w, ["--apply"]);
 
   assert.equal(code, 0);
-  assert.deepEqual(json, { applied: true, reaped: ["feature/merged"], worktreesRemoved: [wt], kept: [] });
+  assert.deepEqual(json, { applied: true, reaped: ["feature/merged"], worktreesRemoved: [wt], kept: [], warnings: [] });
   assert.doesNotMatch(stderr, /KEEP/);
   assert.doesNotMatch(stderr, /registration/, "a successful removal says nothing about registrations");
   assert.equal(existsSync(wt), false);
@@ -2268,6 +2530,7 @@ test("the dry run removes nothing, and still cannot predict a refusal (#391)", (
       reaped: ["feature/a-healthy", "feature/b-locked"],
       worktreesRemoved: [healthy, locked],
       kept: [],
+      warnings: [],
     },
     "the dry run still promises the reap it cannot know will be refused",
   );
@@ -2309,16 +2572,7 @@ test("a registry probe that itself fails is reported as unknown, never as 'clear
   // can be built. Putting the count in the match is what lets this reuse the
   // helper — the match runs exactly once per `git`, ahead of the shim's single
   // `exec`.
-  const countDir = mkdtempSync(join(tmpdir(), "reap-count-"));
-  t.after(() => rmSync(countDir, { recursive: true, force: true }));
-  const counter = join(countDir, "n");
-  const bin = failOnlyShim(
-    t,
-    `[ "$1" = worktree ] && [ "$2" = list ] && ` +
-      `{ n=$(( $(cat "${counter}" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "${counter}"; [ "$n" -ge 2 ]; }`,
-    ["fatal: worktree list exploded"],
-    128,
-  );
+  const { bin, counter } = worktreeListFailsOnCall(t, "-ge 2");
 
   const { code, json } = runReap(w, ["--apply"], withShim(bin));
 
@@ -2808,7 +3062,7 @@ test("an attached worktree is never touched by the branchless sweep (#381)", (t)
   const { code, json, stderr } = runReap(w, ["--apply"]);
 
   assert.equal(code, 0);
-  assert.deepEqual(json, { applied: true, reaped: [], worktreesRemoved: [], kept: [] });
+  assert.deepEqual(json, { applied: true, reaped: [], worktreesRemoved: [], kept: [], warnings: [] });
   assert.doesNotMatch(stderr, /KEEP/, "a worktree on a live branch is not a finding");
   assert.equal(existsSync(live), true);
   assert.equal(branchExists(w, "feature/live"), true);
@@ -2915,13 +3169,17 @@ test("a `+` inside a cherry diagnostic does not strand a detached worktree (#381
   // `mergedGoneBranchWithWorktree` leaves `refs/heads/docs/79-brief` behind —
   // detaching the worktree's HEAD un-checks-out the branch, it doesn't delete
   // it — so the BRANCH sweep also sees this same name as `[gone]` and runs its
-  // own `git cherry`, which the bare match above fires on too. A regex on the
-  // recorded argv, not just presence, is what proves THIS sweep's own probe
-  // (target a full SHA, never a `refs/heads/...` name) is what fired. #759
-  assertShimFired(
-    bin,
-    "no `+` ever reached this sweep's cherry probe — the rest of this arm passes on any fixture",
-    /^cherry \S+ [0-9a-f]{40}$/m,
+  // own `git cherry`, which the bare match above fires on too. Since #2219 that
+  // probe targets the tip SHA it read, not `refs/heads/...`, and the tip is the
+  // very commit this worktree's HEAD sits on, so the two argvs are identical.
+  // The COUNT is what proves THIS sweep's own probe fired too: one line is the
+  // branch sweep's alone. #759
+  const CHERRY_SHA = /^cherry \S+ [0-9a-f]{40}$/;
+  assertShimFired(bin, "no `+` ever reached this sweep's cherry probe — the rest of this arm passes on any fixture");
+  assert.equal(
+    readFileSync(join(bin, "git.fired"), "utf8").split("\n").filter((l) => CHERRY_SHA.test(l)).length,
+    2,
+    "both sweeps' cherry probes fired — the branch sweep's and this one's",
   );
   assert.equal(code, 0);
   assert.deepEqual(json.kept, [], "a `+` inside a diagnostic is not an unmerged commit");
