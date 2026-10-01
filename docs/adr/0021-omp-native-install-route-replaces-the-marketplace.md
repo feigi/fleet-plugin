@@ -98,10 +98,10 @@ ADR 0020:
    and a `files` list shipping `agents/ commands/ skills/ scripts/
    .claude-plugin/ LICENSE NOTICE`); `release.yml` publishes the minted tag
    as that version, treating "already published" as success. The
-   `npm-name-gate` job is deleted: a name we publish is collision-proofed
-   by the publish itself — a squatted name fails the release job loudly
-   (403), which is a stronger gate than a pre-occupancy 404 check, and the
-   old check goes permanently red the moment its own premise ends (200
+   `npm-name-gate` job is deleted: the package is scoped (`@feigi/fleet-ctl`,
+   Consequences), so only the `@feigi` scope owner can publish the name the
+   install resolves — a stronger gate than a pre-occupancy 404 check, which
+   in any case goes permanently red the moment its own premise ends (200
    once published).
 7. **`plugin/.claude-plugin/plugin.json` stays, with its purpose changed.**
    No harness reads it on the native route; it is repo-internal identity

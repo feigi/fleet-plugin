@@ -32,8 +32,8 @@ copy of the same names until you `omp plugin uninstall @feigi/fleet-ctl`, so kee
 it to the box you develop on.
 
 `@feigi/fleet-ctl` is the npm package the fleet publishes on every release —
-publishing the name is the collision guard (a squatted name fails the
-release). Publishing authenticates via [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
+the `@feigi` scope is the collision guard (only its owner can publish under
+it). Publishing authenticates via [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
 (OIDC, no stored token): `@feigi/fleet-ctl` must exist on the registry and have
 this repo's `release.yml` configured as its Trusted Publisher before the
 first automated release — see ADR 0021, Consequences, for the one-time
