@@ -3,7 +3,7 @@
 // "Provenance check"). Names the live Install root — the realpath of omp's
 // `node_modules/@feigi/fleet-ctl` package entry, the one path every install kind
 // places (ADR 0021) — its kind and recorded version, and hashes the placed
-// Resolver (`~/.fleet/bin/fleet-run`) against each install's own copy and
+// Resolver (`~/.fleet/bin/fleet-run`) against the Install root's own copy and
 // refuses on drift. Writes nothing, mutates no config — every path below is
 // read-only.
 //
@@ -103,33 +103,24 @@ function digestScriptsDir(root) {
   return { digest: sha256(Buffer.from(lines.join("\n") + "\n", "utf8")), fileCount: listed.files.length };
 }
 
-// Which install kind produced this root, from where the package entry points:
-// a symlink resolving inside omp's plugin cache → a marketplace install; the
-// entry itself a real directory under node_modules (not a symlink) → an npm
-// install; a symlink pointing anywhere else → a linked checkout. Compare
-// canonicalized paths — macOS resolves /tmp through /private/tmp (measured;
-// the same reason fleet-bootstrap's canonical() exists), so a raw string
-// prefix misreports an npm install as an unknown shape on those boxes.
-function kindOf(res) {
-  const { packagePath, installPath, isLink } = res;
-  let nodeModules;
-  try {
-    nodeModules = fs.realpathSync(path.dirname(packagePath));
-  } catch {
-    nodeModules = path.dirname(packagePath);
-  }
-  if (isLink) {
-    if (installPath.includes(`${path.sep}.omp${path.sep}plugins${path.sep}cache${path.sep}`)) return "marketplace-install";
-    return "linked-checkout";
-  }
-  if (installPath.startsWith(nodeModules + path.sep)) return "npm-install";
-  return "unrecognized-install-shape";
+// Which install kind produced this root, read off the package entry itself:
+// a real directory (not a symlink) → an npm install, which unpacks into
+// node_modules; a symlink resolving inside omp's plugin cache → a
+// marketplace install; a symlink pointing anywhere else → a linked checkout.
+// No path-prefix test decides the npm case: a non-link entry's realpath is
+// always its own parent's realpath plus its name, so every non-link shape is
+// that one kind.
+function kindOf({ installPath, isLink }) {
+  if (!isLink) return "npm-install";
+  return installPath.includes(`${path.sep}.omp${path.sep}plugins${path.sep}cache${path.sep}`)
+    ? "marketplace-install"
+    : "linked-checkout";
 }
 
 function main() {
   const argv = process.argv.slice(2);
-  for (let i = 0; i < argv.length; i++) {
-    process.stderr.write(`${NAME}: unrecognized argument ${argv[i]}\n`);
+  if (argv.length > 0) {
+    process.stderr.write(`${NAME}: unrecognized argument ${argv[0]}\n`);
     process.exit(2);
   }
 
