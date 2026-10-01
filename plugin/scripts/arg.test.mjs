@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const ARG_MODULE = fileURLToPath(new URL("./arg.mjs", import.meta.url));
 
@@ -696,7 +697,7 @@ const GH_FLOOD = [
 function runWithFloodingGh(script, argv, bytes) {
   const dir = mkdtempSync(join(tmpdir(), "arg-die-flood-"));
   writeFileSync(join(dir, "flood"), "z".repeat(bytes));
-  writeFileSync(join(dir, "gh"), `#!/bin/sh\ncat "${join(dir, "flood")}" >&2\nexit 1\n`, { mode: 0o755 });
+  writeExecStub(join(dir, "gh"), `#!/bin/sh\ncat "${join(dir, "flood")}" >&2\nexit 1\n`);
   return spawnSync(
     process.execPath,
     [fileURLToPath(new URL(`./${script}.mjs`, import.meta.url)), ...argv],
@@ -785,7 +786,7 @@ function stubGhBin() {
   // `>> "$GH_LOG"`, not the interpolated path: ci-state.test.mjs's GH_STUB
   // form, which keeps the path out of the generated script text entirely so
   // there is no interpolation left to quote wrongly.
-  writeFileSync(join(dir, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 1\n`, { mode: 0o755 });
+  writeExecStub(join(dir, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 1\n`);
   // The env is built HERE, beside the path it carries. `GH_LOG` is now what
   // makes the receipt work at all, so handing callers a ready env is what
   // keeps the two from drifting apart — a caller assembling its own would be
@@ -923,14 +924,13 @@ for (const { script, argv, flag } of NON_NUMERIC) {
 function stubGhAnswering() {
   const dir = mkdtempSync(join(tmpdir(), "arg num-"));
   const receipt = join(dir, "gh-was-called");
-  writeFileSync(
+  writeExecStub(
     join(dir, "gh"),
     '#!/bin/sh\necho "$@" >> "$GH_LOG"\ncase "$2" in\n' +
       "  view) echo '{\"files\":[{\"path\":\"a.ts\",\"additions\":1,\"deletions\":0}],\"changedFiles\":1}' ;;\n" +
       "  diff) echo src/shared.ts ;;\n" +
       "  *) exit 1 ;;\n" +
       "esac\n",
-    { mode: 0o755 },
   );
   return { dir, receipt, env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GH_LOG: receipt } };
 }

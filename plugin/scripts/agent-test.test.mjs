@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, symlinkSync, copyFileSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
+import { writeExecStub } from "./exec-stub.mjs";
 
 // This repository's own test runner, `./agent-test` at the repo root: the
 // `node --test` argument shim that left claim-ticket.sh's emitter for a
@@ -11,6 +12,9 @@ import { join, dirname, relative } from "node:path";
 // what they assert; only the fixture changed — the runner is copied into a
 // fixture tree rather than emitted by a claim.
 const RUNNER = join(import.meta.dirname, "..", "..", "agent-test");
+// Installed through `writeExecStub`, never copied: a copy is a new executable
+// inode per fixture, and macOS scans each one on its first exec.
+const RUNNER_BODY = readFileSync(RUNNER, "utf8");
 
 // `node --test` marks the processes it spawns, and an inherited mark makes
 // the runner's own `node --test` report to a parent that is not listening —
@@ -47,8 +51,7 @@ function apply(files, parent = tmpdir()) {
       writeFileSync(join(root, name), body);
     }
   }
-  copyFileSync(RUNNER, join(wt, "agent-test"));
-  chmodSync(join(wt, "agent-test"), 0o755);
+  writeExecStub(join(wt, "agent-test"), RUNNER_BODY);
   const env = runnerEnv();
   return {
     wt,
@@ -153,8 +156,8 @@ test("runner: an invalid UTF-8 byte in a discovered path does not drop it", () =
   // the way to argv, turning `\xFF` into the two valid bytes `\303\277`. POSIX
   // `printf` interprets the octal escape, so the fixture stays pure ASCII and
   // the shell makes the byte.
-  writeFileSync(join(bin, "find"), "#!/bin/sh\nprintf 't/b\\377ad.test.mjs\\nt/ok.test.mjs\\n'\n", { mode: 0o755 });
-  writeFileSync(join(bin, "node"), '#!/bin/sh\nprintf %s "$#"\n', { mode: 0o755 });
+  writeExecStub(join(bin, "find"), "#!/bin/sh\nprintf 't/b\\377ad.test.mjs\\nt/ok.test.mjs\\n'\n");
+  writeExecStub(join(bin, "node"), '#!/bin/sh\nprintf %s "$#"\n');
   const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
     cwd: a.wt,
     encoding: "utf8",
@@ -489,8 +492,7 @@ test("runner: the divergence walk ends on an argument that resolves TO the share
   // bytes, and no worktree the assertions below never inspect.
   const home = join(mkdtempSync(join(tmpdir(), "nm-")), "node_modules");
   mkdirSync(home, { recursive: true });
-  copyFileSync(RUNNER, join(home, "agent-test"));
-  chmodSync(join(home, "agent-test"), 0o755);
+  writeExecStub(join(home, "agent-test"), RUNNER_BODY);
   writeFileSync(join(home, "a.test.mjs"), PASSES);
   // Vendored content one level in, where the exemption is at its widest: the
   // runner's own directory name IS the excluded word, and the guard still has
@@ -596,7 +598,7 @@ test("runner: a directory with no test files refuses instead of exiting 0", () =
 test("runner: a grep failure mid-scan is reported distinctly from an empty result", () => {
   const a = apply(SUITE);
   const bin = mkdtempSync(join(tmpdir(), "claim-grepfail-"));
-  writeFileSync(join(bin, "grep"), "#!/bin/sh\nexit 2\n", { mode: 0o755 });
+  writeExecStub(join(bin, "grep"), "#!/bin/sh\nexit 2\n");
   const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
     cwd: a.wt,
     encoding: "utf8",
@@ -614,7 +616,7 @@ test("runner: a grep failure mid-scan is reported distinctly from an empty resul
 test("runner: a sed failure mid-scan is reported distinctly from an empty result", () => {
   const a = apply(SUITE);
   const bin = mkdtempSync(join(tmpdir(), "claim-sedfail-"));
-  writeFileSync(join(bin, "sed"), "#!/bin/sh\nexit 2\n", { mode: 0o755 });
+  writeExecStub(join(bin, "sed"), "#!/bin/sh\nexit 2\n");
   const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
     cwd: a.wt,
     encoding: "utf8",
@@ -638,7 +640,7 @@ test("runner: a sed failure mid-scan is reported distinctly from an empty result
 test("runner: a BSD-style sed rc-1 failure is reported, not tolerated as a no-match analog", () => {
   const a = apply(SUITE);
   const bin = mkdtempSync(join(tmpdir(), "claim-sedrc1-"));
-  writeFileSync(join(bin, "sed"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  writeExecStub(join(bin, "sed"), "#!/bin/sh\nexit 1\n");
   const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
     cwd: a.wt,
     encoding: "utf8",
@@ -658,7 +660,7 @@ test("runner: a BSD-style sed rc-1 failure is reported, not tolerated as a no-ma
 test("runner: grep's plain no-match rc still reads as no test files, not a grep failure", () => {
   const a = apply(SUITE);
   const bin = mkdtempSync(join(tmpdir(), "claim-grepnomatch-"));
-  writeFileSync(join(bin, "grep"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  writeExecStub(join(bin, "grep"), "#!/bin/sh\nexit 1\n");
   const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
     cwd: a.wt,
     encoding: "utf8",
@@ -1388,7 +1390,7 @@ test("runner: an unresolvable argument refuses rather than running unchecked", (
   writeFileSync(join(vendor, "v.test.mjs"), PASSES);
   symlinkSync(join("node_modules", "pkg", "v.test.mjs"), join(a.wt, "vendlink.test.mjs"));
   const bin = mkdtempSync(join(tmpdir(), "no-realpath-"));
-  writeFileSync(join(bin, "realpath"), "#!/bin/sh\nexit 127\n", { mode: 0o755 });
+  writeExecStub(join(bin, "realpath"), "#!/bin/sh\nexit 127\n");
   // The vendored spelling goes FIRST: every file argument is judged, so the
   // refusal names whichever one the loop reaches first, and naming this one is
   // what shows the guard is still armed rather than merely dying early.

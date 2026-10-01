@@ -28,6 +28,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { writeExecStub } from "./exec-stub.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -135,7 +136,7 @@ function run(t, { spec: specObj, list = listed([42, "main", "Repository"]), list
   const bin = join(dir, "bin");
   mkdirSync(fix);
   mkdirSync(bin);
-  writeFileSync(join(bin, "gh"), GH_STUB, { mode: 0o755 });
+  writeExecStub(join(bin, "gh"), GH_STUB);
 
   const specFile = join(dir, "spec.json");
   if (specObj !== undefined) {
@@ -175,8 +176,8 @@ function pathWith(t, names) {
   for (const n of names) {
     // `gh` is the stub even here: this PATH exists to make one tool missing,
     // never to let a real API call out.
-    if (n === "gh") writeFileSync(join(dir, n), GH_STUB, { mode: 0o755 });
-    else writeFileSync(join(dir, n), `#!/bin/sh\nexec ${which(n)} "$@"\n`, { mode: 0o755 });
+    if (n === "gh") writeExecStub(join(dir, n), GH_STUB);
+    else writeExecStub(join(dir, n), `#!/bin/sh\nexec ${which(n)} "$@"\n`);
   }
   return dir;
 }
