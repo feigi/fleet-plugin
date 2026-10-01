@@ -325,3 +325,23 @@ test("an unreachable origin is exit 2, never read as an already-gone branch", (t
   assert.equal(r.json, null);
   assert.ok(onOrigin(origin, branch));
 });
+
+// An ambient GIT_DIR naming another repository would point `ls-remote origin`
+// at THAT repository's origin, where the branch does not exist — read as
+// already gone, exit 0, with the real branch still on the real origin.
+test("an ambient GIT_DIR naming another repository does not redirect the delete", (t) => {
+  const { root, origin, w } = repo(t);
+  const branch = "fix/18-ambient";
+  const { oid } = mergedInWorktree(w, branch, "18-ambient");
+  const decoy = join(root, "decoy");
+  execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", decoy], { env: ENV });
+  execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", "--bare", join(root, "decoy-origin.git")], { env: ENV });
+  git(decoy, "remote", "add", "origin", join(root, "decoy-origin.git"));
+  const gh = ghStub(t, root);
+
+  const r = run(w, ["18"], gh.env({ PR_HEAD: branch, PR_OID: oid, GIT_DIR: join(decoy, ".git") }));
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json, { pr: 18, branch, deleted: true });
+  assert.equal(onOrigin(origin, branch), false);
+});
