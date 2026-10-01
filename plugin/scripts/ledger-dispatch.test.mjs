@@ -152,7 +152,7 @@ test("merge-bot-<n> counts the ## Dispatched merge-bot entries, and a new ledger
 // #2208: the controller names the `task` call's `agent` off this output, not
 // off prose a compaction drops — so every family's definition is printed, and
 // an implementer's follows its row's `tier=` the way tier-check.mjs reads it.
-test("dispatch prints the agent definition the call names: the row's tier for an implementer, fixed for finisher and merge bot, null for a fix-applier", (t) => {
+test("dispatch prints the agent definition the call names: the row's tier for an implementer, fixed for finisher and merge bot, null for a review fix-applier", (t) => {
   const { ok } = fixture(t);
   assert.equal(ok("dispatch", "7", "impl-7").agent, "fleet-implementer");
   ok("row", "8", "impl-8 · class=routine · tier=alt");
@@ -193,6 +193,45 @@ test("a malformed tier= on a row does not refuse a member whose definition ignor
   ok("row", "7", "impl-7=PR#70 · tier=alt · tier=slow-high");
   assert.equal(ok("dispatch", "70", "fix-pr-70").agent, null);
   assert.equal(ok("dispatch", "7", "finisher-pr-70").agent, "fleet-finisher");
+});
+
+// #2299: a fix-applier dispatched on merge-bot's conflict hold is a
+// `fleet-implementer` whatever the row's tier, named off `dispatch`'s output
+// like every other member. A review fix-applier stays a generic `task` —
+// including on a row whose hold a fix-applier has already cleared.
+test("dispatch names a fix-applier on an unresolved conflict hold of its own PR fleet-implementer, and every other fix-applier null", (t) => {
+  const { ok } = fixture(t);
+  ok("row", "20", "impl-20=PR#21 · conflict-hold:#21");
+  assert.equal(ok("dispatch", "21", "fix-pr-21").agent, "fleet-implementer");
+  // A failed one leaves the hold unresolved, so its replacement is one too.
+  ok("settle", "fix-pr-21", "failed");
+  assert.equal(ok("dispatch", "21", "fix-pr-21-b").agent, "fleet-implementer");
+
+  ok("row", "30", "impl-30=PR#31");
+  assert.equal(ok("dispatch", "31", "fix-pr-31").agent, null);
+  // A hold naming another PR is not this fix-applier's.
+  ok("row", "40", "impl-40=PR#41 · conflict-hold:#42");
+  assert.equal(ok("dispatch", "41", "fix-pr-41").agent, null);
+
+  // `tier=` is not consulted — conflicting values neither change nor refuse it.
+  ok("row", "50", "impl-50=PR#51 · tier=alt · conflict-hold:#51");
+  assert.equal(ok("dispatch", "51", "fix-pr-51").agent, "fleet-implementer");
+  ok("row", "60", "impl-60=PR#61 · tier=alt · tier=slow-high · conflict-hold:#61");
+  assert.equal(ok("dispatch", "61", "fix-pr-61").agent, "fleet-implementer");
+
+  // The hold's other spelling the tick reads (fleet-tick.mjs's CONFLICT_HOLD).
+  ok("row", "70", "impl-70=PR#71 · conflict-hold-71");
+  assert.equal(ok("dispatch", "71", "fix-pr-71").agent, "fleet-implementer");
+
+  // A hold a fix-applier settled `applied:`/`no-op` after is cleared: the
+  // row's next fix-applier works a review's survivors.
+  ok("row", "80", "impl-80=PR#81 · conflict-hold:#81 · fix-pr-81=applied:def5678 · reviewed=abc1234:1/0/0");
+  assert.equal(ok("dispatch", "81", "fix-pr-81-b").agent, null);
+  ok("row", "90", "impl-90=PR#91 · conflict-hold:#91 · fix-pr-91=no-op");
+  assert.equal(ok("dispatch", "91", "fix-pr-91-b").agent, null);
+  // ...until a fresh hold after that settle.
+  ok("row", "100", "impl-100=PR#101 · fix-pr-101=applied:73b356de · conflict-hold:#101");
+  assert.equal(ok("dispatch", "101", "fix-pr-101-b").agent, "fleet-implementer");
 });
 
 test("settle rewrites the member's token in its row and in ## Dispatched, and nothing else", (t) => {

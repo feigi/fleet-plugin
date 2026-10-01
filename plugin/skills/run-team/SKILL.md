@@ -2083,8 +2083,11 @@ yours to scan or pass on.
 bot's `conflict-hold:#<M>` (`run-merge-bot.md` step 1's fallback), not
 survivors — is the same slot with a different job, and no review file to hand
 over. Name it `fix-pr-<M>`, or the next suffix (`-b`, `-c` …) when that name is
-already on record — `dispatch` refuses a reused one — and dispatch a
-`fleet-implementer` in the PR's existing worktree with the prompt below's
+already on record — `dispatch` refuses a reused one — and dispatch it with the
+`agent` that `ledger.mjs dispatch` printed, in the PR's existing worktree.
+`dispatch` reads the unresolved hold off the row and prints this member's own
+definition, whatever the row's `tier=` — read it off that output, never recall
+it; a review fix-applier's is `null`. Its prompt takes the prompt below's
 worktree, branch and path discipline, but in place of its review paragraphs:
 bring `<branch>` current with `origin/main`, resolving every conflict by
 `run-merge-bot.md`'s **No-undo audit**, run `<testCmd>`, push, report the new
