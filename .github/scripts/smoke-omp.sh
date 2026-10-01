@@ -113,10 +113,16 @@ fi
 # mock (below, started before any probe runs): it answers any non-canary
 # request with an immediate end_turn. No outbound network is touched
 # anywhere in this script. The 60s bound only covers a wedged mock.
+#
+# Every line the probe reads is also kept in `$SCRATCH/probe-<cmd>.log`, so a
+# failure names its own cause — omp exiting (with its status and last output),
+# no user turn inside the bound, or a user turn that is still the raw
+# `/<cmd>` — instead of one message guessing at command discovery for all three.
 probe_substitution() {
   local cmd="$1"
-  local fifo="$SCRATCH/fifo-$cmd"
+  local fifo="$SCRATCH/fifo-$cmd" log="$SCRATCH/probe-$cmd.log"
   mkfifo "$fifo"
+  : >"$log"
   (
     cd "$PROBE_DIR" \
       && ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-sk-ant-omp-smoke-dummy-not-real}" \
@@ -124,25 +130,47 @@ probe_substitution() {
          HOME="$SCRATCH_HOME" \
          omp -p "/$cmd" --no-tools --mode json --no-session > "$fifo" 2>&1
   ) &
-  local pid=$! substituted="" deadline=$(( $(date +%s) + 60 )) line remaining
+  local pid=$! substituted="" deadline=$(( $(date +%s) + 60 )) line remaining text timed_out=0 read_rc omp_rc
   # The deadline bounds each read itself (`read -t`): a wedged omp that
   # prints nothing never returns a line, so a check placed after `read`
   # alone would never run and only the job timeout would end the probe.
-  while remaining=$(( deadline - $(date +%s) )); [ "$remaining" -gt 0 ] \
-    && IFS= read -r -t "$remaining" line; do
-    if [ "$(printf '%s' "$line" | jq -r 'select(.type=="message_start" and .message.role=="user") | .message.content[0].text // empty' 2>/dev/null || true)" != "" ]; then
-      substituted="$(printf '%s' "$line" | jq -r '.message.content[0].text // empty')"
+  # A read status above 128 is that timeout; any other failure is EOF.
+  while :; do
+    remaining=$(( deadline - $(date +%s) ))
+    if [ "$remaining" -le 0 ]; then timed_out=1; break; fi
+    IFS= read -r -t "$remaining" line || {
+      read_rc=$?
+      if [ "$read_rc" -gt 128 ]; then timed_out=1; fi
       break
-    fi
+    }
+    printf '%s\n' "$line" >>"$log"
+    # jq's stderr is dropped because most lines are not JSON at all (omp's
+    # own stderr shares the stream); the raw line is already in $log.
+    text="$(printf '%s' "$line" | jq -r 'select(.type=="message_start" and .message.role=="user") | .message.content[0].text // empty' 2>/dev/null || true)"
+    if [ -n "$text" ]; then substituted="$text"; break; fi
   done < "$fifo"
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
-  rm -f "$fifo"
-  if [ -z "$substituted" ] || [ "$substituted" = "/$cmd" ]; then
-    return 1
+  if [ -z "$substituted" ] && [ "$timed_out" -eq 0 ]; then
+    # EOF with no user turn: omp exited on its own — reap it for its status.
+    omp_rc=0
+    wait "$pid" 2>/dev/null || omp_rc=$?
+  else
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
   fi
-  echo "smoke-omp: /$cmd substituted $(printf '%s' "$substituted" | wc -c | tr -d ' ') bytes into the first user turn"
-  return 0
+  rm -f "$fifo"
+  local tail_out
+  tail_out="$(tail -n 5 "$log" | tr '\n' ' ' | cut -c1-600)"
+  if [ -n "$substituted" ] && [ "$substituted" != "/$cmd" ]; then
+    echo "smoke-omp: /$cmd substituted $(printf '%s' "$substituted" | wc -c | tr -d ' ') bytes into the first user turn"
+    return 0
+  elif [ -n "$substituted" ]; then
+    echo "::error::smoke-omp: commands: /$cmd did not substitute its body — either command discovery or the extension provider that carries it failed to load (measured: --no-extensions keeps /<name> raw)"
+  elif [ "$timed_out" -eq 1 ]; then
+    echo "::error::smoke-omp: commands: /$cmd probe saw no user message_start within 60s (wedged omp or mock) — last output: ${tail_out:-(none)}"
+  else
+    echo "::error::smoke-omp: commands: /$cmd probe: omp exited $omp_rc before any user message_start — last output: ${tail_out:-(none)}"
+  fi
+  return 1
 }
 
 
@@ -286,10 +314,8 @@ for _ in $(seq 50); do
 done
 [ -n "$MOCK_PORT" ] || { echo "::error::smoke-omp: scripted mock never reported a bound port"; exit 1; }
 for cmd in run-team-help review-and-fix run-merge-bot; do
-  if ! probe_substitution "$cmd"; then
-    echo "::error::smoke-omp: commands: /$cmd did not substitute its body — either command discovery or the extension provider that carries it failed to load (measured: --no-extensions keeps /<name> raw)"
-    fail=1
-  fi
+  # probe_substitution prints its own cause-specific ::error:: line.
+  probe_substitution "$cmd" || fail=1
 done
 
 cd "$PROBE_DIR"
