@@ -382,6 +382,19 @@ test("deriveRun: live reviewer units are in-flight reviews plus unsettled fix-ap
   assert.equal(r.fixLive, 1);
 });
 
+test("deriveRun: live names every unsettled member and each in-flight review by its PR — a review=wf: run has no member token of its own", () => {
+  const r = run({
+    rows: [
+      "#10 impl-10=PR#20 → PR#20 · review=wf:run1",
+      "#11 impl-11=PR#21 → PR#21 · review=wf:run2 reviewed=abc1234:2/1/0 · fix-pr-21",
+      "#13 impl-13=PR#23 → PR#23 · review=wf:run3=failed",
+      "#15 impl-15",
+    ],
+    dispatched: ["fix-pr-21"],
+  }, [pr(20), pr(21), pr(23)]);
+  assert.deepEqual(r.live, ["fix-pr-21", "impl-15", "review:PR#20"], "run2 returned and run3 is dead, so neither is live");
+});
+
 test("deriveRun: fix-pr is due on a returned review with survivors and no fix-applier since", () => {
   const r = run({
     rows: [
@@ -1265,6 +1278,15 @@ test("CLI: a main checkout git cannot read is MAIN-CHECKOUT-UNKNOWN and held, ne
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^MAIN-CHECKOUT-UNKNOWN could not look: git status --porcelain -uall exited \d+.*; live members: impl-412 — .*NEVER re-baseline over it/);
   assert.match(r.stdout, /^implementers 1\/2 → HOLD \(main checkout unknown\)/m);
+});
+
+test("CLI: an in-flight review with no member token is named as review:PR#<n> on the MAIN-CHECKOUT line", () => {
+  const r = runCli([], {
+    ledger: { rows: ["#51 review=wf:x"] }, shortlist: shortlistText([]), prs: [pr(51)],
+    afterBaseline: (repo) => writeFileSync(join(repo, "stray.mjs"), "x\n"),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^MAIN-CHECKOUT-DIRTY stray\.mjs — changed since the run's baseline; live members: review:PR#51 — /m);
 });
 
 test("CLI: an ambient GIT_DIR naming a dirty repository does not move the main-checkout check", () => {

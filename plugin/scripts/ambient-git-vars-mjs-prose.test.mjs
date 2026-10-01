@@ -234,7 +234,7 @@ const COVERED_MJS = {
   // would answer both for another repository, so the tick would compare —
   // and `--record` would baseline — the wrong tree. Measured in
   // main-checkout.test.mjs, "an ambient GIT_DIR naming another repository
-  // does not change the answer".
+  // does not change the answer (#1599)".
   "main-checkout.mjs": 1,
 };
 
