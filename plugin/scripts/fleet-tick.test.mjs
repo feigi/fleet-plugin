@@ -282,6 +282,55 @@ test("actionable: exactly the rows that name work the controller can do unattend
 });
 
 // ---------------------------------------------------------------------------
+// The main-checkout hold (#2210): anything but `clean` holds every
+// dispatching row.
+
+const BUSY = {
+  heads: [412], fixDue: [346], reviewDue: [350], mergeQueue: 1,
+  refresh: { ok: true, entries: 3, lifted: 0, changed: true, trigger: "unclaimed 1 < cap 2" },
+};
+const summary = (s) => reconcile(s).map((r) => [r.role, r.action, r.acts]);
+
+test("main checkout: dirty holds every dispatching row once per role, never actionable; the shortlist row still reports", () => {
+  const hold = "HOLD (main checkout dirty)";
+  assert.deepEqual(summary(state({ ...BUSY, mainCheckout: { state: "dirty", changed: ["x"] } })), [
+    ["implementers", hold, false],
+    ["reviewers", hold, false],
+    ["merge-bot", hold, false],
+    ["shortlist", "REFRESHED shortlist: 3 entries; 0 lifted", true],
+  ]);
+  const [impl] = reconcile(state({ ...BUSY, implLive: 1, mainCheckout: { state: "dirty", changed: ["x"] } }));
+  assert.equal(`${impl.actual}/${impl.target}`, "1/2", "the held row lost its counts");
+});
+
+test("main checkout: unknown holds too, never clean; so does a check that gave no answer at all", () => {
+  for (const mainCheckout of [{ state: "unknown", cause: "read", why: "boom" }, { state: "unknown", cause: "baseline", why: "x" }, undefined]) {
+    assert.deepEqual(summary(state({ ...BUSY, refresh: null, mainCheckout })), [
+      ["implementers", "HOLD (main checkout unknown)", false],
+      ["reviewers", "HOLD (main checkout unknown)", false],
+      ["merge-bot", "HOLD (main checkout unknown)", false],
+    ], JSON.stringify(mainCheckout));
+  }
+});
+
+test("main checkout: no baseline holds every dispatching row and asks the controller to record one", () => {
+  const rows = reconcile(state({ ...BUSY, refresh: null, mainCheckout: { state: "absent", baseline: "/x" } }));
+  assert.deepEqual(rows.map((r) => r.action), Array(3).fill("HOLD (main checkout no baseline)"));
+  assert.equal(actionable(rows), true);
+});
+
+test("main checkout: the hold outranks every role's own guards — drain and tier holds included", () => {
+  const s = state({ ...BUSY, refresh: null, draining: "x", tierMismatch: ["impl-1"], mainCheckout: { state: "dirty", changed: ["x"] } });
+  assert.equal(row(s, "implementers").action, "HOLD (main checkout dirty)");
+  assert.equal(actionable(reconcile(s)), false, "a tier mismatch under a dirty checkout still asks the controller to dispatch");
+});
+
+test("main checkout: clean holds nothing", () => {
+  assert.deepEqual(summary(state({ ...BUSY, refresh: null })).map(([, action]) => action),
+    ["PULL #412", "DISPATCH fix-pr PR#346", "DISPATCH review PR#350", "DISPATCH merge-bot"]);
+});
+
+// ---------------------------------------------------------------------------
 // Reading the run: deriveRun() over `ledger.mjs read`'s payload and the open
 // PR list. Rows are spelled the way ledger.mjs dispatch/settle write them.
 
@@ -1152,6 +1201,81 @@ test("CLI: an inherited GIT_DIR cannot retarget the behind-issue premise probe",
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.issueViews, ["9"], "the probe must still run");
   assert.equal(r.refreshed, 0, "#9 is OPEN in the case's own repository — the exclusion stands");
+});
+
+// #2210, end to end: a real repo, a real baseline, a real stray write.
+const LIVE = {
+  ledger: { rows: ["#412 impl-412 · tier-ok=impl-412:fleet-implementer"], dispatched: ["impl-412"] },
+  shortlist: shortlistText([412, 420, 421]),
+};
+// One more tick over a kept runCli fixture, as the next wake would run it.
+const tickAgain = (r) => spawnSync(process.execPath, [join(r.dir, "bin", "fleet-tick.mjs"), "--state", join(r.dir, "hb.json")], {
+  cwd: r.repo, encoding: "utf8",
+  env: { ...process.env, PATH: `${join(r.dir, "bin")}:${process.env.PATH}`, FIXTURE_PRS: join(r.dir, "prs.json") },
+});
+
+test("CLI: a stray write after the baseline prints MAIN-CHECKOUT-DIRTY first, naming the path and the live members, and holds every dispatching row", () => {
+  const r = runCli([], {
+    ...LIVE, prs: [pr(350)], keep: true,
+    afterBaseline: (repo) => writeFileSync(join(repo, "stray.mjs"), "x\n"),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const lines = r.stdout.trim().split("\n");
+  assert.match(lines[0], /^MAIN-CHECKOUT-DIRTY stray\.mjs — changed since the run's baseline; live members: impl-412 — dispatch held: resolve the stray paths FIRST, then re-baseline with ~\/\.fleet\/bin\/fleet-run main-checkout\.mjs --record/);
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(main checkout dirty\)/m);
+  assert.match(r.stdout, /^reviewers +0\/6 → HOLD \(main checkout dirty\)/m);
+  assert.match(r.stdout, /^merge-bot +0\/1 → HOLD \(main checkout dirty\)/m);
+  assert.doesNotMatch(r.stdout, /PULL|DISPATCH/);
+
+  // Not a one-tick warning: the next tick holds the same way, and only an
+  // explicit re-baseline after the path is resolved lets dispatch through.
+  assert.match(tickAgain(r).stdout, /^MAIN-CHECKOUT-DIRTY stray\.mjs /m);
+  rmSync(join(r.repo, "stray.mjs"));
+  const rec = spawnSync(process.execPath, [join(r.dir, "bin", "main-checkout.mjs"), "--record"], { cwd: r.repo, encoding: "utf8" });
+  assert.equal(rec.status, 0, rec.stderr);
+  const after = tickAgain(r);
+  rmSync(r.dir, { recursive: true, force: true });
+  assert.equal(after.status, 0, after.stderr);
+  assert.doesNotMatch(after.stdout, /MAIN-CHECKOUT|main checkout/);
+  assert.match(after.stdout, /^implementers 1\/2 → PULL #420 /m);
+});
+
+test("CLI: uncommitted work in the main checkout at run start does not hold the run", () => {
+  const r = runCli([], {
+    ...LIVE,
+    beforeRun: (repo) => writeFileSync(join(repo, "my-notes.md"), "the maintainer's own\n"),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /MAIN-CHECKOUT|main checkout/);
+  assert.match(r.stdout, /^implementers 1\/2 → PULL #420 /m);
+});
+
+test("CLI: a run that never recorded a baseline is held, never read as clean", () => {
+  const r = runCli([], { ...LIVE, baseline: false });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^MAIN-CHECKOUT-NO-BASELINE no baseline at .*\.fleet\/main-checkout\.sha — dispatch held: record it at run start with /);
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(main checkout no baseline\)/m);
+});
+
+test("CLI: a main checkout git cannot read is MAIN-CHECKOUT-UNKNOWN and held, never clean", () => {
+  const r = runCli([], {
+    ...LIVE,
+    afterBaseline: (repo) => writeFileSync(join(repo, ".git", "index"), "not an index"),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^MAIN-CHECKOUT-UNKNOWN could not look: git status --porcelain -uall exited \d+.*; live members: impl-412 — .*NEVER re-baseline over it/);
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(main checkout unknown\)/m);
+});
+
+test("CLI: an ambient GIT_DIR naming a dirty repository does not move the main-checkout check", () => {
+  const decoy = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-decoy-mc-")));
+  spawnSync("git", ["init", "-q", decoy]);
+  writeFileSync(join(decoy, "decoy-stray.txt"), "x\n");
+  const r = runCli([], { ...LIVE, env: { GIT_DIR: join(decoy, ".git"), GIT_WORK_TREE: decoy } });
+  rmSync(decoy, { recursive: true, force: true });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /MAIN-CHECKOUT/);
+  assert.match(r.stdout, /^implementers 1\/2 → PULL #420 /m);
 });
 
 // ---------------------------------------------------------------------------
