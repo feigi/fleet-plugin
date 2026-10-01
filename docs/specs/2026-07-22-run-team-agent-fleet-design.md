@@ -46,6 +46,14 @@ Status: implemented
 > ends in one `fleet-tick.mjs` run (ADR 0012). The text below is left as
 > written. See `docs/specs/2026-09-24-slot-based-fleet-loop-design.md`.
 
+> **Superseded in part.** Branch deletion (2026-10-01) no longer rests on a repo
+> setting. The *No `--delete-branch`* guard below still stands, but its closing
+> clause — *"GitHub deletes the remote branch anyway"* — relied on the repo's
+> "Automatically delete head branches" setting, which nothing enforced. The
+> merge bot now deletes the merged head branch from `origin` itself, with
+> `delete-merged-branch.sh` in `run-merge-bot.md` step 4 (#2196). The text below
+> is left as written.
+
 Artifact: `~/.claude/skills/fleet/skills/run-team/SKILL.md` (repo `feigi/claude-config`)
 
 ## Problem

@@ -63,16 +63,19 @@ net_lib="$(dirname "$0")/net.sh"
 pr=$1
 case "$pr" in ''|*[!0-9]*|0?*) die "pr must be a number, got '$pr'";; esac
 
-# One read, so state, head and fork-ness all describe the same moment. @tsv is
-# safe here: git refnames cannot hold a tab, a newline or a backslash
-# (git-check-ref-format), so no field can split or carry an escape.
+# One read, so state, head and fork-ness all describe the same moment. Fields
+# are joined on \037 (unit separator), not @tsv's tab: a tab is IFS whitespace,
+# so `read` collapses a run of them and an empty field shifts every later field
+# left — an empty headRefName read the base branch as the head commit. A
+# non-whitespace IFS keeps an empty field in its place. No field can carry the
+# separator: git refnames cannot hold a control character (git-check-ref-format).
 echo "\$ gh pr view $pr --json state,isCrossRepository,headRefName,headRefOid,baseRefName" >&2
 if ! fields=$(gh pr view "$pr" --json state,isCrossRepository,headRefName,headRefOid,baseRefName \
-  --jq '[.state, (.isCrossRepository | tostring), .headRefName, .headRefOid, .baseRefName] | @tsv'); then
+  --jq '[.state, (.isCrossRepository | tostring), .headRefName, .headRefOid, .baseRefName] | map(. // "") | join("\u001f")'); then
   die "gh pr view $pr failed — cannot tell whether it merged or what its head branch is"
 fi
-tab=$(printf '\t')
-IFS=$tab read -r state cross branch oid base <<EOF
+us=$(printf '\037')
+IFS=$us read -r state cross branch oid base <<EOF
 $fields
 EOF
 
@@ -94,19 +97,20 @@ if [ "$cross" = "true" ]; then
   exit 0
 fi
 
-# 30s, the budget every fleet `ls-remote` gets: it moves refs, no objects.
+# 30s, the budget every fleet `ls-remote` gets: it moves refs, no objects. The
+# ref-only `push --delete` below moves no objects either, so it shares it.
 # `FLEET_NET_TIMEOUT` shortens it, never lengthens — net_budget's rule.
-ls_budget=$(net_budget 30 "${FLEET_NET_TIMEOUT:-}")
+ref_budget=$(net_budget 30 "${FLEET_NET_TIMEOUT:-}")
 
 # Prints the tip of refs/heads/$branch on origin, or nothing when it is absent.
 # An exact field match rather than trusting ls-remote's pattern, which matches
 # any ref ENDING in the pattern on a `/` boundary.
 remote_tip() {
   rt_rc=0
-  rt_out=$(net_git "" "$ls_budget" ls-remote --heads origin "refs/heads/$branch") || rt_rc=$?
+  rt_out=$(net_git "" "$ref_budget" ls-remote --heads origin "refs/heads/$branch") || rt_rc=$?
   if [ "$rt_rc" -ne 0 ]; then
     if net_stalled "$rt_rc"; then
-      die "git ls-remote did not finish within ${ls_budget}s and was killed, so whether $branch is on origin is unknown"
+      die "git ls-remote did not finish within ${ref_budget}s and was killed, so whether $branch is on origin is unknown"
     fi
     die "git ls-remote failed, so whether $branch is on origin is unknown"
   fi
@@ -122,14 +126,16 @@ fi
 
 echo "\$ git push --force-with-lease=refs/heads/$branch:$oid origin --delete refs/heads/$branch" >&2
 push_rc=0
-net_git "" "$ls_budget" push --force-with-lease="refs/heads/$branch:$oid" origin --delete "refs/heads/$branch" >&2 || push_rc=$?
+net_git "" "$ref_budget" push --force-with-lease="refs/heads/$branch:$oid" origin --delete "refs/heads/$branch" >&2 || push_rc=$?
 
 echo "\$ git ls-remote --heads origin refs/heads/$branch" >&2
 after=$(remote_tip)
 if [ -n "$after" ]; then
-  # The branch survived. Say which of the two causes this run can tell apart.
+  # The branch survived. Say which of the three causes this run can tell apart.
   if [ "$after" != "$oid" ]; then
     reason="branch tip $after is not the merged head $oid — a push landed after the merge; not deleting it"
+  elif net_stalled "$push_rc"; then
+    reason="git push --delete did not finish within ${ref_budget}s and was killed; the branch was still on origin when read back"
   else
     reason="git push --delete exited $push_rc and the branch is still on origin"
   fi

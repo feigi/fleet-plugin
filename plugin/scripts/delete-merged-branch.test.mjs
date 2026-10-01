@@ -107,7 +107,7 @@ printf '%s\\n' "$*" >> "${log}"
 case "$*" in
   "pr view "*" --json state,isCrossRepository,headRefName,headRefOid,baseRefName --jq "*)
     [ "\${GH_FAIL:-0}" = 0 ] || { echo "gh: simulated failure" >&2; exit 1; }
-    printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "\${PR_STATE:-MERGED}" "\${PR_CROSS:-false}" "\$PR_HEAD" "\$PR_OID" "\${PR_BASE:-main}"
+    printf '%s\\037%s\\037%s\\037%s\\037%s\\n' "\${PR_STATE:-MERGED}" "\${PR_CROSS:-false}" "\$PR_HEAD" "\$PR_OID" "\${PR_BASE:-main}"
     ;;
   *) echo "gh: unstubbed call: $*" >&2; exit 1 ;;
 esac
@@ -251,6 +251,45 @@ test("a delete the remote refuses is exit 1 with the branch still reported", (t)
   assert.ok(onOrigin(origin, branch));
 });
 
+// A push the script's own net budget kills is not a server's refusal: the
+// reason must say it was killed, the way remote_tip says it for ls-remote.
+test("a delete killed by the net budget says so, exit 1 with the branch still reported", (t) => {
+  const { root, origin, w } = repo(t);
+  const branch = "fix/19-stalled";
+  const { oid } = mergedInWorktree(w, branch, "19-stalled");
+  writeFileSync(join(origin, "hooks", "pre-receive"), "#!/bin/sh\nsleep 20\nexit 1\n", { mode: 0o755 });
+  const gh = ghStub(t, root);
+
+  const r = run(w, ["19"], gh.env({ PR_HEAD: branch, PR_OID: oid, FLEET_NET_TIMEOUT: "1" }));
+
+  assert.equal(r.code, 1, r.stderr);
+  assert.equal(r.json.tip, oid);
+  assert.match(r.json.reason, /git push --delete did not finish within 1s and was killed/);
+  assert.ok(onOrigin(origin, branch));
+});
+
+// The race the script's last branch exists for: the push fails, yet something
+// else (a repo still auto-deleting) removed the branch between the two reads.
+// The outcome this step exists for holds, so it is not a failure — but nor is
+// it this run's delete.
+test("a failed push whose branch is gone on the read-back is already gone, not deleted", (t) => {
+  const { root, origin, w } = repo(t);
+  const branch = "fix/20-raced";
+  const { oid } = mergedInWorktree(w, branch, "20-raced");
+  const gh = ghStub(t, root);
+  writeFileSync(
+    join(gh.bin, "git"),
+    `#!/bin/sh\nfor a in "$@"; do [ "$a" = push ] && { "${REAL_GIT}" "$@"; exit 1; }; done\nexec "${REAL_GIT}" "$@"\n`,
+    { mode: 0o755 },
+  );
+
+  const r = run(w, ["20"], gh.env({ PR_HEAD: branch, PR_OID: oid }));
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json, { pr: 20, branch, deleted: false, alreadyGone: true });
+  assert.equal(onOrigin(origin, branch), false);
+});
+
 test("a PR that is not merged is refused before any git call, branch untouched", (t) => {
   const { root, origin, w } = repo(t);
   const branch = "fix/13-open";
@@ -308,6 +347,17 @@ test("a failed gh read is exit 2, not a verdict", (t) => {
   const r = run(w, ["16"], gh.env({ GH_FAIL: "1" }));
   assert.equal(r.code, 2);
   assert.match(r.stderr, /gh pr view 16 failed/);
+  assert.equal(r.json, null);
+});
+
+// A tab is IFS whitespace, so a tab-joined read collapses an empty field and
+// shifts the rest left — the base branch then reads as the head commit.
+test("an empty head branch from gh is refused as missing, not misread as a later field", (t) => {
+  const { root, w } = repo(t);
+  const gh = ghStub(t, root);
+  const r = run(w, ["21"], gh.env({ PR_HEAD: "", PR_OID: "a".repeat(40) }));
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /returned no head branch or head commit/);
   assert.equal(r.json, null);
 });
 
