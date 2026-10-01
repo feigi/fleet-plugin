@@ -26,12 +26,14 @@
 #   2. Places the Resolver (`fleet-bootstrap --from-checkout`) and runs
 #      `fleet-provenance` — the Install root, its kind, and the Resolver's
 #      own drift check all come from ONE already-built instrument rather
-#      than reimplemented here. The `enabledProviders` precondition retired
-#      with the marketplace route (ADR 0021), so no scratch config is
-#      needed to make this pass anymore — proving the point.
+#      than reimplemented here; this script only requires the printed kind
+#      to be `linked-checkout`, the shape step 1 installed. The
+#      `enabledProviders` precondition retired with the marketplace route
+#      (ADR 0021), so no scratch config is needed to make this pass
+#      anymore — proving the point.
 #   3. For every script NAME a `~/.fleet/bin/fleet-run <script>` prose
 #      callsite names — grepped fresh from `plugin/skills`,
-#      `plugin/commands`, never a hardcoded list that can go stale —
+#      `plugin/commands`, `plugin/scripts`, never a hardcoded list that can go stale —
 #      resolves it via `fleet-run --path <script>` and asserts the resolved
 #      path exists as a real file inside the install root.
 #   4. Execs `fleet-run arg.mjs` once and requires exit 0 — one real
