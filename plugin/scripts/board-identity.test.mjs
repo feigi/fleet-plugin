@@ -23,8 +23,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";

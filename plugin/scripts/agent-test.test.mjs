@@ -2,7 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, symlinkSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { tempDir } from "./temp-dir.mjs";
 import { join, dirname, relative } from "node:path";
 import { writeExecStub } from "./exec-stub.mjs";

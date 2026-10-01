@@ -17,8 +17,7 @@
 // `agent()`/`phase()`/`log()` prelude globals and cannot run under node.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { runReviewToFile } from "./review-eval.mjs";

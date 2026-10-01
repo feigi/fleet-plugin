@@ -25,9 +25,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, symlinkSync, rmSync, realpathSync, existsSync } from "node:fs";
+import { symlinkSync, rmSync, realpathSync, existsSync } from "node:fs";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";

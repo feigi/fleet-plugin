@@ -26,8 +26,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { writeExecStub } from "./exec-stub.mjs";

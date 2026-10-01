@@ -10,7 +10,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { between, paragraph, phrase } from "./prose-pin.mjs";

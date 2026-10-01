@@ -3,7 +3,7 @@
 // dir and asserts it serves board.json and the page.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, statSync, chmodSync, rmSync, readFileSync, existsSync, symlinkSync, realpathSync } from "node:fs";
+import { mkdirSync, writeFileSync, utimesSync, statSync, chmodSync, rmSync, readFileSync, existsSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { tempDir } from "./temp-dir.mjs";
 import { dirname, join } from "node:path";

@@ -1,9 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { readFileSync, writeFileSync, mkdtempSync, existsSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { tmpdir } from "node:os";
 import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
