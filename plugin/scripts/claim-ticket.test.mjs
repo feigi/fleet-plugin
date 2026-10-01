@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync, symlinkSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = join(import.meta.dirname, "claim-ticket.sh");
 
@@ -78,7 +79,7 @@ const TESTS = "run-tests.sh";
 function apply(files, script = SCRIPT, recipe = {}) {
   const dir = repo(files, {}, recipe);
   const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 0\n");
   const r = spawnSync("sh", [script, "42", "slug", "fix", "--apply"], {
     cwd: dir,
     encoding: "utf8",
@@ -314,8 +315,8 @@ for (const [what, stub] of [
     // ci-state.test.mjs's GH_STUB form keeps the path out of the script text.
     // The prefix above now holds a space so this shape is exercised on every
     // machine, not only one whose TMPDIR has one.
-    writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n`, { mode: 0o755 });
-    writeFileSync(join(bin, "cksum"), stub, { mode: 0o755 });
+    writeExecStub(join(bin, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n`);
+    writeExecStub(join(bin, "cksum"), stub);
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_LOG: ghLog };
 
     const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], { cwd: dir, encoding: "utf8", env });
@@ -372,7 +373,7 @@ test("an absent Recipe cache refuses the claim before anything is claimed, namin
 
   const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
   const ghLog = join(bin, "gh.log");
-  writeFileSync(join(bin, "gh"), '#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n', { mode: 0o755 });
+  writeExecStub(join(bin, "gh"), '#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n');
   const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
     cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_LOG: ghLog },
   });
@@ -406,7 +407,7 @@ test("a repo with no origin/main refuses before anything is claimed", () => {
 function applyRecipe(recipe, files = { [TESTS]: "" }, local = {}) {
   const dir = repo(files, local, recipe);
   const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 0\n");
   const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
     cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
   });
@@ -443,7 +444,7 @@ test("an Install step that cannot run is named an invalid cache; one that fails 
   const dir = repo({ [TESTS]: "" }, { "setup.sh": "#!/bin/sh\n" }, { install: "./setup.sh" });
   chmodSync(join(dir, "setup.sh"), 0o755);
   const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 0\n");
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
   const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], { cwd: dir, encoding: "utf8", env });
   assert.equal(r.status, 2, r.stdout + r.stderr);
@@ -470,7 +471,7 @@ test("an Install step present but not executable is also named an invalid cache 
   const dir = repo({ [TESTS]: "", "setup.sh": "#!/bin/sh\n" }, {}, { install: "./setup.sh" });
   chmodSync(join(dir, "setup.sh"), 0o755);
   const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 0\n");
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
   const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], { cwd: dir, encoding: "utf8", env });
   assert.equal(r.status, 2, r.stdout + r.stderr);
@@ -515,7 +516,7 @@ test("an install that creates an UNTRACKED file is caught under status.showUntra
   // On the repo's own config, so the linked worktree the check runs in shares it.
   execFileSync("git", ["config", "status.showUntrackedFiles", "no"], { cwd: dir, stdio: "pipe" });
   const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 0\n");
   const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
     cwd: dir,
     encoding: "utf8",
@@ -648,7 +649,7 @@ test("--apply refuses an unreadable ancestor BEFORE the in-progress label", (t) 
   const bin = mkdtempSync(join(tmpdir(), "claim bin-"));
   assert.match(bin, / /, "fixture: the stub's directory must hold a space, or this pins nothing");
   const marker = join(bin, "gh-ran");
-  writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n`, { mode: 0o755 });
+  writeExecStub(join(bin, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n`);
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_LOG: marker };
 
   const r = spawnSync("sh", [SCRIPT, "42", "slug", "fix", "--apply"], {
@@ -744,7 +745,7 @@ test("a missing json.sh is exit 2, before anything is created", () => {
   const lone = mkdtempSync(join(tmpdir(), "claim-nolib-"));
   copyFileSync(SCRIPT, join(lone, "claim-ticket.sh"));
   const bin = mkdtempSync(join(tmpdir(), "claim-nolib-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 0\n");
 
   const r = spawnSync("sh", [join(lone, "claim-ticket.sh"), "42", "slug", "fix", "--apply"], {
     cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
@@ -765,7 +766,7 @@ test("a missing worktree.sh is exit 2, before anything is created", () => {
   copyFileSync(SCRIPT, join(lone, "claim-ticket.sh"));
   copyFileSync(join(dirname(SCRIPT), "json.sh"), join(lone, "json.sh"));
   const bin = mkdtempSync(join(tmpdir(), "claim-nowt-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 0\n");
 
   const r = spawnSync("sh", [join(lone, "claim-ticket.sh"), "42", "slug", "fix", "--apply"], {
     cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
@@ -814,7 +815,7 @@ const REAL_SED = execFileSync("sh", ["-c", "command -v sed"], { encoding: "utf8"
 /** A dir holding a `sed` shim with the given body, prepended to PATH. */
 function sedShim(body) {
   const bin = mkdtempSync(join(tmpdir(), "claim-sed-shim-"));
-  writeFileSync(join(bin, "sed"), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  writeExecStub(join(bin, "sed"), `#!/bin/sh\n${body}\n`);
   return `${bin}:${process.env.PATH}`;
 }
 
@@ -946,7 +947,7 @@ function ghSpy() {
   const bin = mkdtempSync(join(tmpdir(), "claim ghspy-"));
   assert.match(bin, / /, "fixture: the stub's directory must hold a space, or this pins nothing");
   const marker = join(bin, "ran");
-  writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n`, { mode: 0o755 });
+  writeExecStub(join(bin, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 0\n`);
   return { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_LOG: marker }, ran: () => existsSync(marker) };
 }
 
@@ -1094,7 +1095,7 @@ test("an ambient GIT_WORK_TREE does not make a mutated tree look clean (#1020)",
   const files = { [TESTS]: "", ".gitignore": ".fleet/\n.worktrees/\n" };
   const recipe = { install: "echo MUTATED >> run-tests.sh" };
   const bin = mkdtempSync(join(tmpdir(), "claim-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 0\n");
   const env = (extra) => ({ ...FIXTURE_ENV, PATH: `${bin}:${process.env.PATH}`, ...extra });
 
   // The control, and it is not optional: it proves the install really mutates

@@ -17,6 +17,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const CLAIM = fileURLToPath(new URL("./claim-ticket.sh", import.meta.url));
 const REAP = fileURLToPath(new URL("./reap.sh", import.meta.url));
@@ -53,7 +54,7 @@ function fixture(t) {
   execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", "--bare", origin], { env: BASE_ENV });
   execFileSync("git", ["clone", "-q", origin, w], { env: BASE_ENV });
   execFileSync("mkdir", ["-p", bin]);
-  writeFileSync(join(bin, "gh"), '#!/bin/sh\ncase "$*" in *"issue view"*) echo in-progress;; esac\nexit 0\n', { mode: 0o755 });
+  writeExecStub(join(bin, "gh"), '#!/bin/sh\ncase "$*" in *"issue view"*) echo in-progress;; esac\nexit 0\n');
   const env = { ...BASE_ENV, PATH: `${bin}:${process.env.PATH}` };
   const git = (cwd, ...a) => execFileSync("git", a, { cwd, env, encoding: "utf8" }).trim();
   writeFileSync(join(w, "README.md"), "fixture\n");
