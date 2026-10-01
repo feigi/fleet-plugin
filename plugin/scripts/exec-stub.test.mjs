@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeExecStub } from "./exec-stub.mjs";
@@ -47,7 +47,23 @@ test("a body for another interpreter runs under that interpreter, argv intact", 
   assert.deepEqual(JSON.parse(r.stdout), ["x y", "z"]);
 });
 
+test("a node body runs wherever the extensionless script it replaces would: an --import preload, a type:module package", (t) => {
+  // Node picks a loader by the script's extension, so the body file must not
+  // carry one the stub did not have: both conditions refuse an unknown one.
+  const [bin] = bins(t, 1);
+  writeFileSync(join(bin, "package.json"), '{"type":"module"}');
+  writeFileSync(join(bin, "preload.mjs"), "");
+  writeExecStub(join(bin, "gh"), "#!/usr/bin/env node\nprocess.stdout.write(process.argv.slice(2).join());\n");
+  // Quoted: NODE_OPTIONS splits on spaces, and `bins` puts one in the path.
+  const r = spawnSync(join(bin, "gh"), ["a"], {
+    encoding: "utf8", env: { ...process.env, NODE_OPTIONS: `--import="${join(bin, "preload.mjs")}"` },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "a");
+});
+
 test("a body with no #! line is refused, since that line is what picks the interpreter", (t) => {
   const [bin] = bins(t, 1);
   assert.throws(() => writeExecStub(join(bin, "gh"), "exit 0\n"), /no #! line/);
+  assert.throws(() => writeExecStub(join(bin, "gh"), "#exit 0\n"), /no #! line/);
 });
