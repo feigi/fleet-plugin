@@ -346,9 +346,9 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // memberRowIndex() writes a PR-bound member onto the first row mentioning
     // its PR and onto `#<pr>` only when none does — so the second row continues
     // the first's state rather than losing to it.
-    // `conflictHold`: the row carries a conflict hold. `conflictCleared`: a
-    // fix-applier SETTLED (`applied:`/`no-op`) after the latest one — never
-    // merely dispatched: a live fix-applier is still working the conflict.
+    // `conflictOpen`: the row carries a conflict hold no fix-applier has
+    // SETTLED (`applied:`/`no-op`) after — never merely dispatched: a live
+    // fix-applier is still working the conflict.
     // `reviewFixed`: a REVIEW fix-applier landed after the latest
     // `reviewed=` — one read while no hold stood unresolved. The one read
     // while a hold did is the conflict fix-applier `ledger.mjs dispatch` named
@@ -366,7 +366,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     const st = (pr !== null && byPr.get(pr)) || {
       inFlight: false, reviewedAny: false, survived: 0, reviewFixed: false,
       fixMembers: new Set(), fixLanded: new Set(), held: [],
-      conflictHold: false, conflictCleared: false, reviewedHead: null, pastPinHalt: false,
+      conflictOpen: false, reviewedHead: null, pastPinHalt: false,
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
     // retry suffix ("" < "b" < "c" …) the same way compute-board.mjs's
@@ -392,7 +392,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
         // landed. Which job a landed one did is read off where its token sits:
         // after an unresolved hold it was the conflict fix-applier and clears
         // that hold; otherwise it answered the latest review's survivors. A
-        // hold resets `conflictCleared` below and a `reviewed=` resets
+        // hold reopens `conflictOpen` below and a `reviewed=` resets
         // `reviewFixed`, so only a fix-applier after the latest of each ever
         // counts. Only ONE copy says where: the first in-place settled one,
         // or — none on any row — the first that reads landed. Any other copy
@@ -412,7 +412,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
           if ((o === "no-op" || /^applied:/.test(o)) && !st.fixLanded.has(t.name)
             && (t.outcome !== null || !settledInRow.has(t.name))) {
             st.fixLanded.add(t.name);
-            if (st.conflictHold && !st.conflictCleared) st.conflictCleared = true;
+            if (st.conflictOpen) st.conflictOpen = false;
             else st.reviewFixed = true;
           }
         }
@@ -452,7 +452,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
           // (merge-bot retrying a PR it has already held, #2064) changes
           // nothing a live fix-applier holds off: liveness is not read off
           // token order.
-          Object.assign(st, { conflictHold: true, conflictCleared: false });
+          st.conflictOpen = true;
         }
         const v = TIER_VERDICT.exec(tok);
         if (v) verdicts[v[1]].add(v[2]);
@@ -498,7 +498,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   const asc = (a, b) => a - b;
   const state = (n) => byPr.get(n);
   const heldBehind = (st) => (st?.held ?? []).some((n) => open.has(n));
-  const conflictHeld = (st) => st !== undefined && st.conflictHold && !st.conflictCleared;
+  const conflictHeld = (st) => st !== undefined && st.conflictOpen;
   const fixRunning = (st) => [...st.fixMembers].some((n) => members.get(n).outcome === null);
   // The halt holds only while the head is still past what was reviewed: a
   // `reviewed=` head (7-40 hex) prefix-matching gh's full headRefOid is the
@@ -517,7 +517,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // hold and leaves survivors it never read due for a review one.
     fixDue: [...byPr.entries()]
       .filter(([n, st]) => open.has(n)
-        && ((st.reviewedHead !== null && st.survived > 0 && !st.reviewFixed) || conflictHeld(st))
+        && ((st.survived > 0 && !st.reviewFixed) || conflictHeld(st))
         && !fixRunning(st) && !st.inFlight)
       .map(([n]) => n).sort(asc),
     // Open, not signed off, closing an issue (GitHub's own linked set — a

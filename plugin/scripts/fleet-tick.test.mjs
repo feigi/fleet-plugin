@@ -609,6 +609,15 @@ test("deriveRun: survivors a review fix-applier already answered stay answered t
   assert.deepEqual([live.fixDue, live.conflictHeld], [[], [21]]);
 });
 
+test("deriveRun: a newer review's survivors are not offered beside a live fix-applier, and are due once it settles", () => {
+  // `dispatch` would refuse a second live one. Settled, it was dispatched
+  // before that review, so it never answered the newer survivors.
+  const rereviewed = (fix) => run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · ${fix} · review=wf:x reviewed=def5678:1/0/0`] }, [pr(21)]).fixDue;
+  assert.deepEqual(rereviewed("fix-pr-21"), []);
+  assert.deepEqual(rereviewed("fix-pr-21=applied:def5678"), [21]);
+  assert.deepEqual(rereviewed("fix-pr-21=failed"), [21]);
+});
+
 // One fix-applier does one job, so its landing folds once per PR however many
 // copies of its token the rows carry — a whole-line `row` rewrite leaves bare
 // copies wherever it chose, and the in-place settled copy is the one that says
