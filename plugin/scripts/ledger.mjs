@@ -1652,7 +1652,12 @@ function refuseMalformedDispatched() {
 // `review` is the tick fold's `reviewed` entry for the PR, undefined when the
 // PR has no returned review.
 function dispositionsRefusal(pr, review) {
-  if (review === undefined || (review.survived === 0 && review.unverified === 0)) return null;
+  if (review === undefined) return null;
+  if (review.fixLive.length > 0) {
+    return `${review.fixLive.join(", ")} still live on PR #${pr} — a fix-applier answering review ${review.head} has not settled, `
+      + "so no dispositions verdict answers its work yet; settle it, run dispositions-check.mjs for it, then dispatch the finisher again";
+  }
+  if (review.survived === 0 && review.unverified === 0) return null;
   const v = review.dispositions;
   if (v === null) {
     return `dispositions unchecked — no dispositions-ok=/dispositions-mismatch= token answers PR #${pr}'s latest review, `
@@ -1754,32 +1759,28 @@ function runDispatch() {
   // one row's text can read held where the tick reads cleared, and the
   // reverse. A ledger the tick refuses is refused here too, before the member
   // is live, rather than named a definition off a reading the tick rejects.
-  let held = false;
-  if (member.family === "fix-pr") {
+  // `tickFold` reads that fold for whichever of the two families needs it,
+  // `what` naming what could not be read off a refused ledger.
+  const tickFold = (what) => {
     try {
-      held = deriveRun({ rows: data.rows, dispatched: data.dispatched, drain: data.drain }, []).conflictHeld.includes(member.number);
+      return deriveRun({ rows: data.rows, dispatched: data.dispatched, drain: data.drain }, []);
     } catch (e) {
       if (!(e instanceof LedgerError)) throw e;
-      die(`${e.message} — fleet-tick.mjs refuses this ledger, so ${member.name}'s definition cannot be read off it; fix it with \`ledger.mjs row\` before dispatching`);
+      die(`${e.message} — fleet-tick.mjs refuses this ledger, so ${member.name}'s ${what} cannot be read off it; fix it with \`ledger.mjs row\` before dispatching`);
     }
-  }
+  };
+  const held = member.family === "fix-pr" && tickFold("definition").conflictHeld.includes(member.number);
 
   // A finisher labels its PR `ready-to-merge`, so it is recorded only once
   // the PR's current dispositions verdict is ok — read off the tick's own
-  // per-PR fold, the same latest `reviewed=` head the tick reads. A PR whose
-  // latest review counts no survived and no unverified finding had nothing
-  // for a fix-applier to rule on, and one never reviewed has no review file:
-  // neither is gated. Refused here, before anything is written, so the check
-  // cannot be skipped by forgetting to run it.
+  // per-PR fold, the same latest `reviewed=` head the tick reads — and no
+  // fix-applier on the PR is still live. A PR whose latest review counts no
+  // survived and no unverified finding had nothing for a fix-applier to rule
+  // on, and one never reviewed has no review file: neither is gated on a
+  // verdict. Refused here, before anything is written, so the check cannot
+  // be skipped by forgetting to run it.
   if (member.family === "finisher-pr") {
-    let review;
-    try {
-      review = deriveRun({ rows: data.rows, dispatched: data.dispatched, drain: data.drain }, [])
-        .reviewed.find((r) => r.pr === member.number);
-    } catch (e) {
-      if (!(e instanceof LedgerError)) throw e;
-      die(`${e.message} — fleet-tick.mjs refuses this ledger, so ${member.name}'s dispositions verdict cannot be read off it; fix it with \`ledger.mjs row\` before dispatching`);
-    }
+    const review = tickFold("dispositions verdict").reviewed.find((r) => r.pr === member.number);
     const refusal = dispositionsRefusal(member.number, review);
     if (refusal !== null) die(`${member.name}: ${refusal} — not dispatching ${member.name}`);
   }

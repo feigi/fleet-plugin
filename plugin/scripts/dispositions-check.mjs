@@ -47,18 +47,19 @@
 //     of ALLOWED_DEFER. Any other reason, or none, is a mismatch.
 //
 // Exit status: 0 ok; 1 mismatch; 2 nothing judged and nothing written — a
-// bad flag, an unreadable review file, a git or ledger failure. A missing or
+// bad flag, an unreadable or malformed review file, a record file that
+// exists but cannot be read, a git or ledger failure. A missing or
 // unparseable RECORD is judged, not refused: the fix-applier wrote nothing a
 // reader can use, so every finding it had to cover is dropped.
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname, isAbsolute, relative } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { parseMember, memberTokens } from "./ledger-grammar.mjs";
-import { dispositionsToken, rowNums } from "./fleet-tick.mjs";
+import { dispositionsToken, rowNums, sameHead } from "./fleet-tick.mjs";
 
 const NAME = "dispositions-check";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -73,39 +74,103 @@ const COVERED = ["survived", "unverified"];
 const BUCKETS = [...COVERED, "refuted"];
 const ENUMS = { scope: ["in", "out"], claimKind: ["behavior", "shape"], disposition: ["apply", "defer"] };
 
-export const dispositionsOkToken = (member, head) => `dispositions-ok=${member}:${head}`;
-export const dispositionsMismatchToken = (member, head) => `dispositions-mismatch=${member}:${head}`;
+// Why `review` is not a review file this check can judge a record against,
+// or null when it is: a 7-40 hex `head`, every bucket a list of finding
+// objects, and `counts` reconciling with the lists it counts. checkDispositions
+// reads `review` on that precondition, and main() refuses a file that breaks
+// it rather than judging a record against it.
+export function reviewProblem(review) {
+  if (review === null || typeof review !== "object" || Array.isArray(review)) return "is not a review result object";
+  if (!/^[0-9a-f]{7,40}$/i.test(String(review.head ?? ""))) return "carries no head commit";
+  for (const bucket of BUCKETS) {
+    if (!Array.isArray(review[bucket])) return `has no ${bucket} list`;
+    const bad = review[bucket].findIndex((f) => f === null || typeof f !== "object" || Array.isArray(f));
+    if (bad !== -1) return `has a ${bucket}[${bad}] that is not a finding object`;
+    if (bucket !== "refuted" && review.counts?.[bucket] !== review[bucket].length) {
+      return `says counts.${bucket} is ${review.counts?.[bucket]}, but ${bucket} holds ${review[bucket].length} — the review file does not reconcile with itself`;
+    }
+  }
+  return null;
+}
 
 /**
  * The new-side line numbers each file's hunks touch, from `git diff
  * --unified=0` output with `a/`/`b/` prefixes. A pure deletion (`+c,0`)
  * touches no new-side line; a deleted file has no new side at all.
+ *
+ * A `+++ ` line is a file header only BETWEEN hunks: inside one, each hunk's
+ * own line counts are consumed first, so an added content line that begins
+ * `++ ` (printed `+++ …`) is content, never a header that would credit every
+ * later hunk to a path that does not exist.
  * @returns {Map<string, Set<number>>}
  */
 export function touchedLines(diffText) {
   const touched = new Map();
   let file = null;
+  let oldLeft = 0;
+  let newLeft = 0;
   for (const line of diffText.split("\n")) {
+    if (oldLeft > 0 || newLeft > 0) {
+      if (line.startsWith("-")) oldLeft--;
+      else if (line.startsWith("+")) newLeft--;
+      else if (line.startsWith(" ")) { oldLeft--; newLeft--; }
+      continue;
+    }
     if (line.startsWith("+++ ")) {
-      const path = line.slice(4);
+      const path = headerPath(line.slice(4));
       file = path === "/dev/null" ? null : path.replace(/^b\//, "");
       if (file !== null && !touched.has(file)) touched.set(file, new Set());
       continue;
     }
-    const h = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
-    if (h && file !== null) {
-      const start = Number(h[1]);
-      const count = h[2] === undefined ? 1 : Number(h[2]);
-      for (let n = start; n < start + count; n++) touched.get(file).add(n);
+    const h = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (h) {
+      oldLeft = h[1] === undefined ? 1 : Number(h[1]);
+      const start = Number(h[2]);
+      newLeft = h[3] === undefined ? 1 : Number(h[3]);
+      if (file !== null) for (let n = start; n < start + newLeft; n++) touched.get(file).add(n);
     }
   }
   return touched;
 }
 
+const C_ESCAPES = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, "\\": 92 };
+
+// A `+++ ` header's path as git wrote it: the trailing tab git appends to a
+// name holding a space dropped, and a C-quoted name (`"b/q\"x.js"`, used for
+// a quote, a backslash, a control character or — with core.quotePath — a
+// non-ASCII byte) unquoted, its octal escapes read as UTF-8 bytes.
+function headerPath(raw) {
+  const p = raw.endsWith("\t") ? raw.slice(0, -1) : raw;
+  if (!(p.length >= 2 && p.startsWith('"') && p.endsWith('"'))) return p;
+  const bytes = [];
+  const body = p.slice(1, -1);
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c !== "\\") { bytes.push(...Buffer.from(c, "utf8")); continue; }
+    const next = body[i + 1];
+    if (/[0-7]/.test(next ?? "")) {
+      const oct = /^[0-7]{1,3}/.exec(body.slice(i + 1))[0];
+      bytes.push(parseInt(oct, 8));
+      i += oct.length;
+    } else if (next in C_ESCAPES) {
+      bytes.push(C_ESCAPES[next]);
+      i += 1;
+    } else {
+      bytes.push(92);
+    }
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
 // A finding's `file` as the diff spells it: relative to the repository root,
 // no leading `./`. A specialist that reported an absolute path into the
 // review's snapshot, or into the repository itself, is read relative to it.
-export function repoPath(file, roots = []) {
+// An absolute path under none of `roots` — a specialist's own copy of the
+// snapshot, a `/tmp` alias of a `/private/tmp` root — is read as the longest
+// of `known` (the diff's file names) it ends in, at a path-component
+// boundary: no suffix of the path naming a touched file is the only case in
+// which it cannot sit on a touched line under any root.
+export function repoPath(file, roots = [], known = []) {
   let p = String(file);
   if (isAbsolute(p)) {
     for (const root of roots) {
@@ -113,7 +178,11 @@ export function repoPath(file, roots = []) {
       const rel = relative(root, p);
       if (rel && !rel.startsWith("..") && !isAbsolute(rel)) return rel;
     }
-    return p;
+    let best = null;
+    for (const k of known) {
+      if (p.endsWith(`/${k}`) && (best === null || k.length > best.length)) best = k;
+    }
+    return best ?? p;
   }
   while (p.startsWith("./")) p = p.slice(2);
   return p;
@@ -124,9 +193,8 @@ export function repoPath(file, roots = []) {
 function presumedInScope(finding, touched, roots) {
   if (!Number.isInteger(finding.line)) return "it has no line";
   if (typeof finding.file !== "string" || finding.file === "") return "it has no file";
-  if (touched.get(repoPath(finding.file, roots))?.has(finding.line)) {
-    return `${repoPath(finding.file, roots)}:${finding.line} is a line the PR's diff touched`;
-  }
+  const file = repoPath(finding.file, roots, touched.keys());
+  if (touched.get(file)?.has(finding.line)) return `${file}:${finding.line} is a line the PR's diff touched`;
   return null;
 }
 
@@ -150,7 +218,8 @@ function shapeErrors(e) {
  * ok. `record` is the parsed record, or null when there is none to read
  * (`recordProblem` then says why). `touched` is touchedLines() for the
  * review's head; `roots` the directories an absolute finding path is read
- * relative to.
+ * relative to. `review` must pass reviewProblem() — a bucket missing or
+ * holding a non-object is a TypeError here, not a violation.
  */
 export function checkDispositions({ review, record, recordProblem = null, touched, roots = [] }) {
   const violations = [];
@@ -165,7 +234,7 @@ export function checkDispositions({ review, record, recordProblem = null, touche
     entries = record.entries;
     const head = String(record.head ?? "").toLowerCase();
     const reviewHead = String(review.head).toLowerCase();
-    if (!/^[0-9a-f]{7,40}$/.test(head) || !(reviewHead.startsWith(head) || head.startsWith(reviewHead))) {
+    if (!/^[0-9a-f]{7,40}$/.test(head) || !sameHead(head, reviewHead)) {
       at(null, null, `the record answers head ${JSON.stringify(record.head ?? null)}, not the review's ${review.head}`);
     }
   }
@@ -227,11 +296,11 @@ export function formatViolation({ bucket, index, rule }) {
 // one. Separators a removal leaves doubled are folded.
 export function withVerdict(rowText, token) {
   const mine = dispositionsToken(token);
+  if (mine === null) throw new Error(`withVerdict: '${token}' is not a dispositions-ok=/dispositions-mismatch= token`);
   const words = String(rowText).trim().split(/\s+/).filter(Boolean);
   const kept = words.filter((w) => {
     const d = dispositionsToken(w);
-    return d === null || d.member.name !== mine.member.name
-      || !(d.head.startsWith(mine.head) || mine.head.startsWith(d.head));
+    return d === null || d.member.name !== mine.member.name || !sameHead(d.head, mine.head);
   });
   if (kept.length === words.length - 1 && words.includes(token)) return words.join(" ");
   const folded = kept.join(" ").replace(/·(?:\s+·)+/g, "·").replace(/^·\s+|\s+·$/g, "").trim();
@@ -292,13 +361,8 @@ function main() {
   } catch (e) {
     die(`could not read the review file ${reviewPath}: ${e.message}`);
   }
-  if (!/^[0-9a-f]{7,40}$/i.test(String(review?.head ?? ""))) die(`${reviewPath} carries no head commit`);
-  for (const bucket of BUCKETS) {
-    if (!Array.isArray(review[bucket])) die(`${reviewPath} has no ${bucket} list`);
-    if (bucket !== "refuted" && review.counts?.[bucket] !== review[bucket].length) {
-      die(`${reviewPath}'s counts.${bucket} is ${review.counts?.[bucket]}, but ${bucket} holds ${review[bucket].length} — the review file does not reconcile with itself`);
-    }
-  }
+  const problem = reviewProblem(review);
+  if (problem !== null) die(`${reviewPath} ${problem}`);
   const head = String(review.head).toLowerCase();
 
   const recordPath = join(scratch, `dispositions-${pr}.json`);
@@ -306,8 +370,18 @@ function main() {
   if (!existsSync(recordPath)) {
     recordProblem = `no disposition record at ${recordPath}`;
   } else {
+    // A record that cannot be READ — a directory, no permission — is a fault
+    // in the environment, not a ruling the fix-applier wrote: nothing is
+    // judged and nothing written. Only one that reads and will not parse is
+    // the fix-applier's own, and judged.
+    let text;
     try {
-      record = readJson(recordPath);
+      text = readFileSync(recordPath, "utf8");
+    } catch (e) {
+      die(`could not read the disposition record ${recordPath}: ${e.message}`);
+    }
+    try {
+      record = JSON.parse(text);
     } catch (e) {
       recordProblem = `${recordPath} is not JSON — ${e.message}`;
     }
@@ -322,7 +396,7 @@ function main() {
     review, record, recordProblem, touched: touchedLines(diff), roots: [review.snapshot, top],
   });
   const verdict = violations.length === 0 ? "ok" : "mismatch";
-  const token = verdict === "ok" ? dispositionsOkToken(member.name, head) : dispositionsMismatchToken(member.name, head);
+  const token = `dispositions-${verdict}=${member.name}:${head}`;
 
   // The verdict lands on the row carrying the member on its own PR's row —
   // where `ledger.mjs dispatch` wrote it, and where the gate reads PR M's
@@ -344,4 +418,9 @@ function main() {
   process.exitCode = verdict === "ok" ? 0 : 1;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) main();
+// Compared by realpath: invoked through a symlinked path (on macOS `/tmp` is
+// one), `import.meta.url` is the resolved file and argv[1] is not, and a
+// string comparison would skip main() and exit 0 — the code that means ok —
+// having judged and written nothing.
+const isCLI = process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+if (isCLI) main();

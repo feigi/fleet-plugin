@@ -321,7 +321,7 @@ export function dispositionsToken(tok) {
 
 // Two spellings of one commit: either head a prefix of the other, the way a
 // `reviewed=` head (7-40 hex) is matched against gh's full headRefOid.
-const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
+export const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
 
 // A PR's current dispositions verdict against its latest review head: among
 // the tokens answering that head, the one from the fix-applier with the
@@ -694,13 +694,17 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // anywhere included, rather than re-deriving it from one row's text.
     conflictHeld: [...byPr.entries()].filter(([, st]) => conflictHeld(st)).map(([n]) => n).sort(asc),
     // Every PR, open or not, with a returned review: its latest `reviewed=`
-    // head and counts, and the dispositions verdict currently answering that
-    // head. `ledger.mjs dispatch` gates a finisher off this, read from the
-    // same per-PR fold as everything above. Nothing in this tick acts on it.
+    // head and counts, the dispositions verdict currently answering that
+    // head, and every fix-applier on the PR still unsettled (`fixLive`) — a
+    // re-review at the same head would otherwise read the earlier
+    // fix-applier's verdict while the one answering it is still working.
+    // `ledger.mjs dispatch` gates a finisher off this, read from the same
+    // per-PR fold as everything above. Nothing in this tick acts on it.
     reviewed: [...byPr.entries()].filter(([, st]) => st.reviewedHead !== null)
       .map(([n, st]) => ({
         pr: n, head: st.reviewedHead, survived: st.survived, unverified: st.unverified,
         dispositions: currentDispositions(st.dispositions, st.reviewedHead),
+        fixLive: [...st.fixMembers].filter((name) => members.get(name).outcome === null).sort(),
       }))
       .sort((a, b) => a.pr - b.pr),
     draining: drain ?? null,
