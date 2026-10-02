@@ -13,8 +13,8 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, linkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -176,6 +176,74 @@ test("writeState: `ticked` survives a heartbeat write the same way `beat` surviv
   writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", ticked: { at: "soon" } }));
   assert.equal(readState(path, "fleet-state-test").ticked, null);
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("writeState: the file a reader already opened is replaced whole, never rewritten in place", () => {
+  // #2349. readState maps an empty or half-written file to the no-mark state
+  // on purpose, so a write that truncated heartbeat.json and then filled it
+  // let a reader landing in between see "no mark" on a live run — and
+  // ledger.mjs rotate, which refuses only while a mark is beating, moved the
+  // live controller's ledger. A hard link stands in for that reader: it holds
+  // the inode the reader opened. An in-place write changes what it sees; a
+  // rename leaves it the complete old version while the path gets the new.
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-atomic-"));
+  const path = join(dir, "heartbeat.json");
+  const held = join(dir, "held-by-reader");
+  const old = { at: 1_700_000_000_000, interval: 300, stopped: "" };
+  writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "", beat: old }));
+  linkSync(path, held);
+  const beat = { at: 1_700_000_300_000, interval: 300, stopped: "" };
+  assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { beat }), true);
+  assert.deepEqual(readState(held, "fleet-state-test").beat, old, "the write rewrote the file a reader holds in place");
+  assert.deepEqual(readState(path, "fleet-state-test").beat, beat);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("writeState: a write that cannot land leaves no temp file behind", () => {
+  // The temp is written first and renamed second, so a rename that fails —
+  // here the target is a directory — would otherwise strand one
+  // `heartbeat.json.<pid>.tmp` per failed invocation beside the file, each
+  // heartbeat run a new pid.
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-unlandable-"));
+  const path = join(dir, "heartbeat.json");
+  mkdirSync(path);
+  writeFileSync(join(path, "occupant"), "x");
+  assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { quiet: 1 }), false);
+  assert.deepEqual(readdirSync(dir), ["heartbeat.json"]);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("writeState: two scripts writing the file at once both land — neither takes the other's temp", async () => {
+  // fleet-tick and fleet-heartbeat both write heartbeat.json, each its own
+  // process. A temp name the two share lets one rename the other's temp out
+  // from under it, and the loser's rename fails on ENOENT — a reported write
+  // failure that fleet-heartbeat treats as a fire (#531's race, ledger.mjs's
+  // own temp). Timing decides only whether the two loops overlap, never
+  // whether correct code passes: two pid-named temps cannot collide. Measured
+  // with the shared name `${path}.tmp` instead, it failed on each of six runs.
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-concurrent-"));
+  const path = join(dir, "heartbeat.json");
+  const writer = `
+    const { readState, writeState } = await import(${JSON.stringify(new URL("./fleet-state.mjs", import.meta.url).href)});
+    let fails = 0;
+    for (let i = 0; i < 300; i++) {
+      if (!writeState(${JSON.stringify(path)}, "writer", readState(${JSON.stringify(path)}, "writer"), { digest: String(i).repeat(500) })) fails++;
+    }
+    console.log(fails);
+  `;
+  const run = () => new Promise((resolve) => {
+    const child = spawn(process.execPath, ["--input-type=module", "-e", writer]);
+    let out = "", err = "";
+    child.stdout.on("data", (d) => { out += d; });
+    child.stderr.on("data", (d) => { err += d; });
+    child.on("close", (status) => resolve({ status, out: out.trim(), err }));
+  });
+  const results = await Promise.all([run(), run()]);
+  rmSync(dir, { recursive: true, force: true });
+  for (const r of results) {
+    assert.equal(r.status, 0, r.err);
+    assert.equal(r.out, "0", `writes failed under a concurrent writer:\n${r.err}`);
+  }
 });
 
 test("assessBeat: staleness is judged against the RECORDED interval, not a constant", () => {
