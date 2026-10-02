@@ -175,6 +175,13 @@ function shellQuote(s) {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+// What a malformed catalog value is, for a refusal that names the shape.
+function kindOf(v) {
+  if (v === undefined) return "absent";
+  if (v === null) return "null";
+  return Array.isArray(v) ? "array" : typeof v;
+}
+
 // The operator's install (`modelRoles`, omp's model `catalog`, and any
 // leftover `task.agentModelOverrides`) against what the fleet's own
 // definitions need. `violations` stop a run (ADR 0014); `notices` never do —
@@ -196,19 +203,33 @@ export function checkRoutes({ agentsDir, modelRoles, overrides, catalog }) {
     (usedBy[fm.role] ??= []).push({ file, level: fm.level });
   }
 
+  // A catalog with no `models` list, or an entry whose `thinking` is neither a
+  // list nor `null`, is a shape omp did not print — name it, rather than read
+  // it as "not listed" or "runs at no level" and blame the operator's roles.
+  const listed = Array.isArray(catalog?.models);
+  if (!listed && Object.keys(usedBy).length > 0) {
+    violations.push(`omp's model catalog has no models list (models: ${kindOf(catalog?.models)}) — cannot check the level of any definition`);
+  }
+
   for (const role of ROLE_ORDER) {
     if (!usedBy[role]) continue;
+    const users = usedBy[role].map((u) => u.file).join(", ");
     const model = resolveRole(role, modelRoles);
     if (model === null) {
-      violations.push(`modelRoles.${role} is unset — needed by ${usedBy[role].map((u) => u.file).join(", ")}`);
+      violations.push(`modelRoles.${role} is unset — needed by ${users}`);
       continue;
     }
+    if (!listed) continue;
     const entry = catalogEntry(model, catalog);
     if (entry === null) {
-      violations.push(`modelRoles.${role} resolves to ${model}, which omp's model catalog does not list — cannot check the level of ${usedBy[role].map((u) => u.file).join(", ")}`);
+      violations.push(`modelRoles.${role} resolves to ${model}, which omp's model catalog does not list — cannot check the level of ${users}`);
       continue;
     }
-    const efforts = Array.isArray(entry.thinking) ? entry.thinking : [];
+    if (entry.thinking !== null && !Array.isArray(entry.thinking)) {
+      violations.push(`omp's model catalog lists ${model} with thinking that is neither a list nor null (${kindOf(entry.thinking)}) — cannot check the level of ${users}`);
+      continue;
+    }
+    const efforts = entry.thinking ?? [];
     for (const { file, level } of usedBy[role]) {
       if (!efforts.includes(level)) {
         violations.push(`${file}: level ${level} is not one modelRoles.${role}'s target ${model} runs at (thinking: ${efforts.join(", ") || "none"}) — omp would clamp it silently`);

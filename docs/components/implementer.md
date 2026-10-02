@@ -42,9 +42,11 @@ every 5th Pull by ledger count runs at an exploration cell — see
   killed is replaced by a brand-new member under a new name on the same
   ticket, never woken or resumed — resuming drags stale ticket state
   back in.
-- **`-alt` makes the tier comparison unconfounded.** It is the identical
-  prompt body, differing only in its declared `model:`, so any measured
-  difference in outcome is attributable to the tier alone
+- **Byte-identical bodies keep the prompt out of a cell comparison.**
+  Every `fleet-implementer-<cell>` definition carries the same body
+  (pinned by `implementer-model-tier.test.mjs`); only its frontmatter —
+  name, description and declared route — differs, so a difference
+  measured between cells is not a difference in the definition's prompt
   ([ADR 0005](../adr/0005-tier-declared-per-harness-verified-at-dispatch.md)).
 - **Every reported SHA is verified** (`verify-sha.sh`) before it's
   trusted, because a member can commit inside a nested worktree and

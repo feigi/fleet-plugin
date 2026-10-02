@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { between as section } from "./prose-pin.mjs";
-import { CELL } from "./ledger-grammar.mjs";
+import { CELL_DEF } from "./ledger-grammar.mjs";
 
 // Implementers dispatch at the tier their DEFINITION declares, never one the
 // controller passes: the dispatch rule omits `model` and names the definition
@@ -186,9 +186,8 @@ test("every implementer definition is named for a cell and declares exactly the 
   const names = implementers();
   assert.ok(names.includes(`${PREFIX}slow-high`), `the policy cell's definition is missing: ${names.join(", ")}`);
   for (const name of names) {
-    const cell = name.slice(PREFIX.length);
-    assert.ok(name.startsWith(PREFIX) && CELL.test(cell), `${name}.agent.md is not named fleet-implementer-<cell> — nothing is named fleet-implementer alone`);
-    const [role, level] = cell.split("-");
+    assert.ok(CELL_DEF.test(name), `${name}.agent.md is not named fleet-implementer-<cell> — nothing is named fleet-implementer alone`);
+    const [role, level] = name.slice(PREFIX.length).split("-");
     const fm = frontmatterOf(name);
     assert.match(fm, new RegExp(`^model: "@${role}:${level}"$`, "m"), `${name}.agent.md does not declare model: "@${role}:${level}"`);
     assert.match(fm, new RegExp(`^name: ${name}$`, "m"), `${name}.agent.md's name: is not its file name`);

@@ -256,6 +256,29 @@ test("checkRoutes (d): a target the catalog does not list, or lists with no thin
   assert.match(thinkless[0], /level low is not one .*\(thinking: none\)/);
 });
 
+test("checkRoutes (d): a catalog omp did not print is named as a shape error, never blamed on the operator's roles", () => {
+  const withCatalog = (catalog, modelRoles = MODEL_ROLES) =>
+    checkRoutes({ agentsDir: agentsDir({ "fleet-a": "@slow:high" }), modelRoles, overrides: {}, catalog }).violations;
+  for (const [catalog, kind] of [[{}, "absent"], [{ models: "nope" }, "string"], [{ models: null }, "null"]]) {
+    const v = withCatalog(catalog);
+    assert.equal(v.length, 1, JSON.stringify(v));
+    assert.equal(v[0], `omp's model catalog has no models list (models: ${kind}) — cannot check the level of any definition`);
+  }
+  // An unset role is still its own violation beside a malformed catalog.
+  assert.deepEqual(withCatalog({}, {}).map((v) => v.split(" ")[0]), ["omp's", "modelRoles.slow"]);
+  const opus = (thinking) => ({ models: [{ selector: "anthropic/claude-opus-5", thinking }] });
+  for (const [thinking, kind] of [["low,medium,high,max", "string"], [undefined, "absent"], [{ high: true }, "object"]]) {
+    const v = withCatalog(opus(thinking));
+    assert.equal(v.length, 1, JSON.stringify(v));
+    assert.equal(v[0], `omp's model catalog lists anthropic/claude-opus-5 with thinking that is neither a list nor null (${kind}) — cannot check the level of fleet-a.agent.md`);
+  }
+  // The must-ACCEPT half: `thinking: null` is a real catalog value (a model
+  // with no efforts), so it stays the level violation, and an empty list is a list.
+  assert.match(withCatalog(opus(null))[0], /^fleet-a\.agent\.md: level high is not one .*\(thinking: none\)/);
+  assert.match(withCatalog(opus([]))[0], /^fleet-a\.agent\.md: level high is not one .*\(thinking: none\)/);
+  assert.deepEqual(withCatalog(opus(["high"])), []);
+});
+
 test("catalogEntry: an exact selector wins over a provider-less match", () => {
   assert.equal(catalogEntry("anthropic/claude-haiku-4-5", CATALOG).provider, "anthropic");
   assert.equal(catalogEntry("claude-opus-5", CATALOG).selector, "anthropic/claude-opus-5");

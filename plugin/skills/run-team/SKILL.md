@@ -1052,9 +1052,12 @@ ledger, not your memory, is what still holds the count after a compaction.
 
 **Do not label it anywhere — the dispatch record already carries it.** The
 pairing is a query over `docs/metrics/member-outcomes.tsv` (the exact awk sits
-in that file's header): a `session` that ran BOTH implementer definitions at
-DIFFERENT `model`s — one member whose `subagent_type` is
-`fleet-implementer-alt`, another whose is `fleet-implementer`. That column is
+in that file's header): a `session` that ran BOTH pre-cutover implementer
+definitions at DIFFERENT `model`s — one member whose `subagent_type` is
+`fleet-implementer-alt`, another whose is `fleet-implementer`. Neither
+definition is dispatched any more, so the query counts pre-cutover history
+only: a session whose implementers ran as `fleet-implementer-<cell>` is not in
+it until #2133 replaces it with the per-cell readout. That column is
 the record of what each member was dispatched AS, scraped like every other
 column, so it survives the file's regeneration and mislabels no historical row
 — a pre-rule session carries no such dispatch to find. A hand-set column would
