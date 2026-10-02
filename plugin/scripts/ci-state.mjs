@@ -531,13 +531,13 @@ const blobText = (entry) => {
 // that failed: a repo whose CI is merely misconfigured must never read as one
 // with no CI.
 //
-// `noneNamedIsAbsent` settles the remaining case, YAML present but none of it
-// carrying the workflow's name. At the base that is a --workflow/--workflow-
-// file mismatch, not an absence — saying "no CI configured" of a directory
-// full of workflows is false, and under --declare-no-ci it would exit 0 for a
-// repo whose CI was never looked at. At the head it is a PR that removed or
-// renamed its CI workflow, which contributes no jobs of its own.
-function findWorkflow(tree, side, noneNamedIsAbsent) {
+// `side` settles the remaining case, YAML present but none of it carrying the
+// workflow's name. At the base that is a --workflow/--workflow-file mismatch,
+// not an absence — saying "no CI configured" of a directory full of workflows
+// is false, and under --declare-no-ci it would exit 0 for a repo whose CI was
+// never looked at. At the head it is a PR that removed or renamed its CI
+// workflow, which contributes no jobs of its own.
+function findWorkflow(tree, side) {
   if (tree === null) return null;
   if (!isObject(tree) || tree.__typename !== "Tree" || !Array.isArray(tree.entries) || tree.entries.some((e) => !isObject(e))) {
     die(`${wfDir} at the ${side} commit is not a readable directory (got ${cut(JSON.stringify(tree) ?? "nothing")})`);
@@ -574,7 +574,7 @@ function findWorkflow(tree, side, noneNamedIsAbsent) {
     );
   }
   if (candidates.length === 1) return candidates[0];
-  if (yamls.length && !noneNamedIsAbsent) {
+  if (yamls.length && side === "base") {
     die(
       `${yamls.length} workflow file(s) under ${wfDir}/ at the ${side} commit (${yamls.map((e) => e.name).join(", ")}), none named '${workflow}' — pass --workflow <name> or --workflow-file <path>`,
     );
@@ -584,7 +584,7 @@ function findWorkflow(tree, side, noneNamedIsAbsent) {
 
 // Whether the repo has CI at all is the base's to say: a PR adding a repo's
 // first CI workflow still reads no-ci until that workflow is on the base.
-const baseWf = findWorkflow(baseTree, "base", false);
+const baseWf = findWorkflow(baseTree, "base");
 if (baseWf === null && wfEntry !== null) {
   die(`${wfDir}/${wfEntry} does not exist at the base commit ${baseOid} — an explicit --workflow-file is never read as no CI`);
 }
@@ -735,7 +735,7 @@ if (noCi) {
   // refuses on an underivable workflow at either commit, and that refusal
   // belongs before the run query rather than after it.
   const baseJobs = expectedJobs(baseWf.text, `${baseWf.path} at the base commit`);
-  const headWf = findWorkflow(dirAt(prRead.repo.head, "head", HEAD_DIR, prRead.notFound), "head", true);
+  const headWf = findWorkflow(dirAt(prRead.repo.head, "head", HEAD_DIR, prRead.notFound), "head");
   const headJobs = headWf === null ? [] : expectedJobs(headWf.text, `${headWf.path} at the head commit`);
   const droppedByHead = baseJobs.filter((j) => !headJobs.includes(j));
   vlog(`    head jobs (${headJobs.length}): ${headJobs.join(", ") || `none — no '${workflow}' workflow at the head`}`);
