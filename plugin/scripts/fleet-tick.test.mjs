@@ -534,7 +534,7 @@ test("deriveRun: a conflict hold is fix-due until a fix-applier after it lands, 
       HOLD_ROW(44, "conflict-hold:#44 · fix-pr-44=applied:def5678 · conflict-hold:#44"),
       // A fix-applier that died leaves the conflict where it was.
       HOLD_ROW(45, "conflict-hold:#45 · fix-pr-45=failed"),
-      // A review after the cleared hold resets fixSince; the hold stays cleared.
+      // A review after the cleared hold leaves the hold cleared.
       HOLD_ROW(46, "conflict-hold:#46 · fix-pr-46=applied:def5678 · review=wf:x reviewed=def5678:0/1/0"),
       // A closed PR is nobody's work.
       HOLD_ROW(47, "conflict-hold:#47"),
@@ -572,10 +572,41 @@ test("deriveRun: a fix-applier settled in ## Dispatched clears a conflict hold e
     "the member settled in ## Dispatched, not the row's own stale bare copy");
 });
 
-test("deriveRun: a redundant re-hold on an already-unresolved conflict does not reset a live fix-applier's fixSince", () => {
+test("deriveRun: a redundant re-hold on an already-unresolved conflict does not re-offer the PR to a second fix-applier while the first is live", () => {
   const r = run({ rows: [HOLD_ROW(40, "conflict-hold:#40 · fix-pr-40 · conflict-hold:#40")] }, [pr(40, ["ready-to-merge"])]);
   assert.deepEqual(r.fixDue, [], "a live fix-applier working the first hold is not re-offered by a duplicate hold token");
   assert.deepEqual([r.mergeHeld, r.mergeConflictHeld], [1, 1], "still held — the duplicate hold changes nothing about the merge gate");
+});
+
+// #2328: a fix-applier dispatched on an unresolved hold is the conflict one —
+// it rebases and never reads the review file — so its landing clears the hold
+// and leaves a returned review's survivors exactly as unanswered as they were.
+test("deriveRun: a landed conflict fix-applier clears the hold but not the survivors — a review fix-applier follows", () => {
+  const R = (tail) => `#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · ${tail}`;
+  const at = (tail, dispatched = []) => run({ rows: [R(tail)], dispatched }, [pr(21, ["ready-to-merge"])]);
+  const held = at("conflict-hold:#21");
+  assert.deepEqual([held.fixDue, held.conflictHeld], [[21], [21]]);
+  const working = at("conflict-hold:#21 · fix-pr-21");
+  assert.deepEqual([working.fixDue, working.conflictHeld], [[], [21]], "the live conflict fix-applier is not joined by a review one");
+  const landed = at("conflict-hold:#21 · fix-pr-21=applied:def5678");
+  assert.deepEqual([landed.fixDue, landed.conflictHeld, landed.mergeHeld], [[21], [], 0], "the survivors are re-offered, the hold is gone");
+  // The hold read before the review is the same conflict fix-applier.
+  assert.deepEqual(run({ rows: ["#20 impl-20=PR#21 → PR#21 · conflict-hold:#21 · reviewed=abc1234:2/0/0 · fix-pr-21=no-op"] }, [pr(21)]).fixDue, [21]);
+  // The review fix-applier that follows answers them.
+  assert.deepEqual(at("conflict-hold:#21 · fix-pr-21=applied:def5678 · fix-pr-21-b=applied:0123abc").fixDue, []);
+  assert.deepEqual(at("conflict-hold:#21 · fix-pr-21=applied:def5678 · fix-pr-21-b").fixDue, [], "…and is not re-offered while live");
+  assert.deepEqual(at("conflict-hold:#21 · fix-pr-21=applied:def5678 · fix-pr-21-b=failed").fixDue, [21], "a dead one leaves them due");
+});
+
+test("deriveRun: survivors a review fix-applier already answered stay answered through a later hold and its fix", () => {
+  const R = (tail) => `#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · fix-pr-21=applied:def5678 · ${tail}`;
+  const held = run({ rows: [R("conflict-hold:#21")] }, [pr(21)]);
+  assert.deepEqual([held.fixDue, held.conflictHeld], [[21], [21]], "the hold is due on its own");
+  const cleared = run({ rows: [R("conflict-hold:#21 · fix-pr-21-b=applied:0123abc")] }, [pr(21)]);
+  assert.deepEqual([cleared.fixDue, cleared.conflictHeld], [[], []], "nothing left: the survivors were answered before the hold");
+  // A live review fix-applier when the hold lands is not joined by a conflict one.
+  const live = run({ rows: ["#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · fix-pr-21 · conflict-hold:#21"] }, [pr(21)]);
+  assert.deepEqual([live.fixDue, live.conflictHeld], [[], [21]]);
 });
 
 test("deriveRun: a conflict hold is read in either spelling and on a PR-keyed row", () => {

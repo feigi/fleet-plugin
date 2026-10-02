@@ -334,14 +334,20 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // the first's state rather than losing to it.
     // `conflictHold`: the row carries a conflict hold. `conflictCleared`: a
     // fix-applier SETTLED (`applied:`/`no-op`) after the latest one — never
-    // merely dispatched, which is `fixSince`'s bar and too low for the merge
-    // hold: a live fix-applier is still working the conflict.
+    // merely dispatched: a live fix-applier is still working the conflict.
+    // `reviewFixed`: a REVIEW fix-applier landed after the latest
+    // `reviewed=` — one read while no hold stood unresolved. The one read
+    // while a hold did is the conflict fix-applier `ledger.mjs dispatch` named
+    // `fleet-implementer` (#2299): it rebases and never sees the review file,
+    // so it clears the hold and answers no survivor (#2328). `fixRunning`: a
+    // fix-applier on this PR is unsettled, wherever its token sits —
+    // `dispatch` refuses a second live one on the PR, so none is due beside it.
     // `reviewedHead`: the latest `reviewed=<head>`. `pastPinHalt`: the latest
     // finisher since that review settled `halted:past-pin` (#2083) — any
     // later finisher attempt, live or settled, replaces it, and a later
     // returned review answers it.
     const st = (pr !== null && byPr.get(pr)) || {
-      inFlight: false, reviewedAny: false, survived: 0, fixSince: false, held: [],
+      inFlight: false, reviewedAny: false, survived: 0, reviewFixed: false, fixRunning: false, held: [],
       conflictHold: false, conflictCleared: false, reviewedHead: null, pastPinHalt: false,
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
@@ -356,26 +362,31 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
       const t = parseToken(tok);
       if (t) {
         note(t, where);
-        // A settled `failed`/`killed` fix-applier leaves survivors unfixed and
-        // no successor dispatched — the PR stays fix-due for a `-b`
-        // replacement. Only a live attempt, or one that actually landed
-        // (`applied:`/`no-op`), clears it. Read the outcome off the MERGED
-        // member record (`members`, built above) rather than this row's own
-        // copy of the token: `members` already implements "a member settled
-        // ANYWHERE is settled" for `implLive`/`fixLive`/etc. below, and a
-        // later, unrelated `row` rewrite that drops the `=outcome` suffix and
-        // puts back a bare copy must not un-settle what actually landed. A
-        // landed one also clears a conflict hold; a hold resets this below,
-        // so only a fix-applier after the latest hold ever counts. `note`
-        // above has just recorded this exact token, so the lookup below is
-        // never absent, and its outcome is this token's own unless an
-        // earlier row already settled it — never a reason to fall back to
-        // the row's own copy.
+        // A settled `failed`/`killed` fix-applier leaves survivors or a
+        // conflict unfixed and no successor dispatched — the PR stays fix-due
+        // for a `-b` replacement. Only a live attempt, or one that actually
+        // landed (`applied:`/`no-op`), holds it off. Read the outcome off the
+        // MERGED member record (`members`, built above) rather than this row's
+        // own copy of the token: `members` already implements "a member
+        // settled ANYWHERE is settled" for `implLive`/`fixLive`/etc. below,
+        // and a later, unrelated `row` rewrite that drops the `=outcome`
+        // suffix and puts back a bare copy must not un-settle what actually
+        // landed. Which job a landed one did is read off where its token sits:
+        // after an unresolved hold it was the conflict fix-applier and clears
+        // that hold; otherwise it answered the latest review's survivors. A
+        // hold resets `conflictCleared` below and a `reviewed=` resets
+        // `reviewFixed`, so only a fix-applier after the latest of each ever
+        // counts. `note` above has just recorded this exact token, so the
+        // lookup below is never absent, and its outcome is this token's own
+        // unless an earlier row already settled it — never a reason to fall
+        // back to the row's own copy.
         if (t.family === "fix-pr") {
           const o = members.get(t.name).outcome;
-          const landed = o === "no-op" || /^applied:/.test(o);
-          if (o === null || landed) st.fixSince = true;
-          if (landed) st.conflictCleared = true;
+          if (o === null) st.fixRunning = true;
+          if (o === "no-op" || /^applied:/.test(o)) {
+            if (st.conflictHold && !st.conflictCleared) st.conflictCleared = true;
+            else st.reviewFixed = true;
+          }
         }
         if (t.family === "finisher-pr" && t.number === pr
           && (!latestFinisher || (t.retry ?? "") > (latestFinisher.retry ?? ""))) {
@@ -394,7 +405,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
         if (!m) throw new LedgerError(`${where}: '${tok}' is not reviewed=<head>:<survived>/<refuted>/<unverified>`);
         latestFinisher = null;
         Object.assign(st, {
-          inFlight: false, reviewedAny: true, survived: Number(m[2]), fixSince: false,
+          inFlight: false, reviewedAny: true, survived: Number(m[2]), reviewFixed: false,
           reviewedHead: m[1].toLowerCase(), pastPinHalt: false,
         });
       } else {
@@ -408,17 +419,12 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
           if (Number(c[1]) !== pr) {
             throw new LedgerError(`${where}: '${tok}' names PR #${c[1]}, but this row is ${pr === null ? "no PR's" : `PR #${pr}'s`} — a conflict hold goes on the held PR's own row`);
           }
-          // A fresh hold is unresolved whatever settled before it, the way
-          // a fresh `reviewed=` resets `fixSince` above — UNLESS the row
-          // already carries an unresolved hold with nothing having cleared
-          // it since: a redundant re-hold (merge-bot retrying a PR it has
-          // already held, #2064) must not disturb a live fix-applier's
-          // `fixSince`, or a still-in-progress fix reappears in `fixDue`.
-          const alreadyUnresolved = st.conflictHold && !st.conflictCleared;
-          Object.assign(st, {
-            conflictHold: true, conflictCleared: false,
-            ...(alreadyUnresolved ? null : { fixSince: false }),
-          });
+          // A fresh hold is unresolved whatever settled before it, the way a
+          // fresh `reviewed=` resets `reviewFixed` above. A redundant re-hold
+          // (merge-bot retrying a PR it has already held, #2064) changes
+          // nothing a live fix-applier holds off: `fixRunning` is not read
+          // off token order.
+          Object.assign(st, { conflictHold: true, conflictCleared: false });
         }
         const v = TIER_VERDICT.exec(tok);
         if (v) verdicts[v[1]].add(v[2]);
@@ -475,14 +481,15 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     fixLive: live("fix-pr"),
     mergeBotLive: live("merge-bot"),
     reviewsLive: [...byPr.values()].filter((st) => st.inFlight).length,
-    // A returned review with survivors, or a conflict hold no fix-applier has
-    // cleared — either with no fix-applier since, on a PR still open, with no
-    // newer review running. The hold term carries `!conflictCleared` because
-    // a later `reviewed=` resets `fixSince`, and a hold already cleared must
-    // not come back due with it.
+    // A returned review whose survivors no review fix-applier has answered,
+    // or a conflict hold no fix-applier has cleared — on a PR still open,
+    // with no fix-applier working it and no newer review running. The two
+    // are answered apart (#2328): a landed conflict fix-applier lifts the
+    // hold and leaves survivors it never read due for a review one.
     fixDue: [...byPr.entries()]
-      .filter(([n, st]) => open.has(n) && ((st.reviewedHead !== null && st.survived > 0) || conflictHeld(st))
-        && !st.fixSince && !st.inFlight)
+      .filter(([n, st]) => open.has(n)
+        && ((st.reviewedHead !== null && st.survived > 0 && !st.reviewFixed) || conflictHeld(st))
+        && !st.fixRunning && !st.inFlight)
       .map(([n]) => n).sort(asc),
     // Open, not signed off, closing an issue (GitHub's own linked set — a
     // chore PR closing nothing is review work nobody in the run will ever be
@@ -500,7 +507,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // A `held-behind` hold lifts once its premise PR has left the open list —
     // MERGED or CLOSED, the same lift rule as a `behind-pr` Exclusion. A
     // conflict hold lifts only once a fix-applier after it has SETTLED
-    // `applied:`/`no-op` — not on dispatch, which is all `fixSince` asks.
+    // `applied:`/`no-op` — never on dispatch alone.
     mergeHeld: queued.filter((p) => heldBehind(state(p.number)) || conflictHeld(state(p.number))).length,
     // How many of those are conflict holds — the HOLD row's wording, no field.
     mergeConflictHeld: queued.filter((p) => conflictHeld(state(p.number))).length,
