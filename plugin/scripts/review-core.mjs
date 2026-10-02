@@ -643,6 +643,19 @@ export function runnerPrRefusal(pr) {
   return isDigits(pr) ? null : `args.pr must be a PR number, got ${JSON.stringify(pr)}`;
 }
 
+// #2323. `runReview` owns the review side's `pr<N>/` partition — it appends
+// `/pr${pr}` to the scratch it is given — so a scratch whose last component
+// is already `pr` plus digits (trailing slashes ignored) is a caller that
+// partitioned too, and its run roots would nest at `<root>/pr<N>/pr<N>/run-*`,
+// below where a correctly scoped review's prune looks. Refused whatever the
+// digits, never coerced: stripping the suffix would guess which directory the
+// caller meant. Shared with `runReviewToFile` for the reason the digits rule
+// above is. Null when `scratch` is acceptable.
+export function runnerScratchRefusal(scratch) {
+  if (typeof scratch !== "string" || !/(?:^|\/)pr\d+\/*$/.test(scratch)) return null;
+  return `args.scratch ${JSON.stringify(scratch)} already ends in a pr<N> directory — pass the scratch root; the review creates <root>/pr<N>/ itself`;
+}
+
 // --- Orchestration ----------------------------------------------------
 // `host` supplies `agent(prompt, opts)` (must resolve to PARSED DATA — a
 // rejection or an unresolvable dispatch must resolve to `null`, the
@@ -714,6 +727,9 @@ export async function runReview(host, args) {
   // — which is why this sits BELOW the required-args throw and never merged
   // into it: an absent `pr` is owed "required", not a complaint about digits.
   if (!isDigits(pr)) throw new Error(`review-pr: args.pr must be a PR number, got ${JSON.stringify(pr)}`);
+
+  const scratchRefusal = runnerScratchRefusal(scratch);
+  if (scratchRefusal) throw new Error(`review-pr: ${scratchRefusal}`);
 
   const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS);
 

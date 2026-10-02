@@ -146,6 +146,17 @@ test("a scratch that is missing or relative is refused before any review runs", 
   }
 });
 
+// #2323. A scratch the controller already partitioned is a dispatch mistake,
+// not a review failure: runReview would throw it, and without this the runner
+// would retry it and name a fallback reviewer for a review that never ran.
+test("a scratch already ending in pr<N> is refused before any review runs, not retried", async () => {
+  for (const bad of ["/x/pr7", "/x/pr7/", "/x/pr42"]) {
+    const { run, calls } = scriptedRun([RESULT]);
+    await assert.rejects(runReviewToFile({ pr: 7, scratch: bad, worktree: "/wt" }, run), /pass the scratch root/, bad);
+    assert.equal(calls.length, 0, `${bad}: a partitioned scratch reached the review`);
+  }
+});
+
 test("a pr that is not a PR number is refused before any review runs", async () => {
   for (const bad of [undefined, "my-branch", "7/../../x", -7]) {
     const { run, calls } = scriptedRun([RESULT]);
