@@ -781,8 +781,10 @@ const SIBLING_MODULES = ["arg.mjs", "fleet-state.mjs", "git-env.mjs", "ledger.mj
 // runner's wall-clock kill ends it, as a cancelled file that reads like a hang
 // somewhere else (#2320). Every spawn goes through `spawnBounded`, which kills
 // the child at the bound and fails its own test naming the timeout and the
-// command. The bound sits far above the slowest case: ~1.5s solo, ~4x that
-// under the full suite.
+// command. The bound is per spawn and generous on purpose: #2320's triage
+// measured the slowest whole case at ~1.5s solo on an idle host and ~3.85x
+// that under the full suite, but on a host loaded by other agents the slowest
+// case has taken ~13s solo, and a case can run several spawns.
 const SPAWN_TIMEOUT_MS = 60_000;
 const spawnBounded = (cmd, args, opts = {}) => {
   const r = spawnSync(cmd, args, { encoding: "utf8", ...opts, timeout: SPAWN_TIMEOUT_MS });
@@ -794,6 +796,24 @@ const spawnBounded = (cmd, args, opts = {}) => {
   }
   return r;
 };
+
+// The bound holds only while every spawn takes it: a raw synchronous spawn
+// added anywhere else in this file brings #2320's unbounded hang back, and
+// every case still passes until the day that child hangs. So this reads the
+// file's own source and names any `spawnSync`/`execFileSync`/`execSync` call
+// outside the helper. A comment spelling one of them with its call paren fails
+// it too (the loud direction); an import renamed with `as` walks past it.
+test("CLI: every synchronous spawn in this file goes through spawnBounded (#2320)", () => {
+  const src = readFileSync(fileURLToPath(import.meta.url), "utf8");
+  const start = src.indexOf("const spawnBounded = ");
+  assert.ok(start > 0, "the spawnBounded helper is gone; this sweep has nothing to measure against");
+  const end = src.indexOf("\n};\n", start);
+  const lineOf = (i) => src.slice(0, i).split("\n").length;
+  const raw = [...src.matchAll(/\b(?:spawnSync|execFileSync|execSync)\s*\(/g)]
+    .filter((m) => m.index < start || m.index > end)
+    .map((m) => `line ${lineOf(m.index)}: ${m[0]}`);
+  assert.deepEqual(raw, []);
+});
 
 // `pr list` for the open PRs, `issue view` for a behind-issue premise's state,
 // `issue list --label in-progress` for the stall report's claimed count.
