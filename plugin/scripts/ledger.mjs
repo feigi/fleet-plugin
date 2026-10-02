@@ -20,21 +20,24 @@
 // lets `merge-bot-<n>` be counted from it.
 //
 // Writer policy (#531, reversing #151's item #7): the controller owns run
-// state (`row`/`settle`/`dispatch`/`drain`/`ruled`); filers append filings
-// with `filed`; all writes are serialized by `<file>.lock`. Every write
-// subcommand rewrites the WHOLE file from what it loaded, so two unlocked
-// writers are last-writer-wins — measured, 8 concurrent `filed` kept 2-5 of 8
-// rows — and the lock is what lets a second kind of writer exist at all. The
-// reasoning for each part of the lock lives at acquireLock() below.
+// state (`row`/`settle`/`dispatch`/`drain`/`ruled`/`rotate`); filers append
+// filings with `filed`; all writes are serialized by `<file>.lock`. Every
+// write subcommand except `rotate` — which moves the file whole and never
+// loads it, see runRotate() — rewrites the WHOLE file from what it loaded,
+// so two unlocked writers are last-writer-wins — measured, 8 concurrent
+// `filed` kept 2-5 of 8 rows — and the lock is what lets a second kind of
+// writer exist at all. The reasoning for each part of the lock lives at
+// acquireLock() below.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, openSync, writeSync, closeSync, unlinkSync } from "node:fs";
-import { dirname, resolve, join } from "node:path";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, openSync, writeSync, closeSync, unlinkSync, linkSync } from "node:fs";
+import { dirname, resolve, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError } from "./fleet-tick.mjs";
+import { stateFileIn, readState, assessBeat, stallsAt } from "./fleet-state.mjs";
 
 const NAME = "ledger";
 // The plugin's own agent definitions — the directory tier-check.mjs reads
@@ -238,7 +241,7 @@ const requireFile = requireFileIdx !== -1;
 if (requireFileIdx !== -1) argv.splice(requireFileIdx, 1);
 
 const [cmd, ...rest] = argv;
-if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|filed|ruled|check|read|dispatch|settle|drain [args]");
+if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|filed|ruled|check|read|dispatch|settle|drain|rotate [args]");
 
 const ROWS = "## Rows";
 const DISPATCHED = "## Dispatched";
@@ -788,9 +791,12 @@ async function acquireLock() {
 // bundles both under one undifferentiated exit 2, with no ordering between them.
 if (requireFile && !existsSync(file)) die(`--require-file given but ledger file does not exist: ${file}`);
 
-const WRITE_COMMANDS = new Set(["row", "filed", "ruled", "dispatch", "settle", "drain"]);
+const WRITE_COMMANDS = new Set(["row", "filed", "ruled", "dispatch", "settle", "drain", "rotate"]);
 if (WRITE_COMMANDS.has(cmd)) await acquireLock();
-const data = load();
+// `rotate` moves the file whole and never parses it: a ledger load() would
+// refuse is still the previous run's record, and archiving it as-is is the
+// whole job.
+const data = cmd === "rotate" ? null : load();
 
 // The payload subcommands end by falling out of this chain, never by calling
 // process.exit(). On a pipe, process.stdout.write is async and process.exit()
@@ -917,8 +923,13 @@ if (cmd === "read") {
     console.error(`    already draining: ${data.drain}`);
   }
   console.log(JSON.stringify({ drain: data.drain, created }));
+} else if (cmd === "rotate") {
+  // It moves the file, so a stray word — an imagined `--dry-run` — is
+  // refused rather than read as permission to move it.
+  if (rest.length) die("usage: ledger.mjs rotate");
+  runRotate();
 } else {
-  die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check, read, dispatch, settle or drain`);
+  die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check, read, dispatch, settle, drain or rotate`);
 }
 
 // `check` alone of the subcommands leaves its arm early: the already-filed
@@ -1512,6 +1523,54 @@ function runCheck() {
   // ~230 KB against a four-word argv arrived cut at exit 0, the "clean, safe
   // to file" signal.
   process.exitCode = verdict === "tracker-hit" ? 3 : 0;
+}
+
+// ── rotate ───────────────────────────────────────────────────────────────────
+//
+// One ledger per run. Phase 0 of every run moves the previous run's file aside
+// before anything reads it, so no row, exclusion, filing, ruling or drain
+// marker outlives the run that wrote it: the next write subcommand finds no
+// file and starts the empty skeleton, exactly as on a first run. The archive
+// is the file itself — hard-linked to its stamped name, then unlinked — so its
+// bytes are untouched, and the link refuses atomically when that name is
+// already taken rather than overwriting an older archive.
+//
+// Under the write lock like every other write subcommand, so a concurrent
+// writer either lands before the move (in the archive, whole) or after it (in
+// the fresh skeleton) — never half in each.
+//
+// The liveness guard reads the heartbeat mark beside the ledger, through
+// fleet-state.mjs's own reader and verdict: a controller whose mark is still
+// beating owns this file, and rotating under it would split its run across
+// two ledgers. A stalled mark, a recorded stop, or no mark at all allows the
+// rotation. The guard proves "not beating", never "dead": a controller alive
+// but busy outside its heartbeat hold for longer than its recorded interval
+// reads as stalled, and is rotated under.
+function runRotate() {
+  if (!existsSync(file)) {
+    console.error(`    nothing to rotate: ${file} does not exist`);
+    console.log(JSON.stringify({ rotated: false, archive: null }));
+    return;
+  }
+  const beatFile = stateFileIn(dirname(file));
+  const { beat, ticked } = readState(beatFile, NAME);
+  if (assessBeat({ beat, ticked, now: Date.now() }).kind === "beating") {
+    die(`refusing to rotate ${file}: the controller that owns it is still beating — last beat ${new Date(beat.at).toISOString()} in ${beatFile}; it counts as stalled after ${new Date(stallsAt({ beat, ticked })).toISOString()}`);
+  }
+  const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replaceAll(":", "");
+  const archive = join(dirname(file), `${basename(file, ".md")}.${stamp}.md`);
+  try {
+    linkSync(file, archive);
+  } catch (e) {
+    die(e.code === "EEXIST" ? `refusing to rotate ${file}: ${archive} already exists` : `cannot rotate ${file} to ${archive}: ${e.message}`);
+  }
+  try {
+    unlinkSync(file);
+  } catch (e) {
+    die(`archived ${file} as ${archive} but could not remove it: ${e.message} — remove it by hand before the next write`);
+  }
+  console.error(`    rotated ${file} -> ${archive}`);
+  console.log(JSON.stringify({ rotated: true, archive }));
 }
 
 // ── dispatch / settle (#1799) ────────────────────────────────────────────────

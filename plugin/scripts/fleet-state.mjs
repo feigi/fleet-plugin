@@ -306,15 +306,19 @@ export function assessBeat({ beat, ticked, now }) {
   const intervalMs = beat.interval * 1000;
   const seen = { at: beat.at, ageMs, intervalMs, overdueMs: Math.max(0, ageMs - intervalMs) };
   if (beat.stopped) return { ...seen, kind: "stopped", reason: beat.stopped };
-  const beatOverdue = ageMs > intervalMs * BEAT_GRACE;
-  // Absent `ticked` — every caller before #1597's follow-up, and any state
-  // file fleet-tick has not yet written to — reads as infinitely old, which
-  // is `beat` alone deciding it exactly as before. A present one only ever
-  // shortens the window to "beating"; it can never manufacture a stale verdict
-  // `beat` alone would not have reached.
-  const tickedAgeMs = ticked ? Math.max(0, now - ticked.at) : Infinity;
-  const tickedFresh = tickedAgeMs <= DEFAULT_CEILING_S * 1000 * BEAT_GRACE;
-  return { ...seen, kind: beatOverdue && !tickedFresh ? "stale" : "beating", reason: null };
+  return { ...seen, kind: now > stallsAt({ beat, ticked }) ? "stale" : "beating", reason: null };
+}
+
+// The instant an unstopped mark turns `stale`: past `beat`'s own interval
+// plus grace AND past a tick's ceiling window plus grace, whichever ends
+// later. An absent `ticked` — a state file fleet-tick has not yet written to
+// — contributes nothing, which is `beat` alone deciding it. A present one
+// only ever postpones the stall; it can never manufacture a stale verdict
+// `beat` alone would not have reached. Exported for the readers that must
+// say WHEN a beating mark would stop counting, not only whether it has.
+export function stallsAt({ beat, ticked }) {
+  const beatEnds = beat.at + beat.interval * 1000 * BEAT_GRACE;
+  return ticked ? Math.max(beatEnds, ticked.at + DEFAULT_CEILING_S * 1000 * BEAT_GRACE) : beatEnds;
 }
 
 // Whether this verdict is something to report. Exported because both readers

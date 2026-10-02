@@ -631,6 +631,14 @@ test("deriveRun: a settled tier-mismatch keeps its own hold and is never also un
   assert.deepEqual([token.tierMismatch, token.tierUnchecked], [["impl-7"], []]);
 });
 
+test("deriveRun: tier-unverifiable is a verdict for its own member — it clears unchecked, never reads as a mismatch, and a mismatch still outranks it", () => {
+  const r = run({ rows: ["#7 impl-7=killed · tier-unverifiable=impl-7:no-transcript"] });
+  assert.deepEqual([r.tierUnchecked, r.tierMismatch], [[], []]);
+  const both = run({ rows: ["#7 impl-7=tier-mismatch · tier-unverifiable=impl-7:no-transcript"] });
+  assert.deepEqual([both.tierMismatch, both.tierUnchecked], [["impl-7"], []]);
+  assert.deepEqual(run({ rows: ["#7 impl-7=killed · tier-unverifiable=impl-17:no-transcript"] }).tierUnchecked, ["impl-7"]);
+});
+
 test("deriveRun: only the newest member of a ticket counts toward the tier holds", () => {
   const replaced = run({ rows: ["#8 impl-8=tier-mismatch · impl-8-b"], dispatched: ["impl-8=tier-mismatch", "impl-8-b"] });
   assert.deepEqual([replaced.tierMismatch, replaced.tierUnchecked], [[], ["impl-8-b"]], "the replacement is what is owed a check now");

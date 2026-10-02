@@ -285,8 +285,9 @@ const HELD = /^held-behind[:-]#?(\d+)$/;
 // gates a ticket's claim; this gates a reviewed PR's merge.
 const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
 // #1398: tier-check.mjs's verdict on an implementer, `tier-ok=<member>:<def>`
-// or `tier-mismatch=<member>:<def>`.
-const TIER_VERDICT = /^tier-(ok|mismatch)=([^:\s]+):\S+$/;
+// or `tier-mismatch=<member>:<def>` — or `tier-unverifiable=<member>:no-transcript`
+// for a settled member whose transcript was never written.
+const TIER_VERDICT = /^tier-(ok|mismatch|unverifiable)=([^:\s]+):\S+$/;
 
 export function deriveRun({ rows, dispatched, drain }, prs) {
   // One entry per member name across `## Dispatched` and every row. A member
@@ -316,7 +317,9 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   // token nor as `review=`/`reviewed=`, so both always reach this loop's own
   // `else` branch below, alongside HELD/CONFLICT_HOLD — one pass over every
   // row's tokens covers all four.
-  const verdicts = { ok: new Set(), mismatch: new Set() };
+  // `tier-unverifiable=<member>:no-transcript` is the third: a settled member
+  // with nothing to check, which clears the unchecked hold and nothing else.
+  const verdicts = { ok: new Set(), mismatch: new Set(), unverifiable: new Set() };
   for (const text of rows) {
     const key = text.split(/\s/)[0];
     const keyNum = /^#[0-9]+$/.test(key) ? Number(key.slice(1)) : null;
@@ -448,12 +451,14 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   // replacement's own check passes, the row holds — a replacement that is
   // ALSO mismatched keeps holding, and one not yet checked holds as
   // unchecked. A member with no verdict at all holds whether it is live or
-  // settled: its transcript exists from dispatch, so the check can still
-  // run, and the tick never reads a transcript itself.
+  // settled — the tick never reads a transcript, so only tier-check.mjs can
+  // say whether one exists; a settled member whose transcript was never
+  // written gets `tier-unverifiable=` from it, which clears the hold here.
   const newest = impls.filter((m, i) => !impls.some((o, j) => j > i && o.number === m.number));
   const mismatched = (m) => m.outcome === "tier-mismatch" || verdicts.mismatch.has(m.name);
   const tierMismatch = newest.filter(mismatched).map((m) => m.name);
-  const tierUnchecked = newest.filter((m) => !mismatched(m) && !verdicts.ok.has(m.name)).map((m) => m.name);
+  const cleared = (m) => verdicts.ok.has(m.name) || verdicts.unverifiable.has(m.name);
+  const tierUnchecked = newest.filter((m) => !mismatched(m) && !cleared(m)).map((m) => m.name);
   const isQueued = (p) => p.labels.some((l) => l && l.name === "ready-to-merge");
   const queued = prs.filter(isQueued);
   const asc = (a, b) => a - b;

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync, chmodSync } from "node:fs";
 import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -598,6 +598,113 @@ test("tick: a settled, unchecked implementer holds; a later tier-check writes ti
   const r = w.check();
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.deepEqual([w.tick().tierMismatch, w.tick().tierUnchecked], [[], []]);
+});
+
+// A dispatch whose `task` call failed before any transcript was written: the
+// member is on the ledger — `dispatch` runs before the call — and the session
+// directory exists, but `<session>/<member>.jsonl` does not.
+function noTranscriptWorld({ settle = "killed" } = {}) {
+  const d = dir();
+  mkdirSync(join(d, "agents"));
+  writeFileSync(join(d, "agents", "fleet-implementer.agent.md"), agentMd("@slow:high"));
+  const ledger = join(d, "ledger.md");
+  ledgerCli(ledger, "dispatch", "7", "impl-7");
+  if (settle) ledgerCli(ledger, "settle", "impl-7", settle);
+  mkdirSync(join(d, "session"));
+  const read = () => JSON.parse(ledgerCli(ledger, "read"));
+  return {
+    d, ledger,
+    bytes: () => readFileSync(ledger, "utf8"),
+    check: (entries = [{ member: "impl-7", session: "session" }]) => {
+      writeFileSync(join(d, "batch.json"), JSON.stringify(entries));
+      return runCli(["--batch", "batch.json", "--repo", d, "--ledger", ledger, "--model-roles", modelRolesFile(d)], d);
+    },
+    row: () => read().rows.find((r) => r.split(/\s/)[0] === "#7"),
+    tick: () => deriveRun({ ...read(), drain: null }, []),
+  };
+}
+
+test("no transcript, member settled: tier-unverifiable is appended once, exit 3, and the tick's unchecked hold clears", () => {
+  const w = noTranscriptWorld();
+  assert.deepEqual(w.tick().tierUnchecked, ["impl-7"]);
+  const r = w.check();
+  assert.equal(r.status, 3, r.stdout + r.stderr);
+  assert.equal(w.row(), "#7 impl-7=killed · tier-unverifiable=impl-7:no-transcript");
+  assert.deepEqual([w.tick().tierUnchecked, w.tick().tierMismatch], [[], []]);
+  const before = w.bytes();
+  assert.equal(w.check().status, 3);
+  assert.equal(w.bytes(), before, "a re-run grew the row");
+});
+
+test("no transcript, member live: still an error — exit 2, nothing written, still unchecked", () => {
+  const w = noTranscriptWorld({ settle: null });
+  const before = w.bytes();
+  const r = w.check();
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /no impl-7\.jsonl found under --session/);
+  assert.equal(w.bytes(), before);
+  assert.deepEqual(w.tick().tierUnchecked, ["impl-7"]);
+});
+
+test("no transcript: a session omitted, empty, missing or not a directory is a usage error for live and settled members alike", () => {
+  for (const settle of [null, "killed"]) {
+    const w = noTranscriptWorld({ settle });
+    const before = w.bytes();
+    for (const session of [undefined, "", "no-such-dir", join("agents", "fleet-implementer.agent.md")]) {
+      const r = w.check([{ member: "impl-7", ...(session === undefined ? {} : { session }) }]);
+      assert.equal(r.status, 2, `${settle} ${JSON.stringify(session)}: ${r.stdout}${r.stderr}`);
+      assert.equal(w.bytes(), before, `${settle} ${JSON.stringify(session)}: the ledger changed`);
+    }
+  }
+});
+
+test("no transcript beside a mismatch in one batch: the mismatch's exit 1 wins over exit 3", () => {
+  const w = noTranscriptWorld();
+  ledgerCli(w.ledger, "dispatch", "8", "impl-8");
+  writeFileSync(join(w.d, "session", "impl-8.jsonl"), ompTranscript("anthropic/claude-sonnet-5", "high", { agent: "fleet-implementer" }));
+  const r = w.check([{ member: "impl-7", session: "session" }, { member: "impl-8", session: "session" }]);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(w.row(), /tier-unverifiable=impl-7:no-transcript/);
+  assert.deepEqual(w.tick().tierMismatch, ["impl-8"]);
+});
+
+test("no transcript: only `killed` and `released` are a failed dispatch — a member settled any way that proves it ran is a wrong session, exit 2", () => {
+  for (const settle of ["killed", "released"]) {
+    const w = noTranscriptWorld({ settle });
+    const r = w.check();
+    assert.equal(r.status, 3, `${settle}: ${r.stdout}${r.stderr}`);
+    assert.equal(w.row(), `#7 impl-7=${settle} · tier-unverifiable=impl-7:no-transcript`);
+  }
+  // A PR, a bail report and a mismatch verdict each prove the member ran and
+  // wrote a transcript, so an existing session directory without it is the
+  // wrong directory — never a verdict that clears the hold unchecked.
+  for (const settle of ["PR#20", "bailed", "tier-mismatch"]) {
+    const w = noTranscriptWorld({ settle });
+    const before = w.bytes();
+    const r = w.check();
+    assert.equal(r.status, 2, `${settle}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`impl-7: settled ${settle} with no impl-7\\.jsonl under --session session — .*name the session directory that dispatched it`));
+    assert.equal(w.bytes(), before, `${settle}: the ledger changed`);
+  }
+});
+
+test("no transcript: a session directory that cannot be searched is exit 2 naming EACCES, never a recorded tier-unverifiable", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root searches every directory");
+  const w = noTranscriptWorld();
+  // The transcript EXISTS — only the search bit is gone.
+  writeFileSync(join(w.d, "session", "impl-7.jsonl"), ompTranscript("anthropic/claude-opus-5", "high", { agent: "fleet-implementer" }));
+  const before = w.bytes();
+  chmodSync(join(w.d, "session"), 0o000);
+  let r;
+  try {
+    r = w.check();
+  } finally {
+    chmodSync(join(w.d, "session"), 0o755);
+  }
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /impl-7: .*EACCES/);
+  assert.equal(w.bytes(), before, "an unsearchable session was recorded as no transcript");
+  assert.deepEqual(w.tick().tierUnchecked, ["impl-7"]);
 });
 
 test("ledger append: a mismatch on a member with no derivable ticket (an omp AgentId) still exits 1 but writes no ledger row", () => {

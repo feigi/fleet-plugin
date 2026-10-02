@@ -338,6 +338,30 @@ phase, or in any later one, asks the maintainer which tickets to take.
    `~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>` (the directory, never
    the `.jsonl` file of the same name beside it).
 
+   **Rotate the ledger before the fold-in below and before shortlisting —
+   every run, whatever way the previous one ended.** One ledger per run:
+   `~/.fleet/bin/fleet-run ledger.mjs rotate` moves the previous run's
+   `.fleet/ledger.md` byte-for-byte to `.fleet/ledger.<UTC
+   YYYY-MM-DDTHHMMSSZ>.md` and leaves none behind, so this run's first write
+   starts the empty skeleton. Nothing is carried forward — no row, exclusion,
+   `## Filed` or `## Ruled` entry — so an unchecked `impl-` row a prior run
+   left behind can no longer hold this run's tick. What an unclean end left in
+   flight comes back through the ordinary per-run path: open PRs through the
+   fold-in below, `behind-pr:`/`behind-issue:` exclusions through phase 1's
+   collision and sequence checks, and a killed member's ticket through a new
+   member under a new name. An exclusion that expires with the run that wrote
+   it (`deferred-to-session-end` and its like) must be restated if it still
+   holds. No ledger is exit 0, nothing to rotate. It refuses — exit 2,
+   nothing moved — when the stamped archive name already exists, and while
+   the heartbeat mark beside the ledger is still beating, naming the last
+   beat and when it would count as stalled; a stalled mark, a recorded
+   `--stop`, or no mark at all lets it rotate. **The guard proves "not
+   beating", never "dead":** a previous controller that is alive but busy
+   outside its heartbeat hold for longer than its recorded interval reads as
+   stalled, and its ledger is rotated out from under it. Run the rotation
+   before this run's own first tick or beat, either of which writes the mark
+   the guard reads. Older archives, hand-named ones included, are left alone.
+
    **Fold in every PR a prior run left open, before shortlisting.** A chore PR
    carrying that run's own metrics, or ticket work whose review was deferred —
    both are reviewable work no member otherwise picks up, because the Shortlist
@@ -973,21 +997,39 @@ declares. The verdict lands on the ledger either way, written by the check
 itself: exit 0 appends `tier-ok=impl-<N>:<definition>` to the row, once
 however often it runs; exit 1 runs `ledger.mjs settle impl-<N> tier-mismatch`
 — or, for a member already settled another way, which `settle` will not
-re-settle, appends `tier-mismatch=impl-<N>:<definition>` instead.
+re-settle, appends `tier-mismatch=impl-<N>:<definition>` instead. Exit 3 is
+the third verdict, `tier-unverifiable=impl-<N>:no-transcript`, appended once
+for a member settled `killed` or `released` anywhere on the ledger — a row
+or `## Dispatched` — whose `session` names an existing directory holding no
+`<member>.jsonl`: a dispatch that failed before a transcript was written. It
+says nothing about the tier and only clears the unchecked hold. Exit 2
+writes nothing — a usage error, which includes a LIVE member with no
+transcript; a member settled `PR#M`, `bailed` or `tier-mismatch` with none,
+which ran, so the `session` is the wrong directory — pass the one that
+dispatched it; a session directory that cannot be searched; and a `session`
+that is omitted, empty, or not an existing directory, live member or settled.
+A batch holding both a mismatch and an unverifiable member exits 1.
 
 **The tick holds the next Pull until that verdict exists.** Dispatching the
 next member on top of an unchecked or mismatched dispatch multiplies whatever
 silently degraded. The tick prints `HOLD (tier unchecked impl-<N>)` for the
-newest `impl-` member of a ticket whose row carries neither verdict, whether
-that member is still running or already settled `bailed`, `killed` or
-`released`, and `HOLD (tier mismatch impl-<N>)` for a mismatched one. Only the
-newest member counts, so a replacement (`impl-<N>-b`) is what clears a
-mismatch — and is then owed its own check. The tick never reads a
+newest `impl-` member of a ticket whose row carries none of the three
+verdicts, whether that member is still running or already settled `bailed`,
+`killed` or `released`, and `HOLD (tier mismatch impl-<N>)` for a mismatched
+one. Only the newest member counts, so a replacement (`impl-<N>-b`) is what
+clears a mismatch — and is then owed its own check. The tick never reads a
 transcript: clear an unchecked hold by running the check on that member with
-`session`, which works after it has settled too, because its
-`<session>/<member>.jsonl` is written at dispatch. Clear a mismatch by fixing
-the definition or the dispatch and dispatching the replacement at the right
-tier.
+`session`. A settled member's check works only when its transcript exists;
+without one, the verdict is `tier-unverifiable` for a member settled `killed`
+or `released`, and exit 2 naming the wrong session for any other. Clear a
+mismatch by fixing the definition or the dispatch and dispatching the
+replacement at the right tier.
+
+**Run the check right after the dispatch, and never reinstall the plugin or
+change `modelRoles` while any member is unchecked.** The check reads the
+installed definition and the live `modelRoles` at check time, not at
+dispatch time, so a late check judges a member against a tier it was never
+dispatched under.
 
 **The batch file is a JSON array, one entry per dispatched member** — under
 Pull, a batch of one, the member just dispatched: `{member, session}`.
@@ -1174,7 +1216,9 @@ supply is one Pull per free slot, so there are no implementer batches. **Append 
 never by hand** (that file's header carries the column meanings). The script
 fills `run_date`, `pr`, `ticket` and `tier` itself — `tier` from what actually
 ran, off the implementer's `tier-ok=` ledger verdict or else its one
-member-outcomes row, and BLANK with a WARNING naming why when neither settles
+member-outcomes row (a `tier-unverifiable=` member has no ledger verdict, so
+its one member-outcomes row decides), and BLANK with a WARNING naming why
+when neither settles
 it; never type a tier in over that. A PR that already has a row is left
 untouched, so re-running it is safe. That append is the whole duty; the guard
 fires on the accumulated file, across runs, not on the run in front of you.
@@ -1611,8 +1655,10 @@ depth** guard table applied in code. Act on each line as it reads:
   unchecked tier, a saturated review side, `--max-reviews` in flight, or every
   queued merge candidate held behind a lower PR or on a conflict hold no
   fix-applier has cleared. The two tier holds are yours to clear — an
-  unchecked tier by running `tier-check.mjs --batch` on the member it names,
-  a mismatch by dispatching the replacement at the right tier (phase 2). Each
+  unchecked tier by running `tier-check.mjs --batch` on the member it names
+  (its `tier-ok=`, or `tier-unverifiable=` for a member settled `killed` or
+  `released` with no transcript, clears it), a mismatch by dispatching the
+  replacement at the right tier (phase 2). Each
   prints its clearing step in the row's detail: the `tier-check.mjs` command
   with a batch entry per member it names (fill in `<file>` and `<session>`),
   or the replacement's name — `impl-<N>-b` on a first retry, else one letter
@@ -3189,7 +3235,8 @@ never as a second, hand-run copy of it.
 Four holds outrank every row: `HOLD (draining)` once `ledger.mjs drain` has
 recorded the drain, `HOLD (tier mismatch impl-<N>)` until a replacement is
 dispatched at the right tier, `HOLD (tier unchecked impl-<N>)` until
-`tier-check.mjs` has written its verdict on the newest implementer, and
+`tier-check.mjs` has written its verdict on the newest implementer —
+`tier-ok=`, `tier-mismatch=` or `tier-unverifiable=` — and
 `HOLD (review side saturated)` when a PR is still owed its review and no
 reviewer slot is left for it — refreshing to enable a Pull you are holding
 buys nothing.
@@ -3482,12 +3529,16 @@ decides whether a replacement redoes or destroys work.
 
 ## Run ledger
 
-One git-ignored `.fleet/ledger.md`, updated at **every** state change via
+One git-ignored `.fleet/ledger.md` per run, updated at **every** state change via
 `~/.fleet/bin/fleet-run ledger.mjs` subcommands (`row`, `filed`, `ruled`,
-`check`, `read`, `dispatch`, `settle`, `drain`). Your context is the least
+`check`, `read`, `dispatch`, `settle`, `drain`, `rotate`). Your context is the least
 durable thing in the run: it compacts, and a controller that loses the dispatch
 map or the filed list redoes finished work. Two duplicate tickets shipped in one
 run from exactly that.
+
+**The file lives one run.** Phase 0 rotates it before anything reads it, so
+no row, exclusion, filing, ruling or drain marker outlives the run that
+wrote it. Never rotate mid-run: it is phase 0's step alone.
 
 One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`):
 
@@ -3530,7 +3581,13 @@ live count from it, so nobody states one. Write neither by hand:
   `#M`'s row is genuinely the fallback (a live or settled PR-bound token on it,
   or nothing at all) rather than an unrelated row that merely shares the key.
 - **`ledger.mjs drain "<reason>"`** — the one drain marker per run; supply
-  stops, the review and merge sides keep going.
+  stops, the review and merge sides keep going. It lives in this run's
+  ledger, so the next run's rotation retires it with everything else.
+- **`ledger.mjs rotate`** — phase 0's first ledger write, every run: moves
+  the file as-is to `ledger.<UTC YYYY-MM-DDTHHMMSSZ>.md` beside it under the
+  same `<file>.lock`, and the next write starts the empty skeleton. Refused
+  while the heartbeat mark is still beating or when the archive name already
+  exists; no ledger is exit 0. Phase 0 states the guard's limit.
 
 `row` refuses a malformed member token anywhere in its text — one whose outcome
 is outside the vocabulary above, e.g. `merge-bot-1=dispatched` — at exit 2,
