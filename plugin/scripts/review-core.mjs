@@ -724,7 +724,7 @@ Report \`repoVerified\` = true ONLY if the last line above printed
 SNAPSHOT_TREE_MATCH; otherwise report it false and put the line it printed
 instead — SNAPSHOT_INIT_FAILED, or the whole SNAPSHOT_TREE_MISMATCH= value with
 both hashes — in \`repoError\`. The init is what makes the snapshot MEASURABLE:
-specialists run this repository's own suite in there, and a suite with tests
+the review runs this repository's own suite in there, and a suite with tests
 that need a working tree reports fewer passes and more failures in a bare
 extraction than in a checkout at the same commit, with nothing in the payload
 saying the measurement happened somewhere else (#1056). The tree-hash compare is
