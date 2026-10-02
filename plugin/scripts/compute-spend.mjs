@@ -111,10 +111,10 @@ export function classifyRole(signals) {
   // Except the pre-cell pair #2129 deleted, `fleet-implementer` and
   // `fleet-implementer-alt`, matched for the same reason the finisher branch
   // keeps old spellings: deliberate compatibility with recorded history.
-  // Measured on docs/metrics/member-outcomes.tsv at #2129: 20 of its 303 rows
-  // under those two definitions carry no `impl-` name (`Impl1133`,
-  // `FixPr1568`, …) and book `implementer` off the definition alone — a
-  // re-scrape of their sessions would move them to "other".
+  // Measured on docs/metrics/member-outcomes.tsv at #2129: 20 of the 303 rows
+  // under those two definitions carried no `impl-` name (`Impl1133`,
+  // `FixPr1568`, …) and booked `implementer` off the definition alone — a
+  // re-scrape of their sessions would have moved them to "other".
   //
   // One definition under that prefix is NOT fan-out: `fleet-review-runner`
   // (#1802) is the member that HOLDS an omp review — dispatched as
