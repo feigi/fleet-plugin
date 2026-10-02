@@ -530,9 +530,8 @@ test("the header's `run_date` source claims still hold against the query, the sc
   // The floor's numbers, as the paragraph quotes them. It names figures it
   // does not own; a threshold changed in SKILL.md alone leaves this header
   // quietly citing the old one.
-  const guard = unemphasized(RUN_TEAM);
   assert.match(
-    guard,
+    unemphasized(RUN_TEAM),
     phrase("there are at least ten of them across five or more distinct `run_date`s"),
     "SKILL.md's pairing floor is no longer ten pairs across five dates — the header quotes those numbers",
   );

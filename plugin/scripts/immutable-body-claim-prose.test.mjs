@@ -1,10 +1,11 @@
 // A claim written into a commit body or a PR body needs its settling command
 // re-run at the commit that ships it, written inline beside it, because a
 // pushed body cannot be edited and none of the diff-scoped rules reach it. The
-// rule itself, the anti-count rule and the literal-text `-F` rule live in the
-// claim-discipline block every implementer agent body carries; run-team's
-// SKILL.md keeps the rationale paragraph and the two settling-command
-// paragraphs that follow it. This file pins both homes.
+// rule itself and the literal-text `-F` rule live in the claim-discipline block
+// every implementer agent body carries; run-team's SKILL.md keeps the rationale
+// paragraph and the two settling-command paragraphs that follow it. This file
+// pins both homes. The same block's anti-count rule is pinned in
+// `fix-applier-correction-rules-prose.test.mjs`, as one ordered span.
 //
 // Measured against `origin/main` before this file existed: no test read the
 // words `commit body` in `run-team/SKILL.md` at all, so the whole rule could be
@@ -152,22 +153,11 @@ test("the rationale says why every implementer gets the discipline and why a bod
   );
 });
 
-test("the agent body hands every implementer the commit/PR-body rule and the count rule", () => {
-  const d = discipline();
+test("the agent body hands every implementer the commit/PR-body rule", () => {
   assert.match(
-    d,
+    discipline(),
     phrase("Every claim in a commit body or PR body gets its settling command re-run at the commit that ships it, written inline beside the claim"),
     "the agent body no longer carries the commit/PR-body rule",
-  );
-  assert.match(
-    d,
-    phrase("Never write a count or tally into present-tense prose; state the property instead"),
-    "the agent body lost the anti-count rule",
-  );
-  assert.match(
-    d,
-    phrase("A past-tense record of a measurement you performed stays as written"),
-    "the agent body's count rule lost its past-tense carve-out",
   );
 });
 

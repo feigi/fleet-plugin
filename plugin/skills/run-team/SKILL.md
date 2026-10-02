@@ -2674,10 +2674,11 @@ no verified suite run on record` and add no label.
 
 **Every implementer body carries the claim discipline, because tickets that
 restate facts ship new wrong claims** — inherited from the ticket, and minted
-in prose nobody asked for. It was measured on tickets that set out to correct
-nothing: an unasked-for comment asserting a silent-failure mode that does not
-exist, a false comparative plus positional references replacing a name-based
-one, and two present-tense counts already false when they were written.
+in prose nobody asked for. It was measured on tickets that would have been
+judged routine too: an unasked-for comment asserting a silent-failure mode
+that does not exist, a false comparative plus positional references replacing
+a name-based one, and two present-tense counts already false when they were
+written.
 Nothing before dispatch can see the diff, so the discipline goes to every
 implementer. A pushed commit body cannot be edited, so its claims are settled
 at write time. See references/correction-tickets.md.
