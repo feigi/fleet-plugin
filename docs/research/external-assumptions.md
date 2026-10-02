@@ -47,7 +47,7 @@ refuses, misreads, or silently does nothing.
 **CI / merge gate**
 
 - The repository ruleset on the default branch *is* the gate (ADR 0007): `strict_required_status_checks_policy: true`, `required_approving_review_count: 0`, `bypass_actors: []`, required contexts `rebase-check`, `check`, `validate-release-label`, `smoke-omp`, `install-and-smoke`, each pinned to integration id 15368 (GitHub Actions). Renaming a job strands PRs. — shell#13–19, prose#51–55
-- A full CI cycle is ~5–6 minutes; every wait-cell timeout in the runbook (omp `eval` cells, 900–1000 s) is sized from that. — prose#61, prose#158
+- A full CI cycle is ~5–6 minutes; every wait-cell timeout in the runbook is sized from that (omp `eval` cells: ≥900 s for the rebase poll, ≥1000 s for the grace, "well above the CI cycle" for the CI wait). — prose#61, prose#158
 
 **Consumer repo**
 
