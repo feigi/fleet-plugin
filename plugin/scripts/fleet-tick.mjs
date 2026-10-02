@@ -423,16 +423,23 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   // One entry per member name across `## Dispatched` and every row. A member
   // settled ANYWHERE is settled: `settle` is the only writer of an outcome, and
   // a bare copy beside it is what a whole-line `row` rewrite leaves behind.
+  // The one narrowing (#2391): a PR-bound member (`fix-pr-M`, `finisher-pr-M`)
+  // speaks for PR #M alone, so its outcome counts off `## Dispatched` or off
+  // PR #M's own row, never off another PR's — `dispatch` and `settle` write it
+  // onto PR #M's row only, so a settled copy elsewhere is a hand-written stray
+  // that must not mark PR #M's own live member settled. `rowPr` is the row's
+  // PR (`undefined` for `## Dispatched`, which is no PR's row); a stray's token
+  // still creates the member, live, as before.
   const members = new Map();
-  const note = (t, where) => {
+  const note = (t, where, rowPr) => {
     if (t.error) throw new LedgerError(`${where}: ${t.name}: ${t.error}`);
     const m = members.get(t.name) ?? { name: t.name, family: t.family, number: t.number, outcome: null };
-    if (t.outcome !== null) m.outcome = t.outcome;
+    if (t.outcome !== null && (t.bound !== "pr" || rowPr === undefined || t.number === rowPr)) m.outcome = t.outcome;
     members.set(t.name, m);
   };
   // A fix-applier's outcome as its landing reads it (#2329): off `##
   // Dispatched` and its own PR's rows only, so a settled stray on another
-  // PR's row lends its owner no landing. `members` still takes every copy.
+  // PR's row lends its owner no landing.
   const fixOutcome = new Map();
   for (const e of dispatched) {
     const t = parseToken(e);
@@ -517,7 +524,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     for (const tok of text.split(/\s+/).filter(Boolean)) {
       const t = parseToken(tok);
       if (t) {
-        note(t, where);
+        note(t, where, pr);
         // A settled `failed`/`killed` fix-applier leaves survivors or a
         // conflict unfixed and no successor dispatched — the PR stays fix-due
         // for a `-b` replacement. Only a live attempt, or one that actually
