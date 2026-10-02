@@ -1,10 +1,11 @@
-// #2342. The disposition record and its gate, as the prose states them to the
+// The disposition record and its gate, as the prose states them to the
 // two seats that act on it: review-and-fix.md step 2 tells the fix-applier to
 // write `<scratch>/dispositions-<pr>.json` and what passes, and run-team's
 // gate paragraph tells the controller when `ledger.mjs dispatch` refuses a
 // finisher and what each refusal asks of it. The fix-applier prompt block that
-// restates the record is pinned whole by dispatch-block-golden-prose.test.mjs;
-// these two paragraphs sit outside every `>` block, so nothing else holds them.
+// restates the record is a `>` block, which the dispatch-block golden fixture
+// pins whole; these two paragraphs sit outside every `>` block, so nothing
+// else holds them.
 //
 // THE CEILING: presence pins over bounded slices, each a contiguous clause —
 // the rule and its condition in one span, so an inverted verdict (`ok` →
