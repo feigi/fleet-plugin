@@ -52,8 +52,8 @@ const SCRATCH = join(BASE, "scratch");
 mkdirSync(SCRATCH);
 const ELSEWHERE = repo(join(BASE, "elsewhere"));
 
-const IMPL = { kind: "sub", id: "impl-42", name: "fleet-implementer", depth: 1, parentId: "Main" };
-const ALT = { ...IMPL, name: "fleet-implementer-alt" };
+const IMPL = { kind: "sub", id: "impl-42", name: "fleet-implementer-slow-high", depth: 1, parentId: "Main" };
+const OTHER_CELLS = ["slow-medium", "task-high", "task-max", "smol-high"].map((cell) => ({ ...IMPL, name: `fleet-implementer-${cell}` }));
 const REVIEWER = { kind: "sub", id: "review-pr-9.Correctness", name: "fleet-review-correctness", depth: 2, parentId: "review-pr-9" };
 const FINISHER = { kind: "sub", id: "finisher-pr-9", name: "fleet-finisher", depth: 1, parentId: "Main" };
 const CHILD = { kind: "sub", id: "impl-42.Probe", name: "task", depth: 2, parentId: "impl-42" };
@@ -147,7 +147,10 @@ test("a fix-applier dispatched under the generic `task` definition is guarded by
 test("bash: an implementer is refused from the main checkout, never from its worktree; nobody else is", async () => {
   const r = await refused(IMPL, "bash", { command: "git status" }, ROOT, "implementer bash with no cwd");
   assert.ok(r.includes(REAL_ROOT), `the bash refusal does not name the cwd it resolved: ${r}`);
-  await refused(ALT, "bash", { command: "true" }, ROOT, "implementer-alt bash with no cwd");
+  for (const cell of OTHER_CELLS) await refused(cell, "bash", { command: "true" }, ROOT, `${cell.name} bash with no cwd`);
+  // The bash rule is closed to the `CELL` grammar: a `fleet-implementer-`
+  // name outside it is no implementer definition, and keeps the inherited cwd.
+  await allowed({ ...IMPL, id: "probe-1", name: "fleet-implementer-probe" }, "bash", { command: "true" }, ROOT, "a non-cell fleet-implementer- name");
   await refused(IMPL, "bash", { command: "true", cwd: "plugin" }, ROOT, "a relative cwd inside the main checkout");
   await refused(IMPL, "bash", { command: "true", cwd: ROOT }, WT, "an explicit cwd at the main checkout root");
   await refused(IMPL, "bash", { command: "true", cwd: join(ROOT, ".worktrees") }, ROOT, "cwd at the bare .worktrees directory itself, not a worktree under it");

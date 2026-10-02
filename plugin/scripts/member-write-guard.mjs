@@ -33,9 +33,9 @@
 //     ignored in a fleet repo, so worktrees, run state and agent-brain's cache
 //     stay writable, and what is protected is exactly what the main
 //     checkout's `git status` would show dirty (#2210 watches the same set).
-//   - `bash` cwd, for `fleet-implementer`/`fleet-implementer-alt`, and for a
-//     fix-applier's own id (`fix-pr-<n>`) directly, since a fix-applier is
-//     NOT dispatched as `fleet-implementer` today: refuse when
+//   - `bash` cwd, for every `fleet-implementer-<cell>` (ledger-grammar.mjs's
+//     `CELL_DEF`), and for a fix-applier's own id (`fix-pr-<n>`) directly,
+//     since a review fix-applier is a generic `task`: refuse when
 //     `input.cwd ?? ctx.cwd` lies inside the main checkout outside
 //     `.worktrees/`. Command text is never parsed. Review specialists and
 //     refuters are REQUIRED to start from the inherited cwd (`pwd` first,
@@ -68,11 +68,11 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { CELL_DEF } from "./ledger-grammar.mjs";
 
 /** The task names the controller gives fleet members; a subagent whose parent carries one is a member's child, and a fix-applier — dispatched under a generic `task` definition with no `fleet-` prefix — is caught by its own id matching this directly. */
 const MEMBER_TASK_NAME = /^(impl|fix-pr|review-pr|finisher-pr)-\d+(-[a-z])?$/;
 const FIX_APPLIER_ID = /^fix-pr-\d+(-[a-z])?$/;
-const BASH_CWD_AGENTS = new Set(["fleet-implementer", "fleet-implementer-alt"]);
 const PATH_WRITERS = new Set(["write", "edit", "ast_edit"]);
 const GIT_TIMEOUT_MS = 10_000;
 const REISSUE = "Re-issue it with an absolute path under your worktree `.worktrees/<n>-<slug>/`.";
@@ -82,7 +82,7 @@ function applies(agent, toolName) {
   if (agent?.kind !== "sub") return false;
   const name = typeof agent.name === "string" ? agent.name : "";
   const id = typeof agent.id === "string" ? agent.id : "";
-  if (toolName === "bash") return BASH_CWD_AGENTS.has(name) || FIX_APPLIER_ID.test(id);
+  if (toolName === "bash") return CELL_DEF.test(name) || FIX_APPLIER_ID.test(id);
   return PATH_WRITERS.has(toolName)
     && (name.startsWith("fleet-") || MEMBER_TASK_NAME.test(id)
       || (typeof agent.parentId === "string" && MEMBER_TASK_NAME.test(agent.parentId)));
