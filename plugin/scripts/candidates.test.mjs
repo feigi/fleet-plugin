@@ -39,7 +39,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripComments } from "./strip-comments.mjs";
-import { between } from "./prose-pin.mjs";
+import { between, phrase } from "./prose-pin.mjs";
 import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./candidates.mjs", import.meta.url));
@@ -1970,6 +1970,30 @@ function declaredLabelFlag() {
   return flags[0][1];
 }
 
+// Which carriers of this flag's spelling carry a pin through this function,
+// and what a rename owes the ones that deliberately do not (#1196).
+//
+// The line is LIVE versus FROZEN, never value-bearing versus bare. Every live
+// carrier is pinned — a shipped skill or command, a live doc, and a contract
+// table edited in place, which is live whatever date its file is named for —
+// and a bare `candidates.mjs --<flag>` counts as much as one carrying a value:
+// left behind by a rename, it still names a flag that no longer exists, in a
+// file that is read as current. A rename edits each live carrier in place,
+// with no note, and its pin reds until it does.
+//
+// Frozen records — an accepted ADR's body, a dated spec's narrative, a
+// supersession note — stay unpinned, because a rename's correct handling of
+// them never touches the line a pin would read, so a pin there could only red
+// on a rename it cannot see handled. What a rename owes each kind:
+//   - a dated spec: a supersession note, never a silent swap. The old spelling
+//     now names an invocation this script refuses at exit 2, which is the
+//     behavioural contradiction #257 lets a dated record be corrected for —
+//     the note at the head of the run-team design spec (#240) is the shape.
+//   - an accepted ADR: an `Amended by #N: …` on its `**Status:**` line, its
+//     body left as ruled (AGENTS.md, *ADR amendments*).
+// The one pin on a dated spec below stays: it protects a correction #240
+// already made in place, rather than freezing a record.
+
 test("the run-team design spec's candidate-scan step names the flag this script declares", () => {
   const DECLARED_LABEL_FLAG = declaredLabelFlag();
   // The step alone, for the reason the run-team pin above gives: a match
@@ -1997,17 +2021,16 @@ test("the run-team design spec's candidate-scan step names the flag this script 
   );
 });
 
-// --- #851: another live carrier of the flag spelling, and not the last
-// carrier nothing asserts on. `git grep -l -- --require-label docs skills`
-// lists the carriers; several are unpinned, filed as #1196 — measured by
-// rewriting `docs/specs/2026-07-23-fleet-plugin-design.md`'s value-bearing
-// `[--require-label L]` synopsis row to `[--label L]`, which leaves this whole
-// suite green. `next-ticket/SKILL.md` earns a pin here because it is what a
-// solo caller reads to run the scan, and `--label` is what `gh issue list`
-// accepts, so it is the plausible thing to write and the thing this script
-// refuses at exit 2. Derived from `OPTIONS`, through the same guarded
-// `declaredLabelFlag()` the run-team design-spec pin uses, so a rename of the
-// flag reddens here instead of minting the next hand-copied spelling.
+// --- #851: the next-ticket carrier. `git grep -n -- --require-label docs
+// plugin` lists every carrier of this flag's spelling, pinned and unpinned
+// alike; which ones carry a pin, and why the rest deliberately do not, is the
+// rule above `declaredLabelFlag()`. `next-ticket/SKILL.md` earns a pin here
+// because it is what a solo caller reads to run the scan, and `--label` is
+// what `gh issue list` accepts, so it is the plausible thing to write and the
+// thing this script refuses at exit 2. Derived from `OPTIONS`, through the
+// same guarded `declaredLabelFlag()` the run-team design-spec pin uses, so a
+// rename of the flag reddens here instead of minting the next hand-copied
+// spelling.
 //
 // What gets pinned is the TOKEN inside the candidate step, not the invocation
 // that carries it. Measured, both legs: deleting that step's only fenced block
@@ -2085,6 +2108,157 @@ test("the next-ticket pin reds on the refused spelling and stays green on text i
   );
   assertScanRunsDeclaredFlag(unwrapped, "an unwrapped next-ticket/SKILL.md");
   assertScanRunsDeclaredFlag(rewrapped, "a rewrapped next-ticket/SKILL.md");
+});
+
+// --- #1196: the remaining live carriers, one pin each, by the rule above
+// `declaredLabelFlag()`. Each pin takes the text rather than reading the file,
+// for the reason `assertScanRunsDeclaredFlag` gives, and each has a
+// discrimination test that reds it on the refused spelling and keeps it green
+// on the real text.
+//
+// The fleet-plugin design spec's script-surface table is a live contract,
+// edited in place row by row, not a dated record — so its `candidates.mjs` row
+// is pinned like any shipped file, and a rename edits it with no note.
+const SPEC_PLUGIN_DESIGN = readFileSync(
+  fileURLToPath(new URL("../../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+  "utf8",
+);
+
+// The lookup candidates-exit3-prose.test.mjs's `candidatesRow()` makes, over
+// a text passed in. A local copy rather than an import: importing a test
+// module registers every test in it a second time in this process.
+function candidatesRow(text, where) {
+  const line = text.split("\n").find((l) => l.startsWith("| `candidates.mjs` |"));
+  assert.ok(line, `${where}'s script-surface table no longer has a \`candidates.mjs\` row — update this test`);
+  return line;
+}
+
+// Two tokens, both pinned: the In cell's synopsis and the Non-zero cell's
+// exit-2 cause. Either one alone renamed is a refused spelling in the row a
+// reader copies, and a positive on one cannot see the other.
+function assertRowNamesDeclaredFlag(text, where) {
+  const flag = declaredLabelFlag();
+  const row = candidatesRow(text, where);
+  assert.ok(
+    row.includes(`[--${flag} L]`),
+    `${where}'s candidates row no longer names --${flag} in its In cell, the label flag candidates.mjs' OPTIONS declares`,
+  );
+  assert.ok(
+    row.includes(`without \`--${flag}\``),
+    `${where}'s candidates row no longer names --${flag} in its \`--allow-fallback\` exit-2 cause`,
+  );
+  // The row carries no `gh` invocation, so nothing in it spells `--label`
+  // correctly and a row-wide negative is safe.
+  assert.doesNotMatch(row, /--label\b/, `${where}'s candidates row names \`--label\`, which candidates.mjs refuses at exit 2`);
+}
+
+test("the fleet-plugin design spec's candidates row names the flag this script declares", () => {
+  assertRowNamesDeclaredFlag(SPEC_PLUGIN_DESIGN, "the fleet-plugin design spec");
+});
+
+test("the candidates-row pin reds on either token renamed alone and stays green on the real row", () => {
+  const flag = declaredLabelFlag();
+  for (const [from, to, which] of [
+    [`[--${flag} L]`, "[--label L]", "the In cell"],
+    [`without \`--${flag}\``, "without `--label`", "the Non-zero cell"],
+  ]) {
+    assert.ok(SPEC_PLUGIN_DESIGN.includes(from), `the spec no longer carries ${which}'s "${from}" — this mutant now tests nothing`);
+    assert.throws(
+      () => assertRowNamesDeclaredFlag(SPEC_PLUGIN_DESIGN.replace(from, to), "the mutant"),
+      /the mutant's candidates row/,
+      `the pin does not red when only ${which} is given the spelling this script refuses`,
+    );
+  }
+  assertRowNamesDeclaredFlag(SPEC_PLUGIN_DESIGN, "the real spec");
+});
+
+// The two component docs, each sliced to its candidate-scan list item. Matched
+// through `phrase()` so a rewrap of the item stays green; the negative names
+// `candidates.mjs` so it reads the invocation, not any `--label` near it.
+const COMPONENT_SCANS = [
+  ["next-ticket.md", "1. **List candidates**", "\n2. **Filter.**"],
+  ["supply-and-shortlist.md", "1. **Scan.**", "\n2. **Filter**"],
+].map(([file, from, to]) => ({
+  where: `docs/components/${file}`,
+  text: readFileSync(fileURLToPath(new URL(`../../docs/components/${file}`, import.meta.url)), "utf8"),
+  from,
+  to,
+}));
+
+function assertComponentScanNamesDeclaredFlag({ text, from, to }, where) {
+  const flag = declaredLabelFlag();
+  const item = between(text, from, to, where);
+  assert.match(
+    item,
+    phrase(`candidates.mjs --${flag} ready-for-agent`),
+    `${where}'s candidate-scan item no longer runs the label flag candidates.mjs' OPTIONS declares`,
+  );
+  assert.doesNotMatch(
+    item,
+    /candidates\.mjs\s+--label\b/,
+    `${where}'s candidate-scan item names \`candidates.mjs --label\`, which candidates.mjs refuses at exit 2`,
+  );
+}
+
+for (const doc of COMPONENT_SCANS) {
+  test(`${doc.where}'s candidate scan names the flag this script declares`, () => {
+    assertComponentScanNamesDeclaredFlag(doc, doc.where);
+  });
+
+  test(`the ${doc.where} pin reds on the refused spelling and stays green on the real text`, () => {
+    assert.throws(
+      () =>
+        assertComponentScanNamesDeclaredFlag(
+          { ...doc, text: doc.text.replaceAll(`--${declaredLabelFlag()}`, "--label") },
+          "the mutant",
+        ),
+      /the mutant's candidate-scan item/,
+      "the pin does not red when the candidate-scan item is given the spelling this script refuses",
+    );
+    assertComponentScanNamesDeclaredFlag(doc, doc.where);
+  });
+}
+
+// review-and-fix step 5 names the flag BARE — `candidates.mjs --<flag>`, no
+// value — and is pinned all the same: live, shipped, read as current. The
+// negative names `candidates.mjs` rather than `/--label\b/`, because this same
+// step correctly runs `gh issue create --label`, `gh`'s own flag.
+const REVIEW_AND_FIX = readFileSync(join(import.meta.dirname, "..", "commands", "review-and-fix.md"), "utf8");
+
+function assertDeferralStepNamesDeclaredFlag(text, where) {
+  const flag = declaredLabelFlag();
+  const step5 = between(text, "5. File each deferred finding", "\n6. Diff-check green", `${where} step 5`);
+  assert.match(
+    step5,
+    new RegExp(`${phrase(`candidates.mjs --${flag}`).source}(?![\\w-])`),
+    `${where}'s step 5 no longer names the label flag candidates.mjs' OPTIONS declares`,
+  );
+  assert.doesNotMatch(
+    step5,
+    /candidates\.mjs\s+--label\b/,
+    `${where}'s step 5 names \`candidates.mjs --label\`, which candidates.mjs refuses at exit 2`,
+  );
+}
+
+test("review-and-fix's deferral step names the flag this script declares", () => {
+  assertDeferralStepNamesDeclaredFlag(REVIEW_AND_FIX, "review-and-fix.md");
+});
+
+test("the review-and-fix pin reds on the refused spelling and stays green beside gh's own --label", () => {
+  assert.throws(
+    () =>
+      assertDeferralStepNamesDeclaredFlag(REVIEW_AND_FIX.replaceAll(`--${declaredLabelFlag()}`, "--label"), "the mutant"),
+    /the mutant's step 5/,
+    "the pin does not red when step 5 is given the spelling this script refuses",
+  );
+  // GREEN on the real step, which carries a legitimate `--label` — the input
+  // a looser negative would wrongly refuse.
+  assert.match(
+    between(REVIEW_AND_FIX, "5. File each deferred finding", "\n6. Diff-check green", "review-and-fix.md step 5"),
+    /gh issue create --label/,
+    "review-and-fix step 5 no longer carries gh's own `--label` — this control now proves nothing",
+  );
+  assertDeferralStepNamesDeclaredFlag(REVIEW_AND_FIX, "review-and-fix.md");
 });
 
 test("the cockpit spec's gh invocation keeps the flag gh accepts", () => {
