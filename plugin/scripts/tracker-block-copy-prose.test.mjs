@@ -1,5 +1,5 @@
 // #374. `docs/agents/issue-tracker.md` reproduces the implementer issue-read
-// block — since #1804 carried by the body of `agents/fleet-implementer.agent.md`
+// block — since #1804 carried by the body of `agents/fleet-implementer-<cell>.agent.md`
 // (spec 2026-09-24 § 2 Decision 2), which each harness injects as the member's
 // system prompt; before that, by a `>` quote block in `run-team/SKILL.md`'s
 // phase 2 — and the copy has fallen behind that block
@@ -64,7 +64,7 @@ const REPO = join(import.meta.dirname, "..");
 const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
 // The body alone — everything after the frontmatter's closing `---`. Named
 // SKILL for the history above: this was run-team/SKILL.md's phase 2 until #1804.
-const SKILL = read("agents", "fleet-implementer.agent.md").split("---").slice(2).join("---");
+const SKILL = read("agents", "fleet-implementer-slow-high.agent.md").split("---").slice(2).join("---");
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const TRACKER = readFileSync(join(REPO_ROOT, "docs", "agents", "issue-tracker.md"), "utf8");
 
@@ -150,7 +150,7 @@ function block(text, what, end) {
   return slice.join("\n");
 }
 
-const source = (text = SKILL) => block(text, "agents/fleet-implementer.agent.md", SKILL_END);
+const source = (text = SKILL) => block(text, "agents/fleet-implementer-slow-high.agent.md", SKILL_END);
 const copy = (text = TRACKER) => block(text, "docs/agents/issue-tracker.md", TRACKER_END);
 
 // Each side's own raw bytes, for the fixtures below to mutate. Both throw,

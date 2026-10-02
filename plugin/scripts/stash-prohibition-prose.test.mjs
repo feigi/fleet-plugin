@@ -101,7 +101,7 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 // 2026-09-24 § 2 Decision 2): the body is what each harness injects as the
 // member's system prompt, and SKILL.md's phase 2 no longer re-pastes it. The
 // fix-applier's copy is still a quote block in SKILL.md's Reviewers section.
-const IMPLEMENTER_BODY = readFileSync(join(REPO, "agents", "fleet-implementer.agent.md"), "utf8").split("---").slice(2).join("---");
+const IMPLEMENTER_BODY = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8").split("---").slice(2).join("---");
 
 // `>` gutter and `**` emphasis stripped, whitespace collapsed — mirrors
 // `dispatch-block-pins-prose.test.mjs`'s `flatten`, so a pin here survives the

@@ -327,7 +327,7 @@ test("the dispatch brief tells the member to emit the Sizing line the ruling ste
   // apart from the reader above so dropping either end reds. The brief is the
   // implementer agent body since #1804 (spec 2026-09-24 § 2 Decision 2) — the
   // member's system prompt, where run-team's phase 2 used to paste it.
-  const brief = readFileSync(join(REPO, "plugin", "agents", "fleet-implementer.agent.md"), "utf8").split("---").slice(2).join("---");
+  const brief = readFileSync(join(REPO, "plugin", "agents", "fleet-implementer-slow-high.agent.md"), "utf8").split("---").slice(2).join("---");
   assert.match(
     brief,
     /`Sizing: light` or `Sizing: heavy`/,

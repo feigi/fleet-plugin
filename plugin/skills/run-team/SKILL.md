@@ -660,7 +660,7 @@ terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
    two independent tickets.
 6. **Claim** — `~/.fleet/bin/fleet-run claim-ticket.sh <N> impl-<N> implementer
    --apply` (below). Exit 2 → treat it as taken, next entry.
-7. **Row, then dispatch** — `ledger.mjs row <N> "impl-<N>[ · tier=alt]"`,
+7. **Row, then dispatch** — `ledger.mjs row <N> "impl-<N>[ · tier=<cell>]"`,
    then phase 2 at once: claim what you are about to dispatch;
    dispatch what you have just claimed.
 
@@ -899,8 +899,8 @@ before the member is live; fix the row with `row` first.
 unattended-member block, the `edit`/`read` absolute-path rule (#1727), the
 issue re-read and re-derive backstop, commit incrementally, no `git stash`, the
 shared `eval` kernel (#1447), enumerate-and-declare, sizing and the PR steps —
-is the body of `agents/fleet-implementer.agent.md`, byte-identical in
-`agents/fleet-implementer-alt.agent.md`, and each harness injects it as the
+is the body of every `agents/fleet-implementer-<cell>.agent.md`, byte-identical
+across all of them, and each harness injects it as the
 member's system prompt. Never re-paste it. The prompt fills that body's
 placeholders — the ticket number, the worktree abs path and branch
 (`<abs-path>`, `<branch>`), the scratch path `<scratch>/impl-<N>/`, and the
@@ -941,8 +941,8 @@ never a demotion.
 
 **Dispatch every implementer with the `agent` that `ledger.mjs dispatch`
 printed, and still omit `model` on the `task` call.** The
-tier lives in that definition's frontmatter (`agents/fleet-implementer.agent.md`
-for a row with no `tier=`), which is what an
+tier lives in that definition's frontmatter (`agents/fleet-implementer-<cell>.agent.md`;
+`slow-high`, the policy cell, for a row with no `tier=`), which is what an
 omitted `model` takes first — the session's tier applies only when the definition
 names none, and a member dispatched with `model` set does not get the declared
 tier back. Omitting `model` is therefore still the mechanism; what changed is
@@ -953,9 +953,9 @@ spend classifier and `member-outcomes.mjs` read it.
 **After every Pull's dispatch, run the tier check — a scripted step, never a
 prose reminder.** `~/.fleet/bin/fleet-run tier-check.mjs --batch <path-to-batch.json>`
 judges the implementer just dispatched on the ledger's terms. The definition it
-should have run under comes off its ticket row's `tier=` token: none means
-`fleet-implementer`, `tier=<x>` means `fleet-implementer-<x>` (`tier=alt` →
-`fleet-implementer-alt`) — the same mapping `ledger.mjs dispatch` prints its
+should have run under comes off its ticket row's `tier=` token: none means the
+policy cell, `fleet-implementer-slow-high`; `tier=<cell>` means
+`fleet-implementer-<cell>` — the same mapping `ledger.mjs dispatch` prints its
 `agent` from, so a call that names the printed `agent` passes this half. It
 fails the member two ways, one line each —
 `member: dispatched <agent>, expected <definition>` when its transcript says
@@ -1026,16 +1026,20 @@ ADR 0014).
 
 Before the run's first dispatch run `~/.fleet/bin/fleet-run tier-roles.mjs
 --check`; exit 1 names every definition whose `model:` is not a route,
-every unset `modelRoles.<role>` a definition needs, and every
+every unset `modelRoles.<role>` a definition needs, every definition whose
+`:<level>` its role's target does not run at (omp's model catalog — omp
+would clamp it silently), and every
 `task.agentModelOverrides` entry that would shadow a fleet definition,
 prints the exact remedy, and **stops the run** before any member is
 dispatched — the fleet reads that config and never writes it (ADR 0003).
 
-**Every 5th Pull by ledger count goes at the alternate tier.** Count the `impl-`
+**Every 5th Pull by ledger count goes at an exploration cell.** Count the `impl-`
 rows in `.fleet/ledger.md` at Pull time; the Pull that creates row 5, 10, 15 …
-records `tier=alt` in the row, and a replacement inherits the row's tier —
+records `tier=<cell>` in the row, and a replacement inherits the row's tier —
 written at the Pull's step 7, ahead of `ledger.mjs dispatch`, which reads it
-and prints `fleet-implementer-alt` as the `agent` to dispatch. The
+and prints `fleet-implementer-<cell>` as the `agent` to dispatch. Until the
+router draws the cell (spec 2026-09-28 § 2), `<cell>` is `task-high` — the
+retired alternate tier's own `@task:high` route. The
 assignment rolls to the next Pull when another open ticket sequences after
 it — a ticket the rest of the run
 depends on. Do not tell the member it is a control: a member that
@@ -3473,7 +3477,7 @@ One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`):
 ```
 #332 impl-332=PR#344 → PR#344 → MERGED 73b356de
 #324 impl-324=PR#346 → PR#346 · fix-pr-346 · ports=16324 · ruled:6-applies · held-behind:#313
-#351 impl-351 · tier=alt
+#351 impl-351 · tier=task-high
 #358 excluded · behind-pr:#346
 #360 excluded · behind-issue:#351
 ```
@@ -3489,7 +3493,7 @@ live count from it, so nobody states one. Write neither by hand:
   implementer's comes off its row's `tier=` (phase 2's tier check states the
   mapping), a finisher's and a merge bot's are their own definitions, a
   review fix-applier's is `null`, and a conflict-hold fix-applier's is
-  `fleet-implementer`: its own section says how it is dispatched. It
+  `fleet-implementer-slow-high`: its own section says how it is dispatched. It
   refuses a name this run already used (a replacement takes `-b`, `-c` …), a
   second live member on one ticket or PR, any implementer once the run is
   draining, an implementer whose row's `tier=` names no single definition
@@ -3523,7 +3527,7 @@ naming the token and writing nothing, because every reader would take it as a
 permanent settle.
 
 `→ PR#M` stays as the human-readable arrow; the tick reads only the `=`
-tokens. `tier=alt` marks the every-5th-Pull member (phase 2), and `excluded ·
+tokens. `tier=<cell>` marks the every-5th-Pull member's cell (phase 2), and `excluded ·
 behind-pr:#M | behind-issue:#M` is an Exclusion (phase 1) — a ticket row like
 any other, never a section of its own.
 

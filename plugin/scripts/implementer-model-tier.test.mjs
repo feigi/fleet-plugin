@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { between as section } from "./prose-pin.mjs";
+import { CELL } from "./ledger-grammar.mjs";
 
 // Implementers dispatch at the tier their DEFINITION declares, never one the
 // controller passes: the dispatch rule omits `model` and names the definition
@@ -63,7 +64,7 @@ test("phase 2 dispatches every implementer at its definition's tier, and says so
   );
   assert.match(
     slice,
-    /agents\/fleet-implementer\.agent\.md/,
+    /agents\/fleet-implementer-<cell>\.agent\.md/,
     "phase 2 no longer says WHERE the declared tier lives",
   );
   // `name` is orthogonal to `agent` and is what confers team membership —
@@ -159,51 +160,56 @@ test("phase 2's append duty is mandatory and per PR", () => {
 
 // ---------------------------------------------------------------------------
 // THE DECLARATION ITSELF. Every pin above reads SKILL.md, so a tier changed in
-// `agents/fleet-implementer.agent.md` leaves all of them green while the
-// dispatched tier flips — the same silent drift they exist to catch, routed
-// around the document they read. That hazard is why the declaration arrived
-// with these three.
-const frontmatterOf = (name) =>
-  readFileSync(join(REPO, "agents", `${name}.agent.md`), "utf8").split("---")[1] ?? "";
+// an `agents/fleet-implementer-<cell>.agent.md` leaves all of them green while
+// the dispatched tier flips — the same silent drift they exist to catch,
+// routed around the document they read. That hazard is why the declaration
+// arrived with these pins, and why they walk every implementer definition on
+// disk rather than a list of names: a cell added tomorrow is pinned the day it
+// lands (spec 2026-09-28 § 2).
+const AGENTS = join(REPO, "agents");
+const PREFIX = "fleet-implementer-";
+const implementers = () =>
+  readdirSync(AGENTS).filter((f) => f.startsWith("fleet-implementer") && f.endsWith(".agent.md")).map((f) => f.slice(0, -".agent.md".length)).sort();
+const fileOf = (name) => readFileSync(join(AGENTS, `${name}.agent.md`), "utf8");
+const frontmatterOf = (name) => fileOf(name).split("---")[1] ?? "";
 
-test("the implementer definition declares a model carrying both a role and a level", () => {
+test("every implementer definition is named for a cell and declares exactly the route its name derives", () => {
   // The declaration is one key, `model: "@<role>:<level>"` — the level rides
   // on the model's own suffix (ADR 0014), so there is no second key to omit
   // independently and leave the level inherited from whatever session
-  // dispatched the member.
-  const fm = frontmatterOf("fleet-implementer");
-  assert.match(fm, /^model:\s*"@(slow|task|smol):(minimal|low|medium|high|xhigh|max)"$/m, "the implementer definition declares no tier route");
-});
-
-test("the declared model is a fleet tier route, never a vendor id — both definitions", () => {
-  // A vendor id rots into a superseded generation that is weaker AND
-  // dearer: pricing falls with each generation. The role alias tracks
-  // whatever model the operator's `modelRoles` currently points it at.
-  // Both definitions, not just the default: #1345's dispatch-time tier
-  // check compares this same field on fleet-implementer-alt, and a vendor
-  // id there would fail the role-target comparison silently reading as a
-  // real mismatch rather than a declaration defect.
-  for (const name of ["fleet-implementer", "fleet-implementer-alt"]) {
-    const model = /^model:\s*"?(\S+?)"?$/m.exec(frontmatterOf(name))?.[1];
-    assert.match(model, /^@(slow|task|smol):(minimal|low|medium|high|xhigh|max)$/, `${name}: not a tier route: ${model}`);
+  // dispatched the member. A route, never a vendor id: a vendor id rots into
+  // a superseded generation that is weaker AND dearer, while the role alias
+  // tracks whatever `modelRoles` currently points it at. And the route is the
+  // NAME's: tier-check judges a `tier=<cell>` row against the definition that
+  // cell names, so a file whose route disagrees with its name runs every row
+  // at a cell nobody drew.
+  const names = implementers();
+  assert.ok(names.includes(`${PREFIX}slow-high`), `the policy cell's definition is missing: ${names.join(", ")}`);
+  for (const name of names) {
+    const cell = name.slice(PREFIX.length);
+    assert.ok(name.startsWith(PREFIX) && CELL.test(cell), `${name}.agent.md is not named fleet-implementer-<cell> — nothing is named fleet-implementer alone`);
+    const [role, level] = cell.split("-");
+    const fm = frontmatterOf(name);
+    assert.match(fm, new RegExp(`^model: "@${role}:${level}"$`, "m"), `${name}.agent.md does not declare model: "@${role}:${level}"`);
+    assert.match(fm, new RegExp(`^name: ${name}$`, "m"), `${name}.agent.md's name: is not its file name`);
   }
 });
 
-test("the definition lists no tools — a list would drop dispatch capability", () => {
+test("every implementer definition lists no tools — a list would drop dispatch capability", () => {
   // references/member-lifecycle.md's "Every member is named" section: the
   // name is the ledger token and the hub address — a `tools:` list that
   // narrows what the member can call costs it silently, with no error.
   // Omit the key.
-  assert.doesNotMatch(frontmatterOf("fleet-implementer"), /^tools:/m);
+  for (const name of implementers()) assert.doesNotMatch(frontmatterOf(name), /^tools:/m, name);
 });
 
 // ADR 0014's ruling records the layer-1 (#1314) key set for every fleet
 // agent file: `name`, `description`, `model` — the level no longer rides a
-// separate key. This file only pins the two implementer definitions #1345's
+// separate key. This file only pins the implementer definitions #1345's
 // dispatch-time tier check reads — #1314 owns the general checker over
 // every agent file in the tree.
-test("both implementer definitions carry all three required keys", () => {
-  for (const name of ["fleet-implementer", "fleet-implementer-alt"]) {
+test("every implementer definition carries all three required keys", () => {
+  for (const name of implementers()) {
     const fm = frontmatterOf(name);
     for (const key of ["name", "description", "model"]) {
       assert.match(fm, new RegExp(`^${key}:\\s*\\S`, "m"), `${name}.agent.md declares no ${key}`);
@@ -211,9 +217,20 @@ test("both implementer definitions carry all three required keys", () => {
   }
 });
 
-// The alt definition differing from the default in ROLE ONLY is pinned in
-// within-run-pair-prose.test.mjs's "the alternate definition differs from
-// the default in ROLE ONLY, the level stays shared" — not repeated here.
-// That test already asserts the level suffix is shared and the role alone
-// diverges; duplicating it here would just be a second copy to keep in
-// sync with the same two files.
+test("every implementer definition's body is byte-identical (#1801)", () => {
+  // #1801 moved the shared implementer background into the definitions'
+  // BODIES, on the premise that a member reads its own agent.md body as
+  // `§ Role` whichever prompt dispatched it (measured on #1777: omp injects
+  // the body verbatim). A body that drifts between cells dispatches
+  // differently-briefed implementers under one label, and a cell comparison
+  // then measures the brief as well as the model — silently: the frontmatter
+  // pins above read one line each. Exact string equality over the whole body
+  // is the tightest pin this claim admits; nothing benign satisfies it by
+  // accident.
+  const body = (name) => fileOf(name).split("---").slice(2).join("---");
+  const [first, ...rest] = implementers();
+  assert.ok(rest.length > 0, "fewer than two implementer definitions — nothing to compare");
+  for (const name of rest) {
+    assert.equal(body(name), body(first), `${name}'s body has diverged from ${first}'s — the shared background must be pasted identically into every cell`);
+  }
+});

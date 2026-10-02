@@ -32,7 +32,7 @@ const step7 = () =>
 // since #1804 moved the blocks there out of run-team's phase 2
 // (spec 2026-09-24 § 2 Decision 2); the same slice `member-prompt-prose.test.mjs`
 // takes, for the same reason.
-const memberBlocks = () => read("agents", "fleet-implementer.agent.md").split("---").slice(2).join("---");
+const memberBlocks = () => read("agents", "fleet-implementer-slow-high.agent.md").split("---").slice(2).join("---");
 
 const finisherLabelDuty = () =>
   between(RUN_TEAM, "Add `ready-to-merge`", "A halt at step 1 reads identical from a bare SHA mismatch", "run-team finisher duty 3");

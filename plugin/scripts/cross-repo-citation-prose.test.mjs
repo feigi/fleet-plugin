@@ -12,7 +12,7 @@ import { join } from "node:path";
 // implementer agent body carries, and the applied instance where the foreign
 // evidence sits.
 const REPO = join(import.meta.dirname, "..");
-const AGENT = readFileSync(join(REPO, "agents", "fleet-implementer.agent.md"), "utf8");
+const AGENT = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8");
 const CORRECTIONS = readFileSync(
   join(REPO, "skills", "run-team", "references", "correction-tickets.md"),
   "utf8",
