@@ -629,12 +629,14 @@ test("build: an internal fault exits 70 with a stack, where a refusal exits 2 wi
 // ledger read, then `gh`) and can take single-digit SECONDS on a loaded
 // machine, against ~50ms once the OS/file caches are warm (measured on this
 // machine) — noise far larger than the retry loop's own cost. A discarded
-// warm-up run of the IDENTICAL fixture before both timed runs cancels that
+// warm-up run of the IDENTICAL fixture before the timed pairs cancels that
 // noise; what is left is the loop's own cost. Measured on this machine: the
 // real loop adds ~300-360ms over a from-/dev/null baseline of the same
-// fixture; a body that calls writeSync once and swallows the exception adds
-// ~20-30ms. FAULT_RETRY_FLOOR_MS sits an order of magnitude above the
-// bare-call ceiling and well under the real loop's floor.
+// fixture; a body that calls writeSync once and swallows the exception added
+// ~20-30ms in that single pre-change sample, which is not a bound.
+// FAULT_RETRY_FLOOR_MS sits several times above that bare-call figure and
+// below the real loop's lowest delta measured after #2385 (216ms, below), so
+// the margin on the real-loop side is narrow.
 //
 // #2385: one sample of each was not enough on a loaded CI runner, where a
 // real loop measured BASE=0.221 SAT=0.370 — 149ms, one under the floor.
@@ -642,8 +644,10 @@ test("build: an internal fault exits 70 with a stack, where a refusal exits 2 wi
 // FAULT_TIMING_PAIRS interleaved baseline/saturated pairs and compares the
 // fastest of each: one slow tick no longer moves either side. Measured on
 // this machine after the change: the real loop's fastest-vs-fastest delta
-// read 216-429ms, and a bare-call body's read -45 to +6ms, idle and with two
-// `yes > /dev/null` per core running alike.
+// read 216-429ms. A bare-call body's read -244 to +127ms across repeated
+// runs on a host that was never idle (load average 80-140 on 14 cores, some
+// runs with two `yes > /dev/null` per core added) — the sign flips from run
+// to run, so that delta is noise, not a cost.
 const FAULT_RETRY_FLOOR_MS = 150;
 const FAULT_TIMING_PAIRS = 5;
 
