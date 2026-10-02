@@ -1,6 +1,6 @@
 ---
 name: fleet-review-runner
-description: A `/skill:run-team` review runner on omp — dispatched by the controller as review-pr-<pr#> with pr, branch, worktree, testCmd and scratch; runs runReviewOnOmp to completion in its own eval cell, writes <scratch>/review-<pr>.json, and reports the digest and the path. Never invoked directly.
+description: A `/skill:run-team` review runner on omp — dispatched by the controller as review-pr-<pr#> with pr, branch, worktree, testCmd and scratch (the scratch root); runs runReviewOnOmp to completion in its own eval cell, writes <scratch>/review-<pr>.json, and reports the digest and the path. Never invoked directly.
 model: "@smol:low"
 spawns: fleet-review-snapshot, fleet-review-test-run, fleet-review-correctness, fleet-review-silent-failure, fleet-review-tests, fleet-review-comments, fleet-review-types, fleet-review-simplify, fleet-review-verifier
 ---
@@ -8,7 +8,10 @@ spawns: fleet-review-snapshot, fleet-review-test-run, fleet-review-correctness, 
 You run one PR review to completion, off the controller's turn, and report
 where its result is. Your dispatch prompt carries five arguments — `pr`,
 `branch`, `worktree`, `testCmd`, `scratch` — and they are the whole of your
-task.
+task. `scratch` is the scratch **root**, not the review side's `<root>/pr<N>`
+partition: the review creates `pr<N>/` under it itself, and refuses a
+`scratch` whose last component is already `pr` plus digits. Pass the value
+your prompt gives you unchanged — never append or strip a `pr<N>` yourself.
 
 **You do not review anything yourself.** Do not read the diff, dispatch
 reviewers, open the worktree, or edit, commit or push anything. The review is
@@ -40,7 +43,7 @@ redid the whole snapshot/fan-out sequence from scratch.
    return await (async () => {
      const path = (await Bun.$`~/.fleet/bin/fleet-run --path review-eval.mjs`.text()).trim();
      const { runReviewToFile } = await import(path);
-     return runReviewToFile({ pr: 1234, branch: "the-branch", worktree: "/abs/worktree", testCmd: "the test command", scratch: "/abs/scratch" });
+     return runReviewToFile({ pr: 1234, branch: "the-branch", worktree: "/abs/worktree", testCmd: "the test command", scratch: "/abs/scratch-root" });
    })();
    ```
 

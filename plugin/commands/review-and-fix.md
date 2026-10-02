@@ -66,7 +66,7 @@ jq '.refuted' "$R"                                               # refuted: your
 
 **The controller runs the review; everything below is the fallback for when it cannot.**
 
-`eval` loading `scripts/review-eval.mjs` through the Resolver (`fleet-run --path review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})` is the fleet's **default** review path.
+`eval` loading `scripts/review-eval.mjs` through the Resolver (`fleet-run --path review-eval.mjs`) and calling `runReviewOnOmp({pr, branch, worktree, testCmd, scratch})` is the fleet's **default** review path. Its `scratch` is the scratch root, never `<scratch>/pr<N>`: the review creates that partition itself and refuses a `scratch` already ending in one.
 
 `$(~/.fleet/bin/fleet-run --root)/skills/run-team/SKILL.md`'s Reviewers section owns its dispatch. It cuts the snapshot, sizes the fan-out, adversarially verifies every **critical/important** finding, and has `agent()` return **into the script**, so no report can go undelivered, the failure that cost one fleet five reports on one PR and four on another. It does **not** verify the `suggestion` band — that gets 0 refuters by policy, which is why step 2 checks each in-scope one itself before applying it, and files the rest. **You cannot run it** — the one member that runs it is the `review-pr-<pr#>` runner (`agents/fleet-review-runner.agent.md`), never a reader of this file; this section is the fallback for a member dispatched without it, the `review-pr-<pr#>-b` reviewer the controller sends after a review failed twice included.
 
