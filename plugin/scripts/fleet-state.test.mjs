@@ -13,7 +13,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, linkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -211,6 +211,39 @@ test("writeState: a write that cannot land leaves no temp file behind", () => {
   assert.equal(writeState(path, "fleet-state-test", readState(path, "fleet-state-test"), { quiet: 1 }), false);
   assert.deepEqual(readdirSync(dir), ["heartbeat.json"]);
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("writeState: two scripts writing the file at once both land — neither takes the other's temp", async () => {
+  // fleet-tick and fleet-heartbeat both write heartbeat.json, each its own
+  // process. A temp name the two share lets one rename the other's temp out
+  // from under it, and the loser's rename fails on ENOENT — a reported write
+  // failure that fleet-heartbeat treats as a fire (#531's race, ledger.mjs's
+  // own temp). Timing decides only whether the two loops overlap, never
+  // whether correct code passes: two pid-named temps cannot collide. Measured
+  // with the shared name `${path}.tmp` instead, it failed on each of six runs.
+  const dir = mkdtempSync(join(tmpdir(), "fleet-state-concurrent-"));
+  const path = join(dir, "heartbeat.json");
+  const writer = `
+    const { readState, writeState } = await import(${JSON.stringify(new URL("./fleet-state.mjs", import.meta.url).href)});
+    let fails = 0;
+    for (let i = 0; i < 300; i++) {
+      if (!writeState(${JSON.stringify(path)}, "writer", readState(${JSON.stringify(path)}, "writer"), { digest: String(i).repeat(500) })) fails++;
+    }
+    console.log(fails);
+  `;
+  const run = () => new Promise((resolve) => {
+    const child = spawn(process.execPath, ["--input-type=module", "-e", writer]);
+    let out = "", err = "";
+    child.stdout.on("data", (d) => { out += d; });
+    child.stderr.on("data", (d) => { err += d; });
+    child.on("close", (status) => resolve({ status, out: out.trim(), err }));
+  });
+  const results = await Promise.all([run(), run()]);
+  rmSync(dir, { recursive: true, force: true });
+  for (const r of results) {
+    assert.equal(r.status, 0, r.err);
+    assert.equal(r.out, "0", `writes failed under a concurrent writer:\n${r.err}`);
+  }
 });
 
 test("assessBeat: staleness is judged against the RECORDED interval, not a constant", () => {
