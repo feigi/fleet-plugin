@@ -508,11 +508,11 @@ function rawOffset(text, unemphasizedOffset) {
 
 // The offset of an anchor that must occur EXACTLY ONCE, asserted by count because
 // a search takes the FIRST match silently, so an un-gutter'd restatement of the
-// anchored block ABOVE the real one — the
-// shape this repo's prose already uses where a phase quotes a member prompt back
-// at itself — binds the pin to the copy while the real rule is gutted. A
-// blockquoted copy is harmless (`\s+` cannot span the `>` gutter); a plain one is
-// not. A missing anchor throws rather than widening, for `paragraph`'s reason.
+// anchored block ABOVE the real one — the shape this repo's prose already uses
+// where a phase quotes a member prompt back at itself — binds the pin to the copy
+// while the real rule is gutted. A blockquoted copy is harmless (`\s+` cannot
+// span the `>` gutter); a plain one is not. A missing anchor throws rather than
+// widening, for `paragraph`'s reason.
 //
 // Split out of `paragraph` rather than left inside it because a slice whose END
 // bound is not a blank line needs the same guarantee and must not copy it:

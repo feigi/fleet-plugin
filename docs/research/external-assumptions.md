@@ -127,11 +127,11 @@ omp is the only harness (ADR 0014). The tool vocabulary the fleet leans on:
 | result | auto-delivered; `hub jobs`/`wait` snapshot |
 | shell ceiling | auto-backgrounds at ~60 s (`bash.autoBackground`) — long waits go in Python `eval` |
 | transcripts | `~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>/<member>.jsonl` (home-relative, dots kept) — harness#61, #84 |
-| tier | `model: "@<slow\|task\|smol>:<level>"`; role-routed via `modelRoles.{slow,task,smol}`; `session_init.resolvedModelIdentity` is provider-prefixed — harness#21, #24 |
+| tier | `model: "@<slow\|task\|smol>:<level>"`; role-routed via `modelRoles.{slow,task,smol}`; `session_init.resolvedModelIdentity` is provider-prefixed — harness#21, #24, #76; prose#124 |
 | usage | one `usage` per turn, `usage.cost.total` real — harness#75, #88 |
 | tool blocks | `toolCall`/`toolResult`, ids `toolu_…` — harness#83 |
 
-Frontmatter (`frontmatter-allowlist.json`, harness#19–28): agent `name` must match
+Frontmatter (`frontmatter-allowlist.json`, harness#19–26): agent `name` must match
 `^fleet-[^:]*$`; agent `model` must match `^@(slow|task|smol):(minimal|low|medium|high|xhigh|max)$`;
 `effort`, `thinking-level`/`thinking`, `prewalk`/`advisor` and `isolation` are
 forbidden on agents; `alwaysApply` is forbidden on skills and commands, which are
