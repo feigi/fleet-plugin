@@ -1982,9 +1982,10 @@ review's own in-run retry, and **resume beats handing a crash-heavy review
 on**: a deferred crash is a finding nobody ever looked at.
 No replay exists for a review that ran in a runner's own kernel — `resume` is reported, not acted on, and the fix-applier defers what it names.
 `refuted` comes back deliberately as well — a refutation is itself a claim, and
-one has been reversed on new evidence. The fix-applier may reverse one; its
-report lists every refutation it reversed, and you copy those to the ledger's
-`ruled` line.
+one has been reversed on new evidence. The fix-applier may reverse one; it
+records each reversal as a `refuted` entry in its disposition record, the
+evidence in `reason`, and you copy those entries to the ledger's `ruled` line
+(the Fix-applier report edge).
 
 **`dimensionsRun` is the dispatch; `dimensionsUnrun` is what names a gap.** A
 specialist that dies contributes zero findings while its key stays in
@@ -2414,7 +2415,14 @@ unchecked` — no verdict answers that head: run `dispositions-check.mjs` for
 the fix-applier that answered the review, as the Fix-applier report edge
 states, then dispatch again. `dispositions mismatch` — no finisher: post the
 check's output, which names each violating entry, with `gh pr comment <M>`, and
-flag the PR for a human; re-running the check reprints it.
+flag the PR for a human; re-running the check reprints it. **On any PR with a
+returned review, `0/<n>/0` included, it refuses too while a fix-applier on the
+PR is still live, verdict or not** —
+`fix-pr-<M>[-x] still live`: settle it, run the check for it, then dispatch
+again. That is what keeps a re-review at the same head from being answered by
+the earlier round's verdict while the fix-applier answering the new round is
+still working; once its check has run, its verdict, from the higher suffix, is
+the current one.
 
 **An unanswered question from the member is an outbox item, and it blocks
 dispatch with the same weight as a ruling you have already made.** It does not
