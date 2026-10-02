@@ -3298,7 +3298,9 @@ ticket over a failure a re-run would have cleared.
 held by another worktree, or strands the feature worktree on `main`. After the
 merge, `delete-merged-branch.sh <pr>` deletes the branch from `origin` and reads
 the deletion back; `reap.sh` takes the `[gone]` local branch and its worktree.
-No repo setting is relied on to do it (#2196).
+No repo setting is relied on to do it (#2196). A branch another open PR still
+uses as its head or base is kept instead — `branch-kept-#<that PR>` in the bot's
+report, a deliberate keep and not a failure (#2295).
 
 **Never force a rebase to start.** No `git clean`, `git checkout .`,
 `git reset --hard`, `git stash`. Uncommitted changes may exist nowhere else.

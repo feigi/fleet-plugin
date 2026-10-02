@@ -48,6 +48,14 @@ test("step 4 deletes the head branch itself and reports a failed delete", () => 
   assert.doesNotMatch(step4(), /GitHub removes the remote branch anyway/);
 });
 
+// #2295: exit 3 is a deliberate keep — another open PR uses the branch — and
+// step 4 must say so, or a bot reads it as one more failure to report or retry.
+test("step 4 treats a kept branch as a keep, never a failure or a retry", () => {
+  assert.match(step4(), /\*\*Exit 3 the branch is kept on purpose — another open PR uses it as its head or its base\*\*/);
+  assert.match(step4(), /one `branch-kept-#<pr>` line per such PR/);
+  assert.match(step4(), /A deliberate keep, not a failure: never retry it, and never report it as `branch-delete-failed`/);
+});
+
 test("the drop runs only after the merge is confirmed, never before", () => {
   assert.match(step4(), /call this only after the merge is confirmed/);
 });
