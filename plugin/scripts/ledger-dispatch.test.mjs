@@ -387,6 +387,49 @@ test("row still writes well-formed member tokens and non-member keys", (t) => {
   assert.deepEqual(read().rows, rows.map(([n, text]) => `#${n} ${text}`));
 });
 
+// #2331: `label-off=<attempt>` marks the controller's own removal of
+// `ready-to-merge`, so the tick does not read it as a finisher's miss. One
+// naming no finisher this run ever had would hide a real miss behind a record
+// of nothing, so `row` refuses it — locally, off `## Dispatched` and the rows'
+// member tokens, the same two places dispatch's live-sibling check reads.
+test("row refuses a label-off naming no finisher this run has, writing nothing", (t) => {
+  const { ok, read, refused } = fixture(t);
+  ok("dispatch", "10", "impl-10");
+  ok("settle", "impl-10", "PR#40");
+  ok("dispatch", "40", "finisher-pr-40");
+  const before = read().rows;
+  for (const [tok, why] of [
+    ["label-off=finisher-pr-40-b", /'label-off=finisher-pr-40-b' names no finisher-pr member/], // never dispatched
+    ["label-off=finisher-pr-41", /'label-off=finisher-pr-41'/], // another PR's, never dispatched
+    ["label-off=impl-10", /'label-off=impl-10' names no finisher-pr member/], // a member, not a finisher
+    ["label-off=finisher-pr-40=labelled", /'label-off=finisher-pr-40=labelled'/], // a token, not a name
+    ["label-off=", /'label-off='/],
+  ]) {
+    refused(["row", "10", `impl-10=PR#40 → PR#40 · finisher-pr-40 ${tok}`], why);
+  }
+  // The new line's own copy of a name does not vouch for it.
+  refused(["row", "10", "impl-10=PR#40 → PR#40 · finisher-pr-40-c=labelled label-off=finisher-pr-40-c"], /'label-off=finisher-pr-40-c'/);
+  assert.deepEqual(read().rows, before);
+});
+
+test("row accepts a label-off naming a finisher in ## Dispatched or on any row, settled or live", (t) => {
+  const { ok, read } = fixture(t);
+  ok("dispatch", "10", "impl-10");
+  ok("settle", "impl-10", "PR#40");
+  ok("dispatch", "40", "finisher-pr-40");
+  ok("settle", "finisher-pr-40", "labelled");
+  // In `## Dispatched`.
+  ok("row", "10", "impl-10=PR#40 → PR#40 · finisher-pr-40=labelled label-off=finisher-pr-40");
+  // Only on a row — a token `row` wrote never enters `## Dispatched`.
+  ok("row", "50", "finisher-pr-50");
+  ok("row", "50", "finisher-pr-50 label-off=finisher-pr-50");
+  assert.deepEqual(read().rows, [
+    "#10 impl-10=PR#40 → PR#40 · finisher-pr-40=labelled label-off=finisher-pr-40",
+    "#50 finisher-pr-50 label-off=finisher-pr-50",
+  ]);
+  assert.deepEqual(read().dispatched, ["impl-10=PR#40", "finisher-pr-40=labelled"]);
+});
+
 // #1876: the tick owes an open PR a review while its implementer is still
 // live, so a PR-bound member can be dispatched before `settle impl-N=PR#M`
 // names the PR on the ticket row. dispatch's fallback then keys a row of its
