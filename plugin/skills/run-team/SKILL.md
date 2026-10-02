@@ -1709,7 +1709,10 @@ exactly what the last one said, which is what makes an unattended night
 affordable; a tick on any other wake is read by a controller that just acted and
 needs the rows. An unchanged `PULL` or `DISPATCH` is never folded — unclaimed work
 always prints in full, because folding it would hide the stall behind this
-ticket's own remedy.
+ticket's own remedy. A dirty or unknown main checkout still folds — clearing it
+is the maintainer's, so it is nothing for you to act on — but the folded line
+names it (`…; HOLD (main checkout dirty) persists — …`) for as long as it holds
+dispatch.
 
 **When you stop on purpose, say why — one command, and it is the last thing
 you owe the next run.** The beat leaves a dated mark on every hold, so a run
