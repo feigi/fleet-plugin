@@ -24,9 +24,9 @@ const RUN_MERGE_BOT = readFileSync(join(REPO, "commands", "run-merge-bot.md"), "
 // The reason string belongs to ci-state.mjs, so read it from ci-state.mjs: renaming
 // it there reddens these pins too, instead of leaving both documents quoting a
 // string the source no longer emits. Captures the template's literal head only —
-// everything before `${missing.join(...)}`, which no document can contain.
+// everything before the `${missing…}` interpolation, which no document can contain.
 const CI_STATE = readFileSync(join(import.meta.dirname, "ci-state.mjs"), "utf8");
-const ABSENT_REASON = (CI_STATE.match(/reasons\.push\(`([^`$]+)\$\{missing\.join/) ?? [])[1];
+const ABSENT_REASON = (CI_STATE.match(/reasons\.push\(`([^`$]+)\$\{missing\./) ?? [])[1];
 
 // Each claim is ONE contiguous span (prose-pin.mjs's convention), because
 // keywords bound only by the slice were not enough: with the `pending`

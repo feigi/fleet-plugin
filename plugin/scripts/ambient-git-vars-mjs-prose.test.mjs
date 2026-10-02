@@ -36,7 +36,7 @@
 // What this file does NOT pin: per-site behaviour, or that EVERY git-naming
 // line in a COVERED file individually reaches `gitEnv(`. That lives in each
 // file's own test file, behaviourally — ledger.test.mjs, pr-overlap.test.mjs,
-// repo-root.test.mjs, ci-state.test.mjs, staleness.test.mjs — where a mutation
+// repo-root.test.mjs, staleness.test.mjs — where a mutation
 // that deletes any ONE of a multi-site file's scrub calls (repo-root.mjs
 // carries three separate ones) reds exactly the fixture built for that site
 // and leaves its siblings green; that per-site isolation is what a source
@@ -141,10 +141,9 @@ const countGitEnvCalls = (src) =>
 // `gitEnv()` — this ticket's fix. Each value is the exact number of
 // `gitEnv(` call EXPRESSIONS the file's own code carries today, derived once
 // by reading it rather than guessed, and written out rather than computed
-// from the git-call count above: the two numbers disagree on purpose in the
-// two files with a wrapper indirection (ci-state.mjs's `tryRun`,
-// staleness.mjs's `git`), where several named call sites share ONE spawn
-// primitive and therefore one scrub.
+// from the git-call count above: the two numbers disagree on purpose in
+// staleness.mjs, whose `git` wrapper is ONE spawn primitive several named
+// call sites share, and therefore one scrub.
 const COVERED_MJS = {
   // Three separate `spawnSync`/`execFileSync` calls, no shared wrapper —
   // `isTrackedBy()`, `repoRoot()`, `trackedFiles()` (behind all three of
@@ -155,16 +154,9 @@ const COVERED_MJS = {
   // on BOTH — no half here is inert the uniform way
   // `ambient-git-vars-prose.test.mjs`'s `inflight.sh`/`derive-testcmd.sh` are.
   "repo-root.mjs": 3,
-  // ONE spawn primitive (`tryRun`), reused for both this file's named git
-  // call sites (`workflowsPath()`'s rev-parse, the behind-count block's
-  // `remote get-url origin`) and for every `gh` call in the file — scrubbing
-  // once at the primitive protects both, and is harmless for `gh`, which
-  // reads neither name.
-  "ci-state.mjs": 1,
   // ONE spawn primitive (`git(args)`), reused for all four of this file's
   // named git call sites (`rev-parse --show-toplevel`, then three `-C root`
-  // calls) — same shape as ci-state.mjs's `tryRun`, one scrub for the whole
-  // set.
+  // calls) — one scrub for the whole set.
   "staleness.mjs": 1,
   // ONE spawn primitive, `trackedBasenameCounts()`'s own `git ls-files -z`.
   "pr-overlap.mjs": 1,

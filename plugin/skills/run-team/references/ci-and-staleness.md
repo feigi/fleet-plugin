@@ -27,12 +27,13 @@ elsewhere. Tell members monitor event is wake-up, never verdict — they re-quer
 ## `no-ci`: absence is its own verdict, never green and never red
 
 Third verdict `ci-state.mjs` emits, alongside `green`/`not-green`. Only genuine
-absence earns it: no `.github/workflows/` directory, or one holding no workflow
-files. Every failure to *read* a workflow — directory unreadable, target
-unreadable, files present under names other than `--workflow`, two readable
-files sharing that name, no resolvable repo root — is exit 2, "could not be
-answered", never `no-ci`. So a repo whose CI is merely misconfigured can never
-borrow the declarable verdict.
+absence earns it, judged at the PR's base commit: no `.github/workflows/`
+directory there, or one holding no workflow files. Every failure to *read* a
+workflow — the path not a directory, a workflow blob not read whole, files
+present under names other than `--workflow`, two files sharing that name, no
+GitHub repository gh resolves from the cwd's git remotes — is exit 2, "could
+not be answered", never `no-ci`. So a repo whose CI is merely misconfigured
+can never borrow the declarable verdict.
 
 Absence never means pass. `no-ci` alone exits **1**, same bucket as `not-green`
 — nothing to be green, and not red either. Exit 0 comes only with the caller's

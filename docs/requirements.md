@@ -23,7 +23,7 @@ supported ([ADR 0009](adr/0009-supported-platforms-are-macos-linux-wsl.md)). All
 ### 1.2 `gh` authentication — HARD
 - Logged in (`gh auth status`) with `repo` scope to the GitHub host that owns your repo.
 - All members and the controller share this identity; no per-actor attribution.
-- GitHub Enterprise: works; `ci-state.mjs` derives `--hostname` from `git remote get-url origin`.
+- GitHub Enterprise: works; `ci-state.mjs` takes `--hostname` from `gh repo view`'s resolution of the cwd's repository.
 
 ### 1.3 omp with fleet plugin — HARD
 Install: `omp plugin install @feigi/fleet-ctl` per [README → Installation](../README.md#installation).
