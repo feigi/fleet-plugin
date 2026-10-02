@@ -549,6 +549,9 @@ test("a run dispatched under PascalCase names scrapes into rows tier-outcomes ch
     // book it implementer — implementerRows() filters on role as well as ticket.
     ["Impl333", [sessionEvt("/x"), thinkingEvt("high"), sessionInitEvt("Ticket 333"), assistantEvt("claude-opus-5")]],
     ["FixPr774", [sessionEvt("/x"), thinkingEvt("high"), sessionInitEvt("Apply the findings"), assistantEvt("claude-opus-5")]],
+    // No `session_init` line at all, so neither `task` nor `agent` exists: only
+    // the canonical-stem gate in ompMemberRecord lets the name classify it.
+    ["Impl340", [sessionEvt("/x"), thinkingEvt("high"), assistantEvt("claude-opus-5")]],
   ]);
   const work = tempDir("mo-tier-");
   const members = join(work, "member-outcomes.tsv");
@@ -559,6 +562,7 @@ test("a run dispatched under PascalCase names scrapes into rows tier-outcomes ch
     Impl327: "implementer ticket=327 pr=",
     Impl333: "implementer ticket=333 pr=",
     FixPr774: "reviewer ticket= pr=774",
+    Impl340: "implementer ticket=340 pr=",
   });
 
   const check = (tier) => {
