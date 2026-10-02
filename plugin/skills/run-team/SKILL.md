@@ -1980,7 +1980,7 @@ report recovery, never the exit code alone.
 The tick names every PR owed one — `DISPATCH review PR#<M>`, oldest first —
 and each gets one review, once per PR:
 
-a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the same five args — it loads `review-eval.mjs` through the Resolver (`~/.fleet/bin/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file and reports; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call.
+a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt the five args `pr`, `branch`, `worktree`, `testCmd` and `scratch` — it loads `review-eval.mjs` through the Resolver (`~/.fleet/bin/fleet-run --path review-eval.mjs`), awaits `runReviewOnOmp` in its own kernel, writes the result file and reports; record `review=member:review-pr-<pr#>` on the PR's row before the dispatch call. **`scratch` is the scratch root itself, never the review side's `<scratch>/pr<N>` partition:** the review creates `pr<N>/` under it, so a `pr<N>` passed in nests every run root at `pr<N>/pr<N>/`, and the review refuses a `scratch` whose last component is `pr` plus digits before dispatching anything.
 
 Write the `review=` token with `ledger.mjs row`, which **replaces the whole
 line**, so carry every other field. The tick counts in-flight reviews off the
@@ -3408,11 +3408,13 @@ failures arrive as *wrong findings*, not errors:
   materialization failure. See references/isolation.md.
 - **Scratchpad paths need two levels — the member's own partition, then one
   directory per child it dispatches — and nothing outside them.** An
-  implementer partitions at `<scratch>/impl-<N>/`, the review side at
-  `<scratch>/pr<N>/…`; any member that dispatches a child writes an absolute
-  directory under its own partition into that child's prompt, one per child
-  and never shared, and a child never derives its own. Finding ids restart at 1
-  every review, so two fix-appliers on different PRs both reach for `unv1`; one
+  implementer partitions at `<scratch>/impl-<N>/`; the review side's partition
+  is `<scratch>/pr<N>/…`, which the review core creates itself, so a review
+  runner is handed the scratch root, never that partition; any member that
+  dispatches a child writes an absolute directory under its own partition into
+  that child's prompt, one per child and never shared, and a child never
+  derives its own. Finding ids restart at 1 every review, so two fix-appliers
+  on different PRs both reach for `unv1`; one
   agent overwrote a sibling's `package.json`, and a probe built a git repo at
   the *checkout root*. Read from the object store at a pinned ref, write only
   under your own path. See references/isolation.md.

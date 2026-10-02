@@ -6,6 +6,10 @@
 //   const { runReviewOnOmp } = await import(path);
 //   const result = await runReviewOnOmp({ pr, branch, worktree, testCmd, scratch });
 //
+// `scratch` is the scratch ROOT, never the review side's `<root>/pr<N>`:
+// runReview creates `pr<N>/` under it itself, and refuses a scratch that
+// already ends in one (#2323).
+//
 // Since #1802 the cell that does this is the `review-pr-<pr#>` member's own —
 // agents/fleet-review-runner.agent.md, off the controller's turn — and it calls
 // `runReviewToFile` (bottom of this file), which wraps `runReviewOnOmp` with the
@@ -28,7 +32,7 @@
 // strings are.
 import { mkdir, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import { digestOf, runReview, runnerPrRefusal } from "./review-core.mjs";
+import { digestOf, runReview, runnerPrRefusal, runnerScratchRefusal } from "./review-core.mjs";
 
 // eval's `agent()` returns a HANDLE, not data (#1296 Q2): `agent(prompt,
 // opts)` resolves near-instantly to an `AgentHandle` with `.wait()`, and only
@@ -146,9 +150,10 @@ export async function runReviewOnOmp(args) {
 // reviewer's name (`review-pr-<pr>-b`), and writes no file, so nothing reads a
 // half-review as a review. A dispatch mistake — a pr that is not a PR number, a
 // scratch that is not absolute (eval's cwd is the MAIN CHECKOUT, so a relative
-// one would put the file there) — throws before any run: it is not a review
-// failure, and retrying or falling back would only repeat it. `run` is the seam
-// the test injects; nothing else passes it.
+// one would put the file there), a scratch that already ends in `pr<N>` (#2323)
+// — throws before any run: it is not a review failure, and retrying or falling
+// back would only repeat it. `run` is the seam the test injects; nothing else
+// passes it.
 export async function runReviewToFile(args, run = runReviewOnOmp) {
   const pr = args?.pr;
   const scratch = args?.scratch;
@@ -157,6 +162,8 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
   if (typeof scratch !== "string" || !isAbsolute(scratch)) {
     throw new Error(`review-runner: args.scratch must be an absolute path, got ${JSON.stringify(scratch)}`);
   }
+  const scratchRefusal = runnerScratchRefusal(scratch);
+  if (scratchRefusal) throw new Error(`review-runner: ${scratchRefusal}`);
   const errors = [];
   for (let attempt = 1; attempt <= 2; attempt++) {
     let result;

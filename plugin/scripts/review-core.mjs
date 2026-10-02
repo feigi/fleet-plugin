@@ -22,9 +22,10 @@
 // `null`, which every guard here — `if (snap) {...}`, `unrunCrashed`,
 // `verdictFor` — is written against).
 //
-// ONE import, added by #878: arg.mjs's isDigits(). This file is an ordinary
+// Two imports. arg.mjs's isDigits(), added by #878: this file is an ordinary
 // module, so it consumes the repo's digits rule directly rather than
-// declaring its own copy.
+// declaring its own copy. node:path's `posix`, added by #2323, to normalise a
+// scratch path before `runnerScratchRefusal` reads its last component.
 //
 // `.mjs`, not `.js` (#1763): this file was `review-core.js` until then, and
 // nothing that ships declares a `type`, so Node below 20.19.0/22.7.0 —
@@ -32,6 +33,7 @@
 // review-eval.mjs's import of it failed. node-floor-sweep.test.mjs keeps a
 // shipped `.mjs` from importing a relative module under any other extension.
 
+import { posix } from "node:path";
 import { isDigits } from "./arg.mjs";
 
 // --- Schemas ----------------------------------------------------------
@@ -643,6 +645,30 @@ export function runnerPrRefusal(pr) {
   return isDigits(pr) ? null : `args.pr must be a PR number, got ${JSON.stringify(pr)}`;
 }
 
+// #2323. `runReview` owns the review side's `pr<N>/` partition — it appends
+// `/pr${pr}` to the scratch it is given — so a scratch whose last component
+// is already `pr` plus digits is a caller that partitioned too, and its run
+// roots would nest at `<root>/pr<N>/pr<N>/run-*`, below the snapshot prompt's
+// `find <root>/pr<N> -maxdepth 1` prune. Refused whatever the digits, never
+// coerced: stripping the suffix would guess which directory the caller meant.
+//
+// "Last component" is the one the filesystem resolves, not the last text in
+// the string: `.` segments and repeated or trailing slashes are collapsed
+// first, so `/x/pr42/.` is refused like `/x/pr42`. A `..` segment is refused
+// outright rather than collapsed — the kernel resolves it against a symlink's
+// target and `posix.normalize` against the text, so `/x/link/..` can name a
+// `pr<N>` directory the lexical answer says it does not. Shared with
+// `runReviewToFile` for the reason the digits rule above is. Null when
+// `scratch` is acceptable.
+export function runnerScratchRefusal(scratch) {
+  if (typeof scratch !== "string") return null;
+  if (scratch.split("/").includes("..")) {
+    return `args.scratch ${JSON.stringify(scratch)} has a ".." segment — pass the scratch root as a path without one`;
+  }
+  if (!/(?:^|\/)pr\d+\/*$/.test(posix.normalize(scratch))) return null;
+  return `args.scratch ${JSON.stringify(scratch)} already ends in a pr<N> directory — pass the scratch root; the review creates <root>/pr<N>/ itself`;
+}
+
 // --- Orchestration ----------------------------------------------------
 // `host` supplies `agent(prompt, opts)` (must resolve to PARSED DATA — a
 // rejection or an unresolvable dispatch must resolve to `null`, the
@@ -714,6 +740,9 @@ export async function runReview(host, args) {
   // — which is why this sits BELOW the required-args throw and never merged
   // into it: an absent `pr` is owed "required", not a complaint about digits.
   if (!isDigits(pr)) throw new Error(`review-pr: args.pr must be a PR number, got ${JSON.stringify(pr)}`);
+
+  const scratchRefusal = runnerScratchRefusal(scratch);
+  if (scratchRefusal) throw new Error(`review-pr: ${scratchRefusal}`);
 
   const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS);
 
