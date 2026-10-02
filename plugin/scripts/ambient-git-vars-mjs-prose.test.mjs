@@ -236,6 +236,14 @@ const COVERED_MJS = {
   // main-checkout.test.mjs, "an ambient GIT_DIR naming another repository
   // does not change the answer (#1599)".
   "main-checkout.mjs": 1,
+  // ONE spawn primitive, `git(repo, args, what)`, behind all three of the
+  // file's git calls — the merge-base against `origin/main`, the diff the
+  // touched lines come from, and `rev-parse --show-toplevel` (#2342). An
+  // ambient GIT_DIR would answer all three for another repository and judge
+  // the record against that repository's diff. Measured in
+  // dispositions-check.test.mjs, "an ambient GIT_DIR naming another
+  // repository does not change the answer".
+  "dispositions-check.mjs": 1,
 };
 
 // The two-name-only exemption list #1599's second design question answers
