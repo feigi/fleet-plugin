@@ -2133,19 +2133,30 @@ function candidatesRow(text, where) {
   return line;
 }
 
+// The declared flag as a whole token: `--<flag>` with nothing word-like after
+// it, so `--<flag>s` or `--<flag>-x` is not it.
+const labelFlagToken = () => new RegExp(`--${declaredLabelFlag()}(?![\\w-])`);
+
 // Two tokens, both pinned: the In cell's synopsis and the Non-zero cell's
 // exit-2 cause. Either one alone renamed is a refused spelling in the row a
-// reader copies, and a positive on one cannot see the other.
+// reader copies, and a positive on one cannot see the other. Each positive
+// reads the TOKEN inside its own cell, never the cell's wording around it
+// (#1196: "pin the token, not … the synopsis row's shape"), so a new
+// placeholder or a reworded exit-2 cause stays green.
 function assertRowNamesDeclaredFlag(text, where) {
   const flag = declaredLabelFlag();
+  const token = labelFlagToken();
   const row = candidatesRow(text, where);
-  assert.ok(
-    row.includes(`[--${flag} L]`),
+  const [, , inCell, , nonZeroCell] = row.split("|");
+  assert.match(
+    inCell,
+    token,
     `${where}'s candidates row no longer names --${flag} in its In cell, the label flag candidates.mjs' OPTIONS declares`,
   );
-  assert.ok(
-    row.includes(`without \`--${flag}\``),
-    `${where}'s candidates row no longer names --${flag} in its \`--allow-fallback\` exit-2 cause`,
+  assert.match(
+    nonZeroCell ?? "",
+    token,
+    `${where}'s candidates row no longer names --${flag} in its Non-zero cell, where \`--allow-fallback\` needs it`,
   );
   // The row carries no `gh` invocation, so nothing in it spells `--label`
   // correctly and a row-wide negative is safe.
@@ -2156,17 +2167,44 @@ test("the fleet-plugin design spec's candidates row names the flag this script d
   assertRowNamesDeclaredFlag(SPEC_PLUGIN_DESIGN, "the fleet-plugin design spec");
 });
 
+// The spec's text with its `candidates.mjs` row's cells rewritten by `edit`.
+// Mutants and controls are built from the cells rather than from quoted row
+// wording, so a row edit that keeps the token cannot strand them.
+function withRowCells(text, edit) {
+  const row = candidatesRow(text, "the fleet-plugin design spec");
+  const cells = row.split("|");
+  edit(cells);
+  return text.replace(row, cells.join("|"));
+}
+
 test("the candidates-row pin reds on either token renamed alone and stays green on the real row", () => {
   const flag = declaredLabelFlag();
-  for (const [from, to, which] of [
-    [`[--${flag} L]`, "[--label L]", "the In cell"],
-    [`without \`--${flag}\``, "without `--label`", "the Non-zero cell"],
+  for (const [cell, which] of [
+    [2, "the In cell"],
+    [4, "the Non-zero cell"],
   ]) {
-    assert.ok(SPEC_PLUGIN_DESIGN.includes(from), `the spec no longer carries ${which}'s "${from}" — this mutant now tests nothing`);
+    const mutant = withRowCells(SPEC_PLUGIN_DESIGN, (cells) => {
+      cells[cell] = cells[cell].replace(labelFlagToken(), "--label");
+    });
+    assert.notEqual(mutant, SPEC_PLUGIN_DESIGN, `${which} no longer carries --${flag} — this mutant now tests nothing`);
     assert.throws(
-      () => assertRowNamesDeclaredFlag(SPEC_PLUGIN_DESIGN.replace(from, to), "the mutant"),
+      () => assertRowNamesDeclaredFlag(mutant, "the mutant"),
       /the mutant's candidates row/,
       `the pin does not red when only ${which} is given the spelling this script refuses`,
+    );
+  }
+  // GREEN on a row that keeps the flag's spelling but not its wording — a new
+  // placeholder, a reworded exit-2 cause — the inputs a shape pin wrongly
+  // refuses.
+  for (const [cell, text, which] of [
+    [2, ` \`[--${flag} LABEL] [--limit N]\` `, "the In cell's placeholder"],
+    [4, ` exit 2 when \`--allow-fallback\` is given unless \`--${flag}\` is `, "the Non-zero cell's wording"],
+  ]) {
+    assertRowNamesDeclaredFlag(
+      withRowCells(SPEC_PLUGIN_DESIGN, (cells) => {
+        cells[cell] = text;
+      }),
+      `the spec with ${which} reworded`,
     );
   }
   assertRowNamesDeclaredFlag(SPEC_PLUGIN_DESIGN, "the real spec");
