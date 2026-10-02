@@ -1111,9 +1111,9 @@ they are gone, with only `rewrote row #N` on stderr to say so.
 be abandoned at the pipe buffer and still exit 0, which is what left `board.mjs`
 reporting `ledger read parse failed` and serving a blind cockpit for a whole run
 (#246). Every use above is a recovery path, so a payload that arrives short
-lands exactly where a lost class or a settled `ruled:` is unrecoverable — which
-is why the script's own suite pins that `read`, `row`, `filed` and `ruled` each
-reach a pipe whole.
+lands exactly where a settled `ruled:` is unrecoverable — which is why the
+script's own suite pins that `read`, `row`, `filed` and `ruled` each reach a
+pipe whole.
 
 `check` reaches a pipe whole at both of its exits too. Its ALREADY FILED exit
 sits mid-branch, where falling through would run the near-miss ranking and the
