@@ -651,6 +651,16 @@ test("#2331: the label present, a live repair, a label-off'd attempt, or a close
   }
   const merged = computeBoard(reproInputs({ rows: ["#941 impl-941=PR#931 · finisher-pr-931=labelled"], prs: [], merged: [931], prev: { tickets: [] } }));
   assert.deepEqual(card(merged, 941).flags, []);
+  // gh still lists the PR but not as open — no open list to read a missing label off.
+  for (const state of ["CLOSED", "MERGED"]) {
+    const shut = computeBoard(reproInputs({ rows: ["#941 impl-941=PR#931 · finisher-pr-931=labelled"],
+      prs: [{ ...openPr(931), state }], prev: { tickets: [] } }));
+    assert.deepEqual(card(shut, 941).flags, [], state);
+  }
+  // REVIEW only: a card the row already carries past review flags nothing, even unlabelled.
+  const past = cardFor("#941 impl-941=PR#931 → MERGED abc1234 · finisher-pr-931=labelled", 941).card;
+  assert.equal(past.column, "MERGED");
+  assert.deepEqual(past.flags, []);
 });
 
 // The tick reads `## Dispatched` as well as the rows, and a whole-line `row`

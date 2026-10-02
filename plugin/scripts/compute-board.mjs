@@ -468,7 +468,7 @@ export function computeBoard(inputs) {
     rowIssues.add(p.issue);
     const sinceEnteredStage = stageEntry(prevTicket, column, now);
     const ciState = p.pr != null ? (ci[p.pr] ?? "unknown") : null;
-    const flags = deriveFlags(p, { ci: ciState, column, sinceEnteredStage, now, unlabelled: p.pr != null && unlabelled.has(p.pr) });
+    const flags = deriveFlags(p, { ci: ciState, column, sinceEnteredStage, now, unlabelled: unlabelled.has(p.pr) });
     tickets.push({
       issue: p.issue,
       title: titleFor(p.issue, pr, issues),

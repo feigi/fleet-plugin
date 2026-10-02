@@ -363,7 +363,7 @@ export function unlabelledFinishers({ rows, dispatched }, unqueued) {
       if (off) {
         const r = off.retry ?? "";
         if (!offs.has(off.number) || r > offs.get(off.number)) offs.set(off.number, r);
-      } else if (off === undefined) {
+      } else {
         const t = parseToken(tok);
         if (t && t.number === pr) add(t);
       }
