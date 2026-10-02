@@ -30,6 +30,15 @@ const SCRIPT = fileURLToPath(new URL("./delete-merged-branch.sh", import.meta.ur
 const REAP = fileURLToPath(new URL("./reap.sh", import.meta.url));
 const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
 
+// The gh stub's `pr list` pipes through the real jq (the script itself needs
+// none: `gh --jq` is embedded). Without it every lookup would fail and the
+// suite would read exit 2 everywhere — fail loudly instead of vacuously.
+try {
+  execFileSync("jq", ["--version"], { stdio: "ignore" });
+} catch {
+  throw new Error("jq is required to stub `gh pr list --jq`; install it before running this suite");
+}
+
 // Pinned identity, no developer config, no inherited repo pointers.
 const ENV = {
   ...process.env,
@@ -92,8 +101,17 @@ function mergedInWorktree(w, name, wtName) {
 }
 
 /**
- * A `gh` stub answering the one `pr view` call the script makes, from env
- * vars. Returns a call log reader and an env builder.
+ * A `gh` stub answering the script's `pr view` call and its two `pr list`
+ * lookups, from env vars. Returns a call log reader and an env builder.
+ *
+ * `pr list` is a faithful fake rather than canned output: it filters
+ * PR_LIST_JSON — every PR in the repo, `[{number,state,headRefName,
+ * baseRefName,isCrossRepository}]` — by `--head`/`--base`/`--state` the way
+ * GitHub does (`--head` matches a fork PR whose branch shares the name), then
+ * pipes the result through the real `jq` with the script's own `--jq`
+ * expression, so the selection the script asks for is under test rather than
+ * hard-coded into the fixture. PR_LIST_FAIL=head|base makes that lookup exit
+ * 1; PR_LIST_RAW_HEAD/PR_LIST_RAW_BASE replace its output verbatim at exit 0.
  */
 function ghStub(t, root) {
   const bin = join(root, "bin");
@@ -108,9 +126,30 @@ case "$*" in
   "pr view "*" --json state,isCrossRepository,headRefName,headRefOid,baseRefName --jq "*)
     [ "\${GH_FAIL:-0}" = 0 ] || { echo "gh: simulated failure" >&2; exit 1; }
     printf '%s\\037%s\\037%s\\037%s\\037%s\\n' "\${PR_STATE:-MERGED}" "\${PR_CROSS:-false}" "\$PR_HEAD" "\$PR_OID" "\${PR_BASE:-main}"
+    exit 0
     ;;
+  "pr list "*) ;;
   *) echo "gh: unstubbed call: $*" >&2; exit 1 ;;
 esac
+shift 2
+head= base= state= expr=. which= limit=30
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --head) head=$2; which=head; shift 2 ;;
+    --base) base=$2; which=base; shift 2 ;;
+    --state) state=$2; shift 2 ;;
+    --limit) limit=$2; shift 2 ;;
+    --jq) expr=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ "\${PR_LIST_FAIL:-}" = "$which" ] && { echo "gh: simulated pr list --$which failure" >&2; exit 1; }
+if [ "$which" = head ] && [ -n "\${PR_LIST_RAW_HEAD+set}" ]; then printf '%s\\n' "$PR_LIST_RAW_HEAD"; exit 0; fi
+if [ "$which" = base ] && [ -n "\${PR_LIST_RAW_BASE+set}" ]; then printf '%s\\n' "$PR_LIST_RAW_BASE"; exit 0; fi
+printf '%s' "\${PR_LIST_JSON:-[]}" |
+  jq --arg head "$head" --arg base "$base" --arg state "$state" --argjson limit "$limit" \\
+    '[.[] | select(($head == "" or .headRefName == $head) and ($base == "" or .baseRefName == $base) and ($state == "" or $state == "all" or (.state | ascii_downcase) == $state))] | .[:$limit]' |
+  jq -r "$expr"
 `,
     { mode: 0o755 },
   );
@@ -121,9 +160,20 @@ esac
   };
 }
 
+/** One PR as GitHub's `gh pr list --json` would describe it. */
+const pr = (number, headRefName, baseRefName, state = "OPEN", isCrossRepository = false) => ({
+  number,
+  state,
+  headRefName,
+  baseRefName,
+  isCrossRepository,
+});
+
+/** `json` is the script's one-line payload; exit 3 prints `branch-kept-#<n>` lines instead, read off `stdout`. */
 function run(cwd, args, env) {
   const r = spawnSync("sh", [SCRIPT, ...args], { cwd, env, encoding: "utf8" });
-  return { code: r.status, json: r.stdout.trim() ? JSON.parse(r.stdout) : null, stderr: r.stderr };
+  const out = r.stdout.trim();
+  return { code: r.status, stdout: r.stdout, json: out.startsWith("{") ? JSON.parse(out) : null, stderr: r.stderr };
 }
 
 test("a merged branch checked out in a .worktrees/<issue>-<slug> worktree is deleted from origin, and reap.sh then reaps it locally", (t) => {
@@ -394,4 +444,133 @@ test("an ambient GIT_DIR naming another repository does not redirect the delete"
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(r.json, { pr: 18, branch, deleted: true });
   assert.equal(onOrigin(origin, branch), false);
+});
+
+// #2295: deleting a branch closes every open PR headed by it, and may close
+// rather than retarget every open PR based on it. Either one keeps the branch:
+// no push, one `branch-kept-#<pr>` line per such PR, exit 3. The proof that no
+// delete went out is read off the bare origin — the tip is still the merged head.
+function keptFixture(t, branch, wtName) {
+  const { root, origin, w } = repo(t);
+  const { oid } = mergedInWorktree(w, branch, wtName);
+  return { origin, w, oid, gh: ghStub(t, root) };
+}
+
+test("an open PR headed by the branch keeps it — no push, branch-kept-#<that PR>, exit 3", (t) => {
+  const branch = "fix/22-head";
+  const { origin, w, oid, gh } = keptFixture(t, branch, "22-head");
+  const list = [pr(22, branch, "main", "MERGED"), pr(31, branch, "release")];
+
+  const r = run(w, ["22"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_LIST_JSON: JSON.stringify(list) }));
+
+  assert.equal(r.code, 3, r.stderr);
+  assert.equal(r.stdout, "branch-kept-#31\n");
+  assert.match(r.stderr, /open PR #31 uses fix\/22-head as its head/);
+  assert.doesNotMatch(r.stderr, /git push/);
+  assert.equal(originTip(origin, branch), oid);
+});
+
+test("an open PR based on the branch keeps it — no push, branch-kept-#<that PR>, exit 3", (t) => {
+  const branch = "fix/23-base";
+  const { origin, w, oid, gh } = keptFixture(t, branch, "23-base");
+  const list = [pr(23, branch, "main", "MERGED"), pr(40, "feat/40-stacked", branch)];
+
+  const r = run(w, ["23"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_LIST_JSON: JSON.stringify(list) }));
+
+  assert.equal(r.code, 3, r.stderr);
+  assert.equal(r.stdout, "branch-kept-#40\n");
+  assert.match(r.stderr, /open PR #40 uses fix\/23-base as its base/);
+  assert.doesNotMatch(r.stderr, /git push/);
+  assert.equal(originTip(origin, branch), oid);
+});
+
+test("open PRs of both kinds print one branch-kept-# line per PR, exit 3", (t) => {
+  const branch = "fix/24-both";
+  const { origin, w, oid, gh } = keptFixture(t, branch, "24-both");
+  const list = [
+    pr(24, branch, "main", "MERGED"),
+    pr(51, branch, "release"),
+    pr(9, "feat/9-stacked", branch),
+    pr(60, "feat/60-stacked", branch),
+    pr(70, "feat/70-old", branch, "CLOSED"),
+  ];
+
+  const r = run(w, ["24"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_LIST_JSON: JSON.stringify(list) }));
+
+  assert.equal(r.code, 3, r.stderr);
+  assert.deepEqual(r.stdout.trim().split("\n").sort(), ["branch-kept-#51", "branch-kept-#60", "branch-kept-#9"]);
+  assert.doesNotMatch(r.stderr, /git push/);
+  assert.equal(originTip(origin, branch), oid);
+});
+
+test("every open PR on the branch gets its branch-kept-# line, however many there are — gh lists 30 unless asked for more", (t) => {
+  const branch = "fix/25-many";
+  const { origin, w, oid, gh } = keptFixture(t, branch, "25-many");
+  const list = [pr(25, branch, "main", "MERGED")];
+  for (let n = 100; n < 140; n++) list.push(pr(n, `feat/${n}-stacked`, branch));
+
+  const r = run(w, ["25"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_LIST_JSON: JSON.stringify(list) }));
+
+  assert.equal(r.code, 3, r.stderr);
+  assert.equal(r.stdout.trim().split("\n").length, 40);
+  assert.equal(originTip(origin, branch), oid);
+});
+
+test("a failed or unparsable open-PR lookup is exit 2, names the lookup, and pushes nothing", (t) => {
+  const branch = "fix/25-unknown";
+  const { origin, w, oid, gh } = keptFixture(t, branch, "25-unknown");
+  const cases = [
+    [{ PR_LIST_FAIL: "head" }, /lookup `gh pr list --head fix\/25-unknown` failed/],
+    [{ PR_LIST_FAIL: "base" }, /lookup `gh pr list --base fix\/25-unknown` failed/],
+    [{ PR_LIST_RAW_HEAD: "[]" }, /lookup `gh pr list --head fix\/25-unknown` answered with something that is not a list of PR numbers/],
+    [{ PR_LIST_RAW_BASE: "40\nnull" }, /lookup `gh pr list --base fix\/25-unknown` answered with something that is not a list of PR numbers/],
+  ];
+  for (const [extra, named] of cases) {
+    const r = run(w, ["25"], gh.env({ PR_HEAD: branch, PR_OID: oid, ...extra }));
+    const label = JSON.stringify(extra);
+    assert.equal(r.code, 2, `${label}: ${r.stderr}`);
+    assert.match(r.stderr, named, label);
+    assert.doesNotMatch(r.stderr, /git push/, label);
+    assert.equal(r.stdout, "", label);
+  }
+  assert.equal(originTip(origin, branch), oid);
+});
+
+// What the guard must ACCEPT: none of these PRs is affected by the delete —
+// the merged PR itself, closed PRs, a merged PR based on the branch, a fork PR
+// whose own branch merely shares the name (`--head` matches it; it lives in the
+// fork), and an open PR on an unrelated branch. A guard that kept on any of them
+// would stop every delete.
+test("PRs the delete cannot affect do not keep the branch — it is deleted, exit 0", (t) => {
+  const branch = "fix/26-clear";
+  const { origin, w, oid, gh } = keptFixture(t, branch, "26-clear");
+  const list = [
+    pr(26, branch, "main", "MERGED"),
+    pr(27, branch, "main", "CLOSED"),
+    pr(28, "feat/28-old", branch, "MERGED"),
+    pr(29, branch, "main", "OPEN", true),
+    pr(30, "feat/30-other", "main"),
+  ];
+
+  const r = run(w, ["26"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_LIST_JSON: JSON.stringify(list) }));
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json, { pr: 26, branch, deleted: true });
+  assert.equal(onOrigin(origin, branch), false);
+});
+
+// The lookups guard a delete; a branch already gone has none left to guard,
+// so a lookup that would fail cannot turn the outcome this step exists for
+// into "can't tell", and nothing is kept to report.
+test("a branch already gone is success even when an open-PR lookup would fail", (t) => {
+  const { root, origin, w } = repo(t);
+  const branch = "feat/32-gone";
+  const { oid } = mergedInWorktree(w, branch, "32-gone");
+  git(w, "push", "-q", "origin", "--delete", branch);
+  const gh = ghStub(t, root);
+
+  const r = run(w, ["32"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_LIST_FAIL: "head" }));
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json, { pr: 32, branch, deleted: false, alreadyGone: true });
 });

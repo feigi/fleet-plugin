@@ -29,6 +29,16 @@
 # push — the repo still has auto-delete on, or a re-run — is the same success:
 # the outcome this step exists for already holds.
 #
+# KEPT while another open PR uses the branch (#2295). Deleting a branch closes
+# every open PR headed by it, and may close rather than retarget every open PR
+# based on it — GitHub retargets stacked PRs when IT deletes a merged head, and
+# nobody has observed whether a push-delete triggers the same. So just before
+# the push the script asks for both, and deletes nothing when either answers.
+# The merged PR is not open, so it never matches. A fork PR whose own branch
+# shares the name does not count as headed by it: that branch lives in the fork.
+# The lookups run only when there is a delete to guard — a branch already gone
+# has none, and is exit 0 whatever they would say.
+#
 # Exit 0: the branch is gone from origin (deleted here, already gone, or a fork
 #         PR's branch, which lives in another repository and is not ours to
 #         delete — `"skipped":"cross-repository"`).
@@ -36,7 +46,15 @@
 #         the merge) or the push failed. REPORT IT as
 #         `branch-delete-failed-#<pr>`, never swallow it.
 # Exit 2: could not even tell what to delete — bad usage, the PR is not merged,
-#         a `gh`/`ls-remote` call failed, or the head names the base branch.
+#         a `gh`/`ls-remote` call failed, the head names the base branch, or an
+#         open-PR lookup failed, answered with something that is not a list
+#         of PR numbers, or could not be checked for that (nothing is deleted;
+#         the lookup is named on stderr).
+# Exit 3: KEPT on purpose — another open PR uses the branch as its head or its
+#         base. Nothing was pushed. Stdout is one `branch-kept-#<pr>` line per
+#         such PR (that PR's number, not the merged one's) instead of the JSON
+#         payload; stderr says which role each plays. A deliberate keep, not a
+#         failure: report the lines, never retry.
 set -eu
 
 # Ambient GIT_DIR/GIT_WORK_TREE would point `ls-remote origin` and the push at
@@ -122,6 +140,50 @@ before=$(remote_tip)
 if [ -z "$before" ]; then
   printf '{"pr":%s,"branch":"%s","deleted":false,"alreadyGone":true}\n' "$pr" "$jbranch"
   exit 0
+fi
+
+# Dies unless $2 is empty or one PR number per line: a `gh` that exits 0 has
+# not answered if what it printed cannot be read as that. grep's exit 1 is the
+# only "valid list" answer; anything past it (2 and up) means grep itself
+# failed, and reading that as valid would let the delete through unchecked.
+pr_numbers() {
+  pn_rc=0
+  printf '%s\n' "$2" | grep -Eqv '^([1-9][0-9]*)?$' || pn_rc=$?
+  case "$pn_rc" in
+    0) die "the open-PR lookup \`gh pr list --$1 $branch\` answered with something that is not a list of PR numbers: '$2' — not deleting it" ;;
+    1) ;;
+    *) die "grep exited $pn_rc, so whether the open-PR lookup \`gh pr list --$1 $branch\` answered with a list of PR numbers is unknown — not deleting it" ;;
+  esac
+}
+
+# Asked here, after the branch is known to be on origin and just before the
+# push, so a keep is only ever reported for a branch that is really still
+# there. `--limit` sits far past any real count: a truncated list would still
+# keep the branch, but would drop a `branch-kept-#` line.
+echo "\$ gh pr list --head $branch --state open --json number,isCrossRepository" >&2
+if ! headed=$(gh pr list --head "$branch" --state open --limit 1000 --json number,isCrossRepository \
+  --jq '.[] | select(.isCrossRepository | not) | .number'); then
+  die "the open-PR lookup \`gh pr list --head $branch\` failed — cannot tell whether deleting it would close another PR; not deleting it"
+fi
+pr_numbers head "$headed"
+echo "\$ gh pr list --base $branch --state open --json number" >&2
+if ! based=$(gh pr list --base "$branch" --state open --limit 1000 --json number --jq '.[].number'); then
+  die "the open-PR lookup \`gh pr list --base $branch\` failed — cannot tell whether deleting it would close another PR; not deleting it"
+fi
+pr_numbers base "$based"
+
+# Both lists hold only validated PR numbers, so splitting them is safe — and
+# command substitution strips trailing newlines, so a list is non-empty only
+# when it names a PR.
+for n in $headed; do
+  printf '%s: open PR #%s uses %s as its head — deleting the branch would close it; keeping the branch\n' "$NAME" "$n" "$branch" >&2
+done
+for n in $based; do
+  printf '%s: open PR #%s uses %s as its base — deleting the branch may close it rather than retarget it; keeping the branch\n' "$NAME" "$n" "$branch" >&2
+done
+if [ -n "$headed$based" ]; then
+  printf '%s\n%s\n' "$headed" "$based" | grep . | sort -nu | sed 's/^/branch-kept-#/'
+  exit 3
 fi
 
 echo "\$ git push --force-with-lease=refs/heads/$branch:$oid origin --delete refs/heads/$branch" >&2
