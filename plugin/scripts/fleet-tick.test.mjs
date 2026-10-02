@@ -667,6 +667,12 @@ test("deriveRun: a fix-pr token for another PR leaves this PR's hold and survivo
   // inherits nothing from it.
   assert.deepEqual(due([`${H} · fix-pr-99`], ["fix-pr-99=applied:def5678"]), [[21], [21]]);
   assert.deepEqual(due([`${H} · fix-pr-99`, "#98 impl-98=PR#99 · fix-pr-99=applied:def5678"], [], [pr(21), pr(99)]), [[21], [21]]);
+  // Nor does a settled stray on #21's row stand in for PR #99's own in-place
+  // copy: #99's bare token, the only one on #99's row, still lands its member.
+  assert.deepEqual(
+    due(["#20 impl-20=PR#21 · fix-pr-99=applied:def5678", "#98 impl-98=PR#99 · conflict-hold:#99 · fix-pr-99"],
+      ["fix-pr-99=applied:def5678"], [pr(21), pr(99)]),
+    [[], []], "a foreign settled copy does not keep the owner's bare copy from landing");
   // Nor does a foreign one answer a returned review's survivors.
   assert.deepEqual(due(["#20 impl-20=PR#21 · reviewed=abc1234:2/0/0 · fix-pr-99=applied:def5678"]), [[21], []]);
   // Must accept: the PR's own fix-applier, live and landed.
@@ -674,6 +680,13 @@ test("deriveRun: a fix-pr token for another PR leaves this PR's hold and survivo
   assert.deepEqual(due([`${H} · fix-pr-21=applied:def5678`]), [[], []], "own landed: the hold is cleared");
   // …and on the PR's own `#21` row, which names no `PR#` — its key is its PR.
   assert.deepEqual(due([H, "#21 fix-pr-21=applied:def5678"]), [[], []]);
+  // An in-place settled copy on the ticket row, whose key is the ticket's and
+  // whose PR is its `PR#` mention, is the PR's own: it still says where its
+  // member landed, so a stale bare copy read first does not land it instead.
+  assert.deepEqual(
+    due(["#21 fix-pr-21", "#20 impl-20=PR#21 · reviewed=abc1234:2/0/0 · conflict-hold:#21 · fix-pr-21=applied:def5678"],
+      ["fix-pr-21=applied:def5678"]),
+    [[21], []], "own in-place copy on the ticket row: it cleared the hold and answered no survivor");
 });
 
 test("deriveRun: a conflict hold is read in either spelling and on a PR-keyed row", () => {

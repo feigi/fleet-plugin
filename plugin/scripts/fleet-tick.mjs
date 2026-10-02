@@ -320,26 +320,34 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   // `tier-unverifiable=<member>:no-transcript` is the third: a settled member
   // with nothing to check, which clears the unchecked hold and nothing else.
   const verdicts = { ok: new Set(), mismatch: new Set(), unverifiable: new Set() };
+  // A row's key number and its PR, per the comment above PR_MENTION: the PR
+  // every PR-bound token on the row speaks for.
+  const rowNums = (text) => {
+    const key = text.split(/\s/)[0];
+    const keyNum = /^#[0-9]+$/.test(key) ? Number(key.slice(1)) : null;
+    const mention = PR_MENTION.exec(text);
+    return { keyNum, pr: mention ? Number(mention[1]) : keyNum };
+  };
   // fix-pr members some row carries settled IN PLACE (`<member>=<outcome>`).
   // `settle` rewrites a token where it stands, so that copy sits where the
   // member was dispatched; a bare copy beside it is what a whole-line `row`
   // rewrite put back, wherever that rewrite chose. Its landing is read off
   // the in-place copy (below), and off a bare one only when no row carries
-  // one — settled in `## Dispatched` alone. A malformed token is skipped
+  // one — settled in `## Dispatched` alone. Only a copy on its own PR's row
+  // counts, as in the fold (#2329): a settled stray on another PR's row must
+  // not keep the owner's bare copy from landing. A malformed token is skipped
   // here and refused by the fold below, in row order, as before.
   const settledInRow = new Set();
   for (const text of rows) {
+    const { pr } = rowNums(text);
     for (const tok of text.split(/\s+/)) {
       const t = parseToken(tok);
-      if (t && !t.error && t.family === "fix-pr" && t.outcome !== null) settledInRow.add(t.name);
+      if (t && !t.error && t.family === "fix-pr" && t.number === pr && t.outcome !== null) settledInRow.add(t.name);
     }
   }
   for (const text of rows) {
-    const key = text.split(/\s/)[0];
-    const keyNum = /^#[0-9]+$/.test(key) ? Number(key.slice(1)) : null;
+    const { keyNum, pr } = rowNums(text);
     const where = `row '${text}'`;
-    const mention = PR_MENTION.exec(text);
-    const pr = mention ? Number(mention[1]) : keyNum;
     // One state per PR, shared by every row that resolves to it (#2283): a
     // ticket row settled `impl-658=PR#724` sorts above PR 724's own `#724` row
     // whenever both exist, and either may carry that PR's tokens — ledger.mjs's
