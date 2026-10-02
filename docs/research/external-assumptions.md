@@ -47,7 +47,7 @@ refuses, misreads, or silently does nothing.
 **CI / merge gate**
 
 - The repository ruleset on the default branch *is* the gate (ADR 0007): `strict_required_status_checks_policy: true`, `required_approving_review_count: 0`, `bypass_actors: []`, required contexts `rebase-check`, `check`, `validate-release-label`, `smoke-omp`, `install-and-smoke`, each pinned to integration id 15368 (GitHub Actions). Renaming a job strands PRs. — shell#13–19, prose#51–55
-- A full CI cycle is ~5–6 minutes; every wait-cell timeout in the runbook (600 s Claude / 900–1000 s omp) is sized from that. — prose#61, prose#158
+- A full CI cycle is ~5–6 minutes; every wait-cell timeout in the runbook is sized from that (omp `eval` cells: ≥900 s for the rebase poll, ≥1000 s for the grace, "well above the CI cycle" for the CI wait). — prose#61, prose#158
 
 **Consumer repo**
 
@@ -171,7 +171,7 @@ about *which* divergence exists (shell#67–92, tracker#41–48):
 ## 8. Time, concurrency, network
 
 - Clock is `Date.now()` epoch-ms everywhere; no timezone handling; GitHub `createdAt` whole-second. — tracker#65–66
-- Heartbeat: base 300 s, ×2 backoff, ceiling 1200 s, never above 30 min because arriving supply emits no event; `--hold` 240 s per call because neither harness lets one call block 20 min. — tracker#41, prose#151–153
+- Heartbeat: base 300 s, ×2 backoff, ceiling 1200 s, never above 30 min because arriving supply emits no event; `--hold` 240 s per call because omp lets no call block 20 min (auto-background at 60 s, 300 s command deadline). — tracker#41, prose#151–153
 - Merge bot grace: fixed 15 min after the last actionable label, polling 60 s. — prose#154
 - Rate limits: `gh api rate_limit` is free; secondary-limit outages are seconds long, so retry-and-re-probe, never backoff-and-wait; all pacing lives in the tick tail, never per PR. — prose#155–157
 - Concurrency ceilings: `IN_FLIGHT = 4` network probes per tick; `ci-state.mjs` spawned serially per PR; one watcher per PR, armed by the controller not a member. — tracker#69, harness#102, prose#159–160
@@ -196,8 +196,7 @@ Implied only (lives in code/prose, no doc names it as a requirement):
 - `gh` ≥ 2.94.0; GHE needs `--hostname` in exactly one place (`ci-state.mjs` compare).
 - Required-check names and integration id 15368 in `main.json`.
 - CI cycle ≈ 5–6 min underpinning every timeout constant.
-- Claude Workflow sandbox rules (the reason for the parity-tested copy).
-- Transcript directory encodings for both harnesses (spend scraper).
+- omp's transcript directory encoding (spend scraper).
 
 These are the candidates for either a "consumer requirements" doc or for
 being lifted into configuration; that decision is outside this research.
