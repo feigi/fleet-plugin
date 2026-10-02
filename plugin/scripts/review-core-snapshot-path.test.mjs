@@ -402,8 +402,8 @@ test("the snapshot log line says when the head check was skipped", () => {
 // specialist and refuter prompts further down satisfy the assertions instead,
 // the defect `review-core-testcmd.test.mjs`'s "the test-run prompt hands the
 // command over verbatim and rules 'tests 0' a failure" test records having
-// shipped. Same two anchors `review-pr-reads.test.mjs`'s `slice()` and
-// `review-pr-testcmd.test.mjs` already use.
+// shipped. Same two anchors `review-core-reads.test.mjs`'s `slice()` and
+// `review-core-testcmd.test.mjs` already use.
 function snapshotBlock() {
   return between(CODE, "const snap = await agent(", "if (snap) {", "the snapshot agent dispatch");
 }
@@ -415,7 +415,7 @@ function snapshotBlock() {
 // `required: [..., "pathVerified"]` still passes, all four tests above still
 // pass, and the agent has lost the only instruction saying what value to report:
 // `pathVerified` degrades to a boolean it invents, silently reopening #140 under
-// a green suite. That is the exact shape `review-pr-reads.test.mjs`'s "the
+// a green suite. That is the exact shape `review-core-reads.test.mjs`'s "the
 // snapshot agent asks for the diff facts AND declares them in its schema"
 // measured on the diff facts — "deleting this paragraph outright left this file
 // at 12 pass, 0 fail".
@@ -428,7 +428,7 @@ test("the snapshot prompt runs the emptiness probe AND binds pathVerified to its
   );
   // These names live inside a template literal, so each backtick is a
   // BACKSLASH-backtick in the source text — `\\?` matches it either way, the
-  // idiom review-pr-reads.test.mjs and review-pr-testcmd.test.mjs already use.
+  // idiom review-core-reads.test.mjs and review-core-testcmd.test.mjs already use.
   // `\s+` spans the line wraps so a reflow of the same sentence stays green.
   const B = "\\\\?`";
   assert.match(

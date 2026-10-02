@@ -114,7 +114,7 @@ test("no hardcoded testCmd default remains", () => {
 // diffPath/diffLines/prHead were added: `additionalProperties: false` drops
 // an undeclared field silently, so BOTH the prompt asking for it and the
 // schema declaring it have to be pinned, or the feature disconnects in one
-// token exactly like `review-pr-reads.test.mjs`'s "the snapshot agent asks for
+// token exactly like `review-core-reads.test.mjs`'s "the snapshot agent asks for
 // the diff facts AND declares them in its schema" records happening to the
 // diff facts.
 test("the snapshot agent is told to derive testCmd AND the schema declares it", () => {
@@ -156,7 +156,7 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
   );
   // These names live inside a template literal, so each backtick is a
   // BACKSLASH-backtick in the source text — `\\?` matches it either way, the
-  // same idiom `review-pr-reads.test.mjs` uses for diffPath/prHead/diffLines.
+  // same idiom `review-core-reads.test.mjs` uses for diffPath/prHead/diffLines.
   const B = "\\\\?`";
   assert.match(
     snapshot,

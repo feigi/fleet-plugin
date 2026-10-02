@@ -25,7 +25,7 @@ const FILES = {
 // FIRST `{` after the call's opening paren to its matching close. Comments
 // stripped first so a commented-out `model:` cannot satisfy or defeat this —
 // the same policy every other pin in this directory takes with `stripComments`
-// (review-pr-reads.test.mjs's header explains the measured reason).
+// (strip-comments.mjs's header explains the measured reason).
 function agentCallOptionBlocks(code) {
   const blocks = [];
   const callRe = /\bagent\(/g;
