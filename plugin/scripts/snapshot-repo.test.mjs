@@ -32,7 +32,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { environmentNote } from "./review-core.mjs";
@@ -161,6 +161,59 @@ function pruneLine(path) {
 /** `pruneLine`, rendered for one per-PR parent directory. */
 const renderPrune = (path, runRootParent) =>
   new Function("runRootParent", "return `" + pruneLine(path) + "`")(runRootParent);
+
+/**
+ * A `run-` root under `parent` holding a `locked` directory with no permission
+ * bits at all, aged `days`. On darwin, optionally, the file inside it carries
+ * `uchg` (`immutableFile`), or `locked` itself does (`immutableDir`) — set
+ * after the mode, so the directory's mode cannot be changed back until the
+ * flag is gone. Aged last: creating children sets the root's mtime to now.
+ */
+function lockedRunRoot(parent, name, days, { immutableFile = false, immutableDir = false } = {}) {
+  const root = join(parent, name);
+  const locked = join(root, "locked");
+  mkdirSync(locked, { recursive: true });
+  writeFileSync(join(locked, "inner.txt"), "");
+  if (immutableFile) execFileSync("chflags", ["uchg", join(locked, "inner.txt")]);
+  chmodSync(locked, 0);
+  if (immutableDir) execFileSync("chflags", ["uchg", locked]);
+  const when = (Date.now() - days * DAY) / 1000;
+  utimesSync(root, when, when);
+  return root;
+}
+
+/**
+ * Undoes `lockedRunRoot` so the scratch teardown can remove what a prune left.
+ * The second `chmod` is for `immutableDir`: its mode is only changeable once
+ * `chflags` has cleared the flag.
+ */
+function unlock(parent) {
+  spawnSync("sh", ["-c", 'chmod -R u+rwx "$1"; if command -v chflags >/dev/null; then chflags -R nouchg "$1"; chmod -R u+rwx "$1"; fi; :', "sh", parent], { env: ENV });
+}
+
+/**
+ * The snapshot block's whole first shell block — from the ambient-var clearing
+ * line down to the node_modules symlink, the prune and everything around it —
+ * rendered with the script's own `${runRootParent}`/`${runRootPrefix}`
+ * derivation lifted from the source, so a stray mutation anywhere in it runs
+ * here rather than only one on the lines `pruneLine` lifts.
+ */
+function snapshotBlock(path, scratchRoot, pr, worktree) {
+  const code = stripComments(readFileSync(path, "utf8"));
+  const derive = code.match(/^\s*const runRootParent = .+\n\s*const runRootPrefix = .+$/m);
+  assert.ok(derive, `${path} no longer derives \`runRootParent\` and \`runRootPrefix\` as adjacent statements — reshaped past what this test lifts`);
+  const { runRootParent, runRootPrefix } = new Function("scratch", "pr", `${derive[0]}\nreturn { runRootParent, runRootPrefix };`)(scratchRoot, pr);
+  const from = code.search(/^ *unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_TEMPLATE_DIR *$/m);
+  const to = code.search(/^ *if \[ -n "\$SNAP" \] && \[ -d \$\{worktree\}\/node_modules \]/m);
+  assert.ok(from !== -1 && to > from, `${path} no longer runs from the ambient-var clearing line down to the node_modules symlink — the block was reshaped past what this test lifts`);
+  const script = new Function("scratch", "runRootParent", "runRootPrefix", "worktree", "return `" + code.slice(from, code.indexOf("\n", to)) + "`")(
+    scratchRoot,
+    runRootParent,
+    runRootPrefix,
+    worktree,
+  );
+  return { runRootParent, script };
+}
 
 /**
  * `cutLines`'s slice, prefixed with the block's own ambient-var clearing
@@ -538,6 +591,127 @@ for (const [name, path] of SOURCES) {
       existsSync(staleFile),
       "the prune removed a stale FILE named like a run root — a run root is a directory `mktemp -d` created, and `-type d` is what says so",
     );
+  });
+
+  // #2322. A fixture that drops its own read bit, or a darwin file carrying the
+  // user-immutable flag, made the plain `rm -rf` fail on that root — so it
+  // stayed forever and every later review of the PR printed
+  // SNAPSHOT_PRUNE_FAILED. The prune now restores owner rwx and clears `uchg`
+  // on the roots it SELECTED, then removes them.
+  test(`${name}: the prune removes an aged run root a chmod 000 directory used to wedge`, (t) => {
+    const parent = join(scratch(t, "snapshot-repo-prune-perm-"), "pr7");
+    const stale = lockedRunRoot(parent, "run-staleaa", 9);
+    try {
+      const r = spawnSync("sh", ["-c", renderPrune(path, parent)], { env: ENV, encoding: "utf8" });
+
+      assert.doesNotMatch(r.stdout ?? "", /SNAPSHOT_PRUNE_FAILED/, `the prune named a failure on a root it can normalise: ${r.stderr}`);
+      assert.equal(r.status, 0, `the prune exited non-zero: ${r.stderr}`);
+      assert.ok(!existsSync(stale), "an aged run root holding a chmod 000 directory survived the prune — it now stays forever and every later review prints SNAPSHOT_PRUNE_FAILED");
+    } finally {
+      unlock(parent);
+    }
+  });
+
+  // The other half: normalising is a mutation, and one applied before
+  // selection, or to the whole parent, would rewrite modes in trees a
+  // fix-applier still reads — pinned by mode rather than by existence. Run
+  // through the whole first shell block, not the prune line alone: a stray
+  // `chmod -R` on the parent on a line of its own never runs in a test that
+  // lifts only the prune. SNAPSHOT_TREE_MATCH is the control that the block
+  // ran to its end, past every line that could have done it.
+  test(`${name}: the snapshot block leaves the modes inside a run root younger than the cut-off alone`, (t) => {
+    const worktree = reviewedRepo(t);
+    const { runRootParent, script } = snapshotBlock(path, scratch(t, "snapshot-repo-block-"), 7, worktree);
+    const stale = lockedRunRoot(runRootParent, "run-staleaa", 9);
+    const recent = lockedRunRoot(runRootParent, "run-recentb", 5);
+    try {
+      const r = spawnSync("sh", ["-c", script], { env: ENV, encoding: "utf8" });
+
+      assert.match(r.stdout ?? "", /SNAPSHOT_TREE_MATCH/, `the block did not run to its end, so it measured nothing past the line it stopped on: ${r.stdout}${r.stderr}`);
+      assert.doesNotMatch(r.stdout ?? "", /SNAPSHOT_PRUNE_FAILED/, `the prune named a failure on a root it can normalise: ${r.stderr}`);
+      assert.ok(!existsSync(stale), "the aged run root survived the block, so its prune selected nothing and the young root's modes prove nothing");
+      assert.equal(
+        statSync(join(recent, "locked")).mode & 0o777,
+        0,
+        "the snapshot block changed a mode inside a run root younger than the cut-off — normalisation reached a tree the prune did not select",
+      );
+    } finally {
+      unlock(runRootParent);
+    }
+  });
+
+  test(`${name}: on darwin the prune removes an aged run root holding a uchg file inside a chmod 000 directory`, { skip: process.platform !== "darwin" && "chflags/uchg is darwin's" }, (t) => {
+    const parent = join(scratch(t, "snapshot-repo-prune-uchg-"), "pr7");
+    const stale = lockedRunRoot(parent, "run-staleaa", 9, { immutableFile: true });
+    try {
+      const r = spawnSync("sh", ["-c", renderPrune(path, parent)], { env: ENV, encoding: "utf8" });
+
+      assert.doesNotMatch(r.stdout ?? "", /SNAPSHOT_PRUNE_FAILED/, `the prune named a failure on a root it can normalise: ${r.stderr}`);
+      assert.ok(!existsSync(stale), "an aged run root holding a uchg file survived the prune — the immutable flag wedges `rm -rf` (EPERM) and the root stays forever");
+    } finally {
+      unlock(parent);
+    }
+  });
+
+  // The flag on the DIRECTORY rather than on a file in it: `chmod -R` cannot
+  // restore a `uchg` directory's mode, and `chflags -R` clears the flag but
+  // cannot read the `000` directory it just unflagged — so the mode is only
+  // restorable after the flag step, which is why the prune runs `chmod` again.
+  test(`${name}: on darwin the prune removes an aged run root holding a directory that is both uchg and chmod 000`, { skip: process.platform !== "darwin" && "chflags/uchg is darwin's" }, (t) => {
+    const parent = join(scratch(t, "snapshot-repo-prune-uchgdir-"), "pr7");
+    const stale = lockedRunRoot(parent, "run-staleaa", 9, { immutableDir: true });
+    try {
+      const r = spawnSync("sh", ["-c", renderPrune(path, parent)], { env: ENV, encoding: "utf8" });
+
+      assert.doesNotMatch(r.stdout ?? "", /SNAPSHOT_PRUNE_FAILED/, `the prune named a failure on a root it can normalise: ${r.stderr}`);
+      assert.ok(!existsSync(stale), "an aged run root holding a uchg, chmod 000 directory survived the prune — its mode was never restored after the flag was cleared, so `rm -rf` cannot read it");
+    } finally {
+      unlock(parent);
+    }
+  });
+
+  // The accept case on a host without `chflags`: the flag step is skipped, not
+  // treated as a failure, so the permission case still succeeds there.
+  test(`${name}: without chflags on PATH the prune still removes an aged run root holding a chmod 000 directory`, (t) => {
+    const parent = join(scratch(t, "snapshot-repo-prune-noflags-"), "pr7");
+    const stale = lockedRunRoot(parent, "run-staleaa", 9);
+    const bin = scratch(t, "snapshot-repo-prune-bin-");
+    for (const tool of ["sh", "find", "chmod", "rm"]) {
+      const real = execFileSync("sh", ["-c", `command -v ${tool}`], { env: ENV, encoding: "utf8" }).trim();
+      symlinkSync(real, join(bin, tool));
+    }
+    const env = { ...ENV, PATH: bin };
+    try {
+      const probe = spawnSync(join(bin, "sh"), ["-c", "command -v chflags"], { env, encoding: "utf8" });
+      assert.notEqual(probe.status, 0, "chflags is still reachable on the narrowed PATH, so this case measures nothing");
+
+      const r = spawnSync(join(bin, "sh"), ["-c", renderPrune(path, parent)], { env, encoding: "utf8" });
+
+      assert.doesNotMatch(r.stdout ?? "", /SNAPSHOT_PRUNE_FAILED/, `a host without chflags reported a prune failure: ${r.stderr}`);
+      assert.equal(r.status, 0, `the prune exited non-zero without chflags: ${r.stderr}`);
+      assert.ok(!existsSync(stale), "without chflags the prune left an aged run root holding a chmod 000 directory");
+    } finally {
+      unlock(parent);
+    }
+  });
+
+  // A removal normalisation cannot rescue still refuses by name, and the
+  // snapshot step goes on: a parent the prune cannot write is outside what it
+  // normalises, so `rm -rf` genuinely fails there.
+  test(`${name}: a removal that still fails prints SNAPSHOT_PRUNE_FAILED and the step continues`, { skip: process.getuid?.() === 0 && "root ignores the read-only parent" }, (t) => {
+    const parent = join(scratch(t, "snapshot-repo-prune-fail-"), "pr7");
+    const stale = lockedRunRoot(parent, "run-staleaa", 9);
+    chmodSync(parent, 0o555);
+    try {
+      const r = spawnSync("sh", ["-c", `${renderPrune(path, parent)}\necho AFTER_PRUNE`], { env: ENV, encoding: "utf8" });
+
+      assert.match(r.stdout ?? "", /SNAPSHOT_PRUNE_FAILED/, `a run root the prune could not remove went unreported: ${r.stdout}`);
+      assert.match(r.stdout ?? "", /AFTER_PRUNE/, "a failed prune stopped the snapshot step");
+      assert.equal(r.status, 0, `a failed prune ended the step non-zero: ${r.stderr}`);
+      assert.ok(existsSync(stale), "the fixture's run root was removed, so this case exercised no failure");
+    } finally {
+      unlock(parent);
+    }
   });
 
   // #1616. The ref-head operand, measured where it is PRODUCED rather than
