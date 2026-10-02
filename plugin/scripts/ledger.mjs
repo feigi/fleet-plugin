@@ -36,7 +36,7 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition } from "./ledger-grammar.mjs";
-import { deriveRun, LedgerError } from "./fleet-tick.mjs";
+import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
 import { stateFileIn, readState, assessBeat, stallsAt } from "./fleet-state.mjs";
 
 const NAME = "ledger";
@@ -844,6 +844,22 @@ if (cmd === "read") {
   // rewrite alike; a well-formed token, live or settled, still goes through.
   const malformed = memberTokens(line).find((t) => t.error !== null);
   if (malformed) die(`row ${key}: malformed member token '${malformed.name}=${malformed.outcome}' — ${malformed.error}`);
+  // #2331: `label-off=<attempt>` tells the tick a missing `ready-to-merge` is
+  // the controller's own removal, not a finisher's miss — so one naming no
+  // finisher-pr member this run has would mask a real miss behind a record of
+  // nothing. Known means in `## Dispatched` or among a row's member tokens as
+  // they stand before this write, the two places dispatch's live-sibling check
+  // reads: a token `row` wrote never enters `## Dispatched`, and this line's
+  // own copy of a name vouches for nothing. Local only — never `gh` (#152).
+  const known = new Set([...data.dispatched.map(parseToken), ...data.rows.flatMap(memberTokens)]
+    .filter((t) => t && t.family === "finisher-pr").map((t) => t.name));
+  const badOff = line.split(/\s+/).find((tok) => {
+    const m = labelOffMember(tok);
+    return m === null || (m !== undefined && !known.has(m.name));
+  });
+  if (badOff !== undefined) {
+    die(`row ${key}: '${badOff}' names no finisher-pr member this run has dispatched or recorded — label-off=<finisher-pr-M[-x]>, the latest finisher attempt, before taking ready-to-merge off PR M`);
+  }
   const i = data.rows.findIndex((r) => r.split(/\s/)[0] === key);
   const created = i === -1;
   if (created) {
