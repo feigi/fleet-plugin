@@ -754,6 +754,21 @@ const REVIEWER_BLOCKS = [
     ],
   },
   {
+    what: "the finisher's duty-3 two-step block",
+    opener: "**Duty 3 is two steps, and only the second one labels.**",
+    golden: [
+      "**Duty 3 is two steps, and only the second one labels.**",
+      "(a) `gh pr view <M> --json labels` — confirm exactly one of",
+      "`patch`/`minor`/`major`. Zero or more than one halts you before the label:",
+      "name which you found. A repo whose `gh label list` defines none of the three",
+      "does not gate on one.",
+      "(b) `gh pr edit <M> --add-label ready-to-merge`. Step (a) passing labels",
+      "nothing; this command is the duty.",
+      "Then run `gh pr view <M> --json labels` once more and put its output in your",
+      "report: that read-back is what tells the controller the label is on.",
+    ],
+  },
+  {
     what: "the finisher's halt-cause block",
     opener: "Worktree differs from your pin",
     golden: [

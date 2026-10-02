@@ -1382,7 +1382,7 @@ for a token on a ticket's line — never a hand edit.
 | Implementer report | `verify-sha.sh`; `ledger.mjs settle impl-<N>=PR#<M>`, or `=bailed` and relabel by cause (**Implementer bails before implementing**, below) |
 | Review workflow notification / `review-pr-<n>` report | write `<scratch>/review-<pr>.json`; `reviewed=<head>:<survived>/<refuted>/<unverified>` on the PR's row (**Reviewers**) |
 | Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; copy the refutations it reversed to `ruled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
-| Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
+| Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled` as reported, even when its read-back lacks `ready-to-merge` — the tick's `DISPATCH finisher PR#<M>` catches that next. A **repair** finisher's (one sent on that line) read-back lacking it also gets `gh pr comment <M>` with both finishers' read-backs: the one-shot escalation, where halts comment. `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Finisher report (halted) | `ledger.mjs settle finisher-pr-<M>=halted:<cause>`; `gh pr comment <M>` with the finisher's halt report, cause and evidence; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line; then the per-cause rule (**Resolving a finisher halt**, below) |
 | Label seen (persistent Monitor) | nothing to record |
 | CI run terminal | `ci=<run-id>:<attempt>:<conclusion>` on the row; then the finisher gate (below) |
@@ -1556,6 +1556,20 @@ depth** guard table applied in code. Act on each line as it reads:
 - `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn
   (**Reviewers**).
 - `DISPATCH merge-bot` — the next `merge-bot-<n>` (**Merge bot**).
+- `DISPATCH finisher PR#<M> …` — a finisher settled `labelled`, yet the open
+  list shows PR M without `ready-to-merge`, and no `label-off=` (**Run ledger**)
+  accounts for the removal (#2331). Apply the finisher gate (**Reviewers**: the
+  `check` job green on the current head), then dispatch the next-suffix
+  finisher at that head — `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`, one
+  letter past the highest the PR has used. Never add the label yourself. A head
+  that moved is caught by the new finisher's duty 1 `past-pin` halt and the
+  re-review path that follows it. Finishers take no reviewer slot, so this
+  prints whatever the reviewer cap reads.
+- `ESCALATE unlabelled PR#<M> …` — a second finisher since the last `label-off=`
+  settled `labelled` and the label is still not on: the tick dispatches no
+  third. Not actionable; the maintainer's, through the cockpit's `unlabelled`
+  flag and the comment the repair finisher's report left (**Finisher report**
+  row above).
 - `HOLD (…)` — the row is held and says why: draining, a tier mismatch, an
   unchecked tier, a saturated review side, `--max-reviews` in flight, or every
   queued merge candidate held behind a lower PR or on a conflict hold no
@@ -2499,19 +2513,25 @@ a minute apart showed *different* mutants, so a member's report and any single
    silent-destruction ordering above — report it back, do not run it. One
    finisher refused exactly that instruction live, on the grounds it could not
    prove the diff was its own; that was judgement, and this is the rule.
-3. Add `ready-to-merge` — after reading the PR's labels back
-   (`gh pr view <pr> --json labels`) and finding **exactly one** release label,
-   `patch`/`minor`/`major`. Zero or more than one halts the finisher before the
-   label, naming which it found. This is the backstop for a label lost wherever
-   it was lost, a hand-created PR included: a `gh pr create` that outran its
-   caller's tool timeout leaves the PR open with the flag unapplied and no exit
-   status anywhere to notice, and nothing downstream re-derives the release
-   label. Count only those three — the PR carries other labels, `ready-to-merge`
-   itself among them once you add it, so a PR wearing one release label beside
-   them passes unchanged. A repo that defines none of the three does not gate on
-   one — `gh label list` settles that, and it is no licence to skip the read
-   where they exist.
-4. Report you the label, the deferral issue numbers — a
+3. Add `ready-to-merge` — two steps, each checked on its own, in this order:
+   - **(a) Exactly one release label.** Read the PR's labels back
+     (`gh pr view <pr> --json labels`) and find **exactly one** release label,
+     `patch`/`minor`/`major`. Zero or more than one halts the finisher before
+     the label, naming which it found. This is the backstop for a label lost
+     wherever it was lost, a hand-created PR included: a `gh pr create` that
+     outran its caller's tool timeout leaves the PR open with the flag
+     unapplied and no exit status anywhere to notice, and nothing downstream
+     re-derives the release label. Count only those three — the PR carries
+     other labels, `ready-to-merge` itself among them once you add it, so a PR
+     wearing one release label beside them passes unchanged. A repo that
+     defines none of the three does not gate on one — `gh label list` settles
+     that, and it is no licence to skip the read where they exist.
+   - **(b) Add the label:** `gh pr edit <pr> --add-label ready-to-merge`. (a)
+     passing labels nothing — it is the precondition, and this command is the
+     duty. Two finishers in one run (#2331) stopped at (a) and reported
+     `labelled` on PRs that sat out of the merge queue.
+4. Report you the label (its post-add read-back: `gh pr view <pr> --json labels`
+   run after 3(b), output as printed), the deferral issue numbers — a
    `filed: #N <subject>` line for every issue duty 2 created, and
    `unrecorded: #N <subject>` for one whose `filed` failed twice — and anything
    it halted on — cause and evidence, below, never a bare "head moved". The
@@ -2547,17 +2567,37 @@ is dispatched to read, so it reaches one through this block or not at all:
 > tree — so an exit 2 naming a moved or unreadable audited tree is a halt
 > like every other, not a spelling for you to correct.
 
+**Give the finisher duty 3 verbatim as well, as its two steps.** The finisher's
+agent definition carries no duty text, so this brief is the whole of duty 3 it
+sees. Two finishers in one run (#2331) read the release-label check as the
+whole duty and reported `labelled` on a PR that never got the label:
+
+> **Duty 3 is two steps, and only the second one labels.**
+> (a) `gh pr view <M> --json labels` — confirm exactly one of
+> `patch`/`minor`/`major`. Zero or more than one halts you before the label:
+> name which you found. A repo whose `gh label list` defines none of the three
+> does not gate on one.
+> (b) `gh pr edit <M> --add-label ready-to-merge`. Step (a) passing labels
+> nothing; this command is the duty.
+> Then run `gh pr view <M> --json labels` once more and put its output in your
+> report: that read-back is what tells the controller the label is on.
+
 **Once the label is on, take it off before you approve any push.** The label is a
 verdict on the tree the finisher read, and a GitHub label does not follow the
 branch — on #180 it survived a push and came to sit on a commit nobody had
-audited. Remove `ready-to-merge` *first*, then approve: removing the artifact the
-merge bot gates on is the reliable stop, where messaging the bot races it, and a
-label has been observed holding until after an abort message arrived. Then
+audited. Write `label-off=<latest finisher attempt>` onto the PR's row first
+(`ledger.mjs row`, the row's whole text plus the token — **Run ledger**), then
+remove `ready-to-merge`, then approve. The token is how the tick tells your
+removal from a finisher that never labelled — a tick run between a removal and
+its token re-dispatches a finisher into your take-off window. The label goes
+before the approval because removing the artifact the merge bot gates on is
+the reliable stop, where messaging the bot races it, and a label has been
+observed holding until after an abort message arrived. Then
 dispatch a **fresh** finisher against the new head; the first audit does not
 transfer, since it verified a different tree. The merge bot refuses that head on
 its own (`run-merge-bot.md`, **The labelled head**), so this is not the only
 guard — but its refusal costs a pass and leaves the label lying, which is yours
-to clear either way.
+to clear either way, the same way: `label-off=` first, then the removal.
 
 A halt at step 1 reads identical from a bare SHA mismatch whatever caused it,
 and the causes below are the ones seen so far, not a closed list. Give the
@@ -3458,7 +3498,13 @@ flight, and the tick counts it against the reviewer cap. `ci=<run-id>:<attempt>:
 and `held-behind:#<lower>` are row tokens the same way (Phase 3), and so is
 `conflict-hold:#<pr>` — the one row token the merge bot writes itself, naming
 the row's own PR (`run-merge-bot.md` step 1). It is not an Exclusion: that
-gates a ticket's claim, this a reviewed PR's merge.
+gates a ticket's claim, this a reviewed PR's merge. `label-off=<finisher-pr-M[-x]>`
+is yours, written before you take `ready-to-merge` off PR M on purpose (taking
+it off before you approve a push, or clearing one left on a moved head),
+naming that PR's latest finisher attempt: the tick reads a missing label as a
+finisher's miss only after the last attempt a `label-off=` names, so without
+it your own removal reads as one. `row` refuses a `label-off=` naming no
+`finisher-pr` member that `## Dispatched` or some row already carries.
 
 Plus two append-only lists:
 

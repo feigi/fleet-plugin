@@ -143,6 +143,21 @@ test("the finisher's assertion accepts a normally-labelled PR — it counts rele
   );
 });
 
+// #2331: duty 3 read as one item let two finishers stop at the release-label
+// check and report `labelled` with no `ready-to-merge` on the PR. The add is
+// its own sub-step, after the check, and carries the command itself — sliced
+// to each sub-step, so a command left elsewhere in duty 3 does not satisfy it.
+test("duty 3 is two sub-steps — the release-label check, then the add-label command", () => {
+  const a = between(RUN_TEAM, "- **(a) Exactly one release label.**", "- **(b) Add the label:**", "finisher duty 3(a)");
+  const b = between(RUN_TEAM, "- **(b) Add the label:**", "4. Report you the label", "finisher duty 3(b)");
+  assert.match(a, phrase("exactly one"), "3(a) no longer holds the release-label count");
+  assert.doesNotMatch(a, /--add-label/, "3(a) adds a label — the precondition and the action are one step again");
+  assert.match(b, /`gh pr edit <pr> --add-label ready-to-merge`/, "3(b) no longer spells out the add-label command");
+  assert.ok(RUN_TEAM.indexOf("- **(a) Exactly one release label.**") < RUN_TEAM.indexOf("- **(b) Add the label:**"), "the add precedes its precondition");
+  assert.match(between(RUN_TEAM, "4. Report you the label", "\n\n", "finisher duty 4"), phrase("post-add read-back: `gh pr view <pr> --json labels`"),
+    "duty 4 no longer reports the label read back after the add");
+});
+
 test("the solo labelling step gates on the release label too — the fleet finisher is not its only writer", () => {
   // `review-and-fix.md` step 6 is the other writer of `ready-to-merge`. A guard
   // on the fleet path alone leaves the standalone path labelling PRs with no
