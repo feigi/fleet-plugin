@@ -20,12 +20,14 @@
 // lets `merge-bot-<n>` be counted from it.
 //
 // Writer policy (#531, reversing #151's item #7): the controller owns run
-// state (`row`/`settle`/`dispatch`/`drain`/`ruled`); filers append filings
-// with `filed`; all writes are serialized by `<file>.lock`. Every write
-// subcommand rewrites the WHOLE file from what it loaded, so two unlocked
-// writers are last-writer-wins — measured, 8 concurrent `filed` kept 2-5 of 8
-// rows — and the lock is what lets a second kind of writer exist at all. The
-// reasoning for each part of the lock lives at acquireLock() below.
+// state (`row`/`settle`/`dispatch`/`drain`/`ruled`/`rotate`); filers append
+// filings with `filed`; all writes are serialized by `<file>.lock`. Every
+// write subcommand except `rotate` — which moves the file whole and never
+// loads it, see runRotate() — rewrites the WHOLE file from what it loaded,
+// so two unlocked writers are last-writer-wins — measured, 8 concurrent
+// `filed` kept 2-5 of 8 rows — and the lock is what lets a second kind of
+// writer exist at all. The reasoning for each part of the lock lives at
+// acquireLock() below.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync, openSync, writeSync, closeSync, unlinkSync, linkSync } from "node:fs";
 import { dirname, resolve, join, basename } from "node:path";

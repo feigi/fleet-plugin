@@ -56,19 +56,24 @@
 // lands on the ledger either way: `tier-ok=impl-<N>:<definition>` on the
 // row on a pass, `ledger.mjs settle impl-<N> tier-mismatch` on a failure.
 // fleet-tick.mjs holds the next Pull on the newest implementer of a ticket
-// carrying neither.
+// carrying none of the three verdicts — those two, or `tier-unverifiable=`
+// below.
 //
 // Exit status: 0 every member passed; 1 any member mismatched; 2 usage — a
 // bad batch, flag or config, an unreadable ledger, or a member whose
 // transcript cannot be found, before anything is written; 3 no mismatch, but
 // at least one implementer was recorded `tier-unverifiable=impl-<N>:no-transcript`
-// — settled anywhere on the ledger (a row or `## Dispatched`) while its
-// `session` names an existing directory holding no `<member>.jsonl`, the
-// trace of a dispatch that failed before a transcript was written. That token
-// clears the tick's unchecked hold without claiming the tier was right. A
-// LIVE member with no transcript is still exit 2: it may yet write one, and
-// a `session` that is omitted, empty, missing or not a directory is exit 2
-// whether the member is live or settled.
+// — settled `killed` or `released` anywhere on the ledger (a row or
+// `## Dispatched`) while its `session` names an existing directory holding no
+// `<member>.jsonl`, the trace of a dispatch that failed before a transcript
+// was written. That token clears the tick's unchecked hold without claiming
+// the tier was right. Every other case with no transcript is still exit 2: a
+// LIVE member may yet write one; a member settled `PR#M`, `bailed` or
+// `tier-mismatch` ran, so its transcript exists and the `session` is the
+// wrong directory; a `session` that is omitted, empty, missing or not a
+// directory is exit 2 whether the member is live or settled; and a session
+// directory that cannot be searched (EACCES) is exit 2 naming the errno,
+// never read as holding no transcript.
 
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -219,11 +224,12 @@ export function implementerFailures(r) {
 // refuses to re-settle it, and the mismatch must still hold the next Pull.
 export const tierOkToken = (member, definition) => `tier-ok=${member}:${definition}`;
 export const tierMismatchToken = (member, definition) => `tier-mismatch=${member}:${definition}`;
-// The third verdict: a SETTLED implementer whose `<session>/<member>.jsonl`
-// does not exist under a session directory that does — a dispatch that
-// failed before any transcript was written. It clears the tick's unchecked
-// hold and is never read as `tier-ok=` (tier-outcomes.mjs falls through
-// past it). The check exits UNVERIFIABLE_EXIT when it records one.
+// The third verdict: an implementer settled `killed` or `released` whose
+// `<session>/<member>.jsonl` does not exist under a session directory that
+// does — a dispatch that failed before any transcript was written. It clears
+// the tick's unchecked hold and is never read as `tier-ok=`
+// (tier-outcomes.mjs falls through past it). The check exits
+// UNVERIFIABLE_EXIT when it records one.
 export const tierUnverifiableToken = (member) => `tier-unverifiable=${member}:no-transcript`;
 export const UNVERIFIABLE_EXIT = 3;
 
@@ -285,11 +291,25 @@ function resolveViaSession(repoRoot, sessionPath, member) {
 // True only for a session path that IS a directory and holds no
 // `<member>.jsonl`: the one shape that can mean a dispatch which never wrote
 // a transcript. A path that does not exist, or is not a directory, is a
-// caller's mistake and stays resolveViaSession's refusal.
+// caller's mistake and stays resolveViaSession's refusal. Only ENOENT reads
+// as "no transcript": a directory that cannot be searched throws (EACCES),
+// which main() dies on by name — `existsSync` would swallow it and record a
+// transcript that exists as one that never was.
 function sessionLacksTranscript(repoRoot, sessionPath, member) {
   const root = resolvePath(repoRoot, sessionPath);
-  return statSync(root, { throwIfNoEntry: false })?.isDirectory() === true && !existsSync(join(root, `${member}.jsonl`));
+  if (statSync(root, { throwIfNoEntry: false })?.isDirectory() !== true) return false;
+  return statSync(join(root, `${member}.jsonl`), { throwIfNoEntry: false }) === undefined;
 }
+
+// The settle outcomes a dispatch that failed before writing a transcript can
+// carry: `killed` (the Member-killed row — spend limit, API error, crash) and
+// `released` (a drain releases every claim that never became a PR). `PR#M`,
+// `bailed` and `tier-mismatch` each prove the member ran — it opened a PR,
+// reported its own bail, or had its transcript read by this check — so for
+// them a missing `<member>.jsonl` means the `session` is the wrong directory,
+// and recording `tier-unverifiable` would clear the hold on a member whose
+// tier can still be judged.
+const NO_TRANSCRIPT_OUTCOMES = new Set(["killed", "released"]);
 
 function runLedger(ledgerFile, args, what) {
   try {
@@ -352,8 +372,9 @@ function recordImplementer(ledgerFile, r) {
 // A settled implementer whose transcript does not exist can never be judged,
 // and holding the tick on it forever is the deadlock this verdict ends: the
 // token clears `HOLD (tier unchecked …)` without claiming the tier was right,
-// which is why it is neither `tier-ok=` nor `tier-mismatch=`. Appended once,
-// on the ticket's row, under the same presence rule as the other two.
+// which is why it is neither `tier-ok=` nor `tier-mismatch=`. Only for a
+// member settled one of NO_TRANSCRIPT_OUTCOMES. Appended once, on the
+// ticket's row, under the same presence rule as the other two.
 function recordUnverifiable(ledgerFile, r) {
   const token = tierUnverifiableToken(r.member);
   console.error(`${r.member}: settled ${r.outcome} with no ${r.member}.jsonl under --session ${r.session} — nothing to check; recorded ${token}`);
@@ -438,14 +459,17 @@ function main() {
       // the agent type it was dispatched as lives only there.
       if (impl || !hasJobRecord) {
         if (raw.session) {
-          // A settled implementer with no transcript under a session
-          // directory that does exist: its dispatch failed before one was
-          // written, so there is nothing to judge. Recorded, not refused —
-          // see recordUnverifiable. A live member, one on the ledger nowhere,
-          // or a session path that is not a directory still refuses below.
+          // A member settled `killed` or `released` with no transcript under
+          // a session directory that does exist: its dispatch failed before
+          // one was written, so there is nothing to judge. Recorded, not
+          // refused — see recordUnverifiable. A live member, one on the
+          // ledger nowhere, or a session path that is not a directory still
+          // refuses below; one settled any other way ran, so its missing
+          // transcript names the wrong session and refuses here.
           if (impl && sessionLacksTranscript(repoRoot, raw.session, raw.member)) {
             const outcome = memberOutcome(ledgerData, raw.member);
-            if (outcome) return { impl: true, unverifiable: true, member: raw.member, ticket, outcome, session: raw.session };
+            if (NO_TRANSCRIPT_OUTCOMES.has(outcome)) return { impl: true, unverifiable: true, member: raw.member, ticket, outcome, session: raw.session };
+            if (outcome) throw new Error(`settled ${outcome} with no ${raw.member}.jsonl under --session ${raw.session} — a member settled ${outcome} ran, so its transcript exists: name the session directory that dispatched it`);
           }
           transcriptText = resolveViaSession(repoRoot, raw.session, raw.member);
         } else if (raw.transcript) {

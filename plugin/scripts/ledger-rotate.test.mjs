@@ -12,6 +12,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stallsAt } from "./fleet-state.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
 
@@ -90,7 +91,8 @@ test("rotate refuses while the previous controller is beating, naming the last b
     assert.notEqual(r.status, 0, `${JSON.stringify(mark)}: rotated under a live controller`);
     assert.equal(r.stdout, "");
     assert.match(r.stderr, new RegExp(`last beat ${new Date(mark.beat.at).toISOString()}`));
-    assert.match(r.stderr, /stalled after \d{4}-\d{2}-\d{2}T[\d:.]+Z/);
+    const stalls = new Date(stallsAt({ beat: mark.beat, ticked: mark.ticked ?? null })).toISOString();
+    assert.match(r.stderr, new RegExp(`stalled after ${stalls.replaceAll(".", "\\.")}`));
     assert.equal(readFileSync(f.file, "utf8"), LEDGER, "a refusal must not touch the ledger");
     assert.deepEqual(f.archives(), []);
   }

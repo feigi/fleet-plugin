@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { readState, writeState, assessBeat, isStalled, stallReport, BEAT_GRACE, DEFAULT_CEILING_S } from "./fleet-state.mjs";
+import { readState, writeState, assessBeat, isStalled, stallReport, stallsAt, BEAT_GRACE, DEFAULT_CEILING_S } from "./fleet-state.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./fleet-state.mjs", import.meta.url));
 
@@ -233,6 +233,25 @@ test("assessBeat: a busy run's own `ticked` covers for a `beat` the busy stretch
   // the way out.
   const stopped = { at: now - 11 * 60 * 1000, interval: 300, stopped: "budget" };
   assert.equal(assessBeat({ beat: stopped, ticked: { at: now - 1000 }, now }).kind, "stopped");
+});
+
+test("stallsAt: a tick's window ends at the ceiling times grace, and only ever postpones `beat`'s own end", () => {
+  const now = 2_000_000_000_000;
+  // A beat already past its own window, so the tick alone decides — pinned on
+  // both sides of the edge, the same pair the beat boundary above uses.
+  const beat = { at: now - 11 * 60 * 1000, interval: 300, stopped: "" };
+  const tickEdge = DEFAULT_CEILING_S * 1000 * BEAT_GRACE;
+  assert.equal(stallsAt({ beat, ticked: { at: now - tickEdge } }), now);
+  assert.equal(assessBeat({ beat, ticked: { at: now - tickEdge }, now }).kind, "beating");
+  assert.equal(assessBeat({ beat, ticked: { at: now - tickEdge - 1 }, now }).kind, "stale");
+
+  // The later of the two windows wins: a long recorded interval outlives an
+  // old tick, so the tick must not cut that beat short.
+  const long = { at: now - 30 * 60 * 1000, interval: 1200, stopped: "" };
+  const oldTick = { at: now - 2 * tickEdge };
+  assert.equal(stallsAt({ beat: long, ticked: oldTick }), long.at + 1200 * 1000 * BEAT_GRACE);
+  assert.equal(assessBeat({ beat: long, ticked: oldTick, now }).kind, "beating");
+  assert.equal(stallsAt({ beat: long }), long.at + 1200 * 1000 * BEAT_GRACE, "no tick is `beat` alone");
 });
 
 test("assessBeat: a recorded stop is reported whatever its age, and outranks staleness", () => {

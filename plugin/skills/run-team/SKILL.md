@@ -999,12 +999,15 @@ however often it runs; exit 1 runs `ledger.mjs settle impl-<N> tier-mismatch`
 — or, for a member already settled another way, which `settle` will not
 re-settle, appends `tier-mismatch=impl-<N>:<definition>` instead. Exit 3 is
 the third verdict, `tier-unverifiable=impl-<N>:no-transcript`, appended once
-for a member settled anywhere on the ledger — a row or `## Dispatched` —
-whose `session` names an existing directory holding no `<member>.jsonl`: a
-dispatch that failed before a transcript was written. It says nothing about
-the tier and only clears the unchecked hold. Exit 2 writes nothing — a usage
-error, which includes a LIVE member with no transcript and a `session` that
-is omitted, empty, or not an existing directory, live member or settled.
+for a member settled `killed` or `released` anywhere on the ledger — a row
+or `## Dispatched` — whose `session` names an existing directory holding no
+`<member>.jsonl`: a dispatch that failed before a transcript was written. It
+says nothing about the tier and only clears the unchecked hold. Exit 2
+writes nothing — a usage error, which includes a LIVE member with no
+transcript; a member settled `PR#M`, `bailed` or `tier-mismatch` with none,
+which ran, so the `session` is the wrong directory — pass the one that
+dispatched it; a session directory that cannot be searched; and a `session`
+that is omitted, empty, or not an existing directory, live member or settled.
 A batch holding both a mismatch and an unverifiable member exits 1.
 
 **The tick holds the next Pull until that verdict exists.** Dispatching the
@@ -1017,9 +1020,10 @@ one. Only the newest member counts, so a replacement (`impl-<N>-b`) is what
 clears a mismatch — and is then owed its own check. The tick never reads a
 transcript: clear an unchecked hold by running the check on that member with
 `session`. A settled member's check works only when its transcript exists;
-without one, the verdict is `tier-unverifiable`. Clear a mismatch by fixing
-the definition or the dispatch and dispatching the replacement at the right
-tier.
+without one, the verdict is `tier-unverifiable` for a member settled `killed`
+or `released`, and exit 2 naming the wrong session for any other. Clear a
+mismatch by fixing the definition or the dispatch and dispatching the
+replacement at the right tier.
 
 **Run the check right after the dispatch, and never reinstall the plugin or
 change `modelRoles` while any member is unchecked.** The check reads the
@@ -1652,9 +1656,9 @@ depth** guard table applied in code. Act on each line as it reads:
   queued merge candidate held behind a lower PR or on a conflict hold no
   fix-applier has cleared. The two tier holds are yours to clear — an
   unchecked tier by running `tier-check.mjs --batch` on the member it names
-  (its `tier-ok=`, or `tier-unverifiable=` for a settled member with no
-  transcript, clears it), a mismatch by dispatching the replacement at the
-  right tier (phase 2). Each
+  (its `tier-ok=`, or `tier-unverifiable=` for a member settled `killed` or
+  `released` with no transcript, clears it), a mismatch by dispatching the
+  replacement at the right tier (phase 2). Each
   prints its clearing step in the row's detail: the `tier-check.mjs` command
   with a batch entry per member it names (fill in `<file>` and `<session>`),
   or the replacement's name — `impl-<N>-b` on a first retry, else one letter
