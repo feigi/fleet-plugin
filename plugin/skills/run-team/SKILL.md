@@ -3409,12 +3409,12 @@ failures arrive as *wrong findings*, not errors:
 - **Scratchpad paths need two levels — the member's own partition, then one
   directory per child it dispatches — and nothing outside them.** An
   implementer partitions at `<scratch>/impl-<N>/`; the review side's partition
-  is `<scratch>/pr<N>/…`, which the review core creates itself — a review
-  runner is handed the scratch root, never that partition. Any member that
+  is `<scratch>/pr<N>/…`, which the review core creates itself, so a review
+  runner is handed the scratch root, never that partition; any member that
   dispatches a child writes an absolute directory under its own partition into
   that child's prompt, one per child and never shared, and a child never
-  derives its own. Finding ids restart at 1
-  every review, so two fix-appliers on different PRs both reach for `unv1`; one
+  derives its own. Finding ids restart at 1 every review, so two fix-appliers
+  on different PRs both reach for `unv1`; one
   agent overwrote a sibling's `package.json`, and a probe built a git repo at
   the *checkout root*. Read from the object store at a pinned ref, write only
   under your own path. See references/isolation.md.
