@@ -19,9 +19,17 @@
 //       that config is model-precedence #1 for task/eval dispatch (ADR
 //       0011), so a leftover `fleet-*` key there would silently win over
 //       the definition's own `model:`, which ADR 0014 retires as a lever;
-//   (d) `modelRoles.slow`/`modelRoles.task` resolving to the same model is
-//       flagged as a notice — legal, but the alt-tier comparison
-//       (fleet-implementer-alt) then controls nothing.
+//   (d) every definition's `:<level>` is one its role's current target
+//       runs at — in that model's `thinking` efforts in omp's own model
+//       catalog (`omp models --json`). omp clamps an unsupported level
+//       silently (`claude-haiku-4-5` has no `max`, so `@smol:max` would run
+//       at something else), tier-check would then read a level the
+//       definition never declared, and every row the definition ran would
+//       be inadmissible (spec 2026-09-28 § 2). A target the catalog does
+//       not list cannot be checked, so it fails too;
+//   (e) `modelRoles.slow`/`modelRoles.task` resolving to the same model is
+//       flagged as a notice — legal, but every `slow-*` cell then measures
+//       the same model as its `task-*` twin.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -117,17 +125,40 @@ export function modelsEqual(a, b) {
 // `modelRoles.slow` dotted into a record is `Unknown setting` on this box,
 // so a record-valued key is always read whole. Never writes.
 export function readOmpConfigValue(key) {
+  return readOmpJson(["config", "get", key, "--json"]).value;
+}
+
+// omp's model catalog, `{ models: [{ selector, thinking, … }] }` — `selector`
+// is `<provider>/<id>`, `thinking` the efforts the model runs at, `null` for
+// a model with none (measured, omp 18: `anthropic/claude-haiku-4-5` →
+// minimal…xhigh, `anthropic/claude-opus-5-5` → low…max). Never refreshes.
+export function readOmpModelCatalog() {
+  return readOmpJson(["models", "--json"]);
+}
+
+function readOmpJson(argv) {
+  const cmd = `omp ${argv.join(" ")}`;
   let out;
   try {
-    out = execFileSync("omp", ["config", "get", key, "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    out = execFileSync("omp", argv, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 });
   } catch (e) {
-    throw new Error(`omp config get ${key} --json failed: ${e.stderr || e.message}`);
+    throw new Error(`${cmd} failed: ${e.stderr || e.message}`);
   }
   try {
-    return JSON.parse(out).value;
+    return JSON.parse(out);
   } catch (e) {
-    throw new Error(`omp config get ${key} --json exited 0 but printed non-JSON: ${e.message}`);
+    throw new Error(`${cmd} exited 0 but printed non-JSON: ${e.message}`);
   }
+}
+
+// The catalog entry a `modelRoles` target names — `selector` exactly, else
+// the first entry `modelsEqual` accepts (a role value written without its
+// provider prefix). `null` when the catalog does not list it.
+export function catalogEntry(model, catalog) {
+  const models = Array.isArray(catalog?.models) ? catalog.models : [];
+  return models.find((m) => m?.selector === model)
+    ?? models.find((m) => typeof m?.selector === "string" && modelsEqual(model, m.selector))
+    ?? null;
 }
 
 // Every fleet definition's `name:` carries this prefix — enforced in CI by
@@ -144,15 +175,15 @@ function shellQuote(s) {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-// The operator's install (`modelRoles`, and any leftover
-// `task.agentModelOverrides`) against what the fleet's own definitions need.
-// `violations` stop a run (ADR 0014); `notices` never do — they flag a
-// hazard (the alt-tier pairing controlling nothing) that is legal
+// The operator's install (`modelRoles`, omp's model `catalog`, and any
+// leftover `task.agentModelOverrides`) against what the fleet's own
+// definitions need. `violations` stop a run (ADR 0014); `notices` never do —
+// they flag a hazard (two roles' cells measuring one model) that is legal
 // configuration, just probably not what the operator meant.
-export function checkRoutes({ agentsDir, modelRoles, overrides }) {
+export function checkRoutes({ agentsDir, modelRoles, overrides, catalog }) {
   const violations = [];
   const notices = [];
-  const usedBy = {}; // role -> [file, ...]
+  const usedBy = {}; // role -> [{ file, level }, ...]
 
   const files = readdirSync(agentsDir).filter((f) => f.endsWith(".agent.md")).sort();
   for (const file of files) {
@@ -162,13 +193,26 @@ export function checkRoutes({ agentsDir, modelRoles, overrides }) {
       violations.push(`${file}: model ${JSON.stringify(fm.model)} is not @<role>:<level>`);
       continue;
     }
-    (usedBy[fm.role] ??= []).push(file);
+    (usedBy[fm.role] ??= []).push({ file, level: fm.level });
   }
 
   for (const role of ROLE_ORDER) {
     if (!usedBy[role]) continue;
-    if (resolveRole(role, modelRoles) === null) {
-      violations.push(`modelRoles.${role} is unset — needed by ${usedBy[role].join(", ")}`);
+    const model = resolveRole(role, modelRoles);
+    if (model === null) {
+      violations.push(`modelRoles.${role} is unset — needed by ${usedBy[role].map((u) => u.file).join(", ")}`);
+      continue;
+    }
+    const entry = catalogEntry(model, catalog);
+    if (entry === null) {
+      violations.push(`modelRoles.${role} resolves to ${model}, which omp's model catalog does not list — cannot check the level of ${usedBy[role].map((u) => u.file).join(", ")}`);
+      continue;
+    }
+    const efforts = Array.isArray(entry.thinking) ? entry.thinking : [];
+    for (const { file, level } of usedBy[role]) {
+      if (!efforts.includes(level)) {
+        violations.push(`${file}: level ${level} is not one modelRoles.${role}'s target ${model} runs at (thinking: ${efforts.join(", ") || "none"}) — omp would clamp it silently`);
+      }
     }
   }
 
@@ -189,7 +233,7 @@ export function checkRoutes({ agentsDir, modelRoles, overrides }) {
   const slowModel = resolveRole("slow", modelRoles);
   const taskModel = resolveRole("task", modelRoles);
   if (slowModel !== null && taskModel !== null && modelsEqual(slowModel, taskModel)) {
-    notices.push(`modelRoles.slow and modelRoles.task both resolve to ${slowModel} — the alternate-tier comparison controls nothing`);
+    notices.push(`modelRoles.slow and modelRoles.task both resolve to ${slowModel} — every slow-* cell measures the same model as its task-* twin`);
   }
 
   return { violations, notices };
@@ -206,19 +250,21 @@ const { arg, has, sweep, stray } = defineFlags(die, {
     agents: "value",
     overrides: "value",
     "model-roles": "value",
+    catalog: "value",
   },
 });
 
-function loadJsonObject(path, configKey, flagName) {
+// `--<flagName> <path>` when given, else the live install read `readLive()`
+// performs (`source` names it in a refusal).
+function loadJsonObject(path, readLive, source, flagName) {
   let value;
   try {
-    value = path ? JSON.parse(readFileSync(path, "utf8")) : readOmpConfigValue(configKey);
+    value = path ? JSON.parse(readFileSync(path, "utf8")) : readLive();
   } catch (e) {
     die(e.message);
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    const source = path ? `--${flagName} ${path}` : `omp config get ${configKey} --json`;
-    die(`${source} must be a JSON object, got ${Array.isArray(value) ? "an array" : typeof value}`);
+    die(`${path ? `--${flagName} ${path}` : source} must be a JSON object, got ${Array.isArray(value) ? "an array" : typeof value}`);
   }
   return value;
 }
@@ -228,16 +274,18 @@ function main() {
   stray();
 
   const check = has("check");
-  if (!check) die("--check is required (usage: tier-roles.mjs --check [--agents <dir>] [--model-roles <path>] [--overrides <path>])");
+  if (!check) die("--check is required (usage: tier-roles.mjs --check [--agents <dir>] [--model-roles <path>] [--overrides <path>] [--catalog <path>])");
 
   const agentsDir = arg("agents") ?? join(SCRIPT_DIR, "..", "agents");
-  const overrides = loadJsonObject(arg("overrides"), "task.agentModelOverrides", "overrides");
-  const modelRoles = loadJsonObject(arg("model-roles"), "modelRoles", "model-roles");
+  const config = (key) => [() => readOmpConfigValue(key), `omp config get ${key} --json`];
+  const overrides = loadJsonObject(arg("overrides"), ...config("task.agentModelOverrides"), "overrides");
+  const modelRoles = loadJsonObject(arg("model-roles"), ...config("modelRoles"), "model-roles");
+  const catalog = loadJsonObject(arg("catalog"), readOmpModelCatalog, "omp models --json", "catalog");
 
-  const { violations, notices } = checkRoutes({ agentsDir, modelRoles, overrides });
+  const { violations, notices } = checkRoutes({ agentsDir, modelRoles, overrides, catalog });
 
   if (violations.length === 0) {
-    console.log("tier-roles: every definition routes to a resolvable model, no shadowing override");
+    console.log("tier-roles: every definition routes to a resolvable model at a level it runs, no shadowing override");
     for (const n of notices) console.log(`tier-roles: notice: ${n}`);
     process.exit(0);
   }

@@ -1,14 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   parseModelRoute, parseFrontmatter, stripLevel, resolveRole, expectedOmpModel,
-  modelsEqual, checkRoutes,
+  modelsEqual, checkRoutes, catalogEntry,
 } from "./tier-roles.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./tier-roles.mjs", import.meta.url));
@@ -175,52 +175,52 @@ test("modelsEqual: a bare suffix match without the '/' boundary is NOT equal", (
 
 const MODEL_ROLES = { slow: "anthropic/claude-opus-5:auto", task: "anthropic/claude-sonnet-5:auto", smol: "anthropic/claude-haiku-4-5:auto" };
 
+// The shape of `omp models --json`, trimmed to the three targets above. The
+// efforts are the ones measured on omp's own catalog (spec 2026-09-28 § 2):
+// the adaptive pair runs low…max, haiku's budget mode minimal…xhigh — no max.
+const ADAPTIVE = ["low", "medium", "high", "xhigh", "max"];
+const CATALOG = {
+  models: [
+    { provider: "amazon-bedrock", id: "anthropic.claude-haiku-4-5", selector: "amazon-bedrock/anthropic.claude-haiku-4-5", thinking: null },
+    { provider: "anthropic", id: "claude-opus-5", selector: "anthropic/claude-opus-5", thinking: ADAPTIVE },
+    { provider: "anthropic", id: "claude-sonnet-5", selector: "anthropic/claude-sonnet-5", thinking: ADAPTIVE },
+    { provider: "anthropic", id: "claude-haiku-4-5", selector: "anthropic/claude-haiku-4-5", thinking: ["minimal", "low", "medium", "high", "xhigh"] },
+  ],
+};
+
+const routes = (files, modelRoles = MODEL_ROLES, overrides = {}) =>
+  checkRoutes({ agentsDir: agentsDir(files), modelRoles, overrides, catalog: CATALOG });
+
 test("checkRoutes: every definition routed and every role resolvable -> no violations or notices", () => {
-  const agents = agentsDir({ "fleet-a": "@slow:xhigh", "fleet-b": "@smol:low" });
-  const result = checkRoutes({ agentsDir: agents, modelRoles: MODEL_ROLES, overrides: {} });
-  assert.deepEqual(result, { violations: [], notices: [] });
+  assert.deepEqual(routes({ "fleet-a": "@slow:xhigh", "fleet-b": "@smol:low" }), { violations: [], notices: [] });
 });
 
 test("checkRoutes (a): a definition whose model: is not a route is a violation naming the file", () => {
-  const agents = agentsDir({ "fleet-a": "opus" });
-  const { violations } = checkRoutes({ agentsDir: agents, modelRoles: MODEL_ROLES, overrides: {} });
+  const { violations } = routes({ "fleet-a": "opus" });
   assert.equal(violations.length, 1);
   assert.match(violations[0], /^fleet-a\.agent\.md: model "opus" is not @<role>:<level>$/);
 });
 
 test("checkRoutes (b): a used role with no modelRoles entry is a violation naming the role and the definition", () => {
-  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-  const { violations } = checkRoutes({ agentsDir: agents, modelRoles: {}, overrides: {} });
+  const { violations } = routes({ "fleet-a": "@slow:xhigh" }, {});
   assert.equal(violations.length, 1);
   assert.match(violations[0], /modelRoles\.slow is unset/);
   assert.match(violations[0], /fleet-a\.agent\.md/);
 });
 
 test("checkRoutes (b): an unset role no definition uses is not a violation", () => {
-  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-  const { violations } = checkRoutes({ agentsDir: agents, modelRoles: { slow: MODEL_ROLES.slow }, overrides: {} });
-  assert.deepEqual(violations, []);
+  assert.deepEqual(routes({ "fleet-a": "@slow:xhigh" }, { slow: MODEL_ROLES.slow }).violations, []);
 });
 
 test("checkRoutes (c): a fleet- key in task.agentModelOverrides shadows the definition and violates, remedy resets when nothing else remains", () => {
-  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-  const { violations } = checkRoutes({
-    agentsDir: agents,
-    modelRoles: MODEL_ROLES,
-    overrides: { "fleet-a": "@slow:xhigh" },
-  });
+  const { violations } = routes({ "fleet-a": "@slow:xhigh" }, MODEL_ROLES, { "fleet-a": "@slow:xhigh" });
   assert.equal(violations.length, 1);
   assert.match(violations[0], /task\.agentModelOverrides\.fleet-a shadows the definition's own model \(precedence #1\) — remove it/);
   assert.match(violations[0], /omp config reset task\.agentModelOverrides/);
 });
 
 test("checkRoutes (c): the remedy keeps the operator's own non-fleet- entries when one exists", () => {
-  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-  const { violations } = checkRoutes({
-    agentsDir: agents,
-    modelRoles: MODEL_ROLES,
-    overrides: { "fleet-a": "@slow:xhigh", "my-other-agent": "opus" },
-  });
+  const { violations } = routes({ "fleet-a": "@slow:xhigh" }, MODEL_ROLES, { "fleet-a": "@slow:xhigh", "my-other-agent": "opus" });
   assert.equal(violations.length, 1);
   assert.match(violations[0], /omp config set task\.agentModelOverrides/);
   assert.match(violations[0], /my-other-agent/);
@@ -228,35 +228,64 @@ test("checkRoutes (c): the remedy keeps the operator's own non-fleet- entries wh
 });
 
 test("checkRoutes (c): a non-fleet- override key is the operator's own and never violates", () => {
-  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-  const { violations } = checkRoutes({
-    agentsDir: agents,
-    modelRoles: MODEL_ROLES,
-    overrides: { "my-other-agent": "opus" },
-  });
-  assert.deepEqual(violations, []);
+  assert.deepEqual(routes({ "fleet-a": "@slow:xhigh" }, MODEL_ROLES, { "my-other-agent": "opus" }).violations, []);
 });
 
-test("checkRoutes (d): slow and task resolving to the same model is a notice, not a violation", () => {
-  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-  const { violations, notices } = checkRoutes({
-    agentsDir: agents,
-    modelRoles: { slow: "anthropic/claude-opus-5:auto", task: "anthropic/claude-opus-5:auto", smol: MODEL_ROLES.smol },
-    overrides: {},
-  });
+test("checkRoutes (d): a level the role's target does not run at is a violation naming the file and the efforts", () => {
+  // The one the spec names: haiku has no `max`, so `smol-max` would clamp.
+  const { violations } = routes({ "fleet-implementer-smol-max": "@smol:max", "fleet-implementer-smol-high": "@smol:high" });
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /^fleet-implementer-smol-max\.agent\.md: level max is not one modelRoles\.smol's target anthropic\/claude-haiku-4-5 runs at \(thinking: minimal, low, medium, high, xhigh\)/);
+  // And the other edge of the adaptive range: no `minimal` on opus.
+  assert.match(routes({ "fleet-a": "@slow:minimal" }).violations[0] ?? "", /fleet-a\.agent\.md: level minimal/);
+});
+
+test("checkRoutes (d): every level a target lists is accepted, through a role value written without its provider", () => {
+  // The must-ACCEPT half: `task-max` is a real wire effort on the adaptive
+  // models, and `smol-minimal` one on haiku's budget mode.
+  assert.deepEqual(routes({ "fleet-a": "@task:max", "fleet-b": "@smol:minimal", "fleet-c": "@slow:low" }).violations, []);
+  assert.deepEqual(routes({ "fleet-a": "@task:max" }, { task: "claude-sonnet-5:high" }).violations, []);
+});
+
+test("checkRoutes (d): a target the catalog does not list, or lists with no thinking at all, cannot pass", () => {
+  const unlisted = routes({ "fleet-a": "@slow:high" }, { slow: "acme/unknown-1" }).violations;
+  assert.equal(unlisted.length, 1);
+  assert.match(unlisted[0], /modelRoles\.slow resolves to acme\/unknown-1, which omp's model catalog does not list — cannot check the level of fleet-a\.agent\.md/);
+  const thinkless = routes({ "fleet-a": "@smol:low" }, { smol: "amazon-bedrock/anthropic.claude-haiku-4-5" }).violations;
+  assert.equal(thinkless.length, 1);
+  assert.match(thinkless[0], /level low is not one .*\(thinking: none\)/);
+});
+
+test("catalogEntry: an exact selector wins over a provider-less match", () => {
+  assert.equal(catalogEntry("anthropic/claude-haiku-4-5", CATALOG).provider, "anthropic");
+  assert.equal(catalogEntry("claude-opus-5", CATALOG).selector, "anthropic/claude-opus-5");
+  assert.equal(catalogEntry("claude-opus", CATALOG), null);
+  assert.equal(catalogEntry("anthropic/claude-opus-5", {}), null);
+});
+
+test("checkRoutes (e): slow and task resolving to the same model is a notice, not a violation", () => {
+  const { violations, notices } = routes(
+    { "fleet-a": "@slow:xhigh" },
+    { slow: "anthropic/claude-opus-5:auto", task: "anthropic/claude-opus-5:auto", smol: MODEL_ROLES.smol },
+  );
   assert.deepEqual(violations, []);
   assert.equal(notices.length, 1);
   assert.match(notices[0], /modelRoles\.slow and modelRoles\.task both resolve to/);
 });
 
-test("checkRoutes (d): slow and task resolving to different models is not a notice", () => {
-  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-  const { notices } = checkRoutes({ agentsDir: agents, modelRoles: MODEL_ROLES, overrides: {} });
-  assert.deepEqual(notices, []);
+test("checkRoutes (e): slow and task resolving to different models is not a notice", () => {
+  assert.deepEqual(routes({ "fleet-a": "@slow:xhigh" }).notices, []);
 });
 
-test("checkRoutes: every real plugin/agents definition routes cleanly against a model-roles fixture that covers all three roles", () => {
-  const { violations } = checkRoutes({ agentsDir: REPO_AGENTS, modelRoles: MODEL_ROLES, overrides: {} });
+// The five-cell grid at ratification (spec 2026-09-28 § 2), and every real
+// definition clean against targets that run each one's level.
+test("checkRoutes: every real plugin/agents definition routes cleanly, and the implementer definitions are exactly the five cells", () => {
+  const cells = readdirSync(REPO_AGENTS)
+    .map((f) => /^fleet-implementer(?:-(.+))?\.agent\.md$/.exec(f))
+    .filter(Boolean)
+    .map((m) => m[1]);
+  assert.deepEqual(cells.sort(), ["slow-high", "slow-medium", "smol-high", "task-high", "task-max"]);
+  const { violations } = checkRoutes({ agentsDir: REPO_AGENTS, modelRoles: MODEL_ROLES, overrides: {}, catalog: CATALOG });
   assert.deepEqual(violations, []);
 });
 
@@ -264,21 +293,27 @@ test("checkRoutes: every real plugin/agents definition routes cleanly against a 
 // CLI
 // ---------------------------------------------------------------------------
 
+// Every flag the check reads the live install through, pointed at a fixture:
+// a test that left one off would shell out to the box's own `omp`.
+function installFlags(d, { overrides = {}, modelRoles = MODEL_ROLES, catalog = CATALOG } = {}) {
+  return [
+    "--overrides", jsonFile(d, "overrides.json", overrides),
+    "--model-roles", jsonFile(d, "model-roles.json", modelRoles),
+    "--catalog", jsonFile(d, "catalog.json", catalog),
+  ];
+}
+
 test("CLI: --check with a clean install exits 0", () => {
   const d = dir();
   const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-  const overridesPath = jsonFile(d, "overrides.json", {});
-  const modelRolesPath = jsonFile(d, "model-roles.json", MODEL_ROLES);
-  const r = runCli(["--check", "--agents", agents, "--overrides", overridesPath, "--model-roles", modelRolesPath], d);
+  const r = runCli(["--check", "--agents", agents, ...installFlags(d)], d);
   assert.equal(r.status, 0, r.stderr);
 });
 
 test("CLI: --check with a non-route model: exits 1 naming the file", () => {
   const d = dir();
   const agents = agentsDir({ "fleet-a": "opus" });
-  const overridesPath = jsonFile(d, "overrides.json", {});
-  const modelRolesPath = jsonFile(d, "model-roles.json", MODEL_ROLES);
-  const r = runCli(["--check", "--agents", agents, "--overrides", overridesPath, "--model-roles", modelRolesPath], d);
+  const r = runCli(["--check", "--agents", agents, ...installFlags(d)], d);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /fleet-a\.agent\.md: model "opus" is not @<role>:<level>/);
 });
@@ -286,11 +321,26 @@ test("CLI: --check with a non-route model: exits 1 naming the file", () => {
 test("CLI: --check with a shadowing fleet- override exits 1 naming the remedy", () => {
   const d = dir();
   const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-  const overridesPath = jsonFile(d, "overrides.json", { "fleet-a": "@slow:xhigh" });
-  const modelRolesPath = jsonFile(d, "model-roles.json", MODEL_ROLES);
-  const r = runCli(["--check", "--agents", agents, "--overrides", overridesPath, "--model-roles", modelRolesPath], d);
+  const r = runCli(["--check", "--agents", agents, ...installFlags(d, { overrides: { "fleet-a": "@slow:xhigh" } })], d);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /omp config reset task\.agentModelOverrides/);
+});
+
+test("CLI: --check with a smol-max cell exits 1 — haiku has no max, and the check refuses rather than clamps", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-implementer-smol-high": "\"@smol:high\"", "fleet-implementer-smol-max": "\"@smol:max\"" });
+  const r = runCli(["--check", "--agents", agents, ...installFlags(d)], d);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /fleet-implementer-smol-max\.agent\.md: level max is not one modelRoles\.smol's target/);
+  assert.doesNotMatch(r.stderr, /smol-high/);
+});
+
+test("CLI: a --catalog that is not a JSON object refuses by flag", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  const r = runCli(["--check", "--agents", agents, ...installFlags(d, { catalog: [] })], d);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--catalog .*catalog\.json must be a JSON object, got an array/);
 });
 
 test("CLI: --check without --check flag is required", () => {
@@ -309,8 +359,6 @@ test("CLI: an unknown flag refuses by name", () => {
 
 test("CLI: --agents defaults to the plugin's own agents directory", () => {
   const d = dir();
-  const overridesPath = jsonFile(d, "overrides.json", {});
-  const modelRolesPath = jsonFile(d, "model-roles.json", MODEL_ROLES);
-  const r = runCli(["--check", "--overrides", overridesPath, "--model-roles", modelRolesPath], d);
+  const r = runCli(["--check", ...installFlags(d)], d);
   assert.equal(r.status, 0, r.stderr);
 });
