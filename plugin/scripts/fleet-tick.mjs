@@ -483,7 +483,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // `reviewFixed`: a REVIEW fix-applier landed after the latest
     // `reviewed=` — one read while no hold stood unresolved. The one read
     // while a hold did is the conflict fix-applier `ledger.mjs dispatch` named
-    // `fleet-implementer` (#2299): it rebases and never sees the review file,
+    // a `fleet-implementer-<cell>` (#2299): it rebases and never sees the review file,
     // so it clears the hold and answers no survivor (#2328). Each fix-applier
     // does one of those jobs once, so its landing folds once per PR
     // (`fixLanded`), however many copies of its token the rows carry.

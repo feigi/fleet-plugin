@@ -3,11 +3,14 @@
 ## What it is for
 
 The implementer turns one claimed ticket into a pushed branch and an
-open PR. It runs as
-[`fleet-implementer.agent.md`](../../plugin/agents/fleet-implementer.agent.md),
-or, on every 5th Pull by ledger count, its byte-identical sibling
-[`fleet-implementer-alt.agent.md`](../../plugin/agents/fleet-implementer-alt.agent.md)
-— see [Tier routing](tier-routing.md) for why.
+open PR. It runs as `fleet-implementer-<cell>.agent.md`: one definition
+per cell (`slow-high`, `slow-medium`, `task-high`, `task-max`,
+`smol-high` — an omp role and a thinking level), byte-identical bodies,
+each declaring the route its name derives. A row with no `tier=` runs
+at the policy cell,
+[`fleet-implementer-slow-high.agent.md`](../../plugin/agents/fleet-implementer-slow-high.agent.md);
+every 5th Pull by ledger count runs at an exploration cell — see
+[Tier routing](tier-routing.md) for why.
 
 ## How it works
 1. **Dispatch.** One implementer per Pull, never batched: the

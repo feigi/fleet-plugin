@@ -118,7 +118,7 @@ flowchart TD
     JUDGE -->|"exclude: behind-pr#N /<br/>behind-issue#N"| SL
     JUDGE -->|"claim: worktree + branch +<br/>in-progress (claim-ticket.sh)"| IMPL
 
-    subgraph IMPLSUB["Implementer — fleet-implementer / -alt"]
+    subgraph IMPLSUB["Implementer — fleet-implementer-&lt;cell&gt;"]
         IMPL["build the ticket<br/>tier-check.mjs verifies dispatch"]
     end
     IMPL -.->|"slot frees on report"| SL
@@ -166,7 +166,7 @@ No batching and no maintainer queue: the controller keeps an ordered
 one ticket judged, then claimed, relabelled by cause, or excluded
 ([Supply & Shortlist](docs/components/supply-and-shortlist.md),
 [Pull & Claim](docs/components/pull-and-claim.md)). Every 5th Pull dispatches
-at the alternate tier as a running comparison
+at an exploration cell as a running comparison
 ([Tier routing](docs/components/tier-routing.md)). Reviews and the merge bot
 run off the controller's own turn, as background members it reacts to
 rather than waits on
