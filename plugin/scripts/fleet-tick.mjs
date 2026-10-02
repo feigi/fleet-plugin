@@ -457,7 +457,8 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   const newest = impls.filter((m, i) => !impls.some((o, j) => j > i && o.number === m.number));
   const mismatched = (m) => m.outcome === "tier-mismatch" || verdicts.mismatch.has(m.name);
   const tierMismatch = newest.filter(mismatched).map((m) => m.name);
-  const tierUnchecked = newest.filter((m) => !mismatched(m) && !verdicts.ok.has(m.name) && !verdicts.unverifiable.has(m.name)).map((m) => m.name);
+  const cleared = (m) => verdicts.ok.has(m.name) || verdicts.unverifiable.has(m.name);
+  const tierUnchecked = newest.filter((m) => !mismatched(m) && !cleared(m)).map((m) => m.name);
   const isQueued = (p) => p.labels.some((l) => l && l.name === "ready-to-merge");
   const queued = prs.filter(isQueued);
   const asc = (a, b) => a - b;

@@ -924,6 +924,9 @@ if (cmd === "read") {
   }
   console.log(JSON.stringify({ drain: data.drain, created }));
 } else if (cmd === "rotate") {
+  // It moves the file, so a stray word — an imagined `--dry-run` — is
+  // refused rather than read as permission to move it.
+  if (rest.length) die("usage: ledger.mjs rotate");
   runRotate();
 } else {
   die(`unknown subcommand '${cmd}' — expected row, filed, ruled, check, read, dispatch, settle, drain or rotate`);

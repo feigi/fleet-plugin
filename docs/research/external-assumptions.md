@@ -149,7 +149,7 @@ silently dropped. This is why `review-core.mjs` is a hand-synced copy pinned by
 
 | Path | Owner | Shape | Where |
 |---|---|---|---|
-| `.fleet/ledger.md` | `ledger.mjs` only (`row/filed/ruled/check/read/dispatch/settle/drain`) | five `##` sections `Rows/Dispatched/Filed/Ruled/Drain`; row grammar `impl-<N> · class=… · excluded · behind-pr:#M · review=<agent>:<runId>:<status>`; member tokens `(impl|fix-pr|finisher-pr|merge-bot)-<N>(-[a-z])?`; four historical finisher spellings still parsed | harness#64–70, tracker#64, prose#138–139 |
+| `.fleet/ledger.md` | `ledger.mjs` only (`row/filed/ruled/check/read/dispatch/settle/drain/rotate`) | five `##` sections `Rows/Dispatched/Filed/Ruled/Drain`; row grammar `impl-<N> · class=… · excluded · behind-pr:#M · review=<agent>:<runId>:<status>`; member tokens `(impl|fix-pr|finisher-pr|merge-bot)-<N>(-[a-z])?`; four historical finisher spellings still parsed; lives one run — phase 0's `rotate` moves it whole to `.fleet/ledger.<UTC YYYY-MM-DDTHHMMSSZ>.md` beside it, never rewritten after | harness#64–70, tracker#64, prose#138–139 |
 | `.fleet/heartbeat.json` | `fleet-heartbeat.mjs` (`elapsed`,`beat`) + `fleet-tick.mjs` (`quiet`,`digest`) | one writer per key, no lock, patch-merge; absent file = fresh run; stale = `interval × 2` | tracker#57–59, prose#140 |
 | `.fleet/shortlist.json` | `shortlist.mjs` | `{scanned, shortlist:[{n,t}]}`, temp+rename | tracker#56 |
 | `.fleet/board.json` / `board.html` | `board.mjs serve` | atomic write; page fetches relative `/board.json` every 15 s — `file://` never works; port `8123 + fnv1a(workspace) % 512` | harness#92–100 |

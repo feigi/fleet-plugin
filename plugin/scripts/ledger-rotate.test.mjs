@@ -105,7 +105,7 @@ test("rotate refuses when the archive name already exists, moving nothing", (t) 
   for (let s = 0; s < 30; s++) writeFileSync(join(f.dir, `ledger.${stamp(now + s * 1000)}.md`), "older archive\n");
   const r = f.cli(["rotate"]);
   assert.notEqual(r.status, 0, r.stderr);
-  assert.match(r.stderr, /already exists/);
+  assert.match(r.stderr, /refusing to rotate .* already exists/);
   assert.equal(readFileSync(f.file, "utf8"), LEDGER);
   for (const a of f.archives()) assert.equal(readFileSync(join(f.dir, a), "utf8"), "older archive\n");
 });
@@ -118,6 +118,17 @@ test("rotate with no ledger file says there is nothing to rotate and exits 0", (
   assert.deepEqual(JSON.parse(r.stdout), { rotated: false, archive: null });
   assert.deepEqual(f.archives(), []);
   assert.equal(existsSync(f.file), false);
+});
+
+test("rotate refuses a stray argument — an imagined --dry-run — moving nothing", (t) => {
+  const f = fixture(t);
+  for (const extra of ["--dry-run", "now"]) {
+    const r = f.cli(["rotate", extra]);
+    assert.equal(r.status, 2, `${extra}: ${r.stderr}`);
+    assert.match(r.stderr, /usage: ledger\.mjs rotate/);
+    assert.equal(readFileSync(f.file, "utf8"), LEDGER);
+    assert.deepEqual(f.archives(), []);
+  }
 });
 
 test("rotate takes the write lock: a live holder keeps it from moving the file", (t) => {

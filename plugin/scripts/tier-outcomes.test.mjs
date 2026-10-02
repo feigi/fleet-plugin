@@ -189,8 +189,11 @@ test("append: a member settled tier-mismatch on the ledger blanks the tier even 
 });
 
 test("append: a tier-unverifiable token is no verdict — the tier falls through to member-outcomes.tsv, never read as tier-ok", (t) => {
+  // The token's tail is definition-shaped on purpose: a reader that took
+  // `tier-unverifiable=` for a tier verdict would read `alt` off it, where
+  // tier-check's own `:no-transcript` tail names no tier and would hide that.
   const f = fixture(t, {
-    ledger: { rows: ["#10 impl-10=PR#20 · tier-unverifiable=impl-10:no-transcript"], dispatched: ["impl-10=PR#20"] },
+    ledger: { rows: ["#10 impl-10=PR#20 · tier-unverifiable=impl-10:fleet-implementer-alt"], dispatched: ["impl-10=PR#20"] },
     members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
   });
   const r = f.append();
