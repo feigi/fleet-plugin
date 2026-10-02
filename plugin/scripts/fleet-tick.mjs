@@ -320,6 +320,20 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   // `tier-unverifiable=<member>:no-transcript` is the third: a settled member
   // with nothing to check, which clears the unchecked hold and nothing else.
   const verdicts = { ok: new Set(), mismatch: new Set(), unverifiable: new Set() };
+  // fix-pr members some row carries settled IN PLACE (`<member>=<outcome>`).
+  // `settle` rewrites a token where it stands, so that copy sits where the
+  // member was dispatched; a bare copy beside it is what a whole-line `row`
+  // rewrite put back, wherever that rewrite chose. Its landing is read off
+  // the in-place copy (below), and off a bare one only when no row carries
+  // one — settled in `## Dispatched` alone. A malformed token is skipped
+  // here and refused by the fold below, in row order, as before.
+  const settledInRow = new Set();
+  for (const text of rows) {
+    for (const tok of text.split(/\s+/)) {
+      const t = parseToken(tok);
+      if (t && !t.error && t.family === "fix-pr" && t.outcome !== null) settledInRow.add(t.name);
+    }
+  }
   for (const text of rows) {
     const key = text.split(/\s/)[0];
     const keyNum = /^#[0-9]+$/.test(key) ? Number(key.slice(1)) : null;
@@ -339,15 +353,19 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // `reviewed=` — one read while no hold stood unresolved. The one read
     // while a hold did is the conflict fix-applier `ledger.mjs dispatch` named
     // `fleet-implementer` (#2299): it rebases and never sees the review file,
-    // so it clears the hold and answers no survivor (#2328). `fixRunning`: a
-    // fix-applier on this PR is unsettled, wherever its token sits —
-    // `dispatch` refuses a second live one on the PR, so none is due beside it.
+    // so it clears the hold and answers no survivor (#2328). Each fix-applier
+    // does one of those jobs once, so its landing folds once per PR
+    // (`fixLanded`), however many copies of its token the rows carry.
+    // `fixMembers`: every fix-applier on this PR, wherever its token sits —
+    // one still unsettled anywhere holds the PR off fixDue, since `dispatch`
+    // refuses a second live one on the PR.
     // `reviewedHead`: the latest `reviewed=<head>`. `pastPinHalt`: the latest
     // finisher since that review settled `halted:past-pin` (#2083) — any
     // later finisher attempt, live or settled, replaces it, and a later
     // returned review answers it.
     const st = (pr !== null && byPr.get(pr)) || {
-      inFlight: false, reviewedAny: false, survived: 0, reviewFixed: false, fixRunning: false, held: [],
+      inFlight: false, reviewedAny: false, survived: 0, reviewFixed: false,
+      fixMembers: new Set(), fixLanded: new Set(), held: [],
       conflictHold: false, conflictCleared: false, reviewedHead: null, pastPinHalt: false,
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
@@ -376,14 +394,24 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
         // that hold; otherwise it answered the latest review's survivors. A
         // hold resets `conflictCleared` below and a `reviewed=` resets
         // `reviewFixed`, so only a fix-applier after the latest of each ever
-        // counts. `note` above has just recorded this exact token, so the
-        // lookup below is never absent, and its outcome is this token's own
-        // unless an earlier row already settled it — never a reason to fall
-        // back to the row's own copy.
+        // counts. Only ONE copy says where: the first in-place settled one,
+        // or — none on any row — the first that reads landed. Any other copy
+        // folding again would land the one member twice: a stale bare copy
+        // after the hold its member's in-place copy preceded clearing that
+        // hold, or a second copy after the first cleared the hold answering
+        // survivors the conflict fix-applier never read. Liveness is not read
+        // here at all: a bare copy read before a later row settles its member
+        // reads unsettled at that point, so `fixMembers` is judged once every
+        // row has been read. `note` above has just recorded this exact token,
+        // so the lookup below is never absent, and its outcome is this
+        // token's own unless an earlier row already settled it — never a
+        // reason to fall back to the row's own copy.
         if (t.family === "fix-pr") {
+          st.fixMembers.add(t.name);
           const o = members.get(t.name).outcome;
-          if (o === null) st.fixRunning = true;
-          if (o === "no-op" || /^applied:/.test(o)) {
+          if ((o === "no-op" || /^applied:/.test(o)) && !st.fixLanded.has(t.name)
+            && (t.outcome !== null || !settledInRow.has(t.name))) {
+            st.fixLanded.add(t.name);
             if (st.conflictHold && !st.conflictCleared) st.conflictCleared = true;
             else st.reviewFixed = true;
           }
@@ -422,8 +450,8 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
           // A fresh hold is unresolved whatever settled before it, the way a
           // fresh `reviewed=` resets `reviewFixed` above. A redundant re-hold
           // (merge-bot retrying a PR it has already held, #2064) changes
-          // nothing a live fix-applier holds off: `fixRunning` is not read
-          // off token order.
+          // nothing a live fix-applier holds off: liveness is not read off
+          // token order.
           Object.assign(st, { conflictHold: true, conflictCleared: false });
         }
         const v = TIER_VERDICT.exec(tok);
@@ -471,6 +499,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   const state = (n) => byPr.get(n);
   const heldBehind = (st) => (st?.held ?? []).some((n) => open.has(n));
   const conflictHeld = (st) => st !== undefined && st.conflictHold && !st.conflictCleared;
+  const fixRunning = (st) => [...st.fixMembers].some((n) => members.get(n).outcome === null);
   // The halt holds only while the head is still past what was reviewed: a
   // `reviewed=` head (7-40 hex) prefix-matching gh's full headRefOid is the
   // head that review read, and there is nothing more to review.
@@ -489,7 +518,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     fixDue: [...byPr.entries()]
       .filter(([n, st]) => open.has(n)
         && ((st.reviewedHead !== null && st.survived > 0 && !st.reviewFixed) || conflictHeld(st))
-        && !st.fixRunning && !st.inFlight)
+        && !fixRunning(st) && !st.inFlight)
       .map(([n]) => n).sort(asc),
     // Open, not signed off, closing an issue (GitHub's own linked set — a
     // chore PR closing nothing is review work nobody in the run will ever be

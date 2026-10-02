@@ -609,6 +609,37 @@ test("deriveRun: survivors a review fix-applier already answered stay answered t
   assert.deepEqual([live.fixDue, live.conflictHeld], [[], [21]]);
 });
 
+// One fix-applier does one job, so its landing folds once per PR however many
+// copies of its token the rows carry — a whole-line `row` rewrite leaves bare
+// copies wherever it chose, and the in-place settled copy is the one that says
+// where it was dispatched.
+test("deriveRun: duplicate copies of one fix-applier's token land it once — a conflict fix-applier never also answers the survivors", () => {
+  const R = "#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0";
+  const F = "fix-pr-21=applied:def5678";
+  const D = [F];
+  const due = (rows, dispatched = []) => {
+    const r = run({ rows, dispatched }, [pr(21)]);
+    return [r.fixDue, r.conflictHeld];
+  };
+  // A bare copy on the PR's own row, after the hold-clearing settled one.
+  assert.deepEqual(due([`${R} · conflict-hold:#21 · ${F}`, "#21 fix-pr-21"]), [[21], []]);
+  assert.deepEqual(due([`${R} · conflict-hold:#21 · ${F}`, "#21 fix-pr-21"], D), [[21], []]);
+  // The settled copy twice on one row.
+  assert.deepEqual(due([`${R} · conflict-hold:#21 · ${F} · ${F}`]), [[21], []]);
+  // A stale bare copy BEFORE the hold, the in-place settled one after it:
+  // the settled one cleared the hold, whatever `## Dispatched` says.
+  assert.deepEqual(due([`${R} · fix-pr-21 · conflict-hold:#21`, `#21 ${F}`]), [[21], []]);
+  assert.deepEqual(due([`${R} · fix-pr-21 · conflict-hold:#21`, `#21 ${F}`], D), [[21], []]);
+  // A review fix-applier that landed before a hold: a stale bare copy of it
+  // after the hold does not clear that hold.
+  assert.deepEqual(due([`${R} · ${F} · conflict-hold:#21 · fix-pr-21`], D), [[21], [21]]);
+  // Liveness is read off the member once every row is read: a bare copy on an
+  // earlier row of one a later row settled `failed` is dead, not live.
+  assert.deepEqual(due([`${R} · fix-pr-21`, "#21 fix-pr-21=failed"]), [[21], []]);
+  // Must accept: a DIFFERENT member after the conflict one still answers them.
+  assert.deepEqual(due([`${R} · conflict-hold:#21 · ${F} · fix-pr-21-b=no-op`, "#21 fix-pr-21"]), [[], []]);
+});
+
 test("deriveRun: a conflict hold is read in either spelling and on a PR-keyed row", () => {
   assert.deepEqual(run({ rows: [HOLD_ROW(40, "conflict-hold-#40")] }, [pr(40)]).fixDue, [40]);
   assert.deepEqual(run({ rows: ["#350 review=wf:x reviewed=abc1234:0/1/0 · conflict-hold:#350"] }, [pr(350)]).fixDue, [350]);
