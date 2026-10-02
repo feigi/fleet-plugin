@@ -60,9 +60,9 @@ const SNAP = { path: "/scr/run-1/snapshot-abc1234", head: "abc1234", runRoot: "/
 // One specialist's, one refuter's and the snapshot agent's prompt. Every
 // argument is fixed: these pins are about what the prompts SAY, not about how
 // they vary, so nothing here needs to. `sharedRunNote`/`readRules`/
-// `usableDiff`/`environmentNote` are stubs for the sibling pins' reason — binding them
-// keeps a render that stops passing one throwing a ReferenceError instead of
-// dropping a paragraph silently.
+// `usableDiff`/`environmentNote` are stubs for the sibling pins' reason —
+// binding them keeps a render that stops passing one throwing a
+// ReferenceError instead of dropping a paragraph silently.
 const specialist = promptRenderer({
   file: FILE,
   start: "`Review PR #${pr} (branch ${branch}) for: ",

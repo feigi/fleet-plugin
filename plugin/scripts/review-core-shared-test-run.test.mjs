@@ -19,7 +19,7 @@ import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runReview, DEFAULT_DIMENSIONS, FINDINGS_SCHEMA, CRASHED_REASON } from "./review-core.mjs";
-import { pipeline, parallel, ARGS, SNAP, review, finding, scriptedHost } from "./review-host-fixture.mjs";
+import { pipeline, parallel, ARGS, SNAP, review, finding, vote, scriptedHost } from "./review-host-fixture.mjs";
 
 const ALL = DEFAULT_DIMENSIONS.map((d) => d.key);
 const ALL_ARGS = { ...ARGS, dimensions: ALL };
@@ -61,7 +61,6 @@ test("one review with all six dimensions launches the test command exactly once,
     host.agent = async (prompt, opts) => {
       if (opts.label !== "test-run") return scripted(prompt, opts);
       calls["test-run"] = (calls["test-run"] ?? 0) + 1;
-      (prompts["test-run"] ??= []).push(prompt);
       return obeyTestRun(prompt);
     };
     const result = await run(host, { ...ALL_ARGS, scratch: tmp, testCmd });
@@ -155,6 +154,66 @@ test("a shared run with failures and no finding from any dimension makes every s
   const result = await run(host);
   assert.deepEqual(result.dimensionsUnrun.map((u) => u.dimension), ALL);
   for (const u of result.dimensionsUnrun) assert.match(u.reason, /2 failing tests and no selected dimension filed a finding/);
+});
+
+// The failing-tests check reads what reached the payload, never what a
+// specialist returned before its findings were verified: an unrelated finding
+// the refuters threw out, or the findings of a dimension whose verify stage
+// died, would otherwise stand in for failures nobody reported — and the
+// failures would reach neither the report nor dimensionsUnrun.
+test("a shared run with failures is not satisfied by a refuted finding, nor by a dimension whose verify stage died", async () => {
+  const failing = { exitCode: 1, tests: 10, pass: 8, fail: 2 };
+  const refuted = scriptedHost(
+    script({ "test-run": [failing], "review:correctness": [review([finding("critical")])], "verify:correctness": [vote(true)] }),
+  );
+  const r1 = await run(refuted.host);
+  assert.equal(r1.refuted.length, 1, "the fixture's finding was not refuted — this case tests nothing");
+  assert.deepEqual(r1.dimensionsUnrun.map((u) => u.dimension), ALL, "a refuted finding satisfied the failing-tests check");
+  for (const u of r1.dimensionsUnrun) assert.match(u.reason, /2 failing tests and no selected dimension filed a finding/);
+
+  // A malformed finding throws inside the verify stage: the slot dies, so its
+  // dimension is crashed and its findings never reach the payload.
+  const died = scriptedHost(script({ "test-run": [failing], "review:correctness": [review([null])] }));
+  const r2 = await run(died.host);
+  assert.equal(r2.dimensionsUnrun.find((u) => u.dimension === "correctness")?.reason, CRASHED_REASON);
+  assert.deepEqual(
+    r2.dimensionsUnrun.filter((u) => u.dimension !== "correctness").map((u) => u.dimension),
+    ALL.filter((k) => k !== "correctness"),
+    "a dead dimension's unverified findings satisfied the failing-tests check",
+  );
+
+  // The accept side: a finding that survived its refuters settles it.
+  const kept = scriptedHost(
+    script({ "test-run": [failing], "review:correctness": [review([finding("critical")])], "verify:correctness": [vote(false)] }),
+  );
+  assert.deepEqual((await run(kept.host)).dimensionsUnrun, []);
+});
+
+// The exit status is the command's verdict: clean-looking counts beside a
+// non-zero or missing exit are not a pass, and every specialist is told so.
+test("a shared run whose exit is non-zero with nothing failing, or missing, makes every selected dimension unrun", async () => {
+  for (const answer of [{ exitCode: 137, tests: 5, pass: 5, fail: 0 }, { exitCode: 1, tests: 5, pass: 5 }, { tests: 5, pass: 5, fail: 0 }]) {
+    const { host, prompts } = scriptedHost(script({ "test-run": [answer], "review:correctness": [review([finding("suggestion")])] }));
+    const result = await run(host);
+    const where = JSON.stringify(answer);
+    assert.deepEqual(result.dimensionsUnrun.map((u) => u.dimension), ALL, `${where}: not every dimension is unrun`);
+    for (const u of result.dimensionsUnrun) assert.match(u.reason, /exited \d+ but reported no failing|no exit status/, `${where}: ${u.reason}`);
+    assert.match(prompts["review:tests"][0], /This run is NOT usable/, `${where}: a specialist was not told the run is unusable`);
+  }
+});
+
+// node's runner counts a test that never finished as `cancelled`, not `fail`,
+// and exits 1: that is a failure for the owner to file, not an unusable run.
+test("a shared run with cancelled tests and no failing count hands the owner the cancelled tests to file", async () => {
+  const cancelled = { exitCode: 1, tests: 10, pass: 9, fail: 0, cancelled: 1 };
+  const { host, prompts } = scriptedHost(script({ "test-run": [cancelled] }));
+  const result = await run(host);
+  assert.match(prompts["review:correctness"][0], /It has 0 failing and 1 cancelled tests, and filing them is YOUR job/);
+  assert.doesNotMatch(prompts["review:correctness"][0], /NOT usable/);
+  assert.deepEqual(result.dimensionsUnrun.map((u) => u.dimension), ALL);
+  for (const u of result.dimensionsUnrun) assert.match(u.reason, /1 cancelled tests and no selected dimension filed a finding/);
+  const filed = scriptedHost(script({ "test-run": [cancelled], "review:correctness": [review([finding("suggestion")])] }));
+  assert.deepEqual((await run(filed.host)).dimensionsUnrun, []);
 });
 
 // A crashed specialist is named once, with its own reason — never a second

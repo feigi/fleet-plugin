@@ -236,7 +236,32 @@ test("the test-run prompt hands the command over verbatim and rules 'tests 0' a 
     "the prompt no longer forbids substituting a command — only explains why one would be wrong",
   );
   // Once is the whole point of #2315: a retry by the agent is a second full run.
-  assert.match(prompt, /Run it exactly once/, "the prompt no longer forbids running the command a second time");
+  // The clause, not the phrase — "Run it exactly once, then again when it
+  // fails" still contains "Run it exactly once".
+  assert.match(
+    prompt,
+    /Run it exactly once: not again when it fails, and not again when it hits the\s+deadline\./,
+    "the prompt no longer forbids running the command a second time",
+  );
+});
+
+// How the one run is held and read. Each clause is a behavior the agent obeys
+// and nothing downstream re-checks: a backgrounded or polled run is the
+// unbounded load #2315 measured, a deadline that is far too short reads every
+// heavy suite as no counts, a `tail` too short misses the summary, and a 0
+// typed in for a count the log never stated turns "no counts" (every dimension
+// unrun) into "tests 0" or a clean-looking pass — the distinction
+// TEST_RUN_SCHEMA's absent-count rule exists for.
+test("the test-run prompt holds the run in the foreground under a deadline, and never invents a count", () => {
+  const prompt = testRunPrompt();
+  assert.match(prompt, /ONE blocking foreground command — never backgrounded, never polled —/, "the prompt no longer forbids a backgrounded or polled run");
+  assert.match(prompt, /with a command deadline of 1800 seconds:/, "the prompt's command deadline changed — size it against a full suite under fleet load");
+  assert.match(prompt, /\\`tail -n 40 "\$\{logPath\}"\\`/, "the prompt no longer reads enough of the log's tail to hold a runner's summary");
+  assert.match(
+    prompt,
+    /omit every count and say what happened in \\`error\\`\. Never\s+write 0 for a count the log does not state/,
+    "the prompt no longer forbids writing 0 for a count the log does not state",
+  );
 });
 
 // #143's second correction. The rationale once asserted, present tense and as

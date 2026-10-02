@@ -14,10 +14,10 @@ import { unrunReason, unrunEntries, unrunCrashed, sharedRunNote, FINDINGS_SCHEMA
 // that missing eye.
 //
 // #2315: every run-quality verdict reads the review's ONE shared test run —
-// `unrunReason(run, reviews)`, `reviews` being every selected dimension's
-// returned review — because no specialist runs the full suite any more. The
-// fixtures below are that run's shape: the caller's `command` plus the
-// test-run agent's counts.
+// `unrunReason(run, findings)`, `findings` being every finding that reached
+// the payload, across all selected dimensions — because no specialist runs the
+// full suite any more. The fixtures below are that run's shape: the caller's
+// `command` plus the test-run agent's exit status and counts.
 //
 // Pins read CODE, not SOURCE, wherever they read source text at all:
 // `stripComments` exists because two pins in this directory were MEASURED
@@ -43,7 +43,7 @@ test("a shared run that returned nothing is unrun, and says why", () => {
 // reason names the COMMAND, because "0 tests" without it sends a reader
 // hunting for which command produced them.
 test("a zero-test run is unrun, naming the command that produced no tests", () => {
-  const reason = unrunReason({ command: "npm test --", tests: 0, pass: 0, fail: 0 }, [{ findings: [] }]);
+  const reason = unrunReason({ command: "npm test --", tests: 0, pass: 0, fail: 0 }, []);
   assert.equal(typeof reason, "string", "a zero-test run must yield a reason");
   assert.match(reason, /npm test --/, "the reason no longer names the command that produced no tests");
   assert.match(reason, /0 tests/);
@@ -54,7 +54,7 @@ test("a zero-test run is unrun, naming the command that produced no tests", () =
 // no summary — and its `error` says why, which the reason must carry.
 test("a shared run that reported no count at all is unrun, carrying the agent's error", () => {
   for (const run of [{ command: "npm test --" }, { command: "npm test --", tests: null }]) {
-    const reason = unrunReason(run, [{ findings: [{ severity: "critical", claim: "x", evidence: "y" }] }]);
+    const reason = unrunReason(run, [{ severity: "critical", claim: "x", evidence: "y" }]);
     assert.equal(typeof reason, "string", `a countless run (${JSON.stringify(run)}) must yield a reason`);
     assert.match(reason, /no counts/);
   }
@@ -69,7 +69,7 @@ test("a shared run that reported no count at all is unrun, carrying the agent's 
 // having it.
 test("a clean run with every dimension's findings list empty is NOT unrun", () => {
   assert.equal(
-    unrunReason({ command: "npm test --", tests: 12, pass: 12, fail: 0 }, [{ findings: [] }, { findings: [] }]),
+    unrunReason({ command: "npm test --", exitCode: 0, tests: 12, pass: 12, fail: 0 }, []),
     null,
     "a review whose shared run passed and found nothing is clean, not unrun",
   );
@@ -79,7 +79,7 @@ test("a clean run with every dimension's findings list empty is NOT unrun", () =
 // one class of test result that most needs reporting.
 test("a run with failing tests is NOT unrun", () => {
   assert.equal(
-    unrunReason({ command: "npm test --", tests: 14, pass: 11, fail: 3 }, [{ findings: [{ severity: "critical", claim: "x", evidence: "y" }] }]),
+    unrunReason({ command: "npm test --", exitCode: 1, tests: 14, pass: 11, fail: 3 }, [{ severity: "critical", claim: "x", evidence: "y" }]),
     null,
     "a suite that reported failures still ran",
   );
@@ -102,7 +102,7 @@ test("a run where nothing passed and nothing failed is unrun — every test skip
       { command: "node --test", tests: 2, pass: 0, fail: 0 },
       { command: "node --test", tests: 2, pass: 0 },
     ]) {
-      const reason = unrunReason(run, [{ findings }]);
+      const reason = unrunReason(run, findings);
       const where = `${JSON.stringify(run)} with ${findings.length} findings`;
       assert.equal(typeof reason, "string", `an all-skipped run (${where}) must yield a reason`);
       assert.match(reason, /node --test/, "the reason no longer names the command that did no work");
@@ -123,7 +123,7 @@ test("a run that executed a fraction of what it collected is unrun, not clean", 
       { command: "node --test", tests: 937, pass: 1 },
       { command: "node --test", tests: 937, pass: 468, fail: 0 },
     ]) {
-      const reason = unrunReason(run, [{ findings }]);
+      const reason = unrunReason(run, findings);
       const where = `${JSON.stringify(run)} with ${findings.length} findings`;
       assert.equal(typeof reason, "string", `a mostly-unexecuted run (${where}) must yield a reason`);
       assert.match(reason, /node --test/, "the reason no longer names the command that ran a fraction of its collection");
@@ -142,13 +142,13 @@ test("a run that executed a fraction of what it collected is unrun, not clean", 
 // `typeof` guard stops that from reading as no work.
 test("a small-but-complete run, a half-todo run, and one that omitted pass are NOT unrun", () => {
   for (const run of [
-    { command: "node --test", tests: 3, pass: 3, fail: 0 },
-    { command: "node --test", tests: 937, pass: 937, fail: 0 },
-    { command: "node --test", tests: 2, pass: 1, fail: 0 },
-    { command: "node --test", tests: 937, pass: null },
+    { command: "node --test", exitCode: 0, tests: 3, pass: 3, fail: 0 },
+    { command: "node --test", exitCode: 0, tests: 937, pass: 937, fail: 0 },
+    { command: "node --test", exitCode: 0, tests: 2, pass: 1, fail: 0 },
+    { command: "node --test", exitCode: 0, tests: 937, pass: null },
   ]) {
     assert.equal(
-      unrunReason(run, [{ findings: [] }]),
+      unrunReason(run, []),
       null,
       `a run that did its work (${JSON.stringify(run)}) must stay clean`,
     );
@@ -162,7 +162,7 @@ test("a small-but-complete run, a half-todo run, and one that omitted pass are N
 // off it.
 test("a fully-executed failing run is NOT unrun by the ratio — a suite that failed ran", () => {
   assert.equal(
-    unrunReason({ command: "node --test", tests: 10, pass: 4, fail: 6 }, [{ findings: [{ severity: "critical", claim: "x", evidence: "y" }] }]),
+    unrunReason({ command: "node --test", exitCode: 1, tests: 10, pass: 4, fail: 6 }, [{ severity: "critical", claim: "x", evidence: "y" }]),
     null,
     "a suite that reported failures still ran, having executed everything it collected",
   );
@@ -180,7 +180,7 @@ test("a run that executed a fraction of what it collected through a MIX of pass 
       { command: "node --test", tests: 937, pass: 1, fail: 1 },
       { command: "node --test", tests: 937, pass: 200, fail: 200 },
     ]) {
-      const reason = unrunReason(run, [{ findings }]);
+      const reason = unrunReason(run, findings);
       const where = `${JSON.stringify(run)} with ${findings.length} findings`;
       assert.equal(typeof reason, "string", `a mostly-unexecuted mixed run (${where}) must yield a reason`);
       assert.match(reason, /node --test/, "the reason no longer names the command that ran a fraction of its collection");
@@ -194,7 +194,7 @@ test("a run that executed a fraction of what it collected through a MIX of pass 
 // cannot be the thing keeping this clean — only the ratio is under test here.
 test("a mixed pass/fail run that executed past half its collection is NOT unrun", () => {
   assert.equal(
-    unrunReason({ command: "node --test", tests: 937, pass: 300, fail: 300 }, [{ findings: [{ severity: "critical", claim: "x", evidence: "y" }] }]),
+    unrunReason({ command: "node --test", exitCode: 1, tests: 937, pass: 300, fail: 300 }, [{ severity: "critical", claim: "x", evidence: "y" }]),
     null,
     "a mixed run past the half floor did its work",
   );
@@ -209,7 +209,7 @@ test("a mixed pass/fail run that executed past half its collection is NOT unrun"
 // tell those two apart.
 test("a run where every test failed is NOT unrun, even though nothing passed", () => {
   assert.equal(
-    unrunReason({ command: "npm test --", tests: 3, pass: 0, fail: 3 }, [{ findings: [{ severity: "critical", claim: "x", evidence: "y" }] }]),
+    unrunReason({ command: "npm test --", exitCode: 1, tests: 3, pass: 0, fail: 3 }, [{ severity: "critical", claim: "x", evidence: "y" }]),
     null,
     "a suite that reported only failures still ran",
   );
@@ -220,15 +220,20 @@ test("a run where every test failed is NOT unrun, even though nothing passed", (
 // is the CONJUNCTION with no findings — the suite ran, it reported failures,
 // and nobody filed anything about them. #2315 widened "nobody" from one
 // dimension to the whole review: the shared run's failures are the review's,
-// so EVERY selected dimension's findings are read, and an empty or missing list
-// on every one of them (or a crashed, null slot) is what trips it.
-test("a run with failing tests and no findings from ANY dimension is unrun", () => {
-  for (const reviews of [[], [{ findings: [] }], [{ findings: [] }, { findings: undefined }, null]]) {
-    const reason = unrunReason({ command: "node --test", tests: 744, pass: 738, fail: 6 }, reviews);
-    assert.equal(typeof reason, "string", `fail>0 with reviews ${JSON.stringify(reviews)} must yield a reason`);
+// so EVERY finding that reached the payload is read — and a refuted one does
+// not count, because the review rejected it (an unrelated claim its verifiers
+// threw out is not a report of the failures). Cancelled tests are failures
+// too: node's runner exits 1 on one with `fail 0`.
+test("a run with failing or cancelled tests and no kept finding from ANY dimension is unrun", () => {
+  const refutedOnly = [{ severity: "critical", claim: "x", evidence: "y", verdict: "refuted" }];
+  for (const findings of [[], [null], refutedOnly]) {
+    const reason = unrunReason({ command: "node --test", exitCode: 1, tests: 744, pass: 738, fail: 6 }, findings);
+    assert.equal(typeof reason, "string", `fail>0 with findings ${JSON.stringify(findings)} must yield a reason`);
     assert.match(reason, /6 failing tests/, "the reason no longer says how many tests failed unreported");
     assert.match(reason, /no selected dimension/);
   }
+  const cancelled = unrunReason({ command: "node --test", exitCode: 1, tests: 744, pass: 743, fail: 0, cancelled: 1 }, refutedOnly);
+  assert.match(cancelled ?? "", /0 failing and 1 cancelled tests and no selected dimension/, "a cancelled test nobody reported must not read clean");
 });
 
 // The ACCEPT side, and #2315's ownership rule: one finding from ANY dimension
@@ -236,17 +241,42 @@ test("a run with failing tests and no findings from ANY dimension is unrun", () 
 // to file a duplicate, so reading each dimension's own list would mark every
 // one of them unrun for obeying that.
 test("a run with failing tests and a finding from ONE dimension is NOT unrun", () => {
-  const run = { command: "node --test", tests: 744, pass: 738, fail: 6 };
-  const one = [{ findings: [] }, { findings: [{ severity: "critical", claim: "x", evidence: "y" }] }, { findings: [] }];
-  assert.equal(unrunReason(run, one), null, "a sibling's finding about the failures must satisfy every dimension");
-  assert.deepEqual(unrunEntries(run, one, ["correctness", "tests", "types"]), []);
+  const run = { command: "node --test", exitCode: 1, tests: 744, pass: 738, fail: 6 };
+  for (const verdict of [undefined, "survived", "unverified"]) {
+    const one = [{ severity: "critical", claim: "x", evidence: "y", verdict }];
+    assert.equal(unrunReason(run, one), null, `a ${verdict ?? "bare"} finding about the failures must satisfy every dimension`);
+    assert.deepEqual(unrunEntries(run, one, ["correctness", "tests", "types"]), []);
+  }
+  // A cancelled test routes the same way: one kept finding settles it.
+  assert.equal(unrunReason({ ...run, fail: 0, cancelled: 2, pass: 742 }, [{ severity: "suggestion", claim: "x", evidence: "y", verdict: "unverified" }]), null);
 });
 
 // `pass`/`fail` are optional, so a run that reported only a count must still
 // come back clean rather than tripping the predicate on a field the runner
 // never printed.
 test("a run that reported tests but not pass/fail is NOT unrun", () => {
-  assert.equal(unrunReason({ command: "node --test", tests: 7 }, [{ findings: [] }]), null, "an optional field's absence must not mark a real run unrun");
+  assert.equal(unrunReason({ command: "node --test", exitCode: 0, tests: 7 }, []), null, "an optional field's absence must not mark a real run unrun");
+});
+
+// The exit status is the command's own verdict, and the counts must account
+// for it. A run reporting none, or exiting non-zero with nothing failing or
+// cancelled, is unusable whatever its counts say — and findings cannot buy it
+// clean, because nothing in it names a failure to report.
+test("a run whose exit status is missing, or non-zero with no failing count, is unrun", () => {
+  const finding = [{ severity: "critical", claim: "x", evidence: "y", verdict: "survived" }];
+  for (const [run, pattern] of [
+    [{ command: "node --test", tests: 10, pass: 10, fail: 0 }, /no exit status/],
+    [{ command: "node --test", exitCode: null, tests: 10, pass: 10 }, /no exit status/],
+    [{ command: "node --test", exitCode: 1, tests: 10, pass: 10, fail: 0 }, /exited 1 but reported no failing or cancelled tests/],
+    [{ command: "node --test", exitCode: 137, tests: 10, pass: 10 }, /exited 137/],
+  ]) {
+    for (const findings of [[], finding]) {
+      const reason = unrunReason(run, findings);
+      assert.equal(typeof reason, "string", `${JSON.stringify(run)} must yield a reason`);
+      assert.match(reason, pattern);
+      assert.match(reason, /node --test/, "the reason no longer names the command");
+    }
+  }
 });
 
 // #139: the description at `:37` called `scope_searched` **Required** while the
@@ -280,14 +310,6 @@ test("test_run is declared, carries the command and count, and does not force pa
   }
 });
 
-// The shared run's slice of the wiring: every returned review is collected in
-// the verify stage `(review, d)` — the only closure that holds the
-// per-dimension envelope — because the failing-tests check reads findings
-// across ALL of them, which only exists once the pipeline has returned.
-function verifyStage() {
-  return between(CODE, "(review, d) =>", "const n = verifiersFor", "the verify stage");
-}
-
 // The entry, not the call site. `unrunEntries` returns zero entries or one per
 // key, so its writer `push(...)`es it with no guard of its own — and a guard is
 // exactly what the predecessor of this test could not see: it compared the
@@ -299,7 +321,7 @@ test("an unrun classification becomes one entry per key, with no guard for a cal
   assert.deepEqual(entries.map((e) => e.dimension), ["correctness", "tests"], "a dead shared run must name EVERY key it was asked about");
   for (const e of entries) assert.match(e.reason, /returned nothing/, "the entry no longer carries the classifier's reason");
   assert.deepEqual(
-    unrunEntries({ command: "npm test --", tests: 9 }, [{ findings: [] }], ["tests"]),
+    unrunEntries({ command: "npm test --", exitCode: 0, tests: 9 }, [], ["tests"]),
     [],
     "a covered review must yield NO entry — an empty push is what lets the call site stay unguarded",
   );
@@ -346,17 +368,14 @@ test("a null slot the dimension list cannot explain is still reported, never thr
 // guard of its own. That is why the classification moved behind lifted
 // functions — the pin it replaced had source positions as its only evidence.
 // runReview's own behaviour over a scripted host is review-core-shared-test-run.test.mjs's.
-test("both writers are wired in AFTER the pipeline, and the verify stage collects every returned review", () => {
-  const stage = verifyStage();
-  const collected = stage.indexOf("returned.push(review)");
-  assert.notEqual(collected, -1, "the verify stage no longer collects returned reviews — the failing-tests check reads nobody's findings");
+test("both writers are wired in AFTER the pipeline, the failing-tests check reading the payload's findings", () => {
   // AFTER the pipeline returns, never inside a stage: a stage cannot observe its
   // own absence (#138), and the failing-tests check needs every dimension's
   // findings at once (#2315).
   const call = CODE.indexOf("const reviewed = await pipeline(");
   assert.notEqual(call, -1, "the pipeline call moved — update this test");
   for (const writer of [
-    "dimensionsUnrun.push(...unrunEntries(sharedRun, returned, live))",
+    "dimensionsUnrun.push(...unrunEntries(sharedRun, all, live))",
     "dimensionsUnrun.push(...unrunCrashed(reviewed, dimensions))",
   ]) {
     const at = CODE.indexOf(writer);

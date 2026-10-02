@@ -448,9 +448,14 @@ cannot be told apart from a regression.`;
 // skipped?, error?}`, `command`/`logPath` the caller's own and the rest the
 // test-run agent's report — never a specialist's own run: no specialist runs
 // the full suite any more, so a verdict on one would judge a copy of this.
-// `run` null is the test-run dispatch itself returning nothing; `tests`
+// `run` null is a caller holding no run at all — runReview always hands one
+// over, a null or thrown test-run dispatch arriving as `{error}` — and `tests`
 // absent is a run that returned without a count. Both are "no counts", and
-// neither is ever a pass.
+// neither is ever a pass. Counts alone are not a pass either: the exit status
+// is the command's own verdict, so a run that reports none, or exits non-zero
+// with nothing failing or cancelled to account for it, is unusable — a
+// coverage gate, a crash after the summary, or an agent that dropped the
+// TEST_RUN_EXIT line would otherwise read as green.
 function testRunReason(run) {
   if (!run) return "the review's shared test run returned nothing — no counts exist, so no dimension's tests ran";
   const cmd = run.command || "the test command";
@@ -461,24 +466,42 @@ function testRunReason(run) {
   const executed = run.pass + (run.fail ?? 0);
   if (typeof run.pass === "number" && executed * 2 < run.tests)
     return `\`${cmd}\` passed ${run.pass} and failed ${run.fail ?? 0} of the ${run.tests} tests it collected — most of what it collected never ran`;
+  if (typeof run.exitCode !== "number")
+    return `\`${cmd}\` reported counts but no exit status — nothing shows the command succeeded, so its counts are not a pass`;
+  if (run.exitCode !== 0 && !failingOf(run))
+    return `\`${cmd}\` exited ${run.exitCode} but reported no failing or cancelled tests — its counts do not account for the failure, so they are not a pass`;
   return null;
 }
 
-// Failing tests are owned by the review as a whole (#2315): `reviews` is every
-// selected dimension's returned review, and ONE finding from any of them
+// A cancelled test is a failure the runner counts apart from `fail` — node's
+// runner exits 1 on one with `fail 0` — so both are the review's to report.
+function failingOf(run) {
+  return (run.fail || 0) + (run.cancelled || 0);
+}
+
+function failingDesc(run) {
+  return run.cancelled ? `${run.fail || 0} failing and ${run.cancelled} cancelled tests` : `${run.fail} failing tests`;
+}
+
+// Failing tests are owned by the review as a whole (#2315): `findings` is
+// every finding that reached the payload, and ONE from any dimension
 // satisfies the check for all — no dimension is asked to duplicate a
-// sibling's, and none is marked unrun because a sibling filed it.
-export function unrunReason(run, reviews) {
+// sibling's, and none is marked unrun because a sibling filed it. A refuted
+// finding does not count: the review rejected it, so an unrelated claim its
+// verifiers threw out would otherwise stand in for failures nobody reported.
+// A dimension whose verify stage died never reaches the payload, so its
+// findings are not here to count either.
+export function unrunReason(run, findings) {
   const why = testRunReason(run);
   if (why) return why;
-  if (run.fail > 0 && !reviews.some((r) => r?.findings?.length))
-    return `\`${run.command || "the test command"}\` reported ${run.fail} failing tests and no selected dimension filed a finding about them`;
+  if (failingOf(run) > 0 && !findings.some((f) => f && f.verdict !== "refuted"))
+    return `\`${run.command || "the test command"}\` reported ${failingDesc(run)} and no selected dimension filed a finding about them that the review kept`;
   return null;
 }
 
 // One verdict, every key: the shared run is the same run for each of them.
-export function unrunEntries(run, reviews, keys) {
-  const why = unrunReason(run, reviews);
+export function unrunEntries(run, findings, keys) {
+  const why = unrunReason(run, findings);
   return why ? keys.map((dimension) => ({ dimension, reason: why })) : [];
 }
 
@@ -519,15 +542,16 @@ none — never a run of your own.`,
   if (why)
     lines.push(`This run is NOT usable: ${why}. Every dimension of this review is reported
 unrun for it — do not run the full command yourself to replace it.`);
-  else if (run.fail > 0)
+  else if (failingOf(run) > 0)
     lines.push(
       key === owner
-        ? `It has ${run.fail} failing tests, and filing them is YOUR job in this review:
+        ? `It has ${failingDesc(run)}, and filing them is YOUR job in this review:
 file at least one finding about them, naming each failing test from the log. A
 failure you cannot separate from the environment is still filed — say so in the
-finding, so it is reproduced in the worktree before anyone acts on it. If no
-dimension files one, every dimension of this review is reported unrun.`
-        : `It has ${run.fail} failing tests, and the ${owner} dimension files the finding
+finding, so it is reproduced in the worktree before anyone acts on it. If none is
+filed, or this review's refuters reject every finding filed, every dimension of
+this review is reported unrun.`
+        : `It has ${failingDesc(run)}, and the ${owner} dimension files the finding
 about them. Do not file a duplicate — cite a failure as evidence only where it
 bears on your own lens.`,
     );
@@ -901,8 +925,6 @@ learns the run produced none.`,
   const failureOwner = dimensions[0]?.key;
 
   const dimensionsUnrun = [];
-  // Every specialist review that returned, for the failing-tests check below.
-  const returned = [];
   // #1433. Per-dimension record of the specialist's own CWD-AUDIT line (see
   // `cwdAuditFrom` above) — `{dimension, state, line}`, `state` one of
   // "clean"/"dirty"/"unrepo"/"missing". Populated for every dispatched
@@ -987,7 +1009,6 @@ to name.`,
       ),
 
     (review, d) => {
-      returned.push(review);
       cwdAudit.push({ dimension: d.key, ...cwdAuditFrom(review && review.scope_searched) });
       phase("Verify");
       return parallel(
@@ -1100,18 +1121,19 @@ how three reviews from one cell left four files modified in that checkout
     },
   );
 
-  // #2315. One verdict on the shared run, for every dimension whose chain did
-  // not die — a crashed one is named below with its own reason instead, so no
-  // key is listed twice. Read only once every dimension has returned: the
-  // failing-tests check reads findings across ALL of them.
-  const live = dimensions.filter((_, i) => reviewed[i]).map((d) => d.key);
-  dimensionsUnrun.push(...unrunEntries(sharedRun, returned, live));
-  dimensionsUnrun.push(...unrunCrashed(reviewed, dimensions));
-
   const all = reviewed.flat().filter(Boolean);
   const survived = all.filter((f) => f.verdict === "survived");
   const refuted = all.filter((f) => f.verdict === "refuted");
   const unverified = all.filter((f) => f.verdict === "unverified");
+
+  // #2315. One verdict on the shared run, for every dimension whose chain did
+  // not die — a crashed one is named below with its own reason instead, so no
+  // key is listed twice. Read only once every dimension has been verified: the
+  // failing-tests check reads the findings that reached the payload, across
+  // ALL dimensions, refuted ones excluded.
+  const live = dimensions.filter((_, i) => reviewed[i]).map((d) => d.key);
+  dimensionsUnrun.push(...unrunEntries(sharedRun, all, live));
+  dimensionsUnrun.push(...unrunCrashed(reviewed, dimensions));
 
   const { crashed, resume } = resumeFor(unverified);
 
