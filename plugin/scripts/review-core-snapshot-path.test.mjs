@@ -6,7 +6,8 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
 import { between, phrase } from "./prose-pin.mjs";
-import { snapshotMissing as snapshotMissingRaw } from "./review-core.mjs";
+import { snapshotMissing as snapshotMissingRaw, runReview } from "./review-core.mjs";
+import { scriptedHost, SNAP as HOST_SNAP, ARGS, pipeline, parallel, review } from "./review-host-fixture.mjs";
 
 // `snap.path` used to reach every specialist prompt and every verifier prompt
 // unchecked: a well-formed string the schema required, but never confirmed to
@@ -774,4 +775,45 @@ test("runReview actually calls snapshotMissing and throws on its result", () => 
   assert.ok(schemaAt !== -1 && testCmdAt !== -1, "the schema or the resolveTestCmd call moved — update this test");
   assert.ok(schemaAt < callAt, "the guard runs above the schema that produces pathVerified");
   assert.ok(callAt < testCmdAt, "resolveTestCmd reads snap before the guard has cleared it");
+});
+
+// `usableDiff` carries no head check of its own (#1132), so a diff for a
+// head/refHead-skewed snapshot is safe only because the refusal above is FATAL
+// before any specialist is dispatched (#2203). The tests above check the
+// refusal as a unit and the call site as text; neither notices a refusal that
+// stops being fatal — a removed or softened `throw`, or a `refHead` clause gone
+// from `snapshotMissing` — and a text pin on call ORDER would red on a harmless
+// reorder while missing both. So this drives the real `runReview` and asserts
+// on what was dispatched.
+//
+// Asserted on `calls`, not only on the rejection: an unscripted label does
+// throw `unexpected dispatch`, but the fixture's `pipeline` swallows a stage
+// throw into `null`, so that throw alone would fail nothing. `scriptedHost`
+// counts a dispatch before it looks the label up, so `calls` sees every one.
+function runWithRefHead(refHead) {
+  const snap = { ...HOST_SNAP, refHead, diffPath: `${HOST_SNAP.runRoot}/pr.diff`, diffLines: 40 };
+  const { host, calls } = scriptedHost({ snapshot: [snap], "review:correctness": [review([])] });
+  return { run: runReview({ ...host, pipeline, parallel }, ARGS), calls };
+}
+
+test("a head/refHead-skewed snapshot is refused before any specialist or refuter is dispatched", async () => {
+  assert.equal(HOST_SNAP.head, "abc123", "the fixture's head changed — update this test's expected sha");
+  const { run, calls } = runWithRefHead("9e8ee3d");
+  await assert.rejects(run, (err) => {
+    assert.match(err.message, /abc123/, "the refusal must name the commit the tree is at");
+    assert.match(err.message, /9e8ee3d/, "the refusal must name the PR head it was measured against");
+    return true;
+  });
+  assert.equal(calls.snapshot, 1, "the snapshot agent is the one dispatch that precedes the refusal");
+  const leaked = Object.keys(calls).filter((label) => /^(review|verify):/.test(label));
+  assert.deepEqual(leaked, [], "a skewed snapshot reached a specialist or refuter");
+});
+
+// The control: the identical snapshot with the heads agreeing is admitted and
+// reaches the specialist, so the refusal above comes from the head compare and
+// not from some other field of the fixture that `snapshotMissing` refuses.
+test("the same snapshot with refHead matching head reaches the specialist", async () => {
+  const { run, calls } = runWithRefHead(HOST_SNAP.head);
+  await run;
+  assert.equal(calls["review:correctness"], 1, "an admitted snapshot must dispatch its specialist exactly once");
 });
