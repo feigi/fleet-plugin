@@ -275,7 +275,7 @@ test("every branch carries the bounding rule", () => {
 
 // Bounded at both ends in prose-pin.mjs's between() — an unbounded end runs to
 // EOF where the specialist and refuter prompts satisfy it, the defect
-// `review-pr-testcmd.test.mjs`'s "the specialist prompt hands the command over
+// `review-core-testcmd.test.mjs`'s "the test-run prompt hands the command over
 // verbatim and rules 'tests 0' a failure" records.
 const slice = (from, to) => between(CODE, from, to, "review-core.mjs");
 

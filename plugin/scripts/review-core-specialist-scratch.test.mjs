@@ -62,11 +62,11 @@ const CODE = stripComments(SOURCE);
 const TEMPLATE_START = "`Review PR #${pr} (branch ${branch}) for: ";
 const TEMPLATE_END = "label: `review:";
 
-// The template's free names, in the order `render` binds them. `readRules`,
-// `usableDiff` and `environmentNote` are stubs: what they return is not under
+// The template's free names, in the order `render` binds them. `sharedRunNote`,
+// `readRules`, `usableDiff` and `environmentNote` are stubs: what they return is not under
 // test here, and binding them keeps a render that stops passing one from
 // dropping a paragraph silently — it throws a ReferenceError instead.
-const SCOPE = ["pr", "branch", "d", "snap", "worktree", "stats", "testCmd", "readRules", "usableDiff", "environmentNote"];
+const SCOPE = ["pr", "branch", "d", "snap", "worktree", "stats", "sharedRunNote", "sharedRun", "failureOwner", "readRules", "usableDiff", "environmentNote"];
 
 // `between` owns the bounded-slice extraction (and both failure messages);
 // only the backtick trim below is specific to a template literal and stays
@@ -90,7 +90,9 @@ const render = () =>
     { path: "/scr/run-1/snapshot-abc1234", head: "abc1234", runRoot: "/scr/run-1" },
     "/repo/.worktrees/7-x",
     null,
-    "node --test",
+    () => "SHARED RUN NOTE",
+    {},
+    "correctness",
     () => "READ RULES",
     () => null,
     () => "TEST ENVIRONMENT",

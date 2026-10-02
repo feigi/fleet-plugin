@@ -401,7 +401,7 @@ test("the snapshot log line says when the head check was skipped", () => {
 
 // Bound at both ends via prose-pin.mjs's between() — an unbounded end lets the
 // specialist and refuter prompts further down satisfy the assertions instead,
-// the defect `review-pr-testcmd.test.mjs`'s "the specialist prompt hands the
+// the defect `review-core-testcmd.test.mjs`'s "the test-run prompt hands the
 // command over verbatim and rules 'tests 0' a failure" test records having
 // shipped. Same two anchors `review-pr-reads.test.mjs`'s `slice()` and
 // `review-pr-testcmd.test.mjs` already use.

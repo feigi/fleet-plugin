@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseFrontmatter } from "./frontmatter-check.mjs";
-import { SNAPSHOT_AGENT_TYPE, SPAWNED_AGENT_TYPES, VERIFIER_AGENT_TYPE } from "./review-core.mjs";
+import { SNAPSHOT_AGENT_TYPE, SPAWNED_AGENT_TYPES, TEST_RUN_AGENT_TYPE, VERIFIER_AGENT_TYPE } from "./review-core.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const RUNNER_PATH = join(REPO, "agents", "fleet-review-runner.agent.md");
@@ -76,9 +76,9 @@ test("every agent type fleet-review-runner is allowed to spawn has a definition 
   }
 });
 
-test("review-core.mjs's snapshot/verifier dispatch sites reference the exported constants, not a hardcoded duplicate", () => {
+test("review-core.mjs's snapshot/test-run/verifier dispatch sites reference the exported constants, not a hardcoded duplicate", () => {
   // #2102 review: SPAWNED_AGENT_TYPES and the runner's spawns pin above both
-  // derive from SNAPSHOT_AGENT_TYPE/VERIFIER_AGENT_TYPE, never from the
+  // derive from SNAPSHOT_AGENT_TYPE/TEST_RUN_AGENT_TYPE/VERIFIER_AGENT_TYPE, never from the
   // dispatch call sites themselves — so a call site quietly reverted to a
   // hardcoded string literal (instead of the constant) would leave both
   // pins green while review-core.mjs's real dispatch silently drifts from
@@ -88,6 +88,8 @@ test("review-core.mjs's snapshot/verifier dispatch sites reference the exported 
   const source = readFileSync(CORE_PATH, "utf8");
   assert.equal(SNAPSHOT_AGENT_TYPE, "fleet-review-snapshot");
   assert.match(source, /agentType:\s*SNAPSHOT_AGENT_TYPE\b/);
+  assert.equal(TEST_RUN_AGENT_TYPE, "fleet-review-test-run");
+  assert.match(source, /agentType:\s*TEST_RUN_AGENT_TYPE\b/);
   assert.equal(VERIFIER_AGENT_TYPE, "fleet-review-verifier");
   assert.match(source, /agentType:\s*VERIFIER_AGENT_TYPE\b/);
 });

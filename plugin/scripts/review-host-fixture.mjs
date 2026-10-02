@@ -39,6 +39,10 @@ export const SNAP = {
   testCmd: "node --test",
 };
 export const RAN = { command: "node --test", tests: 5, pass: 5, fail: 0 };
+// #2315. The shared test run's agent report — the `test-run` dispatch every
+// review makes once, before any specialist. Clean, so a script that is about
+// something else need not answer it; one that is about it names its own.
+export const SHARED = { exitCode: 0, tests: 5, pass: 5, fail: 0 };
 export const review = (findings, testRun = RAN) => ({
   dimension: "correctness",
   scope_searched: "CWD-AUDIT: clean /repo",
@@ -52,15 +56,20 @@ export const vote = (refuted) => ({ refuted, reason: "measured. CWD-AUDIT: clean
 // per call in dispatch order (the last entry repeats), and counts the calls.
 // An `Error` entry is thrown rather than returned. Counting happens
 // synchronously on the call, so the two refuters of one pair are calls 1 and
-// 2 of their label, and a re-dispatched pair is calls 3 and 4.
+// 2 of their label, and a re-dispatched pair is calls 3 and 4. A script with
+// no `test-run` entry gets `[SHARED]` for it; every other unscripted label
+// throws. `prompts` records each dispatch's prompt under its label.
 export function scriptedHost(script) {
   const calls = {};
+  const prompts = {};
   return {
     calls,
+    prompts,
     host: {
-      agent: async (_prompt, opts) => {
+      agent: async (prompt, opts) => {
         const n = (calls[opts.label] = (calls[opts.label] ?? 0) + 1);
-        const seq = script[opts.label];
+        (prompts[opts.label] ??= []).push(prompt);
+        const seq = script[opts.label] ?? (opts.label === "test-run" ? [SHARED] : undefined);
         if (!seq) throw new Error(`scriptedHost: unexpected dispatch ${opts.label}`);
         const answer = seq[Math.min(n, seq.length) - 1];
         if (answer instanceof Error) throw answer;
