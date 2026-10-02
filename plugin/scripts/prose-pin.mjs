@@ -506,9 +506,9 @@ function rawOffset(text, unemphasizedOffset) {
   return i;
 }
 
-// The offset of an anchor that must occur EXACTLY ONCE, mirroring `markedLine`'s
-// own count assert for the same reason: a search takes the FIRST match silently,
-// so an un-gutter'd restatement of the anchored block ABOVE the real one — the
+// The offset of an anchor that must occur EXACTLY ONCE, asserted by count because
+// a search takes the FIRST match silently, so an un-gutter'd restatement of the
+// anchored block ABOVE the real one — the
 // shape this repo's prose already uses where a phase quotes a member prompt back
 // at itself — binds the pin to the copy while the real rule is gutted. A
 // blockquoted copy is harmless (`\s+` cannot span the `>` gutter); a plain one is
