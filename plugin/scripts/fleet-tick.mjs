@@ -428,7 +428,8 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   // PR #M's own row, never off another PR's — `dispatch` and `settle` write it
   // onto PR #M's row only, so a settled copy elsewhere is a hand-written stray
   // that must not mark PR #M's own live member settled. `rowPr` is the row's
-  // PR (`undefined` for `## Dispatched`, which is no PR's row); a stray's token
+  // PR (`undefined` for `## Dispatched`, which is no PR's row; `null` for a
+  // row naming no PR, which settles no PR-bound member); a stray's token
   // still creates the member, live, as before.
   const members = new Map();
   const note = (t, where, rowPr) => {
@@ -437,15 +438,10 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     if (t.outcome !== null && (t.bound !== "pr" || rowPr === undefined || t.number === rowPr)) m.outcome = t.outcome;
     members.set(t.name, m);
   };
-  // A fix-applier's outcome as its landing reads it (#2329): off `##
-  // Dispatched` and its own PR's rows only, so a settled stray on another
-  // PR's row lends its owner no landing.
-  const fixOutcome = new Map();
   for (const e of dispatched) {
     const t = parseToken(e);
     if (!t) throw new LedgerError(`## Dispatched entry '${e}' is not a member token — fix the ledger by hand before the tick can count from it`);
     note(t, `## Dispatched entry '${e}'`);
-    if (t.family === "fix-pr" && t.outcome !== null) fixOutcome.set(t.name, t.outcome);
   }
 
   const open = new Set(prs.map((p) => p.number));
@@ -529,13 +525,13 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
         // conflict unfixed and no successor dispatched — the PR stays fix-due
         // for a `-b` replacement. Only a live attempt, or one that actually
         // landed (`applied:`/`no-op`), holds it off. Read the outcome off the
-        // member's merged record (`fixOutcome`, built above and here) rather
-        // than this row's own copy of the token: "a member settled ANYWHERE
-        // is settled", the rule `members` implements for
-        // `implLive`/`fixLive`/etc. below, narrowed to the places it speaks
-        // for — a later, unrelated `row` rewrite that drops the `=outcome`
-        // suffix and puts back a bare copy must not un-settle what actually
-        // landed. Which job a landed one did is read off where its token sits:
+        // member's merged record (`members`, narrowed above) rather than this
+        // row's own copy of the token: "a member settled ANYWHERE is settled",
+        // the rule `members` implements for `implLive`/`fixLive`/etc. below,
+        // narrowed to the places it speaks for — a later, unrelated `row`
+        // rewrite that drops the `=outcome` suffix and puts back a bare copy
+        // must not un-settle what actually landed. Which job a landed one did
+        // is read off where its token sits:
         // after an unresolved hold it was the conflict fix-applier and clears
         // that hold; otherwise it answered the latest review's survivors. A
         // hold reopens `conflictOpen` below and a `reviewed=` resets
@@ -549,7 +545,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
         // here at all: a bare copy read before a later row settles its member
         // reads unsettled at that point, so `fixMembers` is judged once every
         // row has been read. A copy reaching this branch has just been
-        // recorded into `fixOutcome` if settled, so its outcome is this
+        // recorded into `members` by the `note` above, so its outcome is this
         // token's own unless `## Dispatched` or an earlier row already settled
         // it — never a reason to fall back to the row's own copy. A
         // `fix-pr-<M>` speaks for PR #M alone, as a `finisher-pr` does below
@@ -558,8 +554,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
         // absent, and which lends PR #M's own copies no outcome.
         if (t.family === "fix-pr" && t.number === pr) {
           st.fixMembers.add(t.name);
-          if (t.outcome !== null) fixOutcome.set(t.name, t.outcome);
-          const o = fixOutcome.get(t.name) ?? null;
+          const o = members.get(t.name).outcome;
           if ((o === "no-op" || /^applied:/.test(o)) && !st.fixLanded.has(t.name)
             && (t.outcome !== null || !settledInRow.has(t.name))) {
             st.fixLanded.add(t.name);
