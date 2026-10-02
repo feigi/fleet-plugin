@@ -168,12 +168,14 @@ const renderPrune = (path, runRootParent) =>
  * inside `locked`, and the file moves into it. On darwin, optionally, the file
  * carries `fileFlag` (`uchg` or `uappnd`), and every locked directory carries
  * `dirFlag` — set after the mode, so a directory's mode cannot be changed back
- * until the flag is gone. `fileMode` is the file's own mode: one that already
- * grants owner rwx leaves `chmod -R u+rwx` nothing to change on the file, so
- * that pass exits 0 over a flagged file. Aged last: creating children sets the
- * root's mtime to now.
+ * until the flag is gone. `rootFlag` locks the run root itself the same way,
+ * with no permission bits and that flag. `fileMode` is the file's own mode:
+ * one that already grants owner rwx leaves `chmod -R u+rwx` nothing to change
+ * on the file, so that pass exits 0 over a flagged file. Aged before the root
+ * is locked: creating children sets the root's mtime to now, and a flagged
+ * root refuses `utimes`.
  */
-function lockedRunRoot(parent, name, days, { fileFlag = null, fileMode = 0o644, dirFlag = null, nested = false } = {}) {
+function lockedRunRoot(parent, name, days, { fileFlag = null, fileMode = 0o644, dirFlag = null, rootFlag = null, nested = false } = {}) {
   const root = join(parent, name);
   const locked = join(root, "locked");
   const dirs = nested ? [join(locked, "deeper"), locked] : [locked];
@@ -189,6 +191,10 @@ function lockedRunRoot(parent, name, days, { fileFlag = null, fileMode = 0o644, 
   }
   const when = (Date.now() - days * DAY) / 1000;
   utimesSync(root, when, when);
+  if (rootFlag) {
+    chmodSync(root, 0);
+    execFileSync("chflags", [rootFlag, root]);
+  }
   return root;
 }
 
@@ -656,8 +662,9 @@ for (const [name, path] of SOURCES) {
   // one also refuses the `chmod` that makes a `000` directory readable again —
   // while `chflags -R` cannot read a `000` directory it has just unflagged. So
   // a directory's flag and mode have to come off together, before anything
-  // inside it is read, at every depth. The `uappnd` file whose mode already
-  // grants owner rwx is the shape where `chmod -R` exits 0 over a flag.
+  // inside it is read, at every depth and on the run root itself. The `uappnd`
+  // file whose mode already grants owner rwx is the shape where `chmod -R`
+  // exits 0 over a flag.
   for (const [shape, opts] of [
     ["a uchg file inside a chmod 000 directory", { fileFlag: "uchg" }],
     ["a uappnd file whose own mode leaves chmod nothing to change", { fileFlag: "uappnd", fileMode: 0o700 }],
@@ -665,8 +672,11 @@ for (const [name, path] of SOURCES) {
     ["a directory that is both uappnd and chmod 000", { dirFlag: "uappnd" }],
     ["a uchg file inside a directory that is both uchg and chmod 000", { fileFlag: "uchg", dirFlag: "uchg" }],
     ["a uchg, chmod 000 directory inside another", { dirFlag: "uchg", nested: true }],
+    ["its own uchg and chmod 000 bits", { rootFlag: "uchg" }],
+    ["its own uappnd and chmod 000 bits", { rootFlag: "uappnd" }],
+    ["its own uchg and chmod 000 bits over a uchg, chmod 000 directory", { rootFlag: "uchg", dirFlag: "uchg" }],
   ]) {
-    test(`${name}: on darwin the prune removes an aged run root holding ${shape}`, { skip: process.platform !== "darwin" && "chflags/uchg/uappnd are darwin's" }, (t) => {
+    test(`${name}: on darwin the prune removes an aged run root with ${shape}`, { skip: process.platform !== "darwin" && "chflags/uchg/uappnd are darwin's" }, (t) => {
       const parent = join(scratch(t, "snapshot-repo-prune-flags-"), "pr7");
       const stale = lockedRunRoot(parent, "run-staleaa", 9, opts);
       try {
@@ -674,7 +684,7 @@ for (const [name, path] of SOURCES) {
 
         assert.doesNotMatch(r.stdout ?? "", /SNAPSHOT_PRUNE_FAILED/, `the prune named a failure on a root it can normalise: ${r.stderr}`);
         assert.equal(r.status, 0, `the prune exited non-zero: ${r.stderr}`);
-        assert.ok(!existsSync(stale), `an aged run root holding ${shape} survived the prune — it now stays forever and every later review prints SNAPSHOT_PRUNE_FAILED`);
+        assert.ok(!existsSync(stale), `an aged run root with ${shape} survived the prune — it now stays forever and every later review prints SNAPSHOT_PRUNE_FAILED`);
       } finally {
         unlock(parent);
       }
