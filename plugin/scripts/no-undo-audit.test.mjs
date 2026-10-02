@@ -1921,9 +1921,9 @@ test("a BASE_REF that dereferences to a blob is unanswerable (2), never safe (0)
 });
 
 test("a local ref shadowing `origin/main` does not read a real add/add conflict as none (#1565)", (t) => {
-  // Same class release-ticket.sh:243 and reap.sh:174 already found in the same
-  // default — worktree-audit.sh is not a carrier of this fix and still
-  // measures the bare shorthand. `origin/main` is a SHORTHAND, and git
+  // Same class release-ticket.sh, reap.sh and worktree-audit.sh already
+  // found in the same default — each qualifies the shorthand base into
+  // refs/remotes/<name> before measuring. `origin/main` is a SHORTHAND, and git
   // resolves a shorthand through its own disambiguation order (gitrevisions:
   // refs/<name>, refs/tags/<name>, refs/heads/<name>, refs/remotes/<name>,
   // …), in which refs/remotes/origin/main comes LAST. A local TAG literally
