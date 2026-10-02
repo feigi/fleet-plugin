@@ -189,35 +189,32 @@ Slice: `plugin/scripts/{claim-ticket,release-ticket,reap,inflight,no-undo-audit,
 Files read in full or via exhaustive grep+section reads with citations, across this agent and its four parallel sub-investigations:
 
 - `plugin/scripts/claim-ticket.sh` (417 lines) — read directly, in sections (1-253, 254-390, 391-417); the runner it generates (the heredoc at 379-384) is a thin exec of the Test entrypoint and was read in full.
-- `plugin/scripts/release-ticket.sh` (1698 lines) — read directly via targeted `grep` sweeps with full line-numbered context (gh calls, BASE_REF handling, branch-delete/worktree-remove calls, receipt/die/block/halt functions) plus two full-page reads; not read as one linear pass given size.
-- `plugin/scripts/reap.sh` (1507 lines) — read directly via targeted `grep` sweeps with full line-numbered context (header, git calls, awk/tr/grep byte semantics, BASE_REF, keep()/receipt) plus two full-page reads.
+- `plugin/scripts/release-ticket.sh` (1716 lines) — read directly via targeted `grep` sweeps with full line-numbered context (gh calls, BASE_REF handling, branch-delete/worktree-remove calls, receipt/die/block/halt functions) plus two full-page reads; not read as one linear pass given size.
+- `plugin/scripts/reap.sh` (1768 lines) — read directly via targeted `grep` sweeps with full line-numbered context (header, git calls, awk/tr/grep byte semantics, BASE_REF, keep()/receipt) plus two full-page reads.
 - `plugin/scripts/inflight.sh` (1106 lines) — read directly, in full, in four sequential sections (1-300, 300-503/499-753, 749-1003, 1000-1106).
-- `plugin/scripts/net.sh` (384 lines) — read directly (header 1-43, targeted greps for SSH/env-var sections) plus fully covered by `CensusHelperLibs` sub-agent (full 1-384).
+- `plugin/scripts/net.sh` (409 lines) — read directly (header 1-37, targeted greps for SSH/env-var sections) plus fully covered by `CensusHelperLibs` sub-agent (full 1-409).
 - `plugin/scripts/json.sh` (248 lines) — read directly (1-63, 64-248 via grep) plus fully covered by `CensusHelperLibs` sub-agent (full 1-248).
 - `plugin/scripts/no-undo-audit.sh` (1134 lines) — covered by `CensusWorktree` sub-agent, full read.
-- `plugin/scripts/worktree-audit.sh` (412 lines) — covered by `CensusWorktree` sub-agent, full read.
-- `plugin/scripts/worktree.sh` (228 lines) — covered by `CensusWorktree` sub-agent, full read.
-- `plugin/scripts/instruments.sh` (257 lines) — covered by `CensusHelperLibs` sub-agent, full read.
+- `plugin/scripts/worktree-audit.sh` (482 lines) — covered by `CensusWorktree` sub-agent, full read.
+- `plugin/scripts/worktree.sh` (470 lines) — covered by `CensusWorktree` sub-agent, full read.
+- `plugin/scripts/instruments.sh` (394 lines) — covered by `CensusHelperLibs` sub-agent, full read.
 - `plugin/scripts/prove-merge.sh` (228 lines) — covered by `CensusHelperLibs` sub-agent, full read.
 - `plugin/scripts/verify-sha.sh` (117 lines) — covered by `CensusHelperLibs` sub-agent, full read.
-- `plugin/scripts/derive-testcmd.sh` (194 lines) — covered by `CensusHelperLibs` sub-agent, full read.
+- `plugin/scripts/derive-testcmd.sh` (250 lines) — covered by `CensusHelperLibs` sub-agent, full read.
 - `plugin/scripts/drop-merged-label.sh` (173 lines) — read directly (gh calls, receipt) plus covered by `CensusHarnessScripts` sub-agent, full read.
-- `plugin/scripts/fleet-bootstrap` (165 lines) — covered by `CensusHarnessScripts` sub-agent, full read.
-- `plugin/scripts/fleet-run` (316 lines) — covered by `CensusHarnessScripts` sub-agent, full read.
-- `plugin/scripts/fleet-provenance` (264 lines) — covered by `CensusHarnessScripts` sub-agent, full read (text-cross-verified after an initial OCR pass).
+- `plugin/scripts/fleet-bootstrap` (140 lines) — covered by `CensusHarnessScripts` sub-agent, full read.
+- `plugin/scripts/fleet-run` (148 lines) — covered by `CensusHarnessScripts` sub-agent, full read.
+- `plugin/scripts/fleet-provenance` (198 lines) — covered by `CensusHarnessScripts` sub-agent, full read (text-cross-verified after an initial OCR pass).
 - `.github/scripts/pin-drift.sh` (137 lines) — covered by `CensusGithubConfig` sub-agent, full read.
 - `.github/scripts/apply-ruleset.sh` (158 lines) — read directly (gh repo view/api/PUT calls) plus covered by `CensusGithubConfig` sub-agent, full read.
-- `.github/scripts/smoke-omp.sh` (203 lines) — covered by `CensusGithubConfig` sub-agent, full read.
-- `.github/scripts/validate-claude.sh` (114 lines) — covered by `CensusGithubConfig` sub-agent, full read.
-- `.github/scripts/install-and-smoke.sh` (185 lines) — covered by `CensusGithubConfig` sub-agent, full read.
-- `.github/scripts/npm-name-gate.sh` (63 lines) — covered by `CensusGithubConfig` sub-agent, full read.
+- `.github/scripts/smoke-omp.sh` (374 lines) — covered by `CensusGithubConfig` sub-agent, full read.
+- `.github/scripts/install-and-smoke.sh` (164 lines) — covered by `CensusGithubConfig` sub-agent, full read.
 - `.github/scripts/check-tracked.sh` (57 lines) — covered by `CensusGithubConfig` sub-agent, full read.
-- `.github/scripts/validate-claude-warning-allowlist.json` (4 lines) — covered by `CensusGithubConfig` sub-agent, full read.
-- `.github/workflows/ci.yml` (440 lines) — covered by `CensusGithubConfig` sub-agent, full read (two passes).
+- `.github/workflows/ci.yml` (328 lines) — covered by `CensusGithubConfig` sub-agent, full read (two passes).
 - `.github/workflows/pin-drift.yml` (57 lines) — covered by `CensusGithubConfig` sub-agent, full read.
 - `.github/workflows/release-label.yml` (110 lines) — read directly (gh pr view/edit calls) plus covered by `CensusGithubConfig` sub-agent, full read.
-- `.github/workflows/release.yml` (148 lines) — read directly (gh release view/create, GH_HOST) plus covered by `CensusGithubConfig` sub-agent, full read.
-- `.github/rulesets/main.json` (71 lines) — covered by `CensusGithubConfig` sub-agent, full read.
+- `.github/workflows/release.yml` (195 lines) — read directly (gh release view/create, GH_HOST) plus covered by `CensusGithubConfig` sub-agent, full read.
+- `.github/rulesets/main.json` (63 lines) — covered by `CensusGithubConfig` sub-agent, full read.
 
 No files in the assigned slice were skipped. `docs/agents/triage-labels.md` and `docs/specs/2026-07-23-fleet-plugin-design.md` were referenced by in-repo comments but are outside this slice's file list and were not separately read; their claims are only reported here insofar as the shell scripts' own comments describe them (e.g. inflight.sh's four-failure table).
 </content>
