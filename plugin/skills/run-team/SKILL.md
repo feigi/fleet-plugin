@@ -1381,7 +1381,7 @@ for a token on a ticket's line — never a hand edit.
 |---|---|
 | Implementer report | `verify-sha.sh`; `ledger.mjs settle impl-<N>=PR#<M>`, or `=bailed` and relabel by cause (**Implementer bails before implementing**, below) |
 | Review workflow notification / `review-pr-<n>` report | write `<scratch>/review-<pr>.json`; `reviewed=<head>:<survived>/<refuted>/<unverified>` on the PR's row (**Reviewers**) |
-| Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; copy the refutations it reversed to `ruled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
+| Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; for a fix-applier that answered a review — not one that cleared a conflict hold, which has no review file — `~/.fleet/bin/fleet-run dispositions-check.mjs --member <that member> --scratch <scratch>`, from the checkout root: it judges `<scratch>/dispositions-<M>.json` against `<scratch>/review-<M>.json`, writes `dispositions-ok=` or `dispositions-mismatch=<member>:<head>` onto the PR's row itself, and exits 1 on a mismatch, naming each violating entry's bucket, index and rule; copy the refutations it reversed — the record's `refuted` entries — to `ruled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled` as reported, even when its read-back lacks `ready-to-merge` — the tick's `DISPATCH finisher PR#<M>` catches that next. A **repair** finisher's (one sent on that line) read-back lacking it also gets `gh pr comment <M>` with both finishers' read-backs: the one-shot escalation, where halts comment. `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Finisher report (halted) | `ledger.mjs settle finisher-pr-<M>=halted:<cause>`; `gh pr comment <M>` with the finisher's halt report, cause and evidence; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line; then the per-cause rule (**Resolving a finisher halt**, below) |
 | Label seen (persistent Monitor) | nothing to record |
@@ -2340,6 +2340,24 @@ all.
 > that was two commits stale, and a finisher dispatched on either would have
 > halted on a diverged head.
 >
+> **Before you report, write every ruling to `<scratch>/dispositions-<pr>.json`**,
+> beside the review file — the record the controller checks with
+> `dispositions-check.mjs` before it dispatches any finisher. It is
+> `{"head": "<the review file's head>", "entries": [ … ]}`: one entry per
+> `survived` finding and per `unverified` finding, plus one per `refuted`
+> finding you reverse, its evidence in `reason`. Each entry carries `bucket`
+> (`survived|unverified|refuted`), `index` (its position in that bucket of the
+> review file), `scope` (`in|out`), `claimKind` (`behavior|shape`) and
+> `disposition` (`apply|defer`), and where they apply `reason`, `issue` (the
+> number you filed it to or commented on), `verdictPath` (an in-scope
+> suggestion's refuter verdict file) and `remedyFiles` (the files its remedy
+> names). A finding with no `line`, or on a line the PR's diff touched —
+> `git diff` from its merge-base with `origin/main` to the review's head — is
+> in scope whatever its `scope` says. An in-scope `survived` finding you defer
+> carries `reason` `false-rationale`, `mutual-exclusion` or `remedy-worse`. Any
+> other reason, none, or a `survived` or `unverified` finding with no entry is
+> a mismatch, and the PR gets no finisher.
+>
 > Then report to the controller the pushed SHA, your apply/defer split, and
 > the deferral issue numbers — a `filed: #N <subject>` line for every issue
 > step 5 created, and `unrecorded: #N <subject>` for one whose `ledger.mjs filed`
@@ -2385,6 +2403,18 @@ nothing about whether the member considers itself finished, which is what the
 report condition above is for. A withdrawal you
 recorded only in the ledger is undelivered: the member still holds the original
 and will act on it. Relay everything — reversals too — then dispatch.
+
+**That `dispatch` refuses a finisher — exit 2, nothing written — on a PR whose
+latest `reviewed=` counts a survived or unverified finding, unless the
+dispositions verdict answering that review's head is `ok`**: among the
+`dispositions-*=fix-pr-<M>[-x]:<head>` tokens whose head matches it, the one
+from the highest-suffixed fix-applier. A PR whose latest review counts
+`0/<n>/0` is not gated. The refusal names its cause. `dispositions
+unchecked` — no verdict answers that head: run `dispositions-check.mjs` for
+the fix-applier that answered the review, as the Fix-applier report edge
+states, then dispatch again. `dispositions mismatch` — no finisher: post the
+check's output, which names each violating entry, with `gh pr comment <M>`, and
+flag the PR for a human; re-running the check reprints it.
 
 **An unanswered question from the member is an outbox item, and it blocks
 dispatch with the same weight as a ruling you have already made.** It does not
