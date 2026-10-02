@@ -653,6 +653,26 @@ test("#2331: the label present, a live repair, a label-off'd attempt, or a close
   assert.deepEqual(card(merged, 941).flags, []);
 });
 
+// The tick reads `## Dispatched` as well as the rows, and a whole-line `row`
+// rewrite can drop a settled finisher token from the row while `## Dispatched`
+// keeps it. The cockpit reads the same two places, so the card the tick is
+// repairing or escalating is the card it flags — and a label-off on the row
+// clears both alike.
+test("#2331: the cockpit reads `## Dispatched` as the tick does — a settled finisher a row rewrite dropped still flags", () => {
+  const dispatched = ["impl-941=PR#931", "finisher-pr-931=labelled"];
+  const open = [{ number: 931, labels: [], closingIssuesReferences: [{ number: 941 }], headRefOid: "abc1234abc1234abc1234abc1234abc1234abcd" }];
+  for (const [rows, flags] of [
+    [["#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0"], ["unlabelled"]],
+    [["#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0 label-off=finisher-pr-931"], []],
+  ]) {
+    const tick = deriveRun({ rows, dispatched, drain: null }, open).unlabelled;
+    assert.deepEqual(tick.map((u) => u.pr), flags.length ? [931] : [], rows[0]);
+    const b = computeBoard(reproInputs({ rows, ledger: { rows, dispatched, filed: [], ruled: [] }, prev: { tickets: [] } }));
+    assert.equal(card(b, 941).column, "REVIEW", rows[0]);
+    assert.deepEqual(card(b, 941).flags, flags, rows[0]);
+  }
+});
+
 test("#1820: a live implementer is IMPLEMENTING, and still earns stale", () => {
   const b = computeBoard(reproInputs());
   assert.equal(card(b, 906).column, "IMPLEMENTING");

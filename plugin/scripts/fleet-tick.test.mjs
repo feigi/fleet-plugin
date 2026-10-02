@@ -585,6 +585,12 @@ test("deriveRun: a label-off'd attempt is the controller's own removal — nothi
   // A label-off for another PR's attempt leaves this one's miss standing, wherever it sits.
   assert.deepEqual(run({ rows: [`${LABELLED} label-off=finisher-pr-41`] }, open).unlabelled,
     [{ pr: 40, labelled: ["finisher-pr-40"] }]);
+  // Two label-offs for one PR: the HIGHEST attempt named starts the stretch,
+  // whichever token comes first on the row.
+  const three = `${LABELLED} · finisher-pr-40-b=labelled · finisher-pr-40-c=labelled`;
+  for (const offs of ["label-off=finisher-pr-40-b label-off=finisher-pr-40", "label-off=finisher-pr-40 label-off=finisher-pr-40-b"]) {
+    assert.deepEqual(run({ rows: [`${three} ${offs}`] }, open).unlabelled, [{ pr: 40, labelled: ["finisher-pr-40-c"] }], offs);
+  }
 });
 
 test("deriveRun: two labelled attempts in one stretch escalate rather than dispatch a third", () => {

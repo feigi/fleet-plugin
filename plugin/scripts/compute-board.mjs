@@ -68,8 +68,9 @@ import { PR_MENTION, REVIEWED, unlabelledFinishers } from "./fleet-tick.mjs";
 // #2331: a PR whose finisher settled `labelled` while the open list shows no
 // `ready-to-merge` on it carries a severity-4 `unlabelled` flag in REVIEW —
 // fleet-tick.mjs's own reading (unlabelledFinishers: the latest attempt since
-// the last `label-off=`), off row tokens alone like the rest of this file, so
-// the card is flagged whether the tick is repairing it or escalated it.
+// the last `label-off=`), off the same `## Dispatched` and row tokens the tick
+// reads, so the card is flagged whenever the tick is repairing it or escalated
+// it — including after a whole-line `row` rewrite dropped the settled token.
 //
 // A PR's review is not a member (#1773 §7): `review=wf:<runId>` is a Workflow
 // with nobody to name, while `review=member:<name>` and
@@ -452,7 +453,7 @@ export function computeBoard(inputs) {
 
   const parsed = (ledger.rows || []).map(parseRow).filter(Boolean);
   const unqueued = new Set(prs.filter((p) => p.state === "OPEN" && !(p.labels || []).includes("ready-to-merge")).map((p) => p.number));
-  const unlabelled = new Set(unlabelledFinishers({ rows: ledger.rows || [], dispatched: [] }, unqueued).map((u) => u.pr));
+  const unlabelled = new Set(unlabelledFinishers({ rows: ledger.rows || [], dispatched: ledger.dispatched || [] }, unqueued).map((u) => u.pr));
   const rowIssues = new Set();
   const tickets = [];
 
