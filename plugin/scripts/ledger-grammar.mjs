@@ -16,6 +16,8 @@
 // `review=`/`reviewed=` pair, the `→ PR#M` arrow) is not a member and is left
 // alone.
 
+import { createHash } from "node:crypto";
+
 // The outcome vocabulary, verbatim from the spec. A word is matched exactly,
 // except the three that carry a value, which match OUTCOME_PATTERNS below.
 const FAMILIES = {
@@ -87,14 +89,44 @@ export function nextMergeBot(dispatched) {
   return `merge-bot-${dispatched.map(parseToken).filter((t) => t?.family === "merge-bot").length + 1}`;
 }
 
+// #2030: an implementer cell is `<role>-<level>` — an omp role and a thinking
+// level — and each cell is one definition, `fleet-implementer-<cell>`, whose
+// `model:` is `@<role>:<level>` (spec 2026-09-28 § 2). Nothing is named
+// `fleet-implementer` alone, so CELL_DEF is the whole implementer family:
+// derived from CELL rather than spelled twice, so a level added to one cannot
+// be missing from the other.
+export const CELL = /^(slow|task|smol)-(minimal|low|medium|high|xhigh|max)$/;
+export const CELL_DEF = new RegExp(`^fleet-implementer-${CELL.source.slice(1)}`);
+
+// The cell a row with no `tier=` runs at: `policy_cell`, `slow-high` on every
+// Pull until the router (spec § 4) picks one per stratum.
+const POLICY_CELL = "slow-high";
+
+// The Exploration Pull's draw (spec § 2): uniform over every cell but
+// `policyCell`, keyed off the row's own `session` and `ticket`, so the draw
+// is reproducible from the row and a re-dispatch of the same ticket in the
+// same session lands on the same cell. No RNG and no seed token. `k` is the
+// 1-based index into the sorted remainder, `K` its size; with every
+// non-default cell withdrawn (`K === 0`) the Pull runs at `policyCell` and
+// `k`/`K` are 0 — the caller writes no draw column then, and there is no
+// `% 0` to take.
+/** @returns {{cell: string|null, k: number, K: number}} */
+export function drawCell({ session, ticket, policyCell, cells }) {
+  const E = cells.filter((c) => c !== policyCell).sort();
+  const K = E.length;
+  if (K === 0) return { cell: policyCell, k: 0, K: 0 };
+  const k = 1 + (parseInt(createHash("sha256").update(`${session}\t${ticket}`).digest("hex").slice(0, 8), 16) % K);
+  return { cell: E[k - 1], k, K };
+}
+
 // #1398: the definition an implementer should run under, off its ticket
-// row's `tier=` token — none means `fleet-implementer`, `tier=<x>` means
-// `fleet-implementer-<x>`: `alt` (phase 2's every-5th-Pull alternate) and
-// every #2030 per-cell name (`slow-high`) alike. The value becomes a file
+// row's `tier=` token — none means `fleet-implementer-<POLICY_CELL>`,
+// `tier=<x>` means `fleet-implementer-<x>`. The value becomes a file
 // name under `agents/`, so it is held to `[a-z0-9]` words joined by `-`
 // rather than joined into a path as written, and two different `tier=`
 // values on one row name no single definition — refused, never resolved by
-// position.
+// position. A value with no definition behind it (the retired `tier=alt`) is
+// `ledger.mjs dispatch`'s to refuse: it checks the file exists.
 //
 // Here, not in tier-check.mjs, because two readers must agree on it (#2208):
 // `ledger.mjs dispatch` prints the definition before the call, and
@@ -105,7 +137,7 @@ const TIER_SUFFIX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export function expectedDefinition(rowText) {
   const values = [...new Set(String(rowText ?? "").split(/\s+/)
     .filter((t) => t.startsWith("tier=")).map((t) => t.slice("tier=".length)))];
-  if (values.length === 0) return "fleet-implementer";
+  if (values.length === 0) return `fleet-implementer-${POLICY_CELL}`;
   if (values.length > 1) throw new Error(`row carries conflicting tier= tokens (${values.map((v) => `tier=${v}`).join(", ")}) — fix the row with \`ledger.mjs row\``);
   if (!TIER_SUFFIX.test(values[0])) throw new Error(`tier=${values[0]} is not a definition suffix — expected [a-z0-9] words joined by '-' — fix the row with \`ledger.mjs row\``);
   return `fleet-implementer-${values[0]}`;
@@ -115,8 +147,8 @@ export function expectedDefinition(rowText) {
 // and the text of the row it works: `ledger.mjs dispatch` prints it so the
 // `task` call that follows names it off a script's output, not off prose a
 // compaction drops. A fix-applier on an unresolved conflict hold of its own PR
-// is a `fleet-implementer` whatever the row's `tier=` (#2299) — it rebases the
-// PR, it does not work a ticket at a tier. Any other fix-applier is a review
+// is a `fleet-implementer-<POLICY_CELL>` whatever the row's `tier=` (#2299) —
+// it rebases the PR, it does not work a ticket at a tier. Any other fix-applier is a review
 // one and gets null: a generic `task` by design. Whether the hold is
 // unresolved is `conflictHeld`, the caller's to supply from fleet-tick.mjs's
 // deriveRun() — the reading the tick holds the merge on, which folds every
@@ -129,7 +161,7 @@ export function expectedDefinition(rowText) {
 export function agentDefinition(member, rowText, conflictHeld = false) {
   switch (member.family) {
     case "impl": return expectedDefinition(rowText);
-    case "fix-pr": return conflictHeld ? "fleet-implementer" : null;
+    case "fix-pr": return conflictHeld ? `fleet-implementer-${POLICY_CELL}` : null;
     case "finisher-pr": return "fleet-finisher";
     case "merge-bot": return "fleet-merge-bot";
     default: throw new Error(`agentDefinition has no case for member family '${member.family}' (${member.name}) — add one to ledger-grammar.mjs`);

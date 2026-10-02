@@ -3,11 +3,14 @@
 ## What it is for
 
 The implementer turns one claimed ticket into a pushed branch and an
-open PR. It runs as
-[`fleet-implementer.agent.md`](../../plugin/agents/fleet-implementer.agent.md),
-or, on every 5th Pull by ledger count, its byte-identical sibling
-[`fleet-implementer-alt.agent.md`](../../plugin/agents/fleet-implementer-alt.agent.md)
-— see [Tier routing](tier-routing.md) for why.
+open PR. It runs as `fleet-implementer-<cell>.agent.md`: one definition
+per cell (`slow-high`, `slow-medium`, `task-high`, `task-max`,
+`smol-high` — an omp role and a thinking level), byte-identical bodies,
+each declaring the route its name derives. A row with no `tier=` runs
+at the policy cell,
+[`fleet-implementer-slow-high.agent.md`](../../plugin/agents/fleet-implementer-slow-high.agent.md);
+every 5th Pull by ledger count runs at an exploration cell — see
+[Tier routing](tier-routing.md) for why.
 
 ## How it works
 1. **Dispatch.** One implementer per Pull, never batched: the
@@ -39,9 +42,11 @@ or, on every 5th Pull by ledger count, its byte-identical sibling
   killed is replaced by a brand-new member under a new name on the same
   ticket, never woken or resumed — resuming drags stale ticket state
   back in.
-- **`-alt` makes the tier comparison unconfounded.** It is the identical
-  prompt body, differing only in its declared `model:`, so any measured
-  difference in outcome is attributable to the tier alone
+- **Byte-identical bodies keep the prompt out of a cell comparison.**
+  Every `fleet-implementer-<cell>` definition carries the same body
+  (pinned by `implementer-model-tier.test.mjs`); only its frontmatter —
+  name, description and declared route — differs, so a difference
+  measured between cells is not a difference in the definition's prompt
   ([ADR 0005](../adr/0005-tier-declared-per-harness-verified-at-dispatch.md)).
 - **Every reported SHA is verified** (`verify-sha.sh`) before it's
   trusted, because a member can commit inside a nested worktree and

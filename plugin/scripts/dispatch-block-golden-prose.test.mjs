@@ -60,8 +60,8 @@
 //
 // WHERE THE IMPLEMENTER BLOCKS LIVE (#1804). They were a run of `>` quote
 // blocks in SKILL.md's phase 2 until spec 2026-09-24 § 2 Decision 2 moved them
-// into the body of `agents/fleet-implementer.agent.md` (byte-identical in the
-// `-alt` file, pinned by within-run-pair-prose.test.mjs), which each harness
+// into the implementer agent body, `agents/fleet-implementer-<cell>.agent.md`
+// (byte-identical in every cell, pinned by implementer-model-tier.test.mjs), which each harness
 // injects as the member's system prompt; #1804 deleted the SKILL.md copy. The
 // body carries no `>` gutter, so a block there is delimited the only way the
 // body itself can say: it opens on its own opener's paragraph and runs to the
@@ -79,7 +79,7 @@ const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
 
 // The body alone — everything after the frontmatter's closing `---`.
-const AGENT_FILE = readFileSync(join(REPO, "agents", "fleet-implementer.agent.md"), "utf8");
+const AGENT_FILE = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8");
 const BODY = AGENT_FILE.split("---").slice(2).join("---");
 
 // The Reviewers section is sliced before any opener is looked for, for the
@@ -854,7 +854,7 @@ const REVIEWER_BLOCKS = [
 
 const SURFACES = [
   {
-    label: "the implementer agent body", file: "agents/fleet-implementer.agent.md", source: BODY, slice: body,
+    label: "the implementer agent body", file: "agents/fleet-implementer-slow-high.agent.md", source: BODY, slice: body,
     extract: bodyBlock, all: (text) => bodyBlocks(text).blocks, blocks: REGION_BLOCKS, table: "REGION_BLOCKS",
   },
   {
@@ -903,7 +903,7 @@ test("the implementer agent body opens on its first fixtured block, with nothing
   assert.equal(
     bodyBlocks(BODY).lead,
     "",
-    "agents/fleet-implementer.agent.md carries text ahead of its first fixtured block — a rule added there reaches every member and no golden fixture sees it",
+    "agents/fleet-implementer-slow-high.agent.md carries text ahead of its first fixtured block — a rule added there reaches every member and no golden fixture sees it",
   );
 });
 
@@ -920,7 +920,7 @@ test("run-team/SKILL.md has no verbatim block outside the fixtured Reviewers sec
   assert.equal(
     quoteBlocks(RUN_TEAM).length,
     quoteBlocks(reviewers()).length,
-    "run-team/SKILL.md holds a quote block outside the Reviewers section — a block added there is invisible to the coverage tests above, and an implementer block re-pasted into phase 2 is a second copy of what agents/fleet-implementer.agent.md already carries",
+    "run-team/SKILL.md holds a quote block outside the Reviewers section — a block added there is invisible to the coverage tests above, and an implementer block re-pasted into phase 2 is a second copy of what the agents/fleet-implementer-<cell>.agent.md body already carries",
   );
 });
 

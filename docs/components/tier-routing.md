@@ -13,14 +13,19 @@ layer underneath the [Implementer](implementer.md) role.
    operator's `modelRoles.<role>` config, so an install with no
    Anthropic model still runs the fleet
    ([ADR 0011](../adr/0011-omp-tier-routes-through-roles.md)).
-2. **Route.** Today, `fleet-implementer.agent.md` declares `@slow:high`;
-   its alt sibling declares `@task:high`; the controller dispatches
-   `-alt` on every 5th Pull (counted off `.fleet/ledger.md`'s `impl-`
-   rows) as a running, unconfounded A/B comparison.
+2. **Route.** Each implementer cell `<role>-<level>` is one definition,
+   `fleet-implementer-<cell>.agent.md`, declaring `@<role>:<level>`
+   (`CELL` in `ledger-grammar.mjs`). A row with no `tier=` runs at the
+   policy cell, `slow-high`; every 5th Pull (counted off
+   `.fleet/ledger.md`'s `impl-` rows) records `tier=<cell>` and runs at
+   that exploration cell — `task-high` until the router draws one — as
+   a running, unconfounded comparison.
 3. **Check statically.**
    [`tier-roles.mjs`](../../plugin/scripts/tier-roles.mjs) `--check`
    validates that every role a definition uses resolves to a
-   `modelRoles.<role>` entry, with no leftover per-agent override.
+   `modelRoles.<role>` entry, that each definition's level is one the
+   role's target runs at (omp's model catalog), with no leftover
+   per-agent override.
 4. **Verify at dispatch.**
    [`tier-check.mjs`](../../plugin/scripts/tier-check.mjs) reads back
    what the harness resolved — `session_init.resolvedModel` plus
@@ -44,9 +49,9 @@ layer underneath the [Implementer](implementer.md) role.
   deliberately never one "trust the frontmatter" step, because a
   member dispatched with an explicit `model` override on the call was
   measured to silently *not* get the declared tier back.
-- **Cell/Router/Admissible row are decided but not yet built.** The
-  model-effort-router design
+- **The cells are built; Router and Admissible row are decided but not
+  yet.** The model-effort-router design
   ([`docs/specs/2026-09-28-model-effort-router-design.md`](../specs/2026-09-28-model-effort-router-design.md),
   [ADR 0016](../adr/0016-per-ticket-model-effort-routing.md)) is the
-  planned successor to today's flat every-5th-Pull rule, not the
-  current mechanism.
+  planned successor to today's fixed exploration cell, not the current
+  mechanism.

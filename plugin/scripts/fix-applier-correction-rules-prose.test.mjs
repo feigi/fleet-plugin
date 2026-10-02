@@ -15,7 +15,7 @@
 // inside the fix-applier's own prompt slice either; the two files that pin
 // this text (`immutable-body-claim-prose.test.mjs`,
 // `cross-repo-citation-prose.test.mjs`) both scope to the IMPLEMENTER'S copy,
-// which lives in `plugin/agents/fleet-implementer.agent.md`, not in this
+// which lives in `plugin/agents/fleet-implementer-<cell>.agent.md`, not in this
 // section of SKILL.md. `grep -n '### Reviewers\|You are ALREADY in
 // worktree\|Put the standing CI facts\|Two of the rules above are what
 // caught both\|Fallback: hand-dispatched' skills/run-team/SKILL.md` against
@@ -86,7 +86,7 @@ const fixApplierPrompt = () =>
 // implementer agent body, which the harness injects as every implementer's
 // system prompt; bounded to that block so a rewording anywhere else in the
 // body cannot satisfy this slice by accident.
-const AGENT = readFileSync(join(REPO, "agents", "fleet-implementer.agent.md"), "utf8");
+const AGENT = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8");
 const implementerCountRule = () =>
   between(
     AGENT,

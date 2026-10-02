@@ -61,9 +61,9 @@
 //
 // WHERE THE BLOCKS LIVE (#1804). They used to be a run of `>` quote blocks in
 // run-team/SKILL.md's phase 2, pasted into every implementer prompt. Spec
-// 2026-09-24 § 2 Decision 2 moved them into the body of
-// `agents/fleet-implementer.agent.md` (byte-identical in the `-alt` file,
-// pinned by within-run-pair-prose.test.mjs), which each harness injects as the
+// 2026-09-24 § 2 Decision 2 moved them into
+// the implementer agent body, `agents/fleet-implementer-<cell>.agent.md`
+// (byte-identical in every cell, pinned by implementer-model-tier.test.mjs), which each harness injects as the
 // member's system prompt, and #1804 deleted the SKILL.md copy. These pins
 // retargeted with them: same slices, same bounds, read off the agent body.
 import { test } from "node:test";
@@ -75,11 +75,11 @@ import { between, phrase } from "./prose-pin.mjs";
 const REPO = join(import.meta.dirname, "..");
 // The body alone — everything after the frontmatter's closing `---` — so a
 // frontmatter field can never satisfy a pin meant for text the member reads.
-const AGENT_FILE = readFileSync(join(REPO, "agents", "fleet-implementer.agent.md"), "utf8");
+const AGENT_FILE = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8");
 const BODY = AGENT_FILE.split("---").slice(2).join("---");
 
 function region(text = BODY) {
-  assert.ok(text.trim().length > 0, "agents/fleet-implementer.agent.md has no body — the implementer background moved again; update this test");
+  assert.ok(text.trim().length > 0, "agents/fleet-implementer-slow-high.agent.md has no body — the implementer background moved again; update this test");
   return text;
 }
 

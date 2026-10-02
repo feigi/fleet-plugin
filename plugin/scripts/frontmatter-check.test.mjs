@@ -110,7 +110,7 @@ test("parseAllowlist: a kind section with forbidden as an array (wrong shape) is
 // ---------------------------------------------------------------------------
 
 test("kindForPath: classifies agents, skills, commands under a plugin/ prefix", () => {
-  assert.equal(kindForPath("plugin/agents/fleet-implementer.agent.md"), "agents");
+  assert.equal(kindForPath("plugin/agents/fleet-implementer-slow-high.agent.md"), "agents");
   assert.equal(kindForPath("plugin/skills/run-team/SKILL.md"), "skills");
   assert.equal(kindForPath("plugin/commands/review-and-fix.md"), "commands");
 });
@@ -422,8 +422,8 @@ test("MUTATION PROOF: an unknown key introduced -> red; reverted -> green", () =
 // ---------------------------------------------------------------------------
 
 test("REAL TREE: every tracked agents/skills/commands frontmatter file in this checkout passes the real allow-list", () => {
-  const agentFiles = ["fleet-implementer.agent.md", "fleet-implementer-alt.agent.md"]
-    .map((f) => `agents/${f}`);
+  const agentFiles = ["slow-high", "slow-medium", "task-high", "task-max", "smol-high"]
+    .map((cell) => `agents/fleet-implementer-${cell}.agent.md`);
   const skillFiles = ["next-ticket", "run-team", "sizing-a-ticket"].map((s) => `skills/${s}/SKILL.md`);
   const commandFiles = ["review-and-fix.md", "run-merge-bot.md"].map((f) => `commands/${f}`);
   const all = [...agentFiles, ...skillFiles, ...commandFiles];

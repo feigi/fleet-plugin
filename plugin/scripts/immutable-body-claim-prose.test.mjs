@@ -66,7 +66,7 @@ const rule = () => flatten(between(RUN_TEAM, FROM, TO, "the claim-discipline rat
 // The claim-discipline block of the implementer agent body — the hand-over
 // itself, since the harness injects that body as every implementer's system
 // prompt.
-const AGENT = readFileSync(join(REPO, "agents", "fleet-implementer.agent.md"), "utf8");
+const AGENT = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8");
 const discipline = () =>
   flatten(between(AGENT, "**Claim discipline, on every ticket:**", "Commit incrementally as you go", "the agent body's claim-discipline block"));
 

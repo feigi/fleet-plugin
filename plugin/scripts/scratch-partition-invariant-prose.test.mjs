@@ -12,7 +12,7 @@
 // files green — the defect #1150 exists to rule out has no pin anywhere.
 //
 // This mirrors dispatch-block-pins-prose.test.mjs's treatment of the
-// identical invariant in fleet-implementer.agent.md's child-dispatch block
+// identical invariant in the fleet-implementer-<cell> body's child-dispatch block
 // (that file pins the *implementer's* own instance of this rule; this one
 // pins the two general statements of it that the implementer, fix-applier
 // and review-side members are all read against).

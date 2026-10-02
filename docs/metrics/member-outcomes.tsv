@@ -112,6 +112,11 @@
 # they span, which is exactly what run-team's gate reads — and nothing that
 # identifies a pair, because that gate forbids reading them early.
 #
+# It counts pre-cutover pairs only: `fleet-implementer-alt` and
+# `fleet-implementer` are no longer dispatched (#2129), so a session whose
+# implementers ran as `fleet-implementer-<cell>` is not in it until #2133
+# replaces this query with the per-cell readout.
+#
 # Rows by model:
 #   awk -F'\t' '!/^#/ {n[$5]++} END{for (k in n) print n[k], k}' docs/metrics/member-outcomes.tsv
 #

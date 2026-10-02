@@ -336,7 +336,7 @@ test("a definition name in the dispatch PROSE is not a dispatch — the fleet br
 });
 
 test("the fleet implementer definitions classify as implementer, independent of the `^impl-` name pattern", () => {
-  // `agentDefinition`-based classification (`fleet-implementer(-alt)`) is
+  // `agentDefinition`-based classification (`fleet-implementer-<cell>`) is
   // checked BEFORE the `^impl-` name/description pattern below it, so it must
   // not depend on a canonically-shaped member name to fire — this pin
   // exercises classifyRole directly, on `agentDefinition` alone, so it stays
@@ -353,12 +353,16 @@ test("the fleet implementer definitions classify as implementer, independent of 
   // split 73 other, 7 merge-bot, 5 finisher, 5 reviewer, none of them
   // implementer — the gap was in what omp handed classifyRole, not in the
   // classifier's own patterns.
-  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-implementer", description: "Ticket #1486. Worktree: .worktrees/1486-classify" }), "implementer");
-  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-implementer-alt", description: "Ticket #1486. Worktree: .worktrees/1486-classify" }), "implementer");
-  // EXACT, unlike the review prefix above: the alternate-tier pairing is closed
-  // at these two names, so a third `fleet-implementer-`-prefixed definition is a
-  // deliberate addition and not something to classify in advance.
-  assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "fleet-implementer-probe", description: "whatever" }), "other");
+  // Every cell, and the pre-cell pair #2129 retired: recorded history still
+  // carries rows dispatched under those two, and books them by definition.
+  for (const def of ["fleet-implementer-slow-high", "fleet-implementer-slow-medium", "fleet-implementer-task-high", "fleet-implementer-task-max", "fleet-implementer-smol-high", "fleet-implementer", "fleet-implementer-alt"]) {
+    assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: def, description: "Ticket #1486. Worktree: .worktrees/1486-classify" }), "implementer", def);
+  }
+  // EXACT, unlike the review prefix above: a `fleet-implementer-`-prefixed
+  // name outside the `CELL` grammar is not an implementer definition.
+  for (const def of ["fleet-implementer-probe", "fleet-implementer-slow-ultra", "fleet-implementer-alt-2"]) {
+    assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: def, description: "whatever" }), "other", def);
+  }
 });
 
 test("depth still outranks the definition — a fleet member's own fan-out is not another implementer", () => {
@@ -366,7 +370,7 @@ test("depth still outranks the definition — a fleet member's own fan-out is no
   // implementer dispatched is the specialist it structurally is rather than
   // inheriting its parent's definition. Move either branch above the depth
   // check and this goes red.
-  assert.equal(classifyRole({ spawnDepth: 1, agentDefinition: "fleet-implementer", description: "whatever" }), "specialist");
+  assert.equal(classifyRole({ spawnDepth: 1, agentDefinition: "fleet-implementer-slow-high", description: "whatever" }), "specialist");
   // And memory still outranks both, which is the rule that keeps memory-system
   // work out of review spend.
   assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "memory-proxy", description: "Review PR 1353 correctness" }), "memory");

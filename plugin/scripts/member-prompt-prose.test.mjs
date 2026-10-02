@@ -58,9 +58,9 @@ const SIZING = readFileSync(join(REPO, "skills", "sizing-a-ticket", "SKILL.md"),
 // #1804: the member-facing text is the BODY of the implementer agent
 // definition (spec 2026-09-24 § 2 Decision 2), which each harness injects as
 // the member's system prompt — the verbatim carrier the `>` blocks in phase 2
-// used to be. Byte-identical in the `-alt` file (within-run-pair-prose.test.mjs
-// pins that), so one file stands for both.
-const AGENT_FILE = readFileSync(join(REPO, "agents", "fleet-implementer.agent.md"), "utf8");
+// used to be. Byte-identical in every `fleet-implementer-<cell>` file
+// (implementer-model-tier.test.mjs pins that), so one file stands for all.
+const AGENT_FILE = readFileSync(join(REPO, "agents", "fleet-implementer-slow-high.agent.md"), "utf8");
 const memberBlocks = () => AGENT_FILE.split("---").slice(2).join("---");
 const memberProse = () => stripQuoteGutter(memberBlocks());
 const phase2 = () => RUN_TEAM.slice(anchorAt(RUN_TEAM, "## Phase 2", "run-team phase 2"), anchorAt(RUN_TEAM, "## Phase 3", "run-team phase 3"));

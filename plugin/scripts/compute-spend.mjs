@@ -9,6 +9,11 @@
 // expensive. cache_creation is what actually tracks spend, so it is the sort key
 // and the percentage base; the rest is carried for context, never for ranking.
 
+import { CELL_DEF } from "./ledger-grammar.mjs";
+
+// The implementer definitions #2129 retired — see classifyRole's `def` branch.
+const RETIRED_IMPLEMENTER_DEF = /^fleet-implementer(-alt)?$/;
+
 // A fleet agent's role is not recorded anywhere as a field — it has to be
 // recovered from how the controller named the work. Depth first: anything the
 // controller did not spawn directly is a specialist, whatever it calls itself.
@@ -17,10 +22,11 @@
 // `finisher-pr-<n>`, `merge-bot-<n>`).
 //
 // TWO IDENTITY SIGNALS, NEVER ONE (#1505). `agentDefinition` is the agent
-// DEFINITION the dispatch recorded — `memory-housekeeper`, `fleet-implementer`,
-// `fleet-review-verifier` — and `""` when it recorded none. `memberName` is
-// what the member was CALLED (`impl-387`, `brain-housekeeping`), `""` for an
-// unnamed dispatch. They used to arrive as ONE `agentType` parameter,
+// DEFINITION the dispatch recorded — `memory-housekeeper`,
+// `fleet-implementer-slow-high`, `fleet-review-verifier` — and `""` when it
+// recorded none. `memberName` is what the member was CALLED (`impl-387`,
+// `brain-housekeeping`), `""` for an unnamed dispatch. They used to arrive as
+// ONE `agentType` parameter,
 // documented as "the DISPATCH's identity for the member" but sometimes
 // carrying the definition and sometimes the member's own name depending on
 // which was available — so every rule below silently read whichever value
@@ -98,8 +104,17 @@ export function classifyRole(signals) {
   // The review side is a PREFIX and the implementer side is EXACT, deliberately:
   // the fan-out's dimensions are an open set that `review-core.mjs` sizes per
   // PR, so a dimension added tomorrow must not silently fall back to prose,
-  // while the implementer definitions are closed at two by the alternate-tier
-  // pairing that depends on exactly those two names existing.
+  // while the implementer definitions are closed to the `CELL` grammar
+  // (`fleet-implementer-<role>-<level>`, ledger-grammar.mjs): a name outside
+  // it is no implementer definition, however it starts.
+  //
+  // Except the pre-cell pair #2129 deleted, `fleet-implementer` and
+  // `fleet-implementer-alt`, matched for the same reason the finisher branch
+  // keeps old spellings: deliberate compatibility with recorded history.
+  // Measured on docs/metrics/member-outcomes.tsv at #2129: 20 of the 303 rows
+  // under those two definitions carried no `impl-` name (`Impl1133`,
+  // `FixPr1568`, …) and booked `implementer` off the definition alone — a
+  // re-scrape of their sessions would have moved them to "other".
   //
   // One definition under that prefix is NOT fan-out: `fleet-review-runner`
   // (#1802) is the member that HOLDS an omp review — dispatched as
@@ -108,7 +123,7 @@ export function classifyRole(signals) {
   // and is booked "specialist" by the depth check above.
   if (/^fleet-review-runner$/.test(def)) return "reviewer";
   if (/^fleet-review-/.test(def)) return "specialist";
-  if (/^fleet-implementer(-alt)?$/.test(def)) return "implementer";
+  if (CELL_DEF.test(def) || RETIRED_IMPLEMENTER_DEF.test(def)) return "implementer";
 
   // The dispatch NAME is checked alone, in this same fixed order, before the
   // prose blend below ever runs (#1506). Both readers now hand a canonical

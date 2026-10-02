@@ -6,7 +6,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseMember, parseToken, memberTokens, nextMergeBot, expectedDefinition, agentDefinition, MEMBER_FAMILIES } from "./ledger-grammar.mjs";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { parseMember, parseToken, memberTokens, nextMergeBot, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell } from "./ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -144,11 +146,11 @@ test("nextMergeBot counts every merge-bot entry, live or settled, and nothing el
 test("expectedDefinition refuses a tier= it cannot name one definition file by", () => {
   assert.throws(() => expectedDefinition("impl-7 · tier=alt · tier=slow-high"), /conflicting tier= tokens \(tier=alt, tier=slow-high\)/);
   assert.throws(() => expectedDefinition("impl-7 · tier=../../etc"), /is not a definition suffix/);
-  // Lowercase only: on a case-insensitive filesystem `tier=Alt` would find
-  // fleet-implementer-alt.agent.md, so the existence check `ledger.mjs
-  // dispatch` adds cannot refuse a name no definition carries.
-  assert.throws(() => expectedDefinition("impl-7 · tier=Alt"), /tier=Alt is not a definition suffix/);
-  assert.equal(expectedDefinition("impl-7 · tier=alt · tier=alt"), "fleet-implementer-alt");
+  // Lowercase only: on a case-insensitive filesystem `tier=Task-High` would
+  // find fleet-implementer-task-high.agent.md, so the existence check
+  // `ledger.mjs dispatch` adds cannot refuse a name no definition carries.
+  assert.throws(() => expectedDefinition("impl-7 · tier=Task-High"), /tier=Task-High is not a definition suffix/);
+  assert.equal(expectedDefinition("impl-7 · tier=task-high · tier=task-high"), "fleet-implementer-task-high");
 });
 
 // #2330: null is a review fix-applier's deliberate "generic `task`", so a
@@ -157,10 +159,15 @@ test("expectedDefinition refuses a tier= it cannot name one definition file by",
 // MEMBER_FAMILIES) — a family added to FAMILIES without a case here fails
 // this test, not a dispatch.
 test("agentDefinition names a definition for every member family, and throws on one it has no case for", () => {
+  const agents = join(import.meta.dirname, "..", "agents");
   for (const family of MEMBER_FAMILIES) {
     const member = parseMember(`${family}-7`);
     const definition = agentDefinition(member, "", true);
     assert.match(definition, /^fleet-/, `${family}: ${definition}`);
+    // #2129 deleted the bare `fleet-implementer`: a name with no file behind
+    // it is what `ledger.mjs dispatch` refuses, so an untiered impl row or a
+    // conflict-hold fix-applier pointing at it would stop every such dispatch.
+    assert.ok(existsSync(join(agents, `${definition}.agent.md`)), `${family}: ${definition} has no agents/${definition}.agent.md`);
   }
   // The must-ACCEPT half: the deliberate null is still null, not a throw.
   assert.equal(agentDefinition(parseMember("fix-pr-7"), "", false), null);
@@ -168,4 +175,53 @@ test("agentDefinition names a definition for every member family, and throws on 
     () => agentDefinition({ name: "review-pr-7", family: "review-pr", number: 7 }, "", false),
     /no case for member family 'review-pr' \(review-pr-7\)/,
   );
+});
+
+test("CELL is <role>-<level> over omp's three roles and six levels; CELL_DEF is its definition name", () => {
+  for (const cell of ["slow-high", "task-max", "smol-minimal", "slow-xhigh"]) {
+    assert.ok(CELL.test(cell), cell);
+    assert.ok(CELL_DEF.test(`fleet-implementer-${cell}`), cell);
+  }
+  for (const cell of ["alt", "default", "fast-high", "slow-ultra", "slow-high-x", "Slow-High", "high-slow"]) {
+    assert.ok(!CELL.test(cell), cell);
+    assert.ok(!CELL_DEF.test(`fleet-implementer-${cell}`), cell);
+  }
+  // The family has no bare member: nothing is named `fleet-implementer` alone.
+  assert.ok(!CELL_DEF.test("fleet-implementer"));
+  assert.ok(!CELL_DEF.test("xfleet-implementer-slow-high"));
+});
+
+const GRID = ["slow-high", "slow-medium", "task-high", "task-max", "smol-high"];
+const SESSION = "01a0815e-e141-716c-b2d8-2adf310fbe55";
+
+test("drawCell with every non-default cell withdrawn runs the policy cell at k = K = 0", () => {
+  assert.deepEqual(drawCell({ session: SESSION, ticket: 2129, policyCell: "slow-high", cells: ["slow-high"] }), { cell: "slow-high", k: 0, K: 0 });
+  assert.deepEqual(drawCell({ session: SESSION, ticket: 2129, policyCell: "slow-high", cells: [] }), { cell: "slow-high", k: 0, K: 0 });
+});
+
+test("drawCell is sha256(session\\tticket)[0:8] mod K over the sorted non-policy cells", () => {
+  // Golden: sha256("<SESSION>\t2129") starts 6b9befca; 0x6b9befca % 4 = 2, so
+  // k = 3 over [slow-medium, smol-high, task-high, task-max].
+  assert.deepEqual(drawCell({ session: SESSION, ticket: 2129, policyCell: "slow-high", cells: GRID }), { cell: "task-high", k: 3, K: 4 });
+  // The input order of `cells` is not an input: the draw sorts by token.
+  assert.deepEqual(drawCell({ session: SESSION, ticket: 2129, policyCell: "slow-high", cells: [...GRID].reverse() }), { cell: "task-high", k: 3, K: 4 });
+});
+
+test("drawCell never draws the policy cell, reaches every other one, and with no policy cell draws over all", () => {
+  const drawn = new Set();
+  for (let ticket = 1; ticket <= 200; ticket++) {
+    const { cell, k, K } = drawCell({ session: "s", ticket, policyCell: "slow-high", cells: GRID });
+    assert.equal(K, 4);
+    assert.ok(k >= 1 && k <= K, `k=${k}`);
+    drawn.add(cell);
+  }
+  assert.deepEqual([...drawn].sort(), ["slow-medium", "smol-high", "task-high", "task-max"]);
+  // Burn-in (spec § 4 R4) calls it with `policyCell: null`: nothing withheld.
+  const burnIn = new Set();
+  for (let ticket = 1; ticket <= 200; ticket++) {
+    const { cell, K } = drawCell({ session: "s", ticket, policyCell: null, cells: GRID });
+    assert.equal(K, 5);
+    burnIn.add(cell);
+  }
+  assert.deepEqual([...burnIn].sort(), [...GRID].sort());
 });

@@ -1,15 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { CELL } from "./ledger-grammar.mjs";
 import { between as section } from "./prose-pin.mjs";
 
 // #864's finding is that tier is entangled with calendar date and therefore
 // with prompt evolution — 8 of 9 sonnet rows in one week, 23 of 24 opus rows in
-// the next. Dispatching every 5th Pull at the alternate tier (ADR 0013 §6,
-// which replaced the one-per-staged-set rate when #1804 retired staging) makes
-// tier orthogonal to date BY CONSTRUCTION, which is the only thing that lets
-// the accumulated rows ever answer the question they are collected for.
+// the next. Dispatching every 5th Pull at an exploration cell (ADR 0013 §6 and
+// its 2026-09-28 Amendment, which replaced the alternate tier with the cell
+// draw) makes the cell orthogonal to date BY CONSTRUCTION, which is the only
+// thing that lets the accumulated rows ever answer the question they are
+// collected for.
 //
 // This is the one part of the change that costs something on every run, so it
 // is also the part a compression pass is likeliest to quietly drop. These pins
@@ -23,20 +25,20 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 const dispatch = () =>
   section(RUN_TEAM, "**Dispatch every implementer", "The raw split still favours the top tier", "run-team phase 2 dispatch rule");
 
-test("phase 2 dispatches the alternate-tier implementer on every 5th Pull", () => {
+test("phase 2 dispatches an exploration cell's implementer on every 5th Pull", () => {
   const slice = dispatch();
-  assert.match(slice, /fleet-implementer-alt/, "phase 2 no longer dispatches the alternate tier at all");
-  // The RATE, not just the existence. "Dispatch some at the alternate tier"
+  assert.match(slice, /fleet-implementer-<cell>/, "phase 2 no longer dispatches an exploration cell at all");
+  // The RATE, not just the existence. "Dispatch some at an exploration cell"
   // reproduces the block design the pairing exists to replace.
   //
-  // Bound to `alternate tier` inside one sentence: an unbound rate pin once
+  // Bound to `exploration cell` inside one sentence: an unbound rate pin once
   // stayed GREEN through exactly that mutation, because the "**Why one … and
   // not a week…**" rationale below satisfied it on its own. The rate has to be
   // pinned where the rate is ORDERED, not wherever the words co-occur. Order is
   // not assumed — the mirrored phrasing binds the same rate.
   assert.match(
     slice,
-    /every 5th Pull[^.]{0,60}alternate tier|alternate tier[^.]{0,60}every 5th Pull/i,
+    /every 5th Pull[^.]{0,60}exploration cell|exploration cell[^.]{0,60}every 5th Pull/i,
     "phase 2 no longer orders the rate — every 5th Pull is what makes the pair within-run",
   );
 });
@@ -47,16 +49,16 @@ test("phase 2 dispatches the alternate-tier implementer on every 5th Pull", () =
 // green through every existing run-team prose test, because nothing reads
 // the concrete row-count claim — only the "every 5th Pull" phrase two
 // sentences above it.
-test("phase 2 counts the alternate tier by ledger row 5, 10, 15 …, not by any other cadence", () => {
+test("phase 2 counts the exploration cell by ledger row 5, 10, 15 …, not by any other cadence", () => {
   const slice = dispatch();
   assert.match(
     slice,
     /the Pull that creates row 5, 10, 15 …/,
-    "phase 2 no longer names row 5, 10, 15 … as the concrete alternate-tier cadence",
+    "phase 2 no longer names row 5, 10, 15 … as the concrete exploration-cell cadence",
   );
 });
 
-test("phase 2 does not tell the alternate member it is a control", () => {
+test("phase 2 does not tell the exploration member it is a control", () => {
   // A member that knows it is being measured is not measuring the same thing.
   assert.match(
     dispatch(),
@@ -94,67 +96,25 @@ test("phase 2 says why the pairing is within-run and not week-by-week", () => {
   );
 });
 
-test("the alternate definition differs from the default in ROLE ONLY, the level stays shared", () => {
-  // Varying role and level at once yields a pair that answers neither
-  // question. The level rides on the same `model: "@<role>:<level>"` key as
-  // the role now (ADR 0014), so this is the one field left to parse apart.
-  const fm = (n) => readFileSync(join(REPO, "agents", `${n}.agent.md`), "utf8").split("---")[1] ?? "";
-  const route = (name) => {
-    const hit = /^model:\s*"?@([a-z]+):([a-z]+)"?$/m.exec(fm(name));
-    assert.ok(hit, `${name}.agent.md declares no model: route`);
-    return { role: hit[1], level: hit[2] };
-  };
-  const alt = route("fleet-implementer-alt");
-  const base = route("fleet-implementer");
-  // Mutation-tested: setting fleet-implementer-alt.agent.md's level suffix
-  // to `xhigh` (leaving fleet-implementer's `high` alone, #2036) fails this
-  // assertion (`'xhigh' !== 'high'`); reverting the file green again
-  // confirms the pin only fires on the real divergence, not on file-read
-  // noise.
-  assert.equal(
-    alt.level, base.level,
-    "the two implementer definitions no longer share one level — the pair now varies two things",
-  );
-  assert.notEqual(
-    alt.role, base.role,
-    "the alternate definition names the same role as the default — the pair compares nothing",
-  );
-});
-
-test("the alternate definition's body is byte-identical to the default's (#1801)", () => {
-  // #1801 duplicated the shared implementer background into these two agent
-  // files' BODIES — SKILL.md's own per-dispatch prompt copy is untouched by
-  // this diff, so the text now exists in three places — on the premise that a
-  // member reads its own agent.md body as `§ Role` regardless of which prompt
-  // dispatched it (measured on #1777: omp injects the body verbatim, every
-  // occurrence). A body that drifts between the two agent files dispatches two
-  // differently-briefed implementers under one shared label, silently — the
-  // frontmatter-field pins above read one line each and cannot see a
-  // divergence anywhere else in the file. Exact string equality over the whole
-  // body is the tightest pin this claim admits: unlike a regex slice, a single
-  // added, dropped or reworded byte on either side fails it, and nothing
-  // benign can satisfy it by accident.
-  const body = (n) =>
-    readFileSync(join(REPO, "agents", `${n}.agent.md`), "utf8").split("---").slice(2).join("---") ?? "";
-  assert.equal(
-    body("fleet-implementer-alt"),
-    body("fleet-implementer"),
-    "the two implementer definitions' bodies have diverged — #1801's shared background must be pasted identically into both",
-  );
-});
+// The cells' definitions — named for their routes, bodies byte-identical — are
+// pinned in implementer-model-tier.test.mjs, over every
+// `fleet-implementer-<cell>` file on disk. The old two-definition pins here
+// (#1801's body identity, and the alternate differing from the default in
+// ROLE ONLY) went with the pair: the grid varies role, level, or both by
+// design (spec 2026-09-28 § 2).
 
 test("phase 2 counts the rate off the ledger's impl- rows, and a replacement does not count again", () => {
   // The pin above binds the WORDS, not a countable rule — the same gap the old
   // one-per-staged-set rate had, measured then: appending either explicit
   // resolution of its wording left every assertion GREEN while the two readings
-  // differed by an order of magnitude in how much of the fleet ran at the
-  // alternate tier.
+  // differed by an order of magnitude in how much of the fleet ran off the
+  // default.
   //
   // Under Pull the count is the ledger's (ADR 0013 §6), and what disambiguates
   // it is what a row IS: one `impl-` row per pulled ticket, so a replacement
   // member inherits its row's tier instead of drawing a Pull number of its
   // own. Without that clause a killed-and-replaced member shifts every later
-  // alternate-tier assignment by one, silently.
+  // exploration assignment by one, silently.
   const slice = dispatch();
   assert.match(
     slice,
@@ -163,16 +123,24 @@ test("phase 2 counts the rate off the ledger's impl- rows, and a replacement doe
   );
   assert.match(
     slice,
-    /records\s+`tier=alt`\s+in\s+the\s+row,\s+and\s+a\s+replacement\s+inherits\s+the\s+row's\s+tier/,
-    "phase 2 no longer records the tier on the row, or no longer says a replacement inherits it rather than counting as a Pull",
+    /records\s+`tier=<cell>`\s+in\s+the\s+row,\s+and\s+a\s+replacement\s+inherits\s+the\s+row's\s+tier/,
+    "phase 2 no longer records the cell on the row, or no longer says a replacement inherits it rather than counting as a Pull",
   );
-  // The roll: a Pull that lands on a chain head passes the alternate tier to
+  // Until the router draws one, the prose has to name the cell the controller
+  // writes, and that cell has to have a definition: `ledger.mjs dispatch`
+  // refuses a `tier=` naming no `agents/` file, so a cell named here without
+  // one stops every exploration Pull before its member goes live.
+  const named = /Until\s+the\s+router\s+draws\s+the\s+cell[^.]*?`<cell>`\s+is\s+`([^`]+)`/.exec(slice)?.[1];
+  assert.ok(named, "phase 2 no longer names the cell an exploration Pull writes before the router exists");
+  assert.ok(CELL.test(named), `${named} is not a cell`);
+  assert.ok(existsSync(join(REPO, "agents", `fleet-implementer-${named}.agent.md`)), `phase 2 names ${named}, which has no agents/fleet-implementer-${named}.agent.md`);
+  // The roll: a Pull that lands on a chain head passes the exploration cell to
   // the next Pull rather than skipping it, which is the rule ADR 0013 §6 states
   // and the difficulty caveat below depends on.
   assert.match(
     slice,
     /assignment\s+rolls\s+to\s+the\s+next\s+Pull\s+when\s+another\s+open\s+ticket\s+sequences\s+after\s+it/,
-    "phase 2 no longer rolls the alternate tier past chain heads",
+    "phase 2 no longer rolls the exploration cell past chain heads",
   );
 });
 
