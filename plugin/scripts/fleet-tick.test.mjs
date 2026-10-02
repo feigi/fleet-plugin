@@ -1280,6 +1280,59 @@ test("CLI: a main checkout git cannot read is MAIN-CHECKOUT-UNKNOWN and held, ne
   assert.match(r.stdout, /^implementers 1\/2 → HOLD \(main checkout unknown\)/m);
 });
 
+// #2307: a folded tick under a dirty or unknown hold still names the hold, and
+// the hold stays non-actionable — `quiet` rises on every tick, the fold fires.
+// Three `--fold-unchanged` ticks over one kept fixture and one state file.
+const foldTicks = (fixture) => {
+  const first = runCli(["--fold-unchanged"], { ...fixture, keep: true });
+  const state = join(first.dir, "heartbeat.json");
+  const quiet = () => JSON.parse(readFileSync(state, "utf8")).quiet;
+  const ticks = [{ stdout: first.stdout, status: first.status, stderr: first.stderr, quiet: quiet() }];
+  for (let i = 0; i < 2; i++) {
+    const t = spawnSync(process.execPath, [join(first.dir, "bin", "fleet-tick.mjs"), "--fold-unchanged", "--state", state], {
+      cwd: first.repo, encoding: "utf8",
+      env: {
+        ...process.env, PATH: `${join(first.dir, "bin")}:${process.env.PATH}`,
+        FIXTURE_PRS: join(first.dir, "prs.json"), FIXTURE_CLAIMED: join(first.dir, "claimed.json"),
+        FIXTURE_ISSUE_STATES: join(first.dir, "issue-states.json"), FIXTURE_REFRESH: join(first.dir, "refresh.json"),
+        REFRESH_LOG: join(first.dir, "refresh.log"), ISSUE_VIEW_LOG: join(first.dir, "issue-view.log"),
+      },
+    });
+    ticks.push({ stdout: t.stdout, status: t.status, stderr: t.stderr, quiet: quiet() });
+  }
+  rmSync(first.dir, { recursive: true, force: true });
+  return ticks;
+};
+
+for (const [state, afterBaseline] of [
+  ["dirty", (repo) => writeFileSync(join(repo, "stray.mjs"), "x\n")],
+  ["unknown", (repo) => writeFileSync(join(repo, ".git", "index"), "not an index")],
+]) {
+  test(`CLI: --fold-unchanged under a ${state} main checkout folds to one line naming the hold, quiet rising every tick`, () => {
+    const ticks = foldTicks({ ...LIVE, afterBaseline });
+    for (const t of ticks) assert.equal(t.status, 0, t.stderr);
+    assert.match(ticks[0].stdout, new RegExp(`^implementers 1/2 → HOLD \\(main checkout ${state}\\)`, "m"));
+    assert.deepEqual(ticks.map((t) => t.quiet), [1, 2, 3]);
+    for (const [i, t] of ticks.slice(1).entries()) {
+      assert.deepEqual(t.stdout.trim().split("\n"), [
+        `fleet-tick: unchanged, nothing to act on (quiet=${i + 2}); HOLD (main checkout ${state}) persists — full rows on the next change`,
+      ]);
+    }
+  });
+}
+
+test("CLI: --fold-unchanged never folds a missing-baseline hold — it asks the controller to act", () => {
+  const ticks = foldTicks({ ...LIVE, baseline: false });
+  for (const t of ticks) {
+    assert.equal(t.status, 0, t.stderr);
+    assert.match(t.stdout, /^MAIN-CHECKOUT-NO-BASELINE /);
+    assert.match(t.stdout, /^implementers 1\/2 → HOLD \(main checkout no baseline\)/m);
+    assert.doesNotMatch(t.stdout, /nothing to act on/);
+    assert.equal(t.quiet, 0);
+  }
+  assert.equal(ticks[2].stdout, ticks[1].stdout);
+});
+
 test("CLI: an in-flight review with no member token is named as review:PR#<n> on the MAIN-CHECKOUT line", () => {
   const r = runCli([], {
     ledger: { rows: ["#51 review=wf:x"] }, shortlist: shortlistText([]), prs: [pr(51)],

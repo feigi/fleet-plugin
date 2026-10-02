@@ -71,10 +71,17 @@ export function reconcile(s) {
 // `SUGGEST /triage` is not. A missing baseline is the controller's own
 // Phase 0 step, so that one asks it to act.
 const MAIN_CHECKOUT_HOLD = { dirty: "main checkout dirty", absent: "main checkout no baseline" };
+// The reason a main-checkout answer holds dispatch on, or null for `clean` —
+// the one wording the HOLD rows and the folded line (#2307) both carry.
+function mainCheckoutHoldReason(mainCheckout) {
+  const state = mainCheckout?.state ?? "unknown";
+  if (state === "clean") return null;
+  return MAIN_CHECKOUT_HOLD[state] ?? "main checkout unknown";
+}
 function mainCheckoutHold(s, rows) {
-  const state = s.mainCheckout?.state ?? "unknown";
-  if (state === "clean") return rows;
-  const why = MAIN_CHECKOUT_HOLD[state] ?? "main checkout unknown";
+  const why = mainCheckoutHoldReason(s.mainCheckout);
+  if (why === null) return rows;
+  const state = s.mainCheckout?.state;
   const held = [];
   for (const r of rows) {
     if (held.some((h) => h.role === r.role)) continue;
@@ -875,9 +882,15 @@ function main() {
   // every invocation unconditionally — this tick running IS the occurrence.
   writeState(path, NAME, prev, { quiet: acts ? 0 : prev.quiet + 1, digest, ticked: { at: Date.now() } });
 
-  // Fold only when BOTH hold: nothing to act on, and nothing new to say.
+  // Fold only when BOTH hold: nothing to act on, and nothing new to say. A
+  // main-checkout hold still holding dispatch stays named on the folded line
+  // (#2307) — not actionable, so it never resets `quiet`, but the one reason
+  // nothing dispatches must not drop out of view. Outside the digest, which
+  // already covers it through the rows.
   if (fold && !acts && digest === prev.digest) {
-    console.log(`fleet-tick: unchanged, nothing to act on (quiet=${prev.quiet + 1}) — full rows on the next change`);
+    const why = mainCheckoutHoldReason(mainCheckout);
+    const held = why === null ? "" : `; HOLD (${why}) persists`;
+    console.log(`fleet-tick: unchanged, nothing to act on (quiet=${prev.quiet + 1})${held} — full rows on the next change`);
     return;
   }
   for (const line of lines) console.log(line);
