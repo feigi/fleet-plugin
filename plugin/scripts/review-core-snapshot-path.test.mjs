@@ -188,9 +188,8 @@ test("a lagging PR object does not cancel the review of a tree that matches the 
 // ABSENT `refHead` is not a mismatch: the ref read can still come back empty on
 // its own — an unreachable `origin`, or a read that failed — so turning missing
 // input into a refusal would let a network blip cancel a runnable review. That
-// is the inversion `usableDiff`'s own comment records for the diff, now with a
-// whole review behind it instead of a diff, and the rule `run-team/SKILL.md`'s
-// phase-1 compare states as "an empty read is neither equal nor a mismatch".
+// is the rule `run-team/SKILL.md`'s phase-1 compare states as "an empty read is
+// neither equal nor a mismatch", here with a whole review behind it.
 // Absent and mismatching are different cases and stay different.
 //
 // A fork PR is NOT one of the absent cases any more (#1616), and it used to be
