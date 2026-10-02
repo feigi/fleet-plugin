@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
-import { foldOmpTranscript } from "./member-record.mjs";
+import { classifyRole, computeSpend, attributeTools, mergeTools, canonicalMemberName, CANONICAL_MEMBER_NAME_PREFIXES } from "./compute-spend.mjs";
+import { foldOmpTranscript, parseMemberName } from "./member-record.mjs";
 
 const agent = (o) => ({ label: "x", role: "other", cacheWrite: 0, output: 0, cacheRead: 0, ...o });
 
@@ -305,6 +305,35 @@ test("a member family spelled PascalCase or without hyphens classifies off the n
   assert.equal(role("FinishSetupDocs"), "other");
   assert.equal(role("Implementer5"), "other");
   assert.equal(role("ImplPlan"), "other");
+});
+
+test("canonicalMemberName rewrites only a whole family-number name (#2396)", () => {
+  // The start anchor: a name that merely ENDS in a family spelling is not one.
+  assert.equal(canonicalMemberName("Xfix-pr-5"), "Xfix-pr-5");
+  assert.equal(canonicalMemberName("Setup-Impl3"), "Setup-Impl3");
+  // The number is required: a bare family word has no ticket to name.
+  for (const bare of ["Impl", "FixPr", "ReviewPr", "MergeBot"]) {
+    assert.equal(canonicalMemberName(bare), bare);
+    assert.equal(classifyRole({ spawnDepth: 0, memberName: bare, description: "whatever" }), "other");
+  }
+  // Surrounding whitespace is dropped before matching, for the join key and the role alike.
+  assert.equal(canonicalMemberName(" Impl327 "), "impl-327");
+  assert.equal(parseMemberName(" Impl327 ").ticket, "327");
+  assert.equal(parseMemberName(" impl-327 ").ticket, "327");
+  assert.equal(classifyRole({ spawnDepth: 0, memberName: " impl-327 ", description: "whatever" }), "implementer");
+});
+
+test("every canonical member-name prefix round-trips from its PascalCase and hyphenless spellings (#2396)", () => {
+  // A family added to the prefix list that the spelling pattern does not cover
+  // would be a stem member-record accepts but this rewrite leaves blank.
+  const stems = CANONICAL_MEMBER_NAME_PREFIXES.replace("finish(?:er)?", "finish|finisher").split("|");
+  assert.ok(stems.includes("fix-pr") && stems.includes("finisher"), "the expansion above must still yield the stems it is checked against");
+  for (const stem of stems) {
+    const pascal = stem.split("-").map((w) => w[0].toUpperCase() + w.slice(1)).join("");
+    for (const spelling of [`${pascal}12`, `${stem.replaceAll("-", "")}12`, `${stem}-12`]) {
+      assert.equal(canonicalMemberName(spelling), `${stem}-12`, spelling);
+    }
+  }
 });
 
 test("the omp review fan-out classifies off its agent DEFINITION — depth cannot reach it there", () => {
