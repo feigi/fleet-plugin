@@ -649,6 +649,61 @@ test("deriveRun: duplicate copies of one fix-applier's token land it once — a 
   assert.deepEqual(due([`${R} · conflict-hold:#21 · ${F} · fix-pr-21-b=no-op`, "#21 fix-pr-21"]), [[], []]);
 });
 
+// #2329: a fix-applier answers the PR its token names, like the finisher-pr
+// rule beside it. `dispatch`/`settle` only ever put `fix-pr-<M>` on PR #M's
+// row, so a foreign one there is a hand-written stray — it must read as if
+// absent, never clear that PR's hold, answer its survivors or hold it off.
+test("deriveRun: a fix-pr token for another PR leaves this PR's hold and survivors exactly as if it were absent", () => {
+  const H = "#20 impl-20=PR#21 · conflict-hold:#21";
+  const due = (rows, dispatched = [], prs = [pr(21)]) => {
+    const r = run({ rows, dispatched }, prs);
+    return [r.fixDue, r.conflictHeld];
+  };
+  assert.deepEqual(due([H]), [[21], [21]], "control: the hold stands and is due");
+  assert.deepEqual(due([`${H} · fix-pr-99=applied:def5678`]), [[21], [21]], "a foreign landed fix-applier does not clear the hold");
+  assert.deepEqual(due([`${H} · fix-pr-99-b=no-op`]), [[21], [21]], "…a retry-suffixed one neither");
+  assert.deepEqual(due([`${H} · fix-pr-99`]), [[21], [21]], "a foreign live fix-applier does not hold off this PR's own");
+  // The real fix-pr-99 settled elsewhere: a stray bare copy on #21's row
+  // inherits nothing from it.
+  assert.deepEqual(due([`${H} · fix-pr-99`], ["fix-pr-99=applied:def5678"]), [[21], [21]]);
+  assert.deepEqual(due([`${H} · fix-pr-99`, "#98 impl-98=PR#99 · fix-pr-99=applied:def5678"], [], [pr(21), pr(99)]), [[21], [21]]);
+  // Nor does a settled stray on #21's row stand in for PR #99's own in-place
+  // copy: #99's bare token, the only one on #99's row, still lands its member.
+  assert.deepEqual(
+    due(["#20 impl-20=PR#21 · fix-pr-99=applied:def5678", "#98 impl-98=PR#99 · conflict-hold:#99 · fix-pr-99"],
+      ["fix-pr-99=applied:def5678"], [pr(21), pr(99)]),
+    [[], []], "a foreign settled copy does not keep the owner's bare copy from landing");
+  // …and lends it no outcome: a settled stray of fix-pr-21 on #99's row, read
+  // before #21's own row, does not land #21's bare copy and clear its hold.
+  assert.deepEqual(run({ rows: ["#98 impl-98=PR#99 · fix-pr-21=applied:abc1234", `${H} · fix-pr-21`] }, [pr(21), pr(99)]).conflictHeld,
+    [21], "a foreign settled copy does not clear the owner's hold");
+  // A row naming no PR at all (no `#<n>` key, no `PR#`) is no PR's row, so a
+  // settled copy there is a stray as well: the owner's bare copy still lands.
+  assert.deepEqual(due(["notes fix-pr-21=applied:def5678", `${H} · fix-pr-21`], ["fix-pr-21=applied:def5678"]),
+    [[], []], "a settled copy on a PR-less row does not keep the owner's bare copy from landing");
+  // A row's PR is its `PR#` mention even where its key names the token's
+  // number: `fix-pr-21` on `#21 …=PR#22` is a stray on PR #22's row, neither
+  // clearing #22's hold nor standing in for PR #21's own copies.
+  const K = "#21 impl-21=PR#22 · conflict-hold:#22";
+  assert.deepEqual(due([`${K} · fix-pr-21=applied:def5678`], [], [pr(22)]), [[22], [22]], "the key does not make it #22's own");
+  assert.deepEqual(due([`${K} · fix-pr-21=applied:def5678`, `${H} · fix-pr-21`], ["fix-pr-21=applied:def5678"], [pr(21), pr(22)]),
+    [[22], [22]], "…nor keep PR #21's bare copy from landing");
+  // Nor does a foreign one answer a returned review's survivors.
+  assert.deepEqual(due(["#20 impl-20=PR#21 · reviewed=abc1234:2/0/0 · fix-pr-99=applied:def5678"]), [[21], []]);
+  // Must accept: the PR's own fix-applier, live and landed.
+  assert.deepEqual(due([`${H} · fix-pr-21`]), [[], [21]], "own live: not re-offered, still held");
+  assert.deepEqual(due([`${H} · fix-pr-21=applied:def5678`]), [[], []], "own landed: the hold is cleared");
+  // …and on the PR's own `#21` row, which names no `PR#` — its key is its PR.
+  assert.deepEqual(due([H, "#21 fix-pr-21=applied:def5678"]), [[], []]);
+  // An in-place settled copy on the ticket row, whose key is the ticket's and
+  // whose PR is its `PR#` mention, is the PR's own: it still says where its
+  // member landed, so a stale bare copy read first does not land it instead.
+  assert.deepEqual(
+    due(["#21 fix-pr-21", "#20 impl-20=PR#21 · reviewed=abc1234:2/0/0 · conflict-hold:#21 · fix-pr-21=applied:def5678"],
+      ["fix-pr-21=applied:def5678"]),
+    [[21], []], "own in-place copy on the ticket row: it cleared the hold and answered no survivor");
+});
+
 test("deriveRun: a conflict hold is read in either spelling and on a PR-keyed row", () => {
   assert.deepEqual(run({ rows: [HOLD_ROW(40, "conflict-hold-#40")] }, [pr(40)]).fixDue, [40]);
   assert.deepEqual(run({ rows: ["#350 review=wf:x reviewed=abc1234:0/1/0 · conflict-hold:#350"] }, [pr(350)]).fixDue, [350]);

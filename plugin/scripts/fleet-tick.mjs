@@ -300,10 +300,15 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     if (t.outcome !== null) m.outcome = t.outcome;
     members.set(t.name, m);
   };
+  // A fix-applier's outcome as its landing reads it (#2329): off `##
+  // Dispatched` and its own PR's rows only, so a settled stray on another
+  // PR's row lends its owner no landing. `members` still takes every copy.
+  const fixOutcome = new Map();
   for (const e of dispatched) {
     const t = parseToken(e);
     if (!t) throw new LedgerError(`## Dispatched entry '${e}' is not a member token — fix the ledger by hand before the tick can count from it`);
     note(t, `## Dispatched entry '${e}'`);
+    if (t.family === "fix-pr" && t.outcome !== null) fixOutcome.set(t.name, t.outcome);
   }
 
   const open = new Set(prs.map((p) => p.number));
@@ -320,26 +325,34 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   // `tier-unverifiable=<member>:no-transcript` is the third: a settled member
   // with nothing to check, which clears the unchecked hold and nothing else.
   const verdicts = { ok: new Set(), mismatch: new Set(), unverifiable: new Set() };
+  // A row's key number and its PR, per the comment above PR_MENTION: the PR
+  // every PR-bound token on the row speaks for.
+  const rowNums = (text) => {
+    const key = text.split(/\s/)[0];
+    const keyNum = /^#[0-9]+$/.test(key) ? Number(key.slice(1)) : null;
+    const mention = PR_MENTION.exec(text);
+    return { keyNum, pr: mention ? Number(mention[1]) : keyNum };
+  };
   // fix-pr members some row carries settled IN PLACE (`<member>=<outcome>`).
   // `settle` rewrites a token where it stands, so that copy sits where the
   // member was dispatched; a bare copy beside it is what a whole-line `row`
   // rewrite put back, wherever that rewrite chose. Its landing is read off
   // the in-place copy (below), and off a bare one only when no row carries
-  // one — settled in `## Dispatched` alone. A malformed token is skipped
+  // one — settled in `## Dispatched` alone. Only a copy on its own PR's row
+  // counts, as in the fold (#2329): a settled stray on another PR's row must
+  // not keep the owner's bare copy from landing. A malformed token is skipped
   // here and refused by the fold below, in row order, as before.
   const settledInRow = new Set();
   for (const text of rows) {
+    const { pr } = rowNums(text);
     for (const tok of text.split(/\s+/)) {
       const t = parseToken(tok);
-      if (t && !t.error && t.family === "fix-pr" && t.outcome !== null) settledInRow.add(t.name);
+      if (t && !t.error && t.family === "fix-pr" && t.number === pr && t.outcome !== null) settledInRow.add(t.name);
     }
   }
   for (const text of rows) {
-    const key = text.split(/\s/)[0];
-    const keyNum = /^#[0-9]+$/.test(key) ? Number(key.slice(1)) : null;
+    const { keyNum, pr } = rowNums(text);
     const where = `row '${text}'`;
-    const mention = PR_MENTION.exec(text);
-    const pr = mention ? Number(mention[1]) : keyNum;
     // One state per PR, shared by every row that resolves to it (#2283): a
     // ticket row settled `impl-658=PR#724` sorts above PR 724's own `#724` row
     // whenever both exist, and either may carry that PR's tokens — ledger.mjs's
@@ -384,10 +397,11 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
         // conflict unfixed and no successor dispatched — the PR stays fix-due
         // for a `-b` replacement. Only a live attempt, or one that actually
         // landed (`applied:`/`no-op`), holds it off. Read the outcome off the
-        // MERGED member record (`members`, built above) rather than this row's
-        // own copy of the token: `members` already implements "a member
-        // settled ANYWHERE is settled" for `implLive`/`fixLive`/etc. below,
-        // and a later, unrelated `row` rewrite that drops the `=outcome`
+        // member's merged record (`fixOutcome`, built above and here) rather
+        // than this row's own copy of the token: "a member settled ANYWHERE
+        // is settled", the rule `members` implements for
+        // `implLive`/`fixLive`/etc. below, narrowed to the places it speaks
+        // for — a later, unrelated `row` rewrite that drops the `=outcome`
         // suffix and puts back a bare copy must not un-settle what actually
         // landed. Which job a landed one did is read off where its token sits:
         // after an unresolved hold it was the conflict fix-applier and clears
@@ -402,13 +416,18 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
         // survivors the conflict fix-applier never read. Liveness is not read
         // here at all: a bare copy read before a later row settles its member
         // reads unsettled at that point, so `fixMembers` is judged once every
-        // row has been read. `note` above has just recorded this exact token,
-        // so the lookup below is never absent, and its outcome is this
-        // token's own unless an earlier row already settled it — never a
-        // reason to fall back to the row's own copy.
-        if (t.family === "fix-pr") {
+        // row has been read. A copy reaching this branch has just been
+        // recorded into `fixOutcome` if settled, so its outcome is this
+        // token's own unless `## Dispatched` or an earlier row already settled
+        // it — never a reason to fall back to the row's own copy. A
+        // `fix-pr-<M>` speaks for PR #M alone, as a `finisher-pr` does below
+        // (#2329): `dispatch` and `settle` write it onto PR #M's row only, so a
+        // copy on another PR's row is a hand-written stray this PR reads as
+        // absent, and which lends PR #M's own copies no outcome.
+        if (t.family === "fix-pr" && t.number === pr) {
           st.fixMembers.add(t.name);
-          const o = members.get(t.name).outcome;
+          if (t.outcome !== null) fixOutcome.set(t.name, t.outcome);
+          const o = fixOutcome.get(t.name) ?? null;
           if ((o === "no-op" || /^applied:/.test(o)) && !st.fixLanded.has(t.name)
             && (t.outcome !== null || !settledInRow.has(t.name))) {
             st.fixLanded.add(t.name);
