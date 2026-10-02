@@ -305,6 +305,40 @@ const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
 // or `tier-mismatch=<member>:<def>` — or `tier-unverifiable=<member>:no-transcript`
 // for a settled member whose transcript was never written.
 const TIER_VERDICT = /^tier-(ok|mismatch|unverifiable)=([^:\s]+):\S+$/;
+// dispositions-check.mjs's verdict on a review fix-applier's disposition
+// record: `dispositions-ok=fix-pr-<M>[-x]:<head>` or
+// `dispositions-mismatch=…`, `<head>` the head of the review the record
+// answers. `ledger.mjs dispatch` refuses a finisher on it; the tick holds
+// nothing on it, having no finisher role. A token outside this shape is no
+// verdict at all, which the gate reads as unchecked: fail closed.
+export function dispositionsToken(tok) {
+  const m = /^dispositions-(ok|mismatch)=([^:\s]+):([0-9a-f]{7,40})$/i.exec(tok);
+  if (!m) return null;
+  const member = parseMember(m[2]);
+  if (member === null || member.family !== "fix-pr") return null;
+  return { verdict: m[1].toLowerCase(), member, head: m[3].toLowerCase() };
+}
+
+// Two spellings of one commit: either head a prefix of the other, the way a
+// `reviewed=` head (7-40 hex) is matched against gh's full headRefOid.
+const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
+
+// A PR's current dispositions verdict against its latest review head: among
+// the tokens answering that head, the one from the fix-applier with the
+// highest retry suffix ("" < "b" < "c" …) — never row-text position, which a
+// `row` rewrite can reorder. One fix-applier carrying both verdicts for one
+// head reads as a mismatch. null when no token answers the head.
+/** @returns {{verdict: "ok"|"mismatch", member: string}|null} */
+export function currentDispositions(tokens, head) {
+  let best = null;
+  for (const t of tokens) {
+    if (!sameHead(t.head, head)) continue;
+    const retry = t.member.retry ?? "";
+    const bestRetry = best?.member.retry ?? "";
+    if (best === null || retry > bestRetry || (retry === bestRetry && t.verdict === "mismatch")) best = t;
+  }
+  return best === null ? null : { verdict: best.verdict, member: best.member.name };
+}
 
 // #2331: `label-off=<finisher-pr-M[-x]>` — written by the controller BEFORE it
 // takes `ready-to-merge` off PR M on purpose (before approving a push; clearing
@@ -321,7 +355,7 @@ export function labelOffMember(tok) {
 
 // A row's key number and its PR, per the comment above PR_MENTION: the PR
 // every PR-bound token on the row speaks for.
-function rowNums(text) {
+export function rowNums(text) {
   const key = text.split(/\s/)[0];
   const keyNum = /^#[0-9]+$/.test(key) ? Number(key.slice(1)) : null;
   const mention = PR_MENTION.exec(text);
@@ -459,11 +493,14 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // `reviewedHead`: the latest `reviewed=<head>`. `pastPinHalt`: the latest
     // finisher since that review settled `halted:past-pin` (#2083) — any
     // later finisher attempt, live or settled, replaces it, and a later
-    // returned review answers it.
+    // returned review answers it. `unverified`: the latest `reviewed=`'s
+    // unverified count. `dispositions`: every dispositions verdict a fix-pr
+    // member of this PR carries, whatever head it answers — the gate picks
+    // by head and retry suffix, never by where a token sits.
     const st = (pr !== null && byPr.get(pr)) || {
-      inFlight: false, reviewedAny: false, survived: 0, reviewFixed: false,
+      inFlight: false, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
       fixMembers: new Set(), fixLanded: new Set(), held: [],
-      conflictOpen: false, reviewedHead: null, pastPinHalt: false,
+      conflictOpen: false, reviewedHead: null, pastPinHalt: false, dispositions: [],
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
     // retry suffix ("" < "b" < "c" …) the same way compute-board.mjs's
@@ -536,7 +573,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
         if (!m) throw new LedgerError(`${where}: '${tok}' is not reviewed=<head>:<survived>/<refuted>/<unverified>`);
         latestFinisher = null;
         Object.assign(st, {
-          inFlight: false, reviewedAny: true, survived: Number(m[2]), reviewFixed: false,
+          inFlight: false, reviewedAny: true, survived: Number(m[2]), unverified: Number(m[4]), reviewFixed: false,
           reviewedHead: m[1].toLowerCase(), pastPinHalt: false,
         });
       } else if (labelOffMember(tok) === null) {
@@ -561,6 +598,8 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
         }
         const v = TIER_VERDICT.exec(tok);
         if (v) verdicts[v[1]].add(v[2]);
+        const d = dispositionsToken(tok);
+        if (d && d.member.number === pr) st.dispositions.push(d);
       }
     }
     const ex = EXCLUDED_ROW.exec(text);
@@ -654,6 +693,16 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // fold this tick holds the merge on, split rows (#2283) and a settle made
     // anywhere included, rather than re-deriving it from one row's text.
     conflictHeld: [...byPr.entries()].filter(([, st]) => conflictHeld(st)).map(([n]) => n).sort(asc),
+    // Every PR, open or not, with a returned review: its latest `reviewed=`
+    // head and counts, and the dispositions verdict currently answering that
+    // head. `ledger.mjs dispatch` gates a finisher off this, read from the
+    // same per-PR fold as everything above. Nothing in this tick acts on it.
+    reviewed: [...byPr.entries()].filter(([, st]) => st.reviewedHead !== null)
+      .map(([n, st]) => ({
+        pr: n, head: st.reviewedHead, survived: st.survived, unverified: st.unverified,
+        dispositions: currentDispositions(st.dispositions, st.reviewedHead),
+      }))
+      .sort((a, b) => a.pr - b.pr),
     draining: drain ?? null,
     tierMismatch,
     // Every impl member the ledger names, settled or live: the retry letters
