@@ -286,6 +286,27 @@ test("implementers classify off the member NAME, which is where `impl-` actually
   assert.equal(classifyRole({ spawnDepth: 0, agentDefinition: "impl-332", description: "whatever" }), "other");
 });
 
+test("a member family spelled PascalCase or without hyphens classifies off the name like its kebab form (#2396)", () => {
+  // omp task names are free-form, and controllers have dispatched the same
+  // families as `Impl327`, `FixPr774`, `Fix-pr-766`, `ReviewPR77`. The
+  // descriptions carry no role word, so only the name can carry the match.
+  const role = (memberName) => classifyRole({ spawnDepth: 0, memberName, description: "whatever" });
+  assert.equal(role("Impl327"), "implementer");
+  assert.equal(role("FixPr774"), "reviewer");
+  assert.equal(role("Fix-pr-766"), "reviewer");
+  assert.equal(role("ReviewPR77"), "reviewer");
+  assert.equal(role("ResolvePr1232"), "reviewer");
+  assert.equal(role("FinisherPr1567b"), "finisher");
+  assert.equal(role("Finish436"), "finisher");
+  assert.equal(role("MergeBot12"), "merge-bot");
+  // What it must still REFUSE: a generated word pair that merely starts with a
+  // family word is not that family. Kebab-casing these wholesale would turn
+  // `FinishSetupDocs` into `finish-setup-docs`, which `^finish-` books.
+  assert.equal(role("FinishSetupDocs"), "other");
+  assert.equal(role("Implementer5"), "other");
+  assert.equal(role("ImplPlan"), "other");
+});
+
 test("the omp review fan-out classifies off its agent DEFINITION — depth cannot reach it there", () => {
   // The depth check above books a nested fan-out whose specialists are the
   // reviewer's grandchildren under that shape. omp has no such nesting: its

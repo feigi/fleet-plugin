@@ -25,7 +25,7 @@
 import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, basename, relative, isAbsolute, sep } from "node:path";
 
-import { classifyRole, CANONICAL_MEMBER_NAME_PREFIXES } from "./compute-spend.mjs";
+import { classifyRole, canonicalMemberName, CANONICAL_MEMBER_NAME_PREFIXES } from "./compute-spend.mjs";
 
 // ---------------------------------------------------------------------------
 // cwd encoder
@@ -137,8 +137,13 @@ export function normalizeModel(raw) {
 // Unrecognised, a `resolve-pr-<n>` member fell through to `{ticket:"",
 // pr:""}`, losing its join key into tier-outcomes.tsv exactly the way an
 // unmatched finisher spelling once did (#1072).
+//
+// Every pattern below is written against the lower-kebab spelling, so the
+// name is first rewritten by `canonicalMemberName` (compute-spend.mjs), the
+// same rewrite classifyRole applies: `Impl327` and `FixPr774` book the
+// ticket and PR their kebab forms do instead of blanks (#2396).
 export function parseMemberName(name) {
-  const s = String(name ?? "").trim().replace(/-(?:[a-z]|v\d+)$/, "");
+  const s = canonicalMemberName(name).replace(/-(?:[a-z]|v\d+)$/, "");
   let m = /^(?:fix|review|finish(?:er)?|resolve)-pr-(\d+)(?:-\d+)?$/.exec(s);
   if (m) return { ticket: "", pr: m[1] };
   m = /^finish(?:er)?-(\d+)$/.exec(s);
@@ -473,7 +478,7 @@ export function ompMemberRecord(folded, agentStem, spawnDepth = 0) {
   // shape (always an array, never absent), so no `?.` is needed here.
   const pr = namedPr || (folded.openedPrs.length === 1 ? folded.openedPrs[0] : "");
   const hasRoleSignal = spawnDepth >= 1 || typeof folded.task === "string" || typeof folded.agent === "string"
-    || OMP_CANONICAL_STEM_RE.test(member);
+    || OMP_CANONICAL_STEM_RE.test(canonicalMemberName(member));
   const role = hasRoleSignal
     ? classifyRole({ agentDefinition: folded.agent, memberName: member, description: folded.task, spawnDepth })
     : "-";
