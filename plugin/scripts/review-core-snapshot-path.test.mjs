@@ -539,7 +539,7 @@ test("the snapshot block mints a per-run destination, then extracts, probes, and
       "the run root is never printed — the agent cannot report a `runRoot` it can no longer read off this prompt, and the caller's containment check has nothing to check",
     ],
     [
-      /find "?\$\{runRootParent\}"?[^\n]*-exec rm -rf \{\} \+ \|\| echo SNAPSHOT_PRUNE_FAILED/,
+      /find "?\$\{runRootParent\}"?[^\n]*\|\| echo SNAPSHOT_PRUNE_FAILED/,
       "the stale-run-root prune is gone or no longer refuses by name — every review leaves a tree nothing removes (#1083), and `snapshot-repo.test.mjs`'s executed prune test is where its behaviour is measured",
     ],
     [
