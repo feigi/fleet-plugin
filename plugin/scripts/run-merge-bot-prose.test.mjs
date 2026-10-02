@@ -1232,6 +1232,12 @@ test("the report vocabulary includes rebase-fallback", () => {
   assert.match(DOC, /^Report merged [^\n]*rebase-fallback-#X/m);
 });
 
+// #2295: step 4 tells the bot to report each kept branch, so the token has to
+// be in the vocabulary the bot reports from. Bounded to the Report line, as above.
+test("the report vocabulary includes branch-kept", () => {
+  assert.match(DOC, /^Report merged [^\n]*branch-kept-#X/m);
+});
+
 // #1806 (spec 2026-09-24 § 5, ADR 0012 Decision 3). Step 3 is ONE script run
 // twice, and the merge rests on the second run: a conclusion can invert under
 // a fixed run id and a CI wait sits between the two readings. Sliced to step 3

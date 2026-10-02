@@ -132,12 +132,13 @@ case "$*" in
   *) echo "gh: unstubbed call: $*" >&2; exit 1 ;;
 esac
 shift 2
-head= base= state= expr=. which=
+head= base= state= expr=. which= limit=30
 while [ $# -gt 0 ]; do
   case "$1" in
     --head) head=$2; which=head; shift 2 ;;
     --base) base=$2; which=base; shift 2 ;;
     --state) state=$2; shift 2 ;;
+    --limit) limit=$2; shift 2 ;;
     --jq) expr=$2; shift 2 ;;
     *) shift ;;
   esac
@@ -146,8 +147,8 @@ done
 if [ "$which" = head ] && [ -n "\${PR_LIST_RAW_HEAD+set}" ]; then printf '%s\\n' "$PR_LIST_RAW_HEAD"; exit 0; fi
 if [ "$which" = base ] && [ -n "\${PR_LIST_RAW_BASE+set}" ]; then printf '%s\\n' "$PR_LIST_RAW_BASE"; exit 0; fi
 printf '%s' "\${PR_LIST_JSON:-[]}" |
-  jq --arg head "$head" --arg base "$base" --arg state "$state" \\
-    '[.[] | select(($head == "" or .headRefName == $head) and ($base == "" or .baseRefName == $base) and ($state == "" or $state == "all" or (.state | ascii_downcase) == $state))]' |
+  jq --arg head "$head" --arg base "$base" --arg state "$state" --argjson limit "$limit" \\
+    '[.[] | select(($head == "" or .headRefName == $head) and ($base == "" or .baseRefName == $base) and ($state == "" or $state == "all" or (.state | ascii_downcase) == $state))] | .[:$limit]' |
   jq -r "$expr"
 `,
     { mode: 0o755 },
@@ -502,6 +503,19 @@ test("open PRs of both kinds print one branch-kept-# line per PR, exit 3", (t) =
   assert.equal(originTip(origin, branch), oid);
 });
 
+test("every open PR on the branch gets its branch-kept-# line, however many there are — gh lists 30 unless asked for more", (t) => {
+  const branch = "fix/25-many";
+  const { origin, w, oid, gh } = keptFixture(t, branch, "25-many");
+  const list = [pr(25, branch, "main", "MERGED")];
+  for (let n = 100; n < 140; n++) list.push(pr(n, `feat/${n}-stacked`, branch));
+
+  const r = run(w, ["25"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_LIST_JSON: JSON.stringify(list) }));
+
+  assert.equal(r.code, 3, r.stderr);
+  assert.equal(r.stdout.trim().split("\n").length, 40);
+  assert.equal(originTip(origin, branch), oid);
+});
+
 test("a failed or unparsable open-PR lookup is exit 2, names the lookup, and pushes nothing", (t) => {
   const branch = "fix/25-unknown";
   const { origin, w, oid, gh } = keptFixture(t, branch, "25-unknown");
@@ -523,9 +537,10 @@ test("a failed or unparsable open-PR lookup is exit 2, names the lookup, and pus
 });
 
 // What the guard must ACCEPT: none of these PRs is affected by the delete —
-// the merged PR itself, closed PRs, a fork PR whose own branch merely shares
-// the name (`--head` matches it; it lives in the fork), and an open PR on an
-// unrelated branch. A guard that kept on any of them would stop every delete.
+// the merged PR itself, closed PRs, a merged PR based on the branch, a fork PR
+// whose own branch merely shares the name (`--head` matches it; it lives in the
+// fork), and an open PR on an unrelated branch. A guard that kept on any of them
+// would stop every delete.
 test("PRs the delete cannot affect do not keep the branch — it is deleted, exit 0", (t) => {
   const branch = "fix/26-clear";
   const { origin, w, oid, gh } = keptFixture(t, branch, "26-clear");

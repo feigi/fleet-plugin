@@ -47,8 +47,9 @@
 #         `branch-delete-failed-#<pr>`, never swallow it.
 # Exit 2: could not even tell what to delete — bad usage, the PR is not merged,
 #         a `gh`/`ls-remote` call failed, the head names the base branch, or an
-#         open-PR lookup failed or answered with something that is not a list
-#         of PR numbers (nothing is deleted; the lookup is named on stderr).
+#         open-PR lookup failed, answered with something that is not a list
+#         of PR numbers, or could not be checked for that (nothing is deleted;
+#         the lookup is named on stderr).
 # Exit 3: KEPT on purpose — another open PR uses the branch as its head or its
 #         base. Nothing was pushed. Stdout is one `branch-kept-#<pr>` line per
 #         such PR (that PR's number, not the merged one's) instead of the JSON
@@ -142,11 +143,17 @@ if [ -z "$before" ]; then
 fi
 
 # Dies unless $2 is empty or one PR number per line: a `gh` that exits 0 has
-# not answered if what it printed cannot be read as that.
+# not answered if what it printed cannot be read as that. grep's exit 1 is the
+# only "valid list" answer; anything past it (2 and up) means grep itself
+# failed, and reading that as valid would let the delete through unchecked.
 pr_numbers() {
-  if printf '%s\n' "$2" | grep -Eqv '^([1-9][0-9]*)?$'; then
-    die "the open-PR lookup \`gh pr list --$1 $branch\` answered with something that is not a list of PR numbers: '$2' — not deleting it"
-  fi
+  pn_rc=0
+  printf '%s\n' "$2" | grep -Eqv '^([1-9][0-9]*)?$' || pn_rc=$?
+  case "$pn_rc" in
+    0) die "the open-PR lookup \`gh pr list --$1 $branch\` answered with something that is not a list of PR numbers: '$2' — not deleting it" ;;
+    1) ;;
+    *) die "grep exited $pn_rc, so whether the open-PR lookup \`gh pr list --$1 $branch\` answered with a list of PR numbers is unknown — not deleting it" ;;
+  esac
 }
 
 # Asked here, after the branch is known to be on origin and just before the
@@ -165,17 +172,16 @@ if ! based=$(gh pr list --base "$branch" --state open --limit 1000 --json number
 fi
 pr_numbers base "$based"
 
-# Both lists hold only validated PR numbers, so splitting them is safe.
-kept=0
+# Both lists hold only validated PR numbers, so splitting them is safe — and
+# command substitution strips trailing newlines, so a list is non-empty only
+# when it names a PR.
 for n in $headed; do
   printf '%s: open PR #%s uses %s as its head — deleting the branch would close it; keeping the branch\n' "$NAME" "$n" "$branch" >&2
-  kept=1
 done
 for n in $based; do
   printf '%s: open PR #%s uses %s as its base — deleting the branch may close it rather than retarget it; keeping the branch\n' "$NAME" "$n" "$branch" >&2
-  kept=1
 done
-if [ "$kept" -eq 1 ]; then
+if [ -n "$headed$based" ]; then
   printf '%s\n%s\n' "$headed" "$based" | grep . | sort -nu | sed 's/^/branch-kept-#/'
   exit 3
 fi
