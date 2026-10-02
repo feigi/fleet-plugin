@@ -755,7 +755,7 @@ export async function runReview(host, args) {
     mkdir -p "${runRootParent}" || { echo SNAPSHOT_RUNROOT_FAILED; exit 1; }
     RUN=$(mktemp -d "${runRootPrefix}XXXXXXXX") || { echo SNAPSHOT_RUNROOT_FAILED; exit 1; }
     echo SNAPSHOT_RUN_ROOT="$RUN"
-    find "${runRootParent}" -maxdepth 1 -type d -name 'run-*' -mtime +7 -exec sh -c 'rc=0; for d; do chmod -R u+rwx "$d" 2>/dev/null; if command -v chflags >/dev/null 2>&1; then chflags -R nouchg "$d" 2>/dev/null; chmod -R u+rwx "$d" 2>/dev/null; fi; rm -rf "$d" || rc=1; done; exit $rc' sh {} + || echo SNAPSHOT_PRUNE_FAILED
+    find "${runRootParent}" -maxdepth 1 -type d -name 'run-*' -mtime +7 -exec sh -c 'rc=0; for d; do chmod -R u+rwx "$d" 2>/dev/null; m=$?; if command -v chflags >/dev/null 2>&1; then [ $m -eq 0 ] || find "$d" -type d -exec chflags nouchg,nouappnd {} ";" -exec chmod u+rwx {} ";" 2>/dev/null; chflags -R nouchg,nouappnd "$d" 2>/dev/null; fi; rm -rf "$d" || rc=1; done; exit $rc' sh {} + || echo SNAPSHOT_PRUNE_FAILED
     SHA=$(git -C ${worktree} rev-parse --short HEAD) || { echo SNAPSHOT_REVPARSE_FAILED; exit 1; }
     SNAP="$RUN/snapshot-$SHA"
     echo SNAPSHOT_DEST="$SNAP"

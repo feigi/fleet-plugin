@@ -164,19 +164,29 @@ const renderPrune = (path, runRootParent) =>
 
 /**
  * A `run-` root under `parent` holding a `locked` directory with no permission
- * bits at all, aged `days`. On darwin, optionally, the file inside it carries
- * `uchg` (`immutableFile`), or `locked` itself does (`immutableDir`) — set
- * after the mode, so the directory's mode cannot be changed back until the
- * flag is gone. Aged last: creating children sets the root's mtime to now.
+ * bits at all, aged `days`. `nested` puts a second such directory, `deeper`,
+ * inside `locked`, and the file moves into it. On darwin, optionally, the file
+ * carries `fileFlag` (`uchg` or `uappnd`), and every locked directory carries
+ * `dirFlag` — set after the mode, so a directory's mode cannot be changed back
+ * until the flag is gone. `fileMode` is the file's own mode: one that already
+ * grants owner rwx leaves `chmod -R u+rwx` nothing to change on the file, so
+ * that pass exits 0 over a flagged file. Aged last: creating children sets the
+ * root's mtime to now.
  */
-function lockedRunRoot(parent, name, days, { immutableFile = false, immutableDir = false } = {}) {
+function lockedRunRoot(parent, name, days, { fileFlag = null, fileMode = 0o644, dirFlag = null, nested = false } = {}) {
   const root = join(parent, name);
   const locked = join(root, "locked");
-  mkdirSync(locked, { recursive: true });
-  writeFileSync(join(locked, "inner.txt"), "");
-  if (immutableFile) execFileSync("chflags", ["uchg", join(locked, "inner.txt")]);
-  chmodSync(locked, 0);
-  if (immutableDir) execFileSync("chflags", ["uchg", locked]);
+  const dirs = nested ? [join(locked, "deeper"), locked] : [locked];
+  mkdirSync(dirs[0], { recursive: true });
+  const file = join(dirs[0], "inner.txt");
+  writeFileSync(file, "");
+  chmodSync(file, fileMode);
+  if (fileFlag) execFileSync("chflags", [fileFlag, file]);
+  // Deepest first: once a directory is 000, nothing below it can be reached.
+  for (const dir of dirs) {
+    chmodSync(dir, 0);
+    if (dirFlag) execFileSync("chflags", [dirFlag, dir]);
+  }
   const when = (Date.now() - days * DAY) / 1000;
   utimesSync(root, when, when);
   return root;
@@ -184,11 +194,12 @@ function lockedRunRoot(parent, name, days, { immutableFile = false, immutableDir
 
 /**
  * Undoes `lockedRunRoot` so the scratch teardown can remove what a prune left.
- * The second `chmod` is for `immutableDir`: its mode is only changeable once
- * `chflags` has cleared the flag.
+ * A flagged directory's mode is only changeable once its flag is gone, and a
+ * directory below it only reachable once that mode is back, so each directory
+ * is unlocked before `find` descends into it.
  */
 function unlock(parent) {
-  spawnSync("sh", ["-c", 'chmod -R u+rwx "$1"; if command -v chflags >/dev/null; then chflags -R nouchg "$1"; chmod -R u+rwx "$1"; fi; :', "sh", parent], { env: ENV });
+  spawnSync("sh", ["-c", 'chmod -R u+rwx "$1"; if command -v chflags >/dev/null; then find "$1" -type d -exec chflags nouchg,nouappnd {} ";" -exec chmod u+rwx {} ";"; chflags -R nouchg,nouappnd "$1"; fi; :', "sh", parent], { env: ENV });
 }
 
 /**
@@ -596,8 +607,8 @@ for (const [name, path] of SOURCES) {
   // #2322. A fixture that drops its own read bit, or a darwin file carrying the
   // user-immutable flag, made the plain `rm -rf` fail on that root — so it
   // stayed forever and every later review of the PR printed
-  // SNAPSHOT_PRUNE_FAILED. The prune now restores owner rwx and clears `uchg`
-  // on the roots it SELECTED, then removes them.
+  // SNAPSHOT_PRUNE_FAILED. The prune now restores owner rwx and clears darwin's
+  // user flags on the roots it SELECTED, then removes them.
   test(`${name}: the prune removes an aged run root a chmod 000 directory used to wedge`, (t) => {
     const parent = join(scratch(t, "snapshot-repo-prune-perm-"), "pr7");
     const stale = lockedRunRoot(parent, "run-staleaa", 9);
@@ -640,35 +651,35 @@ for (const [name, path] of SOURCES) {
     }
   });
 
-  test(`${name}: on darwin the prune removes an aged run root holding a uchg file inside a chmod 000 directory`, { skip: process.platform !== "darwin" && "chflags/uchg is darwin's" }, (t) => {
-    const parent = join(scratch(t, "snapshot-repo-prune-uchg-"), "pr7");
-    const stale = lockedRunRoot(parent, "run-staleaa", 9, { immutableFile: true });
-    try {
-      const r = spawnSync("sh", ["-c", renderPrune(path, parent)], { env: ENV, encoding: "utf8" });
+  // #2322, #2370. On darwin a user flag wedges the removal too: `uchg` refuses
+  // every change and `uappnd` refuses the unlink, and on a directory either
+  // one also refuses the `chmod` that makes a `000` directory readable again —
+  // while `chflags -R` cannot read a `000` directory it has just unflagged. So
+  // a directory's flag and mode have to come off together, before anything
+  // inside it is read, at every depth. The `uappnd` file whose mode already
+  // grants owner rwx is the shape where `chmod -R` exits 0 over a flag.
+  for (const [shape, opts] of [
+    ["a uchg file inside a chmod 000 directory", { fileFlag: "uchg" }],
+    ["a uappnd file whose own mode leaves chmod nothing to change", { fileFlag: "uappnd", fileMode: 0o700 }],
+    ["a directory that is both uchg and chmod 000", { dirFlag: "uchg" }],
+    ["a directory that is both uappnd and chmod 000", { dirFlag: "uappnd" }],
+    ["a uchg file inside a directory that is both uchg and chmod 000", { fileFlag: "uchg", dirFlag: "uchg" }],
+    ["a uchg, chmod 000 directory inside another", { dirFlag: "uchg", nested: true }],
+  ]) {
+    test(`${name}: on darwin the prune removes an aged run root holding ${shape}`, { skip: process.platform !== "darwin" && "chflags/uchg/uappnd are darwin's" }, (t) => {
+      const parent = join(scratch(t, "snapshot-repo-prune-flags-"), "pr7");
+      const stale = lockedRunRoot(parent, "run-staleaa", 9, opts);
+      try {
+        const r = spawnSync("sh", ["-c", renderPrune(path, parent)], { env: ENV, encoding: "utf8" });
 
-      assert.doesNotMatch(r.stdout ?? "", /SNAPSHOT_PRUNE_FAILED/, `the prune named a failure on a root it can normalise: ${r.stderr}`);
-      assert.ok(!existsSync(stale), "an aged run root holding a uchg file survived the prune — the immutable flag wedges `rm -rf` (EPERM) and the root stays forever");
-    } finally {
-      unlock(parent);
-    }
-  });
-
-  // The flag on the DIRECTORY rather than on a file in it: `chmod -R` cannot
-  // restore a `uchg` directory's mode, and `chflags -R` clears the flag but
-  // cannot read the `000` directory it just unflagged — so the mode is only
-  // restorable after the flag step, which is why the prune runs `chmod` again.
-  test(`${name}: on darwin the prune removes an aged run root holding a directory that is both uchg and chmod 000`, { skip: process.platform !== "darwin" && "chflags/uchg is darwin's" }, (t) => {
-    const parent = join(scratch(t, "snapshot-repo-prune-uchgdir-"), "pr7");
-    const stale = lockedRunRoot(parent, "run-staleaa", 9, { immutableDir: true });
-    try {
-      const r = spawnSync("sh", ["-c", renderPrune(path, parent)], { env: ENV, encoding: "utf8" });
-
-      assert.doesNotMatch(r.stdout ?? "", /SNAPSHOT_PRUNE_FAILED/, `the prune named a failure on a root it can normalise: ${r.stderr}`);
-      assert.ok(!existsSync(stale), "an aged run root holding a uchg, chmod 000 directory survived the prune — its mode was never restored after the flag was cleared, so `rm -rf` cannot read it");
-    } finally {
-      unlock(parent);
-    }
-  });
+        assert.doesNotMatch(r.stdout ?? "", /SNAPSHOT_PRUNE_FAILED/, `the prune named a failure on a root it can normalise: ${r.stderr}`);
+        assert.equal(r.status, 0, `the prune exited non-zero: ${r.stderr}`);
+        assert.ok(!existsSync(stale), `an aged run root holding ${shape} survived the prune — it now stays forever and every later review prints SNAPSHOT_PRUNE_FAILED`);
+      } finally {
+        unlock(parent);
+      }
+    });
+  }
 
   // The accept case on a host without `chflags`: the flag step is skipped, not
   // treated as a failure, so the permission case still succeeds there.
