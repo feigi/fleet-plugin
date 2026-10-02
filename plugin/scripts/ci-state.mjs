@@ -13,7 +13,6 @@
 
 import { execFileSync } from "node:child_process";
 import { gitEnv } from "./git-env.mjs";
-import { readdirSync, readFileSync } from "node:fs";
 import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 
 const NAME = "ci-state";
@@ -40,7 +39,7 @@ const { arg, numArg, has, sweep, stray } = defineFlags(die, {
 });
 
 // `--quiet` suppresses the diagnostic stream (command echoes, per-job/per-field
-// lines) and drops `jobs` and `missing` from the payload. The controller's CI
+// lines) and drops `jobs`, `missing` and `dropped` from the payload. The controller's CI
 // Monitor (and, standalone, the reviewer's own watch loop) polls this hot, and
 // none of that stream is acted on — `reasons` already names every failing job,
 // and the exit code already encodes green/not-green. die() and the one-line
@@ -124,10 +123,12 @@ function emitRateLimited(query) {
   writeAll(1, `${JSON.stringify(payload)}\n`);
 }
 
-function run(cmd, args) {
+// `maxBuffer` defaults to execFileSync's own 1 MiB; only the workflow-tree
+// reads pass a larger one (see graphql() below).
+function run(cmd, args, maxBuffer) {
   vlog(`$ ${cmd} ${args.join(" ")}`);
   try {
-    return execFileSync(cmd, args, { encoding: "utf8" });
+    return execFileSync(cmd, args, { encoding: "utf8", ...(maxBuffer ? { maxBuffer } : {}) });
   } catch (e) {
     // Names the cause, never the child's stderr — execFileSync forwarded it
     // already (no `stdio` above), so interpolating it emits every byte twice.
@@ -170,8 +171,8 @@ const cut = (s, n = 120) => (s.length > n ? `${s.slice(0, n)}… (truncated)` : 
 // rather than cited by line, since both files move. Parity with them is
 // partial on purpose: those check the discriminating field of every row, the
 // row-level checks here refuse on object-ness alone — see the next comment.
-function runJson(cmd, args, shape) {
-  const raw = run(cmd, args);
+function runJson(cmd, args, shape, maxBuffer) {
+  const raw = run(cmd, args, maxBuffer);
   let parsed;
   try {
     parsed = JSON.parse(raw);
@@ -291,140 +292,261 @@ sweep();
 // positional of its own, so any leftover token is one.
 stray();
 
-// --- PR facts -------------------------------------------------------------
-const prInfo = runJson(
-  "gh",
-  ["pr", "view", String(pr), "--json", "headRefName,headRefOid,state,mergeStateStatus"],
-  (v) => {
-    if (!isObject(v)) return "expected an object";
-    if (typeof v.headRefName !== "string" || !v.headRefName) return `headRefName (the branch) is not a non-empty string (${saw(v, "headRefName")})`;
-    if (typeof v.headRefOid !== "string" || !v.headRefOid) return `headRefOid (the head sha) is not a non-empty string (${saw(v, "headRefOid")})`;
+// The spawn primitive for the reads allowed to fail — the `origin` remote the
+// host comes from, and the behind-count's own probes — answering null where
+// run() would die. Its child's env drops GIT_DIR and GIT_WORK_TREE (gitEnv()):
+// either one outranks the child's cwd, and an ambient GIT_DIR answers `remote
+// get-url origin` for a DIFFERENT repository, silently, at exit 0 — which
+// would bind every `gh api --hostname` below to a host the caller never named.
+function tryRun(cmd, args) {
+  vlog(`$ ${cmd} ${args.join(" ")}`);
+  try {
+    return execFileSync(cmd, args, { encoding: "utf8", env: gitEnv() });
+  } catch (e) {
+    // Same discipline as run(), and it matters more here: --quiet suppresses
+    // vlog entirely, so under the controller's Monitor this line is discarded
+    // and the interpolated stderr would have been paid for and then thrown
+    // away. Name the cause; the child's own bytes already reached the caller.
+    vlog(
+      `    ${NAME}: ${cmd} failed: ${
+        e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)
+      }`,
+    );
     return null;
-  },
-);
-const branch = prInfo.headRefName;
-const prHead = prInfo.headRefOid;
-vlog(`    branch=${branch} head=${prHead} state=${prInfo.state} mergeState=${prInfo.mergeStateStatus}`);
-
-// --- Workflow file: discovered, not assumed --------------------------------
-// A hard-coded `.github/workflows/ci.yml` default made every fleet CI read
-// exit 2 the moment a repo's workflow had a different filename — no caller
-// anywhere passed --workflow-file to work around it (#111). Locate the file
-// by the SAME workflow identity `--workflow` already selects runs by (default
-// "CI"), read off disk rather than another `gh api` round trip (#262 budget).
-// --workflow-file stays as the explicit override for the one case discovery
-// cannot settle by itself: two workflow files sharing a name.
-const WORKFLOWS_DIR = ".github/workflows";
-
-// Anchored to the repo root, never to the cwd. Every other fact in this script
-// comes from `gh`, which resolves the repo from any depth, so a cwd-relative
-// read made the SAME repo answer `no-ci` from a subdirectory while answering
-// not-green from its root — and board.mjs spawns this with whatever cwd the
-// cockpit happens to have. `git rev-parse` is a local read, so anchoring costs
-// no REST call (#262). A root we cannot locate is exit 2, never `no-ci`:
-// absence has to be established, and failing to find the root establishes
-// nothing at all. Called only when discovery actually runs — an explicit
-// --workflow-file answers the question without a repo root and must not die
-// for want of one.
-function workflowsPath() {
-  const root = tryRun("git", ["rev-parse", "--show-toplevel"])?.trim();
-  if (!root) {
-    die(`git rev-parse --show-toplevel failed — cannot locate ${WORKFLOWS_DIR}/ to answer whether this repo has CI`);
   }
-  return `${root}/${WORKFLOWS_DIR}`;
 }
 
-// Returns the workflow's path, or null ONLY where this repo genuinely has no
-// CI: no workflows directory, or a directory holding no YAML at all. Every
-// other outcome is die() (exit 2, "could not be answered") — the directory
-// unreadable, the target unreadable, or YAML present under other names. #111's
-// whole point is that absence must be DECLARED, never inferred from an error:
-// a repo whose CI is merely misconfigured must never read as one with no CI.
-function discoverWorkflowFile(dir, workflowName) {
-  let entries;
-  try {
-    entries = readdirSync(dir);
-  } catch (e) {
-    // ENOENT is the one and only condition that means "no CI configured".
-    // EACCES, ENOTDIR, ELOOP and friends all mean the directory is there and
-    // we could not read it — unanswerable, exactly like the unreadable
-    // workflow file below. The bare `catch` this replaced relabelled every one
-    // of them `no-ci`, so a `chmod 000` on .github/workflows/ reported no-CI
-    // for a repo whose CI run was `failure` — and exit 0 under --declare-no-ci.
-    if (e.code === "ENOENT") return null;
-    die(`cannot read ${dir}: ${e.message}`);
+// --- The repository's host ------------------------------------------------
+// Every read up to the run query is `gh api`, and `gh api` does NOT infer the
+// host from the local remote the way `gh pr` and `gh run` do — on a GitHub
+// Enterprise repo it silently 404s against github.com. So the host is derived
+// once, here, from the cwd's `origin` remote and named on every `gh api` call;
+// owner and name stay gh's own `{owner}`/`{repo}` resolution from that same
+// cwd. A cwd with no origin to read is exit 2: the repository the question is
+// about cannot be resolved at all, and guessing a host could answer for a
+// different one.
+const remote = tryRun("git", ["remote", "get-url", "origin"]);
+const host = remote?.trim().replace(/^(git@|https:\/\/|ssh:\/\/git@)/, "").replace(/[:/].*$/, "");
+if (!host) {
+  die("git remote get-url origin failed — no repository to resolve from this cwd, so neither the PR nor its workflows can be read");
+}
+
+// --- PR facts and both workflow trees, read at explicit commits -------------
+// The workflow the expected jobs come from is read at the PR's own commits —
+// the head the run is bound to and the base it merges into — never from the
+// caller's working tree. A working tree answers for whatever is checked out
+// in it: a PR worktree with the head's job set, a `main` checkout with the
+// base's, stale or dirty, so one PR and one run used to read differently
+// depending on who asked.
+//
+// One GraphQL query carries the PR fields and both trees. The head is
+// addressed as `refs/pull/N/head`, which outlives the head branch (the PR's
+// `headRef` reads null once the branch is deleted), and must resolve to
+// `headRefOid` — any other commit means the head moved between the halves of
+// one read, which is exit 2 rather than one commit's workflow judged against
+// another's run.
+//
+// The base is the commit at `baseRefOid`. `baseRef.target` is the base
+// branch's TIP, which is that commit only until the base advances: an open
+// PR whose base moved on since its last push carries a `baseRefOid` behind
+// the tip. When the two agree, the tree already read is the right one;
+// otherwise a second read addresses `baseRefOid` itself and must answer for
+// exactly that commit, or exit 2 — never the tip's tree in its place.
+const WORKFLOWS_DIR = ".github/workflows";
+
+// `--workflow-file` names a repo-relative path, read at both commits like a
+// discovered one. It is split into the directory read and the entry picked
+// out of it, so it travels the same tree shape discovery does. A path that
+// could leave the repository, or that names no directory, is refused before
+// any read.
+let wfDir = WORKFLOWS_DIR;
+let wfEntry = null;
+if (workflowFileArg) {
+  const segs = workflowFileArg.replace(/^(?:\.\/)+/, "").split("/");
+  if (workflowFileArg.startsWith("/") || segs.length < 2 || segs.some((s) => s === "" || s === "." || s === "..")) {
+    die(`--workflow-file takes a repo-relative path such as ${WORKFLOWS_DIR}/ci.yml, read at the PR's head and base commits — got '${workflowFileArg}'`);
+  }
+  wfEntry = segs.pop();
+  wfDir = segs.join("/");
+}
+
+const TREE_FRAGMENT =
+  "fragment wf on GitObject { __typename ... on Tree { entries { name type object { __typename ... on Blob { text isTruncated } } } } }";
+const PR_QUERY = `${TREE_FRAGMENT}
+query($owner: String!, $name: String!, $pr: Int!, $dir: String!, $headExpr: String!, $headTreeExpr: String!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $pr) {
+      headRefName headRefOid baseRefName baseRefOid state mergeStateStatus
+      baseRef { target { oid ... on Commit { file(path: $dir) { object { ...wf } } } } }
+    }
+    head: object(expression: $headExpr) { oid }
+    headTree: object(expression: $headTreeExpr) { ...wf }
+  }
+}`;
+const BASE_QUERY = `${TREE_FRAGMENT}
+query($owner: String!, $name: String!, $baseExpr: String!, $baseTreeExpr: String!) {
+  repository(owner: $owner, name: $name) {
+    base: object(expression: $baseExpr) { oid }
+    baseTree: object(expression: $baseTreeExpr) { ...wf }
+  }
+}`;
+
+// `shape` here receives `data.repository`, the one object every query above
+// answers inside; a reply without it is refused before `shape` runs. The
+// query goes out on one line so its command echo stays one line too.
+//
+// The reply carries the text of every workflow file at up to two commits, so
+// it gets a buffer sized for that rather than execFileSync's 1 MiB default:
+// past the default the read dies ENOBUFS, and a repo whose workflows are
+// merely large would get exit 2 where reading them off disk never did.
+const TREE_READ_BYTES = 64 * 1024 * 1024;
+function graphql(query, vars, shape) {
+  const fields = Object.entries(vars).flatMap(([k, v]) => [typeof v === "number" ? "-F" : "-f", `${k}=${v}`]);
+  return runJson(
+    "gh",
+    ["api", "graphql", "--hostname", host, "-F", "owner={owner}", "-F", "name={repo}", ...fields, "-f", `query=${query.replace(/\s+/g, " ")}`],
+    (v) => {
+      if (!isObject(v) || !isObject(v.data) || !isObject(v.data.repository)) return "expected an object carrying data.repository";
+      return shape(v.data.repository);
+    },
+    TREE_READ_BYTES,
+  ).data.repository;
+}
+
+const headExpr = `refs/pull/${pr}/head`;
+const prRead = graphql(PR_QUERY, { pr, dir: wfDir, headExpr, headTreeExpr: `${headExpr}:${wfDir}` }, (repo) => {
+  const v = repo.pullRequest;
+  if (!isObject(v)) return `pullRequest is not an object (${saw(repo, "pullRequest")})`;
+  if (typeof v.headRefName !== "string" || !v.headRefName) return `headRefName (the branch) is not a non-empty string (${saw(v, "headRefName")})`;
+  if (typeof v.headRefOid !== "string" || !v.headRefOid) return `headRefOid (the head sha) is not a non-empty string (${saw(v, "headRefOid")})`;
+  if (typeof v.baseRefName !== "string" || !v.baseRefName) return `baseRefName (the base branch) is not a non-empty string (${saw(v, "baseRefName")})`;
+  if (typeof v.baseRefOid !== "string" || !v.baseRefOid) return `baseRefOid (the base sha) is not a non-empty string (${saw(v, "baseRefOid")})`;
+  return null;
+});
+const prInfo = prRead.pullRequest;
+const branch = prInfo.headRefName;
+const prHead = prInfo.headRefOid;
+const baseOid = prInfo.baseRefOid;
+vlog(`    branch=${branch} head=${prHead} base=${prInfo.baseRefName}@${baseOid} state=${prInfo.state} mergeState=${prInfo.mergeStateStatus}`);
+
+const headOid = prRead.head?.oid;
+if (headOid !== prHead) {
+  die(`${headExpr} resolves to ${headOid ?? "nothing"}, not the PR head ${prHead} — the head moved mid-read; re-query rather than judge one commit's workflow against another's run`);
+}
+
+let baseTree;
+const baseTip = prInfo.baseRef?.target;
+if (isObject(baseTip) && baseTip.oid === baseOid && Object.hasOwn(baseTip, "file")) {
+  baseTree = baseTip.file === null ? null : baseTip.file?.object;
+} else {
+  const baseRead = graphql(BASE_QUERY, { baseExpr: baseOid, baseTreeExpr: `${baseOid}:${wfDir}` }, () => null);
+  const got = baseRead.base?.oid;
+  if (got !== baseOid) die(`the PR's base commit ${baseOid} reads back as ${got ?? "nothing"} — its workflow cannot be bound to it`);
+  baseTree = baseRead.baseTree;
+}
+
+// One tree entry's YAML text, or null when the blob cannot be read whole:
+// absent, binary, or truncated by the API. A truncated text is not a shorter
+// workflow, so it is never parsed.
+const blobText = (entry) => {
+  const o = entry.object;
+  return isObject(o) && o.__typename === "Blob" && typeof o.text === "string" && o.isTruncated === false ? o.text : null;
+};
+
+// The CI workflow in one commit's tree: `{ path, text }`, or null ONLY where
+// that commit genuinely has none — no workflows directory, a directory holding
+// no YAML at all, or (explicit route) no entry at the named path. Every other
+// outcome is die() (exit 2, "could not be answered"): the path not a
+// directory, a YAML blob that cannot be read whole, two files sharing the
+// workflow's name. Absence must be established, never inferred from a read
+// that failed: a repo whose CI is merely misconfigured must never read as one
+// with no CI.
+//
+// `noneNamedIsAbsent` settles the remaining case, YAML present but none of it
+// carrying the workflow's name. At the base that is a --workflow/--workflow-
+// file mismatch, not an absence — saying "no CI configured" of a directory
+// full of workflows is false, and under --declare-no-ci it would exit 0 for a
+// repo whose CI was never looked at. At the head it is a PR that removed or
+// renamed its CI workflow, which contributes no jobs of its own.
+function findWorkflow(tree, side, noneNamedIsAbsent) {
+  if (tree === null) return null;
+  if (!isObject(tree) || tree.__typename !== "Tree" || !Array.isArray(tree.entries) || tree.entries.some((e) => !isObject(e))) {
+    die(`${wfDir} at the ${side} commit is not a readable directory (got ${cut(JSON.stringify(tree) ?? "nothing")})`);
+  }
+  if (wfEntry !== null) {
+    const entry = tree.entries.find((e) => e.name === wfEntry);
+    if (!entry) return null;
+    const text = blobText(entry);
+    if (text === null) die(`cannot read ${wfDir}/${wfEntry} at the ${side} commit — not a file whose text came back whole`);
+    return { path: `${wfDir}/${wfEntry}`, text };
+  }
+  const yamls = tree.entries.filter((e) => e.type === "blob" && /\.ya?ml$/.test(String(e.name)));
+  const unreadable = yamls.filter((e) => blobText(e) === null).map((e) => `${wfDir}/${e.name}`);
+  if (unreadable.length) {
+    die(`cannot read ${unreadable.join(", ")} at the ${side} commit — the text came back absent, binary or truncated, so which workflow it is cannot be settled`);
   }
   const candidates = [];
-  const yamls = [];
-  const unreadable = [];
-  for (const f of entries) {
-    if (!/\.ya?ml$/.test(f)) continue;
-    const path = `${dir}/${f}`;
-    yamls.push(f);
-    let text;
-    try {
-      text = readFileSync(path, "utf8");
-    } catch (e) {
-      // NOT fatal on the spot: this entry may be an unrelated sibling, and
-      // dying on it blinds discovery to a target sitting readable right next
-      // to it (one chmod-000 workflow made a green repo exit 2). Fail closed
-      // only if nothing matched — then this file is the one that might have
-      // been the CI workflow. The ambiguity check below sees readable files
-      // only, so an unreadable second `CI` is invisible; a matched target wins.
-      unreadable.push(`${path}: ${e.message}`);
-      continue;
-    }
+  for (const e of yamls) {
     // Top-level `name:` only (column 0) — a job's own `name:` step is indented
     // and expectedJobs() below already treats that as a different concern. The
     // optional ` #…` tail is a YAML comment, not part of the name: without it
     // `name: CI  # main pipeline` parsed as a workflow called `CI  # main
     // pipeline`, so a correctly configured repo reported no-ci. ` #` with the
     // space is what makes it a comment in YAML, so `name: CI#1` stays `CI#1`.
-    const m = text.match(/^name:\s*(.+?)(?:\s+#.*)?\s*$/m);
+    const m = blobText(e).match(/^name:\s*(.+?)(?:\s+#.*)?\s*$/m);
     const name = m ? m[1].replace(/^['"]|['"]$/g, "") : null;
-    if (name === workflowName) candidates.push(path);
+    if (name === workflow) candidates.push({ path: `${wfDir}/${e.name}`, text: blobText(e) });
   }
   if (candidates.length > 1) {
     die(
-      `${candidates.length} workflow files under ${dir}/ are named '${workflowName}' (${candidates.join(", ")}) — pass --workflow-file to pick one`,
+      `${candidates.length} workflow files under ${wfDir}/ at the ${side} commit are named '${workflow}' (${candidates.map((c) => c.path).join(", ")}) — pass --workflow-file to pick one`,
     );
   }
   if (candidates.length === 1) return candidates[0];
-  if (unreadable.length) {
-    // Nothing matched, so an unreadable file could have been the match.
-    die(`cannot read ${unreadable.join("; ")}`);
-  }
-  if (yamls.length) {
-    // Workflows ARE configured here, just none under this name: a --workflow /
-    // --workflow-file mismatch, not an absence. Saying "no CI configured" of a
-    // directory full of workflows is a false statement, and if
-    // --declare-no-ci let it through, it would hand the caller exit 0 for a repo
-    // whose CI it never looked at.
+  if (yamls.length && !noneNamedIsAbsent) {
     die(
-      `${yamls.length} workflow file(s) under ${dir}/ (${yamls.join(", ")}), none named '${workflowName}' — pass --workflow <name> or --workflow-file <path>`,
+      `${yamls.length} workflow file(s) under ${wfDir}/ at the ${side} commit (${yamls.map((e) => e.name).join(", ")}), none named '${workflow}' — pass --workflow <name> or --workflow-file <path>`,
     );
   }
-  return null; // directory present, no workflow files in it — genuinely no CI
+  return null;
 }
 
-const workflowFile = workflowFileArg || discoverWorkflowFile(workflowsPath(), workflow);
+// Whether the repo has CI at all is the base's to say: a PR adding a repo's
+// first CI workflow still reads no-ci until that workflow is on the base.
+const baseWf = findWorkflow(baseTree, "base", false);
+if (baseWf === null && wfEntry !== null) {
+  die(`${wfDir}/${wfEntry} does not exist at the base commit ${baseOid} — an explicit --workflow-file is never read as no CI`);
+}
 // No workflows at all, so this repo has no CI configured for ci-state to read.
 // That is its own verdict (`no-ci`), never the exit code reserved for "the
 // question could not be answered" — every way of failing to READ a workflow
-// (unreadable directory, unreadable file, malformed file) dies with exit 2
-// instead, above or via expectedJobs() below.
-const noCi = workflowFile === null;
+// (a path that is not a directory, a blob not read whole, a malformed file)
+// dies with exit 2 instead, above or via expectedJobs() below.
+const noCi = baseWf === null;
 if (noCi) {
-  vlog(`    no workflow files under ${WORKFLOWS_DIR}/ — no-ci verdict`);
+  vlog(`    no workflow files under ${WORKFLOWS_DIR}/ at the base commit — no-ci verdict`);
 }
 
-// --- Expected jobs, derived from the workflow file ------------------------
-// Never hardcoded: expectedJobs() parses the `jobs:` block of the workflow file
-// this run resolved (discoverWorkflowFile, or --workflow-file), so the expected
-// set tracks that file and follows it across repos. A reader asking whether an
-// empty `missing` is real should read that workflow for the current set. It is
-// deliberately not restated here: a set written into this comment is wrong the
-// moment a job is added.
+// --- Expected jobs ----------------------------------------------------------
+// Never hardcoded: the expected set is derived from the CI workflow's `jobs:`
+// block as it stands at the PR's two commits, read above — H, the job ids at
+// the head, and B, the job ids at the base. The run must carry every job in
+//
+//   expected = H ∪ (D ∩ required), where D = B − H
+//
+// D is what the PR's own diff drops, and `required` is every status-check
+// context the base branch's rules still require — its rulesets and classic
+// branch protection together. So a PR may drop a CI job only once no rule a
+// human owns still requires it: deleting a failing job is not a way to read
+// green while the base still demands that job. A job the PR adds needs no
+// clause of its own, since every job the run reports must succeed anyway.
+// The rules are read only when some dropped job is also absent from the run;
+// otherwise the answer cannot depend on them.
+//
+// A reader asking whether an empty `missing` is real should read that
+// workflow at both commits for the current sets. They are deliberately not
+// restated here: a set written into this comment is wrong the moment a job is
+// added.
 //
 // Not built from the fleet's own prose instead: `integration-docker` — a job in
 // the agent-brain repo's CI workflow, which is on an internal GHE host and so
@@ -432,13 +554,7 @@ if (noCi) {
 // component dirs but here (`git grep -l integration-docker -- commands scripts
 // skills` matches only this file), so a
 // list built from those documents would have accepted a run missing it.
-function expectedJobs(file) {
-  let text;
-  try {
-    text = readFileSync(file, "utf8");
-  } catch (e) {
-    die(`cannot read ${file}: ${e.message}`);
-  }
+function expectedJobs(text, label) {
   const ids = [];
   let inJobs = false;
   let sawNameOverride = false;
@@ -472,10 +588,50 @@ function expectedJobs(file) {
   // `sawNameOverride` stays false, and this function returns a verdict built
   // on an id the API no longer reports under.
   if (sawNameOverride) {
-    die(`${file} sets a job-level 'name:' — job ids no longer match reported job names, derivation invalid`);
+    die(`${label} sets a job-level 'name:' — job ids no longer match reported job names, derivation invalid`);
   }
-  if (ids.length === 0) die(`derived zero jobs from ${file} — refusing to answer`);
+  if (ids.length === 0) die(`derived zero jobs from ${label} — refusing to answer`);
   return ids;
+}
+
+// The status-check contexts the base branch's rules require: every active
+// ruleset's `required_status_checks` rule, plus classic branch protection's
+// own list. Both are read because either alone can miss a requirement — a
+// branch protected the classic way shows nothing under its rulesets. A
+// dropped job counts as required when its id equals a context exactly; the
+// app a context is pinned to plays no part. Either read failing is exit 2,
+// never an empty set: an empty set would let every dropped job go.
+function requiredContexts(branchName) {
+  const rulesPath = `repos/{owner}/{repo}/rules/branches/${branchName}`;
+  const pages = runJson("gh", ["api", rulesPath, "--hostname", host, "--paginate", "--slurp"], (v) => {
+    if (!Array.isArray(v) || v.some((page) => !Array.isArray(page))) return "expected pages of rules";
+    const rules = v.flat();
+    const bad = rules.findIndex(
+      (r) =>
+        !isObject(r) ||
+        (r.type === "required_status_checks" &&
+          (!Array.isArray(r.parameters?.required_status_checks) ||
+            r.parameters.required_status_checks.some((c) => !isObject(c) || typeof c.context !== "string"))),
+    );
+    return bad === -1 ? null : `rule ${bad} is not an object, or a required_status_checks rule without a list of contexts`;
+  });
+  const required = new Set();
+  for (const rule of pages.flat()) {
+    if (rule.type !== "required_status_checks") continue;
+    for (const c of rule.parameters.required_status_checks) required.add(c.context);
+  }
+  const protection = runJson("gh", ["api", `repos/{owner}/{repo}/branches/${branchName}`, "--hostname", host], (v) => {
+    if (!isObject(v) || !isObject(v.protection)) return `expected a branch carrying a protection object (${isObject(v) ? saw(v, "protection") : "not an object"})`;
+    const checks = v.protection.required_status_checks;
+    if (checks === undefined) return null;
+    if (!isObject(checks) || !Array.isArray(checks.contexts) || checks.contexts.some((c) => typeof c !== "string")) {
+      return `protection.required_status_checks.contexts is not a list of strings (${saw(v.protection, "required_status_checks")})`;
+    }
+    return null;
+  }).protection;
+  for (const c of protection.required_status_checks?.contexts ?? []) required.add(c);
+  vlog(`    required by ${branchName}'s rules (${required.size}): ${[...required].join(", ")}`);
+  return required;
 }
 
 // --- Find the run bound to this head --------------------------------------
@@ -489,6 +645,7 @@ function expectedJobs(file) {
 const reasons = [];
 let jobs = [];
 let missing = [];
+let dropped = [];
 let runId = null;
 let attempt = null;
 let runHeadSha = null;
@@ -502,12 +659,16 @@ if (noCi) {
       : `no workflows configured under ${WORKFLOWS_DIR}/ — pass --declare-no-ci once this repo is verified to gate on the reviewer's own suite run instead; absence never means pass`,
   );
 } else {
-  // Derived here rather than above the no-ci fork: `expected` is read on this
-  // arm alone, and the payload carries `missing`, not `expected`. Kept as this
-  // arm's first statement — expectedJobs() refuses on an underivable workflow,
-  // and that refusal belongs before the run query rather than after it.
-  const expected = expectedJobs(workflowFile);
-  vlog(`    expected jobs (${expected.length}): ${expected.join(", ")}`);
+  // Derived here rather than above the no-ci fork: the job sets are read on
+  // this arm alone. Kept as this arm's first statements — expectedJobs()
+  // refuses on an underivable workflow at either commit, and that refusal
+  // belongs before the run query rather than after it.
+  const baseJobs = expectedJobs(baseWf.text, `${baseWf.path} at the base commit`);
+  const headWf = findWorkflow(prRead.headTree, "head", true);
+  const headJobs = headWf === null ? [] : expectedJobs(headWf.text, `${headWf.path} at the head commit`);
+  const droppedByHead = baseJobs.filter((j) => !headJobs.includes(j));
+  vlog(`    head jobs (${headJobs.length}): ${headJobs.join(", ") || `none — no '${workflow}' workflow at the head`}`);
+  if (droppedByHead.length) vlog(`    dropped by the head (${droppedByHead.length}): ${droppedByHead.join(", ")} — still expected where a base rule requires them`);
   const runs = runJson(
     "gh",
     ["run", "list", "--branch", branch, "--workflow", workflow, "--limit", "30", "--json", "databaseId,headSha,status,conclusion,event,createdAt"],
@@ -622,11 +783,19 @@ if (noCi) {
     if (status !== "completed") reasons.push(`run status is ${status}, not completed`);
 
     const present = new Set(jobs.map((j) => j.name));
-    missing = expected.filter((e) => !present.has(e));
+    // A job the head dropped and the run lacks is excused only where no base
+    // rule still requires it, and only that case pays for reading the rules.
+    const absentDropped = droppedByHead.filter((j) => !present.has(j));
+    const required = absentDropped.length ? requiredContexts(prInfo.baseRefName) : new Set();
+    const stillRequired = absentDropped.filter((j) => required.has(j));
+    dropped = absentDropped.filter((j) => !required.has(j));
+    missing = [...headJobs.filter((e) => !present.has(e)), ...stillRequired];
     // An absent job reads as pending and is invisible in a checks summary. This is
     // the case a force-push creates: the run is cancelled, finished jobs keep their
     // conclusions, and the missing ones simply never appear.
-    if (missing.length) reasons.push(`expected jobs absent from the run: ${missing.join(", ")}`);
+    if (missing.length) {
+      reasons.push(`expected jobs absent from the run: ${missing.map((j) => (stillRequired.includes(j) ? `${j} (dropped by the head's workflow, still required by the base ruleset)` : j)).join(", ")}`);
+    }
 
     // `skipped` is NOT `passed`. When the currency check fails, the heavy suites
     // report skipped — they did not execute.
@@ -642,54 +811,20 @@ if (noCi) {
 }
 
 // --- Behind-count ---------------------------------------------------------
-// `gh api` does NOT infer the host from the local remote the way `gh pr` and
-// `gh run` do — on a GitHub Enterprise repo it silently 404s against github.com.
+// Uses the host derived above, which is why it no longer reads `origin` here.
 //
 // This block MUST NOT use run(): run()'s failure path calls die(), which calls
 // process.exit(2) and terminates before any surrounding catch can see it. An
 // earlier version wrapped run() in a try/catch here, which made the catch
 // unreachable — a transient failure on this purely informational side channel
-// hard-exited the tool and discarded a fully computed CI verdict. Use a helper
-// that returns null instead, so the behind-count can be unknown without costing
+// hard-exited the tool and discarded a fully computed CI verdict. tryRun()
+// returns null instead, so the behind-count can be unknown without costing
 // the caller the answer it actually asked for.
-//
-// GIT_DIR/GIT_WORK_TREE scrubbed (#1599, gitEnv()): this is the ONE spawn
-// primitive both of this file's git calls route through — `workflowsPath()`'s
-// `rev-parse --show-toplevel` above and `remote get-url origin` below — so
-// scrubbing it here protects both without a second copy. Harmless for the
-// `gh` calls also routed through it: neither name means anything to `gh`.
-// Measured: an ambient GIT_WORK_TREE alone answers `workflowsPath()`'s
-// `rev-parse --show-toplevel` with the AMBIENT path outright, silently, at
-// exit 0, regardless of the real cwd — sending workflow discovery to search
-// a directory that is not this repository at all. An ambient GIT_DIR alone
-// answers `remote get-url origin` for a DIFFERENT repository, silently, at
-// exit 0 — binding `gh api`'s `--hostname` to a repo the caller never named,
-// which behind-count's own comment above already treats as a 404 hazard for
-// an unrelated reason (GHE host inference) and this closes for a second.
-function tryRun(cmd, args) {
-  vlog(`$ ${cmd} ${args.join(" ")}`);
-  try {
-    return execFileSync(cmd, args, { encoding: "utf8", env: gitEnv() });
-  } catch (e) {
-    // Same discipline as run(), and it matters more here: --quiet suppresses
-    // vlog entirely, so under the controller's Monitor this line is discarded
-    // and the interpolated stderr would have been paid for and then thrown
-    // away. Name the cause; the child's own bytes already reached the caller.
-    vlog(
-      `    ${NAME}: ${cmd} failed: ${
-        e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)
-      }`,
-    );
-    return null;
-  }
-}
 
 let behind = null;
 try {
-  const remote = tryRun("git", ["remote", "get-url", "origin"]);
-  const repoJson = remote === null ? null : tryRun("gh", ["repo", "view", "--json", "nameWithOwner"]);
-  if (remote !== null && repoJson !== null) {
-    const host = remote.trim().replace(/^(git@|https:\/\/|ssh:\/\/git@)/, "").replace(/[:/].*$/, "");
+  const repoJson = tryRun("gh", ["repo", "view", "--json", "nameWithOwner"]);
+  if (repoJson !== null) {
     const repo = JSON.parse(repoJson).nameWithOwner;
     const cmpJson = tryRun("gh", ["api", "--hostname", host, `repos/${repo}/compare/${base}...${prHead}`]);
     if (cmpJson !== null) {
@@ -732,22 +867,22 @@ const verdict = noCi ? "no-ci" : reasons.length === 0 ? "green" : "not-green";
 writeAll(2, `\n${NAME}: verdict=${verdict}${reasons.length ? ` — ${reasons.join("; ")}` : ""}\n`);
 
 // Compact, single-line: the consumer is an agent/script parsing JSON, and the
-// pretty view already went to stderr. On the quiet hot path drop `jobs` and
-// `missing` too — `reasons` already states every failing/absent job, so they
-// are pure duplication in the two longest-lived contexts that poll this.
+// pretty view already went to stderr. On the quiet hot path drop `jobs`,
+// `missing` and `dropped` too — `reasons` already states every failing/absent
+// job, so they are pure duplication in the two longest-lived contexts that
+// poll this.
 //
 // no-ci drops them unconditionally, quiet or not — never folded into the
 // `!quiet` check above, which is about duplication, not about what was read.
-// `jobs`/`missing` stay at their `let jobs = []`/`let missing = []`
-// initialisers on this path (the no-ci branch never reaches the run-binding
-// arm that assigns them), so shipping them read as "checked, nothing
-// missing" to a caller gating on `missing.length` when no workflow was ever
-// read to check against. `emitRateLimited()` above already answers the same
-// "nothing was read" question by omitting `jobs`/`missing` rather than
+// They stay at their `let … = []` initialisers on this path (the no-ci branch
+// never reaches the run-binding arm that assigns them), so shipping them read
+// as "checked, nothing missing" to a caller gating on `missing.length` when no
+// workflow was ever read to check against. `emitRateLimited()` above already
+// answers the same "nothing was read" question by omitting them rather than
 // emitting them empty; this is the no-ci arm agreeing with it, one
 // convention for both places in this file that never bind a run.
 const payload = { pr, branch, prHead, runId, attempt, runHeadSha, status, conclusion, behind, verdict, reasons };
-if (!quiet && !noCi) Object.assign(payload, { jobs, missing });
+if (!quiet && !noCi) Object.assign(payload, { jobs, missing, dropped });
 writeAll(1, `${JSON.stringify(payload)}\n`);
 
 // Exit vocabulary unchanged: 0 only when the gate is satisfied, 1 when it is

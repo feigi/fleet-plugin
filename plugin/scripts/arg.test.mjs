@@ -684,8 +684,13 @@ test("writeAll() delivers the full payload across more confirmed EAGAIN stalls t
 // forwarded and exit 2 — and since #1803 it reaches gh with no argv at all,
 // the gh read being the first thing it does that can refuse.
 // A consumer added later belongs here deliberately.
+//
+// `origin`: ci-state reads the host every one of its `gh api` calls names off
+// the cwd's `origin` remote before its first gh read, and refuses without one
+// — so its row runs in a repository that has one, or the flood is never
+// reached and the row pins the wrong refusal.
 const GH_FLOOD = [
-  { script: "ci-state", argv: ["--pr", "42"] },
+  { script: "ci-state", argv: ["--pr", "42"], origin: true },
   { script: "diff-stats", argv: ["--pr", "42"] },
   { script: "pr-overlap", argv: ["--a", "5", "--b", "6"] },
   { script: "fleet-tick", argv: [] },
@@ -694,8 +699,12 @@ const GH_FLOOD = [
 // A `gh` that writes exactly `bytes` to stderr and then fails, so the script
 // under test takes its execFileSync catch. The payload is a file the stub
 // `cat`s rather than shell-generated, to keep the byte count exact.
-function runWithFloodingGh(script, argv, bytes) {
+function runWithFloodingGh(script, argv, bytes, origin = false) {
   const dir = tempDir("arg-die-flood-");
+  if (origin) {
+    spawnSync("git", ["init", "-q", dir], { stdio: "ignore" });
+    spawnSync("git", ["remote", "add", "origin", "https://github.com/acme/repo.git"], { cwd: dir, stdio: "ignore" });
+  }
   writeFileSync(join(dir, "flood"), "z".repeat(bytes));
   writeExecStub(join(dir, "gh"), `#!/bin/sh\ncat "${join(dir, "flood")}" >&2\nexit 1\n`);
   return spawnSync(
@@ -705,14 +714,14 @@ function runWithFloodingGh(script, argv, bytes) {
   );
 }
 
-for (const { script, argv } of GH_FLOOD) {
+for (const { script, argv, origin } of GH_FLOOD) {
   test(`${script}.mjs still exits 2 when gh fails behind a stderr larger than the pipe buffer`, () => {
     // The row the guard must NOT change. A catch around the write could just as
     // easily swallow the refusal on the ordinary path, or return before the
     // exit — so the small case pins both halves: the line lands, the code is 2.
     // Anchored on the script's own NAME prefix only, not the wording after it,
     // so rephrasing a refusal is not this test's business.
-    const ordinary = runWithFloodingGh(script, argv, 64);
+    const ordinary = runWithFloodingGh(script, argv, 64, origin);
     assert.equal(ordinary.status, 2, `expected exit 2 on the ordinary path, got ${ordinary.status}: ${ordinary.stderr}`);
     assert.match(ordinary.stderr, new RegExp(`^${script}: `, "m"), `${script}.mjs refused without saying so: ${ordinary.stderr}`);
 
@@ -735,7 +744,7 @@ for (const { script, argv } of GH_FLOOD) {
     // candidates.test.mjs's 7/15 unfixed / 0/20 fixed is a DIFFERENT
     // experiment — candidates.mjs under JQ_OVERRIDE (#299) — not these scripts
     // under a gh stub. The two are not one series; neither figure carries over.
-    const flooded = runWithFloodingGh(script, argv, 200_000);
+    const flooded = runWithFloodingGh(script, argv, 200_000, origin);
     assert.ok(
       flooded.stderr.length > 60_000,
       `gh's forwarded stderr must exceed the pipe buffer or this pins nothing, got ${flooded.stderr.length}`,

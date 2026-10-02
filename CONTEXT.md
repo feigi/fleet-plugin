@@ -151,6 +151,17 @@ Inert since ADR 0007 — the gate refuses the merge on currency directly, rather
 than waiting for a workflow to flip the colour back.
 _Avoid_: false green, cosmetic green
 
+**Expected jobs**:
+The CI jobs a PR's bound run must carry for `ci-state.mjs` to read it green:
+**H ∪ (D ∩ required)**, where H is the job ids of the CI workflow at the PR's
+head commit, B those at its base commit (`baseRefOid`), D = B − H the jobs the
+PR drops, and *required* every status-check context the base branch's rulesets
+or classic branch protection still require. Both workflows are read at those
+commits, never from the caller's working tree. A PR may drop a job only once no
+human-owned rule still requires it; jobs it adds are covered because every job
+the run reports must succeed. Applies the **Merge gate** to the tooling (#2332).
+_Avoid_: required checks (that is *required* alone), the job list
+
 ### Triage
 
 **Review deferral**:

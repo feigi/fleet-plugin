@@ -1716,7 +1716,7 @@ run id, attempt, conclusion, behind-count and per-job conclusions, branch derive
 from the PR — including the `gh api --hostname <host>` a GHE compare call needs,
 without which the probe 404s and `behind` comes back `null`, never 0, so every
 event reads as unknown-behind. Call it **without `--quiet`** — that flag drops
-`jobs` and `missing`.
+`jobs`, `missing` and `dropped`.
 
 A monitor event is a wake-up, never a verdict; members re-query at labelling
 time. See references/ci-and-staleness.md.
@@ -2734,7 +2734,7 @@ applied.
 Gate on the `check` job, **not** on `ci-state --quiet` exit 0: a behind PR never
 reaches full green, so an exit-0 gate strands it unlabelled. The finisher reads
 per-job state (`ci-state.mjs` without `--quiet`, or its `jobs`), since `--quiet`
-drops `jobs` and `missing`. Normal path, not only kill-recovery.
+drops `jobs`, `missing` and `dropped`. Normal path, not only kill-recovery.
 
 **`ci-state.mjs` reads `verdict: "no-ci"`** — no `check` job exists in this repo
 to gate on, and that is not a third way to skip the wait. **The
@@ -2746,7 +2746,7 @@ for instead:
 
 1. `ci-state.mjs` **without** the flag still reads `verdict: "no-ci"`. A repo
    whose CI is merely misconfigured — workflow files present under other names,
-   or `.github/workflows/` unreadable — exits 2 there rather than reading no-ci,
+   or `.github/workflows/` not a directory — exits 2 there rather than reading no-ci,
    so this is the check that separates real absence from misconfiguration, the
    case that must never ship silently.
 2. The reviewer's own final verdict reports a green `testCmd` run on the SHA it

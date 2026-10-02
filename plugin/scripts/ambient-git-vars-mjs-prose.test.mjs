@@ -155,11 +155,10 @@ const COVERED_MJS = {
   // on BOTH — no half here is inert the uniform way
   // `ambient-git-vars-prose.test.mjs`'s `inflight.sh`/`derive-testcmd.sh` are.
   "repo-root.mjs": 3,
-  // ONE spawn primitive (`tryRun`), reused for both this file's named git
-  // call sites (`workflowsPath()`'s rev-parse, the behind-count block's
-  // `remote get-url origin`) and for every `gh` call in the file — scrubbing
-  // once at the primitive protects both, and is harmless for `gh`, which
-  // reads neither name.
+  // ONE spawn primitive (`tryRun`), reused for this file's one git call
+  // (`remote get-url origin`, the host every `gh api` read names) and for the
+  // behind-count's `gh` probes — scrubbing once at the primitive covers the
+  // git call without a second copy.
   "ci-state.mjs": 1,
   // ONE spawn primitive (`git(args)`), reused for all four of this file's
   // named git call sites (`rev-parse --show-toplevel`, then three `-C root`

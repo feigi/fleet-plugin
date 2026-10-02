@@ -7,12 +7,13 @@
 //
 // `gh` is stubbed on PATH and logs every call it receives, so a test can
 // assert `run list`/`run view` were never reached under no-ci — the point of
-// skipping them (#262's REST budget) is unverifiable without that log. `git`
-// is real, and the repo fixture IS `git init`-ed: discovery anchors itself to
-// `git rev-parse --show-toplevel`, so a non-repo fixture would exit 2 before
-// reaching any of this. No `origin` is added, so `git remote get-url origin`
-// still fails on its own and the behind-count block degrades to `null`,
-// exactly the path it already has a contract for.
+// skipping them (#262's REST budget) is unverifiable without that log. The
+// workflow trees are served by that stub too, as the GraphQL reply the
+// script reads them from at the PR's head and base commits: `repoFiles`
+// paths under `.github/workflows/` become both trees unless `headFiles` or
+// `baseFiles` says otherwise, and nothing is read off the fixture's disk.
+// `git` is real and the fixture IS `git init`-ed with an `origin`, because
+// the host every `gh api` call names is read off that remote.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -34,7 +35,10 @@ const GH_STUB = `#!/bin/sh
 echo "$*" >> "$GH_LOG"
 fail() { [ -n "$GH_FAIL_MSG" ] && echo "$GH_FAIL_MSG" >&2; exit 1; }
 case "$1 $2" in
-  "pr view") [ -f "$PR_VIEW_FILE" ] && cat "$PR_VIEW_FILE" || fail ;;
+  "api graphql") case "$*" in *baseExpr=*) f="$BASE_READ_FILE" ;; *) f="$PR_READ_FILE" ;; esac
+    [ -f "$f" ] && cat "$f" || fail ;;
+  "api repos/{owner}/{repo}/rules/branches/"*) [ -f "$RULES_FILE" ] && cat "$RULES_FILE" || fail ;;
+  "api repos/{owner}/{repo}/branches/"*) [ -f "$PROTECTION_FILE" ] && cat "$PROTECTION_FILE" || fail ;;
   "run list") [ -f "$RUN_LIST_FILE" ] && cat "$RUN_LIST_FILE" || fail ;;
   "run view") [ -f "$RUN_VIEW_FILE" ] && cat "$RUN_VIEW_FILE" || fail ;;
   "repo view") [ -f "$REPO_VIEW_FILE" ] && cat "$REPO_VIEW_FILE" || fail ;;
@@ -43,10 +47,13 @@ esac
 `;
 
 const PR_HEAD = "abc123def";
+const BASE_OID = "bbb000bbb";
 const BRANCH = "fix/1";
 const PR_VIEW = JSON.stringify({
   headRefName: BRANCH,
   headRefOid: PR_HEAD,
+  baseRefName: "main",
+  baseRefOid: BASE_OID,
   state: "OPEN",
   mergeStateStatus: "CLEAN",
 });
@@ -61,29 +68,57 @@ const RUN_VIEW = JSON.stringify({
   headSha: PR_HEAD,
 });
 
-// repoFiles: { "relative/path": "content" }, written under a fresh cwd.
-// unreadable: repo-relative files OR directories chmod'ed 0o000 for the run and
-// restored after, so a permission probe cannot leave an undeletable tmpdir.
-// cwd: repo-relative directory to run from, for the repo-root anchoring test.
-// git: `false` leaves the fixture outside any repo, for the routes that have to
-// answer without a repo root.
+const WF = ".github/workflows";
+const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+// The GraphQL tree for `.github/workflows` at one commit, built from a
+// `{ path: content }` map: null when no path lies under it (the directory
+// does not exist there). A content that is an object stands for a blob the
+// API could not hand back whole — `{ text: null }` (binary or absent) or
+// `{ truncated: true }` — and `{ dir: true }` for a subdirectory entry.
+function treeOf(files) {
+  const entries = Object.entries(files)
+    .filter(([p]) => p.startsWith(`${WF}/`))
+    .map(([p, c]) => {
+      const name = p.slice(WF.length + 1);
+      if (isObj(c) && c.dir) return { name, type: "tree", object: { __typename: "Tree" } };
+      if (isObj(c)) return { name, type: "blob", object: { __typename: "Blob", text: c.truncated ? "name: CI\n" : (c.text ?? null), isTruncated: !!c.truncated } };
+      return { name, type: "blob", object: { __typename: "Blob", text: c, isTruncated: false } };
+    });
+  return entries.length ? { __typename: "Tree", entries } : null;
+}
+
+// The required-checks replies: `rules` is the contexts every ruleset requires,
+// `classic` the classic branch protection's own list.
+const rulesReply = (contexts) =>
+  JSON.stringify([[{ type: "deletion" }, { type: "required_status_checks", parameters: { required_status_checks: contexts.map((context) => ({ context, integration_id: 15368 })) } }]]);
+const protectionReply = (contexts) =>
+  JSON.stringify({ name: "main", protected: contexts.length > 0, protection: { enabled: contexts.length > 0, required_status_checks: { enforcement_level: contexts.length ? "non_admins" : "off", contexts, checks: [] } } });
+
+// repoFiles: { "relative/path": "content" } — the workflow files at BOTH
+// commits unless headFiles/baseFiles replaces one side.
+// baseTip: the oid the base branch's tip reports; anything but BASE_OID sends
+// the script to its second, oid-bound base read, which answers baseReadOid.
+// headOid: what `refs/pull/N/head` resolves to.
+// rules/classic: required contexts (ruleset / classic protection); pass
+// rulesRaw/protectionRaw to serve a reply verbatim, `null` to make it fail.
+// prRead: the whole first GraphQL reply verbatim, bypassing the builder.
+// cwd: repo-relative directory to run from.
 // pr: the `--pr` value, defaulting to the digits every other fixture wants;
 // `null` omits the flag entirely, for the tests that probe how the argument
 // itself is refused rather than what it selects.
 // gh responses default to the green fixtures above; pass `null` to make that gh
 // subcommand fail (exit 1) if reached, so an unexpected call surfaces as a
-// crash rather than silently serving the wrong fixture.
-function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "", tolerateUnparsedStdout = false, readOnlyStdout = false, nonBlockingStdout = false, git = true, origin = null, repoView = null, spawnEnv = {} } = {}) {
+// crash rather than silently serving the wrong fixture. `prView` is the
+// pullRequest object inside the first GraphQL reply; null fails that read.
+function run(args, { repoFiles = {}, headFiles = null, baseFiles = null, tipFiles = null, baseTreeRaw, headTreeRaw, baseTip = BASE_OID, baseReadOid = BASE_OID, headOid = PR_HEAD, rules = [], classic = [], rulesRaw, protectionRaw, prRead, cwd = ".", localFiles = {}, pr = "42", prView = PR_VIEW, runList = RUN_LIST, runView = RUN_VIEW, ghFailMsg = "", tolerateUnparsedStdout = false, readOnlyStdout = false, nonBlockingStdout = false, origin = "https://github.com/acme/repo.git", repoView = null, spawnEnv = {} } = {}) {
   const repoDir = mkdtempSync(join(tmpdir(), "ci-state-repo-"));
-  // Discovery resolves `.github/workflows` off `git rev-parse --show-toplevel`,
-  // never the cwd, so a fixture that reaches discovery has to be a real repo.
-  // No remote is added by default: the behind-count block still degrades to
-  // null as before. `origin` opts a fixture in, for the behind-count block's
-  // own tests.
-  if (git) spawnSync("git", ["init", "-q", repoDir], { stdio: "ignore" });
+  spawnSync("git", ["init", "-q", repoDir], { stdio: "ignore" });
   if (origin !== null) spawnSync("git", ["remote", "add", "origin", origin], { cwd: repoDir, stdio: "ignore" });
   const binDir = mkdtempSync(join(tmpdir(), "ci-state-bin-"));
-  for (const [rel, content] of Object.entries(repoFiles)) {
+  // localFiles: written into the caller's working tree, which the script must
+  // never read — the cwd-independence tests put a DIFFERENT workflow here.
+  for (const [rel, content] of Object.entries(localFiles)) {
     const full = join(repoDir, rel);
     mkdirSync(join(full, ".."), { recursive: true });
     writeFileSync(full, content);
@@ -94,6 +129,16 @@ function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prVi
   const ghLog = join(binDir, "gh.log");
   writeFileSync(ghLog, "");
 
+  const baseTree = baseTreeRaw !== undefined ? baseTreeRaw : treeOf(baseFiles ?? repoFiles);
+  const tipTree = tipFiles === null ? baseTree : treeOf(tipFiles);
+  let firstReply = prRead ?? null;
+  if (firstReply === null && prView !== null) {
+    const pull = JSON.parse(prView);
+    if (isObj(pull) && !Object.hasOwn(pull, "baseRef")) {
+      pull.baseRef = { target: { oid: baseTip, file: tipTree === null ? null : { object: tipTree } } };
+    }
+    firstReply = JSON.stringify({ data: { repository: { pullRequest: pull, head: { oid: headOid }, headTree: headTreeRaw !== undefined ? headTreeRaw : treeOf(headFiles ?? repoFiles) } } });
+  }
   const fixtureFile = (name, content) => {
     if (content === null) return "";
     const p = join(binDir, name);
@@ -105,21 +150,18 @@ function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prVi
     PATH: `${binDir}:${process.env.PATH}`,
     GH_LOG: ghLog,
     GH_FAIL_MSG: ghFailMsg,
-    PR_VIEW_FILE: fixtureFile("pr-view.json", prView),
+    PR_READ_FILE: fixtureFile("pr-read.json", firstReply),
+    BASE_READ_FILE: fixtureFile("base-read.json", JSON.stringify({ data: { repository: { base: { oid: baseReadOid }, baseTree } } })),
+    RULES_FILE: fixtureFile("rules.json", rulesRaw === undefined ? rulesReply(rules) : rulesRaw),
+    PROTECTION_FILE: fixtureFile("protection.json", protectionRaw === undefined ? protectionReply(classic) : protectionRaw),
     RUN_LIST_FILE: fixtureFile("run-list.json", runList),
     RUN_VIEW_FILE: fixtureFile("run-view.json", runView),
     REPO_VIEW_FILE: fixtureFile("repo-view.json", repoView),
-    // Last, so a test can deliberately put back a var #1599's scrub in
-    // tryRun() removes — that is the whole point of the ambient GIT_DIR/
-    // GIT_WORK_TREE tests below.
+    // Last, so a test can deliberately put back a var tryRun()'s gitEnv()
+    // scrub removes — that is the whole point of the ambient GIT_DIR test
+    // below.
     ...spawnEnv,
   };
-  const restore = [];
-  for (const rel of unreadable) {
-    const full = join(repoDir, rel);
-    restore.push([full, statSync(full).mode & 0o777]);
-    chmodSync(full, 0o000);
-  }
   // readOnlyStdout: hand the child a stdout it cannot write to, so its first
   // write fails with EBADF rather than by racing a reader. CLOSING fd 1 does
   // not do it — libuv reopens a closed standard fd onto /dev/null and the write
@@ -147,7 +189,6 @@ function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prVi
     });
   } finally {
     if (roStdout !== null) closeSync(roStdout);
-    for (const [full, mode] of restore.reverse()) chmodSync(full, mode);
   }
   const log = readFileSync(ghLog, "utf8");
   // Parsing eagerly is what lets every other test assert straight off `payload`,
@@ -225,59 +266,53 @@ test("two workflow files share the target name: ambiguous, dies (exit 2) rather 
   assert.match(r.stderr, /pass --workflow-file to pick one/);
 });
 
-// Both routes to an unreadable workflow file refuse with exit 2, and they
-// refuse at different depths: discovery opens each candidate as it scans, while
-// an explicit --workflow-file target is not read until expectedJobs(). Kept as
-// two cases because that difference is the point — a fix that closes only the
-// scan leaves the explicit route reading the file as absent, and absent is the
-// one shape that can be declared away as no-ci.
-//
-// The explicit route also runs OUTSIDE a repo — the second discrimination these
-// two cases carry. Naming the file answers the question without a repo root, so
-// a root lookup made eager again refuses a caller who never asked for
-// discovery, and nothing else in this file runs the script from a non-repo cwd.
-// The refusal is asserted down to its errno because `cannot read` alone is also
-// what a path that never existed produces: drift between the argument and the
-// fixture would leave this case pinning absence, the shape above.
-for (const [route, args, opts] of [
-  ["the discovery scan", [], {}],
-  ["an explicit --workflow-file", ["--workflow-file", ".github/workflows/ci.yml"], { git: false }],
+// Both routes to a workflow blob the API could not hand back whole refuse with
+// exit 2: discovery has to read every YAML blob to learn which one carries the
+// workflow's name, and an explicit --workflow-file names its target outright.
+// A text that is absent (binary) and one that is truncated are both cases: a
+// truncated text is not a shorter workflow, and parsing it would derive a job
+// set from half a file.
+for (const [route, args] of [
+  ["the discovery scan", []],
+  ["an explicit --workflow-file", ["--workflow-file", ".github/workflows/ci.yml"]],
 ]) {
-  test(`an unreadable workflow file reached through ${route}: exit 2, never no-ci`, (t) => {
-    if (process.getuid?.() === 0) return t.skip("root reads every file");
-    const r = run(args, {
-      repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
-      unreadable: [".github/workflows/ci.yml"],
-      ...opts,
+  for (const [what, blob] of [["absent", { text: null }], ["truncated", { truncated: true }]]) {
+    test(`a workflow blob whose text came back ${what}, reached through ${route}: exit 2, never no-ci`, () => {
+      for (const extra of [[], ["--declare-no-ci"]]) {
+        const r = run([...args, ...extra], { repoFiles: { ".github/workflows/ci.yml": blob } });
+        assert.equal(r.status, 2, r.stdout + r.stderr);
+        assert.match(r.stderr, /cannot read \.github\/workflows\/ci\.yml at the base commit/);
+        assert.equal(r.payload, null);
+      }
     });
-    assert.equal(r.status, 2, r.stdout + r.stderr);
-    assert.match(r.stderr, /cannot read [^\n]*: EACCES: permission denied/);
-  });
+  }
 }
 
 // --- Error policy (#111): only a genuinely absent workflow set is `no-ci` ---
-// The verdict must be reachable one way only: `.github/workflows/` absent, or
-// present and holding no workflow files. Every other outcome — the directory
-// unreadable, the target unreadable, files present under other names — is exit
-// 2, "the question could not be answered", and `--declare-no-ci` must not
-// convert any of them to exit 0. The four tests below pin one branch each,
-// because the first review of this file reached merge with two of them wrong.
+// The verdict must be reachable one way only: `.github/workflows/` absent at
+// the base, or present and holding no workflow files. Every other outcome —
+// the path not a directory, a blob not read whole, files present under other
+// names — is exit 2, "the question could not be answered", and
+// `--declare-no-ci` must not convert any of them to exit 0.
 
 const CI_WORKFLOW_COMMENTED = CI_WORKFLOW.replace("name: CI", `name: "CI"  # main pipeline`);
 
-test("unreadable .github/workflows directory: exit 2, never no-ci — --declare-no-ci cannot let it through", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root reads every directory");
+test("`.github/workflows` that is not a directory at the base: exit 2, never no-ci — --declare-no-ci cannot let it through", () => {
   for (const args of [[], ["--declare-no-ci"]]) {
-    // Same repo, same real CI: only the directory's mode differs. Reading this
-    // as no-ci reported "no CI configured" for a repo whose run was `failure`.
     const r = run(args, {
       repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
-      unreadable: [".github/workflows"],
+      baseTreeRaw: { __typename: "Blob" },
     });
     assert.equal(r.status, 2, r.stdout + r.stderr);
-    assert.match(r.stderr, /cannot read/);
+    assert.match(r.stderr, /\.github\/workflows at the base commit is not a readable directory/);
     assert.equal(r.payload, null);
   }
+});
+
+test("a workflows directory holding no YAML at the base is a genuine no-ci", () => {
+  const r = run([], { repoFiles: { ".github/workflows/README.md": "nothing here" } });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "no-ci");
 });
 
 test("workflow name with a trailing YAML comment (and quotes) still matches — a configured repo never reads as no-ci", () => {
@@ -303,67 +338,71 @@ test("workflow files present but none named CI: exit 2 naming them, never a decl
   }
 });
 
-test("an unreadable irrelevant sibling does not blind discovery to a readable target", (t) => {
-  if (process.getuid?.() === 0) return t.skip("root reads every file");
+// Discovery cannot skip a YAML blob it could not read: until its text is
+// read, nothing says it is not a second file carrying the workflow's name.
+test("an unreadable sibling YAML blob refuses rather than being skipped — its name cannot be settled", () => {
   const r = run([], {
     repoFiles: {
       ".github/workflows/ci.yml": CI_WORKFLOW,
-      ".github/workflows/zz-other.yml": OTHER_WORKFLOW,
+      ".github/workflows/zz-other.yml": { truncated: true },
     },
-    unreadable: [".github/workflows/zz-other.yml"],
   });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.equal(r.payload.verdict, "green");
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /cannot read \.github\/workflows\/zz-other\.yml/);
 });
 
-test("discovery is anchored to the repo root, not the cwd — a subdirectory answers the same", () => {
+// A non-YAML entry and a subdirectory are neither workflows nor unreadable
+// workflows: they must not refuse a repo whose CI workflow reads fine.
+test("a non-YAML file or a subdirectory in the workflows directory does not disturb discovery", () => {
   const r = run([], {
-    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
-    cwd: "scripts",
+    repoFiles: {
+      ".github/workflows/ci.yml": CI_WORKFLOW,
+      ".github/workflows/README.md": { text: null },
+      ".github/workflows/shared.yml": { dir: true },
+    },
   });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(r.payload.verdict, "green");
 });
 
-// #1599: tryRun()'s single spawn primitive (used for both this script's git
-// AND gh calls) passed no env at all before this fix, and #1020's own census
-// could not see either of its two git call sites — its scan is `.sh`-only.
-// Measured directly: an ambient GIT_DIR or GIT_WORK_TREE (a git hook,
-// `rebase --exec`, `bisect run`) corrupts each call in its own distinct way,
-// silently, at exit 0.
-test("workflowsPath()'s rev-parse: an inherited GIT_WORK_TREE must not substitute a foreign toplevel for the caller's own repo root", () => {
-  const other = mkdtempSync(join(tmpdir(), "ci-state-other-"));
-  spawnSync("git", ["init", "-q", other], { stdio: "ignore" });
-  try {
-    const r = run([], {
-      repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
-      // A subdirectory, the realistic shape: workflowsPath() never receives
-      // a repo root as an argument, it derives one from wherever the process
-      // happens to be running — measured, unscrubbed, an ambient
-      // GIT_WORK_TREE answers `--show-toplevel` with the AMBIENT path
-      // outright regardless of the real cwd, which then sends discovery
-      // looking for `.github/workflows` in a directory that is not this
-      // repository at all.
-      cwd: "scripts",
-      spawnEnv: { GIT_WORK_TREE: other },
-    });
-    assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.equal(r.payload.verdict, "green",
-      "an ambient GIT_WORK_TREE must not relocate workflow discovery into a foreign directory that has no .github/workflows");
-  } finally {
-    rmSync(other, { recursive: true, force: true });
-  }
+// The verdict is a property of the PR and its run, not of whoever asks. The
+// caller's working tree used to supply the expected set, so a `main` checkout
+// and the PR's own worktree read the same run differently. Here the working
+// tree carries a CI workflow with a job the run never had, and the answer from
+// it, from a subdirectory, and from an empty tree must be identical.
+test("the same PR and run give the same verdict whatever the caller's working tree holds", () => {
+  const repoFiles = { ".github/workflows/ci.yml": CI_WORKFLOW };
+  const stale = { ".github/workflows/ci.yml": `${CI_WORKFLOW}  stale-job:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n` };
+  const answers = [
+    run([], { repoFiles }),
+    run([], { repoFiles, localFiles: stale }),
+    run([], { repoFiles, localFiles: stale, cwd: "scripts" }),
+  ];
+  for (const r of answers) assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(answers[1].payload, answers[0].payload);
+  assert.deepEqual(answers[2].payload, answers[0].payload);
 });
 
-test("the behind-count probe: an inherited GIT_DIR must not bind gh's --hostname to another repository's origin", () => {
+test("a cwd with no origin remote refuses (exit 2) before asking gh anything — no repository to resolve", () => {
+  const r = run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW }, origin: null });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /no repository to resolve/);
+  assert.equal(r.log, "", "nothing may be read for a repository that was never resolved");
+});
+
+// tryRun() — the spawn primitive the `origin` read goes through —
+// scrubs GIT_DIR/GIT_WORK_TREE. Measured directly: an ambient GIT_DIR (a git
+// hook, `rebase --exec`, `bisect run`) answers `remote get-url origin` for a
+// DIFFERENT repository, silently, at exit 0 — and that host is named on every
+// `gh api` call, the workflow read included.
+test("an inherited GIT_DIR must not bind gh's --hostname to another repository's origin", () => {
   // The real repository's own origin, and the OTHER (ambient) repository's —
   // deliberately different hosts, so the logged `--hostname` argument tells
   // the two apart unambiguously. `gh repo view` is stubbed to answer for the
   // real repository regardless (it consults no git state at all), so the
-  // only way the wrong host can reach the logged `gh api` call is through
+  // only way the wrong host can reach a logged `gh api` call is through
   // `git remote get-url origin` answering for the ambient repository instead
-  // of the real one — measured, unscrubbed, that is exactly what an ambient
-  // GIT_DIR does.
+  // of the real one.
   const other = mkdtempSync(join(tmpdir(), "ci-state-other-"));
   spawnSync("git", ["init", "-q", other], { stdio: "ignore" });
   spawnSync("git", ["remote", "add", "origin", "https://ghe-other.example/other/other-repo.git"], { cwd: other, stdio: "ignore" });
@@ -375,8 +414,10 @@ test("the behind-count probe: an inherited GIT_DIR must not bind gh's --hostname
       spawnEnv: { GIT_DIR: join(other, ".git") },
     });
     assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.match(r.log, /api --hostname ghe-real\.example /,
-      "an ambient GIT_DIR must not substitute the OTHER repository's origin host for this repository's own");
+    assert.match(r.log, /^api graphql --hostname ghe-real\.example /m,
+      "an ambient GIT_DIR must not substitute the OTHER repository's origin host on the workflow read");
+    assert.match(r.log, /^api --hostname ghe-real\.example /m,
+      "an ambient GIT_DIR must not substitute the OTHER repository's origin host on the behind-count probe");
     assert.doesNotMatch(r.log, /ghe-other\.example/,
       `the ambient repository's host must never reach gh at all, and the log reads: ${r.log}`);
   } finally {
@@ -474,6 +515,177 @@ test("no run in the list matches the PR head at all: not-green, exit 1 — the u
   assert.equal(r.payload.verdict, "not-green");
   assert.match(r.payload.reasons.join("; "), /no CI run whose headSha equals the PR head abc123def/);
 });
+
+// --- Expected = H ∪ (D ∩ required): a PR may drop a job no rule requires ----
+// H is the head's CI job set, B the base's, D = B − H the jobs the PR drops.
+// The base here runs `check` and `integration`, the head only `check`, and the
+// run (the default fixture) carries `check` alone, succeeded — so whether
+// `integration` may be absent is decided by the base branch's rules alone.
+const DROPS_INTEGRATION = {
+  baseFiles: { ".github/workflows/ci.yml": TWO_JOB_WORKFLOW },
+  headFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+};
+const RULES_READ = /^api repos\/\{owner\}\/\{repo\}\/rules\/branches\/main /m;
+const PROTECTION_READ = /^api repos\/\{owner\}\/\{repo\}\/branches\/main /m;
+
+test("a job the head drops and no rule requires: green, named in `dropped`, never in `missing`", () => {
+  const r = run([], DROPS_INTEGRATION);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+  assert.deepEqual(r.payload.dropped, ["integration"]);
+  assert.deepEqual(r.payload.missing, []);
+  assert.match(r.log, RULES_READ, "an allowed drop has to be established against the rules, never assumed");
+  assert.match(r.log, PROTECTION_READ);
+});
+
+for (const [authority, opts] of [
+  ["a ruleset", { rules: ["check", "integration"] }],
+  ["classic branch protection alone", { classic: ["integration"] }],
+]) {
+  test(`a job the head drops that ${authority} still requires: not-green, in \`missing\`, annotated`, () => {
+    const r = run([], { ...DROPS_INTEGRATION, ...opts });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.equal(r.payload.verdict, "not-green");
+    assert.deepEqual(r.payload.missing, ["integration"]);
+    assert.deepEqual(r.payload.dropped, []);
+    assert.match(r.payload.reasons.join("; "), /expected jobs absent from the run: integration \(dropped by the head's workflow, still required by the base ruleset\)/);
+  });
+}
+
+// What the rule must ACCEPT: a required context is matched to a job id by
+// exact string, so a context that only resembles the dropped job — another
+// workflow's job, a display name — does not keep it expected.
+test("a required context that merely resembles the dropped job does not keep it expected", () => {
+  const r = run([], { ...DROPS_INTEGRATION, rules: ["CI / integration", "Integration"], classic: ["integration-docker"] });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(r.payload.dropped, ["integration"]);
+});
+
+test("no dropped job absent from the run: the rules are never read", () => {
+  for (const opts of [
+    { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } },
+    // The head drops `integration`, but the run reports it anyway — its own
+    // conclusion is judged like any job's, so the rules cannot matter.
+    { ...DROPS_INTEGRATION, runView: JSON.stringify({ ...JSON.parse(RUN_VIEW), jobs: [{ name: "check", status: "completed", conclusion: "success" }, { name: "integration", status: "completed", conclusion: "success" }] }) },
+  ]) {
+    const r = run([], { ...opts, rulesRaw: null, protectionRaw: null });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.deepEqual(r.payload.dropped, []);
+    assert.doesNotMatch(r.log, RULES_READ);
+    assert.doesNotMatch(r.log, PROTECTION_READ);
+  }
+});
+
+test("a job the head adds and the run lacks is missing like any other, and reads no rules", () => {
+  const r = run([], {
+    baseFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    headFiles: { ".github/workflows/ci.yml": TWO_JOB_WORKFLOW },
+    rulesRaw: null,
+    protectionRaw: null,
+  });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.deepEqual(r.payload.missing, ["integration"]);
+  assert.match(r.payload.reasons.join("; "), /expected jobs absent from the run: integration$|expected jobs absent from the run: integration;/);
+  assert.doesNotMatch(r.log, RULES_READ);
+});
+
+// A head with no CI workflow contributes no jobs (H = ∅): every base job is a
+// drop, and the still-required ones stay expected. Removed outright and
+// renamed away (YAML present, none named CI) are both that case at the head,
+// where at the base the second one is a refusal.
+for (const [shape, headFiles] of [
+  ["no CI workflow at all", {}],
+  ["only workflows under other names", { ".github/workflows/release-label.yml": OTHER_WORKFLOW }],
+]) {
+  test(`a head with ${shape}: its still-required base jobs stay expected`, () => {
+    const r = run([], { baseFiles: { ".github/workflows/ci.yml": TWO_JOB_WORKFLOW }, headFiles, rules: ["integration"] });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.deepEqual(r.payload.missing, ["integration"]);
+  });
+}
+
+test("the base tree is the one at baseRefOid, never the base branch's newer tip", () => {
+  // The tip has since gained `integration`, which the rules require; the
+  // commit the PR is based on never had it. Judged against the tip, the PR
+  // would "drop" a job it never had and read not-green.
+  const r = run([], {
+    baseTip: "ccc111ccc",
+    tipFiles: { ".github/workflows/ci.yml": TWO_JOB_WORKFLOW },
+    baseFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    headFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    rules: ["integration"],
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "green");
+  assert.match(r.log, /baseExpr=bbb000bbb/, "the base has to be read at baseRefOid itself");
+});
+
+test("a base branch that no longer exists still reads the base at baseRefOid", () => {
+  const r = run([], {
+    repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+    prView: JSON.stringify({ ...JSON.parse(PR_VIEW), baseRef: null }),
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.log, /baseExpr=bbb000bbb/);
+});
+
+// Every way the expected set's sources can fail to answer is exit 2 (or the
+// rate-limited payload) — never the base set alone, never green.
+for (const [what, opts, said] of [
+  ["the head ref answering for another commit", { headOid: "fff999fff" }, /refs\/pull\/42\/head resolves to fff999fff, not the PR head abc123def/],
+  ["the base read answering for another commit", { baseTip: "ccc111ccc", baseReadOid: "ddd222ddd" }, /base commit bbb000bbb reads back as ddd222ddd/],
+  ["two head files sharing the CI name", { headFiles: { ".github/workflows/a.yml": CI_WORKFLOW, ".github/workflows/b.yml": CI_WORKFLOW } }, /2 workflow files under \.github\/workflows\/ at the head commit are named 'CI'/],
+  ["a head CI blob truncated", { headFiles: { ".github/workflows/ci.yml": { truncated: true } } }, /cannot read \.github\/workflows\/ci\.yml at the head commit/],
+  ["the PR read missing baseRefOid", { prView: JSON.stringify({ headRefName: BRANCH, headRefOid: PR_HEAD, baseRefName: "main" }) }, /baseRefOid \(the base sha\) is not a non-empty string \(the key is absent\)/],
+  ["the ruleset read failing", { ...DROPS_INTEGRATION, rulesRaw: null }, /gh failed/],
+  ["the classic protection read failing", { ...DROPS_INTEGRATION, protectionRaw: null }, /gh failed/],
+  ["the ruleset read the wrong shape", { ...DROPS_INTEGRATION, rulesRaw: JSON.stringify([[{ type: "required_status_checks", parameters: {} }]]) }, /required_status_checks rule without a list of contexts/],
+  ["the protection read without a protection object", { ...DROPS_INTEGRATION, protectionRaw: JSON.stringify({ name: "main" }) }, /protection object \(the key is absent\)/],
+]) {
+  test(`${what}: exit 2, never a verdict on the base set or green`, () => {
+    const r = run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW }, ...opts });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, said);
+    assert.equal(r.payload, null);
+  });
+}
+
+test("a quota refusal on the rules read is the rate-limited payload, naming that read", () => {
+  const r = run([], { ...DROPS_INTEGRATION, rulesRaw: null, ghFailMsg: "API rate limit exceeded for user ID 1." });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.equal(r.payload.verdict, "rate-limited");
+  assert.match(r.payload.reasons.join("; "), /gh api repos\/\{owner\}\/\{repo\}\/rules\/branches\/main/);
+});
+
+// --workflow-file names a repo-relative path read at both commits. Missing at
+// the base it refuses — an explicit target is never no-ci; missing at the head
+// it contributes no jobs, like any head without its CI workflow.
+test("--workflow-file absent at the base: exit 2 even under --declare-no-ci", () => {
+  const r = run(["--workflow-file", ".github/workflows/ci.yml", "--declare-no-ci"], {
+    baseFiles: { ".github/workflows/other.yml": CI_WORKFLOW },
+    headFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /\.github\/workflows\/ci\.yml does not exist at the base commit bbb000bbb/);
+});
+
+test("--workflow-file absent at the head: the head contributes no jobs and the drop rule decides", () => {
+  const r = run(["--workflow-file", "./.github/workflows/ci.yml"], {
+    baseFiles: { ".github/workflows/ci.yml": TWO_JOB_WORKFLOW },
+    headFiles: { ".github/workflows/other.yml": CI_WORKFLOW },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(r.payload.dropped, ["integration"]);
+});
+
+for (const bad of ["/abs/.github/workflows/ci.yml", ".github/../ci.yml", "ci.yml", ".github/workflows/"]) {
+  test(`--workflow-file ${bad}: refused before any read — not a repo-relative file path`, () => {
+    const r = run(["--workflow-file", bad], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.match(r.stderr, /--workflow-file takes a repo-relative path/);
+    assert.equal(r.log, "");
+  });
+}
 
 // --- #1410: two runs tied on head SHA AND createdAt to the second ----------
 // A stable sort with no tie-break keeps gh's own (unspecified) API order on
@@ -616,7 +828,7 @@ test("trailing --base (no value) dies (exit 2) rather than silently comparing ag
   const r = run(["--base"]);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--base needs a value/);
-  assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+  assert.equal(r.log, "", "must die before ever asking gh anything");
 });
 
 test("--workflow=CI form dies by name, not silently read as absent (indexOf cannot see it)", () => {
@@ -636,7 +848,7 @@ for (const flag of ["declare-no-ci", "quiet"]) {
       const r = run([`--${flag}${v}`]);
       assert.equal(r.status, 2);
       assert.match(r.stderr, new RegExp(`--${flag} is a boolean flag, not --${flag}=`));
-      assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+      assert.equal(r.log, "", "must die before ever asking gh anything");
     });
   }
 }
@@ -652,7 +864,7 @@ test("--declare-no-ci=true dies behind another flag too, not only at the front o
   const r = run(["--quiet", "--declare-no-ci=true"]);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--declare-no-ci is a boolean flag, not --declare-no-ci=/);
-  assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+  assert.equal(r.log, "", "must die before ever asking gh anything");
 });
 
 // The control: the new `=` guard must not touch the bare spelling. --quiet's
@@ -663,28 +875,28 @@ test("--declare-no-ci=true dies behind another flag too, not only at the front o
 test("--quiet still reads as present in its bare spelling — the = refusal is not a blanket one", () => {
   const loud = run([], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } });
   assert.equal(loud.status, 0, loud.stdout + loud.stderr);
-  assert.match(loud.stderr, /\$ gh pr view/);
+  assert.match(loud.stderr, /\$ gh api graphql/);
 
   const quiet = run(["--quiet"], { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } });
   assert.equal(quiet.status, 0, quiet.stdout + quiet.stderr);
-  assert.doesNotMatch(quiet.stderr, /\$ gh pr view/);
-  assert.match(quiet.log, /pr view/, "gh still ran despite the quieter stderr");
+  assert.doesNotMatch(quiet.stderr, /\$ gh api graphql/);
+  assert.match(quiet.log, /api graphql/, "gh still ran despite the quieter stderr");
 });
 
 // #677. The other half of what `--quiet` does, and the half the flag exists for:
-// `jobs` and `missing` leave the JSON payload with it and are present without
+// `jobs`, `missing` and `dropped` leave the JSON payload with it and are present without
 // it. Same fixture both ways, so the flag is the only difference. The field
 // names are spelled out rather than derived from ci-state.mjs — deriving them
 // from the assignment under test would make this pass vacuously if that
 // assignment changed, which is the one thing it must not do. The deriving is
 // `quiet-payload-prose.test.mjs`'s job, over the prose that has to agree.
-test("--quiet drops `jobs` and `missing` from the payload; without it they are there", () => {
+test("--quiet drops `jobs`, `missing` and `dropped` from the payload; without it they are there", () => {
   const opts = { repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW } };
   const loud = run([], opts);
   const quiet = run(["--quiet"], opts);
   assert.equal(loud.status, 0, loud.stdout + loud.stderr);
   assert.equal(quiet.status, 0, quiet.stdout + quiet.stderr);
-  for (const field of ["jobs", "missing"]) {
+  for (const field of ["jobs", "missing", "dropped"]) {
     assert.ok(field in loud.payload, `without --quiet the payload must carry \`${field}\`, and it reads ${JSON.stringify(loud.payload)}`);
     assert.ok(!(field in quiet.payload), `--quiet must drop \`${field}\` from the payload, and it reads ${JSON.stringify(quiet.payload)}`);
   }
@@ -703,7 +915,7 @@ test("--base followed by another flag is rejected, not read as the string \"--wo
   const r = run(["--base", "--workflow", "CI"]);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--base needs a value/);
-  assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+  assert.equal(r.log, "", "must die before ever asking gh anything");
 });
 
 // #463 fallout: `--workflow-file` is the one flag this file used to read below
@@ -715,7 +927,7 @@ test("trailing --workflow-file names --workflow-file, not the innocent value of 
   const r = run(["--workflow-file", "--base", "main"]);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--workflow-file needs a value/);
-  assert.doesNotMatch(r.log, /pr view/, "must die before ever asking gh anything");
+  assert.equal(r.log, "", "must die before ever asking gh anything");
 });
 
 test("--base given a whitespace-only value dies rather than comparing against the default base", () => {
@@ -736,8 +948,8 @@ test("--base given a whitespace-only value dies rather than comparing against th
 
 // Every assertion in this section is about the REFUSAL LINE, not about stderr
 // as a whole: the diagnostic stream echoes each gh command before running it,
-// and that echo carries `pr view`, `run view` and every field name in the
-// `--json` list — `$ gh pr view 42 --json headRefName,headRefOid,state,...`
+// and that echo carries `api graphql`, `run view` and every field name the
+// query asks for — `$ gh api graphql … headRefName headRefOid baseRefName …`
 // (measured). `assert.match(r.stderr, /headRefName/)` is therefore satisfied
 // by a refusal that names nothing at all, which leaves the exit status as the
 // only load-bearing half of such a case. Asserting on the line itself is what
@@ -779,7 +991,7 @@ for (const [what, field, prFields, saw, notSaw] of [
       prView: JSON.stringify({ state: "OPEN", mergeStateStatus: "CLEAN", ...prFields }),
     });
     assert.equal(r.status, 2, r.stdout + r.stderr);
-    assert.match(r.stderr, /pr view/);
+    assert.match(r.stderr, /api graphql/);
     assert.match(refusal(r), new RegExp(field));
     assert.match(refusal(r), saw);
     assert.doesNotMatch(refusal(r), notSaw);
@@ -993,13 +1205,12 @@ test("in-progress job with conclusion:null is accepted — not refused as malfor
 // also redden tests above, which happen to pass them.
 //
 // So: every flag ci-state.mjs accepts, in ONE green run. --workflow-file is the
-// one that would not otherwise be here, because its arg() call sits far below
-// the sweep, next to discoverWorkflowFile — the sweep needs the NAME, and a set
-// built by reading down to the first gh call would miss it.
+// one that would not otherwise be here, because its value is first needed far
+// below the sweep, where the workflow trees are read — the sweep needs the
+// NAME, and a set built by reading down to the first gh call would miss it.
 //
-// Relative to cwd on purpose: run() builds its repo in a fresh tmpdir this
-// scope cannot name, and the script resolves an explicit --workflow-file
-// against cwd, which run() sets to that repo.
+// A repo-relative path: the script reads it at the PR's head and base
+// commits, which run() serves from the same files.
 test("every flag ci-state.mjs accepts survives the unknown-flag sweep in one invocation", () => {
   const r = run(["--base", "main", "--workflow", "CI", "--workflow-file", ".github/workflows/ci.yml", "--declare-no-ci", "--quiet"], {
     repoFiles: { ".github/workflows/ci.yml": CI_WORKFLOW },
@@ -1053,7 +1264,7 @@ test("a rate-limited gh read names the quota as its cause in the payload, at the
   // indistinguishable from a correct report at the point a caller reads it.
   // assert/strict, so this pins the type as well as the value.
   assert.equal(r.payload.pr, 42);
-  // The refused query, not merely that a quota was mentioned: `pr view` is
+  // The refused query, not merely that a quota was mentioned: the PR read is
   // GraphQL and `run list`/`run view` are REST, so which one was refused is
   // what separates an exhausted REST quota from a token or repo problem. The
   // fixture refuses `run list` — keep this literal in step with it.
@@ -1102,7 +1313,7 @@ test("a gh read failing for any other reason reports exactly as it did before: e
 // observed state.
 test("the outage payload reports no CI state it could not observe", () => {
   const r = ghFailure(RATE_LIMIT_STDERR);
-  for (const field of ["status", "conclusion", "jobs", "missing", "runId"]) {
+  for (const field of ["status", "conclusion", "jobs", "missing", "dropped", "runId"]) {
     assert.ok(
       !(field in r.payload),
       `a probe that never read CI must not report \`${field}\`, and the payload reads ${JSON.stringify(r.payload)}`,
@@ -1126,7 +1337,7 @@ test("a payload for a question never asked — no-ci — omits `jobs`/`missing` 
   assert.equal(noCi.status, 1, noCi.stdout + noCi.stderr);
   assert.equal(noCi.payload.verdict, "no-ci");
 
-  for (const field of ["jobs", "missing"]) {
+  for (const field of ["jobs", "missing", "dropped"]) {
     assert.ok(
       !(field in noCi.payload),
       `no-ci never binds a run, so \`${field}\` must be absent, not an empty array — and the payload reads ${JSON.stringify(noCi.payload)}`,
@@ -1140,7 +1351,7 @@ test("a payload for a question never asked — no-ci — omits `jobs`/`missing` 
 test("no CI + --declare-no-ci: `jobs`/`missing` stay absent — the flag changes the gate, not what was read", () => {
   const r = run(["--declare-no-ci"]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  for (const field of ["jobs", "missing"]) {
+  for (const field of ["jobs", "missing", "dropped"]) {
     assert.ok(!(field in r.payload), `\`${field}\` must stay absent under --declare-no-ci too — got ${JSON.stringify(r.payload)}`);
   }
 });
@@ -1204,7 +1415,7 @@ test("a non-numeric --pr refuses before any query, rather than reporting `pr: nu
 // so each value refuses only while its own anchor is present and neither mutant
 // survives the pair. What a surviving mutant lets through is this block's whole
 // defect back: Number("42x") is NaN, the payload's only identifying field
-// serializes to null, and `gh pr view 42x` resolves the value as a BRANCH — the
+// serializes to null, and the PR read would build `refs/pull/42x/head` out of it — the
 // ambiguity the digits-only shape is chosen to forfeit against. Every other
 // --pr this suite feeds the guard is all digits or none, and both mutants agree
 // with the real guard on those.
