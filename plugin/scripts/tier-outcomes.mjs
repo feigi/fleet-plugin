@@ -5,7 +5,7 @@
 // `opus` for two implementers dispatched as a generic `task` that ran
 // sonnet/high, which is neither tier arm.
 //
-//   append <pr> --class <c> --closed-own-ticket yes|no --minted-false-claim yes|no
+//   append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no
 //          --note <text> [--sizing light|heavy] [--profile <p>] [--loc <n>] [--files <n>]
 //     Fills `run_date` (today, the ruling date), `pr`, `ticket` (off
 //     `gh pr view --json closingIssuesReferences`) and `tier`. Idempotent by
@@ -253,13 +253,13 @@ export function unrecordedReviewedPrs(ledger, rows) {
 // CLI
 // ---------------------------------------------------------------------------
 
-const USAGE = "usage: tier-outcomes.mjs append <pr> --class <c> --closed-own-ticket yes|no --minted-false-claim yes|no --note <text> "
+const USAGE = "usage: tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note <text> "
   + "[--sizing light|heavy] [--profile <p>] [--loc <n>] [--files <n>] [--file <tsv>] [--member-outcomes <tsv>] [--ledger <path>]\n"
   + "       tier-outcomes.mjs check [--live] [--file <tsv>] [--member-outcomes <tsv>] [--ledger <path>]";
 
 const die = makeDie(NAME);
 const APPEND_FLAGS = {
-  class: "value", "closed-own-ticket": "value", "minted-false-claim": "value", note: "value",
+  "closed-own-ticket": "value", "minted-false-claim": "value", note: "value",
   sizing: "value", profile: "value", loc: "value", files: "value",
 };
 const FLAGS = { ...APPEND_FLAGS, file: "value", "member-outcomes": "value", ledger: "value", live: "bool" };
@@ -359,10 +359,10 @@ function append(pr, paths) {
   pr = String(Number(pr));
   if (has("live")) die("--live is a check flag");
   const fields = {
-    class: arg("class"), closed_own_ticket: arg("closed-own-ticket"), minted_false_claim: arg("minted-false-claim"),
+    closed_own_ticket: arg("closed-own-ticket"), minted_false_claim: arg("minted-false-claim"),
     note: arg("note"), sizing: arg("sizing") ?? "", profile: arg("profile") ?? "", loc: arg("loc") ?? "", files: arg("files") ?? "",
   };
-  for (const col of ["class", "closed_own_ticket", "minted_false_claim", "note"]) {
+  for (const col of ["closed_own_ticket", "minted_false_claim", "note"]) {
     if (fields[col] === null) die(`append needs --${col.replaceAll("_", "-")}\n${USAGE}`);
   }
   for (const [col, value] of Object.entries(fields)) {
@@ -371,7 +371,6 @@ function append(pr, paths) {
   for (const col of ["closed_own_ticket", "minted_false_claim"]) {
     if (!["yes", "no"].includes(fields[col])) die(`--${col.replaceAll("_", "-")} must be yes or no, got '${fields[col]}'`);
   }
-  if (!/^[a-z][a-z-]*$/.test(fields.class)) die(`--class must be one lowercase word, got '${fields.class}'`);
   if (fields.sizing && !["light", "heavy"].includes(fields.sizing)) die(`--sizing must be light or heavy, got '${fields.sizing}'`);
   for (const col of ["loc", "files"]) {
     if (fields[col] && !isDigits(fields[col])) die(`--${col} must be a count, got '${fields[col]}'`);
