@@ -81,11 +81,11 @@ function mainCheckoutHoldReason(mainCheckout) {
 function mainCheckoutHold(s, rows) {
   const why = mainCheckoutHoldReason(s.mainCheckout);
   if (why === null) return rows;
-  const state = s.mainCheckout?.state;
+  const acts = s.mainCheckout?.state === "absent";
   const held = [];
   for (const r of rows) {
     if (held.some((h) => h.role === r.role)) continue;
-    held.push({ ...r, action: `HOLD (${why})`, acts: state === "absent" });
+    held.push({ ...r, action: `HOLD (${why})`, acts });
   }
   return held;
 }
