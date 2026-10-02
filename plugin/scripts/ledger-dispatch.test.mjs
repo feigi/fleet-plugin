@@ -793,3 +793,49 @@ test("one fix-applier carrying both verdicts for the same head reads as a mismat
   ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_HEAD}`, `dispositions-mismatch=fix-pr-40:${GATE_HEAD}`));
   refused(["dispatch", "40", "finisher-pr-40"], /dispositions mismatch/);
 });
+
+test("only a fix-applier's well-formed verdict answers the gate: another family's, a short head's or a non-verdict's never does", (t) => {
+  const { ok, read, refused } = fixture(t);
+  const unchecked = /finisher-pr-40: dispositions unchecked/;
+  for (const token of [
+    `dispositions-ok=finisher-pr-40:${GATE_HEAD}`, // a finisher writes no disposition record
+    `dispositions-ok=impl-10:${GATE_HEAD}`,
+    "dispositions-ok=fix-pr-40:abc", // 3 hex: below the 7-hex floor, matches every head starting abc
+    `dispositions-maybe=fix-pr-40:${GATE_HEAD}`,
+  ]) {
+    ok("row", "10", gateRow("1/0/0", token));
+    refused(["dispatch", "40", "finisher-pr-40"], unchecked);
+  }
+  // Case is not a verdict's meaning: an upper-case head and verdict still answer.
+  ok("row", "10", gateRow("1/0/0", `DISPOSITIONS-OK=fix-pr-40:${GATE_HEAD.toUpperCase()}`));
+  assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+  assert.deepEqual(read().dispatched, ["finisher-pr-40"]);
+});
+
+test("a verdict's head and the review's match as prefixes in either direction", (t) => {
+  const { ok, refused } = fixture(t);
+  // A 7-hex verdict head answers a 40-hex `reviewed=` head …
+  ok("row", "10", ["impl-10=PR#40 → PR#40", `reviewed=${GATE_HEAD}:1/0/0`, "fix-pr-40=applied:def5678",
+    `dispositions-ok=fix-pr-40:${GATE_HEAD.slice(0, 7)}`].join(" · "));
+  assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+  // … and a 7-hex one that is not its prefix does not.
+  ok("row", "11", ["impl-11=PR#41 → PR#41", `reviewed=${GATE_HEAD}:1/0/0`, "fix-pr-41=applied:def5678",
+    `dispositions-ok=fix-pr-41:${OTHER_HEAD.slice(0, 7)}`].join(" · "));
+  refused(["dispatch", "41", "finisher-pr-41"], /finisher-pr-41: dispositions unchecked/);
+});
+
+test("a finisher is refused while a fix-applier on the PR is live, even with an earlier ok answering the same head", (t) => {
+  const { ok, read, refused } = fixture(t);
+  // A re-review at the same head: fix-pr-40 answered the first round, and
+  // fix-pr-40-b, answering the second, is still working.
+  ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_HEAD}`, `reviewed=${GATE_HEAD.slice(0, 7)}:3/0/2`, "fix-pr-40-b"));
+  refused(["dispatch", "40", "finisher-pr-40"], /finisher-pr-40: fix-pr-40-b still live on PR #40 — .*settle it, run dispositions-check\.mjs for it/);
+  // A PR outside the verdict gate is still held while its fix-applier works.
+  ok("row", "11", `impl-11=PR#41 → PR#41 · reviewed=${GATE_HEAD}:0/1/0 · fix-pr-41`);
+  refused(["dispatch", "41", "finisher-pr-41"], /finisher-pr-41: fix-pr-41 still live on PR #41/);
+  // Settled with its own verdict written, the -b's answer is the current one.
+  ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_HEAD}`, `reviewed=${GATE_HEAD.slice(0, 7)}:3/0/2`,
+    "fix-pr-40-b=applied:fedcba9", `dispositions-ok=fix-pr-40-b:${GATE_HEAD}`));
+  assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+  assert.deepEqual(read().dispatched, ["finisher-pr-40"]);
+});
