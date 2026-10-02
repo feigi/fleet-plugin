@@ -14,10 +14,11 @@ import { reconcile, formatLines, actionable, deriveRun, parseShortlist, unclaime
 // rest — a defaulted field is a guard nobody is pinning.
 const state = (over = {}) => ({
   implCap: 2, reviewerCap: 6, maxReviews: 6,
-  implLive: 0, draining: null, tierMismatch: [], tierUnchecked: [],
+  implLive: 0, draining: null, tierMismatch: [], tierUnchecked: [], implNames: [],
   heads: [], supply: 0, shortlistStatus: "ok", refresh: null,
   reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [],
   mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeConflictHeld: 0,
+  mainCheckout: { state: "clean" },
   ...over,
 });
 const rowsOf = (s, role) => reconcile(s).filter((r) => r.role === role);
@@ -97,18 +98,55 @@ test("implementers: draining holds the row and outranks every other branch", () 
   }
 });
 
-test("implementers: a tier mismatch holds the row, names the member, and asks the controller to act", () => {
+// #2255: a tier hold's detail names the step that clears it, so the row
+// carries its own command when SKILL.md's prose is gone from context.
+test("implementers: a tier mismatch holds the row, names the member, asks the controller to act, and names the replacement", () => {
   const r = row(state({ heads: [7], tierMismatch: ["impl-412"] }), "implementers");
   assert.equal(r.action, "HOLD (tier mismatch impl-412)");
   assert.equal(r.acts, true, "the controller fixes a mismatch unattended — backing off on it is a stall");
+  assert.match(r.detail, /^unclaimed=1 supply=0 unreviewed=0 — /, "the counts stay in front of the clearing step");
+  assert.match(r.detail, /dispatch impl-412-b at its row's tier/);
+});
+
+test("implementers: a mismatched replacement names the NEXT retry letter, one per held member", () => {
+  const r = row(state({ tierMismatch: ["impl-8-b", "impl-9"] }), "implementers");
+  assert.equal(r.action, "HOLD (tier mismatch impl-8-b impl-9)");
+  assert.match(r.detail, /dispatch impl-8-c, impl-9-b each at its row's tier/);
+  assert.doesNotMatch(r.detail, /impl-8-b-b|impl-9-c/);
+  // `-z` is the grammar's last letter: no legal replacement name to print, so
+  // the row says so instead of naming one ledger.mjs would refuse.
+  assert.match(row(state({ tierMismatch: ["impl-8-z"] }), "implementers").detail, /impl-8-z has no retry letter left/);
+});
+
+test("implementers: a mismatch batch with some members named and some out of letters prints both clauses, `; `-joined", () => {
+  const counts = "unclaimed=0 supply=0 unreviewed=0";
+  assert.equal(row(state({ tierMismatch: ["impl-8-b", "impl-9-z"] }), "implementers").detail,
+    `${counts} — dispatch impl-8-c at its row's tier; impl-9-z has no retry letter left`);
+  assert.equal(row(state({ tierMismatch: ["impl-7-z", "impl-9-z"] }), "implementers").detail,
+    `${counts} — impl-7-z, impl-9-z have no retry letter left`);
 });
 
 test("implementers: an unchecked implementer holds the row and asks the controller to run the check; a mismatch outranks it", () => {
   const r = row(state({ heads: [7], tierUnchecked: ["impl-412"] }), "implementers");
   assert.equal(r.action, "HOLD (tier unchecked impl-412)");
   assert.equal(r.acts, true, "running tier-check is the controller's own step — backing off on it is a stall");
+  assert.ok(r.detail.includes(
+    `run ~/.fleet/bin/fleet-run tier-check.mjs --batch <file> with [{"member":"impl-412","session":"<session>"}]`), r.detail);
   const both = row(state({ heads: [7], tierMismatch: ["impl-9"], tierUnchecked: ["impl-412"] }), "implementers");
   assert.equal(both.action, "HOLD (tier mismatch impl-9)");
+  assert.doesNotMatch(both.detail, /tier-check/, "the detail names the step for the hold the row prints, not the one it outranks");
+});
+
+test("implementers: several unchecked members share one batch file, one entry each", () => {
+  const r = row(state({ tierUnchecked: ["impl-7", "impl-8-b"] }), "implementers");
+  assert.ok(r.detail.includes(
+    `[{"member":"impl-7","session":"<session>"},{"member":"impl-8-b","session":"<session>"}]`), r.detail);
+});
+
+test("implementers: no tier hold, no clearing step in the detail", () => {
+  for (const over of [{ heads: [7] }, { draining: "x", tierUnchecked: ["impl-4"] }, {}]) {
+    assert.doesNotMatch(row(state(over), "implementers").detail, /—/, JSON.stringify(over));
+  }
 });
 
 test("implementers: the detail carries the numbers the branch turned on", () => {
@@ -244,6 +282,55 @@ test("actionable: exactly the rows that name work the controller can do unattend
 });
 
 // ---------------------------------------------------------------------------
+// The main-checkout hold (#2210): anything but `clean` holds every
+// dispatching row.
+
+const BUSY = {
+  heads: [412], fixDue: [346], reviewDue: [350], mergeQueue: 1,
+  refresh: { ok: true, entries: 3, lifted: 0, changed: true, trigger: "unclaimed 1 < cap 2" },
+};
+const summary = (s) => reconcile(s).map((r) => [r.role, r.action, r.acts]);
+
+test("main checkout: dirty holds every dispatching row once per role, never actionable; the shortlist row still reports", () => {
+  const hold = "HOLD (main checkout dirty)";
+  assert.deepEqual(summary(state({ ...BUSY, mainCheckout: { state: "dirty", changed: ["x"] } })), [
+    ["implementers", hold, false],
+    ["reviewers", hold, false],
+    ["merge-bot", hold, false],
+    ["shortlist", "REFRESHED shortlist: 3 entries; 0 lifted", true],
+  ]);
+  const [impl] = reconcile(state({ ...BUSY, implLive: 1, mainCheckout: { state: "dirty", changed: ["x"] } }));
+  assert.equal(`${impl.actual}/${impl.target}`, "1/2", "the held row lost its counts");
+});
+
+test("main checkout: unknown holds too, never clean; so does a check that gave no answer at all", () => {
+  for (const mainCheckout of [{ state: "unknown", cause: "read", why: "boom" }, { state: "unknown", cause: "baseline", why: "x" }, undefined]) {
+    assert.deepEqual(summary(state({ ...BUSY, refresh: null, mainCheckout })), [
+      ["implementers", "HOLD (main checkout unknown)", false],
+      ["reviewers", "HOLD (main checkout unknown)", false],
+      ["merge-bot", "HOLD (main checkout unknown)", false],
+    ], JSON.stringify(mainCheckout));
+  }
+});
+
+test("main checkout: no baseline holds every dispatching row and asks the controller to record one", () => {
+  const rows = reconcile(state({ ...BUSY, refresh: null, mainCheckout: { state: "absent", baseline: "/x" } }));
+  assert.deepEqual(rows.map((r) => r.action), Array(3).fill("HOLD (main checkout no baseline)"));
+  assert.equal(actionable(rows), true);
+});
+
+test("main checkout: the hold outranks every role's own guards — drain and tier holds included", () => {
+  const s = state({ ...BUSY, refresh: null, draining: "x", tierMismatch: ["impl-1"], mainCheckout: { state: "dirty", changed: ["x"] } });
+  assert.equal(row(s, "implementers").action, "HOLD (main checkout dirty)");
+  assert.equal(actionable(reconcile(s)), false, "a tier mismatch under a dirty checkout still asks the controller to dispatch");
+});
+
+test("main checkout: clean holds nothing", () => {
+  assert.deepEqual(summary(state({ ...BUSY, refresh: null })).map(([, action]) => action),
+    ["PULL #412", "DISPATCH fix-pr PR#346", "DISPATCH review PR#350", "DISPATCH merge-bot"]);
+});
+
+// ---------------------------------------------------------------------------
 // Reading the run: deriveRun() over `ledger.mjs read`'s payload and the open
 // PR list. Rows are spelled the way ledger.mjs dispatch/settle write them.
 
@@ -293,6 +380,19 @@ test("deriveRun: live reviewer units are in-flight reviews plus unsettled fix-ap
   }, [pr(20), pr(21), pr(22), pr(23), pr(24)]);
   assert.equal(r.reviewsLive, 2, "run1 and the fallback are in flight; run2 returned, run3 is dead");
   assert.equal(r.fixLive, 1);
+});
+
+test("deriveRun: live names every unsettled member and each in-flight review by its PR — a review=wf: run has no member token of its own", () => {
+  const r = run({
+    rows: [
+      "#10 impl-10=PR#20 → PR#20 · review=wf:run1",
+      "#11 impl-11=PR#21 → PR#21 · review=wf:run2 reviewed=abc1234:2/1/0 · fix-pr-21",
+      "#13 impl-13=PR#23 → PR#23 · review=wf:run3=failed",
+      "#15 impl-15",
+    ],
+    dispatched: ["fix-pr-21"],
+  }, [pr(20), pr(21), pr(23)]);
+  assert.deepEqual(r.live, ["fix-pr-21", "impl-15", "review:PR#20"], "run2 returned and run3 is dead, so neither is live");
 });
 
 test("deriveRun: fix-pr is due on a returned review with survivors and no fix-applier since", () => {
@@ -389,6 +489,23 @@ test("deriveRun: a past-pin halt is answered once the head is the reviewed one, 
   assert.deepEqual(run({ rows: [halted] }, [pr(40, ["ready-to-merge"], [10], HEAD_B), pr(41, [], [], HEAD_B)]).reviewDue, []);
 });
 
+test("deriveRun: a ticket row settled =PR#M shares PR M's state with M's own row, in either order (#2283)", () => {
+  // ledger.mjs's `settle impl-658-c=PR#724` names PR 724 on the ticket row, and
+  // a `#724` row can carry that PR's tokens beside it. Both rows are PR 724's:
+  // whichever sorts first must not swallow what the other records.
+  const prs = [pr(724, [], [658])];
+  const ticket = "#658 impl-658-c=PR#724";
+  for (const rows of [[ticket, "#724 review=member:review-pr-724"], ["#724 review=member:review-pr-724", ticket]]) {
+    const r = run({ rows }, prs);
+    assert.equal(r.reviewsLive, 1, `the live review is counted: ${rows}`);
+    assert.deepEqual(r.reviewDue, [], `a reviewed PR is not re-offered: ${rows}`);
+  }
+  for (const rows of [[ticket, "#724 review=member:review-pr-724 reviewed=abc1234:2/1/0"], ["#724 review=member:review-pr-724 reviewed=abc1234:2/1/0", ticket]]) {
+    const r = run({ rows }, prs);
+    assert.deepEqual([r.reviewsLive, r.fixDue, r.reviewDue], [0, [724], []], `${rows}`);
+    assert.ok(r.claimed.has(658), "the ticket row still reads as claimed");
+  }
+});
 test("deriveRun: merge holds are held-behind rows whose premise PR is still open", () => {
   const r = run({
     rows: [
@@ -527,6 +644,20 @@ test("deriveRun: only the newest member of a ticket counts toward the tier holds
   assert.deepEqual(run({ rows: ["#8 impl-8=killed · impl-8-b · tier-ok=impl-8-b:fleet-implementer"] }).tierUnchecked, []);
 });
 
+// PR #2302 review: the replacement climbs past the HIGHEST letter the ticket
+// has used, not the held member's own — `-c` dispatched before `-b` left the
+// tick naming `impl-7-c`, which ledger.mjs refuses as already dispatched.
+test("deriveRun → implementers: a mismatch's replacement skips every retry letter the ticket already used", () => {
+  const step = (rows) => {
+    const d = run({ rows });
+    return row(state({ tierMismatch: d.tierMismatch, implNames: d.implNames }), "implementers").detail.split(" — ")[1];
+  };
+  assert.equal(step(["#7 impl-7=killed · impl-7-c=killed · impl-7-b=tier-mismatch"]), "dispatch impl-7-d at its row's tier");
+  assert.equal(step(["#7 impl-7-z=killed · impl-7-c=tier-mismatch"]), "impl-7-c has no retry letter left");
+  // Another ticket's letters are not this one's.
+  assert.equal(step(["#7 impl-7=tier-mismatch", "#8 impl-8-c=killed"]), "dispatch impl-7-b at its row's tier");
+});
+
 test("deriveRun: excluded rows claim their ticket while their premise still holds, and carry their premises", () => {
   const r = run({ rows: ["#50 excluded · behind-pr:#44", "#51 excluded · behind-issue:#9 behind-pr:feat/x"] }, [pr(44)]);
   assert.ok(r.claimed.has(50) && r.claimed.has(51));
@@ -633,7 +764,7 @@ const SCRIPT = fileURLToPath(new URL("./fleet-tick.mjs", import.meta.url));
 // or transitive — and ledger.mjs with its own, because the tick reads the
 // ledger through `ledger.mjs read`. An unlisted sibling is a module-not-found
 // at startup: exit 1, a shape no case below expects.
-const SIBLING_MODULES = ["arg.mjs", "fleet-state.mjs", "git-env.mjs", "ledger.mjs", "ledger-grammar.mjs"].map(
+const SIBLING_MODULES = ["arg.mjs", "fleet-state.mjs", "git-env.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs"].map(
   (m) => [m, fileURLToPath(new URL(`./${m}`, import.meta.url))],
 );
 
@@ -684,9 +815,14 @@ const ledgerText = ({ rows = [], dispatched = [], drain = null } = {}) => {
 };
 const shortlistText = (ns, scanned = ns.length) => JSON.stringify({ scanned, shortlist: ns.map((n) => ({ n, t: `t${n}` })) });
 
+// `baseline` records the run's main-checkout baseline the way Phase 0 does,
+// after `beforeRun`; `afterBaseline` is a stray write landing mid-run. The
+// repo ignores `.fleet/` and `.worktrees/` as a fleet repo's .gitignore does,
+// through info/exclude so no tracked file says so.
 function runCli(args = [], {
   prs = [], ledger, shortlist, refresh = shortlistText([]), refreshFail = false,
   issueStates = {}, claimed = [], env: extraEnv = {}, defaultState = false, keep = false, beforeRun = () => {},
+  baseline = true, afterBaseline = () => {},
 } = {}) {
   // realpath, because on macOS tmpdir() is /var -> /private/var: a script COPY
   // under the unresolved path never runs its own main(), since import.meta.url
@@ -697,6 +833,7 @@ function runCli(args = [], {
   mkdirSync(bin);
   mkdirSync(join(repo, ".fleet"), { recursive: true });
   assert.equal(spawnSync("git", ["init", "-q", repo], { encoding: "utf8" }).status, 0);
+  writeFileSync(join(repo, ".git", "info", "exclude"), ".fleet/\n.worktrees/\n");
   writeExecStub(join(bin, "gh"), GH_STUB);
   const script = join(bin, "fleet-tick.mjs");
   writeFileSync(script, readFileSync(SCRIPT));
@@ -706,6 +843,11 @@ function runCli(args = [], {
   if (ledger !== undefined) writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText(ledger));
   if (shortlist !== undefined) writeFileSync(join(repo, ".fleet", "shortlist.json"), shortlist);
   beforeRun(repo);
+  if (baseline) {
+    const rec = spawnSync(process.execPath, [join(bin, "main-checkout.mjs"), "--record"], { cwd: repo, encoding: "utf8" });
+    assert.equal(rec.status, 0, rec.stderr);
+  }
+  afterBaseline(repo);
   const refreshLog = fx("refresh.log", "");
   const issueViewLog = fx("issue-view.log", "");
   // Every case gets its own state file unless it names one: the default path
@@ -925,12 +1067,12 @@ test("CLI: a ledger ledger.mjs itself refuses is a refusal here too", () => {
 
 test("CLI: a tier mismatch holds the implementer row until a replacement is dispatched", () => {
   const r = runCli([], { ledger: { rows: ["#7 impl-7=tier-mismatch"], dispatched: ["impl-7=tier-mismatch"] }, shortlist: shortlistText([8, 9]) });
-  assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m);
+  assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\) +\(.* — dispatch impl-7-b at its row's tier\)$/m);
 });
 
 test("CLI: an implementer with no tier verdict on the ledger holds the implementer row until tier-check writes one", () => {
   const r = runCli([], { ledger: { rows: ["#7 impl-7 · class=routine"], dispatched: ["impl-7"] }, shortlist: shortlistText([8, 9]) });
-  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier unchecked impl-7\)/m);
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(tier unchecked impl-7\) +\(.* — run ~\/\.fleet\/bin\/fleet-run tier-check\.mjs --batch <file> with \[\{"member":"impl-7","session":"<session>"\}\]\)$/m);
   const ok = runCli([], {
     ledger: { rows: ["#7 impl-7 · class=routine · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7"] },
     shortlist: shortlistText([8, 9]),
@@ -1072,6 +1214,90 @@ test("CLI: an inherited GIT_DIR cannot retarget the behind-issue premise probe",
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.issueViews, ["9"], "the probe must still run");
   assert.equal(r.refreshed, 0, "#9 is OPEN in the case's own repository — the exclusion stands");
+});
+
+// #2210, end to end: a real repo, a real baseline, a real stray write.
+const LIVE = {
+  ledger: { rows: ["#412 impl-412 · tier-ok=impl-412:fleet-implementer"], dispatched: ["impl-412"] },
+  shortlist: shortlistText([412, 420, 421]),
+};
+// One more tick over a kept runCli fixture, as the next wake would run it.
+const tickAgain = (r) => spawnSync(process.execPath, [join(r.dir, "bin", "fleet-tick.mjs"), "--state", join(r.dir, "hb.json")], {
+  cwd: r.repo, encoding: "utf8",
+  env: { ...process.env, PATH: `${join(r.dir, "bin")}:${process.env.PATH}`, FIXTURE_PRS: join(r.dir, "prs.json") },
+});
+
+test("CLI: a stray write after the baseline prints MAIN-CHECKOUT-DIRTY first, naming the path and the live members, and holds every dispatching row", () => {
+  const r = runCli([], {
+    ...LIVE, prs: [pr(350)], keep: true,
+    afterBaseline: (repo) => writeFileSync(join(repo, "stray.mjs"), "x\n"),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const lines = r.stdout.trim().split("\n");
+  assert.match(lines[0], /^MAIN-CHECKOUT-DIRTY stray\.mjs — changed since the run's baseline; live members: impl-412 — dispatch held: resolve the stray paths FIRST, then re-baseline with ~\/\.fleet\/bin\/fleet-run main-checkout\.mjs --record/);
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(main checkout dirty\)/m);
+  assert.match(r.stdout, /^reviewers +0\/6 → HOLD \(main checkout dirty\)/m);
+  assert.match(r.stdout, /^merge-bot +0\/1 → HOLD \(main checkout dirty\)/m);
+  assert.doesNotMatch(r.stdout, /PULL|DISPATCH/);
+
+  // Not a one-tick warning: the next tick holds the same way, and only an
+  // explicit re-baseline after the path is resolved lets dispatch through.
+  assert.match(tickAgain(r).stdout, /^MAIN-CHECKOUT-DIRTY stray\.mjs /m);
+  rmSync(join(r.repo, "stray.mjs"));
+  const rec = spawnSync(process.execPath, [join(r.dir, "bin", "main-checkout.mjs"), "--record"], { cwd: r.repo, encoding: "utf8" });
+  assert.equal(rec.status, 0, rec.stderr);
+  const after = tickAgain(r);
+  rmSync(r.dir, { recursive: true, force: true });
+  assert.equal(after.status, 0, after.stderr);
+  assert.doesNotMatch(after.stdout, /MAIN-CHECKOUT|main checkout/);
+  assert.match(after.stdout, /^implementers 1\/2 → PULL #420 /m);
+});
+
+test("CLI: uncommitted work in the main checkout at run start does not hold the run", () => {
+  const r = runCli([], {
+    ...LIVE,
+    beforeRun: (repo) => writeFileSync(join(repo, "my-notes.md"), "the maintainer's own\n"),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /MAIN-CHECKOUT|main checkout/);
+  assert.match(r.stdout, /^implementers 1\/2 → PULL #420 /m);
+});
+
+test("CLI: a run that never recorded a baseline is held, never read as clean", () => {
+  const r = runCli([], { ...LIVE, baseline: false });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^MAIN-CHECKOUT-NO-BASELINE no baseline at .*\.fleet\/main-checkout\.sha — dispatch held: record it at run start with /);
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(main checkout no baseline\)/m);
+});
+
+test("CLI: a main checkout git cannot read is MAIN-CHECKOUT-UNKNOWN and held, never clean", () => {
+  const r = runCli([], {
+    ...LIVE,
+    afterBaseline: (repo) => writeFileSync(join(repo, ".git", "index"), "not an index"),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^MAIN-CHECKOUT-UNKNOWN could not look: git status --porcelain -uall exited \d+.*; live members: impl-412 — .*NEVER re-baseline over it/);
+  assert.match(r.stdout, /^implementers 1\/2 → HOLD \(main checkout unknown\)/m);
+});
+
+test("CLI: an in-flight review with no member token is named as review:PR#<n> on the MAIN-CHECKOUT line", () => {
+  const r = runCli([], {
+    ledger: { rows: ["#51 review=wf:x"] }, shortlist: shortlistText([]), prs: [pr(51)],
+    afterBaseline: (repo) => writeFileSync(join(repo, "stray.mjs"), "x\n"),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^MAIN-CHECKOUT-DIRTY stray\.mjs — changed since the run's baseline; live members: review:PR#51 — /m);
+});
+
+test("CLI: an ambient GIT_DIR naming a dirty repository does not move the main-checkout check", () => {
+  const decoy = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-decoy-mc-")));
+  spawnSync("git", ["init", "-q", decoy]);
+  writeFileSync(join(decoy, "decoy-stray.txt"), "x\n");
+  const r = runCli([], { ...LIVE, env: { GIT_DIR: join(decoy, ".git"), GIT_WORK_TREE: decoy } });
+  rmSync(decoy, { recursive: true, force: true });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /MAIN-CHECKOUT/);
+  assert.match(r.stdout, /^implementers 1\/2 → PULL #420 /m);
 });
 
 // ---------------------------------------------------------------------------
