@@ -681,6 +681,13 @@ test("deriveRun: a fix-pr token for another PR leaves this PR's hold and survivo
   // settled copy there is a stray as well: the owner's bare copy still lands.
   assert.deepEqual(due(["notes fix-pr-21=applied:def5678", `${H} · fix-pr-21`], ["fix-pr-21=applied:def5678"]),
     [[], []], "a settled copy on a PR-less row does not keep the owner's bare copy from landing");
+  // A row's PR is its `PR#` mention even where its key names the token's
+  // number: `fix-pr-21` on `#21 …=PR#22` is a stray on PR #22's row, neither
+  // clearing #22's hold nor standing in for PR #21's own copies.
+  const K = "#21 impl-21=PR#22 · conflict-hold:#22";
+  assert.deepEqual(due([`${K} · fix-pr-21=applied:def5678`], [], [pr(22)]), [[22], [22]], "the key does not make it #22's own");
+  assert.deepEqual(due([`${K} · fix-pr-21=applied:def5678`, `${H} · fix-pr-21`], ["fix-pr-21=applied:def5678"], [pr(21), pr(22)]),
+    [[22], [22]], "…nor keep PR #21's bare copy from landing");
   // Nor does a foreign one answer a returned review's survivors.
   assert.deepEqual(due(["#20 impl-20=PR#21 · reviewed=abc1234:2/0/0 · fix-pr-99=applied:def5678"]), [[21], []]);
   // Must accept: the PR's own fix-applier, live and landed.
