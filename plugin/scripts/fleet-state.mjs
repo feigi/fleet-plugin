@@ -32,7 +32,7 @@
 // One writer per key. A key both scripts wrote would need locking to be
 // correct, and neither script is in a position to hold one.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { workspaceDirFromGitCommonDir } from "./git-env.mjs";
@@ -205,6 +205,19 @@ export function readState(path, name) {
 // remainder — an interval that can never complete — so fleet-heartbeat treats
 // a failed write as a fire instead of counting progress that nothing is
 // keeping.
+//
+// The write is a sibling temp file renamed over the target, ledger.mjs save()'s
+// convention, because the readers do not hold still for it (#2349). A plain
+// writeFileSync truncates and then writes, and readState() maps the empty or
+// half-written file a reader can land on to the fresh, no-mark state on
+// purpose — so a reader racing a live beat read "no mark", and ledger.mjs
+// rotate, which refuses only while a mark is beating, moved a live
+// controller's ledger. rename is atomic on POSIX: a reader sees the whole old
+// file or the whole new one. The temp name carries the pid for the reason
+// ledger.mjs gives (#531): two scripts write this file, and a shared temp name
+// lets one rename the other's out from under it. A temp that never made it
+// into place is removed rather than left to accumulate, one per failed
+// invocation, beside the file it failed to replace.
 export function writeState(path, name, prev, patch) {
   // Built from the VALIDATED view plus the fields outside the schema, never
   // from the raw parse: see `rest` in readState above.
@@ -224,11 +237,16 @@ export function writeState(path, name, prev, patch) {
     ...(prev.ticked ? { ticked: prev.ticked } : {}),
     ...patch,
   };
+  const tmp = `${path}.${process.pid}.tmp`;
   try {
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`);
+    writeFileSync(tmp, `${JSON.stringify(next, null, 2)}\n`);
+    renameSync(tmp, path);
     return true;
   } catch (e) {
+    // Best-effort and never fatal: a cleanup that threw would turn a reported,
+    // survived write failure into the crash the comment above rules out.
+    try { rmSync(tmp, { force: true }); } catch {}
     console.error(`${name}: WARNING could not write ${path} (${e.message}) — back-off progress will not persist`);
     return false;
   }
