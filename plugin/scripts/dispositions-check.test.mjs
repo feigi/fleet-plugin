@@ -505,6 +505,8 @@ test("touchedLines reads an added `++ ` line as content and unquotes git's heade
 test("withVerdict leaves a row already carrying only the token unchanged, folds an emptied row, and refuses a non-verdict token", () => {
   const ok = `dispositions-ok=fix-pr-40:${H40}`;
   assert.equal(withVerdict(ok, ok), ok);
+  // Already the row's only verdict for that member and head: left where it sits.
+  assert.equal(withVerdict(`${ok} · impl-10=PR#40`, ok), `${ok} · impl-10=PR#40`);
   assert.equal(withVerdict(`dispositions-mismatch=fix-pr-40:${H40}`, ok), ok);
   assert.equal(withVerdict(`· dispositions-mismatch=fix-pr-40:${H40} ·`, ok), ok);
   assert.throws(() => withVerdict(`impl-10=PR#40 · ${ok}`, "garbage"), /'garbage' is not a dispositions-ok=\/dispositions-mismatch= token/);
