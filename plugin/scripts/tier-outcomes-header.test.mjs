@@ -380,16 +380,16 @@ test("the ruling step refuses to record a sizing verdict it cannot date", () => 
   );
 });
 
-// #1071: `run_date` is DERIVED in `member-outcomes.tsv` (a transcript mtime)
-// and STAMPED AT RULING here, and phase 2 states TWO floors that each count
-// distinct `run_date`s — three PRs across two dates over this file, ten pairs
-// across five dates over the other. The ticket's filer read the ten/five floor
-// as a count over THIS file. It is not one, and nothing in this header said so.
+// `run_date` is DERIVED in `member-outcomes.tsv` (a transcript mtime) and
+// STAMPED AT RULING here, and phase 2's pairing floor counts distinct
+// `run_date`s — ten pairs across five dates — over the other file, never this
+// one. Read as a count over THIS file, it answers a different question, and
+// nothing in this header used to say so.
 //
 // The paragraph that now says it makes claims about files this one does not
 // contain, which is the shape that rots silently: it stays true only while
 // member-outcomes.tsv keeps carrying the pairing query, `member-outcomes.mjs`
-// keeps stamping dates off an mtime, and SKILL.md keeps both floors' numbers.
+// keeps stamping dates off an mtime, and SKILL.md keeps the floor's numbers.
 // So the pins below DERIVE each claim from its real source — the same reason
 // the `profile` pin above derives the enum instead of restating it.
 const MEMBER_TSV = readFileSync(join(REPO, "docs", "metrics", "member-outcomes.tsv"), "utf8");
@@ -411,15 +411,10 @@ const runDateSources = () =>
 test("the header says which file each distinct-`run_date` count is read from, and that the two columns differ", () => {
   const block = runDateSources();
 
-  // Each floor bound to its file in ONE span. Split into a mention of the
+  // The floor bound to its file in ONE span. Split into a mention of the
   // number and a separate mention of the file, a reader counting the ten/five
   // floor over this file satisfies both halves and is wrong anyway — which is
   // the defect, not a wording preference.
-  assert.match(
-    block,
-    phrase("at least three `class=routine` PRs spanning two or more distinct `run_date`s — IS this file's `run_date`"),
-    "the header no longer says the revert floor's distinct-date count is read from THIS file",
-  );
   assert.match(
     block,
     phrase(
@@ -464,33 +459,6 @@ test("the header says which file each distinct-`run_date` count is read from, an
 
 test("the header's `run_date` source claims still hold against the query, the scraper and the guard", () => {
   const block = runDateSources();
-
-  // The floor half: SKILL.md's own recount accumulates distinct dates keyed on
-  // a positional field of THIS file. Resolve that `$n` against the column list
-  // rather than trusting the paragraph's word for it — the mutation this must
-  // survive is repointing the recount at another column.
-  const floorAwk = between(RUN_TEAM, "grep -vc '^#' docs/metrics/tier-outcomes.tsv", "```", "SKILL.md's recount block");
-  const floorKey = /d\[\$(\d+)\]=1/.exec(floorAwk);
-  assert.ok(floorKey, "SKILL.md's recount no longer accumulates the floor's distinct dates");
-  assert.match(floorAwk, /length\(d\)/, "SKILL.md's recount no longer prints the floor's distinct-date count");
-  assert.equal(COLUMNS[floorKey[1] - 1], "run_date", "the floor's distinct-date count is not this file's `run_date`");
-  assert.ok(
-    block.includes(floorKey[0]),
-    `the header cites an idiom for the floor's date key that SKILL.md no longer uses (\`${floorKey[0]}\`)`,
-  );
-
-  // The header's own prose also names WHICH column that count reads
-  // ("column 1 here") — a positional claim nothing above checked, since
-  // `floorKey[0]` only pins the awk idiom, not the number the header prints
-  // beside it in English. Resolve it against the same `$n` the recount
-  // above actually keys on.
-  const floorColumnCite = /column (\d+) here/.exec(block);
-  assert.ok(floorColumnCite, "the header no longer names which column the revert floor's distinct-date count reads");
-  assert.equal(
-    Number(floorColumnCite[1]),
-    Number(floorKey[1]),
-    "the header's `column N here` cite no longer matches the column SKILL.md's recount actually keys on",
-  );
 
   // The pairing half: the query lives in the OTHER file's header and keys its
   // dates off the other file's own columns, so resolve it against that file's
@@ -559,24 +527,14 @@ test("the header's `run_date` source claims still hold against the query, the sc
   // SKILL.md duty: tier-outcomes.test.mjs runs `append` and pins the date it
   // writes to the day it ran.
 
-  // Both floors' numbers, as the paragraph quotes them. It names four figures
-  // it does not own; a threshold changed in SKILL.md alone leaves this header
+  // The floor's numbers, as the paragraph quotes them. It names figures it
+  // does not own; a threshold changed in SKILL.md alone leaves this header
   // quietly citing the old one.
   const guard = unemphasized(RUN_TEAM);
   assert.match(
     guard,
-    phrase("Floor: the file holds at least three `class=routine` PRs spanning two or more distinct `run_date`s"),
-    "SKILL.md's revert floor is no longer three PRs across two dates — the header quotes those numbers",
-  );
-  assert.match(
-    guard,
     phrase("there are at least ten of them across five or more distinct `run_date`s"),
     "SKILL.md's pairing floor is no longer ten pairs across five dates — the header quotes those numbers",
-  );
-  assert.match(
-    block,
-    phrase("at least three `class=routine` PRs spanning two or more"),
-    "the header no longer states the revert floor it attributes to this file",
   );
   assert.match(
     block,
