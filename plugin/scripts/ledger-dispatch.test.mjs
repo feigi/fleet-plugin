@@ -57,7 +57,7 @@ function fixture(t, body = null) {
 test("dispatch appends a live member row and records the dispatch in ## Dispatched", (t) => {
   const { ok, read, bytes } = fixture(t);
   assert.deepEqual(ok("dispatch", "412", "impl-412"), {
-    member: "impl-412", agent: "fleet-implementer", ticket: "#412", line: "#412 impl-412", created: true, total: 1,
+    member: "impl-412", agent: "fleet-implementer-slow-high", ticket: "#412", line: "#412 impl-412", created: true, total: 1,
   });
   const l = read();
   assert.deepEqual(l.rows, ["#412 impl-412"]);
@@ -73,7 +73,7 @@ test("dispatch keeps an existing row's text, appending the token only where it i
   ok("row", "412", "impl-412 · class=routine");
   ok("row", "415", "claimed · class=correction");
   assert.deepEqual(ok("dispatch", "412", "impl-412"), {
-    member: "impl-412", agent: "fleet-implementer", ticket: "#412", line: "#412 impl-412 · class=routine", created: false, total: 1,
+    member: "impl-412", agent: "fleet-implementer-slow-high", ticket: "#412", line: "#412 impl-412 · class=routine", created: false, total: 1,
   });
   assert.equal(ok("dispatch", "#415", "impl-415").line, "#415 claimed · class=correction · impl-415");
   assert.deepEqual(read().dispatched, ["impl-412", "impl-415"]);
@@ -151,27 +151,29 @@ test("merge-bot-<n> counts the ## Dispatched merge-bot entries, and a new ledger
 
 // #2208: the controller names the `task` call's `agent` off this output, not
 // off prose a compaction drops — so every family's definition is printed, and
-// an implementer's follows its row's `tier=` the way tier-check.mjs reads it.
+// an implementer's follows its row's `tier=` the way tier-check.mjs reads it:
+// none is the policy cell, `slow-high`.
 test("dispatch prints the agent definition the call names: the row's tier for an implementer, fixed for finisher and merge bot, null for a review fix-applier", (t) => {
   const { ok } = fixture(t);
-  assert.equal(ok("dispatch", "7", "impl-7").agent, "fleet-implementer");
-  ok("row", "8", "impl-8 · class=routine · tier=alt");
-  assert.equal(ok("dispatch", "8", "impl-8").agent, "fleet-implementer-alt");
+  assert.equal(ok("dispatch", "7", "impl-7").agent, "fleet-implementer-slow-high");
+  ok("row", "8", "impl-8 · class=routine · tier=task-high");
+  assert.equal(ok("dispatch", "8", "impl-8").agent, "fleet-implementer-task-high");
   // A replacement inherits the row's tier, because it reads the same row.
   ok("settle", "impl-8", "killed");
-  assert.equal(ok("dispatch", "8", "impl-8-b").agent, "fleet-implementer-alt");
+  assert.equal(ok("dispatch", "8", "impl-8-b").agent, "fleet-implementer-task-high");
   // Neither verdict token is a `tier=` token.
-  ok("row", "10", "impl-10 · tier-ok=impl-10:fleet-implementer-alt · tier-mismatch=impl-10:fleet-implementer-alt");
-  assert.equal(ok("dispatch", "10", "impl-10").agent, "fleet-implementer");
+  ok("row", "10", "impl-10 · tier-ok=impl-10:fleet-implementer-task-high · tier-mismatch=impl-10:fleet-implementer-task-high");
+  assert.equal(ok("dispatch", "10", "impl-10").agent, "fleet-implementer-slow-high");
   ok("settle", "impl-7", "PR#70");
   assert.equal(ok("dispatch", "70", "finisher-pr-70").agent, "fleet-finisher");
   assert.equal(ok("dispatch", "70", "fix-pr-70").agent, null);
   assert.equal(ok("dispatch", "merge-bot").agent, "fleet-merge-bot");
 });
 
-// A `tier=` of the right shape whose definition has no file (`slow-high`, a
-// #2030 cell that has not shipped) is refused the same way: a `task` call
-// naming it cannot resolve.
+// A `tier=` of the right shape whose definition has no file is refused the
+// same way: a `task` call naming it cannot resolve. Two of those: a cell
+// outside the shipped grid (`smol-max` — haiku has no `max`), and the
+// pre-cell `alt` whose definition #2129 deleted.
 test("dispatch refuses an implementer whose row names no single definition, or one with no file, before marking it live", (t) => {
   const { ok, read, refused } = fixture(t);
   ok("row", "7", "class=routine · tier=alt · tier=slow-high");
@@ -180,8 +182,10 @@ test("dispatch refuses an implementer whose row names no single definition, or o
   refused(["dispatch", "8", "impl-8"], /impl-8: tier=\.\.\/\.\.\/etc is not a definition suffix — expected \[a-z0-9\] words joined by '-' — fix the row with `ledger\.mjs row` — not dispatching impl-8/);
   ok("row", "9", "class=routine · tier=");
   refused(["dispatch", "9", "impl-9"], /impl-9: tier= is not a definition suffix/);
-  ok("row", "10", "class=routine · tier=slow-high");
-  refused(["dispatch", "10", "impl-10"], /impl-10: row #10's tier= names fleet-implementer-slow-high, which has no agents\/fleet-implementer-slow-high\.agent\.md — fix the row with `ledger\.mjs row` — not dispatching impl-10/);
+  ok("row", "10", "class=routine · tier=smol-max");
+  refused(["dispatch", "10", "impl-10"], /impl-10: row #10's tier= names fleet-implementer-smol-max, which has no agents\/fleet-implementer-smol-max\.agent\.md — fix the row with `ledger\.mjs row` — not dispatching impl-10/);
+  ok("row", "11", "class=routine · tier=alt");
+  refused(["dispatch", "11", "impl-11"], /impl-11: row #11's tier= names fleet-implementer-alt, which has no agents\/fleet-implementer-alt\.agent\.md/);
   assert.deepEqual(read().dispatched, []);
 });
 
@@ -196,26 +200,27 @@ test("a malformed tier= on a row does not refuse a member whose definition ignor
 });
 
 // #2299: a fix-applier dispatched on merge-bot's conflict hold is a
-// `fleet-implementer` whatever the row's tier, named off `dispatch`'s output
-// like every other member. A review fix-applier stays a generic `task` —
-// including on a row whose hold a fix-applier has already cleared.
-test("dispatch names a fix-applier on an unresolved conflict hold of its own PR fleet-implementer, whatever the row's tier or the hold's spelling", (t) => {
+// `fleet-implementer-slow-high` (the policy cell) whatever the row's tier,
+// named off `dispatch`'s output like every other member. A review
+// fix-applier stays a generic `task` — including on a row whose hold a
+// fix-applier has already cleared.
+test("dispatch names a fix-applier on an unresolved conflict hold of its own PR the policy cell's implementer, whatever the row's tier or the hold's spelling", (t) => {
   const { ok } = fixture(t);
   ok("row", "20", "impl-20=PR#21 · conflict-hold:#21");
-  assert.equal(ok("dispatch", "21", "fix-pr-21").agent, "fleet-implementer");
+  assert.equal(ok("dispatch", "21", "fix-pr-21").agent, "fleet-implementer-slow-high");
   // A failed one leaves the hold unresolved, so its replacement is one too.
   ok("settle", "fix-pr-21", "failed");
-  assert.equal(ok("dispatch", "21", "fix-pr-21-b").agent, "fleet-implementer");
+  assert.equal(ok("dispatch", "21", "fix-pr-21-b").agent, "fleet-implementer-slow-high");
 
   // `tier=` is not consulted — conflicting values neither change nor refuse it.
-  ok("row", "50", "impl-50=PR#51 · tier=alt · conflict-hold:#51");
-  assert.equal(ok("dispatch", "51", "fix-pr-51").agent, "fleet-implementer");
+  ok("row", "50", "impl-50=PR#51 · tier=task-high · conflict-hold:#51");
+  assert.equal(ok("dispatch", "51", "fix-pr-51").agent, "fleet-implementer-slow-high");
   ok("row", "60", "impl-60=PR#61 · tier=alt · tier=slow-high · conflict-hold:#61");
-  assert.equal(ok("dispatch", "61", "fix-pr-61").agent, "fleet-implementer");
+  assert.equal(ok("dispatch", "61", "fix-pr-61").agent, "fleet-implementer-slow-high");
 
   // The hold's other spelling the tick reads (fleet-tick.mjs's CONFLICT_HOLD).
   ok("row", "70", "impl-70=PR#71 · conflict-hold-71");
-  assert.equal(ok("dispatch", "71", "fix-pr-71").agent, "fleet-implementer");
+  assert.equal(ok("dispatch", "71", "fix-pr-71").agent, "fleet-implementer-slow-high");
 });
 
 test("dispatch names a review fix-applier null, including after a hold a fix-applier settled, until a fresh hold", (t) => {
@@ -231,7 +236,7 @@ test("dispatch names a review fix-applier null, including after a hold a fix-app
   assert.equal(ok("dispatch", "91", "fix-pr-91-b").agent, null);
   // ...until a fresh hold after that settle.
   ok("row", "100", "impl-100=PR#101 · fix-pr-101=applied:73b356de · conflict-hold:#101");
-  assert.equal(ok("dispatch", "101", "fix-pr-101-b").agent, "fleet-implementer");
+  assert.equal(ok("dispatch", "101", "fix-pr-101-b").agent, "fleet-implementer-slow-high");
 });
 
 // The hold is the tick's reading, so a ledger the tick refuses — here a hold
@@ -259,13 +264,13 @@ test("dispatch reads a fix-applier's conflict hold off the PR's merged state, ag
     const tickHeld = deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null }, []).conflictHeld.includes(Number(key));
     const { agent } = ok("dispatch", key, member);
     assert.equal(agent, expected, `${member} on ${JSON.stringify(l.rows)}`);
-    assert.equal(agent, tickHeld ? "fleet-implementer" : null, `${member}: dispatch and the tick disagree`);
+    assert.equal(agent, tickHeld ? "fleet-implementer-slow-high" : null, `${member}: dispatch and the tick disagree`);
   };
 
   // The hold on the PR's own row, the ticket row first and holding none.
   ok("row", "20", "impl-20=PR#21");
   ok("row", "21", "conflict-hold:#21");
-  agrees("21", "fix-pr-21", "fleet-implementer");
+  agrees("21", "fix-pr-21", "fleet-implementer-slow-high");
 
   // The hold on the ticket row, cleared by a settle on the PR's own row.
   ok("row", "30", "impl-30=PR#31 · conflict-hold:#31");
@@ -512,7 +517,7 @@ test("a review's survivors outlive a conflict fix-applier's settle: the next fix
       [{ number: 21, labels: [], closingIssuesReferences: [{ number: 20 }] }]);
   };
   assert.deepEqual([tick().fixDue, tick().conflictHeld], [[21], [21]]);
-  assert.equal(ok("dispatch", "21", "fix-pr-21").agent, "fleet-implementer");
+  assert.equal(ok("dispatch", "21", "fix-pr-21").agent, "fleet-implementer-slow-high");
   assert.deepEqual(tick().fixDue, [], "one fix-applier at a time");
   ok("settle", "fix-pr-21", "applied:def5678");
   assert.deepEqual([tick().fixDue, tick().conflictHeld], [[21], []], "the survivors it never read are due again");
