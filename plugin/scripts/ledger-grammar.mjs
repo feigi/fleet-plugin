@@ -24,6 +24,9 @@ const FAMILIES = {
   "finisher-pr": { label: "finisher-pr-M", bound: "pr", outcomes: ["labelled", "failed", "killed", "halted:<cause>"] },
   "merge-bot": { label: "merge-bot-n", bound: null, outcomes: ["done", "killed"] },
 };
+// Every family parseMember can yield: MEMBER below is built from this list,
+// so every family it matches has an entry here by construction.
+export const MEMBER_FAMILIES = Object.freeze(Object.keys(FAMILIES));
 // A finisher halt's causes (#2083): the finisher worked correctly and refused
 // to label, which `failed` (it crashed or gave up) does not say. `unreadable`,
 // `missing` and `absent` are duty 1's audit-read halts (#1106).
@@ -39,7 +42,7 @@ const OUTCOME_PATTERNS = {
 // suffix (`impl-<N>-b` — member-record.mjs has -b, -c and -d observed);
 // merge bots take none, because a replacement for a dead bot gets a new n.
 // Attempts on one number order by it: no suffix first, then by letter.
-const MEMBER = /^(impl|fix-pr|finisher-pr|merge-bot)-([1-9][0-9]*)(-[a-z])?$/;
+const MEMBER = new RegExp(`^(${MEMBER_FAMILIES.join("|")})-([1-9][0-9]*)(-[a-z])?$`);
 
 /** `{name, family, number, retry, bound}` for a member name, else null.
  * `retry` is the suffix letter (`"b"` for `impl-412-b`), null for none.
@@ -103,8 +106,8 @@ export function expectedDefinition(rowText) {
   const values = [...new Set(String(rowText ?? "").split(/\s+/)
     .filter((t) => t.startsWith("tier=")).map((t) => t.slice("tier=".length)))];
   if (values.length === 0) return "fleet-implementer";
-  if (values.length > 1) throw new Error(`row carries conflicting tier= tokens (${values.map((v) => `tier=${v}`).join(", ")})`);
-  if (!TIER_SUFFIX.test(values[0])) throw new Error(`tier=${values[0]} is not a definition suffix — expected [a-z0-9] words joined by '-'`);
+  if (values.length > 1) throw new Error(`row carries conflicting tier= tokens (${values.map((v) => `tier=${v}`).join(", ")}) — fix the row with \`ledger.mjs row\``);
+  if (!TIER_SUFFIX.test(values[0])) throw new Error(`tier=${values[0]} is not a definition suffix — expected [a-z0-9] words joined by '-' — fix the row with \`ledger.mjs row\``);
   return `fleet-implementer-${values[0]}`;
 }
 
@@ -118,13 +121,17 @@ export function expectedDefinition(rowText) {
 // unresolved is `conflictHeld`, the caller's to supply from fleet-tick.mjs's
 // deriveRun() — the reading the tick holds the merge on, which folds every
 // row of the PR, never one row's text alone. Throws whatever
-// expectedDefinition throws.
+// expectedDefinition throws, and on a family this switch has no case for
+// (#2330): null is the review fix-applier's deliberate answer, so a
+// `default: return null` would print a new family as a generic `task`
+// without anyone having decided it is one.
+/** @returns {string|null} the definition name; null only for a review fix-applier. */
 export function agentDefinition(member, rowText, conflictHeld = false) {
   switch (member.family) {
     case "impl": return expectedDefinition(rowText);
     case "fix-pr": return conflictHeld ? "fleet-implementer" : null;
     case "finisher-pr": return "fleet-finisher";
     case "merge-bot": return "fleet-merge-bot";
-    default: return null;
+    default: throw new Error(`agentDefinition has no case for member family '${member.family}' (${member.name}) — add one to ledger-grammar.mjs`);
   }
 }

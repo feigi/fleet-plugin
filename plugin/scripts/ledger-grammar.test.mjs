@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseToken, memberTokens, nextMergeBot, expectedDefinition } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, expectedDefinition, agentDefinition, MEMBER_FAMILIES } from "./ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -149,4 +149,23 @@ test("expectedDefinition refuses a tier= it cannot name one definition file by",
   // dispatch` adds cannot refuse a name no definition carries.
   assert.throws(() => expectedDefinition("impl-7 · tier=Alt"), /tier=Alt is not a definition suffix/);
   assert.equal(expectedDefinition("impl-7 · tier=alt · tier=alt"), "fleet-implementer-alt");
+});
+
+// #2330: null is a review fix-applier's deliberate "generic `task`", so a
+// family agentDefinition has no case for must throw, never read as one. This
+// walks every family parseMember can yield (MEMBER is built from
+// MEMBER_FAMILIES) — a family added to FAMILIES without a case here fails
+// this test, not a dispatch.
+test("agentDefinition names a definition for every member family, and throws on one it has no case for", () => {
+  for (const family of MEMBER_FAMILIES) {
+    const member = parseMember(`${family}-7`);
+    const definition = agentDefinition(member, "", true);
+    assert.match(definition, /^fleet-/, `${family}: ${definition}`);
+  }
+  // The must-ACCEPT half: the deliberate null is still null, not a throw.
+  assert.equal(agentDefinition(parseMember("fix-pr-7"), "", false), null);
+  assert.throws(
+    () => agentDefinition({ name: "review-pr-7", family: "review-pr", number: 7 }, "", false),
+    /no case for member family 'review-pr' \(review-pr-7\)/,
+  );
 });
