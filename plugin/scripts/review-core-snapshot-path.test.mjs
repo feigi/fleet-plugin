@@ -779,19 +779,25 @@ test("runReview actually calls snapshotMissing and throws on its result", () => 
 
 // `usableDiff` carries no head check of its own (#1132), so a diff for a
 // head/refHead-skewed snapshot is safe only because the refusal above is FATAL
-// before any specialist is dispatched (#2203). The tests above check the
-// refusal as a unit and the call site as text; neither notices a refusal that
-// stops being fatal — a removed or softened `throw`, or a `refHead` clause gone
-// from `snapshotMissing` — and a text pin on call ORDER would red on a harmless
-// reorder while missing both. So this drives the real `runReview` and asserts
+// before any specialist is dispatched (#2203). The tests above pin the parts:
+// the unit tests red on a `refHead` clause gone from `snapshotMissing`, and the
+// text pin reds on a deleted `throw` or one replaced by a log. Neither notices a
+// throw softened while its text survives — wrapped in a `try` whose `catch`
+// logs — and a text pin on call ORDER would red on a reorder that dispatches
+// nothing while missing that. So this drives the real `runReview` and asserts
 // on what was dispatched.
 //
 // Asserted on `calls`, not only on the rejection: an unscripted label does
 // throw `unexpected dispatch`, but the fixture's `pipeline` swallows a stage
 // throw into `null`, so that throw alone would fail nothing. `scriptedHost`
 // counts a dispatch before it looks the label up, so `calls` sees every one.
+//
+// The fixture's `path` ends in `snapshot-abc123`, and the refusal quotes the
+// path, so a path that does not carry the head keeps `/abc123/` below reading
+// the sha the message reports rather than the path it quotes.
 function runWithRefHead(refHead) {
-  const snap = { ...HOST_SNAP, refHead, diffPath: `${HOST_SNAP.runRoot}/pr.diff`, diffLines: 40 };
+  const path = `${HOST_SNAP.runRoot}/snapshot-tree`;
+  const snap = { ...HOST_SNAP, path, refHead, diffPath: `${HOST_SNAP.runRoot}/pr.diff`, diffLines: 40 };
   const { host, calls } = scriptedHost({ snapshot: [snap], "review:correctness": [review([])] });
   return { run: runReview({ ...host, pipeline, parallel }, ARGS), calls };
 }

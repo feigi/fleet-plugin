@@ -19,7 +19,11 @@ The call order is not where the hazard is. `runReview` throws on
 the diff log line and both prompt renders (specialist and refuter). The snapshot
 agent is the only dispatch that runs before the throw. If the `snapshotMissing`
 call and the `usableDiff` call were swapped, the run would still throw before any
-specialist was dispatched, and only a log line would change.
+specialist was dispatched. Two things would change: a log line, and the error for
+a snapshot agent that returned nothing. `usableDiff` reads `snap.diffPath`
+without a null guard, so that refusal would become a `TypeError` instead of
+`snapshotMissing`'s diagnostic. That costs a worse message on a run that is
+refused either way. It hands no specialist a diff, so it is accepted here.
 
 A skewed diff can reach a specialist in only two ways:
 
@@ -33,7 +37,7 @@ snapshot. It asserts that the run rejects, names both shas, and dispatches no
 `review:*` or `verify:*` agent. A control with matching heads dispatches the
 specialist once. Deleting the throw, deleting the `refHead` clause, or replacing
 the throw with a log line each turns that test red. Swapping the two calls leaves
-it green, and that swap is harmless.
+it green, and that swap dispatches nothing.
 
 The second is handled by documentation: the comment in `usableDiff` states the
 precondition, that the snapshot must already be admitted by `snapshotMissing`.
@@ -45,10 +49,11 @@ Each refused remedy costs more than it buys:
   already decided this point.
 - An admission token changes `snapshotMissing`'s contract (it returns a reason
   string or `null`). It also couples the pure `usableDiff` to that contract.
-- A call-order assert in `runReview` guards the order, and the order is harmless.
+- A call-order assert in `runReview` guards the order, and no order of those two
+  calls dispatches a specialist before the refusal.
 - A source-text order pin, in the style of `review-core-testcmd.test.mjs`, reds
-  on a harmless reorder. It also stays green when the `throw` is deleted but the
-  `snapshotMissing` call is left in place.
+  on a reorder that dispatches nothing. It also stays green when the `throw` is
+  deleted but the `snapshotMissing` call is left in place.
 
 ## What reopens it
 
@@ -58,9 +63,9 @@ skewed diff reaching a specialist while the behavioural test stays green.
 
 ## Prior requests
 
-- #1132: "delete the unreachable head-skew apparatus in `usableDiff`/`readRules`".
-  Its ruling chose to collapse the duplicate head compare and rejected keeping it
-  as defence in depth. The tradeoff came up again in the reviews of PR #1126 and
-  PR #2199.
-- #2203: "usableDiff silently accepts a diff for a head/refHead-skewed snapshot —
+- #1132 — "review-pr.js: the head-skew apparatus is unreachable after the #532
+  refusal — three dead branches, one named". Its ruling chose to collapse the
+  duplicate head compare and rejected keeping it as defence in depth. The
+  tradeoff came up again in the reviews of PR #1126 and PR #2199.
+- #2203 — "usableDiff silently accepts a diff for a head/refHead-skewed snapshot —
   depends on an unenforced snapshotMissing-first call order"
