@@ -6,10 +6,10 @@ import { between as section } from "./prose-pin.mjs";
 
 // Implementers dispatch at the tier their DEFINITION declares, never one the
 // controller passes: the dispatch rule omits `model` and names the definition
-// `ledger.mjs dispatch` printed. Nothing outside this file catches a drift in
-// either half; the fleet never reads back the model it dispatched at (board.mjs
-// parses `message.usage` off the subagent JSONL and drops `message.model` on
-// the same line).
+// `ledger.mjs dispatch` printed. Nothing outside this file pins either half of
+// that rule. A dispatch that breaks it is caught only after the fact, at run
+// time: tier-check.mjs compares the agent the member ran as, and the model and
+// level the harness resolved, against the definition its ledger row names.
 //
 // Slice by named anchors and fail loudly when one moves; slice SIZE is what
 // does the work. One slice per paragraph, never per phase: widen a slice to its
@@ -17,12 +17,19 @@ import { between as section } from "./prose-pin.mjs";
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
 
-// These two slices are paragraph-tight. A failure here means the text was
-// deleted OR relocated — check the rest of the file before assuming deletion.
+// The first two slices each run from a named paragraph to the next anchor named
+// here, several paragraphs on, so a neighbouring paragraph can satisfy a pin
+// read over them. A failure here means the text was deleted OR relocated —
+// check the rest of the file before assuming deletion.
 const dispatch = () =>
   section(RUN_TEAM, "**Dispatch every implementer", "**Guard: accumulate per PR", "run-team phase 2 dispatch rule");
 const guard = () =>
   section(RUN_TEAM, "**Guard: accumulate per PR", "Why the agent body carries what it does", "run-team phase 2 tier guard");
+// Paragraph-tight: the dispatch rule alone, ending where the tier check opens.
+// The paragraphs past it recount historical rows by vendor model name, so an
+// absence pin read over `dispatch()` would refuse the file as it stands.
+const dispatchRule = () =>
+  section(RUN_TEAM, "**Dispatch every implementer", "**After every Pull's dispatch", "run-team phase 2 dispatch rule paragraph");
 
 test("phase 2 dispatches every implementer at its definition's tier, and says so with a mechanism", () => {
   const slice = dispatch();
@@ -75,6 +82,27 @@ test("phase 2 dispatches every implementer at its definition's tier, and says so
     slice,
     /replaces the whole line/,
     "phase 2 shows a ledger literal without saying `row` replaces rather than appends",
+  );
+});
+
+// The rule is "omit `model`", so the paragraph that states it names no value
+// for `model` and no vendor model at all. The pins above assert the mechanism
+// is present and stay green beside an appended sentence that contradicts it —
+// measured: `Pass `model: "sonnet"` when the ticket is class=routine.` added
+// before `Keep `name: impl-<N>``, full suite green. The paragraph's own
+// "`model` set" and "omit `model`" are what these must accept: neither puts a
+// colon after the word.
+test("phase 2's dispatch rule binds no model value to any ticket", () => {
+  const slice = dispatchRule();
+  assert.doesNotMatch(
+    slice,
+    /\bmodel\b`?:\s*\S/,
+    "phase 2's dispatch rule now passes a `model` value — the declared tier is obtained by omitting it",
+  );
+  assert.doesNotMatch(
+    slice,
+    /\b(?:sonnet|opus|haiku)\b/i,
+    "phase 2's dispatch rule now names a vendor model — the tier lives in the definition's frontmatter, as a route",
   );
 });
 

@@ -17,10 +17,10 @@ close-out PR rule) and is pinned by
 
 **The cost the rule would prevent is the one #1434 already priced as low.** The
 data/prose split exists because the two halves strand differently: a stranded data
-row is lost (the tier guard re-derives its floor from the undercount, and
-`member-outcomes.tsv` is regenerated from harness transcripts this repo does not
-own), while, in the skill's words, "Stranding a rule change costs the status quo,
-which is where it already was." Two prose changes bundled together fail the same
+row is lost (`member-outcomes.tsv` is regenerated from harness transcripts this
+repo does not own), while, in the skill's words, "Stranding a rule change costs
+the status quo, which is where it already was." Two prose changes bundled
+together fail the same
 way one does. If the bundle stalls, both stay unshipped, and that is the status
 quo for each of them. Nothing is lost that has to be re-derived.
 

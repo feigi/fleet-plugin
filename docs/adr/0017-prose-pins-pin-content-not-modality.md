@@ -109,11 +109,12 @@ This ADR chooses a mechanism. It implements none.
   guard retires, the hedge mutant above lands green. That exposure is a
   recorded, known gap, not an unnoticed one; it is not closed by any pin in
   the interim.
-- **The same limit applies to the revert-note residual** in the same test
-  file: a restoration of the reverted `class=routine` → `sonnet` binding
-  written as modality ("that binding is back in force") rather than as a
-  repeated token or date passes every check there. Its comment cites this ADR
-  instead of an open question.
+- **The same limit applied to the revert-note residual** that test file
+  carried while the reverted `class=routine` → `sonnet` binding was on
+  record: a restoration written as modality ("that binding is back in
+  force") rather than as a repeated token or date passed every check there.
+  That residual and its comment were deleted when #2336 retired the ticket
+  class and the tier-guard revert floor.
 - **A future obligation needing hardness** is carried the same way: name the
   script, its exit contract, and the tick row, and pin *those* — their
   content is pinnable.

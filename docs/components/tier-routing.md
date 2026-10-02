@@ -28,9 +28,11 @@ layer underneath the [Implementer](implementer.md) role.
    compares it to the Declared tier; a mismatch holds the next Pull
    (`HOLD (tier mismatch impl-<N>)`) until a corrected redispatch
    clears it.
-5. **Guard the rate.** A guard over `docs/metrics/tier-outcomes.tsv`
-   runs at every alternate-tier Pull and reverts the A/B pairing to a
-   single tier if the alternate's own floor and trigger fire.
+5. **Record the outcome.** When the controller rules an implementer
+   PR's review it appends one row for that PR to
+   `docs/metrics/tier-outcomes.tsv` (`tier-outcomes.mjs append`).
+   Nothing concludes inside a run and nothing reverts a tier
+   automatically: the rows accumulate across runs for a later comparison.
 
 ## Opinionated choices
 
