@@ -17,10 +17,13 @@ PR, off the controller's own turn.
    [`fleet-review-snapshot`](../../plugin/agents/fleet-review-snapshot.agent.md)
    cuts a `git archive`d, `git init`ed snapshot verified against the
    reviewed commit and sized with
-   [`diff-stats.mjs`](../../plugin/scripts/diff-stats.mjs), then
-   specialists run in parallel over it — correctness always, plus
-   comments/silent-failure/tests/types/simplify scaled to diff size and
-   shape.
+   [`diff-stats.mjs`](../../plugin/scripts/diff-stats.mjs).
+   [`fleet-review-test-run`](../../plugin/agents/fleet-review-test-run.agent.md)
+   then runs the test command once from the snapshot's root, and
+   specialists run in parallel over the snapshot, each reading that one
+   run's counts and log rather than running the suite itself —
+   correctness always, plus comments/silent-failure/tests/types/simplify
+   scaled to diff size and shape.
 3. **Verify.**
    [`fleet-review-verifier`](../../plugin/agents/fleet-review-verifier.agent.md)
    adversarially refutes every `critical`/`important` finding by
@@ -51,9 +54,10 @@ flowchart TD
 
     subgraph RUNNER["fleet-review-runner — review-eval.mjs to review-core.mjs"]
         SNAP["Snapshot — fleet-review-snapshot<br/>git archive + git init, diff-stats.mjs"]
+        TESTRUN["Test run — fleet-review-test-run<br/>the test command, once, for every specialist"]
         SPEC["Specialists, parallel<br/>correctness always runs;<br/>+comments / silent-failure / tests /<br/>types / simplify by size + diff shape"]
         VERI["Verifier — fleet-review-verifier<br/>refutes critical / important only"]
-        SNAP --> SPEC --> VERI
+        SNAP --> TESTRUN --> SPEC --> VERI
     end
 
     VERI -->|"full result to<br/>scratch/review-N.json"| CTRL["controller reads<br/>the digest only"]

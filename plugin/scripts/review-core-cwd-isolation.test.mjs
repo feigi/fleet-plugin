@@ -59,17 +59,17 @@ const SNAP = { path: "/scr/run-1/snapshot-abc1234", head: "abc1234", runRoot: "/
 
 // One specialist's, one refuter's and the snapshot agent's prompt. Every
 // argument is fixed: these pins are about what the prompts SAY, not about how
-// they vary, so nothing here needs to. `readRules`/`usableDiff`/
-// `environmentNote` are stubs for the sibling pins' reason — binding them
-// keeps a render that stops passing one throwing a ReferenceError instead of
-// dropping a paragraph silently.
+// they vary, so nothing here needs to. `sharedRunNote`/`readRules`/
+// `usableDiff`/`environmentNote` are stubs for the sibling pins' reason —
+// binding them keeps a render that stops passing one throwing a
+// ReferenceError instead of dropping a paragraph silently.
 const specialist = promptRenderer({
   file: FILE,
   start: "`Review PR #${pr} (branch ${branch}) for: ",
   end: "label: `review:",
-  scope: ["pr", "branch", "d", "snap", "worktree", "stats", "testCmd", "readRules", "usableDiff", "environmentNote"],
+  scope: ["pr", "branch", "d", "snap", "worktree", "stats", "sharedRunNote", "sharedRun", "failureOwner", "readRules", "usableDiff", "environmentNote"],
   what: "review-core.mjs's specialist prompt (opening `Review PR #${pr} (branch ${branch}) for: `, labelled `review:`)",
-})(7, "feature/x", { key: "correctness", prompt: "does it do what it says" }, SNAP, "/repo/.worktrees/7-x", null, "node --test", () => "READ RULES", () => null, () => "TEST ENVIRONMENT");
+})(7, "feature/x", { key: "correctness", prompt: "does it do what it says" }, SNAP, "/repo/.worktrees/7-x", null, () => "SHARED RUN NOTE", {}, "correctness", () => "READ RULES", () => null, () => "TEST ENVIRONMENT");
 
 const refuter = promptRenderer({
   file: FILE,
@@ -329,6 +329,7 @@ function fakeReviewHost(scopeSearched) {
           repoVerified: true,
           testCmd: "node --test",
         };
+      if (opts.label === "test-run") return { exitCode: 0, tests: 5, pass: 5, fail: 0 };
       if (opts.label === "review:correctness")
         return {
           dimension: "correctness",

@@ -2,7 +2,7 @@
 name: fleet-review-runner
 description: A `/skill:run-team` review runner on omp — dispatched by the controller as review-pr-<pr#> with pr, branch, worktree, testCmd and scratch; runs runReviewOnOmp to completion in its own eval cell, writes <scratch>/review-<pr>.json, and reports the digest and the path. Never invoked directly.
 model: "@smol:low"
-spawns: fleet-review-snapshot, fleet-review-correctness, fleet-review-silent-failure, fleet-review-tests, fleet-review-comments, fleet-review-types, fleet-review-simplify, fleet-review-verifier
+spawns: fleet-review-snapshot, fleet-review-test-run, fleet-review-correctness, fleet-review-silent-failure, fleet-review-tests, fleet-review-comments, fleet-review-types, fleet-review-simplify, fleet-review-verifier
 ---
 
 You run one PR review to completion, off the controller's turn, and report
@@ -17,13 +17,14 @@ and refuters from inside your cell, re-dispatches any that crash once, and
 `runReviewToFile` around it retries a failed review once and writes the file.
 Your part is to run that one call and report what it returns.
 
-This agent's `spawns:` frontmatter above names the 8 agent types
+This agent's `spawns:` frontmatter above names the 9 agent types
 `review-core.mjs`'s own `agentType` list actually dispatches from inside
-`runReviewOnOmp`'s eval cell (`fleet-review-snapshot`, the 6 specialist
-dimensions, `fleet-review-verifier`) — an allowlist, not `"*"`, so a future
-dimension added to `review-core.mjs` without a matching update here fails
-loud (`Cannot spawn '<name>'. Allowed: ...`) instead of silently. Before
-#2102 this field was missing entirely and `tools` was never set either, so
+`runReviewOnOmp`'s eval cell (`fleet-review-snapshot`, `fleet-review-test-run`,
+the 6 specialist dimensions, `fleet-review-verifier`) — an allowlist, not
+`"*"`, so a future dimension added to `review-core.mjs` without a matching
+update here fails loud (`Cannot spawn '<name>'. Allowed: ...`) instead of
+silently. Before #2102 this field was missing entirely and `tools` was never
+set either, so
 the backward-compat `spawns` default (`omp://task-agent-discovery.md:38-39`
 — missing `spawns` defaults to `*` only when `tools` includes `task`) never
 fired: every spawn from this agent's cell was refused, 110+ times in one

@@ -18,8 +18,9 @@ import { resolveTestCmd, SNAPSHOT_SCHEMA } from "./review-core.mjs";
 //
 // This file covers what remains review-core.mjs's own responsibility:
 // resolveTestCmd's resolution order and refusal, the snapshot agent's prompt
-// and schema actually carrying the derivation, and the specialist prompt
-// still handing testCmd over verbatim with the 'tests 0' rule.
+// and schema actually carrying the derivation, and the shared test-run
+// prompt (#2315) handing testCmd over verbatim with the 'tests 0' rule — the
+// one prompt that runs it, since no specialist runs the full suite any more.
 const REPO = join(import.meta.dirname, "..");
 const SOURCE = readFileSync(join(REPO, "scripts", "review-core.mjs"), "utf8");
 
@@ -198,34 +199,35 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
   );
 });
 
-// The prompt is what specialists actually obey, so the reading rule has to be
-// in it. Without this, a specialist that guesses a glob still reports
+// #2315. The prompt that RUNS the command is the shared test run's — every
+// specialist used to run it, which made one review up to six full sweeps.
+// Bounded at both ends: an unbounded slice runs to EOF, where the specialist
+// and refuter prompts could satisfy the assertions below instead.
+function testRunPrompt() {
+  return between(CODE, "`Run this repository's test command ONCE", '{ label: "test-run"', "the shared test-run prompt");
+}
+
+// The prompt is what the test-run agent actually obeys, so the reading rule has
+// to be in it. Without this, an agent that guesses a glob still reports
 // `tests 0` as a pass — the exact failure the derivation alone does not cover.
-test("the specialist prompt hands the command over verbatim and rules 'tests 0' a failure", () => {
-  // indexOf returns -1 when absent and slice(-1) is a truthy one-character
-  // string, so asserting on the slice passes with the prompt gone. Assert the
-  // index — and bound the END too: unbounded, this slice ran to EOF and the
-  // assertions below were satisfiable from the verifier prompt further down.
-  const prompt = between(CODE, "READ ONLY FROM THE SNAPSHOT", "Scratch files go in", "the specialist prompt");
-  // The worked example must INTERPOLATE testCmd, not restate it. A hardcoded
+test("the test-run prompt hands the command over verbatim and rules 'tests 0' a failure", () => {
+  const prompt = testRunPrompt();
+  // The command block must INTERPOLATE testCmd, not restate it. A hardcoded
   // copy drifts from the resolved value the moment either one changes, and a
   // caller passing args.testCmd (or the derivation) would be handed the wrong
-  // command.
+  // command. Run from the snapshot's root, its output captured to the log
+  // every specialist is pointed at.
   assert.match(
     prompt,
-    /run exactly this[^\n]*\n\s*\$\{testCmd\}/,
-    "the prompt no longer hands specialists the interpolated command verbatim",
+    /\{ cd "\$\{snap\.path\}" && \$\{testCmd\}; \} > "\$\{logPath\}" 2>&1; echo "TEST_RUN_EXIT=\$\?"/,
+    "the prompt no longer runs the interpolated command verbatim from the snapshot's root into the log",
   );
   // Match the ruling itself, not the phrase `tests 0` — that appears in the
   // surrounding explanation too, so a looser assertion passes with the rule
   // deleted (observed: it did).
-  assert.match(
-    prompt,
-    /'tests 0' is a FAILED run/,
-    "the prompt no longer rules a zero-test run a failure",
-  );
+  assert.match(prompt, /'tests 0' is a FAILED run/, "the prompt no longer rules a zero-test run a failure");
   // The RULING was pinned and the INSTRUCTION was not, so the sentence telling
-  // specialists not to swap the command out could be deleted with this suite
+  // the agent not to swap the command out could be deleted with this suite
   // green (#143). Everything around it explains why; this is the only clause
   // that actually forbids anything.
   assert.match(
@@ -233,21 +235,48 @@ test("the specialist prompt hands the command over verbatim and rules 'tests 0' 
     /Do not substitute a command of your own\./,
     "the prompt no longer forbids substituting a command — only explains why one would be wrong",
   );
+  // Once is the whole point of #2315: a retry by the agent is a second full run.
+  // The clause, not the phrase — "Run it exactly once, then again when it
+  // fails" still contains "Run it exactly once".
+  assert.match(
+    prompt,
+    /Run it exactly once: not again when it fails, and not again when it hits the\s+deadline\./,
+    "the prompt no longer forbids running the command a second time",
+  );
 });
 
-// #143's second correction. The rationale above asserted, present tense and as
+// How the one run is held and read. Each clause is a behavior the agent obeys
+// and nothing downstream re-checks: a backgrounded or polled run is the
+// unbounded load #2315 measured, a deadline that is far too short reads every
+// heavy suite as no counts, a `tail` too short misses the summary, and a 0
+// typed in for a count the log never stated turns "no counts" (every dimension
+// unrun) into "tests 0" or a clean-looking pass — the distinction
+// TEST_RUN_SCHEMA's absent-count rule exists for.
+test("the test-run prompt holds the run in the foreground under a deadline, and never invents a count", () => {
+  const prompt = testRunPrompt();
+  assert.match(prompt, /ONE blocking foreground command — never backgrounded, never polled —/, "the prompt no longer forbids a backgrounded or polled run");
+  assert.match(prompt, /with a command deadline of 1800 seconds:/, "the prompt's command deadline changed — size it against a full suite under fleet load");
+  assert.match(prompt, /\\`tail -n 40 "\$\{logPath\}"\\`/, "the prompt no longer reads enough of the log's tail to hold a runner's summary");
+  assert.match(
+    prompt,
+    /omit every count and say what happened in \\`error\\`\. Never\s+write 0 for a count the log does not state/,
+    "the prompt no longer forbids writing 0 for a count the log does not state",
+  );
+});
+
+// #143's second correction. The rationale once asserted, present tense and as
 // fact about the run being described, that a bare runner "tears down a shared
 // container mid-run for every sibling". Measured against this repo:
 // this repo's Test entrypoint is a plain `node --test` run and
 // `commands/review-and-fix.md` records that this repo has no
 // compose file, no `globalSetup`, and no vitest — so no teardown can happen,
-// and a specialist that checks the reason it was given finds it false.
+// and an agent that checks the reason it was given finds it false.
 //
 // The rule is still worth carrying, because the review host reviews repos that DO
 // have a stack. It has to be stated as a conditional about those repos rather
 // than as a fact about this run.
 test("the anti-substitution rationale is portable, not a present-tense claim about this run", () => {
-  const prompt = between(CODE, "READ ONLY FROM THE SNAPSHOT", "Scratch files go in", "the specialist prompt");
+  const prompt = testRunPrompt();
   assert.doesNotMatch(
     prompt,
     /tears down a shared container mid-run for every sibling/,
@@ -256,33 +285,35 @@ test("the anti-substitution rationale is portable, not a present-tense claim abo
   // The conditional that replaced it, and the half that is NOT conditional: a
   // zero-match glob exits 0 in every repo, so hedging that one would weaken a
   // rule this repo has actually measured (#142).
+  assert.match(prompt, /In a repo that has a shared test stack/, "the container rationale is no longer scoped to the repos it can happen in");
+  assert.match(prompt, /a guessed glob is\s+worse in every repo/, "the zero-match-glob half is no longer stated as holding everywhere");
+});
+
+// The rule #143 widened, now in the one prompt that runs the suite. The
+// classifier catches the zero-pass case on its own (`review-core-unrun.test.mjs`),
+// but the partial-tree case it CANNOT: `unrunReason` is pure and never learns
+// how many tests the whole tree has, so the only guard is the run itself
+// starting from the snapshot's root. If this instruction goes, that case has no
+// other guard.
+test("the test-run prompt rules a no-work run too: zero passes, and a count below the whole tree", () => {
+  const prompt = testRunPrompt();
+  assert.match(prompt, /0 passes with no failures is\s+everything skipped/, "the prompt no longer rules an all-skipped run a no-work run (#143)");
   assert.match(
     prompt,
-    /In a repo that has a shared test stack/,
-    "the container rationale is no longer scoped to the repos it can happen in",
-  );
-  assert.match(
-    prompt,
-    /a guessed glob is\s+worse in every repo/,
-    "the zero-match-glob half is no longer stated as holding everywhere",
+    /a count well below what the whole tree reports, which means it ran a\s+PARTIAL copy/,
+    "the prompt no longer names a partial-tree run — the case nothing downstream can catch (#143)",
   );
 });
 
-// The rule #143 widened, in the place specialists actually read. The classifier
-// catches the zero-pass case on its own (`review-pr-unrun.test.mjs`), but the
-// partial-tree case it CANNOT: `unrunReason` is pure and never learns how many
-// tests the whole tree has, so the only reader positioned to notice is the agent
-// that ran the command. If this instruction goes, that case has no other guard.
-test("the prompt rules a no-work run unrun too: zero passes, and a count below the whole tree", () => {
+// #2315's other half: the specialist prompt must hand the shared run over and
+// never the command to run. A specialist prompt that interpolates `testCmd`
+// again is six full sweeps per review again.
+test("the specialist prompt carries the shared run's note, and never the command to run", () => {
   const prompt = between(CODE, "READ ONLY FROM THE SNAPSHOT", "Scratch files go in", "the specialist prompt");
+  assert.doesNotMatch(prompt, /\$\{testCmd\}/, "the specialist prompt hands out testCmd to run again — one full sweep per dimension");
   assert.match(
     prompt,
-    /0 passes with no failures is\s+everything skipped/,
-    "the prompt no longer rules an all-skipped run a no-work run (#143)",
-  );
-  assert.match(
-    prompt,
-    /a count well below what the whole tree reports means you\s+ran a PARTIAL copy/,
-    "the prompt no longer rules a partial-tree run unrun — the case nothing downstream can catch (#143)",
+    /\$\{sharedRunNote\(sharedRun, failureOwner, d\.key\)\}/,
+    "the specialist prompt no longer carries the shared run's note",
   );
 });

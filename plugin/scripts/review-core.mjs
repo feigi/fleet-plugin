@@ -2,10 +2,10 @@
 // on #1296). Read that ruling before touching this file.
 //
 // This file holds every host-independent declaration PR review needs: the
-// two JSON schemas, `usableDiff`, `readRules`, `resolveTestCmd`,
+// JSON schemas, `usableDiff`, `readRules`, `resolveTestCmd`,
 // `decodeArgs`, `selectDimensions`, `resolveDimensions`, `snapshotMissing`,
-// `unrunReason`/`unrunEntries`/`unrunCrashed`, `verdictFor`, `resumeFor`,
-// and `runReview(host, args)` — the orchestration function itself.
+// `unrunReason`/`unrunEntries`/`unrunCrashed`, `sharedRunNote`, `verdictFor`,
+// `resumeFor`, and `runReview(host, args)` — the orchestration function itself.
 //
 // review-eval.mjs imports this file directly, a RELATIVE specifier: both
 // ship together under the same Install root, so the Resolver is only needed
@@ -51,10 +51,10 @@ export const FINDINGS_SCHEMA = {
       additionalProperties: false,
       required: ["command", "tests"],
       description:
-        "The test run this pass performed. Report it even when it failed or produced nothing — `tests: 0` is how a dimension gets reported unrun, and an empty findings list cannot say it.",
+        "The review's ONE shared test run, copied from your prompt — you do not run the full suite yourself (#2315). Report it even when it failed or produced nothing.",
       properties: {
-        command: { type: "string", description: "The command as RUN, verbatim." },
-        tests: { type: "integer", description: "Tests the run reported. 0 means the command produced none — a failed run, not a pass." },
+        command: { type: "string", description: "The shared run's command, verbatim as your prompt states it." },
+        tests: { type: "integer", description: "The shared run's test count as your prompt states it; 0 when it states none." },
         pass: { type: "integer" },
         fail: { type: "integer" },
       },
@@ -122,6 +122,27 @@ export const SNAPSHOT_SCHEMA = {
   },
 };
 
+// #2315. What the review's one shared test run reports back. `command` and the
+// log path are NOT asked for: the caller handed both out, so it already knows
+// them, and an agent's echo of either could only disagree. Every count is
+// optional and stays absent when the log does not state it — an absent
+// `tests` is how `unrunReason` learns the run produced no counts at all
+// (crash, deadline, no summary), which a typed-in 0 would misreport as a run
+// that collected nothing.
+export const TEST_RUN_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    exitCode: { type: "integer", description: "The TEST_RUN_EXIT value the command block printed." },
+    tests: { type: "integer" },
+    pass: { type: "integer" },
+    fail: { type: "integer" },
+    cancelled: { type: "integer" },
+    skipped: { type: "integer" },
+    error: { type: "string", description: "Only when no summary was printed: what happened instead." },
+  },
+};
+
 // --- Dimension catalog --------------------------------------------------
 // #1349, per #1303's gap 3: no dimension carries a `model`/`effort` field —
 // dispatch tier lives ONLY in each fleet-owned agent definition's own
@@ -166,16 +187,19 @@ export const DEFAULT_DIMENSIONS = [
 
 // #2102: the omp `fleet-review-runner` agent definition's `spawns:`
 // frontmatter must allow exactly the agent types dispatched below (the
-// snapshot agent, every DEFAULT_DIMENSIONS entry, and the verifier) — omp
-// denies every spawn by default, and the runner declared no `spawns` at all
-// until this fix. Exporting the two literal-only types (snapshot/verifier
-// have no DEFAULT_DIMENSIONS entry of their own) plus the derived full set
-// lets review-runner-spawns.test.mjs pin the frontmatter against what this
-// file actually dispatches, instead of a hand-copied list that can drift.
+// snapshot agent, the shared test run's agent (#2315), every
+// DEFAULT_DIMENSIONS entry, and the verifier) — omp denies every spawn by
+// default, and the runner declared no `spawns` at all until this fix.
+// Exporting the three literal-only types (snapshot/test-run/verifier have no
+// DEFAULT_DIMENSIONS entry of their own) plus the derived full set lets
+// review-runner-spawns.test.mjs pin the frontmatter against what this file
+// actually dispatches, instead of a hand-copied list that can drift.
 export const SNAPSHOT_AGENT_TYPE = "fleet-review-snapshot";
+export const TEST_RUN_AGENT_TYPE = "fleet-review-test-run";
 export const VERIFIER_AGENT_TYPE = "fleet-review-verifier";
 export const SPAWNED_AGENT_TYPES = [
   SNAPSHOT_AGENT_TYPE,
+  TEST_RUN_AGENT_TYPE,
   ...DEFAULT_DIMENSIONS.map((d) => d.agentType),
   VERIFIER_AGENT_TYPE,
 ];
@@ -419,28 +443,119 @@ validation of the tree: its counts are snapshot-measured, and a failure in it
 cannot be told apart from a regression.`;
 }
 
-export function unrunReason(review) {
-  if (!review) return "the reviewer returned nothing — spend limit, timeout, or terminal error";
-  const run = review.test_run;
-  if (!run) return "the reviewer reported no test run at all";
+// #2315. Every run-quality verdict below reads the review's ONE shared test
+// run — `{command, logPath, exitCode?, tests?, pass?, fail?, cancelled?,
+// skipped?, error?}`, `command`/`logPath` the caller's own and the rest the
+// test-run agent's report — never a specialist's own run: no specialist runs
+// the full suite any more, so a verdict on one would judge a copy of this.
+// `run` null is a caller holding no run at all — runReview always hands one
+// over, a null or thrown test-run dispatch arriving as `{error}` — and `tests`
+// absent is a run that returned without a count. Both are "no counts", and
+// neither is ever a pass. Counts alone are not a pass either: the exit status
+// is the command's own verdict, so a run that reports none, or exits non-zero
+// with nothing failing or cancelled to account for it, is unusable — a
+// coverage gate, a crash after the summary, or an agent that dropped the
+// TEST_RUN_EXIT line would otherwise read as green.
+function testRunReason(run) {
+  if (!run) return "the review's shared test run returned nothing — no counts exist, so no dimension's tests ran";
   const cmd = run.command || "the test command";
+  if (typeof run.tests !== "number")
+    return `\`${cmd}\` produced no counts — the shared test run crashed, hit its deadline, or printed no summary${run.error ? ` (${run.error})` : ""} — a failed run, not a pass`;
   if (!run.tests) return `\`${cmd}\` produced 0 tests — a failed run, not a pass`;
   if (run.pass === 0 && !run.fail) return `\`${cmd}\` passed nothing and failed nothing — every test skipped, not a pass`;
   const executed = run.pass + (run.fail ?? 0);
   if (typeof run.pass === "number" && executed * 2 < run.tests)
     return `\`${cmd}\` passed ${run.pass} and failed ${run.fail ?? 0} of the ${run.tests} tests it collected — most of what it collected never ran`;
-  if (run.fail > 0 && !review.findings?.length)
-    return `\`${cmd}\` reported ${run.fail} failing tests and the reviewer filed no findings about them`;
+  if (typeof run.exitCode !== "number")
+    return `\`${cmd}\` reported counts but no exit status — nothing shows the command succeeded, so its counts are not a pass`;
+  if (run.exitCode !== 0 && !failingOf(run))
+    return `\`${cmd}\` exited ${run.exitCode} but reported no failing or cancelled tests — its counts do not account for the failure, so they are not a pass`;
   return null;
 }
 
-export function unrunEntries(review, dimension) {
-  const why = unrunReason(review);
-  return why ? [{ dimension, reason: why }] : [];
+// A cancelled test is a failure the runner counts apart from `fail` — node's
+// runner exits 1 on one with `fail 0` — so both are the review's to report.
+function failingOf(run) {
+  return (run.fail || 0) + (run.cancelled || 0);
 }
 
+function failingDesc(run) {
+  return run.cancelled ? `${run.fail || 0} failing and ${run.cancelled} cancelled tests` : `${run.fail} failing tests`;
+}
+
+// Failing tests are owned by the review as a whole (#2315): `findings` is
+// every finding that reached the payload, and ONE from any dimension
+// satisfies the check for all — no dimension is asked to duplicate a
+// sibling's, and none is marked unrun because a sibling filed it. A refuted
+// finding does not count: the review rejected it, so an unrelated claim its
+// verifiers threw out would otherwise stand in for failures nobody reported.
+// A dimension whose verify stage died never reaches the payload, so its
+// findings are not here to count either.
+export function unrunReason(run, findings) {
+  const why = testRunReason(run);
+  if (why) return why;
+  if (failingOf(run) > 0 && !findings.some((f) => f && f.verdict !== "refuted"))
+    return `\`${run.command || "the test command"}\` reported ${failingDesc(run)} and no selected dimension filed a finding about them that the review kept`;
+  return null;
+}
+
+// One verdict, every key: the shared run is the same run for each of them.
+export function unrunEntries(run, findings, keys) {
+  const why = unrunReason(run, findings);
+  return why ? keys.map((dimension) => ({ dimension, reason: why })) : [];
+}
+
+export const CRASHED_REASON = "the reviewer returned nothing — spend limit, timeout, or terminal error";
+
 export function unrunCrashed(reviewed, dimensions) {
-  return reviewed.flatMap((r, i) => (r ? [] : unrunEntries(null, dimensions[i]?.key ?? `slot ${i}`)));
+  return reviewed.flatMap((r, i) => (r ? [] : [{ dimension: dimensions[i]?.key ?? `slot ${i}`, reason: CRASHED_REASON }]));
+}
+
+function countsOf(run) {
+  return ["tests", "pass", "fail", "cancelled", "skipped"]
+    .filter((k) => typeof run[k] === "number")
+    .map((k) => `${k} ${run[k]}`)
+    .join(", ");
+}
+
+// #2315. The Tests paragraph of every specialist prompt: the shared run's
+// command, counts, exit status and log path, in place of the instruction to
+// run the full suite that each specialist used to follow — one review was up
+// to six full sweeps of one immutable snapshot. `owner` is the one dimension
+// told to file the finding about failing tests, so the others are told not
+// to duplicate it rather than left to race each other to it.
+export function sharedRunNote(run, owner, key) {
+  const lines = [
+    `Tests: this review ran its test command ONCE, from the snapshot's root, before
+dispatching you. Do NOT run that full command yourself — every dimension reads
+this one run. Targeted probes and mutations in your own copy of the snapshot are
+still yours to run.
+  command: ${run.command}
+  counts:  ${countsOf(run) || "none — the run produced no counts"}
+  exit:    ${run.exitCode ?? "(not reported)"}
+  log:     ${run.logPath}
+Read the log for anything the counts do not say. Report this run in
+\`test_run\` — its command verbatim and these counts, \`tests: 0\` when it states
+none — never a run of your own.`,
+  ];
+  const why = testRunReason(run);
+  if (why)
+    lines.push(`This run is NOT usable: ${why}. Every dimension of this review is reported
+unrun for it — do not run the full command yourself to replace it.`);
+  else if (failingOf(run) > 0)
+    lines.push(
+      key === owner
+        ? `It has ${failingDesc(run)}, and filing them is YOUR job in this review:
+file at least one finding about them, naming each failing test from the log. A
+failure you cannot separate from the environment is still filed — say so in the
+finding, so it is reproduced in the worktree before anyone acts on it. If none is
+filed, or this review's refuters reject every finding filed, every dimension of
+this review is reported unrun.`
+        : `It has ${failingDesc(run)}, and the ${owner} dimension files the finding
+about them. Do not file a duplicate — cite a failure as evidence only where it
+bears on your own lens.`,
+    );
+  return lines.join("\n");
 }
 
 // #1433 gap: the CWD-AUDIT line the Review dispatch below asks a specialist
@@ -633,7 +748,7 @@ Report \`repoVerified\` = true ONLY if the last line above printed
 SNAPSHOT_TREE_MATCH; otherwise report it false and put the line it printed
 instead — SNAPSHOT_INIT_FAILED, or the whole SNAPSHOT_TREE_MISMATCH= value with
 both hashes — in \`repoError\`. The init is what makes the snapshot MEASURABLE:
-specialists run this repository's own suite in there, and a suite with tests
+the review runs this repository's own suite in there, and a suite with tests
 that need a working tree reports fewer passes and more failures in a bare
 extraction than in a checkout at the same commit, with nothing in the payload
 saying the measurement happened somewhere else (#1056). The tree-hash compare is
@@ -750,6 +865,65 @@ a false repoVerified.`,
   );
   log(`agents dispatched ${dimensions.map((d) => `${d.key}=${d.agentType}`).join(" ")}`);
 
+  // #2315. The review's ONE run of the test command, before any specialist is
+  // dispatched: every dimension used to run the full suite itself, so one
+  // review was up to six full sweeps of one immutable snapshot. NOT wrapped in
+  // `retryCrashed`: a crashed dispatch may already have launched the command,
+  // so a retry would be a second launch — the load this step removes. A null
+  // or thrown answer is a run with no counts, which `unrunReason` reports for
+  // every dimension, never a pass.
+  const logPath = `${snap.runRoot}/test-run.log`;
+  phase("Test run");
+  const ran = await agent(
+    `Run this repository's test command ONCE, for the review of PR #${pr}, and
+report what it printed. Every review specialist reads your counts instead of
+running the suite itself, so this is the review's only full run.
+
+Your shell starts in a directory you must not write to: this dispatch carries
+no working directory of its own, so you begin wherever the controller's own
+review cell is standing, and a relative path in any command lands THERE. The
+block below is absolute and cd-chained on purpose — run it exactly as written,
+and add nothing relative to it.
+
+Run it as ONE blocking foreground command — never backgrounded, never polled —
+with a command deadline of 1800 seconds:
+
+    { cd "${snap.path}" && ${testCmd}; } > "${logPath}" 2>&1; echo "TEST_RUN_EXIT=$?"
+
+Run it exactly once: not again when it fails, and not again when it hits the
+deadline. A failing run is a result every specialist reads, and a second
+launch is the load this step exists to remove.
+
+Do not substitute a command of your own. In a repo that has a shared test stack,
+a bare runner picks up a default config whose setup can tear a sibling's
+container down mid-run; a guessed glob is worse in every repo, because one
+matching nothing still exits 0 reporting 'tests 0' — a green that ran nothing.
+Run it from the snapshot's root, as the block does: a run from a subdirectory
+reports a count well below what the whole tree reports, which means it ran a
+PARTIAL copy, and nothing downstream can catch that one, because only this run
+knows what the full tree reports.
+
+Then read the summary the runner printed at the end of the log —
+\`tail -n 40 "${logPath}"\`, ignoring any color escapes — and report
+\`exitCode\` = the TEST_RUN_EXIT value, and \`tests\`, \`pass\`, \`fail\`,
+\`cancelled\`, \`skipped\` = the counts that summary states, each copied as
+printed; omit any the runner does not print. Copy the counts, never judge them:
+'tests 0' is a FAILED run, not a pass, and 0 passes with no failures is
+everything skipped — report both exactly as printed, and the caller reports
+every dimension unrun for them.
+
+If the command hit its deadline, crashed before printing a summary, or printed
+no counts at all, omit every count and say what happened in \`error\`. Never
+write 0 for a count the log does not state: an absent count is how the caller
+learns the run produced none.`,
+    { label: "test-run", phase: "Test run", agentType: TEST_RUN_AGENT_TYPE, schema: TEST_RUN_SCHEMA },
+  ).catch((e) => ({ error: `the test-run dispatch threw: ${e?.message ?? e}` }));
+  const sharedRun = { ...(ran || { error: "the test-run agent returned nothing" }), command: testCmd, logPath };
+  log(`shared test run: ${countsOf(sharedRun) || "no counts"} — exit ${sharedRun.exitCode ?? "(absent)"} — log ${logPath}`);
+  // Failing tests are the review's to report, not each dimension's: the first
+  // selected dimension is told to file them, and every other one not to.
+  const failureOwner = dimensions[0].key;
+
   const dimensionsUnrun = [];
   // #1433. Per-dimension record of the specialist's own CWD-AUDIT line (see
   // `cwdAuditFrom` above) — `{dimension, state, line}`, `state` one of
@@ -769,13 +943,13 @@ a false repoVerified.`,
   // tree it must not write to, `pwd` fixes which directory that is, and the
   // `CWD-AUDIT:` line is what makes a clean run say so — an audit reported
   // only when dirty is indistinguishable from one never run, the same reading
-  // `unrunReason` applies to a `test_run` that reports nothing.
+  // `unrunReason` applies to a shared test run that reports nothing.
   phase("Review");
   const reviewed = await pipeline(
     dimensions,
     // #1802: a crashed specialist (null or thrown) is re-dispatched once
     // before it counts as unrun. A specialist that RETURNED is never re-run
-    // here, whatever its `test_run` says — that is `unrunEntries`' case.
+    // here — the shared run, not the specialist, is what `unrunEntries` judges.
     (d) =>
       retryCrashed(
         () =>
@@ -799,26 +973,10 @@ in this prompt as absolute paths.
 
 ${readRules(usableDiff(snap), stats, snap)}
 
-Tests: from the snapshot's root, run exactly this — copy it verbatim:
-  ${testCmd}
-Do not substitute a command of your own. In a repo that has a shared test stack,
-a bare runner picks up a default config whose setup can tear a sibling's
-container down mid-run; a guessed glob is worse in every repo, because one
-matching nothing still exits 0 reporting 'tests 0' — a green that ran nothing.
-Whatever you run, report it in \`test_run\` — the command verbatim and the counts
-you saw — even when it failed or produced nothing.
-'tests 0' is a FAILED run, not a pass: \`tests: 0\` is how this dimension gets
-reported unrun, and an empty findings list cannot say it for you. So is a run
-that collected tests and did none of the work — 0 passes with no failures is
-everything skipped. And a count well below what the whole tree reports means you
-ran a PARTIAL copy: nothing downstream can catch that one for you, because only
-your own run knows what the full tree reports. Run from the snapshot's root, and
-report any of these as unrun.
+${sharedRunNote(sharedRun, failureOwner, d.key)}
 
 ${environmentNote(snap)}
 
-A failure you cannot separate from the environment is neither a finding nor a
-reason to file nothing — say which it is, beside the counts, in \`test_run\`.
 Scratch files go in ${snap.runRoot}/${d.key}/ and nowhere else. Chain the
 directory change into the command, \`cd "$D" && git …\`, never
 \`cd "$D"; git …\`, so a failed \`cd\` cannot leave a \`git\` command running in the
@@ -851,7 +1009,6 @@ to name.`,
       ),
 
     (review, d) => {
-      dimensionsUnrun.push(...unrunEntries(review, d.key));
       cwdAudit.push({ dimension: d.key, ...cwdAuditFrom(review && review.scope_searched) });
       phase("Verify");
       return parallel(
@@ -964,12 +1121,19 @@ how three reviews from one cell left four files modified in that checkout
     },
   );
 
-  dimensionsUnrun.push(...unrunCrashed(reviewed, dimensions));
-
   const all = reviewed.flat().filter(Boolean);
   const survived = all.filter((f) => f.verdict === "survived");
   const refuted = all.filter((f) => f.verdict === "refuted");
   const unverified = all.filter((f) => f.verdict === "unverified");
+
+  // #2315. One verdict on the shared run, for every dimension whose chain did
+  // not die — a crashed one is named below with its own reason instead, so no
+  // key is listed twice. Read only once every dimension has been verified: the
+  // failing-tests check reads the findings that reached the payload, across
+  // ALL dimensions, refuted ones excluded.
+  const live = dimensions.filter((_, i) => reviewed[i]).map((d) => d.key);
+  dimensionsUnrun.push(...unrunEntries(sharedRun, all, live));
+  dimensionsUnrun.push(...unrunCrashed(reviewed, dimensions));
 
   const { crashed, resume } = resumeFor(unverified);
 
@@ -988,13 +1152,14 @@ how three reviews from one cell left four files modified in that checkout
   // separately so the caller never mistakes "not checked" for "survived".
   // `dimensionsRun` names what was DISPATCHED after the size trim: a trimmed
   // fan-out must say so, never read as full coverage. It is not a coverage claim
-  // on its own and never was — a specialist can be dispatched and die, or run and
-  // never execute the suite — so `dimensionsUnrun` names which of those keys did
-  // not cover their ground, and why. A key in the first and NOT in the second ran
-  // a suite — not that it is covered (#535). `unrunReason` reads `test_run`'s
-  // counts and quotes `run.command` into its message; it never compares that
-  // command against the one the dispatch handed out, so a specialist that
-  // substituted a narrower runner is not classified unrun.
+  // on its own and never was — a specialist can be dispatched and die, or the
+  // review's one shared test run can execute nothing (#2315) — so
+  // `dimensionsUnrun` names which of those keys did not cover their ground,
+  // and why. A key in the first and NOT in the second ran a suite — not that
+  // it is covered (#535). `unrunReason` reads the shared run's counts and
+  // quotes its command into its message; it never checks that the test-run
+  // agent ran the command it was handed rather than a narrower one, so a
+  // substituted runner is not classified unrun.
   //
   // The two are siblings rather than one filtered list because they answer
   // different questions. Subtracting the unrun ones from `dimensionsRun` would

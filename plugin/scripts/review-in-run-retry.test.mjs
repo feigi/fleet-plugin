@@ -21,7 +21,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runReview, DIGEST_KEYS, digestOf } from "./review-core.mjs";
-import { pipeline, parallel, ARGS, SNAP, review, finding, vote, scriptedHost } from "./review-host-fixture.mjs";
+import { pipeline, parallel, ARGS, SNAP, SHARED, review, finding, vote, scriptedHost } from "./review-host-fixture.mjs";
 
 const COPIES = [["review-core.mjs", (host, args) => runReview({ ...host, pipeline, parallel }, args)]];
 
@@ -50,15 +50,38 @@ for (const [name, run] of COPIES) {
     assert.match(result.dimensionsUnrun[0].reason, /returned nothing/);
   });
 
-  test(`${name}: a specialist that RETURNED but ran no suite is not a crash — never re-dispatched`, async () => {
+  // #2315: the suite is the review's one shared run now, and it is never
+  // re-dispatched either — a crashed test-run agent may already have launched
+  // the command, so a retry would be a second full run.
+  test(`${name}: a specialist that RETURNED over a shared run that ran nothing is not a crash — never re-dispatched`, async () => {
     const { host, calls } = scriptedHost({
       snapshot: [SNAP],
-      "review:correctness": [review([], { command: "node --test", tests: 0, pass: 0, fail: 0 })],
+      "test-run": [{ exitCode: 0, tests: 0, pass: 0, fail: 0 }],
+      "review:correctness": [review([])],
     });
     const result = await run(host, ARGS);
     assert.equal(calls["review:correctness"], 1, "a returned-but-unrun review was re-dispatched as if it had crashed");
+    assert.equal(calls["test-run"], 1);
     assert.equal(result.dimensionsUnrun.length, 1);
     assert.match(result.dimensionsUnrun[0].reason, /0 tests/);
+  });
+
+  test(`${name}: a crashed shared test run is dispatched once, never retried, and every dimension is unrun`, async () => {
+    for (const crash of [null, new Error("spend limit")]) {
+      const { host, calls } = scriptedHost({
+        snapshot: [SNAP],
+        "test-run": [crash, SHARED],
+        "review:correctness": [review([])],
+        "review:tests": [review([])],
+      });
+      const result = await run(host, { ...ARGS, dimensions: ["correctness", "tests"] });
+      assert.equal(calls["test-run"], 1, "the shared test run was re-dispatched — a second full-suite launch");
+      assert.deepEqual(
+        result.dimensionsUnrun.map((u) => u.dimension),
+        ["correctness", "tests"],
+      );
+      for (const u of result.dimensionsUnrun) assert.match(u.reason, /no counts|returned nothing/);
+    }
   });
 
   test(`${name}: a refuter pair whose every vote died is re-dispatched once, as a pair`, async () => {
@@ -106,6 +129,7 @@ for (const [name, run] of COPIES) {
     const host = {
       agent: async (prompt, opts) => {
         if (opts.label === "snapshot") return structuredClone(SNAP);
+        if (opts.label === "test-run") return structuredClone(SHARED);
         if (opts.label === "review:correctness") return structuredClone(review([crashing, surviving]));
         if (opts.label === "verify:correctness") {
           if (prompt.includes(crashing.claim)) {

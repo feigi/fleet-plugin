@@ -2076,8 +2076,11 @@ report lists every refutation it reversed, and you copy those to the ledger's
 `ruled` line.
 
 **`dimensionsRun` is the dispatch; `dimensionsUnrun` is what names a gap.** A
-specialist that dies, and one that never executed the suite, both contribute zero
-findings while the key stays in `dimensionsRun` — so read the two together. A key
+specialist that dies contributes zero findings while its key stays in
+`dimensionsRun`; a review whose one shared test run executed nothing — the
+review runs the test command once, and every specialist reads that run instead
+of running its own (#2315) — leaves every key there with no suite behind it. So
+read the two together. A key
 in `dimensionsRun` and NOT in `dimensionsUnrun` ran a suite; every
 `dimensionsUnrun` entry is `{dimension, reason}` naming which failure it was.
 The review already re-dispatched each crashed specialist once, so what
