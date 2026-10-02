@@ -710,7 +710,6 @@ for (const [name, path] of SOURCES) {
       assert.equal(r.status, 0, `a failed prune ended the step non-zero: ${r.stderr}`);
       assert.ok(existsSync(stale), "the fixture's run root was removed, so this case exercised no failure");
     } finally {
-      chmodSync(parent, 0o755);
       unlock(parent);
     }
   });
