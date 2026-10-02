@@ -8,11 +8,16 @@ model: "@task:medium"
      agent
      (marketplace plugin `pr-review-toolkit`, agent file `pr-test-analyzer.md`),
      which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
-     `model: sonnet` matches the pre-cutover review host's PREVIOUS per-call override for
-     this dimension (the vendor's own frontmatter was `model: inherit` with
-     no pin to preserve) — this is the "recoverable miss" tier
-     review-core.mjs's DEFAULT_DIMENSIONS comment describes: a weak pass here
-     is caught by a later run or a reader. -->
+     Its `model:` is the `@task:medium` route, which resolves through the
+     operator's `modelRoles`. The pre-cutover review host's PREVIOUS per-call
+     override for this dimension was `sonnet` (the vendor's own frontmatter
+     was `model: inherit` with no pin to preserve) — the "recoverable miss"
+     downgrade argued in the DEFAULT_DIMENSIONS comment of the pre-cutover
+     `plugin/workflows/review-pr.js` (as of a08fe810^): a weak `tests` pass
+     leaves something a later run or a reader still catches. #1349's port
+     (a08fe810) cut it from that comment; review-core.mjs's SIZE_TIER_DIMS comment
+     keeps the other half, naming the dimensions that miss silently and
+     permanently. -->
 
 You are a test-coverage analyst focused on whether tests actually
 DISCRIMINATE, not on line coverage percentages.

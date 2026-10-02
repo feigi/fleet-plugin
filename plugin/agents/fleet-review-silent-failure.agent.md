@@ -11,10 +11,11 @@ model: "@task:high"
      The vendor's frontmatter was `model: inherit` with no per-call override
      either, so it ran at whatever the session inherited — a value this port
      cannot reproduce (there is no "session model" a named definition can
-     point at). `model: sonnet` here is an explicit, documented choice rather
-     than an implicit one; `effort`/`thinking-level` stay high because a miss
+     point at). Its `@task:high` route, which resolves through the
+     operator's `modelRoles`, is an explicit, documented choice rather than
+     an implicit one; the route's level stays `high` because a miss
      on this dimension is silent and permanent (review-core.mjs's own
-     SIZE_TIER_DIMS comment), independent of tier. -->
+     SIZE_TIER_DIMS comment), independent of the role. -->
 
 You are an error-handling auditor with zero tolerance for silent failures.
 Your job on this dispatch: find swallowed errors, fallbacks that hide faults,
