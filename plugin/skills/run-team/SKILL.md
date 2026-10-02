@@ -2118,8 +2118,10 @@ cap. A runner member that is killed rather than failed follows **Failure
 handling** (fresh name, inherited state stated).
 
 **Then dispatch a fix-applier** — on `DISPATCH fix-pr PR#<M>`, which the tick
-prints for a PR whose `reviewed=` counts survivors and that has had no
-fix-applier since — one named member per PR, `fix-pr-<pr#>`, never the PR's
+prints for a PR whose `reviewed=` counts survivors that no review fix-applier
+has landed `applied:`/`no-op` on since, with no fix-applier live on it — one
+named member per PR, `fix-pr-<pr#>` (the next suffix when that name is already
+on record), never the PR's
 implementer, recorded with `ledger.mjs dispatch <pr#> fix-pr-<pr#>` before the
 call. Its prompt carries the PR number, the worktree abs path, the PR's branch,
 the same `testCmd` you passed the review, and the **path** `<scratch>/review-<pr>.json`
@@ -2132,8 +2134,8 @@ report from a refuter it spawns that surfaces to you is its to retrieve, never
 yours to scan or pass on.
 
 **A `DISPATCH fix-pr PR#<M>` on a conflict hold** — the row carries the merge
-bot's `conflict-hold:#<M>` (`run-merge-bot.md` step 1's fallback), not
-survivors — is the same slot with a different job, and no review file to hand
+bot's unresolved `conflict-hold:#<M>` (`run-merge-bot.md` step 1's fallback) —
+is the same slot with a different job, and no review file to hand
 over. Name it `fix-pr-<M>`, or the next suffix (`-b`, `-c` …) when that name is
 already on record — `dispatch` refuses a reused one — and dispatch it with the
 `agent` that `ledger.mjs dispatch` printed, in the PR's existing worktree.
@@ -2146,7 +2148,11 @@ bring `<branch>` current with `origin/main`, resolving every conflict by
 `run-merge-bot.md`'s **No-undo audit**, run `<testCmd>`, push, report the new
 head. Settle it `applied:<head>` — `no-op` if no conflict was left — which is
 what lifts the tick's merge hold; a dispatched-but-live one does not, and
-`failed`/`killed` leave the PR fix-due for a replacement. The push moves the
+`failed`/`killed` leave the PR fix-due for a replacement. It answers the
+hold and nothing else: survivors of a returned review the row also carries
+stay unanswered through its settle, so the tick prints `DISPATCH fix-pr
+PR#<M>` again once it lands, and that one — `dispatch` now prints `null` —
+is a review fix-applier, dispatched as above (#2328). The push moves the
 head after `ready-to-merge`, so the next merge bot refuses it
 `head-moved-after-label-#<M>`: a fresh finisher, per **Failure handling**.
 
