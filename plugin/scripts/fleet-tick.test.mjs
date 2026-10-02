@@ -776,6 +776,45 @@ const SIBLING_MODULES = ["arg.mjs", "fleet-state.mjs", "git-env.mjs", "ledger.mj
   (m) => [m, fileURLToPath(new URL(`./${m}`, import.meta.url))],
 );
 
+// Every subprocess below is spawned synchronously, so a hung one blocks this
+// file's event loop: no per-test or runner timeout can fire, and only the
+// runner's wall-clock kill ends it, as a cancelled file that reads like a hang
+// somewhere else (#2320). Every spawn goes through `spawnBounded`, which kills
+// the child at the bound and fails its own test naming the timeout and the
+// command. The bound is per spawn and generous on purpose: #2320's triage
+// measured the slowest whole case at ~1.5s solo on an idle host and ~3.85x
+// that under the full suite, but on a host loaded by other agents the slowest
+// case has taken ~13s solo, and a case can run several spawns.
+const SPAWN_TIMEOUT_MS = 60_000;
+const spawnBounded = (cmd, args, opts = {}) => {
+  const r = spawnSync(cmd, args, { encoding: "utf8", ...opts, timeout: SPAWN_TIMEOUT_MS });
+  if (r.error) {
+    const what = [cmd, ...args].join(" ");
+    throw new Error(r.error.code === "ETIMEDOUT"
+      ? `timed out after ${SPAWN_TIMEOUT_MS}ms, killed with ${r.signal}: ${what}`
+      : `could not run ${what}: ${r.error.message}`);
+  }
+  return r;
+};
+
+// The bound holds only while every spawn takes it: a raw synchronous spawn
+// added anywhere else in this file brings #2320's unbounded hang back, and
+// every case still passes until the day that child hangs. So this reads the
+// file's own source and names any `spawnSync`/`execFileSync`/`execSync` call
+// outside the helper. A comment spelling one of them with its call paren fails
+// it too (the loud direction); an import renamed with `as` walks past it.
+test("CLI: every synchronous spawn in this file goes through spawnBounded (#2320)", () => {
+  const src = readFileSync(fileURLToPath(import.meta.url), "utf8");
+  const start = src.indexOf("const spawnBounded = ");
+  assert.ok(start > 0, "the spawnBounded helper is gone; this sweep has nothing to measure against");
+  const end = src.indexOf("\n};\n", start);
+  const lineOf = (i) => src.slice(0, i).split("\n").length;
+  const raw = [...src.matchAll(/\b(?:spawnSync|execFileSync|execSync)\s*\(/g)]
+    .filter((m) => m.index < start || m.index > end)
+    .map((m) => `line ${lineOf(m.index)}: ${m[0]}`);
+  assert.deepEqual(raw, []);
+});
+
 // `pr list` for the open PRs, `issue view` for a behind-issue premise's state,
 // `issue list --label in-progress` for the stall report's claimed count.
 const GH_STUB = `#!/bin/sh
@@ -840,7 +879,7 @@ function runCli(args = [], {
   const repo = join(dir, "repo");
   mkdirSync(bin);
   mkdirSync(join(repo, ".fleet"), { recursive: true });
-  assert.equal(spawnSync("git", ["init", "-q", repo], { encoding: "utf8" }).status, 0);
+  assert.equal(spawnBounded("git", ["init", "-q", repo]).status, 0);
   writeFileSync(join(repo, ".git", "info", "exclude"), ".fleet/\n.worktrees/\n");
   writeExecStub(join(bin, "gh"), GH_STUB);
   const script = join(bin, "fleet-tick.mjs");
@@ -852,7 +891,7 @@ function runCli(args = [], {
   if (shortlist !== undefined) writeFileSync(join(repo, ".fleet", "shortlist.json"), shortlist);
   beforeRun(repo);
   if (baseline) {
-    const rec = spawnSync(process.execPath, [join(bin, "main-checkout.mjs"), "--record"], { cwd: repo, encoding: "utf8" });
+    const rec = spawnBounded(process.execPath, [join(bin, "main-checkout.mjs"), "--record"], { cwd: repo });
     assert.equal(rec.status, 0, rec.stderr);
   }
   afterBaseline(repo);
@@ -863,8 +902,8 @@ function runCli(args = [], {
   // make the fold cases order-dependent. `defaultState` opts out for the case
   // whose subject IS that resolution.
   const stateArg = args.includes("--state") || defaultState ? [] : ["--state", join(dir, "heartbeat.json")];
-  const r = spawnSync(process.execPath, [script, ...args, ...stateArg], {
-    cwd: repo, encoding: "utf8",
+  const r = spawnBounded(process.execPath, [script, ...args, ...stateArg], {
+    cwd: repo,
     env: {
       ...process.env, PATH: `${bin}:${process.env.PATH}`,
       FIXTURE_PRS: fx("prs.json", JSON.stringify(prs)),
@@ -1063,8 +1102,8 @@ test("CLI: a ledger ledger.mjs itself refuses is a refusal here too", () => {
   // Two drain markers: ledger.mjs read exits 2 on the broken invariant.
   const dir = runCli([], { shortlist: shortlistText([]), keep: true });
   writeFileSync(join(dir.repo, ".fleet", "ledger.md"), `${ledgerText({ drain: "a" })}\n- b\n`);
-  const r = spawnSync(process.execPath, [join(dir.dir, "bin", "fleet-tick.mjs"), "--state", join(dir.dir, "hb.json")], {
-    cwd: dir.repo, encoding: "utf8",
+  const r = spawnBounded(process.execPath, [join(dir.dir, "bin", "fleet-tick.mjs"), "--state", join(dir.dir, "hb.json")], {
+    cwd: dir.repo,
     env: { ...process.env, PATH: `${join(dir.dir, "bin")}:${process.env.PATH}`, FIXTURE_PRS: join(dir.dir, "prs.json") },
   });
   rmSync(dir.dir, { recursive: true, force: true });
@@ -1202,7 +1241,7 @@ test("CLI: a past-pin halt prints DISPATCH review for its PR (#2083)", () => {
 
 test("CLI: an ambient GIT_DIR naming another repository cannot move the shortlist read", () => {
   const decoy = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-decoy-")));
-  spawnSync("git", ["init", "-q", decoy]);
+  spawnBounded("git", ["init", "-q", decoy]);
   mkdirSync(join(decoy, ".fleet"));
   writeFileSync(join(decoy, ".fleet", "shortlist.json"), shortlistText([666]));
   const r = runCli([], { shortlist: shortlistText([7, 8]), env: { GIT_DIR: join(decoy, ".git") } });
@@ -1213,7 +1252,7 @@ test("CLI: an ambient GIT_DIR naming another repository cannot move the shortlis
 
 test("CLI: an inherited GIT_DIR cannot retarget the behind-issue premise probe", () => {
   const decoy = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-decoy-gh-")));
-  spawnSync("git", ["init", "-q", decoy]);
+  spawnBounded("git", ["init", "-q", decoy]);
   const r = runCli([], {
     shortlist: shortlistText([1, 2, 3]), ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "OPEN" },
     env: { GIT_DIR: join(decoy, ".git"), GH_REPO: "someone/else" },
@@ -1230,8 +1269,8 @@ const LIVE = {
   shortlist: shortlistText([412, 420, 421]),
 };
 // One more tick over a kept runCli fixture, as the next wake would run it.
-const tickAgain = (r) => spawnSync(process.execPath, [join(r.dir, "bin", "fleet-tick.mjs"), "--state", join(r.dir, "hb.json")], {
-  cwd: r.repo, encoding: "utf8",
+const tickAgain = (r) => spawnBounded(process.execPath, [join(r.dir, "bin", "fleet-tick.mjs"), "--state", join(r.dir, "hb.json")], {
+  cwd: r.repo,
   env: { ...process.env, PATH: `${join(r.dir, "bin")}:${process.env.PATH}`, FIXTURE_PRS: join(r.dir, "prs.json") },
 });
 
@@ -1252,7 +1291,7 @@ test("CLI: a stray write after the baseline prints MAIN-CHECKOUT-DIRTY first, na
   // explicit re-baseline after the path is resolved lets dispatch through.
   assert.match(tickAgain(r).stdout, /^MAIN-CHECKOUT-DIRTY stray\.mjs /m);
   rmSync(join(r.repo, "stray.mjs"));
-  const rec = spawnSync(process.execPath, [join(r.dir, "bin", "main-checkout.mjs"), "--record"], { cwd: r.repo, encoding: "utf8" });
+  const rec = spawnBounded(process.execPath, [join(r.dir, "bin", "main-checkout.mjs"), "--record"], { cwd: r.repo });
   assert.equal(rec.status, 0, rec.stderr);
   const after = tickAgain(r);
   rmSync(r.dir, { recursive: true, force: true });
@@ -1297,8 +1336,8 @@ const foldTicks = (fixture) => {
   const quiet = () => JSON.parse(readFileSync(state, "utf8")).quiet;
   const ticks = [{ stdout: first.stdout, status: first.status, stderr: first.stderr, quiet: quiet() }];
   for (let i = 0; i < 2; i++) {
-    const t = spawnSync(process.execPath, [join(first.dir, "bin", "fleet-tick.mjs"), "--fold-unchanged", "--state", state], {
-      cwd: first.repo, encoding: "utf8",
+    const t = spawnBounded(process.execPath, [join(first.dir, "bin", "fleet-tick.mjs"), "--fold-unchanged", "--state", state], {
+      cwd: first.repo,
       env: {
         ...process.env, PATH: `${join(first.dir, "bin")}:${process.env.PATH}`,
         FIXTURE_PRS: join(first.dir, "prs.json"), FIXTURE_CLAIMED: join(first.dir, "claimed.json"),
@@ -1352,7 +1391,7 @@ test("CLI: an in-flight review with no member token is named as review:PR#<n> on
 
 test("CLI: an ambient GIT_DIR naming a dirty repository does not move the main-checkout check", () => {
   const decoy = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-decoy-mc-")));
-  spawnSync("git", ["init", "-q", decoy]);
+  spawnBounded("git", ["init", "-q", decoy]);
   writeFileSync(join(decoy, "decoy-stray.txt"), "x\n");
   const r = runCli([], { ...LIVE, env: { GIT_DIR: join(decoy, ".git"), GIT_WORK_TREE: decoy } });
   rmSync(decoy, { recursive: true, force: true });
