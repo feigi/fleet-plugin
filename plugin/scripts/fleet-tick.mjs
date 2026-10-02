@@ -405,8 +405,11 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
         // row has been read. `note` above has just recorded this exact token,
         // so the lookup below is never absent, and its outcome is this
         // token's own unless an earlier row already settled it — never a
-        // reason to fall back to the row's own copy.
-        if (t.family === "fix-pr") {
+        // reason to fall back to the row's own copy. A `fix-pr-<M>` speaks for
+        // PR #M alone, as a `finisher-pr` does below (#2329): `dispatch` and
+        // `settle` write it onto PR #M's row only, so a copy on another PR's
+        // row is a hand-written stray this PR reads as absent.
+        if (t.family === "fix-pr" && t.number === pr) {
           st.fixMembers.add(t.name);
           const o = members.get(t.name).outcome;
           if ((o === "no-op" || /^applied:/.test(o)) && !st.fixLanded.has(t.name)
