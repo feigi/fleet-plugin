@@ -303,7 +303,7 @@ export function withVerdict(rowText, token) {
     return d === null || d.member.name !== mine.member.name || !sameHead(d.head, mine.head);
   });
   if (kept.length === words.length - 1 && words.includes(token)) return words.join(" ");
-  const folded = kept.join(" ").replace(/·(?:\s+·)+/g, "·").replace(/^·\s+|\s+·$/g, "").trim();
+  const folded = kept.join(" ").replace(/·(?:\s+·)+/g, "·").replace(/^·\s*|\s*·$/g, "").trim();
   return folded === "" ? token : `${folded} · ${token}`;
 }
 

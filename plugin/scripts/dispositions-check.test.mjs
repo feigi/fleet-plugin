@@ -9,11 +9,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { touchedLines, checkDispositions, withVerdict, repoPath } from "./dispositions-check.mjs";
+import { touchedLines, checkDispositions, withVerdict, repoPath, formatViolation } from "./dispositions-check.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./dispositions-check.mjs", import.meta.url));
 const LEDGER = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
@@ -86,8 +86,8 @@ function fixture(t) {
   const writeRecord = (entries, recHead = head) =>
     writeFileSync(join(scratch, "dispositions-40.json"), JSON.stringify({ head: recHead, entries }));
 
-  const check = (member = "fix-pr-40", env = cleanEnv()) => {
-    const r = spawnSync(process.execPath, [SCRIPT, "--member", member, "--scratch", scratch, "--repo", repo, "--ledger", ledger],
+  const check = (member = "fix-pr-40", env = cleanEnv(), script = SCRIPT, extra = []) => {
+    const r = spawnSync(process.execPath, [script, "--member", member, "--scratch", scratch, "--repo", repo, "--ledger", ledger, ...extra],
       { encoding: "utf8", env, cwd: dir });
     return { ...r, json: r.status === 0 || r.status === 1 ? JSON.parse(r.stdout) : null };
   };
@@ -245,7 +245,9 @@ test("a re-check replaces the member's own verdict for the same head and never d
   mismatch(f.check());
   f.writeRecord(f.baseEntries());
   okVerdict(f.check());
-  okVerdict(f.check());
+  const again = f.check();
+  okVerdict(again);
+  assert.match(again.stderr, /row #10 already carries dispositions-ok=fix-pr-40:[0-9a-f]+ — not written again/);
   const row = f.row();
   assert.equal(row.match(/dispositions-/g).length, 1, row);
   assert.ok(row.endsWith(` · dispositions-ok=fix-pr-40:${f.head}`), row);
@@ -325,4 +327,185 @@ test("withVerdict replaces only the same member's verdict for the same head", ()
   assert.equal(withVerdict(`impl-10=PR#40 · ${ok}`, ok), `impl-10=PR#40 · ${ok}`);
   assert.equal(withVerdict(`${bad} · impl-10=PR#40`, ok), `impl-10=PR#40 · ${ok}`);
   assert.equal(withVerdict(`impl-10=PR#40 · ${other} · ${older}`, ok), `impl-10=PR#40 · ${other} · ${older} · ${ok}`);
+});
+
+// A second PR commit on the fixture's repository: `files` written (paths
+// relative to the repository), everything committed, and the review rewritten
+// to answer the new head with `survived` as its only covered findings.
+function advance(f, files, survived) {
+  for (const [p, text] of Object.entries(files)) writeFileSync(join(f.repo, p), text);
+  git(f.repo, "add", "-A");
+  git(f.repo, "commit", "-qm", "pr 2");
+  const head = git(f.repo, "rev-parse", "HEAD");
+  f.writeReview({ ...f.review, head, counts: { ...f.review.counts, survived: survived.length, unverified: 0 }, survived, unverified: [] });
+  return head;
+}
+const declaredOut = (f, n) => Array.from({ length: n }, (_, i) => f.entry("survived", i, { scope: "out", disposition: "defer" }));
+const flagged = (r) => r.json.violations.map((v) => v.index);
+const finding = (file, line) => ({ severity: "important", file, line, claim: "c", evidence: "e" });
+
+test("a touched line is found whatever git prints around it: an added `++ ` line, a name with a space, a quoted name", (t) => {
+  const f = fixture(t);
+  const a = readFileSync(join(f.repo, "src", "a.js"), "utf8").split("\n");
+  a[1] = "++ b/elsewhere"; // git prints this added line as `+++ b/elsewhere`
+  a[17] = "a 18 changed";
+  const head = advance(f, {
+    "src/a.js": a.join("\n"),
+    "src/my file.js": lines(5, "m"),
+    'src/q"x.js': lines(3, "q"),
+    "src/back\\slash.js": lines(2, "s"),
+  }, [
+    finding("src/a.js", 18), finding("src/my file.js", 3), finding('src/q"x.js', 2), finding("src/back\\slash.js", 1),
+    finding("src/a.js", 10), // untouched: its declared scope stands
+  ]);
+  f.writeRecord(declaredOut(f, 5), head);
+  const r = f.check();
+  mismatch(r, /survived\[0\]: .*src\/a\.js:18 is a line the PR's diff touched/);
+  assert.match(r.stderr, /survived\[1\]: .*src\/my file\.js:3 is a line the PR's diff touched/);
+  assert.match(r.stderr, /survived\[2\]: .*src\/q"x\.js:2 is a line the PR's diff touched/);
+  assert.match(r.stderr, /survived\[3\]: .*src\/back\\slash\.js:1 is a line the PR's diff touched/);
+  assert.deepEqual(flagged(r), [0, 1, 2, 3]);
+});
+
+test("only the lines the diff changed are touched — no context lines, and a renamed file's unchanged lines are not", (t) => {
+  const f = fixture(t);
+  // Rename detection held by the check itself, not by a config default.
+  git(f.repo, "config", "diff.renames", "false");
+  const b = lines(10, "b").split("\n");
+  b[2] = "b 3 changed";
+  rmSync(join(f.repo, "src", "b.js"));
+  const head = advance(f, { "src/c.js": b.join("\n") }, [
+    finding("src/a.js", 8), // two lines past the fixture's change at 5-6: context under --unified=3
+    finding("src/c.js", 7), // unchanged by the rename
+    finding("src/c.js", 3), // changed: in scope
+  ]);
+  f.writeRecord(declaredOut(f, 3), head);
+  const r = f.check();
+  mismatch(r, /survived\[2\]: .*src\/c\.js:3 is a line the PR's diff touched/);
+  assert.deepEqual(flagged(r), [2]);
+});
+
+test("run through a symlinked path, the check still judges and writes its verdict", (t) => {
+  const f = fixture(t);
+  const link = join(f.dir, "dispositions-check-link.mjs");
+  symlinkSync(SCRIPT, link);
+  f.writeRecord(f.baseEntries());
+  okVerdict(f.check("fix-pr-40", cleanEnv(), link));
+  assert.ok(f.row().includes(`dispositions-ok=fix-pr-40:${f.head}`), f.row());
+  const bare = spawnSync(process.execPath, [link], { encoding: "utf8", env: cleanEnv() });
+  assert.equal(bare.status, 2);
+  assert.match(bare.stderr, /usage: dispositions-check\.mjs/);
+});
+
+test("nothing is judged or written for a review finding that is no object, an unreadable record file or a stray argument", (t) => {
+  const f = fixture(t);
+  f.writeRecord(f.baseEntries());
+  const before = f.row();
+  f.writeReview({ ...f.review, survived: [f.review.survived[0], null] });
+  let r = f.check();
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /review-40\.json has a survived\[1\] that is not a finding object/);
+  f.writeReview();
+  // A record path that exists and cannot be read is the environment's fault,
+  // not a ruling the fix-applier wrote: no mismatch is blamed on it.
+  rmSync(join(f.scratch, "dispositions-40.json"));
+  mkdirSync(join(f.scratch, "dispositions-40.json"));
+  r = f.check();
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /could not read the disposition record .*dispositions-40\.json: EISDIR/);
+  rmSync(join(f.scratch, "dispositions-40.json"), { recursive: true });
+  f.writeRecord(f.baseEntries());
+  r = f.check("fix-pr-40", cleanEnv(), SCRIPT, ["stray"]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(f.row(), before);
+  // The control: the same files and flags, nothing stray, are judged and written.
+  okVerdict(f.check());
+  assert.notEqual(f.row(), before);
+});
+
+// The pure core, on one review: survived[0] on touched src/a.js:5, one refuted finding.
+const H40 = "abc1234abc1234abc1234abc1234abc1234abcde";
+const core = (entries, { head = H40, reviewHead = H40, survived = [{ file: "src/a.js", line: 5 }], record } = {}) => checkDispositions({
+  review: { head: reviewHead, survived, unverified: [], refuted: [{ file: "src/b.js", line: 1 }] },
+  record: record === undefined ? { head, entries } : record,
+  touched: new Map([["src/a.js", new Set([5])]]),
+  roots: ["/snap"],
+}).map(formatViolation);
+const applied = { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "apply" };
+
+test("a record entry that is no object, names no position, or a record with no entries is a mismatch, never a crash", () => {
+  assert.deepEqual(core([applied, { ...applied, index: -1 }]), ["survived[-1]: entries[1] names no finding — survived holds 1"]);
+  assert.deepEqual(core([applied, null]), ["record: entries[1] is not an object"]);
+  assert.deepEqual(core([applied, ["survived", 0]]), ["record: entries[1] is not an object"]);
+  assert.deepEqual(core(null, { record: { head: H40 } }), [
+    "record: the record is not {head, entries: [...]}", "survived[0]: no entry — a finding with no entry is a dropped finding",
+  ]);
+});
+
+test("every optional field is held to its type, and a well-typed one passes", () => {
+  const malformed = (more, msg) => assert.deepEqual(core([{ ...applied, ...more }]), [`survived[0]: malformed entry — ${msg}`]);
+  malformed({ issue: 0 }, "issue is not an issue number");
+  malformed({ issue: "7" }, "issue is not an issue number");
+  malformed({ issue: 1.5 }, "issue is not an issue number");
+  malformed({ reason: 5 }, "reason is not a string");
+  malformed({ verdictPath: 1 }, "verdictPath is not a string");
+  malformed({ remedyFiles: [1] }, "remedyFiles is not an array of paths");
+  malformed({ remedyFiles: "src/a.js" }, "remedyFiles is not an array of paths");
+  malformed({ claimKind: "both" }, 'claimKind "both" is not one of behavior|shape');
+  malformed({ disposition: undefined }, "disposition null is not one of apply|defer");
+  assert.deepEqual(core([{ ...applied, issue: 1, reason: "", verdictPath: "", remedyFiles: [] }]), []);
+});
+
+test("the record's head answers the review's as a prefix in either direction, never below seven hex", () => {
+  assert.deepEqual(core([applied], { head: H40.slice(0, 7) }), []);
+  assert.deepEqual(core([applied], { head: H40.toUpperCase() }), []);
+  assert.deepEqual(core([applied], { reviewHead: H40.slice(0, 10) }), []);
+  const stale = (head) => [`record: the record answers head ${JSON.stringify(head)}, not the review's ${H40}`];
+  assert.deepEqual(core([applied], { head: "abc" }), stale("abc"));
+  assert.deepEqual(core([applied], { head: "abc1235" }), stale("abc1235"));
+});
+
+test("a finding with a line and no file is in scope; a reversed refutation's whitespace reason names no evidence", () => {
+  const out = { ...applied, scope: "out", disposition: "defer" };
+  assert.match(core([out], { survived: [{ line: 5 }] })[0], /^survived\[0\]: .* it has no file, so it is in scope/);
+  assert.deepEqual(core([applied, { ...applied, bucket: "refuted", reason: " \t" }]),
+    ["refuted[0]: a reversed refutation names its evidence in reason, and this one names none"]);
+});
+
+test("an absolute path into a copy of the tree no root names is read by the touched file it ends in", () => {
+  const out = { ...applied, scope: "out", disposition: "defer" };
+  // A specialist's own copy of the snapshot, and a /tmp alias of a root.
+  for (const file of ["/tmp/specialist-copy/src/a.js", "/private/snap/src/a.js"]) {
+    assert.match(core([out], { survived: [{ file, line: 5 }] })[0] ?? "", /^survived\[0\]: .*src\/a\.js:5 is a line the PR's diff touched/, file);
+  }
+  // What it must accept: an untouched line, an untouched file, and a name
+  // that only ends in a touched one mid-component.
+  for (const [file, line] of [["/tmp/specialist-copy/src/a.js", 6], ["/tmp/specialist-copy/src/b.js", 5], ["/tmp/copy/notsrc/a.js", 5]]) {
+    assert.deepEqual(core([out], { survived: [{ file, line }] }), [], file);
+  }
+  assert.equal(repoPath("/x/src/a.js", ["/snap"], ["a.js", "src/a.js"]), "src/a.js");
+  assert.equal(repoPath("/x/notsrc/a.js", ["/snap"], ["src/a.js"]), "/x/notsrc/a.js");
+  assert.equal(repoPath("./././src/a.js"), "src/a.js");
+});
+
+test("touchedLines reads an added `++ ` line as content and unquotes git's header names", () => {
+  const diff = [
+    "diff --git a/x b/x", "--- a/x", "+++ b/x",
+    "@@ -2 +2 @@", "-l2", "+++ b/elsewhere",
+    "@@ -25 +25 @@", "-l25", "+l25 changed",
+    "diff --git a/my file b/my file", "--- a/my file\t", "+++ b/my file\t", "@@ -1 +1 @@", "-o", "+n",
+    'diff --git "a/q\\"x" "b/q\\"x"', '--- "a/q\\"x"', '+++ "b/q\\"x"', "@@ -0,0 +1 @@", "+n",
+    'diff --git "a/\\303\\251\\tt" "b/\\303\\251\\tt"', "--- /dev/null", '+++ "b/\\303\\251\\tt"', "@@ -0,0 +1 @@", "+n",
+  ].join("\n");
+  const t = touchedLines(diff);
+  assert.deepEqual([...t.keys()], ["x", "my file", 'q"x', "é\tt"]);
+  assert.deepEqual([...t.get("x")], [2, 25]);
+});
+
+test("withVerdict leaves a row already carrying only the token unchanged, folds an emptied row, and refuses a non-verdict token", () => {
+  const ok = `dispositions-ok=fix-pr-40:${H40}`;
+  assert.equal(withVerdict(ok, ok), ok);
+  assert.equal(withVerdict(`dispositions-mismatch=fix-pr-40:${H40}`, ok), ok);
+  assert.equal(withVerdict(`· dispositions-mismatch=fix-pr-40:${H40} ·`, ok), ok);
+  assert.throws(() => withVerdict(`impl-10=PR#40 · ${ok}`, "garbage"), /'garbage' is not a dispositions-ok=\/dispositions-mismatch= token/);
 });
