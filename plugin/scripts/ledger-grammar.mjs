@@ -111,12 +111,18 @@ export function expectedDefinition(rowText) {
 // The agent definition a member is dispatched as (#2208), for a parsed member
 // and the text of the row it works: `ledger.mjs dispatch` prints it so the
 // `task` call that follows names it off a script's output, not off prose a
-// compaction drops. A fix-applier gets null: a review fix-applier is a generic
-// `task` by design, and a conflict-hold one is rare and named by its own
-// section of run-team/SKILL.md. Throws whatever expectedDefinition throws.
-export function agentDefinition(member, rowText) {
+// compaction drops. A fix-applier on an unresolved conflict hold of its own PR
+// is a `fleet-implementer` whatever the row's `tier=` (#2299) — it rebases the
+// PR, it does not work a ticket at a tier. Any other fix-applier is a review
+// one and gets null: a generic `task` by design. Whether the hold is
+// unresolved is `conflictHeld`, the caller's to supply from fleet-tick.mjs's
+// deriveRun() — the reading the tick holds the merge on, which folds every
+// row of the PR, never one row's text alone. Throws whatever
+// expectedDefinition throws.
+export function agentDefinition(member, rowText, conflictHeld = false) {
   switch (member.family) {
     case "impl": return expectedDefinition(rowText);
+    case "fix-pr": return conflictHeld ? "fleet-implementer" : null;
     case "finisher-pr": return "fleet-finisher";
     case "merge-bot": return "fleet-merge-bot";
     default: return null;

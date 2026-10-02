@@ -492,6 +492,12 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     mergeHeld: queued.filter((p) => heldBehind(state(p.number)) || conflictHeld(state(p.number))).length,
     // How many of those are conflict holds — the HOLD row's wording, no field.
     mergeConflictHeld: queued.filter((p) => conflictHeld(state(p.number))).length,
+    // Every PR, open or not, on a conflict hold no fix-applier has cleared —
+    // the one reading of a hold (#2299): `ledger.mjs dispatch` names a
+    // fix-applier's definition off this list, so it answers the same per-PR
+    // fold this tick holds the merge on, split rows (#2283) and a settle made
+    // anywhere included, rather than re-deriving it from one row's text.
+    conflictHeld: [...byPr.entries()].filter(([, st]) => conflictHeld(st)).map(([n]) => n).sort(asc),
     draining: drain ?? null,
     tierMismatch,
     // Every impl member the ledger names, settled or live: the retry letters
