@@ -30,7 +30,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
-  mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, existsSync, rmSync, realpathSync,
+  mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, existsSync, rmSync, realpathSync, readdirSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -367,4 +367,14 @@ test("a shortlist directory that cannot be created is reported as the write fail
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /shortlist: cannot write .*shortlist\.json: /);
   assert.doesNotMatch(r.stderr, /unexpected failure/);
+});
+
+test("a rename that fails after the temp file is written removes the temp file", (t) => {
+  const f = fixture(t);
+  // A directory where shortlist.json belongs: mkdir and the write succeed, the rename fails.
+  mkdirSync(f.shortlistFile, { recursive: true });
+  const r = f.run({ issues: [issue(1701)] });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /shortlist: cannot write .*shortlist\.json: /);
+  assert.deepEqual(readdirSync(join(f.repo, ".fleet")).filter((n) => n.endsWith(".tmp")), []);
 });
