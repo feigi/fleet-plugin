@@ -210,7 +210,7 @@ export function verifiersFor(A) {
 export function usableDiff(snap) {
   if (!snap.diffPath) return null;
   if (!snap.diffLines) return null;
-  // No head check here: `snapshotMissing` owns it and runs first in `runReview`.
+  // No head check here: the snap must already be admitted by `snapshotMissing`, which owns it.
   return `${snap.runRoot}/pr.diff`;
 }
 
