@@ -58,7 +58,7 @@
 // fleet-tick.mjs holds the next Pull on the newest implementer of a ticket
 // carrying neither.
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -200,13 +200,20 @@ export function implementerFailures(r) {
   return lines;
 }
 
-// The two verdict tokens fleet-tick.mjs reads. Neither parses as a member
-// token (ledger-grammar.mjs's parseMember refuses a `tier-ok`/`tier-mismatch`
+// The verdict tokens fleet-tick.mjs reads. None parses as a member token
+// (ledger-grammar.mjs's parseMember refuses a `tier-ok`/`tier-mismatch`
 // name), so `ledger.mjs row` passes them as free text. `tier-mismatch=` is
 // written only for a member already settled some other way — `settle`
 // refuses to re-settle it, and the mismatch must still hold the next Pull.
 export const tierOkToken = (member, definition) => `tier-ok=${member}:${definition}`;
 export const tierMismatchToken = (member, definition) => `tier-mismatch=${member}:${definition}`;
+// The third verdict: a SETTLED implementer whose `<session>/<member>.jsonl`
+// does not exist under a session directory that does — a dispatch that
+// failed before any transcript was written. It clears the tick's unchecked
+// hold and is never read as `tier-ok=` (tier-outcomes.mjs falls through
+// past it). The check exits UNVERIFIABLE_EXIT when it records one.
+export const tierUnverifiableToken = (member) => `tier-unverifiable=${member}:no-transcript`;
+export const UNVERIFIABLE_EXIT = 3;
 
 // A single-token append, idempotent on the token's PRESENCE anywhere in the
 // row — unlike appendedLedgerText's trailing-segment rule, which is for
@@ -261,6 +268,15 @@ function resolveViaSession(repoRoot, sessionPath, member) {
   const flat = join(root, `${member}.jsonl`);
   if (!existsSync(flat)) throw new Error(`no ${member}.jsonl found under --session ${sessionPath}`);
   return readFileSync(flat, "utf8");
+}
+
+// True only for a session path that IS a directory and holds no
+// `<member>.jsonl`: the one shape that can mean a dispatch which never wrote
+// a transcript. A path that does not exist, or is not a directory, is a
+// caller's mistake and stays resolveViaSession's refusal.
+function sessionLacksTranscript(repoRoot, sessionPath, member) {
+  const root = resolvePath(repoRoot, sessionPath);
+  return statSync(root, { throwIfNoEntry: false })?.isDirectory() === true && !existsSync(join(root, `${member}.jsonl`));
 }
 
 function runLedger(ledgerFile, args, what) {
@@ -319,6 +335,20 @@ function recordImplementer(ledgerFile, r) {
   if (updated === existing) console.error(`    ${r.member}: row #${r.ticket} already carries this exact verdict — not appended again`);
   else writeLedgerRow(ledgerFile, r.ticket, updated);
   if (outcome === null) runLedger(ledgerFile, ["settle", r.member, "tier-mismatch"], `settle ${r.member} tier-mismatch`);
+}
+
+// A settled implementer whose transcript does not exist can never be judged,
+// and holding the tick on it forever is the deadlock this verdict ends: the
+// token clears `HOLD (tier unchecked …)` without claiming the tier was right,
+// which is why it is neither `tier-ok=` nor `tier-mismatch=`. Appended once,
+// on the ticket's row, under the same presence rule as the other two.
+function recordUnverifiable(ledgerFile, r) {
+  const token = tierUnverifiableToken(r.member);
+  console.error(`${r.member}: settled ${r.outcome} with no ${r.member}.jsonl under --session ${r.session} — nothing to check; recorded ${token}`);
+  const existing = rowText(readLedger(ledgerFile), r.ticket);
+  const updated = withToken(existing, token);
+  if (updated === existing) console.error(`    ${r.member}: row #${r.ticket} already carries ${token} — not written again`);
+  else writeLedgerRow(ledgerFile, r.ticket, updated);
 }
 
 function main() {
@@ -396,6 +426,15 @@ function main() {
       // the agent type it was dispatched as lives only there.
       if (impl || !hasJobRecord) {
         if (raw.session) {
+          // A settled implementer with no transcript under a session
+          // directory that does exist: its dispatch failed before one was
+          // written, so there is nothing to judge. Recorded, not refused —
+          // see recordUnverifiable. A live member, one on the ledger nowhere,
+          // or a session path that is not a directory still refuses below.
+          if (impl && sessionLacksTranscript(repoRoot, raw.session, raw.member)) {
+            const outcome = memberOutcome(ledgerData, raw.member);
+            if (outcome) return { impl: true, unverifiable: true, member: raw.member, ticket, outcome, session: raw.session };
+          }
           transcriptText = resolveViaSession(repoRoot, raw.session, raw.member);
         } else if (raw.transcript) {
           transcriptText = readFileSync(resolvePath(repoRoot, raw.transcript), "utf8");
@@ -424,6 +463,10 @@ function main() {
   });
 
   for (const r of results) {
+    if (r.unverifiable) {
+      recordUnverifiable(ledgerFile, r);
+      continue;
+    }
     if (r.impl) {
       recordImplementer(ledgerFile, r);
       continue;
@@ -446,7 +489,10 @@ function main() {
     writeLedgerRow(ledgerFile, ticket, updated);
   }
 
-  process.exit(results.some((r) => !r.ok) ? 1 : 0);
+  // A mismatch outranks an unverifiable member in a mixed batch: it is the
+  // one the controller must act on.
+  const failed = results.some((r) => !r.unverifiable && !r.ok);
+  process.exit(failed ? 1 : results.some((r) => r.unverifiable) ? UNVERIFIABLE_EXIT : 0);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) main();

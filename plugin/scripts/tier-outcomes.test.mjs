@@ -188,6 +188,28 @@ test("append: a member settled tier-mismatch on the ledger blanks the tier even 
   assert.match(r.stderr, /the ledger settled impl-10=tier-mismatch/);
 });
 
+test("append: a tier-unverifiable token is no verdict — the tier falls through to member-outcomes.tsv, never read as tier-ok", (t) => {
+  const f = fixture(t, {
+    ledger: { rows: ["#10 impl-10=PR#20 · tier-unverifiable=impl-10:no-transcript"], dispatched: ["impl-10=PR#20"] },
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+  });
+  const r = f.append();
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(f.dataRows()[0][col("tier")], "default");
+  assert.doesNotMatch(r.stderr, /tier-ok|tier-unverifiable/);
+});
+
+test("append: a replaced attempt's tier-unverifiable leaves the PR owner's own tier-ok standing", (t) => {
+  const f = fixture(t, {
+    ledger: {
+      rows: ["#10 impl-10=killed · tier-unverifiable=impl-10:no-transcript · impl-10-b=PR#20 · tier-ok=impl-10-b:fleet-implementer-alt"],
+      dispatched: ["impl-10=killed", "impl-10-b=PR#20"],
+    },
+  });
+  assert.equal(f.append().code, 0);
+  assert.equal(f.dataRows()[0][col("tier")], "alt");
+});
+
 test("append: running it twice is a no-op that names the existing row and never asks gh", (t) => {
   const f = fixture(t, { members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }] });
   assert.equal(f.append().code, 0);

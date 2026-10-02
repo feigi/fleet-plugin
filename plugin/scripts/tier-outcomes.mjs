@@ -116,7 +116,10 @@ export function implementerRows(memberRows, ticket) {
 }
 
 // tier-check.mjs's verdict tokens on a ledger row, restricted to this
-// ticket's implementers.
+// ticket's implementers. Only the two that say what ran: a
+// `tier-unverifiable=` member settled with no transcript to check, so it
+// matches neither kind here and resolves as having no ledger verdict — the
+// fallback order below decides it, and it is never read as `tier-ok`.
 const TIER_VERDICT = /^tier-(ok|mismatch)=([^:\s]+):(\S+)$/;
 
 // A `{tier, source}` on success or `{tier: "", warning}` when the tier must
