@@ -677,6 +677,10 @@ test("deriveRun: a fix-pr token for another PR leaves this PR's hold and survivo
   // before #21's own row, does not land #21's bare copy and clear its hold.
   assert.deepEqual(run({ rows: ["#98 impl-98=PR#99 · fix-pr-21=applied:abc1234", `${H} · fix-pr-21`] }, [pr(21), pr(99)]).conflictHeld,
     [21], "a foreign settled copy does not clear the owner's hold");
+  // A row naming no PR at all (no `#<n>` key, no `PR#`) is no PR's row, so a
+  // settled copy there is a stray as well: the owner's bare copy still lands.
+  assert.deepEqual(due(["notes fix-pr-21=applied:def5678", `${H} · fix-pr-21`], ["fix-pr-21=applied:def5678"]),
+    [[], []], "a settled copy on a PR-less row does not keep the owner's bare copy from landing");
   // Nor does a foreign one answer a returned review's survivors.
   assert.deepEqual(due(["#20 impl-20=PR#21 · reviewed=abc1234:2/0/0 · fix-pr-99=applied:def5678"]), [[21], []]);
   // Must accept: the PR's own fix-applier, live and landed.
