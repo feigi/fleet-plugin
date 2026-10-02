@@ -82,16 +82,17 @@ const fixApplierPrompt = () =>
   between(reviewersSection(), PROMPT_ANCHOR, PROMPT_END, "run-team fix-applier prompt");
 
 // The implementer's own copy of the count rule, the OTHER seat #859 requires
-// the qualification to reach. Bounded to the two-line span that opens on
-// "give them to every implementer regardless of class" and closes on the
-// immutable-body rule that follows it, so a rewording anywhere else in the
-// correction-ticket block cannot satisfy this slice by accident.
+// the qualification to reach. It lives in the claim-discipline block of the
+// implementer agent body, which the harness injects as every implementer's
+// system prompt; bounded to that block so a rewording anywhere else in the
+// body cannot satisfy this slice by accident.
+const AGENT = readFileSync(join(REPO, "agents", "fleet-implementer.agent.md"), "utf8");
 const implementerCountRule = () =>
   between(
-    RUN_TEAM,
-    "Two of the rules above are what caught both",
-    "The immutable-body rule earns the same",
-    "run-team implementer count-rule paragraph",
+    AGENT,
+    "**Claim discipline, on every ticket:**",
+    "Commit incrementally as you go",
+    "the implementer agent body's claim-discipline block",
   );
 
 // `**` emphasis and the `>` blockquote gutter are stripped and whitespace
@@ -160,7 +161,7 @@ test("the implementer's own count rule carries the identical past-tense/live-pro
   const rule = flatten(implementerCountRule());
   assert.match(
     rule,
-    /never write a COUNT or a tally into prose; state the property instead.{0,15}?unless it is a past-tense record of a measurement you performed, which stays as written.{0,10}?a present-tense claim about a live property must be restated as a property.{0,60}?true at any count/,
+    /Never write a count or tally into present-tense prose; state the property instead.{0,40}?A past-tense record of a measurement you performed stays as written/,
     "the implementer's own count rule lost its past-tense/live-property qualification — #859 requires both seats to carry it, not only the fix-applier's new copy",
   );
 });

@@ -185,7 +185,7 @@ test("the controller records the bound run identifier under a named field, not j
   );
   assert.match(
     s,
-    phrase("`row` **replaces the whole line** (above), so repeat `class=`, `ports=` and `→ PR#`"),
+    phrase("`row` **replaces the whole line** (above), so repeat `ports=` and `→ PR#`"),
     "the instruction no longer cross-references the replace-whole-line warning, so a controller following it will silently destroy the row's other tokens",
   );
   assert.match(

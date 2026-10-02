@@ -50,7 +50,7 @@ const step5 = () => flat(between(REVIEW_AND_FIX, "5. File each deferred finding"
 // Bounded by the two phase-0 markers that bracket the note, never by the note
 // itself: anchoring on the sentence under test turns its deletion into a
 // slicing error rather than a failed assertion.
-const decidedNote = () => flat(between(RUN_TEAM, "**Torn → surface, never guess**", "**Class?**", "run-team phase 0 decided? note"));
+const decidedNote = () => flat(between(RUN_TEAM, "**Torn → surface, never guess**", "4. **Collision scan", "run-team phase 0 decided? note"));
 
 test("step 5 routes a confirmed defect with an open remedy to ready-for-agent", () => {
   const s = step5();
