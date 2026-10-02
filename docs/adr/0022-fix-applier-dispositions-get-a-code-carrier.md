@@ -200,6 +200,21 @@ Each ruling below is listed with the alternative it rejected and the reason.
 - Until #2342 lands, the #2228 shape still ships. That is a recorded gap,
   not one nobody noticed. No change to prose closes it in the meantime,
   which is the same position ADR 0017 records for the tier guard.
+- Review of this ADR found two cases the ruling does not cover. They are
+  gaps in the ruling, not in how it is recorded here, so no ruling is
+  invented for them. Each waits on the maintainer:
+  - #2404: Decision 5's table has no row for an out-of-scope `survived`
+    finding. Row 1 needs one of Decision 4's reasons, which apply only to
+    in-scope survivors, and row 6 covers only `suggestion`s. So obligation
+    1(b) has nothing to check for that finding. Step 5 still files it today
+    (a confirmed defect goes `ready-for-agent`), but the carrier does not
+    enforce that.
+  - #2405: Decision 8 does not cover the fallback reviewer. That member
+    makes the fix-applier's rulings itself and records
+    `reviewed=<head>:0/<refuted>/<deferred>`, so a deferral puts the PR
+    under the gate. But no `dispositions-*=fix-pr-<M>:<head>` token can
+    name that member, so as written its finisher is refused as `unchecked`
+    on every attempt.
 - #2226, #2227 and #2228 themselves are not re-opened here. Each was
   triaged separately.
 - The prose that implementation adds to `review-and-fix.md` and the
