@@ -24,8 +24,8 @@ const FAMILIES = {
   "finisher-pr": { label: "finisher-pr-M", bound: "pr", outcomes: ["labelled", "failed", "killed", "halted:<cause>"] },
   "merge-bot": { label: "merge-bot-n", bound: null, outcomes: ["done", "killed"] },
 };
-// Every family parseMember can yield: it reads `bound` off FAMILIES, so a
-// family MEMBER matches without an entry here throws there, never returns.
+// Every family parseMember can yield: MEMBER below is built from this list,
+// so every family it matches has an entry here by construction.
 export const MEMBER_FAMILIES = Object.freeze(Object.keys(FAMILIES));
 // A finisher halt's causes (#2083): the finisher worked correctly and refused
 // to label, which `failed` (it crashed or gave up) does not say. `unreadable`,
@@ -42,7 +42,7 @@ const OUTCOME_PATTERNS = {
 // suffix (`impl-<N>-b` — member-record.mjs has -b, -c and -d observed);
 // merge bots take none, because a replacement for a dead bot gets a new n.
 // Attempts on one number order by it: no suffix first, then by letter.
-const MEMBER = /^(impl|fix-pr|finisher-pr|merge-bot)-([1-9][0-9]*)(-[a-z])?$/;
+const MEMBER = new RegExp(`^(${MEMBER_FAMILIES.join("|")})-([1-9][0-9]*)(-[a-z])?$`);
 
 /** `{name, family, number, retry, bound}` for a member name, else null.
  * `retry` is the suffix letter (`"b"` for `impl-412-b`), null for none.
@@ -106,8 +106,8 @@ export function expectedDefinition(rowText) {
   const values = [...new Set(String(rowText ?? "").split(/\s+/)
     .filter((t) => t.startsWith("tier=")).map((t) => t.slice("tier=".length)))];
   if (values.length === 0) return "fleet-implementer";
-  if (values.length > 1) throw new Error(`row carries conflicting tier= tokens (${values.map((v) => `tier=${v}`).join(", ")})`);
-  if (!TIER_SUFFIX.test(values[0])) throw new Error(`tier=${values[0]} is not a definition suffix — expected [a-z0-9] words joined by '-'`);
+  if (values.length > 1) throw new Error(`row carries conflicting tier= tokens (${values.map((v) => `tier=${v}`).join(", ")}) — fix the row with \`ledger.mjs row\``);
+  if (!TIER_SUFFIX.test(values[0])) throw new Error(`tier=${values[0]} is not a definition suffix — expected [a-z0-9] words joined by '-' — fix the row with \`ledger.mjs row\``);
   return `fleet-implementer-${values[0]}`;
 }
 

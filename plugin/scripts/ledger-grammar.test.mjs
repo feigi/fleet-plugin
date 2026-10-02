@@ -153,12 +153,12 @@ test("expectedDefinition refuses a tier= it cannot name one definition file by",
 
 // #2330: null is a review fix-applier's deliberate "generic `task`", so a
 // family agentDefinition has no case for must throw, never read as one. This
-// walks every family parseMember can yield — a family added to MEMBER and
-// FAMILIES without a case here fails this test, not a dispatch.
+// walks every family parseMember can yield (MEMBER is built from
+// MEMBER_FAMILIES) — a family added to FAMILIES without a case here fails
+// this test, not a dispatch.
 test("agentDefinition names a definition for every member family, and throws on one it has no case for", () => {
   for (const family of MEMBER_FAMILIES) {
     const member = parseMember(`${family}-7`);
-    assert.equal(member?.family, family, `${family}-7 must parse as its own family`);
     const definition = agentDefinition(member, "", true);
     assert.match(definition, /^fleet-/, `${family}: ${definition}`);
   }

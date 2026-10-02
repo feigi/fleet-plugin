@@ -1729,17 +1729,18 @@ function runDispatch() {
       die(`${e.message} — fleet-tick.mjs refuses this ledger, so ${member.name}'s definition cannot be read off it; fix it with \`ledger.mjs row\` before dispatching`);
     }
   }
-  // The refusal names its own cause: a row's `tier=` for an implementer, a
-  // family ledger-grammar.mjs has no definition case for otherwise (#2330) —
-  // so this message says neither, and points at whichever the error named.
+  // Every error caught here carries its own cause and remedy — a row's `tier=`
+  // (fix it with `ledger.mjs row`) for an implementer, a family
+  // ledger-grammar.mjs has no definition case for otherwise (#2330) — so this
+  // refusal's tail names neither.
   let agent;
   try {
     agent = agentDefinition(member, i === -1 ? "" : data.rows[i], held);
     if (member.family === "impl" && !existsSync(join(AGENTS_DIR, `${agent}.agent.md`))) {
-      throw new Error(`row #${member.number}'s tier= names ${agent}, which has no agents/${agent}.agent.md`);
+      throw new Error(`row #${member.number}'s tier= names ${agent}, which has no agents/${agent}.agent.md — fix the row with \`ledger.mjs row\``);
     }
   } catch (e) {
-    die(`${member.name}: ${e.message} — fix that before dispatching ${member.name}`);
+    die(`${member.name}: ${e.message} — not dispatching ${member.name}`);
   }
 
   let line = null;
