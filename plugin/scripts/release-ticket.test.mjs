@@ -2574,6 +2574,14 @@ fi`,
   );
 });
 
+/** A repo whose main is two commits deep and pushed, with ticket 9 claimed off it. */
+function deepenedClaim(t) {
+  const r = repo(t);
+  for (const n of [1, 2]) commit(r.w, `main ${n}`, `main ${n}\n`);
+  git(r.w, "push", "-q", "origin", "main");
+  return { r, c: claim(r.w, 9, "release-ticket") };
+}
+
 /**
  * Stop a git operation that DETACHES HEAD in a sibling worktree holding the
  * claim's branch, the claim's own worktree already gone. `git worktree list
@@ -2586,10 +2594,7 @@ fi`,
  * precondition blocker of its own, and would answer before the delete does.
  */
 function heldSibling(t, stop) {
-  const r = repo(t);
-  for (const n of [1, 2]) commit(r.w, `main ${n}`, `main ${n}\n`);
-  git(r.w, "push", "-q", "origin", "main");
-  const c = claim(r.w, 9, "release-ticket");
+  const { r, c } = deepenedClaim(t);
   git(r.w, "worktree", "remove", c.wt);
   const sib = join(r.w, "..", "held-wt");
   git(r.w, "worktree", "add", "-q", sib, c.branch);
@@ -2605,12 +2610,17 @@ function heldSibling(t, stop) {
 /** Real git with stdio captured, so a rebase's `Stopped at` prose stays out of the test output. */
 const quietGit = (cwd, ...args) => execFileSync("git", args, { cwd, env: ENV, stdio: "pipe" });
 
+/** Stop `sib` mid-`rebase -i` at an `edit` on its tip commit. */
+const stopAtEditRebase = (sib) =>
+  quietGit(sib, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1");
+
+/** The claim branch is still a local head. */
+const branchSurvives = (r, c, msg) =>
+  assert.ok(git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch), msg);
+
 /** What a halted release must leave: the branch, and the sibling still registered. */
 function assertHeldSurvives(r, c, sib) {
-  assert.ok(
-    git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch),
-    "the claim branch survives",
-  );
+  branchSurvives(r, c, "the claim branch survives");
   assert.match(git(r.w, "worktree", "list", "--porcelain"), /held-wt\n/, "and the sibling that holds it is still registered");
   assert.ok(existsSync(sib), "with its directory");
 }
@@ -2620,9 +2630,7 @@ test("a sibling worktree stopped mid-`rebase -i` on the claim branch halts the d
   // line, `update-ref -d` went through at exit 0, and the sibling's `git
   // rebase --continue` then failed on `cannot lock ref`, the work left on a
   // detached HEAD with no branch.
-  const { r, c, sib } = heldSibling(t, (sib) =>
-    quietGit(sib, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1"),
-  );
+  const { r, c, sib } = heldSibling(t, stopAtEditRebase);
 
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 2, stderr);
@@ -2652,13 +2660,10 @@ test("a sibling mid-rebase of a DIFFERENT branch does not hold this claim's rele
   // The false-refusal half: an operation in progress is not by itself a hold.
   // Only the branch that operation names blocks the delete, so a sibling
   // rebasing unrelated work must leave this claim free to release in full.
-  const r = repo(t);
-  for (const n of [1, 2]) commit(r.w, `main ${n}`, `main ${n}\n`);
-  git(r.w, "push", "-q", "origin", "main");
-  const c = claim(r.w, 9, "release-ticket");
+  const { r, c } = deepenedClaim(t);
   const sib = join(r.w, "..", "other-wt");
   git(r.w, "worktree", "add", "-q", sib, "-b", "other", "origin/main");
-  quietGit(sib, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1");
+  stopAtEditRebase(sib);
 
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 0, stderr);
@@ -2682,10 +2687,7 @@ test("a detached worktree whose git dir cannot be read halts the delete as unkno
   assert.equal(code, 2, stderr);
   assert.equal(json.released, false);
   assert.match(stderr, /cannot tell whether fix\/9-release-ticket is held by worktree \S*sealed-wt/);
-  assert.ok(
-    git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch),
-    "the branch survives an unanswerable check",
-  );
+  branchSurvives(r, c, "the branch survives an unanswerable check");
 });
 
 test("a sibling stopped mid-rebase whose admin HEAD is corrupted still halts the delete, resolved as held (#2218)", (t) => {
@@ -2699,9 +2701,7 @@ test("a sibling stopped mid-rebase whose admin HEAD is corrupted still halts the
   // HEAD file, and the admin dir's rebase-merge state beside it is
   // untouched — so the delete halts on a DEFINITE answer, not merely
   // "unknown".
-  const { r, c, sib } = heldSibling(t, (sib) =>
-    quietGit(sib, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1"),
-  );
+  const { r, c, sib } = heldSibling(t, stopAtEditRebase);
   const admin = join(r.w, ".git", "worktrees");
   const name = readdirSync(admin).find(
     (n) => readFileSync(join(admin, n, "gitdir"), "utf8").trim() === join(realpathSync(sib), ".git"),
@@ -2746,9 +2746,7 @@ test("a prunable sibling that genuinely holds the claim via a stopped rebase sti
   // stopped rebase naming this branch, `git branch -D` itself still refuses
   // — measured — so the delete must too, even though the worktree behind it
   // no longer exists to be entered.
-  const { r, c, sib } = heldSibling(t, (sib) =>
-    quietGit(sib, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1"),
-  );
+  const { r, c, sib } = heldSibling(t, stopAtEditRebase);
   rmSync(sib, { recursive: true, force: true });
   assert.match(git(r.w, "worktree", "list", "--porcelain"), /prunable/, "fixture: the sibling's directory must be gone, its registration still there");
 
@@ -2756,10 +2754,7 @@ test("a prunable sibling that genuinely holds the claim via a stopped rebase sti
   assert.equal(code, 2, stderr);
   assert.equal(json.released, false);
   assert.match(stderr, /is held by a rebase or bisect in progress in worktree \S*held-wt — not deleted/);
-  assert.ok(
-    git(r.w, "for-each-ref", "--format=%(refname:short)", "refs/heads").split("\n").includes(c.branch),
-    "the claim branch survives",
-  );
+  branchSurvives(r, c, "the claim branch survives");
 });
 
 test("a sibling's rebase-merge admin subdirectory unsearchable halts the delete as unknown, too (#2218)", (t) => {
@@ -2769,9 +2764,7 @@ test("a sibling's rebase-merge admin subdirectory unsearchable halts the delete 
   // succeeds — and only the rebase-merge subdirectory this function has to
   // read INTO is chmod'd unsearchable: the second, narrower readability
   // guard `wt_op_state` carries for exactly this shape, untested until now.
-  const { r, c, sib } = heldSibling(t, (sib) =>
-    quietGit(sib, "-c", "sequence.editor=sed -i.bak s/^pick/edit/", "rebase", "-i", "HEAD~1"),
-  );
+  const { r, c, sib } = heldSibling(t, stopAtEditRebase);
   const admin = join(r.w, ".git", "worktrees");
   const name = readdirSync(admin).find(
     (n) => readFileSync(join(admin, n, "gitdir"), "utf8").trim() === join(realpathSync(sib), ".git"),
