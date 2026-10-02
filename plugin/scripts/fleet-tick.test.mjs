@@ -16,7 +16,7 @@ const state = (over = {}) => ({
   implCap: 2, reviewerCap: 6, maxReviews: 6,
   implLive: 0, draining: null, tierMismatch: [], tierUnchecked: [], implNames: [],
   heads: [], supply: 0, shortlistStatus: "ok", refresh: null,
-  reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [],
+  reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [], unlabelled: [],
   mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeConflictHeld: 0,
   mainCheckout: { state: "clean" },
   ...over,
@@ -202,6 +202,30 @@ test("reviewers: --max-reviews bounds reviews in flight, and a throttled review 
 
 test("reviewers: work owed with every slot full is AT CAP", () => {
   assert.equal(row(state({ fixLive: 6, fixDue: [1], reviewDue: [2] }), "reviewers").action, "AT CAP");
+});
+
+// #2331: a finisher that settled `labelled` on a PR still lacking
+// `ready-to-merge` is repaired by one fresh finisher, and escalated past that.
+// Finishers are uncapped, so neither row ever waits on a reviewer slot.
+test("reviewers: one labelled finisher on an unlabelled PR dispatches a finisher, uncapped and actionable", () => {
+  const unlabelled = [{ pr: 40, labelled: ["finisher-pr-40"] }, { pr: 44, labelled: ["finisher-pr-44-b"] }];
+  const rs = rowsOf(state({ unlabelled }), "reviewers");
+  assert.deepEqual(rs.map((r) => r.action), ["DISPATCH finisher PR#40 PR#44"], "IDLE OK never prints beside it");
+  assert.equal(rs[0].acts, true);
+  assert.match(rs[0].detail, /finisher-pr-40, finisher-pr-44-b settled labelled; no ready-to-merge/);
+  const full = rowsOf(state({ fixLive: 6, fixDue: [1], unlabelled }), "reviewers");
+  assert.deepEqual(full.map((r) => r.action), ["AT CAP", "DISPATCH finisher PR#40 PR#44"], "a full reviewer side holds no finisher");
+});
+
+test("reviewers: a second labelled finisher in one stretch escalates instead — never actionable, never a dispatch", () => {
+  const rs = rowsOf(state({ unlabelled: [{ pr: 40, labelled: ["finisher-pr-40", "finisher-pr-40-b"] }] }), "reviewers");
+  assert.deepEqual(rs.map((r) => r.action), ["ESCALATE unlabelled PR#40"]);
+  assert.equal(rs[0].acts, false);
+  assert.match(rs[0].detail, /finisher-pr-40, finisher-pr-40-b settled labelled/);
+  const both = rowsOf(state({ fixDue: [7], unlabelled: [
+    { pr: 40, labelled: ["finisher-pr-40", "finisher-pr-40-b"] }, { pr: 41, labelled: ["finisher-pr-41"] },
+  ] }), "reviewers");
+  assert.deepEqual(both.map((r) => r.action), ["DISPATCH fix-pr PR#7", "DISPATCH finisher PR#41", "ESCALATE unlabelled PR#40"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -504,6 +528,87 @@ test("deriveRun: a ticket row settled =PR#M shares PR M's state with M's own row
     const r = run({ rows }, prs);
     assert.deepEqual([r.reviewsLive, r.fixDue, r.reviewDue], [0, [724], []], `${rows}`);
     assert.ok(r.claimed.has(658), "the ticket row still reads as claimed");
+  }
+});
+
+// #2331: a finisher can settle `labelled` without ever adding the label. The
+// open-PR list the tick already reads says so; a `label-off=<attempt>` token
+// marks the controller's own deliberate removals, so they never read as a miss.
+const LABELLED = "#10 impl-10=PR#40 → PR#40 · review=wf:a reviewed=abc1234:0/0/0 · finisher-pr-40=labelled";
+
+test("deriveRun: a labelled finisher on a PR without ready-to-merge is unlabelled, and the tick dispatches a finisher", () => {
+  const r = run({ rows: [LABELLED], dispatched: ["finisher-pr-40=labelled"] }, [pr(40, ["minor"], [10])]);
+  assert.deepEqual(r.unlabelled, [{ pr: 40, labelled: ["finisher-pr-40"] }]);
+  const rows = reconcile({ ...state(), ...r }).filter((x) => x.role === "reviewers");
+  assert.deepEqual(rows.map((x) => x.action), ["DISPATCH finisher PR#40"]);
+  // Settled in `## Dispatched` alone, a bare row copy beside it: settled anywhere is settled.
+  assert.deepEqual(run({ rows: ["#10 impl-10=PR#40 → PR#40 · finisher-pr-40"], dispatched: ["finisher-pr-40=labelled"] },
+    [pr(40, ["minor"], [10])]).unlabelled, [{ pr: 40, labelled: ["finisher-pr-40"] }]);
+});
+
+test("deriveRun: a labelled finisher whose PR carries ready-to-merge is nothing — labelled settles exactly as before", () => {
+  const r = run({ rows: [LABELLED], dispatched: ["finisher-pr-40=labelled"] }, [pr(40, ["minor", "ready-to-merge"], [10])]);
+  assert.deepEqual(r.unlabelled, []);
+  assert.deepEqual(reconcile({ ...state(), ...r }).filter((x) => x.role === "reviewers").map((x) => x.action), ["IDLE OK"]);
+});
+
+test("deriveRun: only a settled-labelled LATEST attempt is a miss — live, halted, failed and closed PRs are not", () => {
+  const base = "#10 impl-10=PR#40 → PR#40";
+  const open = [pr(40, ["minor"], [10])];
+  for (const row of [
+    `${base} · finisher-pr-40`, // live, not yet reported
+    `${base} · finisher-pr-40=labelled · finisher-pr-40-b`, // the repair is live
+    `${base} · finisher-pr-40-b · finisher-pr-40=labelled`, // the same, by suffix not position
+    `${base} · finisher-pr-40=halted:rebase`, // a halt refused to label, and says so
+    `${base} · finisher-pr-40=labelled · finisher-pr-40-b=halted:past-pin`,
+    `${base} · finisher-pr-40=failed`, // #2359's, not this check's
+    `${base} · fix-pr-40=applied:def5678`, // no finisher at all
+  ]) {
+    assert.deepEqual(run({ rows: [row] }, open).unlabelled, [], row);
+  }
+  assert.deepEqual(run({ rows: [LABELLED] }, []).unlabelled, [], "a PR off the open list is nobody's work");
+});
+
+test("deriveRun: a label-off'd attempt is the controller's own removal — nothing until a later attempt labels again", () => {
+  const open = [pr(40, ["minor"], [10])];
+  for (const row of [
+    `${LABELLED} label-off=finisher-pr-40`,
+    "#10 label-off=finisher-pr-40 impl-10=PR#40 → PR#40 · finisher-pr-40=labelled", // before the attempt it names
+    `${LABELLED} · finisher-pr-40-b=labelled label-off=finisher-pr-40-b`,
+    `${LABELLED} · label-off=finisher-pr-40-b · finisher-pr-40-b=labelled`, // suffix order, never position
+  ]) {
+    assert.deepEqual(run({ rows: [row] }, open).unlabelled, [], row);
+  }
+  // A label-off resets the stretch: the attempt after it is the stretch's first.
+  assert.deepEqual(run({ rows: [`${LABELLED} label-off=finisher-pr-40 · finisher-pr-40-b=labelled`] }, open).unlabelled,
+    [{ pr: 40, labelled: ["finisher-pr-40-b"] }]);
+  // A label-off for another PR's attempt leaves this one's miss standing, wherever it sits.
+  assert.deepEqual(run({ rows: [`${LABELLED} label-off=finisher-pr-41`] }, open).unlabelled,
+    [{ pr: 40, labelled: ["finisher-pr-40"] }]);
+});
+
+test("deriveRun: two labelled attempts in one stretch escalate rather than dispatch a third", () => {
+  const open = [pr(40, ["minor"], [10])];
+  const r = run({ rows: [`${LABELLED} · finisher-pr-40-b=labelled`] }, open);
+  assert.deepEqual(r.unlabelled, [{ pr: 40, labelled: ["finisher-pr-40", "finisher-pr-40-b"] }]);
+  assert.deepEqual(reconcile({ ...state(), ...r }).filter((x) => x.role === "reviewers").map((x) => x.action),
+    ["ESCALATE unlabelled PR#40"]);
+  // A halt between the two still leaves both labelled ones in the stretch.
+  assert.deepEqual(run({ rows: [`${LABELLED} · finisher-pr-40-b=halted:live-editor · finisher-pr-40-c=labelled`] }, open).unlabelled,
+    [{ pr: 40, labelled: ["finisher-pr-40", "finisher-pr-40-c"] }]);
+});
+
+test("deriveRun: a finisher token on another PR's row is a stray — it neither makes nor masks a miss", () => {
+  const prs = [pr(40, ["minor"], [10]), pr(41, ["minor"], [11])];
+  const r = run({ rows: ["#10 impl-10=PR#40 → PR#40", "#11 impl-11=PR#41 → PR#41 · finisher-pr-40=labelled"] }, prs);
+  assert.deepEqual(r.unlabelled, []);
+  const masked = run({ rows: [LABELLED, "#11 impl-11=PR#41 → PR#41 · finisher-pr-40-b"] }, prs);
+  assert.deepEqual(masked.unlabelled, [{ pr: 40, labelled: ["finisher-pr-40"] }]);
+});
+
+test("deriveRun: a label-off naming no finisher-pr member refuses the ledger, naming the token", () => {
+  for (const tok of ["label-off=impl-10", "label-off=", "label-off=finisher-pr-40=labelled", "label-off=merge-bot-1"]) {
+    assert.throws(() => run({ rows: [`${LABELLED} ${tok}`] }, [pr(40, [], [10])]), (e) => e.message.includes(`'${tok}'`), tok);
   }
 });
 test("deriveRun: merge holds are held-behind rows whose premise PR is still open", () => {

@@ -192,12 +192,29 @@ function reviewers(s) {
   const rows = [];
   if (fixes.length) rows.push(row(`DISPATCH fix-pr ${prs(fixes)}`, { acts: true }));
   if (reviews.length) rows.push(row(`DISPATCH review ${prs(reviews)}`, { acts: true }));
+  // #2331: a finisher settled `labelled` on a PR the open list shows without
+  // `ready-to-merge`. One such attempt since the controller's last deliberate
+  // removal gets one fresh finisher; a second one escalates, never a third
+  // dispatch. Finishers take no reviewer slot, so neither waits on the cap.
+  const names = (us) => us.flatMap((u) => u.labelled).join(", ");
+  const repair = s.unlabelled.filter((u) => u.labelled.length === 1);
+  const stuck = s.unlabelled.filter((u) => u.labelled.length > 1);
+  const unlabelledRows = [];
+  if (repair.length) {
+    unlabelledRows.push(row(`DISPATCH finisher ${prs(repair.map((u) => u.pr))}`,
+      { acts: true, extra: `${names(repair)} settled labelled; no ready-to-merge on the PR` }));
+  }
+  if (stuck.length) {
+    unlabelledRows.push(row(`ESCALATE unlabelled ${prs(stuck.map((u) => u.pr))}`,
+      { extra: `${names(stuck)} settled labelled since the last label-off; still no ready-to-merge` }));
+  }
   if (!rows.length) {
     const owed = s.fixDue.length + s.reviewDue.length;
     if (owed && free <= 0) rows.push(row("AT CAP"));
     else if (s.reviewDue.length) rows.push(row(`HOLD (max-reviews ${s.maxReviews} in flight)`));
-    else rows.push(row("IDLE OK"));
+    else if (!unlabelledRows.length) rows.push(row("IDLE OK"));
   }
+  rows.push(...unlabelledRows);
   return { rows, left: { unreviewed: s.reviewDue.length - reviews.length, free } };
 }
 
@@ -289,6 +306,81 @@ const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
 // for a settled member whose transcript was never written.
 const TIER_VERDICT = /^tier-(ok|mismatch|unverifiable)=([^:\s]+):\S+$/;
 
+// #2331: `label-off=<finisher-pr-M[-x]>` — written by the controller BEFORE it
+// takes `ready-to-merge` off PR M on purpose (before approving a push; clearing
+// a label left on a moved head), naming the latest finisher attempt. A missing
+// label is a finisher's miss only when no such removal accounts for it.
+// `undefined` for a token that is not a label-off at all, null for one naming
+// no finisher-pr member — `ledger.mjs row` refuses that one at write time, and
+// deriveRun refuses a hand-written one.
+export function labelOffMember(tok) {
+  if (!tok.startsWith("label-off=")) return undefined;
+  const m = parseMember(tok.slice("label-off=".length));
+  return m !== null && m.family === "finisher-pr" ? m : null;
+}
+
+// A row's key number and its PR, per the comment above PR_MENTION: the PR
+// every PR-bound token on the row speaks for.
+function rowNums(text) {
+  const key = text.split(/\s/)[0];
+  const keyNum = /^#[0-9]+$/.test(key) ? Number(key.slice(1)) : null;
+  const mention = PR_MENTION.exec(text);
+  return { keyNum, pr: mention ? Number(mention[1]) : keyNum };
+}
+
+// #2331: PRs whose finisher settled `labelled` while the open list shows no
+// `ready-to-merge` on them — `unqueued` is the set of open PR numbers without
+// it, so the label shape stays the caller's (gh's `{name}` here, plain names in
+// compute-board.mjs). A PR's attempts are its `finisher-pr-M` tokens in
+// `## Dispatched` and on PR M's own rows; a copy on another PR's row is a
+// stray (#2329) that neither makes nor masks a miss. Settled anywhere among
+// those is settled. The STRETCH is the attempts whose retry suffix sorts after
+// the highest one a `label-off=` names — suffix order ("" < "b" < …), never
+// row position (#2083). A miss is the stretch's latest attempt settled
+// `labelled`; `labelled` lists every attempt in the stretch that settled so,
+// the count the tick splits one repair from an escalation on.
+//
+// Lenient on purpose — a malformed token is skipped, never thrown — because
+// the cockpit reads the same ledger and flags rather than refuses; deriveRun
+// has already refused anything malformed before it calls this.
+/** @returns {{pr: number, labelled: string[]}[]} ascending by PR */
+export function unlabelledFinishers({ rows, dispatched }, unqueued) {
+  const attempts = new Map();
+  const offs = new Map();
+  const add = (t) => {
+    if (!t || t.error || t.family !== "finisher-pr") return;
+    if (!attempts.has(t.number)) attempts.set(t.number, new Map());
+    const byName = attempts.get(t.number);
+    const a = byName.get(t.name) ?? { name: t.name, retry: t.retry ?? "", outcome: null };
+    if (t.outcome !== null) a.outcome = t.outcome;
+    byName.set(t.name, a);
+  };
+  for (const e of dispatched) add(parseToken(e));
+  for (const text of rows) {
+    const { pr } = rowNums(text);
+    for (const tok of text.split(/\s+/).filter(Boolean)) {
+      const off = labelOffMember(tok);
+      if (off) {
+        const r = off.retry ?? "";
+        if (!offs.has(off.number) || r > offs.get(off.number)) offs.set(off.number, r);
+      } else if (off === undefined) {
+        const t = parseToken(tok);
+        if (t && t.number === pr) add(t);
+      }
+    }
+  }
+  const out = [];
+  for (const [n, byName] of attempts) {
+    if (!unqueued.has(n)) continue;
+    const stretch = [...byName.values()]
+      .filter((a) => !offs.has(n) || a.retry > offs.get(n))
+      .sort((a, b) => (a.retry < b.retry ? -1 : a.retry > b.retry ? 1 : 0));
+    if (stretch.at(-1)?.outcome !== "labelled") continue;
+    out.push({ pr: n, labelled: stretch.filter((a) => a.outcome === "labelled").map((a) => a.name) });
+  }
+  return out.sort((a, b) => a.pr - b.pr);
+}
+
 export function deriveRun({ rows, dispatched, drain }, prs) {
   // One entry per member name across `## Dispatched` and every row. A member
   // settled ANYWHERE is settled: `settle` is the only writer of an outcome, and
@@ -325,14 +417,6 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   // `tier-unverifiable=<member>:no-transcript` is the third: a settled member
   // with nothing to check, which clears the unchecked hold and nothing else.
   const verdicts = { ok: new Set(), mismatch: new Set(), unverifiable: new Set() };
-  // A row's key number and its PR, per the comment above PR_MENTION: the PR
-  // every PR-bound token on the row speaks for.
-  const rowNums = (text) => {
-    const key = text.split(/\s/)[0];
-    const keyNum = /^#[0-9]+$/.test(key) ? Number(key.slice(1)) : null;
-    const mention = PR_MENTION.exec(text);
-    return { keyNum, pr: mention ? Number(mention[1]) : keyNum };
-  };
   // fix-pr members some row carries settled IN PLACE (`<member>=<outcome>`).
   // `settle` rewrites a token where it stands, so that copy sits where the
   // member was dispatched; a bare copy beside it is what a whole-line `row`
@@ -455,6 +539,8 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
           inFlight: false, reviewedAny: true, survived: Number(m[2]), reviewFixed: false,
           reviewedHead: m[1].toLowerCase(), pastPinHalt: false,
         });
+      } else if (labelOffMember(tok) === null) {
+        throw new LedgerError(`${where}: '${tok}' is not label-off=<finisher-pr member> — fix the row with \`ledger.mjs row\``);
       } else {
         const h = HELD.exec(tok);
         if (h) st.held.push(Number(h[1]));
@@ -559,6 +645,9 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     mergeHeld: queued.filter((p) => heldBehind(state(p.number)) || conflictHeld(state(p.number))).length,
     // How many of those are conflict holds — the HOLD row's wording, no field.
     mergeConflictHeld: queued.filter((p) => conflictHeld(state(p.number))).length,
+    // #2331: finishers settled `labelled` on an open PR without the label.
+    unlabelled: unlabelledFinishers({ rows, dispatched },
+      new Set(prs.filter((p) => !isQueued(p)).map((p) => p.number))),
     // Every PR, open or not, on a conflict hold no fix-applier has cleared —
     // the one reading of a hold (#2299): `ledger.mjs dispatch` names a
     // fix-applier's definition off this list, so it answers the same per-PR
