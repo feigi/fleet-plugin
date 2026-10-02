@@ -175,13 +175,13 @@ test("dispatch prints the agent definition the call names: the row's tier for an
 test("dispatch refuses an implementer whose row names no single definition, or one with no file, before marking it live", (t) => {
   const { ok, read, refused } = fixture(t);
   ok("row", "7", "class=routine · tier=alt · tier=slow-high");
-  refused(["dispatch", "7", "impl-7"], /row #7: row carries conflicting tier= tokens \(tier=alt, tier=slow-high\) — fix the row's tier= with `ledger\.mjs row` before dispatching impl-7/);
+  refused(["dispatch", "7", "impl-7"], /impl-7: row carries conflicting tier= tokens \(tier=alt, tier=slow-high\) — fix that before dispatching impl-7/);
   ok("row", "8", "class=routine · tier=../../etc");
-  refused(["dispatch", "8", "impl-8"], /row #8: tier=\.\.\/\.\.\/etc is not a definition suffix/);
+  refused(["dispatch", "8", "impl-8"], /impl-8: tier=\.\.\/\.\.\/etc is not a definition suffix/);
   ok("row", "9", "class=routine · tier=");
-  refused(["dispatch", "9", "impl-9"], /row #9: tier= is not a definition suffix/);
+  refused(["dispatch", "9", "impl-9"], /impl-9: tier= is not a definition suffix/);
   ok("row", "10", "class=routine · tier=slow-high");
-  refused(["dispatch", "10", "impl-10"], /row #10: fleet-implementer-slow-high has no agents\/fleet-implementer-slow-high\.agent\.md — fix the row's tier= with `ledger\.mjs row` before dispatching impl-10/);
+  refused(["dispatch", "10", "impl-10"], /impl-10: row #10's tier= names fleet-implementer-slow-high, which has no agents\/fleet-implementer-slow-high\.agent\.md — fix that before dispatching impl-10/);
   assert.deepEqual(read().dispatched, []);
 });
 
