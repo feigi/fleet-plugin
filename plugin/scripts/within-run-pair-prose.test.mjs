@@ -21,7 +21,7 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 // implementer-model-tier.test.mjs: widened to the phase, the tier-guard
 // paragraphs below would satisfy half of these pins on their own.
 const dispatch = () =>
-  section(RUN_TEAM, "**Dispatch every implementer", "**`class=routine`", "run-team phase 2 dispatch rule");
+  section(RUN_TEAM, "**Dispatch every implementer", "The raw split still favours the top tier", "run-team phase 2 dispatch rule");
 
 test("phase 2 dispatches the alternate-tier implementer on every 5th Pull", () => {
   const slice = dispatch();
@@ -166,13 +166,13 @@ test("phase 2 counts the rate off the ledger's impl- rows, and a replacement doe
     /records\s+`tier=alt`\s+in\s+the\s+row,\s+and\s+a\s+replacement\s+inherits\s+the\s+row's\s+tier/,
     "phase 2 no longer records the tier on the row, or no longer says a replacement inherits it rather than counting as a Pull",
   );
-  // The roll: a Pull that lands on a correction or a chain head passes the
-  // alternate tier to the next Pull rather than skipping it, which is the rule
-  // ADR 0013 §6 states and the difficulty caveat below depends on.
+  // The roll: a Pull that lands on a chain head passes the alternate tier to
+  // the next Pull rather than skipping it, which is the rule ADR 0013 §6 states
+  // and the difficulty caveat below depends on.
   assert.match(
     slice,
-    /assignment\s+rolls\s+to\s+the\s+next\s+Pull\s+when\s+the\s+pulled\s+ticket\s+is\s+`class=correction`\s*\n?\s*or\s+another\s+open\s+ticket\s+sequences\s+after\s+it/,
-    "phase 2 no longer rolls the alternate tier past corrections and chain heads",
+    /assignment\s+rolls\s+to\s+the\s+next\s+Pull\s+when\s+another\s+open\s+ticket\s+sequences\s+after\s+it/,
+    "phase 2 no longer rolls the alternate tier past chain heads",
   );
 });
 
@@ -184,15 +184,15 @@ const counterEvidence = () =>
 test("the orthogonality claim is scoped — date only, not difficulty", () => {
   // The claim itself is literally true and narrowly scoped, so this is not a
   // false-claim pin. It is the caveat that goes missing: the alternate member
-  // rolls past every correction and every chain head, while the top tier
-  // absorbs all of those. That makes tier SYSTEMATICALLY correlated with ticket
+  // rolls past every chain head, while the top tier absorbs all of those. That
+  // makes tier SYSTEMATICALLY correlated with ticket
   // kind, in a known direction — a different hazard from the "difficulty adds
   // noise" the covariates are elsewhere sold as handling, and the one a reader
   // who trusts "by construction" will skip.
   const slice = counterEvidence();
   assert.match(
     slice,
-    /rolling\s+past\s+every\s+correction[\s\S]{0,120}the\s+top\s+tier\s+absorbs\s+all\s+of\s+those/,
+    /rolling\s+past\s+every\s+ticket\s+another\s+open\s+one\s+sequences\s+after[\s\S]{0,120}the\s+top\s+tier\s+absorbs\s+all\s+of\s+those/,
     "the counter-evidence section no longer says which tickets the alternate tier skips and the top tier absorbs",
   );
   assert.match(

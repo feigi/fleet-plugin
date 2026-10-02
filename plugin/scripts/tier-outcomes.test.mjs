@@ -64,7 +64,7 @@ function fixture(t, { members = [], tierRows = [], ledger = null, closes = [10] 
     return { code: r.status, stdout: r.stdout, stderr: r.stderr };
   };
   f.append = (pr = "20", { note = "a note with spaces" } = {}) =>
-    f.run("append", pr, "--class", "routine", "--closed-own-ticket", "yes", "--minted-false-claim", "no", "--note", note);
+    f.run("append", pr, "--closed-own-ticket", "yes", "--minted-false-claim", "no", "--note", note);
   f.dataRows = () => readFileSync(f.tier, "utf8").split("\n").filter((l) => l.trim() && !l.startsWith("#")).map((l) => l.split("\t"));
   f.ghCalls = () => (existsSync(f.ghLog) ? readFileSync(f.ghLog, "utf8").trim().split("\n").filter(Boolean) : []);
   return f;
@@ -96,6 +96,7 @@ test("append: the ledger's tier-ok token wins over member-outcomes.tsv", (t) => 
   assert.equal(rows[0][col("pr")], "20");
   assert.equal(rows[0][col("ticket")], "10", "the ticket comes from gh's closingIssuesReferences");
   assert.equal(rows[0][col("tier")], "alt");
+  assert.equal(rows[0][col("class")], "", "append writes the retired class column empty");
   // Stamped at ruling: the day `append` ran, in local time — either side of a
   // midnight the run straddled.
   assert.ok([before, after].includes(rows[0][col("run_date")]), `run_date ${rows[0][col("run_date")]} is not the day append ran`);
@@ -260,6 +261,16 @@ test("append: a PR closing no issue is refused, not written with a blank ticket"
   assert.equal(r.code, 2);
   assert.match(r.stderr, /closes no issue/);
   assert.equal(readFileSync(f.tier, "utf8"), before);
+});
+
+test("append: --class is refused as an unknown flag before anything is written", (t) => {
+  const f = fixture(t, { members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }] });
+  const before = readFileSync(f.tier, "utf8");
+  const r = f.run("append", "20", "--class", "routine", "--closed-own-ticket", "yes", "--minted-false-claim", "no", "--note", "n");
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /unknown flag --class/);
+  assert.equal(readFileSync(f.tier, "utf8"), before);
+  assert.deepEqual(f.ghCalls(), [], "refused before gh was asked");
 });
 
 // ---------------------------------------------------------------------------

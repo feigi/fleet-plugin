@@ -52,6 +52,27 @@ not settle; you have the tree, so you are the backstop. Already fixed → report
 that with the commit and do NOT invent work. An acceptance criterion the tree
 now **contradicts** is a bail, not a thing to implement: say which, and stop.
 
+**Claim discipline, on every ticket:**
+
+1. The issue body is a lead, never a citation. Every factual claim the diff
+   restates needs a settling command run against the tree first.
+2. Write no prose the ticket did not ask for — added prose is where minted
+   claims enter.
+3. No positional references (`the closing/second/last X`); name the thing.
+4. Evidence from another repo is cited by host: a github.com source as
+   `owner/repo#N`; anything else (GHE, GitLab, internal) as prose naming host
+   and repo and saying it cannot be settled from this repo. A bare `#N` is only
+   for the current repo's own issues and PRs.
+5. Never write a count or tally into present-tense prose; state the property
+   instead (`every other test in the file`). A past-tense record of a
+   measurement you performed stays as written.
+6. Every claim in a commit body or PR body gets its settling command re-run at
+   the commit that ships it, written inline beside the claim — a pushed body
+   cannot be edited.
+7. A settling command over literal text uses `grep -F`, and its zero counts
+   only after the same command, with the same flags, finds a line known to
+   match.
+
 Commit incrementally as you go. Do not accumulate a large uncommitted diff — if
 you stop for any reason, uncommitted work is invisible to the controller and
 effectively unrecoverable.

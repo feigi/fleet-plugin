@@ -21,10 +21,10 @@ becomes one at all.
    review's closed record issue, promoted only if a later review
    re-derives it as `survived` or a maintainer hits it directly
    ([ADR 0002](../adr/0002-filing-second-bar-worth-a-claim.md)).
-4. **Route `class=correction` tickets** — whose actual subject is
-   *correcting a wrong claim the fleet itself shipped* — through
-   implementation with extra rigor for that same failure mode, never a
-   lower-capability dispatch (see
+4. **No separate route at implementation.** A ticket whose actual subject is
+   *correcting a wrong claim the fleet itself shipped* dispatches like any
+   other: every implementer agent body carries the claim discipline built for
+   that failure mode (see
    [`plugin/skills/run-team/references/correction-tickets.md`](../../plugin/skills/run-team/references/correction-tickets.md)).
 
 ## Opinionated choices

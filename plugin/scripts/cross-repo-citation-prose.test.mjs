@@ -8,22 +8,21 @@ import { join } from "node:path";
 // human and to an agent. Not a broken link (a repo's own markdown files link
 // nothing); a reader defect, which is why counts-not-numbers was the only
 // workaround the file had. The convention that closes it is host-split, and
-// both halves need pinning: the rule in the Reviewers section, which the
-// controller relays to a hand-dispatched fallback reviewer, and the applied
-// instance where the foreign evidence sits.
+// both halves need pinning: the rule in the claim-discipline block every
+// implementer agent body carries, and the applied instance where the foreign
+// evidence sits.
 const REPO = join(import.meta.dirname, "..");
-const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const AGENT = readFileSync(join(REPO, "agents", "fleet-implementer.agent.md"), "utf8");
 const CORRECTIONS = readFileSync(
   join(REPO, "skills", "run-team", "references", "correction-tickets.md"),
   "utf8",
 );
 
-// Slice-scoped, not whole-file: SKILL.md is 1200+ lines and a bare presence
-// check anywhere in it stays green when the text lands somewhere its reader
-// never reaches (measured before in this repo — member-prompt-prose.test.mjs
-// #172). The correction-ticket rule block sits under `### Reviewers`, and its
-// own closing clause names the reader the controller has to relay it to: a
-// hand-dispatched fallback reviewer.
+// Slice-scoped, not whole-file: a bare presence check anywhere in a long file
+// stays green when the text lands somewhere its reader never reaches (measured
+// before in this repo — member-prompt-prose.test.mjs #172). The claim-discipline
+// block is what the harness injects into every implementer, so the rule has to
+// sit inside it.
 function slice(text, startAnchor, endAnchor, what, { endsFile = false } = {}) {
   const at = text.indexOf(startAnchor);
   assert.notEqual(at, -1, `${what} start anchor ('${startAnchor}') moved — update this test`);
@@ -39,13 +38,13 @@ function slice(text, startAnchor, endAnchor, what, { endsFile = false } = {}) {
 // matches need the wrap invisible.
 const flat = (s) => s.replace(/\s+/g, " ");
 
-const correctionRuleBlock = () =>
+const disciplineBlock = () =>
   flat(
     slice(
-      RUN_TEAM,
-      "**Correction tickets ship new wrong claims",
-      "#### Fallback: hand-dispatched reviewer member",
-      "the correction-ticket rule block",
+      AGENT,
+      "**Claim discipline, on every ticket:**",
+      "Commit incrementally as you go",
+      "the agent body's claim-discipline block",
     ),
   );
 
@@ -59,17 +58,17 @@ const conventionSection = () =>
 const secondRunSection = () =>
   flat(slice(CORRECTIONS, "## Second mechanism", "## The clause-by-clause duty", "the second-run evidence"));
 
-test("the cross-repo citation rule reaches the reviewer, in the rule block the controller relays to a fallback reviewer", () => {
-  const block = correctionRuleBlock();
+test("the cross-repo citation rule reaches every implementer, in the agent body's claim-discipline block", () => {
+  const block = disciplineBlock();
   assert.match(
     block,
     /another repo/i,
-    "the correction-ticket rule block no longer says anything about evidence from another repo — a fallback reviewer relayed only this block stops catching a bare `#N` written for foreign evidence",
+    "the claim-discipline block no longer says anything about evidence from another repo — an implementer stops being told not to write a bare `#N` for foreign evidence",
   );
   assert.match(
     block,
     /owner\/repo#N/,
-    "the github.com half of the citation rule is gone from the block the controller relays",
+    "the github.com half of the citation rule is gone from the agent body",
   );
   assert.match(
     block,

@@ -2,340 +2,38 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between as section, sentences } from "./prose-pin.mjs";
+import { between as section } from "./prose-pin.mjs";
 
-// Implementers dispatch at the SESSION's tier, whatever the ticket class. The
-// `class=routine` → `sonnet` binding was reverted 2026-08-16 when the phase-2
-// guard fired, so the class now selects the correction-ticket DISCIPLINE and
-// partitions the metrics file — never a model.
-//
-// Two ways this rots, and they pull in opposite directions. (a) The binding
-// creeps back: someone re-reads the guard's rationale, sees the saving argued
-// for at length, and restores `model: "sonnet"` in one of the two places that
-// used to carry it. The negative pins below exist for that, and there are two
-// because phase 0 and phase 2 each stated the binding independently — changing
-// only one is exactly the half-revert this test failed to catch when the revert
-// was first written. (b) The class judgement is dropped as pointless now that
-// it prices nothing, taking the correction discipline with it. Nothing outside
-// this file catches either; the fleet never reads back the model it dispatched
-// at (board.mjs parses `message.usage` off the subagent JSONL and drops
-// `message.model` on the same line).
-//
-// Presence pins are not enough here. An earlier draft of these tests passed
-// with the rule INVERTED end to end — corrections at `sonnet`, everything else
-// at top tier — because every token it looked for was still somewhere in the
-// slice. Each class is therefore pinned to its tier by ADJACENCY, with the
-// competing tier token excluded from the gap.
+// Implementers dispatch at the tier their DEFINITION declares, never one the
+// controller passes: the dispatch rule omits `model` and names the definition
+// `ledger.mjs dispatch` printed. Nothing outside this file pins either half of
+// that rule. A dispatch that breaks it is caught only after the fact, at run
+// time: tier-check.mjs compares the agent the member ran as, and the model and
+// level the harness resolved, against the definition its ledger row names.
 //
 // Slice by named anchors and fail loudly when one moves; slice SIZE is what
 // does the work. One slice per paragraph, never per phase: widen a slice to its
-// phase and a neighbouring paragraph satisfies the pin on its own. Measured on
-// the old phase 0 — delete step 4's `**correction-ticket discipline**` sentence
-// and the pin on that phrase below stayed green regardless, on step 6's "which
-// tickets carry the correction-ticket discipline" alone. #1804 retired step 6
-// (the multi-select) and moved step 4 into phase 1's Pull as its step 3; the
-// rule the measurement taught still holds, since phase 2's prompt paragraph
-// names the same discipline a few hundred lines on.
+// phase and a neighbouring paragraph satisfies the pin on its own.
 const REPO = join(import.meta.dirname, "..");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
 
-// These three slices are paragraph-tight. A failure here means the text was
-// deleted OR relocated — check the rest of the file before assuming deletion.
-const step4 = () =>
-  section(RUN_TEAM, "3. **Read the ticket in full, once**", "4. **Collision scan", "run-team phase 1 Pull step 3 (was phase 0 step 4)");
+// The first two slices each run from a named paragraph to the next anchor named
+// here, several paragraphs on, so a neighbouring paragraph can satisfy a pin
+// read over them. A failure here means the text was deleted OR relocated —
+// check the rest of the file before assuming deletion.
 const dispatch = () =>
   section(RUN_TEAM, "**Dispatch every implementer", "**Guard: accumulate per PR", "run-team phase 2 dispatch rule");
 const guard = () =>
   section(RUN_TEAM, "**Guard: accumulate per PR", "Why the agent body carries what it does", "run-team phase 2 tier guard");
+// Paragraph-tight: the dispatch rule alone, ending where the tier check opens.
+// The paragraphs past it recount historical rows by vendor model name, so an
+// absence pin read over `dispatch()` would refuse the file as it stands.
+const dispatchRule = () =>
+  section(RUN_TEAM, "**Dispatch every implementer", "**After every Pull's dispatch", "run-team phase 2 dispatch rule paragraph");
 
-// The dispatch slice's past-tense revert note — the one legitimate statement of
-// the `class=routine` → `sonnet` binding, whose SPAN the rebindings scan exempts.
-const REVERT_NOTE = /\*\*`class=routine` → `sonnet` was REVERTED on [\s\S]*?\*\*/;
-
-// Every `class=routine`/`sonnet` binding stated in `slice` that starts outside
-// `note`'s span. Read one sentence at a time, via `sentences()`, with a gap that
-// tolerates a period — never a first-period `[^.]` window over the raw slice
-// (#1983). Any hit is a fault, so a window cut short is this scan's silent
-// direction: "`class=routine` tickets follow `agents/fleet-implementer.agent.md`
-// at `sonnet`" ended the old window at the filename's period and passed. The
-// sentence is what bounds the gap, so a `class=routine` in one sentence never
-// pairs with a `sonnet` in the next. Each sentence's offset is recovered by
-// searching the slice from the previous sentence's end — sentences() drops the
-// whitespace it splits on — so a hit's index is still an index into `slice`,
-// comparable against the note's span as before.
-//
-// The note's own span is masked out of whichever sentence it falls in before
-// matching, the same technique citationFault uses for quoted/parenthesized
-// spans. Found in review: without this, a restoration glued onto the note's
-// closing `**` with no whitespace before it (`.**;`, `.**,`, or nothing at
-// all) leaves the note and the restoration in ONE sentence, because
-// `sentences()` only splits at a terminator FOLLOWED by whitespace. The
-// note's own `class=routine`/`sonnet` pair would then anchor a match whose
-// gap runs past the note and swallows the restoration, and the exemption
-// filter below — keyed on where the match STARTS — would read the whole
-// thing as covered by the note, a silent miss the OLD raw-slice scan did not
-// have (the note's literal period ended its `[^.]` tail first). Masking
-// keeps the sentence the same length, so the offsets recovered above still
-// line up, and the filter below is now a second, redundant guard rather than
-// the only one.
-//
-// RESIDUAL: sentences() still cuts short at a `.)`, `."`, a mid-sentence `?`,
-// a capitalised "E.g." or an "etc." (silent here — none of those four is in
-// this slice today), and still merges two real sentences across #1987's
-// `**late**.[1]` and #1899's sentence-final lowercase "vs." (an over-fire
-// here, also absent today). `.**` itself is common in this slice (14
-// bold-lead sentence ends) but each is a genuine boundary between two
-// unrelated sentences, not one straddling a rebinding fact — the note's own
-// `.**` is the one exception, which is exactly what the masking above is for
-// rather than trusting the corpus to stay accidentally clean.
-const REBINDING = /`class=routine`[\s\S]{0,120}sonnet[\s\S]{0,40}|sonnet[\s\S]{0,120}`class=routine`[\s\S]{0,40}/g;
-const rebindingsOutside = (slice, note) => {
-  const noteAt = slice.indexOf(note);
-  const noteEnd = noteAt + note.length;
-  const hits = [];
-  let cursor = 0;
-  for (const sentence of sentences(slice)) {
-    const at = slice.indexOf(sentence, cursor);
-    cursor = at + sentence.length;
-    const overlapStart = Math.max(at, noteAt);
-    const overlapEnd = Math.min(cursor, noteEnd);
-    const masked = overlapStart < overlapEnd
-      ? sentence.slice(0, overlapStart - at) + "#".repeat(overlapEnd - overlapStart) + sentence.slice(overlapEnd - at)
-      : sentence;
-    for (const hit of masked.matchAll(REBINDING)) {
-      const index = at + hit.index;
-      hits.push({ index, text: slice.slice(index, index + hit[0].length) });
-    }
-  }
-  return hits.filter((hit) => hit.index < noteAt || hit.index >= noteEnd).map((hit) => hit.text);
-};
-
-test("phase 0 step 4 still earns its class judgement now that the class prices nothing", () => {
-  const slice = step4();
-
-  // The criterion, not the label: what makes a ticket a correction ticket has
-  // to be checkable by the controller reading the issue, or the class is a coin
-  // flip. Not /docs|comments/ — this slice opens with `--json title,body,comments`,
-  // so the `comments` alternative stays green with the criterion deleted.
-  // Bound to the class it selects, with `routine` excluded from the gap: a bare
-  // /bad citations/ survives the two classes being swapped.
-  assert.match(
-    slice,
-    /bad citations(?:(?!routine)[^.])*?`class=correction`/,
-    "step 4 no longer routes the correction criterion to `class=correction`",
-  );
-  // What the class is FOR after the revert. Without this the judgement reads as
-  // vestigial and the next compression pass deletes it — taking the correction
-  // discipline, which is the half that caught real defects, with it.
-  assert.match(
-    slice,
-    /no longer selects a model tier/,
-    "step 4 no longer says the class stopped selecting a tier — the reverted binding reads as live again",
-  );
-  assert.match(
-    slice,
-    /correction-ticket\*{0,2} discipline/,
-    "step 4 no longer says what the class still selects, so the judgement reads as vestigial",
-  );
-  // THE NEGATIVE, half one of two. Restoring `class=routine` → `sonnet` here
-  // while phase 2 stays reverted is the self-contradiction the revert shipped
-  // with on its first pass: phase 0 priced the ticket, phase 2 ignored it, and
-  // nothing failed. The window spans sentences rather than one, because the
-  // stated reason for the one-sentence bound is false OF THIS SLICE: step 4
-  // holds ZERO `sonnet` occurrences, and every past-tense mention the bound was
-  // guarding against (L224, L235, L303, L304, L314) lives in the `dispatch` and
-  // `guard` slices, which this pin does not cover. Measured: under the old
-  // bound a restoration split across two sentences escaped the whole suite at
-  // 725/725; [\s\S]{0,400} reds it and leaves the clean tree green. Neither is
-  // the ORDER assumed — a restoration reading "`sonnet` is what `class=routine`
-  // tickets dispatch at" binds the class just as squarely and walks straight
-  // through the forward-only form, so both directions are scanned.
-  assert.doesNotMatch(
-    slice,
-    /`class=routine`[\s\S]{0,400}`sonnet`|`sonnet`[\s\S]{0,400}`class=routine`/,
-    "step 4 has re-bound `class=routine` to `sonnet` — the reverted rule is back in phase 0",
-  );
-  // Safe direction on a judgement with no tiebreak. The adjacent decided?
-  // judgement says "Torn → surface"; this one is cheap enough to just default.
-  assert.match(slice, /\*\*Torn → correction\*\*/, "step 4 lost its tiebreak, so a torn class dispatches on a guess");
-  // The citation is a precaution, NOT evidence about tiers —
-  // references/correction-tickets.md measures no tier and blames the ticket's
-  // framing. An earlier draft claimed the four-for-four happened "at top tier",
-  // a qualifier that reference does not carry. Pin the honesty, or it comes back.
-  assert.match(
-    slice,
-    /precaution, not a\s+\*{0,2}measurement/,
-    "step 4 states the correction exception as measured rather than as a precaution",
-  );
-  assert.match(
-    slice,
-    /measures no tier at\s+all/,
-    "step 4 no longer says the cited reference measures no tier — the citation reads as evidence again",
-  );
-});
-
-test("phase 2 dispatches every class at the session tier, and says so with a mechanism", () => {
+test("phase 2 dispatches every implementer at its definition's tier, and says so with a mechanism", () => {
   const slice = dispatch();
 
-  // The rule, bound to "whatever the class" so a re-introduced per-class branch
-  // reds here rather than silently coexisting with this sentence.
-  assert.match(
-    slice,
-    /omit `model` on the `task`\s+call, whatever the class/,
-    "phase 2 no longer dispatches every class the same way — a per-class tier branch is back",
-  );
-  // The revert is dated and attributed, or the next reader takes the missing
-  // tier for an omission and helpfully restores it. Pinned BEFORE the scan
-  // below, whose exemption is the SPAN this note occupies: a reworded note has
-  // to be diagnosed as a reworded note, or the scan reports it as a restored
-  // binding and sends the reader hunting a rebinding nobody made.
-  assert.match(
-    slice,
-    /REVERTED on 2026-08-16/,
-    "phase 2 no longer records WHEN and WHY the tier binding was removed",
-  );
-  // THE POSITIVE SHAPE PIN (#553). The pin above only checks the phrase is
-  // PRESENT somewhere in the slice, so a restoration clause written INSIDE
-  // the note — keeping "was REVERTED on 2026-08-16" intact — still satisfies
-  // it, then rides the scan's note exemption below to green: that exemption
-  // drops every hit starting inside the note's span, whatever else the hit
-  // says. Pin the note's own shape instead of slicing the note out before the
-  // scan (the rejected remedy — a larger change, not needed once the shape
-  // itself is pinned). Isolated to the bold span itself, not the whole slice,
-  // so a present-tense rebinding written anywhere else in THIS DISPATCH SLICE
-  // stays the rebindings scan's job below. Not "anywhere in phase 2": the
-  // `## Phase 2` heading is far wider than this paragraph, and the guard
-  // paragraph inside it has no rebindings scan of its own — this file holds
-  // exactly one.
-  //
-  // This doc's own convention grounds the shape: a dated note states one
-  // action on one date (comment above — "dated and attributed"), so a
-  // restoration smuggled inside it surfaces as a further date (when the
-  // restoration happened), as the state the binding is restored TO, or as a
-  // second mention of the binding itself. Those are the three checks below,
-  // in that order. Settled against a single edit to this note — appending
-  // "and is RESTORED on 2026-08-18, so routine members dispatch at `sonnet`
-  // again." — each of the three matches it independently and names the
-  // note, not the scan. A pure whitespace reflow, or a past-tense reword
-  // that adds no further mention of the binding, trips none of them — but
-  // that is narrower than "any reword": the third check's own grid below
-  // measures which benign rewords DO trip it (3/7, corrected below).
-  const revertNote = REVERT_NOTE.exec(slice)?.[0];
-  assert.ok(
-    revertNote,
-    "the revert note's opening clause changed shape enough that this pin can no longer find it — read the slice and update the anchor",
-  );
-  assert.equal(
-    (revertNote.match(/\d{4}-\d{2}-\d{2}/g) ?? []).length,
-    1,
-    "the revert note now names more than one date — a restoration is hiding inside the note whose span the rebindings scan exempts",
-  );
-  // ponytail: catches the measured restoration and any dated repeat of it,
-  // plus the specific verb this doc's own restorations are written with. The
-  // dateless restoration phrased without "restored" that this one lets past
-  // is the third check's job, below (#1226).
-  assert.doesNotMatch(
-    revertNote,
-    /\bRESTORED\b/i,
-    "the revert note now says the binding is RESTORED — a restoration is hiding inside the note whose span the rebindings scan exempts",
-  );
-  // THE TOKEN BUDGET (#1226). A restoration written inside the note that
-  // carries no second date and never spells "RESTORED" satisfies both checks
-  // above and then rides the scan's span exemption below, because that
-  // exemption drops every hit starting inside the note whatever the hit says.
-  // Measured from a copy of this tree under a scratch directory: the note
-  // re-ended "firing; that binding is back in force, so routine members
-  // dispatch at `sonnet`." left this file at 10/10.
-  //
-  // Pin what the note is ALLOWED TO SAY, not the vocabulary a restoration
-  // would say it in. The note's legitimate job is to state the reverted
-  // binding once; any further `class=routine` or `sonnet` inside it is a
-  // second statement of a binding the scan below is forbidden to look at.
-  // That invariant survives rewording. A word list does not.
-  //
-  // #1226 asked first whether #476's trigger was met, reading it as a count
-  // of misses. It is not a count: #476 closed with "re-open trigger: someone
-  // exhibits a regex that passes that grid", so the cross-review arithmetic
-  // the issue carried — is one review's two dimensions a second miss? — never
-  // gated anything; the grid did. Ten restoration mutants of this note and
-  // seven benign edits of it, each run as its own copy:
-  //
-  //   instrument                                      kills  over-fires
-  //   /\b(is|are) (now )?(back|restored|in force)\b/i   4/10     0/7
-  //   the note states its binding exactly once          6/10     3/7  <- this
-  //   tight one-clause template over the whole note     8/10     3/7
-  //
-  // Re-measured under independent review: an earlier pass of this comment
-  // claimed 0/7 for this row and claimed above that "a reflow or a
-  // past-tense-only reword trips none of them" — both wrong. This check
-  // counts mentions, not intent, so any benign edit that re-mentions
-  // `class=routine` or `sonnet` inside the note trips it exactly as a
-  // restoration would. The 3 over-fires on the 7-edit grid: pulling the
-  // guard paragraph's own adjacent "reverts `class=routine`" clause into the
-  // note, a reword naming the tier the class moved off to ("...instead of
-  // `sonnet`"), and a parenthetical gloss restating the binding for context.
-  // The other four — whitespace reflow, a past-tense-only reword that adds
-  // no mention, a comma fix, and a moved bold marker — leave the note's
-  // mention count at one and pass. Kept over the template row despite the
-  // now-tied 3/7: this row's over-fires are all edits that literally repeat
-  // the pinned tokens, the same shape a restoration takes, where the
-  // template's 3 over-fires (an em-dash reason, a semicolon expansion, a
-  // moved bold marker — #476's sentence-anchor column, reproduced) are
-  // structural and share nothing with a restoration. The suggested word list
-  // is rejected on its own mutant regardless of either row: drop "that
-  // binding is back in force" from the measured restoration and keep the
-  // restoration — "firing; routine members dispatch at `sonnet` again." —
-  // and it goes green where this check reds. Widening it is ruled out by
-  // docs/adr/0017-prose-pins-pin-content-not-modality.md (#529, #476).
-  //
-  // RESIDUAL, measured and still exposed — TWO gaps, not one:
-  // (1) a restoration that never re-states the binding at all — "that
-  // binding is back in force.", "That revert no longer holds.", "(since
-  // undone)." — passes all three checks here, because none of them read for
-  // restoration MODALITY, only for a repeated token or a repeated date.
-  // (2) a restoration that DOES re-state the binding, but in the doc's own
-  // unbackticked prose rather than the backticked `class=routine` literal —
-  // "routine members dispatch at `sonnet` again", placed outside the note —
-  // clears this check (it never touches the note) and clears the rebindings
-  // scan below (that scan's own regex requires the backticked
-  // `` `class=routine` `` token, which this reword never spells): measured
-  // 10/10 green on a copy of this tree. Gap (2) is strictly larger than gap
-  // (1) — it needs no dateless, wordless restoration trick, just the doc's
-  // ordinary vocabulary — and is not fixed here. Catching either is a
-  // question about prose MODALITY, and that is settled, not open:
-  // docs/adr/0017-prose-pins-pin-content-not-modality.md rules that prose
-  // pins assert content, never modality, and that an obligation which must
-  // not soften gets a code carrier (a script verdict surfaced as a
-  // fleet-tick row), not a prose pin. This residual is a recorded gap under
-  // that ADR. Do not close it with a longer word list.
-  assert.deepEqual(
-    (revertNote.match(/class=routine|sonnet/gi) ?? []).map((token) => token.toLowerCase()),
-    ["class=routine", "sonnet"],
-    "the revert note mentions `class=routine` or `sonnet` more than once — either a restoration is hiding inside the note whose span the rebindings scan exempts, or this is a benign reword that re-mentions the binding (see the grid above); read the note before assuming which",
-  );
-  // THE NEGATIVE, half two of two. See the step-4 companion: the binding was
-  // stated independently in both places, so restoring either one alone is
-  // undetectable without a pin on each. Nothing is assumed between the two
-  // tokens — not the arrow, not a verb, not the backticks around `sonnet` —
-  // because the `class=routine` → `model: "sonnet"` literal this used to require
-  // is only one spelling of the restoration. Measured: `→ `sonnet``, "now
-  // resolves to", and `model:'sonnet'` each re-bind the class in the file's own
-  // vocabulary and each walked straight through the literal form. The one
-  // legitimate statement of the binding in this slice is the past-tense revert
-  // note, exempted by the SPAN it occupies rather than by narrowing the pattern
-  // back to a literal — a narrower pattern is what let the half-revert through.
-  // Exempting on the phrase "was REVERTED" instead was measured to swallow a
-  // live restoration written AFTER the note that quoted that phrase in its own
-  // sentence: the hit began past the note's end and was dropped anyway, because
-  // the filter read the hit's words rather than where it sat. A span cannot be
-  // quoted. The ORDER is not assumed either, for the same reason the arrow is
-  // not: the mirrored sentence states the same binding and matched nothing at
-  // all.
-  assert.deepEqual(
-    rebindingsOutside(slice, revertNote),
-    [],
-    "phase 2 states a `class=routine` → `sonnet` binding outside the past-tense revert note — the reverted rule is back",
-  );
   // Anchored to the omission, not the word "inherit": the tier is obtained by
   // NOT passing `model`, and "implementers run at the session tier" with no
   // mechanism is exactly the instruction-names-no-mechanism defect the skill's
@@ -377,44 +75,6 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
     /Keep `name: impl-<N>`/,
     "phase 2 no longer keeps the impl-<N> name alongside the dispatched agent",
   );
-
-  // A lost class no longer misprices anything, but it still costs the correction
-  // discipline — so the recording rule has to survive the revert, and has to say
-  // what is actually lost or it reads as bookkeeping and gets dropped.
-  assert.match(
-    slice,
-    /\*\*No class recorded → record `class=unknown`, never a guess\.\*\*/,
-    "a missing class is no longer recorded as `class=unknown` — the gap goes invisible",
-  );
-  // Anchored to "still costs the", not bare: the phrase occurs TWICE in this
-  // slice — here, and incidentally in the REVERTED paragraph above ("it still
-  // governs the correction-ticket discipline"). Measured: an unanchored
-  // /correction-ticket discipline/ stayed green with this sentence's cost
-  // clause gutted, because the other copy satisfied it on its own. It pinned
-  // the phrase's existence somewhere in the slice, never the recording rule.
-  assert.match(
-    slice,
-    /still costs the \*\*correction-ticket discipline\*\*/,
-    "phase 2 no longer says what a lost class actually costs now that it prices nothing",
-  );
-  // Reconstructing the class from the model would resurrect the confound the
-  // revert removed, and would silently break under any future tier control.
-  assert.match(
-    slice,
-    /Never infer the class from the tier/,
-    "phase 2 no longer forbids inferring class from tier",
-  );
-
-  // All three ledger literals. Only `class=correction` was ever spelled, which
-  // left an absent field ambiguous between "ran routine", "never recorded" and
-  // "row predates the rule" — and partitioning by class is the guard's whole job.
-  for (const cls of ["routine", "correction", "unknown"]) {
-    assert.match(
-      slice,
-      new RegExp(`ledger\\.mjs row <N> "impl-<N> · class=${cls}"`),
-      `phase 2 no longer spells the ledger literal for class=${cls}`,
-    );
-  }
   // `row` REPLACES the line (ledger.mjs's `data.rows[i] = line`). Replaying a
   // two-token literal over a row carrying KILLED or → PR# drops those tokens with
   // only `rewrote row #N` on stderr.
@@ -425,50 +85,28 @@ test("phase 2 dispatches every class at the session tier, and says so with a mec
   );
 });
 
-test("a period in the gap does not hide a rebinding outside the revert note", () => {
-  // #1983's shape, both directions, on the real dispatch slice. Refuse: each
-  // restoration carries a period between the two tokens — a filename, an
-  // abbreviation — which ended the old `[^.]` window, green. Accept: the note
-  // itself stays exempt, and two tokens in DIFFERENT sentences are no binding.
-  const slice = dispatch();
-  const note = REVERT_NOTE.exec(slice)?.[0];
-  assert.ok(note, "the revert note is no longer findable — update REVERT_NOTE");
-  const after = (sentence) => slice.replace(note, `${note} ${sentence}`);
-  for (const restoration of [
-    "Every `class=routine` ticket follows `agents/fleet-implementer.agent.md` at `sonnet` again.",
-    "Dispatch `sonnet` for, e.g. docs fixes, every `class=routine` ticket.",
-  ]) {
-    assert.equal(rebindingsOutside(after(restoration), note).length, 1, `a restoration read as clean: ${restoration}`);
-  }
-  assert.deepEqual(
-    rebindingsOutside(after("Record `class=routine` in the ledger row. No member dispatches at `sonnet` by class."), note),
-    [],
-    "a `class=routine` and a `sonnet` in two different sentences read as one binding",
+// The rule is "omit `model`", so the paragraph that states it names no value
+// for `model` and no vendor model at all. The pins above assert the mechanism
+// is present and stay green beside an appended sentence that contradicts it —
+// measured: `Pass `model: "sonnet"` when the ticket is class=routine.` added
+// before `Keep `name: impl-<N>``, full suite green. The paragraph's own
+// "`model` set" and "omit `model`" are what these must accept: neither puts a
+// colon after the word.
+test("phase 2's dispatch rule binds no model value to any ticket", () => {
+  const slice = dispatchRule();
+  assert.doesNotMatch(
+    slice,
+    /\bmodel\b`?:\s*\S/,
+    "phase 2's dispatch rule now passes a `model` value — the declared tier is obtained by omitting it",
+  );
+  assert.doesNotMatch(
+    slice,
+    /\b(?:sonnet|opus|haiku)\b/i,
+    "phase 2's dispatch rule now names a vendor model — the tier lives in the definition's frontmatter, as a route",
   );
 });
 
-test("a rebinding glued onto the revert note with no sentence break does not hide inside its span", () => {
-  // Found in review of #1983: sentences() only splits at a terminator FOLLOWED
-  // by whitespace, so a restoration glued directly onto the note's closing
-  // `**` — a semicolon, a comma, or nothing at all before the next token —
-  // leaves the note and the restoration in ONE sentence. Unmasked, the note's
-  // own `class=routine`/`sonnet` pair anchors a match whose gap runs past the
-  // note and swallows the restoration, and the exemption filter, keyed on
-  // where the match starts, reads the whole thing as covered by the note.
-  const slice = dispatch();
-  const note = REVERT_NOTE.exec(slice)?.[0];
-  for (const glue of [
-    `${note}; \`class=routine\` is back at \`sonnet\`.`,
-    `${note}, and \`class=routine\` is back at \`sonnet\`.`,
-    `${note}\`class=routine\` binds \`sonnet\` immediately.`,
-  ]) {
-    const mutated = slice.replace(note, glue);
-    assert.notEqual(mutated, slice, `the glued fixture no longer matches the dispatch slice: ${glue}`);
-    assert.equal(rebindingsOutside(mutated, note).length, 1, `a rebinding glued onto the note's own span read as covered by it: ${glue}`);
-  }
-});
-
-test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
+test("phase 2's append duty is mandatory and per PR", () => {
   const slice = guard();
 
   // The unit. Supply is one Pull per free slot (ADR 0013), so no batch of
@@ -479,23 +117,6 @@ test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
     slice,
     /no implementer batches/,
     "the guard no longer says why a batch is not a usable unit — it comes back otherwise",
-  );
-
-  // Runnable, not merely named. `compute-spend.mjs` is a pure module: no
-  // shebang, no process.argv, no main — running it prints nothing and exits 0,
-  // which reads as "no spend recorded". `board.mjs build` emits it at `.spend`
-  // (compute-board.mjs's `spend: inputs.spend ?? null`). The doesNotMatch is
-  // over a verified-zero baseline and needs the positive companion above it to
-  // stay meaningful. Case-sensitive on purpose, and ruled so twice (#529): the
-  // file on disk is lowercase and so is every reference to it, so an `i` flag
-  // would pin a spelling nothing in the repo can write. Settled with
-  // `grep -rio compute-spend --exclude-dir=.git . | grep -v ':compute-spend$'`,
-  // which is empty.
-  assert.match(slice, /board\.mjs build/, "the guard no longer names a runnable way to read spend");
-  assert.doesNotMatch(
-    slice,
-    /compute-spend\.mjs/,
-    "the guard points at compute-spend.mjs, which has no CLI — it exits 0 printing nothing",
   );
 
   // Normative, not advisory. This repo runs prose-compression passes that hedge
@@ -533,54 +154,6 @@ test("phase 2's guard is mandatory, runnable, and scoped to one class", () => {
     slice,
     /\bOptional\b|\byou may\b/i,
     "the guard has been downgraded to advice — an optional guard is not a guard",
-  );
-
-  // A threshold, or "either climbs" fires on the first noisy pair or never.
-  assert.match(
-    slice,
-    /at least\s+three `class=routine` PRs/,
-    "the guard no longer states a minimum sample, so one PR's findings can trigger a revert",
-  );
-  // Findings/fix-rounds are the counter-signal: reviews run 3-5x LONGER than
-  // implementation, so an extra fix-round costs an implementer slot. A guard on
-  // spend alone measures the wrong side.
-  assert.match(
-    slice,
-    /one extra fix-round costs an implementer slot/,
-    "the guard measures spend without the fix-round cost that would eat the saving",
-  );
-  // The revert UNIT. `/revert/` alone stays green through "revert the rule",
-  // which is the wholesale revert this sentence exists to forbid.
-  assert.match(
-    slice,
-    /revert \*\*`class=routine`\*\*/,
-    "the guard no longer scopes the revert to the affected class",
-  );
-  // The first run under the rule has no top-tier PRs to compare against, so the
-  // guard reads clean by construction. Unstated, that silence reads as a pass.
-  assert.match(
-    slice,
-    /never read the guard's silence as a pass/i,
-    "the guard no longer warns that its first-run silence is a missing baseline, not a pass",
-  );
-});
-
-test("phase 3 owns the guard — otherwise nothing in the event loop ever runs it", () => {
-  // The guard lives in phase 2, which is entered per-dispatch, BEFORE the PRs it
-  // wants to measure exist. Phase 3's tick is what the controller actually acts
-  // on, and the alt Pull it names is where the floor is read (ADR 0005 as
-  // amended by ADR 0012), so the guard needs its paragraph there or it is
-  // unreachable by design.
-  const slice = section(RUN_TEAM, "**Tier guards under Pull.**", "**Own the CI waits.", "run-team phase 3 tier guard under Pull");
-  assert.match(
-    slice,
-    /alt Pull/,
-    "phase 3's tier-guard paragraph no longer names the alt Pull as where it runs",
-  );
-  assert.match(
-    slice,
-    /tier\s+guard/,
-    "no phase 3 step dispatches the tier guard — it is stated in phase 2 and never reached",
   );
 });
 

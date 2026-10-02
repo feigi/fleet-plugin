@@ -248,8 +248,7 @@ phase, or in any later one, asks the maintainer which tickets to take.
    lands the rules THIS run needs and nothing pulls them. Measured twice — 57
    commits stale in one run, 20 in another, the second shipping every dispatch
    prompt without two rules that had merged the day before. Silent by
-   construction: stale text reads as authoritative, and the tier guard's own
-   floor is re-derived from a stale `tier-outcomes.tsv` at the same time.
+   construction: stale text reads as authoritative.
 
    **Pin the instruments, after that fast-forward and before anything reads
    them, from this main checkout.** `~/.fleet/bin/fleet-run instruments.sh --pin`
@@ -643,35 +642,6 @@ terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
 
    No sizing agent here. `sizing-a-ticket` picks the *process path*, and that is
    phase 2's call, after the ticket is claimed.
-
-   **Class?** Second judgement off the same read, so it costs no extra tokens.
-   Stale docs, wrong comments, bad citations → `class=correction`; everything
-   else → `class=routine`. **Torn → correction**: a misjudged routine is a
-   missed saving, a misjudged correction runs the one class that demonstrably
-   ships new wrong claims.
-
-   **The class no longer selects a model tier** — the phase-2 guard fired on
-   2026-08-16 and every class now dispatches at the session's tier. It still
-   earns its read: it selects the **correction-ticket discipline** phase 2
-   hands the implementer (settle every restated claim against the tree, keep
-   the diff to the ticket's stated size, no positional references, never a
-   count in prose, a settling command re-run and written inline for every
-   claim that goes into the commit or PR body, and literal text grepped with
-   `-F`, its zero trusted only after the same command, with the same flags,
-   finds a known match), it partitions
-   `docs/metrics/tier-outcomes.tsv`, and it is what any future tier
-   control would be drawn from. A row with no class is still `class=unknown`,
-   never a guess.
-
-   The correction exception was always a **precaution, not a measurement.**
-   references/correction-tickets.md records four tickets in one run each
-   shipping a *new* wrong claim, and blames the ticket's framing and
-   unasked-for prose — **not** implementer capability; it measures no tier at
-   all. That reasoning is why the discipline survives the tiering that used to
-   accompany it.
-
-   Record the class in the Pull's ledger row (step 7); phase 2 reads it for
-   the discipline, no longer for the tier.
 4. **Collision scan against open PRs and live branches** — the ticket is an
    *un-implemented issue* with no diff, so infer its target files from the brief
    (the paths it names) and compare them against each open PR's `gh pr diff <PR>
@@ -690,7 +660,7 @@ terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
    two independent tickets.
 6. **Claim** — `~/.fleet/bin/fleet-run claim-ticket.sh <N> impl-<N> implementer
    --apply` (below). Exit 2 → treat it as taken, next entry.
-7. **Row, then dispatch** — `ledger.mjs row <N> "impl-<N> · class=… [· tier=alt]"`,
+7. **Row, then dispatch** — `ledger.mjs row <N> "impl-<N>[ · tier=alt]"`,
    then phase 2 at once: claim what you are about to dispatch;
    dispatch what you have just claimed.
 
@@ -939,8 +909,7 @@ comment or the issue body, whichever carries the brief, and its `Out of
 scope`, pasted verbatim from the Pull's own read. Beyond those it carries only
 the lines **Rules that fail silently** above say every dispatch prompt
 carries — the report is a message, reports are not acknowledged, the suite
-runs in the foreground — the class's correction-ticket discipline when
-`class=correction`, and a `staleness.mjs` **could not check** verdict with its
+runs in the foreground — and a `staleness.mjs` **could not check** verdict with its
 reason when the Pull got one, so the member's own re-derive step knows the
 controller's probe could not look.
 
@@ -971,7 +940,7 @@ exactly as the Member-killed row says — new member, new name, the SAME ticket 
 never a demotion.
 
 **Dispatch every implementer with the `agent` that `ledger.mjs dispatch`
-printed, and still omit `model` on the `task` call, whatever the class.** The
+printed, and still omit `model` on the `task` call.** The
 tier lives in that definition's frontmatter (`agents/fleet-implementer.agent.md`
 for a row with no `tier=`), which is what an
 omitted `model` takes first — the session's tier applies only when the definition
@@ -1067,8 +1036,8 @@ rows in `.fleet/ledger.md` at Pull time; the Pull that creates row 5, 10, 15 …
 records `tier=alt` in the row, and a replacement inherits the row's tier —
 written at the Pull's step 7, ahead of `ledger.mjs dispatch`, which reads it
 and prints `fleet-implementer-alt` as the `agent` to dispatch. The
-assignment rolls to the next Pull when the pulled ticket is `class=correction`
-or another open ticket sequences after it — a ticket the rest of the run
+assignment rolls to the next Pull when another open ticket sequences after
+it — a ticket the rest of the run
 depends on. Do not tell the member it is a control: a member that
 knows it is being measured is not measuring the same thing.
 
@@ -1105,27 +1074,6 @@ tier would then be confounded with calendar date and therefore with prompt
 evolution, which is exactly the state #864 documents and the reason the rows
 already on disk cannot answer the question they were collected for.
 
-**`class=routine` → `sonnet` was REVERTED on 2026-08-16, by the guard below
-firing.** Both halves were met on the accumulated `docs/metrics/tier-outcomes.tsv`:
-the floor (8 `class=routine` PRs spanning 3 distinct `run_date`s) and the trigger
-(2 rows carrying `closed_own_ticket` `no` — PR #452, which regressed the exact
-defect its ticket existed to remove, and PR #466, which emitted invalid JSON in
-the very payload its three tickets existed to make truthful). Per the guard's own
-wording this reverts **`class=routine`**, never the rule wholesale: the Pull still
-records the class, it still governs the correction-ticket discipline, and it is
-still what a future control would be drawn from.
-
-**Read the counter-evidence before restoring it.** Recount from the file before
-citing it — these figures are a snapshot, not a live count, and a doc-only
-append lands a row without touching this paragraph. **As of 2026-08-28, 103
-rows:** the file holds 66 `class=routine` PRs across 14 distinct `run_date`s,
-so the floor is long since met, and 6 of them carry `closed_own_ticket` `no`,
-so the trigger is met too. **Firing changes nothing: the action is "revert
-`class=routine` to top tier" and that revert already happened on 2026-08-16.**
-The guard is in its fired state and has no further move; the live question is
-the opposite one, restoring a cheaper tier, which this guard does not decide
-and which no row on file settles.
-
 The raw split still favours the top tier — 3 failures in 11 `routine`/`sonnet`
 rows against 3 in 55 `routine`/`opus`. **Do not read that as a tier result.**
 Tier remains largely confounded with calendar date and therefore with prompt
@@ -1141,7 +1089,7 @@ within-run pairing above**: one implementer in five at the alternate tier makes
 tier orthogonal to date by construction, so the question stops depending on
 whichever rows history happened to leave. **Orthogonal to date, and to nothing
 else** — the alternate member is whichever ticket the 5th Pull draws, rolling
-past every correction and every ticket another open one sequences after, while
+past every ticket another open one sequences after, while
 the top tier absorbs all of those, so the pairing trades the calendar confound
 for a difficulty one that runs in a known direction. That is why the four covariates
 exist: condition a pair comparison on `sizing`/`profile`/`loc`/`files` before
@@ -1155,38 +1103,17 @@ honest summary is unchanged and is the reason this paragraph exists: the guard
 fired on the criterion the maintainer chose in advance, not on a demonstration
 that the cheaper tier is worse.
 
-**No class recorded → record `class=unknown`, never a guess.** Since the revert
-every class dispatches the same way, so a lost class no longer misprices a
-member — but it still costs the **correction-ticket discipline**, which phase 2
-selects on the class and which is the half that caught real defects. Every path
-that loses it lands here — a compaction, a Pull whose read did not survive
-one, a killed member replaced from inherited state. Writing the gap down is what makes it visible; re-read the issue to
-recover the class when a correction's discipline is worth one `gh issue view`.
-**Never infer the class from the tier** — that inference is what the revert
-removed, and a future control would break it again.
-
-Carry the class in the ticket's ledger row, written before dispatch like every
-other field:
-
-```
-ledger.mjs row <N> "impl-<N> · class=routine"
-ledger.mjs row <N> "impl-<N> · class=correction"
-ledger.mjs row <N> "impl-<N> · class=unknown"
-```
-
 `row` **replaces the whole line**, it does not append. Re-dispatching over a row
 that already carries `KILLED`, `ports=` or `→ PR#` must repeat those tokens or
-they are gone, with only `rewrote row #N` on stderr to say so. Recover a class
-after a compaction with `ledger.mjs read` — `class=` is a raw-row field, and the
-cockpit does not parse or surface it.
+they are gone, with only `rewrote row #N` on stderr to say so.
 
 `ledger.mjs read` is safe on a pipe as well as a redirect: its payload used to
 be abandoned at the pipe buffer and still exit 0, which is what left `board.mjs`
 reporting `ledger read parse failed` and serving a blind cockpit for a whole run
 (#246). Every use above is a recovery path, so a payload that arrives short
-lands exactly where a lost class or a settled `ruled:` is unrecoverable — which
-is why the script's own suite pins that `read`, `row`, `filed` and `ruled` each
-reach a pipe whole.
+lands exactly where a settled `ruled:` is unrecoverable — which is why the
+script's own suite pins that `read`, `row`, `filed` and `ruled` each reach a
+pipe whole.
 
 `check` reaches a pipe whole at both of its exits too. Its ALREADY FILED exit
 sits mid-branch, where falling through would run the near-miss ranking and the
@@ -1212,7 +1139,7 @@ on the cockpit are not yet proof the pipeline is idle.
 **Guard: accumulate per PR, never conclude inside one run.** The unit is the PR —
 supply is one Pull per free slot, so there are no implementer batches. **Append one row to
 `docs/metrics/tier-outcomes.tsv` when you rule each PR's review, with
-`~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr> --class <class> --closed-own-ticket yes|no --minted-false-claim yes|no --note "<text>"`,
+`~/.fleet/bin/fleet-run tier-outcomes.mjs append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no --note "<text>"`,
 never by hand** (that file's header carries the column meanings). The script
 fills `run_date`, `pr`, `ticket` and `tier` itself — `tier` from what actually
 ran, off the implementer's `tier-ok=` ledger verdict or else its one
@@ -1220,8 +1147,7 @@ member-outcomes row (a `tier-unverifiable=` member has no ledger verdict, so
 its one member-outcomes row decides), and BLANK with a WARNING naming why
 when neither settles
 it; never type a tier in over that. A PR that already has a row is left
-untouched, so re-running it is safe. That append is the whole duty; the guard
-fires on the accumulated file, across runs, not on the run in front of you.
+untouched, so re-running it is safe. That append is the whole duty.
 
 The row's last four fields are the ticket's difficulty, and they are what lets a
 tier comparison condition on the thing that swamps it. `sizing` is the
@@ -1320,9 +1246,7 @@ letter when the date already has one (`chore/run-artifacts-2026-08-23b`).
 **Data rows and rule-doc prose never share a PR — one branch each, and when the
 rules here compete this is the one to keep.** The two halves have opposite cost
 profiles, and bundling makes the cheap-to-strand half gate the expensive one.
-Stranding a data row loses it: the tier guard re-derives its floor from the
-undercount and re-fires, the same stale-file failure Phase 0's fast-forward step
-exists to catch, and `member-outcomes.tsv` is regenerated from harness
+Stranding a data row loses it: `member-outcomes.tsv` is regenerated from harness
 transcripts this repo does not own, so re-running the scrape later is worth only
 what the harness still holds. Stranding a rule change costs the status quo, which
 is where it already was. So `chore/run-artifacts-<date>` carries the two
@@ -1389,25 +1313,6 @@ number from any other one:** the query it replaces (#1066) counted every
 session whose implementers merely differed, so it cleared this floor by an
 order of magnitude while the controlled comparison did not exist yet.
 
-The risk being priced is economic, not shipped bugs. Reviews run 3-5x *longer*
-than implementation (Red flags, below), so one extra fix-round costs an implementer slot
-and eats the saving the cheaper implementer made. The revert needs a floor AND a
-trigger, and neither alone. **Floor:** the file holds at least
-three `class=routine` PRs spanning **two or more distinct `run_date`s**.
-**Trigger, read only once the floor is met:** **two or more** of those rows carry
-`closed_own_ticket` `no`, or the implementer
-share in `board.mjs build`'s `.spend.roles` is climbing →
-revert **`class=routine`** to top tier, never the rule wholesale. That floor is
-over the accumulated file, never one run — and the `run_date` half is what makes
-that literal instead of merely asserted: a PR count alone is satisfied by a
-single run's rows, which is the state this file ships in. Without the floor a
-single noisy PR reverts a class; without a `no` count, "trending" names no
-threshold and whether the guard fires is undefined. Per-`impl-<N>`
-spend is not available from `.spend.top`: it labels agents by the member
-name, but holds only the eight largest spenders.
-
-**Never read the guard's silence as a pass** — and never read a single run's rows
-as its verdict.
 Why the agent body carries what it does — read this before editing either agent
 file, and keep the two bodies byte-identical. Each rule in the body's
 enumerate-and-declare block is load-bearing, for a different reason.
@@ -1553,7 +1458,7 @@ owes beyond its row:
 - **Monitor: CI run completes** → bind it (`ci-state.mjs --pr <N>`) and **record
   it as `ci=<run-id>:<attempt>:<conclusion>`, not just "CI green"** — in the
   ticket's ledger row, which outlives your context. `row` **replaces the whole
-  line** (above), so repeat `class=`, `ports=` and `→ PR#` or they are gone.
+  line** (above), so repeat `ports=` and `→ PR#` or they are gone.
   That key cannot be reconstructed once the head is superseded, so a
   controller holding only the colour cannot later tell an edge it has already
   spent from one that never fired, and that is the distinction the sibling
@@ -1685,15 +1590,7 @@ depth** guard table applied in code. Act on each line as it reads:
   that vanished mid-run is not a fresh run — report it to the maintainer
   before recording over whatever the tree now holds.
 
-**Tier guards under Pull.** An alt Pull — the Pull phase 2 routes to the
-alternate tier — is where the tier floor is read. Run phase 2's tier guard
-before choosing the alternate tier, on the floor phase 2 defines over the
-accumulated `docs/metrics/tier-outcomes.tsv` and on no gate of this Pull's own:
-a second threshold stated here is a second definition, free to drift from
-the one that governs, and a throttle would need state nothing on disk records
-— a schema change with its own ticket. A floor breach — the guard firing —
-dispatches that Pull at the default tier instead, with no `tier=alt` in its
-row; say why in your report. The per-dispatch `tier-check.mjs --batch` stays
+**Tier guards under Pull.** The per-dispatch `tier-check.mjs --batch` is
 phase 2's own step: a mismatch it finds is the
 `HOLD (tier mismatch impl-<N>)` above, and a member it has no verdict on is
 the `HOLD (tier unchecked impl-<N>)`. Nothing else in the loop owns it.
@@ -2775,79 +2672,16 @@ Both → add the label, and say it rests on the reviewer's suite run, not on CI.
 Either missing → halt here, same as a dirty worktree: report `no CI configured,
 no verified suite run on record` and add no label.
 
-**Correction tickets ship new wrong claims — inherited from the ticket, and
-minted in prose the ticket never asked for.** Put the check on the
-**implementer**, not only the reviewer: every factual claim the diff restates
-must have a settling command run against the tree first — the issue body is a
-lead, never a citation — and the diff must **match the ticket's stated size**,
-since added prose is where minted claims enter. No positional references (`the
-closing/second/last X`); name the thing semantically. Evidence from a run on
-**another repo** is cited by host: a github.com source as `owner/repo#N`;
-anything else (GHE, GitLab, internal) as prose naming host and repo and saying
-it cannot be settled from this repo — a bare `#N` stays bare only for this
-repo's own issues and PRs. The workflow's `comments`
-dimension checks every added assertion against the tree, including comments in
-files the diff does not touch; a fallback reviewer has to be told that *and* told
-to read each corrected sentence literally, clause by clause.
-See references/correction-tickets.md.
-
-**But the discipline follows the DIFF, not the class — hand it to any
-implementer whose diff writes prose.** Phase 2 selects it on `class=correction`,
-and that selection is too narrow: a `routine` ticket that adds a test fixture, a
-helper, or a coverage case writes comment prose too, and prose is where minted
-claims live. Measured twice in one run, both `class=routine`, both therefore
-dispatched WITHOUT this block: PR #756 added an unasked-for comment asserting a
-silent-failure mode that does not exist (gross PATH damage is loud — 10 of 39
-tests red), and PR #768 minted a false comparative ("the cheapest of the four to
-tear down, not the dearest", when its route is the only one of four needing any
-in-body teardown) **and** introduced two positional references replacing a
-name-based one. Neither ticket asked for either sentence.
-
-Two of the rules above are what caught both, so give them to every implementer
-regardless of class: **every factual claim the diff restates needs a settling
-command first**, and **no positional references**. A third earns its place here
-— **never write a COUNT or a tally into prose; state the property instead** —
-unless it is a past-tense record of a measurement you performed, which stays
-as written; a present-tense claim about a live property must be restated as a
-property (`every other test in the file`), true at any count. A
-count is false the moment the next commit lands, and #768 falsified two of them
-(`the only other chmodSync(..., 0o644)`, already off by one before it; `fails 75
-of the 85 cases`, measured 81 of 91) in a file whose own header records having
-shipped a stale count once already. The immutable-body rule earns the same
-place: **every claim a commit body or a PR body asserts needs its settling
-command re-run at the commit that ships it, and written inline beside it.**
-The literal-text `-F` rule earns the same place: **a settling command over
-literal text uses `grep -F`, and its zero counts only after the same
-command, with the same flags, finds a line known to match.** Measured on
-#1087, the same false zero fired twice in one run. A relayed enumeration
-delivers only what it names, so this list is the whole of what a controller
-hands over, never a preface to it.
-
-**One more rule, and the one the diff cannot carry: a claim written into a
-commit body or a PR body needs its settling command re-run at the commit that
-ships it, not at the commit that motivated it — and the command goes inline,
-beside the claim.** The rules above scope to prose the diff restates, and a
-pushed commit body is not in the diff: it cannot be edited, only retracted by a
-later commit, which is itself a fresh unverified historical claim. So the check
-has to sit at write time, and review-time is already too late. The claim types
-are wider than measurement — a line number, a SHA, an **attribution** of who
-said what, a positional reference and a count all rot the same way, and an
-attribution is the worst of them, because the argument it carries collapses
-when it turns out false, while a wrong line number leaves the surrounding
-reasoning standing. `Verified:` is the construct a later reader trusts
-*instead of* re-deriving, so a wrong figure under that header is worse than no
-figure at all. Measured on #399: `f961cf2` and `acce6ee` both close `Verified:`
-with `86/86 across both test files` naming the suites that read this file, a
-file set the tree does not bear out — `git log -1 --format=%b <sha> | grep -A2
-Verified:` shows what each shipped. Inline is what makes the difference visible:
-a claim carrying the command that produces it can be re-run instead of trusted.
-A claim whose settling command cannot be written is still not one to assert
-bare: settle it inline, mark it unsettleable from this repo per the citation
-convention above, or drop it. The marker ending is not a loophole but the case
-that convention already sanctions: it directs foreign evidence to be asserted as
-prose saying it cannot be settled from this repo, and that marker is itself what
-tells a later reader not to trust the claim instead of re-deriving it, which is
-the property this rule protects.
+**Every implementer body carries the claim discipline, because tickets that
+restate facts ship new wrong claims** — inherited from the ticket, and minted
+in prose nobody asked for. It was measured on tickets that would have been
+judged routine too: an unasked-for comment asserting a silent-failure mode
+that does not exist, a false comparative plus positional references replacing
+a name-based one, and two present-tense counts already false when they were
+written.
+Nothing before dispatch can see the diff, so the discipline goes to every
+implementer. A pushed commit body cannot be edited, so its claims are settled
+at write time. See references/correction-tickets.md.
 
 **The settling command for "which files read X" must never be a literal-path
 grep.** The path is assembled in more than one spelling here, one of them behind
@@ -2882,7 +2716,10 @@ that name — never its implementer, recorded as
 like the review it replaces. Give it the PR number and tell it to read
 `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` — the resolved file
 path, not a slash invocation; command availability inside a member is not
-guaranteed the way skill availability is. It then does the fix-applier's job too:
+guaranteed the way skill availability is. Tell it to check every added
+assertion against the tree, including comments in files the diff does not
+touch, and to read each corrected sentence literally, clause by clause. It then
+does the fix-applier's job too:
 apply, defer, file, push, report, exit. On its report, record
 `reviewed=<head>:0/<refuted>/<deferred>` against the head it pushed — it applied
 its own survivors, so the zero is what tells the tick no fix-applier is owed —
@@ -3558,7 +3395,7 @@ One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`):
 ```
 #332 impl-332=PR#344 → PR#344 → MERGED 73b356de
 #324 impl-324=PR#346 → PR#346 · fix-pr-346 · ports=16324 · ruled:6-applies · held-behind:#313
-#351 impl-351 · class=routine · tier=alt
+#351 impl-351 · tier=alt
 #358 excluded · behind-pr:#346
 #360 excluded · behind-issue:#351
 ```
