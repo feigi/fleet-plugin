@@ -57,6 +57,18 @@
 // row on a pass, `ledger.mjs settle impl-<N> tier-mismatch` on a failure.
 // fleet-tick.mjs holds the next Pull on the newest implementer of a ticket
 // carrying neither.
+//
+// Exit status: 0 every member passed; 1 any member mismatched; 2 usage — a
+// bad batch, flag or config, an unreadable ledger, or a member whose
+// transcript cannot be found, before anything is written; 3 no mismatch, but
+// at least one implementer was recorded `tier-unverifiable=impl-<N>:no-transcript`
+// — settled anywhere on the ledger (a row or `## Dispatched`) while its
+// `session` names an existing directory holding no `<member>.jsonl`, the
+// trace of a dispatch that failed before a transcript was written. That token
+// clears the tick's unchecked hold without claiming the tier was right. A
+// LIVE member with no transcript is still exit 2: it may yet write one, and
+// a `session` that is omitted, empty, missing or not a directory is exit 2
+// whether the member is live or settled.
 
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
