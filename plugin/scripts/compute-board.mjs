@@ -25,7 +25,7 @@
 // here, main() being guarded on argv[1].
 import { assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
 import { parseToken, HALT_CAUSES } from "./ledger-grammar.mjs";
-import { PR_MENTION, REVIEWED } from "./fleet-tick.mjs";
+import { PR_MENTION, REVIEWED, unlabelledFinishers } from "./fleet-tick.mjs";
 
 // A ledger row is freeform, controller-authored text. Two real examples:
 //   #332 impl-332=PR#344 → PR#344 → MERGED 73b356de
@@ -64,6 +64,12 @@ import { PR_MENTION, REVIEWED } from "./fleet-tick.mjs";
 // puts it in front of a human. "Latest" is laterAttempt's reading, among the
 // finisher tokens bound to the row's own PR: a live `-b` after the halt
 // clears it.
+//
+// #2331: a PR whose finisher settled `labelled` while the open list shows no
+// `ready-to-merge` on it carries a severity-4 `unlabelled` flag in REVIEW —
+// fleet-tick.mjs's own reading (unlabelledFinishers: the latest attempt since
+// the last `label-off=`), off row tokens alone like the rest of this file, so
+// the card is flagged whether the tick is repairing it or escalated it.
 //
 // A PR's review is not a member (#1773 §7): `review=wf:<runId>` is a Workflow
 // with nobody to name, while `review=member:<name>` and
@@ -288,6 +294,7 @@ export function deriveFlags(parsed, ctx) {
   // gap the other way: still counted due for a fresh review while this flag
   // is up and the head has not caught up to what was reviewed.
   if (parsed.finisherOutcome?.startsWith("halted:") && ctx.column === "REVIEW") flags.push(parsed.finisherOutcome);
+  if (ctx.unlabelled && ctx.column === "REVIEW") flags.push("unlabelled");
   const limit = STALE_MS[ctx.column];
   if (limit != null && ctx.sinceEnteredStage != null && ctx.now - ctx.sinceEnteredStage > limit) {
     flags.push("stale");
@@ -316,7 +323,7 @@ function titleFor(issue, pr, issues) {
 }
 
 const FLAG_SEVERITY = {
-  "red-ci": 5, "ledger-error": 5, killed: 4, "tier-mismatch": 4, blocked: 4, "sha-off-branch": 4,
+  "red-ci": 5, "ledger-error": 5, killed: 4, "tier-mismatch": 4, blocked: 4, "sha-off-branch": 4, unlabelled: 4,
   ...Object.fromEntries(HALT_CAUSES.map((c) => [`halted:${c}`, 4])),
   stale: 1,
 };
@@ -444,6 +451,8 @@ export function computeBoard(inputs) {
   }
 
   const parsed = (ledger.rows || []).map(parseRow).filter(Boolean);
+  const unqueued = new Set(prs.filter((p) => p.state === "OPEN" && !(p.labels || []).includes("ready-to-merge")).map((p) => p.number));
+  const unlabelled = new Set(unlabelledFinishers({ rows: ledger.rows || [], dispatched: [] }, unqueued).map((u) => u.pr));
   const rowIssues = new Set();
   const tickets = [];
 
@@ -458,7 +467,7 @@ export function computeBoard(inputs) {
     rowIssues.add(p.issue);
     const sinceEnteredStage = stageEntry(prevTicket, column, now);
     const ciState = p.pr != null ? (ci[p.pr] ?? "unknown") : null;
-    const flags = deriveFlags(p, { ci: ciState, column, sinceEnteredStage, now });
+    const flags = deriveFlags(p, { ci: ciState, column, sinceEnteredStage, now, unlabelled: p.pr != null && unlabelled.has(p.pr) });
     tickets.push({
       issue: p.issue,
       title: titleFor(p.issue, pr, issues),

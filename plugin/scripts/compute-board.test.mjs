@@ -596,7 +596,8 @@ test("#2083: a later finisher attempt decides — a live or labelled `-b` clears
   for (const [row, flags] of [
     ["#941 impl-941=PR#931 · finisher-pr-931=halted:past-pin · finisher-pr-931-b", []],
     ["#941 impl-941=PR#931 · finisher-pr-931-b · finisher-pr-931=halted:past-pin", []],
-    ["#941 impl-941=PR#931 · finisher-pr-931=halted:live-editor · finisher-pr-931-b=labelled", []],
+    // The halt clears; the `-b` labelled a PR that still has no label (#2331).
+    ["#941 impl-941=PR#931 · finisher-pr-931=halted:live-editor · finisher-pr-931-b=labelled", ["unlabelled"]],
     ["#941 impl-941=PR#931 · finisher-pr-931=failed · finisher-pr-931-b=halted:rebase", ["halted:rebase"]],
     // A bare copy beside the settled token is what a whole-line rewrite
     // leaves; the member is still settled halted.
@@ -617,6 +618,38 @@ test("#2083: a halt a human already resolved — PR labelled or merged — flags
   assert.deepEqual(card(ready, 941).flags, []);
   const merged = computeBoard(reproInputs({ rows: [HALTED], prs: [], merged: [931], prev: { tickets: [] } }));
   assert.equal(card(merged, 941).column, "MERGED");
+  assert.deepEqual(card(merged, 941).flags, []);
+});
+
+// #2331: a finisher settled `labelled` on a PR the open list shows without
+// `ready-to-merge` — the tick's reading, flagged at severity 4 whether the tick
+// is repairing it or has escalated it.
+test("#2331: a labelled finisher on a PR without ready-to-merge flags unlabelled, ranked exactly at severity 4", () => {
+  const b = computeBoard(reproInputs({
+    rows: ["#904 impl-904=killed", "#941 impl-941=PR#931 · finisher-pr-931=labelled", "#942 impl-942=killed",
+      "#943 impl-943=PR#932 · held-behind:#931"],
+    prev: { tickets: [] },
+  }));
+  assert.equal(card(b, 941).column, "REVIEW");
+  assert.deepEqual(card(b, 941).flags, ["unlabelled"]);
+  assert.deepEqual(b.attention.map((t) => t.issue), [904, 941, 942, 943]);
+  // Escalated (a second labelled attempt) flags the same.
+  assert.deepEqual(cardFor("#941 impl-941=PR#931 · finisher-pr-931=labelled · finisher-pr-931-b=labelled", 941).card.flags, ["unlabelled"]);
+});
+
+test("#2331: the label present, a live repair, a label-off'd attempt, or a closed PR flags nothing", () => {
+  const ready = computeBoard(reproInputs({ rows: ["#941 impl-941=PR#931 · finisher-pr-931=labelled"],
+    prs: [openPr(931, ["ready-to-merge"])], prev: { tickets: [] } }));
+  assert.equal(card(ready, 941).column, "READY");
+  assert.deepEqual(card(ready, 941).flags, []);
+  for (const row of [
+    "#941 impl-941=PR#931 · finisher-pr-931=labelled · finisher-pr-931-b",
+    "#941 impl-941=PR#931 · finisher-pr-931=labelled label-off=finisher-pr-931",
+    "#941 impl-941=PR#931 · finisher-pr-931",
+  ]) {
+    assert.deepEqual(cardFor(row, 941).card.flags, [], row);
+  }
+  const merged = computeBoard(reproInputs({ rows: ["#941 impl-941=PR#931 · finisher-pr-931=labelled"], prs: [], merged: [931], prev: { tickets: [] } }));
   assert.deepEqual(card(merged, 941).flags, []);
 });
 
