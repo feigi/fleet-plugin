@@ -453,6 +453,27 @@ test("a conflict hold written by row is cleared by a later dispatch + settle, in
   assert.deepEqual([tick().fixDue, tick().mergeHeld], [[], 0]);
 });
 
+// #2328: the conflict fix-applier rebases without the review file, so once it
+// lands the PR's unanswered survivors come back due — and `dispatch` names
+// their fix-applier a review one, off the same tick state.
+test("a review's survivors outlive a conflict fix-applier's settle: the next fix-applier is a review one", (t) => {
+  const { ok, read } = fixture(t);
+  ok("row", "20", "impl-20=PR#21 · reviewed=abc1234:2/0/0 · conflict-hold:#21");
+  const tick = () => {
+    const l = read();
+    return deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null },
+      [{ number: 21, labels: [], closingIssuesReferences: [{ number: 20 }] }]);
+  };
+  assert.deepEqual([tick().fixDue, tick().conflictHeld], [[21], [21]]);
+  assert.equal(ok("dispatch", "21", "fix-pr-21").agent, "fleet-implementer");
+  assert.deepEqual(tick().fixDue, [], "one fix-applier at a time");
+  ok("settle", "fix-pr-21", "applied:def5678");
+  assert.deepEqual([tick().fixDue, tick().conflictHeld], [[21], []], "the survivors it never read are due again");
+  assert.equal(ok("dispatch", "21", "fix-pr-21-b").agent, null);
+  ok("settle", "fix-pr-21-b", "applied:0123abc");
+  assert.deepEqual(tick().fixDue, []);
+});
+
 test("the fold takes the PR row's settled tokens in order, under the two-argument spelling, wherever the PR row sits", (t) => {
   const { ok, read } = fixture(t);
   // The PR's row comes first here, and a third row follows the ticket's.
