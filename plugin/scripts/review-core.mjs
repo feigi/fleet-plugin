@@ -922,7 +922,7 @@ learns the run produced none.`,
   log(`shared test run: ${countsOf(sharedRun) || "no counts"} — exit ${sharedRun.exitCode ?? "(absent)"} — log ${logPath}`);
   // Failing tests are the review's to report, not each dimension's: the first
   // selected dimension is told to file them, and every other one not to.
-  const failureOwner = dimensions[0]?.key;
+  const failureOwner = dimensions[0].key;
 
   const dimensionsUnrun = [];
   // #1433. Per-dimension record of the specialist's own CWD-AUDIT line (see

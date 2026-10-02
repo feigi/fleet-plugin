@@ -234,6 +234,11 @@ test("a run with failing or cancelled tests and no kept finding from ANY dimensi
   }
   const cancelled = unrunReason({ command: "node --test", exitCode: 1, tests: 744, pass: 743, fail: 0, cancelled: 1 }, refutedOnly);
   assert.match(cancelled ?? "", /0 failing and 1 cancelled tests and no selected dimension/, "a cancelled test nobody reported must not read clean");
+  // The boundary: ONE failing test is failures nobody reported, and one kept
+  // finding settles it — a `> 1` threshold would read the first clean.
+  const one = { command: "node --test", exitCode: 1, tests: 10, pass: 9, fail: 1 };
+  assert.match(unrunReason(one, []) ?? "", /1 failing tests and no selected dimension/, "a single failing test nobody reported read clean");
+  assert.equal(unrunReason(one, [{ severity: "suggestion", claim: "x", evidence: "y", verdict: "unverified" }]), null);
 });
 
 // The ACCEPT side, and #2315's ownership rule: one finding from ANY dimension
