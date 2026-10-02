@@ -670,6 +670,9 @@ map's own instruction:
 
 ## 7. Change surface
 
+**2026-10-02:** the `#2116` items in T1, T2 and T5 below moved to `#2336`;
+those tickets skip them.
+
 Compiled from `#2035`, `#2036`, `#2037`, `#2038`, `#2116`'s hand-offs and corrected
 against § 6. Grouped by the ticket (§ 8) that owns each file.
 
