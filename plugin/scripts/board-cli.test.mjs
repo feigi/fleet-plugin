@@ -635,7 +635,17 @@ test("build: an internal fault exits 70 with a stack, where a refusal exits 2 wi
 // fixture; a body that calls writeSync once and swallows the exception adds
 // ~20-30ms. FAULT_RETRY_FLOOR_MS sits an order of magnitude above the
 // bare-call ceiling and well under the real loop's floor.
+//
+// #2385: one sample of each was not enough on a loaded CI runner, where a
+// real loop measured BASE=0.221 SAT=0.370 — 149ms, one under the floor.
+// Scheduler noise only ever ADDS time to a run, so the harness takes
+// FAULT_TIMING_PAIRS interleaved baseline/saturated pairs and compares the
+// fastest of each: one slow tick no longer moves either side. Measured on
+// this machine after the change: the real loop's fastest-vs-fastest delta
+// read 216-429ms, and a bare-call body's read -45 to +6ms, idle and with two
+// `yes > /dev/null` per core running alike.
 const FAULT_RETRY_FLOOR_MS = 150;
+const FAULT_TIMING_PAIRS = 5;
 
 test("fault()'s writeSync loop spends real time retrying a saturated stderr, not the ~30ms a bare call would take", (t) => {
   if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
@@ -645,9 +655,9 @@ test("fault()'s writeSync loop spends real time retrying a saturated stderr, not
     "import fcntl, os, subprocess, sys, time",
     "argv = sys.argv[1:]",
     "def run_baseline():",
-    "    t0 = time.time()",
+    "    t0 = time.monotonic()",
     "    r = subprocess.run(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)",
-    "    return time.time() - t0, r.returncode",
+    "    return time.monotonic() - t0, r.returncode",
     "def run_saturated():",
     "    r, w = os.pipe()",
     "    fcntl.fcntl(w, fcntl.F_SETFL, fcntl.fcntl(w, fcntl.F_GETFL) | os.O_NONBLOCK)",
@@ -656,31 +666,36 @@ test("fault()'s writeSync loop spends real time retrying a saturated stderr, not
     "            os.write(w, b'x' * 65536)",
     "    except BlockingIOError:",
     "        pass",
-    "    t0 = time.time()",
+    "    t0 = time.monotonic()",
     "    proc = subprocess.Popen(argv, stderr=w, stdout=subprocess.DEVNULL)",
     "    os.close(w)",
     "    proc.wait(timeout=60)",
-    "    elapsed = time.time() - t0",
+    "    elapsed = time.monotonic() - t0",
     "    os.close(r)",
     "    return elapsed, proc.returncode",
     "run_baseline()",
-    "base_t, base_code = run_baseline()",
-    "sat_t, sat_code = run_saturated()",
-    "print(f'BASE={base_t:.3f} BASE_EXIT={base_code} SAT={sat_t:.3f} SAT_EXIT={sat_code}')",
+    `for _ in range(${FAULT_TIMING_PAIRS}):`,
+    "    base_t, base_code = run_baseline()",
+    "    print(f'BASE={base_t:.3f} EXIT={base_code}')",
+    "    sat_t, sat_code = run_saturated()",
+    "    print(f'SAT={sat_t:.3f} EXIT={sat_code}')",
   ].join("\n");
 
   const r = spawnSync("python3", ["-c", harness, process.execPath, ...argv], { cwd, env, encoding: "utf8", timeout: 120_000 });
   assert.equal(r.status, 0, `harness itself failed: ${r.stderr}`);
-  const m = r.stdout.match(/^BASE=(\d+\.\d+) BASE_EXIT=(-?\d+) SAT=(\d+\.\d+) SAT_EXIT=(-?\d+)$/m);
-  assert.ok(m, `harness printed no timing line: stdout=${r.stdout} stderr=${r.stderr}`);
-  const [, baseS, baseExit, satS, satExit] = m;
-  assert.equal(Number(baseExit), 70, `baseline run did not reach the fault exit: ${r.stdout}`);
-  assert.equal(Number(satExit), 70, `saturated run did not reach the fault exit: ${r.stdout}`);
-  const deltaMs = (Number(satS) - Number(baseS)) * 1000;
+  const samples = { BASE: [], SAT: [] };
+  for (const [, kind, s, exit] of r.stdout.matchAll(/^(BASE|SAT)=(\d+\.\d+) EXIT=(-?\d+)$/gm)) {
+    assert.equal(Number(exit), 70, `a ${kind} run did not reach the fault exit: ${r.stdout}`);
+    samples[kind].push(Number(s));
+  }
+  assert.equal(samples.BASE.length, FAULT_TIMING_PAIRS, `harness printed the wrong number of baseline samples: stdout=${r.stdout} stderr=${r.stderr}`);
+  assert.equal(samples.SAT.length, FAULT_TIMING_PAIRS, `harness printed the wrong number of saturated samples: stdout=${r.stdout} stderr=${r.stderr}`);
+  const deltaMs = (Math.min(...samples.SAT) - Math.min(...samples.BASE)) * 1000;
   assert.ok(
     deltaMs > FAULT_RETRY_FLOOR_MS,
-    `fault() against a saturated stderr took only ${deltaMs.toFixed(0)}ms more than baseline — the retry ` +
-      `loop must spend real time on EAGAIN, not return almost immediately like a bare call: ${r.stdout}`,
+    `fault() against a saturated stderr took only ${deltaMs.toFixed(0)}ms more than baseline (fastest of ` +
+      `${FAULT_TIMING_PAIRS} each) — the retry loop must spend real time on EAGAIN, not return almost ` +
+      `immediately like a bare call: ${r.stdout}`,
   );
   // No upper bound here: MAX_EAGAIN_RETRIES capping the loop rather than
   // spinning forever against a reader that never drains is board.test.mjs's
