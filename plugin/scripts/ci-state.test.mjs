@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripComments } from "./strip-comments.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ci-state.mjs", import.meta.url));
 
@@ -89,8 +90,7 @@ function run(args, { repoFiles = {}, unreadable = [], cwd = ".", pr = "42", prVi
   }
   mkdirSync(join(repoDir, cwd), { recursive: true });
   const gh = join(binDir, "gh");
-  writeFileSync(gh, GH_STUB);
-  chmodSync(gh, 0o755);
+  writeExecStub(gh, GH_STUB);
   const ghLog = join(binDir, "gh.log");
   writeFileSync(ghLog, "");
 

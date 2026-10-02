@@ -6,11 +6,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { classify, computeStats } from "./diff-stats.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 // `main()` runs only when this file is executed directly, so the CLI wiring is
 // unreachable from a unit test. Pinned as source text instead — see the
@@ -195,8 +196,7 @@ test("CLI: --pr given an empty value dies naming the flag", () => {
 test("CLI: gh returning no files array dies (exit 2) rather than reporting a fabricated empty PR", () => {
   const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
   const gh = join(bin, "gh");
-  writeFileSync(gh, '#!/bin/sh\necho \'{"changedFiles":1}\'\n');
-  chmodSync(gh, 0o755);
+  writeExecStub(gh, '#!/bin/sh\necho \'{"changedFiles":1}\'\n');
   const r = spawnSync(process.execPath, [SCRIPT, "--pr", "5"], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
@@ -218,8 +218,7 @@ test("CLI: gh returning no files array dies (exit 2) rather than reporting a fab
 test("CLI: gh returning a null body dies (exit 2) naming the missing body, not a TypeError", () => {
   const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
   const gh = join(bin, "gh");
-  writeFileSync(gh, "#!/bin/sh\necho null\n");
-  chmodSync(gh, 0o755);
+  writeExecStub(gh, "#!/bin/sh\necho null\n");
   const r = spawnSync(process.execPath, [SCRIPT, "--pr", "5"], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
@@ -234,8 +233,7 @@ test("CLI: gh returning a null body dies (exit 2) naming the missing body, not a
 test("CLI: a well-formed --pr value is accepted and the CLI succeeds", () => {
   const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
   const gh = join(bin, "gh");
-  writeFileSync(gh, '#!/bin/sh\necho \'{"files":[{"path":"a.ts","additions":1,"deletions":0}],"changedFiles":1}\'\n');
-  chmodSync(gh, 0o755);
+  writeExecStub(gh, '#!/bin/sh\necho \'{"files":[{"path":"a.ts","additions":1,"deletions":0}],"changedFiles":1}\'\n');
   const r = spawnSync(process.execPath, [SCRIPT, "--pr", "5"], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
@@ -284,8 +282,7 @@ const runWithGhStdout = (body) => {
   writeFileSync(payload, body);
   // `cat` of a file, not `echo` of an inlined string: the payloads below are
   // real captured bytes, quotes and all, and must reach stdout unmangled.
-  writeFileSync(join(bin, "gh"), `#!/bin/sh\ncat "${payload}"\n`);
-  chmodSync(join(bin, "gh"), 0o755);
+  writeExecStub(join(bin, "gh"), `#!/bin/sh\ncat "${payload}"\n`);
   const r = spawnSync(process.execPath, [SCRIPT, "--pr", "5"], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
@@ -395,8 +392,7 @@ test("CLI: a multi-line non-JSON payload is still clipped and marked, not just i
 // clip would start discarding it — the inversion this ticket exists to avoid.
 test("CLI: the quoted payload is gh's stdout alone — stderr never enters it", () => {
   const bin = mkdtempSync(join(tmpdir(), "diff-stats-bin-"));
-  writeFileSync(join(bin, "gh"), '#!/bin/sh\necho "STDERR-ONLY-LINE" >&2\necho "<html>not json</html>"\n');
-  chmodSync(join(bin, "gh"), 0o755);
+  writeExecStub(join(bin, "gh"), '#!/bin/sh\necho "STDERR-ONLY-LINE" >&2\necho "<html>not json</html>"\n');
   const r = spawnSync(process.execPath, [SCRIPT, "--pr", "5"], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },

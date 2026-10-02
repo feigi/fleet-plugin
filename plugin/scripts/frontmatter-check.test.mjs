@@ -20,9 +20,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { fileURLToPath } from "node:url";
 import {
   parseAllowlist, kindForPath, parseFrontmatter, checkFields, formatViolation,
@@ -33,7 +33,7 @@ const REAL_ALLOWLIST_PATH = fileURLToPath(new URL("./frontmatter-allowlist.json"
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 
 function dir() {
-  return mkdtempSync(join(tmpdir(), "frontmatter-check-"));
+  return tempDir("frontmatter-check-");
 }
 
 function runCli(argv, cwd) {

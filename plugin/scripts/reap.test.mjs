@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { slowTransport, SSH_URL } from "./slow-transport.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./reap.sh", import.meta.url));
 
@@ -224,7 +225,7 @@ function failOnlyShim(t, match, stderr, code = 1) {
 function toolFailShim(t, tool, realTool, match, stderr, code = 1) {
   const bin = mkdtempSync(join(tmpdir(), `reap-${tool}-shim-`));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(
+  writeExecStub(
     join(bin, tool),
     `#!/bin/sh\n` +
       `if ${match}; then\n` +
@@ -236,7 +237,6 @@ function toolFailShim(t, tool, realTool, match, stderr, code = 1) {
       `  exit ${code}\n` +
       `fi\n` +
       `exec ${realTool} "$@"\n`,
-    { mode: 0o755 },
   );
   return bin;
 }
@@ -3774,14 +3774,13 @@ test("git_probe's captured stderr on a successful `for-each-ref` still reaches t
   mergedGoneBranch(w, "feature/merged", "merged work");
   const bin = mkdtempSync(join(tmpdir(), "reap-shim-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(
+  writeExecStub(
     join(bin, "git"),
     `#!/bin/sh\n` +
       `if [ "$1" = for-each-ref ]; then\n` +
       `  echo "warning: unable to access '/some/broken/config': Permission denied" >&2\n` +
       `fi\n` +
       `exec ${REAL_GIT} "$@"\n`,
-    { mode: 0o755 },
   );
 
   const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));

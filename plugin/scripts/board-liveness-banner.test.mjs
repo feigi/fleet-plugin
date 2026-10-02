@@ -14,10 +14,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync, readFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, existsSync } from "node:fs";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const BOARD = fileURLToPath(new URL("./board.mjs", import.meta.url));
 const HTML = readFileSync(new URL("./board.html", import.meta.url), "utf8");
@@ -82,11 +83,10 @@ test("livenessBanner stays silent for a run with nothing to report", () => {
 // their own default path resolution, in a throwaway repository, and asserts
 // the mark one wrote reaches the board the other built.
 test("a mark written by the real heartbeat reaches the real board (#1597)", () => {
-  const repo = mkdtempSync(join(tmpdir(), "board-liveness-e2e-"));
+  const repo = tempDir("board-liveness-e2e-");
   assert.equal(spawnSync("git", ["init", "-q", repo], { encoding: "utf8" }).status, 0);
-  const bin = mkdtempSync(join(tmpdir(), "board-liveness-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
-  chmodSync(join(bin, "gh"), 0o755);
+  const bin = tempDir("board-liveness-bin-");
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
 
   // `--stop` rather than a beat: a deliberate stop is reported at once, where

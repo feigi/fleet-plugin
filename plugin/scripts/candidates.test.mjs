@@ -34,12 +34,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripComments } from "./strip-comments.mjs";
 import { between } from "./prose-pin.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./candidates.mjs", import.meta.url));
 const ARG_MODULE = fileURLToPath(new URL("./arg.mjs", import.meta.url));
@@ -145,8 +146,7 @@ function run(issues, args = ["--require-label", "ready-for-agent"], unfiltered =
   const fixture = join(dir, "issues.json");
   writeFileSync(fixture, JSON.stringify(issues));
   const gh = join(dir, "gh");
-  writeFileSync(gh, STUB);
-  chmodSync(gh, 0o755);
+  writeExecStub(gh, STUB);
   const engineLog = join(dir, "engine-version");
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, FIXTURE: fixture, ENGINE_LOG: engineLog, ...extraEnv };
   if (unfiltered) {
@@ -179,8 +179,7 @@ function run(issues, args = ["--require-label", "ready-for-agent"], unfiltered =
 function runWithGh(script) {
   const dir = mkdtempSync(join(tmpdir(), "candidates-gh-"));
   const gh = join(dir, "gh");
-  writeFileSync(gh, script);
-  chmodSync(gh, 0o755);
+  writeExecStub(gh, script);
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}` };
   const r = spawnSync(process.execPath, [SCRIPT, "--require-label", "ready-for-agent"], {
     encoding: "utf8",

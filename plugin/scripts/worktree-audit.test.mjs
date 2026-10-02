@@ -15,6 +15,7 @@ import { chmodSync, copyFileSync, mkdtempSync, readdirSync, readFileSync, realpa
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./worktree-audit.sh", import.meta.url));
 
@@ -1051,7 +1052,7 @@ const REAL_SED = execFileSync("sh", ["-c", "command -v sed"], { encoding: "utf8"
 function sedShim(t, body) {
   const bin = mkdtempSync(join(tmpdir(), "worktree-audit-sed-shim-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(join(bin, "sed"), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  writeExecStub(join(bin, "sed"), `#!/bin/sh\n${body}\n`);
   return `${bin}:${ENV.PATH ?? process.env.PATH}`;
 }
 

@@ -33,10 +33,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const BOARD = fileURLToPath(new URL("./board.mjs", import.meta.url));
 
@@ -49,20 +50,19 @@ const REPO_JSON = '{"nameWithOwner":"o/r","url":"https://example.invalid/o/r"}';
 // `node <scriptDir>/ledger.mjs`, and only a stub can hand it stdout that
 // arrives at exit 0 and parses to something no real ledger.mjs emits.
 function gatherWith({ issuesJson = "[]", prsJson = "[]", ledgerBody = null } = {}) {
-  const cwd = mkdtempSync(join(tmpdir(), "board-tpnull-"));
-  const bin = mkdtempSync(join(tmpdir(), "board-tpnull-bin-"));
-  const scriptDir = mkdtempSync(join(tmpdir(), "board-tpnull-scripts-"));
+  const cwd = tempDir("board-tpnull-");
+  const bin = tempDir("board-tpnull-bin-");
+  const scriptDir = tempDir("board-tpnull-scripts-");
 
   writeFileSync(join(scriptDir, "ci-state.mjs"), "process.stdout.write('{}');\n");
   writeFileSync(join(scriptDir, "ledger.mjs"),
     ledgerBody ?? `console.log(JSON.stringify({ rows: [], filed: [], ruled: [] }));`);
-  writeFileSync(join(bin, "gh"),
+  writeExecStub(join(bin, "gh"),
     `#!/bin/sh\ncase "$1 $2" in\n` +
     `"issue list") echo '${issuesJson}' ;;\n` +
     `"pr list") echo '${prsJson}' ;;\n` +
     `"repo view") echo '${REPO_JSON}' ;;\n` +
     `*) exit 1 ;;\nesac\n`);
-  chmodSync(join(bin, "gh"), 0o755);
 
   const driver = `const { gather } = await import(${JSON.stringify(BOARD)});
     const r = await gather({ ledgerFile: ${JSON.stringify(join(cwd, "ledger.md"))},

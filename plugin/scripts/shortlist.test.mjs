@@ -36,6 +36,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv } from "./git-env.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 // Every file the copied shortlist.mjs reaches at run time: its own imports,
@@ -44,7 +45,6 @@ const HERE = fileURLToPath(new URL(".", import.meta.url));
 const COPIED = ["shortlist.mjs", "candidates.mjs", "ledger.mjs", "ledger-grammar.mjs", "arg.mjs", "git-env.mjs"];
 
 const GH_STUB = `#!/bin/sh
-case " $* " in *" --fleet-warm "*) exit 0 ;; esac
 case "$1 $2" in
   "issue list")
     [ -n "$ISSUE_LIST_FAIL" ] && { echo "gh: HTTP 502" >&2; exit 1; }
@@ -130,19 +130,10 @@ function fixture(t) {
   const bin = join(root, "bin");
   mkdirSync(bin);
   const gh = join(bin, "gh");
-  writeFileSync(gh, GH_STUB);
-  chmodSync(gh, 0o755);
-  // The first exec of a freshly written executable pays an OS scan that
-  // ledger.test.mjs measured at seconds under fleet load (#1199); pay it here,
-  // outside the bound shortlist.mjs puts on each gh probe.
-  //
-  // 120 s, not 30 s: a warm-up killed mid-scan leaves the scan unpaid for the
-  // gh probe after it — PR #2224 measured 15-16 s first execs under load ~25,
-  // and a first exec killed at 500 ms still took 14.5-15.0 s next time (#2229).
-  // GH_STUB's `--fleet-warm` arm exits 0 before any other line, so no stub
-  // stall can hide in the longer bound; it only lets the scan finish, and stays
-  // finite so a truly hung exec still ends the case.
-  spawnSync(gh, ["--fleet-warm"], { timeout: 120_000 });
+  // No warm-up exec: `writeExecStub` links the trampoline exec-stub.mjs already
+  // exec'd at import, so the first gh probe pays no OS scan inside the bound
+  // shortlist.mjs puts on it.
+  writeExecStub(gh, GH_STUB);
   const issuesFile = join(root, "issues.json");
   const statesFile = join(root, "states.json");
   const shortlistFile = join(repo, ".fleet", "shortlist.json");

@@ -38,6 +38,7 @@ import { dirname, join } from "node:path";
 import { environmentNote } from "./review-core.mjs";
 import { between, phrase } from "./prose-pin.mjs";
 import { stripComments } from "./strip-comments.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const SOURCES = [["scripts/review-core.mjs", join(REPO, "scripts", "review-core.mjs")]];
@@ -253,9 +254,7 @@ function remoteFixture(t, { branchRef = true, pullRef = true } = {}) {
 function tracingGit(t) {
   const dir = scratch(t, "snapshot-refs-bin-");
   const log = join(dir, "calls.log");
-  writeFileSync(join(dir, "git"), `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexec ${JSON.stringify(REAL_GIT)} "$@"\n`, {
-    mode: 0o755,
-  });
+  writeExecStub(join(dir, "git"), `#!/bin/sh\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexec ${JSON.stringify(REAL_GIT)} "$@"\n`);
   return {
     dir,
     reads: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter((l) => l.includes("ls-remote")) : []),

@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, symlinkSync, copyFileSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, symlinkSync, realpathSync } from "node:fs";
+import { tempDir } from "./temp-dir.mjs";
 import { join, dirname, relative } from "node:path";
+import { writeExecStub } from "./exec-stub.mjs";
 
 // This repository's own test runner, `./agent-test` at the repo root: the
 // `node --test` argument shim that left claim-ticket.sh's emitter for a
@@ -11,6 +12,9 @@ import { join, dirname, relative } from "node:path";
 // what they assert; only the fixture changed — the runner is copied into a
 // fixture tree rather than emitted by a claim.
 const RUNNER = join(import.meta.dirname, "..", "..", "agent-test");
+// Installed through `writeExecStub`, never copied: a copy is a new executable
+// inode per fixture, and macOS scans each one on its first exec.
+const RUNNER_BODY = readFileSync(RUNNER, "utf8");
 
 // `node --test` marks the processes it spawns, and an inherited mark makes
 // the runner's own `node --test` report to a parent that is not listening —
@@ -37,8 +41,8 @@ function runnerEnv() {
 // it (and the copy of the suite sitting in it) is part of what the
 // vendored-path guards have to ignore, and only a fixture built under a
 // `node_modules` parent can pin that.
-function apply(files, parent = tmpdir()) {
-  const dir = mkdtempSync(join(parent, "claim-"));
+function apply(files, parent = null) {
+  const dir = parent === null ? tempDir("claim-") : mkdtempSync(join(parent, "claim-"));
   const wt = join(dir, ".worktrees", "42-slug");
   for (const root of [dir, wt]) {
     mkdirSync(root, { recursive: true });
@@ -47,8 +51,7 @@ function apply(files, parent = tmpdir()) {
       writeFileSync(join(root, name), body);
     }
   }
-  copyFileSync(RUNNER, join(wt, "agent-test"));
-  chmodSync(join(wt, "agent-test"), 0o755);
+  writeExecStub(join(wt, "agent-test"), RUNNER_BODY);
   const env = runnerEnv();
   return {
     wt,
@@ -148,13 +151,13 @@ test("runner: a directory whose path holds a space still runs its tests", () => 
 // deleting both pins keeps this test green.
 test("runner: an invalid UTF-8 byte in a discovered path does not drop it", () => {
   const a = apply(SUITE);
-  const bin = mkdtempSync(join(tmpdir(), "claim-locale-"));
+  const bin = tempDir("claim-locale-");
   // The byte cannot be spelled in JS — node re-encodes every string as UTF-8 on
   // the way to argv, turning `\xFF` into the two valid bytes `\303\277`. POSIX
   // `printf` interprets the octal escape, so the fixture stays pure ASCII and
   // the shell makes the byte.
-  writeFileSync(join(bin, "find"), "#!/bin/sh\nprintf 't/b\\377ad.test.mjs\\nt/ok.test.mjs\\n'\n", { mode: 0o755 });
-  writeFileSync(join(bin, "node"), '#!/bin/sh\nprintf %s "$#"\n', { mode: 0o755 });
+  writeExecStub(join(bin, "find"), "#!/bin/sh\nprintf 't/b\\377ad.test.mjs\\nt/ok.test.mjs\\n'\n");
+  writeExecStub(join(bin, "node"), '#!/bin/sh\nprintf %s "$#"\n');
   const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
     cwd: a.wt,
     encoding: "utf8",
@@ -268,7 +271,7 @@ test("runner: a symlink to a directory containing a vendored tree still runs its
 // resolving outside) also passes the refusal leg alone.
 test("runner: a symlink to a vendored tree outside the worktree refuses", () => {
   const a = apply(SUITE);
-  const outside = mkdtempSync(join(tmpdir(), "outside-"));
+  const outside = tempDir("outside-");
   const vendor = join(outside, "node_modules", "pkg");
   mkdirSync(vendor, { recursive: true });
   writeFileSync(join(vendor, "v.test.mjs"), PASSES);
@@ -301,7 +304,7 @@ test("runner: a symlink to a vendored tree outside the worktree refuses", () => 
 // and resolved forms are asserted side by side here because agreement between
 // them, not any single row, is the property.
 test("runner: a node_modules in the worktree's own ancestry refuses nothing", () => {
-  const under = join(mkdtempSync(join(tmpdir(), "anc-")), "node_modules");
+  const under = join(tempDir("anc-"), "node_modules");
   mkdirSync(under, { recursive: true });
   const a = apply(SUITE, under);
   for (const [args, count] of [
@@ -380,7 +383,7 @@ test("runner: a node_modules in the worktree's own ancestry refuses nothing", ()
 // must still run, which is #230's property and what separates this test from
 // one that merely refuses everything spelled from outside.
 test("runner: a relative argument through the shared ancestor is refused from outside the worktree", () => {
-  const under = join(mkdtempSync(join(tmpdir(), "anc-")), "node_modules");
+  const under = join(tempDir("anc-"), "node_modules");
   mkdirSync(under, { recursive: true });
   const a = apply(SUITE, under);
   // Four levels up from the worktree: `42-slug` -> `.worktrees` -> `claim-XXXX`
@@ -421,7 +424,7 @@ test("runner: a relative argument through the shared ancestor is refused from ou
 // vendored legs it must keep refusing are the two tests above, which this one
 // deliberately does not repeat.
 test("runner: a resolution outside the worktree is judged from the divergence, not the runner's own root", () => {
-  const ancestor = join(mkdtempSync(join(tmpdir(), "anc-")), "node_modules");
+  const ancestor = join(tempDir("anc-"), "node_modules");
   mkdirSync(ancestor, { recursive: true });
   const a = apply(SUITE, ancestor);
   // A sibling of the repo, so the argument diverges ABOVE the worktree while
@@ -487,10 +490,9 @@ test("runner: the divergence walk ends on an argument that resolves TO the share
   // is always `.worktrees/<issue>-<slug>`, which cannot be that name. So the
   // runner is copied straight into a `node_modules` directory instead — same
   // bytes, and no worktree the assertions below never inspect.
-  const home = join(mkdtempSync(join(tmpdir(), "nm-")), "node_modules");
+  const home = join(tempDir("nm-"), "node_modules");
   mkdirSync(home, { recursive: true });
-  copyFileSync(RUNNER, join(home, "agent-test"));
-  chmodSync(join(home, "agent-test"), 0o755);
+  writeExecStub(join(home, "agent-test"), RUNNER_BODY);
   writeFileSync(join(home, "a.test.mjs"), PASSES);
   // Vendored content one level in, where the exemption is at its widest: the
   // runner's own directory name IS the excluded word, and the guard still has
@@ -521,7 +523,7 @@ test("runner: the divergence walk ends on an argument that resolves TO the share
   // The walk reaches the equality three iterations down rather than on the
   // first, and the runner is unmoved, so this row cannot be dismissed as an
   // artifact of relocating one.
-  const under = join(mkdtempSync(join(tmpdir(), "anc-")), "node_modules");
+  const under = join(tempDir("anc-"), "node_modules");
   mkdirSync(under, { recursive: true });
   const a = apply(SUITE, under);
   // 12: the six test files of the committed fixture, once in the repo's own
@@ -595,8 +597,8 @@ test("runner: a directory with no test files refuses instead of exiting 0", () =
 // reported as ITS failure, not folded into the empty-directory message.
 test("runner: a grep failure mid-scan is reported distinctly from an empty result", () => {
   const a = apply(SUITE);
-  const bin = mkdtempSync(join(tmpdir(), "claim-grepfail-"));
-  writeFileSync(join(bin, "grep"), "#!/bin/sh\nexit 2\n", { mode: 0o755 });
+  const bin = tempDir("claim-grepfail-");
+  writeExecStub(join(bin, "grep"), "#!/bin/sh\nexit 2\n");
   const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
     cwd: a.wt,
     encoding: "utf8",
@@ -613,8 +615,8 @@ test("runner: a grep failure mid-scan is reported distinctly from an empty resul
 // from grep's — the failure must still name sed, not grep or "no test files".
 test("runner: a sed failure mid-scan is reported distinctly from an empty result", () => {
   const a = apply(SUITE);
-  const bin = mkdtempSync(join(tmpdir(), "claim-sedfail-"));
-  writeFileSync(join(bin, "sed"), "#!/bin/sh\nexit 2\n", { mode: 0o755 });
+  const bin = tempDir("claim-sedfail-");
+  writeExecStub(join(bin, "sed"), "#!/bin/sh\nexit 2\n");
   const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
     cwd: a.wt,
     encoding: "utf8",
@@ -637,8 +639,8 @@ test("runner: a sed failure mid-scan is reported distinctly from an empty result
 // asserting `no test files under t` instead of a reported sed failure.)
 test("runner: a BSD-style sed rc-1 failure is reported, not tolerated as a no-match analog", () => {
   const a = apply(SUITE);
-  const bin = mkdtempSync(join(tmpdir(), "claim-sedrc1-"));
-  writeFileSync(join(bin, "sed"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const bin = tempDir("claim-sedrc1-");
+  writeExecStub(join(bin, "sed"), "#!/bin/sh\nexit 1\n");
   const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
     cwd: a.wt,
     encoding: "utf8",
@@ -657,8 +659,8 @@ test("runner: a BSD-style sed rc-1 failure is reported, not tolerated as a no-ma
 // "no test files" message, not the new "grep exited" one.
 test("runner: grep's plain no-match rc still reads as no test files, not a grep failure", () => {
   const a = apply(SUITE);
-  const bin = mkdtempSync(join(tmpdir(), "claim-grepnomatch-"));
-  writeFileSync(join(bin, "grep"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const bin = tempDir("claim-grepnomatch-");
+  writeExecStub(join(bin, "grep"), "#!/bin/sh\nexit 1\n");
   const r = spawnSync(join(a.wt, "agent-test"), ["t"], {
     cwd: a.wt,
     encoding: "utf8",
@@ -917,8 +919,10 @@ test("runner: a vendored directory with no search bit is refused as vendored, no
 // Root can read anything, so it cannot see this.
 test("runner: an unreadable directory under a node_modules ancestor names the read fault in every spelling", (t) => {
   if (process.getuid?.() === 0) return t.skip("root searches every directory");
-  const real = mkdtempSync(join(tmpdir(), "anc-"));
-  const spelled = `${real}-link`;
+  const base = tempDir("anc-");
+  const real = join(base, "real");
+  const spelled = join(base, "link");
+  mkdirSync(real);
   symlinkSync(real, spelled);
   mkdirSync(join(real, "node_modules"), { recursive: true });
   const a = apply(SUITE, join(spelled, "node_modules"));
@@ -1090,7 +1094,7 @@ test("runner: a vendored file argument refuses under an inherited CDPATH", () =>
   const vendor = join(a.wt, "node_modules", "plain");
   mkdirSync(vendor, { recursive: true });
   writeFileSync(join(vendor, "v.test.mjs"), PASSES);
-  const decoy = mkdtempSync(join(tmpdir(), "cdpath-decoy-"));
+  const decoy = tempDir("cdpath-decoy-");
   mkdirSync(join(decoy, "node_modules", "plain"), { recursive: true });
   const r = spawnSync(join(a.wt, "agent-test"), ["t/a.test.mjs", "node_modules/plain/v.test.mjs"], {
     cwd: a.wt,
@@ -1277,7 +1281,7 @@ test("runner: a symlink to a vendored file refuses however it is spelled", () =>
   // directory would already have caught, kept so the fix is not narrowed to
   // final-component links alone.
   symlinkSync(join("node_modules", "pkg"), join(a.wt, "dirlink"));
-  const outside = mkdtempSync(join(tmpdir(), "outside-"));
+  const outside = tempDir("outside-");
   mkdirSync(join(outside, "node_modules", "pkg"), { recursive: true });
   writeFileSync(join(outside, "node_modules", "pkg", "o.test.mjs"), PASSES);
   symlinkSync(join(outside, "node_modules", "pkg", "o.test.mjs"), join(a.wt, "extlink.test.mjs"));
@@ -1334,7 +1338,7 @@ test("runner: a symlink to a vendored file refuses however it is spelled", () =>
 test("runner: a symlink to a non-vendored file still runs", () => {
   const a = apply(SUITE);
   symlinkSync(join("t", "b.test.mjs"), join(a.wt, "oklink.test.mjs"));
-  const outside = mkdtempSync(join(tmpdir(), "outside-ok-"));
+  const outside = tempDir("outside-ok-");
   mkdirSync(join(outside, "lib", "node_modules"), { recursive: true });
   writeFileSync(join(outside, "lib", "o.test.mjs"), PASSES);
   symlinkSync(join(outside, "lib", "o.test.mjs"), join(a.wt, "sidelink.test.mjs"));
@@ -1387,8 +1391,8 @@ test("runner: an unresolvable argument refuses rather than running unchecked", (
   mkdirSync(vendor, { recursive: true });
   writeFileSync(join(vendor, "v.test.mjs"), PASSES);
   symlinkSync(join("node_modules", "pkg", "v.test.mjs"), join(a.wt, "vendlink.test.mjs"));
-  const bin = mkdtempSync(join(tmpdir(), "no-realpath-"));
-  writeFileSync(join(bin, "realpath"), "#!/bin/sh\nexit 127\n", { mode: 0o755 });
+  const bin = tempDir("no-realpath-");
+  writeExecStub(join(bin, "realpath"), "#!/bin/sh\nexit 127\n");
   // The vendored spelling goes FIRST: every file argument is judged, so the
   // refusal names whichever one the loop reaches first, and naming this one is
   // what shows the guard is still armed rather than merely dying early.

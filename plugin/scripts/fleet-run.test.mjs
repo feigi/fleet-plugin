@@ -10,8 +10,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, symlinkSync, realpathSync } from "node:fs";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,7 +30,7 @@ function runFleetRun(home, args, extraEnv = {}) {
 // realpath (macOS resolves tmpdir through /private, and the resolver applies
 // realpathSync, so expectations must too).
 function fakeInstall() {
-  const home = mkdtempSync(join(tmpdir(), "fleet-run-home-"));
+  const home = tempDir("fleet-run-home-");
   const payload = join(home, ".omp", "plugins", "cache", "a");
   mkdirSync(join(payload, "scripts"), { recursive: true });
   writeFileSync(join(payload, "scripts", "probe.mjs"), "content\n");
@@ -49,7 +49,7 @@ test("node_modules/@feigi/fleet-ctl present: --root prints its realpath, no noti
 });
 
 test("node_modules/@feigi/fleet-ctl absent: exit 2, stderr names ~/.omp/plugins/node_modules/@feigi/fleet-ctl", () => {
-  const home = mkdtempSync(join(tmpdir(), "fleet-run-home-"));
+  const home = tempDir("fleet-run-home-");
   const r = runFleetRun(home, ["--root"]);
   assert.equal(r.status, 2, `expected a resolver refusal, got status ${r.status}: ${r.stdout}`);
   assert.match(r.stderr, /no omp plugin "@feigi\/fleet-ctl"/);
@@ -57,7 +57,7 @@ test("node_modules/@feigi/fleet-ctl absent: exit 2, stderr names ~/.omp/plugins/
 });
 
 test("a dangling link is named as dangling, not as a missing entry", () => {
-  const home = mkdtempSync(join(tmpdir(), "fleet-run-home-"));
+  const home = tempDir("fleet-run-home-");
   const nm = join(home, ".omp", "plugins", "node_modules");
   mkdirSync(join(nm, "@feigi"), { recursive: true });
   symlinkSync(join(home, "does", "not", "exist"), join(nm, "@feigi", "fleet-ctl"));

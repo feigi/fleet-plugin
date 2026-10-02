@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert";
-import { readFileSync, writeFileSync, mkdtempSync, existsSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { stripComments } from "./strip-comments.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const ARG_MODULE = fileURLToPath(new URL("./arg.mjs", import.meta.url));
 
@@ -81,7 +82,7 @@ test("every fleet script wires die() to arg.mjs's makeDie under its own NAME —
 // on fd 2), and a regex over the template literal would pin the spelling while
 // still proving nothing about what reaches the fd.
 test("die()'s refusal starts its own line even when a partial line is already on fd 2", () => {
-  const dir = mkdtempSync(join(tmpdir(), "arg-die-"));
+  const dir = tempDir("arg-die-");
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
   writeFileSync(join(dir, "run.mjs"), [
     'import { writeSync } from "node:fs";',
@@ -123,7 +124,7 @@ test("die() keeps exit 2 when its own writeSync throws — the guard executed, n
   // Measured on darwin: guarded, exit 2; with the try/catch reverted, exit 1.
   // That is the #299 inversion itself, reproduced without the race, so this is
   // the assertion that discriminates on a machine where EAGAIN never fires.
-  const dir = mkdtempSync(join(tmpdir(), "arg-die-throw-"));
+  const dir = tempDir("arg-die-throw-");
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
   writeFileSync(join(dir, "run.mjs"), [
     'import { closeSync } from "node:fs";',
@@ -155,7 +156,7 @@ test("die() keeps exit 2 when its own writeSync throws — the guard executed, n
 // different (already-handled) failure this loop's cap is not needed for.
 test("die() exits 2 within a bound even when stderr is a saturated pipe whose reader never drains — #889's retry cap", (t) => {
   if (spawnSync("python3", ["-c", ""]).status !== 0) return t.skip("needs python3");
-  const dir = mkdtempSync(join(tmpdir(), "arg-die-stall-"));
+  const dir = tempDir("arg-die-stall-");
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
   writeFileSync(join(dir, "run.mjs"), [
     'import { makeDie } from "./arg.mjs";',
@@ -286,7 +287,7 @@ function spawnUntilShortWrite(runScript, recordPath) {
 // never the limiting factor here (measured: every run delivered the message
 // whole).
 test("die() resumes from a genuine short write and delivers the full message, not just the first pipe buffer", (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "arg-die-short-"));
+  const dir = tempDir("arg-die-short-");
   // The fixture embeds the message, so this is the largest dir this file
   // creates; reaped here the way staleness.test.mjs reaps its own repos.
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -404,7 +405,7 @@ test("writeAll()'s loop consumes writeSync's return value, resets its EAGAIN ret
 // the fd really did short-write rather than take everything at once, retried
 // the same way when a spawn loses the race.
 test("writeAll() returns true and delivers every byte across a genuine short write — the case it must never refuse", (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "arg-writeall-short-"));
+  const dir = tempDir("arg-writeall-short-");
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
   const payload = "w".repeat(SHORT_WRITE_BYTES);
@@ -453,7 +454,7 @@ test("writeAll() returns true and delivers every byte across a genuine short wri
 // a write that is genuinely lost has to come back false, or a caller that
 // promised "a failed write is a could-not-check" silently reports success.
 test("writeAll() returns false when the write is genuinely lost, not merely delayed", (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "arg-writeall-lost-"));
+  const dir = tempDir("arg-writeall-lost-");
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
   writeFileSync(join(dir, "run.mjs"), [
@@ -536,7 +537,7 @@ test("writeAll() delivers the full payload across more confirmed EAGAIN stalls t
     Number.isFinite(MAX_EAGAIN_RETRIES),
     "arg.mjs no longer declares `const MAX_EAGAIN_RETRIES = <digits>;` — this test cannot say what its transfer has to cross",
   );
-  const dir = mkdtempSync(join(tmpdir(), "arg-writeall-slowdrain-"));
+  const dir = tempDir("arg-writeall-slowdrain-");
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
   // Half again the cap: far enough past it that an accumulating counter
@@ -694,9 +695,9 @@ const GH_FLOOD = [
 // under test takes its execFileSync catch. The payload is a file the stub
 // `cat`s rather than shell-generated, to keep the byte count exact.
 function runWithFloodingGh(script, argv, bytes) {
-  const dir = mkdtempSync(join(tmpdir(), "arg-die-flood-"));
+  const dir = tempDir("arg-die-flood-");
   writeFileSync(join(dir, "flood"), "z".repeat(bytes));
-  writeFileSync(join(dir, "gh"), `#!/bin/sh\ncat "${join(dir, "flood")}" >&2\nexit 1\n`, { mode: 0o755 });
+  writeExecStub(join(dir, "gh"), `#!/bin/sh\ncat "${join(dir, "flood")}" >&2\nexit 1\n`);
   return spawnSync(
     process.execPath,
     [fileURLToPath(new URL(`./${script}.mjs`, import.meta.url)), ...argv],
@@ -780,12 +781,12 @@ function stubGhBin() {
   // silently writes no receipt. Baked in here rather than left to the ambient
   // `TMPDIR` so every machine runs the hazardous shape, not just one whose
   // TMPDIR happens to contain a space.
-  const dir = mkdtempSync(join(tmpdir(), "arg sweep-"));
+  const dir = tempDir("arg sweep-");
   const receipt = join(dir, "gh-was-called");
   // `>> "$GH_LOG"`, not the interpolated path: ci-state.test.mjs's GH_STUB
   // form, which keeps the path out of the generated script text entirely so
   // there is no interpolation left to quote wrongly.
-  writeFileSync(join(dir, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 1\n`, { mode: 0o755 });
+  writeExecStub(join(dir, "gh"), `#!/bin/sh\necho "$@" >> "$GH_LOG"\nexit 1\n`);
   // The env is built HERE, beside the path it carries. `GH_LOG` is now what
   // makes the receipt work at all, so handing callers a ready env is what
   // keeps the two from drifting apart — a caller assembling its own would be
@@ -921,16 +922,15 @@ for (const { script, argv, flag } of NON_NUMERIC) {
 // happen. `$2` is the subcommand (`gh pr view <n> --json …`, `gh pr diff <n>
 // --name-only`), the same positional pr-overlap.test.mjs's own stub keys on.
 function stubGhAnswering() {
-  const dir = mkdtempSync(join(tmpdir(), "arg num-"));
+  const dir = tempDir("arg num-");
   const receipt = join(dir, "gh-was-called");
-  writeFileSync(
+  writeExecStub(
     join(dir, "gh"),
     '#!/bin/sh\necho "$@" >> "$GH_LOG"\ncase "$2" in\n' +
       "  view) echo '{\"files\":[{\"path\":\"a.ts\",\"additions\":1,\"deletions\":0}],\"changedFiles\":1}' ;;\n" +
       "  diff) echo src/shared.ts ;;\n" +
       "  *) exit 1 ;;\n" +
       "esac\n",
-    { mode: 0o755 },
   );
   return { dir, receipt, env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GH_LOG: receipt } };
 }
@@ -1051,7 +1051,7 @@ for (const { script, argv, stray } of STRAY_POSITIONALS) {
 // caller's own `table` object, so the same harness drives defineFlags()'s
 // wrong-kind refusals and its construction-time snapshot further down.
 function runFlags(argv, flags, positionals, body) {
-  const dir = mkdtempSync(join(tmpdir(), "arg-stray-unit-"));
+  const dir = tempDir("arg-stray-unit-");
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
   writeFileSync(join(dir, "run.mjs"), [
     'import { makeDie, defineFlags } from "./arg.mjs";',
@@ -1296,7 +1296,7 @@ test("stray() leaves a `--`-prefixed token alone, even an unknown one", () => {
 // behaviourally, by diff-stats.test.mjs's `--pr --json` case: measured, hoisting
 // diff-stats.mjs's sweep above its `if (!pr)` guard turns that red.
 function runSweep(argv) {
-  const dir = mkdtempSync(join(tmpdir(), "arg-sweep-unit-"));
+  const dir = tempDir("arg-sweep-unit-");
   writeFileSync(join(dir, "arg.mjs"), readFileSync(ARG_MODULE));
   writeFileSync(join(dir, "run.mjs"), [
     'import { makeDie, defineFlags } from "./arg.mjs";',

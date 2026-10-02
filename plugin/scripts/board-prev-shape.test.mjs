@@ -29,10 +29,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const BOARD = fileURLToPath(new URL("./board.mjs", import.meta.url));
 
@@ -57,18 +58,17 @@ process.exit(2);`;
 // below would read `undefined` from a parse of nothing. Asserting status here
 // keeps that failure legible at the one place it can happen.
 function gathered(prevBody) {
-  const cwd = mkdtempSync(join(tmpdir(), "board-prevshape-"));
-  const bin = mkdtempSync(join(tmpdir(), "board-prevshape-bin-"));
-  const scriptDir = mkdtempSync(join(tmpdir(), "board-prevshape-scripts-"));
+  const cwd = tempDir("board-prevshape-");
+  const bin = tempDir("board-prevshape-bin-");
+  const scriptDir = tempDir("board-prevshape-scripts-");
 
   writeFileSync(join(scriptDir, "ci-state.mjs"), CI_READ_FAILS);
   // A real ledger answer, so the only unusual read on this stderr is the one
   // under test — the assertions below count lines.
   writeFileSync(join(scriptDir, "ledger.mjs"),
     `console.log(JSON.stringify({ rows: [], filed: [], ruled: [] }));`);
-  writeFileSync(join(bin, "gh"),
+  writeExecStub(join(bin, "gh"),
     '#!/bin/sh\ncase "$1 $2" in\n"pr list") echo \'[{"number":42,"state":"OPEN","labels":[],"title":"t"}]\' ;;\n*) exit 1 ;;\nesac\n');
-  chmodSync(join(bin, "gh"), 0o755);
 
   const prevFile = join(cwd, "prev.json");
   writeFileSync(prevFile, prevBody);
@@ -193,11 +193,10 @@ for (const body of ACCEPTED) {
 // read degrades through tryRun — so the board still builds with no network and
 // no read of this repo's live issue list.
 function runBuild(prevArgs) {
-  const cwd = mkdtempSync(join(tmpdir(), "board-prevshape-cli-"));
-  const home = mkdtempSync(join(tmpdir(), "board-prevshape-home-"));
-  const bin = mkdtempSync(join(tmpdir(), "board-prevshape-cli-bin-"));
-  writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
-  chmodSync(join(bin, "gh"), 0o755);
+  const cwd = tempDir("board-prevshape-cli-");
+  const home = tempDir("board-prevshape-home-");
+  const bin = tempDir("board-prevshape-cli-bin-");
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
   return spawnSync(process.execPath, [BOARD, "build", "--ledger", join(cwd, "nope.md"), ...prevArgs], {
     cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },
@@ -205,7 +204,7 @@ function runBuild(prevArgs) {
 }
 
 test("build: an ignored previous board changes neither the exit code nor stdout (#1192)", () => {
-  const prevFile = join(mkdtempSync(join(tmpdir(), "board-prevshape-file-")), "prev.json");
+  const prevFile = join(tempDir("board-prevshape-file-"), "prev.json");
   writeFileSync(prevFile, '{"tickets": 5}');
   const withPrev = runBuild(["--prev", prevFile]);
   // The baseline is measured in the same run rather than asserted as a

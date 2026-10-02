@@ -22,6 +22,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./verify-sha.sh", import.meta.url));
 
@@ -130,10 +131,9 @@ test("a merge-base that fails rather than answers is exit 2, never reachable:fal
   // the exec: a git under a path with a space word-splits otherwise, and the
   // fetch then dies first — which still satisfies the exit-2 and null-json
   // assertions below, so only the stderr match would catch it.
-  writeFileSync(
+  writeExecStub(
     join(bin, "git"),
     `#!/bin/sh\n[ "$1" = merge-base ] && { echo "error: could not parse commit deadbeef" >&2; exit 128; }\nexec "${REAL_GIT}" "$@"\n`,
-    { mode: 0o755 },
   );
 
   const { code, json, stderr } = verify(w, "main", head, {
@@ -428,10 +428,9 @@ test("a sha the cat-file guard rejects is fatal — the script stops rather than
   t.after(() => rmSync(bin, { recursive: true, force: true }));
   // Resolved out here, where PATH is still the real one, and quoted at the exec,
   // for the reasons the merge-base shim above records at length.
-  writeFileSync(
+  writeExecStub(
     join(bin, "git"),
     `#!/bin/sh\n[ "$1" = cat-file ] && { echo "error: unable to read object" >&2; exit 1; }\nexec "${REAL_GIT}" "$@"\n`,
-    { mode: 0o755 },
   );
 
   const { code, json, stderr } = verify(w, "main", head, {
@@ -609,7 +608,7 @@ test("an ordinary branch name is untouched — the escaping accepts what it shou
 function sedShim(t, body) {
   const bin = mkdtempSync(join(tmpdir(), "verify-sha-sed-shim-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
-  writeFileSync(join(bin, "sed"), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  writeExecStub(join(bin, "sed"), `#!/bin/sh\n${body}\n`);
   return `${bin}:${ENV.PATH ?? process.env.PATH}`;
 }
 

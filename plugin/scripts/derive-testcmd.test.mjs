@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, chmodSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, symlinkSync, chmodSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
+import { writeExecStub } from "./exec-stub.mjs";
 
 // derive-testcmd.sh is the ONE reader of a repository's Recipe cache (ADR
 // 0015) — reused by claim-ticket.sh and review-core.mjs's snapshot agent. It
@@ -24,7 +26,7 @@ const [, FRAME_OPEN, FRAME_CLOSE] = FRAME_MATCH;
 const FIXTURE_ENV = { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined };
 
 function repo(files = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "derive-testcmd-"));
+  const dir = tempDir("derive-testcmd-");
   const git = (...a) => execFileSync("git", a, { cwd: dir, stdio: "pipe", env: FIXTURE_ENV, encoding: "utf8" });
   git("init", "-q");
   git("config", "user.email", "t@t");
@@ -89,7 +91,7 @@ test("a linked worktree reads the main checkout's cache, not a private one", () 
   // once, beside the common git dir, like the ledger.
   const { dir, head } = repo();
   cache(dir, recipe(head, { test: "true" }));
-  const wt = join(mkdtempSync(join(tmpdir(), "derive-wt-")), "wt");
+  const wt = join(tempDir("derive-wt-"), "wt");
   execFileSync("git", ["worktree", "add", "-q", "--detach", wt], { cwd: dir, stdio: "pipe", env: FIXTURE_ENV });
   const r = derive(wt);
   assert.equal(r.status, 0, r.err);
@@ -110,7 +112,7 @@ test("wrong argument count and an unknown field refuse with a usage message", ()
 });
 
 test("a non-repository directory refuses cleanly", () => {
-  const dir = mkdtempSync(join(tmpdir(), "derive-testcmd-not-a-repo-"));
+  const dir = tempDir("derive-testcmd-not-a-repo-");
   const r = derive(dir);
   assert.equal(r.status, 1);
   assert.match(r.err, /is not a git repository/);
@@ -303,7 +305,7 @@ test("the success path writes nothing to stderr, even when node is chatty (#1175
 // interpreter is really unreachable rather than shadowed.
 const SHIMMED = ["sh", "git", "mktemp", "cat", "rm"];
 function shimPath({ node }) {
-  const bin = mkdtempSync(join(tmpdir(), "derive-path-"));
+  const bin = tempDir("derive-path-");
   for (const name of SHIMMED) {
     const real = execFileSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).trim();
     symlinkSync(real, join(bin, name));
@@ -336,9 +338,8 @@ test("an unusable interpreter refuses in this script's own voice, never the cach
 // did not resolve, handed on when it did. Every stub runs the real interpreter
 // by ABSOLUTE path: re-running `node` through PATH would find the stub again.
 function nodeStub(body) {
-  const bin = mkdtempSync(join(tmpdir(), "derive-stub-"));
-  writeFileSync(join(bin, "node"), `#!/bin/sh\n${body.replaceAll("NODE", `'${process.execPath}'`)}\n`);
-  chmodSync(join(bin, "node"), 0o755);
+  const bin = tempDir("derive-stub-");
+  writeExecStub(join(bin, "node"), `#!/bin/sh\n${body.replaceAll("NODE", `'${process.execPath}'`)}\n`);
   return { ...process.env, PATH: `${bin}:${process.env.PATH}` };
 }
 

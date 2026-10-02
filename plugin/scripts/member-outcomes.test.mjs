@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, readFileSync, utimesSync, existsSync } from "node:fs";
+import { tempDir } from "./temp-dir.mjs";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { normalizeModel, parseMemberName, rowsForSession, COLUMNS, mergeRows, formatTsv, parseTsv } from "./member-outcomes.mjs";
@@ -126,7 +126,7 @@ const assistantEvt = (model, usage = {}, ts = "2026-08-25T09:00:00.000Z") => evt
 // the CLI (member-outcomes.mjs's main()) and readMembers()'s tree walk
 // (member-record.test.mjs) do.
 function fixture(members) {
-  const root = mkdtempSync(join(tmpdir(), "mo-"));
+  const root = tempDir("mo-");
   const sessionDir = join(root, "2026-08-25T09-00-00-000Z_abcdef12-3456-7890-abcd-ef1234567890");
   for (const [name, lines] of members) {
     const file = join(sessionDir, `${name}.jsonl`);
@@ -159,7 +159,7 @@ test("a member whose file readFileSync cannot read is skipped without losing its
 });
 
 test("a session directory that does not exist yields no rows and does not throw", () => {
-  const root = mkdtempSync(join(tmpdir(), "mo-"));
+  const root = tempDir("mo-");
   assert.deepEqual(rowsForSession(join(root, "never-created")), []);
 });
 
@@ -334,8 +334,8 @@ test("a nonexistent session directory is a refusal, not a silent no-op", () => {
   // EXISTS but holds no transcripts yet is a real, legitimate state (a
   // session between launch and its first member's spawn) and must not
   // refuse; only a path that genuinely does not resolve should.
-  const missing = join(mkdtempSync(join(tmpdir(), "mo-empty-")), "never-created");
-  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const missing = join(tempDir("mo-empty-"), "never-created");
+  const out = join(tempDir("mo-out-"), "member-outcomes.tsv");
   const r = spawnSync(process.execPath, [CLI, missing, "--file", out], { encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /cannot read/);
@@ -343,10 +343,10 @@ test("a nonexistent session directory is a refusal, not a silent no-op", () => {
 });
 
 test("a session-dir argument that is actually a FILE is a refusal, not a silent no-op", () => {
-  const root = mkdtempSync(join(tmpdir(), "mo-notdir-"));
+  const root = tempDir("mo-notdir-");
   const notADir = join(root, "impl-580.jsonl");
   writeFileSync(notADir, "");
-  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const out = join(tempDir("mo-out-"), "member-outcomes.tsv");
   const r = spawnSync(process.execPath, [CLI, notADir, "--file", out], { encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /ENOTDIR/);
@@ -361,7 +361,7 @@ test("a directory that is not an omp <ISO>_<uuid> session dir is a refusal, not 
   // shape) used to be silently accepted whole: every session under it
   // stamped with the project dir's own name, and the controller's own
   // main-session transcript booked as a member.
-  const root = mkdtempSync(join(tmpdir(), "mo-proj-"));
+  const root = tempDir("mo-proj-");
   const projectDir = join(root, "-dev-fleet-plugin");
   const sessionName = "2026-09-08T14-14-34-049Z_01a0815e-e141-716c-b2d8-2adf310fbe55";
   mkdirSync(join(projectDir, sessionName), { recursive: true });
@@ -369,7 +369,7 @@ test("a directory that is not an omp <ISO>_<uuid> session dir is a refusal, not 
     [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")].join("\n") + "\n");
   writeFileSync(join(projectDir, `${sessionName}.jsonl`),
     [sessionEvt("/x"), assistantEvt("claude-sonnet-5")].join("\n") + "\n");
-  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const out = join(tempDir("mo-out-"), "member-outcomes.tsv");
   const r = spawnSync(process.execPath, [CLI, projectDir, "--file", out], { encoding: "utf8" });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /is not an omp .* session directory/);
@@ -397,7 +397,7 @@ test("two separate sessions scraped in two runs merge into one TSV", () => {
   const dirA = fixture([["impl-580", [sessionEvt("/x"), thinkingEvt("xhigh"), sessionInitEvt("Implement ticket 580", "fleet-implementer"), assistantEvt("claude-opus-5")]]]);
   const dirB = fixture([["Solo", [sessionEvt("/x"), thinkingEvt("high"), sessionInitEvt("Implement ticket 581", "fleet-implementer-alt"), assistantEvt("claude-sonnet-5")]]]);
 
-  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const out = join(tempDir("mo-out-"), "member-outcomes.tsv");
   const runA = spawnSync(process.execPath, [CLI, dirA, "--file", out], { encoding: "utf8" });
   assert.equal(runA.status, 0, runA.stderr);
   const runB = spawnSync(process.execPath, [CLI, dirB, "--file", out], { encoding: "utf8" });
@@ -412,7 +412,7 @@ test("two separate sessions scraped in two runs merge into one TSV", () => {
 
 test("a run writes rows, and a second run over the same session changes nothing", () => {
   const dir = fixture([["impl-580", [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")]]]);
-  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const out = join(tempDir("mo-out-"), "member-outcomes.tsv");
   const run = () => spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8" });
   assert.equal(run().status, 0);
   const first = readFileSync(out, "utf8");
@@ -424,7 +424,7 @@ test("the header survives a rewrite", () => {
   // The header carries the read-out commands and the blank-means-unknown rule.
   // A rewrite that drops it strands every reader.
   const dir = fixture([["impl-580", [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")]]]);
-  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const out = join(tempDir("mo-out-"), "member-outcomes.tsv");
   writeFileSync(out, "# keep me\n");
   spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8" });
   assert.match(readFileSync(out, "utf8"), /^# keep me$/m);
@@ -434,7 +434,7 @@ test("importing the module never runs the CLI, even from a file whose name ends 
   // The guard used to be a suffix match, so a wrapper called
   // run-member-outcomes.mjs tripped the CLI block on import: it wrote a file
   // and exited 2 in a process that only wanted the helpers.
-  const dir = mkdtempSync(join(tmpdir(), "mo-wrap-"));
+  const dir = tempDir("mo-wrap-");
   const wrapper = join(dir, "run-member-outcomes.mjs");
   writeFileSync(wrapper, `import { normalizeModel } from ${JSON.stringify(CLI)};\n`
     + `console.log(normalizeModel("claude-opus-5"));\n`);
@@ -450,7 +450,7 @@ test("the documented bare form works — no --file needed", () => {
   // until the filter stopped treating `fileIdx + 1` as a real index when
   // --file is absent.
   const dir = fixture([["impl-580", [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")]]]);
-  const cwd = mkdtempSync(join(tmpdir(), "mo-cwd-"));
+  const cwd = tempDir("mo-cwd-");
   mkdirSync(join(cwd, "docs", "metrics"), { recursive: true });
   const r = spawnSync(process.execPath, [CLI, dir], { encoding: "utf8", cwd });
   assert.equal(r.status, 0);
@@ -470,7 +470,7 @@ test("the run reports its own YIELD, not just the file's size", () => {
     // transcript that exists, carries no assistant turn, and so yields no row.
     ["impl-581", [sessionEvt("/x"), thinkingEvt("xhigh"), sessionInitEvt("Implement ticket 581", "fleet-implementer")]],
   ]);
-  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const out = join(tempDir("mo-out-"), "member-outcomes.tsv");
   writeFileSync(out, formatTsv([row({ session: "other", member: "impl-1" })]));
 
   const r = spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8" });
@@ -485,7 +485,7 @@ test("a corpus this schema cannot read is refused before anything is rewritten",
   // Reading an out-of-schema file used to pad it and rewrite it, converting a
   // human's unresolved merge conflict into confident-looking data.
   const dir = fixture([["impl-580", [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")]]]);
-  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const out = join(tempDir("mo-out-"), "member-outcomes.tsv");
   const conflicted = "# hdr\n<<<<<<< HEAD\n" + formatTsv([row()]) + "=======\n>>>>>>> theirs\n";
   writeFileSync(out, conflicted);
   const r = spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8" });
@@ -499,7 +499,7 @@ test("the header's blank lines and paragraph order survive a rewrite", () => {
   // top and dropped the blank separators, silently, while the comment promised
   // "preserved verbatim".
   const dir = fixture([["impl-580", [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")]]]);
-  const out = join(mkdtempSync(join(tmpdir(), "mo-out-")), "member-outcomes.tsv");
+  const out = join(tempDir("mo-out-"), "member-outcomes.tsv");
   const header = "# first paragraph\n\n# second paragraph\n";
   writeFileSync(out, header);
   spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8" });

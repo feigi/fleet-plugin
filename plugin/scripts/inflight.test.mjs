@@ -23,11 +23,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, appendFileSync, readF
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { createServer } from "node:net";
-import { stripComments } from "./strip-comments.mjs";
 import { slowTransport, SSH_URL } from "./slow-transport.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = join(import.meta.dirname, "inflight.sh");
-const THIS_FILE = import.meta.filename;
 
 // The stub shells out to jq. Without it every `gh issue view` would fail and
 // the suite would report exit 2 everywhere — which reads as a real red but
@@ -101,8 +100,7 @@ const REAL_HEAD = execFileSync("/bin/sh", ["-c", "command -v head"], { encoding:
  * not the shim itself.
  */
 function gitShim(bin, body) {
-  writeFileSync(join(bin, "git"), `#!/bin/sh\n${body}\nexec '${REAL_GIT}' "$@"\n`);
-  chmodSync(join(bin, "git"), 0o755);
+  writeExecStub(join(bin, "git"), `#!/bin/sh\n${body}\nexec '${REAL_GIT}' "$@"\n`);
 }
 
 // Every chmod-denial fixture below rests on the mode being ENFORCED, and root
@@ -159,8 +157,7 @@ function fixture(t, n, { linked = [], prs = [], issueErr = null, prErr = null, o
 
   const bin = join(root, "bin");
   mkdirSync(bin);
-  writeFileSync(join(bin, "gh"), GH_STUB);
-  chmodSync(join(bin, "gh"), 0o755);
+  writeExecStub(join(bin, "gh"), GH_STUB);
 
   // A filter that could not run at all. Written only when a case asks for it,
   // so every other case forks the real awk directly.
@@ -178,11 +175,10 @@ function fixture(t, n, { linked = [], prs = [], issueErr = null, prErr = null, o
   // `exit`, so they return 0 whether or not anything matched, which is what
   // makes any non-zero status readable as a failure.
   if (awkFailWhenProgramHas !== null) {
-    writeFileSync(join(bin, "awk"), `#!/bin/sh
+    writeExecStub(join(bin, "awk"), `#!/bin/sh
 case "$*" in *'${awkFailWhenProgramHas}'*) exit 1 ;; esac
 exec '${REAL_AWK}' "$@"
 `);
-    chmodSync(join(bin, "awk"), 0o755);
   }
 
   // The same shim shape for `tr`. `-d` addresses jrewritten and nothing else:
@@ -205,11 +201,10 @@ exec '${REAL_AWK}' "$@"
   // it into json.sh behind its own capture and `|| return 1`, and json.test.mjs
   // pins it there.)
   if (trFailWhenArgsHave !== null) {
-    writeFileSync(join(bin, "tr"), `#!/bin/sh
+    writeExecStub(join(bin, "tr"), `#!/bin/sh
 case "$*" in *'${trFailWhenArgsHave}'*) exit 1 ;; esac
 exec '${REAL_TR}' "$@"
 `);
-    chmodSync(join(bin, "tr"), 0o755);
   }
 
   // The same shim shape for `python3`, selected by program text. Probe 1 forks
@@ -222,11 +217,10 @@ exec '${REAL_TR}' "$@"
   // Exits 1 for the reason the awk shim does: it stands in for a fork that
   // could not happen, not for a program that ran and disagreed.
   if (python3FailWhenProgramHas !== null) {
-    writeFileSync(join(bin, "python3"), `#!/bin/sh
+    writeExecStub(join(bin, "python3"), `#!/bin/sh
 case "$*" in *'${python3FailWhenProgramHas}'*) exit 1 ;; esac
 exec '${REAL_PYTHON3}' "$@"
 `);
-    chmodSync(join(bin, "python3"), 0o755);
   }
 
   const repo = join(root, "repo");
@@ -1851,8 +1845,7 @@ test("probe 3: a refs-subdirectory walk whose `head` cannot run is unknown, neve
   //
   // Selected by the first argument for the reason the git shims are, and
   // `head -1` is the only `head` the script runs.
-  writeFileSync(join(bin, "head"), `#!/bin/sh\ncase "$1" in -1) exit 1 ;; esac\nexec '${REAL_HEAD}' "$@"\n`);
-  chmodSync(join(bin, "head"), 0o755);
+  writeExecStub(join(bin, "head"), `#!/bin/sh\ncase "$1" in -1) exit 1 ;; esac\nexec '${REAL_HEAD}' "$@"\n`);
 
   // Measured with the guard deleted: exit 0, `taken:false`, `unknown:[]`, "no
   // local branch or worktree for #77". `$bad` takes the empty string the walk
@@ -1886,8 +1879,7 @@ test("probe 3: a refs-subdirectory find that cannot run at all is unknown, never
   // whether `find` printed a permission-denied hit or never ran at all, so a
   // crashed `find` and a clean tree left the same empty `$bad` and were
   // indistinguishable at the guard below.
-  writeFileSync(join(bin, "find"), "#!/bin/sh\nexit 127\n");
-  chmodSync(join(bin, "find"), 0o755);
+  writeExecStub(join(bin, "find"), "#!/bin/sh\nexit 127\n");
 
   // Measured before the fix: exit 0, `taken:false`, `unknown:[]`, "no local
   // branch or worktree for #77" — a `find` that never ran reported a definite
@@ -2047,8 +2039,7 @@ test("probe 2: a transport that connects and then never answers still terminates
 const sshStub = (dir, name = "user-ssh-stub.sh") => {
   const log = join(dir, `${name}.log`);
   const stub = join(dir, name);
-  writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexit 1\n`);
-  chmodSync(stub, 0o755);
+  writeExecStub(stub, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexit 1\n`);
   return { stub, log };
 };
 
@@ -2476,8 +2467,7 @@ test("mktemp failing leaves probe 2 to answer, rather than abandoning the run", 
   const { repo, env, bin } = fixture(t, 8, {
     remoteBranches: ["fix/8-thing"], detachedWorktreeUnder: "nospace",
   });
-  writeFileSync(join(bin, "mktemp"), "#!/bin/sh\nexit 1\n");
-  chmodSync(join(bin, "mktemp"), 0o755);
+  writeExecStub(join(bin, "mktemp"), "#!/bin/sh\nexit 1\n");
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
   assert.equal(r.status, 1, "the probe that could still look found the ticket taken");
   const json = JSON.parse(r.stdout);
@@ -2504,14 +2494,13 @@ test("cleanup that cannot remove the capture file never rewrites the verdict", (
   // unremovable, which is what `rm -f` fails on (a read-only mount, perms
   // changed under the run). Writing the capture is unaffected: `2>` needs
   // permission on the file, not on the directory.
-  writeFileSync(join(bin, "mktemp"), `#!/bin/sh
+  writeExecStub(join(bin, "mktemp"), `#!/bin/sh
 mkdir -p '${cap}' && chmod 755 '${cap}'
 f='${cap}'/cap.$$
 (umask 077; : > "$f") || exit 1
 chmod 555 '${cap}'
 printf '%s\\n' "$f"
 `);
-  chmodSync(join(bin, "mktemp"), 0o755);
   const r = spawnSync("sh", [SCRIPT, "8"], { cwd: repo, env, encoding: "utf8" });
   // Restored before the first assert, or a failure here leaves a fixture the
   // suite's own cleanup cannot remove.
@@ -2768,55 +2757,14 @@ test("probe 2: a credential helper that never answers is bounded like any other 
   // separates this case from the vacuous one its comment above describes. See
   // the assertion at the bottom for why that is not decoration here.
   const helperRan = join(repo, "helper-ran");
-  // The `--fleet-warm` arm sits above the marker for the reason ledger.test.mjs
-  // records at its own GH_STUB: warming without it would let the warm-up write
-  // the marker itself, and the assertion below — the only thing standing
-  // between this case and the vacuity it already regressed into once — would
-  // read as satisfied on a helper that never ran. git passes a credential
-  // helper its operation and nothing else (measured, git 2.50.1: argv is
-  // exactly `get`), so no real invocation can take the arm.
-  writeFileSync(helper,
-    `#!/bin/sh\ncase " $* " in *" --fleet-warm "*) exit 0 ;; esac\n: > '${helperRan}'\nsleep 300\n`);
-  chmodSync(helper, 0o755);
+  // Through `writeExecStub`, so the helper is a link to the inode exec-stub.mjs
+  // already exec'd at import, and no first-exec OS scan lands inside the 5 s
+  // budget the watchdog kills the fetch at. A freshly written helper measured
+  // ~2.5 s idle and 5.5-12.9 s under load on that scan, and was killed mid-scan
+  // having executed none of its own lines; `helper-ran` below is what catches
+  // that degenerate run.
+  writeExecStub(helper, `#!/bin/sh\n: > '${helperRan}'\nsleep 300\n`);
   git(repo, env, "config", "credential.helper", helper);
-
-  // Pay this helper's first-exec OS scan HERE, before the timed spawn, so it is
-  // spent outside the 5 s budget the watchdog kills the fetch at — #1199's
-  // finding and #1099's ruling on the remedy, reached again from a different
-  // file and a different collision (#1606).
-  //
-  // Measured on this case: the first execution of the freshly written helper
-  // costs ~2.5 s on an idle machine and 5.5-12.9 s under five concurrent copies
-  // of this suite, the fleet's normal condition, while a second execution stays
-  // at ~4 ms either way. The budget is 5 s. So unwarmed the scan never finished
-  // inside it, and the helper was killed mid-scan having executed NONE of its
-  // own lines — `helper-ran` absent in 15 of 15 runs, quiet and loaded alike.
-  //
-  // That is not the reported flake, it is worse and it is deterministic: with
-  // the helper never reaching `sleep 300`, nothing in the case stalled on a
-  // credential at all and it re-tested "an http origin that never answers" —
-  // exactly the vacuity the comment above says moving the 401 out of process
-  // had already fixed once. The 401 does arrive and git does spawn the helper;
-  // what never happened is the helper running. Warmed: 14 of 14 runs reach it,
-  // it really stalls, and net_kill_tree really reaps it (no survivor, and the
-  // caller's stdio closes within 1 ms of the script's own exit).
-  //
-  // Warming, not a longer bound: the 30 s backstop is 5x the observed run and
-  // raising it would only widen the window a helper can hide in. Warming, not a
-  // shared helper, because credential.helper takes a path and the per-case temp
-  // root is what keeps these fixtures isolated.
-  //
-  // "Warming, not a longer bound" is about the timed spawn's 30 s backstop
-  // below, not about this warm-up's own bound, which is 120 s. The warm-up
-  // runs the helper's `--fleet-warm` arm, which exits 0 above the marker write
-  // and the `sleep 300`, so no helper stall can hide in a longer warm-up
-  // bound: the only thing it can extend is the first-exec scan, and letting
-  // that finish is the whole point of warming. Killing it early is worse than
-  // useless — a warm-up killed mid-scan leaves the scan unpaid for the timed
-  // spawn, as PR #2224 measured (first execs 15-16 s under load ~25; one
-  // killed at 500 ms still took 14.5-15.0 s next time) (#2229). It stays
-  // finite only so a truly hung exec still ends the case.
-  spawnSync(helper, ["--fleet-warm"], { timeout: 120_000 });
 
   const started = Date.now();
   const r = spawnSync("sh", [SCRIPT, "8"],
@@ -2833,63 +2781,6 @@ test("probe 2: a credential helper that never answers is bounded like any other 
   assert.ok(Date.now() - started < 30_000, "must terminate on its own bound, not the test's backstop");
   assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
   assert.match(r.stderr, /did not finish within/);
-});
-
-// The other half of the case above, and it needs a different technique. The
-// `helper-ran` assertion is what catches the vacuity UNDER LOAD, where the
-// scan runs 5.5-12.9 s and never fits the 5 s budget; it does not catch it on
-// an idle machine, where the scan is ~2.5 s and the helper squeezes in warmed
-// or not. Measured: deleting the warm-up line leaves this file green, 1 pass /
-// 0 fail, on a quiet host — the exact hole #1199 hit, and its remedy is the
-// same one ledger.test.mjs, arg.mjs's die() and candidates.mjs's EXCLUDE use.
-//
-// So the SHAPE is pinned as well, read back through stripComments() so a
-// comment alone cannot satisfy it, and anchored at line starts under `/m` so an
-// unrelated line inserted between the steps cannot still match.
-//
-// Anchored per STATEMENT, not per line (#2265): inside the warm-up call and
-// the writeFileSync() call every token boundary is `\s*`, and a trailing comma
-// is allowed wherever JS allows one, so wrapping either call across lines — a
-// behavior-neutral reformat a formatter makes on its own — cannot red this pin
-// the way deleting the call does. Only whitespace is free: every token, the
-// timeout's floor included, is still literal and in order.
-test("the credential helper's warm-up survives — deleting it would let a cold exec scan empty the case again (structural pin, #1606)", () => {
-  const src = stripComments(readFileSync(THIS_FILE, "utf8"));
-  const warmUp = /^\s*chmodSync\(helper, 0o755\);\s*^\s*git\(repo, env, "config", "credential\.helper", helper\);\s*^\s*spawnSync\(\s*helper,\s*\[\s*"--fleet-warm",?\s*\],\s*\{\s*timeout:\s*\d{3}_\d{3},?\s*\},?\s*\);\s*^\s*const started = Date\.now\(\);[\s\S]*?^\s*assert\.equal\(existsSync\(helperRan\), true,/m;
-  assert.match(
-    src,
-    warmUp,
-    "the helper must be warmed after it is written and configured and BEFORE the timed spawn, and the vacuity-guard assertion (assert.equal(existsSync(helperRan), true, ...)) must still exist below it — deleting either reopens #1606, and the suite stays green on an idle machine while it does",
-  );
-  // The input the pin must ACCEPT: the same four statements with the warm-up
-  // wrapped the way a formatter wraps it. Quoted lines joined, never a template
-  // literal — a template's lines would sit at line starts in THIS file's own
-  // source and satisfy the pin above with the real warm-up deleted.
-  assert.match(
-    [
-      "  chmodSync(helper, 0o755);",
-      '  git(repo, env, "config", "credential.helper", helper);',
-      '  spawnSync(helper, ["--fleet-warm"], {',
-      "    timeout: 120_000,",
-      "  });",
-      "  const started = Date.now();",
-      "  assert.equal(existsSync(helperRan), true,",
-    ].join("\n"),
-    warmUp,
-    "wrapping the warm-up call across lines changes neither its order nor its presence, so the pin must not read it as deleted (#2265)",
-  );
-  // The arm's POSITION inside the helper body, not merely its presence. Below
-  // the marker write, the warm-up call itself would create `helper-ran` before
-  // any timed run ever executes (measured: a lone --fleet-warm invocation on
-  // the mutated order leaves the marker behind by itself): the vacuity
-  // assertion would then read as satisfied on a helper that never ran during
-  // the timed run. That is ledger.test.mjs's GH_STUB lesson, which had to be
-  // learned once already.
-  assert.match(
-    src,
-    /^\s*writeFileSync\(\s*helper,\s*`#!\/bin\/sh\\ncase " \$\* " in \*" --fleet-warm "\*\) exit 0 ;; esac\\n: > '\$\{helperRan\}'\\nsleep 300\\n`,?\s*\);/m,
-    "the --fleet-warm arm must sit ABOVE the marker write, or warming writes the marker itself and the vacuity guard above goes blind — anchored at line starts under `/m` so a coincidental match elsewhere in the file cannot satisfy it",
-  );
 });
 
 test("the euid-0 guard does not fire on a normal run, and the modes it guards really deny (#184, #660)", (t) => {

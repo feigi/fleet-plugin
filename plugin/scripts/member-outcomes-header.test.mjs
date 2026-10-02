@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
+import { tempDir } from "./temp-dir.mjs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { COLUMNS } from "./member-outcomes.mjs";
@@ -137,7 +137,7 @@ test("the header's pair query counts DELIBERATE pairs, run against a corpus wher
     // review fan-out runs one on every session and must not inflate anything
     ["sE", "2026-09-02", "specialist", "rev", "claude-haiku-4-5", "", "", "", "0", "0", "0", "1", "agent-a11", "claude", "fleet-review-tests"],
   ];
-  const corpus = join(mkdtempSync(join(tmpdir(), "mo-hdr-")), "member-outcomes.tsv");
+  const corpus = join(tempDir("mo-hdr-"), "member-outcomes.tsv");
   writeFileSync(corpus, "# header line, skipped by the query\n" + rows.map((r) => r.join("\t")).join("\n") + "\n");
 
   const program = /awk -F'\\t' '([\s\S]*)' docs\/metrics\/member-outcomes\.tsv$/.exec(pairQuery());

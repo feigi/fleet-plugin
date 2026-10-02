@@ -754,6 +754,7 @@ test("refreshWhy: short of the cap, missing or empty refreshes; draining never d
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync, realpathSync, existsSync } from "node:fs";
+import { writeExecStub } from "./exec-stub.mjs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -833,8 +834,7 @@ function runCli(args = [], {
   mkdirSync(join(repo, ".fleet"), { recursive: true });
   assert.equal(spawnSync("git", ["init", "-q", repo], { encoding: "utf8" }).status, 0);
   writeFileSync(join(repo, ".git", "info", "exclude"), ".fleet/\n.worktrees/\n");
-  writeFileSync(join(bin, "gh"), GH_STUB);
-  chmodSync(join(bin, "gh"), 0o755);
+  writeExecStub(join(bin, "gh"), GH_STUB);
   const script = join(bin, "fleet-tick.mjs");
   writeFileSync(script, readFileSync(SCRIPT));
   for (const [name, path] of SIBLING_MODULES) writeFileSync(join(bin, name), readFileSync(path));

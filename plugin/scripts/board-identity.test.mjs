@@ -23,12 +23,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync, chmodSync, rmSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
+import { tempDir } from "./temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveCockpitInstance } from "./board.mjs";
 import { gitEnv } from "./git-env.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./board.mjs", import.meta.url));
 const HTML = readFileSync(new URL("./board.html", import.meta.url), "utf8");
@@ -44,12 +45,11 @@ const PORT_BASE = 8123;
 // read fails fast instead of shelling out to a real ledger.mjs. None of these
 // tests asserts a ticket.
 function shimPath(ghBody) {
-  const bin = mkdtempSync(join(tmpdir(), "board-id-bin-"));
+  const bin = tempDir("board-id-bin-");
   const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" });
   assert.equal(real.status, 0, "test setup: no git on PATH to shim, so the resolved arm cannot be reached");
   symlinkSync(real.stdout.trim(), join(bin, "git"));
-  writeFileSync(join(bin, "gh"), ghBody);
-  chmodSync(join(bin, "gh"), 0o755);
+  writeExecStub(join(bin, "gh"), ghBody);
   return bin;
 }
 
@@ -67,7 +67,7 @@ const ghNamed = (nameWithOwner) => "#!/bin/sh\ncase \"$1 $2\" in\n\"repo view\")
 // the workspace it derives. Comparing against the unresolved form would fail
 // on the symlink rather than on the behaviour.
 function gitRepo(prefix) {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  const dir = realpathSync(tempDir(prefix));
   // GIT_DIR/GIT_WORK_TREE scrubbed off the fixture too: under an ambient one
   // `git init` exits 0 having re-inited whichever directory the variable
   // names, leaving this one silently not a repository.
@@ -80,7 +80,7 @@ function gitRepo(prefix) {
 // omp session transcripts, and pointing it at an empty directory keeps these
 // runs off the machine's real session tree.
 function runBuild(cwd, bin) {
-  const home = mkdtempSync(join(tmpdir(), "board-id-home-"));
+  const home = tempDir("board-id-home-");
   const r = spawnSync(process.execPath, [SCRIPT, "build"], {
     cwd, encoding: "utf8", timeout: 20000,
     env: { ...process.env, PATH: bin, HOME: home },
@@ -116,7 +116,7 @@ test("CLI: a built snapshot names the workspace it describes and the port that w
 // leaving a reader unable to tell an old payload from a degraded one.
 test("CLI: a build with no resolvable workspace still carries both keys — null workspace, base port", () => {
   const bin = shimPath(GH_FAILS);
-  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "board-id-nogit-")));
+  const cwd = realpathSync(tempDir("board-id-nogit-"));
   try {
     const r = runBuild(cwd, bin);
     assert.equal(r.status, 0, r.stderr);
@@ -138,7 +138,7 @@ const withTimeout = (pr, ms, what) => Promise.race([
 ]);
 
 function serveProcess(cwd, bin) {
-  const home = mkdtempSync(join(tmpdir(), "board-id-home-"));
+  const home = tempDir("board-id-home-");
   const p = spawn(process.execPath, [SCRIPT, "serve", "--port", "0", "--interval", "3600"],
     { cwd, env: { ...process.env, PATH: bin, HOME: home }, stdio: ["ignore", "ignore", "pipe"] });
   p.stderr.setEncoding("utf8");

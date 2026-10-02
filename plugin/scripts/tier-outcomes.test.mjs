@@ -6,12 +6,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, chmodSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { COLUMNS, TIER_SWITCH_DATE } from "./tier-outcomes.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "./member-outcomes.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./tier-outcomes.mjs", import.meta.url));
 const PRE_SWITCH = "2026-09-17";
@@ -39,8 +40,7 @@ function fixture(t, { members = [], tierRows = [], ledger = null, closes = [10] 
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const bin = join(dir, "bin");
   mkdirSync(bin);
-  writeFileSync(join(bin, "gh"), '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$GH_LOG"\nprintf \'%s\\n\' "$GH_JSON"\n');
-  chmodSync(join(bin, "gh"), 0o755);
+  writeExecStub(join(bin, "gh"), '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$GH_LOG"\nprintf \'%s\\n\' "$GH_JSON"\n');
   const f = {
     tier: join(dir, "tier-outcomes.tsv"),
     members: join(dir, "member-outcomes.tsv"),

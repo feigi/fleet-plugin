@@ -31,6 +31,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./no-undo-audit.sh", import.meta.url));
 
@@ -252,8 +253,7 @@ function withSplitXargs(t, size = 300) {
   const log = join(bin, "batches");
   const shim = (name, body) => {
     const real = execFileSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).trim();
-    writeFileSync(join(bin, name), `#!/bin/sh\n${body}exec ${real} "$@"\n`);
-    chmodSync(join(bin, name), 0o755);
+    writeExecStub(join(bin, name), `#!/bin/sh\n${body}exec ${real} "$@"\n`);
   };
   shim("xargs", `set -- -s ${size} "$@"\n`);
   shim("git", `case " $* " in *':(literal)'*) echo x >>"${log}" ;; esac\n`);
@@ -277,8 +277,7 @@ function shimDir(t, prefix) {
     bin,
     real: (name) => execFileSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).trim(),
     write: (name, body) => {
-      writeFileSync(join(bin, name), `#!/bin/sh\n${body}`);
-      chmodSync(join(bin, name), 0o755);
+      writeExecStub(join(bin, name), `#!/bin/sh\n${body}`);
     },
     path: () => `${bin}:${process.env.PATH}`,
   };
@@ -1305,7 +1304,7 @@ function withFailingDedupeAwk(t) {
   const bin = mkdtempSync(join(tmpdir(), "no-undo-audit-awk-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
   const real = execFileSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
-  writeFileSync(join(bin, "awk"), `#!/bin/sh
+  writeExecStub(join(bin, "awk"), `#!/bin/sh
 f="${bin}/stdin.$$"
 cat > "$f"
 if grep -qF 'MAIN COMMIT AT RISK' "$f"; then
@@ -1315,7 +1314,6 @@ if grep -qF 'MAIN COMMIT AT RISK' "$f"; then
 fi
 exec ${real} "$@" < "$f"
 `);
-  chmodSync(join(bin, "awk"), 0o755);
   return { path: `${bin}:${process.env.PATH}`, fired: join(bin, "fired") };
 }
 
@@ -1362,7 +1360,7 @@ function withFailingStashCountAwk(t) {
   const bin = mkdtempSync(join(tmpdir(), "no-undo-audit-awk-stash-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
   const real = execFileSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
-  writeFileSync(join(bin, "awk"), `#!/bin/sh
+  writeExecStub(join(bin, "awk"), `#!/bin/sh
 f="${bin}/stdin.$$"
 cat > "$f"
 if grep -qF 'stash@{' "$f"; then
@@ -1372,7 +1370,6 @@ if grep -qF 'stash@{' "$f"; then
 fi
 exec ${real} "$@" < "$f"
 `);
-  chmodSync(join(bin, "awk"), 0o755);
   return { path: `${bin}:${process.env.PATH}`, fired: join(bin, "fired") };
 }
 
@@ -3309,7 +3306,7 @@ function withBrokenEscaper(t, { tool, marker, selector }) {
   // The selector arg is what keeps this off the script's OWN sed/tr calls:
   // `s/^/"/` appears only in jarr's rule list and `-d` only in jrewritten's.
   selector = selector ?? (tool === "sed" ? `'s/^/"/'` : "-d");
-  writeFileSync(join(bin, tool), `#!/bin/sh
+  writeExecStub(join(bin, tool), `#!/bin/sh
 case " $* " in
   *${selector}*)
     in=$(cat)
@@ -3318,7 +3315,6 @@ case " $* " in
 esac
 exec ${real} "$@"
 `);
-  chmodSync(join(bin, tool), 0o755);
   return `${bin}:${process.env.PATH}`;
 }
 

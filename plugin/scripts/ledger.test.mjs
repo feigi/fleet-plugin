@@ -12,18 +12,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, existsSync, readFileSync, readdirSync, realpathSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync, readdirSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { stripComments } from "./strip-comments.mjs";
+import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
-// The one thing tested by reading THIS file back rather than ledger.mjs: the
-// #1199 warm-up below lives entirely in run()'s own test-helper source, never
-// in the script under test, so a source-shape pin on it has to point here.
-const THIS_FILE = fileURLToPath(new URL(import.meta.url));
-
 // #155's fix resolves the ledger's own repository with a real `git`
 // subprocess (both here in test setup and inside ledger.mjs itself), so PATH
 // cannot simply be reduced to the stub's directory the way `gh` alone used
@@ -43,16 +38,7 @@ if (!REAL_GIT) throw new Error("ledger.test.mjs setup: could not locate a `git` 
 // silently assert the offline path instead. The `|| [ -n "$line" ]` guard emits
 // the last line of a fixture written without a trailing newline, which is what
 // JSON.stringify produces.
-//
-// The one exception to "record argv first" is `--fleet-warm`, and it is above
-// the record precisely so it writes NOTHING: run() execs the stub once under
-// that argv to pay its first-exec OS scan outside the 20 s budget ledger.mjs
-// puts on its gh child (#1199). Warming without this arm would create
-// `$GH_ARGS_FILE` itself, and every "gh was never queried" assertion in this
-// file — the claims `ghRan` exists for — would read as though it had been.
-// ledger.mjs never passes this flag, so no real invocation can take the arm.
 const GH_STUB = `#!/bin/sh
-case " $* " in *" --fleet-warm "*) exit 0 ;; esac
 printf '%s\\n' "$@" > "$GH_ARGS_FILE"
 pwd -P > "$GH_CWD_FILE"
 printf 'GIT_DIR=%s\\nGH_REPO=%s\\n' "\${GIT_DIR-}" "\${GH_REPO-}" > "$GH_ENV_FILE"
@@ -173,40 +159,10 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
     symlinkSync(REAL_GIT, join(bin, "git"));
     if (gh) {
       const ghPath = join(bin, "gh");
-      writeFileSync(ghPath, GH_STUB);
-      chmodSync(ghPath, 0o755);
-      // Pay this stub's first-exec OS scan HERE, before the spawn below, so it
-      // is spent outside the 20 s budget ledger.mjs puts on its gh child.
-      //
-      // Measured (#1199): the first execution of a newly written executable
-      // costs ~148 ms on an idle machine and 3.3-8.9 s under five concurrent
-      // copies of this suite — the fleet's normal condition — while a second
-      // execution of the same file stays at ~4 ms either way. Warm exec is
-      // flat under load; only the first one is not, so the whole
-      // load-sensitive term is this one scan, and unwarmed it was being spent
-      // inside the budget.
-      //
-      // That is the reported failure, mechanically: a stub killed while still
-      // being scanned has executed none of its own lines, so it records no
-      // argv, `queryOf()` reads `r.ghArgv[-1 + 1]` as undefined, and the test
-      // reds with `actual: undefined` against a child that produced no output
-      // in 20 s. Two members hit exactly that on 2026-09-02.
-      //
-      // #1099 reached the same term in net.test.mjs and ruled on the remedy:
-      // stop spending the budget on a scan rather than widen the budget. The
-      // budget here is untouched. Warming, not a shared stub, because PATH
-      // lookup from execFileSync needs a real file per fixture and the sentinel
-      // paths are what keep the cases isolated.
-      //
-      // The warm-up's own bound is not that budget, and it is 120 s rather than
-      // 30 s because a warm-up killed before the scan finishes leaves the scan
-      // unpaid: PR #2224 measured a first exec at 15-16 s under load ~25, and one
-      // killed at 500 ms still took 14.5-15.0 s on its next run — which here
-      // would be the bounded call below (#2229). The `--fleet-warm` arm exits 0
-      // before any other line, so no stub stall can hide in a longer bound; the
-      // only thing it can extend is the scan warming exists to pay. It stays
-      // finite only so a truly hung exec still ends the case.
-      spawnSync(ghPath, ["--fleet-warm"], { env: { PATH: bin }, timeout: 120_000 });
+      // No warm-up exec: `writeExecStub` links the trampoline exec-stub.mjs
+      // already exec'd at import, so this stub's first exec pays no OS scan
+      // inside the 20 s budget ledger.mjs puts on its gh child.
+      writeExecStub(ghPath, GH_STUB);
     }
     // No `stdio` override on purpose: the default pipe is what makes `r.stderr`
     // readable at all. spawnSync drains stdout and stderr concurrently, so the
@@ -264,59 +220,6 @@ function run(subject, { filed = [], hits = [], ghFails = false, ghGarbage = fals
 function queryOf(r) {
   return r.ghArgv[r.ghArgv.indexOf("--search") + 1];
 }
-
-// #1199's whole fix lives inside run()'s OWN test-helper source above, not in
-// ledger.mjs — the warm-up spawn pays the freshly-written gh stub's first-exec
-// OS scan (measured 148 ms idle, 3.3-8.9 s under five concurrent copies of
-// this suite) BEFORE the timed script spawn, so that scan is never charged
-// against the 20 s budget ledger.mjs puts on its own gh child. Delete the
-// warm-up line and every existing test here still passes — the load #1199
-// measured only shows up under five concurrent copies of the whole suite,
-// which this file cannot reproduce as a deterministic single-run assertion,
-// and a timing pin here would just be the flake this fix exists to remove.
-//
-// Pinned as SHAPE instead, the same technique arg.mjs's die() and
-// candidates.mjs's EXCLUDE use elsewhere in this fleet: read this file's own
-// source back through stripComments() (a comment alone must not satisfy it)
-// and require the warm-up to sit INSIDE the `if (gh)` block, after the stub
-// is written and made executable and before the block closes — anchored at
-// line starts under `/m` so an unrelated line inserted between them cannot
-// still match.
-//
-// Anchored per STATEMENT, not per line (#2265): inside the warm-up call every
-// token boundary is `\s*`, and a trailing comma is allowed wherever JS allows
-// one, so wrapping that call across lines — behavior-neutral, and at 85
-// columns the reformat a formatter makes on its own — cannot red this pin the
-// way deleting the call does. Only whitespace is free: every token, the
-// timeout's floor included, is still literal and in order.
-test("run()'s gh-stub warm-up survives — deleting it would let a cold PATH scan spend #1199's budget again (structural pin)", () => {
-  const src = stripComments(readFileSync(THIS_FILE, "utf8"));
-  const warmUp = /^\s*if \(gh\) \{\s*^\s*const ghPath = join\(bin, "gh"\);\s*^\s*writeFileSync\(ghPath, GH_STUB\);\s*^\s*chmodSync\(ghPath, 0o755\);\s*^\s*spawnSync\(\s*ghPath,\s*\[\s*"--fleet-warm",?\s*\],\s*\{\s*env:\s*\{\s*PATH:\s*bin,?\s*\},\s*timeout:\s*\d{3}_\d{3},?\s*\},?\s*\);\s*^\s*\}/m;
-  assert.match(
-    src,
-    warmUp,
-    "run() must warm the freshly-written gh stub (--fleet-warm) before the timed spawn below it — deleting this line reopens #1199 under fleet load",
-  );
-  // The input the pin must ACCEPT: the same block with the warm-up wrapped the
-  // way a formatter wraps it. Quoted lines joined, never a template literal —
-  // a template's lines would sit at line starts in THIS file's own source and
-  // satisfy the pin above with the real warm-up deleted.
-  assert.match(
-    [
-      "    if (gh) {",
-      '      const ghPath = join(bin, "gh");',
-      "      writeFileSync(ghPath, GH_STUB);",
-      "      chmodSync(ghPath, 0o755);",
-      '      spawnSync(ghPath, ["--fleet-warm"], {',
-      "        env: { PATH: bin },",
-      "        timeout: 120_000,",
-      "      });",
-      "    }",
-    ].join("\n"),
-    warmUp,
-    "wrapping the warm-up call across lines changes neither its place nor its presence, so the pin must not read it as deleted (#2265)",
-  );
-});
 
 const FILED_114 =
   "#114 fleet-plugin-design Non-zero column written from intent — audit 11 rows (review-pr-108)";
@@ -2928,7 +2831,7 @@ for (const [cmd, args] of [["row", ["7", "impl-7 · class=routine"]], ["filed", 
 // ---------------------------------------------------------------------------
 
 // `rev-parse` is the only argv either probe uses, so keying on it leaves every
-// other invocation instant and warmable. `/bin/sleep` absolute: PATH is this
+// other invocation instant. `/bin/sleep` absolute: PATH is this
 // fixture's own bin, which holds `git` and `gh` and nothing else.
 //
 // The stall RELEASES the captured pipes before it begins, and that detail is
@@ -2964,35 +2867,14 @@ function gitFixture(t, gitBody) {
   writeFileSync(file, ledgerText([]));
 
   const gitPath = join(bin, "git");
-  writeFileSync(gitPath, gitBody.replace("__DIR__", dir));
-  chmodSync(gitPath, 0o755);
+  writeExecStub(gitPath, gitBody.replace("__DIR__", dir));
   // Records that it was reached, so an accepted probe is told from a degraded
-  // one by something better than an exit code both of them share. The
-  // `--fleet-warm` arm is load-bearing, not defensive: without it the warm-up
-  // below writes the sentinel itself and every `ghRan: false` assertion here
-  // reads true — caught by these tests failing, which is the same pollution
-  // that makes warming run()'s own gh stub in place unsafe. Same spelling as
-  // run()'s own GH_STUB, so the sentinel this file invents stays one flag,
-  // not two that can drift.
+  // one by something better than an exit code both of them share. Neither stub
+  // is warmed: `writeExecStub` links an already-scanned inode, so no first-exec
+  // scan lands inside the bounded region these cases measure.
   const ghSentinel = join(dir, "gh-ran");
   const ghPath = join(bin, "gh");
-  writeFileSync(ghPath, `#!/bin/sh\ncase " $* " in *" --fleet-warm "*) exit 0 ;; esac\n: > '${ghSentinel}'\nprintf '[]\\n'\n`);
-  chmodSync(ghPath, 0o755);
-
-  // Pay both stubs' first-exec OS scan HERE, before anything bounded runs.
-  // That scan is the load-sensitive term #1199 measured: 148 ms on an idle
-  // machine, 8943 ms under five concurrent copies of this suite, against
-  // budgets of seconds. Left inside the bounded region it is indistinguishable
-  // from the stall these cases exist to detect, and the verdicts below would
-  // ride on machine load — #1099's finding, and its remedy.
-  //
-  // 120 s, not 30 s: a warm-up killed mid-scan leaves the scan unpaid for the
-  // bounded call after it — PR #2224 measured 15-16 s first execs under load
-  // ~25, and a first exec killed at 500 ms still took 14.5-15.0 s next time
-  // (#2229). Both `--fleet-warm` arms exit 0 before any other line, so no stub
-  // stall can hide in the longer bound; it only lets the scan finish, and
-  // stays finite so a truly hung exec still ends the case.
-  for (const p of [gitPath, ghPath]) spawnSync(p, ["--fleet-warm"], { env: { PATH: bin }, timeout: 120_000 });
+  writeExecStub(ghPath, `#!/bin/sh\n: > '${ghSentinel}'\nprintf '[]\\n'\n`);
 
   const env = { ...process.env, PATH: bin };
   delete env.GIT_DIR;
