@@ -116,34 +116,26 @@ its own ~20 s network calls. — shell#12, harness#56
 
 ## 5. Harness surface
 
-Dual-harness by design; every dispatch site is a `CLAUDE:`/`OMP:` marked-line
-pair (CONTEXT.md § Dialect, `prose-pin.mjs` `DIALECT_TOKENS`). The pinned tool
-vocabulary — harness#34, prose#94, prose#115:
+omp is the only harness (ADR 0014). The tool vocabulary the fleet leans on:
 
-| Concept | Claude Code | omp |
-|---|---|---|
-| dispatch | `Agent`, `subagent_type: "fleet-ctl:fleet-<x>"` | `task`, `agent: "fleet-<x>"` (bare) |
-| wake / message | `SendMessage` (resumes transcript) | `hub send` (idle peer → same; name collision → `name-2`) |
-| workflow host | `Workflow({scriptPath, resumeFromRunId})` — cached replay | `eval` — no replay, `resume` is reporting only |
-| liveness | one axis: killed / idle / truncated | two axes: job outcome × peer state (`running/idle/parked`) |
-| result | return value, lost if unconsumed | auto-delivered; `hub jobs`/`wait` snapshot |
-| shell ceiling | 300 s default | auto-backgrounds at ~60 s (`bash.autoBackground`) — long waits go in Python `eval` |
-| transcripts | `~/.claude/projects/<encoded-cwd>/<uuid>/subagents/*.jsonl` (cwd encoded by blind `[^a-zA-Z0-9]→-`) | `~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>/<member>.jsonl` (home-relative, dots kept) |
-| tier | `model:`+`effort:` on the agent file; `agent-<id>.jsonl` records `model`/`effort` | `model:`+`thinking-level:`; role-routed via `modelRoles.{slow,task,smol}`; `session_init.resolvedModelIdentity` is provider-prefixed |
-| usage | `message.usage` repeated per content block (must fold by `message.id` — naive sum is +206 %) — no dollar cost | one `usage` per turn, `usage.cost.total` real |
-| tool blocks | `tool_use`/`tool_result` on the next user turn, one result per turn | `toolCall`/`toolResult`, ids `toolu_…` |
+| Concept | omp |
+|---|---|
+| dispatch | `task`, `agent: "fleet-<x>"` (bare name; registry is unnamespaced) — harness#3, #12, #23 |
+| wake / message | `hub send` (idle peer → same; name collision → `name-2`) |
+| workflow host | `eval` — no replay, `resume` is reporting only; `pipeline()`/`parallel()` are hand-rolled by the shim — harness#6 |
+| liveness | two axes: job outcome × peer state (`running/idle/parked`) |
+| result | auto-delivered; `hub jobs`/`wait` snapshot |
+| shell ceiling | auto-backgrounds at ~60 s (`bash.autoBackground`) — long waits go in Python `eval` |
+| transcripts | `~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>/<member>.jsonl` (home-relative, dots kept) — harness#61, #84 |
+| tier | `model: "@<slow\|task\|smol>:<level>"`; role-routed via `modelRoles.{slow,task,smol}`; `session_init.resolvedModelIdentity` is provider-prefixed — harness#21, #24, #76; prose#124 |
+| usage | one `usage` per turn, `usage.cost.total` real — harness#75, #88 |
+| tool blocks | `toolCall`/`toolResult`, ids `toolu_…` — harness#83 |
 
-Frontmatter (`frontmatter-allowlist.json`, harness#19–26): `name` must match
-`^fleet-[^:]*$`; `model ∈ {opus,sonnet,haiku}`; `effort ∈ {low,medium,high,xhigh,max}`;
-`thinking-level ∈ {minimal,…,max}`; `permissionMode`/`mcpServers`/`hooks`
-silently ignored by Claude for plugin subagents; `context`/`agent`/`background`
-forbidden on skills because they bypass run-team's dispatch discipline.
-
-Claude Workflow sandbox (harness#1–2, #29–33): no `import`/`require`; ambient
-`agent()`, `phase()`, `log()`, `pipeline()`, `parallel()`; only top-level
-`workflows/*.js` with `export const meta` first are registered; `.mjs` is
-silently dropped. This is why `review-core.mjs` is a hand-synced copy pinned by
-`review-core-parity.test.mjs`.
+Frontmatter (`frontmatter-allowlist.json`, harness#19–26): agent `name` must match
+`^fleet-[^:]*$`; agent `model` must match `^@(slow|task|smol):(minimal|low|medium|high|xhigh|max)$`;
+`effort`, `thinking-level`/`thinking`, `prewalk`/`advisor` and `isolation` are
+forbidden on agents; `alwaysApply` is forbidden on skills and commands, which are
+invoked, never injected.
 
 ## 6. Controlled-repo filesystem
 
