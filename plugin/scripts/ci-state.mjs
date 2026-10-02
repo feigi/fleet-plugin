@@ -123,18 +123,41 @@ function emitRateLimited(query) {
   writeAll(1, `${JSON.stringify(payload)}\n`);
 }
 
+// The one spawn both primitives below go through. Its child's env drops
+// GIT_DIR and GIT_WORK_TREE (gitEnv()), and every child here is `gh`, which
+// runs git itself to resolve the repository — `{owner}`/`{repo}` and, through
+// `gh repo view`, the host — from the cwd's remotes. Either variable outranks
+// that cwd: measured, `gh repo view` and `gh api repos/{owner}/{repo}` under
+// an ambient GIT_DIR both answer for the repository it names, silently, at
+// exit 0.
+//
 // `maxBuffer` defaults to execFileSync's own 1 MiB; only the workflow-tree
-// reads pass a larger one (see graphql() below).
-function run(cmd, args, maxBuffer) {
+// reads pass a larger one (see graphql() below). `capture` keeps the child's
+// stderr instead of forwarding it, for the one read whose failure can still
+// turn out to be an answer (see graphql()).
+function spawn(cmd, args, { maxBuffer, capture = false } = {}) {
   vlog(`$ ${cmd} ${args.join(" ")}`);
+  return execFileSync(cmd, args, { encoding: "utf8", env: gitEnv(), ...(maxBuffer ? { maxBuffer } : {}), ...(capture ? { stdio: "pipe" } : {}) });
+}
+
+// Three disjoint shapes — Node-aborted (ENOENT/ENOBUFS), signal, exit (#176).
+const failureOf = (e) => e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`);
+
+// `recover(e)`, given, is handed a failed child and returns the stdout to use
+// instead, or null when the failure stands. `why`, given, says what the
+// failure leaves unanswerable.
+function run(cmd, args, { maxBuffer, recover, why } = {}) {
   try {
-    return execFileSync(cmd, args, { encoding: "utf8", ...(maxBuffer ? { maxBuffer } : {}) });
+    return spawn(cmd, args, { maxBuffer, capture: !!recover });
   } catch (e) {
+    const recovered = recover?.(e);
+    if (recovered != null) return recovered;
     // Names the cause, never the child's stderr — execFileSync forwarded it
-    // already (no `stdio` above), so interpolating it emits every byte twice.
-    // `e.message` is the same string, not a fallback: Node builds it as
-    // `Command failed: <cmd>\n<stderr>`. Three disjoint shapes — Node-aborted
-    // (ENOENT/ENOBUFS), signal, exit (#176).
+    // already, so interpolating it emits every byte twice. A recoverable read
+    // captured it instead, so that one is forwarded here, once, now that the
+    // failure stands. `e.message` is the same string, not a fallback: Node
+    // builds it as `Command failed: <cmd>\n<stderr>`.
+    if (recover && e.stderr) writeAll(2, e.stderr);
     // A quota refusal names itself first (#262); every other cause reports
     // exactly as it always has, on this same line and this same exit code.
     // `?? ""` stays — RegExp.test would coerce an absent stderr to the string
@@ -142,7 +165,7 @@ function run(cmd, args, maxBuffer) {
     // it does nothing: encoding: "utf8" above makes e.stderr a string whenever
     // a child ran, and test() ToString-coerces anything else regardless.
     if (RATE_LIMITED.test(e.stderr ?? "")) emitRateLimited(`${cmd} ${args[0]} ${args[1]}`);
-    die(`${cmd} failed: ${e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)}`);
+    die(`${cmd} failed: ${failureOf(e)}${why ? ` — ${why}` : ""}`);
   }
 }
 
@@ -171,8 +194,8 @@ const cut = (s, n = 120) => (s.length > n ? `${s.slice(0, n)}… (truncated)` : 
 // rather than cited by line, since both files move. Parity with them is
 // partial on purpose: those check the discriminating field of every row, the
 // row-level checks here refuse on object-ness alone — see the next comment.
-function runJson(cmd, args, shape, maxBuffer) {
-  const raw = run(cmd, args, maxBuffer);
+function runJson(cmd, args, shape, opts) {
+  const raw = run(cmd, args, opts);
   let parsed;
   try {
     parsed = JSON.parse(raw);
@@ -292,44 +315,61 @@ sweep();
 // positional of its own, so any leftover token is one.
 stray();
 
-// The spawn primitive for the reads allowed to fail — the `origin` remote the
-// host comes from, and the behind-count's own probes — answering null where
-// run() would die. Its child's env drops GIT_DIR and GIT_WORK_TREE (gitEnv()):
-// either one outranks the child's cwd, and an ambient GIT_DIR answers `remote
-// get-url origin` for a DIFFERENT repository, silently, at exit 0 — which
-// would bind every `gh api --hostname` below to a host the caller never named.
+// The spawn primitive for the reads allowed to fail — the behind-count's own
+// probes — answering null where run() would die.
 function tryRun(cmd, args) {
-  vlog(`$ ${cmd} ${args.join(" ")}`);
   try {
-    return execFileSync(cmd, args, { encoding: "utf8", env: gitEnv() });
+    return spawn(cmd, args);
   } catch (e) {
     // Same discipline as run(), and it matters more here: --quiet suppresses
     // vlog entirely, so under the controller's Monitor this line is discarded
     // and the interpolated stderr would have been paid for and then thrown
     // away. Name the cause; the child's own bytes already reached the caller.
-    vlog(
-      `    ${NAME}: ${cmd} failed: ${
-        e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)
-      }`,
-    );
+    vlog(`    ${NAME}: ${cmd} failed: ${failureOf(e)}`);
     return null;
   }
 }
 
-// --- The repository's host ------------------------------------------------
+const WORKFLOWS_DIR = ".github/workflows";
+
+// `--workflow-file` names a repo-relative path, read at both commits like a
+// discovered one. It is split into the directory read and the entry picked
+// out of it, so it travels the same tree shape discovery does. A path that
+// could leave the repository, or that names no directory, is refused before
+// any read.
+let wfDir = WORKFLOWS_DIR;
+let wfEntry = null;
+if (workflowFileArg) {
+  const segs = workflowFileArg.replace(/^(?:\.\/)+/, "").split("/");
+  if (workflowFileArg.startsWith("/") || segs.length < 2 || segs.some((s) => s === "" || s === "." || s === "..")) {
+    die(`--workflow-file takes a repo-relative path such as ${WORKFLOWS_DIR}/ci.yml, read at the PR's head and base commits — got '${workflowFileArg}'`);
+  }
+  wfEntry = segs.pop();
+  wfDir = segs.join("/");
+}
+
+// --- The repository and its host -------------------------------------------
 // Every read up to the run query is `gh api`, and `gh api` does NOT infer the
 // host from the local remote the way `gh pr` and `gh run` do — on a GitHub
-// Enterprise repo it silently 404s against github.com. So the host is derived
-// once, here, from the cwd's `origin` remote and named on every `gh api` call;
-// owner and name stay gh's own `{owner}`/`{repo}` resolution from that same
-// cwd. A cwd with no origin to read is exit 2: the repository the question is
-// about cannot be resolved at all, and guessing a host could answer for a
-// different one.
-const remote = tryRun("git", ["remote", "get-url", "origin"]);
-const host = remote?.trim().replace(/^(git@|https:\/\/|ssh:\/\/git@)/, "").replace(/[:/].*$/, "");
-if (!host) {
-  die("git remote get-url origin failed — no repository to resolve from this cwd, so neither the PR nor its workflows can be read");
-}
+// Enterprise repo it silently 404s against github.com. So the host is named on
+// every `gh api` call, and it is taken from gh's own resolution of the cwd's
+// repository — the same resolution that fills `{owner}`/`{repo}` in those
+// calls — never parsed out of a remote URL. gh already handles what a URL
+// parse gets wrong: credentials in the URL (`https://x-access-token:…@host/`),
+// ssh host aliases, and a repository whose remote is not named `origin`.
+// A cwd gh resolves no repository from is exit 2: the question cannot be asked.
+const repoView = runJson(
+  "gh",
+  ["repo", "view", "--json", "nameWithOwner,url"],
+  (v) => {
+    if (!isObject(v)) return "expected an object";
+    if (typeof v.nameWithOwner !== "string" || !/^[^/\s]+\/[^/\s]+$/.test(v.nameWithOwner)) return `nameWithOwner is not owner/name (${saw(v, "nameWithOwner")})`;
+    if (typeof v.url !== "string" || !URL.canParse(v.url) || !new URL(v.url).hostname) return `url carries no host (${saw(v, "url")})`;
+    return null;
+  },
+  { why: "no GitHub repository resolves from this cwd's git remotes, so neither the PR nor its workflows can be read" },
+);
+const host = new URL(repoView.url).hostname;
 
 // --- PR facts and both workflow trees, read at explicit commits -------------
 // The workflow the expected jobs come from is read at the PR's own commits —
@@ -352,84 +392,112 @@ if (!host) {
 // the tip. When the two agree, the tree already read is the right one;
 // otherwise a second read addresses `baseRefOid` itself and must answer for
 // exactly that commit, or exit 2 — never the tip's tree in its place.
-const WORKFLOWS_DIR = ".github/workflows";
 
-// `--workflow-file` names a repo-relative path, read at both commits like a
-// discovered one. It is split into the directory read and the entry picked
-// out of it, so it travels the same tree shape discovery does. A path that
-// could leave the repository, or that names no directory, is refused before
-// any read.
-let wfDir = WORKFLOWS_DIR;
-let wfEntry = null;
-if (workflowFileArg) {
-  const segs = workflowFileArg.replace(/^(?:\.\/)+/, "").split("/");
-  if (workflowFileArg.startsWith("/") || segs.length < 2 || segs.some((s) => s === "" || s === "." || s === "..")) {
-    die(`--workflow-file takes a repo-relative path such as ${WORKFLOWS_DIR}/ci.yml, read at the PR's head and base commits — got '${workflowFileArg}'`);
-  }
-  wfEntry = segs.pop();
-  wfDir = segs.join("/");
-}
-
+// Every commit's workflow directory is read as `file(path:)` — the tree entry
+// at that path — because the entry's `type` is what tells a directory from
+// anything else standing there: a file, or a submodule (`commit`), whose
+// `object` reads back null exactly as a missing path's would.
 const TREE_FRAGMENT =
   "fragment wf on GitObject { __typename ... on Tree { entries { name type object { __typename ... on Blob { text isTruncated } } } } }";
+const DIR_ENTRY = "file(path: $dir) { type object { ...wf } }";
 const PR_QUERY = `${TREE_FRAGMENT}
-query($owner: String!, $name: String!, $pr: Int!, $dir: String!, $headExpr: String!, $headTreeExpr: String!) {
+query($owner: String!, $name: String!, $pr: Int!, $dir: String!, $headExpr: String!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $pr) {
       headRefName headRefOid baseRefName baseRefOid state mergeStateStatus
-      baseRef { target { oid ... on Commit { file(path: $dir) { object { ...wf } } } } }
+      baseRef { target { oid ... on Commit { ${DIR_ENTRY} } } }
     }
-    head: object(expression: $headExpr) { oid }
-    headTree: object(expression: $headTreeExpr) { ...wf }
+    head: object(expression: $headExpr) { oid ... on Commit { ${DIR_ENTRY} } }
   }
 }`;
 const BASE_QUERY = `${TREE_FRAGMENT}
-query($owner: String!, $name: String!, $baseExpr: String!, $baseTreeExpr: String!) {
+query($owner: String!, $name: String!, $dir: String!, $baseExpr: String!) {
   repository(owner: $owner, name: $name) {
-    base: object(expression: $baseExpr) { oid }
-    baseTree: object(expression: $baseTreeExpr) { ...wf }
+    base: object(expression: $baseExpr) { oid ... on Commit { ${DIR_ENTRY} } }
   }
 }`;
+// Where in each reply a `file` field sits, as GraphQL error paths spell it.
+const HEAD_DIR = "repository.head.file";
+const TIP_DIR = "repository.pullRequest.baseRef.target.file";
+const BASE_DIR = "repository.base.file";
 
 // `shape` here receives `data.repository`, the one object every query above
 // answers inside; a reply without it is refused before `shape` runs. The
 // query goes out on one line so its command echo stays one line too.
+//
+// A path that does not exist is not answered with a quiet null: `file(path:)`
+// returns null AND a top-level `NOT_FOUND` error for it, and gh exits 1 on any
+// reply carrying errors, printing that reply on stdout all the same
+// (measured). That failure is the one that can be an answer: when every error
+// in the reply is a NOT_FOUND on one of the `file` fields named in
+// `absentAt`, the reply stands, and those paths come back in `notFound` — the
+// only way a workflow directory is ever read as absent. Any other error, or a
+// NOT_FOUND anywhere else (no such PR, no such repository), fails the read.
 //
 // The reply carries the text of every workflow file at up to two commits, so
 // it gets a buffer sized for that rather than execFileSync's 1 MiB default:
 // past the default the read dies ENOBUFS, and a repo whose workflows are
 // merely large would get exit 2 where reading them off disk never did.
 const TREE_READ_BYTES = 64 * 1024 * 1024;
-function graphql(query, vars, shape) {
+function graphql(query, vars, absentAt, shape) {
   const fields = Object.entries(vars).flatMap(([k, v]) => [typeof v === "number" ? "-F" : "-f", `${k}=${v}`]);
-  return runJson(
+  let notFound = [];
+  const recover = (e) => {
+    if (e.status !== 1) return null;
+    let reply;
+    try {
+      reply = JSON.parse(e.stdout);
+    } catch {
+      return null;
+    }
+    const errors = isObject(reply) ? reply.errors : undefined;
+    if (!Array.isArray(errors) || errors.length === 0) return null;
+    const paths = errors.map((err) => (isObject(err) && err.type === "NOT_FOUND" && Array.isArray(err.path) ? err.path.join(".") : null));
+    if (paths.some((p) => !absentAt.includes(p))) return null;
+    notFound = paths;
+    return e.stdout;
+  };
+  const repo = runJson(
     "gh",
     ["api", "graphql", "--hostname", host, "-F", "owner={owner}", "-F", "name={repo}", ...fields, "-f", `query=${query.replace(/\s+/g, " ")}`],
     (v) => {
       if (!isObject(v) || !isObject(v.data) || !isObject(v.data.repository)) return "expected an object carrying data.repository";
-      return shape(v.data.repository);
+      return shape?.(v.data.repository) ?? null;
     },
-    TREE_READ_BYTES,
+    { maxBuffer: TREE_READ_BYTES, recover },
   ).data.repository;
+  return { repo, notFound };
+}
+
+// One commit's workflow directory, from the `file` entry `commit` carries:
+// the Tree, or null ONLY where GitHub said NOT_FOUND for exactly that path. A
+// null with no such error is a reply this script does not understand, and an
+// entry that is there but is not a directory is not an absence either.
+function dirAt(commit, side, at, notFound) {
+  const entry = isObject(commit) ? commit.file : undefined;
+  if (entry === null && notFound.includes(at)) return null;
+  if (!isObject(entry) || entry.type !== "tree") {
+    die(`${wfDir} at the ${side} commit is not a readable directory (got ${cut(JSON.stringify(entry) ?? "nothing")})`);
+  }
+  return entry.object;
 }
 
 const headExpr = `refs/pull/${pr}/head`;
-const prRead = graphql(PR_QUERY, { pr, dir: wfDir, headExpr, headTreeExpr: `${headExpr}:${wfDir}` }, (repo) => {
+const prRead = graphql(PR_QUERY, { pr, dir: wfDir, headExpr }, [HEAD_DIR, TIP_DIR], (repo) => {
   const v = repo.pullRequest;
   if (!isObject(v)) return `pullRequest is not an object (${saw(repo, "pullRequest")})`;
-  if (typeof v.headRefName !== "string" || !v.headRefName) return `headRefName (the branch) is not a non-empty string (${saw(v, "headRefName")})`;
-  if (typeof v.headRefOid !== "string" || !v.headRefOid) return `headRefOid (the head sha) is not a non-empty string (${saw(v, "headRefOid")})`;
-  if (typeof v.baseRefName !== "string" || !v.baseRefName) return `baseRefName (the base branch) is not a non-empty string (${saw(v, "baseRefName")})`;
-  if (typeof v.baseRefOid !== "string" || !v.baseRefOid) return `baseRefOid (the base sha) is not a non-empty string (${saw(v, "baseRefOid")})`;
+  for (const [key, what] of [["headRefName", "the branch"], ["headRefOid", "the head sha"], ["baseRefName", "the base branch"], ["baseRefOid", "the base sha"]]) {
+    if (typeof v[key] !== "string" || !v[key]) return `${key} (${what}) is not a non-empty string (${saw(v, key)})`;
+  }
   return null;
 });
-const prInfo = prRead.pullRequest;
+const prInfo = prRead.repo.pullRequest;
 const branch = prInfo.headRefName;
 const prHead = prInfo.headRefOid;
 const baseOid = prInfo.baseRefOid;
 vlog(`    branch=${branch} head=${prHead} base=${prInfo.baseRefName}@${baseOid} state=${prInfo.state} mergeState=${prInfo.mergeStateStatus}`);
 
-const headOid = prRead.head?.oid;
+const headOid = prRead.repo.head?.oid;
 if (headOid !== prHead) {
   die(`${headExpr} resolves to ${headOid ?? "nothing"}, not the PR head ${prHead} — the head moved mid-read; re-query rather than judge one commit's workflow against another's run`);
 }
@@ -437,12 +505,12 @@ if (headOid !== prHead) {
 let baseTree;
 const baseTip = prInfo.baseRef?.target;
 if (isObject(baseTip) && baseTip.oid === baseOid && Object.hasOwn(baseTip, "file")) {
-  baseTree = baseTip.file === null ? null : baseTip.file?.object;
+  baseTree = dirAt(baseTip, "base", TIP_DIR, prRead.notFound);
 } else {
-  const baseRead = graphql(BASE_QUERY, { baseExpr: baseOid, baseTreeExpr: `${baseOid}:${wfDir}` }, () => null);
-  const got = baseRead.base?.oid;
+  const baseRead = graphql(BASE_QUERY, { dir: wfDir, baseExpr: baseOid }, [BASE_DIR]);
+  const got = baseRead.repo.base?.oid;
   if (got !== baseOid) die(`the PR's base commit ${baseOid} reads back as ${got ?? "nothing"} — its workflow cannot be bound to it`);
-  baseTree = baseRead.baseTree;
+  baseTree = dirAt(baseRead.repo.base, "base", BASE_DIR, baseRead.notFound);
 }
 
 // One tree entry's YAML text, or null when the blob cannot be read whole:
@@ -454,8 +522,9 @@ const blobText = (entry) => {
 };
 
 // The CI workflow in one commit's tree: `{ path, text }`, or null ONLY where
-// that commit genuinely has none — no workflows directory, a directory holding
-// no YAML at all, or (explicit route) no entry at the named path. Every other
+// that commit genuinely has none — no workflows directory (GitHub's NOT_FOUND
+// for that path, see graphql()), a directory holding no YAML at all, or
+// (explicit route) no entry at the named path. Every other
 // outcome is die() (exit 2, "could not be answered"): the path not a
 // directory, a YAML blob that cannot be read whole, two files sharing the
 // workflow's name. Absence must be established, never inferred from a read
@@ -480,8 +549,10 @@ function findWorkflow(tree, side, noneNamedIsAbsent) {
     if (text === null) die(`cannot read ${wfDir}/${wfEntry} at the ${side} commit — not a file whose text came back whole`);
     return { path: `${wfDir}/${wfEntry}`, text };
   }
-  const yamls = tree.entries.filter((e) => e.type === "blob" && /\.ya?ml$/.test(String(e.name)));
-  const unreadable = yamls.filter((e) => blobText(e) === null).map((e) => `${wfDir}/${e.name}`);
+  const yamls = tree.entries
+    .filter((e) => e.type === "blob" && /\.ya?ml$/.test(String(e.name)))
+    .map((e) => ({ name: e.name, path: `${wfDir}/${e.name}`, text: blobText(e) }));
+  const unreadable = yamls.filter((y) => y.text === null).map((y) => y.path);
   if (unreadable.length) {
     die(`cannot read ${unreadable.join(", ")} at the ${side} commit — the text came back absent, binary or truncated, so which workflow it is cannot be settled`);
   }
@@ -493,9 +564,9 @@ function findWorkflow(tree, side, noneNamedIsAbsent) {
     // `name: CI  # main pipeline` parsed as a workflow called `CI  # main
     // pipeline`, so a correctly configured repo reported no-ci. ` #` with the
     // space is what makes it a comment in YAML, so `name: CI#1` stays `CI#1`.
-    const m = blobText(e).match(/^name:\s*(.+?)(?:\s+#.*)?\s*$/m);
+    const m = e.text.match(/^name:\s*(.+?)(?:\s+#.*)?\s*$/m);
     const name = m ? m[1].replace(/^['"]|['"]$/g, "") : null;
-    if (name === workflow) candidates.push({ path: `${wfDir}/${e.name}`, text: blobText(e) });
+    if (name === workflow) candidates.push({ path: e.path, text: e.text });
   }
   if (candidates.length > 1) {
     die(
@@ -664,7 +735,7 @@ if (noCi) {
   // refuses on an underivable workflow at either commit, and that refusal
   // belongs before the run query rather than after it.
   const baseJobs = expectedJobs(baseWf.text, `${baseWf.path} at the base commit`);
-  const headWf = findWorkflow(prRead.headTree, "head", true);
+  const headWf = findWorkflow(dirAt(prRead.repo.head, "head", HEAD_DIR, prRead.notFound), "head", true);
   const headJobs = headWf === null ? [] : expectedJobs(headWf.text, `${headWf.path} at the head commit`);
   const droppedByHead = baseJobs.filter((j) => !headJobs.includes(j));
   vlog(`    head jobs (${headJobs.length}): ${headJobs.join(", ") || `none — no '${workflow}' workflow at the head`}`);
@@ -811,7 +882,7 @@ if (noCi) {
 }
 
 // --- Behind-count ---------------------------------------------------------
-// Uses the host derived above, which is why it no longer reads `origin` here.
+// Uses the repository and host resolved above, so it reads neither again here.
 //
 // This block MUST NOT use run(): run()'s failure path calls die(), which calls
 // process.exit(2) and terminates before any surrounding catch can see it. An
@@ -823,21 +894,17 @@ if (noCi) {
 
 let behind = null;
 try {
-  const repoJson = tryRun("gh", ["repo", "view", "--json", "nameWithOwner"]);
-  if (repoJson !== null) {
-    const repo = JSON.parse(repoJson).nameWithOwner;
-    const cmpJson = tryRun("gh", ["api", "--hostname", host, `repos/${repo}/compare/${base}...${prHead}`]);
-    if (cmpJson !== null) {
-      const cmp = JSON.parse(cmpJson);
-      // Shaped like every other gh read here (#269), but fail-SOFT: a compare
-      // reply without a numeric `behind_by` — a 404 body from the wrong host
-      // or base is the live case — leaves `behind` null, this block's
-      // documented unknown, instead of `undefined`, which JSON.stringify drops
-      // from the payload entirely, taking the contract below and its
-      // unknown-vlog with it. Still never dies: the probe stays advisory.
-      behind = typeof cmp?.behind_by === "number" ? cmp.behind_by : null;
-      vlog(`    behind_by=${behind} (status=${cmp?.status})`);
-    }
+  const cmpJson = tryRun("gh", ["api", "--hostname", host, `repos/${repoView.nameWithOwner}/compare/${base}...${prHead}`]);
+  if (cmpJson !== null) {
+    const cmp = JSON.parse(cmpJson);
+    // Shaped like every other gh read here (#269), but fail-SOFT: a compare
+    // reply without a numeric `behind_by` — a 404 body from the wrong host
+    // or base is the live case — leaves `behind` null, this block's
+    // documented unknown, instead of `undefined`, which JSON.stringify drops
+    // from the payload entirely, taking the contract below and its
+    // unknown-vlog with it. Still never dies: the probe stays advisory.
+    behind = typeof cmp?.behind_by === "number" ? cmp.behind_by : null;
+    vlog(`    behind_by=${behind} (status=${cmp?.status})`);
   }
 } catch (e) {
   // JSON.parse of a malformed payload lands here; the subprocess failures are

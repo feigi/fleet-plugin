@@ -83,7 +83,7 @@
 // it in the same sentence, ahead of the `drops` — the clause bound starts at
 // `drops` and leaves it outside the pin. And it covers four sites, not every
 // statement in the repo: the script-surface row in
-// `docs/specs/2026-07-23-fleet-plugin-design.md` names both fields correctly
+// `docs/specs/2026-07-23-fleet-plugin-design.md` names every dropped field
 // today and is left to the pattern its siblings already use —
 // `worktree-audit.test.mjs` and `no-undo-audit.test.mjs` each check their
 // script's Out cell against a real run of that script, which for ci-state.mjs
