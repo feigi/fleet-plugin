@@ -1,7 +1,7 @@
 ---
-name: fleet-implementer
-description: A `/skill:run-team` implementer — takes one ticket, works in its own claimed worktree, opens one PR. Dispatched by the controller in phase 2, never invoked directly.
-model: "@slow:high"
+name: fleet-implementer-slow-medium
+description: A `/skill:run-team` implementer at cell slow-medium. Dispatched by the controller in phase 2, never invoked directly; the body is byte-identical across every fleet-implementer-* definition.
+model: "@slow:medium"
 ---
 
 **You are an unattended fleet member.** No maintainer is reachable, no user

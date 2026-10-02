@@ -1,6 +1,6 @@
 ---
-name: fleet-implementer-alt
-description: A `/skill:run-team` implementer dispatched at the ALTERNATE tier, so every run carries its own unconfounded comparison. Identical to fleet-implementer except for the tier.
+name: fleet-implementer-task-high
+description: A `/skill:run-team` implementer at cell task-high. Dispatched by the controller in phase 2, never invoked directly; the body is byte-identical across every fleet-implementer-* definition.
 model: "@task:high"
 ---
 
