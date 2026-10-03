@@ -3,12 +3,13 @@
 // and owns every per-PR ruling the controller used to make before dispatch —
 // both mutual-exclusion scans, the suggested-fix re-derivation, `refuted=false`
 // ≠ apply, per-site measurement for a sibling-site extension, and reading
-// `testEnvironment`/`cwdAudit` before acting on a `test_run`. Their new home is
-// review-and-fix.md's `## The review result file`, which is the copy the
-// fix-applier reads. The controller-side copies in run-team/SKILL.md are due to
-// be retired once the controller stops making these rulings (§ 8), and a
-// retirement that loses the destination copy too would leave the rulings made
-// by nobody, with every pin that read SKILL.md simply deleted alongside it.
+// `testEnvironment`/`cwdAudit` before acting on a result of the shared test
+// run. Their new home is review-and-fix.md's `## The review result file`, which
+// is the copy the fix-applier reads. The controller-side copies in
+// run-team/SKILL.md are due to be retired once the controller stops making
+// these rulings (§ 8), and a retirement that loses the destination copy too
+// would leave the rulings made by nobody, with every pin that read SKILL.md
+// simply deleted alongside it.
 //
 // Two halves. The recipes half is not prose: a `jq` path naming a field the
 // result does not carry prints `null` at exit 0, which reads exactly like an
@@ -19,11 +20,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./prose-pin.mjs";
+import { between, paragraph, phrase } from "./prose-pin.mjs";
 import { DIGEST_KEYS } from "./review-core.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const DOC = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
+const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
 const RESULT_KEYS = new Set([...DIGEST_KEYS, "snapshot", "survived", "refuted", "unverified"]);
 
 const section = () => between(DOC, "\n## The review result file\n", "\n## Specialists\n", "review-and-fix.md's result-file section");
@@ -92,9 +94,40 @@ test("the fix-applier owns refuted=false ≠ apply, and per-site measurement for
   );
 });
 
-test("the fix-applier reads testEnvironment and cwdAudit before acting on any test_run, and re-runs nothing", () => {
-  const p = ruling("**Read `testEnvironment` and `cwdAudit` before you act on any `test_run`.**");
+test("the fix-applier reads testEnvironment and cwdAudit before acting on any result of the shared test run, and re-runs nothing", () => {
+  const p = ruling("**Read `testEnvironment` and `cwdAudit` before you act on any result of the shared test run.**");
   assert.match(p, phrase("status --porcelain -uall"), "the cwdAudit check lost its explicit untracked mode");
   assert.match(p, phrase("never revert content you did not write"));
   assert.match(p, phrase("re-run nothing"), "a dimensionsUnrun entry now reads as an instruction to re-run the review");
+});
+
+// The two run-team/SKILL.md sentences that hand the fix-applier the same ruling
+// were reworded off the specialists' retired `test_run` field (#2374), and
+// nothing read either one. They go with the rest of the SKILL.md copies (§ 8).
+test("run-team's digest paragraph tells the controller the fix-applier reads testEnvironment before acting on any count from the shared test run", () => {
+  const p = paragraph(
+    RUN_TEAM,
+    "`testEnvironment` says what the review's shared test run is evidence about",
+    "run-team/SKILL.md's testEnvironment digest paragraph",
+    { emphasisTolerant: true },
+  );
+  assert.match(
+    p,
+    phrase("fix-applier reads it before acting on any count from the shared test run"),
+    "the digest paragraph no longer says the fix-applier reads testEnvironment before acting on a count from the shared test run",
+  );
+});
+
+test("run-team's fix-applier dispatch hands it testEnvironment and cwdAudit before any result of the shared test run", () => {
+  const p = between(
+    RUN_TEAM,
+    "\n**Then dispatch a fix-applier** — on `DISPATCH fix-pr PR#<M>`",
+    "\n**A `DISPATCH fix-pr PR#<M>` on a conflict hold**",
+    "run-team/SKILL.md's fix-applier dispatch paragraph",
+  );
+  assert.match(
+    p,
+    phrase("`testEnvironment`/`cwdAudit` before any result of the shared test run."),
+    "the fix-applier dispatch paragraph no longer says to read testEnvironment/cwdAudit before a result of the shared test run",
+  );
 });

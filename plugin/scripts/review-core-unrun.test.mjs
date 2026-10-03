@@ -292,27 +292,22 @@ test("scope_searched is in the required array, not only in its own description",
   const { required } = FINDINGS_SCHEMA;
   assert.ok(Array.isArray(required), "FINDINGS_SCHEMA no longer has a top-level required array — update this test");
   assert.ok(required.includes("scope_searched"), "scope_searched is documented Required and is not in the required array (#139)");
-  assert.ok(required.includes("test_run"), "test_run is not required, so an unrun dimension can still return a clean-looking object (#137)");
 });
 
-// `additionalProperties: false` REJECTS an undeclared field, so a `required`
-// entry whose property is not declared is worse than neither: the specialist is
-// forced to send a field the schema then drops. Both halves, one pin.
-test("test_run is declared, carries the command and count, and does not force pass/fail", () => {
-  const testRun = FINDINGS_SCHEMA.properties.test_run;
-  assert.ok(testRun, "test_run is not declared in FINDINGS_SCHEMA's properties — additionalProperties:false drops it");
-  for (const field of ["command", "tests", "pass", "fail"]) {
-    assert.ok(testRun.properties[field], `test_run no longer declares ${field}`);
-  }
-  assert.ok(Array.isArray(testRun.required), "test_run no longer names which of its fields are required — update this test");
-  assert.ok(testRun.required.includes("command"), "test_run.command must be required — a count with no command bounds nothing");
-  assert.ok(testRun.required.includes("tests"), "test_run.tests must be required — it is the count every specialist copies from the shared run");
-  // A runner whose output does not split pass from fail must not be forced to
-  // invent numbers: an unanswerable required field is answered with a guess,
-  // and a guessed count is worse than an absent one.
-  for (const optional of ["pass", "fail"]) {
-    assert.ok(!testRun.required.includes(optional), `${optional} must stay optional — see the comment above this assertion`);
-  }
+// The review's ONE shared run is the single record of the test run: a
+// specialist is not asked to copy it, so the payload neither requires nor
+// declares a field for the copy. Both halves pinned together, because under
+// `additionalProperties: false` either one re-added alone is a contract the
+// specialist cannot meet — a required field the schema rejects, or a declared
+// one nothing reads.
+test("FINDINGS_SCHEMA neither requires nor declares a specialist copy of the test run", () => {
+  assert.deepEqual(
+    [...FINDINGS_SCHEMA.required].sort(),
+    ["dimension", "findings", "scope_searched"],
+    "FINDINGS_SCHEMA's required list changed — a specialist must return exactly these",
+  );
+  assert.ok(!Object.hasOwn(FINDINGS_SCHEMA.properties, "test_run"), "FINDINGS_SCHEMA declares test_run again — nothing reads a specialist's copy of the shared run");
+  assert.equal(FINDINGS_SCHEMA.additionalProperties, false);
 });
 
 // The entry, not the call site. `unrunEntries` returns zero entries or one per
@@ -403,20 +398,34 @@ test("the returned object carries dimensionsUnrun alongside dimensionsRun", () =
   assert.match(tail, /dimensionsUnrun/, "the return never surfaces dimensionsUnrun — the classification dies in the script (#137, #138)");
 });
 
-// The schema field is inert unless the prompt points at it — the specialists
-// are what fill it in, and a field nothing asks for comes back absent from
-// every one of them. #2315 moved the instruction into `sharedRunNote`, the
-// Tests paragraph every specialist prompt interpolates, and what it says now is
-// to COPY the shared run — including a run that stated no counts.
-test("the shared-run note names test_run as where the shared run gets reported, even one with no counts", () => {
-  for (const run of [
-    { command: "node --test", logPath: "/r/test-run.log", tests: 5, pass: 5, fail: 0 },
-    { command: "node --test", logPath: "/r/test-run.log", error: "no summary" },
+// The note hands every specialist the shared run and tells it not to run the
+// full command itself — and nothing more about the run: the shared run is the
+// single record of it, so no specialist is told to report or copy it anywhere.
+// Every rendering the note has — usable, no counts (NOT usable), and failing
+// tests for the owner and for a non-owner — is checked, because each appends a
+// different paragraph to the same opening one.
+test("the shared-run note hands over the run and forbids a rerun, and asks for no copy of it in any rendering", () => {
+  const usable = { command: "node --test", logPath: "/r/test-run.log", exitCode: 0, tests: 5, pass: 5, fail: 0 };
+  const noCounts = { command: "node --test", logPath: "/r/test-run.log", error: "no summary" };
+  const failing = { command: "node --test", logPath: "/r/test-run.log", exitCode: 1, tests: 5, pass: 3, fail: 2 };
+  for (const [name, run, key, paragraph] of [
+    ["usable", usable, "tests", null],
+    ["no counts", noCounts, "tests", /This run is NOT usable: /],
+    ["failing, owner", failing, "correctness", /filing them is YOUR job in this review/],
+    ["failing, non-owner", failing, "tests", /the correctness dimension files the finding/],
   ]) {
-    const note = sharedRunNote(run, "correctness", "tests");
-    assert.match(note, /`test_run`/, "the note never names test_run, so nothing fills the field the schema requires");
-    assert.match(note, /`tests: 0` when it states\s+none/, "the note no longer says what to report for a run with no counts");
-    assert.match(note, /never a run of your own/);
+    const note = sharedRunNote(run, "correctness", key);
+    assert.doesNotMatch(note, /test_run/, `${name}: the note still names test_run`);
+    assert.match(note, /Do NOT run that full command yourself/, `${name}: the note no longer forbids a rerun`);
+    assert.match(note, /\n {2}command: node --test\n/, `${name}: the note lacks the command line`);
+    assert.match(note, /\n {2}counts: {2}\S/, `${name}: the note lacks the counts line`);
+    assert.match(note, /\n {2}exit: {4}\S/, `${name}: the note lacks the exit line`);
+    assert.match(note, /\n {2}log: {5}\/r\/test-run\.log\n/, `${name}: the note lacks the log line`);
+    // The opening paragraph ends on the log instruction: nothing after it
+    // asks the specialist to report the run.
+    const first = note.split(/\n(?=This run is NOT usable|It has )/)[0];
+    assert.match(first, /Read the log for anything the counts do not say\.$/, `${name}: the opening paragraph says more after the log instruction`);
+    if (paragraph) assert.match(note, paragraph, `${name}: the paragraph this rendering appends is missing`);
   }
 });
 
@@ -437,13 +446,13 @@ test("run-team's Reviewers section documents dimensionsUnrun, not only dimension
 });
 
 // What the absence of an unrun classification ESTABLISHES is that a suite ran —
-// never that the dimension is covered. `unrunReason` above reads `test_run`'s
-// counts and quotes `command` into its message; it never compares that command
-// against the one the dispatch handed out, so a specialist that substituted a
-// narrower runner reports a non-zero count, is not classified unrun, and reads
-// as covered having validated a fraction of the suite. Comparing the two was
-// refuted 2-0 and stays refuted (#535) — the doc claiming only what the
-// classifier can see is the remedy, and nothing pinned the word it turns on.
+// never that the dimension is covered. `unrunReason` above reads the shared
+// run's counts and quotes its `command` into its message; it never judges what
+// that command covers, so a narrower runner reports a non-zero count, is not
+// classified unrun, and reads as covered having validated a fraction of the
+// suite. Comparing that command against the dispatched one was refuted 2-0 and
+// stays refuted (#535) — the doc claiming only what the classifier can see is
+// the remedy, and nothing pinned the word it turns on.
 //
 // The positive pin carries the claim: sliced to the paragraph so a failure
 // prints it rather than the whole 2000-line doc, matched through `phrase` so a

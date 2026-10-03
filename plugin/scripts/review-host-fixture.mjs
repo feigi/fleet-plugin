@@ -38,16 +38,14 @@ export const SNAP = {
   repoVerified: true,
   testCmd: "node --test",
 };
-export const RAN = { command: "node --test", tests: 5, pass: 5, fail: 0 };
 // #2315. The shared test run's agent report — the `test-run` dispatch every
 // review makes once, before any specialist. Clean, so a script that is about
 // something else need not answer it; one that is about it names its own.
 export const SHARED = { exitCode: 0, tests: 5, pass: 5, fail: 0 };
-export const review = (findings, testRun = RAN) => ({
+export const review = (findings) => ({
   dimension: "correctness",
   scope_searched: "CWD-AUDIT: clean /repo",
   findings,
-  test_run: testRun,
 });
 export const finding = (severity) => ({ severity, claim: `a ${severity} claim`, file: "a.js", line: 3, evidence: "line 3 has no else" });
 export const vote = (refuted) => ({ refuted, reason: "measured. CWD-AUDIT: clean /repo" });

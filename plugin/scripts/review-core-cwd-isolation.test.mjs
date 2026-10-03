@@ -25,7 +25,7 @@
 // agent must not write to, `pwd` fixes which directory that is, and the
 // `CWD-AUDIT:` line is what makes a CLEAN run say so. An audit reported only
 // when it finds something is indistinguishable from one never run — the same
-// reading `unrunReason` already applies to a `test_run` reporting nothing, and
+// reading `unrunReason` already applies to a shared test run reporting nothing, and
 // the reason "four files dirty" was found by chance rather than by a report.
 //
 // WHY THESE PINS RENDER RATHER THAN GREP, and why the slice is the pin: same
@@ -335,7 +335,6 @@ function fakeReviewHost(scopeSearched) {
           dimension: "correctness",
           scope_searched: scopeSearched,
           findings: [],
-          test_run: { command: "node --test", tests: 5, pass: 5, fail: 0 },
         };
       throw new Error(`fakeReviewHost: unexpected dispatch ${opts.label}`);
     },

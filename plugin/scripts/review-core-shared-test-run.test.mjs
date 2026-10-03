@@ -18,7 +18,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runReview, DEFAULT_DIMENSIONS, FINDINGS_SCHEMA, CRASHED_REASON } from "./review-core.mjs";
+import { runReview, DEFAULT_DIMENSIONS, CRASHED_REASON } from "./review-core.mjs";
 import { pipeline, parallel, ARGS, SNAP, review, finding, vote, scriptedHost } from "./review-host-fixture.mjs";
 
 const ALL = DEFAULT_DIMENSIONS.map((d) => d.key);
@@ -229,10 +229,47 @@ test("a crashed dimension is listed once, with its crash reason, beside the shar
   assert.equal(result.dimensionsUnrun.find((u) => u.dimension === "types").reason, CRASHED_REASON);
 });
 
-// Downstream readers of `test_run` see the shape they always did.
-test("test_run's shape is unchanged: command and tests required, pass and fail optional, nothing else", () => {
-  const t = FINDINGS_SCHEMA.properties.test_run;
-  assert.deepEqual(Object.keys(t.properties).sort(), ["command", "fail", "pass", "tests"]);
-  assert.deepEqual([...t.required].sort(), ["command", "tests"]);
-  assert.equal(t.additionalProperties, false);
+// The shared run alone decides. A specialist whose payload still carries its
+// own `test_run` — from a prompt that predates the field's removal — is
+// ignored: a count that disagrees with the shared run changes no verdict, and
+// leaves no trace in the result. The baseline is the same script with no stray
+// field, so the comparison is the whole result, not a chosen key.
+test("a specialist's stray test_run never changes the result, and the shared run alone decides", async () => {
+  const stray = (r, testRun) => ({ ...r, test_run: testRun });
+  const cases = [
+    // The shared run counted nothing; a stray copy claims a full suite ran.
+    ["shared tests 0, stray 9999", { exitCode: 0, tests: 0, pass: 0, fail: 0 }, { command: "MARKER-CMD", tests: 9999, pass: 9999, fail: 0 }, {}],
+    // The shared run is clean; a stray copy claims nothing ran. Findings on
+    // three dimensions put an entry in survived, refuted and unverified.
+    [
+      "shared clean, stray 0",
+      { exitCode: 0, tests: 5, pass: 5, fail: 0 },
+      { command: "MARKER-CMD", tests: 0 },
+      {
+        "review:correctness": [review([finding("critical")])],
+        "verify:correctness": [vote(false)],
+        "review:types": [review([finding("important")])],
+        "verify:types": [vote(true)],
+        "review:tests": [review([finding("suggestion")])],
+      },
+    ],
+  ];
+  for (const [name, shared, testRun, extra] of cases) {
+    const base = script({ "test-run": [shared], ...extra });
+    const withStray = Object.fromEntries(
+      Object.entries(base).map(([label, seq]) => [label, label.startsWith("review:") ? seq.map((r) => stray(r, testRun)) : seq]),
+    );
+    const expected = await run(scriptedHost(base).host);
+    const actual = await run(scriptedHost(withStray).host);
+    assert.deepEqual(actual, expected, `${name}: a stray test_run changed the result`);
+    const text = JSON.stringify(actual);
+    assert.doesNotMatch(text, /MARKER-CMD|test_run/, `${name}: the stray test_run reached the result`);
+    if (shared.tests === 0) {
+      assert.deepEqual(actual.dimensionsUnrun.map((u) => u.dimension), ALL, `${name}: not every live dimension is unrun`);
+      assert.doesNotMatch(text, /9999/, `${name}: the stray count reached the result`);
+    } else {
+      assert.deepEqual(actual.dimensionsUnrun, [], `${name}: a stray count of 0 made a dimension unrun`);
+      for (const key of ["survived", "refuted", "unverified"]) assert.equal(actual[key].length, 1, `${name}: ${key} holds no finding — this case tests nothing`);
+    }
+  }
 });

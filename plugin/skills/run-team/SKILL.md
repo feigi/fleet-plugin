@@ -2024,7 +2024,7 @@ up to ~10k characters, in every fix-applier prompt you wrote. The fix-applier
 reads every one off the file and makes every ruling on them
 (`review-and-fix.md`'s **The review result file**). What the digest tells you:
 
-**`testEnvironment` says what every dimension's `test_run` is evidence about**,
+**`testEnvironment` says what the review's shared test run is evidence about**,
 and it is present on a healthy run as well as a degraded one, so there is
 nothing to notice by its absence. The snapshot is `git archive`d and then
 `git init`ed with one commit, and the block that cuts it compares that commit's
@@ -2032,8 +2032,8 @@ tree hash against the reviewed commit's (#1056): verified, a suite run in the
 snapshot collects and runs what a checkout does, and a red is a fact about the
 tree. UNVERIFIED, it is not — tests that ask git what ships decline or fail for
 the environment, and this field carries which line of the cut failed. The
-fix-applier reads it before acting on any `test_run` count; you read it so a
-degraded review never passes for a clean one.
+fix-applier reads it before acting on any count from the shared test run; you
+read it so a degraded review never passes for a clean one.
 `unverified` is *not* "checked and cleared" — a `suggestion` skips the pass by
 policy, and a finding whose refuters all crashed lands there too. Both go to the
 fix-applier with the rest, in the file; never rule on them yourself.
@@ -2104,10 +2104,10 @@ the same `testCmd` you passed the review, and the **path** `<scratch>/review-<pr
 — never the findings. The fix-applier owns every per-PR ruling you once made
 before dispatch: both mutual-exclusion scans, the suggested-fix re-derivation,
 `refuted=false` ≠ apply, per-site measurement for a sibling-site extension, and
-`testEnvironment`/`cwdAudit` before any `test_run`. It holds every finding and
-you hold none, so there is nothing for you to rank, relay or pre-rule — and a
-report from a refuter it spawns that surfaces to you is its to retrieve, never
-yours to scan or pass on.
+`testEnvironment`/`cwdAudit` before any result of the shared test run. It
+holds every finding and you hold none, so there is nothing for you to rank,
+relay or pre-rule — and a report from a refuter it spawns that surfaces to you
+is its to retrieve, never yours to scan or pass on.
 
 **A `DISPATCH fix-pr PR#<M>` on a conflict hold** — the row carries the merge
 bot's unresolved `conflict-hold:#<M>` (`run-merge-bot.md` step 1's fallback) —
@@ -2225,8 +2225,9 @@ all.
 > the rest of the recipes and every ruling on the findings: both
 > mutual-exclusion scans, the suggested-fix re-derivation, `refuted=false` ≠
 > apply, per-site measurement for a sibling-site extension, and `testEnvironment`
-> and `cwdAudit` before any `test_run`. Every one of those rulings is yours —
-> nobody upstream has made one, and the controller never reads the findings.
+> and `cwdAudit` before any result of the shared test run. Every one of those
+> rulings is yours — nobody upstream has made one, and the controller never
+> reads the findings.
 >
 > **Every factual claim your diff restates needs a settling command run
 > against the tree first** — the issue body is a lead, never a citation.

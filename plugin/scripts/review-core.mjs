@@ -40,26 +40,13 @@ import { isDigits } from "./arg.mjs";
 export const FINDINGS_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["dimension", "scope_searched", "findings", "test_run"],
+  required: ["dimension", "scope_searched", "findings"],
   properties: {
     dimension: { type: "string" },
     scope_searched: {
       type: "string",
       description:
         "The exact commands/paths this pass covered. Required so a negative claim is bounded: a grep that found nothing looks identical to a grep never run.",
-    },
-    test_run: {
-      type: "object",
-      additionalProperties: false,
-      required: ["command", "tests"],
-      description:
-        "The review's ONE shared test run, copied from your prompt — you do not run the full suite yourself (#2315). Report it even when it failed or produced nothing.",
-      properties: {
-        command: { type: "string", description: "The shared run's command, verbatim as your prompt states it." },
-        tests: { type: "integer", description: "The shared run's test count as your prompt states it; 0 when it states none." },
-        pass: { type: "integer" },
-        fail: { type: "integer" },
-      },
     },
     findings: {
       type: "array",
@@ -536,9 +523,7 @@ still yours to run.
   counts:  ${countsOf(run) || "none — the run produced no counts"}
   exit:    ${run.exitCode ?? "(not reported)"}
   log:     ${run.logPath}
-Read the log for anything the counts do not say. Report this run in
-\`test_run\` — its command verbatim and these counts, \`tests: 0\` when it states
-none — never a run of your own.`,
+Read the log for anything the counts do not say.`,
   ];
   const why = testRunReason(run);
   if (why)
