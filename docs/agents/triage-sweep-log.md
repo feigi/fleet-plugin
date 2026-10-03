@@ -114,8 +114,11 @@ unconfirmed.
 
 **After:** 100 open issues; 44 carrying `Deferred from PR #<n>`; 0
 `needs-triage` (`gh issue list --state open --label needs-triage --limit 500`
-returns `[]`). The open and deferred counts include issues filed by fleet runs
-during the sweep, so they are not before-minus-closed.
+returns `[]`). Open-count reconciliation: 101 before − 2 closed by this sweep
+(#2473, #2474) − 1 closed by an unrelated merge mid-sweep (#2391,
+2026-10-03T08:52:59Z) + 2 filed mid-sweep (#2485, #2490) = 100. The
+deferred count was not measured before the sweep, so it has no
+before-and-after comparison.
 
 **Revert:** reopen #2473 and #2474; on all six, restore `needs-triage` and drop
 the category and state labels this sweep added; delete this sweep's triage
