@@ -22,6 +22,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { slowTransport, SSH_URL } from "./slow-transport.mjs";
 import { writeExecStub } from "./exec-stub.mjs";
+import { hasAttribute } from "./worktree-porcelain.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./release-ticket.sh", import.meta.url));
 const INFLIGHT = fileURLToPath(new URL("./inflight.sh", import.meta.url));
@@ -994,6 +995,7 @@ test("the locked-stray unlock hint survives a literal ' in the worktree path (#1
   git(c.wt, "checkout", "-q", "--detach", "HEAD");
   git(r.w, "worktree", "lock", c.wt, "--reason", "held by a review");
   rmSync(c.wt, { recursive: true, force: true });
+  assert.ok(hasAttribute(git(r.w, "worktree", "list", "--porcelain"), "locked"), "fixture: the stray must really be locked before the remedy runs");
 
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 1, stderr);
@@ -1005,7 +1007,7 @@ test("the locked-stray unlock hint survives a literal ' in the worktree path (#1
   execFileSync("sh", ["-c", remedy], { cwd: r.w, encoding: "utf8", env: ENV });
 
   assert.ok(
-    !git(r.w, "worktree", "list", "--porcelain").includes("locked"),
+    !hasAttribute(git(r.w, "worktree", "list", "--porcelain"), "locked"),
     `the pasted command actually unlocked the real entry, not a truncated one: ${remedy}`,
   );
 });
@@ -1034,6 +1036,7 @@ test("the locked-stray unlock hint survives a plain space in the worktree path (
   git(c.wt, "checkout", "-q", "--detach", "HEAD");
   git(r.w, "worktree", "lock", c.wt, "--reason", "held by a review");
   rmSync(c.wt, { recursive: true, force: true });
+  assert.ok(hasAttribute(git(r.w, "worktree", "list", "--porcelain"), "locked"), "fixture: the stray must really be locked before the remedy runs");
 
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 1, stderr);
@@ -1045,7 +1048,7 @@ test("the locked-stray unlock hint survives a plain space in the worktree path (
   execFileSync("sh", ["-c", remedy], { cwd: r.w, encoding: "utf8", env: ENV });
 
   assert.ok(
-    !git(r.w, "worktree", "list", "--porcelain").includes("locked"),
+    !hasAttribute(git(r.w, "worktree", "list", "--porcelain"), "locked"),
     `the pasted command actually unlocked the real entry, not a truncated one: ${remedy}`,
   );
 });
@@ -2732,7 +2735,7 @@ test("an unrelated prunable worktree does not block release of a branch it never
   const stale = join(r.w, "..", "stale-wt");
   git(r.w, "worktree", "add", "-q", "--detach", stale, "origin/main");
   rmSync(stale, { recursive: true, force: true });
-  assert.match(git(r.w, "worktree", "list", "--porcelain"), /prunable/, "fixture: the stale registration must still be listed");
+  assert.ok(hasAttribute(git(r.w, "worktree", "list", "--porcelain"), "prunable"), "fixture: the stale registration must still be listed");
 
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 0, stderr);
@@ -2748,7 +2751,7 @@ test("a prunable sibling that genuinely holds the claim via a stopped rebase sti
   // no longer exists to be entered.
   const { r, c, sib } = heldSibling(t, stopAtEditRebase);
   rmSync(sib, { recursive: true, force: true });
-  assert.match(git(r.w, "worktree", "list", "--porcelain"), /prunable/, "fixture: the sibling's directory must be gone, its registration still there");
+  assert.ok(hasAttribute(git(r.w, "worktree", "list", "--porcelain"), "prunable"), "fixture: the sibling's directory must be gone, its registration still there");
 
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 2, stderr);
@@ -3605,9 +3608,8 @@ test("a worktree with no surviving ancestor below / still releases, never a perm
   // died BEFORE it, so a fix that merely downgraded that `die` to a warning
   // would exit 0 here too, with the stale registration still standing and the
   // claim reported released — the same false success from the other side.
-  assert.doesNotMatch(
-    git(r.w, "worktree", "list", "--porcelain"),
-    /nonexistent-top-level-178/,
+  assert.ok(
+    !git(r.w, "worktree", "list", "--porcelain").split("\n").includes(`worktree ${dest}`),
     "the registration must actually be gone, not merely un-refused",
   );
 });
