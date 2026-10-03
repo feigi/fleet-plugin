@@ -1570,3 +1570,43 @@ test("both rows and the window count read a bare footnote marker as a sentence e
   assert.doesNotMatch("For minor and patch bumps, jq '.[] | .x' keeps bounding drift at about one month.\n", UNSCOPED_DRIFT_SENTENCE);
   assert.doesNotMatch("For minor and patch bumps, `m?.[1] || x` keeps bounding drift at about one month.\n", UNSCOPED_DRIFT_SENTENCE);
 });
+
+// #2431. The `review-pr-*.test.mjs` suite was deleted (ed9f2967) and its pins
+// moved to `review-core-*`; the citations that kept naming the old files were
+// retargeted by hand. A citation of a file that is gone is only legitimate as a
+// git-object path — `<sha>^:plugin/scripts/<name>` or `<sha>:plugin/scripts/<name>`
+// — which names the revision it is read at.
+const DELETED_TEST_CITATION = /(?<![0-9a-f]{7,40}\^?:\s?plugin\/scripts\/)review-pr-[a-z-]+\.test\.mjs/g;
+const deletedTestCitations = (text) => [...normalize(text).matchAll(DELETED_TEST_CITATION)].map((m) => m[0]);
+
+function* pluginFiles(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "node_modules") continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) yield* pluginFiles(full);
+    else if (/\.(?:mjs|js|sh|md|yml|json)$/.test(entry.name)) yield full;
+  }
+}
+
+test("no file under plugin/ cites a deleted review-pr-*.test.mjs without a git-object path (#2431)", () => {
+  for (const file of pluginFiles(REPO)) {
+    if (file === import.meta.filename) continue;
+    assert.deepEqual(deletedTestCitations(readFileSync(file, "utf8")), [], `${file} cites a review-pr-*.test.mjs file that no longer exists — name its review-core-* successor, or a pinned revision such as \`ed9f2967^:plugin/scripts/<name>\``);
+  }
+});
+
+test("the deleted-test citation ban accepts git-object paths and review-core-* names", () => {
+  for (const text of [
+    "// `ed9f2967^:plugin/scripts/review-pr-inbound-citation-prose.test.mjs` asserted",
+    "// f743264:plugin/scripts/review-pr-reads.test.mjs | grep -A2",
+    "// in `ed9f2967^:plugin/scripts/review-pr-citation-prose.test.mjs` looked like",
+    "// `ed9f2967^:\n// plugin/scripts/review-pr-x.test.mjs` wrapped after the colon",
+    "// review-core-snapshot-path.test.mjs's guard-ordering pin.",
+  ]) assert.deepEqual(deletedTestCitations(text), [], text);
+  for (const text of [
+    "// review-pr-snapshot-path.test.mjs's guard-ordering pin.",
+    "// `review-pr-citation-prose.test.mjs`, one",
+    "// plugin/scripts/review-pr-reads.test.mjs",
+    "// abc^:review-pr-reads.test.mjs",
+  ]) assert.equal(deletedTestCitations(text).length, 1, text);
+});
