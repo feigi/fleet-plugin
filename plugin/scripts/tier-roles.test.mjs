@@ -211,6 +211,26 @@ test("checkRoutes: an empty agents directory still reports the other violations 
   assert.match(violations.join("\n"), /task\.agentModelOverrides\.fleet-a shadows/);
 });
 
+test("checkRoutes: an --agents path that is missing, or a regular file, is a violation naming the flag and path, not a crash", () => {
+  const d = dir();
+  const missing = join(d, "nope");
+  const file = join(d, "plain.txt");
+  writeFileSync(file, "x\n");
+  for (const [path, code] of [[missing, "ENOENT"], [file, "ENOTDIR"]]) {
+    const { violations } = checkRoutes({ agentsDir: path, modelRoles: MODEL_ROLES, overrides: {}, catalog: CATALOG });
+    assert.deepEqual(violations, [`--agents ${path}: cannot read the agents directory (${code})`]);
+  }
+});
+
+test("checkRoutes: a directory named *.agent.md is a violation naming the entry, and the readable definitions are still checked", () => {
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh", "fleet-b": "@smol:max" });
+  mkdirSync(join(agents, "x.agent.md"));
+  const { violations } = checkRoutes({ agentsDir: agents, modelRoles: MODEL_ROLES, overrides: {}, catalog: CATALOG });
+  assert.equal(violations.length, 2);
+  assert.equal(violations[0], `--agents ${agents}: cannot read x.agent.md (EISDIR)`);
+  assert.match(violations[1], /^fleet-b\.agent\.md: level max is not one modelRoles\.smol's target/);
+});
+
 test("checkRoutes (a): a definition whose model: is not a route is a violation naming the file", () => {
   const { violations } = routes({ "fleet-a": "opus" });
   assert.equal(violations.length, 1);
@@ -357,6 +377,22 @@ test("CLI: --check on an agents directory with no definitions exits 1 naming the
   assert.match(r.stderr, /no \*\.agent\.md definition found in /);
   assert.doesNotMatch(r.stdout, /every definition routes/);
 });
+
+test("CLI: --check on an --agents path that is missing, a regular file, or holds a directory named *.agent.md exits 1 with a refusal, no stack trace", () => {
+  const d = dir();
+  const file = join(d, "plain.txt");
+  writeFileSync(file, "x\n");
+  const trap = agentsDir({ "fleet-a": "@slow:xhigh" });
+  mkdirSync(join(trap, "x.agent.md"));
+  for (const path of [join(d, "nope"), file, trap]) {
+    const r = runCli(["--check", "--agents", path, ...installFlags(d)], d);
+    assert.equal(r.status, 1, path);
+    assert.match(r.stderr, new RegExp(`^tier-roles: --agents ${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: cannot read `), path);
+    assert.doesNotMatch(r.stderr, /\n\s+at /, path);
+    assert.doesNotMatch(r.stdout, /every definition routes/);
+  }
+});
+
 
 test("CLI: --check with a non-route model: exits 1 naming the file", () => {
   const d = dir();

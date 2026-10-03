@@ -31,7 +31,9 @@
 //       flagged as a notice — legal, but every `slow-*` cell then measures
 //       the same model as its `task-*` twin;
 //   (f) the agents directory holds at least one `*.agent.md` definition —
-//       with none, (a), (b) and (d) have nothing to check.
+//       with none, (a), (b) and (d) have nothing to check; an `--agents`
+//       path that cannot be read (missing, not a directory) or a definition
+//       that cannot be read (a directory named `*.agent.md`) fails too.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -207,14 +209,32 @@ export function checkRoutes({ agentsDir, modelRoles, overrides, catalog }) {
   const notices = [];
   const usedBy = {}; // role -> [{ file, level }, ...]
 
-  const files = readdirSync(agentsDir).filter((f) => f.endsWith(".agent.md")).sort();
+  // A path `readdirSync`/`readFileSync` cannot read (missing, a regular file,
+  // a directory named `*.agent.md`, no permission) is the operator's wrong
+  // `--agents`, not a crash: name the path and the flag, like every other
+  // bad-input path in the CLI.
+  const unreadable = (what, e) => `--agents ${agentsDir}: cannot read ${what} (${e.code ?? e.message})`;
+  let files = [];
+  let dirRead = true;
+  try {
+    files = readdirSync(agentsDir).filter((f) => f.endsWith(".agent.md")).sort();
+  } catch (e) {
+    dirRead = false;
+    violations.push(unreadable("the agents directory", e));
+  }
   // A directory with no definitions has nothing to route, so every
   // per-definition check below (the model route, the role's resolution, the
   // level) would pass over it — a wrong `--agents` path that exists must not
   // read as a healthy install.
-  if (files.length === 0) violations.push(`no *.agent.md definition found in ${agentsDir}`);
+  if (dirRead && files.length === 0) violations.push(`no *.agent.md definition found in ${agentsDir}`);
   for (const file of files) {
-    const text = readFileSync(join(agentsDir, file), "utf8");
+    let text;
+    try {
+      text = readFileSync(join(agentsDir, file), "utf8");
+    } catch (e) {
+      violations.push(unreadable(file, e));
+      continue;
+    }
     const fm = parseFrontmatter(text);
     if (!fm.role || !fm.level) {
       violations.push(`${file}: model ${JSON.stringify(fm.model)} is not @<role>:<level>`);
