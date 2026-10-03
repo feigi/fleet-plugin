@@ -81,7 +81,7 @@ What a ticket must look like to be admitted, claimed, and worked.
 | Fallback blocking line `Blocked by: #n, #n` at the top of the body when native dependencies are off; `Part of #<map>` for wayfinder children. | prose#16–18 |
 | Assignee = claimed; the frontier query drops any assigned ticket. | prose#21 |
 | Sizing is *not* on the issue: `Sizing: light|heavy` is a literal PR-body line read by the tier scraper. | prose#13 |
-| Tier is *not* on the issue either — it is declared per agent file (`model:`/`effort:`/`thinking-level:`) and verified at dispatch (ADR 0005). | prose#120–123 |
+| Tier is *not* on the issue either — it is declared per agent file, in one `model: "@<role>:<level>"` key (ADR 0014), and verified at dispatch (ADR 0005). | prose#119–120, harness#24 |
 | Whether a ticket is already worked is read from `closedByPullRequestsReferences.url` (URLs, cross-repo safe), then branch-name matching `--search "<n>"` capped at 100. | shell#5–6 |
 | Non-admission is recorded as a ledger row (`excluded · behind-pr:#M`), never as a label; relabel-by-cause writes only `needs-triage` or `ready-for-human`. | prose#11–12 |
 
