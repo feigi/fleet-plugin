@@ -371,13 +371,18 @@ test("a proof that cannot be attempted exits 2, distinct from a Recipe that is n
     "a refusal at the argument boundary creates no worktree");
 });
 
+// Every temp dir the proof made, scanned for the throwaway worktree it names `wt`.
+function assertNoWorktreeLeft(tmp) {
+  for (const d of readdirSync(tmp)) {
+    assert.deepEqual(readdirSync(join(tmp, d)).filter((n) => n === "wt"), [], `${d} still holds the throwaway worktree`);
+  }
+}
+
 test("the proof leaves no worktree directory behind in its temp dir", () => {
   const { dir } = repo(MAVEN_FILES);
   const r = prove(dir, MAVEN_PROOF);
   assert.equal(r.status, 0, r.err);
-  for (const d of readdirSync(r.tmp)) {
-    assert.deepEqual(readdirSync(join(r.tmp, d)).filter((n) => n === "wt"), [], `${d} still holds the throwaway worktree`);
-  }
+  assertNoWorktreeLeft(r.tmp);
 });
 
 test("a git that cannot be started is named as such, not reported as a missing repository", () => {
@@ -401,10 +406,9 @@ test("a git that stops starting mid-proof is no verdict, never NOT PROVEN — an
   const r = prove(dir, ["--install", install, "--test", "true", "--count-line", "x 1", "--test-count", "1"], { env: { PATH: bin } });
   assert.equal(r.status, 2, r.err);
   assert.match(r.err, /could not start git: .*ENOENT/);
+  assert.match(r.err, /skipped git worktree remove/);
   assert.doesNotMatch(r.err, /NOT PROVEN/);
-  for (const d of readdirSync(r.tmp)) {
-    assert.deepEqual(readdirSync(join(r.tmp, d)).filter((n) => n === "wt"), [], `${d} still holds the throwaway worktree`);
-  }
+  assertNoWorktreeLeft(r.tmp);
 });
 
 // A git that started and ran is never "could not start": here its status
@@ -421,6 +425,23 @@ test("a git whose output outgrows the spawn buffer is a failed command, not a gi
   assert.doesNotMatch(r.err, /could not start git/);
 });
 
+// A git that starts for the worktree removal and not for the prune after it:
+// the stub deletes itself once `worktree remove` has run. The proof's own
+// outcome is NOT PROVEN (the Install step fails), and the prune that cannot
+// start must not replace it.
+test("a git that stops starting during cleanup does not replace the proof's own NOT PROVEN", () => {
+  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  const { dir } = repo(MAVEN_FILES);
+  const bin = tempDir("recipe-prove-path-");
+  const stub = join(bin, "git");
+  writeExecStub(stub, `#!/bin/sh\n'${realGit}' "$@"\nrc=$?\nif [ "$2" = remove ]; then /bin/rm -f '${stub}'; fi\nexit $rc\n`);
+  symlinkSync("/bin/sh", join(bin, "sh"));
+  const r = prove(dir, ["--install", "false", "--test", "true", "--count-line", "x 1", "--test-count", "1"], { env: { PATH: bin } });
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /NOT PROVEN/);
+  assert.match(r.err, /skipped git worktree prune: could not start git/);
+});
+
 // Whether the process ignores file modes: root writes into a 0555 directory.
 const IGNORES_MODES = process.getuid?.() === 0 && "root ignores file modes";
 
@@ -434,9 +455,7 @@ test("read-only install output cannot turn a proof that held into a crash", { sk
   const r = prove(dir, ["--install", READ_ONLY_INSTALL, ...MAVEN_PROOF.slice(2)]);
   assert.equal(r.status, 0, r.err);
   assert.equal(JSON.parse(readFileSync(cachePath(dir), "utf8")).derivedAt, head);
-  for (const d of readdirSync(r.tmp)) {
-    assert.deepEqual(readdirSync(join(r.tmp, d)).filter((n) => n === "wt"), [], `${d} still holds the throwaway worktree`);
-  }
+  assertNoWorktreeLeft(r.tmp);
   assert.equal(git(dir, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length, 1);
 });
 

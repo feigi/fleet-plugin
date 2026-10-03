@@ -45,8 +45,9 @@
 // Exit 1: NOT PROVEN — no cache written; the reason on stderr.
 // Exit 2: no verdict on the proof — it could not be attempted (usage, not a
 //         repository, origin/main missing, the worktree could not be made), or
-//         a filesystem fault stopped it before the cache was settled (the
-//         cache or its temp file could not be written).
+//         a git or filesystem fault stopped it before the cache was settled
+//         (git could not be started, at the outset or partway through the
+//         proof; the cache or its temp file could not be written).
 
 import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
