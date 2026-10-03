@@ -78,3 +78,28 @@ test("a reversed refutation reaches the ledger from the disposition record", () 
     "The fix-applier may reverse one; it records each reversal as a `refuted` entry in its disposition record, the evidence in `reason`, and you copy those entries to the ledger's `ruled` line",
   ));
 });
+
+// Step 6's label conditions: the check over the member's own record is the
+// fourth, so a standalone run — no controller, no ledger — holds its own label.
+const labelStep = () => paragraph(REVIEW_AND_FIX, "6. Diff-check green (run-bound", "review-and-fix.md");
+
+test("step 6 makes the dispositions check over the member's own record a label condition", () => {
+  assert.match(labelStep(), phrase(
+    "**and** `dispositions-check.mjs --member fix-pr-<pr> --scratch <scratch>` run over your own record exiting 0",
+  ));
+});
+
+test("step 6 halts a non-zero dispositions exit before the label and has the member report its violations", () => {
+  assert.match(labelStep(), phrase(
+    "A non-zero dispositions exit halts you before the label, and you report the violations it printed.",
+  ));
+});
+
+test("step 6 has a standalone member pass --no-ledger: no token is written and the exit status is the verdict", () => {
+  assert.match(labelStep(), phrase(
+    "standalone you pass `--no-ledger`, so it writes no token and the exit status is the verdict",
+  ));
+  assert.match(labelStep(), phrase(
+    "without the flag it exits 2 for a ledger with no row for you",
+  ));
+});
