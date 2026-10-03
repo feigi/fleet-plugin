@@ -10,11 +10,11 @@ to consolidate the two null tests has been refused.
 `ledgerFile` is bound once: `null` for a `--no-ledger` (standalone) run,
 otherwise whatever `ledgerInUse()` returns — the ledger path, or `null` when
 that path does not exist. It is a `const` and is never reassigned, so the two
-`ledgerFile === null` tests cannot disagree.
+null tests cannot disagree.
 
 The proposed consolidation — an intermediate
-`writtenToken = ledgerFile === null ? null : token` — still tests
-`ledgerFile === null` at both the gate and the new binding. It moves one test
+`writtenToken = ledgerFile === null ? null : token` — still tests `ledgerFile`
+for null at both the gate and the new binding. It moves one test
 rather than removing it, and the script's observable behaviour (exit status,
 stdout, ledger writes) is identical either way.
 
