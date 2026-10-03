@@ -784,8 +784,8 @@ async function acquireLock() {
 //
 // Also ahead of "unknown subcommand" validation: `--require-file` against a
 // missing file with a bogus subcommand reports the require-file refusal, not
-// a usage error. Deliberate/accepted, not reordered — the doc line above
-// bundles both under one undifferentiated exit 2, with no ordering between them.
+// a usage error. Deliberate/accepted, not reordered — both refusals exit 2,
+// so a caller gating on the exit code reads the same failure either way.
 if (requireFile && !existsSync(file)) die(`--require-file given but ledger file does not exist: ${file}`);
 
 const WRITE_COMMANDS = new Set(["row", "filed", "ruled", "dispatch", "settle", "drain", "rotate"]);
@@ -1019,7 +1019,7 @@ function runCheck() {
     // first walk had already produced — equal sizes are exactly the case
     // where the two walks are the same walk.
     // Not `small.isSubsetOf(big)`: that's Node v22.0.0+, above this repo's
-    // declared >=20.11.0 floor; a test reds it).
+    // declared >=20.11.0 floor (a test reds it).
     return (small.size === big.size || small.size >= 4) && [...small].every((t) => big.has(t));
   };
   // Strip the leading `#NNN ` issue number: it is metadata, not part of the
@@ -1368,7 +1368,8 @@ function runCheck() {
         //
         // stderr first, then the message: on a non-zero exit Node builds the
         // message out of the same bytes prefixed by the command, so it is the
-        // LONGER copy of the cause, not a smaller fallback (measured). The message earns its place wherever stderr holds no
+        // LONGER copy of the cause, not a smaller fallback (measured). The
+        // message earns its place wherever stderr holds no
         // cause — and stderr holds none in three shapes, only one of which is
         // the field being absent: no `stderr` property at all on the output
         // this file refused to parse or refused the shape of, the property
@@ -1512,10 +1513,11 @@ function runCheck() {
   // suggestion, not a finding of duplication. Exit 0 covers "clean",
   // "unverified" and "soft-hit" alike, which `verdict` names explicitly and the
   // exit code deliberately still does not: minting a code for unverified would
-  // break `check "$s" && gh issue create` on every offline run (ruled against), and a soft hit is the same kind of answer — advisory rows, no
-  // established duplicate — so it inherits that ruling rather than reopening
-  // it. The exit code is a pure function of `verdict`; only `tracker-hit`
-  // blocks, so a verdict added later leaves 3 alone unless it says so here.
+  // break `check "$s" && gh issue create` on every offline run, and a soft hit
+  // is the same kind of answer — advisory rows, no established duplicate — so
+  // it inherits that decision rather than reopening it. The exit code is a
+  // pure function of `verdict`; only `tracker-hit` blocks, so a verdict added
+  // later leaves 3 alone unless it says so here.
   //
   // A hit set scoring 0.00 no longer forces 3. gh can match an issue
   // body the title-based score cannot see, which is why those rows are still

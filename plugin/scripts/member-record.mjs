@@ -260,11 +260,12 @@ function createdPrNumbers(text) {
 // `session_init.task` is the closest thing to a dispatch sidecar this
 // module has — there is no separate description file at all.
 // ompMemberRecord below uses it, together with the transcript's own nesting
-// depth AND the AgentId itself, as REAL classifyRole() signals. A
-// canonically-stemmed AgentId (`impl-<n>`, `fix-pr-<n>`, `finisher-<n>`,
-// `review-pr-<n>`, `merge-bot-<n>`) IS matched against classifyRole, as
-// `memberName`; only a non-canonical AgentId — a generated word
-// pair that names nothing — is still never matched.
+// depth AND the AgentId itself, as REAL classifyRole() signals. The AgentId
+// is passed as `memberName` whatever its shape (the RULED paragraph below): a
+// canonically-stemmed one (`impl-<n>`, `fix-pr-<n>`, `finisher-<n>`,
+// `review-pr-<n>`, `merge-bot-<n>`) matches a name-driven branch, while a
+// generated word pair that names nothing satisfies no hyphen-anchored or
+// multi-word branch, so it falls through to the name-plus-description blend.
 //
 // `resolvedModelIdentity` is `session_init`'s OWN field, written at
 // DISPATCH — before the member's first assistant turn exists, which is what
@@ -537,8 +538,8 @@ export function ompSessionTranscripts(sessionDir) {
 //
 // Deliberately NOT wrapped in a blanket try/catch around readOmpMember: the
 // wrong-shape refusal (assertOmpShaped, inside foldOmpTranscript) must
-// propagate all the way out of readMembers, uncaught. Only the directory listing and the raw file read are given the
-// ordinary per-member tolerance.
+// propagate all the way out of readMembers, uncaught. Only the directory
+// listing and the raw file read are given the ordinary per-member tolerance.
 export function readOmpSession(sessionDir) {
   let transcripts;
   try { transcripts = ompSessionTranscripts(sessionDir); }
