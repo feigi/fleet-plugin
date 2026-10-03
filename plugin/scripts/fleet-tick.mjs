@@ -45,6 +45,12 @@
 //             Anything but `clean` — dirty, unknown, no baseline — prints one
 //             MAIN-CHECKOUT-* line and holds every dispatching row until the
 //             maintainer clears it; it never refuses the tick.
+//   guard     `.fleet/cost-guard.json` beside the shortlist, pr-cost.mjs
+//             --guard's verdict on the implementer cells. Printed as the
+//             `router` row and never acted on here: a missing or unreadable
+//             file reads DEFAULT-ONLY, the way the router (not in the tree
+//             yet; ADR 0016) is to read it. pr-cost.mjs writes the main
+//             workspace's file by default, the one read here.
 //
 // The pure half below is `reconcile()` over the counts `deriveRun()` reads off
 // the ledger; main() does the I/O. Split so the guard table and the reading are
@@ -61,7 +67,7 @@ import { parseMember, parseToken } from "./ledger-grammar.mjs";
 // reads what they leave: the slots this tick's own dispatches fill.
 export function reconcile(s) {
   const rev = reviewers(s);
-  return [...mainCheckoutHold(s, [implementers(s, rev.left), ...rev.rows, mergeBot(s)]), ...shortlistRows(s)];
+  return [...mainCheckoutHold(s, [implementers(s, rev.left), ...rev.rows, mergeBot(s)]), ...shortlistRows(s), ...routerRows(s)];
 }
 
 // #2210: a main checkout changed since the run's baseline — or one the tick
@@ -252,6 +258,59 @@ function shortlistRows(s) {
     role: "shortlist", action: `REFRESHED shortlist: ${r.entries} entries; ${r.lifted} lifted`, acts: r.changed,
     detail: r.changed ? r.trigger : `${r.trigger}; unchanged`,
   }];
+}
+
+// The cost guard's verdict, as pr-cost.mjs --guard wrote it: OK, DEFAULT-ONLY
+// (a cell tripped, or no readable guard file — the router then runs the
+// default cell alone), or NO VERDICT (the baseline is short of its n). The
+// controller has nothing to do about any of them inside a run, so the row
+// never acts; it is here so the verdict is printed by code, not recalled.
+// Every verdict carries the guard's own `computed_at`: a refresh that failed
+// leaves the old file on disk, and only its age says the OK is not current.
+// No `router` state at all (a caller that read no guard) prints no row.
+export function routerRows(s) {
+  const g = s.router;
+  if (g === undefined) return [];
+  const row = (action, detail) => [{ role: "router", action, acts: false, detail }];
+  const run = "run pr-cost.mjs --guard";
+  if (g.status === "missing") return row("DEFAULT-ONLY", `cost-guard.json missing — ${run}`);
+  if (g.status !== "ok") return row("DEFAULT-ONLY", `cost-guard.json unreadable (${g.why}) — ${run}`);
+  const { baseline: b, cells, tripped, verdict, min_n: minN, computed_at: computed } = g.guard;
+  const age = `guard computed ${computed}`;
+  if (verdict === "none") return row("NO VERDICT", `baseline n=${b.n}/${minN}; ${age}`);
+  const pct = (x) => (x === null ? "n/a" : `${Math.round(x * 100)}%`);
+  const usd = (x) => (x === null ? "n/a" : `$${x.toFixed(2)}`);
+  const vs = (c) => `${c.cell} ${usd(c.mean_usd)} vs ${usd(b.mean_usd)}, fail ${pct(c.fail_rate)} vs ${pct(b.fail_rate)}, n=${c.n}/${b.n}`;
+  if (verdict === "tripped") {
+    const retired = g.guard.retire ? "; every non-default stage-1 cell tripped — the router retires" : "";
+    return row("DEFAULT-ONLY", `cost guard: ${cells.filter((c) => tripped.includes(c.cell)).map(vs).join("; ")}${retired}; ${age}`);
+  }
+  const others = cells.filter((c) => c.cell !== b.cell);
+  return row("OK", `${others.length ? others.map(vs).join("; ") : `baseline ${b.cell} ${usd(b.mean_usd)}, n=${b.n}`}; ${age}`);
+}
+
+// pr-cost.mjs's guard file, read as the router is to read it: anything but a
+// well-formed, self-consistent verdict is not one.
+export function readCostGuard(path) {
+  if (path === null) return { status: "missing" };
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (e) {
+    return e.code === "ENOENT" ? { status: "missing" } : { status: "unreadable", why: e.code ?? e.message };
+  }
+  let guard;
+  try { guard = JSON.parse(text); } catch { return { status: "unreadable", why: "not JSON" }; }
+  const cellShaped = (c) => c && typeof c.cell === "string" && Number.isInteger(c.n)
+    && (c.mean_usd === null || typeof c.mean_usd === "number") && (c.fail_rate === null || typeof c.fail_rate === "number");
+  const ok = guard && ["ok", "tripped", "none"].includes(guard.verdict) && typeof guard.computed_at === "string"
+    && cellShaped(guard.baseline) && Array.isArray(guard.cells) && guard.cells.every(cellShaped) && Number.isInteger(guard.min_n)
+    && Array.isArray(guard.tripped) && guard.tripped.every((c) => typeof c === "string")
+    // The verdict is "tripped" exactly when a cell is named, and only a reported cell can be named.
+    && (guard.verdict === "tripped") === (guard.tripped.length > 0)
+    && guard.tripped.every((c) => guard.cells.some((x) => x.cell === c))
+    && (guard.retire === undefined || typeof guard.retire === "boolean");
+  return ok ? { status: "ok", guard } : { status: "unreadable", why: "not a guard verdict" };
 }
 
 export function formatLines(rows) {
@@ -1086,7 +1145,10 @@ function claimed() {
 
 function main() {
   const { fold, state: path, ...caps } = options();
-  const current = readShortlist(shortlistPath());
+  const listPath = shortlistPath();
+  const current = readShortlist(listPath);
+  // Beside the shortlist, off the same git probe rather than a second one.
+  const router = readCostGuard(listPath === null ? null : join(dirname(listPath), "cost-guard.json"));
 
   // The PRIOR run's liveness, before anything that can refuse — #1597. The gh
   // read and the ledger read below both exit 2 on failure, and a stall
@@ -1142,7 +1204,7 @@ function main() {
   const mainCheckout = checkMainCheckout();
 
   const rows = reconcile({
-    ...caps, ...run, heads, supply, shortlistStatus: current.status, refresh: fresh, mainCheckout,
+    ...caps, ...run, heads, supply, shortlistStatus: current.status, refresh: fresh, mainCheckout, router,
   });
   const said = describe(mainCheckout, run.live);
   const lines = [...(said === null ? [] : [said]), ...formatLines(rows)];

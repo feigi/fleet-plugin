@@ -59,7 +59,7 @@ test("one review with all six dimensions launches the test command exactly once,
     const { host, calls, prompts } = scriptedHost(script({ snapshot: [snap] }));
     const scripted = host.agent;
     host.agent = async (prompt, opts) => {
-      if (opts.label !== "test-run") return scripted(prompt, opts);
+      if (opts.label !== `test-run:pr${ARGS.pr}`) return scripted(prompt, opts);
       calls["test-run"] = (calls["test-run"] ?? 0) + 1;
       return obeyTestRun(prompt);
     };

@@ -567,8 +567,8 @@ test("an unresolvable override is refused before the snapshot agent is dispatche
 // dispatch. Comment lines are stripped so a commented-out option cannot satisfy
 // it, and the slice is the review dispatch's options object alone.
 function reviewDispatchOptions() {
-  const m = SOURCE.match(/\{ label: `review:\$\{d\.key\}`[^\n]*\},/);
-  assert.ok(m, "review-core.mjs no longer passes an options object labelled review:${d.key} — update this test");
+  const m = SOURCE.match(/\{ label: `review:\$\{d\.key\}\$\{forPr\}`[^\n]*\},/);
+  assert.ok(m, "review-core.mjs no longer passes an options object labelled review:${d.key}${forPr} — update this test");
   return m[0]
     .split("\n")
     .filter((l) => !/^\s*\/\//.test(l))

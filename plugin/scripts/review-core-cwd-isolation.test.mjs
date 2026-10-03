@@ -82,9 +82,9 @@ const refuter = promptRenderer({
 const snapshot = promptRenderer({
   file: FILE,
   start: "`In ${worktree}, cut an immutable review snapshot",
-  end: '{ label: "snapshot"',
+  end: "{ label: `snapshot${forPr}`",
   scope: ["worktree", "scratch", "runRootParent", "runRootPrefix", "pr", "harness"],
-  what: 'review-core.mjs\'s snapshot prompt (opening `In ${worktree}, cut an immutable review snapshot`, labelled "snapshot")',
+  what: "review-core.mjs's snapshot prompt (opening `In ${worktree}, cut an immutable review snapshot`, labelled `snapshot:pr<N>`)",
 })("/repo/.worktrees/7-x", "/scr", "/scr/pr7", "/scr/pr7/run-", 7, "omp");
 
 // --- Part 1: the inherited cwd is named, as a tree not to write to ---------
@@ -320,7 +320,7 @@ test("cwdAuditFrom reads each of the audit line's states, and flags its own abse
 function fakeReviewHost(scopeSearched) {
   return {
     agent: async (_prompt, opts) => {
-      if (opts.label === "snapshot")
+      if (opts.label === "snapshot:pr7")
         return {
           runRoot: "/scr/pr7/run-ab12",
           path: "/scr/pr7/run-ab12/snapshot-abc123",
@@ -329,8 +329,8 @@ function fakeReviewHost(scopeSearched) {
           repoVerified: true,
           testCmd: "node --test",
         };
-      if (opts.label === "test-run") return { exitCode: 0, tests: 5, pass: 5, fail: 0 };
-      if (opts.label === "review:correctness")
+      if (opts.label === "test-run:pr7") return { exitCode: 0, tests: 5, pass: 5, fail: 0 };
+      if (opts.label === "review:correctness:pr7")
         return {
           dimension: "correctness",
           scope_searched: scopeSearched,
