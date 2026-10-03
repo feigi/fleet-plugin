@@ -51,6 +51,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { isDigits } from "./arg.mjs";
 
 const NAME = "recipe-prove";
 const USAGE =
@@ -79,7 +80,9 @@ function parseArgs(argv) {
   const a = {};
   for (let i = 0; i < rest.length; i += 2) {
     const [flag, value] = [rest[i], rest[i + 1]];
-    if (!flags.has(flag) || value === undefined) throw cannot(USAGE);
+    // A value that is itself one of these flags is a missing value — `--install
+    // --test x` would otherwise run `--test` as the Install step.
+    if (!flags.has(flag) || value === undefined || flags.has(value)) throw cannot(USAGE);
     if (flag in a) throw cannot(`${flag} given twice`);
     a[flag] = value;
   }
@@ -87,6 +90,9 @@ function parseArgs(argv) {
     if (!a[f] || !a[f].trim()) throw cannot(`${f} needs a non-empty command — ${USAGE}`);
   }
   if (("--count-line" in a) !== ("--test-count" in a)) throw cannot("--count-line and --test-count go together");
+  if ("--test-count" in a && !isDigits(a["--test-count"])) {
+    throw cannot(`--test-count must be a whole number, got '${a["--test-count"]}'`);
+  }
   if (("--mutate" in a) !== ("--mutation" in a)) throw cannot("--mutate and --mutation go together");
   return {
     repo,
@@ -152,7 +158,6 @@ function prove(o, wt, logs) {
 
   const proof = {};
   if (o.countLine !== undefined) {
-    if (!/^[0-9]+$/.test(o.testCount)) throw cannot(`--test-count must be a whole number, got '${o.testCount}'`);
     const n = Number(o.testCount);
     if (n === 0) throw notProven(`vacuous: a test count of 0 is a run that executed no tests; ${where}`);
     if (!new RegExp(`(^|[^0-9])0*${n}([^0-9]|$)`).test(o.countLine)) {

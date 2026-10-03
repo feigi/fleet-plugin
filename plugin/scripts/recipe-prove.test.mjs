@@ -348,6 +348,17 @@ test("a proof that cannot be attempted exits 2, distinct from a Recipe that is n
   const r = prove(half, ["--install", "true", "--test", "mvn -q test", "--count-line", "Tests run: 1,"]);
   assert.equal(r.status, 2);
   assert.match(r.err, /--count-line and --test-count go together/);
+
+  const nan = prove(half, ["--install", "true", "--test", "mvn -q test", "--count-line", "Tests run: 1,", "--test-count", "1e0"]);
+  assert.equal(nan.status, 2);
+  assert.match(nan.err, /--test-count must be a whole number, got '1e0'/);
+
+  // A flag where a value belongs is a missing value, never the command.
+  const missing = prove(half, ["--install", "--test", "mvn -q test"]);
+  assert.equal(missing.status, 2);
+  assert.match(missing.err, /^recipe-prove: usage:/);
+  assert.equal(git(half, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length, 1,
+    "a refusal at the argument boundary creates no worktree");
 });
 
 test("the proof leaves no worktree directory behind in its temp dir", () => {
