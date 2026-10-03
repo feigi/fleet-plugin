@@ -71,8 +71,9 @@ test("a fully verified snapshot is not missing", () => {
 // back to the model as a tool error and retried, and the rejections measured
 // under Claude Code all recovered on retry (docs/specs/2026-09-08-omp-eval-workflow-host.md,
 // Q2, quoting the "184 rejection events … every one recovered by retry"
-// comment that review-pr.js carried above its FINDINGS_SCHEMA before the
-// re-nest under plugin/). A rejection is therefore a signature successful runs
+// comment that review-pr.js carried inside its FINDINGS_SCHEMA, in the
+// comment block above `required:`, until the omp-only cutover deleted that
+// file). A rejection is therefore a signature successful runs
 // carry, and naming it as the cause of a null would point an operator at the
 // wrong thing. review-eval.mjs's `ompAgent` comment records the omp side: a
 // rejected `.wait()` maps to null there.

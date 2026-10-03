@@ -575,8 +575,12 @@ const FILES = [
   },
   {
     path: ["scripts", "review-core-snapshot-path.test.mjs"],
-    stale: [/select-dimensions\.test\.mjs:251-256/],
-    live: ["resolveDimensions"],
+    // #2546. The test once cited a `required:` comment inside
+    // `FINDINGS_SCHEMA` in review-core.mjs, which that file does not carry —
+    // the comment lived in the deleted review-pr.js. The stale form is that
+    // dangling citation; the live needle is the spec that now holds the quote.
+    stale: [/select-dimensions\.test\.mjs:251-256/, /`required:` comment inside `FINDINGS_SCHEMA` in review-core\.mjs/],
+    live: ["resolveDimensions", "2026-09-08-omp-eval-workflow-host.md"],
   },
   {
     path: ["scripts", "run-merge-bot-prose.test.mjs"],
