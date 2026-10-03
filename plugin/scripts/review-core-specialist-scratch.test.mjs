@@ -45,7 +45,7 @@
 // rules out of the specialist prompt reds all three tests here with the
 // refuter's copy untouched.
 //
-// THE CEILING, same as review-pr-refuter-scratch.test.mjs's: nothing here
+// THE CEILING, same as review-core-refuter-scratch.test.mjs's: nothing here
 // reaches the agent's own obedience. These pins settle what a specialist is
 // TOLD, never where it actually writes.
 import { test } from "node:test";
@@ -146,9 +146,9 @@ test("the rendered specialist prompt chains cd into the git command, never semic
 // Both directions on the tail itself: an exception clause spliced into its
 // leading gap ("…your scratch path, except in CI runners — compare resolved
 // forms…") reds this assertion, where the `.{0,80}`-gapped spelling in
-// review-pr-specialist-scratch.test.mjs lets it through; rewrapping the clause
-// to one line and to a narrower column stays green, since every gap here is
-// `\s+` (all measured).
+// `ed9f2967^:plugin/scripts/review-pr-specialist-scratch.test.mjs` let it
+// through; rewrapping the clause to one line and to a narrower column stays
+// green, since every gap here is `\s+` (all measured).
 test("the rendered specialist prompt requires a toplevel assertion around git init/commit, including the realpath remedy for macOS's /private/tmp symlink", () => {
   assert.match(
     render(),

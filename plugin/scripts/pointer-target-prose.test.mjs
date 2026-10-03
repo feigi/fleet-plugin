@@ -9,7 +9,7 @@ import { logicalLines } from "./prose-pin.mjs";
 // emphasis, so the name in the pointer was never the string on the target.
 // That reads fine linearly and fails exactly one way: an agent that greps for
 // the pointer string finds the pointer and nothing else, i.e. the citation
-// resolves to itself. Same class as `review-pr-citation-prose.test.mjs`, one
+// resolves to itself. Same class as `citation-sweep-prose.test.mjs`, one
 // document inward — there the citation was a line number, here it is a name.
 //
 // THE CEILING: this proves every pointer NAME resolves to a distinct target,
