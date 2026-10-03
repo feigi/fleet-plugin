@@ -756,7 +756,7 @@ test("remedy-outside-diff whose remedy files are all in the PR's diff, or none, 
   const f = fixture(t);
   for (const severity of ["important", "suggestion"]) {
     withSeverity(f, severity);
-    for (const remedyFiles of [["src/a.js"], ["./src/a.js"], [join(f.repo, "src/a.js")], [], [""], undefined]) {
+    for (const remedyFiles of [["src/a.js"], ["./src/a.js"], [join(f.repo, "src/a.js")], [" src/a.js "], ["src//a.js"], ["src/../src/a.js"], ["./src/../src/a.js", " "], [], [""], undefined]) {
       deferOutside(f, remedyFiles);
       const r = f.check();
       mismatch(r, /^fix-pr-40: survived\[0\]: reason remedy-outside-diff needs a remedy file absent from the PR's diff — /m);

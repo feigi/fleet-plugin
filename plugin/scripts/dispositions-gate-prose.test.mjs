@@ -52,6 +52,12 @@ test("step 2's deferral reasons are exactly the ones the check accepts, and anyt
   ));
 });
 
+test("step 2 requires a remedy file absent from the PR's diff for remedy-outside-diff, and refuses none or every one inside it", () => {
+  assert.match(recordStep(), phrase(
+    "`remedy-outside-diff` — the remedy would edit a file the PR's diff does not touch — also needs `remedyFiles` to name at least one file absent from `git diff` from that merge-base to the review's `head`: none named, or every one in that diff, is a mismatch.",
+  ));
+});
+
 test("the gate refuses a finisher unless the verdict answering the latest review's head is ok", () => {
   const s = gate();
   assert.match(s, phrase(

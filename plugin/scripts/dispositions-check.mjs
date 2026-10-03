@@ -80,7 +80,7 @@
 
 import { readFileSync, existsSync, lstatSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join, dirname, isAbsolute, relative } from "node:path";
+import { join, dirname, isAbsolute, relative, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
@@ -314,8 +314,8 @@ export function checkDispositions({ review, record, recordProblem = null, touche
     if (e.reason !== REMEDY_OUTSIDE_DIFF) return;
     if (diffFiles === null) throw new TypeError("checkDispositions: an entry defers remedy-outside-diff and no diffFiles was given");
     const inDiff = new Set(diffFiles);
-    const named = (e.remedyFiles ?? []).filter((f) => f.trim() !== "");
-    const outside = named.map((f) => repoPath(f, roots, inDiff)).filter((f) => !inDiff.has(f));
+    const named = (e.remedyFiles ?? []).map((f) => f.trim()).filter((f) => f !== "");
+    const outside = named.map((f) => posix.normalize(repoPath(f, roots, inDiff))).filter((f) => !inDiff.has(f));
     if (outside.length === 0) {
       const what = named.length === 0 ? "remedyFiles names no file" : "every file remedyFiles names is in the PR's diff";
       at(bucket, index, `reason remedy-outside-diff needs a remedy file absent from the PR's diff — ${what}`);
