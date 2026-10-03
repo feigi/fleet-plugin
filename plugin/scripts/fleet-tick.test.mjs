@@ -1573,6 +1573,19 @@ test("CLI: a probe answering exit 0 with no issue state is disclosed and the hol
   }
 });
 
+// Only the exact string CLOSED lifts the hold: another casing, a prefix, or a
+// state an issue never has (MERGED) is a state, but not a closed one.
+test("CLI: a state other than exactly CLOSED leaves the mismatch hold standing", () => {
+  for (const state of ["closed", "REOPENED", "MERGED", "CLOSED_AS_DUPLICATE"]) {
+    const r = runCli([], {
+      shortlist: shortlistText([1, 2, 3]), ledger: { rows: ["#7 impl-7=tier-mismatch"], dispatched: ["impl-7=tier-mismatch"] },
+      issueStates: { 7: "CLOSED" }, env: { ISSUE_VIEW_BODY: JSON.stringify({ state }) },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m, state);
+  }
+});
+
 // Every mismatched ticket is probed on its own: one CLOSED does not lift, and
 // one failed or OPEN does not hold back, another.
 test("CLI: each mismatched ticket is probed and released or held on its own issue", () => {

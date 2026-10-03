@@ -36,7 +36,10 @@
 //             refresh, never a refusal: the depth only ever bounds PULLs
 //             downward.
 //   gh        The open PRs, by label and by whether they close an issue — the
-//             merge queue, and which PRs are owed a review.
+//             merge queue, and which PRs are owed a review. Also, for each ticket
+//             holding the implementer row on a tier mismatch, whether its issue
+//             is CLOSED (`gh issue view`, #2485): a closed ticket's mismatch
+//             holds nothing.
 //   main      The main checkout against the run-start baseline
 //             `.fleet/main-checkout.sha`, through main-checkout.mjs (#2210).
 //             Anything but `clean` — dirty, unknown, no baseline — prints one
@@ -434,7 +437,7 @@ export function unlabelledFinishers(ledger, unqueued) {
     .map((u) => ({ pr: u.pr, labelled: u.attempts.filter((a) => a.outcome === "labelled").map((a) => a.name) }));
 }
 
-export function deriveRun({ rows, dispatched, drain }, prs) {
+export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set()) {
   // One entry per member name across `## Dispatched` and every row. A member
   // settled ANYWHERE is settled: `settle` is the only writer of an outcome, and
   // a bare copy beside it is what a whole-line `row` rewrite leaves behind.
