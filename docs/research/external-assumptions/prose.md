@@ -270,4 +270,4 @@ Not scanned (out of assignment scope per the task's file list): `plugin/scripts/
 
 Not scanned (added to `plugin/agents/` after the scan; no row in this table cites it): `plugin/agents/fleet-recipe-deriver.agent.md`.
 
-Not scanned: `docs/adr/0014-omp-is-the-only-harness.md` and every later-numbered ADR.
+Not scanned: `docs/adr/0014-omp-is-the-only-harness.md` and every later-numbered ADR, except at the line range or section a row's evidence column cites from one. An ADR in that range that no row cites by path is the evidence of no row.
