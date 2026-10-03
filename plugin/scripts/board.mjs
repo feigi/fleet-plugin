@@ -1604,10 +1604,11 @@ function bindFailure(server, port) {
 // ruled out as the fix for it — it would have to clear a gather(), which
 // charges every launch past a stranger-held port that much per candidate.
 const PROBE_TIMEOUT_MS = 1000;
-// 127.0.0.1 rather than `localhost`: no resolver in the path of a launch,
-// and no chance of asking a different address than the one every cockpit
-// here binds. The announced URL stays `localhost`, which is the operator's
-// spelling, not this probe's.
+// 127.0.0.1 rather than `localhost`: no resolver in the path of a launch.
+// This is not the cockpit's bind address — bindFailure's listen() names no
+// host, so a cockpit binds every interface, not loopback alone — but
+// 127.0.0.1 is one of them, so every cockpit answers here. The announced URL
+// stays `localhost`, which is the operator's spelling, not this probe's.
 const PROBE_HOST = "127.0.0.1";
 // A holder is not necessarily a cockpit, and a second of localhost writes is
 // a lot of memory to accept from one. The board payload for a real run is
