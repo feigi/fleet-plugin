@@ -1,6 +1,6 @@
-# review-pr.js Micro-Refactors
+# review-core.mjs Micro-Refactors
 
-Style-level refactors of `workflows/review-pr.js` — hoisting guards, swapping `&&` for
+Style-level refactors of `plugin/scripts/review-core.mjs` — hoisting guards, swapping `&&` for
 optional chaining, deleting comments that look duplicated — are not accepted on their
 own. Three have been measured and rejected. This is not a rule against changing the
 file; it is a rule against changing it for tidiness alone.
@@ -22,10 +22,13 @@ and thrown message. The variants diverge. The guard stays below the map.
 just added. Both idioms already appear in the file, the guards are unreachable at the
 only call site, and the direct unit tests that *do* exercise them pass either way.
 
-**Deleting the `testCmd` tombstone comment** as a near-duplicate of the function's own
-header misreads what it does: the header states the resolution *policy*, while the
-tombstone is an absence marker sitting where a default used to be — it answers "why is
-there no default here?", which the header does not.
+**Deleting the `testCmd` tombstone comment** — the comment that stood in `review-pr.js`'s
+arg-defaulting block (`workflows/review-pr.js:280`, per #313) before the move to
+`review-core.mjs` — was rejected as a near-duplicate of the function's own header: the header
+states the resolution *policy*, while the tombstone was an absence marker sitting where a
+default used to be — it answered "why is there no default here?", which the header does not.
+`review-core.mjs` carries no such comment now; this is the record of the rejection, not a
+pointer to a live comment.
 
 Comment-density findings over this file land in the same place. A review pass counting
 comment-to-code ratio on a freshly added block, and finding the same rationale in the
@@ -37,7 +40,7 @@ between them is the intended state. Cutting one to remove the overlap trades a d
 answer for a line count, and the repo's agent-facing prose is deliberately dense.
 
 Note the asymmetry if any of this is ever actioned: agent-facing markdown is executable
-instruction, so cutting a clause there can change behaviour, whereas `review-pr.js`
+instruction, so cutting a clause there can change behaviour, whereas `review-core.mjs`
 comments and the spec cannot. That makes the markdown the *least* safe place to trim,
 not the most.
 
