@@ -132,7 +132,7 @@ Slice: `plugin/skills/**/*.md` (run-team + references, next-ticket, sizing-a-tic
 | 92 | `mktemp`/`/tmp` is writable and usable as scratch space for throwaway measurement clones | `plugin/skills/run-team/SKILL.md:2999-3000` (Part4 row 9) "measured 2026-09-09 in a throwaway clone (`/tmp/fleet-probe`)" | A sandboxed or read-only `/tmp` breaks the described measurement/probe workflow |
 | 93 | `flock`-style single-writer locking is NOT used for `.fleet/heartbeat.json`/ledger; instead exactly one process is trusted to own each key (`fleet-tick` owns `quiet`/`digest`, `fleet-heartbeat` owns `elapsed`/`beat`), resolved against `GIT_DIR`/`GIT_WORK_TREE`-scrubbed git-common-dir rather than a lock file | `docs/adr/0008-a-turn-based-fleet-holds-its-own-turn.md:97-111` "One state file, one writer per key... A key both wrote would need a lock neither is positioned to hold" | Any writer other than the one the ADR assigns to a key would race and corrupt the file, with no lock stopping it |
 
-## Harness dialect (Claude Code vs omp) — tool names & dispatch
+## Harness dialect — tool names & dispatch
 
 | # | Assumption | Evidence (file:line, quoted fragment) | Breaks if false |
 |---|---|---|---|
