@@ -58,7 +58,7 @@ hedge mutant *and* survive a pure reflow, a rebold and a sentence reorder.
    decide: facts, values, units, anchors, named sources, runnable
    invocations. Whether a sentence obliges or merely advises is not.
 2. **No `doesNotMatch` hedge-word list is the fix.** No new one is written to
-   guard a modality, and the existing ones are not widened. Adding
+   guard a modality, and the existing one is not widened. Adding
    `advisory|at your discretion|if you like` is the next reword away from
    green, which is exactly what #476 measured.
 3. **An obligation that must not soften into advice gets a code carrier.** A
@@ -92,14 +92,15 @@ This ADR chooses a mechanism. It implements none.
   sentence, not the absence of a hedge. An *absence* pin is a word list,
   which #476 and #529 measured failing. Neither kind meets the bar, by
   construction.
-- **The two existing hedge-word lists stay, as literal-word tripwires only.**
-  Both live in `plugin/scripts/implementer-model-tier.test.mjs`: the
-  tier-check dispatch test's `/tier check[\s\S]{0,600}(?:\bOptional\b|\byou
-  may\b)/i`, and the guard test's `/\bOptional\b|\byou may\b/i`. They catch
-  the literal `Optional` / `you may` hedges that prose-compression passes
-  produce, and nothing else. Their failure messages still read "downgraded to
-  advice"; read them as "one of two words appeared", not as a modality guard.
-  Their comments cite this ADR.
+- **The one remaining hedge-word list stays, as a literal-word tripwire only.**
+  It lives in `plugin/scripts/implementer-model-tier.test.mjs`: the guard
+  test's `/\bOptional\b|\byou may\b/i`. It catches the literal `Optional` /
+  `you may` hedges that prose-compression passes produce, and nothing else.
+  Its failure message still reads "downgraded to advice"; read it as "one of
+  two words appeared", not as a modality guard. Its comment cites this ADR. A
+  second list, the tier-check dispatch test's `/tier check[\s\S]{0,600}(?:\bOptional\b|\byou
+  may\b)/i`, was removed by #1398 when the tier check gained its code carrier
+  (see the Status amendment).
 - **Today's phase-2 tier guard stays exposed until #2037's successor lands.**
   Map #2030 replaces it: #2036 ruled the alt pairing's retirement, and #2037
   specified the successor guard with this ruling's code-carrier requirement
