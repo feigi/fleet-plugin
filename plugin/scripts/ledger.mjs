@@ -1660,7 +1660,7 @@ function dispositionsRefusal(pr, review) {
   if (review.survived === 0 && review.unverified === 0) return null;
   const v = review.dispositions;
   if (v === null) {
-    return `dispositions unchecked — no dispositions-ok=/dispositions-mismatch= token answers PR #${pr}'s latest review, `
+    return `dispositions unchecked — no dispositions-ok=/dispositions-mismatch=/dispositions-escalate= token answers PR #${pr}'s latest review, `
       + `reviewed=${review.head}; run dispositions-check.mjs --member fix-pr-${pr}[-<x>] --scratch <scratch> for the fix-applier `
       + "that answered that review, then dispatch the finisher again";
   }

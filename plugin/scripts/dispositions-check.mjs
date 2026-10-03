@@ -96,8 +96,8 @@ const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
 // pure core — no filesystem or process access until main()
 // ---------------------------------------------------------------------------
 
-export const ALLOWED_DEFER = Object.freeze(["false-rationale", "mutual-exclusion", "remedy-worse", "remedy-outside-diff"]);
 const REMEDY_OUTSIDE_DIFF = "remedy-outside-diff";
+export const ALLOWED_DEFER = Object.freeze(["false-rationale", "mutual-exclusion", "remedy-worse", REMEDY_OUTSIDE_DIFF]);
 const COVERED = ["survived", "unverified"];
 const BUCKETS = [...COVERED, "refuted"];
 const ENUMS = { scope: ["in", "out"], claimKind: ["behavior", "shape"], disposition: ["apply", "defer"] };

@@ -703,19 +703,19 @@ const escalated = (r) => {
   assert.equal(r.json.verdict, "escalate");
 };
 // survived[0], on touched line 5, deferred remedy-outside-diff.
-const deferOutside = (f, remedyFiles, more = {}) => {
+const deferOutside = (f, remedyFiles, recHead) => {
   const entries = f.baseEntries();
-  entries[0] = f.entry("survived", 0, { disposition: "defer", reason: "remedy-outside-diff", issue: 81, remedyFiles, ...more });
-  f.writeRecord(entries);
+  entries[0] = f.entry("survived", 0, { disposition: "defer", reason: "remedy-outside-diff", issue: 81, remedyFiles });
+  f.writeRecord(entries, recHead);
 };
 const withSeverity = (f, severity) => f.writeReview({ ...f.review, survived: [{ ...f.review.survived[0], severity }, f.review.survived[1]] });
 // The same review row with no fix-applier landed on it is fix-due: the control
 // that shows fixDueFor can see a PR become fix-due at all.
 const dueUntilFixed = (f) => deriveRun({ rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=${f.head}:2/1/1`], dispatched: [], drain: null },
   [{ number: 40, labels: [], closingIssuesReferences: [{ number: 10 }] }]).fixDue;
-const fixDueFor = (f, n) => {
+const fixDueFor = (f) => {
   const l = f.okLedger("read");
-  return deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null }, [{ number: n, labels: [], closingIssuesReferences: [{ number: 10 }] }]).fixDue;
+  return deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null }, [{ number: 40, labels: [], closingIssuesReferences: [{ number: 10 }] }]).fixDue;
 };
 
 test("a suggestion deferred remedy-outside-diff, its remedy in a file the diff lacks, passes as ok and lets the finisher dispatch", (t) => {
@@ -748,7 +748,7 @@ test("a critical or important finding deferred remedy-outside-diff writes dispos
     assert.match(d.stderr, /finisher-pr-40: dispositions escalate — fix-pr-40 deferred/);
     assert.equal(readFileSync(join(f.dir, "ledger.md"), "utf8"), before, "a refused dispatch writes nothing");
     assert.deepEqual(dueUntilFixed(f), [40], "control");
-    assert.deepEqual(fixDueFor(f, 40), [], `${severity}: an escalation is a human's, never a fix-pr dispatch`);
+    assert.deepEqual(fixDueFor(f), [], `${severity}: an escalation is a human's, never a fix-pr dispatch`);
   }
 });
 
@@ -778,15 +778,12 @@ test("a file the PR deleted or moved away is in the PR's diff, so a remedy namin
   const head = git(f.repo, "rev-parse", "HEAD");
   f.writeReview({ ...f.review, head, survived: [{ severity: "suggestion", claim: "c", evidence: "e" }, f.review.survived[1]] });
   for (const remedyFiles of [["src/b.js"], ["src/a.js"], ["src/c.js"]]) {
-    deferOutside(f, remedyFiles);
-    f.writeRecord(JSON.parse(readFileSync(join(f.scratch, "dispositions-40.json"), "utf8")).entries, head);
+    deferOutside(f, remedyFiles, head);
     mismatch(f.check(), /reason remedy-outside-diff needs a remedy file absent from the PR's diff/);
   }
   // The control: a file the PR never touched is outside it.
   git(f.repo, "update-ref", "refs/remotes/origin/main", "HEAD~1");
-  const entries = f.baseEntries();
-  entries[0] = f.entry("survived", 0, { disposition: "defer", reason: "remedy-outside-diff", issue: 81, remedyFiles: ["src/never.js"] });
-  f.writeRecord(entries, head);
+  deferOutside(f, ["src/never.js"], head);
   okVerdict(f.check());
 });
 

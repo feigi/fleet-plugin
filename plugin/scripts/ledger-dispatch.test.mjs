@@ -734,7 +734,7 @@ test("a finisher is refused on a dispositions mismatch and recorded on a disposi
 
 test("a finisher is refused as unchecked while no verdict answers the latest review's head", (t) => {
   const { ok, refused } = fixture(t);
-  const unchecked = /finisher-pr-40: dispositions unchecked — no dispositions-ok=\/dispositions-mismatch= token .* run dispositions-check\.mjs --member fix-pr-40/;
+  const unchecked = /finisher-pr-40: dispositions unchecked — no dispositions-ok=\/dispositions-mismatch=\/dispositions-escalate= token .* run dispositions-check\.mjs --member fix-pr-40/;
   // No token at all.
   ok("row", "10", gateRow("1/0/0"));
   refused(["dispatch", "40", "finisher-pr-40"], unchecked);
