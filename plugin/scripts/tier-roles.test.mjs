@@ -391,6 +391,14 @@ test("CLI: a --catalog that is not a JSON object refuses by flag", () => {
   assert.match(r.stderr, /--catalog .*catalog\.json must be a JSON object, got an array/);
 });
 
+test("CLI: a --catalog file holding null refuses as null, not as object", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  const r = runCli(["--check", "--agents", agents, ...installFlags(d, { catalog: null })], d);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--catalog .*catalog\.json must be a JSON object, got null$/m);
+});
+
 test("CLI: --check without --check flag is required", () => {
   const d = dir();
   const r = runCli([], d);
@@ -440,6 +448,14 @@ test("CLI: live `omp models` printing null refuses naming the command", () => {
   const r = runCliWithFakeOmp("null", ["--check", "--agents", agents, "--overrides", jsonFile(d, "o.json", {}), "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES)], d);
   assert.equal(r.status, 2, r.stderr);
   assert.match(r.stderr, /omp models --json exited 0 but printed null, not a JSON object/);
+});
+
+test("CLI: live `omp config get` envelope holding a null value refuses as null, not as object", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  const r = runCliWithFakeOmp("{\"value\":null}", ["--check", "--agents", agents, "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES), "--catalog", jsonFile(d, "c.json", CATALOG)], d);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /omp config get task\.agentModelOverrides --json must be a JSON object, got null$/m);
 });
 
 test("CLI: live `omp` reads printing well-formed objects are accepted", () => {

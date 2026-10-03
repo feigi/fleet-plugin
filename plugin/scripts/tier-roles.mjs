@@ -298,7 +298,7 @@ function loadJsonObject(path, readLive, source, flagName) {
     die(e.message);
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    die(`${path ? `--${flagName} ${path}` : source} must be a JSON object, got ${Array.isArray(value) ? "an array" : typeof value}`);
+    die(`${path ? `--${flagName} ${path}` : source} must be a JSON object, got ${value === null ? "null" : Array.isArray(value) ? "an array" : typeof value}`);
   }
   return value;
 }
