@@ -2616,6 +2616,33 @@ is dispatched to read, so it reaches one through this block or not at all:
 > tree — so an exit 2 naming a moved or unreadable audited tree is a halt
 > like every other, not a spelling for you to correct.
 
+**Give the finisher the test-run verdict rule verbatim too.** Duty 2 runs
+`<testCmd>` for the baseline and for the mutation, and the finisher's agent
+definition says nothing about what a run that was cut short looks like. A
+`timeout`-killed `node --test` still prints a summary, covering only the tests
+it reached, so reading that summary alone reads a partial suite as a whole one:
+
+> **A test run is a verdict only if it ran to completion — and you read that
+> off the test command's own exit status.**
+> Redirect the run's output to a file in your scratch directory and read the
+> command's own `$?` straight after it, then read the file. Never read the
+> status of `<testCmd> | tail` or `<testCmd> | grep`: a pipeline's status is its
+> last stage's, and zsh has no `PIPESTATUS`, so the filter's 0 hides the run's
+> own exit. A run is a verdict only when that exit status is 0 **and** its
+> summary shows `tests` above 0 and `cancelled` 0. A summary line without that
+> is not a verdict, whatever pass count it prints.
+> **Any exit that is not a plain test failure of a completed run is a killed
+> run** — 124 (`timeout`), 137 (SIGKILL), 143 (SIGTERM), an `eval` cell's
+> deadline — and read for green it is FAILED, the same bucket as
+> `tests 0`, however many tests had passed before the kill. Halt with cause
+> `other` and the exit code plus the summary line as evidence; label nothing.
+> The same holds for the mutation gate: a killed run is not a mutant that
+> reddened, and the files it cancelled are not failures — only a run that
+> completed can kill a mutant. A completed red run (exit 1, `cancelled` 0) is a
+> plain failure, not a killed run, and exit 0 with `tests 0` stays FAILED.
+> Do not wrap `<testCmd>` in an external `timeout`. Run a long suite in one
+> `eval` cell with `timeout: 0`, as the review runner does, and wait for it.
+
 **Give the finisher duty 3 verbatim as well, as its two steps.** The finisher's
 agent definition carries no duty text, so this brief is the whole of duty 3 it
 sees. Two finishers in one run (#2331) read the release-label check as the
