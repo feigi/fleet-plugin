@@ -31,7 +31,10 @@
 //       flagged as a notice — legal, but every `slow-*` cell then measures
 //       the same model as its `task-*` twin;
 //   (f) the agents directory holds at least one `*.agent.md` definition —
-//       with none, (a), (b) and (d) have nothing to check.
+//       with none, (a), (b) and (d) have nothing to check; an agents
+//       directory that cannot be read (missing, not a directory) or a
+//       definition that cannot be read (a directory named `*.agent.md`)
+//       fails too.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -202,19 +205,35 @@ function kindOf(v) {
 // definitions need. `violations` stop a run (ADR 0014); `notices` never do —
 // they flag a hazard (two roles' cells measuring one model) that is legal
 // configuration, just probably not what the operator meant.
-export function checkRoutes({ agentsDir, modelRoles, overrides, catalog }) {
+export function checkRoutes({ agentsDir, agentsSource = `--agents ${agentsDir}`, modelRoles, overrides, catalog }) {
   const violations = [];
   const notices = [];
   const usedBy = {}; // role -> [{ file, level }, ...]
 
-  const files = readdirSync(agentsDir).filter((f) => f.endsWith(".agent.md")).sort();
-  // A directory with no definitions has nothing to route, so every
-  // per-definition check below (the model route, the role's resolution, the
-  // level) would pass over it — a wrong `--agents` path that exists must not
-  // read as a healthy install.
-  if (files.length === 0) violations.push(`no *.agent.md definition found in ${agentsDir}`);
+  // A path `readdirSync`/`readFileSync` cannot read (missing, a regular file,
+  // a directory named `*.agent.md`, no permission) is a wrong agents
+  // directory, not a crash: name the path and where it came from
+  // (`agentsSource` — `--agents <dir>`, or the built-in default).
+  const unreadable = (what, e) => `${agentsSource}: cannot read ${what} (${e.code ?? e.message})`;
+  let files = [];
+  try {
+    files = readdirSync(agentsDir).filter((f) => f.endsWith(".agent.md")).sort();
+    // A directory with no definitions has nothing to route, so every
+    // per-definition check below (the model route, the role's resolution, the
+    // level) would pass over it — a wrong `--agents` path that exists must not
+    // read as a healthy install.
+    if (files.length === 0) violations.push(`no *.agent.md definition found in ${agentsDir}`);
+  } catch (e) {
+    violations.push(unreadable("the agents directory", e));
+  }
   for (const file of files) {
-    const text = readFileSync(join(agentsDir, file), "utf8");
+    let text;
+    try {
+      text = readFileSync(join(agentsDir, file), "utf8");
+    } catch (e) {
+      violations.push(unreadable(file, e));
+      continue;
+    }
     const fm = parseFrontmatter(text);
     if (!fm.role || !fm.level) {
       violations.push(`${file}: model ${JSON.stringify(fm.model)} is not @<role>:<level>`);
@@ -317,13 +336,20 @@ function main() {
   const check = has("check");
   if (!check) die("--check is required (usage: tier-roles.mjs --check [--agents <dir>] [--model-roles <path>] [--overrides <path>] [--catalog <path>])");
 
-  const agentsDir = arg("agents") ?? join(SCRIPT_DIR, "..", "agents");
+  const agentsFlag = arg("agents");
+  const agentsDir = agentsFlag ?? join(SCRIPT_DIR, "..", "agents");
   const config = (key) => [() => readOmpConfigValue(key), `omp config get ${key} --json`];
   const overrides = loadJsonObject(arg("overrides"), ...config("task.agentModelOverrides"), "overrides");
   const modelRoles = loadJsonObject(arg("model-roles"), ...config("modelRoles"), "model-roles");
   const catalog = loadJsonObject(arg("catalog"), readOmpModelCatalog, "omp models --json", "catalog");
 
-  const { violations, notices } = checkRoutes({ agentsDir, modelRoles, overrides, catalog });
+  const { violations, notices } = checkRoutes({
+    agentsDir,
+    agentsSource: agentsFlag === null ? `the default agents directory ${agentsDir}` : undefined,
+    modelRoles,
+    overrides,
+    catalog,
+  });
 
   if (violations.length === 0) {
     console.log("tier-roles: every definition routes to a resolvable model at a level it runs, no shadowing override");
