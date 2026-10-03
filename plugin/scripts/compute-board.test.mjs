@@ -762,6 +762,18 @@ test("a failed or killed finisher token on another PR's row is a stray; one sett
   assert.deepEqual(card(d, 941).flags, ["finisher:killed"]);
 });
 
+test("the latest finisher attempt decides the halt flag too, whichever of the row and `## Dispatched` holds it", () => {
+  const flagsFor = (rowToken, dispatchedToken) => {
+    const rows = [`#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0 · ${rowToken}`];
+    const b = computeBoard(reproInputs({ rows, ledger: { rows, dispatched: ["impl-941=PR#931", dispatchedToken], filed: [], ruled: [] }, prev: { tickets: [] } }));
+    return card(b, 941).flags;
+  };
+  assert.deepEqual(flagsFor("finisher-pr-931=halted:rebase", "finisher-pr-931-b=failed"), ["finisher:failed"]);
+  assert.deepEqual(flagsFor("finisher-pr-931=failed", "finisher-pr-931-b=halted:rebase"), ["halted:rebase"]);
+  // ACCEPT side: the halt still flags when it is the latest attempt in the row alone.
+  assert.deepEqual(flagsFor("finisher-pr-931=halted:rebase", "finisher-pr-931=halted:rebase"), ["halted:rebase"]);
+});
+
 test("#1820: a live implementer is IMPLEMENTING, and still earns stale", () => {
   const b = computeBoard(reproInputs());
   assert.equal(card(b, 906).column, "IMPLEMENTING");

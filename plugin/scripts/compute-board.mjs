@@ -61,9 +61,10 @@ import { PR_MENTION, REVIEWED, latestFinisherAttempts } from "./fleet-tick.mjs";
 // that outcome as a severity-4 flag while the PR sits in REVIEW. The halt is
 // the finisher working correctly — it refused to label — so the PR has no
 // `ready-to-merge` until the controller resolves the cause; the flag is what
-// puts it in front of a human. "Latest" is laterAttempt's reading, among the
-// finisher tokens bound to the row's own PR: a live `-b` after the halt
-// clears it.
+// puts it in front of a human. "Latest" is the reading `unlabelled` and
+// `finisher:*` below share (latestFinisherAttempts, off the same rows and
+// `## Dispatched` tokens): a live `-b` after the halt clears it, and a later
+// attempt settled anywhere replaces it.
 //
 // #2331: a PR whose finisher settled `labelled` while the open list shows no
 // `ready-to-merge` on it carries a severity-4 `unlabelled` flag in REVIEW —
@@ -295,13 +296,13 @@ export function deriveFlags(parsed, ctx) {
   // escalated halt by labelling or merging it, the flag has nothing to ask.
   // `past-pin`'s own automatic resolution (SKILL.md "Resolving a finisher
   // halt") re-reviews the PR through fleet-tick.mjs, but a returned
-  // `reviewed=` does not itself clear `finisherOutcome` here — the halt is
+  // `reviewed=` does not itself clear the latest finisher outcome here — the halt is
   // answered only once "its result reaches a fresh finisher through the
   // same gate" (ibid.), so the card stays flagged, same as any other halt
   // cause, until that finisher settles. reviewBacklog below reads the same
   // gap the other way: still counted due for a fresh review while this flag
   // is up and the head has not caught up to what was reviewed.
-  if (parsed.finisherOutcome?.startsWith("halted:") && ctx.column === "REVIEW") flags.push(parsed.finisherOutcome);
+  if (ctx.finisher?.startsWith("halted:") && ctx.column === "REVIEW") flags.push(ctx.finisher);
   if (ctx.finisher === "labelled" && ctx.column === "REVIEW") flags.push("unlabelled");
   if ((ctx.finisher === "failed" || ctx.finisher === "killed") && ctx.column === "REVIEW") flags.push(`finisher:${ctx.finisher}`);
   const limit = STALE_MS[ctx.column];
