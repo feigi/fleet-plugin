@@ -1835,6 +1835,19 @@ const foldTicks = (fixture) => {
   }
 };
 
+// foldTicks keeps its fixture across three ticks, so a throw after the first
+// run (here: `heartbeat.json` is a directory, so reading the state fails)
+// must still remove the dir — the caller never gets it back.
+test("CLI: foldTicks removes its kept fixture dir when a tick throws", () => {
+  let dir;
+  assert.throws(() => foldTicks({
+    ...LIVE,
+    afterBaseline: (repo) => { dir = join(repo, ".."); mkdirSync(join(dir, "heartbeat.json")); },
+  }), /EISDIR/);
+  assert.ok(dir, "afterBaseline never ran, so the throw happened before the dir existed");
+  assert.equal(existsSync(dir), false);
+});
+
 for (const [state, afterBaseline] of [
   ["dirty", (repo) => writeFileSync(join(repo, "stray.mjs"), "x\n")],
   ["unknown", (repo) => writeFileSync(join(repo, ".git", "index"), "not an index")],
