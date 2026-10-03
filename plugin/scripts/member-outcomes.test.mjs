@@ -307,18 +307,29 @@ test("a row whose cell count is wrong is REFUSED, never padded", () => {
   // conflict markers became three data rows, and adding one column ahead of
   // `agent` collapsed 2,702 rows to 156.
   //
-  // The 14-field spelling is the PREVIOUS schema, still on every branch cut
-  // before #1066: it must be refused rather than padded with a blank
-  // `subagent_type`, which would read as "this member was dispatched untyped"
-  // for rows that were nothing of the kind. Regenerating is the migration.
+  // The 15-field spelling is the PREVIOUS schema, from before the four priced
+  // columns: it must be refused rather than padded with blank prices, which
+  // would read as "no figure was recorded" for members whose transcript
+  // carried one. Re-scraping is the migration. The 14-field one before it is
+  // refused the same way.
   //
   // Mutation this must survive: restoring `cells[i] ?? ""`.
   const short = ["s1", "2026-08-25", "memory"].join("\t");
-  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 15/);
+  assert.throws(() => parseTsv(short), /malformed row: 3 fields, expected 19/);
   assert.throws(() => parseTsv("<<<<<<< HEAD"), /malformed row/);
-  assert.throws(() => parseTsv(formatTsv([row()]).trim().split("\t").slice(0, 14).join("\t")), /14 fields, expected 15/);
+  const full = formatTsv([row()]).replace(/\n$/, "").split("\t");
+  assert.equal(full.length, 19);
+  assert.throws(() => parseTsv(full.slice(0, 15).join("\t")), /15 fields, expected 19/);
+  assert.throws(() => parseTsv(full.slice(0, 14).join("\t")), /14 fields, expected 19/);
   // A long row is refused too — that is the schema-drift direction.
-  assert.throws(() => parseTsv(formatTsv([row()]).trim() + "\textra"), /16 fields/);
+  assert.throws(() => parseTsv(full.join("\t") + "\textra"), /20 fields/);
+});
+
+test("the four priced columns follow subagent_type, and a scraped member fills them", () => {
+  assert.deepEqual(COLUMNS.slice(COLUMNS.indexOf("subagent_type")),
+    ["subagent_type", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost"]);
+  const [parsed] = parseTsv(formatTsv([row({ tokensIn: 12, tokensCacheRead: 3400, tokensCacheWrite1h: 900, cost: 0.123457 })]));
+  assert.deepEqual([parsed.tokensIn, parsed.tokensCacheRead, parsed.tokensCacheWrite1h, parsed.cost], ["12", "3400", "900", "0.123457"]);
 });
 
 const row = (o = {}) => ({
@@ -329,7 +340,8 @@ const row = (o = {}) => ({
   // only `member` still get distinct transcript ids, and fixtures that share
   // the default member (untouched) still key as the SAME agent.
   agent: o.member ?? "impl-580", harness: "omp",
-  subagentType: "fleet-implementer", ...o,
+  subagentType: "fleet-implementer",
+  tokensIn: 0, tokensCacheRead: 0, tokensCacheWrite1h: 0, cost: 0.01, ...o,
 });
 
 test("re-scraping a session REPLACES its rows rather than appending duplicates", () => {
@@ -469,6 +481,19 @@ test("two separate sessions scraped in two runs merge into one TSV", () => {
   assert.deepEqual(new Set(rows.map((r) => r.member)), new Set(["impl-580", "Solo"]));
   // #1066: the deliberate-pair column reaches the FILE, not just the record.
   assert.equal(rows.find((r) => r.member === "Solo").subagentType, "fleet-implementer-alt");
+});
+
+test("a scrape writes the priced columns off the transcript's usage, the 1h share off its cttl", () => {
+  const dir = fixture([["impl-580", [sessionEvt("/x"), thinkingEvt("high"),
+    assistantEvt("claude-opus-5", { input: 7, cacheRead: 500, cacheWrite: 300, cttl: { ephemeral1h: 300 }, cost: { total: 0.25 } }),
+    assistantEvt("claude-opus-5", { input: 3, cacheRead: 800, cacheWrite: 40, cttl: { ephemeral5m: 40 }, cost: { total: 0.0500004 } }, "2026-08-25T10:05:00.000Z"),
+  ]]]);
+  const out = join(tempDir("mo-out-"), "member-outcomes.tsv");
+  const r = spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const [row] = parseTsv(readFileSync(out, "utf8"));
+  assert.deepEqual([row.tokensIn, row.tokensCacheRead, row.tokensCacheCreate, row.tokensCacheWrite1h, row.cost],
+    ["10", "1300", "340", "300", "0.3"]);
 });
 
 test("a run writes rows, and a second run over the same session changes nothing", () => {

@@ -77,24 +77,30 @@ export function rowsForSession(sessionDir, stats = {}) {
     tokensCacheCreate: r.tokens_cache_create, tokensOut: r.tokens_out,
     wallS: r.wall_s, turns: r.turns, agent: r.agent, torn: false,
     subagentType: r.subagent_type,
+    tokensIn: r.tokens_in, tokensCacheRead: r.tokens_cache_read,
+    tokensCacheWrite1h: r.tokens_cache_write_1h ?? "", cost: r.cost == null ? "" : Number(r.cost.toFixed(6)),
   }));
 }
 
 // APPENDED TO, never inserted into: every read-out in the file's header and
-// in docs/specs indexes by position, so a column added anywhere but the end
-// silently repoints every `$n` a reader already wrote down. `subagent_type`
-// (#1066) is therefore last, after `harness`.
+// in the design specs indexes by position, so a column added anywhere but the
+// end silently repoints every `$n` a reader already wrote down.
+// `subagent_type` therefore follows `harness`, and the four priced columns
+// follow it. `cost` is the provider's own per-turn `usage.cost.total`, summed
+// to the micro-dollar — the $ of record; `tokens_cache_write_1h` and `cost`
+// are blank where the transcript recorded no figure, never 0.
 export const COLUMNS = [
   "session", "run_date", "role", "member", "model", "effort", "ticket", "pr",
   "tokens_cache_create", "tokens_out", "wall_s", "turns", "agent", "harness",
-  "subagent_type",
+  "subagent_type", "tokens_in", "tokens_cache_read", "tokens_cache_write_1h", "cost",
 ];
 
 // Row objects use camelCase; the file uses snake_case. One map, one direction
 // each, so a rename cannot silently drop a column.
 const FIELD = {
   tokens_cache_create: "tokensCacheCreate", tokens_out: "tokensOut", wall_s: "wallS",
-  subagent_type: "subagentType",
+  subagent_type: "subagentType", tokens_in: "tokensIn", tokens_cache_read: "tokensCacheRead",
+  tokens_cache_write_1h: "tokensCacheWrite1h",
 };
 const field = (c) => FIELD[c] ?? c;
 // Keyed on the transcript's path-relative stem, not the member name: `member`
