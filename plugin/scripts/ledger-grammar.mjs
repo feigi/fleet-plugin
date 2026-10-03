@@ -99,8 +99,9 @@ export const CELL = /^(slow|task|smol)-(minimal|low|medium|high|xhigh|max)$/;
 export const CELL_DEF = new RegExp(`^fleet-implementer-${CELL.source.slice(1)}`);
 
 // The cell a row with no `tier=` runs at: `policy_cell`, `slow-high` on every
-// Pull until the router (spec § 4) picks one per stratum.
-const POLICY_CELL = "slow-high";
+// Pull until the router's table picks one per stratum. Exported so
+// ticket-router.mjs defaults to the same cell this file maps a bare row to.
+export const POLICY_CELL = "slow-high";
 
 // The Exploration Pull's draw (spec § 2): uniform over every cell but
 // `policyCell`, keyed off the row's own `session` and `ticket`, so the draw
@@ -134,9 +135,14 @@ export function drawCell({ session, ticket, policyCell, cells }) {
 // different definitions for one row and fail a dispatch made exactly as
 // printed.
 const TIER_SUFFIX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** Every `tier=` value a row's text carries, in order, duplicates kept. */
+export function tierValues(rowText) {
+  return String(rowText ?? "").split(/\s+/).filter((t) => t.startsWith("tier=")).map((t) => t.slice("tier=".length));
+}
+
 export function expectedDefinition(rowText) {
-  const values = [...new Set(String(rowText ?? "").split(/\s+/)
-    .filter((t) => t.startsWith("tier=")).map((t) => t.slice("tier=".length)))];
+  const values = [...new Set(tierValues(rowText))];
   if (values.length === 0) return `fleet-implementer-${POLICY_CELL}`;
   if (values.length > 1) throw new Error(`row carries conflicting tier= tokens (${values.map((v) => `tier=${v}`).join(", ")}) — fix the row with \`ledger.mjs row\``);
   if (!TIER_SUFFIX.test(values[0])) throw new Error(`tier=${values[0]} is not a definition suffix — expected [a-z0-9] words joined by '-' — fix the row with \`ledger.mjs row\``);

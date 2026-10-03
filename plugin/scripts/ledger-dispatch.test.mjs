@@ -173,20 +173,45 @@ test("dispatch prints the agent definition the call names: the row's tier for an
 // A `tier=` of the right shape whose definition has no file is refused the
 // same way: a `task` call naming it cannot resolve. Two of those: a cell
 // outside the shipped grid (`smol-max` — haiku has no `max`), and the
-// pre-cell `alt` whose definition #2129 deleted.
+// pre-cell `alt`, whose definition is deleted. `row` refuses a non-cell
+// `tier=` before it is written, so the rows `row` would refuse are written
+// as a ledger edited by hand — the case dispatch's own check still meets.
 test("dispatch refuses an implementer whose row names no single definition, or one with no file, before marking it live", (t) => {
-  const { ok, read, refused } = fixture(t);
-  ok("row", "7", "class=routine · tier=alt · tier=slow-high");
+  const rows = ["#7 class=routine · tier=alt · tier=slow-high", "#8 class=routine · tier=../../etc", "#9 class=routine · tier=", "#11 class=routine · tier=alt"];
+  const { ok, read, refused } = fixture(t, `# Fleet run ledger\n\n## Rows\n\n${rows.map((r) => `- ${r}\n`).join("")}\n## Filed\n\n## Ruled\n\n`);
   refused(["dispatch", "7", "impl-7"], /impl-7: row carries conflicting tier= tokens \(tier=alt, tier=slow-high\) — fix the row with `ledger\.mjs row` — not dispatching impl-7/);
-  ok("row", "8", "class=routine · tier=../../etc");
   refused(["dispatch", "8", "impl-8"], /impl-8: tier=\.\.\/\.\.\/etc is not a definition suffix — expected \[a-z0-9\] words joined by '-' — fix the row with `ledger\.mjs row` — not dispatching impl-8/);
-  ok("row", "9", "class=routine · tier=");
   refused(["dispatch", "9", "impl-9"], /impl-9: tier= is not a definition suffix/);
   ok("row", "10", "class=routine · tier=smol-max");
   refused(["dispatch", "10", "impl-10"], /impl-10: row #10's tier= names fleet-implementer-smol-max, which has no agents\/fleet-implementer-smol-max\.agent\.md — fix the row with `ledger\.mjs row` — not dispatching impl-10/);
-  ok("row", "11", "class=routine · tier=alt");
   refused(["dispatch", "11", "impl-11"], /impl-11: row #11's tier= names fleet-implementer-alt, which has no agents\/fleet-implementer-alt\.agent\.md/);
+  ok("row", "12", "class=routine · tier=task-high · tier=slow-high");
+  refused(["dispatch", "12", "impl-12"], /impl-12: row carries conflicting tier= tokens \(tier=task-high, tier=slow-high\)/);
   assert.deepEqual(read().dispatched, []);
+});
+
+// `row` holds `tier=` to the cell grammar, so a retired or misspelt tier is
+// refused at the Pull's own write, before the claim is dispatched on — and a
+// cell token is accepted whether or not its definition has shipped, which is
+// `dispatch`'s to check. The value is held to the whole grammar, not a prefix
+// of it: a real family with an unknown level, a cell with trailing text, or a
+// case-variant of a cell is refused. Only a token that STARTS with `tier=` is
+// a tier token, so one that merely contains it (`x-tier=alt`) is written as is.
+test("row refuses a tier= that is not a cell token, and accepts every cell token", (t) => {
+  const { ok, read, refused } = fixture(t);
+  const bads = [
+    "tier=alt", "tier=", "tier=../../etc", "tier=Task-High", "tier=task-high · tier=alt", "tier=haiku-high",
+    "tier=slow-ultra", "tier=task-", "tier=smol-", "tier=slow", "tier=task-high-x", "tier=task-high-", "tier=task-highx",
+    "tier==task-high", "tier=task-high,", "tier=TASK-HIGH", "tier=Slow-High", "tier=slow-HIGH", "tier=xslow-high",
+  ];
+  for (const bad of bads) {
+    refused(["row", "7", `impl-7 · ${bad}`], /row #7: 'tier=[^']*' is not tier=<cell>/);
+  }
+  assert.deepEqual(read().rows, []);
+  const goods = ["tier=task-high", "tier=slow-high", "tier=smol-max", "tier-ok=impl-7:fleet-implementer-task-high", "x-tier=alt", "x-tier=Slow-ultra · tier=task-high"];
+  for (const good of goods) {
+    assert.equal(ok("row", "7", `impl-7 · ${good}`).line, `#7 impl-7 · ${good}`);
+  }
 });
 
 // The refusal is about the implementer's own definition: a member whose
@@ -194,7 +219,7 @@ test("dispatch refuses an implementer whose row names no single definition, or o
 // row, or one bad token would strand the PR's finisher and fix-applier.
 test("a malformed tier= on a row does not refuse a member whose definition ignores it", (t) => {
   const { ok } = fixture(t);
-  ok("row", "7", "impl-7=PR#70 · tier=alt · tier=slow-high");
+  ok("row", "7", "impl-7=PR#70 · tier=task-high · tier=slow-high");
   assert.equal(ok("dispatch", "70", "fix-pr-70").agent, null);
   assert.equal(ok("dispatch", "7", "finisher-pr-70").agent, "fleet-finisher");
 });
@@ -215,7 +240,7 @@ test("dispatch names a fix-applier on an unresolved conflict hold of its own PR 
   // `tier=` is not consulted — conflicting values neither change nor refuse it.
   ok("row", "50", "impl-50=PR#51 · tier=task-high · conflict-hold:#51");
   assert.equal(ok("dispatch", "51", "fix-pr-51").agent, "fleet-implementer-slow-high");
-  ok("row", "60", "impl-60=PR#61 · tier=alt · tier=slow-high · conflict-hold:#61");
+  ok("row", "60", "impl-60=PR#61 · tier=task-high · tier=slow-high · conflict-hold:#61");
   assert.equal(ok("dispatch", "61", "fix-pr-61").agent, "fleet-implementer-slow-high");
 
   // The hold's other spelling the tick reads (fleet-tick.mjs's CONFLICT_HOLD).
@@ -387,7 +412,7 @@ test("row still writes well-formed member tokens and non-member keys", (t) => {
     ["7", "impl-7 · class=routine · ports=16007"],
     ["8", "impl-8=PR#9 · fix-pr-9=applied:73b356de · review=wf:r1=failed reviewed=abc1234:1/0/0 · ci=123:1:success"],
     ["10", "held-behind:#9 · merge-bot-1=done · review=member:review-pr-10"],
-    ["11", "impl-11 · tier=alt · tier-ok=impl-11:fleet-implementer-alt"],
+    ["11", "impl-11 · tier=task-high · tier-ok=impl-11:fleet-implementer-task-high"],
     ["12", "impl-12=bailed · tier-mismatch=impl-12:fleet-implementer · impl-12: dispatched task, expected fleet-implementer"],
   ];
   for (const [ticket, text] of rows) ok("row", ticket, text);

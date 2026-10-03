@@ -1054,7 +1054,7 @@ test("deriveRun: the row text it does not own is accepted as it stands", () => {
   // The accept side of every refusal below: freeform row text, the arrow, the
   // board's own tokens and an empty ledger are the ordinary case.
   assert.doesNotThrow(() => run({
-    rows: ["#324 impl-324=PR#346 → PR#346 · fix-pr-346=no-op · ruled:6-applies · ci=123:1:success · ports=16324 · tier=alt"],
+    rows: ["#324 impl-324=PR#346 → PR#346 · fix-pr-346=no-op · ruled:6-applies · ci=123:1:success · ports=16324 · tier=task-high"],
     dispatched: ["impl-324=PR#346", "fix-pr-346=no-op"],
   }, [pr(346)]));
   const empty = run({});

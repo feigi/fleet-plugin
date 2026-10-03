@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CELL } from "./ledger-grammar.mjs";
 import { between as section } from "./prose-pin.mjs";
 
 // #864's finding is that tier is entangled with calendar date and therefore
@@ -126,14 +125,16 @@ test("phase 2 counts the rate off the ledger's impl- rows, and a replacement doe
     /records\s+`tier=<cell>`\s+in\s+the\s+row,\s+and\s+a\s+replacement\s+inherits\s+the\s+row's\s+tier/,
     "phase 2 no longer records the cell on the row, or no longer says a replacement inherits it rather than counting as a Pull",
   );
-  // Until the router draws one, the prose has to name the cell the controller
-  // writes, and that cell has to have a definition: `ledger.mjs dispatch`
-  // refuses a `tier=` naming no `agents/` file, so a cell named here without
-  // one stops every exploration Pull before its member goes live.
-  const named = /Until\s+the\s+router\s+draws\s+the\s+cell[^.]*?`<cell>`\s+is\s+`([^`]+)`/.exec(slice)?.[1];
-  assert.ok(named, "phase 2 no longer names the cell an exploration Pull writes before the router exists");
-  assert.ok(CELL.test(named), `${named} is not a cell`);
-  assert.ok(existsSync(join(REPO, "agents", `fleet-implementer-${named}.agent.md`)), `phase 2 names ${named}, which has no agents/fleet-implementer-${named}.agent.md`);
+  // The cell is the router's draw, never one this prose names: a cell
+  // written here is a second copy of the routing, free to disagree with the
+  // table the router reads.
+  assert.match(slice, /the\s+router\s+draws\s+its\s+cell/, "phase 2 no longer says the router draws the exploration cell");
+  assert.doesNotMatch(slice, /Until\s+the\s+router\s+draws/, "phase 2 names a stand-in exploration cell again");
+  assert.match(
+    slice,
+    /While\s+the\s+table's\s+`burn_in`\s+is\s+true\s+every\s+Pull\s+draws,\s+over\s+every\s+cell,\s+the\s+policy\s+cell\s+included/,
+    "phase 2 no longer says burn-in draws on every Pull, over every cell",
+  );
   // The roll: a Pull that lands on a chain head passes the exploration cell to
   // the next Pull rather than skipping it, which is the rule ADR 0013 §6 states
   // and the difficulty caveat below depends on.
@@ -142,6 +143,41 @@ test("phase 2 counts the rate off the ledger's impl- rows, and a replacement doe
     /assignment\s+rolls\s+to\s+the\s+next\s+Pull\s+when\s+another\s+open\s+ticket\s+sequences\s+after\s+it/,
     "phase 2 no longer rolls the exploration cell past chain heads",
   );
+});
+
+// The Pull's own write: the router's line decides the row, and `tier=` is
+// the draw's record — on a row exactly when the router drew. Written for a
+// row the router did not draw for, `ledger.mjs dispatch` would print a cell
+// nothing chose.
+const pullStep7 = () => section(RUN_TEAM, "7. **Route, row, then dispatch**", "**The Pull table**", "run-team Pull step 7");
+
+test("Pull step 7 routes through ticket-router.mjs and writes tier= exactly when it drew", () => {
+  const slice = pullStep7();
+  assert.match(slice, /ticket-router\.mjs\s+route\s+--session\s+<session>\s+--ticket\s+<N>\s+--arm\s+<A\|B>\s+--impl-row\s+<k>/, "step 7 no longer calls the router");
+  assert.match(slice, /--issue\s+<scratch>\/impl-<N>\/issue\.json/, "step 7 no longer hands the router the Pull's own read");
+  assert.match(slice, /`tier=<CELL>`\s+exactly\s+when\s+`DRAW`\s+is\s+not\s+`-`/, "step 7 no longer ties tier= to the draw");
+  assert.match(slice, /Router\s+exit\s+2\s+→\s+no\s+row\s+and\s+no\s+dispatch/, "step 7 dispatches on a router usage error");
+  assert.match(slice, /--impl-row\s+<k>\[\s+--chain-head\]/, "step 7 no longer passes --chain-head for a ticket another sequences after");
+  assert.match(slice, /--guard\s+\.fleet\/cost-guard\.json/, "step 7 no longer hands the router the cost guard");
+  assert.match(slice, /\[\s+·\s+route=<REASON>\]/, "step 7 no longer records the router's REASON on the row");
+  assert.match(slice, /release\s+the\s+claim\s+\(`release-ticket\.sh`/, "step 7 no longer releases the claim on a router exit 2");
+  // The Pull's one read is what the router reads: a second fetch would be a
+  // second network call per Pull.
+  const step3 = section(RUN_TEAM, "3. **Read the ticket in full, once**", "Record the ticket's real", "run-team Pull step 3");
+  assert.match(step3, /--json\s+title,body,comments,labels,createdAt`\s+written\s+to\s+`<scratch>\/impl-<N>\/issue\.json`/, "step 3 no longer writes the file the router reads");
+});
+
+const routerArgs = () =>
+  section(RUN_TEAM, "**The router's arguments, and nothing past its line.**", "**Count the rate against the ledger", "run-team router's arguments");
+
+test("the router's arguments paragraph pins the roll, the arm parity and the single source of CELL", () => {
+  const slice = routerArgs();
+  assert.match(slice, /row\s+5k\s+and\s+every\s+row\s+after\s+it\s+carry\s+no\s+`tier=`/, "the --impl-row rolling definition is gone");
+  assert.match(slice, /`--chain-head`\s+marks\s+a\s+ticket\s+another\s+open\s+ticket\s+sequences\s+after/, "--chain-head is no longer defined");
+  assert.match(slice, /`A`\s+for\s+an\s+even\s+ticket\s+number\s+and\s+`B`\s+for\s+an\s+odd/, "the --arm parity rule changed");
+  assert.match(slice, /never\s+re-derive\s+`CELL`/, "the router's line is no longer the whole decision");
+  assert.match(slice, /`REASON=guard-missing`/, "the guard-missing route is no longer named");
+  assert.match(slice, /`REASON`\s+other\s+than\s+`ok`\s+goes\s+on\s+the\s+row\s+as\s+`route=<REASON>`/, "REASON no longer lands on the row as route=");
 });
 
 // The difficulty caveat lives in the counter-evidence section, past this file's

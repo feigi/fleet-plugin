@@ -18,8 +18,9 @@ layer underneath the [Implementer](implementer.md) role.
    (`CELL` in `ledger-grammar.mjs`). A row with no `tier=` runs at the
    policy cell, `slow-high`; every 5th Pull (counted off
    `.fleet/ledger.md`'s `impl-` rows) records `tier=<cell>` and runs at
-   that exploration cell — `task-high` until the router draws one — as
-   a running, unconfounded comparison.
+   that exploration cell — the router's draw over
+   [`router-table.json`](../../plugin/scripts/router-table.json)'s cells
+   minus the policy cell — as a running, unconfounded comparison.
 3. **Check statically.**
    [`tier-roles.mjs`](../../plugin/scripts/tier-roles.mjs) `--check`
    validates that every role a definition uses resolves to a
@@ -49,9 +50,9 @@ layer underneath the [Implementer](implementer.md) role.
   deliberately never one "trust the frontmatter" step, because a
   member dispatched with an explicit `model` override on the call was
   measured to silently *not* get the declared tier back.
-- **The cells are built; Router and Admissible row are decided but not
-  yet.** The model-effort-router design
+- **The cells and the Router are built; the Admissible row is decided but
+  not yet.** The model-effort-router design
   ([`docs/specs/2026-09-28-model-effort-router-design.md`](../specs/2026-09-28-model-effort-router-design.md),
-  [ADR 0016](../adr/0016-per-ticket-model-effort-routing.md)) is the
-  planned successor to today's fixed exploration cell, not the current
-  mechanism.
+  [ADR 0016](../adr/0016-per-ticket-model-effort-routing.md)) is what
+  [`ticket-router.mjs`](../../plugin/scripts/ticket-router.mjs) builds,
+  replacing today's fixed exploration cell.
