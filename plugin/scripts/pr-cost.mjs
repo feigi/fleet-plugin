@@ -392,6 +392,9 @@ export function guardFile(report, computedAt) {
     tripped: report.tripped,
     verdict: report.verdict,
     retire: report.retire,
+    // The n the baseline and every judged cell need, so a reader prints it
+    // rather than restating it.
+    min_n: MIN_N,
   };
 }
 

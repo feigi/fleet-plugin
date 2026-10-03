@@ -278,6 +278,77 @@ test("no refresh, no shortlist row", () => {
   assert.deepEqual(reconcile(state()).map((r) => r.role), ["implementers", "reviewers", "merge-bot"]);
 });
 
+// ---------------------------------------------------------------------------
+// The router row: pr-cost.mjs --guard's verdict, read off a guard file the way
+// the tick reads it. One case per state, each against a fixture file.
+
+import { routerRows, readCostGuard } from "./fleet-tick.mjs";
+
+const BASE = { cell: "slow-high", n: 31, mean_usd: 31, fail_rate: 0.29 };
+const guardJson = (over = {}) => JSON.stringify({
+  computed_at: "2026-10-03T00:00:00.000Z", window_start: "2026-10-03", baseline: BASE,
+  cells: [{ cell: "slow-high", n: 31, mean_usd: 31, fail_rate: 0.29 }, { cell: "task-high", n: 24, mean_usd: 12.3, fail_rate: 0.25 }],
+  tripped: [], verdict: "ok", retire: false, min_n: 20, ...over,
+});
+function routerRowOf(text) {
+  const dir = mkdtempSync(join(tmpdir(), "fleet-tick-guard-"));
+  try {
+    const path = join(dir, "cost-guard.json");
+    if (text !== null) writeFileSync(path, text);
+    const rows = reconcile(state({ router: readCostGuard(path) }));
+    assert.equal(actionable(rows), false, "no router state is work for the controller");
+    const r = rows.filter((x) => x.role === "router");
+    assert.equal(r.length, 1);
+    assert.equal(rows.at(-1), r[0], "the router row prints last");
+    return { ...r[0], line: formatLines(rows).at(-1) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("router: a guard with no cell tripped is OK, naming each cell against the baseline", () => {
+  const r = routerRowOf(guardJson());
+  assert.equal(r.action, "OK");
+  assert.equal(r.acts, false);
+  assert.equal(r.line, "router       → OK   (task-high $12.30 vs $31.00, fail 25% vs 29%, n=24/31)");
+});
+
+test("router: a tripped cell is DEFAULT-ONLY, naming the cost guard and the cell it tripped", () => {
+  const r = routerRowOf(guardJson({
+    verdict: "tripped", tripped: ["smol-high"],
+    cells: [{ ...BASE }, { cell: "smol-high", n: 21, mean_usd: 9.5, fail_rate: 0.45 }, { cell: "task-high", n: 24, mean_usd: 12.3, fail_rate: 0.25 }],
+  }));
+  assert.equal(r.action, "DEFAULT-ONLY");
+  assert.equal(r.detail, "cost guard: smol-high $9.50 vs $31.00, fail 45% vs 29%, n=21/31");
+  const retired = routerRowOf(guardJson({ verdict: "tripped", tripped: ["task-high"], retire: true }));
+  assert.match(retired.detail, /^cost guard: task-high .*; every non-default stage-1 cell tripped — the router retires$/);
+});
+
+test("router: a baseline short of its n is NO VERDICT, with the count and the n it needs", () => {
+  const r = routerRowOf(guardJson({ verdict: "none", baseline: { ...BASE, n: 7 } }));
+  assert.equal(r.action, "NO VERDICT");
+  assert.equal(r.line, "router       → NO VERDICT   (baseline n=7/20)");
+});
+
+test("router: no guard file is DEFAULT-ONLY, naming the command that writes one", () => {
+  const r = routerRowOf(null);
+  assert.equal(r.line, "router       → DEFAULT-ONLY   (cost-guard.json missing — run pr-cost.mjs --guard)");
+});
+
+test("router: a guard file that is not a verdict reads DEFAULT-ONLY too — deleting or breaking it cannot evade the guard", () => {
+  for (const [text, why] of [["{", "not JSON"], [guardJson({ verdict: "maybe" }), "not a guard verdict"],
+    [guardJson({ tripped: "smol-high" }), "not a guard verdict"], [guardJson({ min_n: undefined }), "not a guard verdict"],
+    [guardJson({ cells: [{ cell: "task-high", n: "24", mean_usd: 1, fail_rate: 0 }] }), "not a guard verdict"]]) {
+    const r = routerRowOf(text);
+    assert.equal(r.action, "DEFAULT-ONLY", text);
+    assert.equal(r.detail, `cost-guard.json unreadable (${why}) — run pr-cost.mjs --guard`, text);
+  }
+});
+
+test("router: with no guard state read at all, no router row", () => {
+  assert.deepEqual(routerRows(state()), []);
+});
+
 test("formatLines prints role, actual/target and the ACTION on one line each", () => {
   assert.deepEqual(
     formatLines(reconcile(state({
@@ -1318,6 +1389,18 @@ test("CLI: runCli with keep: true hands back a fixture dir that still exists", (
     rmSync(r.dir, { recursive: true, force: true });
   }
   assert.equal(existsSync(runCli([]).dir), false, "without keep the dir is gone on return");
+});
+
+test("CLI: the router row reads the run's .fleet/cost-guard.json, and prints DEFAULT-ONLY without one", () => {
+  const none = runCli([], { shortlist: shortlistText([]) });
+  assert.equal(none.status, 0, none.stderr);
+  assert.deepEqual(lineOf(none, "router"), ["router       → DEFAULT-ONLY   (cost-guard.json missing — run pr-cost.mjs --guard)"]);
+  const ok = runCli([], {
+    shortlist: shortlistText([]),
+    beforeRun: (repo) => writeFileSync(join(repo, ".fleet", "cost-guard.json"), guardJson({ verdict: "none", baseline: { ...BASE, n: 12 } })),
+  });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.deepEqual(lineOf(ok, "router"), ["router       → NO VERDICT   (baseline n=12/20)"]);
 });
 
 test("CLI: the #1692 shape, read off the ledger — two live implementers at cap 2 pull nothing", () => {

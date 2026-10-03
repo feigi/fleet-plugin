@@ -15,6 +15,7 @@ import {
   computeReport, parseFeatures, trips, guardFile, formatReport,
   FEATURE_COLUMNS, WINDOW_START, MIN_N,
 } from "./pr-cost.mjs";
+import { readCostGuard, routerRows } from "./fleet-tick.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./pr-cost.mjs", import.meta.url));
 const DAY = WINDOW_START;
@@ -84,6 +85,7 @@ function runCli(w, args = ["--guard"], { features } = {}) {
     ...r,
     guard: existsSync(guardPath) ? JSON.parse(readFileSync(guardPath, "utf8")) : null,
     ghArgs: existsSync(argsPath) ? readFileSync(argsPath, "utf8").trim().split("\n") : null,
+    guardPath,
   };
 }
 
@@ -100,6 +102,12 @@ test("--guard: a cell exactly 15 points worse than the baseline trips, exits 3 a
   assert.deepEqual(r.guard.tripped, ["task-high"]);
   assert.equal(r.guard.verdict, "tripped");
   assert.deepEqual(r.guard.baseline, { cell: "slow-high", n: 20, mean_usd: 10, fail_rate: 0.3 });
+  assert.equal(r.guard.min_n, MIN_N);
+  // The file is the router row's input: fleet-tick reads it as a verdict.
+  const read = readCostGuard(r.guardPath);
+  assert.equal(read.status, "ok");
+  assert.deepEqual(routerRows({ router: read }).map((x) => [x.action, x.detail]),
+    [["DEFAULT-ONLY", "cost guard: task-high $5.00 vs $10.00, fail 45% vs 30%, n=20/20"]]);
   assert.deepEqual(r.guard.cells.find((c) => c.cell === "task-high"), { cell: "task-high", n: 20, mean_usd: 5, fail_rate: 0.45 });
   assert.equal(r.guard.window_start, WINDOW_START);
   assert.ok(!Number.isNaN(Date.parse(r.guard.computed_at)));
