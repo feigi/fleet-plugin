@@ -309,16 +309,17 @@ test("readOmpMember: role is `-`, never a guess off the bare AgentId, when neith
 
 test("readOmpMember: a canonically-named AgentId is itself a role signal under the default `task` definition (#1506)", () => {
   // `fix-pr-1380`, `merge-bot-5`, `impl-1049` and friends are dispatched
-  // under run-team's default `task` definition — `session_init.agent` is
-  // absent. That is a different gap from #1502's: #1502 fixed a forwarding
+  // under run-team's default `task` definition — `session_init.agent` is the
+  // literal string `task`, which no definition branch of classifyRole
+  // matches. That is a different gap from #1502's: #1502 fixed a forwarding
   // bug where an EXISTING `folded.agent` value wasn't reaching classifyRole;
-  // here `session_init.agent` was never recorded at all. But the AgentId
+  // here the recorded definition names no role at all. But the AgentId
   // itself IS the dispatch name (run-team's own naming convention), so it
   // must reach classifyRole as `memberName` and win a real classification
   // even when the dispatch prompt's own prose says nothing role-shaped.
   const noKeywords = [
     sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("high"),
-    sessionInitEvt("Apply the requested patch set and open a PR.", "anthropic/claude-sonnet-5"),
+    sessionInitEvt("Apply the requested patch set and open a PR.", "anthropic/claude-sonnet-5", "task"),
     assistantEvt("claude-sonnet-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 10, totalTokens: 12 }),
   ].join("\n");
   assert.equal(readOmpMember(noKeywords, "/fake/path.jsonl", "fix-pr-1380", 0).role, "reviewer");
