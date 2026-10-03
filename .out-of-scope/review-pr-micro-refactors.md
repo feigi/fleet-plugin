@@ -27,13 +27,6 @@ header misreads what it does: the header states the resolution *policy*, while t
 tombstone is an absence marker sitting where a default used to be — it answers "why is
 there no default here?", which the header does not.
 
-A related trap worth knowing before proposing anything module-level in this file:
-`review-pr-testcmd.test.mjs` lifts `resolveTestCmd` out of the source *text* by regex and
-evals the function body alone, so a `const` declared beside the function is a
-`ReferenceError` at lift time. Measured: the tests that reach the reference go red — two
-if the `const` is read only in the throw branch, all five calling tests if it is read
-above the guards.
-
 Comment-density findings over this file land in the same place. A review pass counting
 comment-to-code ratio on a freshly added block, and finding the same rationale in the
 code comment, the design spec and the test, is measuring restatement rather than a
