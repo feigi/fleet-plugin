@@ -41,7 +41,8 @@
 // `opus`/`sonnet` spelling and are never checked; the header records the
 // switch and how the old values map.
 //
-// Exit codes: 0 ok, 1 `check` found a mismatch, 2 usage or unreadable input.
+// Exit codes: 0 ok, 1 `check` found a mismatch or checked nothing (every filled
+// post-switch row has no member row), 2 usage or unreadable input.
 
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -229,6 +230,13 @@ export function checkRows(rows, memberRows) {
     } else if (actual !== row.tier) {
       failures.push(`PR #${row.pr} (ticket #${row.ticket}): tier=${row.tier}, but ${m.member} ran as ${m.subagentType} (${actual})`);
     }
+  }
+  // `0 checked` is only a pass when nothing was left to compare. Every filled
+  // post-switch row missing its member row means the join to the member file
+  // is gone (a blank ticket there, a stale or absent member file) and the run
+  // verified nothing; several-member-rows skips are by design and stay out.
+  if (checked === 0 && skipped.noMemberRow > 0 && skipped.severalMemberRows === 0) {
+    failures.push(`every one of the ${skipped.noMemberRow} rows dated from ${TIER_SWITCH_DATE} with a filled tier has no implementer row in the member file - nothing was checked`);
   }
   return { failures, skipped, checked };
 }

@@ -339,6 +339,57 @@ test("check: rows dated before the switch are skipped, whatever they say", (t) =
   assert.match(r.stdout, /skipped 1 before/);
 });
 
+// The vacuous pass #2433 closes: every filled post-switch row lost its join to
+// the member file, so nothing was compared and `0 checked` used to exit 0.
+test("check: every filled post-switch row lacking a member row fails instead of passing 0 checked", (t) => {
+  // impl-327-2 is a real implementer name parseMemberName leaves with a blank ticket.
+  const f = fixture(t, {
+    members: [{ member: "impl-327-2", ticket: "", type: "fleet-implementer" }],
+    tierRows: [tierRow({ pr: 20, ticket: 327, tier: "default" }), tierRow({ pr: 21, ticket: 328, tier: "default" })],
+  });
+  const r = f.run("check");
+  assert.equal(r.code, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /FAIL .*every one of the 2 .*no implementer row in the member file.*nothing was checked/);
+  assert.match(r.stdout, /0 checked/);
+});
+
+test("check: a missing member file fails a filled post-switch row the same way", (t) => {
+  const f = fixture(t, { tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" })] });
+  rmSync(f.members);
+  const r = f.run("check");
+  assert.equal(r.code, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /FAIL .*nothing was checked/);
+});
+
+// What the vacuity guard must ACCEPT: 0 checked is fine whenever no filled
+// post-switch row is missing its member row.
+test("check: 0 checked still passes when every row is pre-switch, blank, or has several member rows", (t) => {
+  const f = fixture(t, {
+    members: [
+      { member: "impl-11", ticket: 11, type: "task" },
+      { member: "impl-11-b", ticket: 11, type: "task" },
+    ],
+    tierRows: [
+      tierRow({ date: PRE_SWITCH, pr: 20, ticket: 10, tier: "opus" }),
+      tierRow({ pr: 21, ticket: 10, tier: "" }),
+      tierRow({ pr: 22, ticket: 11, tier: "default" }),
+    ],
+  });
+  const r = f.run("check");
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /0 checked, 0 failed/);
+});
+
+test("check: one checked row keeps a no-member-row sibling a skip, not a failure", (t) => {
+  const f = fixture(t, {
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+    tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" }), tierRow({ pr: 21, ticket: 99, tier: "default" })],
+  });
+  const r = f.run("check");
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /1 checked, 0 failed.*1 with no member row/);
+});
+
 test("check: a missing tier-outcomes.tsv file fails loudly instead of passing 0 checked", (t) => {
   const f = fixture(t, {
     members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
