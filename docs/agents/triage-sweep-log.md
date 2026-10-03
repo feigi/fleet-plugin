@@ -146,10 +146,17 @@ agent, sized to the ticket: #2550 small, #2571 medium, #2551 medium-high,
 | #2568 | `reap.test.mjs`'s `gitdir missing` / `gitdir chmod 000` rows flake in CI | Root-caused: on git ≥ 2.54 the fixture's own `git fetch --prune` starts detached auto-maintenance whose `worktree-prune` task erases the fault before reap.sh reads it. Reproduced locally by enabling that task on git 2.50.1; about 1.4% of CI runs | live-confirmed → `bug` + `ready-for-agent` (brief: `-c maintenance.auto=false` in the test's fixture `git()` helper only) |
 | #2571 | `recipe-prove`'s `git()` cannot tell a signal-killed git from a non-zero exit | Reproduced: `kill -9`, `kill -TERM` and an over-`maxBuffer` git each end in a `NOT PROVEN` message with an empty reason | live-confirmed → `bug` + `ready-for-agent` (brief: name the signal and `error.code` in `err`; do not throw) |
 
+**Filed mid-sweep:** #2587 (2026-10-03T23:06:26Z, `needs-triage`, deferred
+from open PR #2581), probed after the five above:
+
+| # | Central claim | Verdict | Outcome |
+|---|---|---|---|
+| #2587 | `writeCache`'s `git --version` probe catches only a git that cannot start, so a git that starts and exits 126 reads `NOT PROVEN` | The probe is not on `origin/main`@`5cd8b625`; it exists only on PR #2581's head `6e3a9464`, as #2100's construct did. Reproduced there: an exit-126 git stub gives `NOT PROVEN — the Recipe cache reader refuses what was proven: … is not a git repository`, exit 1 | live-confirmed → `bug` + `ready-for-agent` + `onhold` until PR #2581 merges (brief: a non-zero `git --version` maps to exit 2; `git()` unchanged) |
+
 **After:** 0 `needs-triage` (`gh issue list --state open --label needs-triage
 --limit 500` returns `[]`). The open-issue and deferred counts were not
 measured before the sweep, so they have no before-and-after comparison.
 
-**Revert:** reopen #2504; on all five, restore `needs-triage` and drop the
-category and state labels this sweep added; delete this sweep's triage
-comments on each; close PR #2585 unmerged.
+**Revert:** reopen #2504; on all six, restore `needs-triage` and drop the
+category, state and `onhold` labels this sweep added; delete this sweep's
+triage comments on each; close PR #2585 unmerged.
