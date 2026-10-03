@@ -1125,31 +1125,29 @@ Pull is one member, so a rate counted per Pull is a rate counted per member —
 one implementer in five, however the Pulls fall across the run — and the
 ledger, not your memory, is what still holds the count after a compaction.
 
-**Do not label it anywhere — the dispatch record already carries it.** The
-pairing is a query over `docs/metrics/member-outcomes.tsv` (the exact awk sits
-in that file's header): a `session` that ran BOTH pre-cutover implementer
-definitions at DIFFERENT `model`s — one member whose `subagent_type` is
-`fleet-implementer-alt`, another whose is `fleet-implementer`. Neither
-definition is dispatched any more, so the query counts pre-cutover history
-only: a session whose implementers ran as `fleet-implementer-<cell>` is not in
-it until #2133 replaces it with the per-cell readout. That column is
-the record of what each member was dispatched AS, scraped like every other
-column, so it survives the file's regeneration and mislabels no historical row
-— a pre-rule session carries no such dispatch to find. A hand-set column would
-fail both of those tests, and one derived against today's declared tiers would
-mislabel every historical row.
+**Do not label it anywhere — the dispatch record already carries it.** A
+cell's comparisons are a query, and `cell-readout.mjs` is that query: it joins
+`docs/metrics/ticket-features.tsv`, whose `chosen_cell` names the cell the
+router chose, to `docs/metrics/member-outcomes.tsv` on `session`+`agent`, and
+admits a row only when its `subagent_type` is that cell's
+`fleet-implementer-<cell>` definition and its `effort` is the cell's level.
+That column is the record of what each member was dispatched AS, scraped like
+every other column, so it survives the file's regeneration and mislabels no
+historical row — the pre-cutover `fleet-implementer` and
+`fleet-implementer-alt` rows are no cell's, and the readout never admits them.
+A hand-set column would fail both of those tests, and one derived against
+today's declared tiers would mislabel every historical row.
 
-**The query counts DELIBERATE pairs, and that is the whole of #1066.** The
-rule this replaces asked only for a `session`+`role` carrying more than one
-distinct `model`, which any session that happened to stage a routine ticket
-beside a correction one satisfies. Measured 2026-09-12 on one corpus: 198
-keys as that query is literally written, 35 sessions across 21 `run_date`s
-once restricted to implementers, against 17 real pairs across 8 — so the gate
-below read itself past its floor on sessions where nothing had been
-controlled. Dispatch alone is not enough either: both arms must actually have
-RUN different models, because a deliberate alt dispatch whose two arms resolve
-to the same model (a `modelRoles` override, measured on omp 2026-09-12)
-controls nothing.
+**The readout counts DELIBERATE comparisons.** An earlier rule asked
+only for a `session`+`role` carrying more than one distinct `model`, which any
+session that happened to stage a routine ticket beside a correction one
+satisfies. Measured 2026-09-12 on one corpus: 198 keys as that query was
+literally written, 35 sessions across 21 `run_date`s once restricted to
+implementers, against 17 real pairs across 8 — so the gate below read itself
+past its floor on sessions where nothing had been controlled. Dispatch alone
+is not enough either: the two rows must actually have RUN a different model or
+effort, because a deliberate dispatch whose two sides resolve to the same model
+(a `modelRoles` override, measured on omp 2026-09-12) controls nothing.
 
 **Why one in five within the run, not a week of one tier then a week of the other:**
 tier would then be confounded with calendar date and therefore with prompt
@@ -1397,11 +1395,14 @@ pooled across cells, and stop until
 there are at least ten of them across five or more distinct `run_date`s; below
 that, a comparison count is a number, not evidence, and the last guard fired
 with n=1 on the control side. **Report the count the per-cell readout prints,
-never one from any other query:** until that readout exists there is no count
-to report, the pair query in `member-outcomes.tsv`'s header counts pre-cutover
-pairs only, which are no cell's comparisons, and the query before that one
-counted every session whose implementers merely differed, so it cleared this
-floor by an order of magnitude while the controlled comparison did not exist yet.
+never one from any other query:** `~/.fleet/bin/fleet-run cell-readout.mjs`
+prints `<cell> <comparisons> <run_dates> <resolved models>` for each cell past
+that floor and a cell below it only as a count on stderr; a `mixed (…)` models
+column means the cell's history spans more than one model behind its role.
+The pre-cell pair query counted pairs that are no cell's comparisons, and the
+query before that one counted every session whose implementers merely
+differed, so it cleared this floor by an order of magnitude while the
+controlled comparison did not exist yet.
 
 Why the agent body carries what it does — read this before editing any
 `fleet-implementer-<cell>` file, and keep every cell's body byte-identical. Each rule in the body's
