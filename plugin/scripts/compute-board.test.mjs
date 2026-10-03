@@ -752,10 +752,10 @@ test("a failed or killed finisher flags nothing once the label is on, the PR is 
 
 test("a failed or killed finisher token on another PR's row is a stray; one settled only in `## Dispatched` still flags", () => {
   const stray = ["#941 impl-941=PR#931", "#942 impl-942=PR#932 · finisher-pr-931=failed"];
-  const b = computeBoard(reproInputs({ rows: stray, ledger: { rows: stray, dispatched: [], filed: [], ruled: [] }, prev: { tickets: [] } }));
+  const b = computeBoard(reproInputs({ rows: stray, prev: { tickets: [] } }));
   assert.deepEqual(card(b, 941).flags, []);
   const masked = ["#941 impl-941=PR#931 · finisher-pr-931=failed", "#942 impl-942=PR#932 · finisher-pr-931-b"];
-  const m = computeBoard(reproInputs({ rows: masked, ledger: { rows: masked, dispatched: [], filed: [], ruled: [] }, prev: { tickets: [] } }));
+  const m = computeBoard(reproInputs({ rows: masked, prev: { tickets: [] } }));
   assert.deepEqual(card(m, 941).flags, ["finisher:failed"]);
   const rows = ["#941 impl-941=PR#931 → PR#931 · reviewed=abc1234:0/0/0"];
   const d = computeBoard(reproInputs({ rows, ledger: { rows, dispatched: ["impl-941=PR#931", "finisher-pr-931=killed"], filed: [], ruled: [] }, prev: { tickets: [] } }));
