@@ -171,6 +171,13 @@ jobs:
       - name: Tier-outcomes check
         run: node plugin/scripts/tier-outcomes.mjs check --file docs/metrics/tier-outcomes.tsv --member-outcomes docs/metrics/member-outcomes.tsv
 
+      # The router table is a code carrier: it changes only by a re-fit of the
+      # committed rows, never by hand, so CI re-fits it from those rows and
+      # fails on any difference. Offline — the table records the guard
+      # snapshot its fit read.
+      - name: Router table check
+        run: node plugin/scripts/ticket-router.mjs --check --table plugin/scripts/router-table.json --features docs/metrics/ticket-features.tsv --members docs/metrics/member-outcomes.tsv --verdicts docs/metrics/tier-outcomes.tsv
+
       # -S warning, not the default: the default adds info-level hits that are
       # noise here — SC2016 where a single-quoted `python3 -c` script is meant
       # not to expand, SC1003 on an OSC-8 escape, SC2015 on the

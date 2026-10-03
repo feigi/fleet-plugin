@@ -357,7 +357,7 @@ _Avoid_: tier (bare), alt-tier, model
 
 **Router**:
 The checked-in table (`router-table.json`) plus the script that reads and
-fits it (`ticket-router.mjs`) — pending `#2131`, not yet built — mapping a
+fits it (`ticket-router.mjs`), mapping a
 ticket's stratum to a Cell. Not a dispatched member — no `fleet-router`
 agent definition exists; sizing a ticket for the table is one `judge()`
 call in the controller's own eval.
