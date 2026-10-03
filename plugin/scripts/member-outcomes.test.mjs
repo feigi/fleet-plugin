@@ -269,9 +269,9 @@ test("a nested member's fan-out is scraped too, keyed on its path-relative stem"
 });
 
 test("role comes from classifyRole and is not invented here", () => {
-  // `role` had no assertion anywhere: it is the GROUPING column of the header's
-  // pair query, so a classifyRole regression moved every bucket in the read-out
-  // while the suite stayed green.
+  // `role` had no assertion anywhere while it was the GROUPING column of the
+  // header's former pair query, so a classifyRole regression moved every
+  // bucket in that read-out while the suite stayed green.
   const dir = fixture([
     ["impl-580", [sessionEvt("/x"), thinkingEvt("xhigh"), assistantEvt("claude-opus-5")]],
     ["merge-bot-3", [sessionEvt("/x"), thinkingEvt("xhigh"), sessionInitEvt("merge pass 3", "fleet-merge-bot"), assistantEvt("claude-opus-5")]],

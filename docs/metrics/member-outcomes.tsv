@@ -1,5 +1,5 @@
 # One row per dispatched fleet member per run. DERIVED, NOT AUTHORED: every row
-# is produced by skills/fleet/scripts/member-outcomes.mjs from the harness's own
+# is produced by plugin/scripts/member-outcomes.mjs from the harness's own
 # subagent transcripts. Re-running the scraper REPLACES rows in place, and the
 # whole file may be regenerated when the role classifier changes.
 #
@@ -87,44 +87,40 @@
 # indistinguishable here. Whether the work was any good is a verdict, and
 # verdicts live in tier-outcomes.tsv, joined on `pr`.
 #
-# A within-run PAIR — the only unconfounded comparison — is a session that ran
-# BOTH implementer definitions at DIFFERENT models: one member dispatched
-# `fleet-implementer-alt`, another dispatched `fleet-implementer`. Both arms
-# are named by the DISPATCH, never by the role classifier, and
-# never by "these two models differ" alone. The role classifier cannot name an
-# arm at all: both definitions book `role=implementer`, so a role filter
-# selects the pair's two members without distinguishing which is which. Until
+# A CELL'S COMPARISONS — the only unconfounded comparison — are counted by
+# plugin/scripts/cell-readout.mjs, not by a query in this header. A Pull is a
+# ticket-features.tsv row, joined to its row here on `session`+`agent`; its
+# `chosen_cell` names the cell. For a cell X other than slow-high, a comparison
+# is one session holding an ADMISSIBLE row at X and an admissible slow-high row
+# whose resolved (`model`, `effort`) differ from the X row's. A row is
+# admissible only when its `subagent_type` is `fleet-implementer-<chosen_cell>`
+# and its `effort` is the cell's level — so no `fleet-implementer` or
+# `fleet-implementer-alt` row from before the cell grid is any cell's
+# comparison. A cell is read only once it has at least ten comparisons across
+# five or more distinct `run_date`s, this file's own `run_date`:
+#   node plugin/scripts/cell-readout.mjs
+# prints `<cell> <comparisons> <run_dates> <resolved models>` for each cell past
+# that gate — `mixed (<model-a> n=…, <model-b> n=…)` when the cell's admissible
+# rows span more than one model — and nothing that identifies a comparison,
+# because run-team's gate forbids reading them early.
+#
+# Both sides are named by the DISPATCH, never by the role classifier, and
+# never by "these two models differ" alone. The role classifier cannot name a
+# side at all: every implementer definition books `role=implementer`. Until
 # #1486 it failed the other way on omp — a fleet implementer booked
 # `role=other` there, so a role filter dropped that harness outright — and that
 # a DERIVED classification moved under the query at all is the standing reason
-# this key is the dispatch record instead. #1066: the session+role+model
-# query this replaces counted every session that happened to stage a routine
-# ticket beside a correction one. Measured 2026-09-12 on this corpus: 198 keys
-# as that query is written, 35 sessions across 21 run_dates once restricted to
-# implementers, against 17 real pairs across 8. A scheme with three tiers would
-# satisfy it with nothing controlled at all.
+# the key is the dispatch record instead. #1066: the session+role+model query
+# the pre-cell pair query replaced counted every session that happened to stage
+# a routine ticket beside a correction one. Measured 2026-09-12 on this corpus:
+# 198 keys as that query was written, 35 sessions across 21 run_dates once
+# restricted to implementers, against 17 real pairs across 8.
 #
-# The model test stays, on TOP of the dispatch test. Measured 2026-09-12: one
+# The resolved test stays, on TOP of the dispatch test. Measured 2026-09-12: one
 # omp session dispatched 12 alt and 15 top implementers that all resolved to
 # claude-sonnet-5 anyway (a modelRoles override upstream of the dispatch), so
 # the intent was deliberate and the comparison empty. Counting intent alone
-# reads 18 pairs across 9 run_dates where 17 across 8 is the truth.
-#
-# Nothing is labelled; the pairing is a query:
-#   awk -F'\t' '!/^#/ {if ($15 ~ /(^|:)fleet-implementer-alt$/) a[$1 FS $5]; \
-#     else if ($15 ~ /(^|:)fleet-implementer$/) t[$1 FS $5]; d[$1]=$2} \
-#     END{for (k in a) {split(k,x,FS); for (j in t) {split(j,y,FS); \
-#       if (x[1]==y[1] && x[2]!=y[2]) p[x[1]]}} \
-#     for (s in p) {n++; r[d[s]]} print n+0, length(r)}' docs/metrics/member-outcomes.tsv
-#
-# It prints two numbers — the pair count and how many distinct `run_date`s
-# they span, which is exactly what run-team's gate reads — and nothing that
-# identifies a pair, because that gate forbids reading them early.
-#
-# It counts pre-cutover pairs only: `fleet-implementer-alt` and
-# `fleet-implementer` are no longer dispatched (#2129), so a session whose
-# implementers ran as `fleet-implementer-<cell>` is not in it until #2133
-# replaces this query with the per-cell readout.
+# read 18 pairs across 9 run_dates where 17 across 8 was the truth.
 #
 # Rows by model:
 #   awk -F'\t' '!/^#/ {n[$5]++} END{for (k in n) print n[k], k}' docs/metrics/member-outcomes.tsv

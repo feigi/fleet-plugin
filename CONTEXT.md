@@ -365,7 +365,7 @@ _Avoid_: fleet-router, sizer
 
 **Admissible row**:
 A per-cell readout row whose Resolved tier matched its Declared tier and
-whose recorded effort equals its cell's level — the only rows the
-per-cell stopping rule and readout script (`cell-readout.mjs`, pending
-`#2133`/`#2134`, not yet built) count.
+whose recorded effort equals its cell's level — the only rows the readout
+script (`cell-readout.mjs`) and the per-cell stopping rule (pending `#2134`,
+not yet built) count.
 _Avoid_: verified row, valid row
