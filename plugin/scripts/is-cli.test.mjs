@@ -83,3 +83,17 @@ for (const name of CLI_SCRIPTS) {
     assert.equal(linked.stderr, real.stderr);
   });
 }
+
+// The other direction: the control above cannot tell a guard that tests the
+// path from one that is always true — both run main() under --bogus. Loading
+// the script as a module must leave main() unrun: no output, exit 0.
+for (const name of CLI_SCRIPTS) {
+  test(`${name}.mjs imported as a module does not run main()`, () => {
+    const dir = tempDir("is-cli-import-");
+    const url = pathToFileURL(join(SCRIPTS_DIR, `${name}.mjs`)).href;
+    const run = spawnSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(url)});`], { cwd: dir, encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(run.stdout, "");
+    assert.equal(run.stderr, "");
+  });
+}
