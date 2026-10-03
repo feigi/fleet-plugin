@@ -289,7 +289,7 @@ function standalone(f, ...extra) {
 test("with no ledger the exit status is the verdict, and nothing is written to any ledger", (t) => {
   const f = fixture(t);
   const ledgerBefore = readFileSync(join(f.dir, "ledger.md"), "utf8");
-  
+
   f.writeRecord(f.baseEntries());
   let r = standalone(f);
   okVerdict(r);
@@ -319,8 +319,9 @@ test("an explicit --ledger naming no file is no ledger either, and is not create
   assert.equal(existsSync(join(f.dir, "absent")), false);
 });
 
-test("the run's own .fleet/ledger.md is found without --ledger, and the verdict is written to it", (t) => {
-  const f = fixture(t);
+// Writes `f.repo`'s own `.fleet/ledger.md` with the member's row, as a fleet
+// run's `ledger.mjs dispatch` leaves it, and returns its path.
+function seedOwnLedger(f) {
   const ledger = join(f.repo, ".fleet", "ledger.md");
   const run = (...args) => {
     const r = spawnSync(process.execPath, [LEDGER, "--file", ledger, ...args], { encoding: "utf8", env: cleanEnv() });
@@ -329,6 +330,12 @@ test("the run's own .fleet/ledger.md is found without --ledger, and the verdict 
   run("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${f.head}:2/1/1`);
   run("dispatch", "40", "fix-pr-40");
   run("settle", "fix-pr-40", `applied:${f.head.slice(0, 7)}`);
+  return ledger;
+}
+
+test("the run's own .fleet/ledger.md is found without --ledger, and the verdict is written to it", (t) => {
+  const f = fixture(t);
+  const ledger = seedOwnLedger(f);
   f.writeRecord(f.baseEntries());
   const r = standalone(f);
   okVerdict(r);
@@ -349,6 +356,85 @@ test("a ledger that exists is never skipped: one with no row for the member is a
   assert.equal(readFileSync(other, "utf8"), before);
 });
 
+// A repository's `.fleet/ledger.md` outlives the fleet run that wrote it, and
+// every worktree of the repository finds it through the git common dir.
+function linkedWorktree(f) {
+  const wt = join(f.dir, "wt");
+  git(f.repo, "worktree", "add", "-q", "--detach", wt, f.head);
+  return wt;
+}
+
+test("from a linked worktree the default ledger is the main checkout's, found through the git common dir", (t) => {
+  const f = fixture(t);
+  const wt = linkedWorktree(f);
+  const ledger = seedOwnLedger(f);
+  f.writeRecord(f.baseEntries());
+  const r = standalone(f, "--repo", wt);
+  okVerdict(r);
+  assert.equal(r.json.token, `dispositions-ok=fix-pr-40:${f.head}`);
+  assert.match(readFileSync(ledger, "utf8"), new RegExp(`dispositions-ok=fix-pr-40:${f.head}`));
+  assert.equal(existsSync(join(wt, ".fleet")), false, "the worktree holds no ledger of its own");
+});
+
+test("--no-ledger is a standalone run whatever ledger the repository holds: a stale one is not a fault, and none is written", (t) => {
+  const f = fixture(t);
+  const wt = linkedWorktree(f);
+  const stale = join(f.repo, ".fleet", "ledger.md");
+  mkdirSync(join(f.repo, ".fleet"));
+  const made = spawnSync(process.execPath, [LEDGER, "--file", stale, "row", "11", "impl-11=PR#41 → PR#41"], { encoding: "utf8", env: cleanEnv() });
+  assert.equal(made.status, 0, made.stderr);
+  const before = readFileSync(stale, "utf8");
+  f.writeRecord(f.baseEntries());
+
+  const fault = standalone(f, "--repo", wt);
+  assert.equal(fault.status, 2, fault.stderr);
+  assert.match(fault.stderr, /fix-pr-40 is on no row of PR #40.*--no-ledger/);
+
+  const r = standalone(f, "--repo", wt, "--no-ledger");
+  okVerdict(r);
+  assert.equal(r.json.token, null);
+  assert.equal(readFileSync(stale, "utf8"), before);
+
+  const bad = f.baseEntries();
+  bad[0] = f.entry("survived", 0, { disposition: "defer" });
+  f.writeRecord(bad);
+  mismatch(standalone(f, "--repo", wt, "--no-ledger"), /^fix-pr-40: survived\[0\]/m);
+});
+
+test("--no-ledger leaves a ledger that holds the member's row unwritten, and contradicts --ledger", (t) => {
+  const f = fixture(t);
+  const ledger = seedOwnLedger(f);
+  const before = readFileSync(ledger, "utf8");
+  f.writeRecord(f.baseEntries());
+  const r = standalone(f, "--no-ledger");
+  okVerdict(r);
+  assert.equal(r.json.token, null);
+  assert.equal(readFileSync(ledger, "utf8"), before);
+
+  const both = standalone(f, "--no-ledger", "--ledger", ledger);
+  assert.equal(both.status, 2, both.stderr);
+  assert.match(both.stderr, /--no-ledger and --ledger contradict/);
+});
+
+test("a ledger path that cannot be looked up is a fault, never a standalone run", (t) => {
+  const f = fixture(t);
+  f.writeRecord(f.baseEntries());
+
+  // `.fleet` is a regular file, so `.fleet/ledger.md` fails ENOTDIR, not ENOENT.
+  writeFileSync(join(f.repo, ".fleet"), "");
+  let r = standalone(f);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /could not look for the ledger .*ledger\.md/);
+  rmSync(join(f.repo, ".fleet"));
+
+  // A dangling symlink is a ledger that cannot be read, not an absent one.
+  mkdirSync(join(f.repo, ".fleet"));
+  symlinkSync(join(f.dir, "nowhere.md"), join(f.repo, ".fleet", "ledger.md"));
+  r = standalone(f);
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(existsSync(join(f.dir, "nowhere.md")), false, "nothing was created through the link");
+});
+
 test("an ambient GIT_DIR naming another repository does not change the answer", (t) => {
   const f = fixture(t);
   const other = join(f.dir, "other");
@@ -359,6 +445,21 @@ test("an ambient GIT_DIR naming another repository does not change the answer", 
   f.writeRecord(entries);
   const r = f.check("fix-pr-40", { ...cleanEnv(), GIT_DIR: join(other, ".git"), GIT_WORK_TREE: other });
   mismatch(r, /src\/a\.js:5 is a line the PR's diff touched/);
+});
+
+test("an ambient GIT_DIR naming another repository does not change which ledger is found", (t) => {
+  const f = fixture(t);
+  const ledger = seedOwnLedger(f);
+  const other = join(f.dir, "other");
+  mkdirSync(other);
+  git(other, "init", "-q", "-b", "main");
+  f.writeRecord(f.baseEntries());
+  const r = spawnSync(process.execPath, [SCRIPT, "--member", "fix-pr-40", "--scratch", f.scratch, "--repo", f.repo],
+    { encoding: "utf8", env: cleanEnv({ GIT_DIR: join(other, ".git"), GIT_WORK_TREE: other }), cwd: f.dir });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).token, `dispositions-ok=fix-pr-40:${f.head}`);
+  assert.match(readFileSync(ledger, "utf8"), new RegExp(`dispositions-ok=fix-pr-40:${f.head}`));
+  assert.equal(existsSync(join(other, ".fleet")), false);
 });
 
 test("touchedLines reads new-side lines; pure deletions and deleted files touch none", () => {

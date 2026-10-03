@@ -52,14 +52,20 @@
 // unparseable RECORD is judged, not refused: the fix-applier wrote nothing a
 // reader can use, so every finding it had to cover is dropped.
 //
-// Without a ledger — `--ledger`'s path, or the run's `.fleet/ledger.md`, does
-// not exist, as on a standalone `/review-and-fix` with no controller — the
-// record is judged all the same and the exit status is the whole verdict: no
-// token is written, no row is read, and `token` in the stdout payload is null.
-// A ledger that exists is never skipped: one that holds no row for the member
-// is a fault (exit 2), not a standalone run.
+// Without a ledger the record is judged all the same and the exit status is
+// the whole verdict: no token is written, no row is read, and `token` in the
+// stdout payload is null. That is the shape of a standalone `/review-and-fix`
+// with no controller, and it is chosen, never inferred — pass `--no-ledger`.
+// A repository's `.fleet/ledger.md` outlives the fleet run that wrote it, so a
+// standalone member in a worktree of such a repository would otherwise find
+// the previous run's ledger, and a ledger that exists is never skipped: one
+// holding no row for the member is a fault (exit 2), as is a ledger path that
+// cannot be looked up (a parent that is a file, no permission, a symlink loop).
+// Only a path that does not exist is "no ledger". `--no-ledger` names that
+// state outright: no ledger is looked for, whatever the repository holds, and
+// it contradicts `--ledger`.
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, lstatSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname, isAbsolute, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -320,8 +326,8 @@ export function withVerdict(rowText, token) {
 // ---------------------------------------------------------------------------
 
 const die = makeDie(NAME);
-const { arg, sweep, stray } = defineFlags(die, {
-  flags: { member: "value", scratch: "value", repo: "value", ledger: "value" },
+const { arg, has, sweep, stray } = defineFlags(die, {
+  flags: { member: "value", scratch: "value", repo: "value", ledger: "value", "no-ledger": "bool" },
 });
 
 // The one git primitive. An ambient GIT_DIR or GIT_WORK_TREE — a hook, a
@@ -350,13 +356,21 @@ function runLedger(ledgerFile, args, what) {
 // `repo` — the workspace every worktree of one repository shares, which is
 // where `ledger.mjs dispatch` wrote the member's row. The path is handed to
 // `ledger.mjs` as `--file`, so the existence probe and the calls that follow
-// answer for one file.
+// answer for one file. Only ENOENT means "there is none": any other failure
+// to look the path up is a fault, not a standalone run. `lstat`, not `stat`, so
+// a dangling symlink is a ledger that cannot be read rather than an absent one.
 function ledgerInUse(explicit, repo) {
   const file = explicit ?? join(
     workspaceDirFromGitCommonDir(git(repo, ["rev-parse", "--git-common-dir"], "find the git common dir"), repo) ?? repo,
     ".fleet", "ledger.md",
   );
-  return existsSync(file) ? file : null;
+  try {
+    lstatSync(file);
+    return file;
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    die(`could not look for the ledger ${file}: ${e.message}`);
+  }
 }
 
 function readJson(path) {
@@ -364,7 +378,7 @@ function readJson(path) {
 }
 
 function main() {
-  const usage = "usage: dispositions-check.mjs --member fix-pr-<M>[-x] --scratch <dir> [--repo <path>] [--ledger <path>]";
+  const usage = "usage: dispositions-check.mjs --member fix-pr-<M>[-x] --scratch <dir> [--repo <path>] [--ledger <path> | --no-ledger]";
   const name = arg("member");
   const scratch = arg("scratch");
   if (!name || !scratch) die(usage);
@@ -374,6 +388,8 @@ function main() {
   if (member === null || member.family !== "fix-pr") die(`'${name}' is not a fix-applier — expected fix-pr-<M>, a -b, -c … suffix allowed`);
   const pr = member.number;
   const repo = arg("repo") ?? process.cwd();
+  const standalone = has("no-ledger");
+  if (standalone && arg("ledger") !== null) die("--no-ledger and --ledger contradict: name one");
 
   const reviewPath = join(scratch, `review-${pr}.json`);
   let review;
@@ -412,7 +428,7 @@ function main() {
   const diff = git(repo, ["-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--unified=0", "-M",
     "--src-prefix=a/", "--dst-prefix=b/", base, head], `diff ${base}..${head}`);
   const top = git(repo, ["rev-parse", "--show-toplevel"], "find the repository root").trim();
-  const ledgerFile = ledgerInUse(arg("ledger"), repo);
+  const ledgerFile = standalone ? null : ledgerInUse(arg("ledger"), repo);
 
   const violations = checkDispositions({
     review, record, recordProblem, touched: touchedLines(diff), roots: [review.snapshot, top],
@@ -426,7 +442,7 @@ function main() {
   if (ledgerFile !== null) {
     const data = JSON.parse(runLedger(ledgerFile, ["read"], "read the ledger"));
     const row = data.rows.find((r) => rowNums(r).pr === pr && memberTokens(r).some((t) => t.name === member.name));
-    if (row === undefined) die(`${member.name} is on no row of PR #${pr} — \`ledger.mjs dispatch\` records a fix-applier before its record can be checked`);
+    if (row === undefined) die(`${member.name} is on no row of PR #${pr} — \`ledger.mjs dispatch\` records a fix-applier before its record can be checked; with no controller, pass --no-ledger`);
     const key = row.split(/\s/)[0];
     if (!/^#[0-9]+$/.test(key)) die(`the row carrying ${member.name} has no #<n> key for \`ledger.mjs row\` to rewrite it by: ${row}`);
     const text = row.slice(key.length).trim();

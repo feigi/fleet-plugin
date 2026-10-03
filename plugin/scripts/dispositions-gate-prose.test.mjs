@@ -95,8 +95,11 @@ test("step 6 halts a non-zero dispositions exit before the label and has the mem
   ));
 });
 
-test("step 6 says the check needs no ledger standalone: no token is written and the exit status is the verdict", () => {
+test("step 6 has a standalone member pass --no-ledger: no token is written and the exit status is the verdict", () => {
   assert.match(labelStep(), phrase(
-    "with no `.fleet/ledger.md` it writes no token and the exit status is the verdict",
+    "standalone you pass `--no-ledger`, so it writes no token and the exit status is the verdict",
+  ));
+  assert.match(labelStep(), phrase(
+    "without the flag it exits 2 for a ledger with no row for you",
   ));
 });

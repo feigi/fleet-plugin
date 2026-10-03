@@ -228,13 +228,15 @@ const COVERED_MJS = {
   // main-checkout.test.mjs, "an ambient GIT_DIR naming another repository
   // does not change the answer (#1599)".
   "main-checkout.mjs": 1,
-  // ONE spawn primitive, `git(repo, args, what)`, behind all three of the
+  // ONE spawn primitive, `git(repo, args, what)`, behind all four of the
   // file's git calls — the merge-base against `origin/main`, the diff the
-  // touched lines come from, and `rev-parse --show-toplevel` (#2342). An
-  // ambient GIT_DIR would answer all three for another repository and judge
-  // the record against that repository's diff. Measured in
-  // dispositions-check.test.mjs, "an ambient GIT_DIR naming another
-  // repository does not change the answer".
+  // touched lines come from, `rev-parse --show-toplevel` (#2342), and
+  // `rev-parse --git-common-dir`, which locates the ledger. An ambient GIT_DIR
+  // would answer all four for another repository and judge the record against
+  // that repository's diff and write its verdict to that repository's ledger.
+  // Measured in dispositions-check.test.mjs, "an ambient GIT_DIR naming
+  // another repository does not change the answer" and "… does not change
+  // which ledger is found".
   "dispositions-check.mjs": 1,
 };
 
