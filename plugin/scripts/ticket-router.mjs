@@ -316,18 +316,21 @@ function fitTickets({ features, members, verdicts, window, cutoff }) {
     const keys = new Set(rows.map((r) => `${r.session}\0${r.agent}`));
     let cost = 0;
     let costKnown = true;
+    let booked = 0;
     let fixRounds = 0;
     for (const mr of members) {
       const name = String(mr.member ?? mr.agent ?? "");
       if (UNBOOKED(name)) continue;
-      const booked = keys.has(`${mr.session}\0${mr.agent}`) || mr.ticket === ticket || (verdict && verdict.pr && mr.pr === verdict.pr);
-      if (!booked) continue;
+      if (!(keys.has(`${mr.session}\0${mr.agent}`) || mr.ticket === ticket || (verdict && verdict.pr && mr.pr === verdict.pr))) continue;
+      booked++;
       if (mr.cost === undefined || mr.cost === "" || !Number.isFinite(Number(mr.cost))) costKnown = false;
       else cost += Number(mr.cost);
       if (parseMember(name)?.family === "fix-pr") fixRounds++;
     }
+    // A ticket with no member row on record has an unknown cost, not a free one.
+    if (booked === 0) costKnown = false;
     for (const r of rows) if (r.router_usd !== "") cost += Number(r.router_usd) || 0;
-    out.push({ ticket, cell: last.chosen_cell, stratum: ruleStratum(last), verdict, cost, costKnown, fixRounds, run_date: last.run_date, dates: rows.map((r) => r.run_date) });
+    out.push({ ticket, cell: last.chosen_cell, stratum: ruleStratum(last), verdict, cost, costKnown, fixRounds });
   }
   return { tickets: out, used: inRange };
 }
