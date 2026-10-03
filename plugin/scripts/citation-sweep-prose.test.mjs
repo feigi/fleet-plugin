@@ -517,7 +517,7 @@ const FILES = [
     // "(line ~1527)" for the `keyNum` check it mirrors — a line that had
     // already drifted into an unrelated comment. It names the check by its
     // enclosing function now.
-    stale: [/fleet-plugin-design\.md:200/, /candidates\.mjs:279/, /\(line ~?\d+\)/],
+    stale: [/fleet-plugin-design\.md:200/, /candidates\.mjs:279/, /\blines?\s+~?\d+/],
     live: ["refuseIfCapped", "runDispatch's `keyNum` check"],
   },
   {
