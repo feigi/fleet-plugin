@@ -376,6 +376,7 @@ test("with no ledger the exit status is the verdict, and nothing is written to a
   okVerdict(r);
   assert.equal(r.json.token, null);
   assert.deepEqual(r.json.violations, []);
+  assert.equal(r.stderr, "", "no --ledger and no default ledger is a standalone run that prints nothing");
 
   const bad = f.baseEntries();
   bad[0] = f.entry("survived", 0, { disposition: "defer" });
@@ -392,7 +393,7 @@ test("with no ledger the exit status is the verdict, and nothing is written to a
   assert.equal(readFileSync(join(f.dir, "ledger.md"), "utf8"), ledgerBefore, "a ledger elsewhere is not this run's and is not touched");
 });
 
-test("an explicit --ledger naming no file is no ledger either: the default ledger is not borrowed, and nothing is created", (t) => {
+test("an explicit --ledger naming no file is no ledger either: the default ledger is not borrowed, nothing is created, and stderr says so", (t) => {
   const f = fixture(t);
   const own = seedOwnLedger(f);
   const ownBefore = readFileSync(own, "utf8");
@@ -403,6 +404,16 @@ test("an explicit --ledger naming no file is no ledger either: the default ledge
   assert.equal(r.json.token, null);
   assert.equal(readFileSync(own, "utf8"), ownBefore);
   assert.equal(existsSync(join(f.dir, "absent")), false);
+  const lines = r.stderr.split("\n").filter(Boolean);
+  assert.equal(lines.length, 1, r.stderr);
+  assert.ok(lines[0].startsWith(`dispositions-check: no ledger at ${absent} `), lines[0]);
+  assert.match(lines[0], /no token was written.*--no-ledger/);
+
+  // A --ledger that exists is used, and draws no such note.
+  const present = standalone(f, "--repo", f.repo, "--ledger", own);
+  okVerdict(present);
+  assert.equal(present.json.token, `dispositions-ok=fix-pr-40:${f.head}`);
+  assert.doesNotMatch(present.stderr, /no ledger at/);
 });
 
 // Writes `f.repo`'s own `.fleet/ledger.md` with the member's row, as a fleet
@@ -479,6 +490,7 @@ test("--no-ledger is a standalone run whatever ledger the repository holds: a st
   const r = standalone(f, "--repo", wt, "--no-ledger");
   okVerdict(r);
   assert.equal(r.json.token, null);
+  assert.equal(r.stderr, "", "--no-ledger is a chosen standalone run and prints nothing");
   assert.equal(readFileSync(stale, "utf8"), before);
 
   const bad = f.baseEntries();
@@ -495,6 +507,7 @@ test("--no-ledger leaves a ledger that holds the member's row unwritten, and con
   const r = standalone(f, "--no-ledger");
   okVerdict(r);
   assert.equal(r.json.token, null);
+  assert.equal(r.stderr, "");
   assert.equal(readFileSync(ledger, "utf8"), before);
 
   const both = standalone(f, "--no-ledger", "--ledger", ledger);

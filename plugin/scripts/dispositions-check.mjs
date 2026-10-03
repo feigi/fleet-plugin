@@ -71,15 +71,17 @@
 // Without a ledger the record is judged all the same and the exit status is
 // the whole verdict: no token is written, no row is read, and `token` in the
 // stdout payload is null. That is the shape of a standalone `/review-and-fix`
-// with no controller, and it is chosen, never inferred — pass `--no-ledger`.
+// with no controller, chosen by `--no-ledger` or by a ledger path that does
+// not exist.
 // A repository's `.fleet/ledger.md` outlives the fleet run that wrote it, so a
 // standalone member in a worktree of such a repository would otherwise find
 // the previous run's ledger, and a ledger that exists is never skipped: one
 // holding no row for the member is a fault (exit 2), as is a ledger path that
 // cannot be looked up (a parent that is a file, no permission, a symlink loop).
-// Only a path that does not exist is "no ledger". `--no-ledger` names that
-// state outright: no ledger is looked for, whatever the repository holds, and
-// it contradicts `--ledger`.
+// Only a path that does not exist is "no ledger": the default path, or one
+// `--ledger` names, which also prints a note on stderr that no token was
+// written. `--no-ledger` names that state outright: no ledger is looked for,
+// whatever the repository holds, and it contradicts `--ledger`.
 
 import { readFileSync, existsSync, lstatSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -410,8 +412,10 @@ function runLedger(ledgerFile, args, what) {
 // where `ledger.mjs dispatch` wrote the member's row. The path is handed to
 // `ledger.mjs` as `--file`, so the existence probe and the calls that follow
 // answer for one file. Only ENOENT means "there is none": any other failure
-// to look the path up is a fault, not a standalone run. `lstat`, not `stat`, so
-// a dangling symlink is a ledger that cannot be read rather than an absent one.
+// to look the path up is a fault, not a standalone run. An absent path named
+// by `--ledger` is announced on stderr; an absent default path is not.
+// `lstat`, not `stat`, so a dangling symlink is a ledger that cannot be read
+// rather than an absent one.
 function ledgerInUse(explicit, repo) {
   const file = explicit ?? join(
     workspaceDirFromGitCommonDir(git(repo, ["rev-parse", "--git-common-dir"], "find the git common dir"), repo)
@@ -422,7 +426,10 @@ function ledgerInUse(explicit, repo) {
     lstatSync(file);
     return file;
   } catch (e) {
-    if (e.code === "ENOENT") return null;
+    if (e.code === "ENOENT") {
+      if (explicit !== null) console.error(`${NAME}: no ledger at ${file} (named by --ledger) — judged with no ledger, so no token was written; pass --no-ledger to choose that`);
+      return null;
+    }
     die(`could not look for the ledger ${file}: ${e.message}`);
   }
 }
