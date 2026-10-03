@@ -84,3 +84,39 @@ out to reconcile is empty.
 
 **Revert:** nothing to undo. This entry records changes made elsewhere and
 makes none of its own.
+
+## 2026-10-03 sweep
+
+**As-of 2026-10-03**, probed against `origin/main`@`2fb6e68b`. The sweep was a
+`/triage` pass over every open `needs-triage` issue. It used #593's procedure
+(probe `origin/main`, never the working tree or the ticket's cited line
+numbers), but #593 itself was already closed.
+
+**Before:** 101 open issues; 6 `needs-triage` (#2447, #2466, #2467, #2472,
+#2473, #2474), all 6 carrying `Deferred from PR #<n>`.
+
+**Probed:**
+
+| # | Central claim | `origin/main` verdict | Outcome |
+|---|---|---|---|
+| #2447 | ADR 0017's removed tier-check regex sits in an inline code span split across two lines | Live: `awk 'length>80'` reports the span's line at 92 characters, and the span continues on the next line | live-confirmed → `bug` + `ready-for-agent` (brief: whitespace-only rewrap, since the ADR is accepted) |
+| #2466 | `external-assumptions.md`'s index bullet calls `task.agentModelOverrides` retired while `prose.md` row 125 is live | Live: `tier-roles.mjs --check` with fixture files (no real omp config) exits 1 on a leftover `fleet-` key, and the bullet ("the only omp settings a run depends on") does not cite row 125 | live-confirmed → `bug` + `ready-for-agent` |
+| #2467 | `prose.md` row 125's "measured omp 18.4.10" has no in-tree provenance | Live: 8 of the 9 rows that state a measurement cite a separate in-tree carrier that records it; row 125 is the only exception, and `18.4.10` occurs nowhere else in the tree | live-confirmed → `bug` + `ready-for-agent` (a superseding brief replaced the first one, which made the row cite itself) |
+| #2472 | An explicit `--ledger` naming a missing file drops `dispositions-check.mjs` to standalone mode silently | Reproduced: exit 0, `token:null`, empty stderr. Standalone mode is deliberate and pinned by a test, which asserts nothing about stderr; no caller passes `--ledger` | live-confirmed as a diagnosability gap → `enhancement` + `ready-for-agent` (brief: add a stderr note, keep the semantics) |
+| #2473 | The standalone-mode tests may let mutant M7 survive | Refuted: baseline 45/45 green; M7 and a GIT_DIR-scrub removal each turn 2 tests red | refuted → `bug` + `wontfix`, closed |
+| #2474 | `ledgerFile === null` is tested at two sites | Refuted: `ledgerFile` is a `const` bound once, so the two tests cannot disagree, and the proposed refactor still tests it twice | refuted → `enhancement` + `wontfix`, closed; recorded in `.out-of-scope/dispositions-check-ledger-sentinel.md` (PR #2489) |
+
+Two closures (#2473, #2474) are a sixth outcome that #593's five do not name:
+the filer marked each finding refuted, the probe confirmed the refutation, and
+there was nothing left to change. They are closed `wontfix` rather than left
+in `needs-triage`, because the probe settled them; nothing is left
+unconfirmed.
+
+**After:** 100 open issues; 44 carrying `Deferred from PR #<n>`; 0
+`needs-triage` (`gh issue list --state open --label needs-triage --limit 500`
+returns `[]`). The open and deferred counts include issues filed by fleet runs
+during the sweep, so they are not before-minus-closed.
+
+**Revert:** reopen #2473 and #2474; on all six, restore `needs-triage` and drop
+the category and state labels this sweep added; delete this sweep's triage
+comments on each; close PR #2489 unmerged.
