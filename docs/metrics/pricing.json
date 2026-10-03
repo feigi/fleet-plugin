@@ -1,0 +1,12 @@
+{
+  "_about": "Cross-check reference only: USD per million tokens, per model, read off omp's own per-turn usage.cost components divided by their token counts (the modal figure across ~/.omp/agent/sessions on 2026-10-03; cache_write split by usage.cttl). member-outcomes.tsv's `cost` is the $ of record; pr-cost.mjs uses this table only to report how far that recorded `cost` sits from the token columns priced here, never to produce a $. null = no turn of that kind was recorded for the model.",
+  "unit": "usd_per_mtok",
+  "models": {
+    "claude-opus-5": { "input": 5, "output": 25, "cache_read": 0.5, "cache_write_5m": 6.25, "cache_write_1h": 10 },
+    "claude-opus-5-5": { "input": 4, "output": 20, "cache_read": 0.2, "cache_write_5m": null, "cache_write_1h": 8 },
+    "claude-sonnet-5": { "input": 2, "output": 10, "cache_read": 0.2, "cache_write_5m": 2.5, "cache_write_1h": 4 },
+    "claude-sonnet-5-5": { "input": 2, "output": 10, "cache_read": 0.2, "cache_write_5m": null, "cache_write_1h": 4 },
+    "claude-haiku-4-5": { "input": 1, "output": 5, "cache_read": 0.1, "cache_write_5m": 1.25, "cache_write_1h": 2 },
+    "claude-fable-5-1": { "input": 10, "output": 50, "cache_read": 0.25, "cache_write_5m": 12.5, "cache_write_1h": 20 }
+  }
+}
