@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveRun } from "./fleet-tick.mjs";
-import { touchedLines, checkDispositions, withVerdict, repoPath, formatViolation } from "./dispositions-check.mjs";
+import { touchedLines, checkDispositions, withVerdict, repoPath, formatViolation, failedBefore } from "./dispositions-check.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./dispositions-check.mjs", import.meta.url));
 const LEDGER = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
@@ -253,6 +253,80 @@ test("a re-check replaces the member's own verdict for the same head and never d
   assert.equal(row.match(/dispositions-/g).length, 1, row);
   assert.ok(row.endsWith(` · dispositions-ok=fix-pr-40:${f.head}`), row);
   assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+});
+
+// A first mismatch is retried by `fix-pr-<M>-b`; a second on the same review
+// is written as an escalate, which keeps the finisher refused and is the end
+// of the automatic path.
+const badRecord = (f) => {
+  const entries = f.baseEntries();
+  entries[0] = f.entry("survived", 0, { disposition: "defer" });
+  return entries;
+};
+const retry = (f, name = "fix-pr-40-b") => {
+  f.okLedger("dispatch", "40", name);
+  f.okLedger("settle", name, `applied:${f.head.slice(0, 7)}`);
+};
+
+test("a second mismatch on the same review writes dispositions-escalate, and the finisher stays refused", (t) => {
+  const f = fixture(t);
+  f.writeRecord(badRecord(f));
+  mismatch(f.check());
+  retry(f);
+  const r = f.check("fix-pr-40-b");
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.json.verdict, "escalate");
+  assert.equal(r.json.token, `dispositions-escalate=fix-pr-40-b:${f.head}`);
+  assert.match(r.stderr, /^fix-pr-40-b: survived\[0\]: an in-scope survived finding deferred with no reason/m, "the violations are still printed");
+  const row = f.row();
+  assert.ok(row.includes(`dispositions-mismatch=fix-pr-40:${f.head}`) && row.includes(`dispositions-escalate=fix-pr-40-b:${f.head}`), row);
+  const d = f.ledgerCli("dispatch", "40", "finisher-pr-40");
+  assert.equal(d.status, 2);
+  assert.match(d.stderr, /finisher-pr-40: dispositions escalate — fix-pr-40-b deferred .*second mismatch/);
+  // Re-running the escalated member's check is idempotent.
+  const again = f.check("fix-pr-40-b");
+  assert.equal(again.json.verdict, "escalate");
+  assert.equal(f.row().match(/dispositions-escalate=/g).length, 1, f.row());
+});
+
+test("the retry that passes the check ends the refusal, and the first mismatch stays on the row unread", (t) => {
+  const f = fixture(t);
+  f.writeRecord(badRecord(f));
+  mismatch(f.check());
+  retry(f);
+  f.writeRecord(f.baseEntries());
+  okVerdict(f.check("fix-pr-40-b"));
+  assert.ok(f.row().includes(`dispositions-mismatch=fix-pr-40:${f.head}`), "the first fix-applier's verdict is kept");
+  assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+});
+
+test("the first mismatch is a plain mismatch, and a mismatch on an earlier review does not count toward a later one", (t) => {
+  const f = fixture(t);
+  f.writeRecord(badRecord(f));
+  const first = f.check();
+  assert.equal(first.json.verdict, "mismatch");
+  assert.equal(first.json.token, `dispositions-mismatch=fix-pr-40:${f.head}`);
+  // The earlier fix-applier's mismatch answered another review's head.
+  retry(f);
+  f.okLedger("row", "10", f.row().slice(4).replace(`dispositions-mismatch=fix-pr-40:${f.head}`, "dispositions-mismatch=fix-pr-40:deadbee1"));
+  const second = f.check("fix-pr-40-b");
+  assert.equal(second.json.verdict, "mismatch", second.stderr);
+});
+
+test("a mismatch from a later suffix, an ok, or another PR's fix-applier is not an earlier failure", () => {
+  const H = "abc1234";
+  const row = (...tokens) => `#10 impl-10=PR#40 → PR#40 · reviewed=${H}:1/0/0 · ${tokens.join(" · ")}`;
+  const b = { retry: "b" };
+  assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40:${H}`)], 40, b, H), true);
+  assert.equal(failedBefore([row(`dispositions-escalate=fix-pr-40:${H}`)], 40, b, H), true);
+  assert.equal(failedBefore([row(`dispositions-ok=fix-pr-40:${H}`)], 40, b, H), false, "an ok is no failure");
+  assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40-c:${H}`)], 40, b, H), false, "a later suffix is not earlier");
+  assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40-b:${H}`)], 40, b, H), false, "the member itself is not earlier");
+  assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40:${H}`)], 40, { retry: null }, H), false, "nor is the first fix-applier's own re-run");
+  assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40:fedcba9`)], 40, b, H), false, "another review's head");
+  assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-41:${H}`)], 40, b, H), false, "another PR's fix-applier");
+  // A split row: the earlier verdict sits on another row that resolves to PR 40.
+  assert.equal(failedBefore(["#11 impl-11=PR#40 → PR#40 · dispositions-mismatch=fix-pr-40:abc1234", "#12 impl-12=PR#41 → PR#41"], 40, b, H), true);
 });
 
 test("nothing is judged or written when the review file or the git history cannot be read", (t) => {

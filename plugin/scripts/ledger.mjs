@@ -1670,8 +1670,9 @@ function dispositionsRefusal(pr, review) {
   }
   if (v.verdict === "escalate") {
     return `dispositions escalate — ${v.member} deferred a finding above suggestion severity because its remedy lies outside the PR's diff, `
-      + `which needs a human's ruling: review ${review.head} gets no finisher and no retry; dispositions-check.mjs --member ${v.member} `
-      + "--scratch <scratch> names each escalated finding by bucket and index, for the PR comment that hands it to a human";
+      + "or its record drew a second mismatch on this review; either needs a human's ruling: "
+      + `review ${review.head} gets no finisher and no retry; dispositions-check.mjs --member ${v.member} `
+      + "--scratch <scratch> names each escalated finding or violating entry by bucket and index, for the PR comment that hands it to a human";
   }
   return null;
 }
