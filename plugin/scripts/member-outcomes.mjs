@@ -124,13 +124,16 @@ export function formatTsv(rows) {
 }
 
 // REFUSES a row whose cell count is not exactly COLUMNS.length rather than
-// padding it. Padding looked harmless and was not: `agent` is the LAST column,
-// so a short row parsed to `agent: ""` — a key rowsForSession can never
-// produce, which means mergeRows can never REPLACE it. Three ways to reach that
-// were measured, all previously exit 0: a transcript torn mid-write became a
-// permanent phantom that re-scraping could not heal; git conflict markers became
-// three data rows; and adding one column ahead of `agent` collapsed the corpus
-// onto one key per session, 2,702 rows to 156.
+// padding it. Padding looked harmless and was not: when this was written
+// `agent` was the LAST column, so a short row parsed to `agent: ""` — a key
+// rowsForSession can never produce, which means mergeRows can never REPLACE
+// it. Three ways to reach that were measured, all previously exit 0: a
+// transcript torn mid-write became a permanent phantom that re-scraping could
+// not heal; git conflict markers became three data rows; and adding one column
+// ahead of `agent` collapsed the corpus onto one key per session, 2,702 rows
+// to 156. `agent` is no longer last — the priced columns follow it — and
+// there a padded "" would read as "no figure was recorded" for a member whose
+// transcript carried one, so a short row stays refused for that too.
 export function parseTsv(text) {
   return String(text ?? "").split("\n")
     .filter((l) => l.trim() && !l.startsWith("#"))

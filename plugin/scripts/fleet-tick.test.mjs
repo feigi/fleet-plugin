@@ -310,7 +310,13 @@ test("router: a guard with no cell tripped is OK, naming each cell against the b
   const r = routerRowOf(guardJson());
   assert.equal(r.action, "OK");
   assert.equal(r.acts, false);
-  assert.equal(r.line, "router       → OK   (task-high $12.30 vs $31.00, fail 25% vs 29%, n=24/31)");
+  assert.equal(r.line, "router       → OK   (task-high $12.30 vs $31.00, fail 25% vs 29%, n=24/31; guard computed 2026-10-03T00:00:00.000Z)");
+});
+
+test("router: the row carries the guard's own computed_at, so a stale OK reads as old", () => {
+  const r = routerRowOf(guardJson({ computed_at: "2026-09-01T08:00:00.000Z" }));
+  assert.equal(r.action, "OK");
+  assert.match(r.detail, /; guard computed 2026-09-01T08:00:00\.000Z$/);
 });
 
 test("router: a tripped cell is DEFAULT-ONLY, naming the cost guard and the cell it tripped", () => {
@@ -319,15 +325,15 @@ test("router: a tripped cell is DEFAULT-ONLY, naming the cost guard and the cell
     cells: [{ ...BASE }, { cell: "smol-high", n: 21, mean_usd: 9.5, fail_rate: 0.45 }, { cell: "task-high", n: 24, mean_usd: 12.3, fail_rate: 0.25 }],
   }));
   assert.equal(r.action, "DEFAULT-ONLY");
-  assert.equal(r.detail, "cost guard: smol-high $9.50 vs $31.00, fail 45% vs 29%, n=21/31");
+  assert.equal(r.detail, "cost guard: smol-high $9.50 vs $31.00, fail 45% vs 29%, n=21/31; guard computed 2026-10-03T00:00:00.000Z");
   const retired = routerRowOf(guardJson({ verdict: "tripped", tripped: ["task-high"], retire: true }));
-  assert.match(retired.detail, /^cost guard: task-high .*; every non-default stage-1 cell tripped — the router retires$/);
+  assert.match(retired.detail, /^cost guard: task-high .*; every non-default stage-1 cell tripped — the router retires; guard computed /);
 });
 
 test("router: a baseline short of its n is NO VERDICT, with the count and the n it needs", () => {
   const r = routerRowOf(guardJson({ verdict: "none", baseline: { ...BASE, n: 7 } }));
   assert.equal(r.action, "NO VERDICT");
-  assert.equal(r.line, "router       → NO VERDICT   (baseline n=7/20)");
+  assert.equal(r.line, "router       → NO VERDICT   (baseline n=7/20; guard computed 2026-10-03T00:00:00.000Z)");
 });
 
 test("router: no guard file is DEFAULT-ONLY, naming the command that writes one", () => {
@@ -336,9 +342,19 @@ test("router: no guard file is DEFAULT-ONLY, naming the command that writes one"
 });
 
 test("router: a guard file that is not a verdict reads DEFAULT-ONLY too — deleting or breaking it cannot evade the guard", () => {
+  const cell = { cell: "task-high", n: 24, mean_usd: 1, fail_rate: 0 };
   for (const [text, why] of [["{", "not JSON"], [guardJson({ verdict: "maybe" }), "not a guard verdict"],
     [guardJson({ tripped: "smol-high" }), "not a guard verdict"], [guardJson({ min_n: undefined }), "not a guard verdict"],
-    [guardJson({ cells: [{ cell: "task-high", n: "24", mean_usd: 1, fail_rate: 0 }] }), "not a guard verdict"]]) {
+    [guardJson({ computed_at: undefined }), "not a guard verdict"],
+    [guardJson({ cells: [{ ...cell, n: "24" }] }), "not a guard verdict"],
+    [guardJson({ cells: [{ ...cell, mean_usd: "12" }] }), "not a guard verdict"],
+    [guardJson({ cells: [{ ...cell, fail_rate: "0.2" }] }), "not a guard verdict"],
+    [guardJson({ baseline: { ...BASE, mean_usd: "31" } }), "not a guard verdict"],
+    // Self-contradicting files: a verdict that disagrees with tripped[], a tripped cell the file never reports, a non-boolean retire.
+    [guardJson({ verdict: "ok", tripped: ["task-high"] }), "not a guard verdict"],
+    [guardJson({ verdict: "tripped", tripped: [] }), "not a guard verdict"],
+    [guardJson({ verdict: "tripped", tripped: ["ghost"] }), "not a guard verdict"],
+    [guardJson({ retire: "yes" }), "not a guard verdict"]]) {
     const r = routerRowOf(text);
     assert.equal(r.action, "DEFAULT-ONLY", text);
     assert.equal(r.detail, `cost-guard.json unreadable (${why}) — run pr-cost.mjs --guard`, text);
@@ -1400,7 +1416,7 @@ test("CLI: the router row reads the run's .fleet/cost-guard.json, and prints DEF
     beforeRun: (repo) => writeFileSync(join(repo, ".fleet", "cost-guard.json"), guardJson({ verdict: "none", baseline: { ...BASE, n: 12 } })),
   });
   assert.equal(ok.status, 0, ok.stderr);
-  assert.deepEqual(lineOf(ok, "router"), ["router       → NO VERDICT   (baseline n=12/20)"]);
+  assert.deepEqual(lineOf(ok, "router"), ["router       → NO VERDICT   (baseline n=12/20; guard computed 2026-10-03T00:00:00.000Z)"]);
 });
 
 test("CLI: the #1692 shape, read off the ledger — two live implementers at cap 2 pull nothing", () => {

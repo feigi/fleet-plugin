@@ -98,6 +98,18 @@ test("readOmpMember: tokens_cache_write_1h sums each turn's usage.cttl.ephemeral
   assert.equal(mixed.tokens_cache_write_1h, 320);
   assert.equal(rec(turn(0, null)).tokens_cache_write_1h, 0, "nothing written is a real zero");
   assert.equal(rec(turn(40, null)).tokens_cache_write_1h, null, "cache written with no recorded split is unknown, never zero");
+  assert.equal(rec(turn(300, { ephemeral1h: 300 }), turn(700, null, "2026-09-08T15:13:00.000Z")).tokens_cache_write_1h, null,
+    "one cache-writing turn with no recorded split makes the whole figure unknown, never the recorded share alone");
+});
+
+test("readOmpMember: cost is null, never 0, when no turn carries usage.cost.total", () => {
+  const rec = (...turns) => readOmpMember([sessionEvt("/x"), thinkingEvt("high"), ...turns].join("\n"), "/fake/path.jsonl", "impl-1");
+  const noCost = assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 });
+  const priced = assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0.25 } }, "2026-09-08T15:13:00.000Z");
+  assert.equal(rec(noCost).cost, null, "no figure recorded is blank, so pr-cost counts it unpriced instead of booking a free member");
+  assert.equal(rec(noCost, noCost).cost, null);
+  assert.equal(rec(noCost).turns, 1, "the turn itself still counts");
+  assert.equal(rec(priced).cost, 0.25);
 });
 
 test("foldOmpTranscript: resolvedModelIdentity comes off session_init, present before any assistant turn (#1345)", () => {

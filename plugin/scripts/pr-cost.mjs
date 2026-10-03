@@ -5,11 +5,15 @@
 //               [--ticket-features <tsv>] [--pricing <json>] [--out <json>]
 //
 // Inputs: the three metrics TSVs (docs/metrics/ by default, relative to the
-// working directory) and ONE `gh pr list --state all`, scoped to PRs created
-// in the window, for merged state, which tier-outcomes.tsv does not record. A
-// PR that list does not return is counted pending. Output: a TSV per cell on stdout
+// working directory; ticket-features.tsv is written by the router script at
+// dispatch and must exist, else exit 2 — pricing.json and the router-table.json
+// beside this script are optional, though a `--pricing` named but absent is
+// exit 2 too) and ONE `gh pr list --state all`, scoped to PRs created in the
+// window, for merged state, which tier-outcomes.tsv does not record. A PR that
+// list does not return is counted pending. Output: a TSV per cell on stdout
 // (`--json` prints the whole report instead). `--guard` also writes the
-// verdict to `.fleet/cost-guard.json` (`--out` overrides) and exits on it:
+// verdict to `.fleet/cost-guard.json` in the main workspace — where fleet-tick
+// reads it, wherever this runs from; `--out` overrides — and exits on it:
 //
 //   0  ok — no cell tripped
 //   3  at least one cell tripped; `tripped[]` names each
@@ -17,8 +21,9 @@
 //   2  input error — nothing is written
 //
 // The exit status is the guard's carrier: the verdict never lives only in
-// prose. The router reads the file; a missing or unparseable file means the
-// default cell only, so deleting it cannot evade the guard.
+// prose. The router (not in the tree yet; ADR 0016) is to read the file, and
+// fleet-tick's `router` row prints it today; a missing or unparseable file
+// means the default cell only, so deleting it cannot evade the guard.
 //
 // BOOKING. A Pull is a ticket-features.tsv row; its $ is the cost of the
 // member-outcomes.tsv row with the same `session` + `agent`, plus every member
@@ -29,7 +34,8 @@
 // parseMemberName decides), with their own nested members. `merge-bot-*`,
 // `memory` and `__advisor` are booked nowhere: their cost does not vary with
 // the implementer's cell. Only omp rows are read; a blank `cost` books 0 and
-// is counted as unpriced.
+// is counted as unpriced, and a Pull with no member row at all books 0 and is
+// listed as unbooked.
 //
 // A ticket's RULING is its last tier-outcomes.tsv row dated on or after its
 // first Pull in the window; that row names the PR and carries the quality
@@ -50,12 +56,12 @@
 // bootstrap 95% interval on `mean_usd` minus the baseline's — printed to be
 // read, never judged on.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, isDigits } from "./arg.mjs";
-import { gitEnv } from "./git-env.mjs";
+import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { CELL } from "./ledger-grammar.mjs";
 import { parseMemberName } from "./member-record.mjs";
@@ -105,7 +111,8 @@ export function parseFeatures(text) {
 }
 
 const EXCLUDED_MEMBER = /^(?:merge-?bot|memory$|__advisor$)/i;
-const lastSegment = (agent) => String(agent).split("/").at(-1);
+// omp nests a member's id as `<parent>/<parent>.<child>`: the child is the last segment after either separator.
+const lastSegment = (agent) => String(agent).split(/[/.]/).at(-1);
 const usd = (r) => (r.cost === "" || r.cost === undefined ? 0 : Number(r.cost));
 const isMerged = (pr) => pr?.state === "MERGED";
 const failed = (tier) => tier.minted_false_claim === "yes" || tier.closed_own_ticket === "no";
@@ -260,13 +267,14 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   }
 
   const base = cells.get(BASELINE_CELL) ?? null;
+  const meanUsd = (c) => (c.n_merged ? c.usd / c.n_merged : null);
   const figures = [...cells.values()].sort((a, b) => a.cell.localeCompare(b.cell)).map((c) => ({
     cell: c.cell,
     n_pulls: c.n_pulls,
     n_merged: c.n_merged,
     n_pass: c.n_pass,
     fail_rate: c.n_merged ? round((c.n_merged - c.n_pass) / c.n_merged) : null,
-    mean_usd: c.n_merged ? round(c.usd / c.n_merged, 2) : null,
+    mean_usd: round(meanUsd(c), 2),
     median_usd: round(median(c.merged_usd), 2),
     router_usd: round(c.router_usd, 4),
     usd_diff_ci95: c.cell === BASELINE_CELL || !base ? null : bootstrapDiffCI(c.units, base.units),
@@ -280,7 +288,11 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   if (baseline.n >= MIN_N) {
     for (const f of figures) {
       if (f.cell === BASELINE_CELL || f.n_merged < MIN_N) continue;
-      if (trips({ n: f.n_merged, n_pass: f.n_pass, mean_usd: f.mean_usd }, { n: b.n_merged, n_pass: b.n_pass, mean_usd: b.mean_usd })) tripped.push(f.cell);
+      // The $ leg takes the unrounded means: the cent-rounded figures are for
+      // display, and a trip is sticky, so a cell cheaper by under half a cent
+      // must not trip on rounding alone.
+      const c = cells.get(f.cell);
+      if (trips({ n: f.n_merged, n_pass: f.n_pass, mean_usd: meanUsd(c) }, { n: b.n_merged, n_pass: b.n_pass, mean_usd: meanUsd(base) })) tripped.push(f.cell);
     }
   }
   const verdict = baseline.n < MIN_N ? "none" : tripped.length ? "tripped" : "ok";
@@ -301,6 +313,9 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
     mismatch,
     pending: [...new Set(pending)].sort((x, y) => Number(x) - Number(y)),
     unpriced: inReport.filter((r) => r.cost === "").length,
+    // A Pull whose member row never reached member-outcomes.tsv books $0 into
+    // its cell's mean, which reads as a cheap run unless it is listed here.
+    unbooked_pulls: pulls.filter((p) => !pullUsd.has(p)).map((p) => p.agent),
     ab: abReport(groups, pulls, prState, pullUsd, prMemberUsd),
     cross_check: crossCheck(inReport, pricing),
   };
@@ -374,6 +389,9 @@ export function formatReport(report) {
   if (report.mismatch.length) {
     lines.push(`# mismatch (excluded from every cell): ${report.mismatch.map((m) => `PR#${m.pr} ${m.cell} vs ${m.subagent_type || "(none)"}/${m.effort || "(none)"}`).join("; ")}`);
   }
+  if (report.unbooked_pulls.length) {
+    lines.push(`# unbooked Pulls (no member row, so $0 in the mean): ${report.unbooked_pulls.join(" ")}`);
+  }
   const ab = report.ab;
   lines.push(ab.status === "not-run"
     ? `# A/B: ${ab.reason}`
@@ -402,6 +420,14 @@ export function guardFile(report, computedAt) {
 // CLI
 // ---------------------------------------------------------------------------
 
+// `.fleet/cost-guard.json` in the main workspace — the git common dir's parent,
+// where fleet-tick reads it — not in the cwd, which from a linked worktree is a
+// different directory the tick never looks in. The cwd when git cannot answer.
+function defaultGuardPath() {
+  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", env: gitEnv() });
+  return join(workspaceDirFromGitCommonDir(r.stdout) ?? ".", ".fleet", "cost-guard.json");
+}
+
 function main() {
   const die = makeDie(NAME);
   const { arg, has, sweep, stray } = defineFlags(die, {
@@ -412,9 +438,9 @@ function main() {
   });
   sweep();
   stray();
-  const read = (path) => {
+  const read = (path, ifMissing = "") => {
     try { return readFileSync(path, "utf8"); }
-    catch (e) { die(`cannot read ${path}: ${e.code ?? e.message}`); }
+    catch (e) { die(`cannot read ${path}: ${e.code ?? e.message}${e.code === "ENOENT" ? ifMissing : ""}`); }
   };
   const parse = (what, fn) => {
     try { return fn(); }
@@ -423,11 +449,13 @@ function main() {
   const membersPath = arg("member-outcomes") ?? "docs/metrics/member-outcomes.tsv";
   const tiersPath = arg("tier-outcomes") ?? "docs/metrics/tier-outcomes.tsv";
   const featuresPath = arg("ticket-features") ?? "docs/metrics/ticket-features.tsv";
-  const pricingPath = arg("pricing") ?? "docs/metrics/pricing.json";
+  const pricingArg = arg("pricing");
+  const pricingPath = pricingArg ?? "docs/metrics/pricing.json";
   const members = parse(membersPath, () => parseMemberTsv(read(membersPath)));
   const tiers = parse(tiersPath, () => parseTierOutcomes(read(tiersPath)));
-  const features = parse(featuresPath, () => parseFeatures(read(featuresPath)));
-  const pricing = existsSync(pricingPath) ? parse(pricingPath, () => JSON.parse(read(pricingPath))) : null;
+  const features = parse(featuresPath, () => parseFeatures(read(featuresPath, " — the router script writes it at dispatch, so there is nothing to price before it has dispatched")));
+  // The default pricing.json is optional; one named on the command line is not.
+  const pricing = pricingArg === null && !existsSync(pricingPath) ? null : parse(pricingPath, () => JSON.parse(read(pricingPath)));
   const tablePath = join(SCRIPT_DIR, "router-table.json");
   const routerTable = existsSync(tablePath) ? parse(tablePath, () => JSON.parse(read(tablePath))) : null;
 
@@ -451,7 +479,7 @@ function main() {
   const report = computeReport({ members, tiers, features, prs, routerTable, pricing });
   process.stdout.write(has("json") ? JSON.stringify(report, null, 2) + "\n" : formatReport(report));
   if (!has("guard")) return;
-  const file = arg("out") ?? join(".fleet", "cost-guard.json");
+  const file = arg("out") ?? defaultGuardPath();
   try {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(`${file}.tmp`, JSON.stringify(guardFile(report, new Date().toISOString()), null, 2) + "\n");

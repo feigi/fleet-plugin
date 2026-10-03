@@ -4,15 +4,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./temp-dir.mjs";
 import { writeExecStub } from "./exec-stub.mjs";
+import { gitEnv } from "./git-env.mjs";
 import { COLUMNS as MEMBER_COLUMNS, formatTsv, parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { COLUMNS as TIER_COLUMNS, formatRow, parseTierOutcomes } from "./tier-outcomes.mjs";
 import {
-  computeReport, parseFeatures, trips, guardFile, formatReport,
+  computeReport, parseFeatures, trips, guardFile, formatReport, crossCheck,
   FEATURE_COLUMNS, WINDOW_START, MIN_N,
 } from "./pr-cost.mjs";
 import { readCostGuard, routerRows } from "./fleet-tick.mjs";
@@ -66,7 +67,8 @@ const parsed = (w) => ({
 });
 const featuresText = (w) => [FEATURE_COLUMNS.join("\t"), ...w.features.map((f) => FEATURE_COLUMNS.map((c) => f[c] ?? "").join("\t"))].join("\n") + "\n";
 
-function runCli(w, args = ["--guard"], { features } = {}) {
+// `at(dir)` may replace the cwd and argv, and add env, for a run that needs the scratch dir's own paths.
+function runCli(w, args = ["--guard"], { features, at } = {}) {
   const dir = tempDir("pr-cost-");
   mkdirSync(join(dir, "docs", "metrics"), { recursive: true });
   mkdirSync(join(dir, "bin"));
@@ -74,10 +76,11 @@ function runCli(w, args = ["--guard"], { features } = {}) {
   writeFileSync(join(dir, "docs", "metrics", "tier-outcomes.tsv"), `# ${TIER_COLUMNS.join("\t")}\n${w.tiers.map(formatRow).join("\n")}\n`);
   writeFileSync(join(dir, "docs", "metrics", "ticket-features.tsv"), features ?? featuresText(w));
   writeFileSync(join(dir, "prs.json"), JSON.stringify(w.prs));
-  writeExecStub(join(dir, "bin", "gh"), `#!/bin/sh\n[ "$1 $2" = "pr list" ] || exit 9\nprintf '%s\\n' "$@" > "$FIXTURE_PRS.args"\ncat "$FIXTURE_PRS"\n`);
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], {
-    cwd: dir, encoding: "utf8",
-    env: { ...process.env, PATH: `${join(dir, "bin")}:${process.env.PATH}`, FIXTURE_PRS: join(dir, "prs.json") },
+  writeExecStub(join(dir, "bin", "gh"), `#!/bin/sh\n[ "$1 $2" = "pr list" ] || exit 9\nprintf '%s\\n' "$@" > "$FIXTURE_PRS.args"\nprintf '%s' "\${GIT_DIR-unset}" > "$FIXTURE_PRS.gitdir"\ncat "$FIXTURE_PRS"\n`);
+  const run = at?.(dir) ?? { cwd: dir, args };
+  const r = spawnSync(process.execPath, [SCRIPT, ...run.args], {
+    cwd: run.cwd, encoding: "utf8",
+    env: { ...process.env, PATH: `${join(dir, "bin")}:${process.env.PATH}`, FIXTURE_PRS: join(dir, "prs.json"), ...run.env },
   });
   const guardPath = join(dir, ".fleet", "cost-guard.json");
   const argsPath = join(dir, "prs.json.args");
@@ -85,7 +88,9 @@ function runCli(w, args = ["--guard"], { features } = {}) {
     ...r,
     guard: existsSync(guardPath) ? JSON.parse(readFileSync(guardPath, "utf8")) : null,
     ghArgs: existsSync(argsPath) ? readFileSync(argsPath, "utf8").trim().split("\n") : null,
+    ghGitDir: existsSync(join(dir, "prs.json.gitdir")) ? readFileSync(join(dir, "prs.json.gitdir"), "utf8") : null,
     guardPath,
+    dir,
   };
 }
 
@@ -107,7 +112,7 @@ test("--guard: a cell exactly 15 points worse than the baseline trips, exits 3 a
   const read = readCostGuard(r.guardPath);
   assert.equal(read.status, "ok");
   assert.deepEqual(routerRows({ router: read }).map((x) => [x.action, x.detail]),
-    [["DEFAULT-ONLY", "cost guard: task-high $5.00 vs $10.00, fail 45% vs 30%, n=20/20"]]);
+    [["DEFAULT-ONLY", `cost guard: task-high $5.00 vs $10.00, fail 45% vs 30%, n=20/20; guard computed ${r.guard.computed_at}`]]);
   assert.deepEqual(r.guard.cells.find((c) => c.cell === "task-high"), { cell: "task-high", n: 20, mean_usd: 5, fail_rate: 0.45 });
   assert.equal(r.guard.window_start, WINDOW_START);
   assert.ok(!Number.isNaN(Date.parse(r.guard.computed_at)));
@@ -122,6 +127,16 @@ test("--guard: a cell at least as dear as the baseline trips on $ alone, at an e
   const r = runCli(w);
   assert.equal(r.status, 3, r.stderr);
   assert.deepEqual(r.guard.tripped, ["task-high"]);
+});
+
+test("--guard: the $ leg compares unrounded means, so a cell cheaper by under half a cent does not trip on rounding", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 4, 10.004);
+  addCell(w, "task-high", MIN_N, 4, 10.001);
+  const r = runCli(w);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.guard.cells.map((c) => c.mean_usd), [10, 10], "both print as $10.00");
+  assert.deepEqual(r.guard.tripped, []);
 });
 
 test("--guard: every cell within the margin and cheaper exits 0, verdict ok", () => {
@@ -167,6 +182,20 @@ test("--guard: an unreadable input is exit 2 and writes no guard file", () => {
   assert.match(noCell.stderr, /chosen_cell "fast-high" is not a cell/);
 });
 
+test("--guard: a missing ticket-features.tsv is exit 2 naming its producer, and writes no guard file", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 0, 10);
+  const r = runCli(w, null, {
+    at: (dir) => {
+      rmSync(join(dir, "docs", "metrics", "ticket-features.tsv"));
+      return { cwd: dir, args: ["--guard"] };
+    },
+  });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /cannot read docs\/metrics\/ticket-features\.tsv: ENOENT — the router script writes it at dispatch/);
+  assert.equal(r.guard, null);
+});
+
 test("--guard: a gh pr list page at its cap is refused rather than read as complete", () => {
   const w = world();
   addCell(w, "slow-high", 1, 0, 10);
@@ -174,6 +203,95 @@ test("--guard: a gh pr list page at its cap is refused rather than read as compl
   const r = runCli(w);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /returned 1000 PRs, its cap/);
+});
+
+test("--guard: an explicit --pricing that does not exist is exit 2, while an absent default is simply no cross-check", () => {
+  const w = world();
+  addCell(w, "slow-high", 1, 0, 10);
+  const named = runCli(w, null, { at: (dir) => ({ cwd: dir, args: ["--guard", "--pricing", join(dir, "nope.json")] }) });
+  assert.equal(named.status, 2);
+  assert.match(named.stderr, /cannot read .*nope\.json: ENOENT/);
+  assert.equal(named.guard, null);
+  const absent = runCli(w, ["--json"]);
+  assert.equal(absent.status, 0, absent.stderr);
+  assert.equal(JSON.parse(absent.stdout).cross_check, null);
+  const present = runCli(w, null, {
+    at: (dir) => {
+      writeFileSync(join(dir, "p.json"), JSON.stringify({ models: {} }));
+      return { cwd: dir, args: ["--json", "--pricing", join(dir, "p.json")] };
+    },
+  });
+  assert.deepEqual(JSON.parse(present.stdout).cross_check, { rows: 0, skipped: 1, ratio: null });
+});
+
+test("--guard: with no --out the file lands in the main workspace, where fleet-tick reads it, even from a linked worktree", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N - 1, 0, 10);
+  const r = runCli(w, null, {
+    at: (dir) => {
+      const git = (cwd, ...a) => {
+        const g = spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...a], { cwd, encoding: "utf8", env: gitEnv() });
+        assert.equal(g.status, 0, g.stderr);
+      };
+      const main = join(dir, "main");
+      mkdirSync(main);
+      git(main, "init", "-q");
+      git(main, "commit", "-q", "--allow-empty", "-m", "x");
+      git(main, "worktree", "add", "-q", join(dir, "wt"), "-b", "side");
+      const m = join(dir, "docs", "metrics");
+      return {
+        cwd: join(dir, "wt"),
+        args: ["--guard", "--member-outcomes", join(m, "member-outcomes.tsv"), "--tier-outcomes", join(m, "tier-outcomes.tsv"),
+          "--ticket-features", join(m, "ticket-features.tsv")],
+      };
+    },
+  });
+  assert.equal(r.status, 4, r.stderr);
+  const file = join(r.dir, "main", ".fleet", "cost-guard.json");
+  assert.equal(readCostGuard(file).status, "ok", "the tick's reader accepts the file where it looks for it");
+  assert.equal(existsSync(join(r.dir, "wt", ".fleet")), false, "nothing is written under the worktree's own cwd");
+});
+
+test("an ambient GIT_DIR naming another repository cannot move the guard file out of the repository pr-cost runs in", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N - 1, 0, 10);
+  let other;
+  const git = (cwd, env, ...a) => spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", ...a], { cwd, encoding: "utf8", env });
+  const r = runCli(w, null, {
+    at: (dir) => {
+      const here = join(dir, "here");
+      other = join(dir, "other");
+      for (const repo of [here, other]) {
+        mkdirSync(repo);
+        assert.equal(git(repo, gitEnv(), "init", "-q").status, 0);
+        assert.equal(git(repo, gitEnv(), "commit", "-q", "--allow-empty", "-m", "x").status, 0);
+      }
+      const m = join(dir, "docs", "metrics");
+      return {
+        cwd: here, env: { GIT_DIR: join(other, ".git") },
+        args: ["--guard", "--member-outcomes", join(m, "member-outcomes.tsv"), "--tier-outcomes", join(m, "tier-outcomes.tsv"),
+          "--ticket-features", join(m, "ticket-features.tsv")],
+      };
+    },
+  });
+  assert.equal(r.status, 4, r.stderr);
+  // The injection reaches a child: an unscrubbed git, in the same cwd, answers for the other repository.
+  const unscrubbed = git(join(r.dir, "here"), { ...process.env, GIT_DIR: join(other, ".git") }, "rev-parse", "--git-common-dir");
+  assert.equal(unscrubbed.stdout.trim(), join(other, ".git"));
+  assert.equal(existsSync(join(r.dir, "here", ".fleet", "cost-guard.json")), true);
+  assert.equal(existsSync(join(other, ".fleet")), false);
+});
+
+test("an ambient GIT_DIR does not reach the gh child that reads merged state", () => {
+  const w = world();
+  addCell(w, "slow-high", 1, 0, 10);
+  const r = runCli(w, ["--json"], { at: (dir) => ({ cwd: dir, args: ["--json"], env: { GIT_DIR: join(dir, "elsewhere", ".git") } }) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.ghGitDir, "unset");
+  // The stub does echo an injected GIT_DIR back when it is not scrubbed.
+  const probe = spawnSync(join(r.dir, "bin", "gh"), ["pr", "list"], { env: { ...process.env, GIT_DIR: "probe", FIXTURE_PRS: join(r.dir, "prs.json") } });
+  assert.equal(probe.status, 0);
+  assert.equal(readFileSync(join(r.dir, "prs.json.gitdir"), "utf8"), "probe");
 });
 
 test("without --guard the report prints and exits 0, writing nothing", () => {
@@ -229,8 +347,11 @@ test("a PR carries every attempt for its ticket, its PR-named members and their 
   for (const [agent, cost] of [[`review-pr-${P}`, 1], [`fix-pr-${P}`, 1.25], [`finisher-pr-${P}`, 0.25],
     [`reviewcorrectnesspr${P}`, 0.75], [`verifycorrectnesspr${P}-2`, 0.125], [`snapshotpr${P}`, 0.0625], [`test-runpr${P}`, 0.0625],
     [`review-pr-${P}/Helper`, 0.25], ["merge-bot-3", 100], ["memory", 100], ["__advisor", 100], ["MergeBot4", 100],
-    // Excluded by its own name even where an ancestor is booked.
-    [`impl-${T}-b/__advisor`, 100], [`review-pr-${P}/memory`, 100]]) {
+    // Excluded by its own name even where an ancestor is booked — nested as
+    // `<parent>/<name>` and as omp writes it, `<parent>/<parent>.<name>`.
+    [`impl-${T}-b/__advisor`, 100], [`review-pr-${P}/memory`, 100], [`review-pr-${P}/mergebot-2`, 100],
+    [`impl-${T}-b/impl-${T}-b.__advisor`, 100], [`review-pr-${P}/review-pr-${P}.memory`, 100],
+    [`review-pr-${P}/review-pr-${P}.merge-bot-2`, 100]]) {
     w.members.push(member({ agent, cost, role: "reviewer" }));
   }
   w.tiers.push(tier({ pr: String(P), ticket: String(T) }));
@@ -284,6 +405,22 @@ test("a blank cost books 0 and is counted unpriced; Claude rows are outside the 
   assert.equal(rep.cells[0].mean_usd, 2);
 });
 
+test("a Pull with no member row books $0 and is listed as unbooked, so its cell's mean never reads cheap unflagged", () => {
+  const w = world();
+  addPr(w, { ticket: 1, pr: 101, cell: "slow-high", usd: 10 });
+  addPr(w, { ticket: 2, pr: 102, cell: "slow-high", usd: 6 });
+  const lost = w.members.pop();
+  assert.equal(lost.agent, "impl-2");
+  const rep = computeReport(parsed(w));
+  assert.deepEqual(rep.unbooked_pulls, ["impl-2"]);
+  assert.equal(rep.cells.find((c) => c.cell === "slow-high").mean_usd, 5);
+  assert.match(formatReport(rep), /^# unbooked Pulls \(no member row, so \$0 in the mean\): impl-2$/m);
+  w.members.push(lost);
+  const whole = computeReport(parsed(w));
+  assert.deepEqual(whole.unbooked_pulls, []);
+  assert.doesNotMatch(formatReport(whole), /unbooked/);
+});
+
 test("the A/B report says B has not run until a B Pull carries a sizing_pre", () => {
   const w = world();
   addCell(w, "slow-high", 3, 0, 10);
@@ -293,6 +430,36 @@ test("the A/B report says B has not run until a B Pull carries a sizing_pre", ()
   assert.equal(computeReport(parsed(w)).ab.status, "insufficient");
 });
 
+test("the A/B report is underpowered until B disagrees with the policy on MIN_N Pulls, and not at MIN_N", () => {
+  const build = (agreeing) => {
+    const w = world();
+    addCell(w, "task-high", 2 * MIN_N, 0, 10);
+    for (const f of w.features) if (Number(f.ticket) % 2 === 1) f.sizing_pre = "light";
+    // `policy_cell` is slow-high on every Pull; make `agreeing` of the B Pulls agree with it.
+    for (const f of w.features.filter((f) => Number(f.ticket) % 2 === 1).slice(0, agreeing)) f.policy_cell = f.chosen_cell;
+    return computeReport(parsed(w)).ab;
+  };
+  const under = build(1);
+  assert.equal(under.disagreement, (MIN_N - 1) / MIN_N);
+  assert.equal(under.status, "underpowered");
+  const enough = build(0);
+  assert.equal(enough.disagreement, 1);
+  assert.notEqual(enough.status, "underpowered");
+});
+
+test("trips() draws the 15-point line at counts that are not multiples of 5", () => {
+  const base = { n: 20, n_pass: 20, mean_usd: 10 };
+  assert.equal(trips({ n: 50, n_pass: 43, mean_usd: 1 }, base), false, "7 of 50 failing is +14 points");
+  assert.equal(trips({ n: 100, n_pass: 85, mean_usd: 1 }, base), true, "15 of 100 failing is +15 points");
+});
+
+test("the table labels a non-baseline cell under MIN_N as n<MIN_N rather than ok", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 0, 10);
+  addCell(w, "smol-high", MIN_N - 1, 0, 5);
+  assert.match(formatReport(computeReport(parsed(w))), new RegExp(`^smol-high\\t.*\\tn<${MIN_N}$`, "m"));
+});
+
 test("the cross-check reports recorded cost against pricing.json as a ratio, never a $", () => {
   const w = world();
   addPr(w, { ticket: 1, pr: 101, cell: "slow-high", usd: 0.03 });
@@ -300,4 +467,55 @@ test("the cross-check reports recorded cost against pricing.json as a ratio, nev
   const pricing = { models: { "claude-opus-5": { input: 5, output: 25, cache_read: 0.5, cache_write_5m: 6.25, cache_write_1h: 10 } } };
   assert.deepEqual(computeReport({ ...parsed(w), pricing }).cross_check, { rows: 1, skipped: 0, ratio: 1 });
   assert.deepEqual(computeReport({ ...parsed(w), pricing: { models: {} } }).cross_check, { rows: 0, skipped: 1, ratio: null });
+});
+
+test("the cross-check skips a blank cost and an unpriced token kind, and prices a 1h cache write apart from the 5m remainder", () => {
+  const pricing = { models: { m: { input: 5, output: 25, cache_read: 0.5, cache_write_5m: 6.25, cache_write_1h: 10 } } };
+  const row = (o) => parseMemberTsv(formatTsv([member({ model: "m", cost: 0, ...o })]))[0];
+  // Blank cost: no figure of record, so nothing to compare.
+  assert.deepEqual(crossCheck([row({ cost: "", tokensIn: 1000 })], pricing), { rows: 0, skipped: 1, ratio: null });
+  // A token kind the model has no price for cannot be priced as 0.
+  assert.deepEqual(crossCheck([row({ cost: 1, tokensCacheRead: 100 })], { models: { m: { input: 5, output: 25 } } }),
+    { rows: 0, skipped: 1, ratio: null });
+  // A cache write with no recorded 1h split is unpriceable.
+  assert.deepEqual(crossCheck([row({ cost: 1, tokensCacheCreate: 100, tokensCacheWrite1h: "" })], pricing),
+    { rows: 0, skipped: 1, ratio: null });
+  // 100 of the 300 cache-write tokens are 1h; the other 200 are priced 5m, none twice.
+  const exact = (100 * 10 + 200 * 6.25) / 1e6;
+  assert.deepEqual(crossCheck([row({ cost: exact, tokensCacheCreate: 300, tokensCacheWrite1h: 100 })], pricing),
+    { rows: 1, skipped: 0, ratio: 1 });
+});
+
+test("a ticket's ruling is its LAST tier row: a re-ruling on a later PR decides the cell and n_pass", () => {
+  const w = world();
+  addPr(w, { ticket: 1, pr: 101, cell: "slow-high", usd: 10, fail: true });
+  w.tiers.push(tier({ pr: "102", ticket: "1" }));
+  w.prs.push({ number: 102, state: "MERGED" });
+  const slow = computeReport(parsed(w)).cells.find((c) => c.cell === "slow-high");
+  assert.deepEqual({ n_merged: slow.n_merged, n_pass: slow.n_pass }, { n_merged: 1, n_pass: 1 });
+});
+
+test("two tickets ruled by one PR: the later-dated ruling carries the quality verdict, whichever ticket is read first", () => {
+  const w = world();
+  for (const t of [1, 2, 3, 4]) {
+    w.features.push(pull({ ticket: String(t), agent: `impl-${t}`, chosen_cell: "slow-high" }));
+    w.members.push(member({ agent: `impl-${t}`, cost: 1, effort: "high", subagentType: "fleet-implementer-slow-high" }));
+  }
+  const LATER = "2026-10-04";
+  // PR 101: the earlier ticket's ruling is the early failure, the later ticket's the late pass.
+  w.tiers.push(tier({ pr: "101", ticket: "1", minted_false_claim: "yes" }), tier({ pr: "101", ticket: "2", run_date: LATER }));
+  // PR 102: the earlier ticket's ruling is the late pass, the later ticket's the early failure.
+  w.tiers.push(tier({ pr: "102", ticket: "3", run_date: LATER }), tier({ pr: "102", ticket: "4", minted_false_claim: "yes" }));
+  w.prs.push({ number: 101, state: "MERGED" }, { number: 102, state: "MERGED" });
+  const slow = computeReport(parsed(w)).cells.find((c) => c.cell === "slow-high");
+  assert.deepEqual({ n_merged: slow.n_merged, n_pass: slow.n_pass }, { n_merged: 2, n_pass: 2 });
+});
+
+test("a Pull whose member ran at another effort than its cell's level is a mismatch even when its subagent_type matches", () => {
+  const w = world();
+  addPr(w, { ticket: 1, pr: 101, cell: "slow-high", usd: 10 });
+  w.members.at(-1).effort = "medium";
+  const rep = computeReport(parsed(w));
+  assert.deepEqual(rep.mismatch, [{ pr: "101", cell: "slow-high", subagent_type: "fleet-implementer-slow-high", effort: "medium" }]);
+  assert.equal(rep.cells.find((c) => c.cell === "slow-high"), undefined);
 });

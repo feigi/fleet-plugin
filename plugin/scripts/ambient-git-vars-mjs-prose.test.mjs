@@ -255,6 +255,18 @@ const COVERED_MJS = {
   // cache reader child gets the same env but unsets both itself, so no
   // fixture can tell its env apart.
   "recipe-prove.mjs": 1,
+  // TWO scrubbed children. `defaultGuardPath()`'s `rev-parse --git-common-dir`
+  // names the workspace the guard file is written into: an ambient GIT_DIR
+  // would answer for ANOTHER repository, and the verdict would land in its
+  // `.fleet/` at exit 0 while fleet-tick reads this one's. Measured in
+  // pr-cost.test.mjs, "an ambient GIT_DIR naming another repository cannot move
+  // the guard file out of the repository pr-cost runs in". The `gh pr list`
+  // child is the second: gh's remote resolution follows GIT_DIR too (measured
+  // for shortlist.mjs's `probeState()` above), so merged state could be read
+  // for another repository's PRs; the gh stub in pr-cost.test.mjs, "an ambient
+  // GIT_DIR does not reach the gh child that reads merged state", records
+  // that the child sees no GIT_DIR.
+  "pr-cost.mjs": 2,
 };
 
 // The two-name-only exemption list #1599's second design question answers

@@ -48,7 +48,9 @@
 //   guard     `.fleet/cost-guard.json` beside the shortlist, pr-cost.mjs
 //             --guard's verdict on the implementer cells. Printed as the
 //             `router` row and never acted on here: a missing or unreadable
-//             file reads DEFAULT-ONLY, the way the router itself reads it.
+//             file reads DEFAULT-ONLY, the way the router (not in the tree
+//             yet; ADR 0016) is to read it. pr-cost.mjs writes the main
+//             workspace's file by default, the one read here.
 //
 // The pure half below is `reconcile()` over the counts `deriveRun()` reads off
 // the ledger; main() does the I/O. Split so the guard table and the reading are
@@ -263,6 +265,8 @@ function shortlistRows(s) {
 // default cell alone), or NO VERDICT (the baseline is short of its n). The
 // controller has nothing to do about any of them inside a run, so the row
 // never acts; it is here so the verdict is printed by code, not recalled.
+// Every verdict carries the guard's own `computed_at`: a refresh that failed
+// leaves the old file on disk, and only its age says the OK is not current.
 // No `router` state at all (a caller that read no guard) prints no row.
 export function routerRows(s) {
   const g = s.router;
@@ -271,21 +275,22 @@ export function routerRows(s) {
   const run = "run pr-cost.mjs --guard";
   if (g.status === "missing") return row("DEFAULT-ONLY", `cost-guard.json missing — ${run}`);
   if (g.status !== "ok") return row("DEFAULT-ONLY", `cost-guard.json unreadable (${g.why}) — ${run}`);
-  const { baseline: b, cells, tripped, verdict, min_n: minN } = g.guard;
-  if (verdict === "none") return row("NO VERDICT", `baseline n=${b.n}/${minN}`);
+  const { baseline: b, cells, tripped, verdict, min_n: minN, computed_at: computed } = g.guard;
+  const age = `guard computed ${computed}`;
+  if (verdict === "none") return row("NO VERDICT", `baseline n=${b.n}/${minN}; ${age}`);
   const pct = (x) => (x === null ? "n/a" : `${Math.round(x * 100)}%`);
   const usd = (x) => (x === null ? "n/a" : `$${x.toFixed(2)}`);
   const vs = (c) => `${c.cell} ${usd(c.mean_usd)} vs ${usd(b.mean_usd)}, fail ${pct(c.fail_rate)} vs ${pct(b.fail_rate)}, n=${c.n}/${b.n}`;
   if (verdict === "tripped") {
     const retired = g.guard.retire ? "; every non-default stage-1 cell tripped — the router retires" : "";
-    return row("DEFAULT-ONLY", `cost guard: ${cells.filter((c) => tripped.includes(c.cell)).map(vs).join("; ")}${retired}`);
+    return row("DEFAULT-ONLY", `cost guard: ${cells.filter((c) => tripped.includes(c.cell)).map(vs).join("; ")}${retired}; ${age}`);
   }
   const others = cells.filter((c) => c.cell !== b.cell);
-  return row("OK", others.length ? others.map(vs).join("; ") : `baseline ${b.cell} ${usd(b.mean_usd)}, n=${b.n}`);
+  return row("OK", `${others.length ? others.map(vs).join("; ") : `baseline ${b.cell} ${usd(b.mean_usd)}, n=${b.n}`}; ${age}`);
 }
 
-// pr-cost.mjs's guard file, read as the router reads it: anything but a
-// well-formed verdict is not one.
+// pr-cost.mjs's guard file, read as the router is to read it: anything but a
+// well-formed, self-consistent verdict is not one.
 export function readCostGuard(path) {
   if (path === null) return { status: "missing" };
   let text;
@@ -298,9 +303,13 @@ export function readCostGuard(path) {
   try { guard = JSON.parse(text); } catch { return { status: "unreadable", why: "not JSON" }; }
   const cellShaped = (c) => c && typeof c.cell === "string" && Number.isInteger(c.n)
     && (c.mean_usd === null || typeof c.mean_usd === "number") && (c.fail_rate === null || typeof c.fail_rate === "number");
-  const ok = guard && ["ok", "tripped", "none"].includes(guard.verdict) && cellShaped(guard.baseline)
-    && Array.isArray(guard.cells) && guard.cells.every(cellShaped) && Number.isInteger(guard.min_n)
-    && Array.isArray(guard.tripped) && guard.tripped.every((c) => typeof c === "string");
+  const ok = guard && ["ok", "tripped", "none"].includes(guard.verdict) && typeof guard.computed_at === "string"
+    && cellShaped(guard.baseline) && Array.isArray(guard.cells) && guard.cells.every(cellShaped) && Number.isInteger(guard.min_n)
+    && Array.isArray(guard.tripped) && guard.tripped.every((c) => typeof c === "string")
+    // The verdict is "tripped" exactly when a cell is named, and only a reported cell can be named.
+    && (guard.verdict === "tripped") === (guard.tripped.length > 0)
+    && guard.tripped.every((c) => guard.cells.some((x) => x.cell === c))
+    && (guard.retire === undefined || typeof guard.retire === "boolean");
   return ok ? { status: "ok", guard } : { status: "unreadable", why: "not a guard verdict" };
 }
 

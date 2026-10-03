@@ -161,7 +161,9 @@ test("a fan-out stem that carries no PR, or a name that only resembles one, book
   // Measured stems from before the label carried its PR.
   for (const name of ["verifycorrectness-26", "reviewtests", "snapshot-8", "snapshot", "test-run",
     // Generated or human names: PascalCase never matches, and a bare number is not `pr<n>`.
-    "ReviewCorrectness", "VerifyAndRepair", "Verify685", "ReviewTestsPr12", "review:correctness", "verify::pr", "reviewpr"]) {
+    "ReviewCorrectness", "VerifyAndRepair", "Verify685", "ReviewTestsPr12", "review:correctness", "verify::pr", "reviewpr",
+    // Look-alikes of a fan-out stem: a prefix before the family word, a key-less `verify`, a hyphen before `pr`.
+    "xreviewfoopr12", "xsnapshotpr12", "verifypr12", "snapshot-pr12", "test-run-pr12", "verify-pr12", "reviewers-sprint-pr3"]) {
     assert.deepEqual(parseMemberName(name), { ticket: "", pr: "" }, name);
   }
 });
@@ -300,12 +302,13 @@ test("`subagent_type` is what the DISPATCH named, and blank when it named nothin
 });
 
 test("a row whose cell count is wrong is REFUSED, never padded", () => {
-  // Padding put "" in the LAST column — `agent` when this was written,
-  // `subagent_type` now — a key rowsForSession can never produce, so mergeRows
+  // Padding put "" in the trailing columns — `agent` was the LAST one when
+  // this was written, a key rowsForSession can never produce, so mergeRows
   // could never replace it. Three measured routes there, all exit 0: a torn
   // last line became a permanent phantom that re-scraping could not heal, git
   // conflict markers became three data rows, and adding one column ahead of
-  // `agent` collapsed 2,702 rows to 156.
+  // `agent` collapsed 2,702 rows to 156. The columns that trail `agent` now
+  // are the priced ones, where a padded blank reads as "no figure recorded".
   //
   // The 15-field spelling is the PREVIOUS schema, from before the four priced
   // columns: it must be refused rather than padded with blank prices, which

@@ -165,8 +165,10 @@ export function parseMemberName(name) {
 // a reviewer keeps its own id there — and only lowercase, the case the label
 // templates write, so a generated PascalCase name never books a PR. A stem
 // from before the label carried its PR (`verifycorrectness-26`) has no
-// `pr<n>` and stays blank.
-const SPECIALIST_STEM_RE = /^(?:(?:review|verify)[a-z0-9_-]+?|snapshot|test-run)pr(\d+)(?:-\d+)?$/;
+// `pr<n>` and stays blank. The key never ends in a hyphen — a label's `<key>:`
+// loses its colon, never leaving one — so a typed `verify-pr12` or
+// `review-sprint-pr3` is not a fan-out stem and stays blank.
+const SPECIALIST_STEM_RE = /^(?:(?:review|verify)[a-z0-9_-]*?[a-z0-9_]|snapshot|test-run)pr(\d+)(?:-\d+)?$/;
 function specialistPr(name) {
   const stem = String(name ?? "").split(/[/.]/).at(-1).replace(/[^A-Za-z0-9_-]+/g, "");
   return SPECIALIST_STEM_RE.exec(stem)?.[1] ?? "";
@@ -349,7 +351,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
   let model = null, thinking = null, task = null, resolvedModelIdentity = null, agent = null;
   let firstTs = null, lastTs = null;
   let input = 0, cacheWrite = 0, cacheWrite1h = 0, cacheRead = 0, output = 0, cost = 0, turns = 0;
-  let sawCost = false, sawCttl = false;
+  let sawCost = false, unsplit = false;
   let malformedNonLastLines = 0;
   const entries = [];
   const createCallIds = new Set();
@@ -389,7 +391,8 @@ export function foldOmpTranscript(jsonlText, filePath) {
         cacheWrite += cw;
         cacheRead += Number(u.cacheRead ?? 0);
         output += Number(u.output ?? 0);
-        if (u.cttl && typeof u.cttl === "object") { cacheWrite1h += Number(u.cttl.ephemeral1h ?? 0); sawCttl = true; }
+        if (u.cttl && typeof u.cttl === "object") cacheWrite1h += Number(u.cttl.ephemeral1h ?? 0);
+        else if (cw > 0) unsplit = true;
         if (u.cost && typeof u.cost.total === "number") { cost += u.cost.total; sawCost = true; }
         turns++;
         entries.push({
@@ -414,9 +417,10 @@ export function foldOmpTranscript(jsonlText, filePath) {
     input, cacheWrite, cacheRead, output,
     // The 1h-TTL share of `cacheWrite`, off each turn's `usage.cttl`
     // (`{ephemeral1h}` or `{ephemeral5m}`, present only on a turn that wrote
-    // cache). No `cttl` anywhere is a real 0 when nothing was written, and
-    // unknown — `null` — when something was: the split was never recorded.
-    cacheWrite1h: sawCttl ? cacheWrite1h : cacheWrite === 0 ? 0 : null,
+    // cache). A real 0 when nothing was written, and unknown — `null` — when
+    // any turn that wrote cache recorded no `cttl`: the split was never
+    // recorded for that share, and a partial sum would pass for the whole.
+    cacheWrite1h: unsplit ? null : cacheWrite1h,
     cost: sawCost ? cost : null,
     turns,
     wallS: Number.isFinite(span) ? Math.round(span) : 0,
