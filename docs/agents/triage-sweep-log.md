@@ -147,16 +147,20 @@ agent, sized to the ticket: #2550 small, #2571 medium, #2551 medium-high,
 | #2571 | `recipe-prove`'s `git()` cannot tell a signal-killed git from a non-zero exit | Reproduced: `kill -9`, `kill -TERM` and an over-`maxBuffer` git each end in a `NOT PROVEN` message with an empty reason | live-confirmed → `bug` + `ready-for-agent` (brief: name the signal and `error.code` in `err`; do not throw) |
 
 **Filed mid-sweep:** #2587 (2026-10-03T23:06:26Z, `needs-triage`, deferred
-from open PR #2581), probed after the five above:
+from open PR #2581) and #2589 (2026-10-03T23:08:46Z, `needs-triage`, filed by
+the fleet controller for a decision), probed after the five above:
 
 | # | Central claim | Verdict | Outcome |
 |---|---|---|---|
 | #2587 | `writeCache`'s `git --version` probe catches only a git that cannot start, so a git that starts and exits 126 reads `NOT PROVEN` | The probe is not on `origin/main`@`5cd8b625`; it exists only on PR #2581's head `6e3a9464`, as #2100's construct did. Reproduced there: an exit-126 git stub gives `NOT PROVEN — the Recipe cache reader refuses what was proven: … is not a git repository`, exit 1 | live-confirmed → `bug` + `ready-for-agent` + `onhold` until PR #2581 merges (brief: a non-zero `git --version` maps to exit 2; `git()` unchanged) |
+| #2589 | A merge bot can skip `drop-merged-label.sh`, leaving `in-progress` on closed issues unnoticed | Confirmed: the drop is its own step in the merge-bot runbook, no script calls it, and nothing else drops the label after a merge. The 113 leaked closed-issue labels had already been cleared (0 at probe time) | maintainer chose option 3 (make the step un-skippable; the merge stays the single writer) → `bug` + `ready-for-agent` (brief: `delete-merged-branch.sh` runs the label drop on every MERGED path, with a distinct failure signal) |
 
-**After:** 0 `needs-triage` (`gh issue list --state open --label needs-triage
---limit 500` returns `[]`). The open-issue and deferred counts were not
-measured before the sweep, so they have no before-and-after comparison.
+**After (as-of 2026-10-03T23:15Z):** 0 `needs-triage` (`gh issue list --state
+open --label needs-triage --limit 500` returns `[]`). The fleet was filing
+issues throughout the sweep, so a later filing is outside this entry. The
+open-issue and deferred counts were not measured before the sweep, so they
+have no before-and-after comparison.
 
-**Revert:** reopen #2504; on all six, restore `needs-triage` and drop the
+**Revert:** reopen #2504; on all seven, restore `needs-triage` and drop the
 category, state and `onhold` labels this sweep added; delete this sweep's
 triage comments on each; close PR #2585 unmerged.
