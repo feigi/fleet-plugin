@@ -772,7 +772,8 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { isCLI } from "./is-cli.mjs";
 import { parseArgs } from "node:util";
 import { makeDie, isDigits } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
@@ -1098,4 +1099,4 @@ function main() {
   for (const line of lines) console.log(line);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) main();
+if (isCLI(import.meta.url)) main();

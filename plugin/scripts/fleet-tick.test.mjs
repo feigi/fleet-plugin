@@ -1009,7 +1009,7 @@ const SCRIPT = fileURLToPath(new URL("./fleet-tick.mjs", import.meta.url));
 // or transitive — and ledger.mjs with its own, because the tick reads the
 // ledger through `ledger.mjs read`. An unlisted sibling is a module-not-found
 // at startup: exit 1, a shape no case below expects.
-const SIBLING_MODULES = ["arg.mjs", "fleet-state.mjs", "git-env.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs"].map(
+const SIBLING_MODULES = ["arg.mjs", "fleet-state.mjs", "git-env.mjs", "is-cli.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs"].map(
   (m) => [m, fileURLToPath(new URL(`./${m}`, import.meta.url))],
 );
 
@@ -1108,9 +1108,9 @@ function runCli(args = [], {
   issueStates = {}, claimed = [], env: extraEnv = {}, defaultState = false, keep = false, beforeRun = () => {},
   baseline = true, afterBaseline = () => {},
 } = {}) {
-  // realpath, because on macOS tmpdir() is /var -> /private/var: a script COPY
-  // under the unresolved path never runs its own main(), since import.meta.url
-  // resolves the symlink and process.argv[1] does not.
+  // On macOS tmpdir() is /var -> /private/var; resolving it up front makes
+  // every path below the resolved one. (A symlinked path no longer stops a
+  // copy running its own main(): is-cli.mjs compares by realpath.)
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-")));
   const bin = join(dir, "bin");
   const repo = join(dir, "repo");

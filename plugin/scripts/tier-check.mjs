@@ -78,7 +78,8 @@
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname, isAbsolute } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { foldOmpTranscript, parseMemberName } from "./member-record.mjs";
 import { parseFrontmatter, expectedOmpModel, modelsEqual, readOmpConfigValue } from "./tier-roles.mjs";
@@ -531,4 +532,4 @@ function main() {
   process.exit(failed ? 1 : results.some((r) => r.unverifiable) ? UNVERIFIABLE_EXIT : 0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) main();
+if (isCLI(import.meta.url)) main();

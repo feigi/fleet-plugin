@@ -49,7 +49,8 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags, isDigits } from "./arg.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { parseMember, parseToken, memberTokens } from "./ledger-grammar.mjs";
@@ -459,4 +460,4 @@ function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) main();
+if (isCLI(import.meta.url)) main();

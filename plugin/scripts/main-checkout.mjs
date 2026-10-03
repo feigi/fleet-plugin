@@ -74,7 +74,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 
@@ -309,4 +309,4 @@ function main() {
   process.exitCode = c.state === "dirty" ? 1 : 2;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) main();
+if (isCLI(import.meta.url)) main();

@@ -32,7 +32,7 @@
 // heuristic outright.
 
 import { execFile, spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, renameSync, existsSync, realpathSync, readdirSync, statSync, writeSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, existsSync, readdirSync, statSync, writeSync } from "node:fs";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
 import {
   encodeProjectDir, isOmpSessionDirName, ompSessionTranscripts, foldOmpTranscript, ompMemberRecord,
@@ -49,6 +49,7 @@ import { mergedReadPrs } from "./compute-board.mjs";
 // caller takes (#1582), and a second probe could answer differently.
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { fileURLToPath } from "node:url";
+import { isCLI } from "./is-cli.mjs";
 import { dirname, join, basename } from "node:path";
 import { createServer, request as httpRequest } from "node:http";
 import { inspect } from "node:util";
@@ -2029,9 +2030,5 @@ function fault(e) {
   process.exit(FAULT_EXIT);
 }
 
-// Only run main() as a CLI, never when imported by a test. realpathSync resolves
-// both sides (relative argv, symlinks) so the equality is reliable regardless of
-// how node was invoked.
-const isCLI = process.argv[1] &&
-  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
-if (isCLI) main().catch(fault);
+// Only run main() as a CLI, never when imported by a test (see is-cli.mjs).
+if (isCLI(import.meta.url)) main().catch(fault);

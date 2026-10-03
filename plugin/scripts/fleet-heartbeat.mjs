@@ -77,7 +77,7 @@ export function heldThisCall({ elapsed, target, hold }) {
 // I/O. Everything below runs only as a CLI — importing this file must never
 // parse argv or touch the filesystem, or the pure half stops being unit-testable.
 
-import { pathToFileURL } from "node:url";
+import { isCLI } from "./is-cli.mjs";
 import { parseArgs } from "node:util";
 import { makeDie, isDigits } from "./arg.mjs";
 import { statePath, readState, writeState, DEFAULT_CEILING_S } from "./fleet-state.mjs";
@@ -269,4 +269,4 @@ function main() {
     : `heartbeat: held ${held}s, ${target - elapsed}s of ${target}s remain (quiet=${state.quiet}) → re-issue this command now, do not end your turn`);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) main();
+if (isCLI(import.meta.url)) main();
