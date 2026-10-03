@@ -50,7 +50,7 @@ test("isCLI refuses another module — an import, not a run", () => {
 
 test("isCLI refuses, rather than throws, when argv[1] is missing or names nothing", () => {
   const { dir, url } = fixture();
-  assert.equal(isCLI(url, undefined), false);
+  assert.equal(isCLI(url, null), false);
   assert.equal(isCLI(url, ""), false);
   assert.equal(isCLI(url, join(dir, "gone.mjs")), false);
   assert.equal(isCLI(url, "-"), false);
