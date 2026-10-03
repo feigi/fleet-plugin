@@ -407,6 +407,20 @@ test("a git that stops starting mid-proof is no verdict, never NOT PROVEN — an
   }
 });
 
+// A git that started and ran is never "could not start": here its status
+// output outgrows spawnSync's default 1 MiB buffer, which kills it and sets
+// `error` (ENOBUFS) on a process that did run. The tree the Install step left
+// is unreadable, so the proof does not hold — NOT PROVEN, exit 1.
+test("a git whose output outgrows the spawn buffer is a failed command, not a git that could not be started", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const flood = 'const fs = require("fs"); for (let i = 0; i < 7000; i++) fs.writeFileSync("f".repeat(200) + i, "")';
+  const install = `'${process.execPath}' -e '${flood}'`;
+  const r = prove(dir, ["--install", install, "--test", "true", "--count-line", "x 1", "--test-count", "1"]);
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /NOT PROVEN — could not read the tree state in the throwaway worktree/);
+  assert.doesNotMatch(r.err, /could not start git/);
+});
+
 // Whether the process ignores file modes: root writes into a 0555 directory.
 const IGNORES_MODES = process.getuid?.() === 0 && "root ignores file modes";
 

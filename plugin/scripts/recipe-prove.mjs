@@ -111,10 +111,13 @@ function parseArgs(argv) {
 // A git that cannot be started is no verdict, as for `sh` below: read as a
 // failed git command, it would surface as whatever that command's failure
 // means to its caller — a missing repository, an unfetched origin/main, a
-// proof that did not hold.
+// proof that did not hold. Only a spawn that produced no process counts:
+// spawnSync also sets `error` for a git that ran and was killed — ENOBUFS,
+// when its output outgrows the default maxBuffer — and that is a failed git
+// command like any other, never a git that could not be started.
 function git(args, cwd) {
   const r = spawnSync("git", args, { cwd, env: ENV, encoding: "utf8" });
-  if (r.error) throw cannot(`could not start git: ${r.error.message}`);
+  if (r.error && !r.pid) throw cannot(`could not start git: ${r.error.message}`);
   return { ok: r.status === 0, out: (r.stdout ?? "").replace(/\n$/, ""), err: (r.stderr ?? "").trim() };
 }
 
