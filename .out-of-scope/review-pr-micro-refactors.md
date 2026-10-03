@@ -1,6 +1,6 @@
-# review-pr.js Micro-Refactors
+# review-core.mjs Micro-Refactors
 
-Style-level refactors of `workflows/review-pr.js` — hoisting guards, swapping `&&` for
+Style-level refactors of `plugin/scripts/review-core.mjs` — hoisting guards, swapping `&&` for
 optional chaining, deleting comments that look duplicated — are not accepted on their
 own. Three have been measured and rejected. This is not a rule against changing the
 file; it is a rule against changing it for tidiness alone.
@@ -37,7 +37,7 @@ between them is the intended state. Cutting one to remove the overlap trades a d
 answer for a line count, and the repo's agent-facing prose is deliberately dense.
 
 Note the asymmetry if any of this is ever actioned: agent-facing markdown is executable
-instruction, so cutting a clause there can change behaviour, whereas `review-pr.js`
+instruction, so cutting a clause there can change behaviour, whereas `review-core.mjs`
 comments and the spec cannot. That makes the markdown the *least* safe place to trim,
 not the most.
 
