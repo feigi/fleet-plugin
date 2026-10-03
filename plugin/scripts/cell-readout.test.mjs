@@ -126,7 +126,7 @@ test("a comparison is one session, however many rows it holds, and a row on each
   // A pair split across two sessions is no comparison either.
   addRow(w, { session: "sD", date: "2026-10-04", cell: "smol-high" });
   addRow(w, { session: "sE", date: "2026-10-04", cell: "slow-high" });
-  const [task, smol] = ["task-high", "smol-high"].map((c) => readout(parsed(w)).find((x) => x.cell === c));
+  const [task, smol] = ["task-high", "smol-high"].map((c) => readout(parsed(w)).cells.find((x) => x.cell === c));
   assert.deepEqual([task.comparisons, task.runDates], [1, 1]);
   assert.deepEqual([smol.comparisons, smol.runDates], [0, 0]);
 });
@@ -152,7 +152,7 @@ test("only admissible rows count: dispatched as the drawn cell's definition, at 
   // the control: admissible on both sides
   addRow(w, { session: s(6), date: "2026-10-01", cell: "task-high" });
   addRow(w, { session: s(6), date: "2026-10-01", cell: "slow-high" });
-  const task = readout(parsed(w)).find((x) => x.cell === "task-high");
+  const task = readout(parsed(w)).cells.find((x) => x.cell === "task-high");
   assert.equal(task.comparisons, 1, "only the admissible session counts");
   assert.deepEqual([...task.models], [["claude-sonnet-5", 3]], "the models column reads admissible rows only — sessions 3, 4 and 6");
 });
@@ -165,7 +165,7 @@ test("a comparison needs a resolved (model, effort) that differs from slow-high'
   // slow-medium: same model, a different effort — a real comparison
   addRow(w, { session: "sEff", date: "2026-10-02", cell: "slow-medium" });
   addRow(w, { session: "sEff", date: "2026-10-02", cell: "slow-high" });
-  const rows = readout(parsed(w));
+  const rows = readout(parsed(w)).cells;
   assert.equal(rows.find((x) => x.cell === "task-high").comparisons, 0);
   assert.equal(rows.find((x) => x.cell === "slow-medium").comparisons, 1);
   assert.equal(rows.find((x) => x.cell === "slow-high"), undefined, "slow-high is the baseline, never a readout line");

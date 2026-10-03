@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { between, phrase, sentences, stripHashGutter, unemphasized } from "./prose-pin.mjs";
-import { COLUMNS as MEMBER_COLUMNS } from "./member-outcomes.mjs";
+import { GATE, readout } from "./cell-readout.mjs";
 import { COLUMNS } from "./tier-outcomes.mjs";
 
 // #472: this file's header has never been pinned, while SKILL.md's guard tells
@@ -381,25 +381,19 @@ test("the ruling step refuses to record a sizing verdict it cannot date", () => 
 });
 
 // `run_date` is DERIVED in `member-outcomes.tsv` (a transcript mtime) and
-// STAMPED AT RULING here, and phase 2's pairing floor counts distinct
-// `run_date`s — ten pairs across five dates — over the other file, never this
-// one. Read as a count over THIS file, it answers a different question, and
-// nothing in this header used to say so.
+// STAMPED AT RULING here, and phase 2's per-cell gate counts distinct
+// `run_date`s — ten comparisons across five dates — over the other file, never
+// this one. Read as a count over THIS file, it answers a different question,
+// and nothing in this header used to say so.
 //
 // The paragraph that now says it makes claims about files this one does not
 // contain, which is the shape that rots silently: it stays true only while
-// member-outcomes.tsv keeps carrying the pairing query, `member-outcomes.mjs`
-// keeps stamping dates off an mtime, and SKILL.md keeps the floor's numbers.
-// So the pins below DERIVE each claim from its real source — the same reason
-// the `profile` pin above derives the enum instead of restating it.
-const MEMBER_TSV = readFileSync(join(REPO, "docs", "metrics", "member-outcomes.tsv"), "utf8");
+// cell-readout.mjs keeps dating comparisons off member-outcomes.tsv,
+// `member-outcomes.mjs` keeps stamping dates off an mtime, and SKILL.md keeps
+// the floor's numbers. So the pins below DERIVE each claim from its real
+// source — the same reason the `profile` pin above derives the enum instead of
+// restating it.
 const MEMBER_SRC = readFileSync(join(REPO, "plugin", "scripts", "member-outcomes.mjs"), "utf8");
-
-const memberHeaderLines = [];
-for (const l of MEMBER_TSV.split("\n")) {
-  if (!l.startsWith("#") && l.trim()) break;
-  memberHeaderLines.push(l);
-}
 
 // Bounded at both ends, for `between`'s own stated reason: this header is 140
 // lines about exactly these words, so an unbounded match is satisfiable from
@@ -418,9 +412,9 @@ test("the header says which file each distinct-`run_date` count is read from, an
   assert.match(
     block,
     phrase(
-      "at least ten within-run pairs across five or more distinct `run_date`s, the floor that forbids reading the pairs early — is NOT read here at all. It comes from the pairing query in `docs/metrics/member-outcomes.tsv`'s own header",
+      "at least ten comparisons across five or more distinct `run_date`s, the floor that forbids reading a cell early — is NOT read here at all. It comes from `plugin/scripts/cell-readout.mjs`, which dates each comparison by its session's `run_date` in `docs/metrics/member-outcomes.tsv`",
     ),
-    "the header no longer says the pairing floor's distinct-date count is read from member-outcomes.tsv, not here",
+    "the header no longer says the per-cell gate's distinct-date count is read from member-outcomes.tsv through cell-readout.mjs, not here",
   );
 
   // The definitional halves, each joined to what it makes the column MEAN. A
@@ -457,47 +451,27 @@ test("the header says which file each distinct-`run_date` count is read from, an
   );
 });
 
-test("the header's `run_date` source claims still hold against the query, the scraper and the guard", () => {
+test("the header's `run_date` source claims still hold against the readout, the scraper and the guard", () => {
   const block = runDateSources();
 
-  // The pairing half: the query lives in the OTHER file's header and keys its
-  // dates off the other file's own columns, so resolve it against that file's
-  // COLUMNS export. This is the claim that makes the paragraph load-bearing —
-  // if the query moves or is rekeyed, "read it from there" stops being true.
-  // Bounded to the query BLOCK, not the whole 140-line header —
-  // member-outcomes-header.test.mjs's own `pairQuery()` bounds it the same
-  // way, for the same reason: an unbounded match is satisfiable by a stale
-  // `d[$1]=$2` idiom anywhere in that header even after the real query moved
-  // or was rekeyed, which is exactly what would make "read it from there"
-  // stop being true without this pin noticing.
-  const pairQueryStart = memberHeaderLines.findIndex((l) => l.includes("awk -F") && l.includes("fleet-implementer-alt"));
-  assert.ok(pairQueryStart >= 0, "member-outcomes.tsv's header lost its within-run pair query");
-  let pairQueryEnd = pairQueryStart;
-  while (pairQueryEnd < memberHeaderLines.length && !memberHeaderLines[pairQueryEnd].endsWith("docs/metrics/member-outcomes.tsv")) pairQueryEnd++;
-  assert.ok(pairQueryEnd < memberHeaderLines.length, "the pairing query never reaches the file it reads");
-  const pairQueryBlock = memberHeaderLines.slice(pairQueryStart, pairQueryEnd + 1).join("\n");
-
-  const pairKey = /d\[\$(\d+)\]=\$(\d+)/.exec(pairQueryBlock);
-  assert.ok(pairKey, "member-outcomes.tsv's header no longer carries the pairing query this header points at");
-  assert.equal(
-    MEMBER_COLUMNS[pairKey[2] - 1],
-    "run_date",
-    "the pairing query's distinct-date count is not member-outcomes.tsv's `run_date`",
-  );
-  assert.ok(
-    block.includes(pairKey[0]),
-    `the header cites an idiom for the pairing query's date key that member-outcomes.tsv no longer uses (\`${pairKey[0]}\`)`,
-  );
-
-  // The header also cites the query's distinct-date ACCUMULATOR
-  // (`length(r)`) — resolve the variable name against the query's own
-  // `length(...)` call rather than trusting the header's word for it.
-  const pairAccumulator = /print n\+0, length\((\w+)\)/.exec(pairQueryBlock);
-  assert.ok(pairAccumulator, "member-outcomes.tsv's pair query no longer prints its distinct-date count via `length(...)`");
-  assert.ok(
-    block.includes(`length(${pairAccumulator[1]})`),
-    `the header cites the wrong accumulator for the pairing query's distinct-date count (expected \`length(${pairAccumulator[1]})\`)`,
-  );
+  // The gate half: the count lives in cell-readout.mjs and dates each
+  // comparison off the OTHER file's `run_date`. Run, not read: one comparison
+  // whose ticket-features date and member-outcomes date differ, and the date
+  // the readout counts must be the member-outcomes one. If the readout ever
+  // keys its dates elsewhere, "it comes from there" stops being true.
+  const session = "s-tier-hdr";
+  const pull = (agent, chosen_cell) => ({ run_date: "2026-01-01", session, agent, chosen_cell });
+  const member = (agent, cell, model) => ({
+    session, agent, run_date: "2026-02-02", model, effort: "high", subagentType: `fleet-implementer-${cell}`,
+  });
+  const { cells: [task] } = readout({
+    features: [pull("impl-1", "task-high"), pull("impl-2", "slow-high")],
+    members: [member("impl-1", "task-high", "m-task"), member("impl-2", "slow-high", "m-slow")],
+  });
+  assert.deepEqual([task.cell, task.comparisons, task.runDates], ["task-high", 1, 1]);
+  assert.deepEqual([...task.dates], ["2026-02-02"], "cell-readout.mjs no longer dates a comparison by member-outcomes.tsv's `run_date`");
+  assert.match(block, /`plugin\/scripts\/cell-readout\.mjs`/);
+  assert.match(block, /`docs\/metrics\/member-outcomes\.tsv`/);
 
   // The DERIVED half as code, not prose: the date comes off a transcript
   // mtime. A scraper switched to a clock read would make this header's
@@ -528,16 +502,17 @@ test("the header's `run_date` source claims still hold against the query, the sc
   // writes to the day it ran.
 
   // The floor's numbers, as the paragraph quotes them. It names figures it
-  // does not own; a threshold changed in SKILL.md alone leaves this header
-  // quietly citing the old one.
+  // does not own; a threshold changed in SKILL.md or in the readout alone
+  // leaves this header quietly citing the old one.
   assert.match(
     unemphasized(RUN_TEAM),
     phrase("there are at least ten of them across five or more distinct `run_date`s"),
-    "SKILL.md's pairing floor is no longer ten pairs across five dates — the header quotes those numbers",
+    "SKILL.md's per-cell floor is no longer ten comparisons across five dates — the header quotes those numbers",
   );
+  assert.deepEqual({ ...GATE }, { comparisons: 10, runDates: 5 }, "cell-readout.mjs's gate is no longer ten across five — the header quotes those numbers");
   assert.match(
     block,
-    phrase("at least ten within-run pairs across five or more"),
-    "the header no longer states the pairing floor it attributes to the other file",
+    phrase("at least ten comparisons across five or more"),
+    "the header no longer states the per-cell floor it attributes to the other file",
   );
 });

@@ -62,8 +62,9 @@ function admissibleMember(pull, members) {
 }
 
 /**
- * One entry per cell other than the policy cell that has a ticket-features
- * row: `{ cell, comparisons, runDates, models, gated }`, sorted by cell.
+ * `cells`: one entry per cell other than the policy cell that has a
+ * ticket-features row, `{ cell, comparisons, runDates, dates, models, gated }`,
+ * sorted by cell. `dates` is the comparisons' distinct run_dates, sorted;
  * `models` maps each resolved model of the cell's admissible rows to its row
  * count, largest first. `unjoined` counts Pulls with no member row.
  */
@@ -97,14 +98,14 @@ export function readout({ features, members }) {
     }
     const models = new Map([...modelCounts].sort(([a, n], [b, k]) => k - n || (a < b ? -1 : a > b ? 1 : 0)));
     const runDates = dates.size;
-    return { cell, comparisons, runDates, models, gated: comparisons >= GATE.comparisons && runDates >= GATE.runDates };
+    return { cell, comparisons, runDates, dates: [...dates].sort(), models, gated: comparisons >= GATE.comparisons && runDates >= GATE.runDates };
   });
-  out.unjoined = unjoined;
-  return out;
+  return { cells: out, unjoined };
 }
 
-export function formatModels(models) {
-  if (models.size === 0) return "-";
+// Only a gated cell is formatted, and a comparison needs an admissible row at
+// the cell, so `models` is never empty here.
+function formatModels(models) {
   if (models.size === 1) return [...models.keys()][0];
   return `mixed (${[...models].map(([m, n]) => `${m} n=${n}`).join(", ")})`;
 }
@@ -128,11 +129,11 @@ function main() {
   const features = load(featuresPath, parseFeatures);
   const members = load(membersPath, parseMemberTsv);
 
-  const cells = readout({ features, members });
+  const { cells, unjoined } = readout({ features, members });
   const lines = [];
   const notes = [];
-  if (cells.unjoined > 0) {
-    notes.push(`${cells.unjoined} ticket-features row${cells.unjoined === 1 ? " has" : "s have"} no member-outcomes row — never admissible`);
+  if (unjoined > 0) {
+    notes.push(`${unjoined} ticket-features row${unjoined === 1 ? " has" : "s have"} no member-outcomes row — never admissible`);
   }
   if (cells.length === 0) notes.push(`no cell but ${POLICY_CELL} has a ticket-features row`);
   for (const c of cells) {
