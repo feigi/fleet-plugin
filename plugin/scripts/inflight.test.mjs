@@ -2849,11 +2849,18 @@ test("an ambient GIT_DIR does not ask another repository whether the ticket is t
   // The fixture's own positive control: if the other repository happened to
   // carry a worktree for #77 too, looking in the wrong place would give the
   // right answer and this case would pass while pinning nothing.
-  assert.doesNotMatch(
-    execFileSync("git", ["-C", elsewhere.repo, "worktree", "list"], { encoding: "utf8" }),
-    /77/,
-    "fixture: the other repository must hold nothing for #77",
-  );
+  //
+  // Matched against each worktree's basename and branch, never the whole
+  // listing: the listing carries the fixture's mkdtemp path, whose random
+  // suffix can itself contain `77` (#2512). The main worktree's basename is
+  // fixture()'s fixed `repo`, so no random byte reaches what is matched.
+  const elsewhereNames = execFileSync("git", ["-C", elsewhere.repo, "worktree", "list", "--porcelain"],
+    { encoding: "utf8" })
+    .split("\n")
+    .flatMap((l) => l.startsWith("worktree ") ? [l.slice(9).replace(/.*\//, "")]
+      : l.startsWith("branch refs/heads/") ? [l.slice(18)] : []);
+  assert.ok(!elsewhereNames.some((name) => /77/.test(name)),
+    `fixture: the other repository must hold nothing for #77; it lists ${JSON.stringify(elsewhereNames)}`);
 
   const r = spawnSync("sh", [SCRIPT, "77"], {
     cwd: here.repo,
