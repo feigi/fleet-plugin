@@ -30,7 +30,8 @@
 #
 # At least one of testCount/mutation is the proof; a cache carrying neither,
 # or `installClean` anything but `true`, is an UNPROVEN Recipe and refused like
-# an absent one. Written only by the deriving agent; no script writes it.
+# an absent one. Written only by recipe-prove.mjs, the derivation step's proof,
+# and only once that proof holds; this script never writes it.
 #
 # INVALID on failure to RUN, never on failing tests: the command this script
 # is asked for must name something that resolves from <repo> (a builtin, a
