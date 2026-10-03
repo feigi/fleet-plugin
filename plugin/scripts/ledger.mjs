@@ -6,20 +6,20 @@
 //
 // Rows are rewritten in place, one per ticket. `filed` and `ruled` are
 // append-only, because their whole purpose is to outlive the reasoning that
-// produced them; `filed` appends at most one row per issue (#2087).
+// produced them; `filed` appends at most one row per issue.
 //
-// `dispatch`, `settle` and `drain` (#1799) exist so a reader can derive every
+// `dispatch`, `settle` and `drain` exist so a reader can derive every
 // liveness count from this file alone, rather than from row text a controller
 // typed by hand: `dispatch` writes a member's live token onto its row and
 // appends it to `## Dispatched`, `settle` rewrites that token to
 // `<member>=<outcome>` in both places (an implementer's settle to `PR#M` also
-// folds the PR's own `#M` row into its ticket's, #1876), and `drain` writes the
+// folds the PR's own `#M` row into its ticket's), and `drain` writes the
 // one marker that stops supply. The token grammar is
 // ledger-grammar.mjs's. `## Dispatched` gains an entry per dispatch and never
 // loses or reorders one — settling annotates an entry in place — which is what
 // lets `merge-bot-<n>` be counted from it.
 //
-// Writer policy (#531, reversing #151's item #7): the controller owns run
+// Writer policy: the controller owns run
 // state (`row`/`settle`/`dispatch`/`drain`/`ruled`/`rotate`); filers append
 // filings with `filed`; all writes are serialized by `<file>.lock`. Every
 // write subcommand except `rotate` — which moves the file whole and never
@@ -45,24 +45,24 @@ const NAME = "ledger";
 const AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "agents");
 
 // die() shared with the other fleet scripts (writeSync-based, pipe-safe —
-// see arg.mjs for the #176/#328/#363 rationale). arg()/has() themselves are
+// see arg.mjs for the rationale). arg()/has() themselves are
 // NOT shared here: this file splices its flags out of argv and refuses in its
-// own wording (#362), where arg() refuses under a message generated from the
+// own wording, where arg() refuses under a message generated from the
 // flag name.
 //
-// Their RULES are shared, which is a different thing (#567). isFlagLike() and
+// Their RULES are shared, which is a different thing. isFlagLike() and
 // hasEqualsForm() are arg.mjs's refusal rules as exported predicates; the
 // three guards below call them and supply their own die() text. This file
 // used to restate the expressions instead, and nothing failed when a
-// restatement drifted from the original — shared-refusal.test.mjs is what
-// fails now, and it reds even on a re-inlined copy that changes no behaviour
+// restatement drifted from the original — a test over the shared source is
+// what fails now, and it reds even on a re-inlined copy that changes no behaviour
 // at all, which is the only kind a behavioural test cannot see.
 const die = makeDie(NAME);
 
 // The cause of a failed child process, for `check`'s repository probe and its
 // tracker query — each captures the child's stderr instead of forwarding it, so
 // what the child printed reaches no terminal and this string is the only copy
-// of it (#638).
+// of it.
 //
 // Trim BEFORE choosing, not after. A whitespace-only stderr is truthy, so it
 // wins a choice made on the raw values and then trims away to nothing, leaving
@@ -87,7 +87,7 @@ function cause(...candidates) {
 
 // The budget every `git` child in this file gets, in milliseconds.
 //
-// Both git probes ran UNBOUNDED before #1199, while the `gh` query between
+// Both git probes ran UNBOUNDED before they were bounded, while the `gh` query between
 // them carried 20 s. That asymmetry was the defect: measured with a `git` that
 // answers and then never returns, `check` — the fleet's pre-filing duplicate
 // guard — was still running at 60 s having written nothing at all to stdout,
@@ -102,8 +102,8 @@ function cause(...candidates) {
 // p50 11-15 ms and max 24.7 ms, so this is ~400x the worst latency observed
 // under load. Generous on purpose, because a probe killed while HEALTHY does
 // not fail loudly here — defaultLedgerPath() degrades to a cwd-relative
-// ledger and only warns (a pre-existing fallback #155 leaves alone, not
-// something it introduces). It also stays under the `gh` bound beside it —
+// ledger and only warns (a fallback that predates this budget, not
+// something the budget introduces). It also stays under the `gh` bound beside it —
 // though "dominant" overstates that relationship: a normal invocation
 // without `--file` pays this same budget TWICE in sequence, once here and
 // once more in repoCheck() below, before ever reaching `gh` at all. At
@@ -135,14 +135,14 @@ const GIT_TIMEOUT_MS = gitBudget(10, process.env.LEDGER_GIT_TIMEOUT);
 // is precisely the duplicate-filing guard failing open. Resolve against the
 // git COMMON dir (shared by every worktree) rather than the cwd, via
 // git-env.mjs's workspaceDirFromGitCommonDir() — the resolution itself is
-// shared with fleet-state.mjs and board.mjs since #1658, and only the
+// shared with fleet-state.mjs and board.mjs, and only the
 // filename and the warning below are this caller's own. No canonicalisation
 // is asked for: that is board.mjs's opt-in, and taking it here would change
 // the path this function RETURNS (and `check` prints) without changing which
 // file it names.
 function defaultLedgerPath() {
-  // GIT_DIR/GIT_WORK_TREE scrubbed (#1599, gitEnv()): unlike the tracker-query
-  // probe below in this same file, this call passed no env at all until now.
+  // GIT_DIR/GIT_WORK_TREE scrubbed (gitEnv()): unlike the tracker-query
+  // probe below in this same file, this call used to pass no env at all.
   // An ambient GIT_DIR answers `--git-common-dir` for a DIFFERENT repository,
   // so the ONE ledger every run's duplicate-filing guard reads gets resolved
   // underneath THAT repository instead of the caller's own — measured
@@ -161,7 +161,7 @@ function defaultLedgerPath() {
     // Could not resolve the shared git dir → fall back to a cwd-relative path.
     // That re-opens the worktree fail-open this resolution exists to close (a
     // member reads a cwd-local ledger, not the run's), so say so rather than
-    // degrading the duplicate-filing guard in silence. Since #1199 this probe
+    // degrading the duplicate-filing guard in silence. This probe
     // is bounded too, and an ETIMEDOUT stall prints byte-identical stderr to
     // an instant "not a repository" failure without naming which — the
     // sibling probe in runCheck() already names it via cause(); match that
@@ -189,7 +189,7 @@ const argv = process.argv.slice(2);
 // process.argv, and why the scan is not anchored to a position.
 //
 // The same refusals arg.mjs gives the scripts that route through its arg() and
-// has(), in this reader's own wording (#362) — and since #567 that parity is
+// has(), in this reader's own wording — and that parity is
 // the shared hasEqualsForm() predicate itself rather than a claim about two
 // expressions that were free to drift apart.
 // Flag names lived here AND in OWN_FLAGS below with no shared source — a
@@ -199,8 +199,8 @@ const argv = process.argv.slice(2);
 // silently accepted at exit 0). One name each, declared once, reused by
 // the indexOf() calls and OWN_FLAGS below. Not by the hasEqualsForm() calls
 // right below, which keep their own literal text on purpose —
-// shared-refusal.test.mjs pins that pair's source verbatim against arg.mjs's
-// rule (#567), so interpolating them here would fail that pin without
+// a test pins that pair's source verbatim against arg.mjs's
+// rule, so interpolating them here would fail that pin without
 // fixing anything it exists to catch.
 const FILE_FLAG_NAME = "file";
 const REQUIRE_FILE_FLAG_NAME = "require-file";
@@ -208,7 +208,7 @@ if (hasEqualsForm("file", argv)) die("--file needs a space-separated value, not 
 if (hasEqualsForm("require-file", argv)) die("--require-file is a boolean flag, not --require-file=");
 const fileIdx = argv.indexOf(`--${FILE_FLAG_NAME}`);
 const file = fileIdx === -1 ? defaultLedgerPath() : argv[fileIdx + 1];
-// #362: `--file` took whatever token followed it, so `--file --require-file`
+// `--file` took whatever token followed it, so `--file --require-file`
 // made the FLAG the path and the splice below then ate it — `--require-file`,
 // the flag whose entire job is to turn a missing ledger into a hard failure,
 // silently absent, and the duplicate-filing check answering "safe to file" at
@@ -231,8 +231,8 @@ const file = fileIdx === -1 ? defaultLedgerPath() : argv[fileIdx + 1];
 // The `file &&` term is load-bearing and must not fold into isFlagLike(),
 // which answers TRUE for an absent value: without it a truly trailing `--file`
 // would land on this clause's wording instead of the pre-existing "given with
-// no path" one below, which is the behaviour #362's own Measured block records
-// as already correct and which ledger.test.mjs pins.
+// no path" one below, which is the existing behaviour for a truly trailing
+// `--file` and which the ledger test pins.
 if (fileIdx !== -1 && file && isFlagLike(file)) die("--file needs a path");
 if (fileIdx !== -1) argv.splice(fileIdx, 2);
 if (!file) die("--file given with no path");
@@ -262,7 +262,7 @@ const headerRe = (name) => new RegExp(`(^|\\n)${name.replace(/[.*+?^${}()|[\]\\]
 // first, then newline, so a `\` in entry text can never be mistaken for the
 // start of an escape sequence introduced by this encoding. Without this, an
 // entry containing a real newline — or a line that happens to look like
-// `## Filed` or `- #999 ...` — gets misparsed on reload: real records
+// `## Filed` or `- #<issue> ...` — gets misparsed on reload: real records
 // silently drop, or phantom ones get injected.
 function escapeText(s) {
   return s.replace(/\\/g, "\\\\").replace(/\n/g, "\\n");
@@ -271,7 +271,7 @@ function unescapeText(s) {
   return s.replace(/\\(\\|n)/g, (_, c) => (c === "n" ? "\n" : "\\"));
 }
 
-// #584: a `--`-prefixed token in `check`'s free-text tail used to fold
+// A `--`-prefixed token in `check`'s free-text tail used to fold
 // straight into the duplicate-filing subject, so a misspelled flag searched
 // for a DIFFERENT subject and read "safe to file" where the correct spelling
 // answers ALREADY FILED at exit 1. A `--` token can legitimately BE that data
@@ -285,7 +285,7 @@ function unescapeText(s) {
 // carrying a `--`-prefixed element is refused by name. Structural, not a
 // distance threshold.
 //
-// `check`'s tail ALONE — narrower than #584's first pass, which called this
+// `check`'s tail ALONE — narrower than the first pass, which called this
 // from `filed`, `row` and `ruled` too. The length rule is only sound where
 // the documented convention IS one quoted argument, and `check` is the only
 // subcommand where it is: both places that instruct a caller to run it spell
@@ -296,36 +296,35 @@ function unescapeText(s) {
 // usage strings for them. Applied there, the rule refused what the docs
 // prescribe: measured on the tree ahead of this narrowing, `filed 999 the
 // --basee flag is unread`, `row 42 the --basee flag is unread` and `ruled 77
-// the --basee flag is unread` each exited 2, where the tree before #584
-// (07dc927) answered all three at exit 0. #1161 ruled the guard back to
+// the --basee flag is unread` each exited 2, where the tree before this guard
+// existed answered all three at exit 0. The guard was ruled back to
 // `check` rather than respelling three conventions SKILL.md carries, two
 // other tickets holding that file open.
 //
-// Stated here and nowhere else (#1557). This paragraph is the one copy of why
+// Stated here and nowhere else. This paragraph is the one copy of why
 // the rule is `check`'s alone; arg.mjs's refuseUnknown() comment and
-// ledger.test.mjs's two stray-tail blocks each used to carry their own, and
+// the ledger test's two stray-tail blocks each used to carry their own, and
 // now point here instead. Anything that reads on the docs or the
 // measurement belongs in this paragraph, not beside a caller.
 //
-// Narrowing it does not keep #584's signature whole on those three: only the
+// Narrowing it does not keep the original guard's signature whole on those three: only the
 // ID-slot vector survives — a stray flag one token to the LEFT is still
 // refused by refuseStrayInId() below. The tail-slot vector does not: a
 // stray `--` word inside filed/row/ruled's tail is now accepted as data (no
 // rule can tell it apart from the subject a caller typed), so `filed 999
 // --typo-flag some new subject` exits 0 and writes a row a later `check
 // "some new subject"` cannot exact-match — a near-miss at best, the same
-// wrong-subject shape #584 closed, reopened here on the tail. That is the
-// cost of taking the ticket's option 2 (narrow the guard rather than
-// requote the docs, #1161) instead of option 1; it is why it is the
+// wrong-subject shape the guard closed, reopened here on the tail. That is the
+// cost of narrowing the guard rather than requoting the docs; it is why it is the
 // DOCUMENTED convention, not the hazard, that decides where the length rule
 // may be read at all.
 //
-// The cost `check` keeps is real and is what #365's AC prices, so it is
+// The cost `check` keeps is real, so it is
 // stated rather than denied: a legitimate subject carrying a `--` word
 // anywhere, given unquoted, was accepted before this guard and is refused by
 // it — `check the --basee flag is unread` answered at exit 0 before and exits
-// 2 now. Quoting the subject accepts it unchanged. The trade the ticket ruled
-// for is that this refusal is loud and recoverable where the wrong-subject
+// 2 now. Quoting the subject accepts it unchanged. The trade taken
+// is that this refusal is loud and recoverable where the wrong-subject
 // answer it replaces was silent. One residual of that trade is not this
 // file's to close: SKILL.md's ledger section spells `check <subject>`
 // unquoted inside the same entry that spells `filed <issue> <subject>`, where
@@ -334,9 +333,9 @@ function unescapeText(s) {
 // Narrowed on `check` too, not closed: a lone stray with no subject beside it
 // is a one-element tail, so it is still taken as the subject and answered at
 // exit 0. Harmless because it then searches for a string nothing matches, and
-// ledger.test.mjs's degenerate-subject case pins it so it stays deliberate.
+// the ledger test's degenerate-subject case pins it so it stays deliberate.
 //
-// #1744: one dash short is the same slip, and the `--` test let it through —
+// One dash short is the same slip, and the `--` test let it through —
 // `check -require-file widget guard missing` scored "-require-file widget
 // guard missing" and answered exit 0 where the correctly-spelled call answers
 // ALREADY FILED at exit 1. That test cannot simply lose a dash: single-dash
@@ -345,7 +344,7 @@ function unescapeText(s) {
 // negative number. Measured when this was written, 23 of the repo's 1068
 // issue titles carry one as a whitespace-split word, 20 of them letter-led,
 // so neither the prefix nor a `-<letter>` shape tells the slip apart. A NAME
-// does, the way arg.mjs's stray() tells a stray from a value (#463): a
+// does, the way arg.mjs's stray() tells a stray from a value: a
 // single-dash word is refused only when one more dash, ahead of any `=value`,
 // makes it a flag this script reads — OWN_FLAGS, the two spliced out of argv
 // above. None of those titles carries one. It sits behind the same length
@@ -357,26 +356,26 @@ function unescapeText(s) {
 // `-f` is exactly the other-tool short flag above; both still fold into the
 // subject.
 const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`].map((f) => f.toLowerCase());
-// The one-dash name clause below, before #1766, matched only a's FIRST
+// The one-dash name clause below once matched only a's FIRST
 // whitespace-split word (ahead of any `=value`), not the whole element: a
 // quoted multi-word tail element (`check "-require-file widget" guard
 // missing`, one argv element) reconstructed to "--require-file widget"
 // under a whole-token match, which is not in OWN_FLAGS, so it fell through
-// to exit 0 — the same verdict flip #1744 exists to refuse, just via a
+// to exit 0 — the same verdict flip the one-dash clause exists to refuse, just via a
 // quoted shape rather than a bare token. Splitting first mirrored the `--`
 // clause above it, which already matches on startsWith rather than
-// requiring the whole element. #1766 below widened the split to check
-// EVERY word of the element, not only the first — see that paragraph for
-// why the first-word version stopped being enough.
+// requiring the whole element. The split now checks EVERY word of the
+// element, not only the first — see the paragraph on the four missed shapes
+// for why the first-word version stopped being enough.
 //
-// #1766: that first-word, exact-case split still missed four shapes of the
+// That first-word, exact-case split still missed four shapes of the
 // same name, each confirmed by direct probe against the shipped script: a
 // case-variant spelling (`-REQUIRE-FILE`), whitespace ahead of the dash —
 // including U+00A0, which `\s` already matches, but the FIRST-word split
 // still lost the real word to the empty token that whitespace leaves at
 // index 0 — and the flag name landing anywhere but first in a quoted
 // multi-word element (`"widget -require-file"`, the mirror of the shape
-// just above, where #1744's fix only checked the front). None of the four
+// just above, where the one-dash fix only checked the front). None of the four
 // changes the rule itself — still a NAME match against OWN_FLAGS, never a
 // prefix or shape test — only how a word is pulled out of the element:
 // every whitespace-split word, lower-cased, before the OWN_FLAGS lookup —
@@ -384,7 +383,7 @@ const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`].map((f)
 // stays correct even if FILE_FLAG_NAME/REQUIRE_FILE_FLAG_NAME ever gain a
 // capital letter.
 //
-// #1850: the per-word test above only ever builds the ONE-dash-PREPENDED
+// The per-word test above only ever builds the ONE-dash-PREPENDED
 // form of a word (`-${word...}`), so it matches a word already spelled with
 // one dash but never a word already spelled with this script's own TWO-dash
 // flag name — that spelling comes out of the split as `--require-file`,
@@ -393,15 +392,15 @@ const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`].map((f)
 // two-dash name when it leads the WHOLE tail element; the same name landing
 // anywhere else in a quoted multi-word element — trailing, in the middle, or
 // alone behind leading whitespace — was invisible to both clauses and folded
-// back into the subject: the identical verdict flip #1744 and #1766 exist to
-// refuse, one dash count over. Reproducible on `main` before #1766 too;
-// #1766 only made it visible by contrast, once the one-dash mirror shape
-// started being refused. Fixed the same way #1744 chose for the one-dash
-// case — a NAME match, never a prefix or shape test — by also checking a
+// back into the subject: the identical verdict flip the one-dash clauses exist to
+// refuse, one dash count over. Reproducible before the widened split too;
+// the split only made it visible by contrast, once the one-dash mirror shape
+// started being refused. Fixed the same way the one-dash case is
+// — a NAME match, never a prefix or shape test — by also checking a
 // word's own AS-SPELLED form against OWN_FLAGS, alongside the
 // one-dash-prepended form already there.
 //
-// #1851: a Unicode format character (general category Cf — U+200B zero-width
+// A Unicode format character (general category Cf — U+200B zero-width
 // space, U+2060 word joiner, U+00AD soft hyphen, the bidi controls, …) is
 // invisible and sits outside `\s`, so the split above never cut on it and it
 // rode along inside the word: `\u200B-require-file` reads as `-require-file`
@@ -421,7 +420,7 @@ const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`].map((f)
 // among others); stripping them costs a refusal only of such a mark glued to
 // an own-flag name, which no subject carries.
 //
-// #1904: invisible characters OUTSIDE Cf — U+3164 and the other Hangul
+// Invisible characters OUTSIDE Cf — U+3164 and the other Hangul
 // fillers (letters), U+034F and the variation selectors (combining marks) —
 // are text rather than format controls, so the Cf strip above let them ride
 // inside the word exactly as a zero-width space rode before it. The strip is
@@ -430,8 +429,8 @@ const OWN_FLAGS = [`--${FILE_FLAG_NAME}`, `--${REQUIRE_FILE_FLAG_NAME}`].map((f)
 // rather than a hand-curated block list, which would miss the members no
 // ticket named (U+17B4, the Mongolian selectors U+180B–180F, …). A union,
 // not DICP alone: DICP leaves out the visible Cf marks just above, so
-// swapping it in would drop cases #1851 already refuses. Same site and the
-// same after-the-split order as #1851; U+FEFF stays the one code point in
+// swapping it in would drop cases the Cf strip already refuses. Same site and the
+// same after-the-split order as the Cf strip; U+FEFF stays the one code point in
 // both the strip and `\s`, no DICP member adding another. An emoji's own
 // presentation selector (U+FE0F) is stripped too, which costs nothing: only
 // a word that is an own-flag spelling once stripped is refused.
@@ -456,7 +455,7 @@ function refuseStrayInCheckTail(tail) {
 
 // The id slot ahead of `filed`/`row`/`ruled`'s tail is a hazard of its own,
 // and the only one of the three a rule can act on. refuseStrayInCheckTail()
-// above is not read on those subcommands at all (#1161), and would not
+// above is not read on those subcommands at all, and would not
 // catch this shape if it were: a stray flag one token earlier lands in
 // `issue`/`ticket`/`pr`, and the tail left behind carries no `--` element to
 // find. Nor could that helper be read over the whole of `rest` instead —
@@ -464,12 +463,12 @@ function refuseStrayInCheckTail(tail) {
 // tail with a `--` element, pinned here as must-keep-working. A legitimate
 // id is bare digits, optionally `#`-prefixed, and never carries a leading
 // dash at all — single or double — so this slot refuses ANY leading dash,
-// not only a double one (#1678). The free-text tail cannot take that same
+// not only a double one. The free-text tail cannot take that same
 // test: a subject can legitimately open with a double-dash-leading word —
 // exactly what `--flag-like subject text` above and check's own
 // dash-leading-subject pin exist to keep working. A single-dash-leading word
 // is ordinary subject text too, which is why check's tail refuses one only
-// by name (#1744, on refuseStrayInCheckTail() above). So only the id slot
+// by name (see refuseStrayInCheckTail() above). So only the id slot
 // can take the bare prefix test at all, for the same no-free-text reason
 // given above.
 function refuseStrayInId(value, what) {
@@ -477,7 +476,7 @@ function refuseStrayInId(value, what) {
 }
 
 // Set by load(), the only function that reads the file, so `ledger.ok` can
-// report what the parse saw rather than what a later stat() guesses (#231).
+// report what the parse saw rather than what a later stat() guesses.
 let ledgerParsed = false;
 
 function load() {
@@ -501,7 +500,8 @@ function load() {
   // Set here, past the read and the early return, so it can only be true of a
   // file this function actually opened and recognised as a ledger.
   ledgerParsed = headerRe(FILED).test(text);
-  // A ledger written before #1799 has neither `## Dispatched` nor `## Drain`,
+  // A ledger written before `dispatch` and `drain` existed has neither
+  // `## Dispatched` nor `## Drain`,
   // which reads as nothing dispatched through `dispatch` and no drain — the
   // truth about that file, not a default standing in for it.
   const drainEntries = section(DRAIN);
@@ -536,7 +536,7 @@ function save(d) {
     // atomic on a POSIX filesystem — a crash mid-write leaves the temp file
     // corrupt but never truncates the durability file itself. The temp name
     // carries the pid: a shared `${file}.tmp` let one writer rename another's
-    // temp file out from under it, and the loser died on ENOENT (#531).
+    // temp file out from under it, and the loser died on ENOENT.
     const tmp = `${file}.${process.pid}.tmp`;
     writeFileSync(tmp, out);
     renameSync(tmp, file);
@@ -546,7 +546,7 @@ function save(d) {
   console.error(`    wrote ${file}`);
 }
 
-// ── The write lock (#531) ────────────────────────────────────────────────────
+// ── The write lock ───────────────────────────────────────────────────────────
 //
 // Held from before load() through save() on every write subcommand, because
 // save() rewrites the whole document from what load() read: without it two
@@ -572,8 +572,8 @@ function save(d) {
 // the same dead pid, and RE-CHECKING that pid is still dead. Unlink-then-
 // create, or a bare rename, lets two waiters that both saw the dead pid each
 // remove the other's FRESH lock and write at once; the re-read is what makes
-// the takeover safe. The re-check narrows the one window the re-read leaves
-// (#2088), and the order the two run in is what narrows it: isDead(deadPid)
+// the takeover safe. The re-check narrows the one window the re-read leaves,
+// and the order the two run in is what narrows it: isDead(deadPid)
 // runs before the re-read, not after, so a live writer that takes the lock in
 // the gap between them is caught by the read that follows, not hidden behind
 // one taken before it arrived. Read first, and a recycled pid that came back
@@ -610,8 +610,8 @@ function save(d) {
 //
 // What the lock does NOT cover: `check` -> `gh issue create` -> `filed` is
 // three commands, and each takes the lock (or not) alone, so two filers can
-// both read `clean` before either records. Accepted (#531): the measured
-// same-run accidental duplicate, #298 -> #302, was filed minutes apart, and a
+// both read `clean` before either records. Accepted: the measured
+// same-run accidental duplicate was filed minutes apart, and a
 // claim/reserve subcommand closing that window was ruled out.
 const LOCK = `${file}.lock`;
 const REAP = `${LOCK}.reap`;
@@ -771,11 +771,8 @@ async function acquireLock() {
 // the other four subcommands ignored it entirely: `read --require-file` on an
 // absent file printed the empty payload at exit 0, byte-identical to a real
 // empty ledger on both streams, and `row --require-file` CREATED the very file
-// whose absence the flag exists to refuse (#816). One flag read in one place is
-// also what docs/specs/2026-07-23-fleet-plugin-design.md's `ledger.mjs` row
-// already documents
-// — "Exit 2 on any subcommand — ... `--require-file` with no ledger file" — so
-// the implementation is what had drifted, not the contract.
+// whose absence the flag exists to refuse. One flag read in one place is
+// what makes it hold on every subcommand, not only `check`.
 //
 // Ahead of load() rather than after it: load() answers "absent" and "present
 // but unparseable" with the same empty lists, which is the ambiguity this flag
@@ -801,7 +798,7 @@ const data = cmd === "rotate" ? null : load();
 // The payload subcommands end by falling out of this chain, never by calling
 // process.exit(). On a pipe, process.stdout.write is async and process.exit()
 // discards whatever is still queued, so a payload past the buffer arrives cut
-// — at exit 0, which types a corrupt read as a successful one (#246).
+// — at exit 0, which types a corrupt read as a successful one.
 // candidates.mjs states the same reason at its own exit line; this was the
 // second script on that shape. The consumer that made it visible is board.mjs,
 // which reads `read` through execFileSync — a pipe — and accepts its ledger
@@ -816,7 +813,7 @@ const data = cmd === "rotate" ? null : load();
 // statement of its branch and became one directly. Its already-filed exit sits
 // mid-branch, where falling through would run the near-miss ranking and the
 // tracker search that exit exists to skip — so `check`'s branch is a function
-// now (runCheck, below the chain), and a `return` is what skips them (#808).
+// now (runCheck, below the chain), and a `return` is what skips them.
 //
 // What that leaves is a property of every payload this file emits rather than
 // of whichever branches a sweep happened to reach: none of them reaches
@@ -840,17 +837,17 @@ if (cmd === "read") {
   // Every reader parses member tokens anywhere in a row's text, so a token
   // with an outcome outside its family's vocabulary would land as a permanent
   // settle — `settle merge-bot-1 done` then refuses as "already settled as
-  // dispatched" (#2139). Refused before anything is written, new row or
+  // dispatched". Refused before anything is written, new row or
   // rewrite alike; a well-formed token, live or settled, still goes through.
   const malformed = memberTokens(line).find((t) => t.error !== null);
   if (malformed) die(`row ${key}: malformed member token '${malformed.name}=${malformed.outcome}' — ${malformed.error}`);
-  // #2331: `label-off=<attempt>` tells the tick a missing `ready-to-merge` is
+  // `label-off=<attempt>` tells the tick a missing `ready-to-merge` is
   // the controller's own removal, not a finisher's miss — so one naming no
   // finisher-pr member this run has would mask a real miss behind a record of
   // nothing. Known means in `## Dispatched` or among a row's member tokens as
   // they stand before this write, the two places dispatch's live-sibling check
   // reads: a token `row` wrote never enters `## Dispatched`, and this line's
-  // own copy of a name vouches for nothing. Local only — never `gh` (#152).
+  // own copy of a name vouches for nothing. Local only — never `gh`.
   const known = new Set([...data.dispatched.map(parseToken), ...data.rows.flatMap(memberTokens)]
     .filter((t) => t && t.family === "finisher-pr").map((t) => t.name));
   const badOff = line.split(/\s+/).find((tok) => {
@@ -884,17 +881,17 @@ if (cmd === "read") {
   const id = issue.replace(/^#/, "");
   // isDigits() gates id the same way the sibling ticket/PR check gates key
   // (line ~1527): left unvalidated, a non-digit id becomes a `#<id> ` prefix
-  // subjectOf()'s digits-only regex (#933) cannot strip, so a near-duplicate
+  // subjectOf()'s digits-only regex cannot strip, so a near-duplicate
   // `check` against that row silently degrades from the hard "already
   // filed" block to a soft near-miss suggestion instead.
   if (!isDigits(id)) die(`'${issue}' is not an issue number`);
   // Both callers retry once on a failure they observed, and an observed
   // failure is not proof the write failed — a timeout after the row landed
-  // reads as one — so a repeat filing of an issue already on file is a no-op
-  // (#2087). Identity is the issue number alone, matched NUMERICALLY — so a
+  // reads as one — so a repeat filing of an issue already on file is a no-op.
+  // Identity is the issue number alone, matched NUMERICALLY — so a
   // non-canonical spelling (`08`) still dedupes against `8` — as the token
   // between `#` and the first whitespace: never `check`'s fuzzy subject
-  // matcher, and never a prefix test, which would dedupe #8 against #80.
+  // matcher, and never a prefix test, which would dedupe issue 8 against issue 80.
   // The existing row wins, subject and all — a retry reworded is still the
   // same filing.
   const existing = data.filed.find((row) => Number(row.match(/^#(\S+)/)?.[1]) === Number(id));
@@ -953,7 +950,7 @@ if (cmd === "read") {
 // it, whose results that answer would only discard. A function is what makes
 // leaving early expressible — `process.exitCode` and a `return`, reaching the
 // same exit by the same path every other subcommand takes, where an arm of the
-// chain had only `process.exit()` and the payload it abandoned (#808).
+// chain had only `process.exit()` and the payload it abandoned.
 // Hoisted, so the dispatch chain above stays the file's spine.
 function runCheck() {
   // The first check of a run legitimately has no file yet, so absence alone
@@ -962,7 +959,7 @@ function runCheck() {
   // would notice. Warn loudly by default; --require-file makes absence a
   // hard failure for callers that know the file must already exist — and that
   // refusal is read ahead of the dispatch now, not here, because four other
-  // subcommands needed the same one (#816). Reaching this line at all means
+  // subcommands needed the same one. Reaching this line at all means
   // the flag was absent.
   //
   // `ledger.ok` is the parse's answer, not this stat()'s: load() sets it only
@@ -973,21 +970,21 @@ function runCheck() {
   // contract is absence rather than shape — so the two are two observations
   // now, each true of its own question, where before they were one that was
   // true of neither. Narrower, not airtight: a ledger truncated AFTER the
-  // header still parses, with the rows below it lost (#231).
+  // header still parses, with the rows below it lost.
   const ledger = { ok: ledgerParsed };
   if (!existsSync(file)) {
     console.error(
       `${NAME}: WARNING — ledger file not found: ${file}. Every check will read "safe to file" until it exists.`,
     );
   } else if (!ledger.ok) {
-    // #817: the existence probe above is silent once `file` exists, so a
+    // The existence probe above is silent once `file` exists, so a
     // `--file` landing on a real-but-wrong path — a typo'd neighbour, a
     // corrupted "## Filed" header, a 0-byte file — got the SAME silence as a
     // clean read. `ledger.ok` (above) already tells the machine-readable half
     // apart; this is that same "opened it, it did not parse" fact stated on
     // stderr, in wording that does not borrow "file not found" — the file
     // demonstrably exists, so claiming otherwise would be a fresh version of
-    // the defect #231 removed from the JSON half.
+    // the defect already removed from the JSON half.
     console.error(
       `${NAME}: WARNING — ${file} exists but does not look like a ledger (no "${FILED}" header found). Every check will read "safe to file" until it is fixed.`,
     );
@@ -997,7 +994,7 @@ function runCheck() {
   // Quoted here, unlike the three usage strings above, because
   // refuseStrayInCheckTail() is the reason: `check` is the subcommand whose tail
   // must arrive as ONE argument, and this is the only spelling of its call
-  // inside the script (#1161). The other three take their tail as the words a
+  // inside the script. The other three take their tail as the words a
   // caller typed.
   if (!subject) die("usage: ledger.mjs check \"<subject>\"");
   const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -1022,7 +1019,7 @@ function runCheck() {
     // first walk had already produced — equal sizes are exactly the case
     // where the two walks are the same walk.
     // Not `small.isSubsetOf(big)`: that's Node v22.0.0+, above this repo's
-    // declared >=20.11.0 floor (#1954; node-floor-sweep.test.mjs reds it).
+    // declared >=20.11.0 floor; a test reds it).
     return (small.size === big.size || small.size >= 4) && [...small].every((t) => big.has(t));
   };
   // Strip the leading `#NNN ` issue number: it is metadata, not part of the
@@ -1049,7 +1046,7 @@ function runCheck() {
     // ordinary four-word check against one wide filed row arrived cut at the
     // pipe buffer. The code it arrived under was already this 1, so what the
     // exit lost was the payload alone, the `verdict` field parsing consumers
-    // read included (#808). The `return` is what keeps the ranking and the
+    // read included. The `return` is what keeps the ranking and the
     // tracker query below unreached; nothing after it assigns exitCode on
     // this path, so 1 is what the process leaves with.
     process.exitCode = 1;
@@ -1060,7 +1057,7 @@ function runCheck() {
   // "was this near-verbatim wording already filed" — and answers it well. It
   // says nothing about the same finding described in DIFFERENT words, which is
   // how a second discoverer actually words it: one measured run rediscovered
-  // #114 five times, each in its own phrasing, and the check caught none of
+  // one issue five times, each in its own phrasing, and the check caught none of
   // them. Rank the filed list by token overlap and hand the top rows back with
   // a score, instead of collapsing all of that into `found: false`.
   //
@@ -1068,7 +1065,7 @@ function runCheck() {
   // and the singular fold only sharpen a ranking, but folding them into
   // isMatch() would widen what counts as ALREADY FILED — the one behaviour
   // here that callers gate on and that must not move.
-  // Widened for #153: modals, negations and temporals ("should", "never",
+  // Widened to cover modals, negations and temporals ("should", "never",
   // "still"...) are noise words that are never the subject's distinctive
   // term, yet the old, shorter list let them survive to outrank one — "the
   // guard should never fail open on a fork" picked "should guard never" over
@@ -1109,7 +1106,7 @@ function runCheck() {
   };
   const round2 = (n) => Math.round(n * 100) / 100;
   const scored = scoreTokens(subject);
-  // No floor was tuned here: the measured #114 rewording shares exactly one
+  // No floor was tuned here: the measured rewording shares exactly one
   // content word, and a threshold picked to look tidy would drop the very case
   // this exists for. The top-3 cap, not the floor, is what keeps the output
   // short. `rankedNear`'s filter still imposes one, because it tests the
@@ -1122,13 +1119,13 @@ function runCheck() {
   // output would need a wider precision, not just a different filter.
   const NEAR_SHOWN = 3;
   // The floor at which a near-miss stops being decoration and becomes the
-  // verdict's own answer — `soft-hit` rather than `clean` (#388). A tuning
+  // verdict's own answer — `soft-hit` rather than `clean`. A tuning
   // value, deliberately named and deliberately here beside the display cap
   // rather than inlined in the verdict below.
   //
-  // Chosen from the rows #388 measured: the near-misses a reader went on to
+  // Chosen from measured rows: the near-misses a reader went on to
   // confirm as the genuinely adjacent issue scored from 0.20 up to 0.45, so a
-  // floor at 0.20 admits them. #388 also records an adjacent row at 0.09, which
+  // floor at 0.20 admits them. The same measurement includes an adjacent row at 0.09, which
   // this floor does not reach — the floor buys a short answer, never
   // completeness, and the rows themselves stay printed and stay in the payload
   // at every verdict for exactly that reason. Raise it and adjacent rows fall
@@ -1144,8 +1141,8 @@ function runCheck() {
   // scores tie across it routinely — measured, five rows at 1.00 with the
   // caller shown three — so the cut is arbitrary among equals. A bare
   // three-row list is then indistinguishable from a complete one, which is
-  // the "no silent caps" rule `candidates.mjs`'s `refuseIfCapped` legislates one script over
-  // (#154). It enforces that rule by refusing outright; refusing is wrong
+  // the "no silent caps" rule `candidates.mjs`'s `refuseIfCapped` legislates one script over.
+  // It enforces that rule by refusing outright; refusing is wrong
   // here — these rows are advisory context for a decision, not the work queue,
   // and a single tracker hit already forces exit 3. Report the COUNT withheld
   // and the best score among them, never the rows: printing the rows would
@@ -1157,22 +1154,22 @@ function runCheck() {
   // The ledger can only see what THIS run recorded. An issue that already
   // exists on the tracker but never reached this `filed` list — filed by an
   // earlier run, by the maintainer, by hand — is structurally invisible to
-  // every match above, and that is the measured failure: #114 was rediscovered
+  // every match above, and that is the measured failure: one issue was rediscovered
   // five times in one run and `check` reported it safe to file every time. Ask
   // the tracker.
   //
   // gh ANDs the search terms, so every extra term can only narrow the result —
   // keep the query SHORT: three of the subject's most distinctive words.
   // Measured against the live tracker, "candidates opposite states" returns
-  // #114. Whether a fourth term helps or hurts turns on whether it happens to
-  // occur in the target issue's text — gh searches bodies, not just titles —
-  // which the subject cannot know: "code" leaves #114 in, "open" drops it. So
+  // that issue. Whether a fourth term helps or hurts turns on whether it
+  // happens to occur in the target issue's text — gh searches bodies, not just titles —
+  // which the subject cannot know: "code" leaves it in, "open" drops it. So
   // three is a recall-preserving floor, not a measured optimum. Longest-first is a crude stand-in for distinctiveness (no
   // corpus to weigh terms against) and the >= 3 filter erases short but
   // distinctive identifiers like `CI` or `gh`; upgrade to a real frequency
   // weighting if the query starts missing.
   //
-  // #153 widened STOP (above) to stop modals/negations/temporals from
+  // STOP was widened (above) to stop modals/negations/temporals from
   // outranking real content words, and stops there — this is a pin, not a
   // retune. Two things it deliberately leaves broken: longest-first still
   // prefers a long ordinary word over a short distinctive one ("postgres"
@@ -1198,7 +1195,7 @@ function runCheck() {
   // How many tracker rows the caller is shown. gh is asked for one MORE than
   // this (below): its list arrives with no total, so a full page and a
   // truncated one are byte-identical, and the extra row's presence is the only
-  // truncation signal available — #154. Cheap: one row, one query, and it is
+  // truncation signal available. Cheap: one row, one query, and it is
   // ranked alongside the rest rather than discarded.
   const TRACKER_SHOWN = 5;
   let tracker;
@@ -1207,7 +1204,7 @@ function runCheck() {
     // every subject as a tracker hit. Not searching is the honest answer.
     // `hits` is omitted, not `[]` — the tracker was never read, so an empty
     // list here would be a claim of cleanliness this branch never earned
-    // (issue #152: a consumer testing `.length` must not read this as clean).
+    // (a consumer testing `.length` must not read this as clean).
     tracker = { ok: false, query: null, error: "subject has no distinctive terms to search for" };
   } else {
     // gh resolves "the repository" from the child process's cwd, which
@@ -1216,7 +1213,7 @@ function runCheck() {
     // --git-common-dir above; in the documented flow (no --file, run from
     // the repo) the two agree, but an explicit --file naming a ledger
     // outside the caller's repo diverges silently: the query searches the
-    // wrong tracker and reports a confident, empty result (#155). Bind gh's
+    // wrong tracker and reports a confident, empty result. Bind gh's
     // cwd to the ledger's OWN repository instead of leaving it implicit. No
     // --repo flag needed — gh's remote-based resolution does the rest once it
     // is pointed at the right directory, and a worktree ledger (shared .git,
@@ -1224,18 +1221,17 @@ function runCheck() {
     //
     // cwd is not the whole story: inherited git vars outrank it, so an
     // ambient GIT_DIR/GIT_WORK_TREE retargets BOTH the probe below and gh's
-    // own remote resolution at the other repository, and the #155
+    // own remote resolution at the other repository, and the same
     // confident-empty result comes straight back with `ok: true` on it.
     // Plausible here: a git hook, `rebase --exec`, `bisect run`. Scrub them
-    // off both children — the fleet's own fixtures already do exactly this
-    // (inflight.test.mjs).
+    // off both children — the fleet's own fixtures already do exactly this.
     //
     // GH_REPO is the same hazard one layer up, and worse: gh reads it BEFORE
     // it ever consults git, so no amount of git-var hygiene covers it and the
     // bound cwd is simply ignored. Measured against a live tracker with the
     // cwd binding in place: `GH_REPO=<some other real repo>` searched that
-    // repo and returned `{"ok":true,"hits":[],"verdict":"clean"}` — #155
-    // verbatim, in the documented flow, no --file divergence needed. Not
+    // repo and returned `{"ok":true,"hits":[],"verdict":"clean"}` — the
+    // same wrong-tracker answer, in the documented flow, no --file divergence needed. Not
     // hypothetical here either: this repo's own
     // .github/workflows/release-label.yml exports GH_REPO to every step that
     // shells out to gh.
@@ -1260,14 +1256,14 @@ function runCheck() {
       // More than one cause lands here: a ledger path genuinely outside any
       // repository, but also git missing entirely (spawn ENOENT, so `status`
       // is null and `null !== 0`), a dubious-ownership refusal, an unreadable
-      // `.git` gitfile, and since #1199 a probe that overran GIT_TIMEOUT_MS —
+      // `.git` gitfile, and a probe that overran GIT_TIMEOUT_MS —
       // spawnSync reports that the same way ENOENT arrives, `status` null with
       // the reason in `error.message`, so it needs no arm of its own and
       // cause() names it (`spawnSync git ETIMEDOUT`) without this branch
       // having to. Do not name one of them — carry git's own reason,
       // because this call leaves stdio at the default pipe, so git's stderr
       // reaches no terminal and this string is the only place the cause is
-      // ever seen (the same call the gh catch below makes, #176). The CAUSE is
+      // ever seen (the same call the gh catch below makes). The CAUSE is
       // capped for the same reason: it ships on stdout inside `tracker.error`
       // — see cause(), which owns both that cap and the choice between the
       // fields a failed git can put a reason in. Empty here is a tolerable
@@ -1278,7 +1274,7 @@ function runCheck() {
       // That cap covers the cause and NOTHING else. `tracker.error` as a whole
       // is deliberately unbounded here, because the directory interpolates
       // raw: the field measured 1100 characters from a 557-character
-      // directory, a cause already cut to 500, and 43 of fixed text (#940).
+      // directory, a cause already cut to 500, and 43 of fixed text.
       // Capping the directory would buy the payload no ceiling — `subject`
       // and `tracker.query` ride in the same JSON uncapped: as JSON fields
       // from a 3000-character subject word they measure 3012 and 3010
@@ -1324,14 +1320,14 @@ function runCheck() {
         // field still describes itself truthfully. Validating `title` here would
         // degrade that row to `unverified` over the one field the hit line does
         // not need, which is the opposite of what a guard against undescribable
-        // hits is for (#232).
+        // hits is for.
         //
         // Absence is the whole of that claim, deliberately: a `title` that is
         // PRESENT and not a string is not handled here or anywhere below —
         // `h.title || ""` keeps a truthy non-string, and scoreTokens then calls
         // `.toLowerCase()` on it, so the read degrades to `unverified` reporting
-        // a TypeError where a tracker reason belongs. That is #643's, which
-        // rules on field TYPE where this guard rules on field PRESENCE.
+        // a TypeError where a tracker reason belongs. That is a question of field TYPE; this
+        // guard rules on field PRESENCE.
         if (!Array.isArray(parsed) || parsed.some((h) => !h || typeof h.number !== "number"
           || typeof h.state !== "string" || typeof h.url !== "string")) {
           throw new Error("gh returned JSON that is not an issue list");
@@ -1360,7 +1356,7 @@ function runCheck() {
         // --git-common-dir resolution above already closed once. Degrade to the
         // ledger-only answer and say so.
         // Capped, and deliberately still carrying the stderr — the opposite call
-        // from the fleet's other gh catches (#176). Those omit it because
+        // from the fleet's other gh catches. Those omit it because
         // execFileSync forwarded the child's bytes to our stderr already, so
         // interpolating emits them twice; this call sets `stdio`, which turns
         // that forwarding OFF, so this string is the only place the cause is
@@ -1372,8 +1368,7 @@ function runCheck() {
         //
         // stderr first, then the message: on a non-zero exit Node builds the
         // message out of the same bytes prefixed by the command, so it is the
-        // LONGER copy of the cause, not a smaller fallback (#176, measured
-        // again here). The message earns its place wherever stderr holds no
+        // LONGER copy of the cause, not a smaller fallback (measured). The message earns its place wherever stderr holds no
         // cause — and stderr holds none in three shapes, only one of which is
         // the field being absent: no `stderr` property at all on the output
         // this file refused to parse or refused the shape of, the property
@@ -1391,7 +1386,7 @@ function runCheck() {
         // in `e.stderr`, which on a timeout holds whatever gh printed before
         // the kill: measured end to end, a gh that warned about cached
         // credentials and then hung reported that warning as the cause of a
-        // 20-second stall and named the timeout nowhere (#638). The flip moves
+        // 20-second stall and named the timeout nowhere. The flip moves
         // exactly one failure, the timeout that printed something — the other
         // aborts leave `e.stderr` undefined, so the message already won there.
         // A Node that did set `e.code` on a plain non-zero exit would degrade
@@ -1440,7 +1435,7 @@ function runCheck() {
     // HIT` is imperative, blocking language, and a row the scorer rates 0.00
     // rendered in it was indistinguishable from a genuine duplicate — measured,
     // and recovered from only by readers who went and searched the tracker by
-    // hand (#388). Under this heading stderr and the verdict now say the same
+    // hand. Under this heading stderr and the verdict now say the same
     // thing: a set with a scoring row is a hit, a set without one is rows to
     // read.
     const heading = bestHit > 0 ? "TRACKER HIT" : "TRACKER ROW";
@@ -1449,7 +1444,7 @@ function runCheck() {
     }
     // `more than N`, never `N`: with the probe row back, the exact count is
     // precisely what is not known, and printing `5` for it is the silent cap
-    // restated as a number (#154).
+    // restated as a number.
     console.error(bestHit > 0
       ? `${NAME}: not in this run's filed list, but ${tracker.truncated ? `more than ${TRACKER_SHOWN}` : tracker.hits.length} tracker issue(s) match '${query}' — review before filing`
       : `${NAME}: not in this run's filed list; the tracker rows matching '${query}' all score 0.00 against this subject — gh matched something the title-based score cannot see, so read them, but they are not a finding of duplication`);
@@ -1459,16 +1454,16 @@ function runCheck() {
   } else {
     // Not "found no related issues" — that asserts the tracker has nothing,
     // when all that is actually established is that a ${terms.length}-term
-    // heuristic query came back empty (#153). A query built from a few
+    // heuristic query came back empty. A query built from a few
     // longest-surviving words can miss the very issue it should have found
     // (see the STOP comment above); "no matches for this query" says what was
     // established and leaves the rest unclaimed.
     console.error(`${NAME}: not previously filed; tracker search '${query}' (${terms.length} term${terms.length === 1 ? "" : "s"}) returned no matches — not a certification the tracker has nothing on this`);
   }
   // Named explicitly so a consumer does not have to reconstruct it from
-  // `tracker.ok` plus `tracker.hits` — issue #152.
+  // `tracker.ok` plus `tracker.hits`.
   //
-  // The scores decide, not the presence of rows (#388). Both halves of the
+  // The scores decide, not the presence of rows. Both halves of the
   // answer were measured reporting the opposite of what their own numbers said:
   // `tracker-hit` over rows this file rates 0.00, and `clean` printed directly
   // above near-miss rows that named the right issue. Nothing new is computed
@@ -1500,13 +1495,13 @@ function runCheck() {
   }
   // `nearTotal` alongside `near`, and `tracker.truncated` alongside `hits`:
   // both lists are capped and neither cap was previously visible from the
-  // payload a consumer parses (#154). They differ in what is knowable —
+  // payload a consumer parses. They differ in what is knowable —
   // the ledger is fully in hand, so the near-miss total is exact, while gh
   // reports no total, so the tracker can only say that more exist.
   // `ledger.ok` beside `tracker.ok`, and deliberately NOT inside `verdict`:
   // the two halves each report their own readability, which is what makes an
   // unread ledger distinguishable from one read and found empty — those
-  // payloads were otherwise identical in every field (#231). Folding it into
+  // payloads were otherwise identical in every field. Folding it into
   // the verdict instead would answer `unverified` for the run's FIRST check
   // on any fresh clone, where `.fleet/` does not exist until save() creates
   // it — see the comment on the repository probe above.
@@ -1517,16 +1512,15 @@ function runCheck() {
   // suggestion, not a finding of duplication. Exit 0 covers "clean",
   // "unverified" and "soft-hit" alike, which `verdict` names explicitly and the
   // exit code deliberately still does not: minting a code for unverified would
-  // break `check "$s" && gh issue create` on every offline run (ruled against
-  // in #152), and a soft hit is the same kind of answer — advisory rows, no
+  // break `check "$s" && gh issue create` on every offline run (ruled against), and a soft hit is the same kind of answer — advisory rows, no
   // established duplicate — so it inherits that ruling rather than reopening
   // it. The exit code is a pure function of `verdict`; only `tracker-hit`
   // blocks, so a verdict added later leaves 3 alone unless it says so here.
   //
-  // A hit set scoring 0.00 no longer forces 3 (#388). gh can match an issue
+  // A hit set scoring 0.00 no longer forces 3. gh can match an issue
   // body the title-based score cannot see, which is why those rows are still
   // printed and still shipped in the payload — but the instruction the callers
-  // carry makes exit 3 binding, and #388 measured what that costs: every
+  // carry makes exit 3 binding, and measurement shows what that costs: every
   // recorded case of a hard stop over rows this file rates zero was survived
   // only by a reader who overrode it and searched the tracker by hand, and
   // obeying it would have dropped a real deferral.
@@ -1589,7 +1583,7 @@ function runRotate() {
   console.log(JSON.stringify({ rotated: true, archive }));
 }
 
-// ── dispatch / settle (#1799) ────────────────────────────────────────────────
+// ── dispatch / settle ────────────────────────────────────────────────────────
 //
 // Hoisted beside runCheck() for the same reason: each has several refusals
 // ahead of its one write, and the chain above stays the file's spine. Every
@@ -1603,7 +1597,7 @@ function rowKey(r) {
 
 // A row's PR is its first `PR#<n>` mention: the `→ PR#346` arrow or the
 // implementer's settled `impl-324=PR#346` token, which name the same PR.
-// compute-board.mjs parseRow() reads the settled token (#1820), so the row a
+// compute-board.mjs parseRow() reads the settled token, so the row a
 // PR-bound member lands on is the card the cockpit shows that PR on.
 function rowPr(r) {
   const m = /\bPR\s*#(\d+)\b/.exec(r);
@@ -1750,8 +1744,8 @@ function runDispatch() {
   }
 
   // The definition the `task` call names, printed so the controller reads it
-  // off this output rather than recalling it from prose a compaction drops
-  // (#2208). An implementer's comes off its row's `tier=`, the same function
+  // off this output rather than recalling it from prose a compaction drops.
+  // An implementer's comes off its row's `tier=`, the same function
   // tier-check.mjs judges it by — so a row that names no single definition,
   // or names one with no file under `agents/` (a well-formed `tier=` whose
   // definition has not shipped: a `task` call naming it cannot resolve), is
@@ -1759,9 +1753,9 @@ function runDispatch() {
   // after the call.
   //
   // A fix-applier's turns on whether its PR sits on an unresolved conflict
-  // hold (#2299), and that is the tick's own verdict, not a second reading
+  // hold, and that is the tick's own verdict, not a second reading
   // of row `i`: a PR's tokens can be split across its ticket row and its own
-  // `#<pr>` row (#2283), and a settle can live in `## Dispatched` alone, so
+  // `#<pr>` row, and a settle can live in `## Dispatched` alone, so
   // one row's text can read held where the tick reads cleared, and the
   // reverse. A ledger the tick refuses is refused here too, before the member
   // is live, rather than named a definition off a reading the tick rejects.
@@ -1792,7 +1786,7 @@ function runDispatch() {
   }
   // Every error caught here carries its own cause and remedy — a row's `tier=`
   // (fix it with `ledger.mjs row`) for an implementer, a family
-  // ledger-grammar.mjs has no definition case for otherwise (#2330) — so this
+  // ledger-grammar.mjs has no definition case for otherwise — so this
   // refusal's tail names neither.
   let agent;
   try {
@@ -1860,7 +1854,7 @@ function runSettle() {
     return;
   }
 
-  // #1876: capture whether the row this settle is about to write to already
+  // Capture whether the row this settle is about to write to already
   // named a PR, before the rewrite below touches it. The fold further down
   // must refuse to run once a row already has PR-specific content on it —
   // see the fold's own comment for why.
@@ -1878,12 +1872,12 @@ function runSettle() {
     i = memberRowIndex(parsed);
     if (i !== -1 && !carries(data.rows[i], name)) data.rows[i] = `${data.rows[i]} · ${token}`;
   }
-  // #1876: the tick owes an open PR a review while its implementer is still
+  // The tick owes an open PR a review while its implementer is still
   // live, so a PR-bound member can be dispatched before this settle names the
   // PR here — and memberRowIndex() then finds no row naming it, so
   // runDispatch() keys a row of its own to the PR. Once this row names the PR
   // too, two rows would: the cockpit draws two cards and the tick merges the
-  // two rows' tokens in row order (#2283), not in the order they were written.
+  // two rows' tokens in row order, not in the order they were written.
   // Fold that row's tokens onto this one, in order, so later PR-bound writes
   // find the one row through rowPr(). Only
   // an implementer settles to `PR#M` (ledger-grammar.mjs), and only when the

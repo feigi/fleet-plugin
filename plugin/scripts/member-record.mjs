@@ -1,4 +1,4 @@
-// The member-telemetry adapter (#1342, ruled on #1302). ONE per-member
+// The member-telemetry adapter. ONE per-member
 // record shape, TWO readers a tree walk chooses by content, never by
 // caller-supplied config: board.mjs (the live spend panel) and
 // member-outcomes.mjs (the scraper) build on the primitives here rather than
@@ -13,9 +13,8 @@
 // — no pricing table exists in this repo, and inventing one is not this
 // module's business.
 //
-// `thinking` is the harness-written level, blank when a hole is visible
-// (#1302's ruling on "auto"). `subagent_type` (#1066) is what the member was
-// DISPATCHED AS — the agent DEFINITION the dispatch named, never the
+// `thinking` is the harness-written level, blank when a hole is visible.
+// `subagent_type` is what the member was DISPATCHED AS — the agent DEFINITION the dispatch named, never the
 // member's own name: it is the only field that separates a deliberate
 // alternate-tier pair from two members whose models already happened to
 // differ, and both readers keep it because it is derived rather than
@@ -46,7 +45,7 @@ import { classifyRole, canonicalMemberName, CANONICAL_MEMBER_NAME_PREFIXES } fro
 // (`.claude` -> `-.claude`); non-home paths are realpath-resolved (so `/tmp/x`,
 // a symlink to `/private/tmp/x` on macOS, encodes under the resolved name)
 // and double-dash-wrapped. Both forms are measured against real
-// `~/.omp/agent/sessions/*` directory names in member-record.test.mjs - a
+// `~/.omp/agent/sessions/*` directory names - a
 // `~/dev/fleet-plugin`, `--private-tmp-fx685-scratch--` all exist on disk
 // today.
 export function encodeProjectDir(cwd, { home = process.env.HOME, realpath = realpathSync } = {}) {
@@ -81,7 +80,7 @@ export function normalizeModel(raw) {
 
 // A member's name is the only place its unit of work is recorded — there is
 // no dispatch sidecar at all (see ompMemberRecord). The one exception is a
-// PR the member OPENED (#2209): an `impl-<ticket>` name can never carry it,
+// PR the member OPENED: an `impl-<ticket>` name can never carry it,
 // so ompMemberRecord reads it off the member's own `gh pr create` result
 // (createdPrNumbers) — this function still answers `pr: ""` for that name.
 //
@@ -91,7 +90,7 @@ export function normalizeModel(raw) {
 // members their join key to tier-outcomes.tsv. The fix-pr-<n> and
 // review-pr-<n> families share the first pattern only because the infix is
 // the same — they are NOT finisher spellings. `finisher-pr-<n>` is the
-// canonical name run-team now fixes (#326); the other three stay matched
+// canonical name run-team now fixes; the other three stay matched
 // because the runs that used them are already in the record.
 //
 // merge-bot-<n> is deliberately excluded: its number is a per-run dispatch
@@ -101,7 +100,7 @@ export function normalizeModel(raw) {
 // re-dispatched member works the same unit. A trailing `-v<n>` (`-v2`,
 // `-v10`, ...) is a DIFFERENT spelling of the same re-dispatch, used when a
 // controller re-dispatches a finisher/reviewer against a PR whose head moved
-// after label (#1482, measured: ~67% of one finisher's tokens fell through
+// after label (measured: ~67% of one finisher's tokens fell through
 // to a blank pr column under the old letter-only regex); it is stripped for
 // the same reason, not because it looks like a second-ticket suffix — no
 // naming convention in this repo otherwise uses a literal `-v` + digits
@@ -120,28 +119,28 @@ export function normalizeModel(raw) {
 // ticket the way `impl-<ticket>-<n>`'s can — there is only ever one PR per
 // such name. A trailing `-\d+` there (`finisher-pr-1440-2`, `fix-pr-1281-2`)
 // is the same re-dispatch retry the letter and `-v<n>` suffixes above
-// already cover, and is now stripped for PR-shaped names only (#1482,
-// measured: 476,202 cache-create tokens across 7 real rows fell through to a
+// already cover, and is now stripped for PR-shaped names only
+// (measured: 476,202 cache-create tokens across 7 real rows fell through to a
 // blank pr column this way — more than the 37,580 the `-v<n>` fix above
 // addressed). The ticket-shaped `impl-<ticket>-<n>` family above is
 // untouched: its second-ticket ambiguity is real, and a PR-shaped name's is
 // not.
 //
-// `resolve` joins the `-pr-` alternation for #1250: `resolve-pr-<n>` is a
+// `resolve` joins the `-pr-` alternation: `resolve-pr-<n>` is a
 // controller-dispatched conflict/rebase resolver against an already-open PR
-// (measured session descriptions: "Resolve conflict on PR 1232", "Rebase
-// and resolve conflicts for PR #1310") — the same shape as `fix-pr-<n>`'s
+// (measured session descriptions: "Resolve conflict on PR <n>", "Rebase
+// and resolve conflicts for PR #<n>") — the same shape as `fix-pr-<n>`'s
 // applier and `review-pr-<n>`'s reviewer, just not a name run-team's own
 // naming convention fixes, so it stays out of the canonical list in
 // SKILL.md/member-lifecycle.md the same way `finish-<n>`/`finisher-<n>` do.
 // Unrecognised, a `resolve-pr-<n>` member fell through to `{ticket:"",
 // pr:""}`, losing its join key into tier-outcomes.tsv exactly the way an
-// unmatched finisher spelling once did (#1072).
+// unmatched finisher spelling once did.
 //
 // Every pattern below is written against the lower-kebab spelling, so the
 // name is first rewritten by `canonicalMemberName` (compute-spend.mjs), the
 // same rewrite classifyRole applies: `Impl327` and `FixPr774` book the
-// ticket and PR their kebab forms do instead of blanks (#2396).
+// ticket and PR their kebab forms do instead of blanks.
 export function parseMemberName(name) {
   const s = canonicalMemberName(name).replace(/-(?:[a-z]|v\d+)$/, "");
   let m = /^(?:fix|review|finish(?:er)?|resolve)-pr-(\d+)(?:-\d+)?$/.exec(s);
@@ -161,7 +160,7 @@ export function parseMemberName(name) {
 // lives in the DIRECTORY name, never per line; omp's envelope is
 // `{type,id,parentId,timestamp,message}`. That is the structural signature
 // this reader refuses on if it is ever absent — a validation CHECK inside
-// this reader, per #1302's ruling: every root this module is ever handed is
+// this reader: every root this module is ever handed is
 // an omp `~/.omp/agent/sessions/**` tree, so a line failing this shape
 // signals a corrupted or foreign file, not a harness to dispatch to.
 //
@@ -185,7 +184,7 @@ function assertOmpShaped(d, filePath) {
   }
 }
 
-// `openedPrs` (#2209) is every PR number the member's OWN `gh pr create`
+// `openedPrs` is every PR number the member's OWN `gh pr create`
 // printed — the source of `pr` for a member whose name carries none, which is
 // every implementer (`impl-<ticket>` names a ticket, never a PR). Chosen over
 // the ledger's `impl-<N>=PR#M` settle token because that token is written by a
@@ -195,8 +194,8 @@ function assertOmpShaped(d, filePath) {
 // transcripts printed a created PR from a `bash` toolCall whose result held
 // gh's stdout — the URL on a line of its own — then omp's "Wall time"
 // trailer. A create is also sometimes run via `eval` instead of `bash` —
-// measured on impl-1113 (a Python subprocess, `gh pr create` printing PR
-// #1535) — and stays blank there too: `eval` is not read, because a cell
+// measured on impl-1113 (a Python subprocess, `gh pr create` printing a PR
+// URL) — and stays blank there too: `eval` is not read, because a cell
 // that only READS transcripts (or `gh pr view`s) prints the very same URLs.
 //
 // Three filters keep a URL that is NOT a PR this member opened out:
@@ -205,7 +204,7 @@ function assertOmpShaped(d, filePath) {
 //   keyword, optionally through `rtk`/`env`/`command`/`timeout <n>`, a
 //   `NAME=value` prefix, or a path-qualified `.../gh` — a `gh pr view`/
 //   `gh pr list` result prints bare PR URLs too, and `gh pr create` quoted
-//   as text is no invocation (measured false-miss shapes: #2213 review);
+//   as text is no invocation (measured false-miss shapes);
 // - the URL must be a LINE of its own, the shape gh prints, never a URL
 //   inside prose;
 // - a URL right after gh's "... already exists:" refusal is skipped: that PR
@@ -225,7 +224,7 @@ function assertOmpShaped(d, filePath) {
 // `view` copy of an "already exists:" URL is not caught by the one-line-back
 // skip above. Measured 0 real occurrences of any of these across the whole
 // local `~/.omp/agent/sessions/**/*.jsonl` corpus and every filled `pr` in
-// the committed TSV (#2213 review); accepted as known gaps rather than
+// the committed TSV; accepted as known gaps rather than
 // hand-rolling shell-quote/heredoc awareness into a single regex.
 const GH_PR_CREATE_RE =
   /(?:^|[;&|(\n]|\b(?:if|then|do|!)\s)\s*(?:(?:env|command|rtk|timeout\s+\S+)\s+|[A-Za-z_]\w*=\S*\s+)*(?:\S*\/)?gh\s+pr\s+create\b/;
@@ -253,9 +252,8 @@ function createdPrNumbers(text) {
 //       "cacheRead":0,"cacheWrite":0.0783,"total":0.0803}}}}
 //
 // `thinking` reads the harness-WRITTEN level, never the frontmatter — that
-// is what makes #1298's declared-vs-resolved comparison possible (#1302's
-// ruling). It stays `null` here (ompMemberRecord turns that into the
-// record's `-`) when no `thinking_level_change` line exists, rather than
+// is what makes a declared-vs-resolved comparison possible. It stays `null`
+// here (ompMemberRecord turns that into the record's `-`) when no `thinking_level_change` line exists, rather than
 // guessing the default: a member that is not a fleet definition genuinely
 // has no recorded level, and the hole must stay visible.
 //
@@ -265,10 +263,10 @@ function createdPrNumbers(text) {
 // depth AND the AgentId itself, as REAL classifyRole() signals. A
 // canonically-stemmed AgentId (`impl-<n>`, `fix-pr-<n>`, `finisher-<n>`,
 // `review-pr-<n>`, `merge-bot-<n>`) IS matched against classifyRole, as
-// `memberName`, per #1506; only a non-canonical AgentId — a generated word
+// `memberName`; only a non-canonical AgentId — a generated word
 // pair that names nothing — is still never matched.
 //
-// `resolvedModelIdentity` (#1345) is `session_init`'s OWN field, written at
+// `resolvedModelIdentity` is `session_init`'s OWN field, written at
 // DISPATCH — before the member's first assistant turn exists, which is what
 // makes it different from `model` above: a member still working folds to
 // `model: null` (no assistant turn yet) but already carries
@@ -280,14 +278,14 @@ function createdPrNumbers(text) {
 // per-turn value (which can in principle change mid-run) is the fact they
 // want, not the dispatch-time identity.
 //
-// `agent` (#1066) is `session_init`'s dispatch-time record of WHICH AGENT
+// `agent` is `session_init`'s dispatch-time record of WHICH AGENT
 // DEFINITION this member is. Measured 2026-09-12 across real
 // `~/.omp/agent/sessions/**`: present on every one of the 1,191 transcripts
 // carrying a `session_init` line (`fleet-implementer` 51,
 // `fleet-implementer-alt` 17, the default `task` 220, plus the review
 // fan-out's own definitions), absent only where the line itself is.
 //
-// `entries` (#1717) is the per-agent tool stream compute-spend.mjs's
+// `entries` is the per-agent tool stream compute-spend.mjs's
 // attributeTools reads: `assistant`/`result` entries. Measured 2026-09-26
 // across 5,085 real `~/.omp/agent/sessions/**/*.jsonl` files, the call is a
 // block on the assistant message and the result a line of its own:
@@ -323,7 +321,7 @@ function createdPrNumbers(text) {
 // reached the API its usage is all zero, and attributeTools books the batch
 // before it at 0.
 //
-// `openedPrs` (#2209) folds the `bash` calls that invoke `gh pr create`
+// `openedPrs` folds the `bash` calls that invoke `gh pr create`
 // against their own results, via createdPrNumbers above — distinct PR
 // numbers in first-seen order.
 export function foldOmpTranscript(jsonlText, filePath) {
@@ -342,7 +340,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
     let d;
     // A torn tail (transcript read mid-write) is dropped, and costs at most
     // that one turn either way. A MIDDLE line failing the same parse is not
-    // a live write in progress — it is lost data, and (#1717) it can desync
+    // a live write in progress — it is lost data, and it can desync
     // a toolCall from its toolResult, not just a turn's totals, so it is
     // counted, never for the last line.
     try { d = JSON.parse(raw); }
@@ -404,7 +402,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // One member record from one omp transcript's fold. `member` is the AgentId
 // (the filename stem, e.g. `InstallVerifySearch`) — there is no separate
 // display name, so `ticket`/`pr` extraction runs against it directly — except
-// a `pr` the name cannot carry, read off the fold's `openedPrs` (#2209).
+// a `pr` the name cannot carry, read off the fold's `openedPrs`.
 //
 // `role` is NEVER guessed off the bare AgentId ALONE — a generated CamelCase
 // word pair names nothing classifyRole can read. FOUR real signals exist:
@@ -412,16 +410,16 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // `session_init.task` (the dispatch prompt, when present), `spawnDepth` (the
 // transcript's own nesting depth, supplied by readOmpSession from the walk —
 // a fact about where the file lives, not a guess about what it is), and —
-// per #1506's ruling below — the AgentId itself, handed to classifyRole as
+// per the RULED paragraph below — the AgentId itself, handed to classifyRole as
 // `memberName`. Depth matters on its own: classifyRole checks depth BEFORE
 // any text match, specifically so a nested member whose task happens to
-// read like a reviewer's ("Review PR 1353 correctness") still books as the
+// read like a reviewer's ("Review PR <n> correctness") still books as the
 // fan-out specialist it structurally is, not a reviewer. None present
 // yields `"-"` — the same visible-hole spelling as `thinking`, never a
 // default like "other", which only makes sense where a real dispatch record
 // backs it.
 //
-// `agent` reaches classifyRole as its `agentDefinition` (#1486, #1505). It
+// `agent` reaches classifyRole as its `agentDefinition`. It
 // is the same value the `subagent_type` column below already records, and
 // withholding it here made classifyRole's FIRST branch — the one whose
 // comment says memory-system work must "never land in review spend" —
@@ -431,7 +429,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // definition (`fleet-review-verifier`) split across four buckets on nothing
 // but how each prompt happened to read.
 //
-// #1506's gap: `memberName` used to be left unset here on the theory that
+// The gap this closes: `memberName` used to be left unset here on the theory that
 // the AgentId genuinely is not a name — a generated CamelCase word pair
 // (`InstallVerifySearch`) names nothing the classifier can read. True for
 // the ordinary case, but false for members dispatched under run-team's own
@@ -441,7 +439,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // dispatched under the generic default `task` definition (`folded.agent` is
 // `undefined`), so the definition-based fix above cannot reach them, and
 // they fall through to prose classification of `folded.task` alone.
-// Measured against docs/metrics/member-outcomes.tsv (#1506): 478 omp rows
+// Measured against docs/metrics/member-outcomes.tsv: 478 omp rows
 // carry such an AgentId, 52 of them booked `other` for want of this signal —
 // 31 `fix-pr-*`, 9 `impl-*` and 12 `merge-bot-*` members whose dispatch
 // prompt never happens to name the role.
@@ -452,9 +450,9 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // multi-word phrase ("implement ticket", "review pr"), so a stray generated
 // word pair cannot coincidentally satisfy one; the one bare-word pattern,
 // `finisher`, carries that risk today and has not fired on the 4,574
-// sidecars measured for #1505. `OMP_CANONICAL_STEM_RE` below exists only to
+// sidecars measured. `OMP_CANONICAL_STEM_RE` below exists only to
 // widen `hasRoleSignal` itself: a canonically-named member whose transcript
-// predates #1343 (no `session_init` line at all, so neither `task` nor
+// predates `session_init` (no such line at all, so neither `task` nor
 // `agent` exist) still holds a readable identity and must not fall back to
 // the "-" hole. Measured 2026-09-16: zero such rows on disk today, but the
 // gate exists so the design does not assume that stays true forever. Built
@@ -471,7 +469,7 @@ export function ompMemberRecord(folded, agentStem, spawnDepth = 0) {
   const member = agentStem;
   const { ticket, pr: namedPr } = parseMemberName(member);
   // A name-carried PR (`fix-pr-<n>`, `finisher-<n>`, ...) is the member's unit
-  // of work by construction and wins. Otherwise (#2209) the one PR its own
+  // of work by construction and wins. Otherwise the one PR its own
   // `gh pr create` printed; none, or more than one (measured: impl-1578 opened
   // its real PR plus a throwaway probe PR), stays blank — never a guess.
   // `folded.openedPrs` is `foldOmpTranscript`'s own unconditional return
@@ -487,11 +485,11 @@ export function ompMemberRecord(folded, agentStem, spawnDepth = 0) {
     role,
     member,
     model: folded.model,
-    // Additive only (#1345) — `model` above stays the per-turn value
+    // Additive only — `model` above stays the per-turn value
     // board.mjs/member-outcomes.mjs already key cost/spend attribution on;
     // this is the dispatch-time identity `session_init` wrote before any
-    // turn existed, `null` when the transcript predates #1343 or carries no
-    // `session_init` line at all (never guessed).
+    // turn existed, `null` when the transcript carries no `session_init`
+    // line at all (never guessed).
     resolvedModelIdentity: folded.resolvedModelIdentity ?? null,
     thinking: folded.thinking ?? "-",
     // The dispatch record's own agent definition, `""` when the transcript
@@ -507,7 +505,7 @@ export function ompMemberRecord(folded, agentStem, spawnDepth = 0) {
 
 // ompMemberRecord straight from the transcript text. board.mjs's live spend
 // panel calls the two halves itself instead, because it needs the fold's tool
-// stream (#1717) beside the record, and folding the file twice for it would
+// stream beside the record, and folding the file twice for it would
 // parse every transcript twice on every tick.
 export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
   return ompMemberRecord(foldOmpTranscript(jsonlText, filePath), agentStem, spawnDepth);
@@ -515,7 +513,7 @@ export function readOmpMember(jsonlText, filePath, agentStem, spawnDepth = 0) {
 
 // One omp session directory's member transcripts, as the walk both readers of
 // that directory need it: readOmpSession below, and board.mjs's live spend
-// panel (#1716), which folds each file itself so it can keep its own
+// panel, which folds each file itself so it can keep its own
 // per-transcript skip tally. RECURSIVE: a member can itself dispatch further
 // members (measured on disk — a research session's `Facts1303/` held seven
 // more `.jsonl` files one level down), and `agent` is the path-relative stem
@@ -539,8 +537,7 @@ export function ompSessionTranscripts(sessionDir) {
 //
 // Deliberately NOT wrapped in a blanket try/catch around readOmpMember: the
 // wrong-shape refusal (assertOmpShaped, inside foldOmpTranscript) must
-// propagate all the way out of readMembers, uncaught, per #1342's acceptance
-// criterion. Only the directory listing and the raw file read are given the
+// propagate all the way out of readMembers, uncaught. Only the directory listing and the raw file read are given the
 // ordinary per-member tolerance.
 export function readOmpSession(sessionDir) {
   let transcripts;
@@ -567,7 +564,7 @@ export function readOmpSession(sessionDir) {
 // per-session directories, so `findOmpSessionDirs` recursing from the
 // encoded-cwd dir hit the `.jsonl` test there first, returned the whole
 // project as "one session", stamped every row `session=-dev-fleet-plugin`
-// instead of the `<ISO>_<uuid>` name #1302 rules the row key on, and booked
+// instead of the `<ISO>_<uuid>` name the row key is built on, and booked
 // the controller's own top-level transcripts as members. Name-only matching
 // costs nothing a real fixture needs: every fixture in this repo already
 // names its session dir in the real shape.
@@ -595,7 +592,7 @@ function findOmpSessionDirs(root) {
 
 // The adapter's public entry point. A root that resolves to no session
 // directory anywhere is refused rather than silently skipped: silently
-// returning no rows for a typo'd path is the blackout #1302's ruling exists
+// returning no rows for a typo'd path is the blackout this refusal exists
 // to prevent.
 export function readMembers(roots) {
   const rows = [];

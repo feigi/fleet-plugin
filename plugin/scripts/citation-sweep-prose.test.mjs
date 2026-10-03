@@ -514,7 +514,7 @@ const FILES = [
   {
     path: ["scripts", "ledger.mjs"],
     stale: [/fleet-plugin-design\.md:200/, /candidates\.mjs:279/],
-    live: ["fleet-plugin-design.md's", "refuseIfCapped"],
+    live: ["refuseIfCapped"],
   },
   {
     path: ["scripts", "ledger.test.mjs"],
