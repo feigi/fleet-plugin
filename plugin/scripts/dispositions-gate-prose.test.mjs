@@ -44,11 +44,17 @@ test("step 2 reads scope off the diff before the declared scope", () => {
 
 test("step 2's deferral reasons are exactly the ones the check accepts, and anything else refuses the finisher", () => {
   const s = recordStep();
-  const listed = /An in-scope `survived` finding deferred passes only with `reason` `([^`]+)`, `([^`]+)` or `([^`]+)`\./.exec(s);
+  const listed = /An in-scope `survived` finding deferred passes only with `reason` `([^`]+)`, `([^`]+)`, `([^`]+)` or `([^`]+)`\./.exec(s);
   assert.ok(listed, "step 2 no longer lists the in-scope deferral reasons in one sentence — update this test");
   assert.deepEqual(listed.slice(1), [...ALLOWED_DEFER]);
   assert.match(s, phrase(
     "Any other reason, none, or a `survived` or `unverified` finding with no entry is a mismatch: the script exits 1 naming each violating entry's bucket, index and rule, and `ledger.mjs dispatch` refuses the PR's finisher.",
+  ));
+});
+
+test("step 2 requires a remedy file absent from the PR's diff for remedy-outside-diff, and refuses none or every one inside it", () => {
+  assert.match(recordStep(), phrase(
+    "`remedy-outside-diff` — the remedy would edit a file the PR's diff does not touch — also needs `remedyFiles` to name at least one file absent from `git diff` from that merge-base to the review's `head`: none named, or every one in that diff, is a mismatch.",
   ));
 });
 
@@ -67,6 +73,9 @@ test("the gate says what each refusal asks of the controller", () => {
   ));
   assert.match(s, phrase(
     "`dispositions mismatch` — no finisher: post the check's output, which names each violating entry, with `gh pr comment <M>`, and flag the PR for a human",
+  ));
+  assert.match(s, phrase(
+    "`dispositions escalate` — no finisher, and no retry: a `critical` or `important` finding was deferred `remedy-outside-diff`, which only a human can rule on. Post the check's output, which names each escalated finding, with `gh pr comment <M>`, and flag the PR for a human; dispatch no fix-applier and no finisher for that review's head",
   ));
   assert.match(s, phrase(
     "it refuses too while a fix-applier on the PR is still live, verdict or not** — `fix-pr-<M>[-x] still live`: settle it, run the check for it, then dispatch again.",

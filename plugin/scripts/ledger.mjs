@@ -1660,13 +1660,18 @@ function dispositionsRefusal(pr, review) {
   if (review.survived === 0 && review.unverified === 0) return null;
   const v = review.dispositions;
   if (v === null) {
-    return `dispositions unchecked — no dispositions-ok=/dispositions-mismatch= token answers PR #${pr}'s latest review, `
+    return `dispositions unchecked — no dispositions-ok=/dispositions-mismatch=/dispositions-escalate= token answers PR #${pr}'s latest review, `
       + `reviewed=${review.head}; run dispositions-check.mjs --member fix-pr-${pr}[-<x>] --scratch <scratch> for the fix-applier `
       + "that answered that review, then dispatch the finisher again";
   }
   if (v.verdict === "mismatch") {
     return `dispositions mismatch — ${v.member}'s disposition record fails the check against review ${review.head}; `
       + `dispositions-check.mjs --member ${v.member} --scratch <scratch> names each violating entry by bucket, index and rule`;
+  }
+  if (v.verdict === "escalate") {
+    return `dispositions escalate — ${v.member} deferred a finding above suggestion severity because its remedy lies outside the PR's diff, `
+      + `which needs a human's ruling: review ${review.head} gets no finisher and no retry; dispositions-check.mjs --member ${v.member} `
+      + "--scratch <scratch> names each escalated finding by bucket and index, for the PR comment that hands it to a human";
   }
   return null;
 }

@@ -13,6 +13,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, symlinkSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { deriveRun } from "./fleet-tick.mjs";
 import { touchedLines, checkDispositions, withVerdict, repoPath, formatViolation } from "./dispositions-check.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./dispositions-check.mjs", import.meta.url));
@@ -145,9 +146,9 @@ test("each allowed reason passes an in-scope survivor's deferral, writes disposi
   }
 });
 
-test("any other reason is a mismatch — remedy-outside-diff included, until it is accepted", (t) => {
+test("any other reason is a mismatch", (t) => {
   const f = fixture(t);
-  for (const reason of ["outside-ticket-files", "remedy-outside-diff", ""]) {
+  for (const reason of ["outside-ticket-files", ""]) {
     const entries = f.baseEntries();
     entries[0] = f.entry("survived", 0, { disposition: "defer", reason });
     f.writeRecord(entries);
@@ -490,8 +491,8 @@ test("checkDispositions reads an absolute snapshot path onto the diff's touched 
   const review = { head: "abc1234", survived: [{ file: "/snap/src/a.js", line: 5 }], unverified: [], refuted: [] };
   const record = { head: "abc1234", entries: [{ bucket: "survived", index: 0, scope: "out", claimKind: "behavior", disposition: "defer" }] };
   const touched = new Map([["src/a.js", new Set([5])]]);
-  assert.equal(checkDispositions({ review, record, touched, roots: ["/snap"] }).length, 1);
-  assert.equal(checkDispositions({ review, record, touched: new Map(), roots: ["/snap"] }).length, 0);
+  assert.equal(checkDispositions({ review, record, touched, roots: ["/snap"] }).violations.length, 1);
+  assert.equal(checkDispositions({ review, record, touched: new Map(), roots: ["/snap"] }).violations.length, 0);
 });
 
 test("withVerdict replaces only the same member's verdict for the same head", () => {
@@ -602,12 +603,14 @@ test("nothing is judged or written for a review finding that is no object, an un
 
 // The pure core, on one review: survived[0] on touched src/a.js:5, one refuted finding.
 const H40 = "abc1234abc1234abc1234abc1234abc1234abcde";
-const core = (entries, { head = H40, reviewHead = H40, survived = [{ file: "src/a.js", line: 5 }], record } = {}) => checkDispositions({
+const coreRun = (entries, { head = H40, reviewHead = H40, survived = [{ file: "src/a.js", line: 5 }], record, diffFiles = ["src/a.js"] } = {}) => checkDispositions({
   review: { head: reviewHead, survived, unverified: [], refuted: [{ file: "src/b.js", line: 1 }] },
   record: record === undefined ? { head, entries } : record,
   touched: new Map([["src/a.js", new Set([5])]]),
+  diffFiles,
   roots: ["/snap"],
-}).map(formatViolation);
+});
+const core = (entries, opts) => coreRun(entries, opts).violations.map(formatViolation);
 const applied = { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "apply" };
 
 test("a record entry that is no object, names no position, or a record with no entries is a mismatch, never a crash", () => {
@@ -686,5 +689,155 @@ test("withVerdict leaves a row already carrying only the token unchanged, folds 
   assert.equal(withVerdict(`${ok} · impl-10=PR#40`, ok), `${ok} · impl-10=PR#40`);
   assert.equal(withVerdict(`dispositions-mismatch=fix-pr-40:${H40}`, ok), ok);
   assert.equal(withVerdict(`· dispositions-mismatch=fix-pr-40:${H40} ·`, ok), ok);
-  assert.throws(() => withVerdict(`impl-10=PR#40 · ${ok}`, "garbage"), /'garbage' is not a dispositions-ok=\/dispositions-mismatch= token/);
+  assert.throws(() => withVerdict(`impl-10=PR#40 · ${ok}`, "garbage"), /'garbage' is not a dispositions-ok=\/dispositions-mismatch=\/dispositions-escalate= token/);
+});
+
+// ---------------------------------------------------------------------------
+// remedy-outside-diff: a deferral whose remedy lies in a file the PR's diff
+// does not name. In the fixture src/a.js is in the PR's diff and src/b.js is
+// not.
+// ---------------------------------------------------------------------------
+
+const escalated = (r) => {
+  assert.equal(r.status, 1, `expected an escalation, got exit ${r.status}\n${r.stderr}`);
+  assert.equal(r.json.verdict, "escalate");
+};
+// survived[0], on touched line 5, deferred remedy-outside-diff.
+const deferOutside = (f, remedyFiles, recHead) => {
+  const entries = f.baseEntries();
+  entries[0] = f.entry("survived", 0, { disposition: "defer", reason: "remedy-outside-diff", issue: 81, remedyFiles });
+  f.writeRecord(entries, recHead);
+};
+const withSeverity = (f, severity) => f.writeReview({ ...f.review, survived: [{ ...f.review.survived[0], severity }, f.review.survived[1]] });
+// The same review row with no fix-applier landed on it is fix-due: the control
+// that shows fixDueFor can see a PR become fix-due at all.
+const dueUntilFixed = (f) => deriveRun({ rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=${f.head}:2/1/1`], dispatched: [], drain: null },
+  [{ number: 40, labels: [], closingIssuesReferences: [{ number: 10 }] }]).fixDue;
+const fixDueFor = (f) => {
+  const l = f.okLedger("read");
+  return deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null }, [{ number: 40, labels: [], closingIssuesReferences: [{ number: 10 }] }]).fixDue;
+};
+
+test("a suggestion deferred remedy-outside-diff, its remedy in a file the diff lacks, passes as ok and lets the finisher dispatch", (t) => {
+  const f = fixture(t);
+  withSeverity(f, "suggestion");
+  deferOutside(f, ["src/b.js"]);
+  const r = f.check();
+  okVerdict(r);
+  assert.deepEqual(r.json.escalations, []);
+  assert.ok(f.row().includes(`dispositions-ok=fix-pr-40:${f.head}`), f.row());
+  assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+});
+
+test("a critical or important finding deferred remedy-outside-diff writes dispositions-escalate, refuses the finisher by name and never makes the PR fix-due", (t) => {
+  for (const severity of ["important", "critical"]) {
+    const f = fixture(t);
+    withSeverity(f, severity);
+    deferOutside(f, ["src/a.js", "src/b.js"]);
+    const r = f.check();
+    escalated(r);
+    assert.deepEqual(r.json.violations, []);
+    assert.deepEqual(r.json.escalations, [{ bucket: "survived", index: 0, severity, files: ["src/b.js"] }]);
+    assert.equal(r.json.token, `dispositions-escalate=fix-pr-40:${f.head}`);
+    assert.match(r.stderr, new RegExp(`^fix-pr-40: survived\\[0\\]: a ${severity} finding deferred remedy-outside-diff, its remedy in src/b\\.js — a human rules$`, "m"));
+    assert.ok(f.row().includes(`dispositions-escalate=fix-pr-40:${f.head}`), f.row());
+
+    const before = readFileSync(join(f.dir, "ledger.md"), "utf8");
+    const d = f.ledgerCli("dispatch", "40", "finisher-pr-40");
+    assert.equal(d.status, 2, severity);
+    assert.match(d.stderr, /finisher-pr-40: dispositions escalate — fix-pr-40 deferred/);
+    assert.equal(readFileSync(join(f.dir, "ledger.md"), "utf8"), before, "a refused dispatch writes nothing");
+    assert.deepEqual(dueUntilFixed(f), [40], "control");
+    assert.deepEqual(fixDueFor(f), [], `${severity}: an escalation is a human's, never a fix-pr dispatch`);
+  }
+});
+
+test("remedy-outside-diff whose remedy files are all in the PR's diff, or none, is a mismatch — a suggestion's included", (t) => {
+  const f = fixture(t);
+  for (const severity of ["important", "suggestion"]) {
+    withSeverity(f, severity);
+    for (const remedyFiles of [["src/a.js"], ["./src/a.js"], [join(f.repo, "src/a.js")], [" src/a.js "], ["src//a.js"], ["src/../src/a.js"], ["./src/../src/a.js", " "], [], [""], undefined]) {
+      deferOutside(f, remedyFiles);
+      const r = f.check();
+      mismatch(r, /^fix-pr-40: survived\[0\]: reason remedy-outside-diff needs a remedy file absent from the PR's diff — /m);
+      assert.deepEqual(r.json.escalations, [], `${severity} ${JSON.stringify(remedyFiles)}`);
+      assert.ok(f.row().includes(`dispositions-mismatch=fix-pr-40:${f.head}`), f.row());
+    }
+  }
+  deferOutside(f, ["src/a.js"]);
+  assert.match(f.check().stderr, /every file remedyFiles names is in the PR's diff/);
+  deferOutside(f, []);
+  assert.match(f.check().stderr, /remedyFiles names no file/);
+});
+
+test("a file the PR deleted or moved away is in the PR's diff, so a remedy naming only it is a mismatch", (t) => {
+  const f = fixture(t);
+  git(f.repo, "rm", "-q", "src/b.js");
+  git(f.repo, "mv", "src/a.js", "src/c.js");
+  git(f.repo, "commit", "-qm", "pr 2: delete b, move a");
+  const head = git(f.repo, "rev-parse", "HEAD");
+  f.writeReview({ ...f.review, head, survived: [{ severity: "suggestion", claim: "c", evidence: "e" }, f.review.survived[1]] });
+  for (const remedyFiles of [["src/b.js"], ["src/a.js"], ["src/c.js"]]) {
+    deferOutside(f, remedyFiles, head);
+    mismatch(f.check(), /reason remedy-outside-diff needs a remedy file absent from the PR's diff/);
+  }
+  // The control: a file the PR never touched is outside it.
+  git(f.repo, "update-ref", "refs/remotes/origin/main", "HEAD~1");
+  deferOutside(f, ["src/never.js"], head);
+  okVerdict(f.check());
+});
+
+test("a record that breaks a rule is a mismatch even when it also escalates, and prints both", (t) => {
+  const f = fixture(t);
+  withSeverity(f, "critical");
+  deferOutside(f, ["src/b.js"]);
+  const rec = JSON.parse(readFileSync(join(f.scratch, "dispositions-40.json"), "utf8"));
+  f.writeRecord(rec.entries.filter((e) => !(e.bucket === "survived" && e.index === 1)));
+  const r = f.check();
+  mismatch(r, /^fix-pr-40: survived\[1\]: no entry/m);
+  assert.match(r.stderr, /^fix-pr-40: survived\[0\]: a critical finding deferred remedy-outside-diff/m);
+  assert.equal(r.json.token, `dispositions-mismatch=fix-pr-40:${f.head}`);
+});
+
+test("a re-check after an escalation replaces it with the member's new verdict, and the finisher then dispatches", (t) => {
+  const f = fixture(t);
+  deferOutside(f, ["src/b.js"]);
+  escalated(f.check());
+  f.writeRecord(f.baseEntries());
+  okVerdict(f.check());
+  const row = f.row();
+  assert.equal(row.match(/dispositions-/g).length, 1, row);
+  assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+});
+
+test("an out-of-scope deferral, an unverified one and an applied remedy need no remedy file and escalate nothing", (t) => {
+  const f = fixture(t);
+  const entries = f.baseEntries();
+  entries[1] = f.entry("survived", 1, { scope: "out", disposition: "defer", reason: "remedy-outside-diff", issue: 12 });
+  entries[2] = f.entry("unverified", 0, { disposition: "defer", reason: "remedy-outside-diff", issue: 13 });
+  f.writeRecord(entries);
+  const r = f.check();
+  okVerdict(r);
+  assert.deepEqual(r.json.escalations, []);
+});
+
+test("checkDispositions: escalation is every severity but suggestion, a missing severity included; diffFiles is required when a deferral needs it", () => {
+  const entry = { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "defer", reason: "remedy-outside-diff", remedyFiles: ["src/b.js"] };
+  for (const [severity, expected] of [["critical", 1], ["important", 1], [undefined, 1], ["suggestion", 0]]) {
+    const r = coreRun([entry], { survived: [{ file: "src/a.js", line: 5, severity }] });
+    assert.deepEqual(r.violations, [], String(severity));
+    assert.equal(r.escalations.length, expected, String(severity));
+  }
+  assert.deepEqual(coreRun([entry], { survived: [{ file: "src/a.js", line: 5, severity: "important" }] }).escalations,
+    [{ bucket: "survived", index: 0, severity: "important", files: ["src/b.js"] }]);
+  assert.throws(() => coreRun([entry], { diffFiles: null }), /no diffFiles was given/);
+  // A remedy the other reasons never read: no diffFiles needed.
+  assert.deepEqual(coreRun([{ ...entry, reason: "remedy-worse" }], { diffFiles: null }).violations, []);
+});
+
+test("withVerdict replaces an escalation with the same member's later verdict for the head, and an escalation for an ok", () => {
+  const esc = `dispositions-escalate=fix-pr-40:${H40}`;
+  const ok = `dispositions-ok=fix-pr-40:${H40}`;
+  assert.equal(withVerdict(`impl-10=PR#40 · ${esc}`, ok), `impl-10=PR#40 · ${ok}`);
+  assert.equal(withVerdict(`impl-10=PR#40 · ${ok}`, esc), `impl-10=PR#40 · ${esc}`);
 });

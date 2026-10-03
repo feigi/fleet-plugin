@@ -8,6 +8,9 @@
 //
 //   dispositions-ok=fix-pr-<M>[-x]:<head>        every rule below held
 //   dispositions-mismatch=fix-pr-<M>[-x]:<head>  at least one entry broke one
+//   dispositions-escalate=fix-pr-<M>[-x]:<head>  every rule held, but a critical
+//                                                or important finding was deferred
+//                                                `remedy-outside-diff`: a human rules
 //
 // `<head>` is the review file's `head` — the review the record answers — so a
 // verdict on one review never answers a later one.
@@ -45,10 +48,20 @@
 //     `file`) is in scope. Otherwise the declared `scope` stands.
 //   - An in-scope `survived` finding deferred passes only with `reason` one
 //     of ALLOWED_DEFER. Any other reason, or none, is a mismatch.
+//   - `remedy-outside-diff` passes only when `remedyFiles` names at least one
+//     file absent from the file list of `git diff <merge-base>...<head>`
+//     (renames and deletions listed on both sides, so a file the PR deleted
+//     or moved away is in the diff). Empty `remedyFiles`, or every file named
+//     inside the diff, is a mismatch. The reason can be gamed by naming any
+//     untouched file, so a deferral for it of a `critical` or `important`
+//     finding — or of one whose severity is neither that nor `suggestion` —
+//     is escalated rather than passed: the verdict is `escalate`, and the
+//     output names each such finding. A `suggestion` passes as `ok`. A record
+//     that also breaks a rule is a `mismatch`, its escalations printed too.
 //
-// Exit status: 0 ok; 1 mismatch; 2 nothing judged and nothing written — a
-// bad flag, an unreadable or malformed review file, a record file that
-// exists but cannot be read, a git or ledger failure. A missing or
+// Exit status: 0 ok; 1 mismatch or escalate; 2 nothing judged and nothing
+// written — a bad flag, an unreadable or malformed review file, a record file
+// that exists but cannot be read, a git or ledger failure. A missing or
 // unparseable RECORD is judged, not refused: the fix-applier wrote nothing a
 // reader can use, so every finding it had to cover is dropped.
 //
@@ -67,7 +80,7 @@
 
 import { readFileSync, existsSync, lstatSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join, dirname, isAbsolute, relative } from "node:path";
+import { join, dirname, isAbsolute, relative, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
@@ -83,7 +96,8 @@ const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
 // pure core — no filesystem or process access until main()
 // ---------------------------------------------------------------------------
 
-export const ALLOWED_DEFER = Object.freeze(["false-rationale", "mutual-exclusion", "remedy-worse"]);
+const REMEDY_OUTSIDE_DIFF = "remedy-outside-diff";
+export const ALLOWED_DEFER = Object.freeze(["false-rationale", "mutual-exclusion", "remedy-worse", REMEDY_OUTSIDE_DIFF]);
 const COVERED = ["survived", "unverified"];
 const BUCKETS = [...COVERED, "refuted"];
 const ENUMS = { scope: ["in", "out"], claimKind: ["behavior", "shape"], disposition: ["apply", "defer"] };
@@ -227,16 +241,21 @@ function shapeErrors(e) {
 }
 
 /**
- * Every rule the record breaks against the review, as `{bucket, index, rule}`
- * — `bucket`/`index` null for a rule about the record as a whole. Empty means
- * ok. `record` is the parsed record, or null when there is none to read
- * (`recordProblem` then says why). `touched` is touchedLines() for the
- * review's head; `roots` the directories an absolute finding path is read
- * relative to. `review` must pass reviewProblem() — a bucket missing or
- * holding a non-object is a TypeError here, not a violation.
+ * Every rule the record breaks against the review, as `violations` of
+ * `{bucket, index, rule}` — `bucket`/`index` null for a rule about the record
+ * as a whole — and every deferral that needs a human, as `escalations` of
+ * `{bucket, index, severity, files}`. Empty `violations` means the record
+ * holds every rule. `record` is the parsed record, or null when there is none
+ * to read (`recordProblem` then says why). `touched` is touchedLines() for the
+ * review's head; `diffFiles` every file name `git diff <merge-base>...<head>`
+ * lists, required only when an entry defers `remedy-outside-diff`; `roots` the
+ * directories an absolute finding or remedy path is read relative to.
+ * `review` must pass reviewProblem() — a bucket missing or holding a
+ * non-object is a TypeError here, not a violation.
  */
-export function checkDispositions({ review, record, recordProblem = null, touched, roots = [] }) {
+export function checkDispositions({ review, record, recordProblem = null, touched, diffFiles = null, roots = [] }) {
   const violations = [];
+  const escalations = [];
   const at = (bucket, index, rule) => violations.push({ bucket, index, rule });
 
   let entries = [];
@@ -286,10 +305,24 @@ export function checkDispositions({ review, record, recordProblem = null, touche
     if (bucket !== "survived" || e.disposition !== "defer") return;
     const presumed = presumedInScope(review[bucket][index], touched, roots);
     if (presumed === null && e.scope === "out") return;
-    if (ALLOWED_DEFER.includes(e.reason)) return;
-    const why = presumed === null ? "its entry declares scope in" : `${presumed}, so it is in scope whatever its entry declares`;
-    const reason = e.reason === undefined || e.reason === "" ? "no reason" : `reason ${JSON.stringify(e.reason)}`;
-    at(bucket, index, `an in-scope survived finding deferred with ${reason} — ${why}; it defers only for ${ALLOWED_DEFER.join(", ")}`);
+    if (!ALLOWED_DEFER.includes(e.reason)) {
+      const why = presumed === null ? "its entry declares scope in" : `${presumed}, so it is in scope whatever its entry declares`;
+      const reason = e.reason === undefined || e.reason === "" ? "no reason" : `reason ${JSON.stringify(e.reason)}`;
+      at(bucket, index, `an in-scope survived finding deferred with ${reason} — ${why}; it defers only for ${ALLOWED_DEFER.join(", ")}`);
+      return;
+    }
+    if (e.reason !== REMEDY_OUTSIDE_DIFF) return;
+    if (diffFiles === null) throw new TypeError("checkDispositions: an entry defers remedy-outside-diff and no diffFiles was given");
+    const inDiff = new Set(diffFiles);
+    const named = (e.remedyFiles ?? []).map((f) => f.trim()).filter((f) => f !== "");
+    const outside = named.map((f) => posix.normalize(repoPath(f, roots, inDiff))).filter((f) => !inDiff.has(f));
+    if (outside.length === 0) {
+      const what = named.length === 0 ? "remedyFiles names no file" : "every file remedyFiles names is in the PR's diff";
+      at(bucket, index, `reason remedy-outside-diff needs a remedy file absent from the PR's diff — ${what}`);
+      return;
+    }
+    const severity = review[bucket][index].severity;
+    if (severity !== "suggestion") escalations.push({ bucket, index, severity: severity ?? null, files: outside });
   });
 
   for (const bucket of COVERED) {
@@ -297,11 +330,15 @@ export function checkDispositions({ review, record, recordProblem = null, touche
       if (!seen.has(`${bucket}[${index}]`)) at(bucket, index, "no entry — a finding with no entry is a dropped finding");
     });
   }
-  return violations;
+  return { violations, escalations };
 }
 
 export function formatViolation({ bucket, index, rule }) {
   return bucket === null ? `record: ${rule}` : `${bucket}[${index}]: ${rule}`;
+}
+
+export function formatEscalation({ bucket, index, severity, files }) {
+  return `${bucket}[${index}]: a ${severity ?? "severity-less"} finding deferred remedy-outside-diff, its remedy in ${files.join(", ")} — a human rules`;
 }
 
 // The row text with `token` in place of every verdict the same member wrote
@@ -310,7 +347,7 @@ export function formatViolation({ bucket, index, rule }) {
 // one. Separators a removal leaves doubled are folded.
 export function withVerdict(rowText, token) {
   const mine = dispositionsToken(token);
-  if (mine === null) throw new Error(`withVerdict: '${token}' is not a dispositions-ok=/dispositions-mismatch= token`);
+  if (mine === null) throw new Error(`withVerdict: '${token}' is not a dispositions-ok=/dispositions-mismatch=/dispositions-escalate= token`);
   const words = String(rowText).trim().split(/\s+/).filter(Boolean);
   const kept = words.filter((w) => {
     const d = dispositionsToken(w);
@@ -429,12 +466,16 @@ function main() {
   const diff = git(repo, ["-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--unified=0", "-M",
     "--src-prefix=a/", "--dst-prefix=b/", base, head], `diff ${base}..${head}`);
   const top = git(repo, ["rev-parse", "--show-toplevel"], "find the repository root").trim();
+  // Every file the diff lists, a rename or a deletion by both its names — a
+  // file the PR moved away or removed is a file the PR's diff names.
+  const diffFiles = git(repo, ["diff", "--no-color", "--no-ext-diff", "--no-renames", "--name-only", "-z", base, head],
+    `list the files of ${base}..${head}`).split("\0").filter(Boolean);
   const ledgerFile = standalone ? null : ledgerInUse(arg("ledger"), repo);
 
-  const violations = checkDispositions({
-    review, record, recordProblem, touched: touchedLines(diff), roots: [review.snapshot, top],
+  const { violations, escalations } = checkDispositions({
+    review, record, recordProblem, touched: touchedLines(diff), diffFiles, roots: [review.snapshot, top],
   });
-  const verdict = violations.length === 0 ? "ok" : "mismatch";
+  const verdict = violations.length > 0 ? "mismatch" : escalations.length > 0 ? "escalate" : "ok";
   const token = `dispositions-${verdict}=${member.name}:${head}`;
 
   // The verdict lands on the row carrying the member on its own PR's row —
@@ -453,7 +494,8 @@ function main() {
   }
 
   for (const v of violations) console.error(`${member.name}: ${formatViolation(v)}`);
-  console.log(JSON.stringify({ member: member.name, pr, head, verdict, token: ledgerFile === null ? null : token, violations }));
+  for (const x of escalations) console.error(`${member.name}: ${formatEscalation(x)}`);
+  console.log(JSON.stringify({ member: member.name, pr, head, verdict, token: ledgerFile === null ? null : token, violations, escalations }));
   // exitCode, not exit(): stdout to a pipe is written asynchronously, and an
   // exit() here could cut the payload off.
   process.exitCode = verdict === "ok" ? 0 : 1;
