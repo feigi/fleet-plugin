@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { tempDir } from "./temp-dir.mjs";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,7 @@ import {
 } from "./tier-roles.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./tier-roles.mjs", import.meta.url));
+const SCRIPTS_DIR = fileURLToPath(new URL(".", import.meta.url));
 const REPO_AGENTS = fileURLToPath(new URL("../agents", import.meta.url));
 
 function dir() {
@@ -222,13 +223,19 @@ test("checkRoutes: an --agents path that is missing, or a regular file, is a vio
   }
 });
 
-test("checkRoutes: a directory named *.agent.md is a violation naming the entry, and the readable definitions are still checked", () => {
+test("checkRoutes: a directory named *.agent.md is a violation naming the entry, and the readable definitions after it are still checked", () => {
   const agents = agentsDir({ "fleet-a": "@slow:xhigh", "fleet-b": "@smol:max" });
-  mkdirSync(join(agents, "x.agent.md"));
+  mkdirSync(join(agents, "a.agent.md"));
   const { violations } = checkRoutes({ agentsDir: agents, modelRoles: MODEL_ROLES, overrides: {}, catalog: CATALOG });
   assert.equal(violations.length, 2);
-  assert.equal(violations[0], `--agents ${agents}: cannot read x.agent.md (EISDIR)`);
+  assert.equal(violations[0], `--agents ${agents}: cannot read a.agent.md (EISDIR)`);
   assert.match(violations[1], /^fleet-b\.agent\.md: level max is not one modelRoles\.smol's target/);
+});
+
+test("checkRoutes: an unreadable agents directory names the source the caller gives, not --agents", () => {
+  const missing = join(dir(), "nope");
+  const { violations } = checkRoutes({ agentsDir: missing, agentsSource: "the default agents directory X", modelRoles: MODEL_ROLES, overrides: {}, catalog: CATALOG });
+  assert.deepEqual(violations, ["the default agents directory X: cannot read the agents directory (ENOENT)"]);
 });
 
 test("checkRoutes (a): a definition whose model: is not a route is a violation naming the file", () => {
@@ -378,21 +385,32 @@ test("CLI: --check on an agents directory with no definitions exits 1 naming the
   assert.doesNotMatch(r.stdout, /every definition routes/);
 });
 
-test("CLI: --check on an --agents path that is missing, a regular file, or holds a directory named *.agent.md exits 1 with a refusal, no stack trace", () => {
+test("CLI: --check on an --agents path that is missing, a regular file, or holds a directory named *.agent.md exits 1 with a refusal naming the cause, no stack trace", () => {
   const d = dir();
   const file = join(d, "plain.txt");
   writeFileSync(file, "x\n");
   const trap = agentsDir({ "fleet-a": "@slow:xhigh" });
   mkdirSync(join(trap, "x.agent.md"));
-  for (const path of [join(d, "nope"), file, trap]) {
+  for (const [path, code] of [[join(d, "nope"), "ENOENT"], [file, "ENOTDIR"], [trap, "EISDIR"]]) {
     const r = runCli(["--check", "--agents", path, ...installFlags(d)], d);
     assert.equal(r.status, 1, path);
-    assert.match(r.stderr, new RegExp(`^tier-roles: --agents ${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: cannot read `), path);
+    assert.match(r.stderr, new RegExp(`^tier-roles: --agents ${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: cannot read .*\\(${code}\\)`), path);
     assert.doesNotMatch(r.stderr, /\n\s+at /, path);
     assert.doesNotMatch(r.stdout, /every definition routes/);
   }
 });
 
+test("CLI: --check with no --agents and an unreadable built-in agents directory refuses without naming a flag it was not given", () => {
+  const d = dir();
+  const scripts = join(d, "scripts");
+  mkdirSync(scripts);
+  for (const f of ["tier-roles.mjs", "arg.mjs", "is-cli.mjs"]) copyFileSync(join(SCRIPTS_DIR, f), join(scripts, f));
+  const r = spawnSync(process.execPath, [join(scripts, "tier-roles.mjs"), "--check", ...installFlags(d)], { cwd: d, encoding: "utf8" });
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /^tier-roles: the default agents directory .*agents: cannot read the agents directory \(ENOENT\)/);
+  assert.doesNotMatch(r.stderr, /--agents/);
+  assert.doesNotMatch(r.stderr, /\n\s+at /);
+});
 
 test("CLI: --check with a non-route model: exits 1 naming the file", () => {
   const d = dir();
