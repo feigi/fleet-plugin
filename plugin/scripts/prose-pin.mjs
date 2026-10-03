@@ -555,7 +555,8 @@ export function anchorAt(text, anchor, what, { emphasisTolerant = false } = {}) 
 // because its callers diagnose that differently and both are right:
 // `gp-sep-invariant-prose.test.mjs` slices at module load and wants the empty
 // case as a NAMED test rather than an import-time crash, while
-// `review-pr-inbound-citation-prose.test.mjs` asserts non-empty on the spot.
+// `ed9f2967^:plugin/scripts/review-pr-inbound-citation-prose.test.mjs` asserted
+// non-empty on the spot.
 // The exactly-once half is not the caller's and is not optional: it is
 // `anchorAt`'s, so a second copy of the anchored declaration reds here instead
 // of silently binding the pin to whichever copy comes first.
@@ -590,8 +591,8 @@ export function anchorAt(text, anchor, what, { emphasisTolerant = false } = {}) 
 // regex locally first, each carrying its own chance of dropping a guard. A pin
 // needing this bound imports it — a local copy is the defect, not a style
 // choice. NOT the mirror shape: the run BELOW an anchor
-// (`review-pr-inbound-citation-prose.test.mjs`'s `commentBelow`) has one
-// consumer and so no duplicate to close.
+// (`commentBelow` in `ed9f2967^:plugin/scripts/review-pr-inbound-citation-prose.test.mjs`)
+// had one consumer and so no duplicate to close.
 
 // The closed list `runAbove`'s tail bound tolerates between the comment block
 // and the anchor's own declaration keyword. Deliberately narrow: modifiers

@@ -48,15 +48,16 @@
 //   and the function does something (`endsFile`'s EOF tolerance) `between()`
 //   cannot.
 //
-// finisher-pin-race-prose.test.mjs's `fallbackSection()` and
-// review-pr-citation-prose.test.mjs's `specialists()` looked like two more —
+// finisher-pin-race-prose.test.mjs's `fallbackSection()` and the `specialists()`
+// in `ed9f2967^:plugin/scripts/review-pr-citation-prose.test.mjs` looked like
+// two more —
 // a search from `at` instead of `at + start.length`, and a literal-anchor
 // call this detector cannot even see, respectively — but a before/after
 // byte comparison against their real inputs (RUN_TEAM / REVIEW_AND_FIX)
 // proved both output-identical to `between()`: neither pair's end anchor
 // ever occurs inside its own start anchor's text, so the narrower contract
 // `fallbackSection()`'s own header once claimed never actually diverges.
-// Both are now `import { between }` call sites like every other consumer,
+// Both became `import { between }` call sites like every other consumer,
 // not documented exceptions.
 //
 // THE FLOOR: an empty or near-empty directory listing (a broken glob, or

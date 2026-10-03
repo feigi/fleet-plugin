@@ -709,8 +709,8 @@ test("a run's artefact root stays under the scratch root the caller provisioned"
       `a run under ${scratch} writes to ${runRootPrefix}, outside the root the caller provisioned — a caller that cleans up or inspects its own scratch root now finds nothing there`,
     );
     // A prefix alone does not settle "under": `/scr/../elsewhere` carries it and
-    // resolves outside. Same escape review-pr-refuter-scratch.test.mjs asserts
-    // separately of the refuter paths built on this root.
+    // resolves outside. Same escape the "a snapshot path that climbs out of the
+    // run root with `..` is refused" test asserts of a reported path.
     assert.doesNotMatch(runRootPrefix, /\/\.\.(\/|$)/, `${runRootPrefix} climbs out of the provisioned root with a \`..\` segment`);
   }
 });

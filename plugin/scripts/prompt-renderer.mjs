@@ -7,9 +7,9 @@ import { stripComments } from "./strip-comments.mjs";
 // comments so a block-commented call cannot render as live text, find a
 // template literal's start/end anchors, trim its wrapping backticks, and
 // compile it with `new Function` — existed independently in three test files
-// (review-pr-specialist-scratch.test.mjs, review-pr-refuter-scratch.test.mjs,
+// (review-core-specialist-scratch.test.mjs, review-core-refuter-scratch.test.mjs,
 // injection-control-prose.test.mjs), each around a different anchor pair. One
-// of the three (review-pr-specialist-scratch.test.mjs) already delegated the
+// of the three (review-core-specialist-scratch.test.mjs) already delegated the
 // anchor-finding half to prose-pin.mjs's `between()`; the other two
 // reimplemented the same `indexOf`/`assert.notEqual` pair by hand. Only the
 // extraction MACHINERY moves here; the prompt RULE PROSE itself stays inline

@@ -541,7 +541,7 @@ test("runReview actually calls resolveDimensions, then selectDimensions, to pick
 // The workflow cannot be imported to test this by execution: it runs a
 // top-level `await pipeline(...)` and compiles as a function body (#538), so
 // source position is the observable. Same shape as
-// review-pr-snapshot-path.test.mjs's guard-ordering pin.
+// review-core-snapshot-path.test.mjs's guard-ordering pin.
 test("an unresolvable override is refused before the snapshot agent is dispatched", () => {
   const resolveAt = SOURCE.indexOf("const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS);");
   const guardAt = SOURCE.indexOf('if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");');
