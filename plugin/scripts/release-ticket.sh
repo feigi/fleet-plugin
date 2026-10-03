@@ -306,14 +306,12 @@ common=$(git rev-parse --path-format=absolute --git-common-dir) ||
   die "cannot resolve the git common directory"
 wtroot="$common/worktrees"
 
-# A function, not inline, because the count is taken twice: once here, and
-# once more at the recount below if the cross-check disagrees with git's own
-# listing. The body is unchanged from what stood here as plain
-# top-level code before this function existed — mirrors inflight.sh's own
-# count_registry, which the same recount need already lives behind there,
-# adapted for the difference that matters: that copy returns a status
-# into an accumulate-and-continue probe, this one dies, so the loop itself
-# still just dies on an unreadable registry rather than returning past it.
+# A function, not inline, because the count is taken more than once: here, and
+# again by the recount loop below, up to `recount_tries` times, while the
+# cross-check disagrees with git's own listing. It mirrors inflight.sh's own
+# count_registry, adapted for the difference that matters: that copy returns a
+# status into an accumulate-and-continue probe; this one dies, so an unreadable
+# registry still just dies here rather than returning past it.
 count_registry() {
   registered=0
   [ -e "$wtroot" ] || return 0
@@ -340,8 +338,7 @@ count_registry() {
     # on disk (measured: listed 1 → linked 0, and a gitdir-keyed count returns 0
     # to match). A corrupt entry still holds git's own files — commondir, HEAD,
     # index, logs, refs — so emptiness separates it from a stray where the
-    # missing `gitdir` does not. The skip is therefore keyed on emptiness, not
-    # on the missing `gitdir` — that discriminator is what this copy replaced.
+    # missing `gitdir` does not.
     #
     # `ls`'s STATUS, not just its output, and that is the whole point: an entry
     # we could not LIST is not an empty one, and `2>/dev/null` hides the

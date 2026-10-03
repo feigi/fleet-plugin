@@ -22,7 +22,7 @@ set -eu
 
 # Directly below `set -eu`, not below a locale pin: this script has none, and
 # the locale-pin test deliberately leaves it off its PINNED list (whether
-# its generated runner needs one is not settled here). The five siblings that DO
+# its generated runner needs one is not settled here). The siblings that DO
 # carry a pin put this line under it instead, because that file's PROLOGUE
 # regex admits only comments, blanks and `set -[eux]+` above the pin. Here
 # there is no pin to sit under, so the only constraint left is the real one:
