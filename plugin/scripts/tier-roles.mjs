@@ -194,6 +194,10 @@ export function checkRoutes({ agentsDir, modelRoles, overrides, catalog }) {
   const usedBy = {}; // role -> [{ file, level }, ...]
 
   const files = readdirSync(agentsDir).filter((f) => f.endsWith(".agent.md")).sort();
+  // A directory with no definitions has nothing to route, so every check below
+  // would pass over it — a wrong `--agents` path that exists must not read as a
+  // healthy install.
+  if (files.length === 0) violations.push(`no *.agent.md definition found in ${agentsDir}`);
   for (const file of files) {
     const text = readFileSync(join(agentsDir, file), "utf8");
     const fm = parseFrontmatter(text);
