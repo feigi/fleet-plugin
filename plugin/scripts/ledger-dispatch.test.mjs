@@ -173,7 +173,7 @@ test("dispatch prints the agent definition the call names: the row's tier for an
 // A `tier=` of the right shape whose definition has no file is refused the
 // same way: a `task` call naming it cannot resolve. Two of those: a cell
 // outside the shipped grid (`smol-max` — haiku has no `max`), and the
-// pre-cell `alt` whose definition #2129 deleted. `row` refuses a non-cell
+// pre-cell `alt`, whose definition is deleted. `row` refuses a non-cell
 // `tier=` before it is written, so the rows `row` would refuse are written
 // as a ledger edited by hand — the case dispatch's own check still meets.
 test("dispatch refuses an implementer whose row names no single definition, or one with no file, before marking it live", (t) => {
