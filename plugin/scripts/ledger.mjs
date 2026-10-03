@@ -35,7 +35,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition, CELL } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
 import { stateFileIn, readState, assessBeat, stallsAt } from "./fleet-state.mjs";
 
@@ -841,6 +841,11 @@ if (cmd === "read") {
   // rewrite alike; a well-formed token, live or settled, still goes through.
   const malformed = memberTokens(line).find((t) => t.error !== null);
   if (malformed) die(`row ${key}: malformed member token '${malformed.name}=${malformed.outcome}' — ${malformed.error}`);
+  // `tier=` names the implementer cell an exploration Pull dispatched, so its
+  // value must be a cell token: a retired or misspelt tier written here would
+  // only be refused later, by `dispatch`, after the claim.
+  const badTier = line.split(/\s+/).find((tok) => tok.startsWith("tier=") && !CELL.test(tok.slice("tier=".length)));
+  if (badTier !== undefined) die(`row ${key}: '${badTier}' is not tier=<cell> — a cell is <slow|task|smol>-<level>`);
   // `label-off=<attempt>` tells the tick a missing `ready-to-merge` is
   // the controller's own removal, not a finisher's miss — so one naming no
   // finisher-pr member this run has would mask a real miss behind a record of
