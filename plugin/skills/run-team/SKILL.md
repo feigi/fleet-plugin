@@ -986,7 +986,9 @@ newest `impl-` member of a ticket whose row carries none of the three
 verdicts, whether that member is still running or already settled `bailed`,
 `killed` or `released`, and `HOLD (tier mismatch impl-<N>)` for a mismatched
 one. Only the newest member counts, so a replacement (`impl-<N>-b`) is what
-clears a mismatch — and is then owed its own check. The tick never reads a
+clears a mismatch — and is then owed its own check. A mismatch on a ticket
+whose issue is already CLOSED holds nothing: the tick probes that issue and
+drops it, since its work shipped and there is nothing left to replace. The tick never reads a
 transcript: clear an unchecked hold by running the check on that member with
 `session`. A settled member's check works only when its transcript exists;
 without one, the verdict is `tier-unverifiable` for a member settled `killed`

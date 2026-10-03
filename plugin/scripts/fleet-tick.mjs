@@ -656,8 +656,13 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   // say whether one exists; a settled member whose transcript was never
   // written gets `tier-unverifiable=` from it, which clears the hold here.
   const newest = impls.filter((m, i) => !impls.some((o, j) => j > i && o.number === m.number));
+  // A mismatch on a ticket whose issue is CLOSED holds nothing (#2485): its
+  // work shipped, so there is nothing left for `impl-<N>-b` to replace, and a
+  // retired definition can never re-check. `closed` is the ticket numbers the
+  // caller has probed; the pure fold cannot probe, so none is the default and
+  // every mismatch holds. A still-open ticket keeps its hold.
   const mismatched = (m) => m.outcome === "tier-mismatch" || verdicts.mismatch.has(m.name);
-  const tierMismatch = newest.filter(mismatched).map((m) => m.name);
+  const tierMismatch = newest.filter((m) => mismatched(m) && !closed.has(m.number)).map((m) => m.name);
   const cleared = (m) => verdicts.ok.has(m.name) || verdicts.unverifiable.has(m.name);
   const tierUnchecked = newest.filter((m) => !mismatched(m) && !cleared(m)).map((m) => m.name);
   const isQueued = (p) => p.labels.some((l) => l && l.name === "ready-to-merge");
@@ -1013,6 +1018,27 @@ function liftedPremise(excluded, entries, prs) {
   return null;
 }
 
+// The tickets, of those holding the implementer row on a tier mismatch, whose
+// issue is CLOSED (#2485): the one live read deriveRun needs to lift a hold
+// whose replacement has nothing left to replace. One `gh issue view` per
+// mismatched ticket, and none when nothing is mismatched. A probe that cannot
+// answer is disclosed and the hold stands — the same failure rule as
+// liftedPremise's behind-issue probe above.
+function closedTickets(mismatched) {
+  const closed = new Set();
+  for (const { number } of mismatched.map(parseMember)) {
+    const r = spawnSync("gh", ["issue", "view", String(number), "--json", "state"], { encoding: "utf8", env: gitEnv({ GH_REPO: "" }) });
+    if (r.error || r.status !== 0) {
+      console.error(`${NAME}: ${failure(r, `gh issue view ${number}`)} — tier mismatch on #${number} unconfirmed closed, hold stands`);
+      continue;
+    }
+    let st = null;
+    try { st = JSON.parse(r.stdout).state; } catch { /* unanswered: the hold stands */ }
+    if (st === "CLOSED") closed.add(number);
+  }
+  return closed;
+}
+
 // shortlist.mjs, run by the tick itself (§ 6 §3). Its per-ticket stderr is
 // captured and dropped rather than billed to the controller's context; only a
 // failure's last line rides along.
@@ -1067,7 +1093,12 @@ function main() {
   const prs = openPrs();
   let run;
   try {
-    run = deriveRun(readLedger(), prs);
+    const ledger = readLedger();
+    run = deriveRun(ledger, prs);
+    if (run.tierMismatch.length) {
+      const closed = closedTickets(run.tierMismatch);
+      if (closed.size) run = deriveRun(ledger, prs, closed);
+    }
   } catch (e) {
     if (e instanceof LedgerError) die(e.message);
     throw e;

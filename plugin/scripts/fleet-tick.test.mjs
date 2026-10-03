@@ -365,7 +365,7 @@ const pr = (number, labels = [], closes = [number + 1000], headRefOid = HEAD_B) 
   closingIssuesReferences: closes.map((n) => ({ number: n })),
   headRefOid,
 });
-const run = (ledger, prs = []) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs);
+const run = (ledger, prs = [], closed) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs, closed);
 
 test("deriveRun: live implementers are the unsettled impl- tokens — the #1692 shape, read rather than recited", () => {
   // #1692 was two sources disagreeing about the same fleet. There is one
@@ -951,6 +951,21 @@ test("deriveRun: drain and tier mismatches come off the file", () => {
   assert.deepEqual(r.tierMismatch, ["impl-7"], "#8's replacement is the fix");
 });
 
+// #2485: a mismatch on a ticket whose issue is CLOSED holds nothing.
+test("deriveRun: a tier mismatch on a closed ticket stops holding; one on an open ticket still does", () => {
+  const ledger = { rows: ["#7 impl-7=tier-mismatch", "#8 impl-8 · tier-mismatch=impl-8:fleet-implementer"], dispatched: ["impl-7=tier-mismatch", "impl-8"] };
+  assert.deepEqual(run(ledger).tierMismatch, ["impl-7", "impl-8"], "no probe answer: every mismatch holds");
+  const r = run(ledger, [], new Set([7]));
+  assert.deepEqual(r.tierMismatch, ["impl-8"], "#7 is closed, #8 is not");
+  assert.deepEqual(r.tierUnchecked, [], "a lifted mismatch does not fall through to unchecked");
+  assert.deepEqual(run(ledger, [], new Set([7, 8])).tierMismatch, []);
+});
+
+test("deriveRun: a closed ticket lifts only its own mismatch, not a replacement's on another ticket", () => {
+  const r = run({ rows: ["#7 impl-7=tier-mismatch · impl-7-b=tier-mismatch", "#9 impl-9=tier-mismatch"] }, [], new Set([9]));
+  assert.deepEqual(r.tierMismatch, ["impl-7-b"]);
+});
+
 test("deriveRun: tier mismatch holds while the LATEST replacement is also tier-mismatch", () => {
   const r = run({
     rows: ["#8 impl-8=tier-mismatch · impl-8-b=tier-mismatch"],
@@ -1519,6 +1534,32 @@ test("CLI: a behind-issue exclusion already reflected in the current file names 
   assert.match(r.stdout, /^implementers 0\/3 → PULL #1 #2 #50 /m);
 });
 
+// #2485: the mismatch hold is lifted by the mismatched ticket's own issue
+// being CLOSED, probed live; an open one, or a probe that cannot answer, holds.
+test("CLI: a tier mismatch on a CLOSED ticket no longer holds the implementer row", () => {
+  const mismatch = { rows: ["#7 impl-7=tier-mismatch"], dispatched: ["impl-7=tier-mismatch"] };
+  const base = { shortlist: shortlistText([1, 2, 3]) };
+  const closed = runCli([], { ...base, ledger: mismatch, issueStates: { 7: "CLOSED" } });
+  assert.equal(closed.status, 0, closed.stderr);
+  assert.match(closed.stdout, /^implementers 0\/2 → PULL #1 #2 /m);
+  assert.doesNotMatch(closed.stdout, /tier mismatch/);
+  assert.deepEqual(closed.issueViews, ["7"]);
+  const open = runCli([], { ...base, ledger: mismatch, issueStates: { 7: "OPEN" } });
+  assert.match(open.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m);
+  const none = runCli([], { ...base, ledger: { rows: ["#7 impl-7 · tier-ok=impl-7:fleet-implementer"], dispatched: ["impl-7"] } });
+  assert.deepEqual(none.issueViews, [], "nothing mismatched: no probe");
+});
+
+test("CLI: a failed probe of a mismatched ticket is disclosed and the hold stands", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([1, 2, 3]), ledger: { rows: ["#7 impl-7=tier-mismatch"], dispatched: ["impl-7=tier-mismatch"] },
+    issueStates: { 7: "CLOSED" }, env: { ISSUE_VIEW_FAIL: "1" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m);
+  assert.match(r.stderr, /fleet-tick: gh issue view 7 exited 1: gh: issue view failed — tier mismatch on #7 unconfirmed closed, hold stands/);
+});
+
 test("CLI: a failed gh issue view probe is disclosed, not silently swallowed", () => {
   const full = { shortlist: shortlistText([1, 2, 3]), refresh: shortlistText([1, 2, 3, 50]) };
   const r = runCli([], {
@@ -1597,6 +1638,19 @@ test("CLI: an ambient GIT_DIR naming another repository cannot move the shortlis
   rmSync(decoy, { recursive: true, force: true });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 /m);
+});
+
+test("CLI: an inherited GIT_DIR cannot retarget the tier-mismatch closed-ticket probe", () => {
+  const decoy = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-decoy-tier-")));
+  spawnBounded("git", ["init", "-q", decoy]);
+  const r = runCli([], {
+    shortlist: shortlistText([1, 2, 3]), ledger: { rows: ["#7 impl-7=tier-mismatch"], dispatched: ["impl-7=tier-mismatch"] },
+    issueStates: { 7: "OPEN" }, env: { GIT_DIR: join(decoy, ".git"), GH_REPO: "someone/else" },
+  });
+  rmSync(decoy, { recursive: true, force: true });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.issueViews, ["7"], "the probe must still run");
+  assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m, "#7 is OPEN in the case's own repository - the hold stands");
 });
 
 test("CLI: an inherited GIT_DIR cannot retarget the behind-issue premise probe", () => {
