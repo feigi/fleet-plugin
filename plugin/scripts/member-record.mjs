@@ -468,8 +468,10 @@ export function foldOmpTranscript(jsonlText, filePath) {
 // `review-pr-<n>` and `merge-bot-<n>` ARE the dispatch name — exactly why
 // `parseMemberName` runs against this same stem below. Those members are
 // dispatched under the generic default `task` definition (`folded.agent` is
-// `undefined`), so the definition-based fix above cannot reach them, and
-// they fall through to prose classification of `folded.task` alone.
+// the literal string `task`, or `null` where no `session_init` line records
+// one), and classifyRole's definition branches match neither, so the
+// definition-based fix above cannot reach them; without `memberName` they
+// fall through to prose classification of `folded.task` alone.
 // Measured against docs/metrics/member-outcomes.tsv: 478 omp rows
 // carry such an AgentId, 52 of them booked `other` for want of this signal —
 // 31 `fix-pr-*`, 9 `impl-*` and 12 `merge-bot-*` members whose dispatch
