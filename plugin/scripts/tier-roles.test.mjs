@@ -198,12 +198,11 @@ test("checkRoutes: every definition routed and every role resolvable -> no viola
 test("checkRoutes: an agents directory holding no *.agent.md definition is a violation naming the directory, never a vacuous pass", () => {
   const empty = agentsDir({});
   const { violations } = checkRoutes({ agentsDir: empty, modelRoles: MODEL_ROLES, overrides: {}, catalog: CATALOG });
-  assert.equal(violations.length, 1);
-  assert.match(violations[0], new RegExp(`^no \\*\\.agent\\.md definition found in ${empty.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+  assert.deepEqual(violations, [`no *.agent.md definition found in ${empty}`]);
 
   // A directory that holds only files the check does not read is the same case.
   writeFileSync(join(empty, "README.md"), "not a definition\n");
-  assert.equal(checkRoutes({ agentsDir: empty, modelRoles: MODEL_ROLES, overrides: {}, catalog: CATALOG }).violations.length, 1);
+  assert.deepEqual(checkRoutes({ agentsDir: empty, modelRoles: MODEL_ROLES, overrides: {}, catalog: CATALOG }).violations, [`no *.agent.md definition found in ${empty}`]);
 });
 
 test("checkRoutes: an empty agents directory still reports the other violations alongside", () => {
