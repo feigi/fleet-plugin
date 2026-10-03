@@ -1240,54 +1240,85 @@ function runCli(args = [], {
   // every path below the resolved one. (A symlinked path no longer stops a
   // copy running its own main(): is-cli.mjs compares by realpath.)
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-")));
-  const bin = join(dir, "bin");
-  const repo = join(dir, "repo");
-  mkdirSync(bin);
-  mkdirSync(join(repo, ".fleet"), { recursive: true });
-  assert.equal(spawnBounded("git", ["init", "-q", repo]).status, 0);
-  writeFileSync(join(repo, ".git", "info", "exclude"), ".fleet/\n.worktrees/\n");
-  writeExecStub(join(bin, "gh"), GH_STUB);
-  const script = join(bin, "fleet-tick.mjs");
-  writeFileSync(script, readFileSync(SCRIPT));
-  for (const [name, path] of SIBLING_MODULES) writeFileSync(join(bin, name), readFileSync(path));
-  writeFileSync(join(bin, "shortlist.mjs"), SHORTLIST_STUB);
-  const fx = (name, content) => { const p = join(dir, name); writeFileSync(p, content); return p; };
-  if (ledger !== undefined) writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText(ledger));
-  if (shortlist !== undefined) writeFileSync(join(repo, ".fleet", "shortlist.json"), shortlist);
-  beforeRun(repo);
-  if (baseline) {
-    const rec = spawnBounded(process.execPath, [join(bin, "main-checkout.mjs"), "--record"], { cwd: repo });
-    assert.equal(rec.status, 0, rec.stderr);
+  // Everything from here to the return can throw: a failed `git init` or
+  // `--record`, or spawnBounded's timeout (#2320). The dir goes whenever that
+  // happens, `keep` or not — a throw hands the caller no `r.dir` to remove.
+  // `keep` only spares it on a normal return.
+  let returned = false;
+  try {
+    const bin = join(dir, "bin");
+    const repo = join(dir, "repo");
+    mkdirSync(bin);
+    mkdirSync(join(repo, ".fleet"), { recursive: true });
+    assert.equal(spawnBounded("git", ["init", "-q", repo]).status, 0);
+    writeFileSync(join(repo, ".git", "info", "exclude"), ".fleet/\n.worktrees/\n");
+    writeExecStub(join(bin, "gh"), GH_STUB);
+    const script = join(bin, "fleet-tick.mjs");
+    writeFileSync(script, readFileSync(SCRIPT));
+    for (const [name, path] of SIBLING_MODULES) writeFileSync(join(bin, name), readFileSync(path));
+    writeFileSync(join(bin, "shortlist.mjs"), SHORTLIST_STUB);
+    const fx = (name, content) => { const p = join(dir, name); writeFileSync(p, content); return p; };
+    if (ledger !== undefined) writeFileSync(join(repo, ".fleet", "ledger.md"), ledgerText(ledger));
+    if (shortlist !== undefined) writeFileSync(join(repo, ".fleet", "shortlist.json"), shortlist);
+    beforeRun(repo);
+    if (baseline) {
+      const rec = spawnBounded(process.execPath, [join(bin, "main-checkout.mjs"), "--record"], { cwd: repo });
+      assert.equal(rec.status, 0, rec.stderr);
+    }
+    afterBaseline(repo);
+    const refreshLog = fx("refresh.log", "");
+    const issueViewLog = fx("issue-view.log", "");
+    // Every case gets its own state file unless it names one: the default path
+    // resolves against the git common dir, and a shared streak and digest would
+    // make the fold cases order-dependent. `defaultState` opts out for the case
+    // whose subject IS that resolution.
+    const stateArg = args.includes("--state") || defaultState ? [] : ["--state", join(dir, "heartbeat.json")];
+    const r = spawnBounded(process.execPath, [script, ...args, ...stateArg], {
+      cwd: repo,
+      env: {
+        ...process.env, PATH: `${bin}:${process.env.PATH}`,
+        FIXTURE_PRS: fx("prs.json", JSON.stringify(prs)),
+        FIXTURE_CLAIMED: fx("claimed.json", JSON.stringify(claimed)),
+        FIXTURE_ISSUE_STATES: fx("issue-states.json", JSON.stringify(issueStates)),
+        FIXTURE_REFRESH: fx("refresh.json", refresh),
+        REFRESH_LOG: refreshLog, ISSUE_VIEW_LOG: issueViewLog,
+        ...(refreshFail ? { REFRESH_FAIL: "1" } : {}),
+        ...extraEnv,
+      },
+    });
+    r.refreshed = readFileSync(refreshLog, "utf8").split("\n").filter(Boolean).length;
+    r.issueViews = readFileSync(issueViewLog, "utf8").split("\n").filter(Boolean);
+    r.repo = repo;
+    r.dir = dir;
+    returned = true;
+    return r;
+  } finally {
+    if (!returned || !keep) rmSync(dir, { recursive: true, force: true });
   }
-  afterBaseline(repo);
-  const refreshLog = fx("refresh.log", "");
-  const issueViewLog = fx("issue-view.log", "");
-  // Every case gets its own state file unless it names one: the default path
-  // resolves against the git common dir, and a shared streak and digest would
-  // make the fold cases order-dependent. `defaultState` opts out for the case
-  // whose subject IS that resolution.
-  const stateArg = args.includes("--state") || defaultState ? [] : ["--state", join(dir, "heartbeat.json")];
-  const r = spawnBounded(process.execPath, [script, ...args, ...stateArg], {
-    cwd: repo,
-    env: {
-      ...process.env, PATH: `${bin}:${process.env.PATH}`,
-      FIXTURE_PRS: fx("prs.json", JSON.stringify(prs)),
-      FIXTURE_CLAIMED: fx("claimed.json", JSON.stringify(claimed)),
-      FIXTURE_ISSUE_STATES: fx("issue-states.json", JSON.stringify(issueStates)),
-      FIXTURE_REFRESH: fx("refresh.json", refresh),
-      REFRESH_LOG: refreshLog, ISSUE_VIEW_LOG: issueViewLog,
-      ...(refreshFail ? { REFRESH_FAIL: "1" } : {}),
-      ...extraEnv,
-    },
-  });
-  r.refreshed = readFileSync(refreshLog, "utf8").split("\n").filter(Boolean).length;
-  r.issueViews = readFileSync(issueViewLog, "utf8").split("\n").filter(Boolean);
-  r.repo = repo;
-  r.dir = dir;
-  if (!keep) rmSync(dir, { recursive: true, force: true });
-  return r;
 }
 const lineOf = (r, role) => r.stdout.split("\n").filter((l) => l.startsWith(role));
+
+// A throw inside runCli (a failed `git init`/`--record` assert, spawnBounded's
+// timeout) used to leave its `fleet-tick-*` fixture in the tmpdir.
+// `beforeRun` runs after the dir exists, so it stands in for any such throw.
+for (const keep of [false, true]) {
+  test(`CLI: runCli removes its fixture dir when it throws mid-helper, keep: ${keep}`, () => {
+    let dir;
+    assert.throws(() => runCli([], { keep, beforeRun: (repo) => { dir = join(repo, ".."); throw new Error("boom"); } }), /boom/);
+    assert.ok(dir, "beforeRun never ran, so the throw happened before the dir existed");
+    assert.equal(existsSync(dir), false);
+  });
+}
+
+test("CLI: runCli with keep: true hands back a fixture dir that still exists", () => {
+  const r = runCli([], { keep: true });
+  try {
+    assert.equal(existsSync(r.dir), true);
+  } finally {
+    rmSync(r.dir, { recursive: true, force: true });
+  }
+  assert.equal(existsSync(runCli([]).dir), false, "without keep the dir is gone on return");
+});
 
 test("CLI: the #1692 shape, read off the ledger — two live implementers at cap 2 pull nothing", () => {
   const r = runCli([], {
@@ -1463,15 +1494,15 @@ test("CLI: a ledger token outside the grammar refuses the tick, printing no row"
   assert.match(r.stderr, /^fleet-tick: .*impl-9.*'merged' is not an outcome/m);
 });
 
-test("CLI: a ledger ledger.mjs itself refuses is a refusal here too", () => {
+test("CLI: a ledger ledger.mjs itself refuses is a refusal here too", (t) => {
   // Two drain markers: ledger.mjs read exits 2 on the broken invariant.
   const dir = runCli([], { shortlist: shortlistText([]), keep: true });
+  t.after(() => rmSync(dir.dir, { recursive: true, force: true }));
   writeFileSync(join(dir.repo, ".fleet", "ledger.md"), `${ledgerText({ drain: "a" })}\n- b\n`);
   const r = spawnBounded(process.execPath, [join(dir.dir, "bin", "fleet-tick.mjs"), "--state", join(dir.dir, "hb.json")], {
     cwd: dir.repo,
     env: { ...process.env, PATH: `${join(dir.dir, "bin")}:${process.env.PATH}`, FIXTURE_PRS: join(dir.dir, "prs.json") },
   });
-  rmSync(dir.dir, { recursive: true, force: true });
   assert.equal(r.status, 2, r.stderr);
   assert.equal(r.stdout.trim(), "");
   assert.match(r.stderr, /fleet-tick: ledger\.mjs read exited 2/);
@@ -1676,38 +1707,38 @@ test("CLI: a past-pin halt prints DISPATCH review for its PR (#2083)", () => {
   assert.match(r.stdout, /^reviewers {4}0\/6 → DISPATCH review PR#40 /m);
 });
 
-test("CLI: an ambient GIT_DIR naming another repository cannot move the shortlist read", () => {
+test("CLI: an ambient GIT_DIR naming another repository cannot move the shortlist read", (t) => {
   const decoy = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-decoy-")));
+  t.after(() => rmSync(decoy, { recursive: true, force: true }));
   spawnBounded("git", ["init", "-q", decoy]);
   mkdirSync(join(decoy, ".fleet"));
   writeFileSync(join(decoy, ".fleet", "shortlist.json"), shortlistText([666]));
   const r = runCli([], { shortlist: shortlistText([7, 8]), env: { GIT_DIR: join(decoy, ".git") } });
-  rmSync(decoy, { recursive: true, force: true });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 /m);
 });
 
-test("CLI: an inherited GIT_DIR cannot retarget the tier-mismatch closed-ticket probe", () => {
+test("CLI: an inherited GIT_DIR cannot retarget the tier-mismatch closed-ticket probe", (t) => {
   const decoy = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-decoy-tier-")));
+  t.after(() => rmSync(decoy, { recursive: true, force: true }));
   spawnBounded("git", ["init", "-q", decoy]);
   const r = runCli([], {
     shortlist: shortlistText([1, 2, 3]), ledger: { rows: ["#7 impl-7=tier-mismatch"], dispatched: ["impl-7=tier-mismatch"] },
     issueStates: { 7: "OPEN" }, env: { GIT_DIR: join(decoy, ".git"), GH_REPO: "someone/else" },
   });
-  rmSync(decoy, { recursive: true, force: true });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.issueViews, ["7"], "the probe must still run");
   assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m, "#7 is OPEN in the case's own repository - the hold stands");
 });
 
-test("CLI: an inherited GIT_DIR cannot retarget the behind-issue premise probe", () => {
+test("CLI: an inherited GIT_DIR cannot retarget the behind-issue premise probe", (t) => {
   const decoy = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-decoy-gh-")));
+  t.after(() => rmSync(decoy, { recursive: true, force: true }));
   spawnBounded("git", ["init", "-q", decoy]);
   const r = runCli([], {
     shortlist: shortlistText([1, 2, 3]), ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "OPEN" },
     env: { GIT_DIR: join(decoy, ".git"), GH_REPO: "someone/else" },
   });
-  rmSync(decoy, { recursive: true, force: true });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.issueViews, ["9"], "the probe must still run");
   assert.equal(r.refreshed, 0, "#9 is OPEN in the case's own repository — the exclusion stands");
@@ -1724,11 +1755,12 @@ const tickAgain = (r) => spawnBounded(process.execPath, [join(r.dir, "bin", "fle
   env: { ...process.env, PATH: `${join(r.dir, "bin")}:${process.env.PATH}`, FIXTURE_PRS: join(r.dir, "prs.json") },
 });
 
-test("CLI: a stray write after the baseline prints MAIN-CHECKOUT-DIRTY first, naming the path and the live members, and holds every dispatching row", () => {
+test("CLI: a stray write after the baseline prints MAIN-CHECKOUT-DIRTY first, naming the path and the live members, and holds every dispatching row", (t) => {
   const r = runCli([], {
     ...LIVE, prs: [pr(350)], keep: true,
     afterBaseline: (repo) => writeFileSync(join(repo, "stray.mjs"), "x\n"),
   });
+  t.after(() => rmSync(r.dir, { recursive: true, force: true }));
   assert.equal(r.status, 0, r.stderr);
   const lines = r.stdout.trim().split("\n");
   assert.match(lines[0], /^MAIN-CHECKOUT-DIRTY stray\.mjs — changed since the run's baseline; live members: impl-412 — dispatch held: resolve the stray paths FIRST, then re-baseline with ~\/\.fleet\/bin\/fleet-run main-checkout\.mjs --record/);
@@ -1744,7 +1776,6 @@ test("CLI: a stray write after the baseline prints MAIN-CHECKOUT-DIRTY first, na
   const rec = spawnBounded(process.execPath, [join(r.dir, "bin", "main-checkout.mjs"), "--record"], { cwd: r.repo });
   assert.equal(rec.status, 0, rec.stderr);
   const after = tickAgain(r);
-  rmSync(r.dir, { recursive: true, force: true });
   assert.equal(after.status, 0, after.stderr);
   assert.doesNotMatch(after.stdout, /MAIN-CHECKOUT|main checkout/);
   assert.match(after.stdout, /^implementers 1\/2 → PULL #420 /m);
@@ -1782,24 +1813,40 @@ test("CLI: a main checkout git cannot read is MAIN-CHECKOUT-UNKNOWN and held, ne
 // Three `--fold-unchanged` ticks over one kept fixture and one state file.
 const foldTicks = (fixture) => {
   const first = runCli(["--fold-unchanged"], { ...fixture, keep: true });
-  const state = join(first.dir, "heartbeat.json");
-  const quiet = () => JSON.parse(readFileSync(state, "utf8")).quiet;
-  const ticks = [{ stdout: first.stdout, status: first.status, stderr: first.stderr, quiet: quiet() }];
-  for (let i = 0; i < 2; i++) {
-    const t = spawnBounded(process.execPath, [join(first.dir, "bin", "fleet-tick.mjs"), "--fold-unchanged", "--state", state], {
-      cwd: first.repo,
-      env: {
-        ...process.env, PATH: `${join(first.dir, "bin")}:${process.env.PATH}`,
-        FIXTURE_PRS: join(first.dir, "prs.json"), FIXTURE_CLAIMED: join(first.dir, "claimed.json"),
-        FIXTURE_ISSUE_STATES: join(first.dir, "issue-states.json"), FIXTURE_REFRESH: join(first.dir, "refresh.json"),
-        REFRESH_LOG: join(first.dir, "refresh.log"), ISSUE_VIEW_LOG: join(first.dir, "issue-view.log"),
-      },
-    });
-    ticks.push({ stdout: t.stdout, status: t.status, stderr: t.stderr, quiet: quiet() });
+  try {
+    const state = join(first.dir, "heartbeat.json");
+    const quiet = () => JSON.parse(readFileSync(state, "utf8")).quiet;
+    const ticks = [{ stdout: first.stdout, status: first.status, stderr: first.stderr, quiet: quiet() }];
+    for (let i = 0; i < 2; i++) {
+      const t = spawnBounded(process.execPath, [join(first.dir, "bin", "fleet-tick.mjs"), "--fold-unchanged", "--state", state], {
+        cwd: first.repo,
+        env: {
+          ...process.env, PATH: `${join(first.dir, "bin")}:${process.env.PATH}`,
+          FIXTURE_PRS: join(first.dir, "prs.json"), FIXTURE_CLAIMED: join(first.dir, "claimed.json"),
+          FIXTURE_ISSUE_STATES: join(first.dir, "issue-states.json"), FIXTURE_REFRESH: join(first.dir, "refresh.json"),
+          REFRESH_LOG: join(first.dir, "refresh.log"), ISSUE_VIEW_LOG: join(first.dir, "issue-view.log"),
+        },
+      });
+      ticks.push({ stdout: t.stdout, status: t.status, stderr: t.stderr, quiet: quiet() });
+    }
+    return ticks;
+  } finally {
+    rmSync(first.dir, { recursive: true, force: true });
   }
-  rmSync(first.dir, { recursive: true, force: true });
-  return ticks;
 };
+
+// foldTicks keeps its fixture across three ticks, so a throw after the first
+// run (here: `heartbeat.json` is a directory, so reading the state fails)
+// must still remove the dir — the caller never gets it back.
+test("CLI: foldTicks removes its kept fixture dir when a tick throws", () => {
+  let dir;
+  assert.throws(() => foldTicks({
+    ...LIVE,
+    afterBaseline: (repo) => { dir = join(repo, ".."); mkdirSync(join(dir, "heartbeat.json")); },
+  }), /EISDIR/);
+  assert.ok(dir, "afterBaseline never ran, so the throw happened before the dir existed");
+  assert.equal(existsSync(dir), false);
+});
 
 for (const [state, afterBaseline] of [
   ["dirty", (repo) => writeFileSync(join(repo, "stray.mjs"), "x\n")],
@@ -1839,12 +1886,12 @@ test("CLI: an in-flight review with no member token is named as review:PR#<n> on
   assert.match(r.stdout, /^MAIN-CHECKOUT-DIRTY stray\.mjs — changed since the run's baseline; live members: review:PR#51 — /m);
 });
 
-test("CLI: an ambient GIT_DIR naming a dirty repository does not move the main-checkout check", () => {
+test("CLI: an ambient GIT_DIR naming a dirty repository does not move the main-checkout check", (t) => {
   const decoy = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-decoy-mc-")));
+  t.after(() => rmSync(decoy, { recursive: true, force: true }));
   spawnBounded("git", ["init", "-q", decoy]);
   writeFileSync(join(decoy, "decoy-stray.txt"), "x\n");
   const r = runCli([], { ...LIVE, env: { GIT_DIR: join(decoy, ".git"), GIT_WORK_TREE: decoy } });
-  rmSync(decoy, { recursive: true, force: true });
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stdout, /MAIN-CHECKOUT/);
   assert.match(r.stdout, /^implementers 1\/2 → PULL #420 /m);
@@ -1857,8 +1904,9 @@ test("CLI: an ambient GIT_DIR naming a dirty repository does not move the main-c
 
 const IDLE = { shortlist: shortlistText([]), refresh: shortlistText([]) };
 
-test("CLI: the quiet streak lengthens on an idle tick and resets on an actionable one", () => {
+test("CLI: the quiet streak lengthens on an idle tick and resets on an actionable one", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-state-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   runCli(["--state", path], IDLE);
   assert.equal(JSON.parse(readFileSync(path, "utf8")).quiet, 1);
@@ -1866,22 +1914,22 @@ test("CLI: the quiet streak lengthens on an idle tick and resets on an actionabl
   assert.equal(JSON.parse(readFileSync(path, "utf8")).quiet, 2);
   runCli(["--state", path], { ...IDLE, shortlist: shortlistText([9]) });
   assert.equal(JSON.parse(readFileSync(path, "utf8")).quiet, 0);
-  rmSync(dir, { recursive: true, force: true });
 });
 
-test("CLI: --fold-unchanged folds a repeated idle tick to one line", () => {
+test("CLI: --fold-unchanged folds a repeated idle tick to one line", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-fold-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   const first = runCli(["--fold-unchanged", "--state", path], IDLE);
   assert.equal(first.status, 0, first.stderr);
   assert.ok(first.stdout.trim().split("\n").length >= 3);
   const second = runCli(["--fold-unchanged", "--state", path], IDLE);
   assert.deepEqual(second.stdout.trim().split("\n"), ["fleet-tick: unchanged, nothing to act on (quiet=2) — full rows on the next change"]);
-  rmSync(dir, { recursive: true, force: true });
 });
 
-test("CLI: --fold-unchanged never folds an actionable tick, even an identical one", () => {
+test("CLI: --fold-unchanged never folds an actionable tick, even an identical one", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-fold-act-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   const busy = { shortlist: shortlistText([9, 10]) };
   const first = runCli(["--fold-unchanged", "--state", path], busy);
@@ -1889,11 +1937,11 @@ test("CLI: --fold-unchanged never folds an actionable tick, even an identical on
   assert.equal(second.stdout, first.stdout);
   assert.match(second.stdout, /PULL #9 #10/);
   assert.equal(JSON.parse(readFileSync(path, "utf8")).quiet, 0);
-  rmSync(dir, { recursive: true, force: true });
 });
 
-test("CLI: --fold-unchanged does not fold when the rows change, even with nothing to act on", () => {
+test("CLI: --fold-unchanged does not fold when the rows change, even with nothing to act on", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-fold-differs-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   runCli(["--fold-unchanged", "--state", path], IDLE);
   // A queued candidate, held behind a lower PR: still nothing to act on.
@@ -1906,25 +1954,25 @@ test("CLI: --fold-unchanged does not fold when the rows change, even with nothin
   assert.doesNotMatch(second.stdout, /nothing to act on/);
   const third = runCli(["--fold-unchanged", "--state", path], held);
   assert.match(third.stdout, /^fleet-tick: unchanged, nothing to act on \(quiet=3\)/);
-  rmSync(dir, { recursive: true, force: true });
 });
 
-test("CLI: with no --state, the tick resolves the run's shared default", () => {
+test("CLI: with no --state, the tick resolves the run's shared default", (t) => {
   const r = runCli([], { ...IDLE, defaultState: true, keep: true });
+  t.after(() => rmSync(r.dir, { recursive: true, force: true }));
   const state = join(r.repo, ".fleet", "heartbeat.json");
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stderr, /WARNING/);
   assert.ok(existsSync(state));
   assert.equal(JSON.parse(readFileSync(state, "utf8")).quiet, 1);
-  rmSync(r.dir, { recursive: true, force: true });
 });
 
 // The prior run's liveness - #1597.
 const beat = (ms, interval, stopped = "") =>
   JSON.stringify({ quiet: 0, elapsed: 0, digest: "", beat: { at: Date.now() - ms, interval, stopped } });
 
-test("CLI: a stale prior beat is reported, and reported FIRST, with the stranded claims and the supply", () => {
+test("CLI: a stale prior beat is reported, and reported FIRST, with the stranded claims and the supply", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stall-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   writeFileSync(path, beat(90 * 60_000, 1200));
   const r = runCli(["--state", path], { shortlist: shortlistText([9], 1), claimed: [{ number: 41 }, { number: 42 }, { number: 43 }] });
@@ -1934,31 +1982,31 @@ test("CLI: a stale prior beat is reported, and reported FIRST, with the stranded
   assert.match(lines[1], /^implementers/);
   assert.match(lines[0], /3 ticket\(s\) claimed and in flight/);
   assert.match(lines[0], /pool supply 1/);
-  rmSync(dir, { recursive: true, force: true });
 });
 
-test("CLI: an unreadable shortlist makes the stall report's supply unknown, never zero", () => {
+test("CLI: an unreadable shortlist makes the stall report's supply unknown, never zero", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stall-supply-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   writeFileSync(path, beat(90 * 60_000, 1200));
   const r = runCli(["--state", path], { shortlist: "{" });
   assert.match(r.stdout.split("\n")[0], /pool supply unknown/);
-  rmSync(dir, { recursive: true, force: true });
 });
 
-test("CLI: the stall is announced even when the reconcile then refuses", () => {
+test("CLI: the stall is announced even when the reconcile then refuses", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stall-refuse-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   writeFileSync(path, beat(90 * 60_000, 1200));
   const r = runCli(["--state", path], { ...IDLE, claimed: [{ number: 41 }], env: { PR_FAIL: "1" } });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /gh pr list failed/);
   assert.match(r.stdout, /heartbeat STALLED/);
-  rmSync(dir, { recursive: true, force: true });
 });
 
-test("CLI: an unreadable claim count is `unknown`, never zero", () => {
+test("CLI: an unreadable claim count is `unknown`, never zero", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stall-unknown-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   writeFileSync(path, beat(90 * 60_000, 1200));
   const r = runCli(["--state", path], { ...IDLE, env: { CLAIMED_FAIL: "1" } });
@@ -1966,7 +2014,6 @@ test("CLI: an unreadable claim count is `unknown`, never zero", () => {
   assert.match(r.stdout, /unknown ticket\(s\) claimed and in flight/);
   assert.match(r.stderr, /claimed ticket count unknown/);
   assert.match(r.stderr, /boom/);
-  rmSync(dir, { recursive: true, force: true });
 });
 
 // The claimed-count query is capped at CLAIMED_LIMIT (200). At exactly the cap
@@ -1981,8 +2028,9 @@ test("CLI: an unreadable claim count is `unknown`, never zero", () => {
 // /; 199 ticket/). The literal `199 ticket(s)` adjacency — no `+` allowed
 // between the digits and the space — is what refuses `199+`; the `; ` prefix
 // only anchors the match to the claimed-count field.
-test("CLI: a claim count AT the query cap is disclosed as a floor (`200+`); one below it is exact", () => {
+test("CLI: a claim count AT the query cap is disclosed as a floor (`200+`); one below it is exact", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stall-cap-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   const stalled = (count) => {
     // Re-staled every call: each run records its own tick in the state file.
@@ -1996,21 +2044,21 @@ test("CLI: a claim count AT the query cap is disclosed as a floor (`200+`); one 
   };
   assert.match(stalled(200), /; 200\+ ticket\(s\) claimed and in flight/);
   assert.match(stalled(199), /; 199 ticket\(s\) claimed and in flight/);
-  rmSync(dir, { recursive: true, force: true });
 });
 
-test("CLI: a beat within the interval it promised is not reported at all", () => {
+test("CLI: a beat within the interval it promised is not reported at all", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-quiet-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   writeFileSync(path, beat(20 * 60_000, 1200));
   assert.doesNotMatch(runCli(["--state", path], IDLE).stdout, /STALLED/);
   writeFileSync(path, beat(20 * 60_000, 300));
   assert.match(runCli(["--state", path], IDLE).stdout, /STALLED/);
-  rmSync(dir, { recursive: true, force: true });
 });
 
-test("CLI: the streak write carries the heartbeat's mark instead of erasing it, and writes its own", () => {
+test("CLI: the streak write carries the heartbeat's mark instead of erasing it, and writes its own", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-mark-carry-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   const mark = { at: Date.now() - 60_000, interval: 300, stopped: "" };
   writeFileSync(path, JSON.stringify({ quiet: 3, elapsed: 7, digest: "old", beat: mark }));
@@ -2020,11 +2068,11 @@ test("CLI: the streak write carries the heartbeat's mark instead of erasing it, 
   assert.deepEqual(after.beat, mark);
   assert.equal(after.quiet, 4);
   assert.ok(after.ticked && after.ticked.at >= Date.now() - 5000);
-  rmSync(dir, { recursive: true, force: true });
 });
 
-test("CLI: a deliberate stop is reported with its reason, and a run that never beat says nothing", () => {
+test("CLI: a deliberate stop is reported with its reason, and a run that never beat says nothing", (t) => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stopped-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   writeFileSync(path, beat(6 * 60_000, 300, "context ceiling reached"));
   const r = runCli(["--state", path], IDLE);
@@ -2033,13 +2081,13 @@ test("CLI: a deliberate stop is reported with its reason, and a run that never b
   assert.doesNotMatch(r.stdout, /without a recorded reason/);
   writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "" }));
   assert.doesNotMatch(runCli(["--state", path], IDLE).stdout, /STALLED/);
-  rmSync(dir, { recursive: true, force: true });
 });
 
-test("CLI: a busy, fully-staffed fleet is not reported STALLED just because the queue never drained", () => {
+test("CLI: a busy, fully-staffed fleet is not reported STALLED just because the queue never drained", (t) => {
   // `beat` refreshes only when the queue drains; a tick two minutes ago on a
   // completion edge is what tells a busy run from a dead one.
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-busy-not-stalled-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, "heartbeat.json");
   writeFileSync(path, JSON.stringify({
     quiet: 0, elapsed: 0, digest: "",
@@ -2053,5 +2101,4 @@ test("CLI: a busy, fully-staffed fleet is not reported STALLED just because the 
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stdout, /STALLED/);
   assert.match(r.stdout, /^implementers 2\/2 → AT CAP/m);
-  rmSync(dir, { recursive: true, force: true });
 });
