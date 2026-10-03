@@ -590,8 +590,9 @@ if [ -e "$refsdir" ]; then
   #
   # `head`'s own status is kept too, not discarded — a `head` that cannot run
   # (crashed, missing) is the same class of failure, and was the one failure
-  # this guard could already see before that status read (pinned below at "a
-  # refs-subdirectory walk whose `head` cannot run is unknown, never free").
+  # this guard could already see before find's own status was read (pinned
+  # below at "a refs-subdirectory walk whose `head` cannot run is unknown,
+  # never free").
   # Reading both separately,
   # rather than trusting whichever one the pipeline's single status happens to
   # expose, is what closes the first gap without reopening the second.

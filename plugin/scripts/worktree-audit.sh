@@ -208,10 +208,9 @@ esac
 # The fix is to stop MEASURING against the shorthand: qualify it to the full
 # refs/remotes/ path, where there is nothing left to disambiguate, unless it
 # is already qualified. The accept-list above is what makes this qualify
-# step safe rather than a guess — qualifying was unavailable
-# without one, because BASE_REF could otherwise name a tag, a SHA or a local
-# branch, leaving no prefix that is always correct. $base itself is left
-# unqualified — it never appears in this script's JSON output, only in
+# step safe rather than a guess — BASE_REF could otherwise name a tag, a SHA
+# or a local branch, leaving no prefix that is always correct. $base itself
+# is left unqualified — it never appears in this script's JSON output, only in
 # `die` text, where the shorthand spelling is what an operator expects to
 # read.
 case "$base" in
