@@ -5,6 +5,9 @@ import { tempDir } from "./temp-dir.mjs";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { normalizeModel, parseMemberName, rowsForSession, COLUMNS, mergeRows, formatTsv, parseTsv } from "./member-outcomes.mjs";
+import { COLUMNS as TIER_COLUMNS, TIER_SWITCH_DATE } from "./tier-outcomes.mjs";
+
+const TIER_CLI = new URL("./tier-outcomes.mjs", import.meta.url).pathname;
 
 test("a versioned model id is kept verbatim", () => {
   assert.equal(normalizeModel("claude-opus-5"), "claude-opus-5");
@@ -103,6 +106,35 @@ test("a bare numeric re-dispatch suffix is stripped for PR-shaped names only (#1
 test("an unrecognised name yields blanks, never a guess", () => {
   assert.deepEqual(parseMemberName("size candidate 7"), { ticket: "", pr: "" });
   assert.deepEqual(parseMemberName(""), { ticket: "", pr: "" });
+});
+
+test("a member family spelled PascalCase or without hyphens yields the same join key as its kebab form (#2396)", () => {
+  // omp task names are free-form: this repo's own member-outcomes.tsv carries
+  // `ReviewPR77`, `FinisherPr1567b` and `FixPr1568-2` beside `impl-580`. Each
+  // returned blanks, losing the row's join key into tier-outcomes.tsv.
+  assert.deepEqual(parseMemberName("Impl327"), { ticket: "327", pr: "" });
+  assert.deepEqual(parseMemberName("Fix-pr-766"), { ticket: "", pr: "766" });
+  assert.deepEqual(parseMemberName("FixPr774"), { ticket: "", pr: "774" });
+  assert.deepEqual(parseMemberName("Review-pr-771"), { ticket: "", pr: "771" });
+  assert.deepEqual(parseMemberName("ReviewPR77"), { ticket: "", pr: "77" });
+  assert.deepEqual(parseMemberName("Finisher-pr-766"), { ticket: "", pr: "766" });
+  assert.deepEqual(parseMemberName("ResolvePr1232"), { ticket: "", pr: "1232" });
+  assert.deepEqual(parseMemberName("Finisher532"), { ticket: "", pr: "532" });
+  // The retry suffixes keep their meaning when glued on without a hyphen.
+  assert.deepEqual(parseMemberName("FinisherPr1567b"), { ticket: "", pr: "1567" });
+  assert.deepEqual(parseMemberName("FixPr1568-2"), { ticket: "", pr: "1568" });
+  assert.deepEqual(parseMemberName("Impl580b"), { ticket: "580", pr: "" });
+  // ...and the deliberate blanks stay blank in either spelling.
+  assert.deepEqual(parseMemberName("Impl137-2"), { ticket: "", pr: "" });
+  assert.deepEqual(parseMemberName("MergeBot12"), { ticket: "", pr: "" });
+});
+
+test("a generated word pair that merely starts with a family word yields blanks (#2396)", () => {
+  assert.deepEqual(parseMemberName("InstallVerifySearch"), { ticket: "", pr: "" });
+  assert.deepEqual(parseMemberName("ReviewPrDispatch"), { ticket: "", pr: "" });
+  assert.deepEqual(parseMemberName("Issue134Implement"), { ticket: "", pr: "" });
+  assert.deepEqual(parseMemberName("Implementer5"), { ticket: "", pr: "" });
+  assert.deepEqual(parseMemberName("Impl1341/Impl1341.CwdProbe"), { ticket: "", pr: "" });
 });
 
 // ---------------------------------------------------------------------------
@@ -504,4 +536,46 @@ test("the header's blank lines and paragraph order survive a rewrite", () => {
   writeFileSync(out, header);
   spawnSync(process.execPath, [CLI, dir, "--file", out], { encoding: "utf8" });
   assert.equal(readFileSync(out, "utf8").startsWith(header), true);
+});
+
+test("a run dispatched under PascalCase names scrapes into rows tier-outcomes check can join, and a wrong tier fails (#2396)", () => {
+  // End to end, the two CLIs the ticket's measurement ran: scrape the session,
+  // then check tier-outcomes.tsv against what was scraped. Before the fix the
+  // scraped row's ticket was blank, so check reported 0 checked and exited 0
+  // even with a deliberately wrong tier.
+  const dir = fixture([
+    ["Impl327", [sessionEvt("/x"), thinkingEvt("high"), sessionInitEvt("Ticket 327", "fleet-implementer-alt"), assistantEvt("claude-sonnet-5")]],
+    // Dispatched under the generic `task` definition, so only the NAME can
+    // book it implementer — implementerRows() filters on role as well as ticket.
+    ["Impl333", [sessionEvt("/x"), thinkingEvt("high"), sessionInitEvt("Ticket 333"), assistantEvt("claude-opus-5")]],
+    ["FixPr774", [sessionEvt("/x"), thinkingEvt("high"), sessionInitEvt("Apply the findings"), assistantEvt("claude-opus-5")]],
+    // No `session_init` line at all, so neither `task` nor `agent` exists: only
+    // the canonical-stem gate in ompMemberRecord lets the name classify it.
+    ["Impl340", [sessionEvt("/x"), thinkingEvt("high"), assistantEvt("claude-opus-5")]],
+  ]);
+  const work = tempDir("mo-tier-");
+  const members = join(work, "member-outcomes.tsv");
+  const scrape = spawnSync(process.execPath, [CLI, dir, "--file", members], { encoding: "utf8" });
+  assert.equal(scrape.status, 0, scrape.stderr);
+  const byMember = Object.fromEntries(parseTsv(readFileSync(members, "utf8")).map((r) => [r.member, `${r.role} ticket=${r.ticket} pr=${r.pr}`]));
+  assert.deepEqual(byMember, {
+    Impl327: "implementer ticket=327 pr=",
+    Impl333: "implementer ticket=333 pr=",
+    FixPr774: "reviewer ticket= pr=774",
+    Impl340: "implementer ticket=340 pr=",
+  });
+
+  const check = (tier) => {
+    const tierFile = join(work, "tier-outcomes.tsv");
+    const row = [TIER_SWITCH_DATE, "774", "327", "routine", tier, "yes", "no", "n", "light", "production", "40", "2"].join("\t");
+    writeFileSync(tierFile, `# ${TIER_COLUMNS.join("\t")}\n${row}\n`);
+    return spawnSync(process.execPath, [TIER_CLI, "check", "--file", tierFile, "--member-outcomes", members, "--ledger", join(work, "no-ledger.md")], { encoding: "utf8", cwd: work });
+  };
+  const ok = check("alt");
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /1 rows; 1 checked, 0 failed/);
+  const mutant = check("WRONGTIER");
+  assert.equal(mutant.status, 1);
+  assert.match(mutant.stdout, /1 rows; 1 checked, 1 failed/);
+  assert.match(mutant.stderr, /PR #774 \(ticket #327\): tier=WRONGTIER/);
 });

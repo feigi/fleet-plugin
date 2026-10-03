@@ -49,7 +49,7 @@ const RETIRED_IMPLEMENTER_DEF = /^fleet-implementer(-alt)?$/;
 // measurement (#326).
 export function classifyRole(signals) {
   const def = String(signals?.agentDefinition ?? "");
-  const name = String(signals?.memberName ?? "");
+  const name = canonicalMemberName(signals?.memberName);
   const desc = String(signals?.description ?? "");
 
   // Not fleet work at all — the memory system. Before everything else so it can
@@ -196,6 +196,29 @@ function roleFromNamePatterns(hay) {
 // collapses the `finisher`/`finish` pair into the shape
 // `roleFromNamePatterns`'s own bare-word check already uses.
 export const CANONICAL_MEMBER_NAME_PREFIXES = "impl|fix-pr|finish(?:er)?|review-pr|merge-bot";
+
+// One member family name in any spelling a controller has dispatched it
+// under — PascalCase, mixed case, hyphens dropped (`Impl676`, `FixPr1568`,
+// `Review-pr-1449`, `ReviewPR77`, `FinisherPr1567b`, all in
+// docs/metrics/member-outcomes.tsv) — rewritten to the lower-kebab form every
+// name pattern in this file and in member-record.mjs's parseMemberName is
+// written against (#2396). omp task names are free-form, so nothing upstream
+// guarantees the kebab spelling, and an unmatched spelling lost both its role
+// and its tier-outcomes.tsv join key.
+//
+// Only a WHOLE name of that shape is rewritten — family, number, at most one
+// retry suffix — and anything else is returned as given. Kebab-casing every
+// CamelCase name would turn a generated word pair like `FinishSetupDocs` into
+// `finish-setup-docs`, which classifyRole's `^finish-` books as a finisher.
+const MEMBER_NAME_SPELLING_RE = /^(impl|(?:fix|review|resolve|finish(?:er)?)-?pr|finish(?:er)?|merge-?bot)-?(\d+)(-?(?:v\d+|[a-z])|-\d+)?$/i;
+export function canonicalMemberName(name) {
+  const s = String(name ?? "").trim();
+  const m = MEMBER_NAME_SPELLING_RE.exec(s);
+  if (!m) return s;
+  const family = m[1].replace(/^(.*?)-?(pr|bot)$/i, "$1-$2");
+  const suffix = m[3] ? `-${m[3].replace(/^-/, "")}` : "";
+  return `${family}-${m[2]}${suffix}`.toLowerCase();
+}
 
 // Seeds the rollup buckets and breaks ties in the report, which is otherwise
 // sorted by spend — so this is not the order the UI shows. Review roles lead so
