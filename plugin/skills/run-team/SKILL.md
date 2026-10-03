@@ -515,9 +515,10 @@ terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
    nothing else; work done directly against the shared checkout, by a
    human or another agent session, stakes no branch-shaped claim and trips
    none of them.
-3. **Read the ticket in full, once** — `gh issue view <N> --json title,body,comments,labels
-   --jq '.title, .body, ([.labels[].name]|join(",")), (.comments[]|.author.login + ": " + .body)'`.
-   One read answers every question the Pull asks. Record the ticket's real
+3. **Read the ticket in full, once** — `gh issue view <N> --json title,body,comments,labels,createdAt`
+   written to `<scratch>/impl-<N>/issue.json`, then read off that file with `jq -r
+   '.title, .body, ([.labels[].name]|join(",")), (.comments[]|.author.login + ": " + .body)'`.
+   One read answers every question the Pull asks; step 7's router reads the same file. Record the ticket's real
    brief — the `## Agent Brief` comment where one exists, otherwise the issue
    body, which is where most tickets actually carry it (a controller probe found only 43/100 open
    `ready-for-agent` issues have a separate Agent Brief comment; the rest,
@@ -706,9 +707,16 @@ terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
    two independent tickets.
 6. **Claim** — `~/.fleet/bin/fleet-run claim-ticket.sh <N> impl-<N> implementer
    --apply` (below). Exit 2 → treat it as taken, next entry.
-7. **Row, then dispatch** — `ledger.mjs row <N> "impl-<N>[ · tier=<cell>]"`,
-   then phase 2 at once: claim what you are about to dispatch;
-   dispatch what you have just claimed.
+7. **Route, row, then dispatch** — `~/.fleet/bin/fleet-run ticket-router.mjs route
+   --session <session> --ticket <N> --arm <A|B> --impl-row <k>[ --chain-head] --issue
+   <scratch>/impl-<N>/issue.json --guard .fleet/cost-guard.json` prints
+   `POLICY=… CELL=… DRAW=… STRATUM=… REASON=…` (phase 2's exploration rule
+   says what each argument is); then `ledger.mjs row <N> "impl-<N>[ · tier=<CELL>][ · route=<REASON>]"`,
+   `tier=<CELL>` exactly when `DRAW` is not `-`; then phase 2 at once: claim
+   what you are about to dispatch; dispatch what you have just claimed. Router
+   exit 2 → no row and no dispatch: release the claim (`release-ticket.sh`,
+   below) and emit an event, a probe that could not look — a table the router
+   refuses refuses every Pull.
 
 **The Pull table** — every verdict a Pull can reach, and the one thing each
 does (ADR 0013 Decision 2 and 4):
@@ -923,8 +931,8 @@ kernel and needs a `wait`, while a `task` job is process-level and its report
 auto-delivers on its own, like every other member's.
 
 **No per-call tier or effort anywhere on this path**: tier stays the agent
-definition's own frontmatter (ADR 0005), whichever of the two definitions the
-Pull names, and a member's Resolved tier stays readable from its transcript.
+definition's own frontmatter (ADR 0005), whichever `fleet-implementer-<cell>`
+definition the Pull names, and a member's Resolved tier stays readable from its transcript.
 
 **Claim what you are about to dispatch; dispatch what you have just claimed.**
 Phase 1 makes the claim, serially in the main checkout — its rule is measured —
@@ -1087,15 +1095,30 @@ dispatched — the fleet reads that config and never writes it (ADR 0003).
 
 **Every 5th Pull by ledger count goes at an exploration cell.** Count the `impl-`
 rows in `.fleet/ledger.md` at Pull time; the Pull that creates row 5, 10, 15 …
-records `tier=<cell>` in the row, and a replacement inherits the row's tier —
+is an Exploration Pull, and the router draws its cell: `k = 1 +
+(sha256("<session>\t<ticket>")[0:8] mod K)` over `router-table.json`'s
+`cells` minus the policy cell, in token order. While the table's `burn_in` is
+true every Pull draws, over every cell, the policy cell included. An
+Exploration Pull records `tier=<cell>` in the row, and a replacement inherits the row's tier —
 written at the Pull's step 7, ahead of `ledger.mjs dispatch`, which reads it
-and prints `fleet-implementer-<cell>` as the `agent` to dispatch. Until the
-router draws the cell (spec 2026-09-28 § 2), `<cell>` is `task-high` — the
-retired alternate tier's own `@task:high` route. The
+and prints `fleet-implementer-<cell>` as the `agent` to dispatch; a row with
+no `tier=` runs the policy cell. The
 assignment rolls to the next Pull when another open ticket sequences after
 it — a ticket the rest of the run
-depends on. Do not tell the member it is a control: a member that
+depends on; `class` is not read. Do not tell the member it is a control: a member that
 knows it is being measured is not measuring the same thing.
+
+**The router's arguments, and nothing past its line.** `--impl-row` is the
+row count the Pull creates — or, while an assignment is rolling (the latest
+row 5k and every row after it carry no `tier=`), that row's number;
+`--chain-head` marks a ticket another open ticket sequences after, which is
+what rolls it. `--arm` is `A` for an even ticket number and `B` for an odd
+one; a B Pull routes exactly as an A one until the table opens arm B.
+`--session` is this run's own session directory. The printed line is the
+whole routing decision — never re-derive `CELL` from the table, the guard or
+this paragraph. A missing or unreadable `.fleet/cost-guard.json` routes the
+default cell only (`REASON=guard-missing`), burn-in included, and `REASON`
+other than `ok` goes on the row as `route=<REASON>`, nowhere else.
 
 **Count the rate against the ledger, because a Pull is the dispatch unit.** One
 Pull is one member, so a rate counted per Pull is a rate counted per member —
@@ -1353,31 +1376,35 @@ awk -F'\t' '!/^#/ && $4=="routine" {t[$5]++; if($6=="no") f[$5]++} \
 ```
 
 **These rows are the historical corpus, and nothing appended to them fixes the
-confound.** What fixes it is the within-run pairing in the dispatch rule above:
-from now on one implementer in every five runs at the alternate tier beside the
-top-tier ones, against the same prompts on the same day, so the comparison stops depending on
-which tier history happened to leave in which week. Read the pairs, not the
-whole-file split, once there are enough of them.
+confound.** What fixes it is the exploration draw in the dispatch rule above:
+one implementer in every five — every one, during burn-in — runs at a drawn
+cell beside the policy cell's, against the same prompts on the same day, so
+the comparison stops depending on which tier history happened to leave in
+which week. Read each cell's comparisons, not the whole-file split, once there
+are enough of them.
 
 **So read what the guard actually established: routine tickets sometimes fail to
 close their own ticket. Not that `sonnet` caused it.** The revert is the
 pre-committed rule being honoured, not a measurement. Restoring a cheap tier is
 still the maintainer's call and still a change to the dispatch rule — but the
 deliberate control it used to require is no longer something anyone has to
-authorize one ticket at a time: the alternate-tier dispatch above produces one
-in every five Pulls by construction. **Do not read the pairs early.** Report the count —
-the DELIBERATE count, from the query in `member-outcomes.tsv`'s header, which
-prints the pair count and its distinct `run_date`s and counts only sessions
-that ran both implementer definitions at different models — and stop until
+authorize one ticket at a time: the exploration draw above produces one in
+every five Pulls by construction. **Do not read a cell early.** A cell's
+comparison is one session holding an admissible row at that cell — its tier
+check passed and its resolved effort is the cell's level — and one at
+`slow-high` whose resolved model and effort differ. Count them per cell, never
+pooled across cells, and stop until
 there are at least ten of them across five or more distinct `run_date`s; below
-that, a pair count is a number, not evidence, and the last guard fired with
-n=1 on the control side. **Report whichever number that query prints, never a
-number from any other one:** the query it replaces (#1066) counted every
-session whose implementers merely differed, so it cleared this floor by an
-order of magnitude while the controlled comparison did not exist yet.
+that, a comparison count is a number, not evidence, and the last guard fired
+with n=1 on the control side. **Report the count the per-cell readout prints,
+never one from any other query:** until that readout exists there is no count
+to report, the pair query in `member-outcomes.tsv`'s header counts pre-cutover
+pairs only, which are no cell's comparisons, and the query before that one
+counted every session whose implementers merely differed, so it cleared this
+floor by an order of magnitude while the controlled comparison did not exist yet.
 
-Why the agent body carries what it does — read this before editing either agent
-file, and keep the two bodies byte-identical. Each rule in the body's
+Why the agent body carries what it does — read this before editing any
+`fleet-implementer-<cell>` file, and keep every cell's body byte-identical. Each rule in the body's
 enumerate-and-declare block is load-bearing, for a different reason.
 **Enumerate-and-declare** answers a signature measured four times in one run:
 each implementer fixed exactly the cases its ticket named and left an adjacent
@@ -3667,7 +3694,7 @@ naming the token and writing nothing, because every reader would take it as a
 permanent settle.
 
 `→ PR#M` stays as the human-readable arrow; the tick reads only the `=`
-tokens. `tier=<cell>` marks the every-5th-Pull member's cell (phase 2), and `excluded ·
+tokens. `tier=<cell>` marks an Exploration Pull's cell and `route=<REASON>` a router fallback (phase 2), and `excluded ·
 behind-pr:#M | behind-issue:#M` is an Exclusion (phase 1) — a ticket row like
 any other, never a section of its own.
 
