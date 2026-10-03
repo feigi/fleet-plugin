@@ -22,10 +22,13 @@ and thrown message. The variants diverge. The guard stays below the map.
 just added. Both idioms already appear in the file, the guards are unreachable at the
 only call site, and the direct unit tests that *do* exercise them pass either way.
 
-**Deleting the `testCmd` tombstone comment** as a near-duplicate of the function's own
-header misreads what it does: the header states the resolution *policy*, while the
-tombstone is an absence marker sitting where a default used to be — it answers "why is
-there no default here?", which the header does not.
+**Deleting the `testCmd` tombstone comment** — the comment that stood in `review-pr.js`'s
+arg-defaulting block (`workflows/review-pr.js:280`, per #313) before the move to
+`review-core.mjs` — was rejected as a near-duplicate of the function's own header: the header
+states the resolution *policy*, while the tombstone was an absence marker sitting where a
+default used to be — it answered "why is there no default here?", which the header does not.
+`review-core.mjs` carries no such comment now; this is the record of the rejection, not a
+pointer to a live comment.
 
 Comment-density findings over this file land in the same place. A review pass counting
 comment-to-code ratio on a freshly added block, and finding the same rationale in the
