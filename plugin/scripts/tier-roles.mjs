@@ -147,11 +147,16 @@ function readOmpJson(argv) {
   } catch (e) {
     throw new Error(`${cmd} failed: ${e.stderr || e.message}`);
   }
+  let parsed;
   try {
-    return JSON.parse(out);
+    parsed = JSON.parse(out);
   } catch (e) {
     throw new Error(`${cmd} exited 0 but printed non-JSON: ${e.message}`);
   }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${cmd} exited 0 but printed ${parsed === null ? "null" : Array.isArray(parsed) ? "an array" : `a ${typeof parsed}`}, not a JSON object`);
+  }
+  return parsed;
 }
 
 // The catalog entry a `modelRoles` target names — `selector` exactly, else

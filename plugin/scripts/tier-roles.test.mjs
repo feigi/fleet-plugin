@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { tempDir } from "./temp-dir.mjs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -409,4 +409,46 @@ test("CLI: --agents defaults to the plugin's own agents directory", () => {
   const d = dir();
   const r = runCli(["--check", ...installFlags(d)], d);
   assert.equal(r.status, 0, r.stderr);
+});
+
+// A fake `omp` first on PATH whose every invocation prints `stdout` — the live
+// reads (`omp config get … --json`, `omp models --json`) have no flag-free
+// fixture path, so the binary itself is the fixture.
+function runCliWithFakeOmp(stdout, argv, cwd) {
+  const bin = dir();
+  const fake = join(bin, "omp");
+  writeFileSync(fake, `#!/bin/sh\ncat <<'FAKE_OMP_EOF'\n${stdout}\nFAKE_OMP_EOF\n`);
+  chmodSync(fake, 0o755);
+  return spawnSync(process.execPath, [SCRIPT, ...argv], {
+    cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
+  });
+}
+
+for (const [label, printed, shape] of [["null", "null", "null"], ["an array", "[]", "an array"], ["a string", "\"x\"", "a string"]]) {
+  test(`CLI: live \`omp config get\` printing ${label} refuses naming the command`, () => {
+    const d = dir();
+    const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+    const r = runCliWithFakeOmp(printed, ["--check", "--agents", agents, "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES), "--catalog", jsonFile(d, "c.json", CATALOG)], d);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, new RegExp(`omp config get task\\.agentModelOverrides --json exited 0 but printed ${shape}, not a JSON object`));
+  });
+}
+
+test("CLI: live `omp models` printing null refuses naming the command", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  const r = runCliWithFakeOmp("null", ["--check", "--agents", agents, "--overrides", jsonFile(d, "o.json", {}), "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES)], d);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /omp models --json exited 0 but printed null, not a JSON object/);
+});
+
+test("CLI: live `omp` reads printing well-formed objects are accepted", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  // One fake serves all three reads: `{ value, models }` satisfies the config
+  // envelope and the catalog at once; `value` is then the record each read as.
+  const printed = JSON.stringify({ value: {}, models: CATALOG.models });
+  const r = runCliWithFakeOmp(printed, ["--check", "--agents", agents], d);
+  assert.notEqual(r.status, 2, r.stderr);
+  assert.doesNotMatch(r.stderr, /not a JSON object/);
 });
