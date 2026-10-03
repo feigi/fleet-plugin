@@ -66,11 +66,16 @@ test("a fully verified snapshot is not missing", () => {
 //
 // A falsy `snap` is the agent contract failing — it died, or the harness
 // exhausted structured-output retries and `agent()` returned null — not a
-// claim about the tree on disk, which may be perfectly good. The citation is
-// the `required:` comment inside `FINDINGS_SCHEMA` in review-core.mjs, which
-// records that a schema REJECTION is retried and every observed one recovered:
-// exhaustion is the only one of the two that returns null, so naming rejection
-// as the cause would point an operator at a signature successful runs carry.
+// claim about the tree on disk, which may be perfectly good. The reason names
+// `died` and `exhausted` but never `rejected`: a schema REJECTION is handed
+// back to the model as a tool error and retried, and the rejections measured
+// under Claude Code all recovered on retry (docs/specs/2026-09-08-omp-eval-workflow-host.md,
+// Q2, quoting the "184 rejection events … every one recovered by retry"
+// comment that review-pr.js carried above its FINDINGS_SCHEMA before the
+// re-nest under plugin/). A rejection is therefore a signature successful runs
+// carry, and naming it as the cause of a null would point an operator at the
+// wrong thing. review-eval.mjs's `ompAgent` comment records the omp side: a
+// rejected `.wait()` maps to null there.
 test("a falsy snapshot (agent died, or it exhausted its structured-output retries) names the agent contract, not a missing tree", () => {
   for (const dead of [null, undefined, false]) {
     const reason = snapshotMissing(dead);
