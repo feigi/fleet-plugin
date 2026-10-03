@@ -337,7 +337,10 @@ async function main() {
     writeFileSync(tmp, `${JSON.stringify(payload)}\n`);
     renameSync(tmp, file);
   } catch (e) {
-    rmSync(tmp, { force: true });
+    // Best-effort: when mkdirSync was the failure, tmp sits under a path
+    // component that is not a directory and this rmSync throws ENOTDIR, which
+    // would replace the real cause below with an "unexpected failure" stack.
+    try { rmSync(tmp, { force: true }); } catch {}
     die(`cannot write ${file}: ${e.message}`);
   }
   log(`${NAME}: ${payload.shortlist.length} of ${payload.scanned} scanned → ${file}`);
