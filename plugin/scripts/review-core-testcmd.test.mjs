@@ -204,7 +204,7 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
 // Bounded at both ends: an unbounded slice runs to EOF, where the specialist
 // and refuter prompts could satisfy the assertions below instead.
 function testRunPrompt() {
-  return between(CODE, "`Run this repository's test command ONCE", '{ label: "test-run"', "the shared test-run prompt");
+  return between(CODE, "`Run this repository's test command ONCE", "{ label: `test-run${forPr}`", "the shared test-run prompt");
 }
 
 // The prompt is what the test-run agent actually obeys, so the reading rule has

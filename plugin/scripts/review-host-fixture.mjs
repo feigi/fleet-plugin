@@ -57,17 +57,26 @@ export const vote = (refuted) => ({ refuted, reason: "measured. CWD-AUDIT: clean
 // 2 of their label, and a re-dispatched pair is calls 3 and 4. A script with
 // no `test-run` entry gets `[SHARED]` for it; every other unscripted label
 // throws. `prompts` records each dispatch's prompt under its label.
+//
+// Every label review-core.mjs dispatches ends in `:pr<N>`; scripts, `calls`
+// and `prompts` key on the label WITHOUT it (`review:correctness`), so a case
+// reads the same whatever PR it reviews. `labels` keeps each label as
+// dispatched, in order.
 export function scriptedHost(script) {
   const calls = {};
   const prompts = {};
+  const labels = [];
   return {
     calls,
     prompts,
+    labels,
     host: {
       agent: async (prompt, opts) => {
-        const n = (calls[opts.label] = (calls[opts.label] ?? 0) + 1);
-        (prompts[opts.label] ??= []).push(prompt);
-        const seq = script[opts.label] ?? (opts.label === "test-run" ? [SHARED] : undefined);
+        labels.push(opts.label);
+        const label = opts.label.replace(/:pr\d+$/, "");
+        const n = (calls[label] = (calls[label] ?? 0) + 1);
+        (prompts[label] ??= []).push(prompt);
+        const seq = script[label] ?? (label === "test-run" ? [SHARED] : undefined);
         if (!seq) throw new Error(`scriptedHost: unexpected dispatch ${opts.label}`);
         const answer = seq[Math.min(n, seq.length) - 1];
         if (answer instanceof Error) throw answer;

@@ -128,10 +128,10 @@ for (const [name, run] of COPIES) {
     const calls = { crashing: 0, surviving: 0 };
     const host = {
       agent: async (prompt, opts) => {
-        if (opts.label === "snapshot") return structuredClone(SNAP);
-        if (opts.label === "test-run") return structuredClone(SHARED);
-        if (opts.label === "review:correctness") return structuredClone(review([crashing, surviving]));
-        if (opts.label === "verify:correctness") {
+        if (opts.label === "snapshot:pr7") return structuredClone(SNAP);
+        if (opts.label === "test-run:pr7") return structuredClone(SHARED);
+        if (opts.label === "review:correctness:pr7") return structuredClone(review([crashing, surviving]));
+        if (opts.label === "verify:correctness:pr7") {
           if (prompt.includes(crashing.claim)) {
             calls.crashing++;
             throw new Error(`refuter crash ${calls.crashing}`);

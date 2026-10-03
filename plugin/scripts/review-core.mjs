@@ -700,6 +700,10 @@ export async function runReview(host, args) {
   const scratch = A.scratch || `/tmp/review-pr-${pr}`;
   const runRootParent = `${scratch}/pr${pr}`;
   const runRootPrefix = `${runRootParent}/run-`;
+  // Every dispatch label ends in `:pr${pr}`: the member id the harness derives
+  // from a label is all a transcript keeps of it, and member-record.mjs's
+  // parseMemberName reads the PR back out of that id to book its cost.
+  const forPr = `:pr${pr}`;
   const verifiersForRun = verifiersFor(A);
 
   if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");
@@ -838,7 +842,7 @@ STDOUT, copied verbatim. Only runRoot, path, head, pathVerified and repoVerified
 are ever required — diffStats, diffPath, diffLines, refHead and prHead are each
 omitted independently when their command failed, and repoError only accompanies
 a false repoVerified.`,
-    { label: "snapshot", phase: "Snapshot", agentType: SNAPSHOT_AGENT_TYPE, schema: SNAPSHOT_SCHEMA },
+    { label: `snapshot${forPr}`, phase: "Snapshot", agentType: SNAPSHOT_AGENT_TYPE, schema: SNAPSHOT_SCHEMA },
   );
 
   if (snap) {
@@ -930,7 +934,7 @@ If the command hit its deadline, crashed before printing a summary, or printed
 no counts at all, omit every count and say what happened in \`error\`. Never
 write 0 for a count the log does not state: an absent count is how the caller
 learns the run produced none.`,
-    { label: "test-run", phase: "Test run", agentType: TEST_RUN_AGENT_TYPE, schema: TEST_RUN_SCHEMA },
+    { label: `test-run${forPr}`, phase: "Test run", agentType: TEST_RUN_AGENT_TYPE, schema: TEST_RUN_SCHEMA },
   ).catch((e) => ({ error: `the test-run dispatch threw: ${e?.message ?? e}` }));
   const sharedRun = { ...(ran || { error: "the test-run agent returned nothing" }), command: testCmd, logPath };
   log(`shared test run: ${countsOf(sharedRun) || "no counts"} — exit ${sharedRun.exitCode ?? "(absent)"} — log ${logPath}`);
@@ -1017,7 +1021,7 @@ produce, and an omitted line reads exactly like a check never run. Three PRs
 reviewed from one cell left four files modified in that checkout with nothing in
 any payload saying so (#1433), so a path you cannot account for is still yours
 to name.`,
-            { label: `review:${d.key}`, phase: "Review", agentType: d.agentType, schema: FINDINGS_SCHEMA },
+            { label: `review:${d.key}${forPr}`, phase: "Review", agentType: d.agentType, schema: FINDINGS_SCHEMA },
           ),
         (review) => !review,
       ),
@@ -1108,7 +1112,7 @@ git answered \`fatal: not a git repository\` — every run, clean or not: an
 omitted line reads exactly like a check never run, and applying a mutation is
 how three reviews from one cell left four files modified in that checkout
 (#1433).`,
-                    { label: `verify:${d.key}`, phase: "Verify", agentType: VERIFIER_AGENT_TYPE, schema: VERDICT_SCHEMA },
+                    { label: `verify:${d.key}${forPr}`, phase: "Verify", agentType: VERIFIER_AGENT_TYPE, schema: VERDICT_SCHEMA },
                   ),
                 ),
               ),
