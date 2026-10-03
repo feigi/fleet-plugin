@@ -691,6 +691,46 @@ for (const [name, path] of SOURCES) {
     });
   }
 
+  // GNU find (Linux) refuses an `-exec ... {} +` whose argument list holds the
+  // `{}` placeholder more than once — and counts a `{}` written inside an
+  // `sh -c` script argument as one. BSD find (darwin) does not, so a dev
+  // machine passes a prune that fails every Linux CI run. This shim enforces
+  // GNU's rule over the real `find`, so the case holds on either host.
+  test(`${name}: the prune's find invocation keeps to GNU find's one-placeholder rule for -exec ... +`, (t) => {
+    const parent = join(scratch(t, "snapshot-repo-prune-gnu-"), "pr7");
+    const stale = lockedRunRoot(parent, "run-staleaa", 9);
+    const bin = scratch(t, "snapshot-repo-prune-gnu-bin-");
+    const realFind = execFileSync("sh", ["-c", "command -v find"], { env: ENV, encoding: "utf8" }).trim();
+    writeFileSync(
+      join(bin, "find"),
+      `#!/bin/sh
+# GNU find: with a terminating '+', only one argument may contain {}.
+n=0; plus=0; prev=
+for a in "$@"; do
+  case "$a" in *'{}'*) n=$((n + 1));; esac
+  [ "$a" = "+" ] && [ "$prev" = '{}' ] && plus=1
+  prev=$a
+done
+if [ "$plus" = 1 ] && [ "$n" -gt 1 ]; then
+  echo "find: Only one instance of {} is supported with -exec ... +" >&2
+  exit 1
+fi
+exec "${realFind}" "$@"
+`,
+      { mode: 0o755 },
+    );
+    const env = { ...ENV, PATH: `${bin}:${ENV.PATH}` };
+    try {
+      const r = spawnSync("sh", ["-c", renderPrune(path, parent)], { env, encoding: "utf8" });
+
+      assert.doesNotMatch(r.stdout ?? "", /SNAPSHOT_PRUNE_FAILED/, `a GNU-rule find rejected the prune: ${r.stderr}`);
+      assert.doesNotMatch(r.stderr ?? "", /Only one instance of \{\}/, "the prune's find tripped GNU's one-placeholder rule");
+      assert.ok(!existsSync(stale), "the aged run root survived a find that enforces GNU's placeholder rule");
+    } finally {
+      unlock(parent);
+    }
+  });
+
   // The accept case on a host without `chflags`: the flag step is skipped, not
   // treated as a failure, so the permission case still succeeds there.
   test(`${name}: without chflags on PATH the prune still removes an aged run root holding a chmod 000 directory`, (t) => {
