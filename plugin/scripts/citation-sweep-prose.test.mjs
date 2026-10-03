@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // #516. A scan over every tracked `.mjs`/`.sh`/`.js`/`.yml` file for
@@ -1584,7 +1585,7 @@ function* pluginFiles(dir) {
     if (entry.name === "node_modules") continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) yield* pluginFiles(full);
-    else if (/\.(?:mjs|js|sh|md|yml|json)$/.test(entry.name)) yield full;
+    else yield full;
   }
 }
 
@@ -1592,6 +1593,20 @@ test("no file under plugin/ cites a deleted review-pr-*.test.mjs without a git-o
   for (const file of pluginFiles(REPO)) {
     if (file === import.meta.filename) continue;
     assert.deepEqual(deletedTestCitations(readFileSync(file, "utf8")), [], `${file} cites a review-pr-*.test.mjs file that no longer exists — name its review-core-* successor, or a pinned revision such as \`ed9f2967^:plugin/scripts/<name>\``);
+  }
+});
+
+test("the plugin walk reads extensionless scripts and skips node_modules (#2431)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "plugin-walk-"));
+  try {
+    mkdirSync(join(dir, "sub"));
+    mkdirSync(join(dir, "node_modules"));
+    writeFileSync(join(dir, "fleet-run"), "// see review-pr-reads.test.mjs\n");
+    writeFileSync(join(dir, "sub", "board.html"), "<!-- review-pr-reads.test.mjs -->\n");
+    writeFileSync(join(dir, "node_modules", "dep.mjs"), "// review-pr-reads.test.mjs\n");
+    assert.deepEqual([...pluginFiles(dir)].map((f) => f.slice(dir.length + 1)).sort(), ["fleet-run", join("sub", "board.html")]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
