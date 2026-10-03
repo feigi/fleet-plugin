@@ -264,8 +264,10 @@ Scanned in full (read start-to-finish, or via targeted `grep`+`read` passes cove
 - `docs/agents/triage-labels.md` (83 lines)
 - `README.md` (186 lines)
 - `CONTEXT.md` (327 lines — full file read; `## Language` section is lines 8-327)
-- `docs/adr/0001-filing-label-bar-is-defect-confirmed.md` through `0013-automatic-supply-relabel-by-cause.md` (all 13 files) — Decision sections only, per assignment scope (Context/Consequences/Rejected-alternatives sections skimmed for headings only, not cited)
+- `docs/adr/0001-filing-label-bar-is-defect-confirmed.md` through `0013-automatic-supply-relabel-by-cause.md` — Decision sections only, per assignment scope (Context/Consequences/Rejected-alternatives sections skimmed for headings only, not cited)
 
 Not scanned (out of assignment scope per the task's file list): `plugin/scripts/*` (code, not prose), `.github/workflows/*.yml`, `.github/rulesets/main.json` (cited secondhand via ADR 0007/CONTEXT.md only), `docs/specs/*`, `docs/metrics/*`.
 
 Not scanned (added to `plugin/agents/` after the scan; no row in this table cites it): `plugin/agents/fleet-recipe-deriver.agent.md`.
+
+Not scanned: `docs/adr/0014-omp-is-the-only-harness.md` and every later-numbered ADR, except at the line range or section a row's evidence column cites from one. An ADR in that range that no row cites by path is the evidence of no row.
