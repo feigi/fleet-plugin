@@ -327,6 +327,8 @@ test("a mismatch from a later suffix, an ok, or another PR's fix-applier is not 
   assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-41:${H}`)], 40, b, H), false, "another PR's fix-applier");
   // A split row: the earlier verdict sits on another row that resolves to PR 40.
   assert.equal(failedBefore(["#11 impl-11=PR#40 → PR#40 · dispositions-mismatch=fix-pr-40:abc1234", "#12 impl-12=PR#41 → PR#41"], 40, b, H), true);
+  // A copy of PR 40's verdict on PR 41's row is a stray: that row does not resolve to PR 40.
+  assert.equal(failedBefore(["#12 impl-12=PR#41 → PR#41 · dispositions-mismatch=fix-pr-40:abc1234"], 40, b, H), false);
   // The same review named by a short head on one side and a full SHA on the other.
   const full = `${H}${"0".repeat(33)}`;
   assert.equal(failedBefore([row(`dispositions-mismatch=fix-pr-40:${H}`)], 40, b, full), true, "an earlier token's short head matches a full check head");

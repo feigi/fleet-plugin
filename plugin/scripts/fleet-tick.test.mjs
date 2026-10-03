@@ -752,6 +752,17 @@ test("deriveRun: the retry is not re-offered while live, nor before its own chec
   assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b=failed"]), [21], "a retry that died leaves the mismatch for a replacement");
 });
 
+test("deriveRun: a landed conflict fix-applier does not answer a mismatch — the retry is still due", () => {
+  assert.deepEqual(dueAt([MISMATCH, "conflict-hold:#21", "fix-pr-21-b"]), [], "the conflict one is live: nothing is re-offered");
+  assert.deepEqual(dueAt([MISMATCH, "conflict-hold:#21", "fix-pr-21-b=applied:0123abc"]), [21], "hold cleared by -b, the mismatch still stands");
+  assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b=applied:0123abc"]), [], "control: a review -b that landed is awaiting its own check");
+});
+
+test("deriveRun: a dispositions verdict on a row that never recorded a review head answers nothing", () => {
+  const r = run({ rows: [`#20 impl-20=PR#21 → PR#21 · review=wf:x · fix-pr-21=applied:def5678 · ${MISMATCH}`] }, [pr(21)]);
+  assert.deepEqual(r.fixDue, []);
+});
+
 test("deriveRun: the verdict is read by review head and highest retry, never by position in the row", () => {
   const escalated = ["dispositions-escalate=fix-pr-21-b:abc1234", MISMATCH];
   assert.deepEqual(dueAt(["fix-pr-21-b=applied:0123abc", ...escalated]), [], "the -b escalate answers, wherever it sits");
@@ -764,10 +775,9 @@ test("deriveRun: the verdict is read by review head and highest retry, never by 
 });
 
 test("currentDispositions: escalate parses, and outranks mismatch which outranks ok at one retry suffix", () => {
-  const t = (s) => dispositionsToken(s);
-  assert.deepEqual(t("dispositions-escalate=fix-pr-21-b:abc1234")?.verdict, "escalate");
-  assert.equal(t("dispositions-escalate=finisher-pr-21:abc1234"), null);
-  const heads = (...s) => currentDispositions(s.map(t), "abc1234");
+  assert.deepEqual(dispositionsToken("dispositions-escalate=fix-pr-21-b:abc1234")?.verdict, "escalate");
+  assert.equal(dispositionsToken("dispositions-escalate=finisher-pr-21:abc1234"), null);
+  const heads = (...s) => currentDispositions(s.map(dispositionsToken), "abc1234");
   assert.deepEqual(heads("dispositions-ok=fix-pr-21:abc1234", "dispositions-escalate=fix-pr-21:abc1234"), { verdict: "escalate", member: "fix-pr-21" });
   assert.deepEqual(heads("dispositions-escalate=fix-pr-21:abc1234", "dispositions-mismatch=fix-pr-21:abc1234"), { verdict: "escalate", member: "fix-pr-21" });
   assert.deepEqual(heads("dispositions-escalate=fix-pr-21:abc1234", "dispositions-ok=fix-pr-21-b:abc1234"), { verdict: "ok", member: "fix-pr-21-b" });

@@ -511,7 +511,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // by head and retry suffix, never by where a token sits.
     const st = (pr !== null && byPr.get(pr)) || {
       inFlight: false, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
-      fixMembers: new Set(), fixLanded: new Set(), held: [],
+      fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(), held: [],
       conflictOpen: false, reviewedHead: null, pastPinHalt: false, dispositions: [],
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
@@ -563,8 +563,10 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
           if ((o === "no-op" || /^applied:/.test(o)) && !st.fixLanded.has(t.name)
             && (t.outcome !== null || !settledInRow.has(t.name))) {
             st.fixLanded.add(t.name);
-            if (st.conflictOpen) st.conflictOpen = false;
-            else st.reviewFixed = true;
+            if (st.conflictOpen) {
+              st.conflictOpen = false;
+              st.conflictLanded.add(t.name);
+            } else st.reviewFixed = true;
           }
         }
         if (t.family === "finisher-pr" && t.number === pr
@@ -659,13 +661,14 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   // has answered: the verdict is the highest-suffixed one, and no fix-applier
   // with a higher suffix has landed. A landed one is awaiting its own check, so
   // the earlier mismatch is not its verdict; a failed or killed one answered
-  // nothing. An escalate is a different verdict and is never due.
+  // nothing, and so did a conflict fix-applier, which is never checked. An
+  // escalate is a different verdict and is never due.
   const mismatchDue = (st) => {
     if (st.reviewedHead === null) return false;
     const cur = currentDispositions(st.dispositions, st.reviewedHead);
     if (cur === null || cur.verdict !== "mismatch") return false;
     const retry = parseMember(cur.member).retry ?? "";
-    return ![...st.fixLanded].some((n) => (parseMember(n).retry ?? "") > retry);
+    return ![...st.fixLanded].some((n) => !st.conflictLanded.has(n) && (parseMember(n).retry ?? "") > retry);
   };
   // The halt holds only while the head is still past what was reviewed: a
   // `reviewed=` head (7-40 hex) prefix-matching gh's full headRefOid is the
