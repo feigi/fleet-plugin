@@ -656,11 +656,11 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   // say whether one exists; a settled member whose transcript was never
   // written gets `tier-unverifiable=` from it, which clears the hold here.
   const newest = impls.filter((m, i) => !impls.some((o, j) => j > i && o.number === m.number));
-  // A mismatch on a ticket whose issue is CLOSED holds nothing (#2485): its
-  // work shipped, so there is nothing left for `impl-<N>-b` to replace, and a
-  // retired definition can never re-check. `closed` is the ticket numbers the
-  // caller has probed; the pure fold cannot probe, so none is the default and
-  // every mismatch holds. A still-open ticket keeps its hold.
+  // A mismatch on a ticket whose issue is CLOSED holds nothing (#2485): there
+  // is nothing left for `impl-<N>-b` to replace, and a retired definition can
+  // never re-check. `closed` is the ticket numbers the caller has probed; the
+  // pure fold cannot probe, so none is the default and every mismatch holds.
+  // A still-open ticket keeps its hold.
   const mismatched = (m) => m.outcome === "tier-mismatch" || verdicts.mismatch.has(m.name);
   const tierMismatch = newest.filter((m) => mismatched(m) && !closed.has(m.number)).map((m) => m.name);
   const cleared = (m) => verdicts.ok.has(m.name) || verdicts.unverifiable.has(m.name);
@@ -1022,8 +1022,8 @@ function liftedPremise(excluded, entries, prs) {
 // issue is CLOSED (#2485): the one live read deriveRun needs to lift a hold
 // whose replacement has nothing left to replace. One `gh issue view` per
 // mismatched ticket, and none when nothing is mismatched. A probe that cannot
-// answer is disclosed and the hold stands — the same failure rule as
-// liftedPremise's behind-issue probe above.
+// answer — a nonzero exit, or a reply carrying no issue state — is disclosed
+// and the hold stands.
 function closedTickets(mismatched) {
   const closed = new Set();
   for (const { number } of mismatched.map(parseMember)) {
@@ -1033,8 +1033,13 @@ function closedTickets(mismatched) {
       continue;
     }
     let st = null;
-    try { st = JSON.parse(r.stdout).state; } catch { /* unanswered: the hold stands */ }
+    try { st = JSON.parse(r.stdout).state; } catch { /* no state: disclosed below */ }
     if (st === "CLOSED") closed.add(number);
+    else if (typeof st !== "string") {
+      // Exit 0 with a body that is not an issue (an HTML error page, a proxy's
+      // text, JSON with no state) is as unanswered as a nonzero exit.
+      console.error(`${NAME}: gh issue view ${number} printed no state — tier mismatch on #${number} unconfirmed closed, hold stands`);
+    }
   }
   return closed;
 }
@@ -1095,10 +1100,8 @@ function main() {
   try {
     const ledger = readLedger();
     run = deriveRun(ledger, prs);
-    if (run.tierMismatch.length) {
-      const closed = closedTickets(run.tierMismatch);
-      if (closed.size) run = deriveRun(ledger, prs, closed);
-    }
+    const closed = closedTickets(run.tierMismatch);
+    if (closed.size) run = deriveRun(ledger, prs, closed);
   } catch (e) {
     if (e instanceof LedgerError) die(e.message);
     throw e;

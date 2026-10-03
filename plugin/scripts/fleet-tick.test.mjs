@@ -1187,6 +1187,7 @@ case "$1 $2" in
   "issue view")
     echo "$3" >> "$ISSUE_VIEW_LOG"
     [ -n "$ISSUE_VIEW_FAIL" ] && { echo "gh: issue view failed" >&2; exit 1; }
+    [ -n "$ISSUE_VIEW_BODY" ] && { printf '%s\n' "$ISSUE_VIEW_BODY"; exit 0; }
     # Real gh answers for the repository an inherited GIT_DIR or GH_REPO names;
     # this one answers CLOSED for every issue there, so a probe that forgot to
     # scrub them lifts an exclusion the case's own repository still holds.
@@ -1558,6 +1559,39 @@ test("CLI: a failed probe of a mismatched ticket is disclosed and the hold stand
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m);
   assert.match(r.stderr, /fleet-tick: gh issue view 7 exited 1: gh: issue view failed — tier mismatch on #7 unconfirmed closed, hold stands/);
+});
+
+test("CLI: a probe answering exit 0 with no issue state is disclosed and the hold stands", () => {
+  for (const body of ["<html>rate limited</html>", "{}", "null"]) {
+    const r = runCli([], {
+      shortlist: shortlistText([1, 2, 3]), ledger: { rows: ["#7 impl-7=tier-mismatch"], dispatched: ["impl-7=tier-mismatch"] },
+      issueStates: { 7: "CLOSED" }, env: { ISSUE_VIEW_BODY: body },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m, body);
+    assert.match(r.stderr, /fleet-tick: gh issue view 7 printed no state — tier mismatch on #7 unconfirmed closed, hold stands/, body);
+  }
+});
+
+// Every mismatched ticket is probed on its own: one CLOSED does not lift, and
+// one failed or OPEN does not hold back, another.
+test("CLI: each mismatched ticket is probed and released or held on its own issue", () => {
+  const two = { rows: ["#7 impl-7=tier-mismatch", "#8 impl-8=tier-mismatch"], dispatched: ["impl-7=tier-mismatch", "impl-8=tier-mismatch"] };
+  const base = { shortlist: shortlistText([1, 2, 3]), ledger: two };
+  const mixed = runCli([], { ...base, issueStates: { 7: "CLOSED", 8: "OPEN" } });
+  assert.equal(mixed.status, 0, mixed.stderr);
+  assert.deepEqual(mixed.issueViews, ["7", "8"]);
+  assert.match(mixed.stdout, /HOLD \(tier mismatch impl-8\)/);
+  assert.doesNotMatch(mixed.stdout, /impl-7/);
+  const reversed = runCli([], { ...base, issueStates: { 7: "OPEN", 8: "CLOSED" } });
+  assert.deepEqual(reversed.issueViews, ["7", "8"]);
+  assert.match(reversed.stdout, /HOLD \(tier mismatch impl-7\)/);
+  assert.doesNotMatch(reversed.stdout, /impl-8/);
+  const both = runCli([], { ...base, issueStates: { 7: "CLOSED", 8: "CLOSED" } });
+  assert.deepEqual(both.issueViews, ["7", "8"]);
+  assert.doesNotMatch(both.stdout, /tier mismatch/);
+  const failed = runCli([], { ...base, issueStates: { 7: "CLOSED" }, env: { ISSUE_VIEW_FAIL: "1" } });
+  assert.deepEqual(failed.issueViews, ["7", "8"], "a failed probe of #7 does not stop the probe of #8");
 });
 
 test("CLI: a failed gh issue view probe is disclosed, not silently swallowed", () => {
