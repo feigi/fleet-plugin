@@ -302,8 +302,8 @@ export function deriveFlags(parsed, ctx) {
   // gap the other way: still counted due for a fresh review while this flag
   // is up and the head has not caught up to what was reviewed.
   if (parsed.finisherOutcome?.startsWith("halted:") && ctx.column === "REVIEW") flags.push(parsed.finisherOutcome);
-  if (ctx.unlabelled && ctx.column === "REVIEW") flags.push("unlabelled");
-  if (ctx.finisherDied && ctx.column === "REVIEW") flags.push(`finisher:${ctx.finisherDied}`);
+  if (ctx.finisher === "labelled" && ctx.column === "REVIEW") flags.push("unlabelled");
+  if ((ctx.finisher === "failed" || ctx.finisher === "killed") && ctx.column === "REVIEW") flags.push(`finisher:${ctx.finisher}`);
   const limit = STALE_MS[ctx.column];
   if (limit != null && ctx.sinceEnteredStage != null && ctx.now - ctx.sinceEnteredStage > limit) {
     flags.push("stale");
@@ -477,12 +477,7 @@ export function computeBoard(inputs) {
     rowIssues.add(p.issue);
     const sinceEnteredStage = stageEntry(prevTicket, column, now);
     const ciState = p.pr != null ? (ci[p.pr] ?? "unknown") : null;
-    const finisher = latestFinishers.get(p.pr);
-    const flags = deriveFlags(p, {
-      ci: ciState, column, sinceEnteredStage, now,
-      unlabelled: finisher === "labelled",
-      finisherDied: finisher === "failed" || finisher === "killed" ? finisher : undefined,
-    });
+    const flags = deriveFlags(p, { ci: ciState, column, sinceEnteredStage, now, finisher: latestFinishers.get(p.pr) });
     tickets.push({
       issue: p.issue,
       title: titleFor(p.issue, pr, issues),
