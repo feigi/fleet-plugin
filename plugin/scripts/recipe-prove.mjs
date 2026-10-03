@@ -108,8 +108,13 @@ function parseArgs(argv) {
   };
 }
 
+// A git that cannot be started is no verdict, as for `sh` below: read as a
+// failed git command, it would surface as whatever that command's failure
+// means to its caller — a missing repository, an unfetched origin/main, a
+// proof that did not hold.
 function git(args, cwd) {
   const r = spawnSync("git", args, { cwd, env: ENV, encoding: "utf8" });
+  if (r.error) throw cannot(`could not start git: ${r.error.message}`);
   return { ok: r.status === 0, out: (r.stdout ?? "").replace(/\n$/, ""), err: (r.stderr ?? "").trim() };
 }
 
@@ -231,9 +236,19 @@ function writeCache(cache, recipe, repo) {
 // is the usual one; the repo ignores them) makes both git's removal and a
 // plain recursive delete fail, so the fallback makes the tree writable first.
 // The prune always runs: it is what drops the registration of a worktree
-// whose directory is gone.
+// whose directory is gone. A git that cannot be started is reported and
+// skipped here, since this runs in the proof's `finally`.
 function removeWorktree(wt, repo) {
-  if (!git(["worktree", "remove", "--force", wt], repo).ok) {
+  const tryGit = (args) => {
+    try {
+      return git(args, repo).ok;
+    } catch (e) {
+      if (!(e instanceof Refusal)) throw e;
+      process.stderr.write(`${NAME}: skipped git ${args.join(" ")}: ${e.message}\n`);
+      return false;
+    }
+  };
+  if (!tryGit(["worktree", "remove", "--force", wt])) {
     spawnSync("chmod", ["-R", "u+w", wt], { stdio: "ignore" });
     try {
       rmSync(wt, { recursive: true, force: true });
@@ -241,7 +256,7 @@ function removeWorktree(wt, repo) {
       process.stderr.write(`${NAME}: could not remove the throwaway worktree ${wt}: ${e.message}\n`);
     }
   }
-  git(["worktree", "prune"], repo);
+  tryGit(["worktree", "prune"]);
 }
 
 function main(argv) {

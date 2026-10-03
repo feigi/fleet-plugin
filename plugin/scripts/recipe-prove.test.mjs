@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./temp-dir.mjs";
 import { writeExecStub } from "./exec-stub.mjs";
@@ -375,6 +375,33 @@ test("the proof leaves no worktree directory behind in its temp dir", () => {
   const { dir } = repo(MAVEN_FILES);
   const r = prove(dir, MAVEN_PROOF);
   assert.equal(r.status, 0, r.err);
+  for (const d of readdirSync(r.tmp)) {
+    assert.deepEqual(readdirSync(join(r.tmp, d)).filter((n) => n === "wt"), [], `${d} still holds the throwaway worktree`);
+  }
+});
+
+test("a git that cannot be started is named as such, not reported as a missing repository", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, MAVEN_PROOF, { env: { PATH: "/nonexistent" } });
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /^recipe-prove: could not start git: .*ENOENT/);
+  assert.doesNotMatch(r.err, /not a git repository/);
+});
+
+// A PATH holding only `sh` and a `git` that execs the real one, so the Install
+// step can take git away mid-proof by deleting it: every later git call then
+// fails to start, in the proof and in the worktree cleanup alike.
+test("a git that stops starting mid-proof is no verdict, never NOT PROVEN — and the worktree is still removed", () => {
+  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  const { dir } = repo(MAVEN_FILES);
+  const bin = tempDir("recipe-prove-path-");
+  writeExecStub(join(bin, "git"), `#!/bin/sh\nexec '${realGit}' "$@"\n`);
+  symlinkSync("/bin/sh", join(bin, "sh"));
+  const install = `'${process.execPath}' -e 'require("fs").rmSync(process.argv[1])' '${join(bin, "git")}'`;
+  const r = prove(dir, ["--install", install, "--test", "true", "--count-line", "x 1", "--test-count", "1"], { env: { PATH: bin } });
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /could not start git: .*ENOENT/);
+  assert.doesNotMatch(r.err, /NOT PROVEN/);
   for (const d of readdirSync(r.tmp)) {
     assert.deepEqual(readdirSync(join(r.tmp, d)).filter((n) => n === "wt"), [], `${d} still holds the throwaway worktree`);
   }
