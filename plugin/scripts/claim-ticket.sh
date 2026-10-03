@@ -14,19 +14,19 @@
 #
 # The Install step and the Test entrypoint are READ from the repository's
 # proven Recipe cache through derive-testcmd.sh — never inferred, never
-# defaulted (ADR 0015): this script keeps no table of technologies. An Install
+# defaulted: this script keeps no table of technologies. An Install
 # step that modifies the tree in a throwaway worktree corrupts it for everyone
 # (npm@11 pruning cross-platform @esbuild optional deps out of a lockfile broke
 # CI and the Docker build), so a dirty tree after it is a refusal.
 set -eu
 
 # Directly below `set -eu`, not below a locale pin: this script has none, and
-# locale-pin-prose.test.mjs deliberately leaves it off the PINNED list (whether
-# its generated runner needs one is #600's question). The five siblings that DO
+# the locale-pin test deliberately leaves it off its PINNED list (whether
+# its generated runner needs one is not settled here). The five siblings that DO
 # carry a pin put this line under it instead, because that file's PROLOGUE
 # regex admits only comments, blanks and `set -[eux]+` above the pin. Here
 # there is no pin to sit under, so the only constraint left is the real one:
-# above the first git call. #1020
+# above the first git call.
 #
 # Both halves are measured on this script, and each defeats a different guard.
 #
@@ -43,7 +43,7 @@ set -eu
 # "$wt" status --porcelain -uall`, the one thing standing between a wrong
 # Install step and a worktree corrupted for everyone — reads the AMBIENT tree
 # against $wt's index. Measured (against the lockfile-only form this check
-# had before ADR 0015) with an install that really does rewrite a tracked file
+# had before the Recipe cache) with an install that really does rewrite a tracked file
 # in the fresh worktree: reported clean, rc 0, claim handed out, where the
 # unpoisoned run refuses at exit 2.
 unset GIT_DIR GIT_WORK_TREE
@@ -51,7 +51,7 @@ unset GIT_DIR GIT_WORK_TREE
 NAME=claim-ticket
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
-# The escaping helpers (#119). json.sh's header holds the sourcing contract and
+# The escaping helpers. json.sh's header holds the sourcing contract and
 # the measurements behind it. This script uses exit 2 for every refusal and has
 # no exit 1, so a bare 1 out of it is a code its caller has no reading for. The
 # guard sits ahead of every mutation, so a missing library refuses before a
@@ -62,7 +62,7 @@ json_lib="$(dirname "$0")/json.sh"
 # shellcheck source=json.sh
 . "$json_lib" || die "$json_lib failed to load"
 
-# The worktree readers (#551, #725). worktree.sh's header holds the sourcing
+# The worktree readers. worktree.sh's header holds the sourcing
 # contract; the `[ -r ]` ahead of the `.` is load-bearing there, not decoration.
 # Sourced for `gone()` alone — this script reads no listing.
 wt_lib="$(dirname "$0")/worktree.sh"
@@ -75,8 +75,8 @@ wt_lib="$(dirname "$0")/worktree.sh"
 issue=$1
 slug=$2
 type=$3
-# Exact match, and nothing else tolerated in the slot — the #250 demotion, in
-# the file that still carried it. Measured on the unguarded script: `5 slug fix`
+# Exact match, and nothing else tolerated in the slot: an unknown flag is refused
+# rather than demoted to a dry run. Measured on the unguarded script: `5 slug fix`
 # and `5 slug fix --aply` were byte-identical on stdout AND stderr at exit 0,
 # so nothing anywhere said the flag was not understood; and the arity check
 # above was a lower bound alone, so `5 slug fix --apply extra --whatever`
@@ -97,7 +97,7 @@ runner="$wt/agent-test"
 
 # A repository probe, and deliberately no more. The git-dir identity invariant
 # release-ticket.sh and no-undo-audit.sh check (the git dir answering for $wt
-# must belong to $wt) is not owed here (#421): this script never asks git
+# must belong to $wt) is not owed here: this script never asks git
 # anything through a $wt it did not just create. The pair below establishes the
 # path is absent, `git worktree add` then writes the .git and its admin dir
 # itself, and the one later `git -C "$wt"` call (the tree-mutation check) runs
@@ -124,8 +124,8 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # stderr — in the DEFAULT dry run, where `git worktree add` never runs to refuse
 # it downstream, that is exit 0 and a receipt byte-identical to a free path's.
 # `gone()` is the predicate that keeps established-absent and could-not-measure
-# apart (worktree.sh; #725 made it one definition rather than three), so the
-# refusal below is the existing helper, not a new EACCES-aware stat. #727
+# apart (worktree.sh holds the one definition), so the
+# refusal below is the existing helper, not a new EACCES-aware stat.
 #
 # ABSOLUTE, and this is the term to leave alone. `gone()` walks up to the
 # nearest existing ancestor and asks whether IT is searchable; git hands every
@@ -144,7 +144,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # to. And the wording of the first stays hedged — a dangling link here has two
 # provenances with opposite claim states (rc-0 residue, and a release halted
 # mid-flight with the branch and the label still live), and only the hedge is
-# true of both. #728
+# true of both.
 if [ -e "$wt" ] || [ -L "$wt" ]; then
   die "$wt already exists — ticket may already be claimed"
 elif ! gone "$PWD/$wt"; then
@@ -153,37 +153,37 @@ fi
 git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null && die "branch $branch already exists"
 
 # The worktree is built FROM origin/main, so it must resolve before anything is
-# claimed. The lockfile probe that stood here before ADR 0015 read origin/main
+# claimed. The lockfile probe the Recipe cache replaced read origin/main
 # and refused on its absence as a side effect; reading the Recipe cache reads
 # no ref at all, so the precondition is asked for directly — unasked, the
 # DEFAULT dry run would report a ticket claimable that `git worktree add` then
 # refuses under --apply, after the in-progress label is already on the issue.
 # No `--quiet`: git's own reason for not resolving it reaches the terminal
-# beside this refusal (muted-git-guard-sweep.test.mjs).
+# beside this refusal.
 git rev-parse --verify "origin/main^{commit}" >/dev/null \
   || die "origin/main does not resolve to a commit — nothing to build the worktree from"
 
 # The Recipe: its Install step and Test entrypoint, READ from the repository's
 # Recipe cache by derive-testcmd.sh — the one reader, reused rather than
 # reimplemented, so the claim and the review snapshot cannot disagree about
-# the cache's shape or what makes it usable (#142). Nothing here infers either
+# the cache's shape or what makes it usable. Nothing here infers either
 # command: an absent, unproven or unrunnable cache is derive-testcmd.sh's own
 # refusal, passed through in its own words, which name the step that derives
-# the Recipe (ADR 0015).
+# the Recipe.
 #
 # `2>&1` so the reason travels: the child refuses on its STDERR and `$(...)`
 # captures stdout only, so without the merge `die` fires with an empty
 # argument and prints the bare line `claim-ticket: `. It is safe on the success
 # path only because derive-testcmd.sh writes nothing to stderr when it
-# succeeds, even under an interpreter made deliberately chatty (#1175) — a
-# cross-file invariant, so derive-testcmd.test.mjs pins it where the behaviour
+# succeeds, even under an interpreter made deliberately chatty — a
+# cross-file invariant, so derive-testcmd.sh's own tests pin it where the behaviour
 # lives. The sibling is found beside this script (`dirname -- "$0"`), never on
 # PATH, for the reason json.sh and worktree.sh are.
 script_dir=$(dirname -- "$0")
 # Held in one variable, not repeated as a literal at each die below — the two
 # copies could drift apart, and derive-testcmd.sh already keeps its own
 # version the same way (`$derive`).
-rederive="the Recipe cache is invalid; run the Recipe derivation step (run-team phase 0, before the first claim — ADR 0015) to re-derive it"
+rederive="the Recipe cache is invalid; run the Recipe derivation step (run-team phase 0, before the first claim) to re-derive it"
 install=$("$script_dir/derive-testcmd.sh" . install 2>&1) || die "$install"
 echo "    Install step → $install" >&2
 testcmd=$("$script_dir/derive-testcmd.sh" . test 2>&1) || die "$testcmd"
@@ -193,8 +193,8 @@ echo "    test entrypoint → $testcmd" >&2
 # `sh -c`, so a compound one (`cd sub && make test`) keeps its meaning, with the
 # runner's own arguments appended as "$@". It reaches the runner's source
 # single-quoted — each embedded `'` closed, escaped and reopened — so nothing
-# in it expands at write time. `LC_ALL=C` so sed reads the command as bytes
-# (#582). Derived here, ahead of every mutation, so a failure refuses before
+# in it expands at write time. `LC_ALL=C` so sed reads the command as bytes.
+# Derived here, ahead of every mutation, so a failure refuses before
 # the label.
 quoted=$(printf '%s\n' "$testcmd" | LC_ALL=C sed "s/'/'\\\\''/g") \
   || die "could not quote the Test entrypoint for the runner"
@@ -204,14 +204,14 @@ ollama=$((22000 + issue))
 echo "    ports derive from the issue number: postgres=$pg ollama=$ollama" >&2
 
 # Ports above are only ever exported into a FRESH runner this script writes
-# (below): a tracked repo-local agent-test is left byte-identical (#1262), so
+# (below): a tracked repo-local agent-test is left byte-identical, so
 # it never carries them. Starts true and flips to false in that branch, so
 # the receipt can report which happened instead of asserting exports that
 # never reached the runner.
 runner_ports_applied=true
 
 # The stamp the runner carries. The runner is written once at claim time and
-# never rewritten (#124), so an old worktree can be sitting on a runner a later
+# never rewritten, so an old worktree can be sitting on a runner a later
 # template fix never reached. This stamp does not detect or fix that — nothing
 # reads it, nothing refuses on a mismatch — it only makes staleness legible:
 # diff the stamp against a fresh `cksum` of this script to see if they match.
@@ -266,7 +266,7 @@ else
   # origin/main, so `@{u}` RESOLVES — to main. Every "did my push land?" check a
   # member might reach for (`git rev-parse HEAD @{u}`, `git status -sb`) then
   # answers a question about main and reads healthy no matter what the push did.
-  # That is #760's sharp half, measured on two live worktrees. Under
+  # That is the sharp half, measured on two live worktrees. Under
   # push.default=upstream the same config is a live hazard rather than a
   # misleading guard: a bare `git push` would push $branch's commits onto
   # origin/main. (Under the default push.default=simple it refuses loudly, exit
@@ -282,7 +282,7 @@ else
   # push, `git push --force-with-lease -u origin HEAD` (skills/next-ticket/SKILL.md
   # step 7; its no-lease fallback carries `-u` too), and only then can be `[gone]`.
   #
-  # `--no-track` is also why no branch delete uses `-d` (#760): `-d` measures an
+  # `--no-track` is also why no branch delete uses `-d`: `-d` measures an
   # upstream-less branch against local HEAD, refusing a pristine claim behind
   # origin/main. release-ticket.sh's is `git update-ref -d` on a tip read once.
   printf '$ git worktree add --no-track %s -b %s origin/main\n' "$wt" "$branch" >&2
@@ -292,7 +292,7 @@ else
   # Through `sh -c`, as the runner runs the Test entrypoint: the Install step
   # is a shell command out of the cache, not an argv to split. 126 and 127 are
   # the shell's own "cannot execute" and "not found" — the Recipe failed to
-  # RUN, which is what invalidates a cache (ADR 0015) — so they are named as
+  # RUN, which is what invalidates a cache — so they are named as
   # that; any other non-zero is the install itself failing, reported as such.
   irc=0
   (cd "$wt" && sh -c "$install" >/dev/null 2>&1) || irc=$?
@@ -305,7 +305,7 @@ else
   # The Install step must leave the tree exactly as `worktree add` checked it
   # out: the `installClean` proof the cache records, re-asserted on every
   # claim, over the WHOLE tree rather than a list of lockfile names — fleet-ctl
-  # keeps no table of which files an install may touch (ADR 0015). Non-empty
+  # keeps no table of which files an install may touch. Non-empty
   # means the Recipe no longer holds, and the worktree is now corrupt for
   # everyone. Check git's exit status too: a failed status prints nothing,
   # which is byte-identical to "clean" and would let this guard pass without
@@ -318,14 +318,14 @@ else
   # which this check would read as an untouched tree it never actually
   # looked at. `-f`: `git worktree add` writes $wt's `.git` as a regular file,
   # so no healthy run trips this; reference shape and same reason as
-  # release-ticket.sh's own linkage guard (#128). `-x "$wt"` for the reason
+  # release-ticket.sh's own linkage guard. `-x "$wt"` for the reason
   # reap.sh and worktree-audit.sh give their own copy: `-f` is equally false
   # for a `.git` that is absent and for one this process may not stat, and an
   # unsearchable $wt must not be reported as an absence nothing established.
   # Left ungated it ate the case before the `git -C` below could reach it —
   # measured: `.git` still sitting there while the run blamed its deletion.
   # Gated, git answers with its own denial through the elif, which is what
-  # release-ticket.test.mjs already pins as the wording to prefer over one this
+  # release-ticket.sh's tests already pin as the wording to prefer over one this
   # script invents.
   if [ -x "$wt" ] && [ ! -f "$wt/.git" ]; then
     die "$wt has no .git file — cannot verify the Install step left the tree clean"
@@ -340,7 +340,7 @@ else
   # reaches this terminal on its own, which is the "its own denial" the
   # paragraph above means; the die names the failure, not the reason.
   #
-  # `-uall`: #730 (see reap.sh's branch sweep for the full explanation) —
+  # `-uall`: see reap.sh's branch sweep for the full explanation —
   # the untracked mode is CONFIG: an install that CREATES a file the tree does
   # not track or ignore (a lockfile it was never given) dirties the tree as
   # surely as one that rewrites a tracked file, and under
@@ -358,13 +358,13 @@ else
 
   # A runner is already there: the repo tracks its own `agent-test`, and `git
   # worktree add` checked it out with everything else — a repo-local runner,
-  # the home ADR 0015 gives any convenience beyond "exec the Test entrypoint"
+  # the home for any convenience beyond "exec the Test entrypoint"
   # (this repository's own test-argument shim lives in one). Writing
   # over it is what must not happen: the file is TRACKED, so the write leaves a
   # modified tracked path, and `reap.sh` calls `git worktree remove` without
   # `--force` (its own comment: "refuses on modified and untracked files").
   # Every release of every claim would then strand on a file this script wrote
-  # itself (#1262). On this path $runner is always the fresh worktree's own
+  # itself. On this path $runner is always the fresh worktree's own
   # `agent-test`, so existence IS trackedness: nothing else could have put a
   # file there between `worktree add` and here.
   if [ -e "$runner" ]; then
@@ -394,7 +394,7 @@ fi
 # `$type/$issue-$slug`, `$wt` is `.worktrees/$issue-$slug`, `$runner` is
 # `$wt/agent-test`. A quote in either argument emitted a payload no parser
 # accepts, at exit 0 and — under `--apply` — after the worktree and the label
-# already existed (#119). `$install` is the Recipe cache's own string and can
+# already existed. `$install` is the Recipe cache's own string and can
 # carry any byte a shell command can, a quote included; jstr is what keeps it a
 # JSON string. The numeric fields stay unwrapped: `$issue` is a JSON
 # number by the guard above, and the ports are arithmetic on it.
