@@ -311,11 +311,16 @@ test("with no ledger the exit status is the verdict, and nothing is written to a
   assert.equal(readFileSync(join(f.dir, "ledger.md"), "utf8"), ledgerBefore, "a ledger elsewhere is not this run's and is not touched");
 });
 
-test("an explicit --ledger naming no file is no ledger either, and is not created", (t) => {
+test("an explicit --ledger naming no file is no ledger either: the default ledger is not borrowed, and nothing is created", (t) => {
   const f = fixture(t);
+  const own = seedOwnLedger(f);
+  const ownBefore = readFileSync(own, "utf8");
   const absent = join(f.dir, "absent", "ledger.md");
   f.writeRecord(f.baseEntries());
-  okVerdict(standalone(f, "--repo", f.repo, "--ledger", absent));
+  const r = standalone(f, "--repo", f.repo, "--ledger", absent);
+  okVerdict(r);
+  assert.equal(r.json.token, null);
+  assert.equal(readFileSync(own, "utf8"), ownBefore);
   assert.equal(existsSync(join(f.dir, "absent")), false);
 });
 
@@ -455,11 +460,10 @@ test("an ambient GIT_DIR naming another repository does not change which ledger 
   git(other, "init", "-q", "-b", "main");
   f.writeRecord(f.baseEntries());
   const r = spawnSync(process.execPath, [SCRIPT, "--member", "fix-pr-40", "--scratch", f.scratch, "--repo", f.repo],
-    { encoding: "utf8", env: cleanEnv({ GIT_DIR: join(other, ".git"), GIT_WORK_TREE: other }), cwd: f.dir });
+    { encoding: "utf8", env: { ...cleanEnv(), GIT_DIR: join(other, ".git"), GIT_WORK_TREE: other }, cwd: f.dir });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(JSON.parse(r.stdout).token, `dispositions-ok=fix-pr-40:${f.head}`);
   assert.match(readFileSync(ledger, "utf8"), new RegExp(`dispositions-ok=fix-pr-40:${f.head}`));
-  assert.equal(existsSync(join(other, ".fleet")), false);
 });
 
 test("touchedLines reads new-side lines; pure deletions and deleted files touch none", () => {

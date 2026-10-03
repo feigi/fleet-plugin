@@ -235,8 +235,8 @@ const COVERED_MJS = {
   // would answer all four for another repository and judge the record against
   // that repository's diff and write its verdict to that repository's ledger.
   // Measured in dispositions-check.test.mjs, "an ambient GIT_DIR naming
-  // another repository does not change the answer" and "… does not change
-  // which ledger is found".
+  // another repository does not change the answer" (the diff and merge-base)
+  // and "… does not change which ledger is found" (the common dir).
   "dispositions-check.mjs": 1,
 };
 

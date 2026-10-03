@@ -345,7 +345,7 @@ function git(repo, args, what) {
 
 function runLedger(ledgerFile, args, what) {
   try {
-    return execFileSync(process.execPath, [LEDGER_SCRIPT, ...(ledgerFile ? ["--file", ledgerFile] : []), ...args], { encoding: "utf8" });
+    return execFileSync(process.execPath, [LEDGER_SCRIPT, "--file", ledgerFile, ...args], { encoding: "utf8" });
   } catch (e) {
     die(`could not ${what}: ${e.stderr?.trim() || e.message}`);
   }
@@ -361,7 +361,8 @@ function runLedger(ledgerFile, args, what) {
 // a dangling symlink is a ledger that cannot be read rather than an absent one.
 function ledgerInUse(explicit, repo) {
   const file = explicit ?? join(
-    workspaceDirFromGitCommonDir(git(repo, ["rev-parse", "--git-common-dir"], "find the git common dir"), repo) ?? repo,
+    workspaceDirFromGitCommonDir(git(repo, ["rev-parse", "--git-common-dir"], "find the git common dir"), repo)
+      ?? die("could not find the git common dir: git printed none"),
     ".fleet", "ledger.md",
   );
   try {
