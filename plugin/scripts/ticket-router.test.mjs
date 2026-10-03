@@ -79,6 +79,50 @@ test("route: a clean non-exploration Pull prints the full line, REASON=ok, and r
   assert.equal(again.filter((l) => l === COLUMNS.join("\t")).length, 1);
 });
 
+test("route: with no --pending the features row lands beside the guard, in the run's .fleet/", (t) => {
+  const p = world(t);
+  const r = cli(["route", "--session", SESSION, "--ticket", "42", "--arm", "A", "--impl-row", "3",
+    "--issue", p.issue, "--guard", p.guard, "--table", p.table]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(parseFeatures(readFileSync(join(p.dir, "ticket-features.pending.tsv"), "utf8")).length, 1);
+});
+
+// A scripted Pull's step 7, run against the real ledger.mjs: route, write the
+// row with `tier=<CELL>` exactly when the router drew, then dispatch — whose
+// printed `agent` is the definition the `task` call names.
+test("a scripted Pull dispatches the router's cell: tier=<cell> on an Exploration Pull, no tier= otherwise", (t) => {
+  const LEDGER = fileURLToPath(new URL("./ledger.mjs", import.meta.url));
+  const pull = (p, ticket, implRow) => {
+    const out = parseLine(routeCli(p, { ticket, implRow }).stdout);
+    const ledgerFile = join(p.dir, "ledger.md");
+    const env = { ...process.env, PATH: p.dir };
+    delete env.GIT_DIR;
+    delete env.GIT_WORK_TREE;
+    const led = (...args) => {
+      const r = spawnSync(process.execPath, [LEDGER, "--file", ledgerFile, ...args], { encoding: "utf8", env, cwd: p.dir });
+      assert.equal(r.status, 0, `${args.join(" ")}: ${r.stderr}`);
+      return JSON.parse(r.stdout);
+    };
+    const row = led("row", String(ticket), `impl-${ticket}${out.DRAW === "-" ? "" : ` · tier=${out.CELL}`}`);
+    return { out, row: row.line, agent: led("dispatch", String(ticket), `impl-${ticket}`).agent };
+  };
+  const burnIn = world(t, { table: baseTable({ burn_in: true }) });
+  for (const ticket of [101, 102, 103, 104]) {
+    const { out, row, agent } = pull(burnIn, ticket, 1);
+    assert.notEqual(out.DRAW, "-");
+    assert.equal(row, `#${ticket} impl-${ticket} · tier=${out.CELL}`);
+    assert.equal(agent, `fleet-implementer-${out.CELL}`);
+  }
+  const after = world(t);
+  const plain = pull(after, 201, 4);
+  assert.equal(plain.row, "#201 impl-201", "a Pull the router did not draw for carries no tier=");
+  assert.equal(plain.agent, "fleet-implementer-slow-high");
+  const explore = pull(after, 202, 5);
+  assert.equal(explore.row, `#202 impl-202 · tier=${explore.out.CELL}`);
+  assert.notEqual(explore.out.CELL, "slow-high");
+  assert.equal(explore.agent, `fleet-implementer-${explore.out.CELL}`);
+});
+
 test("route: a session given as its directory path records the session id, not the path", (t) => {
   const p = world(t);
   const r = cli(["route", "--session", `/x/sessions/proj/${SESSION}/`, "--ticket", "42", "--arm", "A", "--impl-row", "3",

@@ -10,7 +10,7 @@
 //     Prints one line, `POLICY=<cell> CELL=<cell> DRAW=<k/K|->
 //     STRATUM=<light|heavy|unknown> REASON=<reason>`, and appends the Pull's
 //     ticket-features row to the pending TSV (by default
-//     `.fleet/ticket-features.pending.tsv` under the workspace). Exit 0 on
+//     `ticket-features.pending.tsv` beside `--guard`, in the run's `.fleet/`). Exit 0 on
 //     every data degradation — a missing or unreadable issue, sizing or guard
 //     file degrades the line, never the exit. Exit 2 only on a usage error or
 //     an unreadable/invalid table: the caller does not dispatch then.
@@ -31,14 +31,12 @@
 import { readFileSync, writeFileSync, renameSync, existsSync, appendFileSync, mkdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
 import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { CELL, POLICY_CELL, drawCell, parseMember } from "./ledger-grammar.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { parseTierOutcomes } from "./tier-outcomes.mjs";
-import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 
 const NAME = "ticket-router";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -437,12 +435,6 @@ export function mergedSince({ table, features, verdicts }) {
 // CLI
 // ---------------------------------------------------------------------------
 
-function pendingPathDefault() {
-  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: 10_000, env: gitEnv() });
-  const workspace = workspaceDirFromGitCommonDir(r.status === 0 ? r.stdout : "");
-  return workspace === null ? null : join(workspace, ".fleet", "ticket-features.pending.tsv");
-}
-
 function main() {
   const die = makeDie(NAME);
   const F = defineFlags(die, {
@@ -491,17 +483,13 @@ function main() {
       session, ticket: Number(ticket), arm, implRow: Number(implRowArg), chainHead: F.has("chain-head"),
       issue: readJson(issuePath), sizing: readJson(F.arg("sizing")), guard: readGuard(readJson(guardPath)), table,
     });
-    const pending = F.arg("pending") ?? pendingPathDefault();
-    if (pending === null) {
-      process.stderr.write(`${NAME}: WARNING could not resolve the workspace's .fleet/ — this Pull's ticket-features row is not recorded\n`);
-    } else {
-      try {
-        mkdirSync(dirname(pending), { recursive: true });
-        const header = existsSync(pending) ? "" : `${COLUMNS.join("\t")}\n`;
-        appendFileSync(pending, `${header}${formatFeatureRow(row)}\n`);
-      } catch (e) {
-        process.stderr.write(`${NAME}: WARNING could not append to ${pending}: ${e.message} — this Pull's ticket-features row is not recorded\n`);
-      }
+    const pending = F.arg("pending") ?? join(dirname(guardPath), "ticket-features.pending.tsv");
+    try {
+      mkdirSync(dirname(pending), { recursive: true });
+      const header = existsSync(pending) ? "" : `${COLUMNS.join("\t")}\n`;
+      appendFileSync(pending, `${header}${formatFeatureRow(row)}\n`);
+    } catch (e) {
+      process.stderr.write(`${NAME}: WARNING could not append to ${pending}: ${e.message} — this Pull's ticket-features row is not recorded\n`);
     }
     process.stdout.write(`${line}\n`);
     return;
