@@ -1234,9 +1234,13 @@ append`, as above. Once both files hold this run's rows, and before either is
 committed, run `~/.fleet/bin/fleet-run tier-outcomes.mjs check --live`. Exit 1
 names each row whose `tier` disagrees with the one implementer the member facts
 say ran for its ticket: correct that row's `tier` to the short name it prints,
-or blank it and say why in `note`. Each WARNING names a PR this run's ledger
-marks `reviewed=` that has no row yet — append it before committing if it is
-an implementer PR.
+or blank it and say why in `note`. Exit 1 also names the PRs of the case where
+the latest `run_date`'s filled rows have no implementer row in the member file
+and none could be compared, so nothing from that run was checked: append the
+run's member rows if they are missing, or blank each named row's `tier` and say
+why in `note`.
+Each WARNING names a PR this run's ledger marks `reviewed=` that has no row yet
+— append it before committing if it is an implementer PR.
 
 Both files are the run's own artifacts and neither commits itself. Carry them to
 main the same way the run carries any other controller-authored change; leaving a
