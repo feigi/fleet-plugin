@@ -99,8 +99,9 @@ export const CELL = /^(slow|task|smol)-(minimal|low|medium|high|xhigh|max)$/;
 export const CELL_DEF = new RegExp(`^fleet-implementer-${CELL.source.slice(1)}`);
 
 // The cell a row with no `tier=` runs at: `policy_cell`, `slow-high` on every
-// Pull until the router (spec § 4) picks one per stratum.
-const POLICY_CELL = "slow-high";
+// Pull until the router's table picks one per stratum. Exported so
+// ticket-router.mjs defaults to the same cell this file maps a bare row to.
+export const POLICY_CELL = "slow-high";
 
 // The Exploration Pull's draw (spec § 2): uniform over every cell but
 // `policyCell`, keyed off the row's own `session` and `ticket`, so the draw

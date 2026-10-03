@@ -1,0 +1,24 @@
+{
+  "window_start": null,
+  "fitted_through": null,
+  "n_rows": 0,
+  "stage": 1,
+  "cells": [
+    "slow-high",
+    "task-high",
+    "smol-high"
+  ],
+  "burn_in": true,
+  "rows": {
+    "*": "slow-high"
+  },
+  "classifier": {
+    "b": null,
+    "tau": null
+  },
+  "estimates": {},
+  "guard": {
+    "tripped": [],
+    "n": {}
+  }
+}
