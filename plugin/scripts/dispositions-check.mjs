@@ -51,6 +51,13 @@
 // exists but cannot be read, a git or ledger failure. A missing or
 // unparseable RECORD is judged, not refused: the fix-applier wrote nothing a
 // reader can use, so every finding it had to cover is dropped.
+//
+// Without a ledger — `--ledger`'s path, or the run's `.fleet/ledger.md`, does
+// not exist, as on a standalone `/review-and-fix` with no controller — the
+// record is judged all the same and the exit status is the whole verdict: no
+// token is written, no row is read, and `token` in the stdout payload is null.
+// A ledger that exists is never skipped: one that holds no row for the member
+// is a fault (exit 2), not a standalone run.
 
 import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -58,7 +65,7 @@ import { join, dirname, isAbsolute, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { gitEnv } from "./git-env.mjs";
+import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 import { parseMember, memberTokens } from "./ledger-grammar.mjs";
 import { dispositionsToken, rowNums, sameHead } from "./fleet-tick.mjs";
 
@@ -338,6 +345,20 @@ function runLedger(ledgerFile, args, what) {
   }
 }
 
+// The ledger file this run writes its verdict to, or null when there is none:
+// `--ledger`, else the run's `.fleet/ledger.md` under the git common dir of
+// `repo` — the workspace every worktree of one repository shares, which is
+// where `ledger.mjs dispatch` wrote the member's row. The path is handed to
+// `ledger.mjs` as `--file`, so the existence probe and the calls that follow
+// answer for one file.
+function ledgerInUse(explicit, repo) {
+  const file = explicit ?? join(
+    workspaceDirFromGitCommonDir(git(repo, ["rev-parse", "--git-common-dir"], "find the git common dir"), repo) ?? repo,
+    ".fleet", "ledger.md",
+  );
+  return existsSync(file) ? file : null;
+}
+
 function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
@@ -353,7 +374,6 @@ function main() {
   if (member === null || member.family !== "fix-pr") die(`'${name}' is not a fix-applier — expected fix-pr-<M>, a -b, -c … suffix allowed`);
   const pr = member.number;
   const repo = arg("repo") ?? process.cwd();
-  const ledgerFile = arg("ledger");
 
   const reviewPath = join(scratch, `review-${pr}.json`);
   let review;
@@ -392,6 +412,7 @@ function main() {
   const diff = git(repo, ["-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--unified=0", "-M",
     "--src-prefix=a/", "--dst-prefix=b/", base, head], `diff ${base}..${head}`);
   const top = git(repo, ["rev-parse", "--show-toplevel"], "find the repository root").trim();
+  const ledgerFile = ledgerInUse(arg("ledger"), repo);
 
   const violations = checkDispositions({
     review, record, recordProblem, touched: touchedLines(diff), roots: [review.snapshot, top],
@@ -401,19 +422,21 @@ function main() {
 
   // The verdict lands on the row carrying the member on its own PR's row —
   // where `ledger.mjs dispatch` wrote it, and where the gate reads PR M's
-  // tokens from.
-  const data = JSON.parse(runLedger(ledgerFile, ["read"], "read the ledger"));
-  const row = data.rows.find((r) => rowNums(r).pr === pr && memberTokens(r).some((t) => t.name === member.name));
-  if (row === undefined) die(`${member.name} is on no row of PR #${pr} — \`ledger.mjs dispatch\` records a fix-applier before its record can be checked`);
-  const key = row.split(/\s/)[0];
-  if (!/^#[0-9]+$/.test(key)) die(`the row carrying ${member.name} has no #<n> key for \`ledger.mjs row\` to rewrite it by: ${row}`);
-  const text = row.slice(key.length).trim();
-  const updated = withVerdict(text, token);
-  if (updated === text) console.error(`    ${member.name}: row ${key} already carries ${token} — not written again`);
-  else runLedger(ledgerFile, ["row", key, updated], `write ${token} onto row ${key}`);
+  // tokens from. No ledger, no row: the exit status below is the verdict.
+  if (ledgerFile !== null) {
+    const data = JSON.parse(runLedger(ledgerFile, ["read"], "read the ledger"));
+    const row = data.rows.find((r) => rowNums(r).pr === pr && memberTokens(r).some((t) => t.name === member.name));
+    if (row === undefined) die(`${member.name} is on no row of PR #${pr} — \`ledger.mjs dispatch\` records a fix-applier before its record can be checked`);
+    const key = row.split(/\s/)[0];
+    if (!/^#[0-9]+$/.test(key)) die(`the row carrying ${member.name} has no #<n> key for \`ledger.mjs row\` to rewrite it by: ${row}`);
+    const text = row.slice(key.length).trim();
+    const updated = withVerdict(text, token);
+    if (updated === text) console.error(`    ${member.name}: row ${key} already carries ${token} — not written again`);
+    else runLedger(ledgerFile, ["row", key, updated], `write ${token} onto row ${key}`);
+  }
 
   for (const v of violations) console.error(`${member.name}: ${formatViolation(v)}`);
-  console.log(JSON.stringify({ member: member.name, pr, head, verdict, token, violations }));
+  console.log(JSON.stringify({ member: member.name, pr, head, verdict, token: ledgerFile === null ? null : token, violations }));
   // exitCode, not exit(): stdout to a pipe is written asynchronously, and an
   // exit() here could cut the payload off.
   process.exitCode = verdict === "ok" ? 0 : 1;

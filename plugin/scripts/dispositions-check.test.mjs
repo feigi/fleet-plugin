@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, symlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, symlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -275,6 +275,78 @@ test("nothing is judged or written when the review file or the git history canno
   r = f.check("finisher-pr-40");
   assert.equal(r.status, 2);
   assert.match(r.stderr, /'finisher-pr-40' is not a fix-applier/);
+});
+
+// A standalone `/review-and-fix` has no controller and so no ledger: the run
+// is from the worktree, `--ledger` is not given, and `.fleet/ledger.md` does
+// not exist under its git common dir.
+function standalone(f, ...extra) {
+  const r = spawnSync(process.execPath, [SCRIPT, "--member", "fix-pr-40", "--scratch", f.scratch, ...extra],
+    { encoding: "utf8", env: cleanEnv(), cwd: f.repo });
+  return { ...r, json: r.status === 0 || r.status === 1 ? JSON.parse(r.stdout) : null };
+}
+
+test("with no ledger the exit status is the verdict, and nothing is written to any ledger", (t) => {
+  const f = fixture(t);
+  const ledgerBefore = readFileSync(join(f.dir, "ledger.md"), "utf8");
+  
+  f.writeRecord(f.baseEntries());
+  let r = standalone(f);
+  okVerdict(r);
+  assert.equal(r.json.token, null);
+  assert.deepEqual(r.json.violations, []);
+
+  const bad = f.baseEntries();
+  bad[0] = f.entry("survived", 0, { disposition: "defer" });
+  f.writeRecord(bad);
+  r = standalone(f);
+  mismatch(r, /^fix-pr-40: survived\[0\]: an in-scope survived finding deferred with no reason/m);
+  assert.equal(r.json.token, null);
+  assert.deepEqual(r.json.violations.map((v) => [v.bucket, v.index]), [["survived", 0]]);
+
+  rmSync(join(f.scratch, "dispositions-40.json"));
+  mismatch(standalone(f), /record: no disposition record at .*dispositions-40\.json/);
+
+  assert.equal(existsSync(join(f.repo, ".fleet")), false, "no .fleet/ was created");
+  assert.equal(readFileSync(join(f.dir, "ledger.md"), "utf8"), ledgerBefore, "a ledger elsewhere is not this run's and is not touched");
+});
+
+test("an explicit --ledger naming no file is no ledger either, and is not created", (t) => {
+  const f = fixture(t);
+  const absent = join(f.dir, "absent", "ledger.md");
+  f.writeRecord(f.baseEntries());
+  okVerdict(standalone(f, "--repo", f.repo, "--ledger", absent));
+  assert.equal(existsSync(join(f.dir, "absent")), false);
+});
+
+test("the run's own .fleet/ledger.md is found without --ledger, and the verdict is written to it", (t) => {
+  const f = fixture(t);
+  const ledger = join(f.repo, ".fleet", "ledger.md");
+  const run = (...args) => {
+    const r = spawnSync(process.execPath, [LEDGER, "--file", ledger, ...args], { encoding: "utf8", env: cleanEnv() });
+    assert.equal(r.status, 0, r.stderr);
+  };
+  run("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${f.head}:2/1/1`);
+  run("dispatch", "40", "fix-pr-40");
+  run("settle", "fix-pr-40", `applied:${f.head.slice(0, 7)}`);
+  f.writeRecord(f.baseEntries());
+  const r = standalone(f);
+  okVerdict(r);
+  assert.equal(r.json.token, `dispositions-ok=fix-pr-40:${f.head}`);
+  assert.match(readFileSync(ledger, "utf8"), new RegExp(`dispositions-ok=fix-pr-40:${f.head}`));
+});
+
+test("a ledger that exists is never skipped: one with no row for the member is a fault, not a standalone run", (t) => {
+  const f = fixture(t);
+  const other = join(f.dir, "other-ledger.md");
+  const made = spawnSync(process.execPath, [LEDGER, "--file", other, "row", "11", "impl-11=PR#41 → PR#41"], { encoding: "utf8", env: cleanEnv() });
+  assert.equal(made.status, 0, made.stderr);
+  const before = readFileSync(other, "utf8");
+  f.writeRecord(f.baseEntries());
+  const r = standalone(f, "--ledger", other);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /fix-pr-40 is on no row of PR #40/);
+  assert.equal(readFileSync(other, "utf8"), before);
 });
 
 test("an ambient GIT_DIR naming another repository does not change the answer", (t) => {
