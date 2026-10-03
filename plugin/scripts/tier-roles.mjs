@@ -279,6 +279,11 @@ export function checkRoutes({ agentsDir, agentsSource = `--agents ${agentsDir}`,
   const overrideKeys = Object.keys(overrides ?? {});
   const fleetKeys = overrideKeys.filter((k) => k.startsWith(FLEET_NAME_PREFIX)).sort();
   if (fleetKeys.length > 0) {
+    // The remedy writes the operator's non-fleet entries back in full because
+    // `omp config set` replaces the whole `task.agentModelOverrides` record
+    // rather than merging into it, and `omp config reset` empties it. Measured
+    // on omp 18.4.10: setting {"other":"y"} over {"fleet-a":"x","other":"y"}
+    // left exactly {"other":"y"}, and `reset` left {}.
     const nonFleet = Object.fromEntries(
       overrideKeys.filter((k) => !k.startsWith(FLEET_NAME_PREFIX)).map((k) => [k, overrides[k]]),
     );
