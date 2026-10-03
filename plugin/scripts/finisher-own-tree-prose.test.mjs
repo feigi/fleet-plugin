@@ -236,7 +236,7 @@ test("duty 1 names the instrument for each check, and halts on a row that cannot
   );
   assert.doesNotMatch(
     flat(RUN_TEAM),
-    /\balways\s+ahead\b/,
+    /\balways\b[^.]{0,20}\bahead\b/i,
     "the run-team skill states an unconditional lead over origin/main again — a PR worktree's `ahead` reads 0 once its merge commit is in a fetched origin/main",
   );
   // The three non-clean row shapes, each halting and each named. Unreadable
