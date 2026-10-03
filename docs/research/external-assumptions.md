@@ -58,7 +58,7 @@ refuses, misreads, or silently does nothing.
 **Harness**
 
 - omp alone (ADR 0014); the install is the native extension package (ADR 0021): `node_modules/@feigi/fleet-ctl` + `omp-plugins.lock.json` resolution, install layout `<installPath>/scripts/<script>`; Resolver copy placed at `~/.fleet/bin/fleet-run`. — shell#94–101, prose#144
-- The only omp settings a fleet run depends on: `modelRoles.slow|task|smol` set to real models (ADR 0011/0014/0021). The `enabledProviders` gate retired with the marketplace route (18.2.1 origin exemption); `eval.workpool.freshAgents` and `task.agentModelOverrides` retired earlier (ADR 0012, ADR 0014). — prose#127–128
+- The only omp settings a fleet run needs set: `modelRoles.slow|task|smol` set to real models (ADR 0011/0014/0021). The `enabledProviders` gate retired with the marketplace route (18.2.1 origin exemption); `eval.workpool.freshAgents` and the `task.agentModelOverrides` precondition retired earlier (ADR 0012, ADR 0014). ADR 0014 retired `task.agentModelOverrides` as a lever but did not clear it: a leftover `fleet-` key there shadows a definition's own `model:`, so `tier-roles.mjs --check` refuses the run and prints the remedy (`omp config set task.agentModelOverrides '<non-fleet entries as JSON>'`, or `omp config reset task.agentModelOverrides` when none remain), which the operator runs — the fleet never does. — prose#124–125, prose#127–128
 - Supported platforms: macOS, Linux, WSL. Native Windows unsupported by ADR 0009. — prose#83
 
 **Humans**
