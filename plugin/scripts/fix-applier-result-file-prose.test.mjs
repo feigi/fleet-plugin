@@ -81,7 +81,11 @@ test("the testEnvironment recipe calls it evidence about the shared test run, an
   const line = recipes.find((l) => l.startsWith("jq -r '.testEnvironment' "));
   assert.ok(line, "the result-file section no longer has a `jq -r '.testEnvironment'` recipe");
   assert.match(line, phrase("# what the shared test run is evidence about"), "the testEnvironment recipe's comment no longer names the shared test run");
-  for (const l of recipes) assert.doesNotMatch(l, /test_run/, `a jq recipe line names the retired test_run field: ${l}`);
+  // Every line of every fenced recipe block, not only the `jq ` ones: the `R=`
+  // line and any other line the block grows carry comments too.
+  const fenced = [...section().matchAll(/^```bash\n([\s\S]*?)^```$/gm)].flatMap((m) => m[1].split("\n"));
+  assert.ok(fenced.length > 0, "the result-file section lost its fenced recipe block");
+  for (const l of fenced) assert.doesNotMatch(l, /test_run/i, `a recipe line names the retired test_run field: ${l}`);
 });
 
 test("the fix-applier owns the mutual-exclusion scan, run twice, with a single refuter for a conflicting pair", () => {

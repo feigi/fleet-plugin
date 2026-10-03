@@ -408,14 +408,32 @@ test("the returned object carries dimensionsUnrun alongside dimensionsRun", () =
 //
 // The no-copy check reads the whole note with its line wrapping flattened, so
 // a request appended after the opening paragraph, or one the hard wrap splits
-// across two lines, is still one sentence to it. The run, its counts or its
-// log must follow the verb within a few words: the opening paragraph's "your
-// own copy of the snapshot are still yours to run" uses `copy` as a noun and
-// ends on `run` in the same sentence. Every rendering below must pass it,
-// which is what keeps it from refusing the note's own vocabulary: that
-// sentence, "reported unrun", "returned nothing", "reported counts but no exit
-// status".
-const COPY_REQUEST = /\b(?:report|copy|echo|record|return|repeat|include|paste)\b(?:\s+[^\s.]+){0,4}?\s+(?:run|counts?|log)\b/i;
+// across two lines, is still one sentence to it. It is a bounded word list, not
+// a proof: a request worded with a verb or noun outside the lists passes it.
+// COPY_REQUEST matches three shapes: a copy verb followed within a few words
+// by the run, its counts, its log or its result; a copy verb followed in the
+// same sentence by a destination in the specialist's own output ("in your
+// result", "to the payload"); and the run, counts or log said to "must be"
+// reported, returned, included and the like. The verbs are whole words, so
+// inflected ones never match as written — and must not be widened to
+// inflections, because the "no exit status" rendering's own "reported counts
+// but no exit status" would then match. The word window is what keeps the
+// opening paragraph's "your own copy of the snapshot are still yours to run"
+// green: it uses `copy` as a noun and ends on `run` in the same sentence.
+// Every rendering below must pass it. The run-is-null reason ("returned
+// nothing") is not rendered here: sharedRunNote dereferences run.command, and
+// that text reaches a note only as the "(the test-run agent returned nothing)"
+// error suffix runReview sets.
+const COPY_VERB = "report|copy|echo|record|return|repeat|restate|include|paste|attach|quote|put|add|list";
+const COPY_OBJECT = "run|counts?|logs?|results?";
+const COPY_REQUEST = new RegExp(
+  [
+    String.raw`\b(?:${COPY_VERB})\b(?:\s+[^\s.]+){0,4}?\s+(?:${COPY_OBJECT})\b`,
+    String.raw`\b(?:${COPY_VERB})\b[^.]*\b(?:in|to|into)\s+(?:your|the)\s+(?:\w+\s+)?(?:result|payload|scope_searched|summary|findings?)\b`,
+    String.raw`\b(?:${COPY_OBJECT})\b(?:\s+[^\s.]+){0,3}?\s+(?:must|should|shall)\s+be\s+(?:report|return|includ|record|cop|attach|quot|past|echo|list|add|put)\w*`,
+  ].join("|"),
+  "i",
+);
 test("the shared-run note hands over the run and forbids a rerun, and asks for no copy of it in any rendering", () => {
   const base = { command: "node --test", logPath: "/r/test-run.log" };
   const usable = { ...base, exitCode: 0, tests: 5, pass: 5, fail: 0 };
