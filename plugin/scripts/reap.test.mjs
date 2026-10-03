@@ -2668,6 +2668,7 @@ test("a detached worktree whose HEAD is merged is removed, not walked past (#381
   const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
   assert.ok(existsSync(wt), "fixture");
   assert.ok(hasAttribute(git(w, "worktree", "list", "--porcelain"), "detached"), "fixture: the worktree must really be detached");
+  assert.ok(listedNames(w).includes("79-brief"), "fixture: the worktree must start out listed");
 
   const { code, json, stderr } = runReap(w, ["--apply"]);
 
@@ -2963,6 +2964,7 @@ test("a detached worktree whose directory was deleted by hand still has its regi
   const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
   rmSync(wt, { recursive: true, force: true });
   assert.ok(hasAttribute(git(w, "worktree", "list", "--porcelain"), "prunable"), "fixture: the stale registration must still be listed");
+  assert.ok(listedNames(w).includes("79-brief"), "fixture: the stale registration must be listed by name before the run");
 
   const { code, json } = runReap(w, ["--apply"]);
 

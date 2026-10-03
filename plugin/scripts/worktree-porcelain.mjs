@@ -17,11 +17,19 @@ export const worktreeNames = (porcelain) =>
     : l.startsWith("branch refs/heads/") ? [l.slice("branch refs/heads/".length)]
     : []);
 
+const ATTRIBUTES = new Set(["locked", "prunable", "detached"]);
+
 /**
  * Whether any worktree in the listing carries the attribute `attr`
  * (`locked`, `prunable`, `detached`). git prints an attribute on a line of its
  * own, the bare word or the word, a space and a reason, so the line is matched
- * whole and a path containing the word never is.
+ * whole and a path containing the word never is. Any other `attr` throws: a
+ * misspelling would answer false for ever, and a guard that asserts the
+ * attribute's absence would pass on it.
  */
-export const hasAttribute = (porcelain, attr) =>
-  porcelain.split("\n").some((l) => l === attr || l.startsWith(`${attr} `));
+export const hasAttribute = (porcelain, attr) => {
+  if (!ATTRIBUTES.has(attr)) {
+    throw new Error(`hasAttribute: unknown attribute ${JSON.stringify(attr)}; one of ${[...ATTRIBUTES].join(", ")}`);
+  }
+  return porcelain.split("\n").some((l) => l === attr || l.startsWith(`${attr} `));
+};

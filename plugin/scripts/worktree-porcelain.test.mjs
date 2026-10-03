@@ -25,8 +25,9 @@ const git = (cwd, ...args) =>
   execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
 
 /**
- * A checkout on `main` whose parent directories spell every name and attribute
- * the guards look for, the way an operator's TMPDIR can.
+ * A checkout on `main` whose parent directories spell the attributes the guards
+ * look for (`locked`, `prunable`, `detached`) and some of the names they look
+ * for (`feature/merged`, `79-brief`), the way an operator's TMPDIR can.
  */
 function repoUnder(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "worktree-porcelain-")));
@@ -75,4 +76,27 @@ test("a worktree's own basename, branch and attributes are reported", (t) => {
 
   rmSync(lone, { recursive: true, force: true });
   assert.equal(hasAttribute(listing(w), "prunable"), true);
+});
+
+test("a lock reason that spells a guard's prefix is not a name", (t) => {
+  const w = repoUnder(t);
+  const a = join(w, ".worktrees", "a");
+  git(w, "worktree", "add", "-q", "-b", "fix/a", a, "main");
+  git(w, "worktree", "lock", a, "--reason", "worktree on usb");
+  const b = join(w, ".worktrees", "b");
+  git(w, "worktree", "add", "-q", "-b", "fix/b", b, "main");
+  git(w, "worktree", "lock", b, "--reason", "branch refs/heads/held");
+  const c = join(w, ".worktrees", "c");
+  git(w, "worktree", "add", "-q", "-b", "fix/c", c, "main");
+  git(w, "worktree", "lock", c, "--reason", "see refs/heads/held");
+  const l = listing(w);
+  for (const reason of ["worktree on usb", "branch refs/heads/held", "see refs/heads/held"]) {
+    assert.match(l, new RegExp(`^locked ${reason}$`, "m"), `fixture: the reason is on its own line: ${l}`);
+  }
+
+  assert.deepEqual(worktreeNames(l), ["w", "main", "a", "fix/a", "b", "fix/b", "c", "fix/c"]);
+});
+
+test("an attribute git never prints is refused, not answered false", () => {
+  assert.throws(() => hasAttribute("worktree /x\nlocked\n", "lock"), /unknown attribute "lock"/);
 });

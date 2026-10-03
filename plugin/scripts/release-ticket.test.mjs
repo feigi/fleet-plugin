@@ -995,6 +995,7 @@ test("the locked-stray unlock hint survives a literal ' in the worktree path (#1
   git(c.wt, "checkout", "-q", "--detach", "HEAD");
   git(r.w, "worktree", "lock", c.wt, "--reason", "held by a review");
   rmSync(c.wt, { recursive: true, force: true });
+  assert.ok(hasAttribute(git(r.w, "worktree", "list", "--porcelain"), "locked"), "fixture: the stray must really be locked before the remedy runs");
 
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 1, stderr);
@@ -1035,6 +1036,7 @@ test("the locked-stray unlock hint survives a plain space in the worktree path (
   git(c.wt, "checkout", "-q", "--detach", "HEAD");
   git(r.w, "worktree", "lock", c.wt, "--reason", "held by a review");
   rmSync(c.wt, { recursive: true, force: true });
+  assert.ok(hasAttribute(git(r.w, "worktree", "list", "--porcelain"), "locked"), "fixture: the stray must really be locked before the remedy runs");
 
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 1, stderr);
