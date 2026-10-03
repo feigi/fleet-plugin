@@ -243,6 +243,18 @@ const COVERED_MJS = {
   // another repository does not change the answer" (the diff and merge-base)
   // and "… does not change which ledger is found" (the common dir).
   "dispositions-check.mjs": 1,
+  // ONE scrubbed env, built once and handed to every child — the `git(args,
+  // cwd)` primitive behind the common-dir, origin/main, worktree, status and
+  // diff calls, AND the one `sh -c` runner of the Install step, the Test
+  // entrypoint and the mutation. An ambient GIT_DIR would answer the first for
+  // another repository and run the Recipe against that repository's tree while
+  // the cache landed here. Measured in recipe-prove.test.mjs, "an ambient
+  // GIT_DIR naming another repository does not change the answer" (the git
+  // primitive) and "the Install step and the Test entrypoint run against their
+  // own worktree whatever GIT_DIR the caller exports" (the `sh -c` runner). The
+  // cache reader child gets the same env but unsets both itself, so no
+  // fixture can tell its env apart.
+  "recipe-prove.mjs": 1,
 };
 
 // The two-name-only exemption list #1599's second design question answers

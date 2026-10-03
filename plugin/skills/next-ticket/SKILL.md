@@ -76,7 +76,7 @@ gh label create in-progress --color FBCA04 --force   # first time only
 gh issue edit <N> --add-label in-progress
 ```
 
-Infer branch/worktree convention from `git worktree list` / `git branch -r` — commonly `feat|fix|refactor/<N>-slug` and `.worktrees/<N>-slug`. Branch off fresh `origin/main`, install deps, run test baseline.
+Infer branch/worktree convention from `git worktree list` / `git branch -r` — commonly `feat|fix|refactor/<N>-slug` and `.worktrees/<N>-slug`. Branch off fresh `origin/main`, run the Install step, run the Test entrypoint as the baseline — both the repo's **Recipe**, read from its Recipe cache: `~/.fleet/bin/fleet-run derive-testcmd.sh . install` and `… . test` print them. **No usable cache (either refuses) → run the Recipe derivation step first:** dispatch a `task` member, agent `fleet-recipe-deriver`, its prompt naming the main checkout's absolute path as `<repo>` and a scratch directory of its own; it reads the repo, proves both commands in a throwaway worktree and writes the cache only on proof. `RECIPE NOT PROVEN` → stop and give the maintainer its reason; never pick a command yourself.
 
 Abandoned before PR opens → remove `in-progress`.
 
@@ -90,7 +90,7 @@ Come back here. The sizing path hands off; this step always follows.
 
 ```bash
 git fetch origin && git rebase origin/main   # rebase, never merge main in
-<test command>                               # re-run after rebasing
+<test command>                               # the Recipe's Test entrypoint; re-run after rebasing
 git push --force-with-lease -u origin HEAD
 gh pr create --base main --body "…
 

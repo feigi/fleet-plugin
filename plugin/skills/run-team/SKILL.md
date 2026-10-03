@@ -361,6 +361,52 @@ phase, or in any later one, asks the maintainer which tickets to take.
    before this run's own first tick or beat, either of which writes the mark
    the guard reads. Older archives, hand-named ones included, are left alone.
 
+   **Derive the Recipe — the Recipe derivation step — before the fold-in below
+   and before the first claim.** Every claim runs this repository's Install
+   step and bakes its Test entrypoint into the member's runner, and every
+   review reads the Test entrypoint, all out of the **Recipe cache**
+   (`.fleet/recipe.json` beside the common git dir); no script infers either
+   command. Check it first: `~/.fleet/bin/fleet-run derive-testcmd.sh .
+   install` and `~/.fleet/bin/fleet-run derive-testcmd.sh . test`. **Both exit
+   0 → the cache is present and valid: use it as it stands and derive
+   nothing.** Either refuses → derive it. This step is yours: one derivation
+   per run start at most, never one per member, and a member never derives.
+   Dispatch a `task` member named `derive-recipe`, agent
+   `fleet-recipe-deriver`, and wait for its report — nothing in this run can
+   claim before it lands:
+
+   > Derive, prove and cache the Recipe of the repository at `<repo>`. Your
+   > scratch directory is `<scratch>/derive-recipe/`; write nowhere else.
+   > Follow your definition's procedure exactly, and end with its report line.
+
+   `<repo>` is this main checkout's absolute path and `<scratch>` is resolved
+   to an absolute path before you send it. The member reads the repository,
+   proposes both commands and proves them with `recipe-prove.mjs` in a
+   throwaway worktree of `origin/main`: the Install step must leave the tree
+   clean, and the Test entrypoint must be shown to run real tests — the
+   runner's own non-zero count, or a deliberate mutation of one test that
+   turns the run red. Only a proof writes the cache, with `derivedAt` (the
+   `origin/main` commit it ran against) and the proof itself. **`RECIPE
+   PROVEN`** → re-run both `derive-testcmd.sh` reads; their output is the
+   Recipe this run uses. **`RECIPE NOT PROVEN`** → stall, below.
+
+   **Mid-run, a cache that stops running is re-derived once, then the run
+   stalls.** A claim or a review that refuses because the Recipe cache is
+   invalid — a command that no longer runs, or an Install step that changed
+   the tree — is the one mid-run trigger: dispatch `derive-recipe` again
+   exactly as above, then retry what refused. The Install step's refusals
+   fire after the claim has labelled the ticket and created its worktree, so
+   release that claim with `release-ticket.sh` first (**Release the claims
+   that never became PRs**). A red suite never triggers it: a failing test is
+   a finding, not a stale Recipe. **Stall:** `RECIPE NOT PROVEN` from any
+   derivation, or a second invalid-cache refusal after this run's one
+   re-derivation, halts the run — no Pull, no claim, no review dispatch — and
+   you report `STALL — Recipe not proven: <cause>` to the maintainer with the
+   deriver's reason verbatim. A repository the fleet cannot run needs human
+   hands, the `ready-for-human` cause: a toolchain this machine lacks, or a
+   suite that runs no tests the proof can see. It is never a loop: no third
+   derivation, and never a cache written by hand.
+
    **Fold in every PR a prior run left open, before shortlisting.** A chore PR
    carrying that run's own metrics, or ticket work whose review was deferred —
    both are reviewable work no member otherwise picks up, because the Shortlist
@@ -730,7 +776,7 @@ oldest-first slot; its row is rewritten to `impl-<N> …` when it is pulled,
 because `row` replaces the whole line.
 
 **Claiming.** `~/.fleet/bin/fleet-run claim-ticket.sh <N> impl-<N> implementer --apply` does
-the label, worktree, branch, frozen install, lockfile-clean assertion, and the
+the label, worktree, branch, the Recipe's Install step, the clean-tree assertion, and the
 isolation runner in one serial pass. The two arguments are always that literal
 pair — `impl-<N>` as `<slug>`, `implementer` as `<type>` — so the claim is
 branch `implementer/<N>-impl-<N>`, worktree `.worktrees/<N>-impl-<N>`. Never
@@ -738,9 +784,12 @@ read them off `git branch -r` or `git worktree list`: human branches on origin
 (`fix/…`, `docs/…`) have another shape, and the script takes both arguments as
 free text, so a pair copied from one claims under that shape at exit 0.
 
-**Infer `<install>` — never default to `npm install`.** A lockfile-mutating
-install in a throwaway worktree corrupts it for everyone; the script derives the
-frozen form from the lockfile and refuses to guess.
+**The Install step comes from the Recipe cache — never pass or infer one.** The
+claim reads it, and the Test entrypoint, through `derive-testcmd.sh`, runs the
+Install step in the fresh worktree and refuses if it left any file changed: an
+install that rewrites the tree in a throwaway worktree corrupts it for everyone.
+No cache is phase 0's Recipe derivation step not having run; an invalid one is
+its re-derive-once rule.
 
 **Materialize the isolation envelope as a file, not a briefing.** The runner is
 tracked at the repo root since #55, so every checkout has one; it derives its
@@ -2128,14 +2177,15 @@ The fix-applier prompt and every refuter brief carry the rule and the safe
 invocation form; the merge bot's brief is the wrong seat, because a bot
 reads gates and never injects a fault.
 
-**Where `testCmd` comes from:** the repo's own test command, the one you hand
-specialists per **Give specialists a stack-free test command** above — in this
-repo `node --test plugin/scripts/*.test.mjs`. Pass the same string to the
-review, to the fix-applier, and to the finisher — whose duty-2 mutation gate
-runs it too — so every gate runs one command. Omit it from the review args and
-the review (`review-core.mjs`, in a runner) now DERIVES it
-from the repo under review (#142) instead of defaulting to a fixed string —
-refusing outright if it can't; the fix-applier has no such fallback, so
+**Where `testCmd` comes from:** the repository's Test entrypoint, out of the
+Recipe cache phase 0's Recipe derivation step proved —
+`~/.fleet/bin/fleet-run derive-testcmd.sh . test` prints it, in this repo
+`node --test plugin/scripts/*.test.mjs` — and the one you hand specialists per
+**Give specialists a stack-free test command** above. Pass the same string to
+the review, to the fix-applier, and to the finisher — whose duty-2 mutation
+gate runs it too — so every gate runs one command. Omit it from the review args
+and the review (`review-core.mjs`, in a runner) reads the same cache itself,
+refusing outright when there is none; the fix-applier has no such fallback, so
 substituting `<testCmd>` with nothing leaves it no gate at all.
 
 **Where `<branch>` comes from:** the PR's head branch —

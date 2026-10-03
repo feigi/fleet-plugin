@@ -8,21 +8,24 @@ entrypoint** that runs the repo's own suite. Both are derived by agent
 reasoning over the repo, never guessed from a hardcoded table of
 technologies
 ([ADR 0015](../adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md)).
-The reading side has shipped (#2117); the deriving side is still open
-(#2118).
+The reading side shipped with #2117 and the deriving side with #2118.
 
 ## How it works
-1. **Derive (planned, #2118).** An agent reasons over the repo to
-   choose the Install step and the Test entrypoint.
-2. **Prove (planned, #2118).** The Install step is usable only once it
-   has run in a fresh worktree and left the tree clean; the Test
-   entrypoint is usable only once it has actually run and shown to
-   execute real tests — a non-zero test count, or a deliberate
-   mutation turning red, is what "passed" means.
+1. **Derive.** The
+   [`fleet-recipe-deriver`](../../plugin/agents/fleet-recipe-deriver.agent.md)
+   agent reads the repo (README, build files, CI workflow) and chooses the
+   Install step and the Test entrypoint. The run-team controller dispatches
+   it in phase 0 when the cache is missing or invalid; a standalone
+   `next-ticket` or `review-and-fix` session dispatches it the same way.
+2. **Prove.** [`recipe-prove.mjs`](../../plugin/scripts/recipe-prove.mjs)
+   runs both commands in a throwaway worktree of `origin/main`. The Install
+   step must leave the tree clean; the Test entrypoint must be shown to
+   execute real tests — the runner's own non-zero count, or a deliberate
+   mutation turning the run red.
 3. **Cache.** A proven Recipe lives in the **Recipe cache**,
    `<workspace>/.fleet/recipe.json` in the main checkout, carrying the
-   commit it was derived at and the proof. Only the deriving agent
-   writes it (#2118, still open); no script does.
+   commit it was derived at and the proof. `recipe-prove.mjs` is its only
+   writer, and writes only once the proof holds.
 4. **Read (shipped, #2117).**
    [`derive-testcmd.sh`](../../plugin/scripts/derive-testcmd.sh) is the
    one reader of the cache and infers nothing. It is reused (never
