@@ -2045,11 +2045,17 @@ function muteHolder() {
 // degrade arm has to stay fatal, exactly as it was before #1585 introduced
 // scanning at all.
 //
-// 8123 just has to be held by SOMEONE — us, or whatever already had it —
-// so the blocker is a bare net server.
-test("CLI: a derived port held by anything is fatal on the degrade arm — there is no identity to scan for", async () => {
+// The blocker is a bare net server, and it has to be OURS: a port some
+// outside process already holds can be let go between this bind and
+// board's own, and board then binds 8123 and serves (#2522). The degrade
+// arm derives no port but 8123, so there is none to move to: when an
+// outside process holds it, the row skips rather than ride that process's
+// timing.
+test("CLI: a derived port held by anything is fatal on the degrade arm — there is no identity to scan for", async (t) => {
   const blocker = createServer();
-  await new Promise((res) => { blocker.once("error", res); blocker.listen(8123, res); });
+  const failure = await new Promise((res) => { blocker.once("error", res); blocker.listen(8123, () => res(null)); });
+  if (failure?.code === "EADDRINUSE") return t.skip(heldOutside(8123));
+  if (failure) throw failure;
   const nobin = tempDir("board-nobin-");
   const cwd = tempDir("board-serve-");
   try {
@@ -2621,11 +2627,22 @@ test("cockpitPorts: the window wraps at the top of the range rather than leaving
 
 // A holder serving `dir` on a real ephemeral port, through the same
 // server-creation seam the cockpit itself uses — no second I/O surface, in
-// the tests either.
+// the tests either. A port someone else already holds comes back as
+// `port: null`; any other bind failure rejects.
 async function holderOn(dir, port = 0) {
   const server = createBoardServer(dir);
-  const bound = await new Promise((res) => { server.once("error", () => res(null)); server.listen(port, () => res(server.address().port)); });
+  const bound = await new Promise((res, rej) => {
+    server.once("error", (e) => (e.code === "EADDRINUSE" ? res(null) : rej(e)));
+    server.listen(port, () => res(server.address().port));
+  });
   return { server, port: bound };
+}
+
+// The skip reason for a row that could not bind its fixed port itself
+// (#2522): the outside process holding it can let go before the launch
+// binds, and the launch then takes the port the row needed held.
+function heldOutside(port) {
+  return `port ${port} is held by a process outside this test, which can release it before the launch binds`;
 }
 
 const boardDir = (payload) => {
@@ -2908,13 +2925,14 @@ for (const [platform, launchers, ran, warns] of [
 // workspace field distinguishes it from the cockpit reused above. A
 // handshake that asks "did anyone answer" rather than "whose board is this"
 // adopts it, and this run gets no board of its own at all.
-test("CLI: a holder reporting a different workspace is not adopted — the launch serves elsewhere", async () => {
+test("CLI: a holder reporting a different workspace is not adopted — the launch serves elsewhere", async (t) => {
   const bin = gitOnlyPath(), repo = gitRepo("board-ws-foreign-");
   const { port: derived } = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
   const dir = boardDir(JSON.stringify({ tickets: [], workspace: "/some/other/workspace" }));
-  const { server } = await holderOn(dir, derived);
-  const launch = serveProcess(repo, bin, ["--interval", "3600"]);
+  const { server, port: held } = await holderOn(dir, derived);
+  const launch = held === null ? null : serveProcess(repo, bin, ["--interval", "3600"]);
   try {
+    if (!launch) return t.skip(heldOutside(derived));
     const url = await withTimeout(launch.url, 20000, "the launch to step over the foreign holder");
     assert.notEqual(url, `http://localhost:${derived}`, "the launch adopted a board belonging to another workspace");
     const window = cockpitPorts({ port: derived, derived: true });
@@ -2924,7 +2942,7 @@ test("CLI: a holder reporting a different workspace is not adopted — the launc
     await untilBoardJson(url);
     assert.equal((await (await fetch(`${url}/board.json`)).json()).workspace, realpathSync(repo));
   } finally {
-    launch.p.kill("SIGKILL");
+    launch?.p.kill("SIGKILL");
     server.close(() => {});
     for (const d of [bin, repo, dir]) rmSync(d, { recursive: true, force: true });
   }
@@ -2944,16 +2962,20 @@ test("CLI: a holder reporting a different workspace is not adopted — the launc
 // PROBE_TIMEOUT_MS). That is the bound doing its job rather than a hang,
 // and it is why this row is the only slow one here — the rows that need a
 // holder to really answer use serveProcess(), which leaves the loop free.
-test("CLI: an exhausted derived range exits non-zero and names the ports it tried", async () => {
+test("CLI: an exhausted derived range exits non-zero and names the ports it tried", async (t) => {
   const bin = gitOnlyPath(), repo = gitRepo("board-ws-full-");
   const instance = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
   const ports = cockpitPorts(instance);
   const dir = boardDir(undefined);
   const blockers = [];
   try {
-    // A port already held by something else is held either way — what this
-    // row needs is the range full, not our own socket on every port in it.
-    for (const p of ports) blockers.push((await holderOn(dir, p)).server);
+    // The range full of OUR sockets: a port something else already holds
+    // can be let go before the launch binds, and the launch then serves.
+    for (const p of ports) {
+      const holder = await holderOn(dir, p);
+      if (holder.port === null) return t.skip(heldOutside(p));
+      blockers.push(holder.server);
+    }
     const r = serveSync(repo, bin, ["--interval", "3600"], 30000);
     assert.equal(r.status, 2, `an exhausted range must refuse, not hang and not succeed: ${r.stderr}`);
     for (const p of ports) assert.match(r.stderr, new RegExp(`\\b${p}\\b`), `the refusal does not name ${p}: ${r.stderr}`);
