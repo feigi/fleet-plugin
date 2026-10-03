@@ -254,6 +254,13 @@ test("a mutation that changes no tracked file is refused, not counted as red", (
   assert.match(r.err, /the mutation \(adds a file\) changed no tracked file/);
 });
 
+test("a mutation that stages its edit still counts as changing a tracked file", () => {
+  const { dir } = repo(GO_FILES);
+  const r = prove(dir, [...GO_PROOF.slice(0, 4), "--mutate", `${GO_PROOF[5]} && git add calc.go`, "--mutation", "Add subtracts, staged"]);
+  assert.equal(r.status, 0, r.err);
+  assert.match(JSON.parse(readFileSync(cachePath(dir), "utf8")).mutation, /changed calc\.go$/);
+});
+
 test("no proof given is a refusal that still shows where the run's output is", () => {
   const { dir } = repo(MAVEN_FILES);
   const r = prove(dir, ["--install", "true", "--test", "mvn -q test"]);

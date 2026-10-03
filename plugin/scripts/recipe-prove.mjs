@@ -175,7 +175,9 @@ function prove(o, wt, logs) {
     const mutateLog = join(logs, "mutate.log");
     const mrc = sh(o.mutate, wt, mutateLog);
     if (mrc !== 0) throw notProven(`the mutation command '${o.mutate}' failed (exit ${mrc}); its output: ${mutateLog}`);
-    const changed = git(["diff", "--name-only"], wt);
+    // Against HEAD, not the index: a mutation that stages its edit (`git mv`,
+    // `git add`) changed a tracked file just as surely.
+    const changed = git(["diff", "HEAD", "--name-only"], wt);
     if (!changed.ok) throw notProven(`could not read what the mutation changed: ${changed.err}`);
     if (!changed.out) throw notProven(`the mutation (${o.mutation}) changed no tracked file — mutate a test, or the code a test covers`);
     const mutatedLog = join(logs, "test-mutated.log");
