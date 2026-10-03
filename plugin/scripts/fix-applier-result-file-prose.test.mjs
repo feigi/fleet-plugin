@@ -3,12 +3,13 @@
 // and owns every per-PR ruling the controller used to make before dispatch —
 // both mutual-exclusion scans, the suggested-fix re-derivation, `refuted=false`
 // ≠ apply, per-site measurement for a sibling-site extension, and reading
-// `testEnvironment`/`cwdAudit` before acting on a `test_run`. Their new home is
-// review-and-fix.md's `## The review result file`, which is the copy the
-// fix-applier reads. The controller-side copies in run-team/SKILL.md are due to
-// be retired once the controller stops making these rulings (§ 8), and a
-// retirement that loses the destination copy too would leave the rulings made
-// by nobody, with every pin that read SKILL.md simply deleted alongside it.
+// `testEnvironment`/`cwdAudit` before acting on a result of the shared test
+// run. Their new home is review-and-fix.md's `## The review result file`, which
+// is the copy the fix-applier reads. The controller-side copies in
+// run-team/SKILL.md are due to be retired once the controller stops making
+// these rulings (§ 8), and a retirement that loses the destination copy too
+// would leave the rulings made by nobody, with every pin that read SKILL.md
+// simply deleted alongside it.
 //
 // Two halves. The recipes half is not prose: a `jq` path naming a field the
 // result does not carry prints `null` at exit 0, which reads exactly like an
@@ -92,8 +93,8 @@ test("the fix-applier owns refuted=false ≠ apply, and per-site measurement for
   );
 });
 
-test("the fix-applier reads testEnvironment and cwdAudit before acting on any test_run, and re-runs nothing", () => {
-  const p = ruling("**Read `testEnvironment` and `cwdAudit` before you act on any `test_run`.**");
+test("the fix-applier reads testEnvironment and cwdAudit before acting on any result of the shared test run, and re-runs nothing", () => {
+  const p = ruling("**Read `testEnvironment` and `cwdAudit` before you act on any result of the shared test run.**");
   assert.match(p, phrase("status --porcelain -uall"), "the cwdAudit check lost its explicit untracked mode");
   assert.match(p, phrase("never revert content you did not write"));
   assert.match(p, phrase("re-run nothing"), "a dimensionsUnrun entry now reads as an instruction to re-run the review");
