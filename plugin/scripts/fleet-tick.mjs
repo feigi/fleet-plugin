@@ -306,13 +306,15 @@ const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
 // for a settled member whose transcript was never written.
 const TIER_VERDICT = /^tier-(ok|mismatch|unverifiable)=([^:\s]+):\S+$/;
 // dispositions-check.mjs's verdict on a review fix-applier's disposition
-// record: `dispositions-ok=fix-pr-<M>[-x]:<head>` or
-// `dispositions-mismatch=…`, `<head>` the head of the review the record
-// answers. `ledger.mjs dispatch` refuses a finisher on it; the tick holds
-// nothing on it, having no finisher role. A token outside this shape is no
-// verdict at all, which the gate reads as unchecked: fail closed.
+// record: `dispositions-ok=fix-pr-<M>[-x]:<head>`,
+// `dispositions-mismatch=…` or `dispositions-escalate=…` (a critical or
+// important deferral that a human rules on), `<head>` the head of the review
+// the record answers. `ledger.mjs dispatch` refuses a finisher on any verdict
+// but ok; the tick holds nothing on one, having no finisher role. A token
+// outside this shape is no verdict at all, which the gate reads as
+// unchecked: fail closed.
 export function dispositionsToken(tok) {
-  const m = /^dispositions-(ok|mismatch)=([^:\s]+):([0-9a-f]{7,40})$/i.exec(tok);
+  const m = /^dispositions-(ok|mismatch|escalate)=([^:\s]+):([0-9a-f]{7,40})$/i.exec(tok);
   if (!m) return null;
   const member = parseMember(m[2]);
   if (member === null || member.family !== "fix-pr") return null;
@@ -326,16 +328,18 @@ export const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
 // A PR's current dispositions verdict against its latest review head: among
 // the tokens answering that head, the one from the fix-applier with the
 // highest retry suffix ("" < "b" < "c" …) — never row-text position, which a
-// `row` rewrite can reorder. One fix-applier carrying both verdicts for one
-// head reads as a mismatch. null when no token answers the head.
-/** @returns {{verdict: "ok"|"mismatch", member: string}|null} */
+// `row` rewrite can reorder. One fix-applier carrying two verdicts for one
+// head reads as the stricter: ok < mismatch < escalate. null when no token
+// answers the head.
+/** @returns {{verdict: "ok"|"mismatch"|"escalate", member: string}|null} */
 export function currentDispositions(tokens, head) {
+  const strictness = { ok: 0, mismatch: 1, escalate: 2 };
   let best = null;
   for (const t of tokens) {
     if (!sameHead(t.head, head)) continue;
     const retry = t.member.retry ?? "";
     const bestRetry = best?.member.retry ?? "";
-    if (best === null || retry > bestRetry || (retry === bestRetry && t.verdict === "mismatch")) best = t;
+    if (best === null || retry > bestRetry || (retry === bestRetry && strictness[t.verdict] > strictness[best.verdict])) best = t;
   }
   return best === null ? null : { verdict: best.verdict, member: best.member.name };
 }

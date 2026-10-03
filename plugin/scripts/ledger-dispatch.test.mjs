@@ -793,6 +793,37 @@ test("a later fix-applier that writes no verdict neither satisfies nor resets th
   refused(["dispatch", "41", "finisher-pr-41"], /finisher-pr-41: dispositions mismatch — fix-pr-41's/);
 });
 
+test("a finisher is refused on a dispositions escalate, naming it, and nothing retries it", (t) => {
+  const { ok, read, refused } = fixture(t);
+  ok("row", "10", gateRow("1/0/0", `dispositions-escalate=fix-pr-40:${GATE_HEAD}`));
+  refused(["dispatch", "40", "finisher-pr-40"],
+    /finisher-pr-40: dispositions escalate — fix-pr-40 deferred .*dispositions-check\.mjs --member fix-pr-40/);
+  assert.deepEqual(read().dispatched, []);
+  const l = read();
+  const run = deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null },
+    [{ number: 40, labels: [], closingIssuesReferences: [{ number: 10 }] }]);
+  assert.deepEqual(run.fixDue, [], "an escalation never returns the PR to fixDue");
+  assert.deepEqual(run.reviewed.find((r) => r.pr === 40).dispositions, { verdict: "escalate", member: "fix-pr-40" });
+});
+
+test("an escalate is the current verdict only until a higher-suffixed fix-applier's own verdict answers the head, and outranks a mismatch of the same member", (t) => {
+  const { ok, refused } = fixture(t);
+  const esc = `dispositions-escalate=fix-pr-40:${GATE_HEAD}`;
+  const okB = `dispositions-ok=fix-pr-40-b:${GATE_HEAD}`;
+  for (const [i, tokens] of [[esc, okB], [okB, esc]].entries()) {
+    ok("row", "10", gateRow("1/0/0", ...tokens));
+    assert.equal(ok("dispatch", "40", `finisher-pr-40${i === 0 ? "" : "-b"}`).agent, "fleet-finisher");
+    ok("settle", `finisher-pr-40${i === 0 ? "" : "-b"}`, "failed");
+  }
+  const swapped = [`dispositions-ok=fix-pr-40:${GATE_HEAD}`, `dispositions-escalate=fix-pr-40-b:${GATE_HEAD}`];
+  for (const tokens of [swapped, [...swapped].reverse()]) {
+    ok("row", "10", gateRow("1/0/0", ...tokens));
+    refused(["dispatch", "40", "finisher-pr-40-c"], /finisher-pr-40-c: dispositions escalate — fix-pr-40-b deferred/);
+  }
+  ok("row", "10", gateRow("1/0/0", `dispositions-mismatch=fix-pr-40:${GATE_HEAD}`, esc));
+  refused(["dispatch", "40", "finisher-pr-40-c"], /dispositions escalate/);
+});
+
 test("one fix-applier carrying both verdicts for the same head reads as a mismatch", (t) => {
   const { ok, refused } = fixture(t);
   ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_HEAD}`, `dispositions-mismatch=fix-pr-40:${GATE_HEAD}`));

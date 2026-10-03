@@ -44,7 +44,7 @@ test("step 2 reads scope off the diff before the declared scope", () => {
 
 test("step 2's deferral reasons are exactly the ones the check accepts, and anything else refuses the finisher", () => {
   const s = recordStep();
-  const listed = /An in-scope `survived` finding deferred passes only with `reason` `([^`]+)`, `([^`]+)` or `([^`]+)`\./.exec(s);
+  const listed = /An in-scope `survived` finding deferred passes only with `reason` `([^`]+)`, `([^`]+)`, `([^`]+)` or `([^`]+)`\./.exec(s);
   assert.ok(listed, "step 2 no longer lists the in-scope deferral reasons in one sentence — update this test");
   assert.deepEqual(listed.slice(1), [...ALLOWED_DEFER]);
   assert.match(s, phrase(
@@ -67,6 +67,9 @@ test("the gate says what each refusal asks of the controller", () => {
   ));
   assert.match(s, phrase(
     "`dispositions mismatch` — no finisher: post the check's output, which names each violating entry, with `gh pr comment <M>`, and flag the PR for a human",
+  ));
+  assert.match(s, phrase(
+    "`dispositions escalate` — no finisher, and no retry: a `critical` or `important` finding was deferred `remedy-outside-diff`, which only a human can rule on. Post the check's output, which names each escalated finding, with `gh pr comment <M>`, and flag the PR for a human; dispatch no fix-applier and no finisher for that review's head",
   ));
   assert.match(s, phrase(
     "it refuses too while a fix-applier on the PR is still live, verdict or not** — `fix-pr-<M>[-x] still live`: settle it, run the check for it, then dispatch again.",
