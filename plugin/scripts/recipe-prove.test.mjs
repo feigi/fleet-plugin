@@ -394,9 +394,9 @@ test("a git that cannot be started is named as such, not reported as a missing r
 });
 
 // A PATH holding only `sh` and a `git` that execs the real one, so the Install
-// step can take git away mid-proof by deleting it: every later git call then
+// step can take git away by deleting it: every later git call then
 // fails to start, in the proof and in the worktree cleanup alike.
-test("a git that stops starting mid-proof is no verdict, never NOT PROVEN — and the worktree is still removed", () => {
+test("a git that stops starting during the Install step is no verdict, never NOT PROVEN — and the worktree is still removed", () => {
   const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
   const { dir } = repo(MAVEN_FILES);
   const bin = tempDir("recipe-prove-path-");
