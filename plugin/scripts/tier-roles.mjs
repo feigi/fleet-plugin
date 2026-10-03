@@ -139,6 +139,13 @@ export function readOmpModelCatalog() {
   return readOmpJson(["models", "--json"]);
 }
 
+// A plain JSON object — not null, an array or a scalar. Every read here
+// dereferences the parsed value (`.value`, `.models`), so anything else is
+// refused where it is read, naming its source.
+function isJsonObject(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
 function readOmpJson(argv) {
   const cmd = `omp ${argv.join(" ")}`;
   let out;
@@ -153,7 +160,7 @@ function readOmpJson(argv) {
   } catch (e) {
     throw new Error(`${cmd} exited 0 but printed non-JSON: ${e.message}`);
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+  if (!isJsonObject(parsed)) {
     throw new Error(`${cmd} exited 0 but printed ${parsed === null ? "null" : Array.isArray(parsed) ? "an array" : `a ${typeof parsed}`}, not a JSON object`);
   }
   return parsed;
@@ -297,7 +304,7 @@ function loadJsonObject(path, readLive, source, flagName) {
   } catch (e) {
     die(e.message);
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isJsonObject(value)) {
     die(`${path ? `--${flagName} ${path}` : source} must be a JSON object, got ${value === null ? "null" : Array.isArray(value) ? "an array" : typeof value}`);
   }
   return value;

@@ -37,8 +37,8 @@ function jsonFile(d, name, value) {
   return p;
 }
 
-function runCli(argv, cwd) {
-  return spawnSync(process.execPath, [SCRIPT, ...argv], { cwd, encoding: "utf8" });
+function runCli(argv, cwd, env) {
+  return spawnSync(process.execPath, [SCRIPT, ...argv], { cwd, encoding: "utf8", env });
 }
 
 // ---------------------------------------------------------------------------
@@ -427,13 +427,15 @@ function runCliWithFakeOmp(stdout, argv, cwd) {
   const fake = join(bin, "omp");
   writeFileSync(fake, `#!/bin/sh\ncat <<'FAKE_OMP_EOF'\n${stdout}\nFAKE_OMP_EOF\n`);
   chmodSync(fake, 0o755);
-  return spawnSync(process.execPath, [SCRIPT, ...argv], {
-    cwd, encoding: "utf8", env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
-  });
+  return runCli(argv, cwd, { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` });
 }
 
-for (const [label, printed, shape] of [["null", "null", "null"], ["an array", "[]", "an array"], ["a string", "\"x\"", "a string"]]) {
-  test(`CLI: live \`omp config get\` printing ${label} refuses naming the command`, () => {
+// What an `omp` read may print that is JSON yet not an object, with the shape
+// the refusal names.
+const NON_OBJECTS = [["null", "null"], ["an array", "[]"], ["a string", "\"x\""], ["a number", "42"], ["a boolean", "true"]];
+
+for (const [shape, printed] of NON_OBJECTS) {
+  test(`CLI: live \`omp config get\` printing ${shape} refuses naming the command`, () => {
     const d = dir();
     const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
     const r = runCliWithFakeOmp(printed, ["--check", "--agents", agents, "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES), "--catalog", jsonFile(d, "c.json", CATALOG)], d);
@@ -442,13 +444,15 @@ for (const [label, printed, shape] of [["null", "null", "null"], ["an array", "[
   });
 }
 
-test("CLI: live `omp models` printing null refuses naming the command", () => {
-  const d = dir();
-  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
-  const r = runCliWithFakeOmp("null", ["--check", "--agents", agents, "--overrides", jsonFile(d, "o.json", {}), "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES)], d);
-  assert.equal(r.status, 2, r.stderr);
-  assert.match(r.stderr, /omp models --json exited 0 but printed null, not a JSON object/);
-});
+for (const [shape, printed] of NON_OBJECTS) {
+  test(`CLI: live \`omp models\` printing ${shape} refuses naming the command`, () => {
+    const d = dir();
+    const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+    const r = runCliWithFakeOmp(printed, ["--check", "--agents", agents, "--overrides", jsonFile(d, "o.json", {}), "--model-roles", jsonFile(d, "mr.json", MODEL_ROLES)], d);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, new RegExp(`omp models --json exited 0 but printed ${shape}, not a JSON object`));
+  });
+}
 
 test("CLI: live `omp config get` envelope holding a null value refuses as null, not as object", () => {
   const d = dir();
@@ -462,9 +466,16 @@ test("CLI: live `omp` reads printing well-formed objects are accepted", () => {
   const d = dir();
   const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
   // One fake serves all three reads: `{ value, models }` satisfies the config
-  // envelope and the catalog at once; `value` is then the record each read as.
+  // envelope and the catalog at once; each config read then takes `value` as its record.
   const printed = JSON.stringify({ value: {}, models: CATALOG.models });
   const r = runCliWithFakeOmp(printed, ["--check", "--agents", agents], d);
   assert.notEqual(r.status, 2, r.stderr);
   assert.doesNotMatch(r.stderr, /not a JSON object/);
+});
+
+test("CLI: live `omp` reads printing an empty object are not refused by the readOmpJson guard", () => {
+  const d = dir();
+  const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
+  const r = runCliWithFakeOmp("{}", ["--check", "--agents", agents], d);
+  assert.doesNotMatch(r.stderr, /exited 0 but printed/);
 });
