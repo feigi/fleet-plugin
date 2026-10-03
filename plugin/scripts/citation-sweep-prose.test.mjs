@@ -1572,12 +1572,12 @@ test("both rows and the window count read a bare footnote marker as a sentence e
   assert.doesNotMatch("For minor and patch bumps, `m?.[1] || x` keeps bounding drift at about one month.\n", UNSCOPED_DRIFT_SENTENCE);
 });
 
-// #2431. The `review-pr-*.test.mjs` suite was deleted (ed9f2967) and its pins
-// moved to `review-core-*`; the citations that kept naming the old files were
+// #2431. The `review-pr-*.test.mjs` suite was deleted (ed9f2967) and its
+// surviving pins moved to `review-core-*`; the citations that kept naming the old files were
 // retargeted by hand. A citation of a file that is gone is only legitimate as a
 // git-object path — `<sha>^:plugin/scripts/<name>` or `<sha>:plugin/scripts/<name>`
 // — which names the revision it is read at.
-const DELETED_TEST_CITATION = /(?<![0-9a-f]{7,40}\^?:\s?plugin\/scripts\/)review-pr-[a-z-]+\.test\.mjs/g;
+const DELETED_TEST_CITATION = /(?<![0-9a-f]{7,40}\^?:\s?plugin\/scripts\/)(?<![\w-])review-pr-[a-z0-9-]+\.test\.mjs/g;
 const deletedTestCitations = (text) => [...normalize(text).matchAll(DELETED_TEST_CITATION)].map((m) => m[0]);
 
 function* pluginFiles(dir) {
@@ -1617,11 +1617,14 @@ test("the deleted-test citation ban accepts git-object paths and review-core-* n
     "// in `ed9f2967^:plugin/scripts/review-pr-citation-prose.test.mjs` looked like",
     "// `ed9f2967^:\n// plugin/scripts/review-pr-x.test.mjs` wrapped after the colon",
     "// review-core-snapshot-path.test.mjs's guard-ordering pin.",
+    "// prefix-review-pr-x.test.mjs is a different file",
   ]) assert.deepEqual(deletedTestCitations(text), [], text);
   for (const text of [
     "// review-pr-snapshot-path.test.mjs's guard-ordering pin.",
     "// `review-pr-citation-prose.test.mjs`, one",
     "// plugin/scripts/review-pr-reads.test.mjs",
     "// abc^:review-pr-reads.test.mjs",
+    "// abc123^:plugin/scripts/review-pr-x.test.mjs",
+    "// review-pr-2nd-pass.test.mjs",
   ]) assert.equal(deletedTestCitations(text).length, 1, text);
 });
