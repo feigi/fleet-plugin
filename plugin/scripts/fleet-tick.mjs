@@ -370,23 +370,23 @@ export function rowNums(text) {
   return { keyNum, pr: mention ? Number(mention[1]) : keyNum };
 }
 
-// #2331: PRs whose finisher settled `labelled` while the open list shows no
-// `ready-to-merge` on them — `unqueued` is the set of open PR numbers without
+// PRs whose finisher attempts are read off the ledger while the open list shows
+// no `ready-to-merge` on them — `unqueued` is the set of open PR numbers without
 // it, so the label shape stays the caller's (gh's `{name}` here, plain names in
 // compute-board.mjs). A PR's attempts are its `finisher-pr-M` tokens in
 // `## Dispatched` and on PR M's own rows; a copy on another PR's row is a
 // stray (#2329) that neither makes nor masks a miss. Settled anywhere among
 // those is settled. The STRETCH is the attempts whose retry suffix sorts after
 // the highest one a `label-off=` names — suffix order ("" < "b" < …), never
-// row position (#2083). A miss is the stretch's latest attempt settled
-// `labelled`; `labelled` lists every attempt in the stretch that settled so,
-// the count the tick splits one repair from an escalation on.
+// row position (#2083). `attempts` is the stretch in suffix order and `outcome`
+// the outcome of its latest attempt (null while that one is live); a PR whose
+// stretch is empty is left out.
 //
 // Lenient on purpose — a malformed token is skipped, never thrown — because
 // the cockpit reads the same ledger and flags rather than refuses; deriveRun
 // has already refused anything malformed before it calls this.
-/** @returns {{pr: number, labelled: string[]}[]} ascending by PR */
-export function unlabelledFinishers({ rows, dispatched }, unqueued) {
+/** @returns {{pr: number, outcome: string|null, attempts: {name: string, retry: string, outcome: string|null}[]}[]} ascending by PR */
+export function latestFinisherAttempts({ rows, dispatched }, unqueued) {
   const attempts = new Map();
   const offs = new Map();
   const add = (t) => {
@@ -417,10 +417,21 @@ export function unlabelledFinishers({ rows, dispatched }, unqueued) {
     const stretch = [...byName.values()]
       .filter((a) => !offs.has(n) || a.retry > offs.get(n))
       .sort((a, b) => (a.retry < b.retry ? -1 : a.retry > b.retry ? 1 : 0));
-    if (stretch.at(-1)?.outcome !== "labelled") continue;
-    out.push({ pr: n, labelled: stretch.filter((a) => a.outcome === "labelled").map((a) => a.name) });
+    if (stretch.length === 0) continue;
+    out.push({ pr: n, outcome: stretch.at(-1).outcome, attempts: stretch });
   }
   return out.sort((a, b) => a.pr - b.pr);
+}
+
+// #2331: PRs whose latest finisher attempt settled `labelled` while the open
+// list shows no `ready-to-merge` on them. `labelled` lists every attempt in the
+// stretch that settled so, the count the tick splits one repair from an
+// escalation on.
+/** @returns {{pr: number, labelled: string[]}[]} ascending by PR */
+export function unlabelledFinishers(ledger, unqueued) {
+  return latestFinisherAttempts(ledger, unqueued)
+    .filter((u) => u.outcome === "labelled")
+    .map((u) => ({ pr: u.pr, labelled: u.attempts.filter((a) => a.outcome === "labelled").map((a) => a.name) }));
 }
 
 export function deriveRun({ rows, dispatched, drain }, prs) {

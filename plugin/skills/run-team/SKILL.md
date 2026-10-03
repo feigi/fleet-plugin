@@ -1396,6 +1396,7 @@ for a token on a ticket's line — never a hand edit.
 | Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; for a fix-applier that answered a review — not one that cleared a conflict hold, which has no review file — `~/.fleet/bin/fleet-run dispositions-check.mjs --member <that member> --scratch <scratch>`, from the checkout root: it judges `<scratch>/dispositions-<M>.json` against `<scratch>/review-<M>.json`, writes `dispositions-ok=`, `dispositions-mismatch=` or `dispositions-escalate=<member>:<head>` onto the PR's row itself, and exits 1 on a mismatch or an escalation, naming each violating or escalated entry's bucket and index, a violation its rule too — **Then dispatch a fix-applier** says what a mismatch asks of you, the gate paragraph below what an escalation does; copy the refutations it reversed — the record's `refuted` entries — to `ruled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled` as reported, even when its read-back lacks `ready-to-merge` — the tick's `DISPATCH finisher PR#<M>` catches that next. A **repair** finisher's (one sent on that line) read-back lacking it also gets `gh pr comment <M>` with both finishers' read-backs: the one-shot escalation, where halts comment. `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Finisher report (halted) | `ledger.mjs settle finisher-pr-<M>=halted:<cause>`; `gh pr comment <M>` with the finisher's halt report, cause and evidence; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line; then the per-cause rule (**Resolving a finisher halt**, below) |
+| Finisher report (failed / killed) | `ledger.mjs settle finisher-pr-<M>=failed` for a finisher that crashed or gave up, `=killed` for one that was killed; no label, and the tick prints no dispatch for it. The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, below) |
 | Label seen (persistent Monitor) | nothing to record |
 | CI run terminal | `ci=<run-id>:<attempt>:<conclusion>` on the row; then the finisher gate (below) |
 | Merge-bot pass report | `held-behind:#<lower>` rows; `ledger.mjs settle merge-bot-<n>=done`; `reap.sh --apply`. (The bot may also have written `conflict-hold:#<pr>` onto a held PR's own row earlier in this same pass, before reporting — that token is the bot's, never `reap.sh`'s.) |
@@ -2800,6 +2801,19 @@ and settling that review `=failed` re-queues nothing — that path covers only a
 review that died before returning. A head that moved past `reviewed=` with no
 such halt — a fix-applier's push — stays not due: duty 2 verifies what it
 applied.
+
+**Resolving a finisher that died.** A finisher settled `failed` or `killed` left
+its PR without `ready-to-merge`, and nothing else notices: the PR is out of the
+merge queue, and the tick dispatches no finisher for it. The cockpit flags a
+REVIEW-column open PR without the label, whose latest finisher attempt settled
+so, `finisher:failed` or `finisher:killed` at severity 4 — one token per
+outcome, neither the implementer's bare `killed` flag nor `unlabelled`. You
+resolve it by hand: investigate why the finisher died, or dispatch the
+next-suffix finisher after the finisher gate, `ledger.mjs dispatch <M>
+finisher-pr-<M>-<x>`. The flag clears when a later attempt settles — `labelled`
+(then `unlabelled` takes over while the label is still off), `halted:<cause>`,
+or a live `-b` — or when the PR carries `ready-to-merge`, merges or closes.
+You never add the label yourself, and the tick does not retry.
 
 Gate on the `check` job, **not** on `ci-state --quiet` exit 0: a behind PR never
 reaches full green, so an exit-0 gate strands it unlabelled. The finisher reads

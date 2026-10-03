@@ -561,12 +561,23 @@ test("deriveRun: only a settled-labelled LATEST attempt is a miss — live, halt
     `${base} · finisher-pr-40-b · finisher-pr-40=labelled`, // the same, by suffix not position
     `${base} · finisher-pr-40=halted:rebase`, // a halt refused to label, and says so
     `${base} · finisher-pr-40=labelled · finisher-pr-40-b=halted:past-pin`,
-    `${base} · finisher-pr-40=failed`, // #2359's, not this check's
+    `${base} · finisher-pr-40=failed`, // died, no label: the cockpit's to flag, no repair here
+    `${base} · finisher-pr-40=killed`,
+    `${base} · finisher-pr-40=labelled · finisher-pr-40-b=failed`,
     `${base} · fix-pr-40=applied:def5678`, // no finisher at all
   ]) {
     assert.deepEqual(run({ rows: [row] }, open).unlabelled, [], row);
   }
   assert.deepEqual(run({ rows: [LABELLED] }, []).unlabelled, [], "a PR off the open list is nobody's work");
+});
+
+test("deriveRun: a failed or killed latest finisher prints no DISPATCH or ESCALATE finisher line", () => {
+  const open = [pr(40, ["minor"], [10])];
+  for (const outcome of ["failed", "killed"]) {
+    const r = run({ rows: [`${LABELLED} · finisher-pr-40-b=${outcome}`] }, open);
+    assert.deepEqual(r.unlabelled, [], outcome);
+    assert.deepEqual(reconcile({ ...state(), ...r }).filter((x) => x.role === "reviewers").map((x) => x.action), ["IDLE OK"], outcome);
+  }
 });
 
 test("deriveRun: a label-off'd attempt is the controller's own removal — nothing until a later attempt labels again", () => {

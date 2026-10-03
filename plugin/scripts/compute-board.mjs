@@ -25,7 +25,7 @@
 // here, main() being guarded on argv[1].
 import { assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
 import { parseToken, HALT_CAUSES } from "./ledger-grammar.mjs";
-import { PR_MENTION, REVIEWED, unlabelledFinishers } from "./fleet-tick.mjs";
+import { PR_MENTION, REVIEWED, latestFinisherAttempts } from "./fleet-tick.mjs";
 
 // A ledger row is freeform, controller-authored text. Two real examples:
 //   #332 impl-332=PR#344 → PR#344 → MERGED 73b356de
@@ -61,9 +61,10 @@ import { PR_MENTION, REVIEWED, unlabelledFinishers } from "./fleet-tick.mjs";
 // that outcome as a severity-4 flag while the PR sits in REVIEW. The halt is
 // the finisher working correctly — it refused to label — so the PR has no
 // `ready-to-merge` until the controller resolves the cause; the flag is what
-// puts it in front of a human. "Latest" is laterAttempt's reading, among the
-// finisher tokens bound to the row's own PR: a live `-b` after the halt
-// clears it.
+// puts it in front of a human. "Latest" is the reading `unlabelled` and
+// `finisher:*` below share (latestFinisherAttempts, off the same rows and
+// `## Dispatched` tokens): a live `-b` after the halt clears it, and a later
+// attempt settled anywhere replaces it.
 //
 // #2331: a PR whose finisher settled `labelled` while the open list shows no
 // `ready-to-merge` on it carries a severity-4 `unlabelled` flag in REVIEW —
@@ -71,6 +72,13 @@ import { PR_MENTION, REVIEWED, unlabelledFinishers } from "./fleet-tick.mjs";
 // the last `label-off=`), off the same `## Dispatched` and row tokens the tick
 // reads, so the card is flagged whenever the tick is repairing it or escalated
 // it — including after a whole-line `row` rewrite dropped the settled token.
+//
+// A PR in REVIEW whose latest finisher attempt settled `failed` or `killed`
+// while it is open and lacks `ready-to-merge` carries `finisher:failed` or
+// `finisher:killed`, severity 4 — read off the same latest attempt and stretch
+// as `unlabelled`, so the tick and the cockpit never read it two ways. The tick
+// dispatches nothing for these; the flag is what puts the PR in front of a
+// human. The names are not the bare `killed` flag, which is the implementer's.
 //
 // A PR's review is not a member (#1773 §7): `review=wf:<runId>` is a Workflow
 // with nobody to name, while `review=member:<name>` and
@@ -288,14 +296,15 @@ export function deriveFlags(parsed, ctx) {
   // escalated halt by labelling or merging it, the flag has nothing to ask.
   // `past-pin`'s own automatic resolution (SKILL.md "Resolving a finisher
   // halt") re-reviews the PR through fleet-tick.mjs, but a returned
-  // `reviewed=` does not itself clear `finisherOutcome` here — the halt is
+  // `reviewed=` does not itself clear the latest finisher outcome here — the halt is
   // answered only once "its result reaches a fresh finisher through the
   // same gate" (ibid.), so the card stays flagged, same as any other halt
   // cause, until that finisher settles. reviewBacklog below reads the same
   // gap the other way: still counted due for a fresh review while this flag
   // is up and the head has not caught up to what was reviewed.
-  if (parsed.finisherOutcome?.startsWith("halted:") && ctx.column === "REVIEW") flags.push(parsed.finisherOutcome);
-  if (ctx.unlabelled && ctx.column === "REVIEW") flags.push("unlabelled");
+  if (ctx.finisher?.startsWith("halted:") && ctx.column === "REVIEW") flags.push(ctx.finisher);
+  if (ctx.finisher === "labelled" && ctx.column === "REVIEW") flags.push("unlabelled");
+  if ((ctx.finisher === "failed" || ctx.finisher === "killed") && ctx.column === "REVIEW") flags.push(`finisher:${ctx.finisher}`);
   const limit = STALE_MS[ctx.column];
   if (limit != null && ctx.sinceEnteredStage != null && ctx.now - ctx.sinceEnteredStage > limit) {
     flags.push("stale");
@@ -325,6 +334,7 @@ function titleFor(issue, pr, issues) {
 
 const FLAG_SEVERITY = {
   "red-ci": 5, "ledger-error": 5, killed: 4, "tier-mismatch": 4, blocked: 4, "sha-off-branch": 4, unlabelled: 4,
+  "finisher:failed": 4, "finisher:killed": 4,
   ...Object.fromEntries(HALT_CAUSES.map((c) => [`halted:${c}`, 4])),
   stale: 1,
 };
@@ -453,7 +463,7 @@ export function computeBoard(inputs) {
 
   const parsed = (ledger.rows || []).map(parseRow).filter(Boolean);
   const unqueued = new Set(prs.filter((p) => p.state === "OPEN" && !(p.labels || []).includes("ready-to-merge")).map((p) => p.number));
-  const unlabelled = new Set(unlabelledFinishers({ rows: ledger.rows || [], dispatched: ledger.dispatched || [] }, unqueued).map((u) => u.pr));
+  const latestFinishers = new Map(latestFinisherAttempts({ rows: ledger.rows || [], dispatched: ledger.dispatched || [] }, unqueued).map((u) => [u.pr, u.outcome]));
   const rowIssues = new Set();
   const tickets = [];
 
@@ -468,7 +478,7 @@ export function computeBoard(inputs) {
     rowIssues.add(p.issue);
     const sinceEnteredStage = stageEntry(prevTicket, column, now);
     const ciState = p.pr != null ? (ci[p.pr] ?? "unknown") : null;
-    const flags = deriveFlags(p, { ci: ciState, column, sinceEnteredStage, now, unlabelled: unlabelled.has(p.pr) });
+    const flags = deriveFlags(p, { ci: ciState, column, sinceEnteredStage, now, finisher: latestFinishers.get(p.pr) });
     tickets.push({
       issue: p.issue,
       title: titleFor(p.issue, pr, issues),
