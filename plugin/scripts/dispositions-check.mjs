@@ -412,8 +412,10 @@ function runLedger(ledgerFile, args, what) {
 // where `ledger.mjs dispatch` wrote the member's row. The path is handed to
 // `ledger.mjs` as `--file`, so the existence probe and the calls that follow
 // answer for one file. Only ENOENT means "there is none": any other failure
-// to look the path up is a fault, not a standalone run. `lstat`, not `stat`, so
-// a dangling symlink is a ledger that cannot be read rather than an absent one.
+// to look the path up is a fault, not a standalone run. An absent path named
+// by `--ledger` is announced on stderr; an absent default path is not.
+// `lstat`, not `stat`, so a dangling symlink is a ledger that cannot be read
+// rather than an absent one.
 function ledgerInUse(explicit, repo) {
   const file = explicit ?? join(
     workspaceDirFromGitCommonDir(git(repo, ["rev-parse", "--git-common-dir"], "find the git common dir"), repo)
