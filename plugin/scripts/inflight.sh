@@ -14,8 +14,7 @@
 # found it. Exit 2 from a probe failure carries a payload — the same shape as
 # 0 and 1, plus an "unknown" list naming which probes could not look.
 #
-# Four failures still exit 2 with no payload at all, the four the script table
-# in docs/specs/2026-07-23-fleet-plugin-design.md lists. Three of them land
+# Four failures still exit 2 with no payload at all. Three of them land
 # before anything has been established: a bad argument, not being inside a git
 # repository, and no such issue. That last one fires inside probe 1, after its
 # own `gh issue view` has already run — it is not a pre-probe check, it is the
@@ -23,14 +22,14 @@
 # recording one probe's unknown. The fourth is the opposite end: the verdict
 # itself cannot be written at all, which fails after every probe has finished,
 # with everything established and no way to say it. An evidence string that
-# cannot be rendered is NOT one of the four (#120): the verdict is already
+# cannot be rendered is NOT one of the four: the verdict is already
 # correct at that point, and a formatter breaking must not retract it — that
 # field is emitted as JSON null instead, on the payload the verdict already
 # earned. No gap left in that: `jstr`'s own `sed` stage used to be invisible —
 # a pipeline reports only its LAST stage, so a failed `sed` rendered the field
 # as "", the same value "found nothing" uses, with no null and no stderr line.
 # json.sh captures each fallible stage and reads its status, so that failure now
-# reaches `add_evidence` and lands in the null branch like any other (#119).
+# reaches `add_evidence` and lands in the null branch like any other.
 set -eu
 
 # Byte semantics for the `tr`, `sed` and `awk` below. There is no `grep`: this
@@ -42,7 +41,7 @@ set -eu
 # paths. Under a UTF-8 locale BSD `tr` and `sed` exit 1 on a byte that is not
 # valid UTF-8 — `sed` emitting nothing at all, measured.
 #
-# `awk` is NOT immune, and reap.sh's own #614 fixture measured the earlier
+# `awk` is NOT immune, and reap.sh's own fixture measured the earlier
 # claim here false: it is byte-identical only when every rule matches at an
 # ANCHOR before the bad byte, never needing to convert it — a rule that must
 # SCAN PAST the byte to decide dies instead (BWK awk, macOS: rc 2, `towc:
@@ -55,19 +54,19 @@ set -eu
 #
 # Such a byte reaches us from a fetched tree even where the local filesystem
 # refuses to hold the name, and inside `$(...)` a `tr` failure empties the
-# cause out of the diagnostic without a trace. #582 measured the cost of
-# leaving this ambient in no-undo-audit.sh: a truncated list reported as a
+# cause out of the diagnostic without a trace. The cost of
+# leaving this ambient in no-undo-audit.sh was measured: a truncated list reported as a
 # clean, confident answer.
 #
 # Safe as a global: nothing in this script sorts, folds case, or holds a POSIX
 # class. It does use ONE collation range — `*[!0-9]*`, the issue-number guard
 # below — and a range IS locale-sensitive by spec, its members drawn from the
 # collation sequence rather than the codepoint order. Measured inert here
-# (#612): `0-9` matches the ASCII digits and nothing else under `C`,
+# — `0-9` matches the ASCII digits and nothing else under `C`,
 # `en_US.UTF-8`, `de_DE.UTF-8` and `tr_TR.UTF-8` alike, with superscript `²`,
 # Arabic-Indic digits and `½` excluded in all four. So collation and
 # case-folding — the two things `LC_ALL=C` otherwise changes — have nothing
-# here to act on. locale-pin-prose.test.mjs holds that inventory as a list and
+# here to act on. The locale-pin prose test holds that inventory as a list and
 # fails if the code drifts from this paragraph in either direction.
 #
 # This completes a pin this script already started: the five `LC_ALL=C` prefixes
@@ -77,7 +76,7 @@ set -eu
 export LC_ALL=C
 
 # Below the locale pin, not above it with `set -eu`: `unset` touches no
-# byte-sensitive tool, but locale-pin-prose.test.mjs treats ANY line here that
+# byte-sensitive tool, but the locale-pin prose test treats ANY line here that
 # is not a comment, a blank, or `set -[eux]+` as work the pin must sit above,
 # and refuses on principle rather than on this line's own behaviour. Same
 # placement, same reason, as release-ticket.sh's copy.
@@ -86,10 +85,10 @@ export LC_ALL=C
 # `rev-parse --git-common-dir`, `for-each-ref`, `worktree list` — so an
 # ambient one asks the WRONG repository whether this ticket is taken.
 # Measured, standing in a checkout that holds both the branch and the
-# worktree for #501, with `GIT_DIR` naming a second clone that holds neither:
-# `no local branch or worktree for #501`, and with probes 1 and 2 silent the
+# worktree for ticket <N>, with `GIT_DIR` naming a second clone that holds neither:
+# `no local branch or worktree for #<N>`, and with probes 1 and 2 silent the
 # verdict is `taken: false` on a ticket already claimed. That is the
-# double-claim phase 0 runs this script to prevent, and inflight.test.mjs's
+# double-claim phase 0 runs this script to prevent, and the test suite's
 # own fixture builder already deletes both variables for exactly this reason
 # — a defence that protected the SUITE while leaving every real caller
 # exposed.
@@ -101,16 +100,16 @@ export LC_ALL=C
 # there is no behaviour for it to change and no behavioural fixture can pin
 # it. It stays on the line because the pair is one hazard with one remedy,
 # and because "inert today" is a measurement of the current call set, not a
-# property of the script. ambient-git-vars-prose.test.mjs pins the line
+# property of the script. A prose test pins the line
 # itself, which is what keeps that half from being quietly dropped.
 unset GIT_DIR GIT_WORK_TREE
 
 NAME=inflight
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
-# The escaping helpers (#119). json.sh's header holds the sourcing contract and
+# The escaping helpers. json.sh's header holds the sourcing contract and
 # the measurements behind it; only what is true of THIS script is repeated here.
-# Below `export LC_ALL=C` deliberately: locale-pin-prose.test.mjs allows only
+# Below `export LC_ALL=C` deliberately: the locale-pin prose test allows only
 # comments, blanks, a shebang or a `set -` line above that pin, and `json_lib=`
 # is none of them.
 #
@@ -123,7 +122,7 @@ json_lib="$(dirname "$0")/json.sh"
 # shellcheck source=json.sh
 . "$json_lib" || die "$json_lib failed to load"
 
-# The bounded, prompt-suppressed git transport (#92, #346, #347). It landed here
+# The bounded, prompt-suppressed git transport. It landed here
 # for probe 2 alone and now lives in net.sh, where every other unattended `git`
 # network call in the fleet reaches it too; net.sh's header holds the reasoning
 # and the measurements. Sourced BELOW json.sh, deliberately: exit 1 from this
@@ -197,8 +196,8 @@ trap 'rm -f ${errfile:+"$errfile"} ${wtfile:+"$wtfile"} ${wdfile:+"$wdfile"} ||
 # merely contained the digits somewhere. Trusting it makes nearly every ticket
 # read as taken, so the fleet skips free work silently and permanently.
 #
-# Nor a closing-keyword regex over the body. Also measured here: PR #344 is a
-# docs fix ABOUT issue references, so its body quotes `Closes #41.` inside a
+# Nor a closing-keyword regex over the body. Also measured here: a PR that is a
+# docs fix ABOUT issue references quotes `Closes #N.` inside a
 # markdown table. A regex cannot tell quoted text from a real link.
 #
 # Ask GitHub instead. `closedByPullRequestsReferences` is its own resolution of
@@ -220,7 +219,7 @@ echo "\$ gh issue view $n --json closedByPullRequestsReferences,url" >&2
 # a fixed /tmp/.inflight.$$ — guessable from the PID, and `>` follows a
 # symlink, so anything on the host that pre-plants that path pointing at a
 # file this user can write gets it truncated the instant stderr lands there
-# (#91, measured: a 37-byte victim file left at 14 bytes). mktemp's
+# (measured: a 37-byte victim file left at 14 bytes). mktemp's
 # unpredictable name closes the guess; the trap closes the other half — no
 # cleanup ran for an interrupt landing between the redirect and the `rm -f`
 # that only ever followed a call that finished.
@@ -350,11 +349,11 @@ print(", ".join(out))') || { add_unknown "pr" "could not filter PR search result
 # Measured: the tally then prints the hole, `( full-text match(es) considered)`.
 #
 # `raw="?"` and NOT `add_unknown "pr"; return 1`, which is what stood here and
-# was wrong (#96). This count feeds nothing but the two diagnostics below: the
+# was wrong. This count feeds nothing but the two diagnostics below: the
 # PR answer is `$pr`, which the guarded filter above already established, so a
 # tally that could not run leaves that answer entirely intact. Returning here
 # discarded an already-sufficient hit over a cosmetic number — measured exit 2
-# with `hits:[]` while `evidence.pr` read `#12 OPEN (linked)`. A stage that
+# with `hits:[]` while `evidence.pr` read `#<pr> OPEN (linked)`. A stage that
 # cannot change the answer must not be able to retract it.
 raw=$(printf '%s' "$pr_json" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))') \
   || raw="?"
@@ -412,26 +411,26 @@ echo "\$ git ls-remote --heads origin" >&2
 # can match. git's own wording is more use on the terminal anyway.
 #
 # This is the one network call in the script (probe 1 goes through `gh`, probe
-# 3 never leaves disk), and unattended it must neither prompt nor hang (#92).
+# 3 never leaves disk), and unattended it must neither prompt nor hang.
 #
 # The knobs that suppress the prompt and the watchdog that bounds the call both
-# live in net.sh now, which every unattended `git` network call in the fleet
-# routes through (#347); its header holds the reasoning and the measurements.
+# live in net.sh now, which every unattended `git` network call in the
+# fleet routes through; its header holds the reasoning and the measurements.
 # What stays here is what is true of THIS call: its budget, and how a killed
 # call is reported.
 #
 # The budget. Above what the ssh options can spend before they give up on their
 # own — ConnectTimeout plus the ServerAlive pair's whole run — so this never
 # preempts a bound that would have produced git's own diagnostic, and short
-# enough that a stalled probe does not hold a fleet slot the way #92 describes.
+# enough that a stalled probe does not hold a fleet slot.
 # `ls-remote` moves refs and no objects, so this is generous for the work.
 #
 # `INFLIGHT_LS_REMOTE_TIMEOUT` is this call's own override. It can only ever
 # SHORTEN, and the rule with its edge cases is net_budget's, in net.sh.
 ls_budget=$(net_budget 30 "${INFLIGHT_LS_REMOTE_TIMEOUT:-}")
 # A file this probe WANTS, not one it needs. Probe 2 is the one probe that
-# answers when mktemp is broken — #185 fixed that deliberately and
-# inflight.test.mjs pins it — so a failed mktemp costs the sharper wording
+# answers when mktemp is broken — deliberately so, and the test suite
+# pins it — so a failed mktemp costs the sharper wording
 # below, never the verdict. The old exit-status inference is what the wording
 # falls back to there.
 wdfile=$(mktemp) || wdfile=""
@@ -527,12 +526,12 @@ probe_remote || :
 # could not run at all (git missing, a fork failure, an unreadable packed-refs,
 # which exits 128). That is the floor, not the whole answer: git's own
 # degraded reads exit 0 with output silently missing, which no exit-status
-# guard can see. Measured (#95): `chmod 000` on refs/heads or on the worktree
+# guard can see. Measured: `chmod 000` on refs/heads or on the worktree
 # admin dir, and both lookups below report nothing, at rc 0, for a ticket that
-# has a live branch or worktree — the same wrong "free" #76 exists to rule out,
+# has a live branch or worktree — the same wrong "free" this script exists to rule out,
 # one probe down. Establish each storage was readable before trusting an empty
 # result from it — the same rule release-ticket.sh's `-r`/`-x` guard on
-# `$wtroot` already applies to its own worktree-registry read (#84) — absence
+# `$wtroot` already applies to its own worktree-registry read — absence
 # must be established, never inferred.
 #
 # Ceiling, left open on purpose: a single loose ref git skips as corrupt
@@ -541,7 +540,7 @@ probe_remote || :
 # it is not — so it stays undetected. Only counting refs against a source
 # independent of git's own read would catch that, roughly doubling this
 # probe's cost, for a fault that usually breaks much else first; out of scope
-# for #95.
+# here.
 probe_local() {
 common=$(git rev-parse --path-format=absolute --git-common-dir) ||
   { add_unknown "local" "cannot resolve the git common directory"; return 1; }
@@ -584,15 +583,16 @@ if [ -e "$refsdir" ]; then
   # after `cmd | head -1` reports only `head`'s, and `head` exits 0 whether
   # find printed a permission-denied hit or never ran at all (missing binary,
   # a failed exec, any other swallowed crash) — both leave `$bad` empty, both
-  # used to read as a clean tree (#1448, reproduced by shimming `find` on
+  # used to read as a clean tree (reproduced by shimming `find` on
   # PATH to `exit 127`). find's own status is read off the bare command
   # substitution instead, with nothing piped after it, so nothing that runs
   # after it can stand in for it again.
   #
   # `head`'s own status is kept too, not discarded — a `head` that cannot run
   # (crashed, missing) is the same class of failure, and was the one failure
-  # this guard could already see before #1448 (pinned below at "a
-  # refs-subdirectory walk whose `head` cannot run is unknown, never free").
+  # this guard could already see before find's own status was read (pinned
+  # below at "a refs-subdirectory walk whose `head` cannot run is unknown,
+  # never free").
   # Reading both separately,
   # rather than trusting whichever one the pipeline's single status happens to
   # expose, is what closes the first gap without reopening the second.
@@ -615,7 +615,7 @@ fi
 # found" — so the `local branches:` line and the localBranch evidence below
 # both hand an operator a name they cannot paste into a git command.
 # %(refname) is always refs/heads/<name>, so the strip yields the bare name for
-# every branch, ambiguous or not. #634 fixed the same spelling in reap.sh.
+# every branch, ambiguous or not. reap.sh enumerates the same way.
 #
 # Here the enumeration fix stands ALONE, and that is a finding about THIS
 # script, not a conclusion carried over from that one. What made the fix unsafe
@@ -623,7 +623,7 @@ fi
 # REV (`git cherry "$base" "$b"`), and git resolves an ambiguous rev by
 # preferring refs/tags/ over refs/heads/ — so restoring the bare name made the
 # merge probe answer about the TAG and authorized -D on an unmerged branch
-# (measured, PR #914, which qualifies that one site `refs/heads/$b` for exactly
+# (measured; reap.sh qualifies that one site `refs/heads/$b` for exactly
 # this reason). Every site consuming this value here was enumerated and
 # classified instead:
 #
@@ -639,7 +639,7 @@ fi
 # there a `refs/heads/$b` key to rebuild the way reap.sh's worktree lookup has:
 # probe 3's worktree half matches the LISTING's own paths by basename, never a
 # name from this enumeration. `$local_b` is a comma-joined list besides, so it
-# could not be a rev even by accident. Nothing to qualify. #915
+# could not be a rev even by accident. Nothing to qualify.
 if ! refs=$(git for-each-ref --format='%(refname)' refs/heads); then
   add_unknown "local" "git for-each-ref failed, so whether #$n has a local branch is unknown"
   return 1
@@ -656,7 +656,7 @@ local_b=$(printf '%s\n' "$refs" | LC_ALL=C awk -v n="$n" '
   { add_unknown "local" "could not filter the local branches for #$n"; return 1; }
 
 # Commit the branch half here, where it is established — NOT at the end of the
-# probe with the worktree half (#96). Every stage between here and there can
+# probe with the worktree half. Every stage between here and there can
 # fail and `return 1`: the registry read and count, `git worktree list`, the
 # listed-versus-registered compare, the worktree filter. Recording the hit down
 # there meant any one of them threw away a branch that already proves the
@@ -672,27 +672,27 @@ if [ -n "$local_b" ]; then
 fi
 
 # The worktree registry's check is a different shape from the one above, on
-# purpose. It began as release-ticket.sh's own fix for this defect (#84) rather
+# purpose. It began as release-ticket.sh's own fix for this defect rather
 # than a second invented convention — but the two copies diverged from there
 # and have converged on most of that ground, but not all of it — see the
 # recount below for what still differs. Three of the four items that
 # landed here first — the stray-directory skip, the awk counter and the
-# direction split — were ported to that copy by #395; the recount was the last
-# of the four, ported by #694. That copy's skip reading only `ls`'s output,
-# not its exit STATUS, was a further divergence — #697 closed it: both
+# direction split — were ported to that copy; the recount was the last
+# of the four to follow. That copy's skip reading only `ls`'s output,
+# not its exit STATUS, was a further divergence, since closed: both
 # copies' skip now reads the exit status.
 #
 # Porting the recount did not converge the two copies on it at once, though:
 # this script's recount re-took `registered` alone (`count_registry`), while
 # release-ticket.sh's copy of the SAME recount re-took `registered` AND
-# `linked` together from #1408 on, because re-taking `registered` by itself
+# `linked` together, because re-taking `registered` by itself
 # leaves `linked` pinned to the first listing and can misname a benign
-# concurrent-worktree race as a fault. #1421 closed that divergence here: both
+# concurrent-worktree race as a fault. That divergence is closed here: both
 # copies now re-take the pair, this one through the `count_linked` below. The
 # mechanism under it is still each script's own — that copy reads the listing
 # through worktree.sh's `wt_listing`, this one through the single EXIT trap's
 # `$wtfile` — a difference in plumbing, same as before. What is no longer true
-# is that the recount ITSELF is: #1424 bounds release-ticket.sh's copy at up
+# is that the recount ITSELF is: release-ticket.sh's copy is bounded at up
 # to two recount passes (`recount_tries`) to close a residual third-mutation
 # race window that this script's own still-single-pass recount does not
 # close.
@@ -700,8 +700,8 @@ fi
 # A directory-level read+execute test alone is not enough
 # here: naming a registry entry needs read+execute on the PARENT only, so a
 # `gitdir` file chmod'd 000 INSIDE one entry passes every test on the entry
-# itself while `worktree list --porcelain` still drops it, at rc 0 (measured,
-# #84). Count registry entries on disk against what git reported instead —
+# itself while `worktree list --porcelain` still drops it, at rc 0
+# (measured). Count registry entries on disk against what git reported instead —
 # that catches a silent drop whichever file inside the entry was unreadable.
 wtroot="$common/worktrees"
 # A function because the count is taken twice — see the recount below. Absent
@@ -736,7 +736,7 @@ count_registry() {
     # and an output-only skip counts 0 to match), no mismatch fires, and the
     # probe answers `taken=false` for a ticket whose checkout is still on disk.
     # Could not read it, so we cannot tell → count it and let the mismatch
-    # below fire. #697
+    # below fire.
     if contents=$(ls -A "$entry" 2>/dev/null) && [ -z "$contents" ]; then continue; fi
     registered=$((registered + 1))
   done
@@ -752,10 +752,10 @@ count_registry || return 1
 # `--porcelain -z`, into a temp file rather than a command substitution. The
 # plain porcelain terminates every attribute with a newline, and a worktree
 # path may legally contain one (APFS and ext4 both allow it), so one record
-# splits into two. Measured on the plain form (#185): `…/wt/fix-66-a<LF>b`
+# splits into two. Measured on the plain form: `…/wt/fix-66-a<LF>b`
 # reported `worktree` truncated at `…/fix-66-a`, a path not on disk; and
 # `…/wt/plain<LF>fix-33-slug` left the number on the orphaned second line,
-# where the `^worktree ` filter never looked, so #33 came back `taken=false` at
+# where the `^worktree ` filter never looked, so that ticket came back `taken=false` at
 # exit 0 with its checkout live — the one answer this script must never invent.
 # A temp file because `-z`'s separator is NUL and no shell variable can hold
 # one, and because it keeps the lookup's status readable on its own, apart from
@@ -775,7 +775,7 @@ fi
 # the `-ge 1` guard below checks, never read outside this function, matching
 # release-ticket.sh's own `count_linked`, whose comment (line 383) likewise
 # names only `linked` and `wt_list`/`wt_err`. Mirrors that same extraction over
-# the same pair for the same recount (#1408). #1421
+# the same pair for the same recount.
 #
 # The `mktemp` stays ABOVE this function rather than moving inside it, where
 # release-ticket.sh's `wt_listing` creates and removes one of its own: the temp
@@ -852,7 +852,7 @@ count_linked() {
   # with no linked worktree — a guard that refused that would make every probe in
   # a clean repo unknown. Real `git worktree list --porcelain` always prints the
   # main worktree, so reaching this needs a broken or shimmed git; the refusal
-  # direction was already right, only the number was nonsense. #699
+  # direction was already right, only the number was nonsense.
   [ "$listed" -ge 1 ] ||
     { add_unknown "local" "git listed no worktrees at all for #$n — not even the main checkout, so the listing cannot be trusted"; return 1; }
   linked=$((listed - 1))
@@ -870,12 +870,12 @@ count_linked || return 1
 # FIRST count and git's listing is already reflected in that listing, so the
 # second count agrees with it — the invariant the ORIGINAL pair above relies
 # on. Escaping still needs a SECOND mutation inside the recount's own window.
-# The two rates #694 measured for recounting at all — 1.99% → 0.00% at
+# The two rates measured for recounting at all — 1.99% → 0.00% at
 # λ = 2/s, 56.6% → 1.29% saturated — were taken on the registered-only
 # recount this replaces, so that 1.29% residual bounds what narrowing the
 # window below can still leave rather than describing it; it was not
 # re-measured after that change. A real dropped entry is a standing state,
-# not a moment, so it survives the recount and still refuses (verified: #84's
+# not a moment, so it survives the recount and still refuses (verified: an
 # unreadable `gitdir` still aborts).
 #
 # BOTH counts, not `registered` alone, which is what that invariant costs.
@@ -895,8 +895,8 @@ count_linked || return 1
 # above takes them, hands the RECOUNT pair the invariant too: the window an
 # escape needs is the narrow gap these two calls open between themselves, not
 # the whole span back to the first listing. Both directions pinned in
-# inflight.test.mjs. Mirrors release-ticket.sh's copy of this recount, which
-# #1408 fixed the same way. #1421
+# the test suite. Mirrors release-ticket.sh's copy of this recount, which
+# is fixed the same way.
 #
 # The retake pair above is still two reads, not one, and the gap it opens
 # between ITSELF — after `count_registry` has already re-scanned but before
@@ -907,7 +907,7 @@ count_linked || return 1
 # registered`, "the registry read missed entries git can see" — while a
 # REMOVE the same way lands `linked -lt registered`, "the listing is
 # incomplete", indistinguishable from the fault that message exists to name
-# even though nothing here is actually wrong. Pinned in inflight.test.mjs.
+# even though nothing here is actually wrong. Pinned in the test suite.
 # Reordering to `count_linked && count_registry` does not remove this
 # residual, it only moves the ADD case's false report onto the
 # `linked -lt registered` branch instead — the direction the comment below
@@ -1026,12 +1026,12 @@ echo "$NAME: #$n taken=$taken" >&2
 # remote — carries one in; a worktree path is a filename, so it carries in `\`
 # as well, which git's ref rules reject. Raw, either emits a payload no JSON
 # parser accepts. The rule list and its ordering live in json.sh, once, rather
-# than here and in release-ticket.sh and in no-undo-audit.sh (#119).
+# than here and in release-ticket.sh and in no-undo-audit.sh.
 #
 # The other three interpolations are not strings and are not wrapped: `$n` is
 # refused unless it is all digits AND unpadded (the guard's `0?*` arm), which is
 # what makes it a JSON number and not merely numeric — RFC 8259 forbids a
-# leading zero, so `007` never reaches this printf (#121); `$taken` is this
+# leading zero, so `007` never reaches this printf; `$taken` is this
 # script's own true/false, `$hits` only the fixed literals `add_hit` is given.
 # `$pr` is wrapped with the rest — GitHub's own repo, number and state
 # vocabulary cannot currently produce a quote, so it is uniformity against a
@@ -1043,7 +1043,7 @@ echo "$NAME: #$n taken=$taken" >&2
 # malformed JSON at exit 0. Assigned first, each one is a simple command whose
 # status this function can read.
 #
-# `die` is NOT the answer here (#120), unlike everywhere else in this script.
+# `die` is NOT the answer here, unlike everywhere else in this script.
 # The verdict — $taken, $hits, $rc — is already correct by this point; a
 # formatter that broke AFTER a real answer was established must not convert
 # that answer into "unanswerable". So a field jstr or jrewritten could not
@@ -1051,7 +1051,7 @@ echo "$NAME: #$n taken=$taken" >&2
 # looked and found nothing" — and the run continues to the payload it earned,
 # at the verdict's own exit code. A failed `sed` inside `jstr` used to escape
 # this branch entirely and reach `""` unannounced; json.sh reads each stage's
-# own status, so it arrives here as a non-zero return like any other (#119).
+# own status, so it arrives here as a non-zero return like any other.
 #
 # The message names the escaper, not just the field, because the two fail
 # independently: jstr can render a string perfectly while jrewritten cannot

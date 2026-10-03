@@ -16,7 +16,7 @@
 # missing (git would silently answer for the ENCLOSING repo instead, rc 0) are
 # all the unknown state — none of them is ever silently ahead:0, dirty:0, which
 # reads as "nothing here, safe to discard" and is indistinguishable from a
-# genuinely empty worktree. #82, #128.
+# genuinely empty worktree.
 set -eu
 
 # Byte semantics for the `awk` and `paste` below — this script runs no `tr`,
@@ -25,12 +25,12 @@ set -eu
 # where the local filesystem refuses to hold the name. `paste -sd, -` is the
 # obvious one — fed `b\377ad.txt` then `plain.txt` it emits the single byte `b`
 # under `en_US.UTF-8` and the whole pair under `C`, exiting 0 both times, a
-# truncation carrying no stderr and no status. #582 measured the cost of
-# leaving this ambient in no-undo-audit.sh: a truncated list reported as a
+# truncation carrying no stderr and no status. Leaving this ambient in
+# no-undo-audit.sh was measured to cost the same: a truncated list reported as a
 # clean, confident answer.
 #
 # `awk` used to be the immune one — measured byte-identical under
-# `en_US.UTF-8` and `C` — and #617 ended that: `jesc` below turns git's octal
+# `en_US.UTF-8` and `C` — and that has ended: `jesc` below turns git's octal
 # escapes back into bytes with `sprintf("%c", n)`, and that IS locale-sensitive.
 # Measured, `%c` with 195: gawk 5.4.1 emits the two-byte UTF-8 encoding of
 # U+00C3 under `en_US.UTF-8` and the single byte \303 under `C`; BWK awk
@@ -41,18 +41,18 @@ set -eu
 # Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
 # range or a POSIX class, so collation and case-folding — the two things
 # `LC_ALL=C` otherwise changes — have nothing here to act on. "Nothing" is an
-# inventory, not a hope: locale-pin-prose.test.mjs enforces it (#612), because
+# inventory, not a hope: the locale-pin prose test enforces it, because
 # this sentence shipped false in no-undo-audit.sh and a `sort` added below
 # would otherwise leave every test in this suite green.
 export LC_ALL=C
 
 # Below the locale pin, not above it with `set -eu`: `unset` touches no
-# byte-sensitive tool, but locale-pin-prose.test.mjs treats ANY line here that
+# byte-sensitive tool, but the locale-pin prose test treats ANY line here that
 # is not a comment, a blank, or `set -[eux]+` as work the pin must sit above,
 # and refuses on principle rather than on this line's own behaviour. Same
 # placement, same reason, as release-ticket.sh's copy.
 #
-# Both halves are measured on THIS script (#1020), and they break it in two
+# Both halves are measured on THIS script, and they break it in two
 # different directions — which is why the line names both rather than the one
 # that happened to be found first.
 #
@@ -71,14 +71,14 @@ export LC_ALL=C
 # layout (`.worktrees/` gitignored, so the parent really is clean): a worktree
 # holding an uncommitted file comes back `dirty: 0, dirtyFiles: [],
 # readable: true` — a false CLEAN, at rc 0, indistinguishable from a worktree
-# that genuinely holds nothing. Same shape as #730's `showUntrackedFiles=no`
+# that genuinely holds nothing. Same shape as a `showUntrackedFiles=no`
 # silence, reached through the environment instead of the config.
 unset GIT_DIR GIT_WORK_TREE
 
 NAME=worktree-audit
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
-# No positional argument (#525). A caller-supplied path was silently discarded
+# No positional argument. A caller-supplied path was silently discarded
 # — no `$#` check, no usage — so a missing worktree returned a full audit of
 # every OTHER worktree at exit 0, first row the main checkout. Refuse loudly
 # instead of adding a filter: this script's whole contract is "every worktree,
@@ -87,7 +87,7 @@ die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 # the json_lib guard below, so a refusal never emits a truncated array.
 [ $# -eq 0 ] || die "takes no arguments; audits every worktree"
 
-# The escaping helpers (#119). json.sh's header holds the sourcing contract and
+# The escaping helpers. json.sh's header holds the sourcing contract and
 # the measurements behind it. This script defines no exit 1 at all, so a bare 1
 # out of it is a code its caller has no reading for. Placed here, above the
 # opening `[`, so a missing library refuses before the array is started rather
@@ -98,7 +98,7 @@ json_lib="$(dirname "$0")/json.sh"
 # shellcheck source=json.sh
 . "$json_lib" || die "$json_lib failed to load"
 
-# The worktree readers (#551, #725). worktree.sh's header holds the sourcing
+# The worktree readers. worktree.sh's header holds the sourcing
 # contract and the measurements behind it, and json.sh's holds the `[ -r ]`
 # reasoning both guards share. Above the opening `[` for the reason the json_lib
 # guard is: a missing library must refuse before the array is started.
@@ -108,7 +108,7 @@ wt_lib="$(dirname "$0")/worktree.sh"
 # shellcheck source=worktree.sh
 . "$wt_lib" || die "$wt_lib failed to load"
 # One unknown state, one place: null counts, readable:false, one reason. Seven
-# call sites below reach this function — #2220's admin-dir-unreadable arm
+# call sites below reach this function — the admin-dir-unreadable arm
 # among them — and differ in nothing but that reason, so one more added
 # later cannot half-set the quadruple and emit a record whose counts
 # contradict its own `readable` field. The MISSING branch stays spelled out —
@@ -120,12 +120,12 @@ unknown() { readable=false; ahead=null; dirty=null; files=""; note=; printf '   
 # on a claim branch lands HEAD on a commit `origin/main` already has — so a
 # count from HEAD alone read such a worktree as `ahead:0, dirty:0`, the
 # "nothing here" row, while the branch it holds carries unpushed commits.
-# `wt_op_state` (#2218) reads the held branch out of the admin dir; this sets
+# `wt_op_state` reads the held branch out of the admin dir; this sets
 # `held` to those refs, relabels `short` with their short names and `note`
 # with the operation, for the count below to run over HEAD and `held`
 # together: that union is the branch's own commits plus whatever a rebase
 # has replayed so far onto HEAD alone. Attached rows are untouched. 1: the
-# admin dir cannot be read, so whether a branch is held is unknown. #2220
+# admin dir cannot be read, so whether a branch is held is unknown.
 #
 # A bisect started from a detached HEAD writes that HEAD's SHA, not a branch,
 # into BISECT_START, and `wt_op_state` still returns it as `refs/heads/<sha>`
@@ -140,7 +140,7 @@ op_held() {
   for h in $wt_op_held; do
     sha=$(git -C "$wt" rev-parse --verify "${h#refs/heads/}^{commit}" 2>/dev/null) || sha=
     # A bisect-from-detached-HEAD write drops here because `$h` never names a
-    # real ref (#2218: it is HEAD's own SHA reread as `refs/heads/<sha>`). The
+    # real ref (it is HEAD's own SHA reread as `refs/heads/<sha>`). The
     # sha=name match alone cannot tell that case apart from a real branch that
     # happens to be NAMED as the 40-hex string it also resolves to — so the
     # second, structural check is what actually distinguishes them: a real
@@ -153,7 +153,7 @@ op_held() {
   [ -n "$held" ] || return 0
   short=
   for h in $held; do short="${short:+$short }${h#refs/heads/}"; done
-  # `$wt_op` names only the LAST admin marker `wt_op_state` found (#2218's own
+  # `$wt_op` names only the LAST admin marker `wt_op_state` found (its own
   # last-wins scan), so it cannot tell a worktree with ONE operation from one
   # with a rebase stopped and a bisect then started on top of it — both leave
   # BISECT_LOG present and `wt_op=BISECT_LOG`, even though the branch actually
@@ -176,8 +176,8 @@ op_held() {
 }
 
 base=${BASE_REF:-origin/main}
-# Only a remote-tracking ref is accepted — the accept-list reap.sh:156 (#924)
-# and release-ticket.sh:229 (#1320) both carry, and this script had none of.
+# Only a remote-tracking ref is accepted — the accept-list reap.sh and
+# release-ticket.sh both carry, and this script had none of.
 # Unlike those two, this script is audit-only: it prints ahead/dirty counts
 # to stdout and never itself writes to git state, so a fleet controller
 # acting on a wrong number is the whole blast radius, not this process. That
@@ -194,7 +194,7 @@ case "$base" in
   *) die "BASE_REF must be a remote-tracking ref, got '$base'";;
 esac
 
-# release-ticket.sh (#1320) found the same bug in the same default: `origin/
+# release-ticket.sh found the same bug in the same default: `origin/
 # main` is a SHORTHAND, and git resolves a shorthand through its own
 # disambiguation order (gitrevisions: refs/<name>, refs/tags/<name>,
 # refs/heads/<name>, refs/remotes/<name>, …), in which refs/remotes/origin/
@@ -203,15 +203,14 @@ esac
 # branch, and every measurement against the bare shorthand then answers
 # about the tag's target instead: `ahead` silently reads 0 against a
 # worktree that genuinely carries unpushed work, exactly the "nothing here"
-# signal #82, #128 established this script's readers trust.
+# signal the header says readers take as safe to discard.
 #
 # The fix is to stop MEASURING against the shorthand: qualify it to the full
 # refs/remotes/ path, where there is nothing left to disambiguate, unless it
 # is already qualified. The accept-list above is what makes this qualify
-# step safe rather than a guess — #924 recorded qualifying as unavailable
-# without one, because BASE_REF could otherwise name a tag, a SHA or a local
-# branch, leaving no prefix that is always correct. $base itself is left
-# unqualified — it never appears in this script's JSON output, only in
+# step safe rather than a guess — BASE_REF could otherwise name a tag, a SHA
+# or a local branch, leaving no prefix that is always correct. $base itself
+# is left unqualified — it never appears in this script's JSON output, only in
 # `die` text, where the shorthand spelling is what an operator expects to
 # read.
 case "$base" in
@@ -242,13 +241,13 @@ printf '['
 # read past it, AND end the `read -r` line below — two truncations, and the loop
 # saw a shorter path than even the awk had. `wt_listing` swaps both separators
 # before either stage runs, so the path arrives on one line; `nl_path` below is
-# what refuses to stat it. #551
+# what refuses to stat it.
 #
 # The path goes LAST, and the branch first, because the tab this awk delimits
 # with is itself a byte a path may hold — and `read -r wt br` split such a path
 # at it, reporting a truncated `MISSING on disk` for a worktree that is present
 # and clean, with the tail of its path swallowed into the branch field. That is
-# #551's own defect shape surviving in #551's own rewrite. With the path last,
+# the newline-path defect's own shape surviving in its own rewrite. With the path last,
 # `read` assigns the whole remainder of the line to the final name whatever it
 # holds, so no byte in a path can split it. The branch cannot take that slot: a
 # ref name rejects a tab outright, which is what makes it safe to read first.
@@ -262,7 +261,7 @@ while IFS="$(printf '\t')" read -r br wt; do
   # substituted byte as a space, so the entry still names which worktree could
   # not be audited, whole, with the byte neutralised. The same ceiling
   # inflight.sh's probe 3 records, and here it costs a diagnosis rather than a
-  # verdict. #551
+  # verdict.
   if nl_path "$wt"; then
     unknown "path holds a newline — git's own listing cannot be read back to a name this script can stat"
   elif [ -d "$wt" ]; then
@@ -280,7 +279,7 @@ while IFS="$(printf '\t')" read -r br wt; do
     # `git worktree list --porcelain` emits a `branch refs/heads/...` line for
     # it, so a `[gone]` branch checked out there binds reap.sh's own `$wt` to
     # it — and handles that shape explicitly before its own `-f` linkage guard
-    # (#128 reference shape) rather than by construction. Here the guard itself
+    # rather than by construction. Here the guard itself
     # must accept both: a real git dir always has `HEAD` sitting directly in
     # it, and an empty stand-in directory or a dangling symlink — the two
     # shapes a broken/deleted linkage takes, and what leaks the parent's status
@@ -292,7 +291,7 @@ while IFS="$(printf '\t')" read -r br wt; do
     if [ -x "$wt" ] && [ ! -f "$wt/.git" ] && [ ! -f "$wt/.git/HEAD" ]; then
       unknown "no .git linkage — git would answer for the enclosing repo, not this worktree"
     # Below the linkage guard, never above it: `wt_op_state` asks git FROM
-    # `$wt`, which without a linkage answers for the enclosing repo. #2220
+    # `$wt`, which without a linkage answers for the enclosing repo.
     elif ! op_held; then
       unknown "cannot read its admin dir — a rebase or bisect there may hold a branch HEAD no longer points at"
     # Chain on `&&`, not `|| echo 0`: a piped `wc -l` always exits 0 even when
@@ -300,23 +299,23 @@ while IFS="$(printf '\t')" read -r br wt; do
     # never fires and a permissions/corruption failure reads as "0 ahead, 0
     # dirty" — indistinguishable from a genuinely clean worktree.
     #
-    # `-uall`: #730 (see reap.sh's branch sweep for the full explanation) — a
+    # `-uall` (see reap.sh's branch sweep for the full explanation) — a
     # bare `--porcelain` reads `dirty: 0` over a dirty tree under
     # `status.showUntrackedFiles = no`, and the `&&` chain above, built
     # precisely so a failure to look is never scored as clean, cannot see it
     # either, because the status IS 0.
     #
     # `-uall` over `-unormal` here specifically, unlike reap.sh's `--ignored`
-    # reason-string probe (which switched to `-unormal`, same PR): this
+    # reason-string probe (which uses `-unormal`): this
     # report's `dirtyFiles[]` is what a fleet controller reads to decide
-    # whether a replacement member would REDO work or DESTROY it, and #617
+    # whether a replacement member would REDO work or DESTROY it, and this script
     # already invested in translating git's C-quoting to JSON precisely so
     # `dirtyFiles[]` round-trips to the real path on disk — infrastructure
     # that exists to let the array name individual files, not just
     # directories. `-unormal` would collapse an untracked directory to one
     # entry, silently dropping that granularity for whoever reads this
     # array. Proven, not just asserted: see the nested-directory test in
-    # worktree-audit.test.mjs.
+    # this script's tests.
     #
     # `$held` unquoted: a space-separated list of full `refs/heads/` names,
     # empty for every attached row, and a ref name holds no space or glob byte.
@@ -332,9 +331,9 @@ while IFS="$(printf '\t')" read -r br wt; do
       # git 2.50.1 — and C-quoting is NOT JSON escaping. `\303\251` for the `é`
       # in `café.txt` is an invalid JSON escape, so ONE such file made the whole
       # array unparseable and cost the caller every other worktree's entry too.
-      # #617 settled the open half of that: TRANSLATE git's form into JSON's, so
+      # The open half of that is settled: TRANSLATE git's form into JSON's, so
       # `dirtyFiles[]` round-trips to the real name on disk. The alternative
-      # #617 weighed — JSON-escape the C-quoted text itself — parses, but hands
+      # considered — JSON-escape the C-quoted text itself — parses, but hands
       # a fleet controller a string it cannot pass back to the filesystem, which
       # is the same defect `nl_path` above refuses rather than reports.
       #
@@ -355,14 +354,14 @@ while IFS="$(printf '\t')" read -r br wt; do
       # `jesc` meets \000 as three literal digit characters (git's own octal
       # spelling of the byte), never as an embedded NUL, so the exclusion that
       # protects `tr` does not apply here. Emits the same five short forms, and
-      # leaves \177 alone (#146).
+      # leaves \177 alone.
       if jfiles=$(printf '%s\n' "$status_out" | awk '
       # git C-quoting to JSON, byte for byte. An UNQUOTED path is returned
       # untouched: git quotes for `"`, `\`, any control byte and any byte with
       # the high bit set, so what it left bare is printable ASCII with nothing
       # JSON needs escaped. `index("01234567", c)`, not a `[0-7]` bracket range
-      # — locale-pin-prose.test.mjs scans this file for collation ranges and a
-      # range here would read as one (#612). git spells an octal escape with
+      # — the locale-pin prose test scans this file for collation ranges and a
+      # range here would read as one. git spells an octal escape with
       # exactly three digits, so the two lookahead reads below always land.
       # jesc_err is a global, deliberately never reset: an unrecognized escape
       # exits the awk program (below) before a second call could matter, so
@@ -379,7 +378,7 @@ while IFS="$(printf '\t')" read -r br wt; do
             out = out (n < 32 ? " " : sprintf("%c", n))
           } else if (c=="a" || c=="v") out=out " "
           else if (index("bfnrt\\\"", c) > 0) out=out "\\" c
-          # An escape letter git 2.50.1 never emits (the #617 enumeration
+          # An escape letter git 2.50.1 never emits (the enumeration
           # above is exhaustive against it) — dead code under real git, same
           # as the header states. Fail loud rather than pass the byte through
           # unescaped: this file has one rule above every other one, never
@@ -402,7 +401,7 @@ while IFS="$(printf '\t')" read -r br wt; do
         # unescaped closing quote, which the scan below finds. Reading the
         # whole rename line as one path put the quotes git had already added
         # inside the pair added below: one such file made the WHOLE payload
-        # unparseable, taking every other worktree entry down with it (#82).
+        # unparseable, taking every other worktree entry down with it.
         if (substr($0,1,1) ~ /[RC]/) {
           if (substr(p,1,1) == "\"") {
             for (i=2; i<=length(p); i++) {
@@ -420,7 +419,7 @@ while IFS="$(printf '\t')" read -r br wt; do
         # Checked here, not after the pipeline: `awk ... | paste -sd, -` would
         # otherwise report the PASTE exit status, and paste never fails on
         # this input — the jesc_err below would kill awk with nothing
-        # downstream ever finding out (#617 suggestion 3).
+        # downstream ever finding out.
         if (jesc_err != "") {
           print "jesc: unrecognized C-quote escape \\" jesc_err > "/dev/stderr"
           exit 1
@@ -444,11 +443,11 @@ while IFS="$(printf '\t')" read -r br wt; do
     # so a DANGLING symlink is `-e` false and `-L` true, and without this it fell
     # past both this arm and `gone` into "an ancestor could not be read" — prose
     # that is false of a path whose every ancestor was read fine. `gone` now
-    # refuses it too (#725), so this arm is where it lands, and the diagnosis
+    # refuses it too, so this arm is where it lands, and the diagnosis
     # below is true of it: a link IS there, and it is not a directory. The
     # wording stays hedged deliberately — a dangling worktree link is rc-0
     # residue OR release-ticket.sh's rc-255 halt path with the claim still live,
-    # and only the hedge is true of both (#728).
+    # and only the hedge is true of both.
     #
     # `-d` false does not mean "not there". A registered worktree path replaced
     # by a regular file, a symlink to one, or a FIFO is all three still LISTED
@@ -471,7 +470,7 @@ while IFS="$(printf '\t')" read -r br wt; do
   # filename and accepts both. This script's whole output is one array, so a
   # single unescaped byte costs the caller every entry, not just this one.
   # `$files` is NOT wrapped here: its elements arrive already quoted and already
-  # JSON-escaped, by `jesc` in the `files=` awk above (#617).
+  # JSON-escaped, by `jesc` in the `files=` awk above.
   # `die` rather than a null field, unlike reap.sh: nothing has been mutated
   # here, so refusing costs no record of work already done.
   wt_j=$(jstr "$wt") && short_j=$(jstr "$short") \

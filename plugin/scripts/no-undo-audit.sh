@@ -20,14 +20,14 @@ set -eu
 # byte landed somewhere sed tolerates. `paste -sd, -` truncates its whole
 # output at the byte while still exiting 0.
 #
-# `awk` is NOT immune, and reap.sh's own #614 fixture measured the earlier
+# `awk` is NOT immune, and reap.sh's own fixture measured the earlier
 # claim here false: it is byte-identical only when every rule matches at an
 # ANCHOR before the bad byte, never needing to convert it — a rule that must
 # SCAN PAST the byte to decide dies instead (BWK awk, macOS: rc 2, `towc:
 # multibyte conversion failure`), and under `set -eu` that death aborts the
 # whole script rather than mis-scoring one record. Reachable only from a
 # fetched tree — a Linux- or latin-1-authored commit — since APFS refuses to
-# hold the name locally. #582.
+# hold the name locally.
 #
 # What that cost was measured on the pipeline that used to split merge-tree's
 # output: PIPESTATUS `1 0 0` — its first stage exiting 1 and truncating, the
@@ -36,17 +36,17 @@ set -eu
 # was watching either, so a conflicting path carrying such a byte dropped every
 # path after it and reported `atRisk: []` at exit 0: a FALSE SAFE from the one
 # tool whose whole job is to say whether a rebase would eat a commit. That
-# split is now a single byte-oriented reader whose status nothing discards
-# (#583), so this pin is no longer the only thing standing between that byte
+# split is now a single byte-oriented reader whose status nothing discards,
+# so this pin is no longer the only thing standing between that byte
 # and a false safe there. Nor is it anywhere else: the `sed` and `tr` below
 # that render a path or git's own diagnostic to stderr used to take the audit
 # down with them on that byte, at the exit status that means dirty, and since
-# #1160 each renders through a guard (`render`, and the fold in the stash
+# then each renders through a guard (`render`, and the fold in the stash
 # branch) whose failure cannot reach the verdict. What the pin still buys is
 # those renders WORKING: unpinned, BSD sed exits emitting nothing and BSD tr
 # exits truncating, so the operator loses the diagnostic while the payload and
 # the exit status stay correct. That is now the whole cost of removing it here,
-# and no-undo-audit.test.mjs' invalid-UTF-8 case is what measures it — grep
+# and the test suite's invalid-UTF-8 case is what measures it — grep
 # this file for those renders; json.sh's escapers do not rely on this pin,
 # pinning the locale on each call instead.
 #
@@ -60,22 +60,22 @@ set -eu
 # is always `t`. That one site is why this paragraph says "one, unreachable"
 # where the five sibling scripts' copies say "none" — two of theirs now name a
 # `*[!0-9]*` range instead, this one is the POSIX-class exception.
-# locale-pin-prose.test.mjs holds all six inventories as lists and fails if the
-# code drifts from them (#612); this paragraph is why the entry below exists.
+# The locale-pin prose test holds all six inventories as lists and fails if the
+# code drifts from them; this paragraph is why the entry below exists.
 # Non-ASCII paths are untouched either way:
 # every scrub set below is \001-\037 and every byte of a multi-byte UTF-8
 # sequence is >= \200.
 export LC_ALL=C
 
 # Below the locale pin, not above it with `set -eu`: `unset` touches no
-# byte-sensitive tool, but locale-pin-prose.test.mjs treats ANY line here that
+# byte-sensitive tool, but the locale-pin prose test treats ANY line here that
 # is not a comment, a blank, or `set -[eux]+` as work the pin must sit above,
 # and refuses on principle rather than on this line's own behaviour. Same
 # placement, same reason, as release-ticket.sh's copy.
 #
 # The `--show-prefix` gate below is the guard against exactly this class —
 # "can git operate here" is not "is this the tree it answers about" — and the
-# environment walks straight past it. Both halves measured (#1020).
+# environment walks straight past it. Both halves measured.
 #
 # GIT_WORK_TREE outranks `-C`, so `git -C "$wt" rev-parse --show-prefix`
 # answers about the AMBIENT tree. When that tree is not an ancestor of the
@@ -100,16 +100,15 @@ NAME=no-undo-audit
 # caller-supplied path, and `emit` below is the one place they all route
 # through. Reached by a CALL, not by a second copy of `emit`'s body spelled
 # here, which is what this line used to be: hand-copied the guard was
-# correct and stayed correct, but #1571 then had to edit both copies to add
-# the SIGPIPE trap, and a call is the only form that cannot be missed that
-# way (#1684).
+# correct and stayed correct, but adding the SIGPIPE trap then meant editing
+# both copies, and a call is the only form that cannot be missed that way.
 #
 # What `die` needs from that guard is the header's rule below applied to the
 # one write whose statement MUST still reach an exit: `set -e` reads the
 # write's status before `exit` is ever reached, and with fd 2 closed that
 # status is 1 — REFUSED on this script — so every unanswerable question
-# blamed the worktree instead of saying it could not be answered (#1514,
-# measured: a path that is not a worktree, `2>&-`, exit 1 where the contract
+# blamed the worktree instead of saying it could not be answered
+# (measured: a path that is not a worktree, `2>&-`, exit 1 where the contract
 # says 2).
 #
 # `emit` is defined below, after `render`, and a shell resolves a function
@@ -127,11 +126,11 @@ die() { emit "$NAME: $1"; exit 2; }
 # failed write, and 1 out of here is the dirty-worktree refusal: with fd 2
 # closed, a clean tree came back "commit the worktree before rebasing", from
 # the one tool whose job is to say whether a rebase would eat a commit.
-# Measured before the fix — clean tree, stdout open, `2>&-`: exit 1 (#1514).
+# Measured before the fix — clean tree, stdout open, `2>&-`: exit 1.
 #
 # The guard is centralized, never hand-appended per site: `render` carries
 # it in a function body every caller inherits, and every other write to fd 2
-# — `die`'s own included, since #1684 — goes through `emit()` (defined after
+# — `die`'s own included — goes through `emit()` (defined after
 # `render`), which does the same. A future call site cannot add an unguarded
 # `>&2` write without also adding a new function to sidestep it, and there
 # are two guard bodies to keep in step rather than three. `|| :` is the third
@@ -151,7 +150,7 @@ die() { emit "$NAME: $1"; exit 2; }
 # receives it — on the spot, mid-syscall, before the interpreter ever returns
 # to evaluate the `||` that follows. `|| :` cannot catch a kill; it can only
 # catch a status, and a killed process never produces one for this shell to
-# read (#1571, measured: a reader that exits before the script finishes
+# read (measured: a reader that exits before the script finishes
 # writing — not merely a closed fd — took the whole process out at 141,
 # outside the script's own 0/1/2 contract).
 #
@@ -177,7 +176,7 @@ die() { emit "$NAME: $1"; exit 2; }
 # Every operator-facing render that pipes a captured value through an external
 # tool goes through here — bar the stash-diagnostic fold below, which folds
 # rather than indents and carries the same guard inline — and the point of it
-# is that a render CANNOT decide the verdict (#1160).
+# is that a render CANNOT decide the verdict.
 # Written bare — `printf '%s\n' "$v" | sed 's/^/    /' >&2` — the pipeline's
 # status is sed's, `set -eu` takes it, and the script exits with it: on this
 # script exit 1 is the dirty-worktree refusal, so a render fabricated that
@@ -200,8 +199,8 @@ die() { emit "$NAME: $1"; exit 2; }
 # one more command whose status `set -e` reads, and it would abort for the
 # reason this function exists to remove. The second and third pieces used to
 # be spelled out here, a hand copy of `emit`'s own body; now they are a CALL
-# to it (#1685), for the same reason `die` stopped carrying its own copy
-# (#1684) — a hand-copied guard is correct only until the next edit to the
+# to it, for the same reason `die` stopped carrying its own copy
+# — a hand-copied guard is correct only until the next edit to the
 # original forgets to touch both.
 #
 # `$1` lands in sed's REPLACEMENT text, where `&` and `\` are metacharacters.
@@ -221,9 +220,9 @@ render() { # render <line-prefix> <text> <what-the-text-is>
 emit() { ( trap '' PIPE; printf '%s\n' "$1" >&2 ) || :; }
 
 
-# The escaping helpers (#119). json.sh's header holds the sourcing contract and
+# The escaping helpers. json.sh's header holds the sourcing contract and
 # the measurements behind it; only what is true of THIS script is repeated here.
-# Below `export LC_ALL=C` deliberately: locale-pin-prose.test.mjs allows only
+# Below `export LC_ALL=C` deliberately: the locale-pin prose test allows only
 # comments, blanks, a shebang or a `set -` line above that pin, and `json_lib=`
 # is none of them.
 #
@@ -242,7 +241,7 @@ json_lib="$(dirname "$0")/json.sh"
 # or a control byte that git's ref rules would reject. The rule list, its
 # ordering and the jarr/jstr split live in json.sh, once, rather than here and
 # in inflight.sh and in release-ticket.sh — five copies of the same rules
-# before the extraction, counting jarr and jarr_rewritten (#119).
+# before the extraction, counting jarr and jarr_rewritten.
 #
 # This script is the only caller that reaches the multi-line machinery: `$wt`
 # is the one value here that can carry a newline, which is why json.sh's slurp
@@ -254,7 +253,7 @@ base=${BASE_REF:-origin/main}
 # Only a remote-tracking ref is accepted — the accept-list `case` that
 # release-ticket.sh and reap.sh carry, and the one this script had none of.
 # worktree-audit.sh carries the same accept-list `case` and already applies the
-# #1329 shorthand fix: its `base_rev` qualify `case` turns `$base` into
+# shorthand fix: its `base_rev` qualify `case` turns `$base` into
 # `$base_rev`, and both its `rev-parse --verify "$base_rev"` and its
 # `rev-list --count "$base_rev"..HEAD` read `$base_rev`, never the bare
 # shorthand. Its stake is smaller, though: being audit-only,
@@ -388,7 +387,7 @@ branch_rev="refs/remotes/origin/$branch"
 # false-refusal classes `--show-prefix` cannot have, comparing nothing. It is
 # asked further down all the same, against a CANONICAL `$wt`, for the one claim
 # `--show-prefix` cannot make: which working tree git answers for once
-# `core.worktree` has moved it (#2040). git's
+# `core.worktree` has moved it. git's
 # `prunable` is no use either: it marks a worktree whose DIRECTORY is gone, and
 # stays silent for one still holding work whose linkage broke (measured).
 prefix=$(git -C "$wt" rev-parse --show-prefix) \
@@ -402,14 +401,14 @@ prefix=$(git -C "$wt" rev-parse --show-prefix) \
 # actually $wt's". A `.git` file rewritten to name a SIBLING worktree's admin
 # dir still resolves its root to $wt (the file's location did not move) while
 # every git command below — `status` included — answers against the sibling's
-# HEAD and index. #189.
+# HEAD and index.
 #
 # So the second claim is asked separately: which git dir answered, and which
 # worktree does THAT dir belong to. Never keyed on the string `--git-dir`
 # returns without `--path-format=absolute`: that is the literal `.git` for a
 # main checkout AND — measured, git 2.50.1 — for a LINKED worktree whose `.git`
 # is a SYMLINK to another worktree's admin dir, so a guard exempting `.git` as
-# "the main worktree, nothing to verify" exempts the #189 spoof spelled as a
+# "the main worktree, nothing to verify" exempts the sibling spoof spelled as a
 # symlink instead of a `gitdir:` file. Absolute, and compared as paths: the one
 # place in the script that compares paths, because unlike `--show-prefix` there
 # is no rc/emptiness shortcut for "do these two name the same tree".
@@ -426,7 +425,7 @@ prefix=$(git -C "$wt" rev-parse --show-prefix) \
 # one shape but on every main checkout. `$wt_real` stays canonical only for
 # resolving `$wt` (symlinks, relative paths), not Unicode normalization, so
 # both owner compares below compare as directories (`-ef`) for the same
-# NFC/NFD reason as `$top` below (#2095, detailed there); the `core.worktree`
+# NFC/NFD reason as `$top` below (detailed there); the `core.worktree`
 # check after them already compares directories, so its own correctness does
 # not depend on `$wt_real`'s spelling either.
 #
@@ -454,11 +453,11 @@ prefix=$(git -C "$wt" rev-parse --show-prefix) \
 # add` can produce.
 #
 # `core.worktree` redirection is NOT caught by either check so far, whatever an
-# earlier version of this comment claimed (#2040, correcting #189's credit):
+# earlier version of this comment claimed:
 # `--show-prefix` is empty at rc 0 for every redirect shape measured, and this
 # owner check passes the two it can see — `$gd` is $wt's own admin dir with its
 # back-pointer intact when the redirect sits in `config.worktree`, and a foreign
-# git dir not named `.git` is the ceiling's admitted shape. The canonical #135
+# git dir not named `.git` is the ceiling's admitted shape. The canonical
 # redirect, a foreign git dir literally named `.git`, IS refused here, by the
 # `${gd%/.git}` owner compare, not by `--show-prefix`. The working-tree compare
 # after this block is what refuses the rest.
@@ -475,7 +474,7 @@ prefix=$(git -C "$wt" rev-parse --show-prefix) \
 # `core.worktree` target whose real directory name itself ends in a literal
 # newline byte loses that byte on whichever side of a compare below reads it,
 # so two directories differing only by that byte compare equal — a redirect
-# this script exists to refuse instead reads clean (measured, #2040). `git
+# this script exists to refuse instead reads clean (measured). `git
 # worktree add`/`git config core.worktree` both accept the byte as an
 # ordinary path character; nothing upstream rejects it.
 #
@@ -521,12 +520,12 @@ fi
 # not called `.git` whose `core.worktree` is `<dir>`: all pass both checks, and
 # `status` then compares the index against `<dir>`'s files. `<dir>` holding the
 # tracked content — any other checkout of the branch — reads `clean` at rc 0
-# over the work sitting in $wt (measured, git 2.50.1, #2040). A `<dir>` INSIDE
+# over the work sitting in $wt (measured, git 2.50.1). A `<dir>` INSIDE
 # $wt is the same leak for every file outside it.
 #
 # `--show-toplevel` names the working tree git actually answers for, so it is
 # compared against `$wt_real`, and the union of this with the checks above is
-# the guard: none is dropped, since this one passes the #189 sibling spoof and
+# the guard: none is dropped, since this one passes the sibling spoof and
 # a foreign `*/.git` whose `core.worktree` names $wt back. The raw-compare
 # false refusals the `--show-prefix` comment warns about do not arise here:
 # measured passing on a relative, symlinked and `/private`-less `$wt`, after
@@ -534,12 +533,12 @@ fi
 # `--separate-git-dir` clone and a `core.worktree` naming $wt itself.
 #
 # Compared as a DIRECTORY (`-ef`, same device and inode), never as a string,
-# for reap.sh's reason (#2072): a worktree whose name is Unicode NFD-composed
+# for reap.sh's reason: a worktree whose name is Unicode NFD-composed
 # (`cafe` + U+0301), passed in the PRECOMPOSED spelling `worktree list
 # --porcelain` echoes under the `core.precomposeunicode` git writes into every
 # new repo on macOS, keeps that spelling through `cd && pwd -P`, while
 # `--show-toplevel` answers the on-disk NFD bytes — visually identical,
-# byte-different, one directory (measured, git 2.50.1, Apple Git-155, #2095).
+# byte-different, one directory (measured, git 2.50.1, Apple Git-155).
 # A byte compare refused every such healthy worktree. `-ef` answers "same
 # directory" for both and for any other spelling the filesystem aliases, and
 # still refuses every redirect — each names a different directory.
@@ -599,7 +598,7 @@ git -C "$wt" rev-parse --verify "$branch_rev" >/dev/null \
 # (`check-ref-format` rejects it, `git branch` refuses to create it), so
 # `$base`, `$branch` and `$fork` cannot carry one.
 #
-# `-uall`: #730 (see reap.sh's branch sweep for the full explanation) — a
+# `-uall` (see reap.sh's branch sweep for the full explanation) — a
 # bare `--porcelain` reads clean over a dirty tree under
 # `status.showUntrackedFiles = no`. Load-bearing here beyond a reap: the merge
 # bot leans on this audit to authorize a REBASE, and the work a rebase
@@ -660,7 +659,7 @@ fi
 # 000` on the same file — same rc pair, same `show-ref` stderr, measured. So
 # the line this branch prints names three causes for four, and `ls -l` on the
 # two files, which is what the runbook sends the operator to read next, shows a
-# healthy mode for that row. Widening either is #437, not this ticket.
+# healthy mode for that row. Widening either is out of scope here.
 #
 # `rev-parse --verify --quiet` cannot do this job: it returns 1 for the
 # unreadable ref FILE for the same reason the list is empty, collapsing that
@@ -671,7 +670,7 @@ fi
 # rc 1 says the REF is absent. It does not say the stash is empty, and the
 # `ref file DELETED` row is the difference: `rm -f .git/refs/stash` leaves the
 # reflog naming commits that are still reachable, and `show-ref` answers 1 for
-# it exactly as it does for a repo that never stashed (#376). So rc 1 buys a
+# it exactly as it does for a repo that never stashed. So rc 1 buys a
 # second question rather than a verdict — is the reflog gone too? Only then is
 # `0` a claim this can make. It composes with the discriminant above rather
 # than replacing it: the three states that land on rc 0/128 never reach the
@@ -700,7 +699,7 @@ fi
 # ceiling here and never printed the `0` this once recorded: the path
 # resolution needs search permission on every ancestor, so it fails before the
 # `-s` stat, and it now answers unknown on its own line rather than refusing
-# the whole audit (#570 — see the resolution below).
+# the whole audit (see the resolution below).
 # `core.logAllRefUpdates=false` is NOT a second one: it suppresses the HEAD
 # reflog, but `git stash push` force-creates `logs/refs/stash` regardless, so
 # such a repo probes normally and reports `unknown` (measured, git 2.50.1).
@@ -708,7 +707,7 @@ fi
 # This does not close every unreadable reflog: one that is merely TRUNCATED —
 # some entries lost, the rest still parses — resolves the ref and returns a
 # nonempty list, so the cross-check sees no disagreement and reports the
-# (too-low) count as exact. That gap is a remaining ceiling. #306's
+# (too-low) count as exact. That gap is a remaining ceiling. A
 # characterization test pins it without closing it — closing it was ruled out
 # separately as not worth the complexity.
 #
@@ -721,7 +720,7 @@ fi
 # signal, which is why the list is captured rather than piped: `| wc -l` made
 # this statement's status `wc`'s, always 0, and git's own rc unrecoverable.
 # Nothing else moves — the count is still the lines the list printed, its stderr
-# is still dropped here, and a list that succeeds is still read as a count. #482.
+# is still dropped here, and a list that succeeds is still read as a count.
 #
 # Only the CORRUPT half of that shape is loud. A non-tip object that is MISSING
 # rather than corrupt leaves the reflog intact too, but `stash list` then skips
@@ -729,7 +728,7 @@ fi
 # (measured: three entries, `rm` the loose object behind `refs/stash@{2}` ->
 # rc 0, two lines, empty stderr, git 2.50.1). Nothing here can tell that from a
 # genuinely shorter stack, so it still reports the exact-looking count and stays
-# under the #306 ceiling above.
+# under the truncated-reflog ceiling above.
 sl_rc=0
 sl=$(git -C "$wt" stash list 2>/dev/null) || sl_rc=$?
 # `awk 'END{print NR}'`, not `wc -l`, and the difference is the empty stack.
@@ -763,7 +762,7 @@ git -C "$wt" show-ref refs/stash >/dev/null 2>&1 || sr_rc=$?
 # path lands on `[ -s "" ]`, false, and prints the confident `0`; the state
 # gets its own emission below instead of falling through to one. git's own
 # `fatal:` naming the path and the errno is left on stderr, unwrapped, as the
-# operator's whole lead on which directory to look at. #570.
+# operator's whole lead on which directory to look at.
 stash_reflog=
 stash_reflog_rc=0
 if [ "$stash" = 0 ] && [ "$sr_rc" = 1 ]; then
@@ -777,7 +776,7 @@ fi
 # ref, and it is the more specific of the two there. What is left for the rc is
 # the state no cross-check can reach: git printed entries and then said it could
 # not finish, so the ref resolves, nothing disagrees, and the number would be
-# short by exactly the entries git refused to read (#482).
+# short by exactly the entries git refused to read.
 msg=
 if [ "$stash" = 0 ] && [ "$sr_rc" -ne 1 ]; then
   msg="    stash entries (repo-global, not gated): unknown — the list came back empty but refs/stash is not absent (an unreadable ref or reflog, or a ref pointing at a missing object)"
@@ -799,7 +798,7 @@ if [ -n "$msg" ]; then
   # for BOTH the unreadable and the malformed ref file: one canned line for two
   # causes, naming a null SHA that neither ref holds. It is silent only for the
   # unreadable reflog. Whether that wrong-but-specific line beats this
-  # right-but-vague one is #481; this change captures `stash list` and nothing
+  # right-but-vague one is a separate question; this change captures `stash list` and nothing
   # else.
   #
   # The counting statement above takes git's exit code and nothing else, and
@@ -809,7 +808,7 @@ if [ -n "$msg" ]; then
   # healthy audit to serve the one path that has already decided something is
   # wrong. Here the second call costs nothing: it runs only on a run that is
   # already reporting a fault, which now includes the run whose rc brought it
-  # here. #304, #482.
+  # here.
   #
   # `2>&1 >/dev/null` in that order captures stderr and drops stdout — the list
   # itself is not wanted, it was already counted. `|| true` is load-bearing
@@ -930,7 +929,7 @@ git -C "$wt" merge-tree --write-tree --name-only -z "$base_rev" "$branch_rev" >"
 # confidence — the false safe the prologue describes, and precisely the outcome
 # the standard below says must be exit 2 instead. `export LC_ALL=C` answers the
 # one byte that was measured getting in; it cannot make a status readable, and
-# any other fault in a prefix stage reproduces the under-report. #583.
+# any other fault in a prefix stage reproduces the under-report.
 #
 # `set -o pipefail` is NOT the alternative, and not merely because POSIX sh
 # lacks it (dash rejects `set -o pipefail` outright). Measured: a healthy
@@ -940,7 +939,7 @@ git -C "$wt" merge-tree --write-tree --name-only -z "$base_rev" "$branch_rev" >"
 # tail unread, and once that tail outgrows a pipe buffer whatever is upstream is
 # still writing when the reader goes away. `pipefail` would turn every such run
 # into a refusal, which is a worse failure than the one it fixes. The control
-# for that is a test rather than this paragraph: no-undo-audit.test.mjs builds a
+# for that is a test rather than this paragraph: the test suite builds a
 # run whose unread tail outgrows a pipe buffer and requires a full answer.
 #
 # One reader answers both questions, so there is nothing left to discard a
@@ -982,7 +981,7 @@ if [ -n "$conflicts" ]; then
 else
   emit "    no conflicting files"
 fi
-# `jarr`/`jarr_rewritten` return non-zero when a stage fails (#119), and a bare
+# `jarr`/`jarr_rewritten` return non-zero when a stage fails, and a bare
 # `var=$(pipeline)` under `set -eu` would abort with the failing tool's own
 # status — 1 out of THIS script is the dirty-worktree refusal, fabricated here
 # on a worktree already measured clean, with no payload and nothing on stderr.
@@ -1019,7 +1018,7 @@ if [ -n "$conflicts" ]; then
   # nothing sits ahead of it with a status to discard. It used to be
   # `printf | sed | tr | xargs`, where the `|| die` could only ever answer for
   # the last of the four and a fault in any of the other three under-reported
-  # `at_risk` at exit 0. #583.
+  # `at_risk` at exit 0.
   at_risk=$(xargs -0 git -C "$wt" log --oneline "$fork".."$base_rev" -- <"$ps_out") \
     || die "listing commits for the conflicting paths failed (git log or xargs) — cannot tell what a resolution would eat"
   # Above ARG_MAX (1048576 on macOS) xargs splits the pathspec list across
@@ -1080,7 +1079,7 @@ fi
 # out. Assigned first, each one is a simple command whose status `add_field`
 # can read.
 #
-# `die` is NOT the answer here (#431), unlike the conflicts and at-risk escapes
+# `die` is NOT the answer here, unlike the conflicts and at-risk escapes
 # above, and the difference is which kind of value each renders. Those two are
 # FINDINGS — the operator can obtain them nowhere else, and step 5 of the
 # no-undo runbook hands `conflicts[]` straight to `git diff -- <path>`, where an
@@ -1093,7 +1092,7 @@ fi
 # payload carries is established, and a formatter breaking HERE would convert a
 # finished audit into "unanswerable" over the formatting of two values the
 # caller typed. Each renders independently and reports JSON `null` when it
-# cannot, which is what #120 shipped for this same class in inflight.sh. Not a
+# cannot, which is what inflight.sh does for this same class. Not a
 # quieter `""`: a field that could not be escaped has no usable path to hand to
 # `git diff` in any case, and `""` is indistinguishable from a path.
 #
