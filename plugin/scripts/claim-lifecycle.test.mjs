@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./exec-stub.mjs";
+import { worktreeNames } from "./worktree-porcelain.mjs";
 
 const CLAIM = fileURLToPath(new URL("./claim-ticket.sh", import.meta.url));
 const REAP = fileURLToPath(new URL("./reap.sh", import.meta.url));
@@ -111,7 +112,7 @@ test("a freshly claimed branch is not [gone], and reap.sh leaves it alone", (t) 
   assert.deepEqual(JSON.parse(reaped.stdout).reaped, []);
   // Positive control on the same run: the branch and its worktree survived.
   assert.equal(f.git(f.w, "rev-parse", "--verify", "refs/heads/fix/42-slug").length, 40);
-  assert.match(f.git(f.w, "worktree", "list"), /42-slug/);
+  assert.ok(worktreeNames(f.git(f.w, "worktree", "list", "--porcelain")).includes("42-slug"));
 });
 
 test("after push -u, merge and prune, reap.sh does see the branch as [gone]", (t) => {

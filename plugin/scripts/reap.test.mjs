@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { slowTransport, SSH_URL } from "./slow-transport.mjs";
 import { writeExecStub } from "./exec-stub.mjs";
+import { hasAttribute, worktreeNames } from "./worktree-porcelain.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./reap.sh", import.meta.url));
 
@@ -42,6 +43,9 @@ const ENV = {
 
 const git = (cwd, ...args) =>
   execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
+
+/** worktreeNames() of `w`'s listing: never its paths, which carry TMPDIR (#2531). */
+const listedNames = (w) => worktreeNames(git(w, "worktree", "list", "--porcelain"));
 
 // Absolute path to the real git, for any test that shadows `git` on PATH.
 const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
@@ -746,14 +750,14 @@ test("a successful --apply run still reaps, still prunes, and exits 0 unchanged"
   const wtDir = join(w, "..", "stale-wt");
   git(w, "worktree", "add", "-q", "-b", "scratch/stale", wtDir, "main");
   rmSync(wtDir, { recursive: true, force: true });
-  assert.match(git(w, "worktree", "list"), /stale-wt/, "fixture must start with a prunable registration");
+  assert.ok(listedNames(w).includes("stale-wt"), "fixture must start with a prunable registration");
 
   const { code, json } = runReap(w, ["--apply"]);
 
   assert.equal(code, 0);
   assert.deepEqual(json.reaped, ["feature/merged"]);
   assert.deepEqual(json.kept, []);
-  assert.doesNotMatch(git(w, "worktree", "list"), /stale-wt/, "the prune must still run and clear the stale registration");
+  assert.ok(!listedNames(w).includes("stale-wt"), "the prune must still run and clear the stale registration");
 });
 
 // The other half of the same guard, and the half no test had: the default
@@ -1307,7 +1311,7 @@ test("a [gone] branch whose worktree directory was deleted by hand is reaped, ne
   const w = repo(t);
   const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
   rmSync(wt, { recursive: true, force: true });
-  assert.match(git(w, "worktree", "list"), /feature\/merged/, "fixture: the stale registration must still be listed");
+  assert.ok(listedNames(w).includes("feature/merged"), "fixture: the stale registration must still be listed");
 
   const { code, json } = runReap(w, ["--apply"]);
 
@@ -1315,7 +1319,7 @@ test("a [gone] branch whose worktree directory was deleted by hand is reaped, ne
   assert.deepEqual(json.reaped, ["feature/merged"], "a directory that is not there holds no work to protect");
   assert.deepEqual(json.kept, []);
   assert.equal(branchExists(w, "feature/merged"), false);
-  assert.doesNotMatch(git(w, "worktree", "list"), /feature\/merged/, "the stale registration must not survive the run");
+  assert.ok(!listedNames(w).includes("feature/merged"), "the stale registration must not survive the run");
 });
 
 test("a dry run and --apply agree about a deleted worktree directory (#128)", (t) => {
@@ -2010,7 +2014,7 @@ test("a refusal that LEFT the registration in place is reported as such, distinc
   assert.doesNotMatch(json.kept[0].reason, /\n/, "git's message here really is two lines — it must arrive flattened");
   assert.match(stderr, /KEEP feature\/merged/);
 
-  assert.match(git(w, "worktree", "list", "--porcelain"), /feature\/merged/, "the registration really did survive");
+  assert.ok(listedNames(w).includes("feature/merged"), "the registration really did survive");
   assert.equal(existsSync(wt), true);
   assert.equal(branchExists(w, "feature/merged"), true);
 });
@@ -2543,9 +2547,9 @@ test("the dry run removes nothing, and still cannot predict a refusal (#391)", (
   // Nothing was touched: directories, registrations and branches all intact.
   assert.equal(existsSync(healthy), true, "a dry run must not remove the worktree it COULD have removed");
   assert.equal(existsSync(locked), true);
-  const reg = git(w, "worktree", "list", "--porcelain");
-  assert.match(reg, /feature\/a-healthy/);
-  assert.match(reg, /feature\/b-locked/);
+  const reg = listedNames(w);
+  assert.ok(reg.includes("feature/a-healthy"));
+  assert.ok(reg.includes("feature/b-locked"));
   assert.equal(branchExists(w, "feature/a-healthy"), true);
   assert.equal(branchExists(w, "feature/b-locked"), true);
 });
@@ -2663,7 +2667,7 @@ test("a detached worktree whose HEAD is merged is removed, not walked past (#381
   const w = repo(t);
   const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
   assert.ok(existsSync(wt), "fixture");
-  assert.match(git(w, "worktree", "list"), /\(detached HEAD\)/, "fixture: the worktree must really be detached");
+  assert.ok(hasAttribute(git(w, "worktree", "list", "--porcelain"), "detached"), "fixture: the worktree must really be detached");
 
   const { code, json, stderr } = runReap(w, ["--apply"]);
 
@@ -2674,7 +2678,7 @@ test("a detached worktree whose HEAD is merged is removed, not walked past (#381
   assert.ok(stderr.includes(`    REMOVED worktree ${wt}`), `the removal must be reported: ${stderr}`);
   // The registration goes with it, or the in-flight probe still reads the
   // ticket as taken — the whole cost this ticket exists to stop.
-  assert.doesNotMatch(git(w, "worktree", "list", "--porcelain"), /79-brief/);
+  assert.ok(!listedNames(w).includes("79-brief"));
 });
 
 test("a branchless sweep whose awk cannot read the listing declines, never sweeps silently (#993)", (t) => {
@@ -2798,7 +2802,7 @@ test("a detached worktree whose HEAD git cannot resolve is kept, never swept (#3
   writeFileSync(join(adminEntry(w, wt), "HEAD"), "not an object id\n");
   assert.match(
     git(w, "worktree", "list", "--porcelain"),
-    /HEAD 0{40}/,
+    /^HEAD 0{40}$/m,
     "fixture: git must report the null object id for this worktree",
   );
 
@@ -2958,14 +2962,14 @@ test("a detached worktree whose directory was deleted by hand still has its regi
   const w = repo(t);
   const wt = detachedMergedWorktree(w, "docs/79-brief", "work that landed");
   rmSync(wt, { recursive: true, force: true });
-  assert.match(git(w, "worktree", "list", "--porcelain"), /prunable/, "fixture: the stale registration must still be listed");
+  assert.ok(hasAttribute(git(w, "worktree", "list", "--porcelain"), "prunable"), "fixture: the stale registration must still be listed");
 
   const { code, json } = runReap(w, ["--apply"]);
 
   assert.equal(code, 0);
   assert.deepEqual(json.worktreesRemoved, [wt]);
   assert.deepEqual(json.kept, []);
-  assert.doesNotMatch(git(w, "worktree", "list", "--porcelain"), /79-brief/);
+  assert.ok(!listedNames(w).includes("79-brief"));
 });
 
 test("a detached worktree behind an unreadable parent is kept, never removed as absent (#381, #83)", (t) => {
