@@ -590,9 +590,7 @@ export function anchorAt(text, anchor, what, { emphasisTolerant = false } = {}) 
 // `paragraph`'s reason and after its history: three pins hand-rolled this same
 // regex locally first, each carrying its own chance of dropping a guard. A pin
 // needing this bound imports it — a local copy is the defect, not a style
-// choice. NOT the mirror shape: the run BELOW an anchor
-// (`commentBelow` in `ed9f2967^:plugin/scripts/review-pr-inbound-citation-prose.test.mjs`)
-// had one consumer and so no duplicate to close.
+// choice.
 
 // The closed list `runAbove`'s tail bound tolerates between the comment block
 // and the anchor's own declaration keyword. Deliberately narrow: modifiers

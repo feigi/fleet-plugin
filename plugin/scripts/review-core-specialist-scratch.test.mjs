@@ -145,10 +145,10 @@ test("the rendered specialist prompt chains cd into the git command, never semic
 //
 // Both directions on the tail itself: an exception clause spliced into its
 // leading gap ("…your scratch path, except in CI runners — compare resolved
-// forms…") reds this assertion, where the `.{0,80}`-gapped spelling in the
-// since-deleted `ed9f2967^:plugin/scripts/review-pr-specialist-scratch.test.mjs`
-// lets it through; rewrapping the clause to one line and to a narrower column
-// stays green, since every gap here is `\s+` (all measured).
+// forms…") reds this assertion, where the `.{0,80}`-gapped spelling in
+// `ed9f2967^:plugin/scripts/review-pr-specialist-scratch.test.mjs` let it
+// through; rewrapping the clause to one line and to a narrower column stays
+// green, since every gap here is `\s+` (all measured).
 test("the rendered specialist prompt requires a toplevel assertion around git init/commit, including the realpath remedy for macOS's /private/tmp symlink", () => {
   assert.match(
     render(),

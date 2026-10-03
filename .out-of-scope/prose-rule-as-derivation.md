@@ -49,8 +49,9 @@ numbers has since moved. The `review-pr.js` negation drifted in wording too — 
 read "those four alone" until #218 put `comments` on the size-tier floor and left
 three — so the pointer and the quotation rotted together, and re-grepping the old
 quote now finds nothing rather than finding it moved.
-`review-pr-inbound-citation-prose.test.mjs` pins each quotation above against the
-block it names, in both directions.
+`ed9f2967^:plugin/scripts/review-pr-inbound-citation-prose.test.mjs` pinned each
+quotation above against the block it names, in both directions, until `ed9f2967`
+deleted it.
 
 **A pin over the rule prose itself would be vacuous.** A positive regex over a
 comment block is anchored by its slice size, not by its content, and this repo
