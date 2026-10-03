@@ -205,12 +205,13 @@ test("duty 1 says worktree-audit.sh takes no argument and audits every worktree"
 // equal alternatives, then halted on "dirty or diverged" — and neither can
 // see diverged. Porcelain is empty over a clean tree one commit past the pin,
 // and the audit's `ahead` is counted against `origin/main`
-// (worktree-audit.sh's `base=${BASE_REF:-origin/main}`), which a PR worktree
-// is always ahead of. The only divergence check is the cause block's
-// head-equality against the dispatch pin. And "find this worktree's row" gave
-// no rule for a row that cannot answer, or for no row at all. Each pin below
-// holds ONE sentence (`sentences()`, #1940), so a clause deleted from inside
-// the duty reds its own pin rather than being satisfied by a neighbour.
+// (worktree-audit.sh's `base=${BASE_REF:-origin/main}`), which a healthy
+// worktree on an open, unmerged PR is ahead of too. The only divergence check
+// is the cause block's head-equality against the dispatch pin. And "find this
+// worktree's row" gave no rule for a row that cannot answer, or for no row at
+// all. Each pin below holds ONE sentence (`sentences()`, #1940), so a clause
+// deleted from inside the duty reds its own pin rather than being satisfied by
+// a neighbour.
 test("duty 1 names the instrument for each check, and halts on a row that cannot answer", () => {
   const said = (re) => sentences(duty1Text()).some((s) => re.test(s));
   assert.ok(
@@ -224,6 +225,19 @@ test("duty 1 names the instrument for each check, and halts on a row that cannot
   assert.ok(
     said(/row's `ahead`.*counted against `origin\/main`.*cannot answer/),
     "duty 1 no longer says the audit's `ahead` is counted against origin/main — a finisher reading it as divergence sees every PR worktree as diverged, or learns to ignore it",
+  );
+  // The reason `ahead` cannot answer holds for the PR the finisher runs on: an
+  // open, unmerged one. It is not true of every PR worktree — after a merge
+  // commit into a fetched origin/main the branch's `ahead` reads 0 — so the
+  // claim is scoped, never "always", and the scope sits in the same sentence.
+  assert.ok(
+    said(/row's `ahead`.*counted against `origin\/main`.*open, unmerged PR.*cannot answer/),
+    "duty 1 no longer scopes the `ahead` reason to an open, unmerged PR's worktree — after a merge into a fetched origin/main a PR worktree's `ahead` reads 0, so an unscoped claim is false",
+  );
+  assert.doesNotMatch(
+    flat(RUN_TEAM),
+    /\balways\s+ahead\b/,
+    "the run-team skill states an unconditional lead over origin/main again — a PR worktree's `ahead` reads 0 once its merge commit is in a fetched origin/main",
   );
   // The three non-clean row shapes, each halting and each named. Unreadable
   // and missing share `readable:false` and differ only in their counts, so
