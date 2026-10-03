@@ -56,8 +56,8 @@ test("the exit status is read off the test command itself, never a pipeline's", 
   const s = sentenceWith(/Never read the status of/, "pipeline rule");
   assert.match(s, /`<testCmd> \| tail`/);
   assert.match(s, /`<testCmd> \| grep`/);
-  assert.match(s, /a pipeline's status is its last stage's/);
-  assert.match(s, /zsh has no `PIPESTATUS`/);
+  assert.match(s, /a pipeline's status is its last stage's, so the filter's 0 hides the run's own exit/);
+  assert.match(s, /earlier stages' statuses is spelled differently per shell/);
   assert.match(sentenceWith(/Redirect the run's output to a file/, "redirect rule"), /read the command's own `\$\?` straight after it/);
 });
 
