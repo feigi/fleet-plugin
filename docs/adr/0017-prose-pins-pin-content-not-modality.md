@@ -98,9 +98,10 @@ This ADR chooses a mechanism. It implements none.
   `you may` hedges that prose-compression passes produce, and nothing else.
   Its failure message still reads "downgraded to advice"; read it as "one of
   two words appeared", not as a modality guard. Its comment cites this ADR. A
-  second list, the tier-check dispatch test's `/tier check[\s\S]{0,600}(?:\bOptional\b|\byou
-  may\b)/i`, was removed by #1398 when the tier check gained its code carrier
-  (see the Status amendment).
+  second list, the tier-check dispatch test's
+  `/tier check[\s\S]{0,600}(?:\bOptional\b|\byou may\b)/i`, was removed by
+  #1398 when the tier check gained its code carrier (see the Status
+  amendment).
 - **Today's phase-2 tier guard stays exposed until #2037's successor lands.**
   Map #2030 replaces it: #2036 ruled the alt pairing's retirement, and #2037
   specified the successor guard with this ruling's code-carrier requirement
