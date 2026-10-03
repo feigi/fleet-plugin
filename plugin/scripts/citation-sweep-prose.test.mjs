@@ -513,8 +513,12 @@ const FILES = [
   },
   {
     path: ["scripts", "ledger.mjs"],
-    stale: [/fleet-plugin-design\.md:200/, /candidates\.mjs:279/],
-    live: ["refuseIfCapped"],
+    // #2516. The `filed` subcommand's isDigits() comment pointed at
+    // "(line ~1527)" for the `keyNum` check it mirrors — a line that had
+    // already drifted into an unrelated comment. It names the check by its
+    // enclosing function now.
+    stale: [/fleet-plugin-design\.md:200/, /candidates\.mjs:279/, /\blines?\s+~?\d+/],
+    live: ["refuseIfCapped", "runDispatch's `keyNum` check"],
   },
   {
     path: ["scripts", "ledger.test.mjs"],
