@@ -251,11 +251,12 @@ json_lib="$(dirname "$0")/json.sh"
 wt=$1
 branch=$2
 base=${BASE_REF:-origin/main}
-# Only a remote-tracking ref is accepted — the accept-list release-ticket.sh:229
-# and reap.sh:156 carry, and the one this script had none of. worktree-audit.sh
-# carries the same accept-list (worktree-audit.sh:131) and already applies the
-# #1329 shorthand fix: :156-159 qualify `$base` into `$base_rev`, and both its
-# rev-parse (:161) and its rev-list (:253) read `$base_rev`, never the bare
+# Only a remote-tracking ref is accepted — the accept-list `case` that
+# release-ticket.sh and reap.sh carry, and the one this script had none of.
+# worktree-audit.sh carries the same accept-list `case` and already applies the
+# #1329 shorthand fix: its `base_rev` qualify `case` turns `$base` into
+# `$base_rev`, and both its `rev-parse --verify "$base_rev"` and its
+# `rev-list --count "$base_rev"..HEAD` read `$base_rev`, never the bare
 # shorthand. Its stake is smaller, though: being audit-only,
 # worktree-audit.sh only ever prints a report, while this
 # script GATES something consequential: the comment below
@@ -282,20 +283,21 @@ case "$base" in
 esac
 
 # release-ticket.sh's SECOND guard — `*/"$branch") die` — is carried too, for
-# the reason release-ticket.sh:233 gives and not reap.sh:161's reason for
-# leaving it out. `origin/$branch` IS a remote-tracking ref, so the accept-list
-# above passes it and nothing else here refuses it, and every measurement below
-# then asks whether the branch conflicts with ITSELF: merge-tree reports no
-# conflicting files, the at-risk list stays empty, and the audit prints
-# `conflicts: []`, `atRisk: []` at exit 0 for a worktree whose branch really
-# does add/add-conflict with the real origin/main. Measured on a bare-origin
-# fixture: the same tree and the same commit report `conflicts: ["conflict.txt"]`
-# with one at-risk main commit when BASE_REF is unset, and the empty pair above
-# when it is `origin/<the audited branch>`. That is the false "clean" the
-# comment above says must not reach a rebase decision. reap.sh can leave the
-# guard out because its `fetch --prune` drops the stale refs that make the same
-# spelling vacuous there; this script fetches nothing — the only fetch it names
-# is the advice in the `$branch_rev does not resolve` die below.
+# the reason release-ticket.sh gives on that guard and not the reason reap.sh
+# gives for leaving it out. `origin/$branch` IS a remote-tracking ref, so the
+# accept-list above passes it and nothing else here refuses it, and every
+# measurement below then asks whether the branch conflicts with ITSELF:
+# merge-tree reports no conflicting files, the at-risk list stays empty, and
+# the audit prints `conflicts: []`, `atRisk: []` at exit 0 for a worktree whose
+# branch really does add/add-conflict with the real origin/main. Measured on a
+# bare-origin fixture: the same tree and the same commit report
+# `conflicts: ["conflict.txt"]` with one at-risk main commit when BASE_REF is
+# unset, and the empty pair above when it is `origin/<the audited branch>`.
+# That is the false "clean" the comment above says must not reach a rebase
+# decision. reap.sh can leave the guard out because its `fetch --prune` drops
+# the stale refs that make the same spelling vacuous there; this script
+# fetches nothing — the only fetch it names is the advice in the
+# `$branch_rev does not resolve` die below.
 case "$base" in
   */"$branch") die "BASE_REF must not name the audited branch, got '$base'";;
 esac
@@ -308,8 +310,9 @@ esac
 # the bare shorthand below would answer about that ref's target instead — at
 # rc 0, with git's own `warning: refname 'origin/main' is ambiguous.` on
 # stderr as the only tell (measured), which this script reads nothing of and
-# which an unattended caller has no one to read. The same class
-# release-ticket.sh:243 and reap.sh:174 already found in the same default.
+# which an unattended caller has no one to read. The same class release-ticket.sh
+# and reap.sh already found in the same default, each in its own `base_rev`
+# qualify `case`.
 # Fix: qualify to the full refs/remotes/ path, where there is nothing left to
 # disambiguate, unless it is already qualified. The accept-list above is
 # what makes this qualify step safe rather than a guess — BASE_REF could
