@@ -1004,8 +1004,8 @@ test("the locked-stray unlock hint survives a literal ' in the worktree path (#1
   assert.notEqual(remedy, json.blockers[0], `the blocker names the remedy: ${json.blockers[0]}`);
   execFileSync("sh", ["-c", remedy], { cwd: r.w, encoding: "utf8", env: ENV });
 
-  assert.doesNotMatch(
-    git(r.w, "worktree", "list", "--porcelain"), /^locked(?: |$)/m,
+  assert.ok(
+    !git(r.w, "worktree", "list", "--porcelain").includes("locked"),
     `the pasted command actually unlocked the real entry, not a truncated one: ${remedy}`,
   );
 });
@@ -1044,8 +1044,8 @@ test("the locked-stray unlock hint survives a plain space in the worktree path (
   assert.notEqual(remedy, json.blockers[0], `the blocker names the remedy: ${json.blockers[0]}`);
   execFileSync("sh", ["-c", remedy], { cwd: r.w, encoding: "utf8", env: ENV });
 
-  assert.doesNotMatch(
-    git(r.w, "worktree", "list", "--porcelain"), /^locked(?: |$)/m,
+  assert.ok(
+    !git(r.w, "worktree", "list", "--porcelain").includes("locked"),
     `the pasted command actually unlocked the real entry, not a truncated one: ${remedy}`,
   );
 });
