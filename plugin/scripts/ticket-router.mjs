@@ -160,7 +160,7 @@ function readJson(path) {
 export function readGuard(raw) {
   if (raw === null || typeof raw !== "object" || !Array.isArray(raw.tripped) || !Array.isArray(raw.cells)) return null;
   const tripped = raw.tripped.map((t) => (typeof t === "string" ? t : t?.cell));
-  if (tripped.some((t) => typeof t !== "string")) return null;
+  if (tripped.some((t) => typeof t !== "string" || !CELL.test(t))) return null;
   const n = {};
   for (const c of raw.cells) {
     if (typeof c?.cell !== "string" || !Number.isFinite(c?.n)) return null;
@@ -295,17 +295,24 @@ function verdictsByTicket(verdictRows) {
  * Per-ticket input rows: the ticket's features rows inside [window, cutoff],
  * attributed to its LAST row's cell and stratum, restricted to rows the
  * free classifier routed plus exploration rows — a row a live B classifier
- * routed is the A/B's test set, not the fit's.
+ * routed is the A/B's test set, not the fit's. A fit over everything cuts at
+ * its latest features row's date; the verdict and member rows are cut at that
+ * same date, so `--check`'s re-fit at the recorded `fitted_through` reads the
+ * rows the fit read and a verdict or member row that lands later waits for the
+ * next fit instead of failing CI.
  */
 function fitTickets({ features, members, verdicts, window, cutoff }) {
   const inRange = features.filter((r) => (!window || r.run_date >= window)
     && (cutoff === undefined || (cutoff !== null && r.run_date <= cutoff)));
+  const through = cutoff === undefined ? inRange.map((r) => r.run_date).filter(Boolean).sort().at(-1) ?? null : cutoff;
+  const upToThrough = (r) => through === null || !r.run_date || r.run_date <= through;
+  members = members.filter(upToThrough);
   const byTicket = new Map();
   for (const r of inRange) {
     if (!byTicket.has(r.ticket)) byTicket.set(r.ticket, []);
     byTicket.get(r.ticket).push(r);
   }
-  const v = verdictsByTicket(verdicts);
+  const v = verdictsByTicket(verdicts.filter(upToThrough));
   const out = [];
   for (const [ticket, rows] of byTicket) {
     const last = rows[rows.length - 1];
@@ -321,6 +328,8 @@ function fitTickets({ features, members, verdicts, window, cutoff }) {
       if (UNBOOKED(name)) continue;
       if (!(keys.has(`${mr.session}\0${mr.agent}`) || mr.ticket === ticket || (verdict && verdict.pr && mr.pr === verdict.pr))) continue;
       booked++;
+      // `cost` is a priced member-outcomes column (#2132); a row without it makes
+      // the ticket's $ unknown, so the fit adopts nothing off a TSV that lacks the column.
       if (mr.cost === undefined || mr.cost === "" || !Number.isFinite(Number(mr.cost))) costKnown = false;
       else cost += Number(mr.cost);
       if (parseMember(name)?.family === "fix-pr") fixRounds++;
@@ -386,8 +395,9 @@ function adopt(est, cells, tripped) {
 
 /**
  * The re-fit table. `guard` is `{ tripped, n, window_start }` (readGuard's
- * shape); `cutoff` limits the rows to `run_date <= cutoff` (--check), or is
- * undefined for a fit over everything.
+ * shape); `cutoff` limits every input to rows with `run_date <= cutoff`
+ * (--check), or is undefined for a fit over everything, which cuts at its
+ * latest features row's date.
  */
 export function fitTable({ prior, features, members, verdicts, guard, cutoff }) {
   const window = guard.window_start ?? prior.window_start ?? null;
@@ -457,7 +467,7 @@ function main() {
     fit: ["table", "features", "members", "verdicts", "guard", "due"],
     check: ["check", "table", "features", "members", "verdicts"],
   }[mode];
-  const given = argv.filter((a) => a.startsWith("--")).map((a) => a.slice(2));
+  const given = argv.filter((a) => a.startsWith("--")).map((a) => a.slice(2).split("=")[0]);
   const foreign = given.find((g) => !allowed.includes(g));
   if (foreign) die(`--${foreign} does not apply to ${mode === "check" ? "--check" : mode}`);
   const need = (name) => F.arg(name) ?? die(`${mode === "check" ? "--check" : mode} needs --${name}`);
@@ -508,7 +518,9 @@ function main() {
     const differ = Object.keys({ ...refit, ...table }).filter((k) => !isDeepStrictEqual(refit[k], table[k]));
     if (differ.length) {
       process.stderr.write(`${NAME}: ${tablePath} is not a re-fit of its own rows — differs in ${differ.map((k) => `\`${k}\``).join(", ")}; re-fitted:\n${JSON.stringify(refit, null, 2)}\n`);
-      process.exit(1);
+      // exitCode, not exit(): a piped stderr is written asynchronously and exit() can cut the payload off.
+      process.exitCode = 1;
+      return;
     }
     process.stdout.write(`${NAME}: ${tablePath} matches a re-fit of ${refit.n_rows} tickets through ${refit.fitted_through ?? "no rows"}\n`);
     return;

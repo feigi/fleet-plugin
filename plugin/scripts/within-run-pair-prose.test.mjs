@@ -157,10 +157,27 @@ test("Pull step 7 routes through ticket-router.mjs and writes tier= exactly when
   assert.match(slice, /--issue\s+<scratch>\/impl-<N>\/issue\.json/, "step 7 no longer hands the router the Pull's own read");
   assert.match(slice, /`tier=<CELL>`\s+exactly\s+when\s+`DRAW`\s+is\s+not\s+`-`/, "step 7 no longer ties tier= to the draw");
   assert.match(slice, /Router\s+exit\s+2\s+→\s+no\s+row\s+and\s+no\s+dispatch/, "step 7 dispatches on a router usage error");
+  assert.match(slice, /--impl-row\s+<k>\[\s+--chain-head\]/, "step 7 no longer passes --chain-head for a ticket another sequences after");
+  assert.match(slice, /--guard\s+\.fleet\/cost-guard\.json/, "step 7 no longer hands the router the cost guard");
+  assert.match(slice, /\[\s+·\s+route=<REASON>\]/, "step 7 no longer records the router's REASON on the row");
+  assert.match(slice, /release\s+the\s+claim\s+\(`release-ticket\.sh`/, "step 7 no longer releases the claim on a router exit 2");
   // The Pull's one read is what the router reads: a second fetch would be a
   // second network call per Pull.
   const step3 = section(RUN_TEAM, "3. **Read the ticket in full, once**", "Record the ticket's real", "run-team Pull step 3");
   assert.match(step3, /--json\s+title,body,comments,labels,createdAt`\s+written\s+to\s+`<scratch>\/impl-<N>\/issue\.json`/, "step 3 no longer writes the file the router reads");
+});
+
+const routerArgs = () =>
+  section(RUN_TEAM, "**The router's arguments, and nothing past its line.**", "**Count the rate against the ledger", "run-team router's arguments");
+
+test("the router's arguments paragraph pins the roll, the arm parity and the single source of CELL", () => {
+  const slice = routerArgs();
+  assert.match(slice, /row\s+5k\s+and\s+every\s+row\s+after\s+it\s+carry\s+no\s+`tier=`/, "the --impl-row rolling definition is gone");
+  assert.match(slice, /`--chain-head`\s+marks\s+a\s+ticket\s+another\s+open\s+ticket\s+sequences\s+after/, "--chain-head is no longer defined");
+  assert.match(slice, /`A`\s+for\s+an\s+even\s+ticket\s+number\s+and\s+`B`\s+for\s+an\s+odd/, "the --arm parity rule changed");
+  assert.match(slice, /never\s+re-derive\s+`CELL`/, "the router's line is no longer the whole decision");
+  assert.match(slice, /`REASON=guard-missing`/, "the guard-missing route is no longer named");
+  assert.match(slice, /`REASON`\s+other\s+than\s+`ok`\s+goes\s+on\s+the\s+row\s+as\s+`route=<REASON>`/, "REASON no longer lands on the row as route=");
 });
 
 // The difficulty caveat lives in the counter-evidence section, past this file's

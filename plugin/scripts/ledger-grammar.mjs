@@ -135,9 +135,14 @@ export function drawCell({ session, ticket, policyCell, cells }) {
 // different definitions for one row and fail a dispatch made exactly as
 // printed.
 const TIER_SUFFIX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** Every `tier=` value a row's text carries, in order, duplicates kept. */
+export function tierValues(rowText) {
+  return String(rowText ?? "").split(/\s+/).filter((t) => t.startsWith("tier=")).map((t) => t.slice("tier=".length));
+}
+
 export function expectedDefinition(rowText) {
-  const values = [...new Set(String(rowText ?? "").split(/\s+/)
-    .filter((t) => t.startsWith("tier=")).map((t) => t.slice("tier=".length)))];
+  const values = [...new Set(tierValues(rowText))];
   if (values.length === 0) return `fleet-implementer-${POLICY_CELL}`;
   if (values.length > 1) throw new Error(`row carries conflicting tier= tokens (${values.map((v) => `tier=${v}`).join(", ")}) — fix the row with \`ledger.mjs row\``);
   if (!TIER_SUFFIX.test(values[0])) throw new Error(`tier=${values[0]} is not a definition suffix — expected [a-z0-9] words joined by '-' — fix the row with \`ledger.mjs row\``);

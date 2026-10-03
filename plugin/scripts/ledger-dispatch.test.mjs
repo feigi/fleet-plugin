@@ -193,14 +193,23 @@ test("dispatch refuses an implementer whose row names no single definition, or o
 // `row` holds `tier=` to the cell grammar, so a retired or misspelt tier is
 // refused at the Pull's own write, before the claim is dispatched on — and a
 // cell token is accepted whether or not its definition has shipped, which is
-// `dispatch`'s to check.
+// `dispatch`'s to check. The value is held to the whole grammar, not a prefix
+// of it: a real family with an unknown level, a cell with trailing text, or a
+// case-variant of a cell is refused. Only a token that STARTS with `tier=` is
+// a tier token, so one that merely contains it (`x-tier=alt`) is written as is.
 test("row refuses a tier= that is not a cell token, and accepts every cell token", (t) => {
   const { ok, read, refused } = fixture(t);
-  for (const bad of ["tier=alt", "tier=", "tier=../../etc", "tier=Task-High", "tier=task-high · tier=alt", "tier=haiku-high"]) {
+  const bads = [
+    "tier=alt", "tier=", "tier=../../etc", "tier=Task-High", "tier=task-high · tier=alt", "tier=haiku-high",
+    "tier=slow-ultra", "tier=task-", "tier=smol-", "tier=slow", "tier=task-high-x", "tier=task-high-", "tier=task-highx",
+    "tier==task-high", "tier=task-high,", "tier=TASK-HIGH", "tier=Slow-High", "tier=slow-HIGH", "tier=xslow-high",
+  ];
+  for (const bad of bads) {
     refused(["row", "7", `impl-7 · ${bad}`], /row #7: 'tier=[^']*' is not tier=<cell>/);
   }
   assert.deepEqual(read().rows, []);
-  for (const good of ["tier=task-high", "tier=slow-high", "tier=smol-max", "tier-ok=impl-7:fleet-implementer-task-high"]) {
+  const goods = ["tier=task-high", "tier=slow-high", "tier=smol-max", "tier-ok=impl-7:fleet-implementer-task-high", "x-tier=alt", "x-tier=Slow-ultra · tier=task-high"];
+  for (const good of goods) {
     assert.equal(ok("row", "7", `impl-7 · ${good}`).line, `#7 impl-7 · ${good}`);
   }
 });
