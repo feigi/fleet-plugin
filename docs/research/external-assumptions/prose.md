@@ -1,7 +1,7 @@
 # prose — external assumptions
 
 Slice: `plugin/skills/**/*.md` (run-team + references, next-ticket, sizing-a-ticket),
-`plugin/commands/*.md`, `plugin/agents/*.agent.md` (all 13), `docs/agents/*.md`,
+`plugin/commands/*.md`, `plugin/agents/*.agent.md`, `docs/agents/*.md`,
 `README.md`, `CONTEXT.md` (Language section), `docs/adr/*.md` (Decision sections).
 
 ## GitHub tracker — label vocabulary & authority
@@ -255,6 +255,7 @@ Scanned in full (read start-to-finish, or via targeted `grep`+`read` passes cove
 - `plugin/agents/fleet-review-silent-failure.agent.md` (51 lines)
 - `plugin/agents/fleet-review-simplify.agent.md` (48 lines)
 - `plugin/agents/fleet-review-snapshot.agent.md` (26 lines)
+- `plugin/agents/fleet-review-test-run.agent.md` (29 lines)
 - `plugin/agents/fleet-review-tests.agent.md` (48 lines)
 - `plugin/agents/fleet-review-types.agent.md` (43 lines)
 - `plugin/agents/fleet-review-verifier.agent.md` (31 lines)
@@ -266,3 +267,5 @@ Scanned in full (read start-to-finish, or via targeted `grep`+`read` passes cove
 - `docs/adr/0001-filing-label-bar-is-defect-confirmed.md` through `0013-automatic-supply-relabel-by-cause.md` (all 13 files) — Decision sections only, per assignment scope (Context/Consequences/Rejected-alternatives sections skimmed for headings only, not cited)
 
 Not scanned (out of assignment scope per the task's file list): `plugin/scripts/*` (code, not prose), `.github/workflows/*.yml`, `.github/rulesets/main.json` (cited secondhand via ADR 0007/CONTEXT.md only), `docs/specs/*`, `docs/metrics/*`.
+
+Not scanned (added to `plugin/agents/` after the scan; no row in this table cites it): `plugin/agents/fleet-recipe-deriver.agent.md`.
