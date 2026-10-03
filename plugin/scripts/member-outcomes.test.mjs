@@ -137,6 +137,35 @@ test("a generated word pair that merely starts with a family word yields blanks 
   assert.deepEqual(parseMemberName("Impl1341/Impl1341.CwdProbe"), { ticket: "", pr: "" });
 });
 
+test("a review fan-out label books its PR, in the label's own spelling and in the stem omp writes for it", () => {
+  // omp names the member by deleting every character outside [A-Za-z0-9_-]
+  // from the label and appending -<n> from a label's second dispatch on.
+  for (const [label, stem] of [
+    ["review:correctness:pr2132", "reviewcorrectnesspr2132"],
+    ["review:silent-failure:pr2132", "reviewsilent-failurepr2132"],
+    ["verify:comments:pr2132", "verifycommentspr2132"],
+    ["snapshot:pr2132", "snapshotpr2132"],
+    ["test-run:pr2132", "test-runpr2132"],
+  ]) {
+    assert.deepEqual(parseMemberName(label), { ticket: "", pr: "2132" }, label);
+    assert.deepEqual(parseMemberName(stem), { ticket: "", pr: "2132" }, stem);
+    assert.deepEqual(parseMemberName(`${stem}-7`), { ticket: "", pr: "2132" }, `${stem}-7`);
+    // Nested under the reviewer that dispatched it: the last segment is the member.
+    assert.deepEqual(parseMemberName(`review-pr-2132/${stem}`), { ticket: "", pr: "2132" }, `nested ${stem}`);
+  }
+  // A dimension key that itself spells `pr` still yields the trailing number.
+  assert.deepEqual(parseMemberName("reviewprpr12"), { ticket: "", pr: "12" });
+});
+
+test("a fan-out stem that carries no PR, or a name that only resembles one, books nothing", () => {
+  // Measured stems from before the label carried its PR.
+  for (const name of ["verifycorrectness-26", "reviewtests", "snapshot-8", "snapshot", "test-run",
+    // Generated or human names: PascalCase never matches, and a bare number is not `pr<n>`.
+    "ReviewCorrectness", "VerifyAndRepair", "Verify685", "ReviewTestsPr12", "review:correctness", "verify::pr", "reviewpr"]) {
+    assert.deepEqual(parseMemberName(name), { ticket: "", pr: "" }, name);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // omp fixtures — shaped like real ~/.omp/agent/sessions/**/*.jsonl lines
 // ---------------------------------------------------------------------------

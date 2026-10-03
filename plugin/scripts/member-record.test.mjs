@@ -88,6 +88,18 @@ test("readOmpMember: cost, tokens and thinking come off real usage/thinking_leve
   assert.equal(rec.turns, 1);
 });
 
+test("readOmpMember: tokens_cache_write_1h sums each turn's usage.cttl.ephemeral1h, and is unknown when cache was written with no TTL split", () => {
+  const turn = (cacheWrite, cttl, ts) => assistantEvt("claude-opus-5", { input: 1, output: 1, cacheRead: 0, cacheWrite, ...(cttl ? { cttl } : {}), cost: { total: 0.01 } }, ts);
+  const rec = (...turns) => readOmpMember([sessionEvt("/x"), thinkingEvt("high"), ...turns].join("\n"), "/fake/path.jsonl", "impl-1");
+  // Measured shapes: `{ephemeral1h:n}` and `{ephemeral5m:n}`, only on a turn that wrote cache.
+  const mixed = rec(turn(300, { ephemeral1h: 300 }), turn(0, null, "2026-09-08T15:13:00.000Z"),
+    turn(50, { ephemeral5m: 50 }, "2026-09-08T15:14:00.000Z"), turn(20, { ephemeral1h: 20 }, "2026-09-08T15:15:00.000Z"));
+  assert.equal(mixed.tokens_cache_create, 370);
+  assert.equal(mixed.tokens_cache_write_1h, 320);
+  assert.equal(rec(turn(0, null)).tokens_cache_write_1h, 0, "nothing written is a real zero");
+  assert.equal(rec(turn(40, null)).tokens_cache_write_1h, null, "cache written with no recorded split is unknown, never zero");
+});
+
 test("foldOmpTranscript: resolvedModelIdentity comes off session_init, present before any assistant turn (#1345)", () => {
   // Measured shape: always provider-prefixed (`anthropic/claude-opus-5`),
   // written at DISPATCH — before the member's first assistant turn, which

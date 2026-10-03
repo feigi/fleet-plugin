@@ -7,11 +7,11 @@
 //
 // The record: harness, session, role, agent, model, thinking,
 // subagent_type, tokens_in, tokens_cache_create, tokens_cache_read,
-// tokens_out, cost, wall_s, turns, ticket, pr. `harness` is set by whichever
-// reader produced the row — structural, decided by which root the transcript
-// lives under, before any byte is parsed. `cost` is real (`usage.cost.total`
-// — no pricing table exists in this repo, and inventing one is not this
-// module's business.
+// tokens_cache_write_1h, tokens_out, cost, wall_s, turns, ticket, pr.
+// `harness` is set by whichever reader produced the row — structural,
+// decided by which root the transcript lives under, before any byte is
+// parsed. `cost` is real (`usage.cost.total`, the provider's own per-turn
+// figure) — this module prices nothing itself.
 //
 // `thinking` is the harness-written level, blank when a hole is visible.
 // `subagent_type` is what the member was DISPATCHED AS — the agent DEFINITION the dispatch named, never the
@@ -137,10 +137,11 @@ export function normalizeModel(raw) {
 // pr:""}`, losing its join key into tier-outcomes.tsv exactly the way an
 // unmatched finisher spelling once did.
 //
-// Every pattern below is written against the lower-kebab spelling, so the
-// name is first rewritten by `canonicalMemberName` (compute-spend.mjs), the
-// same rewrite classifyRole applies: `Impl327` and `FixPr774` book the
-// ticket and PR their kebab forms do instead of blanks.
+// Every pattern below but the review fan-out one (specialistPr, after the
+// function) is written against the lower-kebab spelling, so the name is first
+// rewritten by `canonicalMemberName` (compute-spend.mjs), the same rewrite
+// classifyRole applies: `Impl327` and `FixPr774` book the ticket and PR their
+// kebab forms do instead of blanks.
 export function parseMemberName(name) {
   const s = canonicalMemberName(name).replace(/-(?:[a-z]|v\d+)$/, "");
   let m = /^(?:fix|review|finish(?:er)?|resolve)-pr-(\d+)(?:-\d+)?$/.exec(s);
@@ -149,7 +150,26 @@ export function parseMemberName(name) {
   if (m) return { ticket: "", pr: m[1] };
   m = /^impl-(\d+)$/.exec(s);
   if (m) return { ticket: m[1], pr: "" };
-  return { ticket: "", pr: "" };
+  return { ticket: "", pr: specialistPr(name) };
+}
+
+// A review fan-out dispatch is labelled `review:<key>:pr<n>`,
+// `verify:<key>:pr<n>`, `snapshot:pr<n>` or `test-run:pr<n>` (review-core.mjs),
+// and books to PR <n>. The label is not what reaches this function off disk:
+// omp derives the member id from it by deleting every character outside
+// `[A-Za-z0-9_-]` and appending `-<n>` from the second dispatch of one label
+// on (measured: `verify:silent-failure` lands as `verifysilent-failure-6`), so
+// `review:correctness:pr12` is the stem `reviewcorrectnesspr12`, or
+// `reviewcorrectnesspr12-3`. Both spellings are matched by applying that same
+// deletion first. Only the LAST path segment is read — a member nested under
+// a reviewer keeps its own id there — and only lowercase, the case the label
+// templates write, so a generated PascalCase name never books a PR. A stem
+// from before the label carried its PR (`verifycorrectness-26`) has no
+// `pr<n>` and stays blank.
+const SPECIALIST_STEM_RE = /^(?:(?:review|verify)[a-z0-9_-]+?|snapshot|test-run)pr(\d+)(?:-\d+)?$/;
+function specialistPr(name) {
+  const stem = String(name ?? "").split(/[/.]/).at(-1).replace(/[^A-Za-z0-9_-]+/g, "");
+  return SPECIALIST_STEM_RE.exec(stem)?.[1] ?? "";
 }
 
 // ---------------------------------------------------------------------------
@@ -328,8 +348,8 @@ function createdPrNumbers(text) {
 export function foldOmpTranscript(jsonlText, filePath) {
   let model = null, thinking = null, task = null, resolvedModelIdentity = null, agent = null;
   let firstTs = null, lastTs = null;
-  let input = 0, cacheWrite = 0, cacheRead = 0, output = 0, cost = 0, turns = 0;
-  let sawCost = false;
+  let input = 0, cacheWrite = 0, cacheWrite1h = 0, cacheRead = 0, output = 0, cost = 0, turns = 0;
+  let sawCost = false, sawCttl = false;
   let malformedNonLastLines = 0;
   const entries = [];
   const createCallIds = new Set();
@@ -369,6 +389,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
         cacheWrite += cw;
         cacheRead += Number(u.cacheRead ?? 0);
         output += Number(u.output ?? 0);
+        if (u.cttl && typeof u.cttl === "object") { cacheWrite1h += Number(u.cttl.ephemeral1h ?? 0); sawCttl = true; }
         if (u.cost && typeof u.cost.total === "number") { cost += u.cost.total; sawCost = true; }
         turns++;
         entries.push({
@@ -391,6 +412,11 @@ export function foldOmpTranscript(jsonlText, filePath) {
   return {
     model, thinking, task, resolvedModelIdentity, agent,
     input, cacheWrite, cacheRead, output,
+    // The 1h-TTL share of `cacheWrite`, off each turn's `usage.cttl`
+    // (`{ephemeral1h}` or `{ephemeral5m}`, present only on a turn that wrote
+    // cache). No `cttl` anywhere is a real 0 when nothing was written, and
+    // unknown — `null` — when something was: the split was never recorded.
+    cacheWrite1h: sawCttl ? cacheWrite1h : cacheWrite === 0 ? 0 : null,
     cost: sawCost ? cost : null,
     turns,
     wallS: Number.isFinite(span) ? Math.round(span) : 0,
@@ -497,7 +523,7 @@ export function ompMemberRecord(folded, agentStem, spawnDepth = 0) {
     // carries no `session_init` line to read one from.
     subagent_type: folded.agent ?? "",
     tokens_in: folded.input, tokens_cache_create: folded.cacheWrite,
-    tokens_cache_read: folded.cacheRead, tokens_out: folded.output,
+    tokens_cache_read: folded.cacheRead, tokens_cache_write_1h: folded.cacheWrite1h, tokens_out: folded.output,
     cost: folded.cost,
     wall_s: folded.wallS, turns: folded.turns,
     ticket, pr,
