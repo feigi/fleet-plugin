@@ -815,6 +815,44 @@ test("deriveRun: a fix-pr token for another PR leaves this PR's hold and survivo
     [[21], []], "own in-place copy on the ticket row: it cleared the hold and answered no survivor");
 });
 
+// #2391: the other direction of #2329 — a settled stray reaching its OWNER
+// through the member record `fixRunning`/`fixLive` (and a finisher's
+// `past-pin` read) share. A PR-bound member's outcome counts off `##
+// Dispatched` and its own PR's row only, whichever order the rows sit in.
+test("deriveRun: a settled stray of a PR-bound member on another PR's row does not settle its owner's live one", () => {
+  const own = "#20 impl-20=PR#21 · conflict-hold:#21 · fix-pr-21";
+  const stray = "#98 impl-98=PR#99 · fix-pr-21=applied:abc1234";
+  const seen = (rows, dispatched = []) => {
+    const r = run({ rows, dispatched }, [pr(21), pr(99)]);
+    return [r.fixDue, r.fixLive, r.reviewed.flatMap((x) => x.fixLive)];
+  };
+  for (const rows of [[own, stray], [stray, own], [own]]) {
+    const [due, n] = seen(rows);
+    assert.deepEqual([due, n], [[], 1], `fix-pr-21 is still working #21: ${JSON.stringify(rows)}`);
+  }
+  // The same reading through `reviewed.fixLive`, which gates the finisher.
+  const reviewed = "#20 impl-20=PR#21 · reviewed=abc1234:0/0/0 · fix-pr-21";
+  assert.deepEqual(seen([stray, reviewed])[2], ["fix-pr-21"]);
+  // Must accept: the member's real settle — in `## Dispatched` or on its own
+  // PR's row — still settles it, and a stray's own PR is unaffected.
+  assert.deepEqual(seen([own], ["fix-pr-21=applied:abc1234"]).slice(0, 2), [[], 0], "settled in ## Dispatched");
+  assert.deepEqual(seen(["#20 impl-20=PR#21 · conflict-hold:#21 · fix-pr-21=failed"]).slice(0, 2), [[21], 0], "settled on its own row");
+  // A stray's token still counts as a live member when nothing settles it.
+  assert.equal(seen(["#98 impl-98=PR#99 · fix-pr-21"])[1], 1);
+
+  // A finisher's `halted:past-pin` read follows the same rule: a settled stray
+  // on PR #99's row must not read PR #21's live finisher as halted past-pin,
+  // wherever the rows sit.
+  const fin = "#20 impl-20=PR#21 · reviewed=abc1234:0/0/0 · finisher-pr-21";
+  const finStray = "#98 impl-98=PR#99 · finisher-pr-21=halted:past-pin";
+  for (const rows of [[fin, finStray], [finStray, fin], [fin]]) {
+    assert.deepEqual(run({ rows }, [pr(21), pr(99)]).reviewDue, [99], `live finisher, no halt: ${JSON.stringify(rows)}`);
+  }
+  assert.deepEqual(
+    run({ rows: ["#20 impl-20=PR#21 · reviewed=abc1234:0/0/0 · finisher-pr-21=halted:past-pin"] }, [pr(21)]).reviewDue,
+    [21], "own-row halted:past-pin still re-offers the review");
+});
+
 test("deriveRun: a conflict hold is read in either spelling and on a PR-keyed row", () => {
   assert.deepEqual(run({ rows: [HOLD_ROW(40, "conflict-hold-#40")] }, [pr(40)]).fixDue, [40]);
   assert.deepEqual(run({ rows: ["#350 review=wf:x reviewed=abc1234:0/1/0 · conflict-hold:#350"] }, [pr(350)]).fixDue, [350]);
