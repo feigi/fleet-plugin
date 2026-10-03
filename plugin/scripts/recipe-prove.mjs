@@ -27,9 +27,10 @@
 //        proof however honestly the runner reports it.
 //      - the mutation proof: the unmutated run must be green; `--mutate` is a
 //        shell command that must change a tracked file (the deliberate
-//        failing mutation of one test, or of the code one test covers); the
-//        run must then go red. A mutation that leaves the run green is a
-//        suite that runs nothing that matters.
+//        failing mutation of one test, or of the code one test covers) — run
+//        against the tree restored to HEAD, so a file the unmutated run itself
+//        rewrote is not credited to it; the run must then go red. A mutation
+//        that leaves the run green is a suite that runs nothing that matters.
 //   With neither, nothing is proven: the refusal still names where the test
 //   run's output is, so the caller can read the count line off it.
 //
@@ -42,8 +43,10 @@
 //
 // Exit 0: proven, cache written (its path and contents on stdout).
 // Exit 1: NOT PROVEN — no cache written; the reason on stderr.
-// Exit 2: the proof could not be attempted (usage, not a repository,
-//         origin/main missing, the worktree could not be made).
+// Exit 2: no verdict on the proof — it could not be attempted (usage, not a
+//         repository, origin/main missing, the worktree could not be made), or
+//         a filesystem fault stopped it before the cache was settled (the
+//         cache or its temp file could not be written).
 
 import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
@@ -112,13 +115,17 @@ function git(args, cwd) {
 
 // Run a Recipe command through `sh -c` from the worktree root, its output to
 // a log file rather than a pipe: a real suite's output has no useful size
-// bound, and the log is what the caller reads a count line off.
+// bound, and the log is what the caller reads a count line off. A command
+// killed by a signal (an OOM kill, a timeout wrapper) has no exit status, so
+// it is refused here and never reported as one: a crashed run must not count
+// as a red suite.
 function sh(cmd, cwd, log) {
   const fd = openSync(log, "a");
   try {
     const r = spawnSync("sh", ["-c", cmd], { cwd, env: ENV, stdio: ["ignore", fd, fd] });
     if (r.error) throw cannot(`could not start sh: ${r.error.message}`);
-    return r.status ?? 128;
+    if (r.signal) throw notProven(`'${cmd}' was killed by ${r.signal}, so it has no exit status to read; output: ${log}`);
+    return r.status;
   } finally {
     closeSync(fd);
   }
@@ -172,6 +179,10 @@ function prove(o, wt, logs) {
     if (trc !== 0) {
       throw notProven(`the unmutated run is already red (exit ${trc}), so a mutation turning it red proves nothing — use the count proof; ${where}`);
     }
+    // What the unmutated Test run rewrote is not the mutation's work: restore
+    // every tracked file first, so the change read below is the mutation's alone.
+    const reset = git(["reset", "--hard", "-q", "HEAD"], wt);
+    if (!reset.ok) throw notProven(`could not restore the tree before the mutation: ${reset.err}`);
     const mutateLog = join(logs, "mutate.log");
     const mrc = sh(o.mutate, wt, mutateLog);
     if (mrc !== 0) throw notProven(`the mutation command '${o.mutate}' failed (exit ${mrc}); its output: ${mutateLog}`);
@@ -197,8 +208,13 @@ function writeCache(cache, recipe, repo) {
   mkdirSync(dirname(cache), { recursive: true });
   const prior = existsSync(cache) ? readFileSync(cache) : null;
   const tmp = `${cache}.${process.pid}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(recipe)}\n`);
-  renameSync(tmp, cache);
+  try {
+    writeFileSync(tmp, `${JSON.stringify(recipe)}\n`);
+    renameSync(tmp, cache);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
   for (const field of ["install", "test"]) {
     const r = spawnSync("sh", [READER, repo, field], { env: ENV, encoding: "utf8" });
     if (r.status !== 0 || r.stdout.replace(/\n$/, "") !== recipe[field]) {
@@ -207,6 +223,25 @@ function writeCache(cache, recipe, repo) {
       throw notProven(`the Recipe cache reader refuses what was proven: ${(r.stderr || r.stdout).trim()}`);
     }
   }
+}
+
+// Best-effort, and never allowed to replace the proof's own outcome — a proof
+// that held, or a Refusal that names why it did not, is what the caller reads.
+// An Install step that leaves read-only directories behind (a Go module cache
+// is the usual one; the repo ignores them) makes both git's removal and a
+// plain recursive delete fail, so the fallback makes the tree writable first.
+// The prune always runs: it is what drops the registration of a worktree
+// whose directory is gone.
+function removeWorktree(wt, repo) {
+  if (!git(["worktree", "remove", "--force", wt], repo).ok) {
+    spawnSync("chmod", ["-R", "u+w", wt], { stdio: "ignore" });
+    try {
+      rmSync(wt, { recursive: true, force: true });
+    } catch (e) {
+      process.stderr.write(`${NAME}: could not remove the throwaway worktree ${wt}: ${e.message}\n`);
+    }
+  }
+  git(["worktree", "prune"], repo);
 }
 
 function main(argv) {
@@ -226,10 +261,7 @@ function main(argv) {
   try {
     proof = prove(o, wt, logs);
   } finally {
-    if (!git(["worktree", "remove", "--force", wt], o.repo).ok) {
-      rmSync(wt, { recursive: true, force: true });
-      git(["worktree", "prune"], o.repo);
-    }
+    removeWorktree(wt, o.repo);
   }
 
   const recipe = { install: o.install, test: o.test, derivedAt: sha.out, installClean: true, ...proof };
@@ -241,7 +273,13 @@ function main(argv) {
 try {
   main(process.argv.slice(2));
 } catch (e) {
-  if (!(e instanceof Refusal)) throw e;
+  // A fault outside the proof — the cache or its temp file could not be
+  // written — is "no verdict" (2), never the NOT PROVEN (1) a stack trace's
+  // exit status would read as.
+  if (!(e instanceof Refusal)) {
+    process.stderr.write(`${NAME}: ${e.message}\n`);
+    process.exit(2);
+  }
   // The closing sentence on a line of its own: most reasons end in a log path,
   // and a `.` riding on one would read as part of it.
   const msg = e.code === 1 ? `NOT PROVEN — ${e.message}\nNo Recipe cache written.` : e.message;

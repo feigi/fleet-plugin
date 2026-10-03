@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./temp-dir.mjs";
 import { writeExecStub } from "./exec-stub.mjs";
@@ -360,8 +360,11 @@ test("a proof that cannot be attempted exits 2, distinct from a Recipe that is n
   assert.equal(nan.status, 2);
   assert.match(nan.err, /--test-count must be a whole number, got '1e0'/);
 
-  // A flag where a value belongs is a missing value, never the command.
-  const missing = prove(half, ["--install", "--test", "mvn -q test"]);
+  // A flag where a value belongs is a missing value, never the command. The
+  // fixture must be one whose swallowed value would otherwise be ACCEPTED: with
+  // `--install --test "mvn -q test"` the later iteration refuses on its own
+  // and the guard under test is never what fires.
+  const missing = prove(half, ["--install", "--test", "--test", "mvn -q test"]);
   assert.equal(missing.status, 2);
   assert.match(missing.err, /^recipe-prove: usage:/);
   assert.equal(git(half, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length, 1,
@@ -375,4 +378,160 @@ test("the proof leaves no worktree directory behind in its temp dir", () => {
   for (const d of readdirSync(r.tmp)) {
     assert.deepEqual(readdirSync(join(r.tmp, d)).filter((n) => n === "wt"), [], `${d} still holds the throwaway worktree`);
   }
+});
+
+// Whether the process ignores file modes: root writes into a 0555 directory.
+const IGNORES_MODES = process.getuid?.() === 0 && "root ignores file modes";
+
+// An Install step whose output the repo ignores and leaves read-only — a Go
+// module cache is the usual one. git's own removal of the worktree fails on it.
+const READ_ONLY_INSTALL = "mkdir -p build/x && : > build/x/f && chmod 555 build/x";
+const IGNORING_BUILD = { ...MAVEN_FILES, ".gitignore": "target/\nbuild/\n" };
+
+test("read-only install output cannot turn a proof that held into a crash", { skip: IGNORES_MODES }, () => {
+  const { dir, head } = repo(IGNORING_BUILD);
+  const r = prove(dir, ["--install", READ_ONLY_INSTALL, ...MAVEN_PROOF.slice(2)]);
+  assert.equal(r.status, 0, r.err);
+  assert.equal(JSON.parse(readFileSync(cachePath(dir), "utf8")).derivedAt, head);
+  for (const d of readdirSync(r.tmp)) {
+    assert.deepEqual(readdirSync(join(r.tmp, d)).filter((n) => n === "wt"), [], `${d} still holds the throwaway worktree`);
+  }
+  assert.equal(git(dir, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length, 1);
+});
+
+test("read-only install output does not replace a refusal's reason with a stack trace", { skip: IGNORES_MODES }, () => {
+  const { dir } = repo(IGNORING_BUILD);
+  const r = prove(dir, ["--install", READ_ONLY_INSTALL, "--test", "echo 'tests 0'", "--count-line", "tests 0", "--test-count", "0"]);
+  assert.equal(r.status, 1);
+  assert.match(r.err, /NOT PROVEN — vacuous: a test count of 0/);
+  assert.doesNotMatch(r.err, /ENOTEMPTY/);
+  assert.equal(existsSync(cachePath(dir)), false);
+});
+
+test("a cache that cannot be written is exit 2 with its reason, never a stack trace or a NOT PROVEN", { skip: IGNORES_MODES }, () => {
+  const { dir } = repo(MAVEN_FILES);
+  mkdirSync(join(dir, ".fleet"));
+  chmodSync(join(dir, ".fleet"), 0o555);
+  try {
+    const r = prove(dir, MAVEN_PROOF);
+    assert.equal(r.status, 2, r.err);
+    assert.match(r.err, /^recipe-prove: EACCES/);
+    assert.doesNotMatch(r.err, /\n\s+at /);
+    assert.doesNotMatch(r.err, /NOT PROVEN/);
+    assert.equal(r.out, "");
+  } finally {
+    chmodSync(join(dir, ".fleet"), 0o755);
+  }
+});
+
+test("a command killed by a signal is refused, never counted as a red or a green run", () => {
+  // The count proof: the output carries the count line, then the run dies.
+  const { dir } = repo(MAVEN_FILES);
+  const t = prove(dir, ["--install", "true", "--test", "echo 'tests 3'; kill -9 $$", "--count-line", "tests 3", "--test-count", "3"]);
+  assert.equal(t.status, 1, t.err);
+  assert.match(t.err, /NOT PROVEN — 'echo 'tests 3'; kill -9 \$\$' was killed by SIGKILL/);
+  assert.equal(existsSync(cachePath(dir)), false);
+
+  // The mutation proof: the unmutated run is green, the mutated one dies — a
+  // crash is not a test failing.
+  const { dir: go } = repo(GO_FILES);
+  const dies = "if grep -q 'a - b' calc.go; then kill -9 $$; else go test ./...; fi";
+  const m = prove(go, ["--install", "true", "--test", dies, ...GO_PROOF.slice(4)]);
+  assert.equal(m.status, 1, m.err);
+  assert.match(m.err, /NOT PROVEN — '.*kill -9 \$\$.*' was killed by SIGKILL/);
+  assert.equal(existsSync(cachePath(go)), false);
+});
+
+test("an untracked file an Install step creates is seen even under status.showUntrackedFiles=no", () => {
+  const { dir } = repo(MAVEN_FILES);
+  git(dir, "config", "status.showUntrackedFiles", "no");
+  const r = prove(dir, ["--install", ": > deps.lock", ...MAVEN_PROOF.slice(2)]);
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /the Install step changed the tree \(first: \?\? deps\.lock\)/);
+  assert.equal(existsSync(cachePath(dir)), false);
+});
+
+test("the claimed count is a whole number on the count line, leading zeros aside", () => {
+  const claim = (line, n) => {
+    const { dir } = repo(MAVEN_FILES);
+    return { dir, ...prove(dir, ["--install", "true", "--test", `echo '${line}'`, "--count-line", line, "--test-count", n]) };
+  };
+  // 1 is a substring of 11 and of 21, and is not the number either line carries.
+  for (const line of ["Tests run: 11", "21 passed"]) {
+    const r = claim(line, "1");
+    assert.equal(r.status, 1, `${line}: ${r.err}`);
+    assert.match(r.err, /does not carry the test count 1/);
+    assert.equal(existsSync(cachePath(r.dir)), false);
+  }
+  // A runner that zero-pads its count still carries it.
+  const padded = claim("tests 01", "1");
+  assert.equal(padded.status, 0, padded.err);
+  assert.equal(JSON.parse(readFileSync(cachePath(padded.dir), "utf8")).testCount, 1);
+});
+
+test("the Install step and the Test entrypoint run against their own worktree whatever GIT_DIR the caller exports", () => {
+  // Each command asks git where it is: with an ambient GIT_DIR/GIT_WORK_TREE
+  // reaching the `sh -c` child, the answer is the other repository.
+  const here = 'test "$(git rev-parse --show-toplevel)" = "$(pwd -P)"';
+  const args = ["--install", here, "--test", `${here} && mvn -q test`, "--count-line", "Tests run: 1,", "--test-count", "1"];
+  const { dir } = repo(MAVEN_FILES);
+  const control = prove(dir, args);
+  assert.equal(control.status, 0, `the commands pass without an ambient GIT_DIR: ${control.err}`);
+
+  const { dir: other } = repo(withoutTests(MAVEN_FILES));
+  const { dir: dir2 } = repo(MAVEN_FILES);
+  const r = prove(dir2, args, { env: { GIT_DIR: join(other, ".git"), GIT_WORK_TREE: other } });
+  assert.equal(r.status, 0, r.err);
+});
+
+test("exit 126 and 127 both mean a command did not RUN, in the Install step and in the Test entrypoint", () => {
+  const { dir } = repo({ ...MAVEN_FILES, "t.sh": "echo 'Tests run: 1,'\n" });
+  // t.sh is committed 0644: `sh -c ./t.sh` exits 126, "found but not executable".
+  const i = prove(dir, ["--install", "./t.sh", ...MAVEN_PROOF.slice(2)]);
+  assert.equal(i.status, 1);
+  assert.match(i.err, /the Install step '\.\/t\.sh' did not run \(exit 126/);
+  const t = prove(dir, ["--install", "true", "--test", "./t.sh", "--count-line", "Tests run: 1,", "--test-count", "1"]);
+  assert.equal(t.status, 1);
+  assert.match(t.err, /the Test entrypoint '\.\/t\.sh' did not run \(exit 126/);
+});
+
+test("a mutation command that fails, or that leaves nothing runnable, or that breaks git itself, is refused for that reason", () => {
+  const { dir } = repo(GO_FILES);
+  const failing = prove(dir, ["--install", "true", "--test", "go test ./...", "--mutate", "exit 3", "--mutation", "x"]);
+  assert.equal(failing.status, 1);
+  assert.match(failing.err, /the mutation command 'exit 3' failed \(exit 3\)/);
+
+  // The Test entrypoint is an executable the mutation deletes: the mutated run
+  // exits 127, which is not a red suite.
+  const { dir: tool } = repo({ tool: "#!/bin/sh\necho 'Tests run: 1,'\n" });
+  git(tool, "update-index", "--chmod=+x", "tool");
+  git(tool, "commit", "-q", "--amend", "--no-edit");
+  git(tool, "update-ref", "refs/remotes/origin/main", "HEAD");
+  const gone = prove(tool, ["--install", "true", "--test", "./tool", "--mutate", "rm tool", "--mutation", "delete the runner"]);
+  assert.equal(gone.status, 1);
+  assert.match(gone.err, /the Test entrypoint did not run on the mutated tree \(exit 127\)/);
+
+  // A mutation that removes the worktree's link to its repository leaves
+  // git unable to say what changed.
+  const { dir: blind } = repo(GO_FILES);
+  const lost = prove(blind, ["--install", "true", "--test", "go test ./...", "--mutate", "rm .git", "--mutation", "orphan the tree"]);
+  assert.equal(lost.status, 1);
+  assert.match(lost.err, /could not read what the mutation changed/);
+});
+
+test("the mutation is credited only with what it changed, never with what the unmutated Test run rewrote", () => {
+  // t.sh is red while state.txt holds anything, and otherwise writes into it:
+  // the unmutated run rewrites a tracked file.
+  const files = { "state.txt": "", "t.sh": "if [ -s state.txt ]; then exit 1; fi\necho run > state.txt\n" };
+  const { dir } = repo(files);
+  const noop = prove(dir, ["--install", "true", "--test", "sh t.sh", "--mutate", "true", "--mutation", "no-op"]);
+  assert.equal(noop.status, 1, noop.err);
+  assert.match(noop.err, /the mutation \(no-op\) changed no tracked file/);
+  assert.equal(existsSync(cachePath(dir)), false);
+
+  // A genuine mutation of a file the run also rewrites is still a mutation.
+  const { dir: real } = repo(files);
+  const r = prove(real, ["--install", "true", "--test", "sh t.sh", "--mutate", "echo x > state.txt", "--mutation", "poison the state"]);
+  assert.equal(r.status, 0, r.err);
+  assert.match(JSON.parse(readFileSync(cachePath(real), "utf8")).mutation, /changed state\.txt$/);
 });
