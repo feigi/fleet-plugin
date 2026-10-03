@@ -2651,6 +2651,23 @@ const boardDir = (payload) => {
   return dir;
 };
 
+// holderOn's other half: only EADDRINUSE reads as "someone else holds it". A
+// listen() that fails for any other reason must reject, not come back as
+// `port: null`, which the rows that skip on a null port would then report as
+// a port held from outside. A unix-socket path under a directory that does
+// not exist fails through the same 'error' event without privileges; the
+// code it fails with differs by platform, and that it is not EADDRINUSE is
+// the point.
+test("holderOn: a bind failure that is not EADDRINUSE rejects instead of reading as a held port", async () => {
+  const dir = boardDir();
+  try {
+    await assert.rejects(
+      holderOn(dir, join(dir, "no-such-dir", "s.sock")),
+      (e) => e instanceof Error && e.code !== undefined && e.code !== "EADDRINUSE",
+    );
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 // The half that must ACCEPT: a real board payload naming a workspace is the
 // one answer the probe has to believe, and everything below is a way of not
 // believing it. A probe that only ever returns null passes every negative
