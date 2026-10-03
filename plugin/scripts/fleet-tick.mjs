@@ -308,13 +308,12 @@ const TIER_VERDICT = /^tier-(ok|mismatch|unverifiable)=([^:\s]+):\S+$/;
 // dispositions-check.mjs's verdict on a review fix-applier's disposition
 // record: `dispositions-ok=fix-pr-<M>[-x]:<head>`,
 // `dispositions-mismatch=…` or `dispositions-escalate=…` (a critical or
-// important deferral that a human rules on), `<head>` the head of the review
-// the record answers. `ledger.mjs dispatch` refuses a finisher on a mismatch
-// or an escalate. A mismatch returns the PR to fixDue for one retry; an
-// escalate is a hold only a human answers, so the tick never re-offers the PR
-// for it. A token outside this shape is no verdict at all, which the gate
-// reads as
-// unchecked: fail closed.
+// important deferral, or a second mismatch on one review, that a human rules
+// on), `<head>` the head of the review the record answers. `ledger.mjs
+// dispatch` refuses a finisher on a mismatch or an escalate. A mismatch
+// returns the PR to fixDue for one retry; an escalate is a hold only a human
+// answers, so the tick never re-offers the PR for it. A token outside this
+// shape is no verdict at all, which the gate reads as unchecked: fail closed.
 export function dispositionsToken(tok) {
   const m = /^dispositions-(ok|mismatch|escalate)=([^:\s]+):([0-9a-f]{7,40})$/i.exec(tok);
   if (!m) return null;
