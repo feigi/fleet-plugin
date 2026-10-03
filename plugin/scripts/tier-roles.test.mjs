@@ -195,6 +195,22 @@ test("checkRoutes: every definition routed and every role resolvable -> no viola
   assert.deepEqual(routes({ "fleet-a": "@slow:xhigh", "fleet-b": "@smol:low" }), { violations: [], notices: [] });
 });
 
+test("checkRoutes: an agents directory holding no *.agent.md definition is a violation naming the directory, never a vacuous pass", () => {
+  const empty = agentsDir({});
+  const { violations } = checkRoutes({ agentsDir: empty, modelRoles: MODEL_ROLES, overrides: {}, catalog: CATALOG });
+  assert.deepEqual(violations, [`no *.agent.md definition found in ${empty}`]);
+
+  // A directory that holds only files the check does not read is the same case.
+  writeFileSync(join(empty, "README.md"), "not a definition\n");
+  assert.deepEqual(checkRoutes({ agentsDir: empty, modelRoles: MODEL_ROLES, overrides: {}, catalog: CATALOG }).violations, [`no *.agent.md definition found in ${empty}`]);
+});
+
+test("checkRoutes: an empty agents directory still reports the other violations alongside", () => {
+  const { violations } = checkRoutes({ agentsDir: agentsDir({}), modelRoles: MODEL_ROLES, overrides: { "fleet-a": "@slow:xhigh" }, catalog: CATALOG });
+  assert.equal(violations.length, 2);
+  assert.match(violations.join("\n"), /task\.agentModelOverrides\.fleet-a shadows/);
+});
+
 test("checkRoutes (a): a definition whose model: is not a route is a violation naming the file", () => {
   const { violations } = routes({ "fleet-a": "opus" });
   assert.equal(violations.length, 1);
@@ -331,6 +347,15 @@ test("CLI: --check with a clean install exits 0", () => {
   const agents = agentsDir({ "fleet-a": "@slow:xhigh" });
   const r = runCli(["--check", "--agents", agents, ...installFlags(d)], d);
   assert.equal(r.status, 0, r.stderr);
+});
+
+test("CLI: --check on an agents directory with no definitions exits 1 naming the directory", () => {
+  const d = dir();
+  const agents = agentsDir({});
+  const r = runCli(["--check", "--agents", agents, ...installFlags(d)], d);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /no \*\.agent\.md definition found in /);
+  assert.doesNotMatch(r.stdout, /every definition routes/);
 });
 
 test("CLI: --check with a non-route model: exits 1 naming the file", () => {

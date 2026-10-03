@@ -1028,8 +1028,9 @@ Before the run's first dispatch run `~/.fleet/bin/fleet-run tier-roles.mjs
 --check`; exit 1 names every definition whose `model:` is not a route,
 every unset `modelRoles.<role>` a definition needs, every definition whose
 `:<level>` its role's target does not run at (omp's model catalog — omp
-would clamp it silently), and every
-`task.agentModelOverrides` entry that would shadow a fleet definition,
+would clamp it silently), every
+`task.agentModelOverrides` entry that would shadow a fleet definition, and
+an `--agents` directory holding no `*.agent.md` definition,
 prints the exact remedy, and **stops the run** before any member is
 dispatched — the fleet reads that config and never writes it (ADR 0003).
 

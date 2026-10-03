@@ -29,7 +29,9 @@
 //       not list cannot be checked, so it fails too;
 //   (e) `modelRoles.slow`/`modelRoles.task` resolving to the same model is
 //       flagged as a notice — legal, but every `slow-*` cell then measures
-//       the same model as its `task-*` twin.
+//       the same model as its `task-*` twin;
+//   (f) the agents directory holds at least one `*.agent.md` definition —
+//       with none, (a), (b) and (d) have nothing to check.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -194,6 +196,11 @@ export function checkRoutes({ agentsDir, modelRoles, overrides, catalog }) {
   const usedBy = {}; // role -> [{ file, level }, ...]
 
   const files = readdirSync(agentsDir).filter((f) => f.endsWith(".agent.md")).sort();
+  // A directory with no definitions has nothing to route, so every
+  // per-definition check below (the model route, the role's resolution, the
+  // level) would pass over it — a wrong `--agents` path that exists must not
+  // read as a healthy install.
+  if (files.length === 0) violations.push(`no *.agent.md definition found in ${agentsDir}`);
   for (const file of files) {
     const text = readFileSync(join(agentsDir, file), "utf8");
     const fm = parseFrontmatter(text);
