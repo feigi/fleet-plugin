@@ -123,3 +123,33 @@ before-and-after comparison.
 **Revert:** reopen #2473 and #2474; on all six, restore `needs-triage` and drop
 the category and state labels this sweep added; delete this sweep's triage
 comments on each; close PR #2489 unmerged.
+
+## 2026-10-03 sweep, second pass
+
+**As-of 2026-10-03T22:30Z**, probed against `origin/main`@`5cd8b625`. A
+`/triage` pass over every open `needs-triage` issue, run with #593's
+procedure (probe `origin/main` in a throwaway worktree, never the working
+tree or the ticket's cited line numbers). Each ticket was probed by its own
+agent, sized to the ticket: #2550 small, #2571 medium, #2551 medium-high,
+#2504 and #2568 high.
+
+**Before:** 5 `needs-triage` (#2504, #2550, #2551, #2568, #2571); 4 carry
+`Deferred from PR #<n>` (all but #2568, which was filed from two CI failures).
+
+**Probed:**
+
+| # | Central claim | `origin/main` verdict | Outcome |
+|---|---|---|---|
+| #2504 | A CLOSED ticket's unchecked replacement (`impl-<N>-b`) still reads `HOLD (tier unchecked …)` | Reproduced, but as designed: one `tier-check.mjs --batch` run always clears it (a `tier-mismatch=` verdict is then lifted by the closed-ticket mismatch lift), and the check guards the next Pull against a definition or `modelRoles` fault, not the closed ticket | refuted → `enhancement` + `wontfix`, closed; recorded in `.out-of-scope/closed-ticket-tier-unchecked-lift.md` (PR #2585) |
+| #2550 | `recipe-prove` leaves its log directory in `$TMPDIR` after `PROVEN` | Reproduced. Nothing reads the logs after `PROVEN` (the cache carries the proof); `NOT PROVEN` refusals name a log path | live-confirmed → `bug` + `ready-for-agent` (brief: remove on `PROVEN` and exit 2, keep on `NOT PROVEN`) |
+| #2551 | `recipe-prove` runs Install, Test and mutation with no timeout | Reproduced a hang (only an outer alarm ended it). Also found that a SIGTERM-trapping command keeps a `timeout`-only `spawnSync` from ever returning | live-confirmed → `bug` + `ready-for-agent` (brief: 20-minute bound per command, shorten-only `RECIPE_PROVE_TIMEOUT`, `SIGKILL`, `NOT PROVEN` refusal naming the bound) |
+| #2568 | `reap.test.mjs`'s `gitdir missing` / `gitdir chmod 000` rows flake in CI | Root-caused: on git ≥ 2.54 the fixture's own `git fetch --prune` starts detached auto-maintenance whose `worktree-prune` task erases the fault before reap.sh reads it. Reproduced locally by enabling that task on git 2.50.1; about 1.4% of CI runs | live-confirmed → `bug` + `ready-for-agent` (brief: `-c maintenance.auto=false` in the test's fixture `git()` helper only) |
+| #2571 | `recipe-prove`'s `git()` cannot tell a signal-killed git from a non-zero exit | Reproduced: `kill -9`, `kill -TERM` and an over-`maxBuffer` git each end in a `NOT PROVEN` message with an empty reason | live-confirmed → `bug` + `ready-for-agent` (brief: name the signal and `error.code` in `err`; do not throw) |
+
+**After:** 0 `needs-triage` (`gh issue list --state open --label needs-triage
+--limit 500` returns `[]`). The open-issue and deferred counts were not
+measured before the sweep, so they have no before-and-after comparison.
+
+**Revert:** reopen #2504; on all five, restore `needs-triage` and drop the
+category and state labels this sweep added; delete this sweep's triage
+comments on each; close PR #2585 unmerged.
