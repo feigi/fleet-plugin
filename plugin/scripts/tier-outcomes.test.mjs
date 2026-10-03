@@ -15,6 +15,8 @@ import { COLUMNS as MEMBER_COLUMNS } from "./member-outcomes.mjs";
 import { writeExecStub } from "./exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./tier-outcomes.mjs", import.meta.url));
+const LATER = "2026-10-03";
+assert.ok(LATER > TIER_SWITCH_DATE);
 const PRE_SWITCH = "2026-09-17";
 assert.ok(PRE_SWITCH < TIER_SWITCH_DATE);
 
@@ -339,17 +341,24 @@ test("check: rows dated before the switch are skipped, whatever they say", (t) =
   assert.match(r.stdout, /skipped 1 before/);
 });
 
-// The vacuous pass #2433 closes: every filled post-switch row lost its join to
-// the member file, so nothing was compared and `0 checked` used to exit 0.
-test("check: every filled post-switch row lacking a member row fails instead of passing 0 checked", (t) => {
-  // impl-327-2 is a real implementer name parseMemberName leaves with a blank ticket.
+// The vacuous pass #2433 closes: the latest run's filled post-switch rows all
+// lost their join to the member file, so nothing from it was compared and
+// `0 checked` used to exit 0.
+test("check: a run whose filled post-switch rows all lack a member row fails, naming them", (t) => {
+  // impl-327-2 is an implementer name parseMemberName leaves with a blank ticket.
   const f = fixture(t, {
     members: [{ member: "impl-327-2", ticket: "", type: "fleet-implementer" }],
-    tierRows: [tierRow({ pr: 20, ticket: 327, tier: "default" }), tierRow({ pr: 21, ticket: 328, tier: "default" })],
+    tierRows: [
+      tierRow({ date: PRE_SWITCH, pr: 19, ticket: 326, tier: "opus" }),
+      tierRow({ pr: 20, ticket: 327, tier: "default" }),
+      tierRow({ pr: 21, ticket: 328, tier: "default" }),
+      tierRow({ pr: 22, ticket: 329, tier: "" }),
+    ],
   });
   const r = f.run("check");
   assert.equal(r.code, 1, r.stdout + r.stderr);
-  assert.match(r.stderr, /FAIL .*every one of the 2 .*no implementer row in the member file.*nothing was checked/);
+  assert.match(r.stderr, new RegExp(`FAIL nothing from ${TIER_SWITCH_DATE}, .*was checked: .*PR #20 \\(ticket #327\\), PR #21 \\(ticket #328\\)$`, "m"));
+  assert.doesNotMatch(r.stderr, /PR #19|PR #22/, "a pre-switch or blank-tier row is not a lost join");
   assert.match(r.stdout, /0 checked/);
 });
 
@@ -358,11 +367,53 @@ test("check: a missing member file fails a filled post-switch row the same way",
   rmSync(f.members);
   const r = f.run("check");
   assert.equal(r.code, 1, r.stdout + r.stderr);
-  assert.match(r.stderr, /FAIL .*nothing was checked/);
+  assert.match(r.stderr, /FAIL nothing from .*was checked: .*PR #20/);
+});
+
+// The tsv is cumulative, so an earlier run that checked fine must not hide a
+// later run that lost every join.
+test("check: a later run that lost every join fails even though an earlier run was checked", (t) => {
+  const f = fixture(t, {
+    members: [
+      { member: "impl-10", ticket: 10, type: "fleet-implementer" },
+      { member: "impl-327-2", ticket: "", type: "fleet-implementer" },
+    ],
+    tierRows: [
+      tierRow({ pr: 20, ticket: 10, tier: "default" }),
+      tierRow({ date: LATER, pr: 21, ticket: 327, tier: "default" }),
+      tierRow({ date: LATER, pr: 22, ticket: 328, tier: "default" }),
+    ],
+  });
+  const r = f.run("check");
+  assert.equal(r.code, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, new RegExp(`FAIL nothing from ${LATER}, .*PR #21 .*PR #22`));
+  assert.match(r.stdout, /1 checked, 1 failed/);
+});
+
+// A several-member-rows skip is by design, but it is no comparison and must
+// not cancel the no-member-row alarm.
+test("check: a several-member-rows row does not hide lost joins beside it", (t) => {
+  const f = fixture(t, {
+    members: [
+      { member: "impl-11", ticket: 11, type: "task" },
+      { member: "impl-11-b", ticket: 11, type: "task" },
+    ],
+    tierRows: [
+      tierRow({ pr: 20, ticket: 327, tier: "default" }),
+      tierRow({ pr: 21, ticket: 328, tier: "default" }),
+      tierRow({ pr: 22, ticket: 329, tier: "default" }),
+      tierRow({ pr: 23, ticket: 11, tier: "default" }),
+    ],
+  });
+  const r = f.run("check");
+  assert.equal(r.code, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /FAIL nothing from .*PR #20 .*PR #21 .*PR #22/);
+  assert.doesNotMatch(r.stderr, /PR #23/);
+  assert.match(r.stdout, /0 checked.*3 with no member row, 1 with several member rows/);
 });
 
 // What the vacuity guard must ACCEPT: 0 checked is fine whenever no filled
-// post-switch row is missing its member row.
+// post-switch row of the latest run is missing its member row.
 test("check: 0 checked still passes when every row is pre-switch, blank, or has several member rows", (t) => {
   const f = fixture(t, {
     members: [
@@ -387,6 +438,21 @@ test("check: one checked row keeps a no-member-row sibling a skip, not a failure
   });
   const r = f.run("check");
   assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /1 checked, 0 failed.*1 with no member row/);
+});
+
+// Only the latest run is held to the guard: rows of an earlier run that lost
+// their join stay a skip once a later run was checked.
+test("check: an earlier run's lost joins do not fail a later run that was checked", (t) => {
+  const f = fixture(t, {
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+    tierRows: [
+      tierRow({ pr: 20, ticket: 327, tier: "default" }),
+      tierRow({ date: LATER, pr: 21, ticket: 10, tier: "default" }),
+    ],
+  });
+  const r = f.run("check");
+  assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /1 checked, 0 failed.*1 with no member row/);
 });
 

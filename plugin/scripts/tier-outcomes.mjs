@@ -13,7 +13,9 @@
 //   check [--live]
 //     Post-switch rows only: a filled `tier` must equal the short name of the
 //     ticket's single implementer row in member-outcomes.tsv, and that row
-//     must be a `fleet-implementer*` definition — exit 1 otherwise. `--live`
+//     must be a `fleet-implementer*` definition — exit 1 otherwise, and exit 1
+//     when none of the latest run_date's filled rows could be compared and some
+//     lack a member row (nothing from that run was checked). `--live`
 //     (a run in progress; CI never passes it) adds a WARNING, never a
 //     failure, per PR whose run-ledger row carries `reviewed=` but which has
 //     no row here. `--ledger <path>` names another ledger than the run's own.
@@ -41,8 +43,8 @@
 // `opus`/`sonnet` spelling and are never checked; the header records the
 // switch and how the old values map.
 //
-// Exit codes: 0 ok, 1 `check` found a mismatch or checked nothing (every filled
-// post-switch row has no member row), 2 usage or unreadable input.
+// Exit codes: 0 ok, 1 `check` found a mismatch or checked nothing from the latest
+// run_date (see `check`), 2 usage or unreadable input.
 
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -212,6 +214,8 @@ export function checkRows(rows, memberRows) {
   const failures = [];
   const skipped = { preSwitch: 0, blank: 0, noMemberRow: 0, severalMemberRows: 0 };
   let checked = 0;
+  // The filled post-switch rows of each run_date, for the vacuity guard below.
+  const byDate = new Map();
   for (const row of rows) {
     if (!DATE.test(row.run_date)) {
       failures.push(`PR #${row.pr}: run_date '${row.run_date}' is not YYYY-MM-DD`);
@@ -220,9 +224,11 @@ export function checkRows(rows, memberRows) {
     if (row.run_date < TIER_SWITCH_DATE) { skipped.preSwitch++; continue; }
     if (row.tier === "") { skipped.blank++; continue; }
     const members = implementerRows(memberRows, row.ticket);
-    if (members.length === 0) { skipped.noMemberRow++; continue; }
+    const day = byDate.get(row.run_date) ?? byDate.set(row.run_date, { checked: 0, lost: [] }).get(row.run_date);
+    if (members.length === 0) { skipped.noMemberRow++; day.lost.push(`PR #${row.pr} (ticket #${row.ticket})`); continue; }
     if (members.length > 1) { skipped.severalMemberRows++; continue; }
     checked++;
+    day.checked++;
     const [m] = members;
     const actual = shortName(m.subagentType);
     if (actual === null) {
@@ -231,12 +237,17 @@ export function checkRows(rows, memberRows) {
       failures.push(`PR #${row.pr} (ticket #${row.ticket}): tier=${row.tier}, but ${m.member} ran as ${m.subagentType} (${actual})`);
     }
   }
-  // `0 checked` is only a pass when nothing was left to compare. Every filled
-  // post-switch row missing its member row means the join to the member file
-  // is gone (a blank ticket there, a stale or absent member file) and the run
-  // verified nothing; several-member-rows skips are by design and stay out.
-  if (checked === 0 && skipped.noMemberRow > 0 && skipped.severalMemberRows === 0) {
-    failures.push(`every one of the ${skipped.noMemberRow} rows dated from ${TIER_SWITCH_DATE} with a filled tier has no implementer row in the member file - nothing was checked`);
+  // `0 checked` is only a pass when nothing was left to compare. The tsv is
+  // cumulative, so the whole file's `checked` stays positive once any earlier
+  // run was verified: the guard reads the latest run_date alone. When none of
+  // that day's filled post-switch rows got a member row compared and some lost
+  // their join (a blank ticket there, a stale or absent member file), that run
+  // verified nothing. A several-member-rows skip is by design and neither
+  // counts as checked nor exempts the lost rows.
+  const latest = [...byDate.keys()].sort().at(-1);
+  const latestDay = latest === undefined ? null : byDate.get(latest);
+  if (latestDay && latestDay.checked === 0 && latestDay.lost.length > 0) {
+    failures.push(`nothing from ${latest}, the latest run_date with a filled tier, was checked: no implementer row in the member file for ${latestDay.lost.join(", ")}`);
   }
   return { failures, skipped, checked };
 }
