@@ -41,8 +41,14 @@ const ENV = {
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
 
+// `maintenance.auto=false` on every fixture call: fetch, commit and merge start
+// a detached `git maintenance run --auto`, whose `worktree-prune` task can erase
+// a deliberately faulted `gitdir` before the script under test reads the
+// registry, leaving the test to check a consistent registry instead of the
+// fault. Kept out of ENV, which also reaches reap.sh's own git calls and would
+// hide a lapse in net_git's own suppression.
 const git = (cwd, ...args) =>
-  execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
+  execFileSync("git", ["-c", "maintenance.auto=false", ...args], { cwd, env: ENV, encoding: "utf8" }).trim();
 
 /** worktreeNames() of `w`'s listing: never its paths, which carry TMPDIR (#2531). */
 const listedNames = (w) => worktreeNames(git(w, "worktree", "list", "--porcelain"));
