@@ -85,8 +85,9 @@ and revise.
 
 Exit 0 is the proof holding: the script wrote the Recipe cache and printed
 `PROVEN` and the cache's contents. Exit 1 is `NOT PROVEN`, with the reason;
-no cache was written. Exit 2 means the proof could not be attempted (no
-`origin/main`, not a repository) — report it, do not work around it.
+no cache was written. Exit 2 means no verdict on the proof: it could not be
+attempted (no `origin/main`, not a repository) or the cache could not be
+written — report it, do not work around it.
 
 You may revise and re-run after a `NOT PROVEN` you can act on — a wrong
 command, a count line you mis-copied, a mutation that changed nothing — **at
