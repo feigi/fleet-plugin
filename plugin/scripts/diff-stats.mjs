@@ -17,7 +17,7 @@
 // this file is executed directly.
 
 import { execFileSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
+import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
 
 const NAME = "diff-stats";
@@ -228,4 +228,4 @@ function main() {
   console.log(JSON.stringify({ pr, ...stats }));
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) main();
+if (isCLI(import.meta.url)) main();

@@ -43,7 +43,8 @@
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { isCLI } from "./is-cli.mjs";
 
 const NAME = "frontmatter-check";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -253,4 +254,4 @@ function main() {
   process.exit(anyViolation ? 1 : 0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) main();
+if (isCLI(import.meta.url)) main();

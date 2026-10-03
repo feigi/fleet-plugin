@@ -52,11 +52,12 @@
 // unparseable RECORD is judged, not refused: the fix-applier wrote nothing a
 // reader can use, so every finding it had to cover is dropped.
 
-import { readFileSync, existsSync, realpathSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname, isAbsolute, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "./arg.mjs";
+import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { parseMember, memberTokens } from "./ledger-grammar.mjs";
 import { dispositionsToken, rowNums, sameHead } from "./fleet-tick.mjs";
@@ -418,9 +419,7 @@ function main() {
   process.exitCode = verdict === "ok" ? 0 : 1;
 }
 
-// Compared by realpath: invoked through a symlinked path (on macOS `/tmp` is
-// one), `import.meta.url` is the resolved file and argv[1] is not, and a
-// string comparison would skip main() and exit 0 — the code that means ok —
-// having judged and written nothing.
-const isCLI = process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
-if (isCLI) main();
+// Only run main() as a CLI, never when imported (see is-cli.mjs): a string
+// comparison skipped main() through a symlinked path and exited 0 — the code
+// that means ok — having judged and written nothing.
+if (isCLI(import.meta.url)) main();

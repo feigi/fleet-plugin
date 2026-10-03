@@ -140,16 +140,15 @@ export function parseTsv(text) {
 }
 
 import { writeFileSync, existsSync, renameSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { isCLI } from "./is-cli.mjs";
 import { makeDie, isFlagLike } from "./arg.mjs";
 
 const NAME = "member-outcomes";
 
 // Only runs as a CLI, never on import — the test file and any wrapper import
-// the pure helpers. Exact identity, not a suffix match: fleet-tick.test.mjs
-// records a copy under an unresolved path silently never running main(), and a
-// suffix test additionally fires for any file ending in this one's name.
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
+// the pure helpers. Exact identity (by realpath, see is-cli.mjs), not a suffix
+// match: a suffix test fires for any file ending in this one's name.
+if (isCLI(import.meta.url)) {
   const die = makeDie(NAME);
   const argv = process.argv.slice(2);
   const fileIdx = argv.indexOf("--file");
