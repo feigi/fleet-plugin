@@ -8,7 +8,7 @@
 // settled member live, has to go red here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reconcile, formatLines, actionable, deriveRun, parseShortlist, unclaimed, refreshWhy } from "./fleet-tick.mjs";
+import { reconcile, formatLines, actionable, deriveRun, parseShortlist, unclaimed, refreshWhy, dispositionsToken, currentDispositions } from "./fleet-tick.mjs";
 
 // Every field named, so a test that cares about one number still states the
 // rest — a defaulted field is a guard nobody is pinning.
@@ -718,6 +718,69 @@ test("deriveRun: survivors a review fix-applier already answered stay answered t
   // A live review fix-applier when the hold lands is not joined by a conflict one.
   const live = run({ rows: ["#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · fix-pr-21 · conflict-hold:#21"] }, [pr(21)]);
   assert.deepEqual([live.fixDue, live.conflictHeld], [[], [21]]);
+});
+
+// A dispositions mismatch is answered by one automatic retry: the PR returns
+// to fix-due on the row that already dispatches fix-appliers, once, until the
+// retry has been checked. A second failure is escalate, and escalate is a hold
+// no fix-applier answers.
+const D = (fix, ...tokens) => `#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · ${[...fix, ...tokens].join(" · ")}`;
+const MISMATCH = "dispositions-mismatch=fix-pr-21:abc1234";
+const dueAt = (tail, prs = [pr(21)]) => run({ rows: [D(["fix-pr-21=applied:def5678"], ...tail)] }, prs).fixDue;
+
+test("deriveRun: a first dispositions mismatch puts the PR back in fixDue, and the reviewers row prints it", () => {
+  const r = run({ rows: [D(["fix-pr-21=applied:def5678"], MISMATCH)] }, [pr(21)]);
+  assert.deepEqual(r.fixDue, [21]);
+  assert.equal(row(state({ fixDue: r.fixDue }), "reviewers").action, "DISPATCH fix-pr PR#21");
+  // The survivors alone were answered: with an ok verdict the PR is not due.
+  assert.deepEqual(dueAt(["dispositions-ok=fix-pr-21:abc1234"]), []);
+  // No other role's row moves on the mismatch.
+  const others = (fixDue) => reconcile(state({ fixDue })).filter((x) => x.role !== "reviewers");
+  assert.deepEqual(others(r.fixDue), others([]));
+});
+
+test("deriveRun: a mismatch is due whether the review counted survivors or only unverified findings", () => {
+  const unverifiedOnly = run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:0/0/2 · fix-pr-21=applied:def5678 · ${MISMATCH}`] }, [pr(21)]);
+  assert.deepEqual(unverifiedOnly.fixDue, [21]);
+});
+
+test("deriveRun: the retry is not re-offered while live, nor before its own check has run, nor after any verdict of its own", () => {
+  assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b"]), [], "live");
+  assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b=applied:0123abc"]), [], "settled, its check not yet run: the earlier mismatch is not the retry's answer");
+  assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b=applied:0123abc", "dispositions-ok=fix-pr-21-b:abc1234"]), [], "ok ends it");
+  assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b=applied:0123abc", "dispositions-escalate=fix-pr-21-b:abc1234"]), [], "escalate is never due");
+  assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b=failed"]), [21], "a retry that died leaves the mismatch for a replacement");
+});
+
+test("deriveRun: a landed conflict fix-applier does not answer a mismatch — the retry is still due", () => {
+  assert.deepEqual(dueAt([MISMATCH, "conflict-hold:#21", "fix-pr-21-b"]), [], "the conflict one is live: nothing is re-offered");
+  assert.deepEqual(dueAt([MISMATCH, "conflict-hold:#21", "fix-pr-21-b=applied:0123abc"]), [21], "hold cleared by -b, the mismatch still stands");
+  assert.deepEqual(dueAt([MISMATCH, "fix-pr-21-b=applied:0123abc"]), [], "control: a review -b that landed is awaiting its own check");
+});
+
+test("deriveRun: a dispositions verdict on a row that never recorded a review head answers nothing", () => {
+  const r = run({ rows: [`#20 impl-20=PR#21 → PR#21 · review=wf:x · fix-pr-21=applied:def5678 · ${MISMATCH}`] }, [pr(21)]);
+  assert.deepEqual(r.fixDue, []);
+});
+
+test("deriveRun: the verdict is read by review head and highest retry, never by position in the row", () => {
+  const escalated = ["dispositions-escalate=fix-pr-21-b:abc1234", MISMATCH];
+  assert.deepEqual(dueAt(["fix-pr-21-b=applied:0123abc", ...escalated]), [], "the -b escalate answers, wherever it sits");
+  // A mismatch on an older review does not answer a newer one.
+  const newer = run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · fix-pr-21=applied:def5678 · ${MISMATCH} · review=wf:x reviewed=fedcba9:0/1/0`] }, [pr(21)]);
+  assert.deepEqual(newer.fixDue, [], "the new review has no verdict and no survivors");
+  const rev = run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · fix-pr-21=applied:def5678 · ${MISMATCH} · review=wf:x`] }, [pr(21)]);
+  assert.deepEqual(rev.fixDue, [], "a review running on the PR holds it off");
+  assert.deepEqual(dueAt([MISMATCH], []), [], "a PR no longer open is nobody's work");
+});
+
+test("currentDispositions: escalate parses, and outranks mismatch which outranks ok at one retry suffix", () => {
+  assert.deepEqual(dispositionsToken("dispositions-escalate=fix-pr-21-b:abc1234")?.verdict, "escalate");
+  assert.equal(dispositionsToken("dispositions-escalate=finisher-pr-21:abc1234"), null);
+  const heads = (...s) => currentDispositions(s.map(dispositionsToken), "abc1234");
+  assert.deepEqual(heads("dispositions-ok=fix-pr-21:abc1234", "dispositions-escalate=fix-pr-21:abc1234"), { verdict: "escalate", member: "fix-pr-21" });
+  assert.deepEqual(heads("dispositions-escalate=fix-pr-21:abc1234", "dispositions-mismatch=fix-pr-21:abc1234"), { verdict: "escalate", member: "fix-pr-21" });
+  assert.deepEqual(heads("dispositions-escalate=fix-pr-21:abc1234", "dispositions-ok=fix-pr-21-b:abc1234"), { verdict: "ok", member: "fix-pr-21-b" });
 });
 
 test("deriveRun: a newer review's survivors are not offered beside a live fix-applier, and are due once it settles", () => {

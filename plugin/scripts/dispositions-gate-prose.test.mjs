@@ -72,14 +72,29 @@ test("the gate says what each refusal asks of the controller", () => {
     "`dispositions unchecked` — no verdict answers that head: run `dispositions-check.mjs` for the fix-applier that answered the review",
   ));
   assert.match(s, phrase(
-    "`dispositions mismatch` — no finisher: post the check's output, which names each violating entry, with `gh pr comment <M>`, and flag the PR for a human",
+    "`dispositions mismatch` — no finisher: the tick prints `DISPATCH fix-pr PR#<M>` for it, and the next-suffix fix-applier answers it",
   ));
   assert.match(s, phrase(
-    "`dispositions escalate` — no finisher, and no retry: a `critical` or `important` finding was deferred `remedy-outside-diff`, which only a human can rule on. Post the check's output, which names each escalated finding, with `gh pr comment <M>`, and flag the PR for a human; dispatch no fix-applier and no finisher for that review's head",
+    "`dispositions escalate` — no finisher, no retry and no further fix-applier: either a `critical` or `important` finding was deferred `remedy-outside-diff`, or a second mismatch was drawn on one review, and only a human can rule on either.",
+  ));
+  assert.match(s, phrase(
+    "Post the check's output, which names each escalated finding or violating entry, with `gh pr comment <M>`, and flag the PR for a human; re-running the check reprints it. Dispatch no fix-applier and no finisher for that review's head",
   ));
   assert.match(s, phrase(
     "it refuses too while a fix-applier on the PR is still live, verdict or not** — `fix-pr-<M>[-x] still live`: settle it, run the check for it, then dispatch again.",
   ));
+});
+
+test("a mismatch is retried once by the next suffix, whose prompt carries the violation list, and a second failure escalates", () => {
+  const s = paragraph(SKILL, "`DISPATCH fix-pr PR#<M>` on a dispositions mismatch", "run-team/SKILL.md", { emphasisTolerant: true });
+  assert.match(s, phrase("is one automatic retry, a review fix-applier named the next suffix (`fix-pr-<M>-b`)"));
+  assert.match(s, phrase(
+    "the review file `<scratch>/review-<M>.json`, the disposition record `<scratch>/dispositions-<M>.json` it rewrites, and the check's violation list **verbatim**",
+  ));
+  assert.match(s, phrase(
+    "A second failure on the same review is written as `dispositions-escalate=fix-pr-<M>-b:<head>` in place of a mismatch: the tick prints no `DISPATCH fix-pr` for it, `dispatch` refuses the finisher naming `dispositions escalate`",
+  ));
+  assert.match(s, phrase("A new review of the PR counts again from none."));
 });
 
 test("a reversed refutation reaches the ledger from the disposition record", () => {

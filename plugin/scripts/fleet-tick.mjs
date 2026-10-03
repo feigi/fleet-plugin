@@ -308,11 +308,12 @@ const TIER_VERDICT = /^tier-(ok|mismatch|unverifiable)=([^:\s]+):\S+$/;
 // dispositions-check.mjs's verdict on a review fix-applier's disposition
 // record: `dispositions-ok=fix-pr-<M>[-x]:<head>`,
 // `dispositions-mismatch=…` or `dispositions-escalate=…` (a critical or
-// important deferral that a human rules on), `<head>` the head of the review
-// the record answers. `ledger.mjs dispatch` refuses a finisher on any verdict
-// but ok; the tick holds nothing on one, having no finisher role. A token
-// outside this shape is no verdict at all, which the gate reads as
-// unchecked: fail closed.
+// important deferral, or a second mismatch on one review, that a human rules
+// on), `<head>` the head of the review the record answers. `ledger.mjs
+// dispatch` refuses a finisher on a mismatch or an escalate. A mismatch
+// returns the PR to fixDue for one retry; an escalate is a hold only a human
+// answers, so the tick never re-offers the PR for it. A token outside this
+// shape is no verdict at all, which the gate reads as unchecked: fail closed.
 export function dispositionsToken(tok) {
   const m = /^dispositions-(ok|mismatch|escalate)=([^:\s]+):([0-9a-f]{7,40})$/i.exec(tok);
   if (!m) return null;
@@ -325,21 +326,24 @@ export function dispositionsToken(tok) {
 // `reviewed=` head (7-40 hex) is matched against gh's full headRefOid.
 export const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
 
+// Which verdict outranks which when one fix-applier carries more than one for
+// a head: the stricter reading wins.
+const VERDICT_RANK = { ok: 0, mismatch: 1, escalate: 2 };
+
 // A PR's current dispositions verdict against its latest review head: among
 // the tokens answering that head, the one from the fix-applier with the
 // highest retry suffix ("" < "b" < "c" …) — never row-text position, which a
 // `row` rewrite can reorder. One fix-applier carrying two verdicts for one
-// head reads as the stricter: ok < mismatch < escalate. null when no token
-// answers the head.
+// head reads as the stricter one. null when no token answers the head.
 /** @returns {{verdict: "ok"|"mismatch"|"escalate", member: string}|null} */
 export function currentDispositions(tokens, head) {
-  const strictness = { ok: 0, mismatch: 1, escalate: 2 };
   let best = null;
   for (const t of tokens) {
     if (!sameHead(t.head, head)) continue;
     const retry = t.member.retry ?? "";
     const bestRetry = best?.member.retry ?? "";
-    if (best === null || retry > bestRetry || (retry === bestRetry && strictness[t.verdict] > strictness[best.verdict])) best = t;
+    if (best === null || retry > bestRetry
+      || (retry === bestRetry && VERDICT_RANK[t.verdict] > VERDICT_RANK[best.verdict])) best = t;
   }
   return best === null ? null : { verdict: best.verdict, member: best.member.name };
 }
@@ -506,7 +510,7 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     // by head and retry suffix, never by where a token sits.
     const st = (pr !== null && byPr.get(pr)) || {
       inFlight: false, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
-      fixMembers: new Set(), fixLanded: new Set(), held: [],
+      fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(), held: [],
       conflictOpen: false, reviewedHead: null, pastPinHalt: false, dispositions: [],
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
@@ -558,8 +562,10 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
           if ((o === "no-op" || /^applied:/.test(o)) && !st.fixLanded.has(t.name)
             && (t.outcome !== null || !settledInRow.has(t.name))) {
             st.fixLanded.add(t.name);
-            if (st.conflictOpen) st.conflictOpen = false;
-            else st.reviewFixed = true;
+            if (st.conflictOpen) {
+              st.conflictOpen = false;
+              st.conflictLanded.add(t.name);
+            } else st.reviewFixed = true;
           }
         }
         if (t.family === "finisher-pr" && t.number === pr
@@ -650,6 +656,19 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
   const heldBehind = (st) => (st?.held ?? []).some((n) => open.has(n));
   const conflictHeld = (st) => st !== undefined && st.conflictOpen;
   const fixRunning = (st) => [...st.fixMembers].some((n) => members.get(n).outcome === null);
+  // The latest review's dispositions verdict is a mismatch no later fix-applier
+  // has answered: the verdict is the highest-suffixed one, and no fix-applier
+  // with a higher suffix has landed. A landed one is awaiting its own check, so
+  // the earlier mismatch is not its verdict; a failed or killed one answered
+  // nothing, and so did a conflict fix-applier, which is never checked. An
+  // escalate is a different verdict and is never due.
+  const mismatchDue = (st) => {
+    if (st.reviewedHead === null) return false;
+    const cur = currentDispositions(st.dispositions, st.reviewedHead);
+    if (cur === null || cur.verdict !== "mismatch") return false;
+    const retry = parseMember(cur.member).retry ?? "";
+    return ![...st.fixLanded].some((n) => !st.conflictLanded.has(n) && (parseMember(n).retry ?? "") > retry);
+  };
   // The halt holds only while the head is still past what was reviewed: a
   // `reviewed=` head (7-40 hex) prefix-matching gh's full headRefOid is the
   // head that review read, and there is nothing more to review.
@@ -661,13 +680,14 @@ export function deriveRun({ rows, dispatched, drain }, prs) {
     mergeBotLive: live("merge-bot"),
     reviewsLive: [...byPr.values()].filter((st) => st.inFlight).length,
     // A returned review whose survivors no review fix-applier has answered,
-    // or a conflict hold no fix-applier has cleared — on a PR still open,
-    // with no fix-applier working it and no newer review running. The two
-    // are answered apart (#2328): a landed conflict fix-applier lifts the
-    // hold and leaves survivors it never read due for a review one.
+    // a conflict hold no fix-applier has cleared, or a dispositions mismatch
+    // no retry has answered — on a PR still open, with no fix-applier working
+    // it and no newer review running. The first two are answered apart
+    // (#2328): a landed conflict fix-applier lifts the hold and leaves
+    // survivors it never read due for a review one.
     fixDue: [...byPr.entries()]
       .filter(([n, st]) => open.has(n)
-        && ((st.survived > 0 && !st.reviewFixed) || conflictHeld(st))
+        && ((st.survived > 0 && !st.reviewFixed) || conflictHeld(st) || mismatchDue(st))
         && !fixRunning(st) && !st.inFlight)
       .map(([n]) => n).sort(asc),
     // Open, not signed off, closing an issue (GitHub's own linked set — a

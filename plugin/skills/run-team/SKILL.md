@@ -1393,7 +1393,7 @@ for a token on a ticket's line — never a hand edit.
 |---|---|
 | Implementer report | `verify-sha.sh`; `ledger.mjs settle impl-<N>=PR#<M>`, or `=bailed` and relabel by cause (**Implementer bails before implementing**, below) |
 | Review workflow notification / `review-pr-<n>` report | write `<scratch>/review-<pr>.json`; `reviewed=<head>:<survived>/<refuted>/<unverified>` on the PR's row (**Reviewers**) |
-| Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; for a fix-applier that answered a review — not one that cleared a conflict hold, which has no review file — `~/.fleet/bin/fleet-run dispositions-check.mjs --member <that member> --scratch <scratch>`, from the checkout root: it judges `<scratch>/dispositions-<M>.json` against `<scratch>/review-<M>.json`, writes `dispositions-ok=`, `dispositions-mismatch=` or `dispositions-escalate=<member>:<head>` onto the PR's row itself, and exits 1 on a mismatch or an escalation, naming each violating or escalated entry's bucket and index, a violation its rule too (an escalation is then the gate paragraph's, below); copy the refutations it reversed — the record's `refuted` entries — to `ruled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
+| Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; for a fix-applier that answered a review — not one that cleared a conflict hold, which has no review file — `~/.fleet/bin/fleet-run dispositions-check.mjs --member <that member> --scratch <scratch>`, from the checkout root: it judges `<scratch>/dispositions-<M>.json` against `<scratch>/review-<M>.json`, writes `dispositions-ok=`, `dispositions-mismatch=` or `dispositions-escalate=<member>:<head>` onto the PR's row itself, and exits 1 on a mismatch or an escalation, naming each violating or escalated entry's bucket and index, a violation its rule too — **Then dispatch a fix-applier** says what a mismatch asks of you, the gate paragraph below what an escalation does; copy the refutations it reversed — the record's `refuted` entries — to `ruled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled` as reported, even when its read-back lacks `ready-to-merge` — the tick's `DISPATCH finisher PR#<M>` catches that next. A **repair** finisher's (one sent on that line) read-back lacking it also gets `gh pr comment <M>` with both finishers' read-backs: the one-shot escalation, where halts comment. `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Finisher report (halted) | `ledger.mjs settle finisher-pr-<M>=halted:<cause>`; `gh pr comment <M>` with the finisher's halt report, cause and evidence; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line; then the per-cause rule (**Resolving a finisher halt**, below) |
 | Label seen (persistent Monitor) | nothing to record |
@@ -1562,8 +1562,8 @@ depth** guard table applied in code. Act on each line as it reads:
   blind until it can.
 - `SUGGEST /triage, hold idle` — nothing is admissible after the refresh.
   Suggest, never run (**Queue depth**).
-- `DISPATCH fix-pr PR#<M> …` — a fix-applier per PR, for a review's survivors
-  or a merge bot's `conflict-hold:#<M>` (**Reviewers**). Printed
+- `DISPATCH fix-pr PR#<M> …` — a fix-applier per PR, for a review's survivors,
+  a dispositions mismatch no retry has answered, or a merge bot's `conflict-hold:#<M>` (**Reviewers**). Printed
   ahead of reviews on purpose: finishing what is started beats starting more.
 - `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn
   (**Reviewers**).
@@ -2080,6 +2080,22 @@ is a review fix-applier, dispatched as above (#2328). The push moves the
 head after `ready-to-merge`, so the next merge bot refuses it
 `head-moved-after-label-#<M>`: a fresh finisher, per **Failure handling**.
 
+**A `DISPATCH fix-pr PR#<M>` on a dispositions mismatch** — the PR's row carries
+`dispositions-mismatch=<member>:<head>` for its latest review, and no later
+fix-applier has landed — is one automatic retry, a review fix-applier named the
+next suffix (`fix-pr-<M>-b`) and dispatched like the first. Its prompt is the
+first one's, with two paths and a list copied in: the review file
+`<scratch>/review-<M>.json`, the disposition record `<scratch>/dispositions-<M>.json`
+it rewrites, and the check's violation list **verbatim** — the lines
+`dispositions-check.mjs` printed, each naming a bucket, an index and a rule;
+re-run the check for the mismatched member to reprint them. It rewrites the
+record, and when it reports you run the check for it exactly as for the first
+one. `ok` ends it. A second failure on the same review is written as
+`dispositions-escalate=fix-pr-<M>-b:<head>` in place of a mismatch: the tick
+prints no `DISPATCH fix-pr` for it, `dispatch` refuses the finisher naming
+`dispositions escalate`, and you post the check's output with `gh pr comment <M>`
+and flag the PR for a human. A new review of the PR counts again from none.
+
 **A refutation resting on an injection nothing proved landed is not a refutation
 — it is a cell that never ran.** A mutation test and a finding reproduction are
 both failure injections: break something, read what the child does. When the
@@ -2428,14 +2444,16 @@ from the highest-suffixed fix-applier. A PR whose latest review counts
 `0/<n>/0` is not gated. The refusal names its cause. `dispositions
 unchecked` — no verdict answers that head: run `dispositions-check.mjs` for
 the fix-applier that answered the review, as the Fix-applier report edge
-states, then dispatch again. `dispositions mismatch` — no finisher: post the
-check's output, which names each violating entry, with `gh pr comment <M>`, and
-flag the PR for a human; re-running the check reprints it. `dispositions
-escalate` — no finisher, and no retry: a `critical` or `important` finding was
-deferred `remedy-outside-diff`, which only a human can rule on. Post the check's
-output, which names each escalated finding, with `gh pr comment <M>`, and flag
-the PR for a human; dispatch no fix-applier and no finisher for that review's
-head, and expect no `fix-due` row for it. **On any PR with a
+states, then dispatch again. `dispositions mismatch` — no finisher: the tick
+prints `DISPATCH fix-pr PR#<M>` for it, and the next-suffix fix-applier answers
+it (**Then dispatch a fix-applier**). `dispositions escalate` — no finisher, no
+retry and no further fix-applier: either a `critical` or `important` finding was
+deferred `remedy-outside-diff`, or a second mismatch was drawn on one review, and
+only a human can rule on either. Post the check's output, which names each
+escalated finding or violating entry, with `gh pr comment <M>`, and flag the PR
+for a human; re-running the check reprints it. Dispatch no fix-applier and no
+finisher for that review's head, and expect no `fix-due` row for it; a new
+review of the PR starts the check again. **On any PR with a
 returned review, `0/<n>/0` included, it refuses too while a fix-applier on the
 PR is still live, verdict or not** —
 `fix-pr-<M>[-x] still live`: settle it, run the check for it, then dispatch

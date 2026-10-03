@@ -8,9 +8,12 @@
 //
 //   dispositions-ok=fix-pr-<M>[-x]:<head>        every rule below held
 //   dispositions-mismatch=fix-pr-<M>[-x]:<head>  at least one entry broke one
-//   dispositions-escalate=fix-pr-<M>[-x]:<head>  every rule held, but a critical
-//                                                or important finding was deferred
-//                                                `remedy-outside-diff`: a human rules
+//   dispositions-escalate=fix-pr-<M>[-x]:<head>  a human rules: either every rule held
+//                                                but a critical or important finding
+//                                                was deferred `remedy-outside-diff`,
+//                                                or a rule broke and an earlier
+//                                                fix-applier's record on the same
+//                                                review already had
 //
 // `<head>` is the review file's `head` — the review the record answers — so a
 // verdict on one review never answers a later one.
@@ -358,6 +361,19 @@ export function withVerdict(rowText, token) {
   return folded === "" ? token : `${folded} · ${token}`;
 }
 
+// Whether a fix-applier on PR `pr` with a lower retry suffix than `member`
+// already has a mismatch or escalate on the ledger for `head` — on any row
+// that resolves to the PR, since a row can be split. A verdict on another
+// review head counts for nothing, so a new review starts the count again.
+export function failedBefore(rows, pr, member, head) {
+  const mine = member.retry ?? "";
+  return rows.some((r) => rowNums(r).pr === pr && r.split(/\s+/).some((w) => {
+    const d = dispositionsToken(w);
+    return d !== null && d.verdict !== "ok" && d.member.number === pr
+      && (d.member.retry ?? "") < mine && sameHead(d.head, head);
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
@@ -475,14 +491,20 @@ function main() {
   const { violations, escalations } = checkDispositions({
     review, record, recordProblem, touched: touchedLines(diff), diffFiles, roots: [review.snapshot, top],
   });
-  const verdict = violations.length > 0 ? "mismatch" : escalations.length > 0 ? "escalate" : "ok";
-  const token = `dispositions-${verdict}=${member.name}:${head}`;
-
   // The verdict lands on the row carrying the member on its own PR's row —
   // where `ledger.mjs dispatch` wrote it, and where the gate reads PR M's
-  // tokens from. No ledger, no row: the exit status below is the verdict.
-  if (ledgerFile !== null) {
-    const data = JSON.parse(runLedger(ledgerFile, ["read"], "read the ledger"));
+  // tokens from. No ledger, no row: the exit status below is the verdict, and
+  // with no earlier fix-applier's verdict to count, a broken rule is always a
+  // mismatch.
+  const data = ledgerFile === null ? null : JSON.parse(runLedger(ledgerFile, ["read"], "read the ledger"));
+  // A mismatch an earlier fix-applier already drew on this review makes this
+  // one the second: it is written as an escalate, which no fix-applier answers.
+  const secondMismatch = violations.length > 0 && data !== null && failedBefore(data.rows, pr, member, head);
+  const verdict = violations.length > 0 ? (secondMismatch ? "escalate" : "mismatch")
+    : escalations.length > 0 ? "escalate" : "ok";
+  const token = `dispositions-${verdict}=${member.name}:${head}`;
+
+  if (data !== null) {
     const row = data.rows.find((r) => rowNums(r).pr === pr && memberTokens(r).some((t) => t.name === member.name));
     if (row === undefined) die(`${member.name} is on no row of PR #${pr} — \`ledger.mjs dispatch\` records a fix-applier before its record can be checked; with no controller, pass --no-ledger`);
     const key = row.split(/\s/)[0];
@@ -495,6 +517,9 @@ function main() {
 
   for (const v of violations) console.error(`${member.name}: ${formatViolation(v)}`);
   for (const x of escalations) console.error(`${member.name}: ${formatEscalation(x)}`);
+  if (secondMismatch) {
+    console.error(`${member.name}: escalate — an earlier fix-applier's record on review ${head} already failed this check; no further fix-applier answers PR #${pr}, a human does`);
+  }
   console.log(JSON.stringify({ member: member.name, pr, head, verdict, token: ledgerFile === null ? null : token, violations, escalations }));
   // exitCode, not exit(): stdout to a pipe is written asynchronously, and an
   // exit() here could cut the payload off.

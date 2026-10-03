@@ -783,6 +783,31 @@ test("the current verdict is the highest-suffixed fix-applier's, in either text 
   assert.deepEqual(read().dispatched, ["finisher-pr-40=failed", "finisher-pr-40-b=failed"]);
 });
 
+test("a mismatch is retried by the next fix-applier suffix: ok from it ends the refusal, escalate from it never does", (t) => {
+  const { ok, read, refused } = fixture(t);
+  ok("row", "10", gateRow("1/0/0", `dispositions-mismatch=fix-pr-40:${GATE_HEAD}`));
+  refused(["dispatch", "40", "finisher-pr-40"], /dispositions mismatch/);
+  // The retry is dispatched under the next suffix; the first name is spent.
+  refused(["dispatch", "40", "fix-pr-40"], /fix-pr-40/);
+  ok("dispatch", "40", "fix-pr-40-b");
+  ok("settle", "fix-pr-40-b", `applied:${GATE_HEAD.slice(0, 7)}`);
+  // Settled with no verdict of its own: the earlier mismatch still stands.
+  refused(["dispatch", "40", "finisher-pr-40"], /dispositions mismatch — fix-pr-40's/);
+  ok("row", "10", gateRow("1/0/0", `dispositions-mismatch=fix-pr-40:${GATE_HEAD}`, `dispositions-ok=fix-pr-40-b:${GATE_HEAD}`, "fix-pr-40-b=applied:0123abc"));
+  assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+  assert.ok(read().dispatched.includes("finisher-pr-40"));
+  // Escalated instead: a finisher is refused naming it, whichever way the tokens sit.
+  ok("settle", "finisher-pr-40", "failed");
+  const escalated = [`dispositions-mismatch=fix-pr-40:${GATE_HEAD}`, `dispositions-escalate=fix-pr-40-b:${GATE_HEAD}`];
+  for (const tokens of [escalated, [...escalated].reverse()]) {
+    ok("row", "10", gateRow("1/0/0", ...tokens, "fix-pr-40-b=applied:0123abc"));
+    refused(["dispatch", "40", "finisher-pr-40-b"], /finisher-pr-40-b: dispositions escalate — fix-pr-40-b deferred/);
+  }
+  // A new review (a new head) starts the gate over: the old escalate answers nothing.
+  ok("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${GATE_HEAD}:1/0/0 · ${escalated[1]} · review=wf:x reviewed=${OTHER_HEAD}:1/0/0`);
+  refused(["dispatch", "40", "finisher-pr-40-b"], /dispositions unchecked/);
+});
+
 test("a later fix-applier that writes no verdict neither satisfies nor resets the gate", (t) => {
   const { ok, refused } = fixture(t);
   // A conflict-hold fix-applier after the review one: no review file, no token.
