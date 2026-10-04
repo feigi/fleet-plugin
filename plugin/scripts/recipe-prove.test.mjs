@@ -535,7 +535,7 @@ const KILLED_GIT = [
   {
     name: "a git killed for outgrowing the spawn buffer reading the tree state",
     when: "status*", act: "yes | head -c 2000000; exit 0",
-    status: 1, reason: /NOT PROVEN — could not read the tree state in the throwaway worktree: git was killed by SIGTERM \(ENOBUFS[^)]*\); install output: /,
+    status: 1, reason: /NOT PROVEN — could not read the tree state in the throwaway worktree: git was killed by SIGTERM \(ENOBUFS: its output outgrew the spawn buffer\); install output: /,
   },
   {
     name: "a git that wrote to stderr and was then killed",
