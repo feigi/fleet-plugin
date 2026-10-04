@@ -1334,10 +1334,9 @@ for b in $gone_branches; do
       # than what was measured. reap.sh and release-ticket.sh once answered an
       # unreadable worktree in opposite directions; that is closed, and a third
       # filesystem probe here would reopen exactly that ground. `gone()` above
-      # is deliberately not reused: it
-      # answers a harder question (established absence vs an unsearchable
-      # prefix) that a registry read does not have, and cannot fail the way a
-      # stat can.
+      # is deliberately not reused: it answers a harder question (established
+      # absence vs an unsearchable prefix) that a registry read does not have,
+      # and cannot fail the way a stat can.
       #
       # Captured, not piped: `git … | grep -q` takes grep's status, never
       # git's — the same swallow fixed for `git cherry` above, which the probe
@@ -1639,9 +1638,9 @@ else
     # bare branch name — but the BASE side is a shorthand until it is
     # qualified, and this sweep removes DIRECTORIES, so the tag shadowing the
     # top of the file records costs the files themselves here and not only a
-    # branch ref: measured, a local tag named
-    # `origin/main` at a detached worktree's own tip made this probe read clean
-    # and `--apply` deleted the worktree holding the only copy of that commit.
+    # branch ref: measured, a local tag named `origin/main` at a detached
+    # worktree's own tip made this probe read clean and `--apply` deleted the
+    # worktree holding the only copy of that commit.
     # `$base_rev` is built at the top of the file; the branch sweep's copy of
     # this probe carries the same qualification for the same reason.
     if ! cherry=$(git cherry "$base_rev" "$head" 2>&1); then
@@ -1755,7 +1754,7 @@ else
       fi
       # A line of its own, unlike the branch sweep's silent success: there is no
       # `REAPED <branch>` here to stand in for it, and a removal nothing prints
-      # is the silence this ticket exists to end.
+      # is the silence this sweep exists to end.
       printf '    REMOVED worktree %s\n' "$wt" >&2
     else
       printf '    would remove worktree %s\n' "$wt" >&2
