@@ -35,8 +35,11 @@ export { normalizeModel, parseMemberName };
 //
 // `subagentType` is the record's `subagent_type` unchanged — `""` stays
 // `""` here, because unlike `effort` it does NOT mean unknown: it means the
-// dispatch named no agent definition, which is the reading cell-readout.mjs's
-// admissibility test depends on: a blank is never any cell's definition.
+// transcript carried no `session_init` agent to read (no such line, or one
+// without a string `agent`); an untyped dispatch is not that shape, since the
+// omp reader records the generic `task` for it. That closed reading is what
+// cell-readout.mjs's admissibility test depends on: a blank is never any
+// cell's definition.
 //
 // A member is never torn in the sense this file historically tracked (no
 // fold-back to tear mid-turn); `false` says so plainly rather than leaving

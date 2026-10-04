@@ -18,6 +18,9 @@ for (const l of TSV.split("\n")) {
   headerLines.push(l);
 }
 const HEADER = headerLines.join("\n");
+// A comment block as prose: comment markers stripped, whitespace collapsed, so
+// a pinned sentence survives a re-wrap.
+const flat = (s) => s.replace(/^\/\/ ?|^# ?/gm, "").replace(/\s+/g, " ");
 
 test("the header's column line matches COLUMNS exactly, in order", () => {
   // Drift here is silent and total: every awk one-liner in the header indexes
@@ -41,8 +44,9 @@ test("the header states the blank, hand-edit, and superseded-generation rules", 
   // meant a pinned rule that had been moved down among the data rows still
   // satisfied the pin.
   assert.match(HEADER, /BLANK MEANS UNKNOWN/);
-  // …and the one column where it does not. Blank `subagent_type` means the
-  // dispatch named no agent definition — a closed category, not missing data.
+  // …and the one column where it does not. Blank `subagent_type` is a closed
+  // category, not missing data: on an omp row the transcript carried no
+  // `session_init` agent to read, on a claude row the dispatch was untyped.
   // Read as "unknown" it turns thousands of pre-2026-08-28 rows into evidence
   // someone believes a re-scrape could recover, which is how #1066's
   // over-count got argued for in the first place.
@@ -53,6 +57,23 @@ test("the header states the blank, hand-edit, and superseded-generation rules", 
   // The corpus spans both transcript depths. A reader who assumes the flat half
   // only would under-count every review role by roughly half.
   assert.match(HEADER, /workflows\/wf_/);
+});
+
+test("the blank-subagent_type wording says what blank means per harness: omp in the header and the script, claude in the header", () => {
+  // On omp an untyped dispatch records the generic `task`; blank is only a
+  // transcript with no `session_init` agent to read. Both places that restate
+  // the column must say so, and neither may call an omp blank an untyped
+  // dispatch. The claude rows are the other population — there blank IS an
+  // untyped dispatch — and only the header describes them, so only it is held
+  // to saying so.
+  const SRC = readFileSync(join(import.meta.dirname, "member-outcomes.mjs"), "utf8");
+  for (const [where, text] of [["header", flat(HEADER)], ["script", flat(SRC)]]) {
+    assert.match(text, /no `session_init` agent to read/, `${where}: blank's cause`);
+    assert.match(text, /records the generic `task`/, `${where}: untyped dispatch's record`);
+    assert.doesNotMatch(text, /named no (agent )?definition/, `${where}: stale wording`);
+    assert.doesNotMatch(text, /untyped Task call/, `${where}: stale wording`);
+  }
+  assert.match(flat(HEADER), /claude row[^.]*blank means the sidecar carried no `customAgentType`/, "header: claude's blank");
 });
 
 test("the header's awk read-out indexes the column it names", () => {
@@ -88,7 +109,7 @@ test("the header points at cell-readout.mjs for a cell's comparisons and carries
   );
 
   // The definition the header states is the one the script applies.
-  const block = HEADER.replace(/^#\s?/gm, "").replace(/\s+/g, " ");
+  const block = flat(HEADER);
   assert.match(block, /a comparison is one session holding an ADMISSIBLE row at X and an admissible slow-high row whose resolved \(`model`, `effort`\) differ from the X row's/);
   assert.match(block, /admissible only when its `subagent_type` is `fleet-implementer-<chosen_cell>` and its `effort` is the cell's level/);
   assert.match(block, /joined to its row here on `session`\+`agent`/);
