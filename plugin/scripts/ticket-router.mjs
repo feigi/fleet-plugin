@@ -36,7 +36,7 @@ import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { CELL, POLICY_CELL, drawCell, parseMember } from "./ledger-grammar.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { parseTierOutcomes } from "./tier-outcomes.mjs";
+import { DATE, parseTierOutcomes, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
 const NAME = "ticket-router";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -280,26 +280,26 @@ export function parseFeatures(text) {
 const UNBOOKED = (name) => name.startsWith("merge-bot-") || name === "memory" || name === "__advisor";
 const round4 = (x) => Math.round(x * 1e4) / 1e4;
 
-/** The last verdict row per ticket: `{ pr, fail }`. A verdict is a ruled PR; the floor fails on a minted false claim or an unclosed ticket. */
-function verdictsByTicket(verdictRows) {
-  const by = new Map();
-  for (const r of verdictRows) {
-    for (const t of String(r.ticket ?? "").split("+").filter(Boolean)) {
-      by.set(t, { pr: String(r.pr ?? ""), fail: r.minted_false_claim === "yes" || r.closed_own_ticket === "no" });
-    }
-  }
-  return by;
+/**
+ * The verdict on a ticket's Pull dated `pullDate`, `{ pr, fail }`, or null: the
+ * ruling `rulingFor` picks. A verdict is a ruled PR; the floor fails on a
+ * minted false claim or an unclosed ticket.
+ */
+function verdictOf(rulings, ticket, pullDate) {
+  const r = rulingFor(rulings, ticket, pullDate);
+  return r && { pr: String(r.pr ?? ""), fail: r.minted_false_claim === "yes" || r.closed_own_ticket === "no" };
 }
 
 /**
  * Per-ticket input rows: the ticket's features rows inside [window, cutoff],
  * attributed to its LAST row's cell and stratum, restricted to rows the
  * free classifier routed plus exploration rows — a row a live B classifier
- * routed is the A/B's test set, not the fit's. A fit over everything cuts at
- * its latest features row's date; the verdict and member rows are cut at that
- * same date, so `--check`'s re-fit at the recorded `fitted_through` reads the
- * rows the fit read and a verdict or member row that lands later waits for the
- * next fit instead of failing CI.
+ * routed is the A/B's test set, not the fit's. Its verdict rules its last
+ * input row. A fit over everything cuts at its latest features row's date;
+ * the verdict and member rows are cut at that same date, so `--check`'s
+ * re-fit at the recorded `fitted_through` reads the rows the fit read and a
+ * verdict or member row that lands later waits for the next fit instead of
+ * failing CI.
  */
 function fitTickets({ features, members, verdicts, window, cutoff }) {
   const inRange = features.filter((r) => (!window || r.run_date >= window)
@@ -312,12 +312,15 @@ function fitTickets({ features, members, verdicts, window, cutoff }) {
     if (!byTicket.has(r.ticket)) byTicket.set(r.ticket, []);
     byTicket.get(r.ticket).push(r);
   }
-  const v = verdictsByTicket(verdicts.filter(upToThrough));
+  // A ruling whose date is not YYYY-MM-DD cannot be placed against the cut, and
+  // a string `<=` would drop 'abc' or '2027' unseen: it is left in, so `rulingFor`
+  // refuses it when its ticket is an input, as `fit --due` does.
+  const rulings = rulingsByTicket(verdicts.filter((r) => !DATE.test(r.run_date) || upToThrough(r)));
   const out = [];
   for (const [ticket, rows] of byTicket) {
     const last = rows[rows.length - 1];
     if (last.exploration_draw === "" && last.sizing_src !== "rule") continue;
-    const verdict = v.get(ticket) ?? null;
+    const verdict = verdictOf(rulings, ticket, last.run_date);
     const keys = new Set(rows.map((r) => `${r.session}\0${r.agent}`));
     let cost = 0;
     let costKnown = true;
@@ -434,11 +437,12 @@ export function fitTable({ prior, features, members, verdicts, guard, cutoff }) 
   };
 }
 
-/** Merged PRs (tickets with a verdict) among the features rows dated after `fitted_through`. */
+/** Merged PRs (tickets with a verdict on their last such row) among the features rows dated after `fitted_through`. */
 export function mergedSince({ table, features, verdicts }) {
-  const v = verdictsByTicket(verdicts);
+  const rulings = rulingsByTicket(verdicts);
   const after = features.filter((r) => (!table.window_start || r.run_date >= table.window_start) && (!table.fitted_through || r.run_date > table.fitted_through));
-  return new Set(after.map((r) => r.ticket).filter((t) => v.has(t))).size;
+  const pullDates = new Map(after.map((r) => [r.ticket, r.run_date]));
+  return [...pullDates].filter(([ticket, date]) => verdictOf(rulings, ticket, date)).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -512,9 +516,13 @@ function main() {
   const features = read("features", parseFeatures);
   const members = read("members", parseMemberTsv);
   const verdicts = read("verdicts", parseTierOutcomes);
+  // The verdict join throws on a ruling of an input ticket it cannot place.
+  const joined = (fit) => {
+    try { return fit(); } catch (e) { die(`cannot read --verdicts ${need("verdicts")}: ${e.message}`); }
+  };
 
   if (mode === "check") {
-    const refit = fitTable({ prior: table, features, members, verdicts, guard: { ...table.guard, window_start: table.window_start }, cutoff: table.fitted_through });
+    const refit = joined(() => fitTable({ prior: table, features, members, verdicts, guard: { ...table.guard, window_start: table.window_start }, cutoff: table.fitted_through }));
     const differ = Object.keys({ ...refit, ...table }).filter((k) => !isDeepStrictEqual(refit[k], table[k]));
     if (differ.length) {
       process.stderr.write(`${NAME}: ${tablePath} is not a re-fit of its own rows — differs in ${differ.map((k) => `\`${k}\``).join(", ")}; re-fitted:\n${JSON.stringify(refit, null, 2)}\n`);
@@ -530,11 +538,11 @@ function main() {
   const guard = readGuard(readJson(guardPath));
   if (guard === null) die(`cannot read --guard ${guardPath} as a cost guard — the fit needs its tripped cells and per-cell n`);
   if (F.has("due")) {
-    const n = mergedSince({ table, features, verdicts });
+    const n = joined(() => mergedSince({ table, features, verdicts }));
     process.stdout.write(`DUE=${n >= FIT_EVERY_MERGED ? "yes" : "no"} MERGED=${n}/${FIT_EVERY_MERGED}\n`);
     return;
   }
-  const next = fitTable({ prior: table, features, members, verdicts, guard });
+  const next = joined(() => fitTable({ prior: table, features, members, verdicts, guard }));
   writeFileSync(`${tablePath}.tmp`, `${JSON.stringify(next, null, 2)}\n`);
   renameSync(`${tablePath}.tmp`, tablePath);
   process.stdout.write(`${NAME}: fitted ${next.n_rows} tickets through ${next.fitted_through ?? "no rows"}; rows ${JSON.stringify(next.rows)}; burn_in ${next.burn_in}; stage ${next.stage}\n`);

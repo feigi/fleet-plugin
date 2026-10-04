@@ -743,7 +743,7 @@ test("fit: a non-exploration row a live B classifier routed is the A/B's test se
 
 test("fit --due counts merged PRs since fitted_through against the cadence", (t) => {
   const features = Array.from({ length: 50 }, (_, i) => featureRow({ ticket: String(i + 1), run_date: "2026-10-05" }));
-  const verdicts = features.map((f) => ({ ticket: f.ticket, pr: String(Number(f.ticket) + 500) }));
+  const verdicts = features.map((f) => ({ ticket: f.ticket, pr: String(Number(f.ticket) + 500), run_date: f.run_date }));
   const p = fitWorld(t, { features, members: [], verdicts: verdicts.slice(0, 49), table: baseTable({ fitted_through: "2026-10-01" }) });
   const before = readFileSync(p.table, "utf8");
   const no = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--due"]);
@@ -755,7 +755,7 @@ test("fit --due counts merged PRs since fitted_through against the cadence", (t)
 
 test("mergedSince: strictly after fitted_through, on or after window_start, each bound only when set, the window bounding what fitted_through admits", () => {
   const features = ["2026-09-30", "2026-10-01", "2026-10-02"].map((d, i) => featureRow({ ticket: String(i + 1), run_date: d }));
-  const verdicts = features.map((f) => ({ ticket: f.ticket, pr: String(Number(f.ticket) + 500) }));
+  const verdicts = features.map((f) => verdictRow({ ticket: f.ticket, pr: String(Number(f.ticket) + 500), run_date: "2026-10-03" }));
   const count = (over) => mergedSince({ table: baseTable(over), features, verdicts });
   assert.equal(count({ fitted_through: null, window_start: null }), 3, "neither bound set: every ruled ticket counts");
   assert.equal(count({ fitted_through: "2026-10-01" }), 1, "the fitted_through day itself is already fitted");
@@ -765,6 +765,14 @@ test("mergedSince: strictly after fitted_through, on or after window_start, each
   assert.equal(mergedSince({ table: baseTable(), features, verdicts: verdicts.slice(1) }), 2, "a ticket with no verdict is not a merged PR");
   const twice = [...features, featureRow({ ticket: "3", run_date: "2026-10-03" })];
   assert.equal(mergedSince({ table: baseTable(), features: twice, verdicts }), 3, "a ticket with two features rows is one merged PR");
+});
+
+test("mergedSince: a ticket is merged only on a ruling dated on or after its last features row, a row with both verdict columns blank skipped", () => {
+  const features = [featureRow({ ticket: "1", run_date: "2026-10-01" }), featureRow({ ticket: "1", run_date: "2026-10-03" })];
+  const count = (verdicts) => mergedSince({ table: baseTable(), features, verdicts });
+  assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-02" })]), 0, "a ruling dated before the last features row predates that Pull");
+  assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-03", closed_own_ticket: "", minted_false_claim: "" })]), 0, "a both-blank row was never ruled");
+  assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-03" })]), 1, "a ruling dated the day of the last features row rules it");
 });
 
 test("fit refuses an unreadable guard or input file at exit 2 and leaves the table alone", (t) => {
@@ -784,6 +792,91 @@ test("fit refuses an unreadable guard or input file at exit 2 and leaves the tab
 const fitDirect = (input, guard = {}) => fitTable({ prior: baseTable(), ...input, guard: { tripped: [], n: {}, window_start: null, ...guard } });
 const exploring = (over) => featureRow({ exploration_draw: "1/3", ...over });
 const ruled = (ticket, pr, over) => verdictRow({ ticket: String(ticket), pr: String(pr), ...over });
+
+test("fit: a ticket's verdict is its last ruling dated on or after its last input row, a row with both verdict columns blank skipped", () => {
+  // Ticket 2, in another cell, carries the fit's cutoff past ticket 1's last input row.
+  const features = [
+    exploring({ ticket: "1", run_date: "2026-10-01" }),
+    exploring({ ticket: "1", run_date: "2026-10-03" }),
+    exploring({ ticket: "2", run_date: "2026-10-05", chosen_cell: "task-high" }),
+  ];
+  const fit = (verdicts) => fitDirect({ features, members: [], verdicts }).estimates["*"]["slow-high"];
+  const failed = ruled(1, 11, { run_date: "2026-10-03", minted_false_claim: "yes" });
+  const blank = ruled(1, 11, { run_date: "2026-10-04", closed_own_ticket: "", minted_false_claim: "" });
+  assert.equal(fit([failed, blank]).fail_rate, 1, "a both-blank row after a real ruling was never ruled, so the ruling stands");
+  assert.equal(fit([blank]).merged, 0, "a ticket whose only row is both-blank has no verdict");
+  assert.equal(fit([ruled(1, 11, { run_date: "2026-10-02", minted_false_claim: "yes" })]).merged, 0, "a ruling dated before the last input row predates that Pull");
+  const pass = ruled(1, 11, { run_date: "2026-10-03" });
+  assert.deepEqual(fit([pass]), { ...fit([pass]), merged: 1, fail_rate: 0 }, "a ruling dated the day of the last input row rules it");
+  assert.equal(fit([pass, ruled(1, 11, { run_date: "2026-10-05", minted_false_claim: "yes" })]).fail_rate, 1, "the last such ruling wins");
+});
+
+test("fit refuses at exit 2 a ruling of an input ticket whose run_date is not YYYY-MM-DD, and leaves the table alone; one of a ticket outside the input is not refused", (t) => {
+  const features = [exploring({ ticket: "1" })];
+  const p = fitWorld(t, { features, members: [], verdicts: [ruled(1, 11), ruled(2, 12, { run_date: "10/01/2026" })] });
+  const before = readFileSync(p.table, "utf8");
+  for (const mode of [["--due"], []]) {
+    const ok = cli(["fit", ...p.fitArgs, "--guard", p.guard, ...mode]);
+    assert.equal(ok.status, 0, `fit ${mode.join(" ")}: ${ok.stderr}`);
+  }
+  writeFileSync(p.table, before);
+  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [ruled(1, 11, { run_date: "10/01/2026" })].map(verdictRow)));
+  for (const mode of [[], ["--due"]]) {
+    const r = cli(["fit", ...p.fitArgs, "--guard", p.guard, ...mode]);
+    assert.equal(r.status, 2, `fit ${mode.join(" ")}: ${r.stderr}`);
+    assert.match(r.stderr, /ticket #1 \(PR #11\): run_date is '10\/01\/2026', expected YYYY-MM-DD/);
+    assert.equal(r.stdout, "");
+  }
+  assert.equal(readFileSync(p.table, "utf8"), before);
+});
+
+test("fit refuses at exit 2 a ruling of an input ticket whose run_date is not YYYY-MM-DD even when it sorts after the fit's cut, as fit --due does", (t) => {
+  const features = [exploring({ ticket: "1" })];
+  const p = fitWorld(t, { features, members: [], verdicts: [ruled(1, 11)] });
+  const before = readFileSync(p.table, "utf8");
+  // Each of these is `>` the cut ("2026-10-01"), so a string `<=` would drop it before `rulingFor` saw it.
+  for (const bad of ["abc", "zzz", "2027", "2026-13-45x"]) {
+    writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [ruled(1, 11, { run_date: bad })].map(verdictRow)));
+    for (const mode of [[], ["--due"]]) {
+      const r = cli(["fit", ...p.fitArgs, "--guard", p.guard, ...mode]);
+      assert.equal(r.status, 2, `run_date ${bad}, fit ${mode.join(" ")}: ${r.stderr}`);
+      assert.match(r.stderr, new RegExp(`ticket #1 \\(PR #11\\): run_date is '${bad}', expected YYYY-MM-DD`));
+      assert.equal(r.stdout, "");
+    }
+  }
+  assert.equal(readFileSync(p.table, "utf8"), before);
+  // The same junk on a ticket outside the input is still not refused.
+  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [ruled(1, 11), ruled(2, 12, { run_date: "zzz" })].map(verdictRow)));
+  assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard]).status, 0);
+});
+
+test("fit: a ruling's run_date with trailing or leading junk is refused, not read as the date inside it", () => {
+  const features = [exploring({ ticket: "1", run_date: "2026-10-01" }), exploring({ ticket: "2", run_date: "2026-10-05", chosen_cell: "task-high" })];
+  for (const bad of ["2026-10-01x", "x2026-10-01"]) {
+    assert.throws(
+      () => fitDirect({ features, members: [], verdicts: [ruled(1, 11, { run_date: bad })] }),
+      { message: new RegExp(`ticket #1 \\(PR #11\\): run_date is '${bad}', expected YYYY-MM-DD`) },
+    );
+  }
+});
+
+test("fit: a ruling with closed_own_ticket no and no minted false claim still fails the floor", () => {
+  const features = [exploring({ ticket: "1" })];
+  const next = fitDirect({ features, members: [], verdicts: [ruled(1, 11, { closed_own_ticket: "no", minted_false_claim: "no" })] });
+  assert.deepEqual(next.estimates["*"]["slow-high"], { ...next.estimates["*"]["slow-high"], merged: 1, fail_rate: 1 });
+});
+
+test("--check refuses at exit 2 a ruling of an input ticket whose run_date is not YYYY-MM-DD, not as a mismatch with the table", (t) => {
+  const features = [exploring({ ticket: "1" })];
+  const p = fitWorld(t, { features, members: [], verdicts: [ruled(1, 11)] });
+  assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard]).status, 0);
+  assert.equal(cli(["--check", ...p.fitArgs]).status, 0);
+  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [ruled(1, 11, { run_date: "10/01/2026" })].map(verdictRow)));
+  const r = cli(["--check", ...p.fitArgs]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /ticket #1 \(PR #11\): run_date is '10\/01\/2026', expected YYYY-MM-DD/);
+  assert.equal(r.stdout, "");
+});
 
 test("fit: a ticket's cell and stratum are its last features row's", () => {
   const features = [

@@ -68,9 +68,7 @@ import { isCLI } from "./is-cli.mjs";
 import { CELL, POLICY_CELL } from "./ledger-grammar.mjs";
 import { formatTsv as formatMemberTsv, parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { parseFeatures } from "./pr-cost.mjs";
-import { VERDICT, VERDICT_COLUMNS } from "./tier-outcomes.mjs";
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+import { rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
 const NAME = "cell-readout";
 export const GATE = Object.freeze({ comparisons: 10, runDates: 5 });
@@ -175,11 +173,7 @@ export function readout({ features, members }) {
  */
 export function stoppingRule({ features, members, verdicts, added }) {
   const byKey = indexMembers(members);
-  const rulings = new Map();
-  for (const v of verdicts) {
-    if (VERDICT_COLUMNS.every((c) => v[c] === "")) continue;
-    for (const t of String(v.ticket).split("+")) (rulings.get(t) ?? rulings.set(t, []).get(t)).push(v);
-  }
+  const rulings = rulingsByTicket(verdicts);
   // Per cell, each ticket's last admissible Pull: the one its ruling must follow.
   const charged = new Map(Object.keys(added).filter((c) => c !== POLICY_CELL).map((c) => [c, new Map()]));
   for (const p of features) {
@@ -190,15 +184,8 @@ export function stoppingRule({ features, members, verdicts, added }) {
   return [...charged].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([cell, pulls]) => {
     const list = [];
     for (const p of pulls.values()) {
-      const own = rulings.get(p.ticket) ?? [];
-      for (const r of own) {
-        if (!ISO_DATE.test(r.run_date)) throw new Error(`ticket #${p.ticket} (PR #${r.pr}): run_date is '${r.run_date}', expected YYYY-MM-DD`);
-      }
-      const v = own.findLast((r) => r.run_date >= p.run_date);
+      const v = rulingFor(rulings, p.ticket, p.run_date);
       if (!v) continue;
-      for (const c of VERDICT_COLUMNS) {
-        if (!VERDICT.includes(v[c])) throw new Error(`ticket #${p.ticket} (PR #${v.pr}): ${c} is '${v[c]}', expected yes or no`);
-      }
       list.push({
         ticket: p.ticket, pr: v.pr, run_date: v.run_date,
         closed_own_ticket: v.closed_own_ticket, minted_false_claim: v.minted_false_claim,
