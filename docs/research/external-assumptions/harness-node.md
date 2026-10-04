@@ -164,19 +164,19 @@ Scope: `plugin/scripts/{board.mjs,board.html,compute-board.mjs,compute-spend.mjs
 
 Scanned in full or via targeted `grep` + follow-up `read` of every matched region (large files were not read byte-for-byte outside grep hit windows, but every hit's surrounding context — including all header/doc comments — was read):
 
-- `plugin/scripts/board.mjs` (2032 lines) — read via multi-pattern grep across the whole file plus targeted range reads (gh/graphql query block, port-derivation block, probe/serve block, ci-state invocation, labelsOf)
+- `plugin/scripts/board.mjs` (2035 lines) — read via multi-pattern grep across the whole file plus targeted range reads (gh/graphql query block, port-derivation block, probe/serve block, ci-state invocation, labelsOf)
 - `plugin/scripts/board.html` (471 lines) — read in full, plus targeted grep for fetch/poll/interval logic in the inline `<script>`
-- `plugin/scripts/compute-board.mjs` (530 lines) — header (1-30), label/column-derivation logic (30-450), end (440-530) read directly
-- `plugin/scripts/compute-spend.mjs` (329 lines) — read in full (header, `classifyRole`, `computeSpend`, `attributeTools`/`mergeTools` headers)
-- `plugin/scripts/ledger.mjs` (1753 lines) — read via multi-pattern grep across the whole file plus targeted range reads (git-common-dir resolution, ledger section grammar, lock timeout, GH_REPO scrub, tracker query)
-- `plugin/scripts/ledger-grammar.mjs` (79 lines) — read in full
-- `plugin/scripts/member-record.mjs` (610 lines) — read via multi-pattern grep across the whole file plus targeted range reads (header, cwd encoder, model normalisation, omp transcript fold, omp session reader, end/readMembers)
-- `plugin/scripts/member-outcomes.mjs` (230 lines) — read via grep + full first-53-line read plus surrounding context
-- `plugin/scripts/review-core.mjs` (1025 lines) — read via multi-pattern grep plus targeted range reads (header/sandbox-restriction comment, DEFAULT_DIMENSIONS, snapshot shell block, resumeFor/digest, environmentNote/testCmd)
-- `plugin/scripts/review-eval.mjs` (197 lines) — read in full
-- `plugin/scripts/prompt-renderer.mjs` (39 lines) — read in full
+- `plugin/scripts/compute-board.mjs` (599 lines) — header (1-30), label/column-derivation logic (30-450), end (440-530, the file's last line when this range was last set; the count is a later `wc -l` re-measure and the lines past 530 were not part of that read) read directly
+- `plugin/scripts/compute-spend.mjs` (370 lines) — read in full (header, `classifyRole`, `computeSpend`, `attributeTools`/`mergeTools` headers)
+- `plugin/scripts/ledger.mjs` (1919 lines) — read via multi-pattern grep across the whole file plus targeted range reads (git-common-dir resolution, ledger section grammar, lock timeout, GH_REPO scrub, tracker query)
+- `plugin/scripts/ledger-grammar.mjs` (175 lines) — read in full
+- `plugin/scripts/member-record.mjs` (641 lines) — read via multi-pattern grep across the whole file plus targeted range reads (header, cwd encoder, model normalisation, omp transcript fold, omp session reader, end/readMembers)
+- `plugin/scripts/member-outcomes.mjs` (239 lines) — read via grep + full first-53-line read plus surrounding context
+- `plugin/scripts/review-core.mjs` (1211 lines) — read via multi-pattern grep plus targeted range reads (header/sandbox-restriction comment, DEFAULT_DIMENSIONS, snapshot shell block, resumeFor/digest, environmentNote/testCmd)
+- `plugin/scripts/review-eval.mjs` (204 lines) — read in full
+- `plugin/scripts/prompt-renderer.mjs` (40 lines) — read in full
 - `plugin/scripts/strip-comments.mjs` (44 lines) — read in full
-- `plugin/scripts/frontmatter-check.mjs` (256 lines) — read in full
+- `plugin/scripts/frontmatter-check.mjs` (257 lines) — read in full
 - `plugin/scripts/frontmatter-allowlist.json` (64 lines) — read in full
 - `plugin/scripts/prose-pin.mjs` — exports listed via grep, gutter-stripping functions read directly; remaining exports are internal prose-pinning machinery with no external-world assumptions
 - `plugin/scripts/cwd-isolation-pins.mjs` (83 lines) — read in full
