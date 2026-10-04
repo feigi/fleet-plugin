@@ -11,7 +11,7 @@ the map. 481 rows total, deduplicated within slice, not across:
 | Slice | File | Rows | Scope |
 |---|---|---|---|
 | shell | [`external-assumptions/shell.md`](external-assumptions/shell.md) | 129 | `plugin/scripts/*.sh`, `fleet-bootstrap`/`fleet-run`/`fleet-provenance`, all of `.github/` |
-| tracker-node | [`external-assumptions/tracker-node.md`](external-assumptions/tracker-node.md) | 72 | `candidates`, `shortlist`, `ci-state`, `merge-gate`, `staleness`, `pr-overlap`, `diff-stats`, `fleet-tick`/`state`/`heartbeat`, `repo-root`, `git-env`, `tier-*`, `arg`, `slow-transport`, `lift` |
+| tracker-node | [`external-assumptions/tracker-node.md`](external-assumptions/tracker-node.md) | 72 | `candidates`, `shortlist`, `ci-state`, `merge-gate`, `staleness`, `pr-overlap`, `diff-stats`, `fleet-tick`/`state`/`heartbeat`, `repo-root`, `git-env`, `tier-*`, `arg`, `slow-transport` |
 | harness-node | [`external-assumptions/harness-node.md`](external-assumptions/harness-node.md) | 113 | `board.*`, `compute-*`, `ledger*`, `member-*`, `review-*`, `prompt-renderer`, `frontmatter-*`, `prose-pin`, manifests, `package.json`, `.nvmrc`, `renovate.json` |
 | prose | [`external-assumptions/prose.md`](external-assumptions/prose.md) | 167 | skills, commands, agents, `docs/agents/*`, `README.md`, `CONTEXT.md` glossary, ADR decisions |
 
@@ -165,7 +165,7 @@ about *which* divergence exists (shell#67–92, tracker#41–48):
 - ssh honours the *first* `-o` for a repeated option; `ConnectTimeout` bounds the banner exchange, not just SYN.
 - macOS `/tmp` → `/private/tmp` (`realpath` before compare); macOS `ps` truncates `args` without `-ww`; shebang read is 512 bytes on macOS, 255 on Linux.
 - `Atomics.wait` on a `SharedArrayBuffer` blocks the thread; `writeSync` to a full pipe throws `EAGAIN` (retry ≤ 200).
-- Node `RegExp.escape` is v24+, above the `>=20.11` floor, so `lift.mjs` hand-rolls it; `readdirSync({recursive:true})` needs ≥ 20.
+- Node `RegExp.escape` is v24+, above the `>=20.11` floor, so `prose-pin.mjs`, `ledger.mjs` and `node-floor-sweep.test.mjs` hand-roll it; `readdirSync({recursive:true})` needs ≥ 20.
 - `.nvmrc` (26.5.0) and `engines.node` (>=20.11.0) drift; Renovate manages only `nvm`. — harness#104–106
 
 ## 8. Time, concurrency, network
