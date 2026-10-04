@@ -30,14 +30,14 @@
 # reads and has a SYNTAX error aborts before either guard on /bin/sh, bash 3.2
 # and `bash --posix`, while bash 5.3 reaches the `|| die` with status 2. The
 # suite does NOT cover that case: measured, a syntax error appended at EOF
-# leaves bash 3.2 with every function it had already parsed and json.test.mjs
+# leaves bash 3.2 with every function it had already parsed and the suite
 # stays green. CI's `shellcheck -x -S warning` over `git ls-files '*.sh'` is
 # what catches it (SC1072/SC1073).
 #
 # `LC_ALL=C` is a per-command prefix on every tool below, never an export. Three
 # of the callers (verify-sha.sh, prove-merge.sh, claim-ticket.sh) do not pin the
 # locale, and exporting from a sourced lib would silently re-locale every OTHER
-# tool in them. The prefix is a no-op in the five that do pin it (#582), and
+# tool in them. The prefix is a no-op in the five that do pin it, and
 # closes the same hazard in the three that do not. It matters here because BSD
 # `tr` exits 1 on a byte that is not valid UTF-8 under a UTF-8 locale, and
 # `sed` emits nothing at all.
@@ -52,7 +52,7 @@
 # zero-width word BOUNDARY to GNU sed and a literal `b` to BSD sed, so the rule
 # would insert `\b` at every word edge on one and mangle every letter `b` on the
 # other (measured, GNU sed 4.9 and macOS sed). \177 (DEL) is not a C0 byte and
-# JSON permits it unescaped, so it is left alone (#146). Every remaining byte
+# JSON permits it unescaped, so it is left alone. Every remaining byte
 # below \040 has no short form, \013 (VT) included — RFC 8259 lists exactly the
 # five above and `\v` is not among them; `tr` turns it into a space, and
 # `jrewritten` is how a caller finds out that happened, since a replaced value
@@ -70,11 +70,11 @@
 # POSIX leaves this undefined and GNU sed's answer differs — so plain `N;$!ba`
 # prints nothing at all for a single-line value.
 #
-# EVERY FALLIBLE STAGE'S STATUS IS READ HERE, and that is the #119 fix rather
+# EVERY FALLIBLE STAGE'S STATUS IS READ HERE, and that is a fix rather
 # than a style choice. A pipeline's status is its LAST stage's, so the
 # original `printf | sed | tr` reported only `tr` — forcing `sed` to fail left
 # jstr exiting 0 with an empty value and every caller's `|| die` unfired, while
-# forcing `tr` worked (measured on PR #425). POSIX sh has no `pipefail` and no
+# forcing `tr` worked (measured). POSIX sh has no `pipefail` and no
 # `PIPESTATUS`, so each stage that can fail is captured and its status read.
 # The consequence, and the rule a later edit is checked against: a pipeline may
 # still END a function, but only where its LAST stage is the fallible one — `tr`
@@ -89,7 +89,7 @@
 # indistinguishable one and `$( )` takes it off — `jstr` of `a<LF>` and of `a`
 # are byte-identical (measured). No live caller can reach it: every argument
 # reaching jstr today is a script literal or a `$( )`/`awk`/`read` capture that
-# has already lost its own trailing newline. #119 leaves it there rather than
+# has already lost its own trailing newline. This file leaves it there rather than
 # adding a sentinel no caller would exercise. jarr is the exception and is
 # handled in its own note.
 #
@@ -104,13 +104,13 @@
 # sequence starts or continues with — sailed through untouched and landed raw
 # in the payload: `jq` then silently substitutes U+FFFD on decode (changing
 # what the caller reads back) and a strict parser (`python3 json.load`)
-# refuses the payload outright (#613). `jstr` and `jarr` now run the value
+# refuses the payload outright. `jstr` and `jarr` now run the value
 # through Python's own UTF-8 decoder with `errors="replace"` first — the same
 # U+FFFD a lenient consumer already substitutes, made explicit and JSON-legal
 # at the source instead of implicit and consumer-dependent — and `jrewritten`
 # reports it as a rewrite like any other replaced byte.
 
-# Python's own UTF-8 decoder with errors="replace" (#613), shared script text
+# Python's own UTF-8 decoder with errors="replace", shared script text
 # rather than a function: a function called on the right side of a pipe runs
 # in its own subshell, and a `json_u8=` assigned inside it would not survive
 # back to the caller — every call site below runs this as
@@ -123,7 +123,7 @@ sys.stdout.buffer.write(sys.stdin.buffer.read().decode("utf-8", "replace").encod
 # Escape $1 into a JSON string BODY — no surrounding quotes, the caller adds
 # those. Exit 0 with the escaped value, non-zero if any stage failed.
 jstr() {
-  # Empty in, empty out, no fork at all (#120). This is what lets a PATH-wide
+  # Empty in, empty out, no fork at all. This is what lets a PATH-wide
   # sed/tr outage — the failure inflight.sh measures at its own top — leave a
   # field that legitimately found nothing untouched: that field never calls the
   # broken tool, so it cannot observe its failure.
@@ -179,7 +179,7 @@ jrewritten() {
   # short-circuit above existed).
   json_ascii=$(printf '%s' "$1" | LC_ALL=C tr -d '\200-\377') || return 1
   [ "$json_ascii" = "$json_orig" ] && { printf false; return 0; }
-  # jstr also repairs a byte that is not valid UTF-8 (#613) — a second,
+  # jstr also repairs a byte that is not valid UTF-8 — a second,
   # independent replacement alongside the C0 scrub above, so a second,
   # independent check: this value must decode as strict UTF-8 unchanged, or
   # jstr rewrote it too.
@@ -194,15 +194,14 @@ jrewritten() {
 # boundary between two elements by the time a value reaches per-line stdin,
 # which is why no-undo-audit.sh refuses a conflicting path holding one before it
 # ever calls this. Escaping a byte this function structurally never receives
-# would be dead code standing in for a restructure nobody has needed; #89 owns
-# that class.
+# would be dead code standing in for a restructure nobody has needed.
 #
 # Empty stdin gives empty stdout at exit 0 — measured as the original
 # pipeline's behaviour, and the `[ -n ]` guard is what preserves it: without it
 # the `printf '%s\n'` re-emit below would turn "no elements" into one empty
 # line and `paste` would answer `""`, inventing an element out of nothing.
 jarr() {
-  # Same repair as jstr, same reason (#613), run once over the whole
+  # Same repair as jstr, same reason, run once over the whole
   # (possibly multi-line) input rather than per line: \n is ASCII and never a
   # byte of a multi-byte UTF-8 sequence, so decoding the joined blob in one
   # pass cannot manufacture or hide a line boundary.
