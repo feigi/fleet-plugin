@@ -13,12 +13,12 @@
 //
 // That transcript tree is keyed by PROJECT DIRECTORY, not by session, and one
 // directory can hold several sessions at once. `serve` therefore resolves ONE
-// session's transcript directory and keeps it for its whole life (#1583) — see
+// session's transcript directory and keeps it for its whole life — see
 // spendDirPin() below — rather than re-picking the newest on every tick and
 // alternating between two live runs' numbers in silence.
 //
 // LIMITATION, stated rather than solved: the session it keeps is whichever
-// FIRST writes a transcript at or after the pin's own construction (#1679).
+// FIRST writes a transcript at or after the pin's own construction.
 // Before that, a session that was already active when the pin was built —
 // this run's own, mid-EACCES-fault, or a genuinely previous run's — is never
 // latched; the pin keeps re-asking findSubagentsDir() every tick instead,
@@ -26,7 +26,7 @@
 // freezing the panel for the server's whole life. What is not solved: two
 // sessions that BOTH start writing after the pin exists, in the same project
 // directory, are still indistinguishable — the board is scoped to a
-// workspace and a workspace does not know that (#39) — so the first of them
+// workspace and a workspace does not know that — so the first of them
 // to pass the newest-transcript check wins and keeps winning. `--spend-dir
 // <path>` is how an operator names the right one: it overrides the
 // heuristic outright.
@@ -40,13 +40,13 @@ import {
 import { makeDie, defineFlags } from "./arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 import { mergedReadPrs } from "./compute-board.mjs";
-// #1597: the heartbeat's liveness mark, read here and never written. The
+// The heartbeat's liveness mark, read here and never written. The
 // cockpit is a READER of that key — the heartbeat is its only writer — and it
 // reaches the file through the module that owns the filename rather than
 // spelling `heartbeat.json` a second time. The PATH still comes from this
 // file's own resolveCockpitInstance(), not from statePath(): that probe is
 // already run once per launch here, with the `canonicalise` opt-in only this
-// caller takes (#1582), and a second probe could answer differently.
+// caller takes, and a second probe could answer differently.
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { fileURLToPath } from "node:url";
 import { isCLI } from "./is-cli.mjs";
@@ -57,7 +57,7 @@ import { inspect } from "node:util";
 const NAME = "board";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 // die()/arg()/has() shared with the other fleet scripts — see arg.mjs for
-// the fail-open (#61/#169/#364) and pipe-safety (#176/#328/#363) rationale.
+// the fail-open and pipe-safety rationale.
 const die = makeDie(NAME);
 const { arg, has, sweep, stray } = defineFlags(die, {
   flags: {
@@ -78,7 +78,7 @@ const { arg, has, sweep, stray } = defineFlags(die, {
 // nothing after it silently read the DEFAULT ledger file instead of the one
 // asked for.
 //
-// #468: a guard used to fire only where the flag was actually READ, and that
+// A guard used to fire only where the flag was actually READ, and that
 // was not every subcommand — `port` and `open` are USED in serve() alone, so
 // `build --port` (trailing), `build --port abc` and `build --open=1` were all
 // IGNORED at exit 0 rather than refused. main() now calls argPort()/
@@ -89,14 +89,14 @@ const { arg, has, sweep, stray } = defineFlags(die, {
 // same as before this fix: the guard checks the flag's SHAPE, not whether
 // this subcommand has a use for it. `ledger`/`prev`/`spend-since`/`interval`
 // were already read on the build path and already refused there.
-// #1092: that last claim held for `ledger`/`spend-since`/`interval`, not for
+// That last claim held for `ledger`/`spend-since`/`interval`, not for
 // `prev` — `prev` was read on `build` alone, and serve() never read it at
 // all. Hoisted in main() below, next to argPort()/has("open").
 
-// #1546: the "is this a plain JSON object" predicate and its kind word, one
+// The "is this a plain JSON object" predicate and its kind word, one
 // copy for the reads in this file that reject a parsed-but-wrong payload
 // WHOLE — gather's `--prev` payload, gather's per-entry `tickets[i]` check,
-// and readMerged()'s `data.repository` (#1840). Each carried its own inline
+// and readMerged()'s `data.repository`. Each carried its own inline
 // copy of both halves before, which is three places for one policy to drift in.
 //
 // TWO functions and not one, because `typeof` alone cannot name the fault the
@@ -118,10 +118,10 @@ function jsonKind(v) {
   return v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
 }
 
-// #366: `Number(x) || default` treated a garbage --port/--interval exactly
+// `Number(x) || default` treated a garbage --port/--interval exactly
 // like an absent one — "abc" is NaN, NaN is falsy, so it silently became the
 // default with no refusal. Same silent-fallback class as arg()'s own comment
-// above and #361's --spend-since guard. `interval` is read from argv in two
+// above and the --spend-since guard. `interval` is read from argv in two
 // places (serve(), and gather()'s build payload); both call argInterval() so
 // the check lives once, not as two copies that can drift apart. Neither
 // guard runs on an already-typed value a caller passed in-process — arg()
@@ -137,8 +137,8 @@ function argPort() {
 // millisecond delay: hand it more and Node clamps the delay to 1ms with only a
 // TimeoutOverflowWarning, so `--interval 3000000` (34 days) turns the rebuild
 // loop into a spin loop shelling out to gh hundreds of times a second — the
-// inverse of what was asked, announced by nothing the board prints (#435
-// review). 2147483647ms / 1000, floored, is the last WHOLE second that fits;
+// inverse of what was asked, announced by nothing the board prints.
+// 2147483647ms / 1000, floored, is the last WHOLE second that fits;
 // the ceiling is a hair under that in fractional seconds, which nobody types.
 function argInterval() {
   const raw = arg("interval");
@@ -164,15 +164,15 @@ function argInterval() {
 // `since`. 1e12 ms is 2001-09-09, below any real run; a future boundary
 // matches nothing at all.
 //
-// #1076: pulled out of gather() into its own function, like argPort()/
+// Pulled out of gather() into its own function, like argPort()/
 // argInterval() above, so main() can call it too (below) ahead of the
 // build/serve dispatch and ahead of both branches' stray() call — before
 // this fix the read sat inline inside gather(), below every stray() call on
 // every path that reaches it, so a trailing `--spend-since` ahead of a stray
 // positional refused under stray()'s generic wording instead of this one.
 // gather() still calls this itself, in the same spot, so nothing about WHEN
-// it validates changes for a caller that skips main() (same reasoning #468
-// gives for argPort()/has("open") staying in serve() too).
+// it validates changes for a caller that skips main() (same reasoning as
+// for argPort()/has("open") staying in serve() too).
 function argSpendSince() {
   const sinceRaw = arg("spend-since");
   if (sinceRaw === null) return null;
@@ -183,7 +183,7 @@ function argSpendSince() {
   return sinceMs;
 }
 
-// #1583: the operator's override for the session heuristic (findSubagentsDir()
+// The operator's override for the session heuristic (findSubagentsDir()
 // below). A PATH, so there is no range or magnitude to check the way
 // --spend-since and --interval have one — every malformed SHAPE this flag can
 // take is already arg()'s: a trailing `--spend-dir`, an empty or whitespace
@@ -191,7 +191,7 @@ function argSpendSince() {
 // What this read buys is that all four refuse under THIS flag's name instead
 // of stray()'s generic "unexpected argument", and they do so before gather()
 // shells out to anything — which is what declaring it in the flag table above
-// and calling it from main() below are for, exactly as #1076 did for
+// and calling it from main() below are for, exactly as for
 // --spend-since. A named read rather than a bare arg() at each call site so
 // the flag is spelled in one place and this reasoning has a home.
 //
@@ -213,10 +213,11 @@ function argSpendDir() {
 }
 
 // Node's default stdout cap is 1 MiB and a capped child read FAILS past it
-// rather than truncating (#807). Here that failure is indistinguishable from an
+// rather than truncating. Here that failure is indistinguishable from an
 // unreachable tool: the read degrades to the caller's empty default and the
 // cockpit is served a BLANK board at HTTP 200 with only a stderr line — the
-// #246 symptom, which #803 moved up from the pipe buffer rather than removed.
+// same blank-board symptom the old pipe-buffer limit produced, which the raised
+// ceiling moved up rather than removed.
 // The ledger is append-mostly and shared by every fleet script, so the ceiling
 // arms itself over the life of a run and gives no second warning. Bounded, not
 // Infinity: a runaway child should still be stopped rather than allowed to
@@ -227,22 +228,22 @@ function argSpendDir() {
 // tryRun discards — so a fix applied only here would leave that one uncapped.
 const READ_OPTS = { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 };
 
-// #1713: every child read in this file is ASYNCHRONOUS, and that is
+// Every child read in this file is ASYNCHRONOUS, and that is
 // load-bearing rather than stylistic. serve() ticks on a timer inside the same
 // process that answers HTTP, so a SYNCHRONOUS read holds the event loop for as
 // long as the child runs — measured at 4.72–4.91s for one board — and during
 // that window this cockpit answers nothing at all. A relaunch's identity probe
 // (PROBE_TIMEOUT_MS, one retry, ~2s in total) landing inside it therefore got
 // no answer, read the port as foreign, and started a SECOND cockpit on this
-// workspace's state directory: the duplicate #1585/#1660 exist to prevent,
+// workspace's state directory: the duplicate the launch handshake and the identity stub exist to prevent,
 // reached through timing rather than through a missing handshake. The browser
 // page stalled for the same reason and the same duration, every tick.
 //
 // One thing execFileSync did that this has to keep doing by hand: given no
 // `stdio` of its own it re-emits the child's captured stderr onto this
 // process's stderr (node's own `process.stderr.write(ret.stderr)`) BEFORE it
-// throws. That single oversized write is the subject of board-cli.test.mjs's
-// #807/#363 flood row, so it is spelled out below — and on both arms, because
+// throws. That single oversized write is the subject of a flood row in the CLI tests,
+// so it is spelled out below — and on both arms, because
 // the sync one wrote whether or not it went on to throw.
 //
 // This never throws; a failure is REPORTED in the record, in the field names
@@ -276,8 +277,8 @@ async function tryRun(cmd, args) {
   return r.stdout;
 }
 
-// #1714: `serve --open`'s browser launcher, one per supported platform (ADR
-// 0009). macOS ships `open`. Linux has no single program, but `xdg-open` is
+// `serve --open`'s browser launcher, one per supported platform.
+// macOS ships `open`. Linux has no single program, but `xdg-open` is
 // the freedesktop one every mainstream desktop provides; WSL usually lacks it
 // and has `wslview` (wslu) instead, which hands the URL to the Windows default
 // browser. Only a launcher that is NOT ON PATH passes the URL down the list:
@@ -322,7 +323,7 @@ async function openBrowser(url) {
 // that null is not it.
 //
 // Reported, and never as "parse failed": the parse succeeded, and keeping the
-// state a read reached apart from the state it failed at is what #816 was about.
+// state a read reached apart from the state it failed at is what the ledger states are for.
 function tryParse(json, fallback, what) {
   if (json == null) return fallback;
   let parsed;
@@ -342,7 +343,7 @@ function tryParse(json, fallback, what) {
 // key. Drop it, loudly. candidates.mjs's row guard is a different shape —
 // comprehensive and hard-failing (die() on the first bad row) — this one is
 // narrower: it only checks `number`, the one field whose absence corrupts
-// OTHER rows, and degrades instead of dying (#786).
+// OTHER rows, and degrades instead of dying.
 //
 // `rows` itself can be the wrong shape too: `tryParse` only checks that its
 // input is valid JSON, not that it is an array, so a syntactically-valid
@@ -363,7 +364,7 @@ function withNumber(rows, what) {
   return kept;
 }
 
-// #2108: gh stops a `list` read at its `--limit` with exit 0 and no warning, so
+// gh stops a `list` read at its `--limit` with exit 0 and no warning, so
 // a read that came back exactly that long may have been cut there — "at least
 // this many", never "this many". candidates.mjs's refuseIfCapped() and
 // fleet-tick.mjs's PR_LIMIT/CLAIMED_LIMIT carry the same rule; this board is a
@@ -376,7 +377,7 @@ function hitLimit(parsed, limit) {
   return Array.isArray(parsed) && parsed.length >= limit;
 }
 
-// #1840: which of `prNums` gh calls MERGED, in ONE `gh api graphql` query —
+// Which of `prNums` gh calls MERGED, in ONE `gh api graphql` query —
 // one aliased `pullRequest(number:)` field per PR, on the cwd's repository
 // (gh's own `{owner}`/`{repo}` placeholders, the repo every other read here
 // resolves) — so a PR merged at any age is found, and ten PRs cost what one
@@ -393,7 +394,7 @@ function hitLimit(parsed, limit) {
 // not a PR comes back null beside a NOT_FOUND error, and gh exits 1 with the
 // whole body on stdout (measured 2026-09-26, gh 2.101.0, which also names
 // the number on stderr). Refusing that body would let one such row — a
-// typo, or an amendment-2a row keyed by an issue number — put every other
+// typo, or a row with no impl token keyed by an issue number — put every other
 // row PR back in REVIEW on every tick. A null alias reads as not merged,
 // which is what a failed read means for that one PR.
 //
@@ -402,7 +403,7 @@ function hitLimit(parsed, limit) {
 // shape the API produces, only a corrupted or truncated one; `isJsonObject`
 // alone cannot tell that apart from a genuine "checked, nothing merged"
 // answer, so it is checked for too. Anything else is a failed read: `[]`,
-// and computeBoard()'s #1841 rule takes it from there.
+// and computeBoard()'s carry-forward rule takes it from there.
 async function readMerged(prNums) {
   if (!prNums.length) return [];
   const fields = prNums.map((n) => `p${n}:pullRequest(number:${n}){state}`).join(" ");
@@ -445,7 +446,7 @@ function labelsOf(row) {
 // strip, never fires.
 //
 // What separates a verdict from a failed read is the EXIT CODE. Emptiness of
-// stdout was only ever a proxy for it, and #262 retired the proxy: a quota
+// stdout was only ever a proxy for it, and that proxy no longer holds: a quota
 // refusal now names its cause on stdout on the way out at exit 2, so "non-empty
 // stdout" began reading an outage as a reading. That payload carries no
 // `status`, so mapCi answered "unknown" and gather()'s prevCi carry-forward —
@@ -453,14 +454,14 @@ function labelsOf(row) {
 // last-known-good CI state during a blip that clears itself. Exit 2 means the
 // question could not be answered, whatever the script printed while saying so.
 //
-// The exit code is not sufficient on its own either (#875), for the symmetric
+// The exit code is not sufficient on its own either, for the symmetric
 // reason: it reports that the child reached its own exit path, never that its
 // payload arrived whole. `e.status !== 2` is also true of a signal kill, where
 // `status` is null, and of a write cut mid-JSON at exit 1 — emit() over in
 // ci-state.mjs abandons a short write it cannot retry, which keeps the exit
 // code intact while losing the tail of the line. Those bytes were returned AS a
 // verdict, mapCi could not parse them, and the non-null return skipped the very
-// carry-forward #262 added: the #262 regression re-entering through the gate
+// carry-forward added for the exit-2 case: that regression re-entering through the gate
 // built to stop it. So both halves have to hold — a non-2 exit AND bytes that
 // parse.
 //
@@ -523,13 +524,13 @@ async function runCiState(scriptDir, pr) {
     }
     return out;
   }
-  // #1593: exit 0 was never covered by any of the checks above — they only run
+  // Exit 0 was never covered by any of the checks above — they only run
   // once the child read reports a failure, and a child that exits 0 reports
   // none. So the same write cut mid-JSON that the failure block above salvages
   // at exit 1 rode straight through here and into mapCi at exit 0, where an
   // unparseable string maps to "unknown" and gather()'s carry-forward — which
   // only a null return reaches — was skipped, discarding the PR's last-known
-  // CI value exactly as #262 did before the exit-2 case was fixed. Same parse
+  // CI value exactly as the exit-2 case did before it was fixed. Same parse
   // check, same null return as the failure block above — but its OWN channel,
   // `ci-salvage-exit0`, not that block's `ci-salvage-nonzero`: a
   // zero-exit child does not get a looser contract than a non-zero one, and
@@ -584,7 +585,7 @@ function warnOnce(channel, key, msg) {
 export function mapCi(ciJson, pr) {
   // A NULL payload, which is a failed read runCiState() has already reported
   // on stderr. Warning again here would report one failure twice. Null
-  // strictly, not falsiness: an EMPTY payload is not that case. Since #1593
+  // strictly, not falsiness: an EMPTY payload is not that case. Since
   // runCiState() parse-checks its exit-0 return too, so its own callers never
   // hand this an empty string any more — but mapCi() is exported and total
   // over any caller, not just this file's, so a `!ciJson` guard that swallowed
@@ -595,9 +596,9 @@ export function mapCi(ciJson, pr) {
   // A payload that will not parse is a THIRD state, and the return value cannot
   // carry it: "unknown" is what the regression gate pins, since a false red is
   // worse than no verdict. So the distinction leaves through stderr or not at
-  // all. #875 closed this for runCiState()'s catch block (a payload that will
+  // all. That was closed for runCiState()'s catch block (a payload that will
   // not parse there is a failed read, reaching gather()'s carry-forward);
-  // #1593 closed it for the exit-0 arm the same way (see runCiState() above),
+  // and for the exit-0 arm the same way (see runCiState() above),
   // so a write cut mid-JSON no longer reaches mapCi from gather() on EITHER
   // arm — a lost write now reads as a failed read there too, and that PR's
   // last-known CI value stands instead of reverting to "unknown". This catch
@@ -627,7 +628,7 @@ export function mapCi(ciJson, pr) {
 
 // Where this session's member transcripts live:
 //   ~/.omp/agent/sessions/<encoded-cwd>/<ISO>_<uuid>/
-// The encoder lives in member-record.mjs (#1342), shared with
+// The encoder lives in member-record.mjs, shared with
 // member-outcomes.mjs; it is re-exported here under its original name so
 // nothing importing `encodeProjectDir` from this file needs to change.
 export { encodeProjectDir };
@@ -716,7 +717,7 @@ function newestTranscriptMs(dir) {
   return newest;
 }
 
-// #1583: the transcript directory a `serve` process is bound to, resolved
+// The transcript directory a `serve` process is bound to, resolved
 // once it can be trusted and reused by every tick after it. findSubagentsDir()
 // above ranks sessions by newest transcript mtime and gather() reached it
 // through gatherSpend() on EVERY tick (~15s by default), so two sessions live
@@ -725,7 +726,7 @@ function newestTranscriptMs(dir) {
 // had switched.
 //
 // The pin holds the first answer that COULD BE THIS RUN'S, not the first
-// non-null answer and not the first call (#1679). findSubagentsDir() has
+// non-null answer and not the first call. findSubagentsDir() has
 // three returns and none of them is safe to latch on sight: a directory
 // resolved at pin-construction time can be a PREVIOUS run's session — newer
 // than nothing else that exists yet, so it wins the ranking, but not this
@@ -734,7 +735,7 @@ function newestTranscriptMs(dir) {
 // as easily as it can be the truly unresolvable "bug that never fixes
 // itself" the ticket originally reasoned about. Latching either one turns
 // the self-correcting degradation this file's header describes into a
-// permanent one: measured (#1679), a chmod'd-then-restored session tree left
+// permanent one: measured, a chmod'd-then-restored session tree left
 // the OLD `??=` pin stuck on `{ error }` forever while the unpinned lookup
 // recovered on its very next tick, and a prior run's session dir
 // present at launch left the old pin on yesterday's numbers for the whole of
@@ -819,7 +820,7 @@ export function spendDirPin(explicit, home = process.env.HOME, cwd = process.cwd
 //
 // `ok` is an explicit TAG, and it is what the page switches on — never the
 // presence or the truthiness of any other field. Reading the error case off
-// `error`'s truthiness is what #959 was: `e.message` is "" for an error thrown
+// `error`'s truthiness was a bug: `e.message` is "" for an error thrown
 // without one and `undefined` for a thrown non-Error, so two shapes the catch
 // below can emit matched neither the error branch nor a success shape, and the
 // panel HID — a fault rendered as an idle run, the one conflation this panel
@@ -830,7 +831,7 @@ export function spendDirPin(explicit, home = process.env.HOME, cwd = process.cwd
 // success-only field is read.
 export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8, explicit = false } = {}) {
   try {
-    // #1583: a caller-supplied `null` is a RESOLUTION from one that owns a pin
+    // A caller-supplied `null` is a RESOLUTION from one that owns a pin
     // (spendDirPin() above) — the project directory is there and holds no
     // session yet — and must not run the heuristic a second time; only an
     // omitted `dir` (every gatherSpend test driver, and `build`, which is one
@@ -839,7 +840,7 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
     // that distinction — the hand-rolled `if (dir === undefined) dir =
     // findSubagentsDir();` this used to spell out is redundant with it.
     //
-    // `explicit` (#1679) is true only when `dir` came from the operator's
+    // `explicit` is true only when `dir` came from the operator's
     // own --spend-dir, never from the heuristic or an unresolved pin — see
     // its one use below, at the empty-directory branch.
     const dirError = dir?.error;
@@ -848,7 +849,7 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
       return { ok: false, error: dirError };
     }
     if (!dir) return null; // resolved, but this session has spawned no agents yet
-    // #1679/#1302: only for an EXPLICIT --spend-dir — the heuristic's own
+    // Only for an EXPLICIT --spend-dir — the heuristic's own
     // findSubagentsDir() already dispatches on isOmpSessionDirName, so a
     // resolved-but-non-heuristic `dir` here only ever arrives from the
     // operator naming a directory directly. Without this check the
@@ -866,7 +867,7 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
 
     const { agents, toolTables, skipped, damaged } = readOmpSpend(dir, sinceMs);
     if (!agents.length) {
-      // #1894: `damaged` belongs here beside `skipped`. An omp transcript with
+      // `damaged` belongs here beside `skipped`. An omp transcript with
       // no parseable assistant-with-usage line folds to no model, so
       // readOmpSpend drops it without a throw — `skipped` stays 0 — and its
       // non-last parse failures are the only trace that the directory held a
@@ -888,7 +889,7 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
         return { ok: false, error: `no agent turn readable: ${lost.join("; ")}` };
       }
       if (skipped) return { ok: false, error: `all ${skipped} transcripts unreadable` };
-      // #1679: only for an EXPLICIT override — never the heuristic's own
+      // Only for an EXPLICIT override — never the heuristic's own
       // "resolved, no session yet" `null` case two arms up, which is the
       // normal state at launch and must stay silent. An operator who named
       // this exact directory has a panel that just went quiet with nothing
@@ -918,7 +919,7 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
     // `e.message` is carried as-is, including the "" and `undefined` a
     // message-less throw would give it: the tag above is what routes this to the
     // error panel, so an unhelpful message costs wording, never the panel.
-    // #1679: an explicit --spend-dir naming a directory that does not exist
+    // An explicit --spend-dir naming a directory that does not exist
     // YET (the legitimate, tested case) throws ENOENT here on every tick
     // until it appears, and this catch used to print unconditionally — one
     // line per ~15s tick, forever. Routed through warnOnce, keyed on the
@@ -929,7 +930,7 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
   }
 }
 
-// omp's side (#1716): one agent per member transcript anywhere under the
+// omp's side: one agent per member transcript anywhere under the
 // session dir — a nested member's too, at its own spawnDepth — read by
 // member-record.mjs's own omp reader over the walk readOmpSession uses:
 // foldOmpTranscript once per file, then ompMemberRecord on that fold, never
@@ -937,7 +938,7 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
 // are exactly the member record's: role from `session_init`'s agent
 // definition, task and AgentId, label the AgentId itself (the path-relative
 // stem, `review-pr-12/Security` for a nested one). The same fold's `entries`
-// are the tool stream (#1717), so the tool table goes through attributeTools.
+// are the tool stream, so the tool table goes through attributeTools.
 //
 // Per-transcript tolerance is this file's, not readOmpSession's: readOmpSession
 // (used by the bulk scrape) lets a wrong-shape refusal propagate, and here
@@ -948,7 +949,7 @@ export function gatherSpend({ dir = findSubagentsDir(), sinceMs = null, topN = 8
 // dispatched this second) has spent nothing, so it is neither booked nor
 // skipped.
 //
-// `damaged` is real — the tool-attribution stream (#1717) is a join
+// `damaged` is real — the tool-attribution stream is a join
 // across lines (a toolCall's id names its tool, a pending result batch bills
 // the next turn), so a dropped MIDDLE line can silently shift spend onto a
 // neighbouring tool instead of just costing its own turn's totals — the
@@ -985,17 +986,17 @@ function readOmpSpend(dir, sinceMs) {
   return { agents, toolTables, skipped, damaged };
 }
 
-// `workspace`/`port` are the caller's answers, never read in here (#1584):
+// `workspace`/`port` are the caller's answers, never read in here:
 // resolveCockpitInstance() already decided both, and a second derivation in
 // this function could disagree with the one the server actually bound. They
 // join the payload HERE, alongside the repo fields above, because this is the
 // boundary where every impure input meets the pure model — computeBoard() only
 // echoes them. Defaulted to null, which is also the degrade arm's workspace
-// and the value #1585's handshake refuses to match on, so a caller with no
+// and the value the launch handshake refuses to match on, so a caller with no
 // instance to name (every gather() test driver) says so rather than omitting
 // the fields.
 //
-// `spendDir` is the caller's PINNED transcript directory (#1583) and is the one
+// `spendDir` is the caller's PINNED transcript directory and is the one
 // parameter here whose ABSENCE is not a default to fill in: serve() hands the
 // same pin's answer to every tick, and its three shapes — a directory, `null`
 // for "resolved, no session yet", `{ error }` for unresolvable — all have to
@@ -1007,20 +1008,20 @@ function readOmpSpend(dir, sinceMs) {
 // nor the flag, gatherSpend() resolves for itself exactly as it did before
 // this ticket, which is what keeps `build`'s output unchanged by it.
 //
-// `spendDirExplicit` (#1679) is read the same way, independently of
+// `spendDirExplicit` is read the same way, independently of
 // `spendDir` itself: serve() always passes a resolved `spendDir` (the pin's
 // answer), never leaving it to default, so `spendDir`'s own presence cannot
 // say whether an operator named it. Whether --spend-dir was given is a fact
 // about argv, unrelated to which of gatherSpend's three shapes the pin
 // currently holds.
-// #1713: async, because every child read below is. The event loop this frees
+// Async, because every child read below is. The event loop this frees
 // belongs to serve()'s HTTP server, which shares this process — see execRead's
 // note above for what the synchronous version cost. `build` awaits it and is
 // otherwise unchanged: one gather per process, nothing else waiting on it.
 export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir = SCRIPT_DIR, interval, workspace = null, port = null, spendDir = argSpendDir(), spendDirExplicit = argSpendDir() != null }) {
   // The one read that must not crash the gather: a corrupt/partial board.json
   // (the fallback safety net itself) is ignored, not fatal. That holds for a
-  // SHAPE fault as much as a parse fault (#1192) — the guard below rejects the
+  // SHAPE fault as much as a parse fault — the guard below rejects the
   // payload here so both leave through the one catch, which names the file the
   // operator passed. A wrong-typed `tickets` left to reach the prevCi map
   // instead throws `.filter is not a function` out of gather(), which made a
@@ -1043,7 +1044,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
       // object, and `typeof null` alone would let it through. Same check and
       // same wording as readMerged()'s `data.repository` read, which is this
       // repo's precedent for rejecting a parsed-but-wrong payload at its own
-      // read — since #1546 literally the same, both calling the shared predicate.
+      // read — literally the same, both calling the shared predicate.
       const p = JSON.parse(readFileSync(prevFile, "utf8"));
       if (!isJsonObject(p)) throw new TypeError(`expected a JSON object, got ${jsonKind(p)}`);
       // Nullish `tickets` is ABSENT and stays usable: `|| []` reads it as the
@@ -1071,7 +1072,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   }
 
   // `--require-file` turns an absent ledger into a refusal at exit 2 rather
-  // than the empty payload a real empty ledger returns (#816). Without it the
+  // than the empty payload a real empty ledger returns. Without it the
   // two are byte-identical on stdout, and tryParse's fallback is that same
   // empty shape besides — so an unread ledger, one read empty, and a read whose
   // answer would not parse were three states with one rendering, on the one
@@ -1107,10 +1108,10 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   // POOL loop reads `iss.title` RAW, never through titleFor()'s fallback
   // chain — so this row genuinely needs a guaranteed string: an issue found
   // but unable to describe itself reads as its number rather than literal
-  // `undefined` on the operator's page (#786).
+  // `undefined` on the operator's page.
   //
-  // Its null fallback, not the open-PR read's `[]` below, is deliberate
-  // (#1597 follow-up): this read is the pool's ONLY source, and
+  // Its null fallback, not the open-PR read's `[]` below, is deliberate:
+  // this read is the pool's ONLY source, and
   // compute-board.mjs's stall() needs to tell a genuinely empty pool from a
   // `gh` outage the same way it already tells an empty ledger from an unread
   // one — a `[]` fallback collapses both to the identical shape before a
@@ -1143,19 +1144,19 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
     state: p.state,
     title: p.title,
     labels: labelsOf(p),
-    // (#2083) compute-board.mjs's reviewBacklog needs it to tell a
+    // compute-board.mjs's reviewBacklog needs it to tell a
     // past-pin halt already answered by the automatic re-review apart from
     // one still owed a fresh one — the same field fleet-tick.mjs's
     // openPrs() already requires.
     headRefOid: p.headRefOid,
   }));
 
-  // #1820: MERGED is gh's answer, not a ledger token — no rule writes `MERGED
-  // <sha>`, and the open list above drops a PR the moment it merges. #1840:
+  // MERGED is gh's answer, not a ledger token — no rule writes `MERGED
+  // <sha>`, and the open list above drops a PR the moment it merges. It is
   // asked only about mergedReadPrs()'s set — row PRs absent from the open
-  // list, with no token, not carried forward (#1841) — in one batched read
+  // list, with no token, not carried forward — in one batched read
   // that answers whatever their merge age; see readMerged(). A failed read
-  // is `[]`, and #1841's carry-forward in computeBoard() covers exactly the
+  // is `[]`, and the carry-forward in computeBoard() covers exactly the
   // PRs this set leaves out, so a failure costs only a PR never yet seen
   // MERGED, which reads REVIEW.
   const merged = await readMerged(mergedReadPrs({ ledger, prs, prev }));
@@ -1168,7 +1169,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   // ci-state.mjs` per open PR and each of those hits the GitHub API, so a fan
   // of 40 at once is a rate-limit and a load spike where a queue of 40 is
   // neither. Nothing here waits on the loop any more — the server answers
-  // throughout it (#1713) — so the only thing concurrency would buy is a
+  // throughout it — so the only thing concurrency would buy is a
   // shorter tick, against an interval measured in seconds. The warn-once
   // lines below also stay in PR order this way.
   for (const p of prs) {
@@ -1187,13 +1188,13 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
     catch (e) { console.error(`${NAME}: gh repo view parse failed: ${e.message}`); }
   }
 
-  // #1076: guard's own rationale (fail loud, gate on presence and on range,
+  // The guard's own rationale (fail loud, gate on presence and on range,
   // not just finiteness) now lives at argSpendSince()'s definition above,
   // alongside argPort()/argInterval() — this call is unchanged in when it
   // runs, only in where the check itself is written.
   const sinceMs = argSpendSince();
   const spend = gatherSpend({ dir: spendDir, sinceMs, explicit: spendDirExplicit });
-  // #1597: the heartbeat's mark, raw. readState() never throws — an absent
+  // The heartbeat's mark, raw. readState() never throws — an absent
   // file is the ordinary state of a run whose heartbeat has not beaten yet,
   // and an unreadable or corrupt one announces itself on stderr and degrades
   // to no mark, which computeBoard() renders as no panel rather than as a
@@ -1207,7 +1208,7 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   // resolution could name a different workspace's beat.
   // `ticked` rides beside `beat`, same file same read, and under the same
   // "no try/catch, no tryRun shape" rule just above — fleet-tick.mjs's own
-  // liveness key (#1597 follow-up), for the busy-stretch case `beat` alone
+  // liveness key, for the busy-stretch case `beat` alone
   // cannot see (fleet-state.mjs's assessBeat has the rule).
   const priorState = stateFile ? readState(stateFile, NAME) : null;
   const beat = priorState?.beat ?? null;
@@ -1218,9 +1219,9 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
 }
 
 async function main() {
-  // #365: a misspelled flag was never looked for, so `serve --prot 9000`
+  // A misspelled flag was never looked for, so `serve --prot 9000`
   // served on the default 8123 in silence. In main(), not at module scope:
-  // board.test.mjs and board-cli.test.mjs both import from this module, so a
+  // the test files for this module import from it, so a
   // module-scope sweep would read the TEST RUNNER's argv.
   //
   // One set for both subcommands, deliberately. `--port`/`--open` are USED
@@ -1229,14 +1230,14 @@ async function main() {
   // subcommand would close that too, but that is a larger design question
   // (per-subcommand arg schemas) this ticket does not take; refusing a flag
   // this file does accept somewhere is not this ticket's business. What
-  // build no longer does is stay silent on a MALFORMED one — see #468 below.
+  // build no longer does is stay silent on a MALFORMED one — see the argPort()/has("open") note below.
   //
   // Above `cmd`, so `board.mjs --prot 9000` names the stray rather than
   // printing the usage line for a missing subcommand. `build`/`serve` carry
   // no `--` and are never the sweep's business.
   sweep();
   const cmd = process.argv[2];
-  // #1656: no default applied here any more — `build` and `serve` now each
+  // No default applied here any more — `build` and `serve` now each
   // apply their own. `build` has no workspace instance to default against
   // (no state directory, no board), so it keeps today's cwd-relative literal
   // below. `serve` defaults against `resolveCockpitInstance()`'s stateDir
@@ -1244,7 +1245,7 @@ async function main() {
   // served state directory does, rather than the caller's raw cwd.
   const ledgerFile = arg("ledger");
 
-  // #468: argPort()/has("open") used to run only inside serve(), so `build
+  // argPort()/has("open") used to run only inside serve(), so `build
   // --port abc` and `build --open=1` were accepted and silently ignored — the
   // malformed spellings these guards exist to refuse never ran on that path.
   // Called here, once, ahead of the build/serve dispatch (and ahead of both
@@ -1252,9 +1253,9 @@ async function main() {
   // wording over stray()'s generic one, same ordering rule arg.mjs documents
   // for every other value guard in this file). Ahead of the `cmd` check too,
   // so `board.mjs --port abc` with NO subcommand names the flag rather than
-  // falling through to the usage die below — the same precedence the #365
+  // falling through to the usage die below — the same precedence the
   // sweep note above claims for a stray, now true of these two guards as
-  // well. Both orderings are pinned in board.test.mjs; before this fix the
+  // well. Both orderings are pinned in the board tests; before this fix the
   // no-subcommand shape printed the usage line (measured). The return values are
   // deliberately discarded on the build path: build has no server to bind or
   // browser to open, so a WELL-FORMED --port/--open still does nothing here,
@@ -1264,7 +1265,7 @@ async function main() {
   // its own argv for a caller that skips main(). Nothing in this repo is such
   // a caller today — every serve() test drives the real CLI, which enters
   // main() — but serve() is public surface, so the guard stays with it.
-  // #1092: unlike --port/--open (never read on `build` before #468) or
+  // --prev: unlike --port/--open (never read on `build` before they were hoisted) or
   // --ledger/--spend-since/--interval (already read on `build`, per the
   // header comment above), --prev was read on exactly one subcommand and it
   // was the wrong one to skip: `arg("prev")` sat inside the `build` branch
@@ -1272,7 +1273,7 @@ async function main() {
   // so `serve --prev`, `serve --prev=x` and `serve --prev --port 9000` all
   // fell through with no guard ever firing (measured), the last one blaming
   // --port's innocent value once stray() reached it instead. Hoisted here
-  // for the same reason #468 hoisted argPort()/has("open") below it — ahead
+  // for the same reason argPort()/has("open") were hoisted below it — ahead
   // of the dispatch and both branches' stray() calls — and ahead of argPort()
   // itself so a caller who gets BOTH flags wrong at once (`--port --prev`,
   // each trailing with no value) still hears about --prev specifically,
@@ -1284,8 +1285,8 @@ async function main() {
   argPort();
   has("open");
 
-  // #1076: same fail-open shape as --port/--open above (#468) — this closes
-  // the two flags PR #1090 (#468) left standing. `argInterval()`'s read had
+  // Same fail-open shape as --port/--open above — this closes
+  // the two flags that hoisting left standing. `argInterval()`'s read had
   // two call sites — inside serve() directly, and embedded in gather()'s
   // return (`interval ?? argInterval() ?? 15`), which build's dispatch below
   // reaches too — and the --spend-since read sat inside gather() (now
@@ -1303,10 +1304,10 @@ async function main() {
   // own argInterval() (via `interval ?? argInterval() ?? 15`) and gather()
   // still calls its own argSpendSince() — re-evaluating a pure read of argv
   // costs nothing, and keeps both validating their own argv for a caller
-  // that skips main(), same reasoning #468 gives for argPort()/has("open").
+  // that skips main(), same reasoning as for argPort()/has("open").
   argInterval();
   argSpendSince();
-  // #1583: `--spend-dir` joins them for the same two reasons, from the day it
+  // `--spend-dir` joins them for the same two reasons, from the day it
   // ships rather than one ticket later — it is read on both subcommands (in
   // gather()'s default, and through serve()'s pin), and a trailing
   // `--spend-dir` ahead of a stray positional has to name itself instead of
@@ -1314,7 +1315,7 @@ async function main() {
   // argPort()'s; gather() below does the read that reaches the panel.
   argSpendDir();
 
-  // #463: sweep() above only refuses a `--`-prefixed token; a bare or
+  // sweep() above only refuses a `--`-prefixed token; a bare or
   // single-dash stray alongside a valid subcommand (`build --ledger x junk`)
   // rode along in silence the same way. Below the `cmd` check, deliberately
   // unlike sweep() above it: `board.mjs junk` is an unknown SUBCOMMAND, which
@@ -1329,20 +1330,20 @@ async function main() {
   if (cmd === "build") {
     stray();
     const { computeBoard } = await import("./compute-board.mjs");
-    // #1584: a snapshot printed here outlives the process that printed it —
+    // A snapshot printed here outlives the process that printed it —
     // redirected to a file, pasted into a ticket, read back by the next
     // launch — so it says which workspace it describes and which port that
     // workspace's cockpit answers on. The same seam serve() uses, so the two
     // subcommands can never name different instances from one cwd.
     //
     // No `port:` argument, deliberately: --port is read and DISCARDED on this
-    // path (#468 above), and honouring it here would give the flag a meaning
+    // path (see argPort()/has("open") above), and honouring it here would give the flag a meaning
     // on `build` it has never had. The DERIVED port is the identity anyway —
     // it is the port this workspace is reachable on, which is what a stray
     // snapshot needs to name; the port some one-shot invocation happened to
     // ask for is not.
     //
-    // The default ledger stays the cwd-relative literal #1656 left here. That
+    // The default ledger stays the cwd-relative literal that serve() used to share. That
     // is not an oversight to fix in passing: `build` prints to stdout and
     // writes no state directory, so the argument that moved serve()'s default
     // onto the workspace does not reach it, and changing it would change what
@@ -1350,7 +1351,7 @@ async function main() {
     const instance = resolveCockpitInstance({ cwd: process.cwd(), gitCommonDir: gitCommonDir() });
     const model = computeBoard(await gather({
       ledgerFile: ledgerFile || ".fleet/ledger.md", prevFile,
-      // #1597: the heartbeat's file, from the SAME instance the identity
+      // The heartbeat's file, from the SAME instance the identity
       // fields below come from — not the cwd-relative literal the ledger
       // default keeps. That literal is `build`'s own back-compatibility (see
       // the note above); the mark has no existing `build` behaviour to
@@ -1393,7 +1394,7 @@ export function createBoardServer(dir) {
 //
 // BASE is the port this file hardcoded before any of this existed;
 // resolveCockpitInstance()'s degrade arm, with no workspace to hash, still
-// defaults to it. SPAN = 512 was kept deliberately (ruling on #39/#1657): a
+// defaults to it. SPAN = 512 was kept deliberately: a
 // collision between two DIFFERENT workspaces is not priced into the width but
 // carried by serve()'s launch loop, which probes whoever holds the derived
 // port, reuses that cockpit when it is this workspace's own, and otherwise
@@ -1422,7 +1423,7 @@ function workspaceHash(key) {
 }
 
 // The one spelling of "this value is a workspace identity", read by every
-// side of the cockpit handshake (#1661). The invariant is that null and the
+// side of the cockpit handshake. The invariant is that null and the
 // empty string are never an identity to match on, and it used to be carried
 // by two independently-written guards — resolveCockpitInstance()'s
 // `workspace === null` below and probeCockpitWorkspace()'s
@@ -1447,7 +1448,7 @@ function workspaceHash(key) {
 // Not exported, for workspaceHash()'s reason above it: nothing outside this
 // file asks the question, and every widening of it is already pinned from
 // outside through the two call sites — mutation-verified for this extraction
-// (#1661), each mutant killed by a test that was already in board.test.mjs:
+// and each mutant was killed by a test that already existed in the board tests:
 // `v != null && v !== ""` by the probe's not-a-string row, `typeof v ===
 // "string"` by its empty-workspace row, a degrade arm publishing `""` by
 // resolveCockpitInstance's three degrade rows, and dropping it from
@@ -1473,7 +1474,7 @@ function isWorkspaceId(v) {
  *
  * `--git-common-dir` answers with the MAIN checkout's git dir from inside a
  * linked worktree, so every worktree of one repo resolves to ONE state
- * directory. That resolution is not spelled here: since #1658 it is
+ * directory. That resolution is not spelled here: it is
  * git-env.mjs's workspaceDirFromGitCommonDir(), the same function
  * ledger.mjs's defaultLedgerPath() and fleet-state.mjs's statePath() resolve
  * the run's single ledger and single heartbeat with — so the board, the
@@ -1486,7 +1487,7 @@ function isWorkspaceId(v) {
  */
 export function resolveCockpitInstance({ cwd = process.cwd(), gitCommonDir, port } = {}) {
   // `port != null`, never truthiness: --port 0 is a real request (an
-  // ephemeral bind, #366/#435) and reading it as "absent" would derive a port
+  // ephemeral bind) and reading it as "absent" would derive a port
   // straight over the top of one the caller explicitly asked for.
   const forced = port != null;
   const workspace = workspaceDirFromGitCommonDir(gitCommonDir, cwd, { canonicalise: true });
@@ -1523,9 +1524,9 @@ export function resolveCockpitInstance({ cwd = process.cwd(), gitCommonDir, port
 }
 
 // The impure half, deliberately outside the seam above. Bounded for the
-// reason #1199 bounded the ledger's identical probe: an unbounded git that
+// reason the ledger's identical probe is bounded: an unbounded git that
 // never returns hangs serve() before it binds anything, with nothing on
-// stderr to say why. Ambient GIT_DIR/GIT_WORK_TREE scrubbed (#1599) — either
+// stderr to say why. Ambient GIT_DIR/GIT_WORK_TREE scrubbed — either
 // one answers `--git-common-dir` for a DIFFERENT repository, which would
 // serve this cockpit out of someone else's workspace at exit 0, in silence.
 // A non-zero exit, a stall and git missing entirely all land on "" and take
@@ -1593,14 +1594,14 @@ function bindFailure(server, port) {
 // read tells a port nobody holds from one whose holder was busy for that
 // second, and a box under load, a process still between its bind and its
 // identity write, or a dropped SYN all produce the second shape. The probe
-// retries once before it will call a silent port foreign (#1660).
+// retries once before it will call a silent port foreign.
 //
-// Until #1713 the commonest producer of that shape was this cockpit itself —
+// Until the tick's reads became asynchronous the commonest producer of that shape was this cockpit itself —
 // a same-workspace holder blocked inside its own synchronous gather() when
 // the probe arrived, for the 4.72–4.91s a board took to build, which no
 // number of retries at this timeout would have covered. That one is gone at
 // the source: the tick's reads are asynchronous and the server answers
-// throughout (cockpit-tick-nonblocking.test.mjs). Raising this timeout was
+// throughout. Raising this timeout was
 // ruled out as the fix for it — it would have to clear a gather(), which
 // charges every launch past a stranger-held port that much per candidate.
 const PROBE_TIMEOUT_MS = 1000;
@@ -1628,12 +1629,12 @@ const PROBE_BODY_CAP = 1024 * 1024;
  * same answer — foreign. A holder that IS this workspace's cockpit answers
  * with the board payload it already serves, so no endpoint is added for
  * this and the handshake reaches nothing a browser could not. The one
- * consequence to know: a cockpit started from a build older than #1585
+ * consequence to know: a cockpit started from a build older than the identity handshake
  * serves a payload with no `workspace` at all, so it reads as foreign and a
  * launch steps over it rather than reusing it — once, until that process is
  * restarted.
  *
- * A bare timeout gets one retry (#1660) rather than folding straight into
+ * A bare timeout gets one retry rather than folding straight into
  * "foreign": nothing in a socket read distinguishes "nobody is there" from
  * "busy for that second", and a loaded box produces the second shape. Only a
  * second silent window calls it, and says so on stderr distinctly from a
@@ -1671,7 +1672,7 @@ export function probeCockpitWorkspace(port, timeoutMs = PROBE_TIMEOUT_MS) {
           let w;
           try { w = JSON.parse(body)?.workspace; } catch { finish(null); return; }
           // Exactly the construction side's rule, because it is literally
-          // the same predicate (#1661): a non-string, or the empty string,
+          // the same predicate: a non-string, or the empty string,
           // is no identity. `=== ours` would be false for the first anyway,
           // but an empty string could match an empty workspace and there
           // must be no such thing.
@@ -1694,27 +1695,27 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   //
   // A GIVEN-but-invalid --port is refused outright by argPort() and never
   // reaches here; an ABSENT one leaves `portGiven` nullish, which is how the
-  // seam is told to derive rather than obey. `??` and not `||`, for #366's
-  // reason: --port 0 is a legal ephemeral bind and `||` would discard it.
+  // seam is told to derive rather than obey. `??` and not `||`:
+  // --port 0 is a legal ephemeral bind and `||` would discard it.
   //
   // A bind failure no longer means one thing, so the two kinds of port part
   // company here. One this script DERIVED is negotiable: the loop below
-  // handshakes with whoever holds it and steps over a stranger (#1585). One
+  // handshakes with whoever holds it and steps over a stranger. One
   // the caller CHOSE is not — the refusal names that port bare and dies,
   // because scanning off it would serve the board somewhere the operator did
   // not ask for and reusing it would hand them someone else's. What tells
   // them apart is `instance.derived` and not truthiness on `portGiven`: an
-  // explicit `--port 0` is falsy (#366's legal ephemeral bind), so the old
+  // explicit `--port 0` is falsy (a legal ephemeral bind), so the old
   // spelling gave it the derived port's treatment, and nothing pinned that.
   const portGiven = port ?? argPort();
   interval = interval ?? argInterval() ?? 15;
   open = open ?? has("open");
-  // #1583: built HERE, once, and read by every tick below. Beside the other
+  // Built HERE, once, and read by every tick below. Beside the other
   // argv reads rather than inside tick() for the obvious reason — a pin rebuilt
   // per tick is a pin in name only — and above the port loop because it costs
   // nothing to carry: spendDirPin() touches no filesystem until its first call,
   // so the reuse and degrade arms that exit before ticking pay nothing for it.
-  // `spendDir ?? argSpendDir()` (#1679), matching the `port ?? argPort()`
+  // `spendDir ?? argSpendDir()`, matching the `port ?? argPort()`
   // shape above: every other argv-read option here takes an in-process
   // override, and this one hadn't, so the only way to drive --spend-dir
   // through `serve` at all was the real CLI — no test exercised it.
@@ -1723,7 +1724,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   const instance = resolveCockpitInstance({ cwd: process.cwd(), gitCommonDir: gitCommonDir(), port: portGiven });
   const stateDir = instance.stateDir;
   const jsonPath = join(stateDir, "board.json");
-  // #1656: the ledger's own default (ledger.mjs's defaultLedgerPath()) is
+  // The ledger's own default (ledger.mjs's defaultLedgerPath()) is
   // never reached here — board.mjs always passes an explicit --file — so an
   // absent --ledger has to be defaulted against the SAME instance the state
   // directory came from, not a cwd-relative literal. A worktree or a
@@ -1731,18 +1732,18 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // not exist there, while the state directory (above) had already moved to
   // the workspace: the board and the ledger could disagree about which run
   // they belonged to, exactly what resolveCockpitInstance() exists to rule
-  // out (#1656 review).
+  // out.
   ledgerFile = ledgerFile || join(stateDir, "ledger.md");
   // `served` is the port this process actually BOUND, handed in rather than
   // closed over: it is not knowable until listen() returns (--port 0 is an
-  // ephemeral bind, #366/#435, and the loop below may also land past a
+  // ephemeral bind, and the loop below may also land past a
   // candidate it could not take), and a tick that reached for `portGiven`
   // instead would stamp every board served on an ephemeral port with a
   // `port: 0` no browser could ever reach. A parameter makes that
   // unreachable rather than merely unlikely — there is no earlier value in
   // scope for it to pick up.
   // One tick at a time, and the flag is load-bearing rather than defensive.
-  // Before #1713 the timer's callback was synchronous, so node could not start
+  // The timer's callback used to be synchronous, so node could not start
   // a second tick while the first was still inside gather() — it just fired
   // late. An async tick has no such floor: a gather that outruns `interval`
   // (a `gh` outage riding out its own timeouts, an operator's `--interval 1`)
@@ -1767,7 +1768,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
     }
     ticking = true;
     try {
-      // #1585: the identity a second launch's handshake reads off this
+      // The identity a second launch's handshake reads off this
       // cockpit. It rides the board payload deliberately, rather than a
       // lockfile or a second endpoint: a payload exists only while the
       // process serving it does, so nothing written here can outlive this
@@ -1775,13 +1776,13 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
       // on the degrade arm — no workspace was established — which is exactly
       // the value no launch may ever match on.
       //
-      // #1584: joined at gather(), not stamped onto the finished model. The
+      // Joined at gather(), not stamped onto the finished model. The
       // assignment that used to sit below this line wrote a field the pure
       // model did not declare, so `build` printed a board with no identity
       // at all and only the served copy carried one.
       const model = computeBoard(await gather({
         ledgerFile, prevFile: jsonPath, interval,
-        // #1597: beside the ledger and out of the same state directory, so
+        // Beside the ledger and out of the same state directory, so
         // the board, the ledger and the heartbeat cannot disagree about which
         // run they belong to — the invariant resolveCockpitInstance() exists
         // for. Re-derived per tick rather than closed over, exactly like
@@ -1790,7 +1791,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
         workspace: instance.workspace, port: served,
         // The pinned transcript directory, not a fresh lookup: every tick after
         // the first gets the SAME answer, which is what stops the panel
-        // alternating between two sessions under one project directory (#1583).
+        // alternating between two sessions under one project directory.
         spendDir: spendPin(),
       }));
       const tmp = `${jsonPath}.tmp`;
@@ -1800,14 +1801,14 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
     finally { ticking = false; }
   };
 
-  // #1660: a held port used to mean three different things this loop could
+  // A held port used to mean three different things this loop could
   // only tell apart by binding first and probing whichever candidate
   // happened to refuse — so a live cockpit that landed past a squatter
   // which has since departed was invisible the moment that squatter's port
   // freed (this process would just bind it directly), and a workspace with
   // no identity established (the degrade arm) still scanned past a held
   // port with nothing a handshake could ever match, reopening the
-  // dual-cockpit hazard #1656 closed.
+  // dual-cockpit hazard.
   //
   // Bind stays the FIRST thing tried per candidate: that is what lets two
   // launches racing at start settle on one winner quickly, the winner's
@@ -1821,7 +1822,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // this workspace has no identity to match on: an explicit --port
   // (`!instance.derived`) and the degrade arm (no `isWorkspaceId` identity)
   // never had a handshake to reach in the first place, so a held port for
-  // either stays fatal, exactly as it was before #1585 existed.
+  // either stays fatal, exactly as it was before the handshake existed.
   const candidates = cockpitPorts(instance);
   const scannable = instance.derived && isWorkspaceId(instance.workspace);
   let server = null;
@@ -1837,7 +1838,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
       attempt.close();
       const url = `http://localhost:${rest[matchAt]}/`;
       console.error(`${NAME}: cockpit already running for this workspace on ${url}`);
-      // Nothing is opened here, --open or not (#1714). This cockpit was
+      // Nothing is opened here, --open or not. This cockpit was
       // already running when this launch arrived, so its tab was the business
       // of the launch that started it; run-team's phase 0 relaunches on every
       // re-shortlist, and opening here stacked one more tab for the same
@@ -1871,7 +1872,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // the state directory and board.html. Never for a launch either check
   // above already turned into a no-op: this shares the state directory
   // with whatever this workspace's live cockpit is doing, and touching it
-  // before reuse was settled is what #1660's review flagged in the reuse
+  // before reuse was settled was a defect in the reuse
   // arm (mkdirSync/copyFileSync used to run before the candidate loop).
   mkdirSync(stateDir, { recursive: true });
   try { copyFileSync(join(SCRIPT_DIR, "board.html"), join(stateDir, "board.html")); }
@@ -1885,28 +1886,28 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   server.on("error", (e) => die(e.message));
 
   // Everything below is reached only by a process that HOLDS a port, which is
-  // what #1656's listen-callback gating bought and what this loop has to keep
+  // what the listen-callback gating bought and what this loop has to keep
   // paying for by position: tick() writes into stateDir, SHARED by every cwd
   // that resolves to this workspace, so a process that never binds must not
   // reach it. A second cockpit that ticked first would overwrite the live
   // one's board.json and reset every ticket's dwell clock.
   //
   // Announce the port we GOT, not the one we asked for. They differ for the
-  // one value #366 newly permits: listen(0) binds an ephemeral port, so
+  // one value `--port 0` newly permits: listen(0) binds an ephemeral port, so
   // echoing the request prints — and --opens — http://localhost:0, which
-  // reaches nothing while the board sits on a port nobody was told (#435
-  // review). address() is only populated once listening, hence only here.
+  // reaches nothing while the board sits on a port nobody was told.
+  // address() is only populated once listening, hence only here.
   const bound = server.address().port;
   console.error(`${NAME}: cockpit on http://localhost:${bound}  (interval ${interval}s)`);
 
-  // #1660: publish identity the instant this port is ours — before the
+  // Publish identity the instant this port is ours — before the
   // first tick, which is the one that can be slow (gather() shells out to
   // gh and ledger.mjs). A sibling launch races this one by sending its
   // probe as soon as ITS bind attempt refuses, which can be well before
   // this process's first gather() ever returns; the answer that probe needs
   // has to already be on disk, not waiting on a compute this process has
   // not started yet.
-  // #1584: `port` rides along. This stub is a board payload like any other
+  // `port` rides along. This stub is a board payload like any other
   // for as long as the first gather() takes, and a reader that finds it —
   // the operator, a script, the page — gets the same two identity fields
   // from it that every later tick writes. The handshake above still reads
@@ -1915,7 +1916,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   renameSync(`${jsonPath}.tmp`, jsonPath);
   // Yield once so a connection already arriving — that same sibling's probe —
   // gets a chance to read the identity just written before this process starts
-  // the first tick. The tick no longer blocks the loop (#1713), but gather()
+  // the first tick. The tick no longer blocks the loop, but gather()
   // still opens with a synchronous prev-board read before its first await, and
   // a turn of the loop costs nothing.
   await new Promise((resolve) => setImmediate(resolve));
@@ -1938,9 +1939,9 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   process.on("SIGTERM", stop);
 
   // --open, from this launch alone: it is the one that bound a port and
-  // started a server, and the reuse arms above open nothing (#1714). Only
+  // started a server, and the reuse arms above open nothing. Only
   // once the identity is on disk — a launcher running BEFORE that write put a
-  // child squarely inside the window #1660 exists to keep empty, where a
+  // child squarely inside the window the identity stub exists to keep empty, where a
   // racing launch's probe finds no payload and reads this port as foreign —
   // and only after the tick, the timer and both signal handlers are in
   // place: `xdg-open` can run the browser it starts in the foreground and
@@ -1951,13 +1952,13 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   await new Promise(() => {}); // run until signalled
 }
 
-// #1093: an internal FAULT is not a refusal, and until this they were one
+// An internal FAULT is not a refusal, and until this they were one
 // line. Every guard in this file refuses through die(), which writes its own
 // line and calls process.exit(2) itself (arg.mjs) rather than throwing, so
 // nothing a caller can type unwinds as far as the catch below. Re-checked
 // against the tree rather than taken from the ticket: every `throw` in this
 // file — readOmpSpend's per-transcript catch, and the three prev-board shape guards
-// gather() gained in #1192 — is caught by the try that raises it, so the whole
+// gather() gained — is caught by the try that raises it, so the whole
 // population reaching this handler is this script breaking. Handing that
 // to die() printed a bug under the wording and the exit code a typo gets — one
 // `board: <text>` line, exit 2, no stack — and an operator could not tell the
@@ -1968,14 +1969,12 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
 // "an internal software error has been detected", and it spends nothing the
 // fleet's exit vocabulary already means: 0 is the answer, 1 is a verdict (this
 // script has none to give), 2 is every refusal here, 3 is candidates.mjs's
-// minted verdict, and 126+ is the band a shell mints for itself. Stated in the
-// script-surface table of docs/specs/2026-07-23-fleet-plugin-design.md, which
-// board.mjs had no row in at all before this.
+// minted verdict, and 126+ is the band a shell mints for itself.
 const FAULT_EXIT = 70;
 
 // The diagnostic, and it can never come back empty. Read off `stack` rather
 // than `instanceof Error`: the stack is what a fault owes the operator, and
-// asking for it directly needs no error TYPE — the hierarchy #1093 rules out.
+// asking for it directly needs no error TYPE — the hierarchy this rules out.
 // A thrown non-Error has no stack and used to arrive as `e.message ===
 // undefined`, so the CLI printed the literal `board: undefined`; inspect()
 // renders every value there is — `undefined`, `null`, `""`, a circular object
@@ -1991,11 +1990,10 @@ export function faultText(e) {
 //
 // A single writeSync call can also short-write — return the count it
 // managed and throw nothing at all — or throw EAGAIN outright, the same
-// failure #889 gave die() (arg.mjs) a bounded retry loop for, and PR #1523
-// then gave staleness.mjs's verdict() too. board.mjs has exactly one
-// writeSync call site — this one — and #1549 moved arg.mjs's die() and
-// staleness.mjs's verdict() onto the shared writeAll() and deleted
-// ci-state.mjs's emit() outright, so fault() is now the only script-level
+// failure arg.mjs's writeAll() has a bounded retry loop for. board.mjs has
+// exactly one writeSync call site — this one — and arg.mjs's die() and
+// staleness.mjs's verdict() use the shared writeAll() while
+// ci-state.mjs has no emit() of its own, so fault() is now the only script-level
 // function left hand-rolling this loop directly: it carries the largest
 // single payload of any of them, a full stack, not a one-line refusal — so
 // it is the one most likely to collide with a saturated pipe and lose the

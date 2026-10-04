@@ -1,9 +1,9 @@
 // Pure board-model builder. No I/O and no clock read — `now` is passed in, so
 // dwell/staleness is deterministic and unit-testable. board.mjs does the gh/
 // ledger I/O and calls computeBoard(); every stage-derivation and flag decision
-// lives here and is exercised by compute-board.test.mjs (`node --test`).
+// lives here and is exercised by its unit tests (`node --test`).
 //
-// #1597, #1820, #1839: the THREE imports this module takes, all pure ones.
+// The THREE imports this module takes, all pure ones.
 // fleet-state.mjs owns the heartbeat's `beat` key, and the rule for reading
 // that key travels with it rather than being copied here. That module's own
 // I/O (its path probe, its file read) is never called from this file; only
@@ -16,26 +16,27 @@
 // from it for the same reason — one grammar, one reader, so the cockpit and
 // fleet-tick.mjs cannot disagree about which members are live.
 // fleet-tick.mjs owns a row's PR reading, PR_MENTION, and a row with no impl
-// token is read through it (#1820 amendment 2a, below) so both readers name
-// the same PR for the same text, for a row that carries a PR-bound signal —
+// token is read through it (see the paragraph below on a row with no `impl`
+// token) so both readers name the same PR for the same text, for a row that
+// carries a PR-bound signal —
 // an unsignaled row (no mention, no PR-bound member, no review=/reviewed=)
 // still gets pr: null here while fleet-tick.mjs's own row-key fallback keys
-// it to its ticket number regardless; see the amendment note below. The
+// it to its ticket number regardless; see the same paragraph below. The
 // regex is all this file takes from it: the tick's I/O and main() never run
 // here, main() being guarded on argv[1].
 import { assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
 import { parseToken, HALT_CAUSES } from "./ledger-grammar.mjs";
 import { PR_MENTION, REVIEWED, latestFinisherAttempts } from "./fleet-tick.mjs";
 
-// A ledger row is freeform, controller-authored text. Two real examples:
-//   #332 impl-332=PR#344 → PR#344 → MERGED 73b356de
-//   #324 impl-324=PR#346 → PR#346 · fix-pr-346 · ruled:6-applies · held-behind:#313
+// A ledger row is freeform, controller-authored text. Two example shapes:
+//   #<n> impl-<n>=PR#<m> → PR#<m> → MERGED 73b356de
+//   #<n> impl-<n>=PR#<m> → PR#<m> · fix-pr-<m> · ruled:6-applies · held-behind:#<k>
 // Extract by token, never by position — the controller reorders and appends
 // tokens freely. Unknown text is ignored, never fatal.
 //
-// Member tokens are ledger-grammar.mjs's (#1820). On a row that has one, the
+// Member tokens are ledger-grammar.mjs's. On a row that has one, the
 // row's latest `impl` attempt decides the card — the greatest retry suffix,
-// wherever it sits (#1843, laterAttempt below): live → IMPLEMENTING, `=PR#M`
+// wherever it sits (laterAttempt below): live → IMPLEMENTING, `=PR#M`
 // → that PR decides, `=released`/`=bailed` → no card of
 // the row's own (the POOL loop shows the ticket if it is still
 // `ready-for-agent`), `=killed`/`=tier-mismatch` → IMPLEMENTING with that
@@ -46,7 +47,7 @@ import { PR_MENTION, REVIEWED, latestFinisherAttempts } from "./fleet-tick.mjs";
 // nothing enforces that order, so on such a row the arrow is never a value
 // either reader may rely on.
 //
-// #1820 amendment 2a: a row with no `impl` token at all has no outcome to
+// A row with no `impl` token at all has no outcome to
 // read, so it takes the tick's reading. `ledger.mjs dispatch <pr> fix-pr-<pr>` /
 // `finisher-pr-<pr>` appends `#<pr> <member>` for a PR this run's
 // implementers did not open. Once such a row carries a PR-bound signal — a
@@ -57,7 +58,7 @@ import { PR_MENTION, REVIEWED, latestFinisherAttempts } from "./fleet-tick.mjs";
 // A member settled anywhere on the row is settled — a bare copy beside
 // `<member>=<outcome>` is what a whole-line `row` rewrite leaves.
 //
-// #2083: a PR whose latest finisher attempt settled `halted:<cause>` carries
+// A PR whose latest finisher attempt settled `halted:<cause>` carries
 // that outcome as a severity-4 flag while the PR sits in REVIEW. The halt is
 // the finisher working correctly — it refused to label — so the PR has no
 // `ready-to-merge` until the controller resolves the cause; the flag is what
@@ -66,7 +67,7 @@ import { PR_MENTION, REVIEWED, latestFinisherAttempts } from "./fleet-tick.mjs";
 // `## Dispatched` tokens): a live `-b` after the halt clears it, and a later
 // attempt settled anywhere replaces it.
 //
-// #2331: a PR whose finisher settled `labelled` while the open list shows no
+// A PR whose finisher settled `labelled` while the open list shows no
 // `ready-to-merge` on it carries a severity-4 `unlabelled` flag in REVIEW —
 // fleet-tick.mjs's own reading (unlabelledFinishers: the latest attempt since
 // the last `label-off=`), off the same `## Dispatched` and row tokens the tick
@@ -80,12 +81,12 @@ import { PR_MENTION, REVIEWED, latestFinisherAttempts } from "./fleet-tick.mjs";
 // dispatches nothing for these; the flag is what puts the PR in front of a
 // human. The names are not the bare `killed` flag, which is the implementer's.
 //
-// A PR's review is not a member (#1773 §7): `review=wf:<runId>` is a Workflow
+// A PR's review is not a member: `review=wf:<runId>` is a Workflow
 // with nobody to name, while `review=member:<name>` and
 // `review=fallback:<name>` name a runner member, live until the token is
 // settled `=failed` or a later `reviewed=` records its result.
 //
-// #1820 amendment 5a: a `review=` token puts the PR under review only while
+// A `review=` token puts the PR under review only while
 // it is live. A settled `review=…=failed` is a dead review and the PR is owed
 // one again, as run-team SKILL.md defines review-due and as fleet-tick.mjs's
 // `reviewedAny` reads the token: the PR is owed none while the row carries
@@ -105,7 +106,7 @@ const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
 // what each kind means and how `=failed` settles it.
 const REVIEW = /^review=(wf|member|fallback):([^=\s]+?)(=failed)?$/;
 
-// #1843: which of two well-formed impl tokens is the later attempt for THIS
+// Which of two well-formed impl tokens is the later attempt for THIS
 // row's ticket. A token whose number matches the row's own ticket always
 // outranks one that does not: a retry suffix only orders attempts on ONE
 // number (ledger-grammar.mjs's MEMBER regex comment — "Attempts on one
@@ -158,8 +159,8 @@ export function parseRow(row) {
   const finishers = []; // well-formed finisher tokens, for the row's PR below
   let anyImpl = false;
   let prMember = false;
-  let review = false; // any review= token: a PR-bound signal (amendment 2a)
-  let reviewLive = false; // one not settled `=failed` (amendment 5a)
+  let review = false; // any review= token: a PR-bound signal on a row with no impl token
+  let reviewLive = false; // one not settled `=failed`: a live review
   let reviewed = false;
   let reviewedHead = null;
   let runners = [];
@@ -194,7 +195,7 @@ export function parseRow(row) {
       }
     } else if (tok.startsWith("reviewed=")) {
       reviewed = true;
-      // (#2083) The head that review actually read — the cockpit's own copy
+      // The head that review actually read — the cockpit's own copy
       // of fleet-tick.mjs's `reviewedHead`, needed below to tell a past-pin
       // halt already answered by this review apart from one still owed a
       // fresh one.
@@ -208,7 +209,7 @@ export function parseRow(row) {
   const implOutcome = lastImpl ? (implOutcomes.get(lastImpl.name) ?? null) : null;
   const prM = implOutcome && /^PR#(\d+)$/.exec(implOutcome);
   let pr = prM ? Number(prM[1]) : null;
-  // #1820 amendment 2a: a row with NO impl token — a malformed one still
+  // A row with NO impl token — a malformed one still
   // counts, since that row's key is a ticket — is keyed, once THIS row
   // carries a PR-bound signal, the way fleet-tick.mjs's PR_MENTION-then-
   // row-key logic would: its first PR_MENTION (itself a signal), else the
@@ -249,7 +250,7 @@ export function parseRow(row) {
 // released or bailed implementer: the ticket went back to the tracker, and the
 // POOL loop shows it if it is still `ready-for-agent`). An Exclusion is POOL.
 // MERGED is an explicit `MERGED <sha>` token or, failing one, `prState.merged`
-// — gh's answer for a row PR absent from the open list, or (#1841) a
+// — gh's answer for a row PR absent from the open list, or a
 // carry-forward of the previous board's MERGED for that SAME PR on that
 // ticket: MERGED is terminal, so a merged PR never reopens regardless of
 // what this run's merged read says — but a ticket retried under a NEW PR
@@ -276,7 +277,7 @@ export const STALE_MS = {
   READY: 15 * 60 * 1000,
 };
 
-// An Exclusion's badges are its premises, `excluded:#880` for a number and
+// An Exclusion's badges are its premises, `excluded:#<n>` for a number and
 // `excluded:<branch>` for a branch name, and nothing else: it is supply, so no
 // dwell clock and no cause applies. isBadge() keeps them out of `attention`.
 export function deriveFlags(parsed, ctx) {
@@ -352,7 +353,7 @@ function splitNumbered(line) {
   return m ? { issue: Number(m[1]), subject: m[2] } : { issue: null, subject: line };
 }
 
-// The stall surface, or null when there is nothing to say. #1597.
+// The stall surface, or null when there is nothing to say.
 //
 // The two facts the report needs beyond the mark itself — what is claimed and
 // whether the pool still has supply — are read off THIS model rather than
@@ -386,7 +387,7 @@ function stall(beat, ticked, tickets, pool, { ledgerOk, poolOk }, now) {
   return { ...verdict, claimed, supply, text: stallReport(verdict, { claimed, supply }) };
 }
 
-// #2108: which of gather()'s `gh ... list` reads came back exactly as long as
+// Which of gather()'s `gh ... list` reads came back exactly as long as
 // its own `--limit` — and so may have been cut there, gh saying nothing — as
 // one rendered line, or null when neither did. The pool's count carries its
 // own `n+` besides (computeBoard below); this line is for what a count cannot
@@ -401,7 +402,7 @@ function capNotice({ poolCapped, prsCapped }) {
   return parts.length ? parts.join("; ") : null;
 }
 
-// #1841: the previous board already showed this SAME PR MERGED on this
+// The previous board already showed this SAME PR MERGED on this
 // ticket. MERGED is terminal, so that verdict stands whatever this run's
 // merged read says. Keyed on the PR, not just the ticket: a ticket retried
 // under a NEW PR after its earlier one merged carries no MERGED verdict
@@ -412,7 +413,7 @@ function carriedMerged(prevTicket, p) {
   return prevTicket?.column === "MERGED" && prevTicket.pr === p.pr;
 }
 
-// #1840: the row PRs whose merged status gather() has to ask gh about this
+// The row PRs whose merged status gather() has to ask gh about this
 // tick — exactly those computeBoard() would consult `merged` for and cannot
 // already place: a row PR absent from the open list `prs`, on a row that is
 // not an Exclusion (always POOL), carries no `MERGED <sha>` token, has a PR
@@ -441,15 +442,15 @@ export function mergedReadPrs({ ledger, prs, prev }) {
   return [...need].sort((a, b) => a - b);
 }
 
-// `merged` (#1820) is gh's list of merged PR numbers, consulted only for a row
+// `merged` is gh's list of merged PR numbers, consulted only for a row
 // PR absent from the open list `prs`; absent means none known, and a PR in
 // neither list (closed unmerged, or a failed read) keeps REVIEW — unless
-// (#1841) carriedMerged() holds for it, in which case it stays MERGED
+// carriedMerged() holds for it, in which case it stays MERGED
 // whether this run's merged read failed outright or simply succeeded
 // without listing it. A PR that IS in the open list is never eligible for
 // this carry-forward — only the "absent from both `prs` and (maybe)
 // `merged`" branch below ever consults it. gather() asks gh only about
-// mergedReadPrs()'s set (#1840), so `merged` never lists more than that.
+// mergedReadPrs()'s set, so `merged` never lists more than that.
 export function computeBoard(inputs) {
   const { ledger, issues, prs, ci, prev, now } = inputs;
   const prByNum = new Map(prs.map((p) => [p.number, p]));
@@ -492,8 +493,8 @@ export function computeBoard(inputs) {
     });
   }
 
-  // A wayfinder:* ticket is documentation-only regardless of its triage role
-  // (#1331): candidates.mjs's dispatch scan never surfaces one even carrying
+  // A wayfinder:* ticket is documentation-only regardless of its triage role:
+  // candidates.mjs's dispatch scan never surfaces one even carrying
   // `ready-for-agent`, so this POOL column must not either, or an
   // undispatchable ticket inflates the operator's read of available work.
   // Filtered HERE rather than out of gather()'s gh query: `issues` also feeds
@@ -515,8 +516,8 @@ export function computeBoard(inputs) {
     .sort((a, b) => severity(b.flags) - severity(a.flags));
 
   // Backlog is a PR nobody has reviewed and nobody is reviewing: no live
-  // `review=` (#1820 amendment 5a — a settled `=failed` one is no review), no
-  // `reviewed=`, and no live fix-applier or finisher on the row — or (#2083)
+  // `review=` (a settled `=failed` one is no review), no
+  // `reviewed=`, and no live fix-applier or finisher on the row — or
   // a returned review whose finisher halted `past-pin` against a head it
   // never read: owed again until the head catches up to what `reviewed=`
   // recorded, the same rule fleet-tick.mjs's reviewDue reads off headRefOid
@@ -530,7 +531,7 @@ export function computeBoard(inputs) {
     return t.column === "REVIEW" && !p.underReview && (!p.reviewed || pastPinBacklog(p));
   }).length;
   const cardsInPool = tickets.filter((t) => t.column === "POOL").length;
-  // #2108: a capped pool read makes this count a floor, and it says so the way
+  // A capped pool read makes this count a floor, and it says so the way
   // fleet-tick.mjs's claimed count does — `"100+"`, never a bare 100 that
   // reads as exact. stall() below receives the same value, so the stall line
   // and the footer cannot disagree about it.
@@ -541,13 +542,13 @@ export function computeBoard(inputs) {
     interval: inputs.interval ?? 15,
     repo: inputs.repo ?? null,
     repoUrl: inputs.repoUrl ?? null,
-    // #1584: which workspace this board describes and which port served it.
+    // Which workspace this board describes and which port served it.
     // Pass-through, exactly like repo/repoUrl above and for the same reason —
     // resolveCockpitInstance() answers both at the gather boundary, and this
     // module reads no cwd, no git and no socket, so it cannot re-derive either
     // and must not try. Defaulted to null rather than left undefined: a
     // missing key and a null one are the same value to a reader in JS but not
-    // in the JSON on disk, and #1585's launch handshake reads `workspace` off
+    // in the JSON on disk, and the launch handshake reads `workspace` off
     // that JSON — a dropped key would make every board anonymous to it.
     workspace: inputs.workspace ?? null,
     port: inputs.port ?? null,
@@ -557,7 +558,7 @@ export function computeBoard(inputs) {
     filed: (ledger.filed || []).map(splitNumbered),
     // Not derivable from anything else in this model: a ledger that was never
     // read, one read empty, and one whose payload would not parse all reduce to
-    // the same empty lists, which is the collapse #816 names. gather() is the
+    // the same empty lists. gather() is the
     // only caller that can tell them apart, so it says so and this carries the
     // answer to the page. Defaulted rather than required — every other caller
     // of computeBoard builds its inputs by hand and means a ledger it read.
@@ -569,7 +570,7 @@ export function computeBoard(inputs) {
     // which would read as "this run was free", and shows the error, which is
     // a bug the operator has to act on.
     spend: inputs.spend ?? null,
-    // #1597. Telemetry beside `spend`, and under the same rule: a liveness
+    // Telemetry beside `spend`, and under the same rule: a liveness
     // input can only ever POPULATE or OMIT this field, and nothing above it
     // reads `inputs.beat` — no column, no flag, no dwell clock, no attention
     // row. A dead controller does not move a ticket; it means nobody is

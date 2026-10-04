@@ -8,7 +8,7 @@
   :root { color-scheme: dark; --bg:#0d1117; --panel:#161b22; --line:#30363d;
     --fg:#e6edf3; --dim:#8b949e; --red:#f85149; --amber:#d29922; --green:#3fb950; --blue:#58a6ff; }
   * { box-sizing: border-box; }
-  /* The page is the window's height (#1759): header, banner, attention strip,
+  /* The page is the window's height: header, banner, attention strip,
      spend panel and footer keep their natural height and never shrink; #board
      takes the rest, and each column scrolls on its own past that. The board's
      min-height is the floor for a window too short for the fixed parts — they
@@ -91,7 +91,7 @@ const COLUMNS = ["POOL", "IMPLEMENTING", "REVIEW", "READY", "MERGED"];
 let interval = 15;
 let repoUrl = null; // full repo URL from the model (carries the host) — PR links, GHE-safe
 
-// The instance's name, for the tab strip and the header (#1584). Two cockpits
+// The instance's name, for the tab strip and the header. Two cockpits
 // are two WORKSPACES, and until this the pair rendered one constant twice —
 // the operator's only way to tell two open windows apart was to read the
 // tickets on them. `repo` has ridden the payload since the board existed and
@@ -99,7 +99,7 @@ let repoUrl = null; // full repo URL from the model (carries the host) — PR li
 //
 // Truthiness, not a null check: `gh repo view` failing leaves gather()'s
 // `repo` null, a malformed answer can leave it "", and the identity stub
-// served before the first tick (#1660) carries no `repo` key at all. All
+// served before the first tick carries no `repo` key at all. All
 // three mean "this board cannot name its repo", and all three must render
 // today's constant rather than `fleet cockpit — undefined`.
 //
@@ -136,15 +136,15 @@ function spendRows(host, items, { label, value, pct, highlight }) {
 // branching lives here rather than in renderSpend below because this page has no
 // other test seam: it is served as one self-contained file, so a test reaches
 // this decision only by lifting it out of the source and calling it directly,
-// which spend-view.test.mjs does. That gap is not academic — the falsy-cacheWrite
+// which a test does. That gap is not academic — the falsy-cacheWrite
 // case below shipped broken and its fix shipped untested, because until this
-// split there was nothing a test could call (#371).
+// split there was nothing a test could call.
 //
 // `kind` is the tag the renderer switches on; "hidden" appends nothing at all.
 // Both text-only outcomes carry the same `text` field because both render as one
 // `spend-wrap` div, differing only in wording.
 function spendView(sp) {
-  // #916's phrase, shared by both the early note-only branch and the funded
+  // The damaged-lines phrase, shared by both the early note-only branch and the funded
   // panel's note below, so a rewording can't update one copy and silently
   // miss the other. It names the LINES, not the files: one transcript can
   // hold several damaged lines, and "1 transcript damaged" would read as a
@@ -156,7 +156,7 @@ function spendView(sp) {
   // launched backgrounded and the operator is watching this page, not a log.
   //
   // Switch on `ok`, gatherSpend's explicit tag, and never on `error`. Reading
-  // the error case off `error`'s truthiness was #959: `{ error: "" }` and
+  // the error case off `error`'s truthiness was a bug: `{ error: "" }` and
   // `{ error: undefined }` — both of which the producer's outer catch can emit,
   // from a message-less throw and a thrown non-Error — matched neither this
   // branch nor a success shape, so they fell through, found no totals, and HID
@@ -179,7 +179,7 @@ function spendView(sp) {
   // rendered identically to "nothing yet". stderr does not cover it (see
   // above), so the note goes out on its own, without the zeroed two-column body.
   if (!sp.totals || !sp.totals.cacheWrite) {
-    // #916's worst case: when a damaged line WAS the run's only cache-creation
+    // The damaged-lines worst case: when a damaged line WAS the run's only cache-creation
     // turn there is nothing left to sum, so cache-write is 0 with `skipped`
     // also 0 — a freshly-dispatched agent with no cache-creation turn flushed
     // yet can land here too, which is why `damaged` alone, without `skipped`,
@@ -198,7 +198,7 @@ function spendView(sp) {
     lede: `${k(sp.totals.cacheWrite)} cache-write · ${k(sp.totals.cacheRead)} cache-read · ${k(sp.totals.output)} output · ${sp.totals.agents} agents · review ${sp.reviewPct.toFixed(0)}%`,
     // `skipped` means "contributed nothing"; `damaged` means "contributed, but
     // may be missing the torn line's tool_use blocks and output_tokens
-    // snapshot" (#916) — cache_creation/cache_read repeat on every line
+    // snapshot" — cache_creation/cache_read repeat on every line
     // of a turn and survive a mid-turn tear, so the panel's totals are not
     // necessarily short. Two different
     // lies, so two different phrases, both routed through the one channel that
@@ -282,27 +282,27 @@ function render(m) {
     span.append(el("span", "flag", (t.flags || []).join(" ")));
     att.append(span);
   }
-  // columns — each built once and kept, its contents rewritten every tick
-  // (#1848). A column scrolls on its own (#1759) and a scroll offset lives on
+  // columns — each built once and kept, its contents rewritten every tick.
+  // A column scrolls on its own and a scroll offset lives on
   // the element, so a tick that threw the columns away and built new ones
   // jumped every column back to the top within one poll. Keeping the node
   // keeps its scroll — and a scroll still in flight — with nothing to save
   // or restore. #board's own children ARE the column cache: nothing else
   // ever appends to or clears #board, so board.children[i] is always
-  // COLUMNS[i]'s node and no separate Map is needed to remember it (#1857
-  // review — a Map here could only ever agree with board.children or go
-  // silently stale against it, never disagree usefully). Every column's
+  // COLUMNS[i]'s node and no separate Map is needed to remember it: a
+  // Map here could only ever agree with board.children or go
+  // silently stale against it, never disagree usefully. Every column's
   // contents are built before any of them reach the DOM, so a ticket that
   // makes card() throw partway through leaves EVERY column on the previous
   // tick together — never some columns on the new tick and others frozen on
   // the old one, a mixed-tick board that could look like a normal render
-  // (#1857 review; poll()'s own catch below still banners the failure).
+  // (poll()'s own catch below still banners the failure).
   const board = document.getElementById("board");
   const q = m.queue || {};
   const next = COLUMNS.map((name) => {
     const inCol = (m.tickets || []).filter((t) => t.column === name);
     const h = el("h2", null, name + " ");
-    // #2108: POOL's own count is `q.pool` — the same number, except that a
+    // POOL's own count is `q.pool` — the same number, except that a
     // capped pool read makes it `"100+"`, and a header reading a bare 100
     // beside a footer reading 100+ would be the exact claim the `+` retracts.
     h.append(el("span", null, String(name === "POOL" ? q.pool ?? inCol.length : inCol.length)));
@@ -314,7 +314,7 @@ function render(m) {
     col.replaceChildren(...next[i]);
   });
   renderSpend(m.spend);
-  // #2108: computed here, ahead of the footer, not only inside the banner
+  // Computed here, ahead of the footer, not only inside the banner
   // arm below. The banner is a single slot behind a stale/stall/ledger
   // priority chain (next section): whenever any of those also fires on the
   // same tick, that chain's capMsg arm never runs, and an open-PR cap has no
@@ -334,8 +334,8 @@ function render(m) {
     (m.filed || []).map((f) => "#" + f.issue).join(" "));
   foot.append(filed);
   // freshness
-  // #1713: exactly one payload reaches this page without a `generatedAt` —
-  // #1660's identity stub, written at bind time so a racing launch's probe has
+  // Exactly one payload reaches this page without a `generatedAt` —
+  // the identity stub, written at bind time so a racing launch's probe has
   // something to read. The page can now SEE it, because the cockpit answers
   // HTTP while its first tick is still computing where it used to answer
   // nothing at all until the tick was done. Only computeBoard() sets the
@@ -346,7 +346,7 @@ function render(m) {
   const banner = document.getElementById("stale-banner");
   const ledgerMsg = ledgerBanner(m.ledgerState);
   const stallMsg = livenessBanner(m.liveness);
-  // #2108: best-effort placement in the single banner slot when nothing
+  // Best-effort placement in the single banner slot when nothing
   // higher-priority holds it — ranked last, since stale/a stall/an unread
   // ledger each say the board is wrong wholesale, versus this notice, which
   // only says it may be short at one edge. The footer append above is what
@@ -375,7 +375,7 @@ function render(m) {
   } else { banner.style.display = "none"; banner.className = ""; }
 }
 
-// The heartbeat's mark, rendered — #1597. A dead run's tickets keep the label
+// The heartbeat's mark, rendered. A dead run's tickets keep the label
 // that marks them in flight, and the candidate scan EXCLUDES that label, so a
 // run that stopped silently costs the night AND strands its tickets out of
 // sight of the next run's scans. This is the surface that says so while the
@@ -402,7 +402,7 @@ function livenessBanner(l) {
   return l && l.text ? "⚠ " + l.text : null;
 }
 
-// Three ledger states, three renderings (#816). `read` refuses an absent ledger
+// Three ledger states, three renderings. `read` refuses an absent ledger
 // under --require-file now, so gather() can tell "there was no ledger to read"
 // from "read it, nothing filed yet" from "read it, the answer would not parse".
 // All three used to arrive here as the same empty lists and drew the same empty
