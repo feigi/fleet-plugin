@@ -260,7 +260,7 @@ test("CLI: a state write that cannot land FIRES rather than holding the same rem
   }
 });
 
-test("CLI: a fleet-tick that runs DURING the hold is not reverted when the hold ends", async () => {
+test("CLI: a fleet-tick that runs DURING the hold is not reverted when the hold ends", () => {
   // The hold is up to 240s by default, and fleet-tick runs on every other wake
   // that owe this script nothing — so the file it wrote at the end of a hold is
   // not the file it read at the start. Patching the pre-hold snapshot back
@@ -273,23 +273,36 @@ test("CLI: a fleet-tick that runs DURING the hold is not reverted when the hold 
   // A long streak, so the interval is at the ceiling and one hold cannot serve
   // it — which is the state a quiet night is in when work finally arrives.
   writeFileSync(path, JSON.stringify({ quiet: 6, elapsed: 0, digest: "old" }));
-  const child = spawn(process.execPath,
-    [SCRIPT, "--base", "600", "--ceiling", "1200", "--hold", "3", "--state", path], { stdio: "ignore" });
-  const exited = new Promise((resolve, reject) => {
-    child.on("exit", resolve);
-    child.on("error", reject);
-  });
-  // Well inside the hold, and after the read it opens with.
-  await new Promise((r) => setTimeout(r, 700));
-  writeFileSync(path, JSON.stringify({ quiet: 0, elapsed: 0, digest: "fresh" }));
-  assert.equal(await exited, 0);
-
+  // fleet-tick's write lands INSIDE the hold, from the child itself: the
+  // preload wraps Atomics.wait, which block() holds with, and writes the fresh
+  // state as the hold begins. A sleep in this process cannot place that write:
+  // a child that starts later than the sleep reads the fresh file at startup,
+  // and the pre-hold-snapshot regression then passes. If the hold stops going
+  // through Atomics.wait, nothing writes the fresh state and the assertions on
+  // it below fail.
+  const preload = `import { writeFileSync } from "node:fs";
+    const wait = Atomics.wait;
+    let held = false;
+    Atomics.wait = (...a) => {
+      if (!held) {
+        held = true;
+        writeFileSync(${JSON.stringify(path)}, ${JSON.stringify(JSON.stringify({ quiet: 0, elapsed: 0, digest: "fresh" }))});
+      }
+      return wait(...a);
+    };`;
+  const r = spawnSync(process.execPath,
+    ["--import", `data:text/javascript,${encodeURIComponent(preload)}`,
+      SCRIPT, "--base", "600", "--ceiling", "1200", "--hold", "1", "--state", path], { encoding: "utf8" });
   const after = JSON.parse(readFileSync(path, "utf8"));
   rmSync(dir, { recursive: true, force: true });
+  assert.equal(r.status, 0, r.stderr);
+  // The opening read saw the pre-hold file: the printed streak is the one it
+  // read before the hold.
+  assert.match(r.stdout, /\(quiet=6\)/);
   assert.equal(after.quiet, 0, "the streak fleet-tick reset during the hold must survive the hold");
   assert.equal(after.digest, "fresh", "the digest fleet-tick wrote during the hold must survive the hold");
   // And this script's own key still advanced by the hold it actually served.
-  assert.equal(after.elapsed, 3);
+  assert.equal(after.elapsed, 1);
 });
 
 test("CLI: with no --state, and with an empty one, it resolves the run's shared default", () => {
