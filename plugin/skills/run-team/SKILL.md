@@ -3149,9 +3149,12 @@ immediately before the branch delete, because a commit can land across the
 pushed-branch checks are **not** re-run there — a commit landing in that window
 is ahead of `origin/main` by construction, so the recount covers it. All clear →
 drops the label, removes the worktree without `--force`, deletes the branch with
-`-D`, authorized by those two commit checks plus the recount and by nothing else
-(`-d` measures against local HEAD, and a claim has no upstream, so it refuses a
-pristine claim whenever local `main` is behind `origin/main` — #760). Any one of
+`git update-ref -d` on the tip it read once before the recount — a
+compare-and-swap that refuses if the branch has moved off that tip — authorized
+by those two commit checks, the recount and a fresh check that no worktree holds
+the branch, and by nothing else (not `git branch -d`: it measures against local
+HEAD, and a claim has no upstream, so it refuses a pristine claim whenever local
+`main` is behind `origin/main`). Any one of
 them failing → it touches nothing and names the blocker. **That refusal is the
 finding, never an obstacle**: a claim carrying commits or a pushed branch is not
 auto-released, ever — run `worktree-audit.sh` (it audits every worktree; find

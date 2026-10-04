@@ -113,6 +113,34 @@ test("run-team/SKILL.md: the release-claims section carries the same limitation"
   );
 });
 
+test("run-team/SKILL.md: the release deletes the branch with update-ref's compare-and-swap, not `-D`", () => {
+  // release-ticket.sh deletes with `git update-ref -d refs/heads/<branch> <tip>`
+  // on a tip read once, which refuses if the ref moved off that tip. SKILL.md
+  // kept saying `-D` after the script stopped using it, so a controller read
+  // the release as a force-delete of whatever the ref held at that moment.
+  const section = between(
+    RUN_TEAM,
+    "### Release the claims that never became PRs",
+    "**That refusal is the",
+    "run-team/SKILL.md",
+  );
+  assert.match(
+    section,
+    phrase("deletes the branch with `git update-ref -d` on the tip it read once"),
+    "SKILL.md's release section no longer names `git update-ref -d` on a tip read once as the branch delete",
+  );
+  assert.match(
+    section,
+    phrase("compare-and-swap that refuses if the branch has moved off that tip"),
+    "SKILL.md's release section no longer says the update-ref delete is a compare-and-swap that refuses if the branch has moved off the tip",
+  );
+  assert.doesNotMatch(
+    section,
+    /(?:deletes?|deleted)\s+(?:the\s+branch\s+)?(?:is\s+)?with\s+`(?:git\s+branch\s+)?-D`/,
+    "SKILL.md's release section says the branch is deleted with `-D` — release-ticket.sh deletes it with `git update-ref -d`",
+  );
+});
+
 test("run-team/SKILL.md: the by-hand fallback names worktree-audit.sh's no-argument contract", () => {
   // #525. The by-hand fallback for a claim `release-ticket.sh` refused sends
   // the reader to `worktree-audit.sh`, which takes NO argument and audits
