@@ -165,8 +165,14 @@ esac
 
 # Exit 4: the branch half succeeded but a label token was printed. The branch
 # half's own 1, 2 and 3 win; this only lifts a would-be 0.
+lift_exit_to_label_failure() {
+  exit_rc=$?
+  trap - EXIT
+  if [ "$exit_rc" -eq 0 ]; then exit 4; fi
+  exit "$exit_rc"
+}
 if [ "$label_failed" = true ]; then
-  trap 'exit_rc=$?; trap - EXIT; if [ "$exit_rc" -eq 0 ]; then exit 4; fi; exit "$exit_rc"' EXIT
+  trap lift_exit_to_label_failure EXIT
 fi
 [ -n "$branch" ] && [ -n "$oid" ] || die "gh pr view $pr returned no head branch or head commit"
 case "$oid" in *[!0-9a-f]*) die "gh pr view $pr returned a head commit that is not a hex SHA: '$oid'";; esac
