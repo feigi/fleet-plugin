@@ -1,12 +1,11 @@
 #!/usr/bin/env node
-// The allow-list checker (#1314, #1347). Layer 1 of two (#1298/ADR 0005):
+// The allow-list checker. Layer 1 of two:
 // this is a STATIC audit of an agent/skill/command file's frontmatter SHAPE,
-// before any run exists. Layer 2 (tier-check.mjs, #1345) compares a live
+// before any run exists. Layer 2 (tier-check.mjs) compares a live
 // dispatch's RESOLVED tier against the declaration; this file never reads a
 // transcript and never runs anything.
 //
-// Contract, fixed on #1314 and recorded with the key sets on its closing
-// comment: three key sets (agents, skills, commands), enforced in BOTH
+// Contract: three key sets (agents, skills, commands), enforced in BOTH
 // directions — an unknown key is a violation (half a contract leaves an
 // undocumented addition silent) and a missing REQUIRED key is a
 // violation — plus a third class, FORBIDDEN: a key that IS documented but
@@ -19,16 +18,16 @@
 // printed before exiting). Exit 2 for CANNOT-RUN — the allow-list is
 // missing or unreadable, or a file's frontmatter cannot be parsed at all.
 // The distinction matters: a missing allow-list must fail LOUDLY rather
-// than silently pass with an empty key set (#1314's own wording), which a
+// than silently pass with an empty key set, which a
 // bare exit-1-on-no-violations would do by accident if a missing file
 // happened to yield an empty ruleset instead of an error.
 //
 // Kind classification is PATH-based, never content-sniffed: an ancestor
 // segment named `agents`, a `<name>/SKILL.md` under `skills`, or a
-// `commands/<name>.md` — the same convention install-root-audit.test.mjs's
-// own tree walk and repo-root.mjs's own layout assumptions already use.
-// Works whether invoked with a repo-relative path (`plugin/agents/x.md`,
-// after #1336's re-nest) or a bare one under a kind directory (check-tracked.sh
+// `commands/<name>.md` — the same convention the test suite's install-root
+// tree walk and repo-root.mjs's own layout assumptions already use.
+// Works whether invoked with a repo-relative path (`plugin/agents/x.md`)
+// or a bare one under a kind directory (check-tracked.sh
 // hands this xargs-expanded `git ls-files` paths, always repo-relative from
 // the repo root check-tracked.sh itself runs in).
 //
@@ -39,7 +38,7 @@
 // this reader cannot make sense of (no closing fence, a line that is
 // neither blank nor `key: value`) is CANNOT-RUN, not a violation — a parser
 // that quietly skipped what it couldn't read would silently pass exactly
-// the "frontmatter unparseable" case #1314 named as a hard exit-2.
+// the "frontmatter unparseable" case the contract names as a hard exit-2.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -51,7 +50,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ALLOWLIST_PATH = join(SCRIPT_DIR, "frontmatter-allowlist.json");
 
 // ---------------------------------------------------------------------------
-// pure core — unit- and mutation-tested directly (frontmatter-check.test.mjs),
+// pure core — unit- and mutation-tested directly,
 // no filesystem or process access below this line until main()
 // ---------------------------------------------------------------------------
 

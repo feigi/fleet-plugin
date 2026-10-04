@@ -1,6 +1,6 @@
 // Pure spend-model builder. No I/O and no clock read — board.mjs reads the
 // session's subagent transcripts and calls computeSpend(); every classification
-// and rollup lives here and is exercised by compute-spend.test.mjs (`node --test`).
+// and rollup lives here.
 //
 // WHY cache_creation is the headline and cache_read is not: a fleet run reads
 // its cache an order of magnitude more than it writes it (one measured run:
@@ -11,7 +11,7 @@
 
 import { CELL_DEF } from "./ledger-grammar.mjs";
 
-// The implementer definitions #2129 retired — see classifyRole's `def` branch.
+// The retired pre-cell implementer definitions — see classifyRole's `def` branch.
 const RETIRED_IMPLEMENTER_DEF = /^fleet-implementer(-alt)?$/;
 
 // A fleet agent's role is not recorded anywhere as a field — it has to be
@@ -21,7 +21,7 @@ const RETIRED_IMPLEMENTER_DEF = /^fleet-implementer(-alt)?$/;
 // run-team fixes them (`impl-<n>`, `fix-pr-<n>`, `review-pr-<n>`,
 // `finisher-pr-<n>`, `merge-bot-<n>`).
 //
-// TWO IDENTITY SIGNALS, NEVER ONE (#1505). `agentDefinition` is the agent
+// TWO IDENTITY SIGNALS, NEVER ONE. `agentDefinition` is the agent
 // DEFINITION the dispatch recorded — `memory-housekeeper`,
 // `fleet-implementer-slow-high`, `fleet-review-verifier` — and `""` when it
 // recorded none. `memberName` is what the member was CALLED (`impl-387`,
@@ -33,7 +33,7 @@ const RETIRED_IMPLEMENTER_DEF = /^fleet-implementer(-alt)?$/;
 // happened to be supplied, and no rule could state which it meant.
 // That ambiguity is what booked a memory-system member dispatched as
 // `memory-housekeeper` but NAMED `brain-housekeeping` into the specialist
-// bucket, moving its session's review-spend headline by 22 points (#1505).
+// bucket, moving its session's review-spend headline by 22 points.
 // Each rule now names the signal it actually means and both readers fill both
 // parameters from the same kind of value, so the asymmetry cannot come back by
 // one reader being taught something the other was not.
@@ -46,7 +46,7 @@ const RETIRED_IMPLEMENTER_DEF = /^fleet-implementer(-alt)?$/;
 // that way books as "other" whenever its description does not happen to say
 // "finish pr" too, moving the headline for runs already recorded.
 // member-record.mjs matches the same four names, and its comment carries the
-// measurement (#326).
+// measurement.
 export function classifyRole(signals) {
   const def = String(signals?.agentDefinition ?? "");
   const name = canonicalMemberName(signals?.memberName);
@@ -57,7 +57,7 @@ export function classifyRole(signals) {
   //
   // Reads the member's IDENTITY — the recorded definition and the name — and
   // never `hay`. The definition is the authoritative half and the whole of
-  // #1505: a dispatch that recorded `memory-housekeeper` books memory whatever
+  // the fix: a dispatch that recorded `memory-housekeeper` books memory whatever
   // it called the member, so the eleven rows that shared one definition across
   // three buckets collapse to one. The NAME stays a signal beside it because a
   // definition that says nothing about the role is a real category here rather
@@ -82,7 +82,7 @@ export function classifyRole(signals) {
   if (/^size (candidate|ticket)/.test(desc.toLowerCase())) return "sizing";
 
   // Everything else at depth ≥ 1 is a reviewer's fan-out. This must stay AHEAD of
-  // the member patterns below: specialists are named things like "Review PR 539
+  // the member patterns below: specialists are named things like "Review PR <n>
   // correctness", which would otherwise book half the fan-out as reviewer spend.
   if (Number(signals?.spawnDepth ?? 0) >= 1) return "specialist";
 
@@ -92,16 +92,16 @@ export function classifyRole(signals) {
   // nested review host, so its fan-out arrives at depth 0 — measured 2026-09-16
   // on the live corpus, 466 of 477 `fleet-review-*` rows — and falls straight
   // through to the description patterns below, which is precisely the
-  // "Review PR 539 correctness" misread the depth check above exists to
+  // "Review PR <n> correctness" misread the depth check above exists to
   // prevent. Before this branch one definition, `fleet-review-verifier`, was
   // split across four buckets on nothing but prompt wording: 211 other, 172
-  // reviewer, 20 finisher, 2 merge-bot (#1486).
+  // reviewer, 20 finisher, 2 merge-bot.
   //
   // Matched against `def` ALONE — never the member's name, and never the `hay`
   // blend the patterns below use. A fleet member's own dispatch prompt says what
   // it is, so these names occur in description prose constantly, and a member
   // that merely mentions a definition was not dispatched as one. `^`-anchored:
-  // omp's own registry is bare-name/unnamespaced (ADR 0014), so the recorded
+  // omp's own registry is bare-name/unnamespaced, so the recorded
   // definition is always the bare form.
   //
   // The review side is a PREFIX and the implementer side is EXACT, deliberately:
@@ -111,16 +111,16 @@ export function classifyRole(signals) {
   // (`fleet-implementer-<role>-<level>`, ledger-grammar.mjs): a name outside
   // it is no implementer definition, however it starts.
   //
-  // Except the pre-cell pair #2129 deleted, `fleet-implementer` and
+  // Except the retired pre-cell pair, `fleet-implementer` and
   // `fleet-implementer-alt`, matched for the same reason the finisher branch
   // keeps old spellings: deliberate compatibility with recorded history.
-  // Measured on docs/metrics/member-outcomes.tsv at #2129: 20 of the 303 rows
+  // Measured on docs/metrics/member-outcomes.tsv at their retirement: 20 of the 303 rows
   // under those two definitions carried no `impl-` name (`Impl1133`,
   // `FixPr1568`, …) and booked `implementer` off the definition alone — a
   // re-scrape of their sessions would have moved them to "other".
   //
   // One definition under that prefix is NOT fan-out: `fleet-review-runner`
-  // (#1802) is the member that HOLDS an omp review — dispatched as
+  // is the member that HOLDS an omp review — dispatched as
   // `review-pr-<n>`, the reviewer the name branch below would book — so it is
   // matched EXACTLY, ahead of the prefix. Its own fan-out arrives at depth ≥ 1
   // and is booked "specialist" by the depth check above.
@@ -129,14 +129,14 @@ export function classifyRole(signals) {
   if (CELL_DEF.test(def) || RETIRED_IMPLEMENTER_DEF.test(def)) return "implementer";
 
   // The dispatch NAME is checked alone, in this same fixed order, before the
-  // prose blend below ever runs (#1506). Both readers now hand a canonical
+  // prose blend below ever runs. Both readers now hand a canonical
   // omp/run-team name (`impl-<n>`, `fix-pr-<n>`, `finisher-<n>`, `finish-<n>`,
   // `review-pr-<n>`, `merge-bot-<n>`) straight through as `memberName`, and
   // that name is a MORE PRECISE signal than the member's own free-text
   // description — concatenating them into one `hay` before matching let a
   // description's prose out-rank the name whenever the fixed branch order
   // happened to check an earlier pattern the prose satisfied first. Measured
-  // live: `finisher-1380` described as "Fix PR 1380 review findings." matched
+  // live: `finisher-<n>` described as "Fix PR <n> review findings." matched
   // the reviewer branch on "review" in the prose before the finisher branch
   // ever saw the name that actually says what the member is; `merge-bot-12`
   // described with "...review findings" misread the same way as finisher.
@@ -163,10 +163,10 @@ function roleFromNamePatterns(hay) {
   // one and its cache writes fall through to "other", moving the review-side
   // headline — the one number anyone acts on — by several points.
   //
-  // `resolve-pr-<n>` joins the same bucket (#1250): it is a controller
+  // `resolve-pr-<n>` joins the same bucket: it is a controller
   // dispatch against an ALREADY-OPEN PR, not new ticket work — measured
-  // meta.json descriptions "Resolve conflict on PR 1232" and "Rebase and
-  // resolve conflicts for PR #1310", the same rebase/conflict-resolver shape
+  // meta.json descriptions "Resolve conflict on PR <n>" and "Rebase and
+  // resolve conflicts for PR #<n>", the same rebase/conflict-resolver shape
   // `run-team/SKILL.md` calls "a rebase-resolver" sent into an open PR's
   // worktree. It carries no ticket, no dispatch counter and no new-work verb —
   // only a PR number — so it is remediation on that PR's path to merge,
@@ -176,8 +176,8 @@ function roleFromNamePatterns(hay) {
   //
   // Only the NAME form `resolve-pr-` joins the alternation, deliberately
   // narrower than the `review pr`/`fix pr` prose forms beside it: the two
-  // real meta.json descriptions above ("Resolve conflict on PR 1232",
-  // "Rebase and resolve conflicts for PR #1310") never contain the bare
+  // real meta.json descriptions above ("Resolve conflict on PR <n>",
+  // "Rebase and resolve conflicts for PR #<n>") never contain the bare
   // words "resolve pr" adjacently, so a `resolve pr` prose alternative would
   // be untested reach rather than a measured pattern — and "resolve" is
   // common enough in unrelated prose (a finisher applying reviewer
@@ -205,7 +205,7 @@ export const CANONICAL_MEMBER_NAME_PREFIXES = "impl|fix-pr|finish(?:er)?|review-
 // `Review-pr-1449`, `ReviewPR77`, `FinisherPr1567b`, all in
 // docs/metrics/member-outcomes.tsv) — rewritten to the lower-kebab form every
 // name pattern in this file and in member-record.mjs's parseMemberName is
-// written against (#2396). omp task names are free-form, so nothing upstream
+// written against. omp task names are free-form, so nothing upstream
 // guarantees the kebab spelling, and an unmatched spelling lost both its role
 // and its tier-outcomes.tsv join key.
 //
@@ -264,7 +264,7 @@ export function computeSpend({ agents = [], topN = 8 } = {}) {
     .sort((a, b) => b.cacheWrite - a.cacheWrite);
 
   // `model` rides along only where the caller's agent object supplied one
-  // (#1716) — an agent with no `model` key keeps its payload exactly as it
+  // — an agent with no `model` key keeps its payload exactly as it
   // was rather than gaining a null column.
   const top = [...agents]
     .sort((a, b) => (b.cacheWrite ?? 0) - (a.cacheWrite ?? 0))

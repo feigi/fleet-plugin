@@ -13,7 +13,7 @@
 //   elapsed  fleet-heartbeat only. Seconds already held toward the current
 //            interval, because no harness lets one command block long enough
 //            to serve a twenty-minute interval in a single call.
-//   beat     fleet-heartbeat only (#1597). The liveness mark: when the beat
+//   beat     fleet-heartbeat only. The liveness mark: when the beat
 //            was last seen, the interval that was in effect when it was, and
 //            a deliberate stop's reason if one was recorded. Written by the
 //            heartbeat and by nothing else — fleet-tick READS it at the start
@@ -37,10 +37,10 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { workspaceDirFromGitCommonDir } from "./git-env.mjs";
 
-// The filename, in one place, because #1597 gave this file a SECOND resolver.
+// The filename, in one place, because the liveness mark gave this file a SECOND resolver.
 // board.mjs already resolves the run's workspace for itself — it has to, since
 // its own `canonicalise` opt-in is what keeps a symlinked route from deriving
-// a second port (#1582) — so it reaches the state file by joining onto the
+// a second port — so it reaches the state file by joining onto the
 // `.fleet` directory it already holds rather than re-running the probe below.
 // What it must NOT do is spell `heartbeat.json` a second time: a filename in
 // two places is the drift this module's header exists to prevent, and a
@@ -59,11 +59,11 @@ export function stateFileIn(fleetDir) {
 // This is ledger.mjs's defaultLedgerPath() resolution applied to a second file
 // for the same reason (there, a cwd-local ledger silently degraded the
 // duplicate-filing guard). The third file this comment used to predict arrived
-// with #1656 — board.mjs's resolveCockpitInstance() — so the resolution itself
+// as board.mjs's resolveCockpitInstance(), so the resolution itself
 // moved, as promised, though into git-env.mjs beside gitEnv() rather than into
 // this module: board.mjs and ledger.mjs both already import that one, and a
 // cockpit reaching into the heartbeat's state module for a path rule would be
-// a stranger dependency than either has now (#1658). Only the filename and the
+// a stranger dependency than either has now. Only the filename and the
 // warning below are this caller's own.
 export function statePath(name) {
   // GIT_DIR and GIT_WORK_TREE scrubbed, never inherited: an ambient GIT_DIR
@@ -75,10 +75,10 @@ export function statePath(name) {
   // run-merge-bot.md performs on the identical command in shell (`env -u
   // GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir`); spelled as an
   // env object here because there is no shell to spell it in.
-  // Migrating this inline scrub to gitEnv() — imported in this file since
-  // #1658 for the path rule above, not for the env — stays out of scope: it is
+  // Migrating this inline scrub to gitEnv() — imported in this file
+  // for the path rule above, not for the env — stays out of scope: it is
   // recorded with its own measurement and its own behavioural fixture in
-  // ambient-git-vars-mjs-prose.test.mjs's MJS_LEGACY_INLINE list.
+  // the test suite's MJS_LEGACY_INLINE list.
   const env = { ...process.env };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
@@ -207,14 +207,14 @@ export function readState(path, name) {
 // keeping.
 //
 // The write is a sibling temp file renamed over the target, ledger.mjs save()'s
-// convention, because the readers do not hold still for it (#2349). A plain
+// convention, because the readers do not hold still for it. A plain
 // writeFileSync truncates and then writes, and readState() maps the empty or
 // half-written file a reader can land on to the fresh, no-mark state on
 // purpose — so a reader racing a live beat read "no mark", and ledger.mjs
 // rotate, which refuses only while a mark is beating, moved a live
 // controller's ledger. rename is atomic on POSIX: a reader sees the whole old
 // file or the whole new one. The temp name carries the pid for the reason
-// ledger.mjs gives (#531): two scripts write this file, and a shared temp name
+// ledger.mjs gives: two scripts write this file, and a shared temp name
 // lets one rename the other's out from under it. A temp that never made it
 // into place is removed rather than left to accumulate, one per failed
 // invocation, beside the file it failed to replace.
@@ -253,7 +253,7 @@ export function writeState(path, name, prev, patch) {
 }
 
 // --------------------------------------------------------------------------
-// READING THE MARK — #1597. The rule, and the wording, in one place.
+// READING THE MARK. The rule, and the wording, in one place.
 //
 // Two readers consume this key and neither of them writes it: fleet-tick at
 // the start of a run (so a run that died overnight announces itself even when
@@ -307,7 +307,7 @@ export const DEFAULT_CEILING_S = 1200;
 //             drains (SKILL.md: "beat when there is nothing to do"), so a
 //             busy stretch that outlasts `beat`'s own grace window is not a dead
 //             run; fleet-tick's own edge-triggered invocations are the other
-//             liveness signal for exactly that case (#1597 follow-up).
+//             liveness signal for exactly that case.
 //   stopped   a reason was recorded. Reported whatever the age, because a
 //             recorded stop IS the end of the run and waiting for it to go
 //             stale first would sit on the one report that knows its cause.
@@ -354,8 +354,8 @@ export function isStalled(verdict) {
 // documented values) but not for every value the CLI guard actually accepts:
 // fleet-heartbeat.mjs's own guard refuses `--ceiling < --base` the same way
 // this file refuses other invalid shapes, and mirroring that refusal onto
-// sub-60s `--base`/`--ceiling` was the first fix tried for #1735 — until
-// fleet-heartbeat.test.mjs turned out to lean on 2s/3s/8s/9s/64s intervals
+// sub-60s `--base`/`--ceiling` was the first fix tried for the "0m" floor —
+// until the heartbeat's own test suite turned out to lean on 2s/3s/8s/9s/64s intervals
 // throughout, deliberately, to keep its real `Atomics.wait` holds fast. A
 // CLI-level refusal would force that whole suite onto minute-plus real
 // holds for no behavioural gain, so the fix lives here instead: a value
@@ -363,7 +363,7 @@ export function isStalled(verdict) {
 // to "0m" is what read as a division-by-zero defect, not the sub-minute
 // input itself.
 //
-// #1735 only moved the floor for values UNDER 60s. A 60-119s value still
+// That fix only moved the floor for values UNDER 60s. A 60-119s value still
 // fell on the whole-minutes branch, so a 90-119s interval floors to "1m"
 // while its own overdue remainder (usually still under 60s) prints in
 // seconds — the line's three numbers stop reconciling the moment any of
