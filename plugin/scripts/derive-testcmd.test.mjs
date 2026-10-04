@@ -352,6 +352,21 @@ for (const [tool, reason] of [
   });
 }
 
+// The reader asks mktemp twice, and a mktemp that starts and then fails — a
+// full or unwritable temp directory — is the same environment fault as one
+// that is missing, on either call.
+test("a mktemp that runs and fails on its second call is exit 3, never the cache's", () => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head, { test: "true" }));
+  const bin = shimPath({ node: true, omit: "mktemp" });
+  const real = execFileSync("sh", ["-c", "command -v mktemp"], { encoding: "utf8" }).trim();
+  const mark = join(bin, "called");
+  writeExecStub(join(bin, "mktemp"), `#!/bin/sh\nif [ -e '${mark}' ]; then echo 'mktemp: no space left' >&2; exit 1; fi\n: > '${mark}'\nexec '${real}' "$@"\n`);
+  const r = derive(dir, "test", { ...process.env, PATH: bin });
+  assert.equal(r.status, 3, r.err);
+  assert.match(r.err, /^derive-testcmd: cannot create a temporary file to read the Recipe cache$/m);
+});
+
 // `rm` is the reader's cleanup only, so it must not decide the outcome: with
 // it gone a good cache still reads cleanly — status 0 and nothing on stderr,
 // the success-path invariant claim-ticket.sh relies on — and a refused cache
