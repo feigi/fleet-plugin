@@ -28,8 +28,9 @@ the hold never gets stuck.
 
 The check also never mattered only to its own ticket. The dispatch-time tier
 check (ADR 0005, layer 2) catches a definition, `modelRoles` or harness
-resolution that "could load clean and silently run at the wrong tier". That
-fault is in how the fleet dispatches, so the next Pull would repeat it.
+resolution under which a member "could load clean and silently run at the
+wrong tier" (ADR 0005, Context, #1298). That fault is in how the fleet
+dispatches, so the next Pull would repeat it.
 run-team's phase 2 says so: dispatching the next member on top of an
 unchecked dispatch multiplies whatever silently degraded. A ticket closing
 does not make that risk go away.
