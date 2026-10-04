@@ -742,6 +742,16 @@ function fakeReaderSh(act) {
   return `${bin}:${BIN}:${process.env.PATH}`;
 }
 
+// The control: the same `sh` in front of the reader, doing nothing to it, is
+// a proof that holds — so the refusals below are about the kill, not the stub.
+test("an sh stub in front of the Recipe cache reader that lets it run still proves", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, COUNT_PROOF, { env: { PATH: fakeReaderSh(":") } });
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, /^recipe-prove: PROVEN/);
+  assert.equal(existsSync(cachePath(dir)), true);
+});
+
 // The reader's `sh` killed mid-read has no exit status and wrote nothing: it
 // reached no verdict, so it is no verdict either, and the refusal names the
 // kill rather than quoting an empty reason.
