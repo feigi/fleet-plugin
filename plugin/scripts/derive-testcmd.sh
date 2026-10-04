@@ -38,6 +38,12 @@
 # PATH entry, an executable path). A red suite is a finding, not a stale
 # Recipe, so nothing here ever runs the command.
 #
+# A Test entrypoint is also INVALID when a glob in it matches no tracked file
+# (the vacuous-suite probe, below): such a suite selects no tests and passes
+# having run nothing. The optional trailing `--at <rev>` names the commit whose
+# tree that probe reads instead of <repo>'s own index, for a caller that runs
+# the command in a worktree cut from a ref.
+#
 # Exit status: 0 the command is printed; 1 a refusal about the cache, the
 # repository or the arguments; 3 a tool this script needs to read the cache
 # (node, mktemp, cat) could not be started or node died mid-read, so nothing
@@ -77,10 +83,10 @@ export LC_ALL=C
 # runs it in a fresh worktree and bakes it into the runner, and review-core.mjs's
 # snapshot agent hands it to every specialist.
 #
-# GIT_WORK_TREE is unset alongside it and is INERT here: `rev-parse --git-dir`
-# and `--git-common-dir` consult no work tree. It stays on the line because the
-# pair is one hazard with one remedy, and "inert today" is a measurement of the
-# current call set, not a property of the script.
+# GIT_WORK_TREE is unset alongside it: the vacuous-suite probe's `check-ignore`
+# reads the ignore rules of whatever work tree git is pointed at, so an ambient
+# one naming another directory would refuse a Test entrypoint whose pattern
+# names this repository's gitignored build output.
 # A prose test pins the line itself.
 unset GIT_DIR GIT_WORK_TREE
 
@@ -101,7 +107,22 @@ unrunnable() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 3; }
 # step, so a controller or reviewer reading any of them knows what to run.
 derive="run the Recipe derivation step (run-team phase 0, before the first claim) to derive, prove and write it"
 
-[ $# -eq 2 ] || die "usage: derive-testcmd.sh <repo> <install|test>"
+# `--at <rev>` names the commit whose tree the Test entrypoint will run in, for
+# the vacuous-suite probe below. A caller that builds its worktree from a ref
+# (claim-ticket.sh cuts one from origin/main) is asking about THAT tree, which
+# the repository's own checkout may not hold: after the suite moves upstream
+# the checkout still lists the old layout until someone updates it. Without
+# `--at` the probe reads <repo>'s own index, as for a caller that runs the
+# command in <repo> itself. Three arguments is neither shape: a refusal.
+usage="usage: derive-testcmd.sh <repo> <install|test> [--at <rev>]"
+rev=
+case $# in
+  2) ;;
+  4) [ "$3" = --at ] || die "$usage"
+     rev=$4
+     case $rev in ''|-*) die "--at needs a commit, got '$rev' — $usage" ;; esac ;;
+  *) die "$usage" ;;
+esac
 repo=$1
 field=$2
 
@@ -111,6 +132,14 @@ case $field in
   install|test) ;;
   *) die "unknown Recipe field '$field' — expected install or test" ;;
 esac
+
+# A <rev> is only ever consulted by the probe, which only the Test entrypoint
+# has; accepting it for the Install step would answer a question nothing asked.
+if [ -n "$rev" ]; then
+  [ "$field" = test ] || die "--at applies to the test field only, not '$field' — $usage"
+  revc=$(git -C "$repo" rev-parse --verify "$rev^{commit}") \
+    || die "--at '$rev' does not resolve to a commit in $repo"
+fi
 
 # `--path-format=absolute` so the workspace is a real directory whatever the
 # caller's cwd; the workspace is the common dir's parent, the same rule
@@ -162,7 +191,7 @@ lenf=$(mktemp) || unrunnable "cannot create a temporary file to read the Recipe 
 # Cleanup decides nothing: an `rm` that cannot be started would otherwise
 # replace the script's own exit status with 127 (and print a line on the
 # success path), so the status the script was leaving with is kept.
-trap 'rc=$?; rm -f "$errf" "$lenf" 2>/dev/null || :; exit $rc' EXIT
+trap 'rc=$?; rm -f "$errf" "$lenf" "$errf.idx" 2>/dev/null || :; exit $rc' EXIT
 
 open='recipe<' close='>recipe'
 rc=0
@@ -231,12 +260,14 @@ esac
 value=${framed#"$open"}
 value=${value%"$close"}
 
-# Both consumers append the runner's own arguments after this string
-# textually (claim-ticket.sh's `exec sh -c '<cmd> "$@"' agent-test "$@"`), so
-# a command ending in `;`, `&`, or a newline lets a real shell read the
-# caller's "$@" as an unrelated top-level command instead of args reaching
-# the Test entrypoint, and one containing a `#`-led word swallows everything
-# after it, "$@" included, as a comment — measured on both. A trailing
+# claim-ticket.sh appends the runner's own arguments after this string
+# textually (`exec sh -c '<cmd> "$@"' agent-test "$@"`), so a command ending in
+# `;`, `&`, or a newline lets a real shell read the caller's "$@" as an
+# unrelated top-level command instead of args reaching the Test entrypoint, and
+# one containing a `#`-led word swallows everything after it, "$@" included, as
+# a comment. review-core.mjs's snapshot agent appends no arguments but embeds
+# the string in `{ cd <dir> && <cmd>; }`, where the same endings and `#` word
+# break the wrapper as a syntax error — measured on both. A trailing
 # newline is checked here too: the frame above lets a value keep one
 # where an unframed `$(…)` capture always dropped it silently, so a value
 # that used to read as `true;` now reads as `true;\n` and would otherwise
@@ -298,5 +329,107 @@ case $1 in
       || die "the Recipe cache at $cache is invalid: its $field command '$1' is not found or not executable from $repo — a Recipe that cannot run is stale, not a finding; $derive"
     ;;
 esac
+
+# The vacuous-suite probe, for the Test entrypoint only. A pattern that
+# matches no tracked file selects no tests, and a runner handed one can pass
+# having run nothing: `node --test` over a glob that matches nothing reports
+# `tests 0` and exits 0. The suite moved and the Recipe did not, so it is
+# stale, refused like a binary that is gone. Tracked, not present on disk: a
+# fresh worktree holds only what is tracked. Only a word the shell globs as
+# written, from <repo>, can be settled without running the command: a word
+# carrying quoting or an expansion, an option, an `=` assignment or value, or a
+# path outside <repo> is the program's own to read and is accepted unprobed,
+# and the scan stops at a `cd`, past which a pattern no longer resolves from
+# <repo>. So is a word right after an option written without `=`, unless it
+# has a `/` or a `.`: it may be that option's value, which names no path. A
+# pattern under a path git ignores names generated output, such as a build
+# the Install step produces, which is never tracked, so it is accepted too,
+# and so is one through a symlink or a submodule, which git lists as one
+# entry and declines to be asked beneath, and the shell follows or the
+# Install step populates. `[` is a pattern only with a `]` after it, so the
+# `[` builtin is not. The probe is git's `:(glob)` pathspec, whose `*` and
+# `?` match a leading dot where the shell's do not, so a pattern whose only
+# tracked matches are dotfiles is accepted though the shell would match
+# nothing. With `--at <rev>` the tracked files are <rev>'s tree, read into a
+# private index file, and the symlink and submodule test reads that tree
+# too; the ignore rules are still <repo>'s working copy's, the one place git
+# reads them from. The resolvability probe of the command's leading word
+# above stays <repo>'s own.
+if [ "$field" = test ]; then
+  # An ambient index would answer `ls-files` for whatever repository or commit
+  # the caller is in the middle of, not for <repo>'s tracked files.
+  unset GIT_INDEX_FILE
+  where=$repo
+  if [ -n "$rev" ]; then
+    where="$repo at $rev"
+    export GIT_INDEX_FILE="$errf.idx"
+    git -C "$repo" read-tree "$revc" 2>"$errf" || {
+      listed=$?
+      die "cannot read the tree of $rev in $repo (git read-tree exit $listed): $(cat "$errf" 2>/dev/null)"
+    }
+  fi
+  # Whether <path> is a directory git lists as ONE entry and never beneath: a
+  # symlink (the shell follows it) or a submodule (a gitlink, mode 160000, that
+  # the Install step populates). A symlink is a link on disk in <repo> itself
+  # and a mode-120000 entry in <rev>'s tree; a gitlink is an index entry either
+  # way. Status 0 yes, 1 no, 2 git could not say (its exit status in `listed`,
+  # its reason in `$errf`).
+  opaque() {
+    if [ -z "$rev" ] && [ -L "$repo/$1" ]; then return 0; fi
+    entries=$(git -C "$repo" ls-files -s -- ":(literal)$1" 2>"$errf") || { listed=$?; return 2; }
+    printf '%s\n' "$entries" \
+      | { while read -r mode _ _ path; do
+            [ "$path" = "$1" ] || continue
+            case $mode in
+              160000) exit 0 ;;
+              120000) [ -n "$rev" ] && exit 0 ;;
+            esac
+          done; exit 1; }
+  }
+  set -f
+  prev=
+  # shellcheck disable=SC2086 # field splitting is the point: scanning every word
+  for word in $value; do
+    before=$prev
+    prev=$word
+    case $word in
+      cd|pushd|*[\(\;\&\|]cd|*[\(\;\&\|]pushd) break ;;
+      -*|*=*|/*|*..*|*[\'\"\\\$\`\(\)\{\}\<\>\|\&\;\~]*) continue ;;
+      *'*'*|*'?'*|*'['*']'*) ;;
+      *) continue ;;
+    esac
+    case $before in
+      -*=*) ;;
+      -*) case $word in */*|*.*) ;; *) continue ;; esac ;;
+    esac
+    # The second pathspec is the directories the word matches: the shell hands
+    # `tests/*` the directory `tests/unit`, which ls-files lists only as the
+    # prefix of the files beneath it.
+    tracked=$(git -C "$repo" ls-files -- ":(glob)$word" ":(glob)${word%/}/**" 2>"$errf") || {
+      listed=$?
+      die "cannot list the files tracked in $where to check its test command's pattern '$word' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)"
+    }
+    [ -z "$tracked" ] || continue
+    lead=${word%%[*?[]*}
+    while :; do
+      case $lead in */*) lead=${lead%/*} ;; *) break ;; esac
+      opq=0
+      opaque "$lead" || opq=$?
+      case $opq in
+        0) continue 2 ;;
+        1) ;;
+        *) die "cannot ask git whether '$lead' is a symlink or a submodule in $where, to check its test command's pattern '$word' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)" ;;
+      esac
+    done
+    ignored=0
+    git -C "$repo" check-ignore -q --no-index -- "$word" 2>"$errf" || ignored=$?
+    case $ignored in
+      0) ;;
+      1) die "the Recipe cache at $cache is invalid: its test command's pattern '$word' matches no file tracked in $where — a Test entrypoint that selects no tests passes having run nothing, so the Recipe is stale, not a finding; $derive" ;;
+      *) die "cannot ask git whether $repo ignores its test command's pattern '$word' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
+    esac
+  done
+  set +f
+fi
 
 printf '%s\n' "$value"
