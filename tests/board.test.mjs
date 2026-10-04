@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { tempDir } from "./support/temp-dir.mjs";
 import { dirname, join } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
-import { createServer } from "node:net";
+import { createServer, connect } from "node:net";
 import { fileURLToPath } from "node:url";
 import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, spendDirPin, gatherSpend, faultText, resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "../plugin/scripts/board.mjs";
 import { readOmpMember } from "../plugin/scripts/member-record.mjs";
@@ -777,15 +777,15 @@ test("createBoardServer serves board.json and the page", async () => {
   await new Promise((res) => server.listen(0, res));
   const port = server.address().port;
 
-  const j = await fetch(`http://localhost:${port}/board.json`);
+  const j = await fetch(`http://127.0.0.1:${port}/board.json`);
   assert.equal(j.status, 200);
   assert.equal((await j.json()).generatedAt, 1);
 
-  const h = await fetch(`http://localhost:${port}/`);
+  const h = await fetch(`http://127.0.0.1:${port}/`);
   assert.equal(h.status, 200);
   assert.match(await h.text(), /cockpit/);
 
-  const nf = await fetch(`http://localhost:${port}/nope`);
+  const nf = await fetch(`http://127.0.0.1:${port}/nope`);
   assert.equal(nf.status, 404);
 
   await new Promise((res) => server.close(res));
@@ -2078,6 +2078,11 @@ test("CLI: a derived port held by anything is fatal on the degrade arm — there
 // callback now owns tick()/setInterval()) is what this test pins: the loser
 // must leave the state directory exactly as untouched as a process that
 // never ran at all.
+//
+// The blocker names no host, so it holds every interface. On macOS/BSD a
+// 127.0.0.1 bind succeeds beside a listener like that rather than failing
+// EADDRINUSE, so the refusal pinned here — an explicit port is never scanned
+// off, it dies "in use" — has to come from somewhere other than the bind.
 test("CLI: a port already in use must not write board.json before the process dies", async () => {
   const blocker = createServer();
   const port = await new Promise((res) => blocker.listen(0, () => res(blocker.address().port)));
@@ -2085,6 +2090,7 @@ test("CLI: a port already in use must not write board.json before the process di
   try {
     const r = spawnSync(process.execPath, serveArgs(["--port", String(port)]), opts);
     assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, new RegExp(`port ${port} in use`), r.stderr);
     assert.ok(!existsSync(join(opts.cwd, ".fleet", "board.json")),
       "the bind loser ticked and wrote board.json before dying on EADDRINUSE");
   } finally { blocker.close(() => {}); }
@@ -2121,7 +2127,7 @@ test("CLI: serve accepts --port 0 (ephemeral bind), announces the port it actual
   const r = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600"]), { ...serveOpts(), timeout: 2000 });
   assert.notEqual(r.status, 2, r.stderr);
   assert.doesNotMatch(r.stderr, /--port wants/);
-  const announced = r.stderr.match(/cockpit on http:\/\/localhost:(\d+)/);
+  const announced = r.stderr.match(/cockpit on http:\/\/127\.0\.0\.1:(\d+)/);
   assert.ok(announced, `no cockpit line: ${r.stderr}`);
   assert.notEqual(announced[1], "0", `announced the requested port, not the bound one: ${r.stderr}`);
   // …and the ABSENT half of #364's has() control rides this spawn rather than
@@ -2228,7 +2234,7 @@ test("CLI: serve refuses --open=true behind other flags, not only as the first a
 // one this would otherwise repeat.
 test("CLI: serve --open (bare) still reads as present, not swallowed by the `=` guard", () => {
   const opened = spawnSync(process.execPath, serveArgs(["--port", "0", "--interval", "3600", "--open"]), { ...serveOpts(), timeout: 2000 });
-  assert.match(opened.stderr, /could not open a browser .*http:\/\/localhost:\d+\//, opened.stderr);
+  assert.match(opened.stderr, /could not open a browser .*http:\/\/127\.0\.0\.1:\d+\//, opened.stderr);
 });
 
 // #463: sweep() only ever refuses a `--`-prefixed token, so a bare stray
@@ -2490,7 +2496,7 @@ function serveProcess(cwd, bin, args = ["--port", "0", "--interval", "3600"], no
   const url = new Promise((res, rej) => {
     p.stderr.on("data", (d) => {
       buf += d;
-      const m = buf.match(/cockpit on (http:\/\/localhost:\d+)/);
+      const m = buf.match(/cockpit on (http:\/\/127\.0\.0\.1:\d+)/);
       if (m) res(m[1]);
     });
     p.on("exit", (code) => rej(new Error(`serve exited (${code}) before announcing: ${buf}`)));
@@ -2810,7 +2816,7 @@ test("CLI: a second launch for the same workspace reuses the live cockpit, opens
   const first = serveProcess(repo, rig.bin, ["--interval", "3600", "--open"]);
   try {
     const url = await withTimeout(first.url, 20000, "the first cockpit to announce");
-    assert.equal(url, `http://localhost:${expected}`,
+    assert.equal(url, `http://127.0.0.1:${expected}`,
       "a launch with nothing in its way must take the port its workspace derives — that URL is the bookmarkable one");
     // The handshake reads the payload, so the first tick has to have landed.
     await untilBoardJson(url);
@@ -2857,7 +2863,7 @@ test("CLI: a launch whose post-bind scan finds this workspace's cockpit further 
     assert.equal(port, further, "test setup: the stand-in cockpit must hold the later candidate");
     const status = await withTimeout(new Promise((res) => p.on("close", res)), 20000, "the launch to exit");
     assert.equal(status, 0, `the reuse path must exit 0: ${stderr}`);
-    assert.match(stderr, new RegExp(`already running for this workspace on http://localhost:${further}/`), stderr);
+    assert.match(stderr, new RegExp(`already running for this workspace on http://127\\.0\\.0\\.1:${further}/`), stderr);
     assert.doesNotMatch(stderr, /cockpit on http/, stderr);
     assert.deepEqual(rig.launched(), [], "a launch that found this workspace's cockpit already running opened a tab for it");
   } finally {
@@ -2942,6 +2948,12 @@ for (const [platform, launchers, ran, warns] of [
 // workspace field distinguishes it from the cockpit reused above. A
 // handshake that asks "did anyone answer" rather than "whose board is this"
 // adopts it, and this run gets no board of its own at all.
+//
+// holderOn() names no host, so this stranger holds every interface — the
+// shape of a dev server on the port. On macOS/BSD a 127.0.0.1 bind succeeds
+// beside it instead of failing EADDRINUSE, and a launch that took the port
+// that way would shadow the stranger on 127.0.0.1 rather than step over it.
+// So the stranger has to still be the one answering there afterwards.
 test("CLI: a holder reporting a different workspace is not adopted — the launch serves elsewhere", async (t) => {
   const bin = gitOnlyPath(), repo = gitRepo("board-ws-foreign-");
   const { port: derived } = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
@@ -2951,18 +2963,147 @@ test("CLI: a holder reporting a different workspace is not adopted — the launc
   try {
     if (!launch) return t.skip(heldOutside(derived));
     const url = await withTimeout(launch.url, 20000, "the launch to step over the foreign holder");
-    assert.notEqual(url, `http://localhost:${derived}`, "the launch adopted a board belonging to another workspace");
+    assert.notEqual(url, `http://127.0.0.1:${derived}`, "the launch adopted a board belonging to another workspace");
     const window = cockpitPorts({ port: derived, derived: true });
     assert.ok(window.includes(Number(url.split(":")[2])), `${url} is outside the bounded scan window ${window.join(", ")}`);
     // …and it is really serving its OWN board there, not merely announcing a
     // port it stepped onto.
     await untilBoardJson(url);
     assert.equal((await (await fetch(`${url}/board.json`)).json()).workspace, realpathSync(repo));
+    assert.equal((await (await fetch(`http://127.0.0.1:${derived}/board.json`)).json()).workspace, "/some/other/workspace",
+      "the launch bound 127.0.0.1 beside the stranger and took its traffic there");
   } finally {
     launch?.p.kill("SIGKILL");
     server.close(() => {});
     for (const d of [bin, repo, dir]) rmSync(d, { recursive: true, force: true });
   }
+});
+
+// The same-workspace half of the row above, with the holder bound the way a
+// cockpit from before the loopback-only bind was: no host, every interface.
+// A 127.0.0.1 bind beside it succeeds on macOS/BSD, so the bind failing is
+// not what reports this cockpit; the launch has to find and reuse it anyway,
+// exit 0 and open nothing. The holder answers from THIS process, so the
+// launch is spawned asynchronously, for the reason the post-bind-scan row
+// above gives.
+test("CLI: this workspace's cockpit holding every interface on the derived port is reused, not shadowed", async (t) => {
+  const rig = launcherBin(ALL_LAUNCHERS), repo = gitRepo("board-ws-wild-reuse-");
+  const instance = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
+  const dir = boardDir(JSON.stringify({ tickets: [], workspace: instance.workspace }));
+  const { server, port: held } = await holderOn(dir, instance.port);
+  const p = held === null ? null : spawn(process.execPath, serveArgs(["--interval", "3600", "--open"]),
+    { cwd: repo, env: { ...process.env, PATH: rig.bin }, stdio: ["ignore", "ignore", "pipe"] });
+  let stderr = "";
+  p?.stderr.setEncoding("utf8");
+  p?.stderr.on("data", (d) => { stderr += d; });
+  try {
+    if (!p) return t.skip(heldOutside(instance.port));
+    const status = await withTimeout(new Promise((res) => p.on("close", res)), 20000, "the launch to exit");
+    assert.equal(status, 0, `the reuse path must exit 0: ${stderr}`);
+    assert.match(stderr, new RegExp(`already running for this workspace on http://127\\.0\\.0\\.1:${instance.port}/`), stderr);
+    assert.doesNotMatch(stderr, /cockpit on http/, `a second server was started beside this workspace's cockpit: ${stderr}`);
+    assert.deepEqual(rig.launched(), [], "a launch that found this workspace's cockpit already running opened a tab for it");
+  } finally {
+    p?.kill("SIGKILL");
+    server.close(() => {});
+    for (const d of [rig.bin, repo, dir]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// The cockpit binds 127.0.0.1 and nothing else: its board is a read-only
+// mirror of the ledger, and no other machine on the network has a reason to
+// read it. A listen() with no host binds `::` dual-stack, which answers on
+// 127.0.0.1 as well, so the half that tells the two apart is `[::1]`
+// refusing. Skipped only on a host with no ::1 to refuse on.
+test("CLI: serve binds 127.0.0.1 alone — 127.0.0.1 answers and [::1] refuses", async (t) => {
+  const v6 = createServer();
+  const noV6 = await new Promise((res) => { v6.once("error", res); v6.listen(0, "::1", () => v6.close(() => res(null))); });
+  if (noV6) return t.skip(`this host has no ::1 to refuse on: ${noV6.code}`);
+  const bin = gitOnlyPath(), cwd = tempDir("board-bind-");
+  const launch = serveProcess(cwd, bin);
+  try {
+    const url = await withTimeout(launch.url, 20000, "the cockpit to announce");
+    const port = Number(url.split(":")[2]);
+    await untilBoardJson(`http://127.0.0.1:${port}`);
+    const v6Answer = await new Promise((res) => {
+      const s = connect({ host: "::1", port });
+      s.once("connect", () => { s.destroy(); res("connected"); });
+      s.once("error", (e) => res(e.code));
+    });
+    assert.equal(v6Answer, "ECONNREFUSED", `the cockpit answered on [::1]:${port}, so it is bound beyond 127.0.0.1`);
+  } finally {
+    launch.p.kill("SIGKILL");
+    for (const d of [bin, cwd]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// The two branches of the pre-bind connect check that no real listener can
+// produce on demand: a connect that fails with something other than a
+// refusal, and one that never completes. A loopback connect to a port
+// nobody holds is always refused, and a holder whose accept backlog is full
+// drops the SYN only on the kernel's schedule — so the launch runs with
+// net.connect replaced, through the CJS exports (a module that imported the
+// name picks the replacement up after syncBuiltinESMExports). The stub is
+// in the child, so the port never has to be held: a launch that wrongly
+// reads the stubbed answer as "free" goes on to bind `port` and serve, and
+// the row sees a launch that never exits with 2.
+//
+// The replacement's answer reaches the assertion through board's own output
+// — the EPERM text below, the "in use" line — so a stub that never landed
+// reads as a failure of the row, not as a pass.
+function serveWithConnect(stubBody, port) {
+  const preload = `import { createRequire, syncBuiltinESMExports } from "node:module";
+const net = createRequire(process.cwd() + "/")("node:net");
+net.connect = () => { ${stubBody} };
+syncBuiltinESMExports();`;
+  const opts = serveOpts();
+  const r = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(preload)}`, ...serveArgs(["--port", String(port), "--interval", "3600"])], { ...opts, timeout: 10000 });
+  return { r, cwd: opts.cwd };
+}
+
+// A port nobody holds, for a launch whose connect is stubbed: only a launch
+// that wrongly decides the port is free ever binds it.
+async function unheldPort() {
+  const probe = createServer();
+  const port = await new Promise((res) => probe.listen(0, "127.0.0.1", () => res(probe.address().port)));
+  await new Promise((res) => probe.close(res));
+  return port;
+}
+
+// ECONNREFUSED is the one connect error that means "free". Any other —
+// EPERM from a sandbox that denies loopback connects, say — is a fault of
+// the launch's own, and binding anyway would answer a question the check
+// could not ask. It dies with the error as it came, and starts nothing.
+test("CLI: a pre-bind connect that fails with anything but a refusal is fatal, not read as a free port", async () => {
+  const port = await unheldPort();
+  const { r, cwd } = serveWithConnect(
+    `const s = new net.Socket(); setImmediate(() => s.emit("error", Object.assign(new Error("connect EPERM 127.0.0.1:${port}"), { code: "EPERM" }))); return s;`,
+    port,
+  );
+  assert.equal(r.status, 2, `a connect fault must refuse, not bind: ${r.stderr}`);
+  assert.match(r.stderr, new RegExp(`connect EPERM 127\\.0\\.0\\.1:${port}`), `the stubbed error never reached the launch: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /in use/, `a connect fault is not a held port: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /cockpit on http/, `the launch bound after a connect fault: ${r.stderr}`);
+  assert.ok(!existsSync(join(cwd, ".fleet")), "the launch created a state directory after a connect fault");
+});
+
+// A holder whose accept backlog is full drops the SYN instead of refusing
+// it, so "nothing answered within the timeout" has to count as held — read
+// as free, the launch would bind beside a live holder on macOS/BSD. The
+// stub's socket never connects and never errors; the check's own timer is
+// the only thing that can end it. The keep-alive interval stands in for the
+// kernel's pending connect, which keeps a real process alive; without it a
+// never-resolving promise lets the process exit 0 with nothing said.
+test("CLI: a pre-bind connect that never completes counts as a held port", async () => {
+  const port = await unheldPort();
+  const { r, cwd } = serveWithConnect(
+    `const s = new net.Socket(); const keep = setInterval(() => {}, 100); s.once("close", () => clearInterval(keep)); return s;`,
+    port,
+  );
+  assert.equal(r.status, 2, `an unanswered connect must read as held: ${r.stderr}`);
+  assert.match(r.stderr, new RegExp(`port ${port} in use`), r.stderr);
+  assert.doesNotMatch(r.stderr, /cockpit on http/, `the launch bound beside a port it could not prove free: ${r.stderr}`);
+  assert.ok(!existsSync(join(cwd, ".fleet")), "the launch created a state directory for a port it did not take");
 });
 
 // The only hard failure left on a derived port, and the shape it has to

@@ -146,7 +146,7 @@ function serveProcess(cwd, bin) {
   const port = new Promise((res, rej) => {
     p.stderr.on("data", (d) => {
       buf += d;
-      const m = buf.match(/cockpit on http:\/\/localhost:(\d+)/);
+      const m = buf.match(/cockpit on http:\/\/127\.0\.0\.1:(\d+)/);
       if (m) res(Number(m[1]));
     });
     p.on("exit", (code) => rej(new Error(`serve exited (${code}) before announcing: ${buf}`)));
@@ -161,7 +161,7 @@ function serveProcess(cwd, bin) {
 async function builtBoard(port) {
   const ms = 20000, deadline = Date.now() + ms;
   for (;;) {
-    const res = await fetch(`http://localhost:${port}/board.json`);
+    const res = await fetch(`http://127.0.0.1:${port}/board.json`);
     if (res.status === 200) {
       const body = await res.json();
       if (typeof body.generatedAt === "number") return body;
