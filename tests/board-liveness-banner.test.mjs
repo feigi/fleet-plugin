@@ -19,6 +19,7 @@ import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
+import { heartbeatLink, KILL_PATTERN } from "./support/heartbeat-link.mjs";
 
 const BOARD = fileURLToPath(new URL("../plugin/scripts/board.mjs", import.meta.url));
 const HTML = readFileSync(new URL("../plugin/scripts/board.html", import.meta.url), "utf8");
@@ -93,8 +94,11 @@ test("a mark written by the real heartbeat reaches the real board (#1597)", () =
   // a live beat would have to be backdated by hand — and backdating means
   // writing the file this test is trying to prove nobody has to write by hand.
   // No --state either, on purpose: the default resolution IS the subject.
-  const heartbeat = fileURLToPath(new URL("../plugin/scripts/fleet-heartbeat.mjs", import.meta.url));
-  const stop = spawnSync(process.execPath, [heartbeat, "--stop", "budget exhausted"],
+  // Through a link, so a controller's `pkill -f fleet-heartbeat.mjs` cannot
+  // SIGTERM this child mid-run (#2787; see tests/support/heartbeat-link.mjs).
+  const stopArgs = [heartbeatLink(), "--stop", "budget exhausted"];
+  assert.doesNotMatch(stopArgs.join(" "), KILL_PATTERN);
+  const stop = spawnSync(process.execPath, stopArgs,
     { cwd: repo, encoding: "utf8", env });
   assert.equal(stop.status, 0, stop.stderr);
   assert.equal(existsSync(join(repo, ".fleet", "heartbeat.json")), true,
