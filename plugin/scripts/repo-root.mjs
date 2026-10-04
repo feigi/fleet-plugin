@@ -7,21 +7,21 @@
 // with it. What the premise costs is a precondition: there has to be a `.git`
 // at or above the file. A checkout and a worktree both have one; a bare `git
 // archive` extraction does not. Review specialists used to measure the suite in
-// exactly such an extraction, which cost this repo 19 silent declines per run
-// (#1056); since that ticket the review snapshot is `git init`ed and committed
+// exactly such an extraction, which cost this repo 19 silent declines per run;
+// since then the review snapshot is `git init`ed and committed
 // at cut time, so the declines below are no longer the review's normal path.
 // They remain the answer for any OTHER repo-less tree — a hand-cut archive, a
 // tarball unpacked in CI — which is why the guard stays rather than becoming
 // dead weight.
 //
-// Before #1149 each file paid that cost as a bare module-scope `execFileSync`
+// Before this module, each file paid that cost as a bare module-scope `execFileSync`
 // whose failure escaped. Node cannot attribute a throw during module
 // evaluation to any test, so it synthesised one entry at line 1 of the file and
 // the run showed a single failure in place of the file's real tests — a
 // diagnostic that reads like a regression in the tree under test rather than an
 // environment missing a repository.
 //
-// #1339 found the second way "there has to be a `.git`" is not the same
+// There is a second way "there has to be a `.git`" is not the same
 // question as "there has to be THIS repository": git's discovery walk answers
 // with whatever working tree it finds first, and nothing about that answer
 // says it is fleet-plugin's own tree rather than an ambient repository the
@@ -33,11 +33,11 @@
 // through it.
 //
 // The first fix here compared the resolved root's OWN `.claude-plugin/
-// plugin.json` name against this file's — and #1354's review measured that a
+// plugin.json` name against this file's — and a review measured that a
 // DIFFERENT checkout of this same plugin, sitting above some unrelated caller
 // directory, still passed: same name, wrong tree. The second fix required the
 // running script to be somewhere INSIDE the resolved root — and that review
-// measured it regresses #1339's OWN shape: pre-cutover, an installed copy
+// measured it regresses the ambient-repository case's OWN shape: pre-cutover, an installed copy
 // under the harness's own plugin cache genuinely sat inside the operator's
 // dotfiles checkout, which was exactly the ambient repository the bug is about.
 // Containment is not identity either. What repoRoot now insists on is
@@ -46,10 +46,10 @@
 // must both be tracked by `root`'s OWN git (`git ls-files --error-unmatch`).
 // An installed plugin's cache directory sits inside the operator's dotfiles
 // checkout but is never committed there, so it fails; a real checkout, a
-// worktree, a `plugin/`-nested layout after #1336, and a vendored copy inside
+// worktree, a `plugin/`-nested layout, and a vendored copy inside
 // a monorepo all pass, because in each of those the file genuinely IS part of
 // that repository's own tracked tree. The self-relative manifest lookup is
-// what survives #1336's planned re-nesting of the payload under `plugin/`: a
+// what survived the payload's re-nesting under `plugin/`: a
 // hardcoded `root/.claude-plugin/plugin.json` breaks the moment the manifest
 // moves a level deeper, while `dirname(thisFile)/../.claude-plugin/
 // plugin.json` does not care where `root` (the git toplevel) ends up relative
@@ -68,14 +68,15 @@
 //                                  binary at all. A repository may well be
 //                                  present; what is missing is an answer. A
 //                                  probe that could not look must never read as
-//                                  an answer — that is #1149's own defect, and
-//                                  buying a skip with it would reproduce it
-//                                  inside its own fix. `repoRoot` THROWS here,
+//                                  an answer: buying a skip with it would
+//                                  reproduce that defect inside the guard
+//                                  written against it. `repoRoot` THROWS here,
 //                                  which is the loud module-load failure the
-//                                  pre-#1149 code produced for these.
+//                                  earlier bare-`execFileSync` code produced
+//                                  for these.
 //   the root answers, but its      identity, not non-emptiness, not name
 //   own git does not TRACK this    equality, and not mere containment either
-//   file or this file's own        (#1339, then #1354 twice): a root that
+//   file or this file's own        (each measured failing): a root that
 //   manifest                       merely names the same plugin, contains an
 //                                  untracked copy, or answers non-empty for
 //                                  some other reason, is still a stranger's
@@ -92,7 +93,7 @@
 //                                  skipping; each caller's own non-vacuity
 //                                  guard is what judges it. The
 //                                  wrong-repository half of this used to live
-//                                  here too, before #1339 moved it up into the
+//                                  here too, before it moved up into the
 //                                  identity check above, where it can throw
 //                                  loudly instead of waiting on each caller's
 //                                  guard to notice.
@@ -131,9 +132,10 @@ const NO_REPOSITORY_ANYWHERE = /not a git repository \(or any /;
  * caller resolved. Relative to `cwd` would ask the wrong question, since
  * `cwd` is exactly the thing under test; relative to a resolved `root` would
  * have to guess how many levels separate the manifest from the git toplevel,
- * and #1336 is about to change that answer. This guesses nothing — wherever
- * this file is copied (a checkout, a worktree, an installed plugin cache, and
- * after #1336 a `plugin/` subdirectory), its own manifest is always exactly
+ * and the payload's re-nesting under `plugin/` already changed that answer
+ * once. This guesses nothing — wherever
+ * this file is copied (a checkout, a worktree, an installed plugin cache, or
+ * a `plugin/` subdirectory), its own manifest is always exactly
  * one directory up from it.
  */
 function ownManifestPath() {
@@ -180,7 +182,7 @@ export function ownPluginName() {
  * nearest the pathspec itself (measured: from an unrelated cwd, the same
  * absolute path is reported "outside repository at <that other repo>").
  *
- * GIT_DIR scrubbed (#1599, gitEnv()): measured, an ambient GIT_DIR answers
+ * GIT_DIR scrubbed (gitEnv()): measured, an ambient GIT_DIR answers
  * for a DIFFERENT repository regardless of `cwd` — `ls-files
  * --error-unmatch` on a path this file's OWN repository genuinely tracks
  * then exits 1 "did not match any file(s) known to git", a false negative
@@ -206,7 +208,7 @@ function isTrackedBy(root, path) {
  * than an ambient repository the caller's directory happened to nest under.
  *
  * Containment (is the running script somewhere INSIDE `root`?) was tried
- * first and is not enough — it regresses #1339's own measured shape. There,
+ * first and is not enough — it regresses the ambient-repository case's own measured shape. There,
  * pre-cutover, self was under the harness's own plugin cache at
  * `fleet-plugin/fleet/0.1.1/scripts/repo-root.mjs`, and `root` resolved to
  * that cache's own parent dotfiles directory, which genuinely CONTAINED self
@@ -218,7 +220,7 @@ function isTrackedBy(root, path) {
  * working tree is exactly as much a stranger as no copy at all. This also
  * accepts every tree that legitimately IS this file's own — this checkout, a
  * worktree, a
- * `plugin/`-nested layout after #1336, even a vendored copy inside a larger
+ * `plugin/`-nested layout, even a vendored copy inside a larger
  * monorepo — because in every one of those cases the file is actually
  * COMMITTED to that repository's index, which an ambient-but-unrelated
  * repository's cache directory never is.
@@ -286,13 +288,13 @@ function dotGitAtOrAbove(cwd) {
  *
  * A working tree that IS found is not returned on the strength of being
  * found — `assertOwnRoot` checks it is this plugin's own before it ever
- * reaches a caller (#1339). A non-empty wrong root throws exactly as loudly as
+ * reaches a caller. A non-empty wrong root throws exactly as loudly as
  * an unanswerable one; the old guard against it lived only in each caller's
  * non-vacuity check on `trackedShellScripts`, which a non-empty foreign
  * answer sailed straight through.
  */
 export function repoRoot(cwd) {
-  // GIT_DIR/GIT_WORK_TREE scrubbed (#1599, gitEnv()): measured from a
+  // GIT_DIR/GIT_WORK_TREE scrubbed (gitEnv()): measured from a
   // subdirectory of a real working tree (the realistic shape — `cwd` here is
   // wherever the calling script happens to live, rarely the root itself) —
   // an ambient GIT_DIR alone answers `--show-toplevel` with `cwd` ITSELF, not
@@ -338,8 +340,8 @@ export function skipWithoutRepo(root, subject) {
 // file at the path, for any reader — rather than a failure to look: nothing
 // there at all (ENOENT); a file standing where one of the path's own
 // directories should be (ENOTDIR); and a symlink that loops, or chains past the
-// kernel's link limit (ELOOP), which no reader can ever open a file through
-// (#1950). `root` is git's own resolved toplevel, so every link counted toward
+// kernel's link limit (ELOOP), which no reader can ever open a file through.
+// `root` is git's own resolved toplevel, so every link counted toward
 // that limit is one inside the tracked path itself — a fact about the tree,
 // not about where the checkout sits.
 //
@@ -371,7 +373,7 @@ function isRegularFile(path) {
  * Every file tracked in the working tree at `root` that `pathspecs` match,
  * repo-relative — the one discovery rule behind all three exports below, so what
  * `root` must be and which repository answers cannot drift apart between
- * them (#1751). `caller` is the export's own name, for the refusal.
+ * them. `caller` is the export's own name, for the refusal.
  *
  * `root` must be a real root — call it only where `repoRoot` answered. A `null`
  * root is rejected rather than absorbed into an empty list: `execFileSync`
@@ -390,13 +392,13 @@ function isRegularFile(path) {
  * checked out on disk), a file standing where the path's own directory was.
  * Every caller reads each path it is handed, and one absent path in the answer
  * aborted that read with a raw ENOENT, leaving every real finding in every
- * other file unreported (#1910). Passing over it lets nothing ship unswept: a
+ * other file unreported. Passing over it lets nothing ship unswept: a
  * deletion that is committed does not ship, and one that is not is swept again
  * in any checkout that has the file; a link with no file behind it has no text
  * to sweep. A path the probe could not look at is not one of these — it
  * throws, as NO_REGULAR_FILE_THERE says.
  *
- * GIT_DIR scrubbed (#1599, gitEnv()): measured, an ambient GIT_DIR silently
+ * GIT_DIR scrubbed (gitEnv()): measured, an ambient GIT_DIR silently
  * substitutes a DIFFERENT repository's tracked list for `root`'s own — the
  * caller's non-vacuity guard cannot see this, since the wrong list is
  * routinely non-empty. GIT_WORK_TREE is inert here (measured, for `*.sh` and
@@ -465,7 +467,7 @@ const NODE_SHEBANG = /^#!\s*(?:\S*\/)?(?:env(?:\s+(?:-(?:u|-unset|C|-chdir)(?:=\
 const SHEBANG_BYTES = 256;
 
 // The most of a first line ever read, and the length at which one is not a
-// node shebang (#1941). Reading on to the end of the line however long read a
+// node shebang. Reading on to the end of the line however long read a
 // tracked `#!` file holding no newline into memory whole to answer a boolean —
 // measured, 300 MiB of one peaked above 1.1 GiB, and one past the longest
 // string V8 builds (~512 MiB) threw ERR_STRING_TOO_LONG out of the whole
@@ -476,9 +478,10 @@ const SHEBANG_BYTES = 256;
 // Linux, on a prefix naming node — is one no author writes.
 //
 // A cap, not a verdict on the bytes before it: those are not judged at all,
-// so this is never the prefix verdict #1887 retired. Refused rather than
+// so this is never a prefix verdict, the kind hasNodeShebang() refuses to
+// give. Refused rather than
 // thrown, because one pathological tracked file must not abort every sweep's
-// listing (#1910); rather than listed, because a sweep reads each listed file
+// listing; rather than listed, because a sweep reads each listed file
 // whole, which would move the unbounded read, not remove it.
 const SHEBANG_MAX_BYTES = 4096;
 
@@ -488,7 +491,7 @@ const SHEBANG_MAX_BYTES = 4096;
  * first read and grows past it only for a longer line, never past
  * SHEBANG_MAX_BYTES: a first line that long or longer, newline not counted, is
  * not one, and nothing past the cap is read. A verdict on the prefix one read
- * holds parts from the line's own both ways (#1887): it misses a `node` past
+ * holds parts from the line's own both ways: it misses a `node` past
  * its end, reads `nodemon` cut after its `node` as `node` at the end of the
  * line, and decodes a character it cuts in half as U+FFFD. A file that does
  * not open with `#!` is decided on that first read however long its first
@@ -530,7 +533,7 @@ function hasNodeShebang(path, buf) {
  * Every tracked file this repository ships that the consumer's own `node`
  * executes, in the working tree at `root`, repo-relative: each `*.mjs`, and
  * any other file whose first line is a node shebang — the extensionless
- * entrypoints `fleet-run`, `fleet-bootstrap` and `fleet-provenance` (#1855).
+ * entrypoints `fleet-run`, `fleet-bootstrap` and `fleet-provenance`.
  * A shebang decides, never an extension alone: `plugin/workflows/*.js` is ESM
  * a harness runs and plain node never loads, and carries none. Test files —
  * `*.test.mjs`, the one naming this repository gives them — are not shipped,
