@@ -4,16 +4,15 @@
 # claim that never became" a PR). This is neither Release nor Reap
 # (CONTEXT.md's Reap is branches and worktrees, not the label) — a third,
 # merge-triggered step in the claim lifecycle CONTEXT.md does not yet name.
-# #170.
 #
-# Single writer, per the #170 ruling: the merge is the only moment the ticket
+# Single writer: the merge is the only moment the ticket
 # number and the fact of completion are known together, so only a PROVEN merge
 # triggers this — never reap (branches, not tickets), never a repo automation
 # (no attribution). The merge bot's branch-delete step, delete-merged-branch.sh,
 # calls this script as a sibling with --apply, after its own MERGED gate: the
 # claim has not ended until the merge lands. Direct use is manual repair.
 #
-# #1617: `closingIssuesReferences` reflects `Closes #N` syntax in the PR's own
+# `closingIssuesReferences` reflects `Closes #N` syntax in the PR's own
 # title/body, but NOT a commit-message-only reference — GitHub's real
 # merge-time closer honors the latter (confirmed via the issue's own
 # timeline), this field never does, even after the merge. This script unions
@@ -53,7 +52,7 @@ if ! issues=$(gh pr view "$pr" --json closingIssuesReferences --jq '.closingIssu
   die "gh pr view $pr failed — cannot read which issues it closes"
 fi
 
-# #1617: the query above misses a commit-message-only close. Scan every
+# The query above misses a commit-message-only close. Scan every
 # commit's own headline+body for the same close/fix/resolve keyword forms
 # GitHub's real closer recognizes, and union the result into `$issues` — the
 # set of issues this PR is proven to close, so the check below acts on
@@ -63,13 +62,13 @@ if ! commit_text=$(gh pr view "$pr" --json commits --jq '[.commits[] | (.message
   die "gh pr view $pr failed — cannot scan its commit messages for issue closes"
 fi
 
-# Same three-outcome discipline as the label scan below (#1543): rc 1 (no
+# Same three-outcome discipline as the label scan below: rc 1 (no
 # keyword anywhere in any commit) must read as zero commit-closed issues,
 # never conflated with rc 2+ (the scan itself broke), which must halt loudly
 # instead of silently behaving like "commits close nothing".
 # The leading `(^|[^[:alnum:]_])` requires a non-word character (or line
-# start) immediately before the keyword, so "bugfix #77" or "prefix #88"
-# never read as closing #77/#88 just because "fix" is a substring of a
+# start) immediately before the keyword, so "bugfix #N" or "prefix #N"
+# never reads as closing issue N just because "fix" is a substring of a
 # larger word — only a real close/fix/resolve keyword counts.
 if matched=$(printf '%s\n' "$commit_text" | grep -Eio '(^|[^[:alnum:]_])(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]*#[0-9]+'); then
   commit_grep_rc=0
@@ -92,9 +91,9 @@ esac
 # Union both signals through the SAME three-outcome discipline, never a bare
 # `grep | sort`: command substitution reports only the LAST pipe stage's
 # exit status, so `sort`'s own rc 0 would otherwise mask a grep 2+ break
-# entirely — the exact "commits close nothing" misreading #1543 already
-# guards against elsewhere in this file. `awk '{print $0+0}'` strips any
-# leading zeros (#121's defect class) before the final sort, so a
+# entirely — the exact "commits close nothing" misreading the label scan
+# below already guards against. `awk '{print $0+0}'` strips any
+# leading zeros before the final sort, so a
 # commit-message "#007" reaches the JSON payload below as the bare,
 # valid-JSON integer `7` — and correctly dedupes against a plain `7` named
 # by the other signal.
@@ -127,7 +126,7 @@ for n in $issues; do
   fi
 
   # grep's OWN scan failing (rc 2+) must not read as "no in-progress label":
-  # the same defect PR #1519 fixed in reap.sh's grep_probe (#1543). A bare
+  # the same defect reap.sh's grep_probe guards against. A bare
   # `if … grep -qx …; then had=true; else had=false; fi` has room for only two
   # of grep's three `-q` outcomes — rc 0 matched, rc 1 none did, rc 2+ the
   # scan itself broke — so a scan that could not look would read here exactly
