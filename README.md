@@ -80,7 +80,7 @@ Run the test suite from the repo root — the glob only expands there, and a
 wrong directory silently exits 0 with zero tests run:
 
 ```
-node --test plugin/scripts/*.test.mjs
+node --test tests/*.test.mjs
 ```
 
 ## How it works

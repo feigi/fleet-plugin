@@ -1,0 +1,3961 @@
+// Regression gate for no-undo-audit.sh, all three of its outcomes. Zero deps:
+// `node --test tests/no-undo-audit.test.mjs`.
+//
+// The audit answers one question — is this worktree safe to rebase — and the
+// only thing that makes it refuse is uncommitted work in the worktree. It used
+// to also refuse on a nonzero repo-global stash count, which is unrelated to
+// that question: a rebase never consumes a pre-existing entry, so the count
+// refused every run in a repo holding any entry while proving nothing about the
+// branch. Both directions are pinned, because a fix for a false refusal is one
+// keystroke from deleting the true one.
+//
+// The refusal is only half of it. A clean worktree exits 0 while still
+// answering "what would a careless resolution eat", and everything below the
+// `conflicts[] and atRisk[]` banner pins that half — the half that had no
+// coverage at all while this file called itself the regression gate.
+//
+// Exit 2 is its own outcome: the question could not be answered. Its rule is
+// that no payload is emitted, because a payload is an answer, and every exit-2
+// test asserts that as well as the code. Reported safe on a question never
+// asked is the one failure this script exists to prevent, so a shape it cannot
+// answer must exit 2 rather than exit 0 with an empty `atRisk`.
+//
+// Real git throughout: a shell script that reasons about git state can only be
+// tested against real git state.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { between, phrase, stripHashGutter } from "./support/prose-pin.mjs";
+import { writeExecStub } from "./support/exec-stub.mjs";
+
+const SCRIPT = fileURLToPath(new URL("../plugin/scripts/no-undo-audit.sh", import.meta.url));
+
+// Pin identity and cut the developer's ~/.gitconfig out of the fixtures, so a
+// local pull.rebase or hook cannot change what these repos look like. BASE_REF
+// is unset because the fleet harness is exactly the caller that would have it
+// set, and inheriting it would point every fixture at a local main while the
+// suite stayed green.
+const ENV = {
+  ...process.env,
+  BASE_REF: undefined,
+  GIT_DIR: undefined,
+  GIT_WORK_TREE: undefined,
+  GIT_TEMPLATE_DIR: undefined,
+  GIT_INDEX_FILE: undefined,
+  GIT_AUTHOR_NAME: "t",
+  GIT_AUTHOR_EMAIL: "t@example.com",
+  GIT_COMMITTER_NAME: "t",
+  GIT_COMMITTER_EMAIL: "t@example.com",
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null",
+  // GIT_CONFIG_GLOBAL alone does not isolate: these two carry config in through
+  // a separate door and outrank the files. A suite run from inside a git hook
+  // inherits whatever set them, which is a false red nobody can reproduce by
+  // hand.
+  GIT_CONFIG_COUNT: undefined,
+  GIT_CONFIG_PARAMETERS: undefined,
+};
+
+const git = (cwd, ...args) =>
+  execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
+
+/** Bare origin + clone with `main` and a pushed feature branch, checked out. */
+function repo(t, branch = "fix/1-thing", prefix = "no-undo-audit-") {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const origin = join(root, "origin.git");
+  const w = join(root, "w");
+  execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", "--bare", origin], { env: ENV });
+  execFileSync("git", ["clone", "-q", origin, w], { env: ENV });
+  writeFileSync(join(w, "f.txt"), "root\n");
+  git(w, "add", "f.txt");
+  git(w, "commit", "-q", "-m", "root");
+  git(w, "branch", "-M", "main");
+  git(w, "push", "-q", "-u", "origin", "main");
+  git(w, "checkout", "-q", "-b", branch);
+  writeFileSync(join(w, "g.txt"), "branch work\n");
+  git(w, "add", "g.txt");
+  git(w, "commit", "-q", "-m", "branch work");
+  git(w, "push", "-q", "-u", "origin", branch);
+  return { w, branch };
+}
+
+/** Leave a stash entry behind without leaving the worktree dirty. */
+function stashSomething(w, name = "h.txt") {
+  writeFileSync(join(w, name), "stashed\n");
+  git(w, "add", name);
+  git(w, "stash", "push", "-q", "-m", `pre-existing ${name}`);
+}
+
+/** Add/add conflict on `path`, with main holding the later commit that made it. */
+// Two decoys make `atRisk` discriminating rather than merely nonempty. Without
+// them every main commit since the fork touches the conflicting path and the
+// root commit touches nothing else, so "filtered by path", "filtered by range"
+// and "not filtered at all" all return exactly one line — and dropping either
+// filter from the script leaves the suite green. DECOY_OLD is on the path but
+// before the fork; DECOY_NEW is after the fork but on another file.
+// `branch` and `prefix` pass straight through to `repo`, so a case can plant a
+// marker in the branch name or in the worktree path — the two values #431's
+// escape block renders, and the only two a content-selected shim can address
+// there. Both default through `repo`'s own defaults, so every existing caller
+// is unchanged.
+function conflictRepo(t, path, branch, prefix) {
+  const c = repo(t, branch, prefix);
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, path), "older, already shared\n");
+  git(c.w, "add", "--", `:(literal)${path}`);
+  git(c.w, "commit", "-q", "-m", "DECOY_OLD before the fork");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+  git(c.w, "merge", "-q", "main", "-m", "carry main into the branch");
+  writeFileSync(join(c.w, path), "branch side\n");
+  git(c.w, "add", "--", `:(literal)${path}`);
+  git(c.w, "commit", "-q", "-m", "branch edits the file");
+  git(c.w, "push", "-q", "origin", c.branch);
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, "decoy.txt"), "untouched by the conflict\n");
+  git(c.w, "add", "--", "decoy.txt");
+  git(c.w, "commit", "-q", "-m", "DECOY_NEW after the fork");
+  writeFileSync(join(c.w, path), "MAIN SIDE\n");
+  git(c.w, "add", "--", `:(literal)${path}`);
+  git(c.w, "commit", "-q", "-m", "MAIN COMMIT AT RISK");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+  return c;
+}
+
+/** Both sides add `path`; nothing else. Used where the decoys would be noise. */
+function bareConflictRepo(t, path) {
+  const c = repo(t);
+  writeFileSync(join(c.w, path), "branch side\n");
+  git(c.w, "add", "--", `:(literal)${path}`);
+  git(c.w, "commit", "-q", "-m", "branch edits the file");
+  git(c.w, "push", "-q", "origin", c.branch);
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, path), "MAIN SIDE\n");
+  git(c.w, "add", "--", `:(literal)${path}`);
+  git(c.w, "commit", "-q", "-m", "MAIN COMMIT AT RISK");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+  return c;
+}
+
+/**
+ * Both sides add a path spelled as a `printf` FORMAT, plus `plain.txt`, so
+ * merge-tree reports TWO conflicting paths, and main's later commit is
+ * `MAIN COMMIT AT RISK` — the same shape `conflictRepo` builds, reached without
+ * ever naming the path in JavaScript.
+ *
+ * The name has to be produced by the SHELL. `execFileSync` re-encodes every JS
+ * string as UTF-8, so a JS `"\xFF"` arrives as the two bytes `\303\277` — valid
+ * UTF-8, which reproduces nothing. `printf 'b\377ad.txt'` is the only way to get
+ * the raw byte across, and it keeps this file pure ASCII.
+ *
+ * The commits go in through a THROWAWAY `GIT_INDEX_FILE` and are pushed straight
+ * to origin, so neither the real index nor the filesystem ever has to hold the
+ * name — APFS refuses it outright (`touch $(printf 'b\377ad.txt')` → `Illegal
+ * byte sequence`, status 1), which is what makes `--cacheinfo` load-bearing
+ * rather than a shortcut. Nothing needs checking out either: the audit reads
+ * `origin/main` and `origin/<branch>` and compares neither against local HEAD,
+ * so the local branch stays one commit behind and `status --porcelain` stays
+ * clean. That is also why no sparse-checkout is needed to keep it clean.
+ */
+function byteConflictRepo(t, printfPath) {
+  const c = repo(t);
+  execFileSync("sh", ["-c", `
+    set -eu
+    w=$1; idx=$2; branch=$3; p=$(printf "$4")
+    cd "$w"
+    side() {
+      parent=$(git rev-parse "$1")
+      blob=$(printf '%s\\n' "$2" | git hash-object -w --stdin)
+      GIT_INDEX_FILE=$idx git read-tree "$parent"
+      GIT_INDEX_FILE=$idx git update-index --add --cacheinfo "100644,$blob,$p" --cacheinfo "100644,$blob,plain.txt"
+      tree=$(GIT_INDEX_FILE=$idx git write-tree)
+      git commit-tree "$tree" -p "$parent" -m "$3"
+    }
+    git push -q origin "$(side "origin/$branch" 'branch side' 'branch edits the file')":"refs/heads/$branch"
+    git push -q origin "$(side origin/main 'MAIN SIDE' 'MAIN COMMIT AT RISK')":refs/heads/main
+  `, "sh", c.w, join(c.w, "..", "idx"), c.branch, printfPath], { env: ENV, encoding: "utf8" });
+  return c;
+}
+
+/**
+ * Add/add conflicts on 20 paths, introduced on main by TWO distinct commits
+ * that INTERLEAVE through the pathspec list: the even-numbered paths come
+ * from one, the odd-numbered from the other, and the audit hands them to
+ * `git log` in sorted order. So a batch — always a contiguous run of that
+ * list — holds paths from both commits and reports both, and the
+ * concatenation across batches is `B A B A …` rather than `A A B B`.
+ *
+ * Every part of that shape is load-bearing, and one commit pinned none of it:
+ * with a single commit each batch emits the same line, so all duplicates are
+ * adjacent and a merely-ADJACENT dedupe (`uniq`) passes; interleaved, `uniq`
+ * has nothing adjacent to collapse and returns one line per batch. The two
+ * subjects share a first word so a dedupe keyed on `$2` — the subject's first
+ * word rather than `$1`, the SHA that is the actual commit identity —
+ * collapses them to one and fails. And two DISTINCT commits are what pin that
+ * the dedupe drops only true duplicates: both must survive the split.
+ *
+ * Returns `paths` so the test asserts against the fixture's own count instead
+ * of a literal repeated at the call site.
+ *
+ * Real ARG_MAX needs thousands of ordinary-length paths to split on its own —
+ * the exact figure is ambient-environment-size dependent, since xargs' budget
+ * is the limit minus the inherited environment — so `withSplitXargs` below
+ * forces the split at 20 instead.
+ */
+function manyConflictsTwoCommits(t) {
+  const c = repo(t);
+  const paths = Array.from({ length: 20 }, (_, i) => `conflict-${String(i).padStart(2, "0")}.txt`);
+  const evens = paths.filter((_, i) => i % 2 === 0);
+  const odds = paths.filter((_, i) => i % 2 === 1);
+  git(c.w, "checkout", "-q", "main");
+  for (const [subject, batch] of [["MAIN COMMIT AT RISK, even paths", evens], ["MAIN COMMIT AT RISK, odd paths", odds]]) {
+    for (const p of batch) writeFileSync(join(c.w, p), "MAIN SIDE\n");
+    git(c.w, "add", "--", ...batch);
+    git(c.w, "commit", "-q", "-m", subject);
+  }
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+  for (const p of paths) writeFileSync(join(c.w, p), "branch side\n");
+  git(c.w, "add", "--", ...paths);
+  git(c.w, "commit", "-q", "-m", "branch edits every file");
+  git(c.w, "push", "-q", "origin", c.branch);
+  return { ...c, paths };
+}
+
+/**
+ * Shadows `xargs` on PATH with a wrapper that inserts `-s size` ahead of
+ * whatever args the script passes, forcing the ARG_MAX split #148 describes
+ * on an ordinary small fixture instead of a ~1 MiB pathspec list — the same
+ * technique the ticket used to measure the bug. Both wrappers resolve the real
+ * binary once up front — outside the shadowed PATH, so the lookup cannot
+ * recurse into the wrapper — and then `exec` it, so nothing else changes.
+ *
+ * `git` is shadowed too, and only to COUNT the batches: it records every
+ * invocation carrying a `:(literal)` pathspec, which is the one call xargs
+ * drives, so the count IS the number of batches. Without it the split is an
+ * unasserted side condition and the test is only conditionally a test — an
+ * xargs that clamps or ignores a small `-s` runs the whole fixture in one
+ * batch, and then every assertion below passes with the dedupe DELETED,
+ * measured end to end. `batches()` is what makes that platform fail red
+ * instead of green-on-nothing.
+ */
+function withSplitXargs(t, size = 300) {
+  const bin = mkdtempSync(join(tmpdir(), "no-undo-audit-xargs-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  const log = join(bin, "batches");
+  const shim = (name, body) => {
+    const real = execFileSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).trim();
+    writeExecStub(join(bin, name), `#!/bin/sh\n${body}exec ${real} "$@"\n`);
+  };
+  shim("xargs", `set -- -s ${size} "$@"\n`);
+  shim("git", `case " $* " in *':(literal)'*) echo x >>"${log}" ;; esac\n`);
+  return {
+    path: `${bin}:${process.env.PATH}`,
+    batches: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").length - 1 : 0),
+  };
+}
+
+/**
+ * A wrapper factory for the two shims below: resolves the real binary once, up
+ * front and outside the shadowed PATH so the lookup cannot recurse into the
+ * wrapper, then writes an executable of the given body. Same technique as
+ * `withSplitXargs`, kept separate because these two need a whole script rather
+ * than a prefix ahead of a trailing `exec`.
+ */
+function shimDir(t, prefix) {
+  const bin = mkdtempSync(join(tmpdir(), prefix));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  return {
+    bin,
+    real: (name) => execFileSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).trim(),
+    write: (name, body) => {
+      writeExecStub(join(bin, name), `#!/bin/sh\n${body}`);
+    },
+    path: () => `${bin}:${process.env.PATH}`,
+  };
+}
+
+/**
+ * Makes the file holding merge-tree's `-z` output unreadable at the moment the
+ * audit reads it, and not one step earlier: the `git` wrapper chmods it only
+ * after the real `merge-tree` has written and exited, so the emptiness guard
+ * that sits between the write and the read still sees a non-empty file and
+ * passes. That ordering is the whole point — the fault has to land on the stage
+ * that READS, which is the stage a pipeline's exit status does not report.
+ *
+ * `chmod 000` rather than `rm` for the same reason: a removed file fails the
+ * emptiness guard instead, and the test would then be green on a refusal raised
+ * by a different guard about a different fault, proving nothing about this one.
+ *
+ * The `mktemp` wrapper exists only to learn the name of a temporary that is
+ * otherwise private to the script. It records the FIRST one, which is the file
+ * merge-tree writes; a later temporary is left alone.
+ */
+function withUnreadableMergeTreeOutput(t) {
+  const s = shimDir(t, "no-undo-audit-mtout-");
+  const recorded = join(s.bin, "first-temp-path");
+  s.write("mktemp", `f=$(${s.real("mktemp")} "$@") || exit $?
+[ -e "${recorded}" ] || printf '%s\\n' "$f" >"${recorded}"
+printf '%s\\n' "$f"
+`);
+  s.write("git", `case " $* " in
+  *" merge-tree "*)
+    ${s.real("git")} "$@"
+    rc=$?
+    chmod 000 "$(cat "${recorded}")"
+    exit $rc ;;
+esac
+exec ${s.real("git")} "$@"
+`);
+  return s.path();
+}
+
+/**
+ * Fails every `mktemp` after the first, leaving merge-tree's own temporary
+ * intact so the run reaches the point where a second one is asked for. A full
+ * TMPDIR or a TMPDIR that has gone missing does this for real.
+ *
+ * The path the first call handed back is recorded, not merely the fact that a
+ * call happened, because the abort this injects is also the abort that has to
+ * clean up after itself: the caller reads `firstTemp` to check the file is gone
+ * once the run has exited. Recording it is what lets the assertion name a real
+ * path rather than trusting the trap.
+ */
+function withLaterMktempFailing(t) {
+  const s = shimDir(t, "no-undo-audit-mktemp-");
+  const firstTemp = join(s.bin, "first-temp-path");
+  s.write("mktemp", `if [ -e "${firstTemp}" ]; then
+  echo "mktemp: failed to create file" >&2
+  exit 1
+fi
+f=$(${s.real("mktemp")} "$@") || exit $?
+printf '%s\n' "$f" >"${firstTemp}"
+printf '%s\n' "$f"
+`);
+  return { path: s.path(), firstTemp };
+}
+
+/**
+ * Add/add conflicts on enough paths, each named long enough, that merge-tree's PROSE tail — the
+ * `Auto-merging`/`CONFLICT` section that follows the empty record, and the part
+ * of the output the audit deliberately never wants — is larger than a pipe
+ * buffer.
+ *
+ * That size is the whole fixture. The reader stops at the empty record by
+ * design, so on any conflicted run it leaves the tail unread; once the tail no
+ * longer fits in the buffer, whatever is upstream of the reader is still trying
+ * to write when the reader goes away. A `tr | tr | awk` reads back
+ * `141 141 0 0` there — two stages killed by SIGPIPE on a run whose answer is
+ * completely CORRECT. Anything that adopts a prefix stage's status as the
+ * pipeline's own, `set -o pipefail` most obviously, converts exactly this run
+ * into a refusal. So the fixture is a control: it must keep answering.
+ *
+ * One main commit, not `manyConflictsTwoCommits`' two — the dedupe across xargs
+ * batches is that fixture's claim and not this one's.
+ */
+function longTailConflictRepo(t) {
+  const c = repo(t);
+  const paths = Array.from({ length: 200 }, (_, i) => `${String(i).padStart(3, "0")}-${"x".repeat(220)}.txt`);
+  git(c.w, "checkout", "-q", "main");
+  for (const p of paths) writeFileSync(join(c.w, p), "MAIN SIDE\n");
+  git(c.w, "add", "--", ...paths);
+  git(c.w, "commit", "-q", "-m", "MAIN COMMIT AT RISK");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+  for (const p of paths) writeFileSync(join(c.w, p), "branch side\n");
+  git(c.w, "add", "--", ...paths);
+  git(c.w, "commit", "-q", "-m", "branch edits every file");
+  git(c.w, "push", "-q", "origin", c.branch);
+  return { ...c, paths };
+}
+
+/** Bytes of merge-tree's output after the empty record — the part left unread. */
+function unreadTailBytes({ w, branch }) {
+  const mt = spawnSync("git", ["-C", w, "merge-tree", "--write-tree", "--name-only", "-z", "origin/main", `origin/${branch}`],
+    { env: ENV, maxBuffer: 1 << 27 });
+  const end = mt.stdout.indexOf(Buffer.from([0, 0]));
+  assert.notEqual(end, -1, "merge-tree must emit the empty record that ends the filename section");
+  return mt.stdout.length - (end + 2);
+}
+
+/**
+ * A linked worktree NESTED inside the clone, `.worktrees/` gitignored — the
+ * fleet's own layout, and the only one where breaking the linkage is dangerous:
+ * an enclosing repo is standing by to answer in the worktree's place, and being
+ * clean it answers "nothing uncommitted here". A worktree with no repo above it
+ * has nothing to walk up to, so git fails there and the script already refuses.
+ * `precious.txt` is the uncommitted work that exists nowhere else.
+ *
+ * The directory is made BEFORE `worktree add`, not left for `git` to create
+ * it: a leaf `git` creates itself comes back reprecomposed under
+ * `core.precomposeunicode` even when `name` is passed decomposed (measured),
+ * so a caller wanting an on-disk NFD leaf (#2095) needs the directory to
+ * already exist — `git` then uses it as-is, byte for byte.
+ */
+function nestedWorktree(t, name = "9-x") {
+  const branch = "fix/9-nested";
+  const c = repo(t);
+  writeFileSync(join(c.w, ".gitignore"), ".worktrees/\n");
+  git(c.w, "add", ".gitignore");
+  git(c.w, "commit", "-q", "-m", "ignore the nested worktree");
+  const w = join(c.w, ".worktrees", name);
+  mkdirSync(w, { recursive: true });
+  git(c.w, "worktree", "add", "-q", "-b", branch, w);
+  git(w, "push", "-q", "-u", "origin", branch);
+  writeFileSync(join(w, "precious.txt"), "work that exists nowhere else\n");
+  return { parent: c.w, w, branch };
+}
+
+/**
+ * `nestedWorktree` plus a SECOND linked worktree under the same parent,
+ * named `8-y` to match the ticket's own repro. `sibling` is where it lives;
+ * `siblingAdmin` is its admin dir — the thing #189's spoof names in place of
+ * $wt's own.
+ */
+function nestedWorktreePair(t) {
+  const c = nestedWorktree(t);
+  const sibling = join(c.parent, ".worktrees", "8-y");
+  git(c.parent, "worktree", "add", "-q", "-b", "fix/8-sibling", sibling);
+  // Asked of git itself, not built with `join`: on macOS `tmpdir()` sits under
+  // a `/var` that is itself a symlink to `/private/var`, and git's own
+  // `--git-dir` answers with the resolved form. A hand-joined path would
+  // still WORK if spoofed into a `.git` file — the filesystem resolves either
+  // spelling — but comparing it against a later `--git-dir` call in a test
+  // assertion needs the same spelling git itself produces.
+  const siblingAdmin = git(sibling, "rev-parse", "--git-dir");
+  return { ...c, sibling, siblingAdmin };
+}
+
+// The payload is parsed here rather than at the call site: "the audit passed and
+// then the caller crashed on its own stdout" is a distinct outcome from "the
+// audit refused", and a test cannot tell them apart if the parse throws inside
+// the helper that also reports the exit code.
+// `cwd` defaults to `$wt`, which is what every fixture predating #376 wants.
+// The real caller runs from its own directory; the cwd-independence test below
+// passes that in rather than relying on the two happening to coincide.
+const audit = ({ w, branch }, env = ENV, cwd = w) => {
+  const r = spawnSync("sh", [SCRIPT, w, branch], { cwd, env, encoding: "utf8" });
+  const out = r.stdout.trim();
+  let json = null;
+  let jsonError = null;
+  if (out) {
+    try {
+      json = JSON.parse(out);
+    } catch (e) {
+      jsonError = e;
+    }
+  }
+  return { ...r, json, jsonError };
+};
+
+/**
+ * Runs the audit with its own stderr piped to a reader that exits after one
+ * line — a genuine SIGPIPE (#1571), not the closed-fd-before-launch shape
+ * `2>&-` gives the tests above it: here the descriptor is live and writable
+ * right up until the reader goes away mid run.
+ *
+ * `spawnSync`'s own `status`/`signal` fields cannot carry this: node reads
+ * the child's stdio through its OWN pipes, and destroying node's end races
+ * the child's writes without ever reproducing a real reader closing a real
+ * pipe (measured — it left the unfixed script un-killed as often as not).
+ * A `head -1` in a real shell pipeline is what actually closes the
+ * descriptor, and what is left to report the audit's exit code is `sh`
+ * itself, the same way an unattended caller would read it — `$?` — not
+ * node's process object. `printf … >&3` carries that `$?` around the pipe
+ * that would otherwise discard it: `3>&1` on the outer group aliases fd 3 to
+ * the descriptor `spawnSync` is already reading as `r.stdout`, and the
+ * pipeline's left-hand brace group inherits that alias directly — `$0`,
+ * `$1`, `$2` are already this `sh -c`'s own positionals, so nothing needs
+ * re-passing into a second shell.
+ */
+function earlyClosingStderrReaderStatus({ w, branch }, cwd = w) {
+  const wrapper = '{ { sh "$0" "$1" "$2" 2>&1 >/dev/null; printf "RC=%s" "$?" >&3; } '
+    + '| head -1 >/dev/null; } 3>&1';
+  const r = spawnSync("sh", ["-c", wrapper, SCRIPT, w, branch], { cwd, env: ENV, encoding: "utf8" });
+  const m = /^RC=(\d+)$/.exec(r.stdout);
+  assert.ok(m, `wrapper must report the audit's own exit code; got ${JSON.stringify(r)}`);
+  return Number(m[1]);
+}
+
+/** `atRisk` with the abbreviated SHA stripped, so a test can pin the exact set. */
+const subjects = (r) => r.json.atRisk.map((l) => l.replace(/^\S+ /, ""));
+
+/**
+ * The audit's own stash line, pulled out of stderr whole. Pinned as a literal
+ * rather than a substring match: #304 appends git's diagnostic to this line,
+ * and the thing that must not happen is a separator appended with nothing
+ * after it — which every `/unknown/` match above would still pass.
+ */
+const UNKNOWN_LINE =
+  "    stash entries (repo-global, not gated): unknown — the list came back empty but refs/stash is not absent (an unreadable ref or reflog, or a ref pointing at a missing object)";
+/**
+ * #376's line, and deliberately NOT the one above: there `refs/stash` is
+ * present and unreadable, here it is gone while its reflog is not. Reusing
+ * UNKNOWN_LINE would tell the operator "refs/stash is not absent" about a
+ * state whose whole shape is that it IS, and send them to `ls -l` on a file
+ * that no longer exists.
+ */
+const ORPHAN_LINE =
+  "    stash entries (repo-global, not gated): unknown — refs/stash is absent but its reflog is not, and still names entries no ref points at";
+/**
+ * #482's line, and the third of the three: the two above are reached with an
+ * EMPTY list, this one with entries printed and a nonzero rc. Literal for the
+ * same reason they are — `/unknown/` passes on any wording, so a reword naming
+ * the wrong call as the one that failed would go unseen. git's own diagnostic
+ * is appended after it, so what is pinned here is the prefix, not the line.
+ */
+const RC_FAILED_LINE =
+  "    stash entries (repo-global, not gated): unknown — the list call itself failed, so what it printed cannot be read as a count";
+/**
+ * #570's line, and the fourth. Of the three above only ORPHAN_LINE is reached
+ * with the reflog path in hand: the resolution is guarded on an empty list AND
+ * an absent ref, so UNKNOWN_LINE (ref present) and RC_FAILED_LINE (entries
+ * printed) never ask for the path at all — measured. This one is reached
+ * because asking for it FAILED. So it says only that the reflog could not be
+ * reached and nothing about what it holds — ORPHAN_LINE's claim that the
+ * reflog "still names entries no ref points at" is a claim about contents this
+ * state has not read and cannot make.
+ */
+const UNREACHED_LINE =
+  "    stash entries (repo-global, not gated): unknown — the reflog path could not be resolved, so the reflog could not be read";
+const stashLine = (r) => r.stderr.split("\n").find((l) => l.includes("stash entries (repo-global"));
+/**
+ * `stashLine`'s sibling: every matching line, not just the first. `.find()`
+ * above answers "what is the first sentence", and nothing built on it can
+ * therefore see a SECOND stash-entry line appear — so a future edit that
+ * breaks the if/elif/elif/else below into independent `if`s, letting two
+ * arms fire for one state, would go unnoticed. The design rule for that
+ * chain is one sentence per state — each `elif` branch names its own state
+ * and prints exactly one line for it (no-undo-audit.sh:424-431, 490-505);
+ * the length-1 assertions below are what actually enforces it. #1210.
+ */
+const stashLines = (r) => r.stderr.split("\n").filter((l) => l.includes("stash entries (repo-global"));
+
+// `$wt` is caller-supplied and reaches the operator through a step header.
+// Under `#!/bin/sh` an `echo` operand expands escapes, so a worktree whose
+// name holds `\c` truncated that header and the next stderr line landed on
+// top of it. No corrupt repo needed — which makes this a strictly more
+// reachable instance of the same hazard as the stash line's, and the reason
+// `printf` is used at both sites.
+test("a worktree path holding a backslash escape reaches the operator whole", (t) => {
+  const c = repo(t, "fix/1-thing", "no-undo-audit-back\\clue-");
+  assert.match(c.w, /back\\clue/, "fixture must actually put a `\\c` in the path");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `fixture must be clean; got ${r.status} ${r.stderr}`);
+  assert.ok(
+    r.stderr.includes(`$ git -C ${c.w} status --porcelain`),
+    "`echo` truncates the header at the `\\c` — it must name the worktree verbatim",
+  );
+});
+
+// The same hazard on the refusal path. `die` interpolates `$wt` into 11 of
+// its messages and is the single place they all route through, so one `printf`
+// covers every one of them.
+test("a die message naming an unreachable worktree keeps the path whole", (t) => {
+  const c = repo(t);
+  const notARepo = `${c.w}-back\\clue-notarepo`;
+  mkdirSync(notARepo);
+
+  const r = audit({ w: notARepo, branch: c.branch });
+  assert.equal(r.status, 2, `a non-worktree is unanswerable, not a refusal; got ${r.status} ${r.stderr}`);
+  assert.ok(
+    r.stderr.includes(`${notARepo} is not a git worktree`),
+    `\`echo\` truncates the refusal at the \`\\c\`; got ${JSON.stringify(r.stderr)}`,
+  );
+});
+
+// `$porcelain` carries the uncommitted file list — the audit's whole subject,
+// and the lines it prints when it REFUSES. A filename is free to hold `\c`.
+test("an uncommitted path holding a backslash escape survives the refusal listing", (t) => {
+  const c = repo(t);
+  writeFileSync(join(c.w, "back\\clue.txt"), "work that exists nowhere else\n");
+
+  const r = audit(c);
+  assert.equal(r.status, 1, `uncommitted work must refuse; got ${r.status} ${r.stderr}`);
+  // git C-quotes a path holding a backslash, so the bytes on the wire are `\\`.
+  // `echo` collapses that pair to one, silently rewriting the quoted path into
+  // a different one — corruption rather than truncation here, but on the very
+  // line the refusal prints. `-z` turns the same quoting OFF for the conflict
+  // list below, which is why that one truncates outright instead.
+  assert.ok(
+    r.stderr.includes('?? "back\\\\clue.txt"'),
+    `the C-quoted path must keep its doubled backslash; got ${JSON.stringify(r.stderr)}`,
+  );
+});
+
+test("a pre-existing stash does not refuse a clean worktree", (t) => {
+  const c = repo(t);
+  stashSomething(c.w);
+  assert.equal(git(c.w, "status", "--porcelain"), "", "fixture must leave the worktree clean");
+  assert.equal(git(c.w, "stash", "list").split("\n").filter(Boolean).length, 1, "fixture must leave one stash");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a stash the rebase will not consume must not refuse; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+  assert.equal(r.json.stash, 1, "the count is still reported, just not gated on");
+  assert.doesNotMatch(r.stderr, /REFUSED/);
+});
+
+test("several pre-existing stashes still do not refuse", (t) => {
+  const c = repo(t);
+  stashSomething(c.w, "h1.txt");
+  stashSomething(c.w, "h2.txt");
+  stashSomething(c.w, "h3.txt");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, "the refusal must not scale with the count either");
+  assert.equal(r.json.stash, 3);
+});
+
+test("a dirty worktree still refuses, and names the worktree not the stash", (t) => {
+  const c = repo(t);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work that exists nowhere else\n");
+
+  const r = audit(c);
+  assert.equal(r.status, 1, "uncommitted work is the whole point of this audit");
+  assert.equal(r.json.clean, false);
+  assert.match(r.stderr, /REFUSED/);
+  assert.match(r.stderr, /commit the worktree before rebasing/);
+  // The old message told the caller to clear the stash list and forbade
+  // `git stash drop` in the same refusal. Removing the gate must remove the
+  // instruction, or the contradiction outlives the bug.
+  assert.doesNotMatch(r.stderr, /stash-list-clear/);
+  // `git stash`, not `git stash drop`: stashing to clear a dirty worktree now
+  // leaves `clean` true, so this line is the only thing in the repo forbidding
+  // a maneuver nothing detects. Narrowing it back to `drop` reads like a
+  // consistency fix and silently reopens the hole.
+  assert.match(r.stderr, /`git stash` to make a rebase start/);
+});
+
+// #730 (see reap.sh's branch sweep for the full explanation) — a bare
+// `--porcelain` reads `clean` over a dirty tree under
+// `status.showUntrackedFiles = no`. Load-bearing here beyond a reap: the
+// merge bot leans on this audit to authorize a REBASE, and the work a
+// rebase replays over may exist nowhere else.
+test("a dirty worktree still refuses under status.showUntrackedFiles=no (#730)", (t) => {
+  const c = repo(t);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work that exists nowhere else\n");
+  git(c.w, "config", "status.showUntrackedFiles", "no");
+  assert.equal(git(c.w, "status", "--porcelain"), "",
+    "fixture: the config must really silence the unpinned probe, or this test measures nothing");
+
+  const r = audit(c);
+  assert.equal(r.status, 1, `a silenced probe must not become a clean verdict; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, false);
+  assert.match(r.stderr, /REFUSED/);
+  assert.match(r.stderr, /commit the worktree before rebasing/);
+  // Exit 1 is the refusal that means dirty; exit 2 means unanswerable. A fix
+  // that turned the silenced answer into a refusal-to-answer would satisfy a
+  // bare "not 0" and report the wrong thing about a worktree git can read.
+  assert.match(r.stderr, /uncommitted\.txt/, "the file git could only see with the mode pinned must be named");
+});
+
+test("a dirty worktree refuses with an empty stash stack", (t) => {
+  const c = repo(t);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work\n");
+  assert.equal(git(c.w, "stash", "list"), "", "fixture must leave no stash");
+
+  const r = audit(c);
+  assert.equal(r.status, 1, "clean is the sole gate — it must fire on its own");
+  assert.equal(r.json.stash, 0);
+});
+
+test("a clean worktree with no stash passes", (t) => {
+  const c = repo(t);
+  const r = audit(c);
+  assert.equal(r.status, 0);
+  assert.equal(r.json.clean, true);
+  assert.equal(r.json.stash, 0);
+});
+
+// #147: `git stash list` prints nothing at rc 0 when the reflog behind
+// `refs/stash` cannot be read — no error to catch, so this used to report
+// `stash: 0`, indistinguishable from the case right above, where there really
+// is nothing. `show-ref` still finds `refs/stash` here (rc 0), which is what
+// tells the two apart.
+test("stash entries present but the reflog is unreadable reports unknown, not zero", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads a 000 file regardless");
+  const c = repo(t);
+  stashSomething(c.w);
+  assert.equal(git(c.w, "stash", "list").split("\n").filter(Boolean).length, 1, "fixture must leave one stash");
+  chmodSync(join(c.w, ".git", "logs", "refs", "stash"), 0o000);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null, "an unreadable reflog must report unknown, not the zero this used to silently report");
+  assert.match(r.stderr, /unknown/);
+});
+
+// The third trap, and the one a `rev-parse --verify` cross-check cannot see:
+// the `refs/stash` FILE itself unreadable. The list comes back empty at rc 0
+// exactly as above, but this time the ref does not resolve either — so
+// rev-parse takes the genuinely-empty branch and prints the confident `0`
+// that #147 exists to remove. `show-ref` returns 1 only for a ref that is
+// genuinely ABSENT, and 128 for one that is there but unreadable, which is
+// what keeps the two apart.
+test("stash entries present but refs/stash is unreadable reports unknown, not zero", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads a 000 file regardless");
+  const c = repo(t);
+  stashSomething(c.w);
+  assert.equal(git(c.w, "stash", "list").split("\n").filter(Boolean).length, 1, "fixture must leave one stash");
+  chmodSync(join(c.w, ".git", "refs", "stash"), 0o000);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null, "an unreadable refs/stash must report unknown, not the zero a rev-parse cross-check reports");
+  assert.match(r.stderr, /unknown/);
+});
+
+// The second, different trap: a corrupted stash ref (missing object) makes
+// `git stash list` itself fail — `fatal: bad object refs/stash`, rc 1 — but
+// the pipeline's exit status was always `wc`'s, never git's, so an rc capture
+// on the old pipeline would not have caught this either. `show-ref` fails
+// here at rc 128 rather than the rc 1 that means genuinely absent, so the
+// same cross-check catches this case too.
+test("a corrupted stash ref reports unknown, not zero", (t) => {
+  const c = repo(t);
+  stashSomething(c.w);
+  const sha = git(c.w, "rev-parse", "refs/stash");
+  rmSync(join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2)));
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null, "a corrupted stash object must report unknown, not zero");
+  assert.match(r.stderr, /unknown/);
+});
+
+// #304: of the states above, exactly one has git saying anything —
+// `fatal: bad object refs/stash`. The counting pipeline's `2>/dev/null` threw
+// it away, so the operator got the guess in place of the answer git had
+// already named. Appended, never substituted: in the other states git is
+// silent, and the generic line is all there is.
+test("a corrupted stash ref passes git's own diagnostic through to the operator", (t) => {
+  const c = repo(t);
+  stashSomething(c.w);
+  const sha = git(c.w, "rev-parse", "refs/stash");
+  rmSync(join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2)));
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null, "the diagnostic is stderr only — the payload still says unknown");
+  // The whole line, not `startsWith` plus a substring match: those two leave
+  // the text between them unconstrained, so `msg="$msg$diag"` — separator
+  // dropped entirely — satisfies both, as does any other joiner.
+  assert.equal(
+    stashLine(r),
+    `${UNKNOWN_LINE} — fatal: bad object refs/stash`,
+    "git named the fault; the audit must append it to the generic line, ` — ` and all, not substitute for it and not run it together",
+  );
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
+});
+
+// #376: the fourth `show-ref` state, and the only one that used to print a
+// number. The three above all leave `refs/stash` resolvable, so they land on
+// rc 0 or rc 128 and trip the `-ne 1` guard. Delete the ref FILE and leave
+// `.git/logs/refs/stash` behind and `show-ref` exits **1** — the exact rc that
+// guard defines as genuine absence — while both stash commits are still named
+// in the reflog and still reachable. `git stash list` is empty at rc 0, so
+// nothing contradicts the `0`, and `0` is the value the runbook reads as
+// nothing to look at before an irreversible rebase.
+test("a deleted refs/stash with an intact reflog reports unknown, not zero", (t) => {
+  const c = repo(t);
+  stashSomething(c.w, "h1.txt");
+  stashSomething(c.w, "h2.txt");
+  rmSync(join(c.w, ".git", "refs", "stash")); // the ref file only — the reflog is untouched
+
+  // The three conditions that make this indistinguishable from an empty stash
+  // by everything the script asked before this change.
+  const reflog = readFileSync(join(c.w, ".git", "logs", "refs", "stash"), "utf8").split("\n").filter(Boolean);
+  assert.equal(reflog.length, 2, "fixture must leave both reflog entries behind");
+  const showRef = spawnSync("git", ["show-ref", "refs/stash"], { cwd: c.w, env: ENV, encoding: "utf8" });
+  assert.equal(showRef.status, 1, "the whole defect is this rc — the same one a genuinely empty stash gives");
+  assert.equal(git(c.w, "stash", "list"), "", "and the list agrees with it, at rc 0");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `an orphaned stash reflog is a report, not a refusal; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.stash, null, "two recoverable stash commits are still named in the reflog — `0` is not a claim the audit can make");
+  assert.equal(stashLine(r), ORPHAN_LINE);
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
+});
+
+// The reflog path has to come from the repo's REAL gitdir. `$wt` is routinely a
+// linked worktree — the fleet's own layout, which is where this script actually
+// runs — and there `.git` is a FILE, so `$wt/.git/logs/refs/stash` reaches
+// nothing. A probe built on that path reads "no reflog", takes the accept
+// branch, and prints the same confident `0` this fix exists to remove, in the
+// one layout that matters. The stash stack is repo-global, so the entries are
+// created in the parent and seen from the worktree.
+test("the orphaned-reflog probe resolves against the shared gitdir, not $wt/.git", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, "precious.txt")); // this fixture is otherwise dirty, and dirty refuses at exit 1
+  stashSomething(c.parent, "h1.txt");
+  rmSync(join(c.parent, ".git", "refs", "stash"));
+
+  assert.ok(!existsSync(join(c.w, ".git", "logs", "refs", "stash")), "a naive $wt/.git path must find nothing here — that is what this test discriminates");
+  assert.ok(existsSync(join(c.parent, ".git", "logs", "refs", "stash")), "the reflog lives in the shared gitdir");
+  assert.equal(git(c.w, "status", "--porcelain"), "", "fixture must leave the worktree clean");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null, "the reflog is one directory up, and the probe has to follow git there");
+  assert.equal(stashLine(r), ORPHAN_LINE);
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
+});
+
+// Every other fixture in this file spawns the script with `cwd === $wt`, which
+// is not how it is called: `run-merge-bot.md` runs `no-undo-audit.sh <worktree>
+// <branch>` from wherever the operator's shell already sits. `--git-path`
+// answers relative to `-C` in a main checkout, so a probe that keeps that
+// answer looks for the reflog under the CALLER's cwd, finds nothing, takes the
+// accept branch and prints the confident `0` this fix exists to remove — in the
+// one invocation that actually happens. Pinned as behaviour, not mechanism: the
+// probe has to resolve from anywhere, and how the path is made absolute is
+// git's business, not this test's.
+test("the orphaned-reflog probe resolves from a cwd that is not $wt", (t) => {
+  const c = repo(t);
+  stashSomething(c.w, "h1.txt");
+  rmSync(join(c.w, ".git", "refs", "stash")); // the ref file only — the reflog is untouched
+
+  const r = audit(c, ENV, tmpdir());
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null, "the reflog is under $wt — resolved against the caller's cwd instead, it reads as absent and reports the `0` #376 removes");
+  assert.equal(stashLine(r), ORPHAN_LINE);
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
+});
+
+// #570: the reflog path is resolved lazily, and resolving it needs search
+// permission on every ancestor directory. An unsearchable `logs/refs` makes
+// that call fail, and the `|| die` behind it turned a fault in a field the
+// script declares "reported, not gated" into a refusal of the WHOLE audit —
+// exit 2 with a zero-byte payload, withholding the `clean`, `conflicts` and
+// `atRisk` answers the audit exists to give before an irreversible rebase.
+// The suite already pins that rule twice above, with `unknown must not gate
+// the audit`, for the unreadable-reflog FILE and unreadable-ref FILE faults;
+// the unsearchable DIRECTORY is the same class.
+//
+// Both rows reach the probe: it is entered on an empty list plus a genuinely
+// absent ref, which is what a never-stashed repo looks like and what an
+// orphaned reflog looks like. So the common state — a repo that never stashed
+// at all — is one of them, and needed no stash history to refuse.
+//
+// The die's stated rationale was that a failure here means the repo went away
+// mid-run. These fixtures falsify it: the repository is entirely present, and
+// the worktree status and three earlier revision resolutions have already
+// succeeded on it. A repo that really goes away still refuses from the steps
+// that need it — the status and merge-tree probes both die on their own.
+for (const [why, prepare] of [
+  ["a repository that never stashed", () => {}],
+  ["a stash ref deleted while its reflog survived", (w) => { stashSomething(w); rmSync(join(w, ".git", "refs", "stash")); }],
+]) {
+  test(`an unsearchable reflog directory reports unknown rather than refusing the whole audit — ${why}, #570`, (t) => {
+    if (process.getuid?.() === 0) return t.skip("root searches a 000 directory regardless");
+    const c = repo(t);
+    prepare(c.w);
+    const dir = join(c.w, ".git", "logs", "refs");
+    mkdirSync(dir, { recursive: true });
+    assert.equal(git(c.w, "stash", "list"), "", "both fixtures must leave the list empty — that is what reaches the probe");
+    chmodSync(dir, 0o000);
+    const probe = spawnSync("git", ["-C", c.w, "rev-parse", "--path-format=absolute", "--git-path", "logs/refs/stash"], { env: ENV, encoding: "utf8" });
+    assert.notEqual(probe.status, 0, "fixture must actually defeat the path resolution — that failure is the whole subject");
+
+    const r = audit(c);
+    // Restored here, not in a `t.after`: `repo` registers its own teardown
+    // first and node runs them in that order, so an rmSync that cannot recurse
+    // into a 000 directory fires before any later hook could reopen it.
+    chmodSync(dir, 0o755);
+    assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+    assert.equal(r.jsonError, null, `payload must parse — this used to be zero bytes; got ${r.jsonError?.message}\n${r.stdout}`);
+    assert.equal(r.json.stash, null, "the probe could not look, so a number is not a claim it can make");
+    assert.equal(stashLine(r), UNREACHED_LINE);
+    assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — the ticket's own measured mutation (elif -> fi/if) doubles this state, #1210");
+    // The other half of the ruling: this state must not borrow the sentence
+    // that asserts what the reflog CONTAINS.
+    assert.notEqual(stashLine(r), ORPHAN_LINE);
+    // Degrading must not fall through to the confident `0` either: with the
+    // path unresolved, the `-s` test that guards the orphan branch is false
+    // against an empty string and the trailing branch prints the count.
+    assert.doesNotMatch(r.stderr, /stash entries \(repo-global, not gated\): 0$/m);
+    // git's own `fatal:` naming the path and the errno is the operator's whole
+    // lead on WHICH directory to reopen — the audit's own sentence names none.
+    // Unpinned, a `2>/dev/null` on that `rev-parse` deletes it silently: the
+    // mutation leaves every other assertion here green (measured).
+    assert.match(
+      r.stderr,
+      /fatal: .*logs\/refs\/stash.*Permission denied/,
+      "git's unwrapped diagnostic is the only thing naming the directory",
+    );
+    // The audit's real subject still answers, which is the point of degrading.
+    assert.equal(r.json.clean, true);
+    assert.deepEqual(r.json.conflicts, []);
+  });
+}
+
+// The control that keeps the guard above honest in the other direction, and
+// the one state it must NOT reach. Not by the count: an unsearchable
+// `logs/refs` empties `git stash list` too — it prints nothing at rc 0
+// (measured) — so `$stash` is 0 here exactly as in the rows above. What keeps
+// this state off #570's probe is `show-ref refs/stash` still answering rc 0,
+// which fails the probe's `sr_rc = 1` guard, so an unsearchable directory
+// lands on the existing empty-list unknown line, unchanged.
+test("a healthy stash under an unsearchable reflog directory keeps the sentence it already printed, #570", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root searches a 000 directory regardless");
+  const c = repo(t);
+  stashSomething(c.w);
+  const dir = join(c.w, ".git", "logs", "refs");
+  chmodSync(dir, 0o000);
+
+  const r = audit(c);
+  chmodSync(dir, 0o755); // see the sibling above — `repo`'s teardown runs before any `t.after` here
+  assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.stash, null);
+  assert.equal(stashLine(r), UNKNOWN_LINE, "this state never reaches #570's probe — its line must not move");
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
+});
+
+// The other half of #376, and the more expensive one to get wrong. This script
+// gates an irreversible action; an operator who sees `unknown` on every run
+// stops reading it, and then the three states above go unread too. So the
+// accept case is pinned explicitly, across every way a stack empties honestly.
+//
+// Measured, git 2.50.1: `pop`, `drop`, `clear` and `update-ref -d` each remove
+// `.git/logs/refs/stash` outright — there is no lifecycle that empties the
+// stack and leaves the reflog behind, which is why the probe can be this
+// blunt. The zero-byte row is not reachable that way; it is here because
+// `-s` and `-e` differ on exactly it, and a probe testing mere existence
+// would turn it into `unknown` for nothing.
+for (const [why, prepare] of [
+  ["never stashed at all", () => {}],
+  // `pop` restores the entry staged, so the fixture has to put the worktree
+  // back itself — the audit refuses a dirty one at exit 1 before it ever
+  // reaches the stash line.
+  ["stashed and popped", (w) => { stashSomething(w); git(w, "stash", "pop", "-q"); git(w, "rm", "-q", "-f", "h.txt"); }],
+  ["stashed and dropped", (w) => { stashSomething(w); git(w, "stash", "drop", "-q"); }],
+  ["stashed twice and cleared", (w) => { stashSomething(w, "h1.txt"); stashSomething(w, "h2.txt"); git(w, "stash", "clear"); }],
+  ["the ref deleted with update-ref, which takes the reflog with it", (w) => { stashSomething(w); git(w, "update-ref", "-d", "refs/stash"); }],
+  ["a zero-byte reflog left behind with no ref", (w) => { stashSomething(w); git(w, "stash", "clear"); mkdirSync(join(w, ".git", "logs", "refs"), { recursive: true }); writeFileSync(join(w, ".git", "logs", "refs", "stash"), ""); }],
+]) {
+  test(`an honestly empty stash still reports a confident zero — ${why}`, (t) => {
+    const c = repo(t);
+    prepare(c.w);
+    assert.equal(git(c.w, "status", "--porcelain"), "", "fixture must leave the worktree clean");
+    assert.equal(git(c.w, "stash", "list"), "", "fixture must leave no stash");
+
+    const r = audit(c);
+    assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+    assert.equal(r.json.stash, 0, "nothing is recoverable here — reporting `unknown` would be a worse bug than the one #376 fixes");
+    assert.equal(stashLine(r), "    stash entries (repo-global, not gated): 0");
+    assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
+  });
+}
+
+// #306: CHARACTERIZATION TEST, not a spec. The three tests above close every
+// unreadable-reflog case that fails LOUDLY enough for the `show-ref`
+// cross-check to notice. A reflog that is merely TRUNCATED — some lines
+// gone, the rest still parses — is the one case left open, named in-line,
+// right above the stash-counting pipeline this exercises, as "a remaining
+// ceiling" (grep the phrase rather than a line number — those drift). This
+// pins that known undercount so a later change to the block cannot silently
+// move it. It does NOT assert desired behavior, and no detection logic is
+// being added here — that was ruled out on the issue. If the gap is ever
+// closed for real, this test goes red and whoever closed it deletes it
+// deliberately; that is the point, not a regression.
+test("a truncated-but-parseable stash reflog reports the too-low count as exact — pins a known ceiling, not desired behaviour, #306", (t) => {
+  // The citation above is an anchor, not decoration: the phrase it sends the
+  // next reader to grep for has to still be in the script.
+  assert.match(readFileSync(SCRIPT, "utf8"), /a remaining ceiling/, "no-undo-audit.sh no longer names the ceiling this test cites by phrase");
+  const c = repo(t);
+  stashSomething(c.w, "h1.txt");
+  stashSomething(c.w, "h2.txt");
+  stashSomething(c.w, "h3.txt");
+  assert.equal(git(c.w, "stash", "list").split("\n").filter(Boolean).length, 3, "fixture must leave three stashes");
+
+  // Drop the oldest reflog line — one per stash push, oldest first. The
+  // remaining lines still parse, so `stash list` resolves the ref and
+  // returns a shorter-but-nonempty list instead of failing loudly.
+  const reflogPath = join(c.w, ".git", "logs", "refs", "stash");
+  const lines = readFileSync(reflogPath, "utf8").split("\n").filter(Boolean);
+  writeFileSync(reflogPath, lines.slice(1).join("\n") + "\n");
+
+  // The two conditions that make the undercount invisible to the script's own
+  // cross-check: the list call itself does not fail, and `show-ref` still
+  // finds the ref. Neither signature the three tests above rely on fires.
+  const list = spawnSync("git", ["stash", "list"], { cwd: c.w, env: ENV, encoding: "utf8" });
+  assert.equal(list.status, 0, `truncation must not make the list call itself fail; got ${list.status} ${list.stderr}`);
+  assert.equal(list.stdout.split("\n").filter(Boolean).length, 2, "fixture must leave a nonempty, undercounted list");
+  const showRef = spawnSync("git", ["show-ref", "refs/stash"], { cwd: c.w, env: ENV, encoding: "utf8" });
+  assert.equal(showRef.status, 0, `refs/stash must still resolve — this is why the cross-check sees no disagreement; got ${showRef.status} ${showRef.stderr}`);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a truncated reflog must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.stash, 2, "known-wrong: the true count is 3, and this pins the undercount printing as exact rather than `unknown`");
+  assert.doesNotMatch(r.stderr, /unknown/, "the cross-check misses this state, which is the whole ceiling");
+  assert.equal(stashLine(r), "    stash entries (repo-global, not gated): 2", "the operator-facing line must print the undercount as a plain number");
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
+});
+
+// #482: one shape of that ceiling, and the one that is not a ceiling any more.
+// Only this half of it — a MISSING non-tip object is skipped in silence at rc 0
+// and stays under #306, which is why this fixture corrupts rather than removes.
+// Corrupt the loose object behind a NON-TIP entry and the reflog stays
+// intact, so `stash list` resolves the ref, prints the entries it could read,
+// names the fault and exits 1 — a nonempty list at a nonzero rc, which is the
+// one shape none of the `show-ref` states above produce. The cross-check sees
+// no disagreement, so the rc is the whole signal, and the old pipeline gave
+// `wc`'s status instead of git's. The count printed was short by exactly the
+// entries git refused to read.
+test("a corrupt loose object behind a non-tip stash entry reports unknown, not the count git could not finish, #482", (t) => {
+  const c = repo(t);
+  stashSomething(c.w, "h1.txt");
+  stashSomething(c.w, "h2.txt");
+  stashSomething(c.w, "h3.txt");
+  const sha = git(c.w, "rev-parse", "refs/stash@{2}"); // the OLDEST entry, not the tip
+  const obj = join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2));
+  chmodSync(obj, 0o644); // loose objects are mode 444
+  writeFileSync(obj, "junk\n");
+
+  // The signature that makes this state its own: git fails, and it fails
+  // AFTER printing entries. Measured here rather than asserted in prose,
+  // because both halves are what the fix reads and neither is obvious.
+  const list = spawnSync("git", ["stash", "list"], { cwd: c.w, env: ENV, encoding: "utf8" });
+  assert.equal(list.status, 1, `a corrupt non-tip object must make the list call fail; got ${list.status} ${list.stderr}`);
+  assert.equal(list.stdout.split("\n").filter(Boolean).length, 2, "fixture must leave a nonempty, undercounted list — an empty one lands on the show-ref branch instead");
+  const showRef = spawnSync("git", ["show-ref", "refs/stash"], { cwd: c.w, env: ENV, encoding: "utf8" });
+  assert.equal(showRef.status, 0, `refs/stash must still resolve — this is why the cross-check cannot see it; got ${showRef.status} ${showRef.stderr}`);
+  const reflog = readFileSync(join(c.w, ".git", "logs", "refs", "stash"), "utf8").split("\n").filter(Boolean);
+  assert.equal(reflog.length, 3, "the reflog is intact — the true count is 3, which is what makes the printed 2 a lie rather than a limit");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `unknown must not gate the audit; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.stash, null, "a list call that failed is not a count — the payload must say unknown, never the short number");
+  assert.equal(stashLine(r).slice(0, RC_FAILED_LINE.length), RC_FAILED_LINE, "the operator-facing line must name THIS cause, not just say unknown — the other two say the list came back empty, which this state is not");
+  assert.match(stashLine(r), /fatal: loose object \S+ .* is corrupt/, "git named the fault outright; the audit must pass it through rather than guess");
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
+});
+
+// A stash object that is CORRUPT rather than missing reaches the same branch —
+// list empty at rc 1, show-ref rc 0 — but git answers in SEVEN lines there, and
+// a bad `objects/info/alternates` both adds three more and puts a backslash in
+// them. That fixture is what makes the two hazards of `msg="$msg — $diag";
+// echo "$msg"` observable at once: unfolded newlines put git's text at column 0
+// where only the audit's own `$ git ...` step headers belong, and `echo` under
+// `#!/bin/sh` eats the operator's line from the `\c` onward.
+//
+// The alternates path also makes git's LATER calls complain at column 0, which
+// is why the fold assertion below is scoped to the diagnostic's own text rather
+// than to every unindented line.
+test("a multi-line diagnostic holding a backslash arrives folded and whole", (t) => {
+  const c = repo(t);
+  stashSomething(c.w);
+  const sha = git(c.w, "rev-parse", "refs/stash");
+  const obj = join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2));
+  chmodSync(obj, 0o644);
+  writeFileSync(obj, "junk\n");
+
+  // The rc both comments name for this state, measured rather than asserted in
+  // prose (#494). `stash list` FAILS here, unlike the states it stays silent
+  // about — and the counting pipeline takes `wc`'s status, so the branch still
+  // fires and the rc is discarded. That discard is why a wrong rc in the prose
+  // above could sit here for as long as it did without a test noticing.
+  const list = spawnSync("git", ["stash", "list"], { cwd: c.w, env: ENV, encoding: "utf8" });
+  assert.equal(list.status, 1, `a corrupt tip object must make the list call itself fail; got ${list.status} ${list.stderr}`);
+
+  mkdirSync(join(c.w, ".git", "objects", "info"), { recursive: true });
+  writeFileSync(join(c.w, ".git", "objects", "info", "alternates"), "/no\\clue/objects\n");
+
+  const r = audit(c);
+  assert.equal(r.json.stash, null, "a corrupt (not missing) stash object must reach the unknown branch too");
+  assert.match(stashLine(r), /fatal: loose object \S+ .* is corrupt/, "git named the fault; the audit must not drop it");
+  assert.match(
+    stashLine(r),
+    /\/no\\clue\/objects/,
+    "`echo` expands the `\\c` and truncates the line there — the path must arrive verbatim",
+  );
+  assert.equal(stashLines(r).length, 1, "exactly one stash-entry line — a broken elif chain would let a second one through, #1210");
+  const atColumn0 = r.stderr.split("\n").filter((l) => /^\S/.test(l) && /loose object|unable to unpack|inflate/.test(l));
+  assert.deepEqual(atColumn0, [], "git's diagnostic belongs folded into the audit's own indented line, never at column 0");
+});
+
+// Its own test, not a line inside the behaviour test above: `assert` aborts the
+// whole test function, so a prose drift ahead of `audit(c)` would pre-empt this
+// file's only coverage of the #304 fold and `printf` hazards, and report the
+// comment instead of the behaviour. Measured — with the fold dropped AND the
+// comment reverted, the fold regression went unnamed and only the comment was
+// reported.
+test("no-undo-audit.sh's own comment names the rc the fixture above measures", () => {
+  // Bounded to the paragraph under test, not matched against the whole file: an
+  // unbounded end lets a later, unrelated occurrence of the phrase satisfy this
+  // after the real clause is deleted. Measured — that false green reproduces
+  // against an unbounded match and reds here. The gutter comes off before
+  // `phrase`'s wrap-tolerant `\s+`, because the clause is hard-wrapped and it is
+  // the `#`, not whitespace, that sits at the break.
+  const paragraph = between(
+    stripHashGutter(readFileSync(SCRIPT, "utf8")),
+    "A stash object that is CORRUPT",
+    "`printf`, not `echo`",
+    "no-undo-audit.sh",
+  );
+  assert.match(
+    paragraph,
+    phrase("list empty at rc 1"),
+    "no-undo-audit.sh states this same rc in its own comment; the two must not drift apart again",
+  );
+});
+
+// The other half of #304, and the half a careless append breaks: the `stash
+// list` this branch captures says nothing in either permission state, so the
+// line must come out exactly as it did before — no trailing separator, no
+// empty parenthetical, nothing dangling where the diagnostic would have gone.
+// One test for both, because it is one behaviour: an empty capture appends
+// nothing. Git as a whole is NOT silent in both — see the narrowing below.
+test("the states `stash list` is silent about print the unknown line unchanged", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads a 000 file regardless");
+  for (const path of [[".git", "logs", "refs", "stash"], [".git", "refs", "stash"]]) {
+    const c = repo(t);
+    stashSomething(c.w);
+    chmodSync(join(c.w, ...path), 0o000);
+
+    const r = audit(c);
+    assert.equal(r.json.stash, null, `${path.join("/")}: fixture must reach the unknown branch`);
+    assert.equal(stashLine(r), UNKNOWN_LINE, `${path.join("/")}: git said nothing, so nothing may be appended`);
+    assert.equal(stashLines(r).length, 1, `${path.join("/")}: exactly one stash-entry line — a broken elif chain would let a second one through, #1210`);
+    // Reflog only. The `stash list` this branch captures is silent in both
+    // states, but git as a whole is not: in the `refs/stash` case the
+    // `show-ref` cross-check above prints `fatal: git show-ref: bad ref
+    // refs/stash (0000…)`, and the audit only looks silent there because that
+    // call runs under `>/dev/null 2>&1` (#481). Asserting no `fatal:` over
+    // that state would convert an unstated ceiling into an invariant, and make
+    // the follow-up edit a passing test.
+    if (path.includes("logs")) {
+      assert.doesNotMatch(r.stderr, /fatal:|warning:/, "the unreadable reflog is the one state git says nothing about at all");
+    }
+  }
+});
+
+// The count stays reported-only, even at "unknown" — the dirty check is the
+// sole gate, and an unreadable reflog must not mask it either.
+test("a dirty worktree refuses even when the stash is unknown", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads a 000 file regardless");
+  const c = repo(t);
+  stashSomething(c.w);
+  chmodSync(join(c.w, ".git", "logs", "refs", "stash"), 0o000);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work\n");
+
+  const r = audit(c);
+  assert.equal(r.status, 1, "unknown must not mask the dirty check, in either direction");
+  assert.equal(r.json.clean, false);
+  assert.equal(r.json.stash, null);
+});
+
+// `clean` is now the sole gate, so a `git status` that fails must not read as a
+// clean worktree. It used to have an accidental backstop: a repo holding any
+// stash refused anyway, whatever `status` did. That backstop left with the gate.
+test("a git status that fails is unanswerable (2), never clean (0)", (t) => {
+  if (process.getuid?.() === 0) return t.skip("root reads a 000 file regardless");
+  const c = repo(t);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work that exists nowhere else\n");
+  chmodSync(join(c.w, ".git", "index"), 0o000);
+
+  const r = audit(c);
+  assert.equal(r.status, 2, "an unreadable index cannot answer the question — it must not answer 'clean'");
+  assert.match(r.stderr, /cannot tell a clean worktree from a dirty one/);
+  assert.doesNotMatch(r.stdout, /"clean":true/);
+});
+
+test("a dirty worktree refuses even when a stash is also present", (t) => {
+  const c = repo(t);
+  stashSomething(c.w);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work\n");
+
+  const r = audit(c);
+  assert.equal(r.status, 1, "the stash must not mask the dirty check, in either direction");
+  assert.equal(r.json.clean, false);
+  assert.equal(r.json.stash, 1);
+});
+
+// ---------------------------------------------------------------------------
+// conflicts[] and atRisk[]. The refusal above is only half the audit: a clean
+// worktree still exits 0 while answering "what would a careless resolution
+// eat", and that answer had no coverage at all.
+// ---------------------------------------------------------------------------
+
+// One path carries both failures, because they compound. The space made the
+// pathspec word-split into `has` + `space.txt`, so `atRisk` came back empty on
+// a branch that really was about to eat a commit — a false safe, which is the
+// one outcome this script exists to prevent. The quote made the payload
+// unparseable, on exit 0, so a caller that got as far as reading the answer
+// crashed instead. A path that git has to quote also proves the paths reaching
+// the caller are real paths and not git's C-quoted rendering of them.
+test("a conflicting path with a space and a quote still names the commits at risk", (t) => {
+  const path = 'has"quote and space.txt';
+  const c = conflictRepo(t, path);
+
+  const fork = git(c.w, "merge-base", "origin/main", `origin/${c.branch}`);
+  const truth = git(c.w, "log", "--oneline", `${fork}..origin/main`, "--", path);
+  assert.equal(truth.split("\n").filter(Boolean).length, 1, "fixture must put exactly one main commit at risk");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a clean worktree passes even with conflicts; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `a passing audit must emit parseable JSON; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, [path], "the real path, not git's C-quoted rendering of it");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"], `ground truth was ${truth}`);
+  assert.match(r.stderr, /at risk: /);
+});
+
+// Same question, asked the other way: an ordinary path must not regress while
+// the quoted one is being fixed.
+test("a plain conflicting path names the commits at risk", (t) => {
+  const c = conflictRepo(t, "plain.txt");
+
+  const r = audit(c);
+  assert.equal(r.status, 0);
+  assert.deepEqual(r.json.conflicts, ["plain.txt"]);
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
+});
+
+// #148: above ARG_MAX, `xargs -0` runs `git log` once per batch of the
+// pathspec list, and each invocation reports every commit touching ITS OWN
+// batch — so a commit spanning several batches used to come back once per
+// batch. `withSplitXargs` forces that split at 20 files instead of the
+// thousands real ARG_MAX needs, reproducing the ticket's own measurement
+// (`xargs -s 300`) without a ~1 MiB fixture.
+//
+// Sorted, because the set is the whole claim: once xargs splits, `atRisk` is
+// the concatenation of per-batch outputs in PATHSPEC order, not `git log`'s
+// reverse-chronological one, and which commit lands first depends on how the
+// batch boundaries fall — which depends on the length of the tmpdir path.
+// Asserting the emitted order would pin the environment, not the dedupe.
+test("two commits spanning the conflicting paths are each named once in atRisk, even when xargs splits the pathspec list into several batches", (t) => {
+  const c = manyConflictsTwoCommits(t);
+  const xargs = withSplitXargs(t);
+
+  const r = audit(c, { ...ENV, PATH: xargs.path });
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.conflicts.length, c.paths.length, "fixture must put every file in conflict");
+  assert.ok(xargs.batches() > 1, `xargs must actually split — ran git log ${xargs.batches()}x, and at 1 this test passes with the dedupe deleted`);
+  assert.deepEqual(
+    subjects(r).sort(),
+    ["MAIN COMMIT AT RISK, even paths", "MAIN COMMIT AT RISK, odd paths"],
+    "each commit named once, not once per xargs batch it lands in",
+  );
+});
+
+// #522: this pipeline's status is `xargs`' — the last command — not that of the
+// `git log` xargs drives, and there is no `pipefail` in POSIX sh to change
+// that. So an xargs-side fault reaches the guard, and the guard used to answer
+// for it by naming git log, sending the reader to git for a fault git never had.
+// Induced with the same shim #148's test uses, at a size that leaves xargs no
+// room for the command line at all, so it exits nonzero without running git.
+// Only the audit's own line is pinned: the accompanying diagnostic is xargs'
+// own and its wording differs between implementations.
+test("an xargs-side failure listing the at-risk commits is unanswerable, and does not answer for it by naming git log", (t) => {
+  const c = bareConflictRepo(t, "plain.txt");
+  const xargs = withSplitXargs(t, 60);
+
+  const r = audit(c, { ...ENV, PATH: xargs.path });
+  assert.equal(r.status, 2, `an at-risk list that could not be built is unanswerable, not a verdict; got ${r.status} ${r.stderr}`);
+  assert.equal(r.stdout.trim(), "", `exit 2 emits no payload — a payload is an answer; got ${r.stdout}`);
+  assert.match(
+    r.stderr,
+    /listing commits for the conflicting paths failed \(git log or xargs\)/,
+    "the guard no longer names both commands that can produce the status it reads",
+  );
+  assert.doesNotMatch(
+    r.stderr,
+    /git log failed for the conflicting paths/,
+    "the guard is back to blaming git log for a fault that can be xargs' own",
+  );
+});
+
+/**
+ * Shadows `awk` on PATH with a wrapper that fails ONLY the dedupe call this
+ * guard reads, and defers to the real awk otherwise — so the earlier
+ * stash-counting `awk 'END{print NR}'` keeps working and the fault lands on
+ * the one statement under test. Same technique as `withBrokenEscaper`, and
+ * for its reason: the call is selected on the at-risk list flowing THROUGH
+ * it, never on the program text handed to it. Selecting on the literal
+ * `!seen[$1]++` looked equivalent and was not — a behaviour-preserving
+ * rewrite to `{if(!seen[$1]++)print}` fell straight through to the real awk,
+ * disarming the injection while the test went red as if the `|| die` had
+ * regressed (measured).
+ *
+ * Input is captured to a file and replayed byte-for-byte rather than through
+ * `printf`, which would turn the stash call's empty input into one blank line
+ * and its `NR` from 0 into 1.
+ *
+ * `fired` is the residual that selecting on content cannot cover: a rewrite
+ * routing the dedupe away from awk altogether still disarms the fault, and
+ * without this the run would again red as a guard regression rather than as
+ * an injection that never fired.
+ */
+function withFailingDedupeAwk(t) {
+  const bin = mkdtempSync(join(tmpdir(), "no-undo-audit-awk-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  const real = execFileSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
+  writeExecStub(join(bin, "awk"), `#!/bin/sh
+f="${bin}/stdin.$$"
+cat > "$f"
+if grep -qF 'MAIN COMMIT AT RISK' "$f"; then
+  : > "${bin}/fired"
+  echo "SHIM: forced awk failure for test" >&2
+  exit 13
+fi
+exec ${real} "$@" < "$f"
+`);
+  return { path: `${bin}:${process.env.PATH}`, fired: join(bin, "fired") };
+}
+
+// This statement is kept separate from the xargs/git-log pipe above it (see
+// the comment ahead of the dedupe line in the script) precisely so an
+// awk-side fault is diagnosed by name instead of swallowed into that pipe's
+// status. Nothing forced that statement to fail before this test, so the
+// separation it documents was unpinned -- deleting the `|| die` left this
+// exact fixture green (measured): under `set -eu` a bare
+// `at_risk=$(... | awk ...)` still aborts on the shim's exit 13, but with
+// awk's own status and no named message, which is what the assertions below
+// discriminate from the guard actually firing.
+test("an awk-side failure deduplicating the at-risk commits is unanswerable, and names awk rather than the git-log/xargs pipe ahead of it", (t) => {
+  const c = bareConflictRepo(t, "plain.txt");
+
+  const awk = withFailingDedupeAwk(t);
+  const r = audit(c, { ...ENV, PATH: awk.path });
+  assert.ok(existsSync(awk.fired),
+    "the fault injection never fired — the at-risk list no longer flows through awk, so every assertion below is measuring an unmutated run");
+  assert.equal(r.status, 2, `an at-risk list that could not be deduplicated is unanswerable, not a verdict; got ${r.status} ${r.stderr}`);
+  assert.equal(r.stdout.trim(), "", `exit 2 emits no payload -- a payload is an answer; got ${r.stdout}`);
+  assert.match(
+    r.stderr,
+    /awk failed deduplicating the at-risk commits/,
+    "the guard must name awk, not fall through to a bare set -e abort",
+  );
+  assert.doesNotMatch(
+    r.stderr,
+    /listing commits for the conflicting paths failed \(git log or xargs\)/,
+    "an awk-side fault must not be misreported as the git-log/xargs pipe ahead of it",
+  );
+});
+
+/**
+ * Shadows `awk` on PATH with a wrapper that fails ONLY the stash-count call
+ * this guard reads — selected on content flowing THROUGH it, never on the
+ * program text handed to it, same technique and same reason as
+ * `withFailingDedupeAwk` above. `stash@{` is git's own `stash list` line
+ * prefix and cannot appear in the at-risk dedupe's commit-log input, so the
+ * two awk call sites stay distinguishable without either one shadowing the
+ * other.
+ */
+function withFailingStashCountAwk(t) {
+  const bin = mkdtempSync(join(tmpdir(), "no-undo-audit-awk-stash-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  const real = execFileSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
+  writeExecStub(join(bin, "awk"), `#!/bin/sh
+f="${bin}/stdin.$$"
+cat > "$f"
+if grep -qF 'stash@{' "$f"; then
+  : > "${bin}/fired"
+  echo "SHIM: forced awk failure for test" >&2
+  exit 13
+fi
+exec ${real} "$@" < "$f"
+`);
+  return { path: `${bin}:${process.env.PATH}`, fired: join(bin, "fired") };
+}
+
+// Same shape as the dedupe guard's own test above, and the fix for finding 1
+// of #1160's follow-up review: this was the one external-tool command
+// substitution left in the file with no guard, and it reproduced the EXACT
+// symptom this script exists to remove — a clean worktree refused at exit 1,
+// no payload, no cause named — because it ANSWERS a question (the stash
+// count) rather than only rendering one, so it belongs with the `|| die`
+// family below, not with `render`'s family above.
+test("an awk-side failure counting the stash entries is unanswerable, and names awk rather than a bare set -e abort", (t) => {
+  const c = repo(t);
+  stashSomething(c.w);
+  assert.equal(git(c.w, "stash", "list").split("\n").filter(Boolean).length, 1, "fixture must leave one stash");
+
+  const awk = withFailingStashCountAwk(t);
+  const r = audit(c, { ...ENV, PATH: awk.path });
+  assert.ok(existsSync(awk.fired),
+    "the fault injection never fired — the stash count no longer flows through awk, so every assertion below is measuring an unmutated run");
+  assert.equal(r.status, 2, `a stash count that could not be computed is unanswerable, not a verdict; got ${r.status} ${r.stderr}`);
+  assert.equal(r.stdout.trim(), "", `exit 2 emits no payload -- a payload is an answer; got ${r.stdout}`);
+  assert.match(
+    r.stderr,
+    /awk failed counting the stash entries/,
+    "the guard must name awk, not fall through to a bare set -e abort — the #1160 symptom this fixes",
+  );
+});
+
+// #583: a POSIX pipeline's status is its LAST command's, so a fault in any
+// earlier stage is invisible to `set -e` and to a trailing `|| die` alike. The
+// stage that reads merge-tree's output is the one that can fail — measured on
+// the locale fault #582 filed, `PIPESTATUS: 1 0 0`, the first stage exiting 1
+// and truncating while the two behind it exit 0 on the short input handed to
+// them. What came out was a SMALLER conflicts list at exit 0: a false safe from
+// the one tool whose job is to say whether a rebase would eat a commit.
+//
+// The fault is injected on the file rather than on any one command, so the
+// pin survives a change of reader: whatever reads merge-tree's output, it must
+// refuse when it cannot.
+test("merge-tree's output going unreadable at the moment it is read is unanswerable (2), never an empty conflicts list at exit 0", (t) => {
+  const c = bareConflictRepo(t, "plain.txt");
+
+  const r = audit(c, { ...ENV, PATH: withUnreadableMergeTreeOutput(t) });
+  assert.equal(r.status, 2,
+    `a conflicts list that could not be read is unanswerable, not a verdict; got ${r.status} ${r.stderr}`);
+  assert.equal(r.stdout.trim(), "",
+    `exit 2 emits no payload — an empty conflicts[] here would be a false safe on a branch that really conflicts; got ${r.stdout}`);
+  assert.match(r.stderr, /could not read git merge-tree's output \(python3\)/,
+    "the guard names the command whose status it actually reads, the way #522 taught the at-risk guard to");
+});
+
+// The other half of #583, and the one that rules `set -o pipefail` out even
+// where a shell offers it: on a large CORRECT run the reader stops at the empty
+// record by design and leaves merge-tree's prose tail unread, so a `tr | tr |
+// awk` reads back `141 141 0 0` — two stages killed by SIGPIPE with nothing
+// wrong. Adopting a prefix stage's status would refuse this run. It must
+// answer, and answer in full.
+test("a conflicting run whose unread tail outgrows a pipe buffer still answers, and answers in full", (t) => {
+  const c = longTailConflictRepo(t);
+  const tail = unreadTailBytes(c);
+  assert.ok(tail > 65536,
+    `the fixture must leave more unread than a pipe buffer holds, or nothing is being controlled for — left ${tail} bytes`);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a large correct run is an answer, not a refusal; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}`);
+  assert.deepEqual([...r.json.conflicts].sort(), [...c.paths].sort(),
+    "every conflicting path, not the prefix that fitted before the reader stopped");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
+});
+
+// The at-risk half of #583. Its `|| die` reads the status of the LAST command
+// in the pipeline that built the pathspec list, so the `printf | sed | tr` that
+// once sat ahead of `xargs` could fail and leave `at_risk` short or empty at
+// exit 0 — a branch reported as eating nothing while it really was about to.
+// The fix is that the list no longer passes through them at all, and this is
+// the assertion that says so: break `sed` on the invocation that used to build
+// the pathspecs and the answer must be unchanged, because there is no longer
+// such an invocation. Restore the pipeline and the decoy commit comes back with
+// the real one, since an empty pathspec list leaves `git log` filtering by
+// nothing.
+//
+// `conflictRepo`, not `bareConflictRepo`: the decoys are what make an
+// unfiltered `git log` distinguishable from a correctly filtered one. Without
+// them the range holds a single commit and the broken run returns the right
+// answer for the wrong reason.
+test("breaking the sed that used to build the at-risk pathspecs changes nothing, because nothing ahead of xargs can fail unseen", (t) => {
+  const c = conflictRepo(t, "plain.txt");
+
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, { tool: "sed", marker: "plain.txt", selector: "literal" }) });
+  assert.equal(r.status, 0, `nothing failed, so nothing is unanswerable; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}`);
+  assert.deepEqual(r.json.conflicts, ["plain.txt"]);
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"],
+    "the decoys are back, which means the pathspec list went through something that could fail without the guard hearing it");
+});
+
+// A temporary the audit cannot create is a question it cannot answer, and the
+// exit code has to say so: bare `set -eu` would abort with mktemp's own 1,
+// which out of THIS script is the dirty-worktree refusal — fabricated on a
+// worktree already measured clean, with no payload and nothing on stderr.
+//
+// The last assertion is about the abort PATH, not the verdict, and it is the
+// one that needs saying: the fault lands between the two `mktemp` calls, so a
+// cleanup trap armed after both would not yet exist when this run dies, and the
+// temporary the first call created would outlive it. Exit code and message are
+// both correct in that world, which is why they cannot be the whole pin —
+// asking whether the file is gone is the only question that separates a trap
+// armed early enough from one armed too late.
+test("a temporary file the at-risk step cannot create is unanswerable (2), never the refusal that means dirty", (t) => {
+  const c = bareConflictRepo(t, "plain.txt");
+
+  const m = withLaterMktempFailing(t);
+  const r = audit(c, { ...ENV, PATH: m.path });
+  assert.equal(r.status, 2,
+    `the worktree is clean and was measured clean — exit 1 here would report it dirty on the strength of a full TMPDIR; got ${r.status} ${r.stderr}`);
+  assert.equal(r.stdout.trim(), "", `exit 2 emits no payload; got ${r.stdout}`);
+  assert.match(r.stderr, /cannot create a temporary file/,
+    "and it names the cause rather than exiting silently");
+
+  const first = readFileSync(m.firstTemp, "utf8").trim();
+  assert.ok(first, "the shim must have recorded the temporary the first call handed back, or the check below proves nothing");
+  assert.equal(existsSync(first), false,
+    `the temporary created before the failing call has to be cleaned up by the abort that follows it, or a run that dies here leaks one; ${first} survived`);
+});
+
+// #146: a BS, tab, FF, CR or DEL in a conflicting path used to be replaced
+// with a space, so `conflicts[]` named a file that exists nowhere on disk —
+// this is the case the ticket itself measured. RFC 8259 gives short forms to
+// all four control bytes (\b \t \f \r) and DEL (\177) is not a C0 byte at
+// all, so all five must round-trip, and `conflictsRewritten` must say so. BS
+// and FF are here because the first version of this fix scrubbed them anyway.
+test("a conflicting path with a BS, a tab, a FF, a CR and a DEL round-trips and is not flagged rewritten", (t) => {
+  const path = "has\bbs\ttab\fff\rcr\x7fdel.txt";
+  const c = conflictRepo(t, path);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, [path], "the real path, byte for byte — this is what a consumer pastes into `git diff --`");
+  assert.deepEqual(r.json.conflictsRewritten, [false], "escaped or preserved, not replaced");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
+});
+
+// The other half: a byte with no JSON short form still has to be replaced —
+// unlike tab/CR/DEL, JSON has nowhere to put it — but the payload must now say
+// so, since the runbook step that pastes `conflicts[]` into a diff command must
+// skip exactly this path.
+// \013 (VT) rides along with \002: it is the C0 byte that looks like it has a
+// short form and does not — RFC 8259 lists no \v — so narrowing the scrub set
+// to make room for \b and \f must not take VT out with them. Unescaped in a
+// JSON string it is a parse error, so `jsonError` is the discriminator.
+test("a conflicting path with bytes that have no short form is replaced and flagged rewritten", (t) => {
+  const path = "has\x02bell\x0bvt.txt";
+  const c = conflictRepo(t, path);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, ["has bell vt.txt"], "no short form for \\002 or \\013 — both still neutralised to a space");
+  assert.deepEqual(r.json.conflictsRewritten, [true], "and the payload must disclose that it was");
+});
+
+// `--` ends the options, not the pathspec magic, so a real file named
+// `:colon.txt` is parsed as a pathspec expression and matches nothing. Same
+// false safe as the space, reached by a different byte, and `:(literal)` is
+// what closes it.
+test("a conflicting path that looks like pathspec magic names the commits at risk", (t) => {
+  const path = ":colon.txt";
+  const c = conflictRepo(t, path);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.deepEqual(r.json.conflicts, [path]);
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"], "a leading `:` must be matched literally, not as magic");
+});
+
+// #582: `tr` is locale-sensitive, and under a UTF-8 locale BSD tr exits 1 on a
+// byte that is not valid UTF-8. What that cost was measured on the `tr | tr |
+// awk` that used to split merge-tree's output, where the FIRST stage was the
+// one that failed — PIPESTATUS `1 0 0`, the second `tr` and `awk` both exiting
+// 0 on the short input it handed them — so the real status sat in a non-final
+// slot where `set -e` could not see it (the pipeline's status was awk's) and
+// where the line carried no `|| die` of its own either. `conflicts` came back
+// holding the single truncated entry `b`, `plain.txt` was dropped from the list
+// entirely, `atRisk` was `[]`, and the audit exited 0: a false safe from the one
+// tool whose whole job is to say whether a rebase would eat a commit, which is
+// the outcome the comment above `conflicts=` says must be exit 2.
+// `export LC_ALL=C` is the fix, and it is the convention inflight.sh already
+// follows, both globally and per site.
+//
+// Past tense throughout, because that mechanism is no longer here to reproduce:
+// #583 replaced the split with a single byte-oriented reader whose status
+// nothing discards, so the pin is not what stands between that byte and a false
+// safe on this path any more. The assertions below are unchanged by that —
+// they assert the correct ANSWER, which is what both the split and the reader
+// owe.
+//
+// WHAT KILLS THE MUTANT, and the difference matters to anyone tidying the
+// script. Measured on this tree with the pin deleted: the reader parses both
+// conflicting paths correctly whatever the locale, and the kill lands further
+// down, in the `conflict: ` render that prints them to stderr. `sed` exits on
+// the byte — `sed: RE error: illegal byte sequence` on `b\377ad.txt` — and
+// emits nothing, so neither conflict line reaches stderr.
+//
+// It used to produce a second kill beside that one, and it no longer does. The
+// render was a bare pipeline, so `set -eu` took sed's own 1 — which out of
+// this script is the dirty-worktree refusal, fabricated on a worktree the
+// audit had already printed `clean` for — and the status assertion below
+// caught the mutant on that. #1160 put the render behind a guard, so the
+// verdict no longer moves when it fails, and the status, payload and
+// `subjects()` assertions below now all stay GREEN under the mutant.
+//
+// So the kill is the pair of STDERR assertions at the end of this test and
+// nothing else. Measured both ways at #1160's own commit: with the pin, both
+// conflicting paths are named; with it deleted, `no-undo-audit: could not
+// render the conflicting-path list to stderr` stands in their place, at the
+// same exit 0 over the same payload. Do not drop them to tidy the test —
+// on this script nothing else observes the pin.
+//
+// The locale goes in as `LANG`, with `LC_ALL` explicitly UNSET, and both halves
+// are load-bearing. Explicit rather than inherited, because a suite that takes
+// whatever the runner happens to export pins nothing at all — same reasoning,
+// and same technique, as inflight.test.mjs' own locale test. `LANG` rather than
+// `LC_ALL`, because passing `LC_ALL` in puts it in the child's environment
+// BEFORE the script runs, and a POSIX shell keeps a variable's export attribute
+// once it is already there: a plain `LC_ALL=C` with the `export` keyword
+// dropped would still reach `tr`, and these tests would go on passing against a
+// script that exports nothing. Measured both ways — under
+// `{ LC_ALL: "en_US.UTF-8" }` that mutant survives, under this shape it dies.
+// It is also the honest shape: the ambient failure is an operator's
+// `LANG=en_US.UTF-8` with `LC_ALL` unset.
+//
+// Platform ceiling, stated rather than hidden: BSD tr — macOS, the fleet's own
+// platform — rejects the byte, while GNU tr is byte-oriented and accepts it, so
+// on Linux the unpatched script already answers correctly and this test passes
+// with or without the pin. Measured under a full GNU toolchain (coreutils 9.11,
+// gnu-sed 4.10, gawk 5.4.1 ahead of PATH): the whole file stays green with
+// `export LC_ALL=C` deleted. This test asserts the correct ANSWER, which is
+// right on both platforms; only the macOS run kills the mutant. `ci.yml` runs
+// ubuntu-latest, so the half CI can check is the source assertion in
+// locale-pin-prose.test.mjs, not this one.
+test("a conflicting path holding an invalid-UTF-8 byte still names every conflict and every commit at risk under an ambient UTF-8 locale", (t) => {
+  const c = byteConflictRepo(t, "b\\377ad.txt");
+
+  const r = audit(c, { ...ENV, LANG: "en_US.UTF-8", LC_ALL: undefined });
+  assert.equal(r.status, 0, `a clean worktree passes even with conflicts; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.conflicts.length, 2,
+    `both conflicting paths, not a list truncated at the bad byte; got ${JSON.stringify(r.json.conflicts)}`);
+  assert.equal(r.json.conflicts[1], "plain.txt",
+    "the path AFTER the bad one is what truncation drops, and dropping it silently is the false safe");
+  assert.match(r.json.conflicts[0], /^b.ad\.txt$/, "the bad path arrives whole, not cut down to `b`");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"],
+    "and the commit a careless resolution would eat is named, rather than atRisk: [] at exit 0");
+  // The kill, per the block above. Matched on `.` rather than on the byte:
+  // `audit()` decodes the child's stderr as UTF-8 and substitutes U+FFFD for
+  // it on the way in, the same lossy read #613 measured on stdout.
+  assert.match(r.stderr, /^ {4}conflict: b.ad\.txt$/m,
+    "the render must name the bad path — with `export LC_ALL=C` deleted, sed exits on the byte and emits nothing");
+  assert.match(r.stderr, /^ {4}conflict: plain\.txt$/m,
+    "and the path behind it, which sed's failure takes with it whether it aborts the audit or not");
+});
+
+// #613: the test above parses the payload through `audit()`'s
+// `encoding: "utf8"`, and Node decodes a child's stdout as UTF-8 LOSSILY on
+// the way in — the same silent U+FFFD substitution `jq` performs — so it
+// cannot tell "the script emitted valid UTF-8" from "the script emitted a raw
+// invalid byte and Node papered over it before JSON.parse ever saw it". This
+// reads the raw bytes instead and checks them against the two consumers the
+// issue measured: `jq`, which substitutes U+FFFD silently at exit 0
+// (corrupting the data without saying so), and `python3 json.load`, a strict
+// parser that refuses the payload outright with `UnicodeDecodeError`. Both
+// must now accept the SAME bytes the script wrote, and the field naming which
+// element lost a byte must say so honestly rather than silently.
+test("a conflicting path holding an invalid-UTF-8 byte round-trips as valid, parseable UTF-8 JSON, with the fault flagged rather than hidden (#613)", (t) => {
+  const c = byteConflictRepo(t, "b\\377ad.txt");
+
+  const r = spawnSync("sh", [SCRIPT, c.w, c.branch], { env: ENV, encoding: "buffer" });
+  assert.equal(r.status, 0,
+    `a clean worktree passes even with conflicts; got ${r.status} ${r.stderr?.toString("utf8")}`);
+  const raw = r.stdout;
+
+  // Round-trip validity: re-encoding what a lossy UTF-8 decode produces
+  // reproduces the same bytes only when the buffer was already valid UTF-8.
+  assert.deepEqual(Buffer.from(raw.toString("utf8"), "utf8"), raw,
+    "the audit's own stdout is not valid UTF-8 — a raw invalid byte reached the payload");
+
+  // `jq -e '.'` cannot pin the #613 bug on its own — it is one of the two
+  // LENIENT consumers the issue names, silently substituting U+FFFD at exit 0
+  // on a raw invalid byte just like Node's own decode above, so it would
+  // exit 0 against the pre-fix payload too. The round-trip check above and
+  // the strict `python3 json.load` below are what actually pin validity;
+  // this only confirms a real downstream consumer of this payload (several
+  // fleet scripts pipe conflicts/atRisk through jq) can parse it as
+  // well-formed JSON at all.
+  const jq = spawnSync("jq", ["-e", "."], { input: raw });
+  assert.equal(jq.status, 0, `jq must accept the payload as well-formed JSON; stderr: ${jq.stderr?.toString("utf8")}`);
+
+  const py = spawnSync("python3", ["-c", "import json,sys; json.load(sys.stdin.buffer)"], { input: raw });
+  assert.equal(py.status, 0,
+    `a strict UTF-8 JSON parser must accept the payload; stderr: ${py.stderr?.toString("utf8")}`);
+
+  const json = JSON.parse(raw.toString("utf8"));
+  assert.equal(json.conflicts.length, 2, "both conflicting paths are present");
+  assert.match(json.conflicts[0], /^b.ad\.txt$/, "the bad path arrives whole, not cut down to `b`");
+  assert.equal(json.conflicts[0].includes("�"), true,
+    "the fault must render as U+FFFD, not the original invalid byte and not silence");
+  assert.equal(json.conflictsRewritten[0], true,
+    "the path that lost a byte to U+FFFD must be flagged rewritten — a caller must not treat it as the real path");
+  assert.equal(json.conflictsRewritten[1], false, "the untouched path must not be flagged");
+});
+
+// The other half of the same pin, and the half a fix-only suite never covers:
+// what does `export LC_ALL=C` now REFUSE? It makes every `tr`, `sed` and `awk`
+// in the script byte-oriented, so a path of legitimate multi-byte UTF-8 must
+// still round-trip whole and must NOT be flagged rewritten. Every scrub set in
+// this script is \001-\037 and every byte of a multi-byte UTF-8 sequence is
+// >= \200 — the script's own jstr comment says so — so the pin cannot reach it.
+// This is the test that keeps that true.
+//
+// Built through the same shell-side `printf` as the invalid case rather than
+// through `conflictRepo`: written to disk, the name goes through the
+// filesystem's Unicode normalisation, and `caf\303\251.txt` (NFC) can come back
+// NFD — a byte-for-byte assertion failing for a reason that has nothing to do
+// with this script.
+test("a conflicting path of valid multi-byte UTF-8 round-trips whole under the pinned locale and is not flagged rewritten", (t) => {
+  const c = byteConflictRepo(t, "caf\\303\\251.txt");
+
+  const r = audit(c, { ...ENV, LANG: "en_US.UTF-8", LC_ALL: undefined });
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, ["café.txt", "plain.txt"],
+    "byte for byte — this is what a consumer pastes into `git diff --`");
+  assert.deepEqual(r.json.conflictsRewritten, [false, false],
+    "a byte >= \\200 is outside every scrub set, and pinning the locale must not change that");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
+});
+
+// A commit subject is free text, so it reaches the payload with whatever the
+// author typed. `\` matters as much as `"`: escaping the quote first and the
+// backslash second turns `\` into `\\` twice over, so the order is load-bearing
+// and only a subject holding both can tell a correct pipeline from that one.
+// The \x01 rides along because git stores control bytes in a subject happily and
+// JSON forbids them unescaped — dropping the scrub leaves the payload
+// unparseable, which is this PR's own defect class one byte over.
+// `$conflicts` and `$at_risk` are the last two operands carrying caller text,
+// and `$at_risk` is the most reachable of the whole class: it holds
+// `git log --oneline` output, so an ordinary commit subject is enough — no
+// corrupt repo, no exotic filename. It is also the audit's most consequential
+// line, the commits a careless resolution deletes. One fixture pins both.
+test("a backslash escape in a conflicting path and in an at-risk subject reaches the operator whole", (t) => {
+  const c = conflictRepo(t, "back\\clue.txt");
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, "back\\clue.txt"), "MAIN AGAIN\n");
+  git(c.w, "commit", "-q", "-am", "fix: the \\connection retry");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `fixture must be clean; got ${r.status} ${r.stderr}`);
+  assert.match(r.stderr, /^    conflict: back\\clue\.txt$/m, "`echo` truncates the conflict line at the `\\c`");
+  assert.match(r.stderr, /^    at risk: \S+ fix: the \\connection retry$/m, "`echo` truncates the at-risk line at the `\\c` — an ordinary commit subject is enough to lose it");
+});
+
+test("a quote, a backslash and a control byte in a commit subject keep the payload parseable", (t) => {
+  const c = conflictRepo(t, "plain.txt");
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, "plain.txt"), "MAIN AGAIN\n");
+  git(c.w, "commit", "-q", "-am", 'fix: the "quoted" back\\slash \x01 case');
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+  assert.match(git(c.w, "log", "-1", "--pretty=%s", "origin/main"), /\x01/, "fixture must keep the control byte in the subject");
+
+  const r = audit(c);
+  assert.equal(r.status, 0);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.ok(
+    r.json.atRisk.some((l) => l.includes('the "quoted" back\\slash   case')),
+    `the subject must survive escaping verbatim, the control byte scrubbed to a space; got ${JSON.stringify(r.json.atRisk)}`,
+  );
+  assert.deepEqual(r.json.atRiskRewritten, [true, false], "\\001 has no JSON short form — the payload must disclose the scrub");
+});
+
+// #146: BS, tab, FF, CR and DEL in a commit subject get the opposite treatment
+// from \x01 above — four now have JSON short forms and the fifth is not a C0
+// byte at all, so all five must round-trip in atRisk[] too, and none may flag
+// the entry as rewritten.
+test("a BS, a tab, a FF, a CR and a DEL in a commit subject round-trip in atRisk without being flagged rewritten", (t) => {
+  const c = conflictRepo(t, "plain.txt");
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, "plain.txt"), "MAIN AGAIN\n");
+  git(c.w, "commit", "-q", "-am", "fix: has\bbs\ttab\fff\rcr\x7fdel case");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+
+  const r = audit(c);
+  assert.equal(r.status, 0);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.ok(
+    r.json.atRisk.some((l) => l.includes("has\bbs\ttab\fff\rcr\x7fdel case")),
+    `all five bytes must survive verbatim; got ${JSON.stringify(r.json.atRisk)}`,
+  );
+  assert.deepEqual(r.json.atRiskRewritten, [false, false]);
+});
+
+// git accepts `"` in a ref name and every byte but NUL and `/` in a path
+// component, so both of these are names a caller can really hand over. `\` is
+// rejected in a ref but legal in a path, which is why the backslash rides on
+// the worktree.
+test("a quote in the branch and a backslash in the worktree path keep the payload parseable", (t) => {
+  const c = repo(t, 'fix/1-say"hi', 'no-undo-audit-back\\slash-say"hi-');
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.branch, 'fix/1-say"hi');
+  assert.equal(r.json.worktree, c.w);
+  assert.equal(r.json.branchRewritten, false);
+  assert.equal(r.json.worktreeRewritten, false);
+});
+
+// #146, the scalar fields: git forbids control bytes in a ref outright, so
+// `branch` cannot carry one — but `worktree` is a filesystem path, the same
+// vector as the conflicting-path cases above. Tab, CR and DEL must round-trip
+// there too, and a byte with no short form must still be replaced and flagged.
+test("a BS, a tab, a FF, a CR and a DEL in the worktree path round-trip and are not flagged rewritten", (t) => {
+  const c = repo(t, "fix/1-thing", "no-undo-audit-has\bbs\ttab\fff\rcr\x7fdel-");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.worktree, c.w, "BS, tab, FF, CR and DEL must all survive intact");
+  assert.equal(r.json.worktreeRewritten, false);
+});
+
+// The multi-line half of #146. `wt` is argv $1, a filesystem path, and a
+// directory name may hold a newline where a ref may not — so this is the one
+// input json.sh's `jstr` receives as more than one line from any live caller.
+// It is
+// what the `:a;$!N;$!ba` slurp and the `s/\n/\\n/g` rule exist for: without
+// the slurp sed cycles once per LINE and the LF rule never sees the byte, so
+// the payload carries a raw newline inside a JSON string and no parser accepts
+// it. Deleting either half left the whole suite green before this test.
+//
+// The same value cannot be driven through release-ticket.sh or inflight.sh:
+// release-ticket reaches `awk -v b="refs/heads/$branch"` first and awk refuses
+// a newline in a -v value (rc 2, before any receipt); its only other
+// interpolated message is the pair of `halt` calls that already flatten git's
+// stderr with `tr '\n' ' '`; and inflight builds every evidence string from
+// line-oriented git output. (No line numbers: #129 tracks five citations in
+// these files that have already drifted, one of them mid-review here.)
+// Since #119 there is one `jstr`, in json.sh, rather than three copies: those
+// two callers reach the shared slurp with values that can never be multi-line,
+// so this test is still the only place a real value exercises it.
+test("a newline in the worktree path round-trips as an escaped \\n", (t) => {
+  const c = repo(t, "fix/1-thing", "no-undo-audit-has\nnewline-");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.worktree, c.w, "the newline arrives escaped, and the path comes back byte for byte");
+  assert.equal(r.json.worktreeRewritten, false, "escaped, not replaced — \\012 is not in the scrub set");
+});
+
+test("bytes with no short form in the worktree path are replaced and flagged rewritten", (t) => {
+  // \013 (VT) alongside \002 for the same reason as the conflicting-path case:
+  // RFC 8259 has no \v, so VT must stay in the scrub set after \b and \f left it.
+  const c = repo(t, "fix/1-thing", "no-undo-audit-has\x02bell\x0bvt-");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.worktree, c.w.replace("\x02", " ").replace("\x0b", " "), "no short form for \\002 or \\013 — both still neutralised to a space");
+  assert.equal(r.json.worktreeRewritten, true, "and the payload must disclose that it was");
+});
+
+// ---------------------------------------------------------------------------
+// Exit 2. Every one of these is "the question could not be answered"; none of
+// them may reach the payload, because a payload is an answer.
+// ---------------------------------------------------------------------------
+
+// `rev-parse --verify` resolves a tag to an object of ANY type, so a tag on a
+// blob walks straight past it and into merge-tree, which refuses to merge it.
+// git 2.50.1 spends exit 1 on that refusal — the same code it spends on "ran
+// fine, found conflicts" — so the exit code alone cannot tell them apart and
+// the audit used to print `"conflicts":[],"atRisk":[]` and exit 0. Safe, on a
+// question it never asked.
+// The section split reads an empty line as the end of the filename list, so a
+// path holding a literal newline manufactures that marker: the list comes back
+// short — sometimes empty — and the audit exits 0 saying nothing is at risk.
+// git C-quoted such a path before `-z`, which at least emitted JSON the caller
+// choked on, so answering "safe" here would be a strict downgrade. A shell
+// variable cannot hold NUL, so the only honest answer is that there isn't one.
+test("a conflicting path containing a newline is unanswerable (2), never safe (0)", (t) => {
+  const c = bareConflictRepo(t, "lead\nline.txt");
+  writeFileSync(join(c.w, "zz.txt"), "branch side\n");
+  git(c.w, "add", "--", "zz.txt");
+  git(c.w, "commit", "-q", "-m", "branch adds a second file");
+  git(c.w, "push", "-q", "origin", c.branch);
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, "zz.txt"), "MAIN SIDE\n");
+  git(c.w, "add", "--", "zz.txt");
+  git(c.w, "commit", "-q", "-m", "MAIN ALSO AT RISK");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `got ${r.status} with stdout ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.match(r.stderr, /contains a newline/);
+});
+
+// merge-tree refuses unrelated histories at exit 128. Note what this does NOT
+// pin: that refusal also writes nothing, so `[ -s ]` alone catches it and the
+// `mt_rc` half of the guard can be deleted with the suite staying green
+// (measured). No reachable input produces a bad exit code AND output, so the
+// code check is there for a git that prints the tree OID and then fails.
+test("unrelated histories are unanswerable (2), never safe (0)", (t) => {
+  const c = repo(t);
+  git(c.w, "checkout", "-q", "--orphan", "orphan");
+  git(c.w, "rm", "-rq", "--cached", ".");
+  writeFileSync(join(c.w, "o.txt"), "no shared ancestor\n");
+  git(c.w, "add", "--", "o.txt");
+  git(c.w, "commit", "-q", "-m", "orphan root");
+  git(c.w, "push", "-q", "origin", "orphan");
+  git(c.w, "checkout", "-qf", "main");
+  git(c.w, "clean", "-qfd");
+
+  const r = audit({ w: c.w, branch: "orphan" });
+  assert.equal(r.status, 2, `got ${r.status} with stdout ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.match(r.stderr, /cannot determine conflicts/);
+});
+
+test("a BASE_REF that dereferences to a blob is unanswerable (2), never safe (0)", (t) => {
+  const c = repo(t);
+  const blob = git(c.w, "hash-object", "-w", "f.txt");
+  // Named under refs/remotes/ rather than as a tag, so it clears the
+  // accept-list (#1565) and reaches the qualify step unchanged, exercising
+  // rev-parse resolving to the wrong TYPE rather than the wrong ref.
+  git(c.w, "update-ref", "refs/remotes/origin/blobtag", blob);
+  assert.equal(git(c.w, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/blobtag"), blob, "fixture must pass the rev-parse guard");
+
+  const r = audit(c, { ...ENV, BASE_REF: "refs/remotes/origin/blobtag" });
+  assert.equal(r.status, 2, `merge-tree could not answer; got ${r.status} with stdout ${r.stdout}`);
+  assert.doesNotMatch(r.stdout, /"conflicts"/, "an unanswerable audit must not emit a payload");
+  assert.match(r.stderr, /cannot determine conflicts/);
+});
+
+test("a local ref shadowing `origin/main` does not read a real add/add conflict as none (#1565)", (t) => {
+  // Same class release-ticket.sh, reap.sh and worktree-audit.sh already
+  // found in the same default — each qualifies the shorthand base into
+  // refs/remotes/<name> before measuring. `origin/main` is a SHORTHAND, and git
+  // resolves a shorthand through its own disambiguation order (gitrevisions:
+  // refs/<name>, refs/tags/<name>, refs/heads/<name>, refs/remotes/<name>,
+  // …), in which refs/remotes/origin/main comes LAST. A local TAG literally
+  // named `origin/main` outranks the real remote-tracking branch, so `git
+  // merge-tree` and `git merge-base`/`git log` against the bare shorthand
+  // below answer about the tag's target instead, at rc 0 — git's own
+  // `warning: refname 'origin/main' is ambiguous.` on stderr is the only
+  // tell, and this script reads none of it.
+  const path = "conflict.txt";
+  const c = bareConflictRepo(t, path);
+  // The tag points at the FORK point — one commit behind main's real tip —
+  // rather than at main's tip. The fork point never touched `path`, so a
+  // merge-tree probe against the tag sees only the branch's ADD and reports
+  // a clean merge; the real origin/main tip added the same path on its own
+  // side, which is the add/add conflict this fixture exists to carry.
+  const fork = git(c.w, "rev-parse", "main~1");
+  git(c.w, "tag", "origin/main", fork);
+  assert.equal(git(c.w, "rev-parse", "origin/main"), fork, "fixture: the shorthand now resolves to the fork point, not main's tip");
+  assert.notEqual(git(c.w, "rev-parse", "refs/remotes/origin/main"), fork, "fixture: the real upstream is still main's later commit");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a clean worktree passes even with conflicts; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `a passing audit must emit parseable JSON; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, [path], "must measure the merge-tree probe against refs/remotes/origin/main, not the shadowing tag");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"], "must measure the at-risk commit list against refs/remotes/origin/main, not the shadowing tag");
+});
+
+test("a local ref shadowing `origin/$branch` does not read a real add/add conflict as none (#1576)", (t) => {
+  // The branch-side twin of the test above. #1565 qualified only the base
+  // side into $base_rev; the branch side stayed the bare `origin/$branch`
+  // shorthand, so the identical false safe was still reachable by shadowing
+  // the BRANCH's name instead of the base's. A local TAG literally named
+  // `origin/<branch>` outranks the real remote-tracking branch in git's own
+  // disambiguation order (refs/tags/<name> before refs/remotes/<name>), so
+  // `git merge-tree` and `git merge-base` against the bare shorthand below
+  // would answer about the tag's target instead, at rc 0.
+  const path = "conflict.txt";
+  const c = bareConflictRepo(t, path);
+  // The tag points at the branch's PRIOR commit — one commit behind the
+  // branch's real tip, before it added `path` — rather than at the branch's
+  // real tip. A merge-tree probe against the tag then sees main's ADD of
+  // `path` against a branch state that never touched `path` at all: a clean
+  // merge, not the add/add conflict this fixture exists to carry.
+  const fork = git(c.w, "rev-parse", `${c.branch}~1`);
+  git(c.w, "tag", `origin/${c.branch}`, fork);
+  assert.equal(
+    git(c.w, "rev-parse", `origin/${c.branch}`),
+    fork,
+    "fixture: the shorthand now resolves to the branch's prior commit, not its real tip",
+  );
+  assert.notEqual(
+    git(c.w, "rev-parse", `refs/remotes/origin/${c.branch}`),
+    fork,
+    "fixture: the real upstream is still the branch's later commit",
+  );
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a clean worktree passes even with conflicts; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `a passing audit must emit parseable JSON; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, [path], "must measure the merge-tree probe against refs/remotes/origin/$branch, not the shadowing tag");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"], "must measure the at-risk commit list against refs/remotes/origin/$branch, not the shadowing tag");
+});
+
+test("a local ref shadowing `origin/$branch` does not skew the merge-base call's at-risk range (#1576)", (t) => {
+  // The test above proves only that the merge-tree call reads
+  // refs/remotes/origin/$branch, not the shadowing tag: reverting just the
+  // merge-base call's `$branch_rev` argument back to the bare `origin/$branch`
+  // leaves it green, because merge-tree already used the qualified ref there
+  // and the shadowing tag it plants happens to share the real branch's own
+  // fork point with main. This fixture instead points the shadowing tag at
+  // main's OWN tip, so a merge-base computed against the tag collapses the
+  // at-risk range to nothing (`git merge-base main main` == main, so `git log
+  // main..main` is empty) while a merge-base against the real
+  // refs/remotes/origin/$branch still returns the true fork point and a
+  // non-empty at-risk list — the exact false "clean" #1576 exists to close.
+  const path = "conflict.txt";
+  const c = bareConflictRepo(t, path);
+  const mainTip = git(c.w, "rev-parse", "refs/remotes/origin/main");
+  git(c.w, "tag", `origin/${c.branch}`, mainTip);
+  assert.equal(
+    git(c.w, "rev-parse", `origin/${c.branch}`),
+    mainTip,
+    "fixture: the shorthand now resolves to main's own tip, not the branch",
+  );
+  assert.notEqual(
+    git(c.w, "rev-parse", `refs/remotes/origin/${c.branch}`),
+    mainTip,
+    "fixture: the real upstream is still the branch's own tip",
+  );
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a clean worktree passes even with conflicts; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `a passing audit must emit parseable JSON; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, [path], "the merge-tree call already reads refs/remotes/origin/$branch — unaffected by this fixture");
+  assert.deepEqual(
+    subjects(r),
+    ["MAIN COMMIT AT RISK"],
+    "must compute the merge-base against refs/remotes/origin/$branch, not the shadowing tag — a merge-base against the tag collapses the at-risk range to nothing",
+  );
+});
+
+test("every unanswerable precondition exits 2 and emits no payload", (t) => {
+  const c = repo(t);
+  const plain = mkdtempSync(join(tmpdir(), "no-undo-audit-plain-"));
+  t.after(() => rmSync(plain, { recursive: true, force: true }));
+
+  const cases = [
+    ["too few arguments", [c.w], ENV, /usage:/],
+    ["too many arguments", [c.w, c.branch, "extra"], ENV, /usage:/],
+    ["worktree does not exist", [join(c.w, "nope"), c.branch], ENV, /does not exist/],
+    ["not a git worktree", [plain, c.branch], ENV, /is not a git worktree/],
+    ["branch never pushed", [c.w, "never-pushed"], ENV, /origin\/never-pushed does not resolve/],
+    ["BASE_REF does not resolve", [c.w, c.branch], { ...ENV, BASE_REF: "origin/no-such-ref" }, /does not resolve/],
+    ["BASE_REF outside the remote-tracking namespace", [c.w, c.branch], { ...ENV, BASE_REF: "refs/heads/main" }, /BASE_REF must be spelled origin\/<branch> or refs\/remotes\/<path>, got 'refs\/heads\/main'/],
+    // Both spellings of the audited branch, because both clear the accept-list
+    // and both make every measurement ask whether the branch conflicts with
+    // ITSELF — `conflicts: []`, `atRisk: []` at exit 0 on a worktree that
+    // really does conflict with origin/main. A guard narrowed to the shorthand
+    // would leave the qualified half of that reachable, so both are pinned.
+    ["BASE_REF names the audited branch", [c.w, c.branch], { ...ENV, BASE_REF: `origin/${c.branch}` }, new RegExp(`BASE_REF must not name the audited branch, got 'origin/${c.branch}'`)],
+    ["BASE_REF names the audited branch, qualified", [c.w, c.branch], { ...ENV, BASE_REF: `refs/remotes/origin/${c.branch}` }, new RegExp(`BASE_REF must not name the audited branch, got 'refs/remotes/origin/${c.branch}'`)],
+  ];
+
+  for (const [why, args, env, re] of cases) {
+    const r = spawnSync("sh", [SCRIPT, ...args], { cwd: c.w, env, encoding: "utf8" });
+    assert.equal(r.status, 2, `${why}: expected 2, got ${r.status} — ${r.stderr}`);
+    assert.match(r.stderr, re, why);
+    assert.equal(r.stdout, "", `${why}: an unanswerable audit must not emit a payload`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Whose worktree is the answer about. Exit 2 again for the refusals, but the
+// question is upstream of every check above: the script has to be looking at
+// the tree it was handed. The passing case closes the block, because a guard
+// that establishes identity is one keystroke from refusing every real worktree.
+// ---------------------------------------------------------------------------
+
+// The `is not a git worktree` case in the preconditions above passes a plain
+// directory with no repo ANYWHERE above it, so `rev-parse --git-dir` fails and
+// the script refuses. That is the harmless half. These are the other half:
+// `rev-parse --git-dir` WALKS UP, so with an enclosing repo present the gate
+// passes at rc 0 having resolved a git dir that is not this worktree's, and
+// `status --porcelain` then answers for that repo — empty, at rc 0, because the
+// enclosing repo is clean and `.worktrees/` is gitignored. `clean:true` for a
+// tree the script never looked at, with the work still sitting on disk. The
+// `die` on a failing status is the wrong side of this: the command SUCCEEDS,
+// it just answers about somewhere else.
+//
+// Both assert the refusal lands BEFORE the audit reports anything. Exit 2 alone
+// would not pin it — a script that audits, prints "clean", and refuses
+// afterwards has already put the wrong answer on the caller's screen.
+function refusedAsUnknownBeforeAnySay(c) {
+  assert.ok(existsSync(join(c.w, "precious.txt")), "fixture: the uncommitted work must still be on disk");
+  assert.equal(git(c.parent, "status", "--porcelain"), "", "fixture: a CLEAN enclosing repo is what makes the leak answer 'clean'");
+  assert.doesNotThrow(
+    () => git(c.w, "rev-parse", "--git-dir"),
+    "fixture: the script's own gate must still pass here, or this test pins nothing",
+  );
+  assert.equal(git(c.w, "status", "--porcelain"), "", "fixture: git answers for the enclosing repo — the manufactured clean this must refuse");
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `got ${r.status} with stdout ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.doesNotMatch(r.stderr, /status --porcelain/, "the refusal must land before the audit runs, let alone reports");
+  assert.match(r.stderr, /answers for the repo above/);
+}
+
+test("a worktree whose .git was deleted is unanswerable (2), never clean (0)", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, ".git"));
+
+  refusedAsUnknownBeforeAnySay(c);
+});
+
+// One byte over: an EMPTY `.git` DIRECTORY is something a `-e "$wt/.git"` guard
+// calls present, and git walks up past it exactly as it does past an absent one.
+test("a worktree whose .git is an empty directory is unanswerable (2), never clean (0)", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, ".git"));
+  mkdirSync(join(c.w, ".git"));
+  assert.ok(existsSync(join(c.w, ".git")), "fixture: a `-e` guard must call this .git present, or it pins the case above again");
+
+  refusedAsUnknownBeforeAnySay(c);
+});
+
+// And one byte over again, which is why the guard asks git instead of stat-ing
+// `.git`: a DIRECTORY holding a lone HEAD. Every "does the linkage exist" guard
+// spelled against the filesystem calls this present — `-e "$wt/.git/HEAD"` most
+// obviously — and git still walks up, because it wants HEAD *and* `objects/`
+// *and* `refs/` before it will call a directory a git dir. Each subset below
+// manufactured `clean:true` at exit 0 against such a guard (measured, git
+// 2.50.1); the last is a REAL `.git` whose HEAD an interrupted write truncated,
+// so this is not only a hand-built shape.
+for (const [why, build] of [
+  ["holding a lone HEAD", (g) => writeFileSync(join(g, "HEAD"), "ref: refs/heads/fix/9-nested\n")],
+  ["whose HEAD is empty", (g) => writeFileSync(join(g, "HEAD"), "")],
+  ["missing objects/", (g) => {
+    writeFileSync(join(g, "HEAD"), "ref: refs/heads/fix/9-nested\n");
+    mkdirSync(join(g, "refs"));
+  }],
+]) {
+  test(`a worktree whose .git is a directory ${why} is unanswerable (2), never clean (0)`, (t) => {
+    const c = nestedWorktree(t);
+    rmSync(join(c.w, ".git"));
+    mkdirSync(join(c.w, ".git"));
+    build(join(c.w, ".git"));
+    assert.ok(existsSync(join(c.w, ".git", "HEAD")), "fixture: HEAD must be present, or this pins the empty-directory case again");
+
+    refusedAsUnknownBeforeAnySay(c);
+  });
+}
+
+// The other direction, and it is not theory: a guard spelled `-e
+// "$wt/.git/HEAD"` alone passes every refusal test above (measured) while
+// refusing every LINKED worktree on disk, whose `.git` is a file and which
+// therefore has no `.git/HEAD` to stat. That is the fleet's own shape —
+// `claim-ticket.sh` makes worktrees with `git worktree add` — so the false
+// refusal would land on every real caller while the suite stayed green. This
+// pins the shape the refusal tests do not reach.
+test("an intact linked worktree, whose .git is a file, still passes", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, "precious.txt"));
+  assert.ok(statSync(join(c.w, ".git")).isFile(), "fixture must leave the linkage intact, and leave it a FILE — the shape this test exists to pin");
+  assert.equal(git(c.w, "status", "--porcelain"), "", "fixture must leave the worktree clean");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a linked worktree is the fleet's own shape; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+});
+
+// The same worktree, reached through a symlinked path. `--show-toplevel`
+// resolves the symlink away, so the linkage guard's working-tree compare
+// (#2040) holds it against the CANONICAL `$wt`, never against the path as
+// typed — this case is what reds if that canonicalisation is ever dropped.
+test("an intact linked worktree, reached through a symlinked path, still passes", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, "precious.txt"));
+  const link = `${c.w}-symlink`;
+  symlinkSync(c.w, link);
+  t.after(() => rmSync(link, { force: true }));
+
+  const r = audit({ w: link, branch: c.branch });
+  assert.equal(r.status, 0, `a symlinked path to a real worktree must still pass; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+});
+
+// The same worktree, named `cafe` + U+0301 COMBINING ACUTE ACCENT and passed in
+// the spelling `worktree list --porcelain` gives it — reap.sh's `nfd` fixture
+// (#2072), here for the working-tree compare. Where the filesystem also
+// resolves the precomposed spelling to that directory (APFS), the
+// `core.precomposeunicode` `git clone` writes there lists it precomposed while
+// `--show-toplevel` answers the on-disk NFD bytes, so a byte compare refused
+// this healthy worktree at exit 2 (#2095). Where it does not (ext4), both
+// answers are the NFD bytes and this is the plain case.
+test("an intact linked worktree with an NFD name, passed as git lists it, still passes (#2095)", (t) => {
+  const { parent, w: onDisk, branch } = nestedWorktree(t, "cafe\u0301");
+  rmSync(join(onDisk, "precious.txt"));
+
+  const listing = git(parent, "worktree", "list", "--porcelain").split("\n")
+    .filter((l) => l.startsWith("worktree ")).map((l) => l.slice(9));
+  const wt = listing.find((p) => p.normalize("NFC").endsWith("/.worktrees/caf\u00e9"));
+  assert.ok(wt, `fixture: git must list the worktree: ${listing}`);
+  const top = git(onDisk, "rev-parse", "--show-toplevel");
+  assert.ok(top.endsWith("/.worktrees/cafe\u0301"), "fixture: git must answer the on-disk NFD bytes");
+  if (existsSync(onDisk.normalize("NFC"))) {
+    assert.notEqual(wt, top, "fixture: a filesystem that aliases the two spellings must list one git's toplevel answer does not, byte for byte");
+  }
+
+  const r = audit({ w: wt, branch });
+  assert.equal(r.status, 0, `an NFD-named worktree passed as git lists it must still pass; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+});
+
+// The same fixture, `$wt` passed exactly as it sits on disk (NFD) rather than
+// as git lists it. `--show-toplevel` already answers this spelling, so this
+// leaves the test above's working-tree compare a no-op and instead exercises
+// the OWNER compares above it (#2095): `owner` is read back from git's own
+// `gitdir` back-pointer file, spelled however `core.precomposeunicode` wrote
+// it when the linkage was created (measured: precomposed, even though the
+// directory itself stayed decomposed on disk), which can differ — byte for
+// byte, same directory — from `$wt` as passed here.
+test("an intact linked worktree with an NFD name, passed as it sits on disk, still passes (#2095)", (t) => {
+  const c = nestedWorktree(t, "cafe\u0301");
+  rmSync(join(c.w, "precious.txt"));
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `an NFD on-disk worktree path passed as-is must still pass; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+});
+
+// ---------------------------------------------------------------------------
+// #189: whose ADMIN DIR answered, not just whose ROOT git resolved. A `.git`
+// FILE takes its root from the file's own location, so a `.git` rewritten to
+// name a SIBLING worktree's admin dir still passes --show-prefix — the root
+// is genuinely $wt — while status is computed against the sibling's HEAD and
+// index. Every case below refuses via `die`, exit 2, no payload: the guard
+// establishes identity BEFORE the audit runs, same as the --show-prefix block
+// above it, never a warning printed alongside a "clean" answer.
+// ---------------------------------------------------------------------------
+
+test("a .git file naming a sibling worktree's admin dir is refused, never clean — the ticket's repro", (t) => {
+  const c = nestedWorktreePair(t);
+  assert.ok(existsSync(join(c.w, "precious.txt")), "fixture: uncommitted work must still be on disk");
+  // The ticket's leak needs more than an empty prefix: `status` is computed
+  // against the sibling's INDEX, but the WORKING TREE stays $wt's own files
+  // on disk (a `.git` file redirects the git-dir, not the work-tree). Content
+  // collision is what makes that read clean — the sibling commits the exact
+  // bytes $wt already has sitting there uncommitted.
+  writeFileSync(join(c.sibling, "precious.txt"), readFileSync(join(c.w, "precious.txt")));
+  git(c.sibling, "add", "precious.txt");
+  git(c.sibling, "commit", "-q", "-m", "precious.txt, committed here and only here");
+  writeFileSync(join(c.w, ".git"), `gitdir: ${c.siblingAdmin}\n`);
+  // The spoof still resolves a root of $wt and a foreign, CLEAN HEAD/index —
+  // the exact leak the ticket measured, reproduced before asserting the fix.
+  assert.equal(git(c.w, "rev-parse", "--show-prefix"), "", "fixture: the root claim must still admit, or this pins nothing new");
+  assert.equal(git(c.w, "status", "--porcelain"), "", "fixture: the sibling's HEAD must read clean, or this is the old leak by a different name");
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `must be unanswerable, not clean; got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.match(r.stderr, /names another worktree's admin dir/);
+});
+
+test("a .git file naming a sibling's admin dir by a RELATIVE gitdir: path is refused the same way", (t) => {
+  const c = nestedWorktreePair(t);
+  // Relative to $wt/.git's own directory, i.e. $wt itself — same shape git
+  // itself resolves relative gitdir: lines against. Spelled as the literal the
+  // fixture's own layout already fixes, rather than computed: the assertion
+  // below is what keeps it honest, since a wrong spelling resolves elsewhere
+  // and fails there loudly.
+  writeFileSync(join(c.w, ".git"), "gitdir: ../../.git/worktrees/8-y\n");
+  assert.equal(git(c.w, "rev-parse", "--git-dir"), c.siblingAdmin, "fixture: git must resolve the relative spoof to the sibling admin dir, or this pins nothing new");
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `must be unanswerable, not clean; got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /names another worktree's admin dir/);
+});
+
+// The same spoof, spelled as a SYMLINK instead of a `gitdir:` file. It is not a
+// variant of the test above but a separate code path: `rev-parse --git-dir`
+// answers the bare `.git` for this shape — the same string a main checkout
+// answers — so a guard that reads that string as "the main worktree, nothing to
+// verify" skips the linkage check entirely and admits the leak at exit 0.
+// Measured on git 2.50.1, and measured admitted by the first spelling of this
+// PR's own guard.
+test("a .git SYMLINKED to a sibling worktree's admin dir is refused, never clean", (t) => {
+  const c = nestedWorktreePair(t);
+  assert.ok(existsSync(join(c.w, "precious.txt")), "fixture: uncommitted work must still be on disk");
+  writeFileSync(join(c.sibling, "precious.txt"), readFileSync(join(c.w, "precious.txt")));
+  git(c.sibling, "add", "precious.txt");
+  git(c.sibling, "commit", "-q", "-m", "precious.txt, committed here and only here");
+  rmSync(join(c.w, ".git"));
+  symlinkSync(c.siblingAdmin, join(c.w, ".git"));
+  assert.equal(git(c.w, "rev-parse", "--git-dir"), ".git", "fixture: this spelling must still answer the bare `.git`, or it is no longer the shape that bypassed the guard");
+  assert.equal(git(c.w, "rev-parse", "--show-prefix"), "", "fixture: the root claim must still admit, or this pins nothing new");
+  assert.equal(git(c.w, "status", "--porcelain"), "", "fixture: the sibling's HEAD must read clean, or this is the old leak by a different name");
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `must be unanswerable, not clean; got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.match(r.stderr, /names another worktree's admin dir/);
+});
+
+test("an admin dir whose own gitdir back-pointer file is missing is unanswerable, never clean", (t) => {
+  const c = nestedWorktree(t);
+  const admin = git(c.w, "rev-parse", "--path-format=absolute", "--git-dir");
+  rmSync(join(admin, "gitdir"));
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `must be unanswerable, not clean; got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /gitdir is missing or unreadable/);
+});
+
+test("an admin dir whose own gitdir back-pointer file is unreadable is unanswerable, never clean", (t) => {
+  const c = nestedWorktree(t);
+  const admin = git(c.w, "rev-parse", "--path-format=absolute", "--git-dir");
+  // No restore: the outer temp-dir cleanup (registered by `repo()`, and so
+  // ahead of this test's own `t.after`) force-removes the whole tree first,
+  // and deleting a file needs write access to its DIRECTORY, never to the
+  // file itself — same reasoning the existing stash-reflog fixtures above
+  // already rely on without restoring their own chmods.
+  chmodSync(join(admin, "gitdir"), 0o000);
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `must be unanswerable, not clean; got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /gitdir is missing or unreadable/);
+});
+
+// The false-refusal side of the same trim: a legitimate back-pointer file with
+// trailing whitespace tacked on must still compare equal, or the guard refuses
+// worktrees it has no reason to. Real git never writes trailing whitespace
+// here, but a hand-edited or copy-touched one could, and the comparison being
+// exact-string means a wrong turn on this trim is a silent over-refusal, not
+// a loud one.
+test("a back-pointer file with trailing whitespace still passes, not falsely refused", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, "precious.txt"));
+  const admin = git(c.w, "rev-parse", "--path-format=absolute", "--git-dir");
+  const gitdirFile = join(admin, "gitdir");
+  writeFileSync(gitdirFile, `${readFileSync(gitdirFile, "utf8").trimEnd()}  \t\n`);
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `trailing whitespace on the back-pointer must not refuse; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+});
+
+// ---------------------------------------------------------------------------
+// The ACCEPT side of the same guard. A gate on an irreversible action is as
+// wrong when it refuses a healthy checkout as when it admits a spoofed one, and
+// a suite that only feeds a refusal guard spoofs pins nothing about what it must
+// still answer for. Every shape below is one `git` itself produces, and each
+// was measured REFUSED (exit 2, no payload) by the first spelling of this
+// guard. The intact-linked-worktree and symlinked-path cases above, and every
+// `repo(t)` test in this file (a plain main checkout), are the rest of the set.
+// ---------------------------------------------------------------------------
+
+// `--git-dir` answers the bare `.git` here too, exactly as it does for the
+// sibling-admin-dir SYMLINK spoof above — so this is the pair that shows the
+// guard discriminates on whose admin dir answered rather than on that string:
+// same `--git-dir` answer, opposite verdict.
+test("a .git symlinked to the worktree's OWN admin dir still passes", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, "precious.txt"));
+  const admin = git(c.w, "rev-parse", "--path-format=absolute", "--git-dir");
+  rmSync(join(c.w, ".git"));
+  symlinkSync(admin, join(c.w, ".git"));
+  assert.equal(git(c.w, "rev-parse", "--git-dir"), ".git", "fixture: this must be the same `--git-dir` answer the spoof gives, or the pair proves nothing");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a .git symlinked to its own admin dir must pass; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+});
+
+// git writes the back-pointer RELATIVE, not absolute, whenever
+// `worktree.useRelativePaths` is set — per-repo config, or `git worktree add
+// --relative-paths` per invocation. Written here by hand rather than by that
+// flag, in the exact spelling git produces (relative to the admin dir, which is
+// what git resolves it against): the flag and the config both arrived in git
+// 2.48, and a fixture that needs them stops covering anything, silently and
+// green, on any older git the suite is run under.
+test("a RELATIVE back-pointer still passes, not read as another worktree's admin dir", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, "precious.txt"));
+  const admin = git(c.w, "rev-parse", "--path-format=absolute", "--git-dir");
+  writeFileSync(join(admin, "gitdir"), "../../../.worktrees/9-x/.git\n");
+
+  const r = audit(c);
+  assert.equal(r.status, 0, `a relative back-pointer must not refuse; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, true);
+});
+
+// Neither shape below is a linked worktree, so neither admin dir carries a
+// `gitdir` back-pointer to check — and "has no back-pointer" is not "belongs to
+// another worktree". Both are `.git` FILES redirecting to a git dir elsewhere,
+// which is what makes them land in the same guard as #189's spoof; both are
+// DIRTY, so a pass here is the audit actually answering (exit 1, `clean:false`)
+// rather than a refusal wearing a fail-safe exit code.
+//
+// Each audits its own checkout's feature branch rather than `main`: BASE_REF
+// defaults to `origin/main`, and the audited-branch guard refuses a BASE_REF
+// whose last component is the branch under audit, so `main` here would be
+// refused at exit 2 before either shape reached the linkage question these two
+// exist to ask.
+test("a submodule checkout is audited, not refused for carrying no back-pointer", (t) => {
+  const c = repo(t);
+  const sub = repo(t, "fix/2-sub", "no-undo-audit-sub-");
+  git(c.w, "-c", "protocol.file.allow=always", "submodule", "add", "-q", git(sub.w, "remote", "get-url", "origin"), "sub");
+  const w = join(c.w, "sub");
+  writeFileSync(join(w, "dirt.txt"), "uncommitted, inside a submodule\n");
+
+  const r = audit({ w, branch: sub.branch });
+  assert.equal(r.status, 1, `a dirty submodule must report dirty, not refuse; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, false);
+});
+
+test("a --separate-git-dir clone is audited, not refused for carrying no back-pointer", (t) => {
+  const c = repo(t);
+  const w = `${c.w}-sgd`;
+  execFileSync("git", ["clone", "-q", "--separate-git-dir", `${w}.git`, git(c.w, "remote", "get-url", "origin"), w], { env: ENV });
+  writeFileSync(join(w, "dirt.txt"), "uncommitted, in a --separate-git-dir clone\n");
+
+  const r = audit({ w, branch: c.branch });
+  assert.equal(r.status, 1, `a dirty --separate-git-dir clone must report dirty, not refuse; got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, false);
+});
+
+// Named in #189 alongside the spoof: not this ticket's mechanism (git refuses
+// before the linkage guard even runs, same as a deleted `.git`), but the same
+// enumerate pass that found the spoof named it too, so it is pinned here
+// rather than assumed.
+test("a dangling .git symlink is unanswerable (2), never clean (0)", (t) => {
+  const c = nestedWorktree(t);
+  rmSync(join(c.w, ".git"));
+  symlinkSync("/nonexistent-target-189", join(c.w, ".git"));
+
+  refusedAsUnknownBeforeAnySay(c);
+});
+
+// ---------------------------------------------------------------------------
+// #2040: `core.worktree` moves the WORKING TREE, not the git dir. Every shape
+// below passes the `--show-prefix` root claim (empty at rc 0) and the git-dir
+// owner check, and `status` then compares $wt's own HEAD and index against the
+// redirect target's files. A target holding the tracked content — any other
+// checkout of the branch — reads clean at rc 0 over `precious.txt`: the one
+// WRONG VERDICT this script can give, where every other broken shape refuses.
+// Refused by the working-tree compare (`--show-toplevel` against the canonical
+// $wt), exit 2, before anything is audited.
+// ---------------------------------------------------------------------------
+
+/**
+ * The three fixture claims that make a redirect case pin something: the work
+ * is on disk, the root claim still admits the shape (or this is the #74 walk-up
+ * again under another name), and git itself answers "clean" — the false clean
+ * the refusal exists to replace. Then the refusal: exit 2, no payload, before
+ * the audit runs, naming the working tree git actually answered for.
+ */
+function refusedAsRedirected(c, target) {
+  assert.ok(existsSync(join(c.w, "precious.txt")), "fixture: uncommitted work must still be on disk");
+  assert.equal(git(c.w, "rev-parse", "--show-prefix"), "", "fixture: the --show-prefix gate must still admit this shape, or this pins nothing new");
+  assert.equal(git(c.w, "rev-parse", "--show-toplevel"), target, "fixture: git must answer for the redirect target");
+  assert.equal(git(c.w, "status", "--porcelain", "-uall"), "", "fixture: git must read clean over the work — the false clean this pins");
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `a core.worktree redirect must be unanswerable, not clean: got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.doesNotMatch(r.stderr, /status --porcelain/, "the refusal must land before the audit runs");
+  assert.ok(r.stderr.includes(`git answers for the working tree at ${target}, not ${c.w}`), r.stderr);
+}
+
+/** extensions.worktreeConfig on in `repoDir`, then `core.worktree` set for `w` alone. */
+function redirectWorktree(repoDir, w, target) {
+  git(repoDir, "config", "extensions.worktreeConfig", "true");
+  git(w, "config", "--worktree", "core.worktree", target);
+}
+
+test("b2: a linked worktree whose config.worktree sets core.worktree elsewhere is refused, never clean (#2040)", (t) => {
+  // The ticket's b2: `.git` untouched, `$gd` is $wt's own admin dir with its
+  // back-pointer intact, one `git config --worktree` away from a healthy tree.
+  const c = nestedWorktreePair(t);
+  redirectWorktree(c.parent, c.w, c.sibling);
+  refusedAsRedirected(c, git(c.sibling, "rev-parse", "--show-toplevel"));
+});
+
+test("c2: a .git naming a foreign git dir NOT called .git, whose core.worktree is elsewhere, is refused (#2040)", (t) => {
+  // The ticket's c2. `$gd == common` and the `${gd%/.git}` strip is a no-op,
+  // so the owner check admits it as the ceiling's `--separate-git-dir` shape.
+  const c = nestedWorktree(t);
+  const root = dirname(c.parent);
+  const foreignGd = join(root, "foreign-gd");
+  const foreign = join(root, "foreign");
+  execFileSync("git", ["clone", "-q", "--separate-git-dir", foreignGd, git(c.parent, "remote", "get-url", "origin"), foreign], { env: ENV });
+  git(foreign, "checkout", "-q", c.branch);
+  git(foreign, "config", "core.worktree", foreign);
+  writeFileSync(join(c.w, ".git"), `gitdir: ${foreignGd}\n`);
+  assert.equal(git(c.w, "rev-parse", "--path-format=absolute", "--git-dir"), git(c.w, "rev-parse", "--path-format=absolute", "--git-common-dir"),
+    "fixture: the foreign git dir must be the common-dir shape the owner check admits");
+  refusedAsRedirected(c, git(foreign, "rev-parse", "--show-toplevel"));
+});
+
+test("a MAIN checkout whose core.worktree names another checkout is refused, never clean (#2040)", (t) => {
+  // Beyond the ticket's table, and the cheapest of all: one `git config
+  // core.worktree` on an ordinary clone. `$gd == common`, named `.git`, owner
+  // `$wt` — the owner check has nothing to object to.
+  const c = repo(t);
+  const elsewhere = `${c.w}-elsewhere`;
+  git(c.w, "worktree", "add", "-q", "--detach", elsewhere);
+  git(c.w, "config", "core.worktree", elsewhere);
+  writeFileSync(join(c.w, "precious.txt"), "work that exists nowhere else\n");
+  refusedAsRedirected(c, git(elsewhere, "rev-parse", "--show-toplevel"));
+});
+
+test("a core.worktree INSIDE $wt is refused: every file outside it goes unread (#2040)", (t) => {
+  const c = nestedWorktree(t);
+  const sub = join(c.w, "sub");
+  mkdirSync(sub);
+  for (const f of [".gitignore", "f.txt", "g.txt"]) copyFileSync(join(c.w, f), join(sub, f));
+  redirectWorktree(c.parent, c.w, sub);
+  refusedAsRedirected(c, git(sub, "rev-parse", "--show-toplevel"));
+});
+
+test("a core.worktree naming a MISSING directory is unanswerable (2), never the dirty verdict (1) (#2040)", (t) => {
+  // git still answers `--show-toplevel` at rc 0 here (measured), so a guard
+  // that canonicalised that answer through `cd` would fail under `set -e` and
+  // exit 1 — the dirty verdict — over a tree nothing looked at.
+  const c = nestedWorktree(t);
+  const missing = join(dirname(c.parent), "never-created");
+  redirectWorktree(c.parent, c.w, missing);
+  const r = audit(c);
+  assert.equal(r.status, 2, `got ${r.status} ${r.stdout} ${r.stderr}`);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /answers for the working tree at .*never-created, not /);
+});
+
+// Why the working-tree compare was ADDED to the owner check rather than
+// replacing it: a `.git` naming a foreign git dir literally called `.git`
+// whose `core.worktree` names $wt BACK passes the new compare — git answers
+// for $wt — while every read goes against the foreign repo's HEAD and index.
+// A foreign index that already carries `precious.txt`, byte for byte, reads
+// clean over work that exists nowhere in THIS repo. Only the `${gd%/.git}`
+// owner compare refuses it; drop that and this reds (measured, #2040).
+test("a foreign */.git whose core.worktree names $wt back is still refused by the owner compare (#2040)", (t) => {
+  const c = nestedWorktree(t);
+  const foreign = join(dirname(c.parent), "foreign");
+  execFileSync("git", ["clone", "-q", git(c.parent, "remote", "get-url", "origin"), foreign], { env: ENV });
+  git(foreign, "checkout", "-q", c.branch);
+  copyFileSync(join(c.w, "precious.txt"), join(foreign, "precious.txt"));
+  git(foreign, "add", "precious.txt");
+  git(foreign, "commit", "-q", "-m", "precious, committed in a repo that is not $wt's");
+  git(foreign, "config", "core.worktree", c.w);
+  writeFileSync(join(c.w, ".git"), `gitdir: ${join(foreign, ".git")}\n`);
+  assert.equal(git(c.w, "rev-parse", "--show-toplevel"), `${git(c.parent, "rev-parse", "--show-toplevel")}/.worktrees/9-x`,
+    "fixture: git must answer for $wt itself, or the working-tree compare refuses this and it pins nothing about the owner check");
+  assert.equal(git(c.w, "status", "--porcelain", "-uall"), "", "fixture: the foreign index must read clean over the work");
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /whose worktree is .*foreign, not /);
+});
+
+// The `$(...)` that captures `wt_real` and `top` for the working-tree compare
+// strips ALL trailing newlines, not one: a `core.worktree` target whose REAL
+// directory name itself ends in a newline byte would lose it on both sides of
+// the compare, so a redirect to a genuinely different directory could string-
+// match into $wt. Constructed rather than found: `git worktree add`/`git
+// config core.worktree` both accept the byte as an ordinary path character.
+//
+// `refusedAsRedirected` is not reused here: it asserts `--show-toplevel`
+// against a JS-trimmed `target`, and `.trim()` removes the one real byte
+// this case is about, which would make the fixture assertion itself fail
+// against a correctly-fixed script. The behaviour asserted below is the
+// same as every other redirect case: refused, no payload, before the audit.
+test("a core.worktree target whose real name ends in a newline is still refused, never string-matched into $wt (#2040)", (t) => {
+  const c = nestedWorktree(t);
+  const twin = join(c.parent, ".worktrees", "9-x\n");
+  execFileSync("git", ["clone", "-q", git(c.parent, "remote", "get-url", "origin"), twin], { env: ENV });
+  git(twin, "checkout", "-q", c.branch);
+  redirectWorktree(c.parent, c.w, twin);
+
+  const rawTop = execFileSync("git", ["-C", twin, "rev-parse", "--show-toplevel"], { env: ENV, encoding: "utf8" });
+  assert.ok(rawTop.endsWith("9-x\n\n"), "fixture: git must resolve the twin to its real, newline-suffixed path, or this pins nothing new");
+  assert.equal(
+    execFileSync("git", ["-C", c.w, "status", "--porcelain", "-uall"], { env: ENV, encoding: "utf8" }),
+    "",
+    "fixture: git must read clean through the newline-suffixed target — the false clean this pins",
+  );
+
+  const r = audit(c);
+  assert.equal(r.status, 2, `a newline-suffixed redirect target must not string-compare equal to $wt: got ${r.status} ${r.stdout}`);
+  assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
+  assert.match(r.stderr, /git answers for the working tree at/);
+  assert.match(r.stderr, /cannot tell a clean worktree from a dirty one/);
+});
+
+// The ACCEPT side, which a refusal-only suite cannot see: the compare keys on
+// the working tree git answers for, so a `core.worktree` that leaves it at $wt
+// must still be audited. Both measured admitted with the fix in place.
+test("a core.worktree naming $wt itself, through a symlinked spelling, is audited, not refused (#2040)", (t) => {
+  const c = nestedWorktree(t);
+  const link = join(dirname(c.parent), "parent-link");
+  symlinkSync(c.parent, link);
+  redirectWorktree(c.parent, c.w, join(link, ".worktrees", "9-x"));
+  const r = audit(c);
+  assert.equal(r.status, 1, `a core.worktree naming the worktree itself must not refuse: got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, false);
+});
+
+test("a core.worktree git IGNORES — the common config, seen from a linked worktree — is audited, not refused (#2040)", (t) => {
+  // git does not apply the shared config's core.worktree to a linked worktree
+  // (measured: `--show-toplevel` and `status` both still answer for $wt), so
+  // refusing it would be refusing a setting that changes nothing.
+  const c = nestedWorktree(t);
+  git(c.parent, "config", "core.worktree", join(dirname(c.parent), "elsewhere"));
+  const r = audit(c);
+  assert.equal(r.status, 1, `got ${r.status} ${r.stderr}`);
+  assert.equal(r.json.clean, false);
+});
+
+// ---------------------------------------------------------------------------
+// Dirty means dirty. Every fixture above leaves an untracked file, which is the
+// one form `status --porcelain` reports with no index involved at all.
+// ---------------------------------------------------------------------------
+
+// A payload that could not be written is not an answer, but the script's exit
+// code is spent before the write: without a guard the failing `printf` exits 1
+// under `set -e`, and 1 is "REFUSED, worktree dirty" — a clean worktree
+// reported as dirty, with no payload to contradict it. Same shape as the guard
+// inflight.sh carries on its own final printf.
+test("a payload that cannot be written is unanswerable (2), never a refusal (1)", (t) => {
+  const c = repo(t);
+
+  // node cannot hand a child a closed fd 1, so sh closes it after the fork.
+  const r = spawnSync("sh", ["-c", '"$0" "$@" >&-', SCRIPT, c.w, c.branch], {
+    cwd: c.w,
+    env: ENV,
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 2, `got ${r.status}; 1 would claim the worktree is dirty`);
+  // WHICH 2 it is, and the only signal a caller whose stdout is gone can still
+  // read. The design spec's row names this cause in its closed list (#1472),
+  // and a refusal that reached here silently would be indistinguishable from
+  // every other 2 in that list.
+  assert.match(r.stderr, /^no-undo-audit: could not write the audit for /m,
+    `the write failure must name itself on stderr; got ${JSON.stringify(r.stderr)}`);
+});
+
+// --- #1514: the same question asked of the OTHER stream, and the direction
+// that is strictly worse. A caller whose stdout is gone gets no payload and
+// an honest 2, above. A caller whose stderr was gone got a complete payload
+// saying `"clean":true` AND an exit 1 stacked on top of it — REFUSED, from
+// the one tool whose job is to say whether a rebase would eat a commit, about
+// a tree that had already been measured safe on the same run.
+//
+// The cause was the whole class, not one site: `set -e` reads a failed
+// `echo`'s status, 1 out of this script is the dirty-worktree refusal, and
+// every bare `>&2` diagnostic outside `render()` was an unguarded command.
+// The run died on the FIRST of them — the status-command header, before git
+// had been asked anything — so the verdict was fabricated by a stream that
+// answers no part of the question. Measured on this exact fixture before the
+// fix: exit 1.
+test("a diagnostic stream that cannot be written is never a refusal (#1514)", (t) => {
+  const c = repo(t);
+
+  // node cannot hand a child a closed fd 2 either, so sh closes it after the
+  // fork — the same shape the closed-stdout test above uses on fd 1.
+  const r = spawnSync("sh", ["-c", '"$0" "$@" 2>&-', SCRIPT, c.w, c.branch], {
+    cwd: c.w,
+    env: ENV,
+    encoding: "utf8",
+  });
+
+  assert.equal(r.status, 0, `got ${r.status}; 1 would claim a clean worktree is dirty on the strength of a stream that measured nothing`);
+  // Losing the diagnostics is not losing the answer: the payload is the
+  // audit's actual output and it is unaffected by fd 2. Without this the
+  // status assertion above would also pass on a script that exited 0 early.
+  assert.equal(JSON.parse(r.stdout).clean, true,
+    `the verdict must still be delivered in full; got ${JSON.stringify(r.stdout)}`);
+});
+
+// The other half of the pair, and the one that keeps the fix from being a
+// blanket `exit 0`: `|| :` must swallow the WRITE, never the verdict. This
+// tree really is dirty, the answer really is 1, and it has to survive having
+// nowhere to print the refusal — the two-line REFUSED message is itself two
+// of the newly guarded sites, and they sit after `rc=1` is already set.
+test("a genuinely refused worktree still refuses (1) with stderr closed (#1514)", (t) => {
+  const c = repo(t);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work that exists nowhere else\n");
+
+  const r = spawnSync("sh", ["-c", '"$0" "$@" 2>&-', SCRIPT, c.w, c.branch], {
+    cwd: c.w,
+    env: ENV,
+    encoding: "utf8",
+  });
+
+  assert.equal(r.status, 1, `uncommitted work must still refuse with no stderr to say so on; got ${r.status}`);
+  assert.equal(JSON.parse(r.stdout).clean, false,
+    `and the refusal must still carry the payload that justifies it; got ${JSON.stringify(r.stdout)}`);
+});
+
+// `die` is the third outcome and was the worst of the three: its whole body
+// is a write to fd 2 followed by `exit 2`, and `set -e` took the write's
+// status before the `exit` was ever reached. So every unanswerable question —
+// 30-odd `|| die` sites — came back 1 with stderr closed, telling an operator
+// to commit a worktree the run had never managed to look at. Exit 2's own
+// rule still holds here: no payload, because a payload is an answer.
+test("an unanswerable question with stderr closed exits 2, never 1 (#1514)", (t) => {
+  const c = repo(t);
+  const notARepo = `${c.w}-notarepo`;
+  mkdirSync(notARepo);
+
+  const r = spawnSync("sh", ["-c", '"$0" "$@" 2>&-', SCRIPT, notARepo, c.branch], {
+    cwd: c.w,
+    env: ENV,
+    encoding: "utf8",
+  });
+
+  assert.equal(r.status, 2, `a non-worktree is unanswerable however unwritable stderr is; got ${r.status}`);
+  assert.equal(r.stdout.trim(), "", "exit 2 emits no payload — a payload is an answer");
+});
+
+// --- #1571: the same three outcomes, but the descriptor is not closed before
+// launch — a reader takes the first line and then genuinely leaves mid run,
+// a real SIGPIPE rather than a write against a dead fd. Every write above
+// this ticket guarded (`die`, `render`, `emit`) is a bare shell builtin, so
+// it runs in the script's own process rather than a forked child: unguarded,
+// the signal's default disposition killed that process on the spot, before
+// `|| :` was ever consulted, and the script exited 141 — outside its own
+// 0/1/2 contract and unreadable to a caller branching on which of the three
+// it got. Measured before the fix, the case asserting a clean tree exits 0,
+// never 141, itself returned 141.
+//
+// All three outcomes below are the closed-fd trio's own fixtures rerun
+// through `earlyClosingStderrReaderStatus` instead of `2>&-` — the write
+// that fails is now a signal, but which outcome the run reaches and what its
+// payload says must be unchanged either way.
+test("with a genuine SIGPIPE on stderr, a clean tree still exits 0, never 141 (#1571)", (t) => {
+  const c = repo(t);
+
+  assert.equal(earlyClosingStderrReaderStatus(c), 0,
+    "a reader leaving mid run must not turn a safe tree into a signal death");
+});
+
+test("with a genuine SIGPIPE on stderr, a genuinely refused tree still exits 1, never 141 (#1571)", (t) => {
+  const c = repo(t);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work that exists nowhere else\n");
+
+  assert.equal(earlyClosingStderrReaderStatus(c), 1,
+    "uncommitted work must still refuse — not 0 (the signal never reached), not 141 (it reached and killed the run)");
+});
+
+test("with a genuine SIGPIPE on stderr, an unanswerable question still exits 2, never 141 (#1571)", (t) => {
+  const c = repo(t);
+  const notARepo = `${c.w}-notarepo`;
+  mkdirSync(notARepo);
+
+  assert.equal(earlyClosingStderrReaderStatus({ w: notARepo, branch: c.branch }, c.w), 2,
+    "die's own write is a bare printf too — the same signal that killed the process before this fix must not reach it either");
+});
+
+test("a modified tracked file refuses, like an untracked one", (t) => {
+  const c = repo(t);
+  writeFileSync(join(c.w, "f.txt"), "edited in place, committed nowhere\n");
+  // `git` trims, and porcelain spends its first column on the index — so the
+  // status this fixture needs is ` M`, read here with that column already gone.
+  assert.equal(git(c.w, "status", "--porcelain"), "M f.txt", "fixture must modify a tracked file, unstaged");
+
+  const r = audit(c);
+  assert.equal(r.status, 1, "an edit to a tracked file exists nowhere else either");
+  assert.equal(r.json.clean, false);
+});
+
+test("a staged change refuses", (t) => {
+  const c = repo(t);
+  writeFileSync(join(c.w, "staged.txt"), "staged, never committed\n");
+  git(c.w, "add", "staged.txt");
+  assert.equal(git(c.w, "status", "--porcelain"), "A  staged.txt", "fixture must stage without committing");
+
+  const r = audit(c);
+  assert.equal(r.status, 1, "the index is not a commit — a rebase does not carry it");
+  assert.equal(r.json.clean, false);
+});
+
+/** The design spec's script-surface row for this script, as one line. */
+function specRow() {
+  const spec = readFileSync(
+    fileURLToPath(new URL("../docs/specs/2026-07-23-fleet-plugin-design.md", import.meta.url)),
+    "utf8",
+  );
+  const row = spec.split("\n").find((l) => l.startsWith("| `no-undo-audit.sh` |"));
+  assert.ok(row, "the script-surface table must still carry a no-undo-audit.sh row");
+  return row;
+}
+
+// The design spec's script-surface table names this script's payload field by
+// field, and #146 added four fields to it. The table went stale in the same
+// commit that added them — the fix for that is one edited row, and this is the
+// part that keeps the next one from going stale silently. Derived from a real
+// run, never from a hand-written key list: a list typed here drifts from the
+// script exactly the way the table did.
+test("the design spec's script-surface row names every field the payload actually emits", (t) => {
+  const c = repo(t);
+  const r = audit(c);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+
+  const row = specRow();
+
+  // The Out cell alone, since the rest of the row legitimately names things that
+  // are not keys: scanning the whole row let the In cell's `<worktree>` satisfy
+  // `worktree` and the `Non-zero when` prose's "the stash count is reported"
+  // satisfy `stash`, so either could be dropped from the type signature with
+  // this test green (measured, both directions).
+  const out = row.split("|")[3];
+
+  // Word-boundary match, so `worktree` cannot be satisfied by `worktreeRewritten`
+  // sitting elsewhere in the cell — the exact substring trap that would let the
+  // four new flags be dropped again while this test stayed green.
+  const missing = Object.keys(r.json).filter((k) => !new RegExp(`\\b${k}\\b`).test(out));
+  assert.deepEqual(missing, [], `the spec row omits fields the script emits: ${missing.join(", ")}`);
+});
+
+// Both docs describe this script's exit-2 causes, and its linkage clause covers
+// THREE failures git reports differently. A parenthetical naming only the
+// walk-up one stood, byte-identical, in both files, and was false for the
+// second (#420); the third arrived with #2040. Measured, git 2.50.1: delete the
+// worktree's `.git` and `rev-parse --show-prefix` returns `.worktrees/<wt>/`
+// while `--show-toplevel` is the enclosing repo; rewrite that file to
+// `gitdir: …/worktrees/<sibling>` and `--show-prefix` is empty at rc 0 with
+// `--show-toplevel` the worktree itself, while HEAD, the branch and `status`
+// all answer from the sibling; set `core.worktree` elsewhere and
+// `--show-prefix` is still empty at rc 0 while `--show-toplevel` and `status`
+// answer for the other directory, against $wt's own HEAD and index.
+//
+// ONE exact-span assertion rather than a match per mechanism, because the claim
+// lives in the JOIN: separate matches for `enclosing repo` and for `another
+// worktree's HEAD and index` are both satisfied by a rewrite that re-merges the
+// two into a single wrong account ("git walks up and reports the enclosing
+// repo, or reads another worktree's HEAD and index"), which is the defect this
+// pin exists to keep out. Safe to pin as an exact span because both carriers
+// are one unwrapped line — a table row and a prose paragraph — so there is no
+// reflow to survive.
+//
+// SCOPE of the rc-0 clause: measured for a worktree nested inside its repo —
+// the only shape this fleet builds, since `claim-ticket.sh` derives the
+// worktree path under `.worktrees/` relative to the repo root. Outside any
+// repo the clause's own subject does not exist: with `.git` deleted git has
+// nothing to walk up to and `rev-parse` exits 128, though the script still
+// refuses at exit 2, via its not-a-git-worktree die rather than the one for
+// git answering above the worktree (measured, git 2.50.1). Re-open if the
+// fleet ever places a worktree outside the repo — the clause then needs
+// scoping, and the string is byte-identical across the docs this test reads
+// and this constant, so every carrier moves together.
+const LINKAGE_PARENTHETICAL =
+  "its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir, against another directory's files when `core.worktree` moves the working tree there";
+
+test("both docs' exit-2 prose keeps the three linkage failures distinct", () => {
+  for (const [rel, anchor] of [
+    ["../plugin/commands/run-merge-bot.md", (l) => l.includes("Exit **2**")],
+    ["../docs/specs/2026-07-23-fleet-plugin-design.md", (l) => l.startsWith("| `no-undo-audit.sh` |")],
+  ]) {
+    const line = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8")
+      .split("\n").find(anchor);
+    assert.ok(line, `${rel} must still describe this script's exit-2 causes`);
+    assert.ok(line.includes(LINKAGE_PARENTHETICAL),
+      `${rel} no longer names all three linkage failures as distinct: a deleted \`.git\` is the one git walks up from, a \`.git\` naming another worktree's admin dir is the one git answers for this worktree while reading the other one's HEAD and index, and a \`core.worktree\` redirect is the one git answers with this worktree's HEAD and index against another directory's files. Merging them, or generalising until it names none, all land here.`);
+  }
+});
+
+// --- #1472: the exit-2 cause census.
+//
+// The two pins above read this row for its FIELDS and for one clause of its
+// exit-2 prose. Neither asks the closed-list question — does the row name
+// every cause this script can refuse for, and none it cannot reach? #1108
+// answered that for worktree-audit.sh and reap.sh after two PRs in one fleet run
+// each left a row asserting an enumeration its script had outgrown with the
+// suite green (#1104/#525, #1105/#482). This block answers it here, both
+// directions:
+//
+//   TOO NARROW — the script grows a refusal the row does not carry. `CAUSES`
+//   binds every `die` site to the phrase that represents it, and the census
+//   test asserts that binding is EXACTLY the set of sites the script has. Add
+//   a `die` and it reds on an unbound site; delete one and it reds on a
+//   binding whose cause the script can no longer produce. The set is derived
+//   from the script, so the binding cannot rot silently the way the row did —
+//   a reworded message reds too, which is the point: the row is what then has
+//   to be revisited.
+//
+//   TOO BROAD — the row grows a cause no `die` produces. The census cannot see
+//   that; a phrase added to the cell binds to nothing and no assert notices.
+//   `EXIT2_ENUMERATION` is the pin that does: the whole closed list, byte for
+//   byte, in the `UNKNOWN_LINE`/`ORPHAN_LINE` verbatim-constant discipline
+//   this file already uses on the stash lines above.
+//
+// The span pin's cost is deliberate, and it was #1108's ruling: it reds on
+// EVERY edit to the enumeration, a legitimate rewording included. A structural
+// assertion loose enough to survive rewording cannot red on a rewrite that
+// quietly drops a real cause, which is the defect that was measured twice.
+//
+// WHAT THIS SCRIPT'S SHAPE CHANGES, and it is not cosmetic. Its two siblings
+// answer with a 2 or not at all, so their cells OPEN on `exit 2 only` and a
+// prefix slice is its own anchor. Exit 2 is one of THREE outcomes here:
+// the cell opens on the exit-1 refusal — which carries a closed list of its
+// own, the `stash: null` shapes — and closes on the `worktree`/`branch`
+// `null`-field rule, which fires at the verdict's own exit code — 0 or 1 —
+// never exclusively at exit 0.
+// Two consequences, and a copied exit-2-only census gets both wrong.
+//
+//   The anchor is asserted, never assumed: `exit 2` occurs exactly once in the
+//   cell, and the list is read from there for exactly its own length. A prefix
+//   slice would red here on the exit-1 clause it never meant to read, and an
+//   `includes` would let a cause be smuggled in ahead of the list.
+//
+//   The premise is pinned, not inherited: `exitStatements` asserts that `die`'s
+//   `exit 2` and the verdict's `exit "$rc"` are the only exits the script
+//   spells, and that `$rc` is only ever 0 or 1. A sibling suite gets "every
+//   nonzero exit is a `die`" for free; on this script an `exit 2` spelled
+//   outside `die` would be an exit-2 cause with no message to bind, invisible
+//   to the census, and a third verdict code would be an outcome no cell in the
+//   row describes.
+//
+// Scoped to this script's own suite beside its siblings rather than lifted
+// into one shared table over every row: `.out-of-scope/cli-guard-test-
+// consolidation.md` refuses that consolidation for the CLI-guard pins, and its
+// reason holds unchanged here — a file no single script's suite runs recreates
+// the blind spot these pins exist to close.
+
+/**
+ * The `Non-zero when` cell of this script's row, and no more of the row.
+ *
+ * The row is split on `|` and the fifth cell taken; a stray `|` inside any
+ * earlier cell's prose would silently narrow what gets scanned instead of
+ * erroring, so the split's own arity is asserted first — measured at 6
+ * (leading empty, script name, args, JSON shape, `Non-zero when`, trailing
+ * empty).
+ */
+const nonZeroCell = () => {
+  const cells = specRow().split("|");
+  assert.equal(
+    cells.length,
+    6,
+    "the no-undo-audit.sh row's cell count changed — an earlier cell may have gained a literal `|`",
+  );
+  return cells[4];
+};
+
+/**
+ * The row's exit-2 enumeration, verbatim: from `exit 2` to the end of the
+ * sentence that closes the list. The exit-1 refusal ahead of it and the
+ * `worktree`/`branch` `null`-field rule behind it — which fires at the
+ * verdict's own exit code, 0 or 1, never exclusively at exit 0 — are their
+ * own claims with their own pins, so the span stops where the closed list
+ * does — the slice is the size of the claim.
+ */
+const EXIT2_ENUMERATION =
+  "exit 2 the question is unanswerable — bad argument, no such worktree, a worktree git does not answer for (its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir, against another directory's files when `core.worktree` moves the working tree there), `BASE_REF` is not spelled `origin/<branch>` or `refs/remotes/<path>` (#1565), `BASE_REF` names the audited branch (#1565), a ref that does not resolve, a probe that could not run — with the stash reflog's path resolution the exception (#570): that one failing reports `unknown` on the payload at the verdict's own exit code rather than withholding the audit, the same rule `worktree`/`branch` follow below — a conflicting path no pathspec can name, `json.sh` missing, unreadable or failed to load, a conflicting-path or at-risk array that could not be escaped (#119) — and no payload is emitted, or the audit itself could not be written (#1472) — that one can fail after the payload has already begun printing, so stdout carries it truncated and unparseable, which that exit code and the named stderr line are what distinguish from a complete answer.";
+
+/**
+ * Everything in the cell AFTER `EXIT2_ENUMERATION`, verbatim: the
+ * `worktree`/`branch` `null`-field rule the enumeration's own doc comment
+ * says is its own claim with its own pin. Without this, the byte-span
+ * equality below only ever inspects a fixed-length window starting at
+ * `exit 2 ` — a phantom cause appended after the enumeration's closing
+ * sentence, worded without repeating the literal string `exit 2`, would
+ * sit past that window and pass unseen. Pinning the remainder too closes
+ * that gap: together the two constants account for every byte of the cell
+ * from the anchor to the end of the row's cell.
+ */
+const EXIT2_TAIL =
+  " `worktree` and `branch` are the exception (#431): they echo argv rather than reporting a finding, so an escaper that cannot render one reports that field and its `*Rewritten` flag as JSON `null` on the payload the audit already earned, at the verdict's own exit code. A `null` there is \"this run could not render the path or branch you passed in\", never \"there is no worktree\" and never a path ";
+
+/**
+ * The clauses the ROW collapses several refusals into, named because the
+ * bindings below share them and a phrase typed ten times drifts nine ways.
+ *
+ * Sharing is the row's editorial call and not a looseness here: a reader who
+ * meets any of the ten refusals about a worktree git will not answer for
+ * does the same thing about it, and so does one who meets either library
+ * refusal. The phrases are the short load-bearing labels; their exact wording
+ * is `EXIT2_ENUMERATION`'s job.
+ *
+ * The two BASE_REF clauses are named for a different reason than sharing:
+ * each represents exactly one refusal, and `BASE_REF_CLAUSES` below reads
+ * them again to pin that both operator-facing enumerations name them. Spelled
+ * inline they would sit in two places with no constant holding them together,
+ * which is the drift the rest of this block exists to stop.
+ */
+const LIBRARY_CLAUSE = "`json.sh` missing, unreadable or failed to load";
+const LINKAGE_CLAUSE = "a worktree git does not answer for";
+const REF_CLAUSE = "a ref that does not resolve";
+const PROBE_CLAUSE = "a probe that could not run";
+const ESCAPE_CLAUSE = "a conflicting-path or at-risk array that could not be escaped (#119)";
+const BASE_REF_SHAPE_CLAUSE = "`BASE_REF` is not spelled `origin/<branch>` or `refs/remotes/<path>` (#1565)";
+const AUDITED_BRANCH_CLAUSE = "`BASE_REF` names the audited branch (#1565)";
+
+/**
+ * Every clause representing a BASE_REF refusal, as a closed list.
+ *
+ * `plugin/commands/run-merge-bot.md` is the operator-facing doc for this
+ * script's only documented invocation, and its exit-2 enumeration is derived
+ * from nothing: the census below catches a cause the design-spec ROW goes
+ * silent about, and nothing caught one the COMMAND DOC goes silent about —
+ * #1565's own accept-list reached the row and not that doc, with the suite
+ * green. Asserted closed against the script's own messages, so a third
+ * BASE_REF refusal reds here until it is listed and named in both docs.
+ */
+const BASE_REF_CLAUSES = [BASE_REF_SHAPE_CLAUSE, AUDITED_BRANCH_CLAUSE];
+
+/**
+ * Every `die` site in no-undo-audit.sh, bound to the phrase in the row that
+ * represents it.
+ *
+ * The KEY is the message as the script spells it, interpolations and all.
+ * `die` is this script's only exit-2 path — `exitStatements` asserts that of
+ * the script rather than assuming it — so the message set IS the exit-2 cause
+ * set, and keying on it is what makes this derived rather than a third
+ * hand-written copy of the contract sitting beside the script and the row.
+ */
+const CAUSES = new Map([
+  ["cannot read $json_lib — refusing to act without the JSON escaping helpers", LIBRARY_CLAUSE],
+  ["$json_lib failed to load", LIBRARY_CLAUSE],
+  ["usage: no-undo-audit.sh <worktree> <branch>", "bad argument"],
+  ["worktree $wt does not exist", "no such worktree"],
+  ["$wt is not a git worktree", LINKAGE_CLAUSE],
+  ["git answers for the repo above $wt, not $wt — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
+  ["git will not name the git dir answering for $wt — cannot verify its linkage", LINKAGE_CLAUSE],
+  ["git will not name $wt's common git dir — cannot verify its linkage", LINKAGE_CLAUSE],
+  ["$gd/gitdir is missing or unreadable — cannot verify $wt's linkage", LINKAGE_CLAUSE],
+  ["$gd/gitdir names a directory that does not resolve — cannot verify $wt's linkage", LINKAGE_CLAUSE],
+  ["$wt's .git names another worktree's admin dir — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
+  ["$wt's .git names $gd, whose worktree is $owner, not $wt — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
+  ["git will not name the working tree answering for $wt — cannot verify its linkage", LINKAGE_CLAUSE],
+  ["git answers for the working tree at $top, not $wt — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
+  ["BASE_REF must be spelled origin/<branch> or refs/remotes/<path>, got '$base'", BASE_REF_SHAPE_CLAUSE],
+  ["BASE_REF must not name the audited branch, got '$base'", AUDITED_BRANCH_CLAUSE],
+  ["$base does not resolve as $base_rev", REF_CLAUSE],
+  ["$branch_rev does not resolve — run 'git fetch origin' and retry", REF_CLAUSE],
+  ["git status failed in $wt — cannot tell a clean worktree from a dirty one", PROBE_CLAUSE],
+  ["awk failed counting the stash entries — cannot report the stash count", PROBE_CLAUSE],
+  ["cannot create a temporary file", PROBE_CLAUSE],
+  ["git merge-tree could not answer (exit $mt_rc) against origin/$branch — cannot determine conflicts", PROBE_CLAUSE],
+  ["could not read git merge-tree's output (python3) — cannot determine conflicts", PROBE_CLAUSE],
+  ["a conflicting path contains a newline — cannot build a pathspec for it", "a conflicting path no pathspec can name"],
+  ["could not escape the conflicting paths for $branch", ESCAPE_CLAUSE],
+  ["git merge-base failed for $base ($base_rev) and $branch_rev — cannot tell what a resolution would eat", PROBE_CLAUSE],
+  ["listing commits for the conflicting paths failed (git log or xargs) — cannot tell what a resolution would eat", PROBE_CLAUSE],
+  ["awk failed deduplicating the at-risk commits — cannot tell what a resolution would eat", PROBE_CLAUSE],
+  ["could not escape the at-risk commits for $branch", ESCAPE_CLAUSE],
+  ["could not write the audit for $branch", "the audit itself could not be written (#1472)"],
+]);
+
+/**
+ * How many sites a message may have. One, except the `mktemp` refusal, which
+ * the script arms before each of the two temporaries it creates and spells
+ * identically at both: it is one cause, and an operator does nothing
+ * different about the second.
+ *
+ * The siblings' census asserts instead that every message is unique. That is
+ * true of their scripts and is a FALSE REFUSAL here — copied over, it reds on
+ * this script for something that is not a defect. Counting keeps what
+ * uniqueness was buying: a new `die` reusing an existing message reds on the
+ * count rather than binding to a cause that is not its own, and a shared
+ * message that stops being shared reds as the missing site it is.
+ */
+const SITES_PER_MESSAGE = new Map([["cannot create a temporary file", 2]]);
+
+/**
+ * The message of every `die` call in the script, read off the script, one
+ * entry per cause.
+ *
+ * Comment lines are dropped: prose quoting a `die "…"` is not a call site, and
+ * minting a cause out of one would red this suite over a comment. Greedy to
+ * the last quote on the line, so a message carrying a nested `"$…"`
+ * substitution arrives whole rather than truncated at its first inner quote.
+ */
+function dieSites() {
+  const src = readFileSync(SCRIPT, "utf8");
+  // Re-derived for #1684, which replaced the hand-copy of `emit`'s body
+  // that stood here with a call to `emit` itself: the `|| :` of #1514 and
+  // the `( trap '' PIPE; … )` subshell of #1571 now live in one function
+  // body rather than two. The premise this anchor protects — that `die`
+  // formats one message and reaches `exit 2` — is unchanged by that fix, as
+  // it was by the two before it.
+  assert.match(
+    src,
+    /^die\(\) \{ emit "\$NAME: \$1"; exit 2; \}$/m,
+    "the census derives its cause set from one `die` that exits 2 — that definition has changed, so re-derive before trusting this file",
+  );
+  const lines = src.split("\n");
+  const sites = lines
+    .filter((l) => !/^\s*#/.test(l))
+    .flatMap((l) => [...l.matchAll(/(?:^|[;&|(\s])die "(.*)"/g)].map((m) => m[1]));
+  assert.ok(sites.length > 1, `the scan found ${sites.length} die sites, so its spelling has drifted off the script`);
+
+  // `die` is defined ABOVE `emit` and, since #1684, CALLS it — and a shell
+  // resolves a function name at call time, not at definition time. So every
+  // `die` call site has to sit below `emit()`'s definition: one hoisted
+  // above it runs `emit` as an unknown command, `set -e` takes that 127,
+  // and the script answers an unanswerable question with a status outside
+  // its own 0/1/2 contract — on whichever branch reached it and nowhere
+  // else, which is why no fixture would find it. The ordering is the whole
+  // of what makes the forward reference safe, so it is asserted here rather
+  // than left to the paragraph beside the definition.
+  const emitDef = lines.findIndex((l) => /^emit\(\) \{/.test(l));
+  assert.ok(emitDef >= 0,
+    "`emit()` is no longer defined at the start of a line — `die` calls it, so this ordering check no longer knows what it is measuring");
+  const firstCall = lines.findIndex((l) => !/^\s*#/.test(l) && /(?:^|[;&|(\s])die "/.test(l));
+  assert.ok(firstCall > emitDef,
+    `the first \`die\` call sits at line ${firstCall + 1}, above \`emit\`'s definition at line ${emitDef + 1} — it would exit 127, not the 2 this script's contract promises`);
+  for (const message of new Set(sites)) {
+    assert.equal(
+      sites.filter((m) => m === message).length,
+      SITES_PER_MESSAGE.get(message) ?? 1,
+      `\`die "${message}"\` is spelled at a number of sites this census does not expect: two causes sharing a message cannot be bound apart, and a message that stops being shared is a site that went missing`,
+    );
+  }
+  return new Set(sites);
+}
+
+/**
+ * Every `exit` statement the script spells, as it spells it.
+ *
+ * Read from anywhere on the line, not just statement position: `&& exit 2` is
+ * an exit path as much as a bare one, and a scan anchored on line start or
+ * `; ` misses it — measured, and measured green against a stray `exit 2` this
+ * census exists to red on.
+ *
+ * Quoted spans are cut out first, which is what keeps the word inside a
+ * MESSAGE from being minted into an exit path: `die "git merge-tree could not
+ * answer (exit $mt_rc) …"` carries one, and so does the render fold's "the
+ * payload and the exit status stand". Comment lines are dropped for the reason
+ * `dieSites` drops them.
+ */
+function exitStatements(src) {
+  return src
+    .split("\n")
+    .filter((l) => !/^\s*#/.test(l))
+    .flatMap((l) => {
+      const quoted = [...l.matchAll(/'[^']*'|"[^"]*"/g)].map((m) => [m.index, m.index + m[0].length]);
+      return [...l.matchAll(/\bexit\b *([^;)&|]*)/g)]
+        .filter((m) => !quoted.some(([from, to]) => m.index >= from && m.index < to))
+        .map((m) => `exit ${m[1].trim()}`.trim());
+    });
+}
+
+/**
+ * Every `rc=<value>` assignment to the verdict variable, scanned the same
+ * way `exitStatements` scans `exit`: from anywhere on the line rather than
+ * anchored to its start, with quoted spans cut out first and comment lines
+ * dropped. A line-start/line-end anchor would miss a value assigned inline
+ * (`… && rc=2`) or trailed by a comment (`rc=2 # oops`) — exactly the two
+ * shapes `exitStatements` was already built to survive. `\brc=` — not a bare
+ * `rc=` — is what keeps `sl_rc=`, `sr_rc=`, `mt_rc=` and `stash_reflog_rc=`
+ * out: an underscore is a word character, so there is no boundary between it
+ * and the `r` those names share with the verdict variable.
+ */
+function rcAssignments(src) {
+  return src
+    .split("\n")
+    .filter((l) => !/^\s*#/.test(l))
+    .flatMap((l) => {
+      const quoted = [...l.matchAll(/'[^']*'|"[^"]*"/g)].map((m) => [m.index, m.index + m[0].length]);
+      return [...l.matchAll(/\brc=(\S+)/g)]
+        .filter((m) => !quoted.some(([from, to]) => m.index >= from && m.index < to))
+        .map((m) => m[1]);
+    });
+}
+
+test("`die` is the only way this script reaches exit 2, and its other exits are the two verdicts (#1472)", () => {
+  const src = readFileSync(SCRIPT, "utf8");
+
+  assert.deepEqual(
+    exitStatements(src).sort(),
+    ['exit "$rc"', "exit 2"],
+    "the census reads the exit-2 causes off `die`'s messages, so every exit-2 path must BE a `die`: an `exit 2` spelled anywhere else is a cause with no message to bind, and the row could stay silent about it with this suite green",
+  );
+
+  assert.deepEqual(
+    [...new Set(rcAssignments(src))].sort(),
+    ["0", "1"],
+    "`$rc` is the verdict, and the row states exactly two of them — 1 the worktree is dirty, 0 it is clean. A third value assigned here is an outcome no cell in that row describes",
+  );
+
+  // `set -eu` is on, so an unguarded command failing exits with ITS status
+  // rather than with any of the three — a 1 out of a failed `.` or `printf`
+  // reads as the dirty-worktree refusal, which is what the guards above are
+  // for and what their own fixtures pin. This test is about the exits the
+  // script spells itself.
+});
+
+test("the design spec's row represents every exit-2 cause this script can reach, and none it cannot (#1472)", () => {
+  // Both directions in one equality: an unbound site is a cause the row may be
+  // silent about, and a binding with no site is a cause the row claims while
+  // the script can no longer produce it.
+  assert.deepEqual([...dieSites()].sort(), [...CAUSES.keys()].sort());
+
+  const cell = nonZeroCell();
+  for (const phrase of new Set(CAUSES.values())) {
+    assert.equal(
+      cell.split(phrase).length - 1,
+      1,
+      `the \`Non-zero when\` cell must carry "${phrase}" exactly once.\ncell: ${cell}`,
+    );
+  }
+});
+
+test("the design spec's row states this script's exit-2 causes as a closed list, byte for byte (#1472)", () => {
+  const cell = nonZeroCell();
+
+  // The anchor, asserted rather than assumed: this cell does not open on the
+  // exit-2 list the way its siblings' cells do, so the span below is read from
+  // the one place the cell names exit 2 — and that there is exactly one such
+  // place is half the claim. A second one is a second enumeration, which is
+  // the row carrying its own contradiction.
+  assert.equal(
+    cell.split("exit 2 ").length - 1,
+    1,
+    `the cell must name exit 2 exactly once — it is the anchor the closed list is read from.\ncell: ${cell}`,
+  );
+
+  // A slice, not an `includes`: a cause smuggled in anywhere inside the list
+  // sits outside an exact span of the list's own length. The check runs to
+  // the END of the cell, not just the enumeration's own length: a phantom
+  // cause appended after the enumeration's closing sentence would otherwise
+  // sit past a fixed-length window and pass unseen, provided it avoided the
+  // literal string `exit 2` (which the anchor assertion above would still
+  // catch) — `EXIT2_TAIL` is what closes that gap for a phantom cause that
+  // doesn't repeat it.
+  const from = cell.indexOf("exit 2 ");
+  assert.equal(cell.slice(from, from + EXIT2_ENUMERATION.length), EXIT2_ENUMERATION);
+  assert.equal(cell.slice(from + EXIT2_ENUMERATION.length), EXIT2_TAIL);
+});
+
+test("both operator-facing docs name every BASE_REF refusal this script can reach (#1565)", () => {
+  // The closed list, asserted against the script rather than trusted. Both
+  // directions: a BASE_REF `die` bound outside the list is a refusal the docs
+  // may be silent about, and a clause with no `die` behind it is one the docs
+  // claim while the script cannot reach it.
+  for (const [message, clause] of CAUSES) {
+    if (!message.includes("BASE_REF")) continue;
+    assert.ok(
+      BASE_REF_CLAUSES.includes(clause),
+      `\`die "${message}"\` is a BASE_REF refusal bound to "${clause}", which BASE_REF_CLAUSES does not carry — add it there and name it in both docs, or the command doc can stay silent about it with this suite green`,
+    );
+  }
+  assert.equal(
+    [...CAUSES.keys()].filter((m) => m.includes("BASE_REF")).length,
+    BASE_REF_CLAUSES.length,
+    "every clause in BASE_REF_CLAUSES must have a `die` behind it",
+  );
+
+  for (const rel of ["../plugin/commands/run-merge-bot.md", "../docs/specs/2026-07-23-fleet-plugin-design.md"]) {
+    const anchor = rel.endsWith("run-merge-bot.md")
+      ? (l) => l.includes("Exit **2**")
+      : (l) => l.startsWith("| `no-undo-audit.sh` |");
+    const line = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8")
+      .split("\n").find(anchor);
+    assert.ok(line, `${rel} must still describe this script's exit-2 causes`);
+    for (const clause of BASE_REF_CLAUSES) {
+      assert.equal(
+        line.split(clause).length - 1,
+        1,
+        `${rel} must name "${clause}" exactly once.\nline: ${line}`,
+      );
+    }
+  }
+});
+
+// --- #119: the escaping library this script now sources rather than carries.
+//
+// `.` is a POSIX special builtin, so failing to open its operand aborts a
+// non-interactive shell before any `||` on the line can run — measured, /bin/sh
+// (macOS bash 3.2), bash 3.2 and `bash --posix` all exit 1 with the guard
+// unfired. Exit 1 is a VERDICT here — `REFUSED — commit the worktree before
+// rebasing`, and "refused" means a dirty worktree this script actually looked
+// at — so a bare 1 out of a missing file would report that refusal without
+// having measured anything. The `[ -r ]` ahead of the `.` is what makes it a 2.
+test("a missing json.sh is exit 2, not a verdict about the worktree", (t) => {
+  const c = repo(t);
+  const lone = mkdtempSync(join(tmpdir(), "no-undo-audit-nolib-"));
+  t.after(() => rmSync(lone, { recursive: true, force: true }));
+  copyFileSync(SCRIPT, join(lone, "no-undo-audit.sh"));
+
+  const r = spawnSync("sh", [join(lone, "no-undo-audit.sh"), c.w, c.branch], {
+    cwd: c.w, env: ENV, encoding: "utf8",
+  });
+
+  assert.equal(r.status, 2,
+    "a missing library is `the question could not be answered`. Exit 0 would call an unexamined worktree safe to rebase, which is the false safe this whole script exists to prevent.");
+  assert.match(r.stderr, /json\.sh/,
+    "and it names the file — this script has many exit-2 paths and the operator should not have to guess which fired");
+  assert.equal(r.stdout, "", "no payload: nothing was measured");
+});
+
+// --- #119, second half: what happens when the library is THERE and its tools
+// are not. `jarr`/`jarr_rewritten` return non-zero on a failed stage now, which
+// is the whole point of the extraction — and under `set -eu` a bare
+// `var=$(… | jarr)` would then abort with the failing tool's own status. On
+// this script that status is 1, byte-identical to the dirty-worktree refusal,
+// on a worktree the run had already logged as clean, with no payload and no
+// diagnostic. These three pin the `|| die` that converts it to a 2.
+//
+// One shim shape, selected on CONTENT rather than on argv, because the two jarr
+// call sites are invoked with identical arguments and only the values passing
+// through them differ. `sed` fails jarr; `tr -d` fails jrewritten and therefore
+// jarr_rewritten, which is the other operand of each `&&` chain.
+//
+// `selector` overrides that default arg match, which is what #431's cases need:
+// `jstr` ends in a `tr` carrying no `-d`, so the two defaults above cannot
+// address it. Passing json.sh's shared scrub set matches BOTH the replacing
+// `tr` that closes `jstr` and the deleting one inside `jrewritten` — which is
+// not ambiguity to route around, because the caller consults `jstr` first and
+// therefore always reports `jstr` as the escaper that failed.
+function withBrokenEscaper(t, { tool, marker, selector }) {
+  const bin = mkdtempSync(join(tmpdir(), "no-undo-audit-esc-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  const real = execFileSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim();
+  // The selector arg is what keeps this off the script's OWN sed/tr calls:
+  // `s/^/"/` appears only in jarr's rule list and `-d` only in jrewritten's.
+  selector = selector ?? (tool === "sed" ? `'s/^/"/'` : "-d");
+  writeExecStub(join(bin, tool), `#!/bin/sh
+case " $* " in
+  *${selector}*)
+    in=$(cat)
+    case "$in" in *'${marker}'*) exit 1 ;; esac
+    printf '%s\\n' "$in" | exec ${real} "$@" ;;
+esac
+exec ${real} "$@"
+`);
+  return `${bin}:${process.env.PATH}`;
+}
+
+// --- #896: the two `|| die`s the three cases below exist for, and the
+// fatality all three read off the exit CODE — which is the shell's choice and
+// not this script's.
+//
+// Downgrade either guard to a message-preserving warning and the two `sed`
+// cases emit no payload at all to catch it by. Each pair — `conflicts_json`
+// with `conflicts_rewritten_json`, `at_risk_json` with
+// `at_risk_rewritten_json` — is assigned by one `&&` chain, so the failing
+// `jarr` short-circuits the second and leaves that name unset; with the guard
+// advisory the payload `printf` reads it and `set -u` aborts instead. Measured
+// on this box: bash exits 0, not 1 — `no-undo-audit.sh:538`'s `trap 'rm -f
+// "$mt_out" "$ps_out"' EXIT`, armed before either guard, resets the abort
+// status on its way out, so `<name>: unbound variable` still reaches stderr
+// but the caller gets back the same 0 a genuinely healthy run reports — a
+// false SAFE, and worse than the exit 1 this comment used to claim. dash is
+// unaffected by the trap and still exits 2 saying `<name>: parameter not
+// set` — the very status a firing guard returns, under the same message the
+// downgrade still prints. This file spawns a bare `sh` and
+// `.github/workflows/ci.yml`'s `check` job
+// runs on `ubuntu-latest`, where that name is dash. Measured with the at-risk
+// guard downgraded: every case in this file stayed green under dash and the
+// guard was pinned on a Mac alone.
+//
+// The unset NAME is common to both shells and is printed by neither a healthy
+// run nor a firing guard, so that is what discriminates. The `tr` case needs
+// no such assertion and is given none: `jarr` succeeds there and
+// `jarr_rewritten`'s capture is still ASSIGNED, empty, so nothing is unset.
+// Downgraded, that run exits 0 with a payload that PARSES — one conflicting
+// path beside `"conflictsRewritten":[]`, a flag list silently emptied
+// (measured, both shells) — which its status and stdout assertions already
+// refuse.
+
+test("a jarr that cannot escape the conflicts is exit 2 with a cause, never the refusal that means dirty", (t) => {
+  const c = bareConflictRepo(t, "boom-conflict.txt");
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, { tool: "sed", marker: "boom-conflict" }) });
+
+  assert.equal(r.status, 2,
+    "the worktree is clean and was measured clean — exit 1 here would report it dirty on the strength of a broken sed");
+  assert.match(r.stderr, /could not escape the conflicting paths/,
+    "and it names which stage failed rather than exiting silently");
+  assert.equal(r.stdout, "", "no payload: an unescaped conflicts list is not an answer");
+  assert.doesNotMatch(r.stderr, /conflicts_rewritten_json/,
+    "the guard must stop the script, not warn and leave the payload `printf` reading a name the `&&` chain never assigned. The NAME, because bash's wording and status and dash's differ and only the name is common to both.");
+});
+
+test("a jarr that cannot escape the at-risk commits is exit 2 with its own cause", (t) => {
+  const c = bareConflictRepo(t, "plain.txt");
+  git(c.w, "checkout", "-q", "main");
+  writeFileSync(join(c.w, "plain.txt"), "later main side\n");
+  git(c.w, "add", "--", ":(literal)plain.txt");
+  git(c.w, "commit", "-q", "-m", "BOOMATRISK subject");
+  git(c.w, "push", "-q", "origin", "main");
+  git(c.w, "checkout", "-q", c.branch);
+
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, { tool: "sed", marker: "BOOMATRISK" }) });
+
+  // A distinct message, not the conflicts one: the two guards are separate
+  // statements and a single shared message could not tell the operator which
+  // array the run lost.
+  assert.equal(r.status, 2, "an at-risk list that could not be rendered is unanswerable, not a dirty worktree");
+  assert.match(r.stderr, /could not escape the at-risk commits/,
+    "and the cause names the at-risk list, not the conflicts one");
+  assert.equal(r.stdout, "", "no payload: a run that cannot say what a resolution would eat has not answered");
+  assert.doesNotMatch(r.stderr, /at_risk_rewritten_json/,
+    "and the guard is fatal, not advisory — the NAME again, for the reason the conflicts case states: the status a downgrade produces here is 2 under the shell CI runs.");
+});
+
+test("a jarr_rewritten that cannot answer is exit 2 too — the `&&` chain covers both operands", (t) => {
+  const c = bareConflictRepo(t, "boom-conflict.txt");
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, { tool: "tr", marker: "boom-conflict" }) });
+
+  assert.equal(r.status, 2,
+    "`conflictsRewritten` is what tells the runbook a path is not safe to hand to `git diff` — a run that cannot compute it has not answered");
+  assert.match(r.stderr, /could not escape the conflicting paths/);
+  assert.equal(r.stdout, "", "no payload: half the pair is not a receipt");
+});
+
+test("a shimmed escaper that works answers the audit in full — the guards refuse only a real outage", (t) => {
+  // The false-positive half, and the control the three cases above need:
+  // shadowing `sed` on PATH is not by itself fatal to this script. The same
+  // fixture and the same shadowed name as the first of them, a marker nothing
+  // in this run carries — so those exit 2s are the escaper failing, not the
+  // shim's mere presence. Without this they could be measuring a PATH they
+  // broke wholesale and still read green. The `tr` shim has its counterpart in
+  // the #431 cases below, which install that shape and get a payload back.
+  const c = bareConflictRepo(t, "boom-conflict.txt");
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, { tool: "sed", marker: "no value in this run carries this" }) });
+
+  assert.equal(r.status, 0, "the worktree is clean and every stage rendered — a shim on PATH is not itself a refusal");
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, ["boom-conflict.txt"], "the array the first case could not render, rendered");
+  assert.deepEqual(r.json.conflictsRewritten, [false]);
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"], "and the at-risk array the second one could not");
+});
+
+// --- #1160: the OTHER direction from the three cases above, on the same shim.
+// Those escape `conflicts[]` and `atRisk[]` into the payload and must reach
+// exit 2 when they cannot. These two only RENDER already-computed values to
+// stderr for a human, so they decide nothing and must reach no exit at all.
+// Written bare — `printf … | sed 's/^/    conflict: /' >&2` — the pipeline's
+// status was sed's and `set -eu` took it, so a render exited the audit at 1,
+// the dirty-worktree refusal, on a worktree the same run had already printed
+// `clean` for, with no payload and no `no-undo-audit:` line naming a cause.
+//
+// A shim rather than the locale, and that is what makes these the half CI can
+// run. The invalid-UTF-8 case above reaches the same renders through the pin,
+// but only on BSD sed: under a GNU toolchain the byte passes straight through
+// and no render ever fails, and `ci.yml`'s `check` job runs ubuntu-latest.
+//
+// `selector` is the renders' shared `s/^/` prefix, so one shim reaches the
+// `conflict: ` and `at risk: ` renders and the porcelain one, and reaches
+// json.sh's escapers not at all — their only `s/^/` rule is `s/^/"/` (#119's
+// cases above select on exactly that). `marker: ""` switches the helper's
+// content gate off: it exists because the two jarr call sites share one argv,
+// and these three do not, so argv alone addresses them.
+const withFailingRenders = (t) =>
+  withBrokenEscaper(t, { tool: "sed", marker: "", selector: `'s/^/    '` });
+
+test("a render that cannot reach stderr leaves the verdict it decides nothing about intact (#1160)", (t) => {
+  const c = bareConflictRepo(t, "boom-conflict.txt");
+  const r = audit(c, { ...ENV, PATH: withFailingRenders(t) });
+
+  // The fault injection first: without it every assertion below measures an
+  // unmutated run and passes on a script with the guards deleted.
+  assert.doesNotMatch(r.stderr, /^ {4}conflict: /m,
+    "the fault injection never fired — the conflict list still rendered, so nothing here is measuring a failed render");
+  assert.doesNotMatch(r.stderr, /^ {4}at risk: /m,
+    "nor did it reach the at-risk render, which is a separate call site and was a separate bare pipeline");
+
+  assert.equal(r.status, 0,
+    `the worktree is clean and was measured clean — exit 1 here is the render deciding the verdict; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.deepEqual(r.json.conflicts, ["boom-conflict.txt"],
+    "the payload is computed before either render and must survive both of them failing");
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"],
+    "and the run continues past the first failed render rather than stopping at it — the at-risk step is downstream of it");
+
+  // Not `|| :`: a dropped conflict list reads exactly like an empty one, which
+  // is the same silent-failure class as the abort. Each render names itself,
+  // because a single shared message could not tell the operator which went
+  // missing.
+  assert.match(r.stderr, /^no-undo-audit: could not render the conflicting-path list to stderr/m,
+    "a lost diagnostic must say so, and say which one");
+  assert.match(r.stderr, /^no-undo-audit: could not render the at-risk commit list to stderr/m,
+    "and the at-risk render must name itself rather than share the line above");
+});
+
+test("a porcelain render that cannot reach stderr still refuses WITH its payload (#1160)", (t) => {
+  // The dirty half, and the one the case above cannot cover: here exit 1 is
+  // the correct answer, so the status cannot discriminate and the PAYLOAD is
+  // what does. This render runs before the payload is written, so unguarded
+  // its abort took the whole answer with it — a refusal with nothing on stdout
+  // to say what was measured, indistinguishable from the exit 1 a failing
+  // render fabricates on a clean tree.
+  const c = repo(t);
+  writeFileSync(join(c.w, "uncommitted.txt"), "work that exists nowhere else\n");
+
+  const r = audit(c, { ...ENV, PATH: withFailingRenders(t) });
+
+  assert.doesNotMatch(r.stderr, /^ {4}\?\? uncommitted\.txt$/m,
+    "the fault injection never fired — the porcelain dump still rendered");
+  assert.equal(r.status, 1,
+    `a dirty worktree refuses on its own account, at the status it always did; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `the refusal must still carry its payload; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.clean, false, "and the payload must say what was measured, not merely that something failed");
+  assert.match(r.stderr, /REFUSED — commit the worktree before rebasing/,
+    "the refusal the caller acts on is the audit's own sentence, which sits past the failed render");
+  assert.match(r.stderr, /^no-undo-audit: could not render the uncommitted-work list to stderr/m,
+    "and the dump the operator would have read is reported missing rather than dropped");
+});
+
+// render()'s trailing `|| :` is what stands between an aborted audit and a
+// caller whose stderr is completely gone — both the primary write AND its own
+// one-line fallback disclaimer fail, so the guard's third piece is the only
+// one left to catch it. The two cases above reach that state through a `sed`
+// shim on PATH; this one reaches it the way a real caller does, by closing
+// fd 2 on the whole process.
+//
+// That end-to-end shape was unreachable until #1514, and this test used to
+// extract `render()` by name and run it standalone for exactly that reason:
+// every OTHER bare `>&2` write in the script was unguarded too, so a closed
+// fd 2 aborted the run on the first of them — the status-command header,
+// before git had been asked anything — and #1160's guard was dead code to
+// any test that closed fd 2 for real. The standalone extraction went with
+// the gap it existed to work around: this run drives the same three-piece
+// guard through the same function, twice, inside the script that owns it.
+//
+// The PAYLOAD is the proof it got there, and it has to be, because a run
+// with no stderr has no other way to report. `conflicts[]` and `atRisk[]`
+// are rendered by two separate `render()` calls and then carried to stdout,
+// so a non-empty pair says both renders failed, neither decided anything,
+// and the run continued past each — an exit 0 alone would also be produced
+// by a script that bailed out early with an empty payload.
+//
+// Neither of the stronger signals finding 2 raised fits this script without
+// breaking an invariant already established and tested elsewhere: `exec`-ing
+// a marker to fd 1 would inject a second value into the one-JSON-object
+// stdout contract every payload test parses strictly (`jq -e "."` above), and
+// a distinguishable exit code would hand a render exactly the
+// verdict-deciding power #1160 exists to take away — this file's own header
+// says a render "answers nothing and so must reach no exit at all". Pinning
+// the accepted tradeoff (the JSON payload already carries what every render
+// only duplicates onto stderr) rather than changing it.
+test("a closed fd 2 reaches both renders and leaves the verdict intact (#1160, #1514)", (t) => {
+  const c = bareConflictRepo(t, "boom-conflict.txt");
+
+  const r = spawnSync("sh", ["-c", '"$0" "$@" 2>&-', SCRIPT, c.w, c.branch], {
+    cwd: c.w,
+    env: ENV,
+    encoding: "utf8",
+  });
+
+  assert.equal(r.status, 0,
+    `the worktree is clean and was measured clean — 1 is a render deciding the verdict and 2 is a question this run could answer; got ${r.status}`);
+  const json = JSON.parse(r.stdout);
+  assert.deepEqual(json.conflicts, ["boom-conflict.txt"],
+    "the conflicting-path render sits between the status header and this field — an empty list means the run never got past it");
+  assert.deepEqual(json.atRisk.map((l) => l.replace(/^\S+ /, "")), ["MAIN COMMIT AT RISK"],
+    "and the at-risk render is downstream of the first, so this is what says the run continued past a second failed one");
+});
+
+// The sweep, and the only thing that keeps it swept. Every test above walks
+// ONE path: a clean tree, a dirty tree, a conflicted tree, a non-worktree.
+// The stash chain alone has four branches, `die` has thirty-odd call sites,
+// and no realistic fixture set visits all of them — so a future write that
+// bypasses `die`/`render`/`emit` and reaches fd 2 bare on a branch nothing
+// exercises reintroduces the whole bug silently, and no fixture would catch
+// it either.
+//
+// Only `render()`'s write carried failure protection before this PR (#1514).
+// #1160 guarded the FOLD that assembles the stash-diagnostic line against a
+// corrupting `tr`/`sed` exit status — a different hazard — and left every
+// stderr WRITE, `die`'s included, free to abort the run on a closed fd 2.
+// #1514 (this PR) is what guards those, and centralizes them behind `die`,
+// `render`, and the new `emit` so there is one function body to check per
+// guard, not a dozen call sites to keep in sync. #1684 went one further and
+// folded `die`'s own copy of that body into a call to `emit`, so the census
+// below counts two direct writers where it once counted three — `die` still
+// reaches fd 2, but no longer by a statement of its own. #1685 folded
+// `render`'s own copy the same way; the count stayed at two because
+// `render`'s pipeline write and its fallback already shared one segment
+// (see the comment on the count assertion below), so the fold removed a
+// duplicated guard, not a writer the census was counting separately.
+//
+// The rule is structural, so it is asserted structurally rather than
+// sampled: a diagnostic decides nothing, so every statement that writes to
+// fd 2 must end its `||` chain in the no-op, either directly (`|| :`) or by
+// calling a function whose own chain does (`|| emit …`, verified on
+// `emit`'s own segment in the same pass). `render()`'s body spans two lines
+// and ends in a call to `emit` on the second, so continuations are joined
+// before the check; `emit()`'s carries more (`; }`) after ITS OWN guard, on
+// the SAME joined line, separated by `;` rather than `||` — so a line is
+// split on top-level `;` first and each resulting statement's own tail is
+// checked, not just the line's last `>&2`. Quote-aware: a `;`
+// inside a quoted argument (render's fallback message, now `emit`'s own
+// argument, carries one) is not a statement separator. Unaware of that, a
+// line carrying two independent `>&2`-writing statements —
+// `echo "a" >&2; echo "b" >&2 || :` — would report the whole line compliant
+// off the LAST write's guard alone, leaving the first invisible.
+//
+// Paren-aware too, since #1571: `emit()`'s one write still runs inside
+// `( trap '' PIPE; write )`, so the `;` between the trap and the write sits
+// INSIDE that subshell rather than between top-level statements. Splitting
+// on every unquoted `;` regardless of nesting would cut that one segment
+// into two, over-counting below and — worse — leaving one half of the pair
+// to be graded for a guard that was never its own to carry. Depth only
+// needs `(`/`)`, never `{`/`}`: no write in this script sits inside a brace
+// group that isn't also the enclosing function body, which
+// `splitTopLevelStatements` is never handed. The guard check's own tail
+// regex still tolerates one optional `)` immediately after the write's
+// `>&2` for the same reason — `emit`'s subshell close sits between its
+// write and the `|| :` that guards it. `render`'s fallback carries no
+// subshell of its own to tolerate anymore, only a call to the function
+// that does; the tolerance stays because `emit`'s segment still needs it,
+// not because `render`'s does.
+function splitTopLevelStatements(line) {
+  const segments = [];
+  let cur = "";
+  let quote = null;
+  let depth = 0;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quote) {
+      cur += ch;
+      if (ch === "\\" && quote === '"' && i + 1 < line.length) {
+        i += 1;
+        cur += line[i];
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      cur += ch;
+    } else if (ch === "(") {
+      depth += 1;
+      cur += ch;
+    } else if (ch === ")") {
+      depth = Math.max(0, depth - 1);
+      cur += ch;
+    } else if (ch === ";" && depth === 0) {
+      segments.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  segments.push(cur);
+  return segments;
+}
+
+// A `case pat)` arm's close paren has no opening `(` to match, so an
+// unclamped counter would carry depth negative for the rest of the line —
+// every `;` after it stops looking top-level, and the census below would
+// stop seeing statements it must see. Clamping at zero is what keeps a
+// `case` arm from swallowing its neighbors.
+test("an unmatched `)` from a case arm does not swallow the statements after it", () => {
+  assert.deepEqual(
+    splitTopLevelStatements("case x in x) a; b; esac; c"),
+    ["case x in x) a", " b", " esac", " c"],
+  );
+});
+// Shared by the fd-2 write census below and its self-referential-emit
+// regression test: extracting this keeps both walking the exact same
+// filters instead of two copies drifting apart.
+function censusStderrWrites(lines) {
+  const writes = lines
+    .filter((l) => !/^\s*#/.test(l))
+    .flatMap(splitTopLevelStatements)
+    .filter((s) => s.includes(">&2"));
+
+  // A `|| emit` tail only reads as guarded because `emit`'s OWN segment is
+  // checked separately, in this same pass — delegating to it is how a
+  // write that can't speak for itself borrows a guard that already lives
+  // elsewhere. `emit()`'s own definition can't borrow from itself that
+  // way: a `|| emit "lost"` fallback on emit's own write recurses into the
+  // same failing write instead of reaching a segment this pass has
+  // already cleared, and hangs rather than terminating (measured: exit
+  // 124, no termination). `delegates` is the exemption both filters below
+  // share, with that one carve-out.
+  const delegates = (s) =>
+    /^\s*\)?\s*\|\|\s*emit\b/.test(s.slice(s.lastIndexOf(">&2") + 3)) &&
+    !/^\s*emit\(\)/.test(s.trim());
+
+  const unguarded = writes.filter(
+    (s) => !/^\s*\)?\s*\|\|\s*:(\s|;|$)/.test(s.slice(s.lastIndexOf(">&2") + 3)) && !delegates(s),
+  );
+  const untrapped = writes.filter(
+    (s) => !/\(\s*trap\s+''\s+PIPE\s*;/.test(s) && !delegates(s),
+  );
+  return { writes, unguarded, untrapped };
+}
+
+
+test("no stderr write in the script can abort the run under errexit (#1514)", () => {
+  const joined = readFileSync(SCRIPT, "utf8").replace(/\\\n\s*/g, " ").split("\n");
+  const { writes, unguarded, untrapped } = censusStderrWrites(joined);
+
+  // Without this the filter could silently match nothing — a regex typo, a
+  // rename — and the assertion below would pass on an empty list, which is
+  // the shape a false green takes here. The count is exact, not a floor:
+  // `render` and `emit` are the only two places in the script allowed to
+  // touch fd 2 directly, so it can only ever be 2 — any other number means
+  // a bare write appeared outside both of them, or one vanished. It was 3
+  // until #1684 folded `die`'s own copy of `emit`'s body into a call: the
+  // segment that held `die`'s `>&2` is gone, and `render`'s and `emit`'s
+  // are what the filter still returns. #1685 folded `render`'s own copy the
+  // same way and left the count where #1684 put it, for a different reason
+  // than `die`'s drop: `render`'s two writes (the `sed` pipeline and its
+  // fallback) always shared ONE segment, so routing the fallback through a
+  // call to `emit` removed a duplicated guard, not a segment — the filter
+  // still sees one `>&2` per site, same as before either fix. Measured
+  // against the tree, not decremented on paper: arithmetic on the old count
+  // is not a safe way to arrive at the new one.
+  assert.equal(writes.length, 2,
+    `render and emit are the only statements that may write to fd 2 directly; found ${writes.length}`);
+
+  assert.deepEqual(unguarded.map((s) => s.trim()), [],
+    "each of these ends the script on its own write status under `set -e`, and 1 out of this script is REFUSED — append `|| :` or route the fallback through `emit`, which already does");
+
+  // #1700 made `emit()`'s `( trap '' PIPE; … )` wrapper the ONLY SIGPIPE
+  // guard for all 29 `die` call sites — `die` now calls `emit` instead of
+  // carrying its own copy. #1685 moved `render`'s fallback write behind the
+  // same call, so its trap now lives in `emit`'s OWN segment rather than
+  // render's — the `unguarded` filter above already treats a `|| emit` tail
+  // as guarded for that reason (unless the segment IS emit's own
+  // definition — see `censusStderrWrites`'s `delegates`), and this filter
+  // has to agree: a segment whose write reaches fd 2 only by delegating to
+  // `emit` carries no trap text of its own to find, and is not untrapped
+  // for it, because `emit`'s segment is checked separately, right here, in
+  // the same pass. `|| :` only swallows the *status* a killed write would
+  // leave behind, not the SIGPIPE that killed it, which is why a bare
+  // `|| :` tail (with no `emit` call) still has to show the trap substring
+  // in its own segment to pass.
+  assert.deepEqual(untrapped.map((s) => s.trim()), [],
+    "each of these can deliver SIGPIPE and kill the script instead of turning a dropped write into EPIPE — wrap it in `( trap '' PIPE; … )` or route it through `emit`, which already does");
+});
+
+// #1703 found that treating any `|| emit` tail as guarded let `emit` guard
+// ITSELF: a self-referential `|| emit "lost"` fallback on emit's own write
+// recurses into the same failing write instead of reaching a segment this
+// census clears elsewhere, and hangs rather than terminating (measured:
+// exit 124, no termination). `censusStderrWrites`'s `delegates` carve-out
+// is what keeps that shape out of the real script; this proves the
+// carve-out actually fires, not just that the real script currently lacks
+// the shape.
+test("a self-referential emit() fallback does not pass the fd-2 write census (#1703)", () => {
+  const selfReferential = ["emit() { ( trap '' PIPE; printf '%s\\n' \"$1\" >&2 ) || emit \"lost\"; }"];
+  const { unguarded } = censusStderrWrites(selfReferential);
+  assert.deepEqual(unguarded.map((s) => s.trim()), [selfReferential[0].replace(/;\s*}$/, "").trim()],
+    "emit() falling back to calling itself must still be flagged unguarded — it recurses into the same failing write and hangs instead of terminating");
+});
+
+/**
+ * Fails the stash-diagnostic fold and nothing else, addressed by ARGV.
+ *
+ * That fold is the script's only two-operand `tr` whose first operand is the
+ * literal `\n` — json.sh's four all carry either `-d` or a `\001-\007` range
+ * — so the argv test is exact. Content selection is unusable here:
+ * `withBrokenEscaper` reads the tool's stdin through `$(cat)` and re-feeds it
+ * with `printf '%s\n'`, and that round trip appends a newline to every value
+ * json.sh escapes through its own `tr` calls.
+ */
+function withFailingDiagnosticFold(t) {
+  const s = shimDir(t, "no-undo-audit-fold-");
+  const real = s.real("tr");
+  const fired = join(s.bin, "fired");
+  s.write("tr", `if [ $# -eq 2 ] && [ "$1" = '\\n' ] && [ "$2" = ' ' ]; then
+  : >"${fired}"
+  echo "tr: RIP" >&2
+  exit 1
+fi
+exec ${real} "$@"
+`);
+  return { path: s.path(), fired };
+}
+
+test("a stash diagnostic that cannot be folded still answers, and says which half went missing (#1160)", (t) => {
+  // The FOURTH site of the class, and the one #1160's body does not enumerate
+  // — it is named only in this script's own locale-pin comment, alongside the
+  // three renders. It folds git's multi-line `stash list` diagnostic onto the
+  // audit's own line, decides nothing (`$stash` is already `null` and this
+  // branch is already reporting a fault), and unguarded an assignment's
+  // `$( … | tr … )` still hands `set -eu` tr's own status. `tr` is the surer
+  // carrier than the sed renders too: it exits on an invalid byte wherever in
+  // the line it sits, where sed tolerates some positions.
+  //
+  // Same fixture as the fold's own behaviour test above — a corrupt stash TIP
+  // object, the state where `stash list` itself fails and git says why.
+  const c = repo(t);
+  stashSomething(c.w);
+  const sha = git(c.w, "rev-parse", "refs/stash");
+  const obj = join(c.w, ".git", "objects", sha.slice(0, 2), sha.slice(2));
+  chmodSync(obj, 0o644);
+  writeFileSync(obj, "junk\n");
+
+  const fold = withFailingDiagnosticFold(t);
+  const r = audit(c, { ...ENV, PATH: fold.path });
+
+  assert.ok(existsSync(fold.fired),
+    "the fault injection never fired — git's diagnostic no longer flows through a `tr`, so nothing below measures a failed fold");
+  assert.equal(r.status, 0,
+    `the worktree is clean and was measured clean — exit 1 here is the fold deciding the verdict; got ${r.status} ${r.stderr}`);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.stash, null,
+    "the count is still unknown — that verdict is reached before the fold and must not depend on it");
+  assert.equal(stashLines(r).length, 1, "and the line is still printed, exactly once");
+  assert.match(stashLine(r), /git said more, and folding it onto this line failed/,
+    "git's own text is the half that went missing, and the line says so rather than ending where the fold did or carrying it truncated at the byte");
+});
+
+// --- #431: the same broken escaper, one block further down, and the OPPOSITE
+// answer. The three cases above escape `conflicts[]` and `atRisk[]` — findings
+// the operator can obtain nowhere else, and which step 5 of the no-undo runbook
+// hands to `git diff -- <path>`. A run that cannot render those has not
+// answered, so they keep their `die`.
+//
+// `worktree` and `branch` are the other kind. They are echoes of argv: the
+// caller supplied both and still holds them, and by the time this block runs
+// `clean` has been measured, `stash` counted, and both arrays already rendered.
+// A `tr` that has gone missing there used to convert that finished audit into
+// exit 2 with no payload — discarding every real finding over the formatting of
+// two values the caller typed. Each renders independently now and reports JSON
+// `null` when it cannot, which is what #120 shipped for the same class in
+// inflight.sh.
+//
+// `null` is the honest report and not a quieter `""`: a field that could not be
+// escaped has no usable path to hand to `git diff` in any case, and `""` is
+// indistinguishable from a path, which is the false-reassurance direction.
+test("an escaper that cannot render the branch reports it null and still delivers every finding", (t) => {
+  const c = conflictRepo(t, "plain.txt", "fix/1-BOOMBRANCH");
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, {
+    tool: "tr", marker: "BOOMBRANCH", selector: `'\\001-\\007\\013\\016-\\037'`,
+  }) });
+
+  assert.equal(r.status, 0,
+    "the worktree was measured clean and every finding survived — exit 2 here would retract a finished audit over a formatter");
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.branch, null, "the unrenderable field is null, not a truncated or empty string");
+  assert.equal(r.json.branchRewritten, null,
+    "and its paired flag too — a `false` there would claim nothing was replaced in a value nothing could examine");
+
+  // The point of the whole change: everything the audit established is still on
+  // the payload, and the OTHER escaped field is untouched by its sibling's
+  // failure.
+  assert.equal(r.json.worktree, c.w, "the worktree renders independently and keeps its real value");
+  assert.equal(r.json.worktreeRewritten, false);
+  assert.equal(r.json.clean, true, "measured before the escape ran, and still reported");
+  assert.equal(r.json.stash, 0);
+  assert.deepEqual(r.json.conflicts, ["plain.txt"], "the conflicting path was found and is still named");
+  assert.deepEqual(r.json.conflictsRewritten, [false]);
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"],
+    "the commit a careless resolution would eat is still named — that finding is the reason this script exists");
+
+  assert.match(r.stderr, /could not render the branch .*\(jstr\)/,
+    "and the operator is told which field and which escaper, not left to diff the payload against a healthy one");
+});
+
+test("an escaper that cannot say whether the worktree path was rewritten reports it null, leaving the branch intact", (t) => {
+  const c = conflictRepo(t, "plain.txt", undefined, "no-undo-audit-BOOMWT-");
+  const r = audit(c, { ...ENV, PATH: withBrokenEscaper(t, { tool: "tr", marker: "BOOMWT" }) });
+
+  assert.equal(r.status, 0);
+  assert.equal(r.jsonError, null, `payload must parse; got ${r.jsonError?.message}\n${r.stdout}`);
+  assert.equal(r.json.worktree, null,
+    "`jstr` rendered this path perfectly and `jrewritten` still could not say whether a byte was replaced — an undisclosed rewrite is not a path a reader may trust");
+  assert.equal(r.json.worktreeRewritten, null);
+  assert.equal(r.json.branch, c.branch, "the branch renders independently and is unaffected");
+  assert.equal(r.json.branchRewritten, false);
+  assert.deepEqual(r.json.conflicts, ["plain.txt"]);
+  assert.deepEqual(subjects(r), ["MAIN COMMIT AT RISK"]);
+
+  // Named separately from `jstr` because the two fail independently: `jstr` can
+  // render a string while `jrewritten` cannot judge it, which is exactly this
+  // case. One shared word would send a debugger to whichever it guessed.
+  assert.match(r.stderr, /could not render the worktree .*\(jrewritten\)/);
+});
+
+// #431's acceptance criterion that lives in prose rather than in the payload: a
+// reader of the runbook has to meet what a `null` field means BEFORE they act
+// on one. Both carriers state it, on the same two lines the linkage pin above
+// anchors on — the runbook's exit-2 paragraph and the design spec's own row.
+//
+// Two phrases, not one, because either alone is satisfied by a rewrite that
+// loses the point. `there is no worktree` alone passes prose that names the
+// misreading without ruling it out; `could not render the path or branch you passed in`
+// alone passes prose that says what the field IS while leaving the dangerous
+// reading unaddressed. The claim is the pair: this is what `null` means, and
+// that is what it does not.
+//
+// Deliberately NOT pinned as one span: the two docs word the surrounding
+// sentence differently on purpose — the runbook bolds its `never` for an
+// operator mid-pass, the spec row does not — and a span pin would force one
+// voice on both or drift into pinning nothing.
+test("both docs rule out reading a null worktree as an absent one", () => {
+  for (const rel of ["../plugin/commands/run-merge-bot.md", "../docs/specs/2026-07-23-fleet-plugin-design.md"]) {
+    const doc = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+    assert.ok(doc.includes("could not render the path or branch you passed in"),
+      `${rel} must say what a null worktree/branch IS — the run could not render the argument the caller supplied — since the field is an echo of argv rather than a finding`);
+    assert.ok(doc.includes('"there is no worktree"'),
+      `${rel} must rule out the false-reassurance reading by name: a null path is not an absent worktree, and an operator who reads it as one skips the proof step believing there was nothing to prove`);
+  }
+});
+
+// --- #1020: the ambient git variables, one fixture each.
+//
+// The `--show-prefix` gate is this script's answer to "can git operate here is
+// not is this the tree it answers about", and both variables walk past it —
+// but through different doors and to different outcomes, so one fixture
+// cannot speak for both. PR #1015 measured the cost of trying: a case
+// overriding only one of the pair leaves the other half of
+// `unset GIT_DIR GIT_WORK_TREE` unpinned and green.
+
+test("an ambient GIT_WORK_TREE does not report a dirty worktree as clean (#1020)", (t) => {
+  // The silent-failure half, and the one that clears an irreversible rebase.
+  //
+  // GIT_WORK_TREE outranks `-C`, so `git -C "$wt" rev-parse --show-prefix`
+  // answers about the ambient tree. The cwd is not under that tree, so git
+  // returns an EMPTY prefix — the exact value the gate reads as "$wt IS the
+  // root" — and the status below then compares $wt's index against the
+  // ambient tree's files.
+  //
+  // The ambient tree holds a COPY of the branch's tracked content, which is
+  // what makes the leaked answer an empty one. A bare empty directory would
+  // report every tracked file deleted, the audit would refuse, and the case
+  // would pin the false-refusal cousin instead of the false clean — the
+  // strictly less dangerous direction, and the one this script exists to rule
+  // out by name ("clean for a tree nothing looked at").
+  const c = repo(t);
+  const twin = join(c.w, "..", "twin");
+  mkdirSync(twin);
+  for (const f of ["f.txt", "g.txt"]) copyFileSync(join(c.w, f), join(twin, f));
+  writeFileSync(join(c.w, "precious.txt"), "work that exists nowhere else\n");
+
+  // The fixture's own positive control, both directions: without the first the
+  // worktree might never have been dirty, without the second the leak may have
+  // stopped existing and this case would pin nothing either way.
+  assert.equal(git(c.w, "status", "--porcelain"), "?? precious.txt",
+    "fixture: the worktree must really be dirty, or this case measures nothing");
+  assert.equal(
+    execFileSync("git", ["-C", c.w, "status", "--porcelain"], {
+      cwd: c.w, env: { ...ENV, GIT_WORK_TREE: twin }, encoding: "utf8",
+    }),
+    "",
+    "fixture: the ambient GIT_WORK_TREE must really silence that answer, or the leak this pins no longer exists",
+  );
+
+  const r = audit(c, { ...ENV, GIT_WORK_TREE: twin });
+
+  // Exit code first, with stderr as the message, for the reason
+  // release-ticket.test.mjs's own #427 pair records: reaching for a payload
+  // field first turns a refusing run into a null-deref that names nothing,
+  // where this order carries the script's own words.
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.json.clean, false,
+    "an ambient GIT_WORK_TREE must not clear a rebase over uncommitted work — `clean: true` here is the exact failure the --show-prefix gate exists to prevent, reached through a door that gate cannot close");
+  assert.match(r.stderr, /REFUSED — commit the worktree before rebasing/);
+  assert.equal(readFileSync(join(c.w, "precious.txt"), "utf8"), "work that exists nowhere else\n");
+});
+
+test("an ambient GIT_DIR does not blame a healthy .git for another repository (#1020)", (t) => {
+  // The false-refusal half, and it cannot use the dirty check as its detector:
+  // GIT_DIR is caught EARLIER, by the linkage check, which compares $wt's
+  // `.git` against the repository git resolved and finds the ambient one
+  // instead. Measured pre-fix: exit 2 naming $wt's own `.git` as the fault, on
+  // a worktree whose linkage is perfect — a safe rebase blocked, and the
+  // operator sent to repair a file that was never broken.
+  const c = repo(t);
+  const other = join(c.w, "..", "other");
+  execFileSync("git", ["clone", "-q", join(c.w, "..", "origin.git"), other], { env: ENV });
+
+  const r = audit(c, { ...ENV, GIT_DIR: join(other, ".git") });
+
+  // Exit code first, stderr as the message: pre-fix the script dies before it
+  // prints any payload, so `r.json.clean` first is a TypeError naming nothing.
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.json.clean, true, "a clean worktree must still audit clean with an unrelated GIT_DIR ambient");
+  assert.equal(r.json.worktree, c.w,
+    "and the payload must describe the worktree the caller named, not the one the environment did");
+});

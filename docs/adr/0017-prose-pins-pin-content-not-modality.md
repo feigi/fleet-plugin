@@ -11,7 +11,9 @@ impl-<N> tier-mismatch`, or a `tier-mismatch=impl-<N>:<definition>` row token
 for a member `settle` will not re-settle), and `fleet-tick.mjs` holds the next
 Pull on `HOLD (tier mismatch …)` / `HOLD (tier unchecked …)`, both
 `acts: true`. Decision 3's account of it as relying on a hand-run settle no
-longer holds; the decision itself stands.
+longer holds; the decision itself stands. Amended by #2232: the hedge-word
+tripwire's test file moved out of the shipped surface, to
+`tests/implementer-model-tier.test.mjs`.
 
 ## Context
 
