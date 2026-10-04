@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// The dispatch-time tier check (#1345, ruled on #1298; ADR 0014). Layer 2 of
-// two: layer 1 (#1314) is a static audit of the agent files' SHAPE, before
+// The dispatch-time tier check. Layer 2 of
+// two: layer 1 (frontmatter-check.mjs) is a static audit of the agent files' SHAPE, before
 // any run exists; this layer compares what a run actually DISPATCHED against
 // what omp's own record says it RESOLVED, for every member dispatched by
 // named definition. Not a lint — a refusal, run after every Pull's dispatch,
@@ -8,17 +8,17 @@
 // holds the next Pull until there is one (run-team/SKILL.md's phase 2).
 //
 // Declared is the definition's own frontmatter — `model: "@<role>:<level>"`,
-// a fleet tier route (ADR 0014), never a vendor id. Resolved is read back
+// a fleet tier route, never a vendor id. Resolved is read back
 // from omp's own record, three ways, in preference order:
-//   1. the job record's OWN `resolvedModel`/`resolvedThinkingLevel` (#1302)
+//   1. the job record's OWN `resolvedModel`/`resolvedThinkingLevel`
 //      — a controller that already holds BOTH never opens the child's file
-//      at all (this ticket's 4th fixture). Holding only one is the ordinary
+//      at all. Holding only one is the ordinary
 //      case, not a corner (the two live on different omp records), so the
 //      missing half is read off the transcript instead of reported as a lie.
 //   2. `--session <dir>` — the controller's own session root, when it has no
 //      job record (or only half of one) but knows where its dispatched
 //      member's own transcript lives: the flat `<session>/<member>.jsonl`
-//      file, read directly (#1345's extension to member-record.mjs's
+//      file, read directly (this layer's extension to member-record.mjs's
 //      readers — a member with no assistant turn yet still resolves off its
 //      dispatch-time `session_init` record, never treated as absent).
 //   3. `--transcript <file>` — the member's own transcript, when the caller
@@ -46,10 +46,10 @@
 // obtains each field.
 //
 // An implementer (`impl-<N>`, ledger-grammar.mjs's name) is judged on the
-// ledger's terms, not the caller's (#1398): the definition it should have
+// ledger's terms, not the caller's: the definition it should have
 // run under is derived from its ticket row's `tier=` token
 // (ledger-grammar.mjs's `expectedDefinition` — the same function
-// `ledger.mjs dispatch` prints the definition from, #2208), the agent type
+// `ledger.mjs dispatch` prints the definition from), the agent type
 // it was actually dispatched as is
 // read off its own transcript and must BE that definition — a generic `task`
 // dispatch fails even when its model happens to match — and the verdict
@@ -90,7 +90,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
 
 // ---------------------------------------------------------------------------
-// pure core — unit-tested directly (tier-check.test.mjs), no filesystem or
+// pure core — unit-tested directly, no filesystem or
 // process access below this line until main()
 // ---------------------------------------------------------------------------
 
@@ -130,7 +130,7 @@ export function resolveActual({ transcriptText, resolvedModel, resolvedThinkingL
 }
 
 // The comparison itself, called only from evaluateMember below. The declared
-// alias is a fleet tier name (ADR 0011/0014): `ok` requires the role it
+// alias is a fleet tier name: `ok` requires the role it
 // names to resolve to a model (`expected.model !== null`), that resolved
 // model to match what the dispatched member actually ran under, and an
 // exact level match — an unrecognised or unrouted declared model
@@ -339,7 +339,7 @@ function writeLedgerRow(ledgerFile, ticket, text) {
 // text as ONE ` · `-joined note, so appendedLedgerText's trailing-segment
 // idempotency covers a re-run of the whole verdict, and the member is
 // settled `tier-mismatch` here rather than left to the controller — the
-// hand step #1398 measured never taken.
+// hand step measured never taken.
 function recordImplementer(ledgerFile, r) {
   const data = readLedger(ledgerFile);
   const existing = rowText(data, r.ticket);
@@ -391,7 +391,7 @@ function main() {
   const ledgerFile = arg("ledger");
   const repoRoot = arg("repo") ?? join(SCRIPT_DIR, "..");
 
-  // #1669: this file bound only makeDie/makeArg, so a stray or misspelled
+  // This file once bound only makeDie/makeArg, so a stray or misspelled
   // flag (`--ledgerr`) was silently ignored and the run computed a real
   // verdict against the DEFAULT ledger — the fail-open harm arg.mjs exists
   // to prevent. Below the arg() reads and the --batch usage guard above,
@@ -402,8 +402,8 @@ function main() {
   // along with a well-formed --batch is refused by name instead of being
   // silently absorbed into a batch-content error.
   sweep();
-  // #463: sweep() only refuses a `--`-prefixed token; a bare or single-dash
-  // one (`-ledger`, the single-dash cousin of the ticket's own `--ledgerr`)
+  // sweep() only refuses a `--`-prefixed token; a bare or single-dash
+  // one (`-ledger`, the single-dash cousin of `--ledgerr`)
   // rode along in silence the same way. This file takes no positional, so
   // any leftover token is a stray.
   stray();
