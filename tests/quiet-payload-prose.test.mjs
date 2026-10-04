@@ -138,11 +138,9 @@ test("the dropped-field list is still readable out of ci-state.mjs", () => {
 //
 // The shared bound, not a local copy of it (#1372). What it closes that a local
 // copy could not: a blank line carrying whitespace, which a literal `\n\n`
-// search runs straight past into the next paragraph, and an anchor occurring
-// more than once, which binds the pin to whichever copy of the anchored block
-// comes first. What it does NOT close is a blank line deleted outright — the
-// paragraphs then merge and the slice takes both, a hole that predates this
-// bound and is open still (#1377).
+// search runs straight past into the next paragraph, an anchor occurring more
+// than once, which binds the pin to whichever copy of the anchored block comes
+// first, and, through `next`, a blank line deleted outright.
 //
 // The source site takes the other bound and so cannot use `paragraph`: in source
 // the anchor is the declaration BELOW the block, and the slice is the run of
@@ -153,9 +151,9 @@ test("the dropped-field list is still readable out of ci-state.mjs", () => {
 // That bound is `runAbove`, shared (#1604) rather than hand-rolled here, so the
 // uniqueness half comes WITH it — `anchorAt` under the same roof — instead of
 // being copied for the sake of an end bound that differs.
-function siteSlice(name, anchor) {
+function siteSlice(name, anchor, next) {
   const text = read(name);
-  if (!name.endsWith(".mjs")) return paragraph(text, anchor, name);
+  if (!name.endsWith(".mjs")) return paragraph(text, anchor, name, next);
   return runAbove(text, anchor, name, "//");
 }
 
@@ -181,22 +179,22 @@ export function quietClause(slice) {
   return null;
 }
 
-function dropsClause(name, anchor) {
-  const clause = quietClause(siteSlice(name, anchor));
+function dropsClause(name, anchor, next) {
+  const clause = quietClause(siteSlice(name, anchor, next));
   assert.ok(clause, `${name}: the "${anchor}" paragraph no longer has a \`--quiet\` sentence saying what it drops`);
   return clause;
 }
 
 const SITES = [
-  [SKILL, "**Own the CI waits.**", "the CI-Monitor read"],
-  [SKILL, "Gate on the `check` job", "the finisher-duty read"],
-  [REVIEW_AND_FIX, "6. Diff-check green", "step 6's finisher read"],
+  [SKILL, "**Own the CI waits.**", "the CI-Monitor read", "A monitor event is a wake-up, never a verdict;"],
+  [SKILL, "Gate on the `check` job", "the finisher-duty read", "**`ci-state.mjs` reads `verdict: \"no-ci\"`** — no `check` job"],
+  [REVIEW_AND_FIX, "6. Diff-check green", "step 6's finisher read", "**`verdict: \"no-ci\"` — this repo has no"],
   [CI_STATE_PATH, `const quiet = has("quiet");`, "the source-comment read"],
 ];
 
-for (const [name, anchor, label] of SITES) {
+for (const [name, anchor, label, next] of SITES) {
   test(`${name} — ${label} names every field \`--quiet\` drops`, () => {
-    const clause = dropsClause(name, anchor);
+    const clause = dropsClause(name, anchor, next);
     for (const field of FIELDS) {
       assert.ok(
         clause.includes(`\`${field}\``),

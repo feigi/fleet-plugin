@@ -47,9 +47,8 @@
 // match with the live one gutted. Measured: with the command replaced by the
 // `$BASE` form in place AND a correct copy appended elsewhere in the
 // document, in a genuinely separate paragraph with its `>` separator intact,
-// this still reds. What it does NOT close is that separator deleted outright
-// — the paragraphs then merge and the slice takes both, a hole that predates
-// this bound and is open still (#1377).
+// this still reds, and so does that separator deleted outright — the paragraphs
+// would merge and the slice take both, which `paragraph`'s `next` refuses.
 //
 // `stripQuoteGutter` before `paragraph`, which is what makes the shared
 // paragraph bound reach into a blockquote at all: the `>`-only lines that fence
@@ -101,6 +100,7 @@ const note = () =>
     stripQuoteGutter(readFileSync(join(REPO, ...SKILL.split("/")), "utf8")),
     "The CI facts in that file apply to you",
     SKILL,
+    "**Run `<testCmd>` from the worktree before",
   );
 
 // Backticks included: they are what keeps this a code span the reader can run,

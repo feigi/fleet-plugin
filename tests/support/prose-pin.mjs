@@ -26,6 +26,21 @@
 // fixed end anchor, for the same reason one level up: every sibling item
 // inserted between the anchors joins that slice and can carry the span the
 // real item lost.
+//
+// A paragraph is sliced with `paragraph()`, and `next` is REQUIRED: the
+// opening of the block that follows it, or `END` when the paragraph is the
+// last block of the document. The slice ends at the first blank line after the
+// anchor, and a blank line is a bound only while it is there: delete it and
+// the paragraph merges with the next, the slice takes both, and a copy of the
+// gutted clause sitting in the next block's text satisfies the pin. `next`
+// closes that. The text IMMEDIATELY after the blank line must open with it
+// (through `phrase()`, so a reflow passes), else the call throws naming `what`
+// and `next`; `END` asserts that only whitespace follows the slice. A
+// paragraph inserted between the block and its `next` throws too, however the
+// blank lines are laid out: that is the accepted loud direction, since
+// tolerating `\n\n<next>` anywhere after the blank line would reopen the hole
+// in two steps (insert a decoy paragraph, then delete the blank line before
+// it). Omitting `next` throws; there is no opt-out.
 
 import assert from "node:assert/strict";
 
@@ -150,7 +165,8 @@ export const phrase = (s) => new RegExp(s.trim().split(/\s+/).map(escapeRe).join
 // mirror-image reason, since `between`'s literal `indexOf` would break on a
 // rewrap the pinned clause itself survives, turning a reflow into a red.
 // A missing anchor throws rather than widening: silently falling back to the
-// whole document is the false green this bound exists to prevent.
+// whole document is the false green this bound exists to prevent. What
+// `next` adds to the bound is stated once, in the header.
 //
 // The blank line is matched as `\n[ \t]*\n`, never the literal `\n\n`: an
 // editor that keeps a list item's indent on the line between two paragraphs
@@ -168,10 +184,34 @@ export const phrase = (s) => new RegExp(s.trim().split(/\s+/).map(escapeRe).join
 // search-to-blank-line slicer locally, every copy carrying both false greens
 // above by construction; #1372 migrated them onto it. A pin needing this bound
 // imports it — a local copy is the defect, not a style choice.
-export function paragraph(text, anchor, what, options) {
+//
+// `emphasisTolerant` reads `next` and the text after the blank line through
+// `unemphasized`, the same direction the option takes for the anchor: a
+// document that loses a `**` in the next block's opening is not a moved block.
+export const END = Symbol("END");
+
+export function paragraph(text, anchor, what, next, options) {
+  assert.ok(
+    next === END || (typeof next === "string" && next.trim() !== ""),
+    `${what}: paragraph() needs \`next\` — the opening of the block after "${anchor}", or END when it is the last block; without it a deleted blank line merges two paragraphs into the slice`,
+  );
   const rest = text.slice(anchorAt(text, anchor, what, options));
-  const end = rest.search(/\n[ \t]*\n/);
-  return end === -1 ? rest : rest.slice(0, end);
+  const blank = rest.match(/\n[ \t]*\n/);
+  if (next === END) {
+    const trailing = blank ? rest.slice(blank.index + blank[0].length) : "";
+    assert.match(trailing, /^\s*$/, `${what}: slice anchor "${anchor}" is declared the last block (END), but text follows its blank line — name that block's opening as \`next\``);
+    return blank ? rest.slice(0, blank.index) : rest;
+  }
+  assert.ok(blank, `${what}: no blank line follows "${anchor}" — the slice would run to the end of the document; name END if this is the last block`);
+  const after = rest.slice(blank.index + blank[0].length);
+  const tolerant = options?.emphasisTolerant;
+  const opens = new RegExp(`^[ \\t]*${phrase(tolerant ? unemphasized(next) : next).source}`);
+  assert.match(
+    tolerant ? unemphasized(after) : after,
+    opens,
+    `${what}: the text after the blank line following "${anchor}" no longer opens with "${next}" — a deleted blank line merges two paragraphs into the slice; update this test if the next block moved`,
+  );
+  return rest.slice(0, blank.index);
 }
 
 // One list item: from `from` to where markdown ends the item, and never past

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { between, bullet, phrase } from "./support/prose-pin.mjs";
 
 // #375. A `gh pr create --label patch` that exceeds the caller's tool timeout is
 // backgrounded with the PR ALREADY OPEN and the label unapplied, and a timeout
@@ -154,7 +154,7 @@ test("duty 3 is two sub-steps — the release-label check, then the add-label co
   assert.doesNotMatch(a, /--add-label/, "3(a) adds a label — the precondition and the action are one step again");
   assert.match(b, /`gh pr edit <pr> --add-label ready-to-merge`/, "3(b) no longer spells out the add-label command");
   assert.ok(RUN_TEAM.indexOf("- **(a) Exactly one release label.**") < RUN_TEAM.indexOf("- **(b) Add the label:**"), "the add precedes its precondition");
-  assert.match(between(RUN_TEAM, "4. Report you the label", "\n\n", "finisher duty 4"), phrase("post-add read-back: `gh pr view <pr> --json labels`"),
+  assert.match(bullet(RUN_TEAM, "4. Report you the label", "**Give the finisher the instrument re-check verbatim too.**", "finisher duty 4"), phrase("post-add read-back: `gh pr view <pr> --json labels`"),
     "duty 4 no longer reports the label read back after the add");
 });
 

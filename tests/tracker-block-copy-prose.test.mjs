@@ -174,11 +174,11 @@ const copy = (text = TRACKER) => block(text, "docs/agents/issue-tracker.md", TRA
 // message rather than the growth or reflow they are meant to catch).
 // The agent body carries the block as plain prose, like the tracker, so its
 // bound is the paragraph too — no `>` run to bound it since #1804.
-const skillBlock = () => paragraph(SKILL, OPENER, "the implementer body's issue-read block", { emphasisTolerant: true });
+const skillBlock = () => paragraph(SKILL, OPENER, "the implementer body's issue-read block", "**Re-derive the ticket's claims against `origin/main`", { emphasisTolerant: true });
 // The tracker's copy is plain prose in a `##` section, not a quote run, so its
 // bound is the paragraph — `prose-pin.mjs`'s single definition of that bound,
 // blank-line-terminated and anchored exactly once.
-const trackerBlock = () => paragraph(TRACKER, OPENER, "the tracker's copy of the issue-read block", { emphasisTolerant: true });
+const trackerBlock = () => paragraph(TRACKER, OPENER, "the tracker's copy of the issue-read block", "## Wayfinding operations", { emphasisTolerant: true });
 
 // Gutter off, whitespace collapsed — the shape wrap width cannot change, used
 // below to prove a rewrap moved the breaks and nothing else.

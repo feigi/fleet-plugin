@@ -55,13 +55,11 @@ const ANCHOR = "**Both halves of that command are load-bearing.**";
 //
 // The shared bound, not a local copy of it (#1372). What it closes that a local
 // copy could not: a blank line carrying whitespace, which a literal `\n\n`
-// search runs straight past into the next paragraph, and an anchor occurring
-// more than once, which binds the pin to whichever copy of the anchored block
-// comes first. What it does NOT close is a blank line deleted outright — the
-// paragraphs then merge and the slice takes both, a hole that predates this
-// bound and is open still (#1377).
+// search runs straight past into the next paragraph, an anchor occurring more
+// than once, which binds the pin to whichever copy of the anchored block comes
+// first, and, through `next`, a blank line deleted outright.
 const rule = () =>
-  paragraph(readFileSync(join(import.meta.dirname, "..", "plugin", ...SKILL.split("/")), "utf8"), ANCHOR, SKILL);
+  paragraph(readFileSync(join(import.meta.dirname, "..", "plugin", ...SKILL.split("/")), "utf8"), ANCHOR, SKILL, "Measured, one run: one ticket's one-line");
 
 const OLD_HALF = "the prescribed **old**-string search names a *wrong* commit at exit 0";
 const NEW_HALF = "the **new**-string search the paragraph above forbids that prints nothing at exit 0";

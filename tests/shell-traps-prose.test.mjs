@@ -28,6 +28,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
+import { paragraph } from "./support/prose-pin.mjs";
 import { join } from "node:path";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
@@ -107,8 +108,7 @@ test("both consumer seats reach the section instead of restating it", () => {
   // Phase 3 writes the CI watcher's loop; the merge-bot brief is where a bot
   // gets the same traps. The ticket's ruling is that neither carries its own
   // copy, so each has to name the section.
-  const watcher = SKILL.slice(SKILL.indexOf("**Guard every probe, not just the ones with a verdict field.**"));
-  const watcherPara = watcher.slice(0, watcher.indexOf("\n\n**Judge `ci-state`"));
+  const watcherPara = paragraph(SKILL, "**Guard every probe, not just the ones with a verdict field.**", "phase 3's monitor paragraph", "**A readable list can still be a short one.**");
   // The citation is the section NAME, in whatever emphasis the sentence wants.
   // Pinning `**Shell traps**` exactly would fail on a bold span that opens
   // earlier in the clause, which is a rewording rather than a lost pointer.
@@ -120,9 +120,7 @@ test("both consumer seats reach the section instead of restating it", () => {
 
   // The brief's one bullet since #1806 retired the gate traps into
   // merge-gate.mjs: sliced to that paragraph alone.
-  const at = SKILL.indexOf("**Put the shell traps in the bot's brief");
-  assert.notEqual(at, -1, "the merge bot's shell-traps brief paragraph moved — re-anchor this test");
-  const briefPara = SKILL.slice(at, SKILL.indexOf("\n\n", at));
+  const briefPara = paragraph(SKILL, "**Put the shell traps in the bot's brief", "the merge bot's shell-traps brief paragraph", "**Its merge gate is one script, run twice.**");
   assert.match(
     briefPara,
     /\bShell traps\b/,

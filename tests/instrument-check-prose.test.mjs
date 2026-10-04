@@ -57,7 +57,7 @@ const RULE = () =>
 // `paragraph()` is this directory's single definition of that bound (#823,
 // #1372): a hand-rolled end anchor on neighbouring text is the defect it
 // removes, not a style choice.
-const PIN_STEP = () => paragraph(RUN_TEAM, "**Pin the instruments,", "run-team phase 0 pin");
+const PIN_STEP = () => paragraph(RUN_TEAM, "**Pin the instruments,", "run-team phase 0 pin", "**Record the main-checkout baseline in the");
 
 // The gate list is one bullet, and this slice is bounded to it. Read out of the
 // whole RULE slice, `phrase("reap")` is satisfied by the unrelated `reap.sh`

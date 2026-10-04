@@ -51,7 +51,7 @@ const read = () => readFileSync(join(import.meta.dirname, "..", "plugin", ...SKI
 // prompts' own scratch-partition rule is), so an unbounded match is
 // satisfiable from outside the clause it guards.
 const ANCHOR = "**A frozen transcript does not establish that a member is dead";
-const clause = () => paragraph(read(), ANCHOR, `${SKILL}'s stalled-member liveness clause`);
+const clause = () => paragraph(read(), ANCHOR, `${SKILL}'s stalled-member liveness clause`, "Settle outcome and liveness are different");
 
 // One span: the epistemic rule, the discriminator, BOTH verdicts, the
 // carve-out that keeps the second verdict from licensing a false kill, and the

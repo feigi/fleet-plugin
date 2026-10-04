@@ -33,7 +33,7 @@ const LIFECYCLE = read("skills", "run-team", "references", "member-lifecycle.md"
 const PASSAGES = [
   [
     "run-team/SKILL.md's 'Authorize the fan-out explicitly' paragraph",
-    paragraph(SKILL, "Authorize the fan-out explicitly.", "run-team/SKILL.md"),
+    paragraph(SKILL, "Authorize the fan-out explicitly.", "run-team/SKILL.md", "**Delivering specialist reports is your duty"),
     "holding the dispatch tool is not authorization to use it",
     "State that the full specialist set IS the requested work",
   ],

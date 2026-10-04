@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { between, bullet, paragraph, phrase } from "./support/prose-pin.mjs";
+import { END, between, bullet, paragraph, phrase } from "./support/prose-pin.mjs";
 
 // The prose that describes the consumer repo as "whatever the Recipe says"
 // rather than as a Node project: every shipped runbook and the requirement
@@ -96,12 +96,12 @@ test("review-and-fix's git archive bullet runs the Install step in the copy, rea
 });
 
 test("run-team: a tree with no runner gets the Recipe's Test entrypoint only when it brings up no shared stack", () => {
-  const p = paragraph(RUN_TEAM, "**A reused worktree may lack the runner.**", "run-team/SKILL.md reused-worktree runner paragraph");
+  const p = paragraph(RUN_TEAM, "**A reused worktree may lack the runner.**", "run-team/SKILL.md reused-worktree runner paragraph", "**A reused worktree may also be");
   assert.match(p, phrase("the Recipe's Test entrypoint (`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test` prints it) only when it brings up no shared stack to collide on, else that repo's own stack-free command."));
 });
 
 test("run-team: testCmd comes from the Recipe cache and names no repository's own command", () => {
-  const p = paragraph(RUN_TEAM, "**Where `testCmd` comes from:**", "run-team/SKILL.md testCmd source paragraph");
+  const p = paragraph(RUN_TEAM, "**Where `testCmd` comes from:**", "run-team/SKILL.md testCmd source paragraph", "**Where `<branch>` comes from:** the PR's");
   assert.match(p, phrase("the repository's Test entrypoint, out of the Recipe cache phase 0's Recipe derivation step proved — `~/.fleet/bin/fleet-run derive-testcmd.sh . test` prints it — and the one you hand specialists"));
   assert.doesNotMatch(p, /node --test/, "the testCmd source paragraph names this repository's own test command again");
 });
@@ -112,15 +112,15 @@ test("run-team: the quick-install red flag points at the Recipe's Install step, 
 });
 
 test("a merged branch's stale worktree is said to keep its installed dependencies, in SKILL.md and in reaping.md", () => {
-  const skill = paragraph(RUN_TEAM, "The merge bot deletes the remote branch after each merge", "run-team/SKILL.md reap paragraph");
+  const skill = paragraph(RUN_TEAM, "The merge bot deletes the remote branch after each merge", "run-team/SKILL.md reap paragraph", "`~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition");
   assert.match(skill, phrase("with its worktree — and its installed dependencies — still on disk."));
-  const evidence = paragraph(REAPING, "Merge deletes remote branch, leaves local branch", "reaping.md reap-after-each-merge paragraph");
+  const evidence = paragraph(REAPING, "Merge deletes remote branch, leaves local branch", "reaping.md reap-after-each-merge paragraph", "## Why `commit-commands:clean_gone` is disqualified");
   assert.match(evidence, phrase("with worktree — and its installed dependencies — still on disk."));
 });
 
 test("the isolation reference says symlinking installed dependencies in does not isolate the stack, and reproduces a diagnostic by re-running the check", () => {
-  const stack = paragraph(ISOLATION, "Private copy and test command solve different problems", "isolation.md stack-isolation paragraph");
+  const stack = paragraph(ISOLATION, "Private copy and test command solve different problems", "isolation.md stack-isolation paragraph", "## Scratchpad paths need two levels");
   assert.match(stack, phrase("Symlinking installed dependencies in does not help."));
-  const diag = paragraph(ISOLATION, "Probe copies carry same filenames as real tree", "isolation.md diagnostics paragraph");
+  const diag = paragraph(ISOLATION, "Probe copies carry same filenames as real tree", "isolation.md diagnostics paragraph", END);
   assert.match(diag, phrase("(re-run the check that raised it — the typechecker, the linter — from there)"));
 });

@@ -189,12 +189,10 @@ const read = (p) => readFileSync(join(REPO, ...p.split("/")), "utf8");
 //
 // The shared bound, not a local copy of it (#1372). What it closes that a local
 // copy could not: a blank line carrying whitespace, which a literal `\n\n`
-// search runs straight past into the next paragraph, and an anchor occurring
-// more than once, which binds the pin to whichever copy of the anchored block
-// comes first. What it does NOT close is a blank line deleted outright — the
-// paragraphs then merge and the slice takes both, a hole that predates this
-// bound and is open still (#1377).
-const rule = (name, anchor) => paragraph(read(name), anchor, name);
+// search runs straight past into the next paragraph, an anchor occurring more
+// than once, which binds the pin to whichever copy of the anchored block comes
+// first, and, through `next`, a blank line deleted outright.
+const rule = (name, anchor, next) => paragraph(read(name), anchor, name, next);
 
 const CLAUSE =
   "a `skipped` heavy job is behind-count staleness and fine — **solely** off that count, which is a condition to establish rather than infer";
@@ -203,15 +201,17 @@ const MECHANISM = "a `rebase-check` red or heavy jobs `skipped` off the behind-c
 const REVIEW_AND_FIX = "commands/review-and-fix.md";
 const STEP_6 = "6. Diff-check green";
 
+const STEP_6_NEXT = "**`verdict: \"no-ci\"` — this repo has no";
+
 const DOCS = [
-  [REVIEW_AND_FIX, STEP_6],
-  ["skills/run-team/SKILL.md", "**The fix-applier pushes and exits"],
+  [REVIEW_AND_FIX, STEP_6, STEP_6_NEXT],
+  ["skills/run-team/SKILL.md", "**The fix-applier pushes and exits", "**That `dispatch` refuses a finisher — exit 2,"],
 ];
 
-for (const [name, anchor] of DOCS) {
+for (const [name, anchor, next] of DOCS) {
   test(`${name} qualifies the benign \`skipped\` heavy job as behind-count staleness`, () => {
     assert.match(
-      rule(name, anchor),
+      rule(name, anchor, next),
       phrase(CLAUSE),
       `${name} no longer says "${CLAUSE}". Bare "staleness" names no cause, and its twin document still names one — that one-sided drop is exactly #196. Restore the qualifier; if the clause was reworded on purpose, re-anchor CLAUSE in this file to the new wording in BOTH documents at once.`,
     );
@@ -220,7 +220,7 @@ for (const [name, anchor] of DOCS) {
 
 test(`${REVIEW_AND_FIX} step 6 keeps the mechanism behind "a behind PR never reaches" exit-0 green`, () => {
   assert.match(
-    rule(REVIEW_AND_FIX, STEP_6),
+    rule(REVIEW_AND_FIX, STEP_6, STEP_6_NEXT),
     phrase(MECHANISM),
     `${REVIEW_AND_FIX} step 6 no longer says "${MECHANISM}". Stripped of it the line asserts only the consequence — that a behind PR never reaches exit-0 green — and leaves the reader to reconstruct WHY from separated sentences elsewhere. #182 dropped this clause alongside the behind-count qualifier and #196 restored both. Restore it, or re-anchor MECHANISM in this file to the new wording. Unlike CLAUSE this has no twin: SKILL.md's copy of the same gate carries the consequence only.`,
   );

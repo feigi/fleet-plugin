@@ -125,6 +125,7 @@ test("run-team's digest paragraph tells the controller the fix-applier reads tes
     RUN_TEAM,
     "`testEnvironment` says what the review's shared test run is evidence about",
     "run-team/SKILL.md's testEnvironment digest paragraph",
+    "**`dimensionsRun` is the dispatch; `dimensionsUnrun` is",
     { emphasisTolerant: true },
   );
   assert.match(

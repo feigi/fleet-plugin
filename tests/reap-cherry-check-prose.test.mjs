@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { bullet, paragraph, phrase, runAbove, stripHashGutter } from "./support/prose-pin.mjs";
+import { END, bullet, paragraph, phrase, runAbove, stripHashGutter } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const SCRIPT = readFileSync(join(REPO, "plugin", "scripts", "reap.sh"), "utf8");
@@ -65,6 +65,7 @@ const reapAndRelease = () =>
     DOC,
     "- **Reap and release are two different scripts on purpose.**",
     "reaping-and-liveness.md reap-and-release choice",
+    END,
   );
 
 test("reaping-and-liveness.md: the reap step names the delete as a compare-and-swap `update-ref -d`, not `-D`", () => {

@@ -97,6 +97,6 @@ test("a completed run that exits 1 and a zero-test run keep their own verdicts",
 // The block reaches a finisher only because the controller is told to hand it
 // over, and the same sentence says what duty 2 uses `<testCmd>` for.
 test("the lead-in tells the controller to hand the verdict rule over, and says duty 2 runs testCmd for the acceptance mutation", () => {
-  const p = paragraph(RUN_TEAM, "Give the finisher the test-run verdict rule verbatim too.", "the verdict block's lead-in").replace(/\s+/g, " ");
+  const p = paragraph(RUN_TEAM, "Give the finisher the test-run verdict rule verbatim too.", "the verdict block's lead-in", "> **A test run is a").replace(/\s+/g, " ");
   assert.match(p, /^Give the finisher the test-run verdict rule verbatim too\.\*\* Duty 2 runs `<testCmd>` for the acceptance mutation,/);
 });

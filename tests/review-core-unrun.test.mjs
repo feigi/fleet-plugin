@@ -552,7 +552,7 @@ test("run-team claims a suite RAN from a key's absence from dimensionsUnrun, nev
 // correct denials — which must keep saying the word — stay green.
 test("review-core.mjs's own comment claims a suite RAN from a key's absence from dimensionsUnrun, never that it is covered", () => {
   const prose = stripSlashGutter(SOURCE);
-  const para = paragraph(prose, "`dimensionsRun` names what was DISPATCHED", "review-core.mjs");
+  const para = paragraph(prose, "`dimensionsRun` names what was DISPATCHED", "review-core.mjs", "The two are siblings rather than");
   assert.match(
     para,
     phrase("A key in the first and NOT in the second ran a suite — not that it is covered."),

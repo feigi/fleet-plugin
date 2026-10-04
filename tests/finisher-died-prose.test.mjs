@@ -14,7 +14,7 @@ const RUN_TEAM = readFileSync(join(import.meta.dirname, "..", "plugin", "skills"
 const flat = (s) => s.replace(/\s+/g, " ");
 
 test("a finisher that died is flagged by the cockpit and resolved by hand — no automatic retry, no label from the controller", () => {
-  const para = flat(paragraph(RUN_TEAM, "**Resolving a finisher that died.**", "died-finisher resolution"));
+  const para = flat(paragraph(RUN_TEAM, "**Resolving a finisher that died.**", "died-finisher resolution", "Gate on the `check` job, **not**"));
   assert.match(para, /`finisher:failed` or `finisher:killed` at severity 4/);
   assert.match(para, /neither the implementer's bare `killed` flag nor `unlabelled`/);
   assert.match(para, /the tick dispatches no finisher for it/);

@@ -133,7 +133,7 @@ test("a settling command over literal text takes -F, and its zero counts only af
   // boundary between "ree" and "BSD"), and this repo's own dev grep reports
   // itself as "2.6.0-FreeBSD" (measured), so that miss is not hypothetical.
   assert.doesNotMatch(
-    paragraph(RUN_TEAM, "**A settling command over literal text uses `grep -F`", "the literal-text grep rule"),
+    paragraph(RUN_TEAM, "**A settling command over literal text uses `grep -F`", "the literal-text grep rule", "#### Fallback: hand-dispatched reviewer member"),
     /ugrep|ripgrep|claude code|bsd|gnu/i,
     "the literal-text grep rule now names a grep implementation or harness — #1087 ruled it harness-independent",
   );

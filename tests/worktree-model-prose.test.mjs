@@ -31,7 +31,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase } from "./support/prose-pin.mjs";
+import { between, paragraph, phrase } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -48,7 +48,7 @@ const section = () =>
 // ticket's own prose elsewhere in the file cannot satisfy or break these
 // anchors.
 const cwdRecipe = () =>
-  between(section(), "**A member's tree is the claimed worktree", "\n\n**The one open gap", "run-team/SKILL.md cwd recipe");
+  paragraph(section(), "**A member's tree is the claimed worktree", "run-team/SKILL.md cwd recipe", "**The one open gap");
 
 test("run-team/SKILL.md: claim, release and reap are named unchanged on omp, with no dialect branch", () => {
   assert.match(

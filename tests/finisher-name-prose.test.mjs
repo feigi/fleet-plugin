@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { classifyRole } from "../plugin/scripts/compute-spend.mjs";
 import { parseMemberName } from "../plugin/scripts/member-outcomes.mjs";
-import { between } from "./support/prose-pin.mjs";
+import { paragraph } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
@@ -39,10 +39,16 @@ const MEMBER_NAMES = ["impl-<issue#>", "fix-pr-<pr#>", "review-pr-<pr#>", "finis
 // truncates on any inner period — an abbreviation, or the
 // references/member-lifecycle.md pointer this very paragraph already carries —
 // which reds the pin and reports every name as removed while none was. A blank
-// line outlives a rewrap the way a sentence boundary does not. `between` is the
-// shared two-ended slicer the rest of this directory already uses, and it
-// carries the "update this test" guard for either anchor moving.
-const namingSentence = (doc, label) => flat(between(doc, "Names follow", "\n\n", label));
+// line outlives a rewrap the way a sentence boundary does not. `paragraph` is
+// the shared paragraph bound the rest of this directory already uses, and it
+// carries the "update this test" guard for the anchor moving and, through
+// `next`, for the blank line being deleted.
+const namingSentence = (doc, label, next) => flat(paragraph(doc, "Names follow", label, next));
+
+const NEXT_AFTER_NAMES = {
+  "run-team/SKILL.md": "**A depth-2 member cannot dispatch further**",
+  "references/member-lifecycle.md": "## A depth-2 member cannot dispatch further",
+};
 
 test("both member-naming lists name every member, the finisher included", () => {
   // Both, not just the runbook's: SKILL.md's list ends by pointing at
@@ -55,7 +61,7 @@ test("both member-naming lists name every member, the finisher included", () => 
   // the first miss mask the rest, and the count of failures would read as the
   // count of defects.
   for (const [label, doc] of [["run-team/SKILL.md", SKILL], ["references/member-lifecycle.md", LIFECYCLE]]) {
-    const sentence = namingSentence(doc, label);
+    const sentence = namingSentence(doc, label, NEXT_AFTER_NAMES[label]);
     const missing = MEMBER_NAMES.filter((n) => !sentence.includes(`\`${n}\``));
     assert.deepEqual(
       missing,
@@ -78,7 +84,7 @@ test("every name compute-spend calls stable-because-run-team-fixes-it is one run
   // The naming list, not the whole file — which is what the comment above says
   // this checks. A name cited here reaches SKILL.md's narrative without ever
   // being added to the list, and a file-wide haystack scores that as a hit.
-  const list = namingSentence(SKILL, "run-team/SKILL.md");
+  const list = namingSentence(SKILL, "run-team/SKILL.md", NEXT_AFTER_NAMES["run-team/SKILL.md"]);
   for (const role of cited) {
     assert.match(
       list,
