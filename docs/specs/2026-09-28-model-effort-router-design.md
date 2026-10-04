@@ -297,6 +297,21 @@ reachable and keeps the draw from ever naming a cell with no live
 definition). **Reinstatement** = the reverse PR, maintainer-only; the
 date filter above restarts the count.
 
+**Clarification from `#2725` (2026-10-04):** a ticket's verdict belongs to
+one cell, the cell of its carrier (defined here). The ticket's ruling is its
+last `tier-outcomes.tsv` row in file order (a both-blank row skipped); the
+carrier is the ticket's last `ticket-features.tsv` row in file order across
+all cells, `slow-high` included, dated ≤ the ruling. Both picks go by file
+order; dates only set the floor, and neither pick is the latest-dated row.
+The ruling is a verdict for
+X only when the carrier is an admissible row at X dated ≥ the date
+`fleet-implementer-<cell>.agent.md` was most recently added; this replaces
+the "last row per ticket dated ≥ … the ticket's last such row at X" join
+above, under which one ruling dated after Pulls at two cells counted for
+both. A carrier at the policy cell, or one that is not admissible or predates
+its cell's definition, charges nobody: the verdict does not fall back to an
+earlier Pull.
+
 **Amendment from `#2038` (Router, resolved 2026-09-28):**
 1. **Burn-in:** while `router-table.json.burn_in` is true, **every** Pull
    draws — `drawCell({ …, policyCell: null, cells })` so E = all cells
@@ -527,8 +542,7 @@ Under stage 1 + burn-in at ~60 verdicts/week: n=20/cell in ≈1 week, n=60 in
 joined to verdicts per § 1 (member-outcomes on `session`+`agent`;
 tier-outcomes on `ticket`, split `+`; last row per ticket dated ≥ the
 `run_date` of the ticket's last input row wins, a row whose
-`closed_own_ticket` and `minted_false_claim` are both blank skipped — the
-rule the § 2 stopping rule applies), restricted
+`closed_own_ticket` and `minted_false_claim` are both blank skipped), restricted
 to **arm A rows plus Exploration rows** (`exploration_draw` non-blank). B
 non-exploration rows are excluded (they are the A/B's test set). No
 inverse-propensity weighting: within a stratum every `chosen_cell` is

@@ -555,17 +555,20 @@ test("stopping rule: a malformed ruling on a ticket with no counted Pull is not 
 });
 
 // ---------------------------------------------------------------------------
-// Which ruling is a Pull's: the last row dated on or after the Pull, a
-// both-blank (never ruled) row skipped.
+// Which ruling is a ticket's: its last row in file order, a both-blank (never
+// ruled) row skipped. Which Pull carries it: the ticket's last Pull in file
+// order, at any cell, dated on or before the ruling. Dates only set the floor.
 
-// A second admissible Pull of an existing ticket at smol-high, in its own session.
-function rePull(w, ticket, date) {
+// A second Pull of an existing ticket at `cell`, in its own session, with the
+// admissible member row it left unless `member` is false.
+function rePull(w, ticket, date, cell = "smol-high", { member: withMember = true } = {}) {
   const session = `2026-10-02T00-00-00-000Z_v${nextSession++}`;
   const agent = `impl-${ticket}-re`;
-  w.features.push(pull({ session, agent, ticket, chosen_cell: "smol-high", run_date: date }));
+  w.features.push(pull({ session, agent, ticket, chosen_cell: cell, run_date: date }));
+  if (!withMember) return;
   w.members.push(member({
-    session, agent, run_date: date, ticket, model: "claude-sonnet-5",
-    effort: "high", subagentType: "fleet-implementer-smol-high",
+    session, agent, run_date: date, ticket, model: cell.startsWith("slow-") ? "claude-opus-5" : "claude-sonnet-5",
+    effort: cell.split("-").slice(1).join("-"), subagentType: `fleet-implementer-${cell}`,
   }));
 }
 
@@ -588,7 +591,7 @@ test("stopping rule: a ruling dated before its Pull does not rule it, so only pr
   assert.equal(day.stop, true);
 });
 
-test("stopping rule: a re-Pulled ticket is charged with the ruling after its last Pull at the cell, in either corpus order, and with none while that Pull is unruled", () => {
+test("stopping rule: a re-Pulled ticket is charged with its last ruling in file order, and a ruling between the Pull and the re-Pull is the earlier Pull's", () => {
   const added = { "smol-high": "2026-09-01" };
   // Pulled 2026-10-02 and ruled 2026-10-03 failing the floor, then re-Pulled 2026-10-05.
   const build = () => {
@@ -599,17 +602,122 @@ test("stopping rule: a re-Pulled ticket is charged with the ruling after its las
   };
   const unruled = build();
   const { ticket } = unruled.features[0];
-  assert.deepEqual(judged(unruled, added, "smol-high").verdicts, [], "the earlier ruling predates the re-Pull");
+  assert.deepEqual(
+    judged(unruled, added, "smol-high").verdicts.map((v) => [v.ticket, v.pr, v.run_date, v.failed]),
+    [[ticket, String(Number(ticket) + 5000), "2026-10-03", true]],
+    "the 2026-10-02 Pull carries the ruling dated before the re-Pull",
+  );
 
   const later = build();
   later.verdicts.push(verdict({ ticket, pr: "9002", run_date: "2026-10-06" }));
   const charged = judged(later, added, "smol-high").verdicts;
   assert.deepEqual(charged.map((v) => [v.ticket, v.pr, v.run_date, v.failed]), [[ticket, "9002", "2026-10-06", false]]);
 
-  // The stale row appended after the later one, as a backfill would land it.
+  // The stale row appended after the later one, as a backfill would land it:
+  // file order picks the ruling, so the later-appended 2026-10-03 row wins and
+  // the later-dated 2026-10-06 row does not; dates only set the floor.
   const backfilled = build();
   backfilled.verdicts.unshift(verdict({ ticket, pr: "9002", run_date: "2026-10-06" }));
-  assert.deepEqual(judged(backfilled, added, "smol-high").verdicts.map((v) => v.pr), ["9002"]);
+  assert.deepEqual(
+    judged(backfilled, added, "smol-high").verdicts.map((v) => [v.pr, v.run_date]),
+    [[String(Number(ticket) + 5000), "2026-10-03"]],
+  );
+});
+
+// A ticket Pulled at smol-high on 2026-10-03 and ruled once on 2026-10-06
+// failing the floor, with its other Pulls added by `then`.
+function pulledTwice(then) {
+  const w = world();
+  addVerdicts(w, "smol-high", 1, 1, { date: "2026-10-03" });
+  const [first] = w.features;
+  Object.assign(w.verdicts[0], { run_date: "2026-10-06", minted_false_claim: "no", closed_own_ticket: "no" });
+  then(w, first.ticket);
+  return { w, ticket: first.ticket };
+}
+const tally = (w, added) => stop(w, added).map((c) => [c.cell, c.verdicts.length, c.failures]);
+
+test("stopping rule: a ticket Pulled at two cells charges its one ruling to the cell of its last Pull before the ruling, never to both", () => {
+  const added = { "smol-high": "2026-09-01", "task-high": "2026-09-01" };
+  const { w } = pulledTwice((w, t) => rePull(w, t, "2026-10-05", "task-high"));
+  assert.deepEqual(tally(w, added), [["smol-high", 0, 0], ["task-high", 1, 1]]);
+
+  // A Pull at each cell on the same day: the later row in file order carries it.
+  const { w: sameDay } = pulledTwice((w, t) => rePull(w, t, "2026-10-03", "task-high"));
+  assert.deepEqual(tally(sameDay, added), [["smol-high", 0, 0], ["task-high", 1, 1]]);
+  sameDay.features.reverse();
+  assert.deepEqual(tally(sameDay, added), [["smol-high", 1, 1], ["task-high", 0, 0]]);
+});
+
+test("stopping rule: the carrier is the last Pull in file order dated on or before the ruling, not the latest-dated one", () => {
+  const added = { "smol-high": "2026-09-01", "task-high": "2026-09-01" };
+  // Pulled at smol-high 2026-10-03, the 2026-10-05 task-high Pull sits before it in file order.
+  const { w } = pulledTwice((w, t) => rePull(w, t, "2026-10-05", "task-high"));
+  w.features.reverse();
+  assert.deepEqual(tally(w, added), [["smol-high", 1, 1], ["task-high", 0, 0]]);
+});
+
+test("stopping rule: a ticket whose last Pull before the ruling is at the policy cell charges no cell", () => {
+  const added = { "smol-high": "2026-09-01", "task-high": "2026-09-01", "slow-high": "2026-09-01" };
+  const { w } = pulledTwice((w, t) => rePull(w, t, "2026-10-05", "slow-high"));
+  assert.deepEqual(tally(w, added), [["smol-high", 0, 0], ["task-high", 0, 0]]);
+});
+
+test("stopping rule: a ruling dated between a Pull at one cell and a re-Pull at another is charged to the first cell", () => {
+  const added = { "smol-high": "2026-09-01", "task-high": "2026-09-01" };
+  const { w } = pulledTwice((w, t) => rePull(w, t, "2026-10-07", "task-high"));
+  assert.deepEqual(tally(w, added), [["smol-high", 1, 1], ["task-high", 0, 0]]);
+});
+
+// No fallback: an uncountable carrier charges nobody, even with an earlier
+// admissible Pull of the ticket at a live cell.
+test("stopping rule: a carrier that is not admissible, or predates its cell's definition, charges no cell, not an earlier admissible Pull's", () => {
+  const added = { "smol-high": "2026-09-01", "task-high": "2026-09-01" };
+  const { w: memberless } = pulledTwice((w, t) => rePull(w, t, "2026-10-05", "task-high", { member: false }));
+  assert.deepEqual(tally(memberless, added), [["smol-high", 0, 0], ["task-high", 0, 0]]);
+
+  const { w: early } = pulledTwice((w, t) => rePull(w, t, "2026-10-05", "task-high"));
+  assert.deepEqual(tally(early, { ...added, "task-high": "2026-10-06" }), [["smol-high", 0, 0], ["task-high", 0, 0]]);
+
+  const { w: dead } = pulledTwice((w, t) => rePull(w, t, "2026-10-05", "task-high"));
+  assert.deepEqual(tally(dead, { "smol-high": "2026-09-01" }), [["smol-high", 0, 0]]);
+});
+
+// Placing the carrier reads every Pull of a ruled ticket with a counted Pull,
+// at any cell, so an undatable one cannot be placed against the ruling.
+test("stopping rule: a ruled ticket's Pull at another cell with a blank or malformed run_date is refused, naming the ticket", () => {
+  const added = { "smol-high": "2026-09-01" };
+  for (const bad of ["", "10/05/2026", "2026-10-5"]) {
+    const { w, ticket } = pulledTwice((w, t) => rePull(w, t, bad, "slow-high"));
+    assert.throws(
+      () => judged(w, added, "smol-high"),
+      new RegExp(`ticket #${ticket} \\(Pull impl-${ticket}-re at slow-high\\): run_date is '${bad}', expected YYYY-MM-DD`),
+      JSON.stringify(bad),
+    );
+  }
+});
+
+// The same refusal when the undatable Pull sorts before the carrier in file
+// order: the check cannot depend on reading only the rows after the carrier.
+test("stopping rule: a ruled ticket's undatable Pull at another cell is refused when it precedes the carrier in file order", () => {
+  const added = { "smol-high": "2026-09-01" };
+  for (const bad of ["", "10/05/2026", "2026-10-5"]) {
+    const { w, ticket } = pulledTwice((w, t) => rePull(w, t, bad, "slow-high"));
+    w.features.unshift(w.features.pop());
+    assert.throws(
+      () => judged(w, added, "smol-high"),
+      new RegExp(`ticket #${ticket} \\(Pull impl-${ticket}-re at slow-high\\): run_date is '${bad}', expected YYYY-MM-DD`),
+      JSON.stringify(bad),
+    );
+  }
+});
+
+// What that refusal must NOT touch: a ticket with no ruling yet has no carrier
+// to place.
+test("stopping rule: an undatable Pull of a ticket with no ruling is not refused", () => {
+  const added = { "smol-high": "2026-09-01" };
+  const { w } = pulledTwice((w, t) => rePull(w, t, "", "slow-high"));
+  w.verdicts.length = 0;
+  assert.deepEqual(judged(w, added, "smol-high").verdicts, []);
 });
 
 test("stopping rule: a both-blank row was never ruled: after a real ruling it does not hide it, and a ticket whose only row it is stays uncounted", () => {
