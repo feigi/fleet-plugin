@@ -188,7 +188,14 @@ script_dir=$(dirname -- "$0")
 rederive="the Recipe cache is invalid; run the Recipe derivation step (run-team phase 0, before the first claim) to re-derive it"
 install=$("$script_dir/derive-testcmd.sh" . install 2>&1) || die "$install"
 echo "    Install step → $install" >&2
-testcmd=$("$script_dir/derive-testcmd.sh" . test 2>&1) || die "$testcmd"
+# The Test entrypoint is probed against origin/main, not the main checkout: the
+# worktree is cut from origin/main (below), so that tree is where the command
+# runs. Nothing here updates the main checkout, so after the suite moves on
+# origin/main it still lists the old layout, and a pattern into it is accepted
+# by a probe of the checkout and then selects nothing in the worktree — a run
+# that reports `tests 0` at exit 0. The Install step takes no ref: the probe
+# is the Test entrypoint's alone.
+testcmd=$("$script_dir/derive-testcmd.sh" . test --at origin/main 2>&1) || die "$testcmd"
 echo "    test entrypoint → $testcmd" >&2
 
 # The Test entrypoint is a shell COMMAND, not an argv: the runner hands it to

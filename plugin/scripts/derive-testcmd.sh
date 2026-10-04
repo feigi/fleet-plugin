@@ -101,7 +101,22 @@ unrunnable() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 3; }
 # step, so a controller or reviewer reading any of them knows what to run.
 derive="run the Recipe derivation step (run-team phase 0, before the first claim) to derive, prove and write it"
 
-[ $# -eq 2 ] || die "usage: derive-testcmd.sh <repo> <install|test>"
+# `--at <rev>` names the commit whose tree the Test entrypoint will run in, for
+# the vacuous-suite probe below. A caller that builds its worktree from a ref
+# (claim-ticket.sh cuts one from origin/main) is asking about THAT tree, which
+# the repository's own checkout may not hold: after the suite moves upstream
+# the checkout still lists the old layout until someone updates it. Without
+# `--at` the probe reads <repo>'s own index, as for a caller that runs the
+# command in <repo> itself. Three arguments is neither shape: a refusal.
+usage="usage: derive-testcmd.sh <repo> <install|test> [--at <rev>]"
+rev=
+case $# in
+  2) ;;
+  4) [ "$3" = --at ] || die "$usage"
+     rev=$4
+     case $rev in ''|-*) die "--at needs a commit, got '$rev' — $usage" ;; esac ;;
+  *) die "$usage" ;;
+esac
 repo=$1
 field=$2
 
@@ -111,6 +126,14 @@ case $field in
   install|test) ;;
   *) die "unknown Recipe field '$field' — expected install or test" ;;
 esac
+
+# A <rev> is only ever consulted by the probe, which only the Test entrypoint
+# has; accepting it for the Install step would answer a question nothing asked.
+if [ -n "$rev" ]; then
+  [ "$field" = test ] || die "--at applies to the test field only, not '$field' — $usage"
+  revc=$(git -C "$repo" rev-parse --verify "$rev^{commit}") \
+    || die "--at '$rev' does not resolve to a commit in $repo"
+fi
 
 # `--path-format=absolute` so the workspace is a real directory whatever the
 # caller's cwd; the workspace is the common dir's parent, the same rule
@@ -162,7 +185,7 @@ lenf=$(mktemp) || unrunnable "cannot create a temporary file to read the Recipe 
 # Cleanup decides nothing: an `rm` that cannot be started would otherwise
 # replace the script's own exit status with 127 (and print a line on the
 # success path), so the status the script was leaving with is kept.
-trap 'rc=$?; rm -f "$errf" "$lenf" 2>/dev/null || :; exit $rc' EXIT
+trap 'rc=$?; rm -f "$errf" "$lenf" "$errf.idx" 2>/dev/null || :; exit $rc' EXIT
 
 open='recipe<' close='>recipe'
 rc=0
@@ -319,11 +342,31 @@ esac
 # pattern only with a `]` after it, so the `[` builtin is not. The probe is
 # git's `:(glob)` pathspec, whose `*` and `?` match a leading dot where the
 # shell's do not, so a pattern whose only tracked matches are dotfiles is
-# accepted though the shell would match nothing.
+# accepted though the shell would match nothing. With `--at <rev>` the tracked
+# files are <rev>'s tree, read into a private index file, and the symlink test
+# reads that tree too; the ignore rules are still <repo>'s working copy's, the
+# one place git reads them from. The resolvability probe of the command's
+# leading word above stays <repo>'s own.
 if [ "$field" = test ]; then
   # An ambient index would answer `ls-files` for whatever repository or commit
   # the caller is in the middle of, not for <repo>'s tracked files.
   unset GIT_INDEX_FILE
+  where=$repo
+  if [ -n "$rev" ]; then
+    where="$repo at $rev"
+    GIT_INDEX_FILE="$errf.idx" git -C "$repo" read-tree "$revc" 2>"$errf" || {
+      listed=$?
+      die "cannot read the tree of $rev in $repo (git read-tree exit $listed): $(cat "$errf" 2>/dev/null)"
+    }
+    export GIT_INDEX_FILE="$errf.idx"
+  fi
+  # Whether <path> is a symlink in the tree the command runs in: on disk in
+  # <repo> itself, an index entry of mode 120000 in <rev>'s tree.
+  islink() {
+    [ -n "$rev" ] || { [ -L "$repo/$1" ]; return; }
+    git -C "$repo" ls-files -s -- ":(literal)$1" 2>/dev/null \
+      | { while read -r mode _ _ path; do [ "$mode $path" = "120000 $1" ] && exit 0; done; exit 1; }
+  }
   set -f
   prev=
   # shellcheck disable=SC2086 # field splitting is the point: scanning every word
@@ -346,19 +389,19 @@ if [ "$field" = test ]; then
     tracked=$(git -C "$repo" ls-files -- ":(glob)$word" ":(glob)${word%/}/**" 2>"$errf") || {
       listed=$?
       set +f
-      die "cannot list the files tracked in $repo to check its test command's pattern '$word' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)"
+      die "cannot list the files tracked in $where to check its test command's pattern '$word' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)"
     }
     [ -z "$tracked" ] || continue
     lead=${word%%[*?[]*}
     while :; do
       case $lead in */*) lead=${lead%/*} ;; *) break ;; esac
-      [ ! -L "$repo/$lead" ] || continue 2
+      if islink "$lead"; then continue 2; fi
     done
     ignored=0
     git -C "$repo" check-ignore -q --no-index -- "$word" 2>"$errf" || ignored=$?
     case $ignored in
       0) ;;
-      1) set +f; die "the Recipe cache at $cache is invalid: its test command's pattern '$word' matches no file tracked in $repo — a Test entrypoint that selects no tests passes having run nothing, so the Recipe is stale, not a finding; $derive" ;;
+      1) set +f; die "the Recipe cache at $cache is invalid: its test command's pattern '$word' matches no file tracked in $where — a Test entrypoint that selects no tests passes having run nothing, so the Recipe is stale, not a finding; $derive" ;;
       *) set +f; die "cannot ask git whether $repo ignores its test command's pattern '$word' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
     esac
   done

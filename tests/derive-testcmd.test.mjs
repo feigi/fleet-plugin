@@ -371,6 +371,102 @@ test("a git that cannot say whether a path is ignored refuses, naming its exit s
   assert.match(r.err, /^derive-testcmd: cannot ask git whether .* ignores its test command's pattern 'gone\/\*\.test\.mjs' \(git check-ignore exit 128\): git: injected check-ignore failure$/m);
 });
 
+// `--at <rev>`: the vacuous-suite probe against the tree the command will run
+// in, not <repo>'s own index. claim-ticket.sh cuts its worktree from
+// origin/main, which can hold a suite the main checkout does not yet list
+// (the suite moved upstream and nobody updated the checkout). `moved` is that
+// commit: the checkout is left on the old layout, `moved` holds the new one,
+// and a symlink `suite` -> tests exists only there.
+function movedSuite() {
+  const { dir, head } = repo({ "plugin/scripts/a.test.mjs": "" });
+  const git = (...a) => execFileSync("git", a, { cwd: dir, stdio: "pipe", env: FIXTURE_ENV, encoding: "utf8" });
+  const branch = git("rev-parse", "--abbrev-ref", "HEAD").trim();
+  git("checkout", "-q", "-b", "moved");
+  mkdirSync(join(dir, "tests"));
+  git("mv", "plugin/scripts/a.test.mjs", "tests/a.test.mjs");
+  symlinkSync("tests", join(dir, "suite"));
+  git("add", "suite");
+  git("commit", "-q", "-m", "moved");
+  git("checkout", "-q", branch);
+  return { dir, head, git };
+}
+
+function deriveAt(dir, rev, env = process.env) {
+  const r = spawnSync("sh", [SCRIPT, dir, "test", "--at", rev], { encoding: "utf8", env, cwd: tmpdir(), timeout: 30_000 });
+  return { status: r.status, out: r.stdout.replace(/\n$/, ""), err: r.stderr };
+}
+
+test("--at refuses a pattern the named tree no longer holds, though the checkout's index still lists it", () => {
+  const { dir, head, git } = movedSuite();
+  const stale = "node --test plugin/scripts/*.test.mjs";
+  cache(dir, recipe(head, { test: stale }));
+  assert.equal(git("ls-files").trim(), "plugin/scripts/a.test.mjs", "fixture: the checkout lists the old layout");
+  const control = derive(dir);
+  assert.equal(control.status, 0, `fixture: without --at the checkout's index accepts it: ${control.err}`);
+  const r = deriveAt(dir, "moved");
+  assert.equal(r.status, 1, r.err);
+  assert.equal(r.out, "", "nothing may reach the caller");
+  assert.ok(r.err.includes("its test command's pattern 'plugin/scripts/*.test.mjs' matches no file tracked in"), r.err);
+  assert.ok(r.err.includes(" at moved"), `the refusal names the tree it read: ${r.err}`);
+  assert.match(r.err, NAMES_STEP);
+});
+
+test("--at accepts a pattern the named tree holds, though the checkout's index does not", () => {
+  const { dir, head } = movedSuite();
+  const cmd = "node --test tests/*.test.mjs";
+  cache(dir, recipe(head, { test: cmd }));
+  const control = derive(dir);
+  assert.equal(control.status, 1, "fixture: without --at the checkout's index refuses it");
+  const r = deriveAt(dir, "moved");
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out, cmd);
+  assert.equal(r.err, "");
+});
+
+test("--at leaves the checkout's index and working tree as they were", () => {
+  const { dir, head, git } = movedSuite();
+  cache(dir, recipe(head, { test: "node --test tests/*.test.mjs" }));
+  const before = git("ls-files", "-s");
+  assert.equal(deriveAt(dir, "moved").status, 0);
+  assert.equal(git("ls-files", "-s"), before);
+  assert.equal(git("status", "--porcelain", "--untracked-files=no"), "");
+});
+
+test("--at reads a symlink in the named tree, not the checkout's disk", () => {
+  const { dir, head } = movedSuite();
+  const cmd = "node --test suite/*.test.mjs";
+  cache(dir, recipe(head, { test: cmd }));
+  const r = deriveAt(dir, "moved");
+  assert.equal(r.status, 0, `a glob through a symlink the tree holds is accepted: ${r.err}`);
+  assert.equal(r.out, cmd);
+  const absent = derive(dir);
+  assert.equal(absent.status, 1, "fixture: no such link in the checkout, so without --at it is stale");
+});
+
+test("--at refuses what it cannot read: an unresolvable rev, a non-test field, a malformed flag, a git that cannot read the tree", () => {
+  const { dir, head } = movedSuite();
+  cache(dir, recipe(head, { test: "node --test tests/*.test.mjs" }));
+  const gone = deriveAt(dir, "no-such-ref");
+  assert.equal(gone.status, 1, gone.err);
+  assert.equal(gone.out, "");
+  assert.match(gone.err, /--at 'no-such-ref' does not resolve to a commit/);
+  assert.match(gone.err, /^fatal: Needed a single revision$/m, "git's own reason reaches the terminal beside the refusal");
+  const dash = deriveAt(dir, "-x");
+  assert.equal(dash.status, 1, dash.err);
+  assert.match(dash.err, /--at needs a commit, got '-x'/);
+  const inst = spawnSync("sh", [SCRIPT, dir, "install", "--at", "moved"], { encoding: "utf8" });
+  assert.equal(inst.status, 1, inst.stderr);
+  assert.equal(inst.stdout, "");
+  assert.match(inst.stderr, /--at applies to the test field only, not 'install'/);
+  const flag = spawnSync("sh", [SCRIPT, dir, "test", "--on", "moved"], { encoding: "utf8" });
+  assert.equal(flag.status, 1, flag.stderr);
+  assert.match(flag.stderr, /usage: derive-testcmd\.sh <repo> <install\|test>/);
+  const broken = deriveAt(dir, "moved", gitFailing("read-tree"));
+  assert.equal(broken.status, 1, broken.err);
+  assert.equal(broken.out, "");
+  assert.match(broken.err, /^derive-testcmd: cannot read the tree of moved in .* \(git read-tree exit 128\): git: injected read-tree failure$/m);
+});
+
 // claim-ticket.sh appends the runner's own arguments after this string
 // textually (`exec sh -c '<cmd> "$@"' agent-test "$@"`), so a command ending
 // in `;` or `&` lets a real shell read those arguments as an unrelated
