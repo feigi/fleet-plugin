@@ -55,11 +55,10 @@
 // no die() either and has no command line at all — it is imported by
 // review-eval.mjs, and joined the `scripts/*.mjs` glob when it was renamed
 // from `.js`. That is the price of the filter, named here rather than
-// hidden: arg-header-probes-prose.test.mjs runs every importer the filter
-// drops, and one that refuses its command line must be named in this
-// paragraph. Read that output, plus the scripts named here, for the roster —
-// the scripts this header names exemplify a way of qualifying, and were never
-// the whole of it.
+// hidden: a test runs every importer the filter drops, and one that refuses
+// its command line must be named in this header. Read the grep's output, plus
+// the scripts named here, for the roster — the scripts this header names
+// exemplify a way of qualifying, and were never the whole of it.
 //
 // fleet-tick.mjs is the one script still outside arg()/has(), and
 // deliberately: it parses its flags with node:util's parseArgs, so its

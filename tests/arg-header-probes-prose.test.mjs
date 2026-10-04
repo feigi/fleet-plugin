@@ -182,13 +182,37 @@ const scriptsOf = (out) => [...new Set(rows(out).map((r) => r.file))];
 
 // Runs a script the way a stray flag reaches it, and reports what it
 // answered. `extra` supplies argv ahead of the stray flag — needed to clear a
-// delegator's own required-arg guard so a probe can reach sweep() for real,
-// rather than dying earlier for an unrelated reason.
-const probeArgv = (file, extra = []) => {
-  const r = spawnSync("node", [file, ...extra, STRAY], { cwd: ROOT, encoding: "utf8" });
+// script's own required-arg guard so a probe can reach its unknown-flag check
+// for real, rather than dying earlier for an unrelated reason. `tail` supplies
+// argv after it, for a parser that reads flag/value pairs: the stray flag takes
+// the first tail word as its value, so a refusal of the stray flag is the only
+// one left to answer.
+const probeArgv = (file, extra = [], tail = []) => {
+  const r = spawnSync("node", [file, ...extra, STRAY, ...tail], { cwd: ROOT, encoding: "utf8" });
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 };
 const probeStray = (file) => probeArgv(file);
+
+// Whether `text` names the script `file` (`scripts/<name>`): its file name on
+// its own, never inside another name. A bare substring credits `prove.mjs` to a
+// text that names only `recipe-prove.mjs`, and a script named `newscr.mjs` to a
+// text that mentions only `newscr.mjs.bak`.
+const namesScript = (text, file) => {
+  const name = file.replace(/^scripts\//, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\w.-])${name}(?![\\w-])(?!\\.\\w)`).test(text);
+};
+
+test("naming a script means its own file name, not a substring of another name", () => {
+  const file = "scripts/prove.mjs";
+  assert.ok(namesScript("// prove.mjs imports isDigits", file));
+  assert.ok(namesScript("named `prove.mjs`, then", file));
+  assert.ok(namesScript("ends the sentence on prove.mjs.", file));
+  assert.ok(namesScript("see scripts/prove.mjs", file));
+  assert.ok(!namesScript("recipe-prove.mjs imports isDigits", file));
+  assert.ok(!namesScript("prove.mjs.bak is an old backup", file));
+  assert.ok(!namesScript("prove.mjsx", file));
+  assert.ok(!namesScript("prove-mjs", file));
+});
 
 test("arg.mjs's header is one leading comment run, so the slice above holds prose and no code", () => {
   const code = HEADER.split("\n").filter((l) => l.trim() && !l.startsWith("//"));
@@ -372,28 +396,77 @@ test("no roster row is silent: every row the roster grep returns names the stray
 });
 
 // #2781. The roster grep's makeDie filter drops every importer that binds no
-// die() from here, and the header used to say such an importer has no command
-// line — recipe-prove.mjs disproved that while the header said it. So the rows
-// the filter drops are RUN too, read off the header's own import grep: one
-// that refuses the stray flag has a command line the roster cannot see, and
-// the header must name it; one that exits 0 in silence is a module, and does
-// not need naming.
+// die() from here, and a script that binds none can still have a command line
+// with a refusal of its own — recipe-prove.mjs does. So the importers the
+// filter drops are RUN too, read off the header's own import grep: one that
+// refuses the stray flag has a command line the roster cannot see, and the
+// header must name it; one that exits 0 in silence is a module, and does not
+// need naming. A script that ignores flags and exits 0 looks the same from
+// here — catching that shape is the silent-roster-row test's job, for makeDie
+// importers only.
+//
+// Whether a file binds makeDie is read off its whole import statement, not off
+// the grep rows: a row filter sees only the closing row of a multi-line import
+// (`} from "./arg.mjs";`), and takes a trailing comment that mentions makeDie
+// for a binding.
+const bindsMakeDie = (file) => {
+  const src = readFileSync(join(ROOT, file), "utf8").replace(/\/\/.*$/gm, "");
+  return /import\b[^;{]*\{[^}]*\bmakeDie\b[^}]*\}\s*from\s*["']\.\/arg\.mjs["']/.test(src);
+};
+
+// A dropped importer whose own guard answers a stray-only probe first — the
+// stray flag is never named, so that probe cannot credit the script with an
+// unknown-flag refusal — is probed again with argv that clears that guard, so
+// the probe reaches its unknown-flag check. `before` precedes the stray flag,
+// `after` follows it: a value for the stray flag and every required flag, so
+// the unknown-flag check is the only refusal left that can answer.
+// `refusal` is the text that refusal carries, which real work does not.
+const DROPPED_GUARD_FIXTURE = {
+  "scripts/recipe-prove.mjs": {
+    before: ["/zz-no-such-repo-1227"],
+    after: ["v", "--install", "true", "--test", "true"],
+    refusal: "usage:",
+  },
+};
+
 test("every arg.mjs importer the makeDie filter drops is a module, or a script the header names", () => {
-  const dropped = [
-    ...new Set(
-      rows(sh(IMPORT_GREP).stdout)
-        .filter((r) => r.text.trimStart().startsWith("import ") && !r.text.includes("makeDie"))
-        .map((r) => r.file),
-    ),
-  ];
+  const dropped = scriptsOf(sh(IMPORT_GREP).stdout).filter((file) => file !== "scripts/arg.mjs" && !bindsMakeDie(file));
   const unnamed = [];
+  const guardFirst = [];
   for (const file of dropped) {
     const { status, out } = probeStray(file);
     if (status === 0 && out === "") continue;
     assert.equal(status, 2, `${file} ${STRAY} exited ${status}, not 2 — a stray flag reached real work`);
     assert.ok(!out.includes(SWEEP_PREFIX), `${file} binds no makeDie, yet answers ${STRAY} in sweep()'s wording`);
-    if (!FLAT.includes(file.replace(/^scripts\//, ""))) unnamed.push(file);
+    if (!out.includes(STRAY)) {
+      guardFirst.push(file);
+      const clear = DROPPED_GUARD_FIXTURE[file];
+      assert.ok(
+        clear,
+        `${file} refused ${STRAY} without naming it — a guard of its own answered first. Add the argv that clears that guard to DROPPED_GUARD_FIXTURE, so the probe reaches its unknown-flag check`,
+      );
+      const cleared = probeArgv(file, clear.before, clear.after);
+      assert.equal(
+        cleared.status,
+        2,
+        `${file} ${clear.before.join(" ")} ${STRAY} ${clear.after.join(" ")} exited ${cleared.status}, not 2 — the stray flag reached real work`,
+      );
+      assert.ok(
+        cleared.out.includes(clear.refusal),
+        `${file} did not refuse ${STRAY} with its own '${clear.refusal}' once its own guard was cleared — the unknown-flag refusal the header credits it with is gone, or the stray flag reached real work`,
+      );
+    }
+    if (!namesScript(FLAT, file)) unnamed.push(file);
   }
+  // Pinned, not silently skipped: a dropped importer whose own guard stopped
+  // intercepting a stray-only probe, or a new one whose guard grew, reds here
+  // instead of quietly changing which importers the loop above checked
+  // through the fixture.
+  assert.deepEqual(
+    guardFirst.sort(),
+    Object.keys(DROPPED_GUARD_FIXTURE).sort(),
+    "the set of dropped importers whose own guard answers a stray-only probe changed — update DROPPED_GUARD_FIXTURE and this assertion together, never drop the difference",
+  );
   assert.deepEqual(
     unnamed,
     [],
