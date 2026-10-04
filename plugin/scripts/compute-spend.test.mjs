@@ -45,11 +45,12 @@ const CONSECUTIVE = [
 const ORPHAN = [result(["orphan", 100]), { kind: "assistant", cacheWrite: 50, tools: [] }];
 
 test("CONSECUTIVE result turns accumulate — that, not the multi-block turn, is the real shape", () => {
-  // Regression. Parallel tool calls do NOT arrive as one user turn carrying two
-  // tool_result blocks: across 45,062 real result-bearing turns, none carried
-  // two. They arrive as N single-result turns in a row (4,087 occurrences).
-  // Replacing `pending` per result turn dropped every batch but the last —
-  // 9.1% of all attributions — and made the proportional split above dead code.
+  // Regression. Parallel tool calls do NOT arrive as one result entry carrying
+  // two results: omp writes each tool result on a line of its own (176,027
+  // results measured, each on its own line — see member-record.mjs). They
+  // arrive as N single-result entries in a row. Replacing `pending` per
+  // result entry dropped every batch but the last, and made the proportional
+  // split above dead code.
   const tools = attributeTools(CONSECUTIVE);
   const by = Object.fromEntries(tools.map((t) => [t.tool, t.cacheWrite]));
   assert.equal(by.Read, 750);

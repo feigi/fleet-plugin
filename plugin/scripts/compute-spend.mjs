@@ -291,12 +291,13 @@ export function computeSpend({ agents = [], topN = 8 } = {}) {
 // result into the cache. When several results land before that turn, the cost is
 // split proportionally by result size, because that is what drove it.
 //
-// Those results arrive as CONSECUTIVE user turns, not as one turn carrying
-// several blocks: across 45,062 real result-bearing turns, not one carried two
-// tool_results. Parallel tool calls show up as N single-result turns in a row
-// (4,087 occurrences). So `pending` must ACCUMULATE across consecutive result
-// turns — replacing it dropped every batch but the last, losing 9.1% of all
-// attributions, and left the proportional split below unreachable on real data.
+// Those results arrive as CONSECUTIVE result lines, not as one turn carrying
+// several blocks: in omp transcripts each tool result sits on its own line
+// (measured on 176,027 results, recorded beside the reader in
+// member-record.mjs). Parallel tool calls show up as N single-result lines in a
+// row. So `pending` must ACCUMULATE across consecutive result lines —
+// replacing it dropped every batch but the last, and left the proportional
+// split below unreachable on real data.
 //
 // The proxy over-attributes slightly — that next turn also caches the assistant's
 // own preceding output — so treat these as shares, not absolutes. `resultChars`

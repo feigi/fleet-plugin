@@ -116,8 +116,8 @@ itself but this rule.
 **A subagent you dispatch gets its own directory under yours,
 `<scratch>/impl-<N>/<childName>/`, and you write that path, absolute, into its
 prompt — it writes nowhere else, and never derives a path of its own.**
-`<childName>` is a slug of the name you dispatch it under (omp's task `name`,
-Claude Code's `description`) — `[a-z0-9-]` only, never the raw field itself,
+`<childName>` is a slug of the name you dispatch it under (omp's task `name`) —
+`[a-z0-9-]` only, never the raw field itself,
 which can carry spaces and `/` and would split or nest the path in an
 unquoted shell command — unique among your children and never one of your
 own entries (`probe`, `mutate`, or any other name you write under

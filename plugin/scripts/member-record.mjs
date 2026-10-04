@@ -1,8 +1,8 @@
 // The member-telemetry adapter. ONE per-member
-// record shape, TWO readers a tree walk chooses by content, never by
-// caller-supplied config: board.mjs (the live spend panel) and
+// record shape, ONE transcript reader (`foldOmpTranscript`, `readOmpMember`):
+// board.mjs (the live spend panel) and
 // member-outcomes.mjs (the scraper) build on the primitives here rather than
-// each inlining a transcript layout, so the fold-back arithmetic, the cwd
+// each inlining a transcript layout, so the per-turn fold, the cwd
 // encoder and the ticket/PR extraction each live in exactly one place.
 //
 // The record: harness, session, role, agent, model, thinking,
@@ -39,13 +39,14 @@ import { classifyRole, canonicalMemberName, CANONICAL_MEMBER_NAME_PREFIXES } fro
 // callers who need to encode a cwd that is not guaranteed to exist — every
 // caller but board.mjs's own live panel — pass their own resolver.
 //
-// Encodes the way the fleet's own tooling reads it back: every
-// non-alphanumeric character with `-`, so `-Users-x-claude` decodes to
-// `/Users/x/.claude`, not `-Users-x.claude`. Home-relative paths become
-// `~/...`-style (`-` under $HOME) joined by `-` with DOTS PRESERVED
-// (`.claude` -> `-.claude`); non-home paths are realpath-resolved (so `/tmp/x`,
+// Encodes the way omp's own session directory naming does, by path SEGMENT:
+// the segments are split on the path separator, empty ones dropped, and joined
+// with `-`; every other character is kept, dots and underscores included.
+// Home-relative paths become `-` plus their segments
+// (`/Users/x/.claude/a_b` under home `/Users/x` -> `-.claude-a_b`);
+// non-home paths are realpath-resolved (so `/tmp/x`,
 // a symlink to `/private/tmp/x` on macOS, encodes under the resolved name)
-// and double-dash-wrapped. Both forms are measured against real
+// and wrapped in `--` (`/opt/a.b` -> `--opt-a.b--`). Both forms are measured against real
 // `~/.omp/agent/sessions/*` directory names - a
 // `~/dev/fleet-plugin`, `--private-tmp-fx685-scratch--` all exist on disk
 // today.
@@ -188,7 +189,7 @@ function specialistPr(name) {
 // signals a corrupted or foreign file, not a harness to dispatch to.
 //
 // Both halves of that signature are checked, not just the blocklist half: a
-// line carrying neither Claude's keys NOR omp's own `type` field (e.g. a
+// line carrying neither a `sessionId`/`parentUuid` key NOR omp's own `type` field (e.g. a
 // foreign/corrupted `{"foo":"bar"}`) used to sail past the blocklist-only
 // check below and fold into a fabricated all-null/zero member record instead
 // of the refusal this comment already promised. `type` is the one envelope

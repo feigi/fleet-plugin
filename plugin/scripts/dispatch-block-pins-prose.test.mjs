@@ -373,7 +373,7 @@ test("the scratch-discipline block names the shared injected root, the per-membe
   // The name the path is keyed on, bound to what makes it collision-free.
   assert.match(
     b,
-    phrase("`<childName>` is a slug of the name you dispatch it under (omp's task `name`, Claude Code's `description`) — `[a-z0-9-]` only, never the raw field itself, which can carry spaces and `/` and would split or nest the path in an unquoted shell command — unique among your children and never one of your own entries (`probe`, `mutate`, or any other name you write under `<scratch>/impl-<N>/` yourself), so no child shares a directory with a sibling or with you"),
+    phrase("`<childName>` is a slug of the name you dispatch it under (omp's task `name`) — `[a-z0-9-]` only, never the raw field itself, which can carry spaces and `/` and would split or nest the path in an unquoted shell command — unique among your children and never one of your own entries (`probe`, `mutate`, or any other name you write under `<scratch>/impl-<N>/` yourself), so no child shares a directory with a sibling or with you"),
     "`<childName>` is no longer defined as a slugged, own-entry-safe dispatch name unique among the parent's children",
   );
 });
