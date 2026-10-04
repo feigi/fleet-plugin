@@ -181,10 +181,14 @@ test("an untyped dispatch, recorded as the generic `task` or as no definition, s
   // #1505's other half. The default agent records the literal `task` in
   // `session_init`, and a transcript with no `session_init` line records no
   // definition at all; neither names a memory agent or any fleet definition, so
-  // the name is the only memory signal those members have. Measured over the
-  // sidecars on disk: three live members rest on this, and dropping it would
-  // put `memory-housekeeper` (named for its own definition, at depth 1) in the
-  // SPECIALIST bucket, which is the very defect #1505 reports.
+  // the name is the only memory signal those members have. Re-measured
+  // 2026-10-04: over the Claude Code `meta.json` sidecars under
+  // ~/.claude/projects (the reader #1505 fixed, since dropped from
+  // member-record.mjs) three members booked memory on their name alone, each
+  // with no definition recorded and none with `task`; over the omp members on
+  // disk none did, under `task` or without a definition. Dropping the name
+  // would put `memory-housekeeper` (named for its own definition, at depth 1)
+  // in the SPECIALIST bucket, which is the very defect #1505 reports.
   assert.equal(foldOmpTranscript(JSON.stringify({ type: "session_init", agent: "task" }), "/fake/omp.jsonl").agent, "task");
   assert.equal(foldOmpTranscript(JSON.stringify({ type: "session" }), "/fake/omp.jsonl").agent, null);
   assert.equal(classifyRole({ agentDefinition: "task", memberName: "memory-proxy-session-review-2-3" }), "memory");
