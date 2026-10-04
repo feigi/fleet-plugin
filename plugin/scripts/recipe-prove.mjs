@@ -42,14 +42,17 @@
 // the reader stays the one authority on what a usable cache is. A failed
 // proof never touches an existing cache.
 //
-// Exit 0: proven, cache written (its path and contents on stdout).
-// Exit 1: NOT PROVEN — no cache written; the reason on stderr.
+// Exit 0: proven, cache written (its path and contents on stdout); the log
+//         directory under $TMPDIR is removed.
+// Exit 1: NOT PROVEN — no cache written; the reason on stderr. The log
+//         directory under $TMPDIR is kept when the reason names a log in it,
+//         and removed when it names none (the Recipe cache reader's refusal).
 // Exit 2: no verdict on the proof — it could not be attempted (usage, not a
 //         repository, origin/main missing, the worktree could not be made), or
 //         a git or filesystem fault stopped it before the cache was settled
 //         (a git command could not be started, the reader's own git
 //         included, or the reader's `sh`; the cache or its temp file could
-//         not be written).
+//         not be written). The log directory under $TMPDIR is removed.
 
 import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
@@ -148,9 +151,9 @@ const didNotRun = (rc) => rc === 126 || rc === 127;
 // install creates dirties the tree as surely as a rewrite, and the untracked
 // mode is config — under status.showUntrackedFiles=no it is invisible unless
 // pinned.
-function treeChanges(wt) {
+function treeChanges(wt, log) {
   const s = git(["status", "--porcelain", "-uall"], wt);
-  if (!s.ok) throw notProven(`could not read the tree state in the throwaway worktree: ${s.err}`);
+  if (!s.ok) throw notProven(`could not read the tree state in the throwaway worktree: ${s.err}; install output: ${log}`);
   return s.out;
 }
 
@@ -161,8 +164,10 @@ function prove(o, wt, logs) {
     throw notProven(`the Install step '${o.install}' did not run (exit ${irc}: not executable or not found); install output: ${installLog}`);
   }
   if (irc !== 0) throw notProven(`the Install step '${o.install}' failed (exit ${irc}); install output: ${installLog}`);
-  const dirty = treeChanges(wt);
-  if (dirty) throw notProven(`the Install step changed the tree (first: ${dirty.split("\n")[0]}); it must leave every file as checked out`);
+  const dirty = treeChanges(wt, installLog);
+  if (dirty) {
+    throw notProven(`the Install step changed the tree (first: ${dirty.split("\n")[0]}); it must leave every file as checked out; install output: ${installLog}`);
+  }
 
   const testLog = join(logs, "test.log");
   const trc = sh(o.test, wt, testLog);
@@ -179,7 +184,7 @@ function prove(o, wt, logs) {
     const n = Number(o.testCount);
     if (n === 0) throw notProven(`vacuous: a test count of 0 is a run that executed no tests; ${where}`);
     if (!new RegExp(`(^|[^0-9])0*${n}([^0-9]|$)`).test(o.countLine)) {
-      throw notProven(`the count line '${o.countLine}' does not carry the test count ${n}`);
+      throw notProven(`the count line '${o.countLine}' does not carry the test count ${n}; ${where}`);
     }
     if (!readFileSync(testLog, "utf8").includes(o.countLine)) {
       throw notProven(`vacuous: the Test entrypoint's output does not contain the count line '${o.countLine}' — no evidence any test ran; ${where}`);
@@ -193,15 +198,15 @@ function prove(o, wt, logs) {
     // What the unmutated Test run rewrote is not the mutation's work: restore
     // every tracked file first, so the change read below is the mutation's alone.
     const reset = git(["reset", "--hard", "-q", "HEAD"], wt);
-    if (!reset.ok) throw notProven(`could not restore the tree before the mutation: ${reset.err}`);
+    if (!reset.ok) throw notProven(`could not restore the tree before the mutation: ${reset.err}; ${where}`);
     const mutateLog = join(logs, "mutate.log");
     const mrc = sh(o.mutate, wt, mutateLog);
     if (mrc !== 0) throw notProven(`the mutation command '${o.mutate}' failed (exit ${mrc}); its output: ${mutateLog}`);
     // Against HEAD, not the index: a mutation that stages its edit (`git mv`,
     // `git add`) changed a tracked file just as surely.
     const changed = git(["diff", "HEAD", "--name-only"], wt);
-    if (!changed.ok) throw notProven(`could not read what the mutation changed: ${changed.err}`);
-    if (!changed.out) throw notProven(`the mutation (${o.mutation}) changed no tracked file — mutate a test, or the code a test covers`);
+    if (!changed.ok) throw notProven(`could not read what the mutation changed: ${changed.err}; its output: ${mutateLog}`);
+    if (!changed.out) throw notProven(`the mutation (${o.mutation}) changed no tracked file — mutate a test, or the code a test covers; its output: ${mutateLog}`);
     const mutatedLog = join(logs, "test-mutated.log");
     const red = sh(o.test, wt, mutatedLog);
     if (didNotRun(red)) throw notProven(`the Test entrypoint did not run on the mutated tree (exit ${red}); test output: ${mutatedLog}`);
@@ -275,6 +280,19 @@ function removeWorktree(wt, repo) {
   tryGit(["worktree", "prune"]);
 }
 
+// The log directory outlives the run only for a refusal that names it, so the
+// caller can read the log it points at. A proof that held has its evidence
+// summarised in the cache, a run with no verdict was stopped by a fault no log
+// records, and a refusal that names no log (the Recipe cache reader's) has
+// nothing in the directory to point at. Best-effort, as removeWorktree is.
+function removeLogs(logs) {
+  try {
+    rmSync(logs, { recursive: true, force: true });
+  } catch (e) {
+    process.stderr.write(`${NAME}: could not remove the log directory ${logs}: ${e.message}\n`);
+  }
+}
+
 function main(argv) {
   const o = parseArgs(argv);
   if (!git(["rev-parse", "--git-dir"], o.repo).ok) throw cannot(`${o.repo} is not a git repository`);
@@ -285,19 +303,26 @@ function main(argv) {
   if (!sha.ok) throw cannot("origin/main does not resolve to a commit — fetch it; the proof runs against it");
 
   const logs = mkdtempSync(join(tmpdir(), `${NAME}-`));
-  const wt = join(logs, "wt");
-  const add = git(["worktree", "add", "--detach", wt, sha.out], o.repo);
-  if (!add.ok) throw cannot(`could not create the throwaway worktree: ${add.err}`);
-  let proof;
-  try {
-    proof = prove(o, wt, logs);
-  } finally {
-    removeWorktree(wt, o.repo);
-  }
-
-  const recipe = { install: o.install, test: o.test, derivedAt: sha.out, installClean: true, ...proof };
   const cache = join(workspace, ".fleet", "recipe.json");
-  writeCache(cache, recipe, o.repo);
+  let recipe;
+  try {
+    const wt = join(logs, "wt");
+    const add = git(["worktree", "add", "--detach", wt, sha.out], o.repo);
+    if (!add.ok) throw cannot(`could not create the throwaway worktree: ${add.err}`);
+    let proof;
+    try {
+      proof = prove(o, wt, logs);
+    } finally {
+      removeWorktree(wt, o.repo);
+    }
+
+    recipe = { install: o.install, test: o.test, derivedAt: sha.out, installClean: true, ...proof };
+    writeCache(cache, recipe, o.repo);
+  } catch (e) {
+    if (!(e instanceof Refusal && e.message.includes(logs))) removeLogs(logs);
+    throw e;
+  }
+  removeLogs(logs);
   process.stdout.write(`${NAME}: PROVEN — Recipe cache written to ${cache}\n${JSON.stringify(recipe)}\n`);
 }
 
