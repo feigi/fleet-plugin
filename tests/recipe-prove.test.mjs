@@ -311,6 +311,41 @@ test("a cache the reader would refuse is not left behind: it is rolled back to w
   assert.equal(existsSync(cachePath(fresh)), false, "no prior cache: the refused one is removed, not left");
 });
 
+// The suite moved on origin/main and the main checkout was never updated: its
+// index lists `old/a.txt`, origin/main (the tree the proof ran in, and the one
+// a claim cuts its worktree from) holds `tests/a.txt`. The glob in the Test
+// entrypoint selects a file only in the second.
+function movedLayout() {
+  const { dir } = repo({ "old/a.txt": "1\n" });
+  git(dir, "mv", "old", "tests");
+  git(dir, "commit", "-q", "-m", "move the suite");
+  git(dir, "update-ref", "refs/remotes/origin/main", "HEAD");
+  git(dir, "reset", "-q", "--hard", "HEAD~1");
+  return dir;
+}
+// `true` ignores its arguments, so the run passes whatever the glob selects and
+// only the reader's check of the glob can tell the two trees apart.
+const GLOB_PROOF = (glob) => ["--install", "true", "--test", `printf 'Tests run: 1, Failures: 0\\n' && true ${glob}`, "--count-line", "Tests run: 1,", "--test-count", "1"];
+
+test("a Recipe proven at origin/main is read back against that tree, so a checkout still on the old layout does not refuse it", () => {
+  const dir = movedLayout();
+  const r = prove(dir, GLOB_PROOF("tests/*.txt"));
+  assert.equal(r.status, 0, r.err);
+  const recipe = JSON.parse(readFileSync(cachePath(dir), "utf8"));
+  // The claim's own read of the Test entrypoint accepts what was just proven.
+  const claimRead = spawnSync("sh", [READER, dir, "test", "--at", "origin/main"], { encoding: "utf8", env: FIXTURE_ENV });
+  assert.equal(claimRead.status, 0, claimRead.stderr);
+  assert.equal(claimRead.stdout.replace(/\n$/, ""), recipe.test);
+});
+
+test("a Test entrypoint whose glob matches nothing at origin/main is not proven, though the checkout's index lists a match", () => {
+  const dir = movedLayout();
+  const r = prove(dir, GLOB_PROOF("old/*.txt"));
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /NOT PROVEN — the Recipe cache reader refuses what was proven: .*matches no file tracked in .* at /);
+  assert.equal(existsSync(cachePath(dir)), false);
+});
+
 test("from a linked worktree the cache lands beside the common git dir — the main checkout the reader reads", () => {
   const { dir, head } = repo(MAVEN_FILES);
   const wt = join(tempDir("recipe-prove-wt-"), "wt");

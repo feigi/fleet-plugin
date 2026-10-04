@@ -38,6 +38,12 @@
 # PATH entry, an executable path). A red suite is a finding, not a stale
 # Recipe, so nothing here ever runs the command.
 #
+# A Test entrypoint is also INVALID when a glob in it matches no tracked file
+# (the vacuous-suite probe, below): such a suite selects no tests and passes
+# having run nothing. The optional trailing `--at <rev>` names the commit whose
+# tree that probe reads instead of <repo>'s own index, for a caller that runs
+# the command in a worktree cut from a ref.
+#
 # Exit status: 0 the command is printed; 1 a refusal about the cache, the
 # repository or the arguments; 3 a tool this script needs to read the cache
 # (node, mktemp, cat) could not be started or node died mid-read, so nothing
@@ -334,19 +340,21 @@ esac
 # carrying quoting or an expansion, an option, an `=` assignment or value, or a
 # path outside <repo> is the program's own to read and is accepted unprobed,
 # and the scan stops at a `cd`, past which a pattern no longer resolves from
-# <repo>. So is a word right after an option unless it has a `/` or a `.`: it
-# may be that option's value, which names no path. A pattern under a path git
-# ignores names generated output, such as a build the Install step produces,
-# which is never tracked, so it is accepted too, and so is one through a
-# symlink, which git declines to be asked about and the shell follows. `[` is a
-# pattern only with a `]` after it, so the `[` builtin is not. The probe is
-# git's `:(glob)` pathspec, whose `*` and `?` match a leading dot where the
-# shell's do not, so a pattern whose only tracked matches are dotfiles is
-# accepted though the shell would match nothing. With `--at <rev>` the tracked
-# files are <rev>'s tree, read into a private index file, and the symlink test
-# reads that tree too; the ignore rules are still <repo>'s working copy's, the
-# one place git reads them from. The resolvability probe of the command's
-# leading word above stays <repo>'s own.
+# <repo>. So is a word right after an option written without `=`, unless it
+# has a `/` or a `.`: it may be that option's value, which names no path. A
+# pattern under a path git ignores names generated output, such as a build
+# the Install step produces, which is never tracked, so it is accepted too,
+# and so is one through a symlink or a submodule, which git lists as one
+# entry and declines to be asked beneath, and the shell follows or the
+# Install step populates. `[` is a pattern only with a `]` after it, so the
+# `[` builtin is not. The probe is git's `:(glob)` pathspec, whose `*` and
+# `?` match a leading dot where the shell's do not, so a pattern whose only
+# tracked matches are dotfiles is accepted though the shell would match
+# nothing. With `--at <rev>` the tracked files are <rev>'s tree, read into a
+# private index file, and the symlink and submodule test reads that tree
+# too; the ignore rules are still <repo>'s working copy's, the one place git
+# reads them from. The resolvability probe of the command's leading word
+# above stays <repo>'s own.
 if [ "$field" = test ]; then
   # An ambient index would answer `ls-files` for whatever repository or commit
   # the caller is in the middle of, not for <repo>'s tracked files.
@@ -354,18 +362,29 @@ if [ "$field" = test ]; then
   where=$repo
   if [ -n "$rev" ]; then
     where="$repo at $rev"
-    GIT_INDEX_FILE="$errf.idx" git -C "$repo" read-tree "$revc" 2>"$errf" || {
+    export GIT_INDEX_FILE="$errf.idx"
+    git -C "$repo" read-tree "$revc" 2>"$errf" || {
       listed=$?
       die "cannot read the tree of $rev in $repo (git read-tree exit $listed): $(cat "$errf" 2>/dev/null)"
     }
-    export GIT_INDEX_FILE="$errf.idx"
   fi
-  # Whether <path> is a symlink in the tree the command runs in: on disk in
-  # <repo> itself, an index entry of mode 120000 in <rev>'s tree.
-  islink() {
-    [ -n "$rev" ] || { [ -L "$repo/$1" ]; return; }
-    git -C "$repo" ls-files -s -- ":(literal)$1" 2>/dev/null \
-      | { while read -r mode _ _ path; do [ "$mode $path" = "120000 $1" ] && exit 0; done; exit 1; }
+  # Whether <path> is a directory git lists as ONE entry and never beneath: a
+  # symlink (the shell follows it) or a submodule (a gitlink, mode 160000, that
+  # the Install step populates). A symlink is a link on disk in <repo> itself
+  # and a mode-120000 entry in <rev>'s tree; a gitlink is an index entry either
+  # way. Status 0 yes, 1 no, 2 git could not say (its exit status in `listed`,
+  # its reason in `$errf`).
+  opaque() {
+    if [ -z "$rev" ] && [ -L "$repo/$1" ]; then return 0; fi
+    entries=$(git -C "$repo" ls-files -s -- ":(literal)$1" 2>"$errf") || { listed=$?; return 2; }
+    printf '%s\n' "$entries" \
+      | { while read -r mode _ _ path; do
+            [ "$path" = "$1" ] || continue
+            case $mode in
+              160000) exit 0 ;;
+              120000) [ -n "$rev" ] && exit 0 ;;
+            esac
+          done; exit 1; }
   }
   set -f
   prev=
@@ -388,21 +407,26 @@ if [ "$field" = test ]; then
     # prefix of the files beneath it.
     tracked=$(git -C "$repo" ls-files -- ":(glob)$word" ":(glob)${word%/}/**" 2>"$errf") || {
       listed=$?
-      set +f
       die "cannot list the files tracked in $where to check its test command's pattern '$word' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)"
     }
     [ -z "$tracked" ] || continue
     lead=${word%%[*?[]*}
     while :; do
       case $lead in */*) lead=${lead%/*} ;; *) break ;; esac
-      if islink "$lead"; then continue 2; fi
+      opq=0
+      opaque "$lead" || opq=$?
+      case $opq in
+        0) continue 2 ;;
+        1) ;;
+        *) die "cannot ask git whether '$lead' is a symlink or a submodule in $where, to check its test command's pattern '$word' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)" ;;
+      esac
     done
     ignored=0
     git -C "$repo" check-ignore -q --no-index -- "$word" 2>"$errf" || ignored=$?
     case $ignored in
       0) ;;
-      1) set +f; die "the Recipe cache at $cache is invalid: its test command's pattern '$word' matches no file tracked in $where — a Test entrypoint that selects no tests passes having run nothing, so the Recipe is stale, not a finding; $derive" ;;
-      *) set +f; die "cannot ask git whether $repo ignores its test command's pattern '$word' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
+      1) die "the Recipe cache at $cache is invalid: its test command's pattern '$word' matches no file tracked in $where — a Test entrypoint that selects no tests passes having run nothing, so the Recipe is stale, not a finding; $derive" ;;
+      *) die "cannot ask git whether $repo ignores its test command's pattern '$word' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
     esac
   done
   set +f

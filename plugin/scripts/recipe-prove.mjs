@@ -43,7 +43,10 @@
 // On proof, the cache is written atomically to <workspace>/.fleet/recipe.json
 // — <workspace> being the directory holding the repository's common git dir,
 // the place derive-testcmd.sh reads it from — and then read back through
-// derive-testcmd.sh for both fields. A cache the reader refuses is rolled
+// derive-testcmd.sh for both fields, the Test entrypoint against `derivedAt`'s
+// tree (`--at`): the tree the proof ran in, and the one a claim probes, so a
+// main checkout still on an older layout cannot refuse a Recipe that holds
+// where it runs. A cache the reader refuses is rolled
 // back to whatever stood before, as is one whose read-back is no verdict, so
 // the reader stays the one authority on what a usable cache is. A failed
 // proof never touches an existing cache.
@@ -313,7 +316,7 @@ function writeCache(cache, recipe, repo) {
     throw e;
   }
   for (const field of ["install", "test"]) {
-    const r = spawnSync("sh", [READER, repo, field], { env: ENV, encoding: "utf8" });
+    const r = spawnSync("sh", [READER, repo, field, ...(field === "test" ? ["--at", recipe.derivedAt] : [])], { env: ENV, encoding: "utf8" });
     if (r.status === 0 && r.stdout.replace(/\n$/, "") === recipe[field]) continue;
     if (prior === null) unlinkSync(cache);
     else writeFileSync(cache, prior);

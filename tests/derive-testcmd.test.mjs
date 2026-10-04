@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, symlinkSync, chmodSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, symlinkSync, chmodSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join, dirname } from "node:path";
@@ -56,9 +56,13 @@ function cache(dir, body) {
   writeFileSync(join(dir, ".fleet", "recipe.json"), typeof body === "string" ? body : JSON.stringify(body));
 }
 
-function derive(dir, field = "test", env = process.env, cwd = tmpdir()) {
-  const r = spawnSync("sh", [SCRIPT, dir, field], { encoding: "utf8", env, cwd, timeout: 30_000 });
+function run(args, env = process.env, cwd = tmpdir()) {
+  const r = spawnSync("sh", [SCRIPT, ...args], { encoding: "utf8", env, cwd, timeout: 30_000 });
   return { status: r.status, out: r.stdout.replace(/\n$/, ""), err: r.stderr };
+}
+
+function derive(dir, field = "test", env = process.env, cwd = tmpdir()) {
+  return run([dir, field], env, cwd);
 }
 
 // Every refusal that sends its reader to re-derive must say WHICH step does
@@ -337,7 +341,39 @@ test("a test command whose glob goes through a tracked symlink is accepted, not 
   assert.equal(r.out, cmd);
 });
 
-// The probe's two git calls each have a refusal for git itself failing, in
+// A glob into a submodule lists nothing either: the index holds the gitlink
+// (`vendor/lib`, mode 160000) and never what is beneath it, which the Install
+// step populates (`git submodule update --init`). Real submodule, so the
+// gitlink is whatever git itself records.
+test("a test command whose glob goes into a submodule is accepted, with and without --at; the same glob under a directory that is no submodule is refused", () => {
+  const src = tempDir("derive-testcmd-sub-");
+  const gitIn = (cwd, ...a) => execFileSync("git", a, { cwd, stdio: "pipe", env: FIXTURE_ENV, encoding: "utf8" });
+  gitIn(src, "init", "-q");
+  gitIn(src, "config", "user.email", "t@t");
+  gitIn(src, "config", "user.name", "t");
+  mkdirSync(join(src, "test"));
+  writeFileSync(join(src, "test", "s.test.mjs"), "");
+  gitIn(src, "add", "-A");
+  gitIn(src, "commit", "-q", "-m", "sub");
+  const { dir, head } = repo();
+  gitIn(dir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", src, "vendor/lib");
+  gitIn(dir, "commit", "-q", "-m", "submodule");
+  assert.equal(gitIn(dir, "ls-files", "--", "vendor/lib/test/s.test.mjs").trim(), "", "fixture: the index lists the gitlink, not what is beneath it");
+  const into = "node --test vendor/lib/test/*.test.mjs";
+  cache(dir, recipe(head, { test: into }));
+  const plain = derive(dir);
+  assert.equal(plain.status, 0, plain.err);
+  assert.equal(plain.out, into);
+  const at = deriveAt(dir, "HEAD");
+  assert.equal(at.status, 0, at.err);
+  assert.equal(at.out, into);
+
+  cache(dir, recipe(head, { test: "node --test vendor/none/test/*.test.mjs" }));
+  assert.equal(derive(dir).status, 1, "control: a directory that is no submodule is still probed");
+  assert.equal(deriveAt(dir, "HEAD").status, 1, "control, --at: the same");
+});
+
+// Each of the probe's git calls has a refusal for git itself failing, in
 // the script's own words with git's reason appended. The stub fails one
 // subcommand and hands every other call to the real git, so the cache read
 // before the probe is unaffected and only the call under test breaks.
@@ -371,6 +407,21 @@ test("a git that cannot say whether a path is ignored refuses, naming its exit s
   assert.match(r.err, /^derive-testcmd: cannot ask git whether .* ignores its test command's pattern 'gone\/\*\.test\.mjs' \(git check-ignore exit 128\): git: injected check-ignore failure$/m);
 });
 
+// `-s` is the `ls-files -s` that asks whether a leading directory is a symlink
+// or a submodule; no other git call in the script carries that flag.
+test("a git that cannot say whether a leading directory is a symlink or a submodule refuses, naming its exit status and reason", () => {
+  const { dir, head } = repo({ "tests/a.test.mjs": "" });
+  cache(dir, recipe(head, { test: "node --test gone/*.test.mjs" }));
+  const control = derive(dir);
+  assert.equal(control.status, 1, "fixture: without the stub the pattern is refused as stale");
+  assert.ok(control.err.includes("matches no file tracked in"), control.err);
+  const r = derive(dir, "test", gitFailing("-s"));
+  assert.equal(r.status, 1, r.err);
+  assert.equal(r.out, "", "nothing may reach the caller");
+  assert.match(r.err, /^derive-testcmd: cannot ask git whether 'gone' is a symlink or a submodule in .*, to check its test command's pattern 'gone\/\*\.test\.mjs' \(git ls-files exit 128\): git: injected -s failure$/m);
+  assert.doesNotMatch(r.err, /matches no file tracked/, "a git that cannot answer is not a stale Recipe");
+});
+
 // `--at <rev>`: the vacuous-suite probe against the tree the command will run
 // in, not <repo>'s own index. claim-ticket.sh cuts its worktree from
 // origin/main, which can hold a suite the main checkout does not yet list
@@ -392,8 +443,7 @@ function movedSuite() {
 }
 
 function deriveAt(dir, rev, env = process.env) {
-  const r = spawnSync("sh", [SCRIPT, dir, "test", "--at", rev], { encoding: "utf8", env, cwd: tmpdir(), timeout: 30_000 });
-  return { status: r.status, out: r.stdout.replace(/\n$/, ""), err: r.stderr };
+  return run([dir, "test", "--at", rev], env);
 }
 
 test("--at refuses a pattern the named tree no longer holds, though the checkout's index still lists it", () => {
@@ -432,6 +482,26 @@ test("--at leaves the checkout's index and working tree as they were", () => {
   assert.equal(git("status", "--porcelain", "--untracked-files=no"), "");
 });
 
+// The private index file lives beside the script's other temp files and goes
+// with them on every exit: leaked, it would cost one file per probe, silently.
+// A stub `mktemp` on PATH makes the script's temp files land in a directory of
+// the test's own, and it logs each call, so an empty directory afterwards
+// cannot be a stub the script never reached.
+test("--at leaves no temporary file behind, on the accepted path or the refused one", () => {
+  const { dir, head } = movedSuite();
+  const real = execFileSync("sh", ["-c", "command -v mktemp"], { encoding: "utf8" }).trim();
+  for (const [test, status] of [["node --test tests/*.test.mjs", 0], ["node --test plugin/scripts/*.test.mjs", 1]]) {
+    cache(dir, recipe(head, { test }));
+    const bin = tempDir("derive-testcmd-mktemp-");
+    const tmp = tempDir("derive-testcmd-tmp-");
+    writeExecStub(join(bin, "mktemp"), `#!/bin/sh\necho called >> '${bin}/calls'\nexec '${real}' '${tmp}/tmp.XXXXXXXX'\n`);
+    const r = deriveAt(dir, "moved", { ...process.env, PATH: `${bin}:${process.env.PATH}` });
+    assert.equal(r.status, status, r.err);
+    assert.ok(readFileSync(join(bin, "calls"), "utf8").length > 0, "the stub mktemp was never called");
+    assert.deepEqual(readdirSync(tmp), [], `exit ${status} left files behind`);
+  }
+});
+
 test("--at reads a symlink in the named tree, not the checkout's disk", () => {
   const { dir, head } = movedSuite();
   const cmd = "node --test suite/*.test.mjs";
@@ -441,6 +511,25 @@ test("--at reads a symlink in the named tree, not the checkout's disk", () => {
   assert.equal(r.out, cmd);
   const absent = derive(dir);
   assert.equal(absent.status, 1, "fixture: no such link in the checkout, so without --at it is stale");
+});
+
+// `git ls-files -s -- :d` would read the colon as pathspec magic, so the probe
+// names the directory with `:(literal)`; a directory whose name starts with a
+// colon is the one case that tells the two forms apart.
+test("--at reads a symlink in the named tree whose name begins with a colon", () => {
+  const { dir, head } = repo({ "tests/a.test.mjs": "" });
+  const git = (...a) => execFileSync("git", a, { cwd: dir, stdio: "pipe", env: FIXTURE_ENV, encoding: "utf8" });
+  symlinkSync("tests", join(dir, ":d"));
+  git("add", "--", "./:d");
+  git("commit", "-q", "-m", "colon link");
+  const linked = git("rev-parse", "HEAD").trim();
+  git("reset", "-q", "--hard", "HEAD~1");
+  const cmd = "node --test :d/*.test.mjs";
+  cache(dir, recipe(head, { test: cmd }));
+  const r = deriveAt(dir, linked);
+  assert.equal(r.status, 0, `a glob through a symlink the tree holds is accepted: ${r.err}`);
+  assert.equal(r.out, cmd);
+  assert.equal(derive(dir).status, 1, "fixture: the checkout holds no such link, so without --at it is stale");
 });
 
 test("--at refuses what it cannot read: an unresolvable rev, a non-test field, a malformed flag, a git that cannot read the tree", () => {
@@ -454,13 +543,13 @@ test("--at refuses what it cannot read: an unresolvable rev, a non-test field, a
   const dash = deriveAt(dir, "-x");
   assert.equal(dash.status, 1, dash.err);
   assert.match(dash.err, /--at needs a commit, got '-x'/);
-  const inst = spawnSync("sh", [SCRIPT, dir, "install", "--at", "moved"], { encoding: "utf8" });
-  assert.equal(inst.status, 1, inst.stderr);
-  assert.equal(inst.stdout, "");
-  assert.match(inst.stderr, /--at applies to the test field only, not 'install'/);
-  const flag = spawnSync("sh", [SCRIPT, dir, "test", "--on", "moved"], { encoding: "utf8" });
-  assert.equal(flag.status, 1, flag.stderr);
-  assert.match(flag.stderr, /usage: derive-testcmd\.sh <repo> <install\|test>/);
+  const inst = run([dir, "install", "--at", "moved"]);
+  assert.equal(inst.status, 1, inst.err);
+  assert.equal(inst.out, "");
+  assert.match(inst.err, /--at applies to the test field only, not 'install'/);
+  const flag = run([dir, "test", "--on", "moved"]);
+  assert.equal(flag.status, 1, flag.err);
+  assert.match(flag.err, /usage: derive-testcmd\.sh <repo> <install\|test>/);
   const broken = deriveAt(dir, "moved", gitFailing("read-tree"));
   assert.equal(broken.status, 1, broken.err);
   assert.equal(broken.out, "");
