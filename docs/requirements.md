@@ -20,6 +20,8 @@ supported ([ADR 0009](adr/0009-supported-platforms-are-macos-linux-wsl.md)). All
 | `python3` | any 3.x | `python3 -c 'import json'` |
 | `shasum` | any | `command -v shasum` |
 
+Plus whatever your Recipe runs (§2.3): `mvn`, `go`, `cargo`, …
+
 ### 1.2 `gh` authentication — HARD
 - Logged in (`gh auth status`) with `repo` scope to the GitHub host that owns your repo.
 - All members and the controller share this identity; no per-actor attribution.
@@ -56,14 +58,11 @@ Remote: `origin`. Integration branch: `main` (all rebases, cherry-picks, stalene
 Check: `git remote get-url origin && git rev-parse --verify origin/main`
 
 ### 2.3 Installable and testable — HARD
-**[ADR 0015](adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md):** Any technology. Fleet derives your repo's Recipe (Install + Test entrypoint) by agent reasoning, proves both in a throwaway worktree, caches under `.fleet/`.
+**[ADR 0015](adr/0015-consumer-recipe-by-agent-reasoning-no-technology-table.md):** Any technology. Fleet derives your repo's Recipe (Install step + Test entrypoint) by agent reasoning, proves both in a throwaway worktree, caches under `.fleet/` ([Recipe](components/recipe.md)).
 
-**Shipped state (until #2117, #2118 land):** Node-only derivation. `claim-ticket.sh` refuses unless `origin/main` has `package.json` with `scripts.test` or tracked files matching `\.(test|spec)\.[cm]?[jt]sx?$` and an install from `package-lock.json`/`pnpm-lock.yaml`/`yarn.lock` or zero dependencies.
-
-A Maven repo is refused outright (measured 2026-09-28); the interim
-workaround is a one-line `package.json`
-`{"scripts":{"test":"<your command>"}}` with no dependencies, which
-needs `npm` on the fleet machine and is untested.
+- **What the derivation reads:** your README, build files and CI workflow. The deriving agent keeps no table of technologies; nothing checks for a particular manifest or lockfile.
+- **What the proof requires:** the Install step leaves the tree clean; the Test entrypoint is shown to run real tests — the runner's own non-zero count, or a deliberate mutation of one test turning the run red. `RECIPE NOT PROVEN` writes no cache and halts the run.
+- **The cache:** `.fleet/recipe.json` in the main checkout, carrying the `origin/main` commit it was derived at and the proof. Every claim reads both commands from it and every review its Test entrypoint; a missing or unproven cache is a refusal naming the derivation step, never a guess.
 
 Hard rules for any technology:
 1. Repo is learnable (README or build file documents install + test).
@@ -72,10 +71,9 @@ Hard rules for any technology:
 4. Both commands run in a fresh worktree with no ambient environment (no shared databases, compose stacks, or env vars).
 5. Binaries the Recipe runs must be on `PATH` on the fleet machine (§1.1 lists only fleet-plugin dependencies).
 
-Check:
+Check, once a run's phase 0 has derived the Recipe:
 ```sh
-{ node -e 'process.exit(require("./package.json").scripts?.test?0:1)' 2>/dev/null; } || git ls-files | grep -qE '\.(test|spec)\.[cm]?[jt]sx?$'
-git ls-tree --name-only origin/main package-lock.json pnpm-lock.yaml yarn.lock | grep -q . || git show origin/main:package.json | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));process.exit(["dependencies","devDependencies","peerDependencies","optionalDependencies","workspaces"].reduce((n,k)=>n+Object.keys(p[k]||{}).length,0)?1:0)'
+~/.fleet/bin/fleet-run derive-testcmd.sh . install && ~/.fleet/bin/fleet-run derive-testcmd.sh . test
 ```
 
 ### 2.4 Labels — HARD
@@ -187,9 +185,6 @@ set -e
 node -v; git --version; gh --version | head -1; jq --version; python3 --version; command -v shasum
 gh auth status
 git remote get-url origin; git rev-parse --verify -q origin/main >/dev/null
-{ test -f package.json && node -e 'process.exit(require("./package.json").scripts?.test?0:1)'; } || git ls-files | grep -qE '\.(test|spec)\.[cm]?[jt]sx?$'
-git ls-tree --name-only origin/main package-lock.json pnpm-lock.yaml yarn.lock | grep -q . \
-  || git show origin/main:package.json | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));process.exit(["dependencies","devDependencies","peerDependencies","optionalDependencies","workspaces"].reduce((n,k)=>n+Object.keys(p[k]||{}).length,0)?1:0)'
 git check-ignore -q .worktrees/probe
 git check-ignore -q .fleet/probe
 for l in ready-for-agent in-progress ready-to-merge; do gh label list --search "$l" --json name --jq '.[].name' | grep -qx "$l"; done

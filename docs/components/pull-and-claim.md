@@ -22,10 +22,10 @@ it — judged, then either claimed, relabelled by cause, or excluded.
      `behind-issue:#M`).
    - Decided, live, unclaimed → claim.
 4. **Claim.** [`claim-ticket.sh`](../../plugin/scripts/claim-ticket.sh)
-   labels the issue `in-progress`, derives a frozen install command from
-   `origin/main`'s lockfile, creates a branch and worktree
-   (`<type>/<issue>-<slug>`), materializes the [Recipe](recipe.md)'s
-   install step, and emits a JSON claim receipt.
+   labels the issue `in-progress`, creates a branch and worktree
+   (`<type>/<issue>-<slug>`), runs the [Recipe](recipe.md)'s Install step
+   there — read from the Recipe cache, refusing if it changed the tree —
+   and emits a JSON claim receipt.
 5. **Dispatch** the [Implementer](implementer.md).
 
 Relabelling and excluding write a `ledger.mjs row` comment naming the

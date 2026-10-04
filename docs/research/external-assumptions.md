@@ -51,7 +51,7 @@ refuses, misreads, or silently does nothing.
 
 **Consumer repo**
 
-- Contains `package.json` with a `scripts.test` key, or test files matching `\.(test|spec)\.[cm]?[jt]sx?$`, and a lockfile from `{package-lock.json, pnpm-lock.yaml, yarn.lock}`. Anything else refuses the claim. — shell#84, shell#87–88
+- ~~Contains `package.json` with a `scripts.test` key, or test files matching `\.(test|spec)\.[cm]?[jt]sx?$`, and a lockfile from `{package-lock.json, pnpm-lock.yaml, yarn.lock}`. Anything else refuses the claim.~~ **Superseded by ADR 0015: the claim reads the Install step and Test entrypoint from the Recipe cache, and nothing checks for a manifest, a test-file name or a lockfile.** — shell#84, shell#87–88
 - `node` on PATH (≥ 20.11 per `engines`, dev pin 26.5.0), `python3` on PATH (one NUL-safe reader in `no-undo-audit.sh`), `shasum`, POSIX `sh` (dash/macOS bash 3.2), BSD *or* GNU awk/find/sed. — shell#67–92, harness#104
 - `.fleet/` git-ignored and writable at the git common dir; `.worktrees/` likewise. — prose#137, harness#64
 
@@ -189,7 +189,7 @@ Implied only (lives in code/prose, no doc names it as a requirement):
 
 - `origin`/`main` hardcoded (partial `BASE_REF` escape hatch in shell only).
 - Branch/worktree naming `<type>/<issue>-<slug>` / `.worktrees/<issue>-<slug>`.
-- Consumer must be a Node project with `scripts.test` and one of three lockfiles. **Ruled 2026-09-28: ADR 0014 — any technology, Recipe by agent reasoning; #2117–#2120.**
+- Consumer must be a Node project with `scripts.test` and one of three lockfiles. **Ruled 2026-09-28: ADR 0015 — any technology, Recipe by agent reasoning; #2117–#2120.**
 - `python3` and `shasum` on PATH.
 - Sub-issues/dependencies enabled on the GitHub plan; `blockedBy` ≤ 50 edges.
 - ~~Auto-delete head branches on.~~ **Retired 2026-10-01: #2196 — the merge bot deletes merged branches itself.**
