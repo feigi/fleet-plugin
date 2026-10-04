@@ -1275,8 +1275,8 @@ done
 session directory naming does — a cwd under `$HOME` becomes `-` plus its
 home-relative path segments joined by `-`, and any other path is
 realpath-resolved and wrapped in `--`; every other character is kept, dots and
-underscores included (`/Users/x/.claude/a_b` under home `/Users/x` becomes
-`-.claude-a_b`, `/opt/a.b` becomes `--opt-a.b--`) — and hand-guessing that path
+underscores included (`$HOME/.claude/a_b` becomes `-.claude-a_b`, `/opt/a.b`
+becomes `--opt-a.b--`) — and hand-guessing that path
 is why the fleet's own panel once rendered nothing here. The trailing `/` on the glob matters:
 the same encoded-cwd directory also holds this cwd's own top-level session
 transcripts as loose FILES sibling to the per-session directories, and a
