@@ -57,9 +57,10 @@
 //         repository, origin/main missing, the worktree could not be made), or
 //         a git or filesystem fault stopped it before the cache was settled
 //         (a git command could not be started, the reader's own git
-//         included, or the reader's `sh`, `node`, `mktemp` or `cat`; the cache
-//         or its temp file could not be written). The log directory under
-//         $TMPDIR is removed.
+//         included; the reader's `sh`, `node`, `mktemp` or `cat` could not be
+//         started, or its `node` died mid-read — a `cat` that ran and failed
+//         stays the reader's refusal, exit 1; the cache or its temp file
+//         could not be written). The log directory under $TMPDIR is removed.
 
 import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
@@ -112,8 +113,8 @@ const cannot = (message) => new Refusal(2, message);
 const notProven = (message) => new Refusal(1, message);
 
 // The exit status derive-testcmd.sh uses for a refusal about its own
-// environment — a tool it needs would not start — where every refusal about
-// the cache is 1.
+// environment — a tool it needs would not start, or node died mid-read — where
+// every refusal about the cache is 1.
 const READER_COULD_NOT_RUN = 3;
 
 function parseArgs(argv) {
@@ -285,9 +286,10 @@ function prove(o, wt, logs) {
 // the prior bytes restored, or the file removed when none stood before. The
 // cache is undone just the same when the read-back is no verdict: an `sh` that
 // could not be started read nothing; a reader that exits READER_COULD_NOT_RUN
-// could not start its `node`, `mktemp` or `cat`; and the reader runs git itself
-// and reads a git that will not start as no repository at all, so its refusal
-// is a verdict on what was proven only while git still starts.
+// could not start its `node`, `mktemp` or `cat`, or lost its `node` mid-read;
+// and the reader runs git itself and reads a git that will not start as no
+// repository at all, so its refusal is a verdict on what was proven only while
+// git still starts.
 function writeCache(cache, recipe, repo) {
   mkdirSync(dirname(cache), { recursive: true });
   const prior = existsSync(cache) ? readFileSync(cache) : null;

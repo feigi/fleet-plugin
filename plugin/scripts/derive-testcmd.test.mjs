@@ -367,6 +367,60 @@ test("a mktemp that runs and fails on its second call is exit 3, never the cache
   assert.match(r.err, /^derive-testcmd: cannot create a temporary file to read the Recipe cache$/m);
 });
 
+// The reader's `node -e 0` probe passes, and then the interpreter dies during
+// the real read — killed, or no longer runnable. Nothing was read, so that is
+// exit 3 as well. Node's own refusal of the cache (its exit 2) and an uncaught
+// fault of its own (exit 1) are still the cache's exit 1, with node's reason.
+for (const [what, body, status, reason] of [
+  ["is killed", "kill -9 $$", 3, /^derive-testcmd: node did not finish reading the Recipe cache \(exit 137\)/m],
+  ["can no longer be run", "exit 127", 3, /^derive-testcmd: node did not finish reading the Recipe cache \(exit 127\)/m],
+  ["refuses the cache itself", "echo 'it does not parse: boom' >&2; exit 2", 1, /is unusable: it does not parse: boom/],
+  ["faults on its own", "echo 'TypeError: boom' >&2; exit 1", 1, /is unusable: TypeError: boom/],
+]) {
+  test(`a node that passes the probe and then ${what} is exit ${status}`, () => {
+    const { dir, head } = repo();
+    cache(dir, recipe(head, { test: "true" }));
+    const bin = shimPath({ node: false });
+    writeExecStub(join(bin, "node"), `#!/bin/sh\nif [ "$1" = -e ] && [ "$2" = 0 ]; then exit 0; fi\n${body}\n`);
+    const r = derive(dir, "test", { ...process.env, PATH: bin });
+    assert.equal(r.status, status, r.err);
+    assert.equal(r.out, "");
+    assert.match(r.err, reason);
+  });
+}
+
+// A cat that exits 126 — the status a shell gives a command it found but could
+// not execute — is the environment's fault like one that is missing (127). The
+// stub exits 126 itself: whether a shell reports an unexecutable file as 126
+// depends on the shell and its options, and this pins the reader's reading of
+// the status, not the shell's.
+test("a cat that exits 126 is exit 3, never the cache's", () => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head, { test: "true" }));
+  const bin = shimPath({ node: true, omit: "cat" });
+  writeExecStub(join(bin, "cat"), "#!/bin/sh\nexit 126\n");
+  const r = derive(dir, "test", { ...process.env, PATH: bin });
+  assert.equal(r.status, 3, r.err);
+  assert.equal(r.out, "");
+  assert.match(r.err, /^derive-testcmd: cat could not be started \(exit 126\), so the Recipe cache cannot be read$/m);
+});
+
+// A cat that starts and fails while reading node's byte-count file is the
+// cache refusal, exit 1, and carries cat's own reason.
+test("a cat that runs and fails on the byte-count file is exit 1, carrying its reason", () => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head, { test: "true" }));
+  const bin = shimPath({ node: true, omit: "cat" });
+  const real = execFileSync("sh", ["-c", "command -v cat"], { encoding: "utf8" }).trim();
+  const mark = join(bin, "called");
+  writeExecStub(join(bin, "cat"), `#!/bin/sh\nif [ ! -e '${mark}' ]; then : > '${mark}'; echo 'cat: I/O error' >&2; exit 1; fi\nexec '${real}' "$@"\n`);
+  const r = derive(dir, "test", { ...process.env, PATH: bin });
+  assert.equal(r.status, 1, r.err);
+  assert.equal(r.out, "");
+  assert.match(r.err, /cat failed reading node's byte-count file \(exit 1\): cat: I\/O error/);
+  assert.doesNotMatch(r.err, /could not be started/);
+});
+
 // `rm` is the reader's cleanup only, so it must not decide the outcome: with
 // it gone a good cache still reads cleanly — status 0 and nothing on stderr,
 // the success-path invariant claim-ticket.sh relies on — and a refused cache

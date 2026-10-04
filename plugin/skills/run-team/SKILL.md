@@ -369,7 +369,10 @@ phase, or in any later one, asks the maintainer which tickets to take.
    command. Check it first: `~/.fleet/bin/fleet-run derive-testcmd.sh .
    install` and `~/.fleet/bin/fleet-run derive-testcmd.sh . test`. **Both exit
    0 → the cache is present and valid: use it as it stands and derive
-   nothing.** Either refuses → derive it. This step is yours: one derivation
+   nothing.** Either exits 1 (a refusal about the cache) → derive it. Either
+   exits 3 → the reader could not run a tool it needs, so the cache's state is
+   unknown: fix that environment fault and check again; deriving would not
+   help. This step is yours: one derivation
    per run start at most, never one per member, and a member never derives.
    Dispatch a `task` member named `derive-recipe`, agent
    `fleet-recipe-deriver`, and wait for its report — nothing in this run can
