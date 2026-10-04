@@ -376,22 +376,21 @@ test("json.sh's header names every script that sources it in the exit-1 list its
   const dir = dirname(LIB);
   const lib = readFileSync(LIB, "utf8");
   assert.ok(lib.includes(SOURCING), "json.sh's usage block no longer carries the sourcing line this test searches for");
-  const callers = readdirSync(dir)
-    .filter((f) => f.endsWith(".sh") && f !== "json.sh")
-    .filter((f) => readFileSync(join(dir, f), "utf8").includes(SOURCING))
-    .sort();
+  const src = new Map(readdirSync(dir).filter((f) => f.endsWith(".sh") && f !== "json.sh").map((f) => [f, readFileSync(join(dir, f), "utf8")]));
+  const callers = [...src.keys()].filter((f) => src.get(f).includes(SOURCING)).sort();
   assert.ok(callers.length > 0, "no script sources json.sh — the search is broken, not the header");
 
   const header = lib.split("\n").filter((l) => l.startsWith("#")).map((l) => l.replace(/^# ?/, "")).join(" ");
   const m = header.match(/Exit 1 is a VERDICT([\s\S]*?)so a lib that merely went missing([\s\S]*?)define no exit 1 at all/);
   assert.ok(m, "json.sh's header no longer carries the exit-1 paragraph this test reads");
+  assert.doesNotMatch(m[1], /\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+) of the\b/i, "json.sh's header states a caller count in the verdict list — say it as a property, true at any count");
   const named = (s) => (s.match(/[\w-]+\.sh/g) ?? []).sort();
   const verdict = named(m[1]);
   const noExit1 = named(m[2]);
 
   // A caller whose own source says it defines "no exit 1" belongs in the
   // second list; every other caller defines exit 1, and so belongs in the first.
-  const declaresNone = (f) => /no exit 1/i.test(readFileSync(join(dir, f), "utf8"));
-  assert.deepEqual(verdict, callers.filter((f) => !declaresNone(f)));
-  assert.deepEqual(noExit1, callers.filter(declaresNone));
+  const noExit1Callers = callers.filter((f) => /no exit 1/i.test(src.get(f)));
+  assert.deepEqual(verdict, callers.filter((f) => !noExit1Callers.includes(f)));
+  assert.deepEqual(noExit1, noExit1Callers);
 });

@@ -1017,8 +1017,8 @@ test("a positional argument is refused, not silently discarded (#525)", (t) => {
 // whether a replacement member would redo work or destroy it.
 //
 // Neither an exit-code nor a wording match can pin that. `die` here is 2, and
-// this script defines no exit 1 at all (json.sh's header records why for all
-// eight callers): a bare 1 out of it is a code its caller has no reading for.
+// this script defines no exit 1 at all (json.sh's header records why for every
+// caller of it): a bare 1 out of it is a code its caller has no reading for.
 // Which abort the mutant takes is the SHELL's choice, not this script's —
 // measured with the guard downgraded to a non-exiting `printf … >&2`: /bin/sh
 // (macOS bash 3.2) aborts at 1 with `short_j: unbound variable`, /bin/dash at 2
