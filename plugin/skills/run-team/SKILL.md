@@ -403,9 +403,11 @@ phase, or in any later one, asks the maintainer which tickets to take.
    re-derivation, halts the run — no Pull, no claim, no review dispatch — and
    you report `STALL — Recipe not proven: <cause>` to the maintainer with the
    deriver's reason verbatim. A repository the fleet cannot run needs human
-   hands, the `ready-for-human` cause: a toolchain this machine lacks, or a
-   suite that runs no tests the proof can see. It is never a loop: no third
-   derivation, and never a cache written by hand.
+   hands, the `ready-for-human` cause: a toolchain this machine lacks, a
+   suite that runs no tests the proof can see, or an Install step, Test
+   entrypoint or mutation that hangs until the proof's own bound refuses it as
+   timed out. It is never a loop: no third derivation, and never a cache
+   written by hand.
 
    **Fold in every PR a prior run left open, before shortlisting.** A chore PR
    carrying that run's own metrics, or ticket work whose review was deferred —

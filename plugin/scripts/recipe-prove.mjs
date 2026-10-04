@@ -34,6 +34,12 @@
 //   With neither, nothing is proven: the refusal still names where the test
 //   run's output is, so the caller can read the count line off it.
 //
+// Each of those commands — the Install step, both Test runs, the mutation —
+// runs under a time bound of its own, 20 minutes, that RECIPE_PROVE_TIMEOUT
+// (whole seconds) can shorten and never lengthen. A command still running at
+// the bound is killed, and the proof is NOT PROVEN for it, the refusal naming
+// the bound and the command's log.
+//
 // On proof, the cache is written atomically to <workspace>/.fleet/recipe.json
 // — <workspace> being the directory holding the repository's common git dir,
 // the place derive-testcmd.sh reads it from — and then read back through
@@ -59,6 +65,7 @@ import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isCLI } from "./is-cli.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 import { isDigits } from "./arg.mjs";
 
@@ -72,6 +79,27 @@ const READER = join(dirname(fileURLToPath(import.meta.url)), "derive-testcmd.sh"
 // calls below at another repository, and the Install step and Test entrypoint
 // at that repository's tree, while the cache still landed here.
 const ENV = gitEnv();
+
+// The bound on each Recipe command. A command that never returns — a stalled
+// fetch, a watch-mode runner — would otherwise hang the Recipe derivation,
+// which a run waits on before its first claim, with no refusal ever printed.
+// 20 minutes is chosen against the false failure: far above a healthy install
+// or suite, and still a bound.
+//
+// The bound is per command, never for the whole proof: the longest a proof
+// can take is every command it runs taking its full bound.
+//
+// RECIPE_PROVE_TIMEOUT can only SHORTEN it: a knob that could lengthen the
+// bound is one more way for configuration to remove it. A value that is not a
+// positive whole number of seconds below the default is not an error and not
+// a bound either — the default stands, in silence. isDigits() is arg.mjs's
+// own predicate, so `3.5`, `-5` and `5e3` are refused flat, never coerced.
+const COMMAND_DEFAULT_SECONDS = 20 * 60;
+export function commandBudget(override) {
+  const seconds = isDigits(String(override)) ? Number(override) : 0;
+  return (seconds > 0 && seconds < COMMAND_DEFAULT_SECONDS ? seconds : COMMAND_DEFAULT_SECONDS) * 1000;
+}
+const COMMAND_TIMEOUT_MS = commandBudget(process.env.RECIPE_PROVE_TIMEOUT);
 
 class Refusal extends Error {
   constructor(code, message) {
@@ -133,10 +161,25 @@ function git(args, cwd) {
 // killed by a signal (an OOM kill, a timeout wrapper) has no exit status, so
 // it is refused here and never reported as one: a crashed run must not count
 // as a red suite.
+//
+// A command that overruns COMMAND_TIMEOUT_MS is killed with SIGKILL, never the
+// default SIGTERM: a command that traps or ignores SIGTERM would keep spawnSync
+// waiting on it forever. spawnSync reports that kill as an ETIMEDOUT `error`
+// alongside the signal, so the timeout is read first: through the `error`
+// branch it would be a `sh` that could not start, and through the `signal`
+// one a kill with no cause named. Whatever it printed before the kill stays in
+// the log, which is opened for append. Only the `sh` itself is killed:
+// spawnSync cannot kill a process tree, so a child the command started may
+// outlive the refusal.
 function sh(cmd, cwd, log) {
   const fd = openSync(log, "a");
   try {
-    const r = spawnSync("sh", ["-c", cmd], { cwd, env: ENV, stdio: ["ignore", fd, fd] });
+    const r = spawnSync("sh", ["-c", cmd], {
+      cwd, env: ENV, stdio: ["ignore", fd, fd], timeout: COMMAND_TIMEOUT_MS, killSignal: "SIGKILL",
+    });
+    if (r.error?.code === "ETIMEDOUT") {
+      throw notProven(`'${cmd}' timed out: still running after ${COMMAND_TIMEOUT_MS / 1000}s, the bound on each Recipe command, so it was stopped; output: ${log}`);
+    }
     if (r.error) throw cannot(`could not start sh: ${r.error.message}`);
     if (r.signal) throw notProven(`'${cmd}' was killed by ${r.signal}, so it has no exit status to read; output: ${log}`);
     return r.status;
@@ -326,19 +369,22 @@ function main(argv) {
   process.stdout.write(`${NAME}: PROVEN — Recipe cache written to ${cache}\n${JSON.stringify(recipe)}\n`);
 }
 
-try {
-  main(process.argv.slice(2));
-} catch (e) {
-  // A fault outside the proof — the cache or its temp file could not be
-  // written — is "no verdict" (2), never the NOT PROVEN (1) a stack trace's
-  // exit status would read as.
-  if (!(e instanceof Refusal)) {
-    process.stderr.write(`${NAME}: ${e.message}\n`);
-    process.exit(2);
+// Only run main() as a CLI, never when imported by a test (see is-cli.mjs).
+if (isCLI(import.meta.url)) {
+  try {
+    main(process.argv.slice(2));
+  } catch (e) {
+    // A fault outside the proof — the cache or its temp file could not be
+    // written — is "no verdict" (2), never the NOT PROVEN (1) a stack trace's
+    // exit status would read as.
+    if (!(e instanceof Refusal)) {
+      process.stderr.write(`${NAME}: ${e.message}\n`);
+      process.exit(2);
+    }
+    // The closing sentence on a line of its own: most reasons end in a log path,
+    // and a `.` riding on one would read as part of it.
+    const msg = e.code === 1 ? `NOT PROVEN — ${e.message}\nNo Recipe cache written.` : e.message;
+    process.stderr.write(`${NAME}: ${msg}\n`);
+    process.exit(e.code);
   }
-  // The closing sentence on a line of its own: most reasons end in a log path,
-  // and a `.` riding on one would read as part of it.
-  const msg = e.code === 1 ? `NOT PROVEN — ${e.message}\nNo Recipe cache written.` : e.message;
-  process.stderr.write(`${NAME}: ${msg}\n`);
-  process.exit(e.code);
 }

@@ -5,6 +5,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, sy
 import { join } from "node:path";
 import { tempDir } from "./temp-dir.mjs";
 import { writeExecStub } from "./exec-stub.mjs";
+import { commandBudget } from "./recipe-prove.mjs";
 
 // recipe-prove.mjs is the Recipe derivation step's proof and the ONE writer of
 // the Recipe cache: the deriving agent chooses the Install step and the Test
@@ -324,7 +325,7 @@ test("the throwaway worktree is removed afterwards, proven or not", () => {
   const { dir } = repo(MAVEN_FILES);
   prove(dir, MAVEN_PROOF);
   prove(dir, ["--install", "exit 3", ...MAVEN_PROOF.slice(2)]);
-  assert.equal(git(dir, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length, 1);
+  assert.equal(worktrees(dir), 1);
 });
 
 test("an ambient GIT_DIR naming another repository does not change the answer", () => {
@@ -367,9 +368,12 @@ test("a proof that cannot be attempted exits 2, distinct from a Recipe that is n
   const missing = prove(half, ["--install", "--test", "--test", "mvn -q test"]);
   assert.equal(missing.status, 2);
   assert.match(missing.err, /^recipe-prove: usage:/);
-  assert.equal(git(half, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length, 1,
+  assert.equal(worktrees(half), 1,
     "a refusal at the argument boundary creates no worktree");
 });
+
+// The number of worktrees the repository at `dir` has registered, the main checkout included.
+const worktrees = (dir) => git(dir, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length;
 
 // Every temp dir the proof made, scanned for the throwaway worktree it names `wt`.
 function assertNoWorktreeLeft(tmp) {
@@ -581,7 +585,7 @@ test("read-only install output cannot turn a proof that held into a crash", { sk
   assert.equal(r.status, 0, r.err);
   assert.equal(JSON.parse(readFileSync(cachePath(dir), "utf8")).derivedAt, head);
   assert.deepEqual(logDirs(r.tmp), []);
-  assert.equal(git(dir, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length, 1);
+  assert.equal(worktrees(dir), 1);
 });
 
 test("read-only install output does not replace a refusal's reason with a stack trace", { skip: IGNORES_MODES }, () => {
@@ -720,4 +724,116 @@ test("the mutation is credited only with what it changed, never with what the un
   const r = prove(real, ["--install", "true", "--test", "sh t.sh", "--mutate", "echo x > state.txt", "--mutation", "poison the state"]);
   assert.equal(r.status, 0, r.err);
   assert.match(JSON.parse(readFileSync(cachePath(real), "utf8")).mutation, /changed state\.txt$/);
+});
+
+// Every Recipe command runs under a time bound, shortened here through
+// RECIPE_PROVE_TIMEOUT so a hang costs seconds. Each case below hangs one of
+// the four commands the proof runs; a bound that missed one would leave that
+// case to the helper's own 60s spawn timeout, which reads as status null.
+const timedOut = (cmd, seconds) =>
+  new RegExp(`NOT PROVEN — '${cmd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}' timed out: still running after ${seconds}s, the bound on each Recipe command`);
+
+const HANGS = [
+  {
+    name: "an Install step",
+    files: MAVEN_FILES,
+    seconds: 1,
+    hung: "echo fetching deps; exec sleep 30",
+    args: (hung) => ["--install", hung, ...MAVEN_PROOF.slice(2)],
+    log: "install.log",
+    output: /fetching deps/,
+  },
+  {
+    name: "a Test entrypoint",
+    files: MAVEN_FILES,
+    seconds: 1,
+    hung: "echo 'Tests run: 1,'; exec sleep 30",
+    args: (hung) => ["--install", "true", "--test", hung, "--count-line", "Tests run: 1,", "--test-count", "1"],
+    log: "test.log",
+    output: /Tests run: 1,/,
+  },
+  // The two below run a healthy command first, so their bound leaves it room.
+  {
+    name: "a mutation command",
+    files: GO_FILES,
+    seconds: 3,
+    hung: "echo mutating; exec sleep 30",
+    args: (hung) => [...GO_PROOF.slice(0, 4), "--mutate", hung, "--mutation", "never finishes"],
+    log: "mutate.log",
+    output: /mutating/,
+  },
+  {
+    name: "a mutated Test run",
+    files: GO_FILES,
+    seconds: 3,
+    hung: "if grep -q 'a - b' calc.go; then echo mutated; exec sleep 30; else go test ./...; fi",
+    args: (hung) => ["--install", "true", "--test", hung, ...GO_PROOF.slice(4)],
+    log: "test-mutated.log",
+    output: /mutated/,
+  },
+];
+
+for (const c of HANGS) {
+  test(`${c.name} that never finishes is refused as timed out, NOT PROVEN, naming the bound and its log`, () => {
+    const { dir } = repo(c.files);
+    // A cache from an earlier proof: a refusal must leave its bytes alone.
+    mkdirSync(join(dir, ".fleet"));
+    writeFileSync(cachePath(dir), '{"earlier":"cache"}\n');
+    const start = Date.now();
+    const r = prove(dir, c.args(c.hung), { env: { RECIPE_PROVE_TIMEOUT: String(c.seconds) } });
+    const elapsed = Date.now() - start;
+    assert.equal(r.status, 1, `status ${r.status} after ${elapsed} ms: ${r.err}`);
+    assert.match(r.err, timedOut(c.hung, c.seconds));
+    assert.doesNotMatch(r.err, /could not start sh/);
+    assert.doesNotMatch(r.err, /was killed by/, "a timeout is named as one, not as a bare signal");
+    assert.ok(elapsed < 20_000, `the 30s command was not cut at the ${c.seconds}s bound: ${elapsed} ms`);
+    // The log the refusal names is kept, with what the command printed before the kill.
+    const log = r.err.match(/output: (\S+)$/m);
+    assert.ok(log, r.err);
+    assert.ok(log[1].endsWith(`/${c.log}`), `${log[1]} is not the ${c.log}`);
+    assert.match(readFileSync(log[1], "utf8"), c.output);
+    // The throwaway worktree is removed and unregistered, and the cache untouched.
+    assertNoWorktreeLeft(r.tmp);
+    assert.equal(worktrees(dir), 1, git(dir, "worktree", "list"));
+    assert.equal(readFileSync(cachePath(dir), "utf8"), '{"earlier":"cache"}\n');
+  });
+}
+
+// SIGTERM, the default kill signal, is one a command can trap: spawnSync then
+// waits on it forever. The bound must not depend on the command's consent.
+test("a command that ignores SIGTERM is still refused at the bound, not waited on", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const hung = "trap '' TERM; while :; do sleep 1; done";
+  const start = Date.now();
+  const r = prove(dir, ["--install", "true", "--test", hung, "--count-line", "x", "--test-count", "1"], { env: { RECIPE_PROVE_TIMEOUT: "1" } });
+  const elapsed = Date.now() - start;
+  assert.equal(r.status, 1, `status ${r.status} after ${elapsed} ms: ${r.err}`);
+  assert.match(r.err, timedOut(hung, 1));
+  assert.ok(elapsed < 20_000, `the bound did not stop a command that traps SIGTERM: ${elapsed} ms`);
+  assert.equal(existsSync(cachePath(dir)), false);
+  assert.equal(worktrees(dir), 1, git(dir, "worktree", "list"));
+});
+
+// The bound is per command, never one budget for the whole proof: two
+// commands each under it, together over it, still prove.
+test("commands that each finish inside the bound still prove, whatever their total", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, ["--install", "sleep 3", "--test", "sleep 3; mvn -q test", ...MAVEN_PROOF.slice(4)], { env: { RECIPE_PROVE_TIMEOUT: "5" } });
+  assert.equal(r.status, 0, r.err);
+  assert.equal(JSON.parse(readFileSync(cachePath(dir), "utf8")).testCount, 1);
+});
+
+// RECIPE_PROVE_TIMEOUT may only shorten the 20-minute default: a value that is
+// not a whole number of seconds strictly between 0 and the default leaves the
+// default standing. `3.5` and `-5` are numbers Number() would take; a bound
+// they set would be configuration lengthening or removing nothing it may.
+test("RECIPE_PROVE_TIMEOUT can only shorten the default bound", () => {
+  const DEFAULT_MS = 20 * 60 * 1000;
+  assert.equal(commandBudget(undefined), DEFAULT_MS);
+  for (const ignored of ["", "0", "abc", "3.5", "-5", " 5", "5e3", "1200", "1201", "86400"]) {
+    assert.equal(commandBudget(ignored), DEFAULT_MS, `RECIPE_PROVE_TIMEOUT=${JSON.stringify(ignored)} changed the bound`);
+  }
+  assert.equal(commandBudget("1"), 1000);
+  assert.equal(commandBudget("1199"), 1_199_000);
+  assert.equal(commandBudget("007"), 7000);
 });

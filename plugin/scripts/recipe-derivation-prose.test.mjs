@@ -50,6 +50,7 @@ test("an invalid cache is re-derived once; a failed derivation stalls the run in
   assert.match(s, phrase("A red suite never triggers it: a failing test is a finding, not a stale Recipe."));
   assert.match(s, phrase("`RECIPE NOT PROVEN` from any derivation, or a second invalid-cache refusal after this run's one re-derivation, halts the run"));
   assert.match(s, phrase("It is never a loop: no third derivation, and never a cache written by hand."));
+  assert.match(s, phrase("an Install step, Test entrypoint or mutation that hangs until the proof's own bound refuses it as timed out."));
 });
 
 test("the claim paragraph sends an absent or invalid cache to the derivation step, and infers no Install step", () => {
@@ -92,8 +93,20 @@ test("every flag the deriver's procedure passes is one recipe-prove.mjs accepts"
   for (const flag of used) assert.ok(accepted.has(flag), `the deriver passes ${flag}, which recipe-prove.mjs does not accept`);
 });
 
-test("the deriver reports one of two lines, naming vacuity as a cause", () => {
+test("the deriver reports one of two lines, naming vacuity and a timeout as causes", () => {
   assert.match(DERIVER, /`RECIPE PROVEN` followed by the JSON line/);
   assert.match(DERIVER, /`RECIPE NOT PROVEN` followed by the last run's `NOT PROVEN` reason/);
   assert.match(DERIVER, /\*\*vacuous\*\*/);
+  assert.match(DERIVER, /\*\*timed out\*\*/);
+  assert.match(DERIVER, phrase("the Install step, the Test entrypoint or the mutation — hung until the script's own bound stopped it"));
+});
+
+// recipe-prove.mjs bounds its own commands and refuses one that overruns; an
+// outside kill would end the run with no refusal for the deriver to report.
+test("the deriver is told the script bounds its own commands, and never to wrap the call in a timeout", () => {
+  assert.match(DERIVER, phrase("The script bounds each command it runs itself"));
+  assert.match(DERIVER, phrase("**Never wrap the `recipe-prove.mjs` call in a timeout of your own**"));
+  assert.match(DERIVER, phrase("refuses one still running at that bound as `timed out`"));
+  assert.match(DERIVER, phrase("so give that call `timeout: 0` and wait for the script"));
+  assert.match(PROVER, /timed out: still running after/, "recipe-prove.mjs no longer names a timeout the way the deriver's cause reads it");
 });
