@@ -38,14 +38,20 @@
 // listed as unbooked.
 //
 // A ticket's RULING is its last tier-outcomes.tsv row in file order dated on or
-// after its first Pull in the window; that row names the PR and carries the quality
-// verdict. The PR's CELL is the `chosen_cell` of the last Pull dated on or
-// before the ruling, cross-checked against that Pull's member row: a
-// `subagent_type` other than `fleet-implementer-<cell>`, or an `effort` other
-// than the cell's level, lists the PR under `mismatch` and books it to no cell
-// at all. A PR still OPEN is pending and booked nowhere yet. A Pull with no
-// ruling books to its own `chosen_cell` as unmerged spend — unless its member
-// opened a PR that is still open, which is pending too.
+// after its first Pull in the window, skipping rows with both verdict columns
+// blank, which were never ruled; that row names the PR and carries the quality
+// verdict. A PR ruling several tickets takes its verdict from the later of
+// their rulings in file order, whatever their dates. A ruling whose run_date is
+// not YYYY-MM-DD is an input error (exit 2), as is one whose verdict is not
+// yes or no. The PR's CELL is the `chosen_cell` of the last Pull booked to it
+// — tickets in the order of their first Pull, each ticket's Pulls in file
+// order, those dated on or before the ticket's ruling — cross-checked against
+// that Pull's member row: a `subagent_type` other than
+// `fleet-implementer-<cell>`, or an `effort` other than the cell's level,
+// lists the PR under `mismatch` and books it to no cell at all. A PR still
+// OPEN is pending and booked nowhere yet. A Pull with no ruling books to its
+// own `chosen_cell` as unmerged spend — unless its member opened a PR that is
+// still open, which is pending too.
 //
 // PER CELL: `n_pulls`; `n_merged`; `n_pass` (merged PRs passing the quality
 // floor — failure is `minted_false_claim=yes` or `closed_own_ticket=no`);
@@ -66,7 +72,7 @@ import { isCLI } from "./is-cli.mjs";
 import { CELL } from "./ledger-grammar.mjs";
 import { parseMemberName } from "./member-record.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { parseTierOutcomes } from "./tier-outcomes.mjs";
+import { RulingError, parseTierOutcomes, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
 const NAME = "pr-cost";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -203,7 +209,10 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
     }
   }
 
-  // Rulings: per ticket, the last tier-outcomes row in file order on or after its first Pull.
+  // Rulings: per ticket, `rulingFor` of the ticket's first Pull — the last
+  // ruling row in file order dated on or after it, both-blank rows skipped.
+  const rulings = rulingsByTicket(tiers);
+  const fileOrder = new Map(tiers.map((t, i) => [t, i]));
   const pullsByTicket = new Map();
   for (const p of pulls) {
     if (!pullsByTicket.has(p.ticket)) pullsByTicket.set(p.ticket, []);
@@ -212,11 +221,10 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   const groups = new Map(); // pr -> { pr, tier, pulls[] }
   const unruled = [];
   for (const [ticket, ps] of pullsByTicket) {
-    const first = ps[0].run_date;
-    const ruling = tiers.filter((t) => t.ticket.split("+").includes(ticket) && t.run_date >= first).at(-1);
+    const ruling = rulingFor(rulings, ticket, ps[0].run_date);
     if (!ruling) { unruled.push(...ps); continue; }
     const g = groups.get(ruling.pr) ?? { pr: ruling.pr, tier: ruling, pulls: [] };
-    if (ruling.run_date > g.tier.run_date) g.tier = ruling;
+    if (fileOrder.get(ruling) > fileOrder.get(g.tier)) g.tier = ruling;
     for (const p of ps) (p.run_date <= ruling.run_date ? g.pulls : unruled).push(p);
     groups.set(ruling.pr, g);
   }
@@ -476,7 +484,9 @@ function main() {
   // silently, so a full page is refused rather than trusted.
   if (prs.length >= GH_PR_LIMIT) die(`gh pr list returned ${prs.length} PRs, its cap — merged state may be truncated`);
 
-  const report = computeReport({ members, tiers, features, prs, routerTable, pricing });
+  let report;
+  try { report = computeReport({ members, tiers, features, prs, routerTable, pricing }); }
+  catch (e) { if (e instanceof RulingError) die(`${tiersPath}: ${e.message}`); throw e; }
   process.stdout.write(has("json") ? JSON.stringify(report, null, 2) + "\n" : formatReport(report));
   if (!has("guard")) return;
   const file = arg("out") ?? defaultGuardPath();
