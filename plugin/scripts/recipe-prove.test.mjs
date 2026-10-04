@@ -665,6 +665,35 @@ test("a git that stops starting before the cache is read back is no verdict, nev
   assert.equal(readFileSync(cachePath(dir), "utf8"), "prior bytes", "a cache the reader never settled is rolled back");
 });
 
+// A git that starts and cannot run fails the reader's own `git rev-parse` just
+// as a git that will not start does, so its refusal is no verdict either. Each
+// stub stands in for one such git: a wrapper whose target is gone exits 126 or
+// 127, and a killed git has no exit status at all. The stubs differ in what
+// they write to stderr, which the message quotes when there is anything to
+// quote. The control — the same PATH with git left in place proves — is the
+// unstartable-git test's. The Test entrypoint rewrites the stub's body, never
+// the stub: that is a hard link to exec-stub.mjs's shared, read-only
+// trampoline.
+const GIT_THAT_CANNOT_RUN = [
+  { name: "exits 126 and writes nothing", body: "exit 126", cause: " and wrote nothing to stderr" },
+  { name: "exits 127 and writes to stderr", body: "echo boom >&2; exit 127", cause: ": boom" },
+  { name: "is killed by a signal", body: "kill -9 $$", cause: ": git was killed by SIGKILL" },
+];
+for (const c of GIT_THAT_CANNOT_RUN) {
+  test(`a git that starts but ${c.name} before the cache is read back is no verdict, never NOT PROVEN — and the prior cache is restored`, () => {
+    const { dir } = repo(MAVEN_FILES);
+    mkdirSync(join(dir, ".fleet"));
+    writeFileSync(cachePath(dir), "prior bytes");
+    const bin = readerPath();
+    const r = prove(dir, ["--install", "true", "--test", `printf '#!/bin/sh\\n${c.body}\\n' > '${join(bin, ".stub-git")}'; echo 'tests 1'`, "--count-line", "tests 1", "--test-count", "1"], { env: { PATH: bin } });
+    assert.equal(r.status, 2, r.err);
+    assert.ok(r.err.includes(`recipe-prove: git started but does not run: \`git --version\` did not exit 0${c.cause} — the Recipe cache reader runs git, so its refusal is no verdict on what was proven`), r.err);
+    assert.doesNotMatch(r.err, /NOT PROVEN/);
+    assert.doesNotMatch(r.err, /not a git repository/);
+    assert.equal(readFileSync(cachePath(dir), "utf8"), "prior bytes", "a cache the reader never settled is rolled back");
+  });
+}
+
 // The reader's own `sh`, taken away the same way: a read-back that never ran
 // read nothing, so it is no verdict either.
 test("an sh that stops starting before the cache is read back is no verdict, never NOT PROVEN — and no cache is left", () => {
