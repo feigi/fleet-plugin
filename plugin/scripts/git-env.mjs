@@ -2,37 +2,36 @@
 // two exports, one per half of the same spawn. `gitEnv()` builds the env the
 // git child is given; `workspaceDirFromGitCommonDir()` turns what the most
 // common of those children answers with, `rev-parse --git-common-dir`, into
-// the workspace directory a run's files live under. The first half is #1599's
-// reasoning, below; the second is #1658's, beside its own function.
+// the workspace directory a run's files live under. The first half's
+// reasoning is below; the second's sits beside its own function.
 //
 // GIT_DIR and GIT_WORK_TREE outrank both the child's cwd and an explicit `-C`
-// argument — measured directly (#1599): a `git rev-parse`/`ls-files` call
+// argument — measured directly: a `git rev-parse`/`ls-files` call
 // pointed at a repository via `cwd` or `-C` still answers for whichever
 // repository an ambient GIT_DIR or GIT_WORK_TREE names, silently, often at
-// exit 0. #1020 closed the identical class in every shell script under this
-// directory with one line, `unset GIT_DIR GIT_WORK_TREE`; there is no shell
-// to unset in here, so the child's env has to be built instead — and #1020's
-// own EXEMPT reasons for net.sh/worktree.sh ("a library... unset there would
+// exit 0. The shell scripts under this directory close the identical class
+// with one line, `unset GIT_DIR GIT_WORK_TREE`; there is no shell to unset in
+// here, so the child's env has to be built instead — and the reasons
+// net.sh/worktree.sh are exempt from that line ("a library... unset there would
 // reach back into the caller's environment") do not transfer: a spawned
 // child's env object is already private to it, never the calling process's.
 //
 // `fleet-state.mjs`'s `statePath()` and `ledger.mjs`'s tracker-query probe
 // each spell the same three lines inline — `{ ...process.env }` then two
-// `delete`s — predating this module, and #1599's own body cites exactly that
-// duplication as the reason a THIRD hand-spelled copy (its own measured
-// hazard, `ledger.mjs`'s `defaultLedgerPath()`) should not become a fourth.
+// `delete`s — predating this module, and that duplication is exactly the
+// reason a THIRD hand-spelled copy (the hazard measured here, `ledger.mjs`'s
+// `defaultLedgerPath()`) should not become a fourth.
 // A shared helper also turns "does this call scrub the ambient vars" back
 // into a one-name grep, `gitEnv(`, the way `unset GIT_DIR GIT_WORK_TREE` is
-// one for shell — see `ambient-git-vars-mjs-prose.test.mjs`.
+// one for shell.
 //
 // The two pre-existing inline sites are deliberately NOT migrated to call
-// this. Neither is in #1599's scope — its own body excludes
-// `fleet-state.mjs`'s `statePath()` by name (already fixed and covered, by
-// PR #1598), and `ledger.mjs`'s tracker-query scrub is likewise already
-// measured and covered (`ledger.test.mjs`, "an inherited GIT_DIR or GH_REPO
-// cannot retarget the query…") — and touching either to satisfy a detector
-// would be churn with no behavioural change. `ambient-git-vars-mjs-prose.test.mjs`
-// carries both of them by name instead of by import.
+// this. Both are already fixed and covered by tests of their own —
+// `fleet-state.mjs`'s `statePath()`, and `ledger.mjs`'s tracker-query scrub
+// ("an inherited GIT_DIR or GH_REPO cannot retarget the query…") — and
+// touching either to satisfy a detector would be churn with no behavioural
+// change. The suite's census of ambient-var scrubs carries both of them by
+// name instead of by import.
 
 import { realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -65,11 +64,11 @@ export function gitEnv(overrides = {}, base = process.env) {
 // from the checkout root agree about the run's single ledger, its single
 // heartbeat and its single board.
 //
-// Three callers hand-spelled that resolution, one apiece, before #1658:
+// Three callers hand-spelled that resolution, one apiece, before this function:
 // `ledger.mjs`'s `defaultLedgerPath()`, `fleet-state.mjs`'s `statePath()` and
 // `board.mjs`'s `resolveCockpitInstance()` — and `fleet-state.mjs`'s own
 // comment had already written down the trigger ("if a third file ever needs
-// this, the resolution itself should move"), which #1656's addition tripped.
+// this, the resolution itself should move"), which the third caller's arrival tripped.
 // What is NOT shared is the part each caller owns: the filename it joins on
 // (`ledger.md`, `heartbeat.json`, `.fleet`), the wording of the warning it
 // degrades with, and what its own degraded answer is. Hence the seam: this
@@ -100,9 +99,9 @@ export function gitEnv(overrides = {}, base = process.env) {
  * than a path; a trailing newline riding on a real answer would be discarded
  * by `dirname()` anyway, together with the rest of the final segment.
  *
- * `canonicalise` is OPT-IN, and deliberately so (#1658). Only `board.mjs`
+ * `canonicalise` is OPT-IN, and deliberately so. Only `board.mjs`
  * takes it: a symlinked route to one workspace derives a SECOND port and a
- * second state directory for a cockpit already being served (#1582), so the
+ * second state directory for a cockpit already being served, so the
  * cockpit's key has to be the canonical form. `ledger.mjs` and
  * `fleet-state.mjs` do not — both PRINT the path they resolve (the ledger in
  * `check`'s JSON, both in their degrade warnings), and realpath would change
