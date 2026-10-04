@@ -1,5 +1,4 @@
-// The run ledger's member grammar (#1799; spec 2026-09-24 § 6 §2, ADR 0012
-// Decision 5): a member's token is `<member>` while it is live and
+// The run ledger's member grammar: a member's token is `<member>` while it is live and
 // `<member>=<outcome>` once settled. `ledger.mjs dispatch` writes the bare
 // token and `ledger.mjs settle` rewrites it, so a reader derives every
 // liveness count from the ledger file alone instead of from the controller's
@@ -7,12 +6,12 @@
 //
 // A module of its own, not a function inside ledger.mjs, because ledger.mjs is
 // a CLI that parses argv and exits on import — and `fleet-tick.mjs` is to read
-// this same grammar (#1803). A second copy of it there would be two readings
+// this same grammar. A second copy of it there would be two readings
 // of which members are live, free to drift apart.
 //
 // Rows stay freeform text. Only a token whose name part is a member name is
 // claimed here; everything else a row carries (`class=routine`, `ports=`,
-// `ci=`, `held-behind:#M`, merge-bot's `conflict-hold:#<pr>`, #1773's
+// `ci=`, `held-behind:#M`, merge-bot's `conflict-hold:#<pr>`, the
 // `review=`/`reviewed=` pair, the `→ PR#M` arrow) is not a member and is left
 // alone.
 
@@ -29,9 +28,9 @@ const FAMILIES = {
 // Every family parseMember can yield: MEMBER below is built from this list,
 // so every family it matches has an entry here by construction.
 export const MEMBER_FAMILIES = Object.freeze(Object.keys(FAMILIES));
-// A finisher halt's causes (#2083): the finisher worked correctly and refused
+// A finisher halt's causes: the finisher worked correctly and refused
 // to label, which `failed` (it crashed or gave up) does not say. `unreadable`,
-// `missing` and `absent` are duty 1's audit-read halts (#1106).
+// `missing` and `absent` are duty 1's audit-read halts.
 export const HALT_CAUSES = ["live-editor", "rebase", "past-pin", "unreadable", "missing", "absent", "other"];
 const OUTCOME_PATTERNS = {
   "PR#M": /^PR#[1-9][0-9]*$/,
@@ -89,7 +88,7 @@ export function nextMergeBot(dispatched) {
   return `merge-bot-${dispatched.map(parseToken).filter((t) => t?.family === "merge-bot").length + 1}`;
 }
 
-// #2030: an implementer cell is `<role>-<level>` — an omp role and a thinking
+// An implementer cell is `<role>-<level>` — an omp role and a thinking
 // level — and each cell is one definition, `fleet-implementer-<cell>`, whose
 // `model:` is `@<role>:<level>` (spec 2026-09-28 § 2). Nothing is named
 // `fleet-implementer` alone, so CELL_DEF is the whole implementer family:
@@ -120,7 +119,7 @@ export function drawCell({ session, ticket, policyCell, cells }) {
   return { cell: E[k - 1], k, K };
 }
 
-// #1398: the definition an implementer should run under, off its ticket
+// The definition an implementer should run under, off its ticket
 // row's `tier=` token — none means `fleet-implementer-<POLICY_CELL>`,
 // `tier=<x>` means `fleet-implementer-<x>`. The value becomes a file
 // name under `agents/`, so it is held to `[a-z0-9]` words joined by `-`
@@ -129,7 +128,7 @@ export function drawCell({ session, ticket, policyCell, cells }) {
 // position. A value with no definition behind it (the retired `tier=alt`) is
 // `ledger.mjs dispatch`'s to refuse: it checks the file exists.
 //
-// Here, not in tier-check.mjs, because two readers must agree on it (#2208):
+// Here, not in tier-check.mjs, because two readers must agree on it:
 // `ledger.mjs dispatch` prints the definition before the call, and
 // tier-check.mjs judges the member against it after. Two copies could name
 // different definitions for one row and fail a dispatch made exactly as
@@ -149,18 +148,18 @@ export function expectedDefinition(rowText) {
   return `fleet-implementer-${values[0]}`;
 }
 
-// The agent definition a member is dispatched as (#2208), for a parsed member
+// The agent definition a member is dispatched as, for a parsed member
 // and the text of the row it works: `ledger.mjs dispatch` prints it so the
 // `task` call that follows names it off a script's output, not off prose a
 // compaction drops. A fix-applier on an unresolved conflict hold of its own PR
-// is a `fleet-implementer-<POLICY_CELL>` whatever the row's `tier=` (#2299) —
+// is a `fleet-implementer-<POLICY_CELL>` whatever the row's `tier=` —
 // it rebases the PR, it does not work a ticket at a tier. Any other fix-applier is a review
 // one and gets null: a generic `task` by design. Whether the hold is
 // unresolved is `conflictHeld`, the caller's to supply from fleet-tick.mjs's
 // deriveRun() — the reading the tick holds the merge on, which folds every
 // row of the PR, never one row's text alone. Throws whatever
 // expectedDefinition throws, and on a family this switch has no case for
-// (#2330): null is the review fix-applier's deliberate answer, so a
+// it: null is the review fix-applier's deliberate answer, so a
 // `default: return null` would print a new family as a generic `task`
 // without anyone having decided it is one.
 /** @returns {string|null} the definition name; null only for a review fix-applier. */

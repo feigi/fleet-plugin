@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-// The merge bot's pre-merge gate as one read-only conjunction (#1800; spec
-// docs/specs/2026-09-24-slot-based-fleet-loop-design.md § 5, ADR 0012
-// Decision 3).
+// The merge bot's pre-merge gate as one read-only conjunction.
 //
 //   merge-gate.mjs --pr <n> --pre <sha> [--post <sha>] [--out <path>]
 //
@@ -19,7 +17,7 @@
 // its directory. Omitted, the line goes to stdout only: the path the merge bot
 // uses, `<scratch>/pr<N>/merge-bot-<n>/ci.json`, names a scratch root and a
 // member number only the bot knows, so the bot passes it and this script never
-// guesses it (controller ruling on #1800).
+// guesses it.
 //
 // Stdout: exactly one JSON line, `{pr, verdict, reason, head, pre, post,
 // behind, instruments, ci}`. Stderr: the children's own diagnostics, passed

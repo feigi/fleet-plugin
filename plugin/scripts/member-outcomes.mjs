@@ -1,10 +1,9 @@
 // Scraper for per-member model/effort facts. Pure over omp's own subagent
-// transcripts: no clock, no network, no gh. See
-// docs/specs/2026-08-27-fleet-member-outcomes-instrumentation-design.md.
+// transcripts: no clock, no network, no gh.
 //
 // The transcript parsing (fold, model/effort extraction, ticket/pr naming,
-// and the `gh pr create` result an implementer's `pr` comes from, #2209)
-// lives in member-record.mjs (#1342), shared with board.mjs. `normalizeModel`
+// and the `gh pr create` result an implementer's `pr` comes from)
+// lives in member-record.mjs, shared with board.mjs. `normalizeModel`
 // and `parseMemberName` are re-exported here verbatim so nothing importing
 // them from this file needs to change.
 
@@ -23,9 +22,9 @@ export { normalizeModel, parseMemberName };
 // primitive board.mjs's spend reader calls too, so the two can no longer
 // drift.
 //
-// `effort` reads the record's `thinking` field: #1342 keeps the TSV COLUMN
-// named `effort` rather than renaming it, because every awk one-liner in
-// this file's header and in docs/specs indexes columns by position, and a
+// `effort` reads the record's `thinking` field: the TSV COLUMN stays
+// named `effort` rather than renamed, because every awk one-liner in
+// this file's header indexes columns by position, and a
 // rename buys nothing a comment does not already say. `thinking` is never
 // blank on the record (`-` marks the hole so it stays visible there), but
 // this TSV's own `effort` column predates that convention and already
@@ -180,7 +179,7 @@ if (isCLI(import.meta.url)) {
   // instruction all use) always exits 2.
   const dirs = argv.filter((a, i) => !a.startsWith("--") && (fileIdx < 0 || i !== fileIdx + 1));
   if (dirs.length !== 1) die("usage: member-outcomes.mjs <session-dir> [--file <tsv>]");
-  // arg.mjs's rule, consumed rather than copied (#567). This line used to
+  // arg.mjs's rule, consumed rather than copied. This line used to
   // hand-write `!file || file.startsWith("--")`, which was that rule with the
   // blank spelling missing — so `--file "   "` was accepted here and wrote the
   // metrics TSV to a whitespace-named path, while every script routing through
@@ -197,7 +196,7 @@ if (isCLI(import.meta.url)) {
   // directory) both walked straight past it back into the silent exit 0.
   try { readdirSync(sessionDir); }
   catch (e) { die(`cannot read ${sessionDir}: ${e.code ?? e.message}`); }
-  // #1302's ruling already covers `readMembers`'s tree search (findOmpSessionDirs);
+  // The session-dir-name rule already covers `readMembers`'s tree search (findOmpSessionDirs);
   // this CLI hands rowsForSession one EXPLICIT directory instead of a tree to
   // search, which skipped that check entirely — any readable directory (e.g. the
   // encoded-cwd project dir one level up from a real session) passed the readdirSync
