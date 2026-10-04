@@ -202,10 +202,11 @@ test("two ticket-features rows for one session+agent naming different cells are 
   addRow(w, { session: "sTorn", date: "2026-10-01", cell: "slow-high" });
   // The same Pull's row again, drawn at another cell: which cell ran is unknown.
   w.features.push({ ...w.features[0], chosen_cell: "smol-high" });
-  const r = cli(w);
+  const f = files(w);
+  const r = spawnSync(process.execPath, [SCRIPT, "--ticket-features", f.features, "--member-outcomes", f.members], { encoding: "utf8", cwd: f.dir });
   assert.equal(r.status, 2, r.stderr);
   assert.equal(r.stdout, "");
-  assert.match(r.stderr, /cell-readout: ticket-features\.tsv: session sTorn agent impl-100 has two rows, chosen_cell 'task-high' and 'smol-high'\n$/);
+  assert.equal(r.stderr, `\ncell-readout: ${f.features}: session sTorn agent impl-100 has two rows, chosen_cell 'task-high' and 'smol-high'\n`);
   assert.throws(() => readout(parsed(w)), /session sTorn agent impl-100 has two rows, chosen_cell 'task-high' and 'smol-high'/);
 });
 

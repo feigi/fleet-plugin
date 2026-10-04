@@ -7,8 +7,9 @@
 // Inputs default to docs/metrics/ under the working directory. A Pull is a
 // ticket-features.tsv row; what it ran is the member-outcomes.tsv row with the
 // same `session` + `agent`. Rows of one `session` + `agent` that name one
-// `chosen_cell` are one Pull; rows naming different cells are refused, naming
-// the session, agent and both cells, since which cell ran is then unknown.
+// `chosen_cell` are one Pull; the readout refuses rows naming different cells,
+// naming the file, the session, the agent and both cells, since which cell ran
+// is then unknown.
 //
 // ADMISSIBLE ROW. A Pull counts only when its member row exists, was
 // dispatched as the drawn cell's own definition (`subagent_type` =
@@ -36,8 +37,10 @@
 // model by name, or `mixed (<model-a> n=…, <model-b> n=…)` when they span more
 // than one, because a role's target is operator config that can move under a
 // cell's history. A cell below the gate prints nothing on stdout and one
-// `below the gate` count on stderr. Nothing on either stream names a session,
-// ticket or member: the gate forbids reading a comparison early.
+// `below the gate` count on stderr. Neither the gate line nor that count names
+// a session, ticket or member: the gate forbids reading a comparison early.
+// Only the refusal of conflicting ticket-features rows names a session and an
+// agent, and it prints nothing on stdout.
 //
 // STOPPING RULE (exported as `stoppingRule`, not printed by this CLI). For a
 // cell X other than slow-high whose definition is live, a VERDICT is a ticket
@@ -77,19 +80,18 @@ const key = (session, agent) => `${session}\0${agent}`;
 const levelOf = (cell) => CELL.exec(cell)?.[2] ?? null;
 
 /**
- * `rows` keyed by session+agent. A repeat agreeing on every column in `fields`
- * collapses into the first row; one that differs on any of them throws.
+ * `features` keyed by session+agent. A repeat naming the same `chosen_cell`
+ * collapses into the first row; one naming another cell throws.
  */
-function oneRowPer(rows, file, fields) {
-  const byKey = new Map();
-  for (const r of rows) {
-    const k = key(r.session, r.agent);
-    const prev = byKey.get(k);
-    if (!prev) { byKey.set(k, r); continue; }
-    const f = fields.find((c) => prev[c] !== r[c]);
-    if (f) throw new Error(`${file}: session ${r.session} agent ${r.agent} has two rows, ${f} '${prev[f]}' and '${r[f]}'`);
+function pullsOf(features) {
+  const pulls = new Map();
+  for (const p of features) {
+    const k = key(p.session, p.agent);
+    const prev = pulls.get(k);
+    if (!prev) pulls.set(k, p);
+    else if (prev.chosen_cell !== p.chosen_cell) throw new Error(`session ${p.session} agent ${p.agent} has two rows, chosen_cell '${prev.chosen_cell}' and '${p.chosen_cell}'`);
   }
-  return byKey;
+  return pulls;
 }
 
 /** The join's member row for a Pull when the Pull is admissible, else null. */
@@ -111,7 +113,7 @@ function admissibleMember(pull, members) {
  */
 export function readout({ features, members }) {
   const byKey = new Map(members.map((m) => [key(m.session, m.agent), m]));
-  const pulls = oneRowPer(features, "ticket-features.tsv", ["chosen_cell"]);
+  const pulls = pullsOf(features);
   const sessions = new Map();
   const cells = new Map();
   let unjoined = 0;
@@ -218,10 +220,9 @@ function main() {
   const features = load(featuresPath, parseFeatures);
   const members = load(membersPath, parseMemberTsv);
 
-  let result;
-  try { result = readout({ features, members }); }
-  catch (e) { die(e.message); }
-  const { cells, unjoined } = result;
+  let cells, unjoined;
+  try { ({ cells, unjoined } = readout({ features, members })); }
+  catch (e) { die(`${featuresPath}: ${e.message}`); }
   const lines = [];
   const notes = [];
   if (unjoined > 0) {
