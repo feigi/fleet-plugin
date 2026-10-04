@@ -518,6 +518,11 @@ test("deriveRun: an in-flight review whose PR has left the open list is named fo
   assert.deepEqual(r.live, ["review:PR#20", "review:PR#21", "review:PR#22"]);
 });
 
+test("deriveRun: reviewsOffList is ascending whatever order the ledger rows arrive in", () => {
+  const r = run({ rows: [...ZOMBIE_ROWS].reverse() }, [pr(21)]);
+  assert.deepEqual(r.reviewsOffList, [20, 22], "rows arrive 22, 21, 20: the sort, not ledger order, makes it ascending");
+});
+
 test("deriveRun: a review in flight on a PR the caller found merged or closed is not live", () => {
   const r = run({ rows: ZOMBIE_ROWS }, [pr(21)], undefined, new Set([20, 22]));
   assert.equal(r.reviewsLive, 1, "only PR 21's review, on the open list, is live");
