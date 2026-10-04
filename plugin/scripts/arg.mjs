@@ -2,8 +2,8 @@
 // has(), sweep(), stray(), the three refusal rules
 // isFlagLike()/hasEqualsForm()/isDigits(), and writeAll() — the short-write
 // and EAGAIN retry loop every script's own stdout/stderr write routes
-// through (#1549).
-// #367: was five drifting copies of arg(), three of has(), seven of die() in
+// through.
+// These helpers were five drifting copies of arg(), three of has(), seven of die() in
 // two incompatible shapes — one paste behind on any guard fix. One copy now;
 // a fix to the contract lands here once and reaches every caller that routes
 // through the helper it fixes.
@@ -18,16 +18,16 @@
 // argv reader cannot call arg()/has() at all, because those refuse under a
 // GENERATED message ("--<name> needs a value") and such a reader exists
 // precisely to refuse under its own ("--file needs a path"). ledger.mjs
-// splices --file/--require-file out of argv itself (#362) and
+// splices --file/--require-file out of argv itself and
 // member-outcomes.mjs reads its own --file, so both were out of arg()'s
 // reach — and both answered that by copying the expression, which is a
 // requirement recorded where nothing executes it.
 //
-// #567 closed that: the rules are stated once, as isFlagLike() and
+// That gap is closed: the rules are stated once, as isFlagLike() and
 // hasEqualsForm() below, and BOTH readers import and call them while keeping
 // their own wording. No script now restates one of these rules as a value
 // guard instead of calling it. That is executed, not documented —
-// shared-refusal.test.mjs reds when a copy is re-inlined, including one
+// a test reds when a copy is re-inlined, including one
 // re-inlined behaviour-identically, which no behavioural test can see. Read
 // the current division with `grep -n 'from "./arg.mjs"'
 // scripts/*.mjs | grep -v test` rather than trusting a list
@@ -51,7 +51,7 @@
 // importing this file refuses its command line through a die() bound from
 // here, and a module that binds none has no command line to refuse a flag on
 // — review-core.mjs, which imports isDigits alone and is itself imported by
-// review-eval.mjs, joined the `scripts/*.mjs` glob when #1763 renamed it from
+// review-eval.mjs, joined the `scripts/*.mjs` glob when it was renamed from
 // `.js`. A future script that refuses WITHOUT makeDie falls out of this grep;
 // that is the price of the filter, named here rather than hidden. Read that output
 // for the roster — the scripts this header names exemplify a way of
@@ -60,8 +60,8 @@
 // fleet-tick.mjs is the one script still outside arg()/has(), and
 // deliberately: it parses its flags with node:util's parseArgs, so its
 // unknown-flag, required-flag and range refusals are a separate edit site on
-// its own terms. Its integer guard is no longer one of them — #878 gave the
-// digits grammar its own predicate (isDigits() below) precisely because
+// its own terms. Its integer guard is no longer one of them — the digits
+// grammar has its own predicate (isDigits() below) precisely because
 // isFlagLike() cannot express it, and int() now calls that instead of
 // hand-writing the third spelling. What stays fleet-tick's own there is the
 // `String(raw).trim()` its input needs and the wording of its refusal, not
@@ -82,15 +82,15 @@
 
 import { writeSync } from "node:fs";
 
-// #1549: ONE write-retry loop, not three. Resuming a short write and waiting
+// ONE write-retry loop, not three. Resuming a short write and waiting
 // out an EAGAIN are properties of the FD, not of any one caller, so die()
 // below, ci-state.mjs's verdict writes and staleness.mjs's verdict() all
 // route through writeAll() instead of each hand-rolling the same
 // while/try/subarray. They were three independent copies held in step by a
 // comment reading "mirrors emit()" and by nothing executable — which is
 // exactly how one of them (ci-state.mjs's emit()) stayed the only one with no
-// retry cap at all. board.mjs's fault() is the fourth site and is #1547's to
-// move, not this file's.
+// retry cap at all. board.mjs's fault() is the fourth site, and it stays
+// outside this file deliberately — its own comment says why.
 const MAX_EAGAIN_RETRIES = 200;
 
 // Shared across every retry: Atomics.wait never writes or notifies it, so one
@@ -104,7 +104,7 @@ const IDLE = new Int32Array(new SharedArrayBuffer(4));
 // full — the state an fd reaches once a stream has been initialised on it
 // (console.error does that to fd 2) and enough output is queued behind it. It
 // either SHORT-WRITES, returning the count it managed and throwing nothing at
-// all, silently truncating with no diagnostic for a catch to see (#885/#889);
+// all, silently truncating with no diagnostic for a catch to see;
 // or it throws EAGAIN. So this resumes from writeSync's own return value
 // until the buffer is empty, and reads EAGAIN as "momentarily full", waiting
 // 1ms for the reader rather than treating it as failure. The wait is what
@@ -112,7 +112,7 @@ const IDLE = new Int32Array(new SharedArrayBuffer(4));
 // bare `continue` burned a full core for the whole stall where the 1ms wait
 // burned almost none, both delivering the same bytes.
 //
-// The EAGAIN retry is CAPPED (#889). Uncapped, a reader that stays open but
+// The EAGAIN retry is CAPPED. Uncapped, a reader that stays open but
 // never drains — not merely a slow one — spins here forever, and every caller
 // is one whose whole job is to finish and report an exit code, so an
 // indefinite hang trades that guarantee away. Past the cap this gives up on
@@ -141,7 +141,7 @@ export function writeAll(fd, text) {
   return true;
 }
 
-// die() is writeSync, not console.error (#176/#328/#363). On a pipe,
+// die() is writeSync, not console.error. On a pipe,
 // process.stderr.write is ASYNC and process.exit() discards whatever is
 // still queued — a large forwarded child stderr (gh's own) eats the refusal
 // line that follows it, because the refusal is queued last and dropped
@@ -158,9 +158,9 @@ export function makeDie(name) {
     // The try covers the TEMPLATE as well as the write, and that is the whole
     // of its job: uncaught, a throwing msg — or anything escaping writeAll —
     // skips process.exit(2) and drops the process to Node's default exit 1,
-    // inverting the caller's own exit-code contract (#299/#328). Hoisting the
+    // inverting the caller's own exit-code contract. Hoisting the
     // string out to writeAll's argument list reintroduces precisely that,
-    // which is why the pin in candidates.test.mjs requires it to sit inside.
+    // which is why a test pin requires it to sit inside.
     // writeAll's false return is ignored on purpose, and says no more than
     // this function always promised: the message may be lost, the exit code
     // may not.
@@ -173,7 +173,7 @@ export function makeDie(name) {
   };
 }
 
-// #61/#169: a flag given with no value must never read as the flag being
+// A flag given with no value must never read as the flag being
 // absent. Every arg()-reading call site falls back with `||`/`??`, so a
 // trailing flag used to silently substitute a default — the malformed
 // invocation reading as a successful one.
@@ -183,19 +183,19 @@ export function makeDie(name) {
 // `--flag=value` form `indexOf` cannot see (`arg()` would otherwise report
 // the flag absent and the caller would fall back exactly as if it were).
 // Rejecting a `--`-prefixed value does forfeit a real capability — a value
-// that legitimately starts with `--` — and staleness.mjs (#238) is a caller
+// that legitimately starts with `--` — and staleness.mjs is a caller
 // that can want one: its `--gone`/`--present` value is a string quoted out of
-// a ticket, and #240's is `--label ready-for-agent`. Refusing loudly here
+// a ticket, such as `--label ready-for-agent`. Refusing loudly here
 // still beats silently taking the next flag as this one's value, so this
-// guard itself does not bend for it. staleness.mjs (#818) instead opts a
+// guard itself does not bend for it. staleness.mjs instead opts a
 // caller in per flag with its own end-of-options separator, `--gone --
 // '<value>'`, read before arg() ever sees the value — bare, with no `--`
 // immediately before it, this refusal still stands unchanged.
-// #567: the two predicates immediately below ARE those rules, exported so a
+// The two predicates immediately below ARE those rules, exported so a
 // caller that cannot route through arg()/has() consumes them instead of
 // copying the expression — the header above says which callers and why.
 // isDigits(), further down, is a third export on the same terms for a
-// different rule (#878); these two are the ones this paragraph is about.
+// different rule; these two are the ones this paragraph is about.
 //
 // What travels is the RULE, never the refusal text: each caller keeps its own
 // die() wording, which is the constraint that made copying look necessary in
@@ -204,7 +204,7 @@ export function makeDie(name) {
 // flag they typed and not the grammar behind it.
 //
 // Plain exports, not factories, because neither takes a script NAME — one is a
-// predicate over a value, the other over an argv. That is also why #467's
+// predicate over a value, the other over an argv. That is also why a
 // proposed makeCli(NAME) collapse of makeDie/makeArg/makeHas cannot absorb
 // them whichever way it lands: those three exist to BIND a name, and these
 // have no name to bind.
@@ -237,7 +237,7 @@ export function makeArg(die) {
   };
 }
 
-// #364: a boolean flag written --name=value must refuse, not read as
+// A boolean flag written --name=value must refuse, not read as
 // absent — same fail-open class as arg()'s `=` guard above, but
 // boolean-specific wording: there is no value to take, so "needs a
 // space-separated value" would lie.
@@ -248,7 +248,7 @@ export function makeHas(die) {
   };
 }
 
-// #878: the digits rule, stated once. #840 closed a non-numeric `--pr` in
+// The digits rule, stated once. A non-numeric `--pr` was first closed in
 // ci-state.mjs alone, and the identical shape stayed live in its siblings.
 // Measured on the pre-fix tree against a stub `gh` that ANSWERS, the way a
 // real one does for a branch ref: `diff-stats.mjs --pr abc` reached
@@ -266,13 +266,14 @@ export function makeHas(die) {
 // payload field. Its members are ci-state.mjs, diff-stats.mjs and
 // pr-overlap.mjs, and all three now route through numArg() below. A sweep for
 // the flag NAME finds two of the three, which is how the third stayed open
-// through #840's review.
+// through that first fix's review.
 //
 // Stated here rather than a third time at the call sites, because the
 // invariant had no single expression: ci-state.mjs spelled it `/^[0-9]+$/`
 // while fleet-tick.mjs's int() spells it `/^\d+$/` over a parseArgs value,
-// each with its own wording. #367 overturned #169's "no shared module" ruling
-// to stop exactly this drift, and a fourth spelling IS the drift.
+// each with its own wording. This shared module exists, over an earlier "no
+// shared module" ruling, to stop exactly this drift, and a fourth spelling IS
+// the drift.
 
 // `+`, so the empty string is not a number. arg() already refuses that value
 // through isFlagLike, but this predicate's other consumers do not read argv
@@ -300,7 +301,7 @@ export function makeHas(die) {
 // this same invariant (claim-ticket.sh, inflight.sh, release-ticket.sh,
 // drop-merged-label.sh) carries an extra `0?*` clause that refuses them, and
 // this rule deliberately does not adopt it — tightening here would refuse a
-// `--pr 007` that #840's shipped guard accepts, which is a behaviour change
+// `--pr 007` that the already-shipped guard accepts, which is a behaviour change
 // dressed as a de-duplication.
 //
 // A plain export rather than a factory, for the reason isFlagLike and
@@ -322,8 +323,9 @@ export function isDigits(value) {
 // header's "what travels is the RULE, never the refusal text", applied to a
 // product whose two refusals genuinely differ in that respect.
 //
-// This also discharges #840's placement rule structurally instead of
-// positionally. That guard had to sit BELOW ci-state.mjs's usage die because
+// This also discharges the original ci-state.mjs guard's placement rule
+// structurally instead of positionally. That guard had to sit BELOW
+// ci-state.mjs's usage die because
 // RegExp.test coerces `null` to "null": hoisted above it, an omitted `--pr`
 // was answered with a complaint about a number and the usage line never
 // printed. numArg() only ever tests a value it actually read, so the refusal
@@ -343,14 +345,15 @@ function readNum(die, arg, name) {
   return Number(raw);
 }
 
-// #365: the guards above all answer "was this flag given well?", and none of
+// The guards above all answer "was this flag given well?", and none of
 // them can answer "was a flag given that nothing reads?". A MISSPELLED name is
 // simply never looked for, so `ci-state.mjs --pr 5 --basee main` computed a
 // real verdict against the DEFAULT base and exited 0/1 with no refusal — the
-// same fail-open harm as #61/#169, reached from the other side: not an absent
-// value, an unread flag. It bites hardest where the caller is markdown re-read
-// by a model each run (ci-state.mjs, candidates.mjs), and #173 already recorded
-// one landing: a doc naming `--label` where the flag is `--require-label`.
+// same fail-open harm as a valueless flag reading as absent, reached from the
+// other side: not an absent value, an unread flag. It bites hardest where the
+// caller is markdown re-read by a model each run (ci-state.mjs,
+// candidates.mjs), and one landing is already on record: a doc naming
+// `--label` where the flag is `--require-label`.
 //
 // Only `--`-prefixed tokens are its business. Everything else is positional and
 // is not — board.mjs's `build`/`serve` subcommands, and every valued flag's
@@ -358,7 +361,7 @@ function readNum(die, arg, name) {
 // above refuses `--base --other` outright, so there is nothing to skip over and
 // no need to know here which names take a value.
 //
-// #463: that leftover class — a bare or single-dash token nothing reads,
+// That leftover class — a bare or single-dash token nothing reads,
 // `ci-state.mjs --pr 42 basee main` or `-basee` — is not this function's fix,
 // and stays out of scope here for the same reason board.mjs's subcommands are:
 // this sweep still refuses ONLY a `--`-prefixed token, unchanged.
@@ -384,7 +387,7 @@ function readNum(die, arg, name) {
 // needs a value"; both exit 2, both name a real error, both refuse before gh.
 //
 // candidates.mjs deliberately does NOT route through this. It accepts no
-// positionals, so its parseArgs (#173) additionally refuses a bare
+// positionals, so its parseArgs additionally refuses a bare
 // `candidates.mjs ready-for-agent` — which this cannot, board.mjs's
 // subcommands being exactly that shape. Strictly stronger there; leave it.
 //
@@ -393,9 +396,9 @@ function readNum(die, arg, name) {
 // DATA — `check
 // "--require-file silently absent when value missing"` works today and is the
 // shape of issue titles in this repo — so this sweep would refuse working
-// invocations, which #365's own AC calls worse than the bug. #584 NARROWED
-// that gap without routing through this sweep, rather than closing it, and
-// #1161 narrowed it again: ledger.mjs's own refuseStrayInCheckTail() is read on
+// invocations, which is worse than the bug. ledger.mjs NARROWED that gap
+// without routing through this sweep, rather than closing it, and later
+// narrowed it again: ledger.mjs's own refuseStrayInCheckTail() is read on
 // `check`'s tail ALONE, and refuses a `--`-prefixed token there only when it
 // shares that tail with something else — the shape an unquoted stray flag
 // makes, never the shape a one-argument subject makes — so a subject that
@@ -405,7 +408,7 @@ function readNum(die, arg, name) {
 // tracker query, so `the --basee flag is unread` is queried as `unread basee
 // flag`.
 //
-// #1744 widened refuseStrayInCheckTail() again, past `--`-prefixed tokens: it
+// refuseStrayInCheckTail() was widened again, past `--`-prefixed tokens: it
 // also refuses a bare ONE-dash spelling of ledger.mjs's own flag names
 // (`-require-file` for `--require-file`), matched by name rather than
 // prefix, still only when the tail carries something besides it. ledger.mjs
@@ -414,13 +417,13 @@ function readNum(die, arg, name) {
 //
 // `check` alone, on a documented-convention test that ledger.mjs states once
 // on refuseStrayInCheckTail() itself, with the docs and the measurement behind
-// it (#1161) — not restated here, and not restated at its call site either.
+// it — not restated here, and not restated at its call site either.
 // What guards the other three instead is ledger.mjs's refuseStrayInId(), a
 // bare prefix test on the id slot ahead of the tail, where a `--` token is
 // never data.
 //
 // It is the LENGTH gate that spares the legitimate case, not the prefix test
-// — refuseStrayInId()'s id-slot prefix test is now `startsWith("-")` (#1678),
+// — refuseStrayInId()'s id-slot prefix test is now `startsWith("-")`,
 // no longer the same one this sweep uses (`startsWith("--")`). The id slot
 // can take the stricter single-dash test because no free text ever lives
 // there — a legitimate id is bare digits, optionally `#`-prefixed. This
@@ -429,10 +432,10 @@ function readNum(die, arg, name) {
 // above can't either. A prefix test with no length gate was measured
 // refusing the legitimate subject.
 //
-// #584 does not make this file's cost disappear; it buys a smaller version of
+// That narrowing does not make this file's cost disappear; it buys a smaller version of
 // the same cost. An unquoted subject carrying a `--` word is a working
 // invocation ledger.mjs's `check` now refuses too: `check the --basee flag is
-// unread` answered at exit 0 before #584 and exits 2 after it. The residual
+// unread` answered at exit 0 before that narrowing and exits 2 after it. The residual
 // that stays open and owned is a lone stray with no subject beside it, still
 // taken as the subject, which ledger.mjs's own comment prices.
 function refuseUnknown(die, known) {
@@ -443,19 +446,19 @@ function refuseUnknown(die, known) {
   }
 }
 
-// #463: sweep() above only ever refuses a `--`-prefixed token — deliberately,
+// sweep() above only ever refuses a `--`-prefixed token — deliberately,
 // per its own comment, because staying ignorant of which names take a value
 // is what keeps it from having to refuse board.mjs's `build`/`serve` or any
 // flag's own value. That leaves the OTHER half of "was a flag given that
 // nothing reads?" open: a bare word or a single dash, which sweep's
 // `startsWith("--")` check was never going to catch — `ci-state.mjs --pr 42
 // basee main` runs the compare against the DEFAULT base and reports a real,
-// wrong verdict at exit 0/1, the same fail-open harm as #365 reached from the
-// positional side rather than the misspelled-flag side. `-basee` is the
+// wrong verdict at exit 0/1, the same fail-open harm sweep() closes, reached
+// from the positional side rather than the misspelled-flag side. `-basee` is the
 // likelier typo of the two, since the caller plainly meant a flag.
 //
-// Widening sweep's own bound past `--` cannot fix this — #365's triage ruling
-// is explicit that the sweep must never refuse tokens outside it, and
+// Widening sweep's own bound past `--` cannot fix this — the sweep is ruled
+// never to refuse tokens outside that bound, and
 // board.mjs's subcommands are exactly the shape a widened sweep would catch
 // by mistake. Nor can `startsWith("-")`: it refuses a legitimate negative
 // value such as `--spend-since -1`, which arg() accepts today. The only way
@@ -495,7 +498,7 @@ function refuseStrays(die, flags, positionals) {
   }
 }
 
-// #1077: ONE declaration of a script's flags, and every reader bound to it.
+// ONE declaration of a script's flags, and every reader bound to it.
 // `flags` maps each name to "value" or "bool"; `positionals` is the grammar
 // refuseStrays() above accepts ahead of the flags (board.mjs's
 // `build`/`serve`). One key per flag, so a name cannot be declared both ways.
@@ -526,7 +529,7 @@ function refuseStrays(die, flags, positionals) {
 // That refusal goes through die() at exit 2, never a thrown Error: exit 1 is
 // a verdict in ci-state.mjs (not green), merge-gate.mjs (blocked) and
 // tier-roles.mjs (check failed), which is the inversion makeDie() exists to
-// prevent (#299/#328). It is worded `bug:` because only the script's own
+// prevent. It is worded `bug:` because only the script's own
 // source can reach it — no command line can make a correct table disagree
 // with a correct read.
 //
@@ -540,7 +543,7 @@ function refuseStrays(die, flags, positionals) {
 // the needle.
 //
 // The TABLE, by contrast, is copied once here, before anything derives from
-// it (#2114): sweep() takes its names at construction while the other readers
+// it: sweep() takes its names at construction while the other readers
 // look a name up per call, so a caller mutating its own `flags` object
 // afterwards would leave arg() accepting a name sweep() refuses. With the
 // copy, no reader sees a later mutation, and no kind the construction check
@@ -548,10 +551,10 @@ function refuseStrays(die, flags, positionals) {
 // object stays its own, unchanged — the line gitEnv() in git-env.mjs holds
 // for its caller's `base` too.
 //
-// #2172 review: `flags` not being a plain object at all — `null`, or absent
+// `flags` not being a plain object at all — `null`, or absent
 // because a caller typed `{ flag: {...} }` instead of `{ flags: {...} }` and
 // this destructures it to `undefined` — used to throw a TypeError straight
-// out of `Object.keys(undefined)`, before #2114 introduced the copy below.
+// out of `Object.keys(undefined)`, before the copy below was introduced.
 // `{ ...undefined }` and `{ ...null }` both spread to `{}` without
 // complaint, so the copy would otherwise turn a loud construction-time crash
 // into a silently empty flag table whose every read fails later, elsewhere,
