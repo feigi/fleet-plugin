@@ -70,7 +70,7 @@ const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf
 
 // The whole bullet, bounded by its own blank line — the bound the two
 // sibling bullets above it already use in `instrument-check-prose.test.mjs`.
-const LAUNCH_STEP = () => paragraph(RUN_TEAM, "**Launch the cockpit.**", "run-team phase 0 cockpit-launch bullet");
+const LAUNCH_STEP = () => paragraph(RUN_TEAM, "**Launch the cockpit.**", "run-team phase 0 cockpit-launch bullet", "The spend panel reads this workspace's");
 
 test("phase 0 runs the cockpit launch on every pass, not just the first", () => {
   const step = LAUNCH_STEP();

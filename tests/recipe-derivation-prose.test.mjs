@@ -20,7 +20,7 @@ const phase0 = () => between(RUN_TEAM, "## Phase 0 — shortlist", "## Phase 1 �
 // The step spans its quoted dispatch prompt, so it is bounded by the next
 // rule's opener rather than by a blank line.
 const step = () => between(phase0(), "**Derive the Recipe — the Recipe derivation step — before the fold-in below", "**Mid-run, a cache that stops running", "the phase-0 Recipe derivation step");
-const stall = () => paragraph(phase0(), "**Mid-run, a cache that stops running is re-derived once", "the re-derive-once and stall rule");
+const stall = () => paragraph(phase0(), "**Mid-run, a cache that stops running is re-derived once", "the re-derive-once and stall rule", "**Fold in every PR a prior");
 
 test("phase 0 derives the Recipe before the fold-in and before the first claim", () => {
   const p0 = phase0();
@@ -54,7 +54,7 @@ test("an invalid cache is re-derived once; a failed derivation stalls the run in
 });
 
 test("the claim paragraph sends an absent or invalid cache to the derivation step, and infers no Install step", () => {
-  const p = paragraph(RUN_TEAM, "**The Install step comes from the Recipe cache", "run-team/SKILL.md claim Install paragraph");
+  const p = paragraph(RUN_TEAM, "**The Install step comes from the Recipe cache", "run-team/SKILL.md claim Install paragraph", "**Materialize the isolation envelope as a");
   assert.match(p, phrase("never pass or infer one."));
   assert.match(p, phrase("No cache is phase 0's Recipe derivation step not having run"));
 });

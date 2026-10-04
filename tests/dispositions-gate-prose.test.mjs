@@ -28,7 +28,7 @@ const SKILL = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8")
 // Step 2's record paragraph: one line, bounded by step 3's opener.
 const recordStep = () =>
   between(REVIEW_AND_FIX, "**Write every ruling to `<scratch>/dispositions-<pr>.json`", "\n3. **Run `testCmd`", "review-and-fix.md");
-const gate = () => paragraph(SKILL, "That `dispatch` refuses a finisher", "run-team/SKILL.md");
+const gate = () => paragraph(SKILL, "That `dispatch` refuses a finisher", "run-team/SKILL.md", "**An unanswered question from the member");
 
 test("step 2 names the record's file, beside the review file, and that the check judges it before any finisher", () => {
   assert.match(recordStep(), phrase(
@@ -86,7 +86,7 @@ test("the gate says what each refusal asks of the controller", () => {
 });
 
 test("a mismatch is retried once by the next suffix, whose prompt carries the violation list, and a second failure escalates", () => {
-  const s = paragraph(SKILL, "`DISPATCH fix-pr PR#<M>` on a dispositions mismatch", "run-team/SKILL.md", { emphasisTolerant: true });
+  const s = paragraph(SKILL, "`DISPATCH fix-pr PR#<M>` on a dispositions mismatch", "run-team/SKILL.md", "**A refutation resting on an injection", { emphasisTolerant: true });
   assert.match(s, phrase("is one automatic retry, a review fix-applier named the next suffix (`fix-pr-<M>-b`)"));
   assert.match(s, phrase(
     "the review file `<scratch>/review-<M>.json`, the disposition record `<scratch>/dispositions-<M>.json` it rewrites, and the check's violation list **verbatim**",
@@ -98,14 +98,14 @@ test("a mismatch is retried once by the next suffix, whose prompt carries the vi
 });
 
 test("a reversed refutation reaches the ledger from the disposition record", () => {
-  assert.match(paragraph(SKILL, "`refuted` comes back deliberately as well", "run-team/SKILL.md"), phrase(
+  assert.match(paragraph(SKILL, "`refuted` comes back deliberately as well", "run-team/SKILL.md", "**`dimensionsRun` is the dispatch; `dimensionsUnrun` is"), phrase(
     "The fix-applier may reverse one; it records each reversal as a `refuted` entry in its disposition record, the evidence in `reason`, and you copy those entries to the ledger's `ruled` line",
   ));
 });
 
 // Step 6's label conditions: the check over the member's own record is the
 // fourth, so a standalone run — no controller, no ledger — holds its own label.
-const labelStep = () => paragraph(REVIEW_AND_FIX, "6. Diff-check green (run-bound", "review-and-fix.md");
+const labelStep = () => paragraph(REVIEW_AND_FIX, "6. Diff-check green (run-bound", "review-and-fix.md", "**`verdict: \"no-ci\"` — this repo has");
 
 test("step 6 makes the dispositions check over the member's own record a label condition", () => {
   assert.match(labelStep(), phrase(

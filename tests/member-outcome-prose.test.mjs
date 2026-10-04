@@ -46,6 +46,7 @@ const outcomeParagraph = () =>
     phase("## Phase 2", "## Phase 3"),
     "A member settling with nothing is not, by itself, a bail.",
     "run-team/SKILL.md member outcome-classification paragraph",
+    "**Dispatch every implementer with the `agent`",
   );
 
 const relabelParagraph = () =>
@@ -53,6 +54,7 @@ const relabelParagraph = () =>
     phase("## Phase 1", "## Phase 2"),
     "A Pull never re-admits a ticket already relabelled.",
     "run-team/SKILL.md Pull relabel-safety paragraph",
+    "**Relabel by cause.** An unclaimed ticket",
   );
 
 test("run-team/SKILL.md: a member's outcome arrives as its own job status", () => {

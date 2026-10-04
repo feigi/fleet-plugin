@@ -405,7 +405,7 @@ test("the fallback's diverged-worktree STOP survives the primary path's `+` answ
 // bot to compare the two heads at all — "the rebase would carry an unreviewed
 // local commit into the merge". Pinned positively in its own paragraph.
 const headCheck = () =>
-  paragraph(DOC, "**Confirm the worktree head", "run-merge-bot.md's fallback head check");
+  paragraph(DOC, "**Confirm the worktree head", "run-merge-bot.md's fallback head check", "```bash git -C <worktree> rev-parse HEAD");
 
 test("the fallback's head check states the mismatch as a corrupted verification, not a push into the merge", () => {
   assert.match(
@@ -505,7 +505,7 @@ test("the fallback reads the branch ref, and marks the PR-object read as not the
 // every tree the check exists to catch. #1168 pinned the same prohibition at
 // the sibling site for the same reason.
 const compareRule = () =>
-  paragraph(DOC, "**Compare the worktree head", "run-merge-bot.md's fallback compare rule");
+  paragraph(DOC, "**Compare the worktree head", "run-merge-bot.md's fallback compare rule", "**Why the ref and not `headRefOid`:");
 
 test("the fallback compares against the branch ref, and forbids both cheaper operands", () => {
   assert.match(compareRule(), phrase("Compare the worktree head against the branch REF"));
@@ -611,7 +611,7 @@ test("no arm of the fallback names the PR object as a thing to compare against",
 // THE CEILING: the measurement sentence beside these clauses is deliberately
 // unpinned — it is one run's reading at a sibling site, and re-measuring must
 // not turn a test red.
-const whyRef = () => paragraph(DOC, "**Why the ref and not", "run-merge-bot.md's fallback fail-open rationale");
+const whyRef = () => paragraph(DOC, "**Why the ref and not", "run-merge-bot.md's fallback fail-open rationale", "**Unequal → `git fetch origin` and");
 
 test("the fallback says the PR-object compare fails open too, and that a re-read cannot fix it", () => {
   assert.match(whyRef(), phrase("both operands go stale in the SAME direction"));
@@ -636,7 +636,7 @@ test("the fallback says the PR-object compare fails open too, and that a re-read
 //   - no `Equal`-is-unreachable clause, and the surviving mismatch can still
 //     be let through as equal, which is #1512's own defect restored one
 //     paragraph later than where it was removed.
-const reRead = () => paragraph(DOC, "**Unequal → `git fetch origin`", "run-merge-bot.md's fallback bounded re-read");
+const reRead = () => paragraph(DOC, "**Unequal → `git fetch origin`", "run-merge-bot.md's fallback bounded re-read", "**Ahead or behind is `git cherry");
 
 test("a mismatch is re-read exactly once, then refused rather than waited out", () => {
   assert.match(reRead(), phrase("`git fetch origin` and read the ref once more"));
@@ -660,7 +660,7 @@ test("a mismatch is re-read exactly once, then refused rather than waited out", 
 // removed from the operand. The discriminator is `git cherry`, which this
 // step already established two paragraphs up, and pinning it is what keeps
 // the arms' unchanged behaviour actually reachable.
-const armRouting = () => paragraph(DOC, "**Ahead or behind is", "run-merge-bot.md's fallback arm discriminator");
+const armRouting = () => paragraph(DOC, "**Ahead or behind is", "run-merge-bot.md's fallback arm discriminator", "- **Equal** → proceed.");
 
 test("which arm a surviving mismatch takes is decided by patch equivalence, not by the sha compare", () => {
   assert.match(armRouting(), phrase("`git cherry origin/<branch> HEAD` from the worktree"));
@@ -759,7 +759,7 @@ test("the STOP halts on verification against the wrong tree, not on a commit car
 // that now disagrees with it. Pinned inside the paragraph that carries the
 // cross-reference, so the two sites cannot drift apart again in silence.
 const plusOutcome = () =>
-  paragraph(DOC, "**Neither result halts this path", "run-merge-bot.md's `+` outcome paragraph");
+  paragraph(DOC, "**Neither result halts this path", "run-merge-bot.md's `+` outcome paragraph", "**Two, and only two, reasons this");
 
 test("the server-side paragraph routes no carry-into-the-merge rationale to the fallback", () => {
   assert.match(plusOutcome(), phrase("neither path can carry a local commit to the remote, because neither pushes"));
@@ -800,7 +800,7 @@ test("run-team scopes the diverged-worktree row to the fallback, not to every me
 // without this the skill's own statement of it can be deleted with the suite
 // green. Sliced to that one paragraph, and the span is one contiguous clause.
 test("run-team's never-`--delete-branch` paragraph says the branch-delete step also releases the claim label", () => {
-  const para = paragraph(RUN_TEAM, "Never `--delete-branch` — the merge bot deletes the head branch itself.", "run-team/SKILL.md's never-`--delete-branch` paragraph", {
+  const para = paragraph(RUN_TEAM, "Never `--delete-branch` — the merge bot deletes the head branch itself.", "run-team/SKILL.md's never-`--delete-branch` paragraph", "**Never force a rebase to start.**", {
     emphasisTolerant: true,
   });
   assert.match(para, phrase("The branch-delete step also releases the claim label: it drops `in-progress` from every issue the PR closes."));
@@ -905,7 +905,7 @@ test("step 1 re-polls before calling a desync, and that mandate is pinned", () =
 // proves the LAST read failed — is deliberately unpinned; it can be reworded
 // freely.
 const emptyPrHead = () =>
-  paragraph(DOC, "**`pr_head` still empty once the re-poll cap runs out", "run-merge-bot.md step 1 empty pr_head");
+  paragraph(DOC, "**`pr_head` still empty once the re-poll cap runs out", "run-merge-bot.md step 1 empty pr_head", "**A desync that DOES survive the");
 
 test("step 1 reports a pr_head still empty after the cap as unreadable, never as a desync or a landed rebase", () => {
   assert.match(emptyPrHead(), phrase("Report the PR-object read as unreadable"));
@@ -925,7 +925,7 @@ test("step 1 never feeds an empty pr_head into the close-and-reopen ancestry che
 // reason the local rebase is forbidden is pinned apart from the prohibition, so
 // "because" → "since" leaves both green while dropping either reds.
 const survivingDesync = () =>
-  paragraph(DOC, "**A desync that DOES survive the cap", "run-merge-bot.md step 1 surviving desync");
+  paragraph(DOC, "**A desync that DOES survive the cap", "run-merge-bot.md step 1 surviving desync", "**The controller's remedy is close-and-reopen, and");
 
 test("step 1 hands a desync that survives the cap to the controller and repairs nothing itself", () => {
   assert.match(survivingDesync(), phrase("is the one state that needs a controller"));
@@ -1418,7 +1418,7 @@ test("the hold rule says prose=0 clears only when proseUnrun is null", () => {
 // provably unrelated) that says mechanising a bare symbol name would cost
 // more than it buys.
 test("the same-docs-section bullet points at signal 4 and keeps symbols human", () => {
-  const s = paragraph(DOC, "they change the same exported symbol", "the same-section bullet");
+  const s = paragraph(DOC, "they change the same exported symbol", "the same-section bullet", "Genuinely unclear → **hold**. Waiting costs");
   assert.match(
     s,
     phrase("signal 4 mechanises the half of this where the section is a **data file** cited by name"),

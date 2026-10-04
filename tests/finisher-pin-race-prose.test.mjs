@@ -61,7 +61,7 @@ function causeText() {
 // anchor rather than widening to the whole file, which is the only way a
 // "no closed count anywhere" assertion could pass by looking at nothing.
 const LEAD_ANCHOR = "A halt at step 1 reads identical from a bare SHA mismatch";
-const leadIn = () => paragraph(RUN_TEAM, LEAD_ANCHOR, "run-team halt-cause lead-in");
+const leadIn = () => paragraph(RUN_TEAM, LEAD_ANCHOR, "run-team halt-cause lead-in", "> Worktree differs from your pin,");
 
 test("finisher dispatch is gated on outstanding specialist relays, in the section that owns relay receipts", () => {
   const section = fallbackSection();

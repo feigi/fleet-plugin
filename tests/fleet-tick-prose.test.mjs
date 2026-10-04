@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between as section, phrase } from "./support/prose-pin.mjs";
+import { between as section, paragraph, phrase } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -62,7 +62,7 @@ test("the tick block says the tick reads the run itself, and nobody states a cou
 
 // The rule itself, bounded to its own paragraph.
 const maxReviewsPair = () =>
-  section(RUN_TEAM, "**`--max-reviews <n>`", "\n\n", "run-team --max-reviews rule");
+  paragraph(RUN_TEAM, "**`--max-reviews <n>`", "run-team --max-reviews rule", "**Why every wake.** A merge cascade is a firehose");
 
 test("--max-reviews defaults to the reviewer cap, and omp leaves it there", () => {
   const region = maxReviewsPair();
@@ -75,7 +75,7 @@ test("the record-before-tick table names every wake, each with what it records",
   // Spec 2026-09-24 § 6 §7. The table IS the edge list now: a wake missing from
   // it is a wake that records nothing and so is invisible to the tick, which
   // reads only the ledger. Row by row, each by its wake and its record.
-  const table = section(RUN_TEAM, "| Wake | Record, then tick |", "\n\n", "record-before-tick table");
+  const table = paragraph(RUN_TEAM, "| Wake | Record, then tick |", "record-before-tick table", "Then run the tick, act on every line it prints,");
   const rows = table.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Wake"));
   const WAKES = [
     ["Implementer report", ["verify-sha.sh", "settle impl-<N>=PR#<M>", "=bailed"]],

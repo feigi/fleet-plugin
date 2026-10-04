@@ -101,7 +101,7 @@ const VERDICT_ROWS = [
 
 test(`${SKILL} keeps the invocation on the flag \`staleness.mjs\` actually accepts`, () => {
   assert.match(
-    paragraph(text, USAGE, SKILL),
+    paragraph(text, USAGE, SKILL, "A needle that itself starts with"),
     phrase(INVOCATION),
     `${SKILL} no longer spells the invocation "${INVOCATION}". A reader who copies a flag the script does not accept gets \`staleness: --path <path> is required\` at exit 2 — a could-not-check indistinguishable from a real one, which the table below then says to admit and annotate. Restore it, or re-anchor INVOCATION in this file to the new wording.`,
   );
@@ -109,7 +109,7 @@ test(`${SKILL} keeps the invocation on the flag \`staleness.mjs\` actually accep
 
 test(`${SKILL} keeps \`--gone\` and \`--present\` bound to the direction each one means`, () => {
   assert.match(
-    paragraph(text, USAGE, SKILL),
+    paragraph(text, USAGE, SKILL, "A needle that itself starts with"),
     phrase(DIRECTIONS),
     `${SKILL} no longer says "${DIRECTIONS}". The direction is not recoverable from the needle itself, so a reader who loses this gloss picks a flag by guess and the wrong one answers the OPPOSITE verdict with full confidence — a live defect reported fixed, or a fixed one reported live. Restore it, or re-anchor DIRECTIONS in this file to the new wording.`,
   );
@@ -117,7 +117,7 @@ test(`${SKILL} keeps \`--gone\` and \`--present\` bound to the direction each on
 
 test(`${SKILL} keeps the probe to exactly one direction per invocation`, () => {
   assert.match(
-    paragraph(text, USAGE, SKILL),
+    paragraph(text, USAGE, SKILL, "A needle that itself starts with"),
     phrase(EXACTLY_ONE),
     `${SKILL} no longer says "${EXACTLY_ONE}". Without it the usage block reads as if both flags may be passed together, which no verdict in the table below describes. Restore it, or re-anchor EXACTLY_ONE in this file to the new wording.`,
   );
@@ -126,7 +126,7 @@ test(`${SKILL} keeps the probe to exactly one direction per invocation`, () => {
 for (const [code, row] of VERDICT_ROWS) {
   test(`${SKILL} keeps exit ${code}'s verdict bound to what it does at the Pull`, () => {
     assert.match(
-      paragraph(text, TABLE, SKILL),
+      paragraph(text, TABLE, SKILL, "The third value is the one"),
       phrase(row),
       `${SKILL}'s exit-code table no longer carries "${row}". A verdict whose supply action drifts is worse than a missing one: the reader still acts, on the wrong instruction. Restore the row, or re-anchor VERDICT_ROWS in this file to the new wording.`,
     );
@@ -135,7 +135,7 @@ for (const [code, row] of VERDICT_ROWS) {
 
 test(`${SKILL} makes a \`could not check\` ticket reach its member annotated as one`, () => {
   assert.match(
-    paragraph(text, SURVIVORS, SKILL),
+    paragraph(text, SURVIVORS, SKILL, "**The prompt pastes the Pull's own"),
     phrase(ANNOTATE),
     `${SKILL} no longer says "${ANNOTATE}". The dispatch prompt is where the third value has to land — a probe that could not look answers exactly like one that looked and found nothing, so a ticket dispatched without the verdict reads to its member as one the probe checked and found live, which is the collapse into a neighbour that the third value exists to prevent. Restore it, or re-anchor ANNOTATE in this file to the new wording.`,
   );

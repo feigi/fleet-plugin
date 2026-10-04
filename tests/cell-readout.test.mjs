@@ -326,7 +326,7 @@ test("equal per-model counts in a mixed cell list models alphabetically", () => 
 const RUN_TEAM = readFileSync(join(import.meta.dirname, "..", "plugin", "skills", "run-team", "SKILL.md"), "utf8");
 
 test("SKILL.md's floor names the script that prints a cell's count, and that script exists", () => {
-  const floor = unemphasized(paragraph(RUN_TEAM, "**Report the count the per-cell readout prints", "run-team's per-cell floor"));
+  const floor = unemphasized(paragraph(RUN_TEAM, "**Report the count the per-cell readout prints", "run-team's per-cell floor", "Why the agent body carries what"));
   const named = /`~\/\.fleet\/bin\/fleet-run (\S+\.mjs)`/.exec(floor)?.[1];
   assert.ok(named, "the floor no longer tells the controller which script to run");
   assert.equal(named, "cell-readout.mjs");
@@ -347,7 +347,7 @@ test("the line SKILL.md says the readout prints is the line it prints: four fiel
 });
 
 test("SKILL.md says the readout counts a pair only when the two rows ran a different model or effort, as the readout does", () => {
-  const deliberate = unemphasized(paragraph(RUN_TEAM, "**The readout counts DELIBERATE comparisons.**", "run-team's DELIBERATE paragraph"));
+  const deliberate = unemphasized(paragraph(RUN_TEAM, "**The readout counts DELIBERATE comparisons.**", "run-team's DELIBERATE paragraph", "**Why one in five within the"));
   assert.match(deliberate, phrase("the two rows must actually have RUN a different model or effort"));
   // Run, not read: the same model at the same level is no comparison, the same
   // model at a different level is one, a different model at the same level is one.

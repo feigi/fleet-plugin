@@ -42,43 +42,14 @@ const ABSENT_REASON = (CI_STATE.match(/reasons\.push\(`([^`$]+)\$\{missing\./) ?
 //
 // The shared bound, not a local copy of it (#1372). What it closes that a local
 // copy could not: a blank line carrying whitespace, which a literal `\n\n`
-// search runs straight past into the next paragraph, and an anchor occurring
-// more than once, which binds the pin to whichever copy of the anchored block
-// comes first. What it does NOT close is a blank line deleted outright — the
-// paragraphs then merge and the slice takes both, a hole that predates this
-// bound and is open still (#1377).
-//
-// The local copy this replaced took a SECOND bound, the opening of the next
-// paragraph, and used the blank line only as a tightener. In both documents the
-// blank line already falls where that opening begins, so the migrated slices are
-// byte-identical to what the local copy returned. But the local copy also
-// ASSERTED that opening was reachable, and that assert is the one thing that
-// sees the merge — so it is kept, as its own check rather than as a bound.
+// search runs straight past into the next paragraph, an anchor occurring more
+// than once, which binds the pin to whichever copy of the anchored block comes
+// first, and, through `next`, a blank line deleted outright.
 const reviewAndFix = () =>
-  paragraph(REVIEW_AND_FIX, "Its job-presence check is what catches the case above", "review-and-fix job-presence sentence");
+  paragraph(REVIEW_AND_FIX, "Its job-presence check is what catches the case above", "review-and-fix job-presence sentence", "**A repo with no workflow files");
 
 const runMergeBot = () =>
-  paragraph(RUN_MERGE_BOT, "That presence requirement is what catches the case above", "run-merge-bot presence-requirement sentence");
-
-// The blank line each slice stops at is a bound only while it is there: delete
-// it and the following paragraph merges into the slice, where a copy of the
-// gutted clause satisfies every assertion in this file (measured — either
-// document, whole suite green without this check). `paragraph` cannot tell a
-// merged paragraph from a genuine one, so the opening of the next paragraph is
-// asserted here, with the blank line that separates it included in the literal.
-const NEXT_PARAGRAPH = [
-  ["review-and-fix", REVIEW_AND_FIX, "\n\n**A repo with no workflow files"],
-  ["run-merge-bot", RUN_MERGE_BOT, "\n\n   **Why twice: a conclusion can invert under a fixed run id.**"],
-];
-
-test("each pinned paragraph is still followed by a blank line and the paragraph that opened after it", () => {
-  for (const [label, doc, opening] of NEXT_PARAGRAPH) {
-    assert.ok(
-      doc.includes(opening),
-      `${label}: ${JSON.stringify(opening)} is gone. If the blank line went, the pinned slice now runs on into that paragraph and a gutted clause reads as pinned; if the paragraph itself moved or was reworded, re-anchor this check`,
-    );
-  }
-});
+  paragraph(RUN_MERGE_BOT, "That presence requirement is what catches the case above", "run-merge-bot presence-requirement sentence", "**Why twice: a conclusion can invert");
 
 // Both documents carry both claims, but each words the aftermath its own way,
 // so the force-push span is per-document and the `pending` span is shared.

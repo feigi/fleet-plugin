@@ -30,7 +30,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between } from "./support/prose-pin.mjs";
+import { between, paragraph } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -219,7 +219,7 @@ test("the controller records every filing a filer reported unrecorded", () => {
   // The fallback is only a fallback if someone acts on it: an `unrecorded:`
   // line nobody turns into a `filed` row leaves the arm exactly as blind as
   // before, one filing at a time.
-  const table = between(RUN_TEAM, "| Wake | Record, then tick |", "\n\n", "record-before-tick table");
+  const table = paragraph(RUN_TEAM, "| Wake | Record, then tick |", "record-before-tick table", "Then run the tick, act on every line it prints,");
   for (const wake of ["Fix-applier report", "Finisher report", "Finisher report (halted)"]) {
     const row = table.split("\n").find((r) => r.startsWith(`| ${wake} |`)) ?? "";
     assert.match(row, /`ledger\.mjs filed <N> "<subject>"` for each `unrecorded:` line/, `the "${wake}" wake no longer records unrecorded filings`);

@@ -85,7 +85,7 @@ for (const [name, slice] of slices) {
 }
 
 test("run-team/SKILL.md says only a fresh claim writes the runner", () => {
-  const p = paragraph(RUN_TEAM, "**A reused worktree may lack the runner.**", "run-team/SKILL.md reused-worktree runner paragraph");
+  const p = paragraph(RUN_TEAM, "**A reused worktree may lack the runner.**", "run-team/SKILL.md reused-worktree runner paragraph", "**A reused worktree may also be");
   assert.match(p, phrase("`claim-ticket.sh` writes `agent-test` only into the fresh worktree it claims"));
 });
 

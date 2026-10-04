@@ -82,7 +82,7 @@ const text = () => readFileSync(join(import.meta.dirname, "..", "plugin", ...SKI
 // or moving the asterisks must not red a pin that holds the words. Whitespace
 // is left to `phrase()`, which joins on `\s+` and so already absorbs the
 // hard-wrap.
-const recipe = () => paragraph(text(), ANCHOR, SKILL).replace(/\*\*/g, "");
+const recipe = () => paragraph(text(), ANCHOR, SKILL, "**Both halves of that command are").replace(/\*\*/g, "");
 
 // ONE contiguous span, never three presence checks: the rule is the JOIN of the
 // instruction (no ancestry check here), its reason (reachable by construction,

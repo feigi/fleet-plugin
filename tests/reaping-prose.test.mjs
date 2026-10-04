@@ -147,7 +147,7 @@ test("run-team/SKILL.md: the release deletes the branch with update-ref's compar
 // worktree check finds it held — so naming `-D`, or the cherry check as the
 // delete's only authorizer, is false as written.
 const reapParagraph = () =>
-  paragraph(RUN_TEAM, "`~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition", "run-team/SKILL.md's reap paragraph");
+  paragraph(RUN_TEAM, "`~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition", "run-team/SKILL.md's reap paragraph", "**It sweeps detached worktrees too —");
 
 test("run-team/SKILL.md: reap's cherry check authorizes the update-ref delete, with the fresh worktree check beside it", () => {
   const p = reapParagraph();
