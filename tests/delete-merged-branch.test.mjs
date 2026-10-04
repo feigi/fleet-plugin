@@ -112,6 +112,9 @@ function mergedInWorktree(w, name, wtName) {
  * expression, so the selection the script asks for is under test rather than
  * hard-coded into the fixture. PR_LIST_FAIL=head|base makes that lookup exit
  * 1; PR_LIST_RAW_HEAD/PR_LIST_RAW_BASE replace its output verbatim at exit 0.
+ * ISSUE_EDIT_FAIL is a space-separated list of issue numbers whose
+ * `issue edit` exits 1; ISSUE_VIEW_FAIL names the one issue whose `issue view`
+ * does.
  */
 function ghStub(t, root) {
   const bin = join(root, "bin");
@@ -151,7 +154,7 @@ case "$*" in
     exit 0
     ;;
   "issue edit "*" --remove-label in-progress")
-    [ "\${ISSUE_EDIT_FAIL:-}" != "$3" ] || { echo "gh: simulated issue edit failure" >&2; exit 1; }
+    case " \${ISSUE_EDIT_FAIL:-} " in *" $3 "*) echo "gh: simulated issue edit failure" >&2; exit 1 ;; esac
     grep -vx in-progress "${labels}/$3" > "${labels}/$3.tmp" || true
     mv "${labels}/$3.tmp" "${labels}/$3"
     exit 0
@@ -624,7 +627,7 @@ test("a branch already gone is success even when an open-PR lookup would fail", 
 // The label state lives in the gh stub's per-issue files, so "the label is
 // gone" is read off what `issue edit` actually did, never off a canned answer.
 
-const LABEL_SCRIPT = fileURLToPath(new URL("./drop-merged-label.sh", import.meta.url));
+const LABEL_SCRIPT = fileURLToPath(new URL("../plugin/scripts/drop-merged-label.sh", import.meta.url));
 const LABEL_EDIT = (n) => `issue edit ${n} --remove-label in-progress`;
 
 /** A merged PR whose branch is checked out in a worktree and still on origin, with a gh stub. */
@@ -643,7 +646,7 @@ function hostCopy(t, labelBody) {
   const dir = mkdtempSync(join(tmpdir(), "delete-merged-branch-copy-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   for (const f of ["delete-merged-branch.sh", "json.sh", "net.sh"]) {
-    writeFileSync(join(dir, f), readFileSync(fileURLToPath(new URL(`./${f}`, import.meta.url))));
+    writeFileSync(join(dir, f), readFileSync(fileURLToPath(new URL(`../plugin/scripts/${f}`, import.meta.url))));
   }
   if (labelBody !== null) writeFileSync(join(dir, "drop-merged-label.sh"), labelBody);
   return join(dir, "delete-merged-branch.sh");
@@ -831,6 +834,21 @@ test("a failed removal alone exits 4 and names the issue on stdout, before the b
   assert.equal(onOrigin(origin, branch), false, "a label failure never stops the branch delete");
   assert.deepEqual(gh.labelsOf(41), ["in-progress"]);
   assert.deepEqual(gh.labelsOf(43), [], "the other issue is still released");
+});
+
+test("two issues whose removals both fail print one token each, in order, and exit 4", (t) => {
+  const branch = "fix/2751-drop-failed-two";
+  const { origin, w, oid, gh } = mergedFixture(t, branch, "2751-drop-failed-two");
+  gh.setLabels(41, "in-progress");
+  gh.setLabels(43, "in-progress");
+
+  const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41\n43", ISSUE_EDIT_FAIL: "41 43" }));
+
+  assert.equal(r.code, 4, r.stderr);
+  assert.deepEqual(r.stdout.split("\n").filter(Boolean), ["label-drop-failed-#41", "label-drop-failed-#43", JSON.stringify({ pr: 7, branch, deleted: true })]);
+  assert.equal(onOrigin(origin, branch), false, "a label failure never stops the delete");
+  assert.deepEqual(gh.labelsOf(41), ["in-progress"]);
+  assert.deepEqual(gh.labelsOf(43), ["in-progress"]);
 });
 
 test("a failed removal together with a failed branch delete exits 1 and prints both", (t) => {
