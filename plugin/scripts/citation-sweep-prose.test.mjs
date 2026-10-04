@@ -856,12 +856,17 @@ for (const { path, stale, live } of FILES) {
 }
 
 // The cited side of ledger.mjs's "runDispatch's `keyNum` check" pointer: a
-// top-level `function runDispatch(` whose body, up to its closing brace at
-// column 0, still calls `isDigits(keyNum)`. Comments are stripped first, so
-// the pointer's own comment, or the check left behind commented out, cannot
-// stand in for the code. Null when both hold, else the reason.
+// top-level `function runDispatch(` (`async` or not) whose body, up to the
+// first line that starts with `}`, still calls `isDigits(keyNum)`. Comments
+// are stripped first, so the pointer's own comment, or the check left behind
+// as a whole-line `//` or `/* */` comment, cannot stand in for the code, and
+// KEYNUM_CHECK refuses a check that follows a `//` on its line. Two forms
+// still can, because strip-comments.mjs blanks whole-line comments only and
+// nothing here tokenizes: the check's text inside a string literal, and
+// inside a block comment opened after code on the same line. Null when the
+// function and the call both hold, else the reason.
 const RUN_DISPATCH = /^(?:async\s+)?function\s+runDispatch\s*\(/m;
-const KEYNUM_CHECK = /\bisDigits\(\s*keyNum\s*\)/;
+const KEYNUM_CHECK = /^(?:(?!\/\/).)*\bisDigits\(\s*keyNum\s*\)/m;
 
 function runDispatchKeyNumFault(source) {
   const code = stripComments(source);
@@ -874,7 +879,7 @@ function runDispatchKeyNumFault(source) {
 
 test("ledger.mjs's pointer to runDispatch's `keyNum` check still lands on code", () => {
   const fault = runDispatchKeyNumFault(read("scripts", "ledger.mjs"));
-  assert.equal(fault, null, `ledger.mjs's \`filed\` comment points at "runDispatch's \`keyNum\` check", but ${fault} — rename the pointer with its target`);
+  assert.equal(fault, null, `ledger.mjs's \`filed\` comment points at "runDispatch's \`keyNum\` check", but ${fault} — rename the pointer with its target, and RUN_DISPATCH and KEYNUM_CHECK in citation-sweep-prose.test.mjs with it`);
 });
 
 test("the runDispatch pointer reds once the function, the variable or the check's place changes", () => {
@@ -884,7 +889,10 @@ test("the runDispatch pointer reds once the function, the variable or the check'
     "function runDispatch() {\n  const keyDigits = key;\n  if (!isDigits(keyDigits)) die();\n}\n",
     `function runDispatch() {\n}\n\nfunction validate() {\n${check}}\n`,
     "function runDispatch() {\n  const keyNum = key;\n  // if (!isDigits(keyNum)) die();\n}\n",
+    "function runDispatch() {\n  const keyNum = key;\n  void 0; // if (!isDigits(keyNum)) die();\n}\n",
     `/*\nfunction runDispatch() {\n${check}}\n*/\n`,
+    `function wrapper() {\n  function runDispatch() {\n${check}  }\n}\n`,
+    `const x = 1; function runDispatch() {\n${check}}\n`,
   ]) {
     assert.notEqual(runDispatchKeyNumFault(source), null, source);
   }
