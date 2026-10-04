@@ -499,7 +499,16 @@ const FILES = [
     // other number straight back in, and this file already carried the
     // identical stale number at two independent sites.
     path: ["scripts", "fleet-heartbeat.mjs"],
-    stale: [/run-merge-bot\.md:\d+/],
+    // #2667. The header once said run-merge-bot.md's CI gate holds its wait
+    // "and re-issuing it", and the several-holds paragraph once called the
+    // heartbeat "the same remedy the CI gate reached for". The CI wait holds
+    // in one `eval` cell and re-issues nothing. Tolerant of a re-wrap: the
+    // comment is hard-wrapped, so either phrase can break across a `//` line.
+    stale: [
+      /run-merge-bot\.md:\d+/,
+      /re-issuing\s+(?:\/\/\s*)?it\b/,
+      /same remedy the\s+(?:\/\/\s*)?CI gate/,
+    ],
     // One needle per SITE — either can revert independently of the other.
     live: [
       "run-merge-bot.md's CI wait rule already states",
