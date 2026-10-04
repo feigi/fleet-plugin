@@ -299,10 +299,11 @@ date filter above restarts the count.
 
 **Clarification from `#2725` (2026-10-04):** a ticket's verdict belongs to
 one cell, the cell of its carrier (defined here). The ticket's ruling is its
-latest-dated `tier-outcomes.tsv` row (the later in file order on a tie, a
-both-blank row skipped); the carrier is the ticket's latest
-`ticket-features.tsv` row across all cells, `slow-high` included, dated ≤
-the ruling (the later in file order on a tie). The ruling is a verdict for
+last `tier-outcomes.tsv` row in file order (a both-blank row skipped); the
+carrier is the ticket's last `ticket-features.tsv` row in file order across
+all cells, `slow-high` included, dated ≤ the ruling. Both picks go by file
+order; dates only set the floor, and neither pick is the latest-dated row.
+The ruling is a verdict for
 X only when the carrier is an admissible row at X dated ≥ the date
 `fleet-implementer-<cell>.agent.md` was most recently added; this replaces
 the "last row per ticket dated ≥ … the ticket's last such row at X" join

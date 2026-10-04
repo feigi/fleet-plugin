@@ -555,9 +555,9 @@ test("stopping rule: a malformed ruling on a ticket with no counted Pull is not 
 });
 
 // ---------------------------------------------------------------------------
-// Which ruling is a ticket's: its latest-dated row, a both-blank (never ruled)
-// row skipped. Which Pull carries it: the ticket's latest Pull, at any cell,
-// dated on or before the ruling.
+// Which ruling is a ticket's: its last row in file order, a both-blank (never
+// ruled) row skipped. Which Pull carries it: the ticket's last Pull in file
+// order, at any cell, dated on or before the ruling. Dates only set the floor.
 
 // A second Pull of an existing ticket at `cell`, in its own session, with the
 // admissible member row it left unless `member` is false.
@@ -591,7 +591,7 @@ test("stopping rule: a ruling dated before its Pull does not rule it, so only pr
   assert.equal(day.stop, true);
 });
 
-test("stopping rule: a re-Pulled ticket is charged with its latest ruling, in either corpus order, and a ruling between the Pull and the re-Pull is the earlier Pull's", () => {
+test("stopping rule: a re-Pulled ticket is charged with its last ruling in file order, and a ruling between the Pull and the re-Pull is the earlier Pull's", () => {
   const added = { "smol-high": "2026-09-01" };
   // Pulled 2026-10-02 and ruled 2026-10-03 failing the floor, then re-Pulled 2026-10-05.
   const build = () => {
@@ -613,10 +613,15 @@ test("stopping rule: a re-Pulled ticket is charged with its latest ruling, in ei
   const charged = judged(later, added, "smol-high").verdicts;
   assert.deepEqual(charged.map((v) => [v.ticket, v.pr, v.run_date, v.failed]), [[ticket, "9002", "2026-10-06", false]]);
 
-  // The stale row appended after the later one, as a backfill would land it.
+  // The stale row appended after the later one, as a backfill would land it:
+  // file order picks the ruling, so the later-appended 2026-10-03 row wins and
+  // the later-dated 2026-10-06 row does not; dates only set the floor.
   const backfilled = build();
   backfilled.verdicts.unshift(verdict({ ticket, pr: "9002", run_date: "2026-10-06" }));
-  assert.deepEqual(judged(backfilled, added, "smol-high").verdicts.map((v) => v.pr), ["9002"]);
+  assert.deepEqual(
+    judged(backfilled, added, "smol-high").verdicts.map((v) => [v.pr, v.run_date]),
+    [[String(Number(ticket) + 5000), "2026-10-03"]],
+  );
 });
 
 // A ticket Pulled at smol-high on 2026-10-03 and ruled once on 2026-10-06
@@ -631,7 +636,7 @@ function pulledTwice(then) {
 }
 const tally = (w, added) => stop(w, added).map((c) => [c.cell, c.verdicts.length, c.failures]);
 
-test("stopping rule: a ticket Pulled at two cells charges its one ruling to the cell of its latest Pull before the ruling, never to both", () => {
+test("stopping rule: a ticket Pulled at two cells charges its one ruling to the cell of its last Pull before the ruling, never to both", () => {
   const added = { "smol-high": "2026-09-01", "task-high": "2026-09-01" };
   const { w } = pulledTwice((w, t) => rePull(w, t, "2026-10-05", "task-high"));
   assert.deepEqual(tally(w, added), [["smol-high", 0, 0], ["task-high", 1, 1]]);
@@ -643,7 +648,15 @@ test("stopping rule: a ticket Pulled at two cells charges its one ruling to the 
   assert.deepEqual(tally(sameDay, added), [["smol-high", 1, 1], ["task-high", 0, 0]]);
 });
 
-test("stopping rule: a ticket whose latest Pull before the ruling is at the policy cell charges no cell", () => {
+test("stopping rule: the carrier is the last Pull in file order dated on or before the ruling, not the latest-dated one", () => {
+  const added = { "smol-high": "2026-09-01", "task-high": "2026-09-01" };
+  // Pulled at smol-high 2026-10-03, the 2026-10-05 task-high Pull sits before it in file order.
+  const { w } = pulledTwice((w, t) => rePull(w, t, "2026-10-05", "task-high"));
+  w.features.reverse();
+  assert.deepEqual(tally(w, added), [["smol-high", 1, 1], ["task-high", 0, 0]]);
+});
+
+test("stopping rule: a ticket whose last Pull before the ruling is at the policy cell charges no cell", () => {
   const added = { "smol-high": "2026-09-01", "task-high": "2026-09-01", "slow-high": "2026-09-01" };
   const { w } = pulledTwice((w, t) => rePull(w, t, "2026-10-05", "slow-high"));
   assert.deepEqual(tally(w, added), [["smol-high", 0, 0], ["task-high", 0, 0]]);

@@ -43,11 +43,13 @@
 // agent, and it prints nothing on stdout.
 //
 // STOPPING RULE (exported as `stoppingRule`, not printed by this CLI). A
-// ticket's RULING is its latest-dated tier-outcomes.tsv row, the later in file
-// order on a tie (a `+`-joined `ticket` field rules each ticket it names); a
-// row with both verdict columns blank was never ruled, so it is skipped. Its
-// CARRIER is the ticket's latest Pull at any cell, slow-high included, dated
-// on or before the ruling, the later in file order on a tie. A Pull at X is
+// ticket's RULING is its last tier-outcomes.tsv row in file order (a
+// `+`-joined `ticket` field rules each ticket it names); a row with both
+// verdict columns blank was never ruled, so it is skipped. Its CARRIER is
+// the ticket's last Pull in file order, at any cell, slow-high included,
+// dated on or before the ruling. Dates only set that floor: a ruling counts
+// for a Pull only when dated on or after it, and neither pick is the
+// latest-dated row. A Pull at X is
 // COUNTABLE when X is a cell other than slow-high whose definition is live
 // and the Pull is admissible and dated on or after the day X's
 // `fleet-implementer-<cell>` definition was most recently added. The ruling
@@ -175,8 +177,9 @@ export function readout({ features, members }) {
  * `[{ ticket, pr, run_date, closed_own_ticket, minted_false_claim, failed }]`
  * sorted by ticket, `run_date` the ruling's; `stop` is whether the stopping
  * rule withdraws the cell. `verdicts` are parsed tier-outcomes.tsv rows.
- * A ticket's ruling is charged to the cell of its carrier, the ticket's latest
- * Pull at any cell dated on or before the ruling, and only when that Pull is
+ * A ticket's ruling is its last ruling row in file order, charged to the cell
+ * of its carrier, the ticket's last Pull in file order at any cell dated on or
+ * before the ruling, and only when that Pull is
  * countable: admissible, at a cell named in `added` other than the policy
  * cell, and dated on or after the day that cell's definition was added.
  * Throws on the ruling of a ticket with a countable Pull whose
@@ -204,13 +207,12 @@ export function stoppingRule({ features, members, verdicts, added }) {
   }
   for (const [ticket, pulls] of pullsByTicket) {
     if (!pulls.some((p) => countable.has(p))) continue;
-    // The ticket's ruling: its latest-dated row, the later in file order on a tie.
-    const latest = (rulings.get(String(ticket)) ?? []).reduce((d, r) => (r.run_date > d ? r.run_date : d), "");
-    const v = rulingFor(rulings, ticket, latest);
+    // The ticket's ruling: its last ruling row in file order (every date clears a "" floor).
+    const v = rulingFor(rulings, ticket, "");
     if (!v) continue;
-    // Its carrier: the latest Pull dated on or before the ruling, the later in file order on a tie.
+    // Its carrier: the ticket's last Pull in file order dated on or before the ruling.
     let carrier = null;
-    for (const p of pulls) if (dated(p) <= v.run_date && (!carrier || p.run_date >= carrier.run_date)) carrier = p;
+    for (const p of pulls) if (dated(p) <= v.run_date) carrier = p;
     if (!carrier || !countable.has(carrier)) continue;
     charged.get(carrier.chosen_cell).push({
       ticket: carrier.ticket, pr: v.pr, run_date: v.run_date,
