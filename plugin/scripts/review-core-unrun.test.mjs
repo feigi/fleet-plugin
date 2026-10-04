@@ -401,18 +401,57 @@ test("the returned object carries dimensionsUnrun alongside dimensionsRun", () =
 // The note hands every specialist the shared run and tells it not to run the
 // full command itself — and nothing more about the run: the shared run is the
 // single record of it, so no specialist is told to report or copy it anywhere.
-// Every rendering the note has — usable, no counts (NOT usable), and failing
-// tests for the owner and for a non-owner — is checked, because each appends a
-// different paragraph to the same opening one.
+// Every rendering the note has is checked — usable, each reason a run is NOT
+// usable (each reason's own text is interpolated into that paragraph), and
+// failing or cancelled tests for the owner and for a non-owner — because each
+// appends a different paragraph to the same opening one.
+//
+// The no-copy check reads the whole note with its line wrapping flattened, so
+// a request appended after the opening paragraph, or one the hard wrap splits
+// across two lines, is still one sentence to it. It is a bounded word list, not
+// a proof: a request worded with a verb or noun outside the lists passes it.
+// COPY_REQUEST matches three shapes: a copy verb followed within a few words
+// by the run, its counts, its log or its result; a copy verb followed in the
+// same sentence by a destination in the specialist's own output ("in your
+// result", "to the payload"); and the run, counts or log said to "must be"
+// reported, returned, included and the like. The verbs are whole words, so
+// inflected ones never match as written — and must not be widened to
+// inflections, because the "no exit status" rendering's own "reported counts
+// but no exit status" would then match. The word window is what keeps the
+// opening paragraph's "your own copy of the snapshot are still yours to run"
+// green: it uses `copy` as a noun and ends on `run` in the same sentence.
+// Every rendering below must pass it. The run-is-null reason ("returned
+// nothing") is not rendered here: sharedRunNote dereferences run.command, and
+// that text reaches a note only as the "(the test-run agent returned nothing)"
+// error suffix runReview sets.
+const COPY_VERB = "report|copy|echo|record|return|repeat|restate|include|paste|attach|quote|put|add|list";
+const COPY_OBJECT = "run|counts?|logs?|results?";
+const COPY_REQUEST = new RegExp(
+  [
+    String.raw`\b(?:${COPY_VERB})\b(?:\s+[^\s.]+){0,4}?\s+(?:${COPY_OBJECT})\b`,
+    String.raw`\b(?:${COPY_VERB})\b[^.]*\b(?:in|to|into)\s+(?:your|the)\s+(?:\w+\s+)?(?:result|payload|scope_searched|summary|findings?)\b`,
+    String.raw`\b(?:${COPY_OBJECT})\b(?:\s+[^\s.]+){0,3}?\s+(?:must|should|shall)\s+be\s+(?:report|return|includ|record|cop|attach|quot|past|echo|list|add|put)\w*`,
+  ].join("|"),
+  "i",
+);
 test("the shared-run note hands over the run and forbids a rerun, and asks for no copy of it in any rendering", () => {
-  const usable = { command: "node --test", logPath: "/r/test-run.log", exitCode: 0, tests: 5, pass: 5, fail: 0 };
-  const noCounts = { command: "node --test", logPath: "/r/test-run.log", error: "no summary" };
-  const failing = { command: "node --test", logPath: "/r/test-run.log", exitCode: 1, tests: 5, pass: 3, fail: 2 };
+  const base = { command: "node --test", logPath: "/r/test-run.log" };
+  const usable = { ...base, exitCode: 0, tests: 5, pass: 5, fail: 0 };
+  const failing = { ...base, exitCode: 1, tests: 5, pass: 3, fail: 2 };
+  const cancelled = { ...base, exitCode: 1, tests: 5, pass: 4, fail: 0, cancelled: 1 };
+  const unusable = (why) => new RegExp(`This run is NOT usable: \`node --test\` ${why}`);
   for (const [name, run, key, paragraph] of [
     ["usable", usable, "tests", null],
-    ["no counts", noCounts, "tests", /This run is NOT usable: /],
+    ["no counts", { ...base, error: "no summary" }, "tests", unusable("produced no counts")],
+    ["0 tests", { ...base, exitCode: 0, tests: 0, pass: 0, fail: 0 }, "tests", unusable("produced 0 tests")],
+    ["every test skipped", { ...base, exitCode: 0, tests: 5, pass: 0, fail: 0 }, "tests", unusable("passed nothing and failed nothing")],
+    ["most never ran", { ...base, exitCode: 0, tests: 10, pass: 2, fail: 0 }, "tests", unusable("passed 2 and failed 0 of the 10")],
+    ["no exit status", { ...base, tests: 5, pass: 5, fail: 0 }, "tests", unusable("reported counts but no exit status")],
+    ["non-zero exit, nothing failing", { ...base, exitCode: 1, tests: 5, pass: 5, fail: 0 }, "tests", unusable("exited 1 but reported no failing")],
     ["failing, owner", failing, "correctness", /filing them is YOUR job in this review/],
     ["failing, non-owner", failing, "tests", /the correctness dimension files the finding/],
+    ["cancelled, owner", cancelled, "correctness", /cancelled tests, and filing them is YOUR job/],
+    ["cancelled, non-owner", cancelled, "tests", /cancelled tests, and the correctness dimension files/],
   ]) {
     const note = sharedRunNote(run, "correctness", key);
     assert.doesNotMatch(note, /test_run/, `${name}: the note still names test_run`);
@@ -425,6 +464,8 @@ test("the shared-run note hands over the run and forbids a rerun, and asks for n
     // asks the specialist to report the run.
     const first = note.split(/\n(?=This run is NOT usable|It has )/)[0];
     assert.match(first, /Read the log for anything the counts do not say\.$/, `${name}: the opening paragraph says more after the log instruction`);
+    // ...and no paragraph this rendering appends asks for one either.
+    assert.doesNotMatch(note.replace(/\s+/g, " "), COPY_REQUEST, `${name}: the note asks the specialist to report or copy the run`);
     if (paragraph) assert.match(note, paragraph, `${name}: the paragraph this rendering appends is missing`);
   }
 });

@@ -72,6 +72,22 @@ test("the crash populations are told apart off refutersDispatched in the recipes
   assert.match(recipes, /select\(\.refutersDispatched == 0\)/);
 });
 
+// The recipes' comments are prose no ruling paragraph's pin reads. The one on
+// the testEnvironment recipe says what that field is evidence about: the
+// review's one shared test run, which no specialist returns a copy of, so no
+// recipe comment names a specialist `test_run` field that no longer exists.
+test("the testEnvironment recipe calls it evidence about the shared test run, and no recipe comment names a test_run field", () => {
+  const recipes = section().match(/^jq .*$/gm) ?? [];
+  const line = recipes.find((l) => l.startsWith("jq -r '.testEnvironment' "));
+  assert.ok(line, "the result-file section no longer has a `jq -r '.testEnvironment'` recipe");
+  assert.match(line, phrase("# what the shared test run is evidence about"), "the testEnvironment recipe's comment no longer names the shared test run");
+  // Every line of every fenced recipe block, not only the `jq ` ones: the `R=`
+  // line and any other line the block grows carry comments too.
+  const fenced = [...section().matchAll(/^```bash\n([\s\S]*?)^```$/gm)].flatMap((m) => m[1].split("\n"));
+  assert.ok(fenced.length > 0, "the result-file section lost its fenced recipe block");
+  for (const l of fenced) assert.doesNotMatch(l, /test_run/i, `a recipe line names the retired test_run field: ${l}`);
+});
+
 test("the fix-applier owns the mutual-exclusion scan, run twice, with a single refuter for a conflicting pair", () => {
   const p = ruling("**Scan the findings against each other for MUTUAL EXCLUSION");
   assert.match(p, phrase("run it twice"));
