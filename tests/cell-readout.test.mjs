@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { paragraph, phrase, unemphasized } from "./support/prose-pin.mjs";
-import { formatTsv } from "../plugin/scripts/member-outcomes.mjs";
+import { COLUMNS, formatTsv } from "../plugin/scripts/member-outcomes.mjs";
 import { FEATURE_COLUMNS } from "../plugin/scripts/pr-cost.mjs";
 import { readout, stoppingRule, GATE, STOP } from "../plugin/scripts/cell-readout.mjs";
 
@@ -235,7 +235,11 @@ test("a member-outcomes session+agent repeated with different fields is refused,
   const w = world();
   addComparisons(w, "task-low", 12, 6);
   const [first] = w.members;
-  for (const conflict of [{ model: "" }, { cost: 7 }]) {
+  // Every column but the key: a guard that compared only some of them would miss a conflict confined to the rest.
+  const others = Object.keys(first).filter((c) => c !== "session" && c !== "agent");
+  assert.equal(others.length, COLUMNS.length - 2, "the variants cover every column of the member row but the key");
+  const variants = others.map((c) => ({ [c]: typeof first[c] === "number" ? first[c] + 7 : `${first[c]}x` }));
+  for (const conflict of [{ model: "" }, ...variants]) {
     const dup = { ...w, members: [...w.members, { ...first, ...conflict }] };
     const r = cli(dup);
     assert.equal(r.status, 2, `${JSON.stringify(conflict)}: ${r.stderr}`);
@@ -243,6 +247,17 @@ test("a member-outcomes session+agent repeated with different fields is refused,
     assert.ok(r.stderr.includes(`session ${first.session}`) && r.stderr.includes(`agent ${first.agent}`), r.stderr);
     assert.throws(() => readout(parsed(dup)), (e) => e.message.includes(`session ${first.session}`) && e.message.includes(`agent ${first.agent}`));
   }
+});
+
+test("the refusal of a repeated member-outcomes session+agent is prefixed with the path --member-outcomes named", () => {
+  const w = world();
+  addComparisons(w, "task-low", 12, 6);
+  const f = files({ ...w, members: [...w.members, { ...w.members[0], cost: 7 }] });
+  const renamed = join(f.dir, "members-copy.tsv");
+  writeFileSync(renamed, readFileSync(f.members));
+  const r = spawnSync(process.execPath, [SCRIPT, "--ticket-features", f.features, "--member-outcomes", renamed], { encoding: "utf8", cwd: f.dir });
+  assert.equal(r.status, 2, r.stderr);
+  assert.ok(r.stderr.includes(`cell-readout: ${renamed}: `), r.stderr);
 });
 
 test("an identical repeated member-outcomes row is one row, and one agent name in two sessions is two keys", () => {
@@ -646,4 +661,20 @@ test("stopping rule: a both-blank row or an unPulled ticket's row needs no run_d
   w.verdicts.push(verdict({ ticket: "999", pr: "1", run_date: "n/a" }));
   const at = judged(w, { "smol-high": "2026-09-01" }, "smol-high");
   assert.deepEqual(at.verdicts.map((v) => v.ticket), [real]);
+});
+
+// stoppingRule reads the same member-outcomes rows readout does, and the
+// repo-local hook calls it without readout, so it must refuse the repeat too.
+test("stopping rule: a member-outcomes session+agent repeated with different fields is refused in either row order; an identical repeat is one row", () => {
+  const added = { "smol-high": "2026-09-01" };
+  const w = world();
+  addVerdicts(w, "smol-high", 10, 8);
+  const clean = judged(w, added, "smol-high");
+  const [first] = w.members;
+  assert.equal(judged({ ...w, members: [...w.members, { ...first }] }, added, "smol-high").failures, clean.failures);
+  const conflict = { ...first, model: "" };
+  for (const members of [[...w.members, conflict], [conflict, ...w.members]]) {
+    assert.throws(() => judged({ ...w, members }, added, "smol-high"),
+      (e) => e.message.includes(`session ${first.session}`) && e.message.includes(`agent ${first.agent}`));
+  }
 });

@@ -112,7 +112,7 @@ function indexMembers(members) {
     const k = key(m.session, m.agent);
     const held = byKey.get(k);
     if (held && formatMemberTsv([held]) !== formatMemberTsv([m])) {
-      throw new Error(`member-outcomes.tsv: session ${m.session} agent ${m.agent} has two rows with different fields`);
+      throw new Error(`member-outcomes session ${m.session} agent ${m.agent} has two rows with different fields`);
     }
     if (!held) byKey.set(k, m);
   }
@@ -169,11 +169,12 @@ export function readout({ features, members }) {
  * sorted by ticket, `run_date` the ruling's; `stop` is whether the stopping
  * rule withdraws the cell. `verdicts` are parsed tier-outcomes.tsv rows.
  * Throws on a counted ruling whose `closed_own_ticket` or `minted_false_claim`
- * is not `yes` or `no`, and on a non-blank ruling row of a Pulled ticket whose
- * `run_date` is not `YYYY-MM-DD`.
+ * is not `yes` or `no`, on a non-blank ruling row of a Pulled ticket whose
+ * `run_date` is not `YYYY-MM-DD`, and on a member-outcomes session+agent
+ * repeated with different fields.
  */
 export function stoppingRule({ features, members, verdicts, added }) {
-  const byKey = new Map(members.map((m) => [key(m.session, m.agent), m]));
+  const byKey = indexMembers(members);
   const rulings = new Map();
   for (const v of verdicts) {
     if (VERDICT_COLUMNS.every((c) => v[c] === "")) continue;
@@ -234,19 +235,21 @@ function main() {
     try { return parse(text); }
     catch (e) { die(`${path}: ${e.message}`); }
   };
-  // A repeated session+agent naming different cells is refused while the file
-  // is loaded, so the refusal names the path that was read.
+  // A repeated session+agent naming different cells, or a member-outcomes one
+  // repeated with different fields, is refused while its file is loaded, so the
+  // refusal names the path that was read.
   const features = load(featuresPath, (text) => {
     const rows = parseFeatures(text);
     pullsOf(rows);
     return rows;
   });
-  const members = load(membersPath, parseMemberTsv);
+  const members = load(membersPath, (text) => {
+    const rows = parseMemberTsv(text);
+    indexMembers(rows);
+    return rows;
+  });
 
-  let result;
-  try { result = readout({ features, members }); }
-  catch (e) { die(e.message); }
-  const { cells, unjoined } = result;
+  const { cells, unjoined } = readout({ features, members });
   const lines = [];
   const notes = [];
   if (unjoined > 0) {
