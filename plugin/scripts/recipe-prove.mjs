@@ -86,6 +86,9 @@ const ENV = gitEnv();
 // 20 minutes is chosen against the false failure: far above a healthy install
 // or suite, and still a bound.
 //
+// The bound is per command, never for the whole proof: the longest a proof
+// can take is every command it runs taking its full bound.
+//
 // RECIPE_PROVE_TIMEOUT can only SHORTEN it: a knob that could lengthen the
 // bound is one more way for configuration to remove it. A value that is not a
 // positive whole number of seconds below the default is not an error and not

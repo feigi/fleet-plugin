@@ -325,7 +325,7 @@ test("the throwaway worktree is removed afterwards, proven or not", () => {
   const { dir } = repo(MAVEN_FILES);
   prove(dir, MAVEN_PROOF);
   prove(dir, ["--install", "exit 3", ...MAVEN_PROOF.slice(2)]);
-  assert.equal(git(dir, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length, 1);
+  assert.equal(worktrees(dir), 1);
 });
 
 test("an ambient GIT_DIR naming another repository does not change the answer", () => {
@@ -368,9 +368,12 @@ test("a proof that cannot be attempted exits 2, distinct from a Recipe that is n
   const missing = prove(half, ["--install", "--test", "--test", "mvn -q test"]);
   assert.equal(missing.status, 2);
   assert.match(missing.err, /^recipe-prove: usage:/);
-  assert.equal(git(half, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length, 1,
+  assert.equal(worktrees(half), 1,
     "a refusal at the argument boundary creates no worktree");
 });
+
+// The number of worktrees the repository at `dir` has registered, the main checkout included.
+const worktrees = (dir) => git(dir, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length;
 
 // Every temp dir the proof made, scanned for the throwaway worktree it names `wt`.
 function assertNoWorktreeLeft(tmp) {
@@ -582,7 +585,7 @@ test("read-only install output cannot turn a proof that held into a crash", { sk
   assert.equal(r.status, 0, r.err);
   assert.equal(JSON.parse(readFileSync(cachePath(dir), "utf8")).derivedAt, head);
   assert.deepEqual(logDirs(r.tmp), []);
-  assert.equal(git(dir, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length, 1);
+  assert.equal(worktrees(dir), 1);
 });
 
 test("read-only install output does not replace a refusal's reason with a stack trace", { skip: IGNORES_MODES }, () => {
@@ -729,7 +732,6 @@ test("the mutation is credited only with what it changed, never with what the un
 // case to the helper's own 60s spawn timeout, which reads as status null.
 const timedOut = (cmd, seconds) =>
   new RegExp(`NOT PROVEN — '${cmd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}' timed out: still running after ${seconds}s, the bound on each Recipe command`);
-const worktrees = (dir) => git(dir, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length;
 
 const HANGS = [
   {

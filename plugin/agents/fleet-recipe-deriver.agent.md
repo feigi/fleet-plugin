@@ -92,7 +92,9 @@ written — report it, do not work around it.
 The script bounds each command it runs itself — the Install step, both Test
 runs and the mutation — and refuses one still running at that bound as
 `timed out`. **Never wrap the `recipe-prove.mjs` call in a timeout of your
-own**: an outside kill leaves no refusal to report.
+own**: an outside kill leaves no refusal to report. A deadline on the tool
+call that runs it does the same when it is shorter than the script's bound,
+so give that call `timeout: 0` and wait for the script.
 
 You may revise and re-run after a `NOT PROVEN` you can act on — a wrong
 command, a count line you mis-copied, a mutation that changed nothing — **at
@@ -110,6 +112,7 @@ Your last message is exactly one of:
   **vacuous** (the suite ran no tests, or none a mutation could reach),
   **did not run** (a command not found or not executable — a toolchain this
   machine lacks), **dirty install** (the Install step changes the tree),
-  **timed out** (the Install step or the Test entrypoint hung until the
-  script's own bound stopped it), or **unreadable** (you could not tell from
-  the repository how it is built or tested).
+  **timed out** (a command the proof runs — the Install step, the Test
+  entrypoint or the mutation — hung until the script's own bound stopped it),
+  or **unreadable** (you could not tell from the repository how it is built or
+  tested).
