@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
-import { tempDir } from "./temp-dir.mjs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { COLUMNS } from "./member-outcomes.mjs";
+import { GATE } from "./cell-readout.mjs";
 
 const REPO = join(import.meta.dirname, "..", "..");
 const TSV = readFileSync(join(REPO, "docs", "metrics", "member-outcomes.tsv"), "utf8");
@@ -55,94 +55,54 @@ test("the header states the blank, hand-edit, and superseded-generation rules", 
   assert.match(HEADER, /workflows\/wf_/);
 });
 
-test("the header's awk read-outs index the columns they name", () => {
-  // This test asserted COLUMNS[0]/[2]/[4] — a fact about the CODE, not about
-  // the queries it is named for. Mutation-proven: repointing the header's pair
-  // query from $1/$3/$5 to $2/$4/$6 left it GREEN, so the query the header
-  // calls "the only unconfounded comparison" could silently group on run_date
-  // and distinguish by effort with nothing to catch it.
-  //
-  // So read the `$n` references out of the header's own awk lines and resolve
-  // each against COLUMNS. Mutation this must survive: changing any `$n` in the
-  // header without changing COLUMNS.
-  const awkLines = headerLines.filter((l) => l.includes("awk -F"));
-  assert.ok(awkLines.length >= 2, "header lost its awk read-outs");
-
-  const pair = pairQuery();
-  // BOTH arms are identified by the dispatch record (#1066), never by the role
-  // classifier and never by "the models differ" — so both `$n ~ /…/` tests
-  // must land on subagent_type, and there must be two of them.
-  const arms = [...pair.matchAll(/\$(\d+) ~ \/\(\^\|:\)fleet-implementer(-alt)?\$\//g)];
-  assert.equal(arms.length, 2, "the pair query no longer tests BOTH implementer definitions");
-  assert.deepEqual(arms.map((m) => Boolean(m[2])), [true, false], "the -alt arm must be tested FIRST — /fleet-implementer$/ is checked in the else branch");
-  for (const [, n] of arms) assert.equal(COLUMNS[n - 1], "subagent_type", "deliberateness comes from the dispatch record");
-
-  const keys = [...pair.matchAll(/[at]\[\$(\d+) FS \$(\d+)\]/g)];
-  assert.equal(keys.length, 2, "the pair query no longer keys both arms");
-  for (const [, session, model] of keys) {
-    assert.equal(COLUMNS[session - 1], "session", "a pair is WITHIN one session");
-    assert.equal(COLUMNS[model - 1], "model", "the two arms must have run different MODELS");
-  }
-
-  const [, dateKey, dateValue] = /d\[\$(\d+)\]=\$(\d+)/.exec(pair);
-  assert.equal(COLUMNS[dateKey - 1], "session");
-  assert.equal(COLUMNS[dateValue - 1], "run_date", "the gate's second number is distinct run_dateS");
-
+test("the header's awk read-out indexes the column it names", () => {
+  // Read the `$n` reference out of the header's own awk line and resolve it
+  // against COLUMNS — a fact about the CODE alone (COLUMNS[4]) stays green when
+  // the header is repointed. Mutation this must survive: changing the `$n` in
+  // the header without changing COLUMNS.
   const byModel = headerLines.find((l) => /\{n\[\$\d+\]\+\+\}/.test(l));
   assert.ok(byModel, "header lost its rows-by-model read-out");
   assert.equal(COLUMNS[/\{n\[\$(\d+)\]\+\+\}/.exec(byModel)[1] - 1], "model");
 });
 
-// The pair query as a runnable awk program: the header block from `awk -F` to
-// the path it reads, `#` stripped, the shell quoting removed. Index pins alone
-// cannot see a query that indexes the right columns and still counts the wrong
-// thing — which is precisely the defect #1066 was filed for.
-function pairQuery() {
-  const start = headerLines.findIndex((l) => l.includes("awk -F") && l.includes("fleet-implementer-alt"));
-  assert.ok(start >= 0, "header lost its within-run pair query");
-  let end = start;
-  while (end < headerLines.length && !headerLines[end].endsWith("docs/metrics/member-outcomes.tsv")) end++;
-  assert.ok(end < headerLines.length, "the pair query never reaches the file it reads");
-  return headerLines.slice(start, end + 1).map((l) => l.replace(/^#\s{0,3}/, "")).join("\n");
-}
-
-test("the header's pair query counts DELIBERATE pairs, run against a corpus where every near-miss is present", () => {
-  // #1066: the query this replaces counted any session+role carrying two
-  // models, reported 198 keys against 17 real pairs, and so reported run-team's
-  // ten-across-five gate MET while the controlled comparison did not exist.
-  //
-  // Mutations this must survive, all measured against this fixture and all of
-  // which leave the column indexes (and therefore the test above) intact:
-  // dropping the `x[2]!=y[2]` model test reads 4 2, dropping the `-alt` anchor
-  // so both arms match one definition reads 0 0, and going back to #1066's own
-  // query — arms identified by `$3=="implementer"` rather than by the dispatch
-  // — reads 4 2, counting the untyped session and missing the omp one.
-  const rows = [
-    // a real pair: alt at sonnet against the top definition at opus
-    ["sA", "2026-09-01", "implementer", "impl-1", "claude-sonnet-5", "high", "1", "", "0", "0", "0", "1", "agent-a1", "claude", "fleet-implementer-alt"],
-    ["sA", "2026-09-01", "implementer", "impl-2", "claude-opus-5", "high", "2", "", "0", "0", "0", "1", "agent-a2", "claude", "fleet-implementer"],
-    // deliberate dispatch, empty comparison: both arms resolved to one model
-    ["sB", "2026-09-01", "other", "impl-3", "claude-sonnet-5", "high", "3", "", "0", "0", "0", "1", "agent-a3", "omp", "fleet-implementer-alt"],
-    ["sB", "2026-09-01", "other", "impl-4", "claude-sonnet-5", "high", "4", "", "0", "0", "0", "1", "agent-a4", "omp", "fleet-implementer"],
-    // two models, no deliberate dispatch: the accidental pair #1066 counted
-    ["sC", "2026-09-01", "implementer", "impl-5", "claude-sonnet-5", "high", "5", "", "0", "0", "0", "1", "agent-a5", "claude", ""],
-    ["sC", "2026-09-01", "implementer", "impl-6", "claude-opus-5", "high", "6", "", "0", "0", "0", "1", "agent-a6", "claude", ""],
-    // a second pair on the SAME day — two pairs, one run_date
-    ["sD", "2026-09-01", "implementer", "impl-7", "claude-sonnet-5", "high", "7", "", "0", "0", "0", "1", "agent-a7", "claude", "fleet-implementer-alt"],
-    ["sD", "2026-09-01", "implementer", "impl-8", "claude-opus-5", "high", "8", "", "0", "0", "0", "1", "agent-a8", "claude", "fleet-implementer"],
-    // and one on another day, so the second number is not the first
-    ["sE", "2026-09-02", "implementer", "impl-9", "claude-sonnet-5", "high", "9", "", "0", "0", "0", "1", "agent-a9", "claude", "fleet-implementer-alt"],
-    ["sE", "2026-09-02", "implementer", "impl-10", "claude-opus-5", "high", "10", "", "0", "0", "0", "1", "agent-a10", "claude", "fleet-implementer"],
-    // a typed non-implementer at a third model inside a pair session: the
-    // review fan-out runs one on every session and must not inflate anything
-    ["sE", "2026-09-02", "specialist", "rev", "claude-haiku-4-5", "", "", "", "0", "0", "0", "1", "agent-a11", "claude", "fleet-review-tests"],
-  ];
-  const corpus = join(tempDir("mo-hdr-"), "member-outcomes.tsv");
-  writeFileSync(corpus, "# header line, skipped by the query\n" + rows.map((r) => r.join("\t")).join("\n") + "\n");
-
-  const program = /awk -F'\\t' '([\s\S]*)' docs\/metrics\/member-outcomes\.tsv$/.exec(pairQuery());
-  assert.ok(program, "the pair query is no longer a runnable `awk -F'\\t' '<program>' <file>` line");
-  const r = spawnSync("awk", ["-F", "\t", program[1], corpus], { encoding: "utf8" });
+// The comparison count is cell-readout.mjs's, and the header only points at it:
+// a second copy of the definition as a runnable query is two countings free to
+// drift apart, which is how the pre-cell pair query came to count pairs no cell
+// owns once the cell grid replaced the two definitions it keyed on.
+test("the header points at cell-readout.mjs for a cell's comparisons and carries no query of its own", () => {
+  const invocation = headerLines.find((l) => /^#\s+node \S*cell-readout\.mjs\s*$/.test(l));
+  assert.ok(invocation, "header lost its `node plugin/scripts/cell-readout.mjs` pointer");
+  const script = invocation.replace(/^#\s+node\s+/, "").trim();
+  assert.equal(script, "plugin/scripts/cell-readout.mjs");
+  assert.ok(existsSync(join(REPO, script)), `the header points at ${script}, which does not exist`);
+  // The pointer is runnable as written, from the repo root, against this
+  // repo's own metrics files.
+  const r = spawnSync(process.execPath, [script], { cwd: REPO, encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.trim(), "3 2", "three deliberate pairs across two distinct run_dates");
+
+  assert.doesNotMatch(HEADER, /fleet-implementer-alt\$\//, "the header still carries the pre-cell pair query");
+  const subagentType = new RegExp(`\\$${COLUMNS.indexOf("subagent_type") + 1}(?!\\d)`);
+  assert.ok(
+    !headerLines.some((l) => subagentType.test(l)),
+    "an awk read-out over `subagent_type` is a second counting of comparisons",
+  );
+
+  // The definition the header states is the one the script applies.
+  const block = HEADER.replace(/^#\s?/gm, "").replace(/\s+/g, " ");
+  assert.match(block, /a comparison is one session holding an ADMISSIBLE row at X and an admissible slow-high row whose resolved \(`model`, `effort`\) differ from the X row's/);
+  assert.match(block, /admissible only when its `subagent_type` is `fleet-implementer-<chosen_cell>` and its `effort` is the cell's level/);
+  assert.match(block, /joined to its row here on `session`\+`agent`/);
+  const gate = /at least (\w+) comparisons across (\w+) or more distinct `run_date`s/.exec(block);
+  assert.ok(gate, "the header no longer states the gate");
+  const words = { five: 5, ten: 10 };
+  assert.deepEqual({ comparisons: words[gate[1]], runDates: words[gate[2]] }, { ...GATE }, "the header's gate is not cell-readout.mjs's GATE");
+  assert.match(block, /`<cell> <comparisons> <run_dates> <resolved models>`/);
+  assert.match(block, /`mixed \(<model-a> n=…, <model-b> n=…\)`/);
+});
+
+test("the header names a producer script that exists", () => {
+  const producer = /produced by (\S+\.mjs)/.exec(HEADER);
+  assert.ok(producer, "the header no longer names the script that produces its rows");
+  assert.ok(existsSync(join(REPO, producer[1])), `the header names ${producer[1]} as its producer, which does not exist`);
+  assert.equal(producer[1], "plugin/scripts/member-outcomes.mjs");
 });

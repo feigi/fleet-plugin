@@ -364,8 +364,10 @@ call in the controller's own eval.
 _Avoid_: fleet-router, sizer
 
 **Admissible row**:
-A per-cell readout row whose Resolved tier matched its Declared tier and
-whose recorded effort equals its cell's level — the only rows the
-per-cell stopping rule and readout script (`cell-readout.mjs`, pending
-`#2133`/`#2134`, not yet built) count.
+A member-outcomes row whose `subagent_type` is `fleet-implementer-<cell>` for
+the cell its Pull drew (`chosen_cell`), whose recorded effort equals that
+cell's level, and which has a resolved model on record — the only rows the
+readout script (`cell-readout.mjs`) and the per-cell stopping rule (pending
+`#2134`, not yet built) count. Whether the Resolved tier matched the Declared
+tier is the run ledger's check; the readout never makes it.
 _Avoid_: verified row, valid row

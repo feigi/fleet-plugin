@@ -168,14 +168,13 @@
 # WHICH FILE'S `run_date` SUPPLIES WHICH DISTINCT-DATE COUNT. run-team/SKILL.md
 # states a floor that counts distinct `run_date`s, and it is not counted over
 # this file.
-#   * The pairing PRECONDITION — at least ten within-run pairs across five or
-#     more distinct `run_date`s, the floor that forbids reading the pairs early
-#     — is NOT read here at all. It comes from the pairing query in
-#     `docs/metrics/member-outcomes.tsv`'s own header, which keys its dates off
-#     THAT file's `run_date` (`d[$1]=$2` ... `length(r)`) and prints the pair
-#     count beside the number of dates those pairs span. That header says so
-#     itself: the two numbers it prints are "exactly what run-team's gate
-#     reads". Recounting it over this file answers a different question.
+#   * The per-cell gate — at least ten comparisons across five or more
+#     distinct `run_date`s, the floor that forbids reading a cell early — is
+#     NOT read here at all. It comes from `plugin/scripts/cell-readout.mjs`,
+#     which dates each comparison by its session's `run_date` in
+#     `docs/metrics/member-outcomes.tsv` and prints a cell's comparison count
+#     beside the number of dates those comparisons span; that file's header
+#     points there. Recounting it over this file answers a different question.
 #
 # AND THE TWO `run_date` COLUMNS DO NOT MEAN THE SAME THING. Here it is STAMPED
 # AT RULING — `tier-outcomes.mjs append` reads the clock when the controller
