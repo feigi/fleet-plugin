@@ -3037,6 +3037,75 @@ test("CLI: serve binds 127.0.0.1 alone — 127.0.0.1 answers and [::1] refuses",
   }
 });
 
+// The two branches of the pre-bind connect check that no real listener can
+// produce on demand: a connect that fails with something other than a
+// refusal, and one that never completes. A loopback connect to a port
+// nobody holds is always refused, and a holder whose accept backlog is full
+// drops the SYN only on the kernel's schedule — so the launch runs with
+// net.connect replaced, through the CJS exports (a module that imported the
+// name picks the replacement up after syncBuiltinESMExports). The stub is
+// in the child, so the port never has to be held: a launch that wrongly
+// reads the stubbed answer as "free" goes on to bind `port` and serve, and
+// the row sees a launch that never exits with 2.
+//
+// The replacement's answer reaches the assertion through board's own output
+// — the EPERM text below, the "in use" line — so a stub that never landed
+// reads as a failure of the row, not as a pass.
+function serveWithConnect(stubBody, port) {
+  const preload = `import { createRequire, syncBuiltinESMExports } from "node:module";
+const net = createRequire(process.cwd() + "/")("node:net");
+net.connect = () => { ${stubBody} };
+syncBuiltinESMExports();`;
+  const opts = serveOpts();
+  const r = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(preload)}`, ...serveArgs(["--port", String(port), "--interval", "3600"])], { ...opts, timeout: 10000 });
+  return { r, cwd: opts.cwd };
+}
+
+// A port nobody holds, for a launch whose connect is stubbed: only a launch
+// that wrongly decides the port is free ever binds it.
+async function unheldPort() {
+  const probe = createServer();
+  const port = await new Promise((res) => probe.listen(0, "127.0.0.1", () => res(probe.address().port)));
+  await new Promise((res) => probe.close(res));
+  return port;
+}
+
+// ECONNREFUSED is the one connect error that means "free". Any other —
+// EPERM from a sandbox that denies loopback connects, say — is a fault of
+// the launch's own, and binding anyway would answer a question the check
+// could not ask. It dies with the error as it came, and starts nothing.
+test("CLI: a pre-bind connect that fails with anything but a refusal is fatal, not read as a free port", async () => {
+  const port = await unheldPort();
+  const { r, cwd } = serveWithConnect(
+    `const s = new net.Socket(); setImmediate(() => s.emit("error", Object.assign(new Error("connect EPERM 127.0.0.1:${port}"), { code: "EPERM" }))); return s;`,
+    port,
+  );
+  assert.equal(r.status, 2, `a connect fault must refuse, not bind: ${r.stderr}`);
+  assert.match(r.stderr, new RegExp(`connect EPERM 127\\.0\\.0\\.1:${port}`), `the stubbed error never reached the launch: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /in use/, `a connect fault is not a held port: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /cockpit on http/, `the launch bound after a connect fault: ${r.stderr}`);
+  assert.ok(!existsSync(join(cwd, ".fleet")), "the launch created a state directory after a connect fault");
+});
+
+// A holder whose accept backlog is full drops the SYN instead of refusing
+// it, so "nothing answered within the timeout" has to count as held — read
+// as free, the launch would bind beside a live holder on macOS/BSD. The
+// stub's socket never connects and never errors; the check's own timer is
+// the only thing that can end it. The keep-alive interval stands in for the
+// kernel's pending connect, which keeps a real process alive; without it a
+// never-resolving promise lets the process exit 0 with nothing said.
+test("CLI: a pre-bind connect that never completes counts as a held port", async () => {
+  const port = await unheldPort();
+  const { r, cwd } = serveWithConnect(
+    `const s = new net.Socket(); const keep = setInterval(() => {}, 100); s.once("close", () => clearInterval(keep)); return s;`,
+    port,
+  );
+  assert.equal(r.status, 2, `an unanswered connect must read as held: ${r.stderr}`);
+  assert.match(r.stderr, new RegExp(`port ${port} in use`), r.stderr);
+  assert.doesNotMatch(r.stderr, /cockpit on http/, `the launch bound beside a port it could not prove free: ${r.stderr}`);
+  assert.ok(!existsSync(join(cwd, ".fleet")), "the launch created a state directory for a port it did not take");
+});
+
 // The only hard failure left on a derived port, and the shape it has to
 // have. Non-zero, because an exhausted range is a real refusal where reuse
 // is not — and a message naming every port tried, because an operator told
