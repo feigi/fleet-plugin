@@ -720,38 +720,73 @@ test("a git that stops starting before the cache is read back is no verdict, nev
   const bin = readerPath();
   const r = prove(dir, ["--install", "true", "--test", `rm '${join(bin, "git")}'; echo 'tests 1'`, "--count-line", "tests 1", "--test-count", "1"], { env: { PATH: bin } });
   assert.equal(r.status, 2, r.err);
-  assert.match(r.err, /^recipe-prove: could not start git: .*ENOENT — the Recipe cache reader runs git, so its refusal is no verdict/m);
+  assert.match(r.err, /^recipe-prove: derive-testcmd: git did not answer whether .* is a git repository \(exit 127\), so the Recipe cache was not read — the Recipe cache reader could not run a tool it needs, so its refusal is no verdict on what was proven$/m);
   assert.doesNotMatch(r.err, /NOT PROVEN/);
   assert.doesNotMatch(r.err, /not a git repository/);
   assert.equal(readFileSync(cachePath(dir), "utf8"), "prior bytes", "a cache the reader never settled is rolled back");
 });
 
-// A git that starts and cannot run fails the reader's own `git rev-parse` just
-// as a git that will not start does, so its refusal is no verdict either. Each
-// stub stands in for one such git: a wrapper whose target is gone exits 126 or
-// 127, and a killed git has no exit status at all. The message names the exit
-// status when there is one, and quotes what the stub wrote to stderr when
-// there is anything to quote. The control — the same PATH with git left in
-// place proves — is the unstartable-git test's. The Test entrypoint rewrites
-// the stub's body, never the stub: that is a hard link to exec-stub.mjs's
-// shared, read-only trampoline.
+// A git that starts and cannot run: each stub stands in for one such git — a
+// wrapper whose target is gone exits 126 or 127, a killed git exits 128+N in
+// the reader's shell — and the `passes --version` rows break only the one
+// reader call they name, so the cache writer's own `git --version` probe would
+// pass. The reader tells each from git's own refusal by its status and exits
+// READER_COULD_NOT_RUN naming it, so the read-back is no verdict. A git that
+// exits git's own 128 on every call reads to the reader as no repository; the
+// cache writer's `git --version` probe is what makes that one no verdict. The
+// control — the same PATH with git left in place proves — is the
+// unstartable-git test's. The Test entrypoint rewrites the stub's body, never
+// the stub: that is a hard link to exec-stub.mjs's shared, read-only
+// trampoline.
+const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+const onlyOn = (call, act) => `case "$*" in *"${call}") ${act} ;; esac\nexec '${REAL_GIT}' "$@"`;
+// The reader's own line, which the cache writer quotes: a shell that reports a
+// killed git writes its own notice ahead of it, so the quote may start there.
+const noAnswer = (status) => new RegExp(`^(?:recipe-prove: )?derive-testcmd: git did not answer whether .* is a git repository \\(exit ${status}\\), so the Recipe cache was not read — the Recipe cache reader could not run a tool it needs, so its refusal is no verdict on what was proven$`, "m");
 const GIT_THAT_CANNOT_RUN = [
-  { name: "exits 126 and writes nothing", body: "exit 126", cause: "exited 126 and wrote nothing to stderr" },
-  { name: "exits 127 and writes to stderr", body: "echo boom >&2; exit 127", cause: "exited 127: boom" },
-  { name: "is killed by a signal", body: "kill -9 $$", cause: "did not exit 0: git was killed by SIGKILL" },
+  { name: "exits 126 and writes nothing", body: "exit 126", reason: noAnswer(126) },
+  { name: "exits 127 and writes to stderr", body: "echo boom >&2; exit 127", reason: noAnswer(127) },
+  { name: "is killed by a signal", body: "kill -9 $$", reason: noAnswer(137) },
+  { name: "passes --version and is killed on `rev-parse --git-dir`", body: onlyOn("rev-parse --git-dir", "kill -9 $$"), reason: noAnswer(137) },
+  { name: "passes --version and exits 126 on `rev-parse --git-dir`", body: onlyOn("rev-parse --git-dir", "exit 126"), reason: noAnswer(126) },
+  { name: "passes --version and exits 127 on `rev-parse --git-dir`", body: onlyOn("rev-parse --git-dir", "exit 127"), reason: noAnswer(127) },
+  {
+    name: "passes --version and is killed resolving the common git dir",
+    body: onlyOn("rev-parse --path-format=absolute --git-common-dir", "kill -9 $$"),
+    reason: /^(?:recipe-prove: )?derive-testcmd: git did not resolve the common git dir of .* \(exit 137\), so the Recipe cache was not read — the Recipe cache reader could not run a tool it needs, so its refusal is no verdict on what was proven$/m,
+  },
+  {
+    name: "exits git's own 128 on every call",
+    body: "exit 128",
+    reason: /^recipe-prove: git started but does not run: `git --version` exited 128 and wrote nothing to stderr — the Recipe cache reader runs git, so its refusal is no verdict on what was proven$/m,
+  },
 ];
 for (const c of GIT_THAT_CANNOT_RUN) {
   test(`a git that starts but ${c.name} before the cache is read back is no verdict, never NOT PROVEN — and the prior cache is restored`, () => {
+    const body = join(tempDir("recipe-prove-git-body-"), "git");
+    writeFileSync(body, `#!/bin/sh\n${c.body}\n`);
+    const breakGit = (bin) => ["--install", "true", "--test", `cat '${body}' > '${join(bin, ".stub-git")}'; echo 'tests 1'`, "--count-line", "tests 1", "--test-count", "1"];
+
     const { dir } = repo(MAVEN_FILES);
     mkdirSync(join(dir, ".fleet"));
     writeFileSync(cachePath(dir), "prior bytes");
     const bin = readerPath();
-    const r = prove(dir, ["--install", "true", "--test", `printf '#!/bin/sh\\n${c.body}\\n' > '${join(bin, ".stub-git")}'; echo 'tests 1'`, "--count-line", "tests 1", "--test-count", "1"], { env: { PATH: bin } });
+    const r = prove(dir, breakGit(bin), { env: { PATH: bin } });
     assert.equal(r.status, 2, r.err);
-    assert.ok(r.err.includes(`recipe-prove: git started but does not run: \`git --version\` ${c.cause} — the Recipe cache reader runs git, so its refusal is no verdict on what was proven`), r.err);
+    assert.match(r.err, /^recipe-prove: /);
+    assert.match(r.err, c.reason);
     assert.doesNotMatch(r.err, /NOT PROVEN/);
     assert.doesNotMatch(r.err, /not a git repository/);
     assert.equal(readFileSync(cachePath(dir), "utf8"), "prior bytes", "a cache the reader never settled is rolled back");
+    if (c.name.startsWith("passes --version")) {
+      assert.equal(spawnSync(join(bin, "git"), ["--version"]).status, 0, "the fixture is a git that passes --version");
+    }
+
+    const { dir: fresh } = repo(MAVEN_FILES);
+    const freshBin = readerPath();
+    const f = prove(fresh, breakGit(freshBin), { env: { PATH: freshBin } });
+    assert.equal(f.status, 2, f.err);
+    assert.equal(existsSync(cachePath(fresh)), false, "no prior cache: the unsettled one is removed, not left");
   });
 }
 

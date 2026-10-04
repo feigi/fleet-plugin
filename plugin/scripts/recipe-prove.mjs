@@ -118,8 +118,8 @@ const cannot = (message) => new Refusal(2, message);
 const notProven = (message) => new Refusal(1, message);
 
 // The exit status derive-testcmd.sh uses for a refusal about its own
-// environment — a tool it needs would not start, or node died mid-read — where
-// every refusal about the cache is 1.
+// environment — a tool it needs would not start, git did not run to an answer,
+// or node died mid-read — where every refusal about the cache is 1.
 const READER_COULD_NOT_RUN = 3;
 
 function parseArgs(argv) {
@@ -297,13 +297,14 @@ function prove(o, wt, logs) {
 // cache is undone just the same when the read-back is no verdict: an `sh` that
 // could not be started read nothing; an `sh` killed by a signal has no exit
 // status and reached no verdict; a reader that exits READER_COULD_NOT_RUN
-// could not start its `node`, `mktemp` or `cat`, or lost its `node` mid-read;
-// and the reader runs git itself and reads a git that will not run as no
-// repository at all, so its refusal is a verdict on what was proven only while
-// git still runs. `git --version` is the probe: a working git always passes
-// it, so a git that cannot be started fails it, and so does one that starts
-// and cannot run — a wrapper whose target is gone exits 126 or 127, a killed
-// git has no exit status at all.
+// could not start its git, `node`, `mktemp` or `cat`, saw git end on any
+// status but git's own 128, or lost its `node` mid-read; and the reader reads
+// a git that ends on 128 as no repository at all, so its refusal is a verdict
+// on what was proven only while git still runs. `git --version` is the probe:
+// a working git always passes it, so a git that cannot be started fails it,
+// and so does one that starts and cannot run — one that exits 128 on every
+// call, a wrapper whose target is gone exits 126 or 127, a killed git has no
+// exit status at all.
 function writeCache(cache, recipe, repo) {
   mkdirSync(dirname(cache), { recursive: true });
   const prior = existsSync(cache) ? readFileSync(cache) : null;
