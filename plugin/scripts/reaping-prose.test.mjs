@@ -161,10 +161,10 @@ test("run-team/SKILL.md: reap's cherry check authorizes the update-ref delete, w
     phrase("a fresh check that no worktree holds the branch"),
     "SKILL.md's reap paragraph no longer names the fresh worktree check — reap.sh keeps a branch the cherry check cleared whenever a worktree holds it",
   );
-  assert.doesNotMatch(p, /`(?:git\s+branch\s+)?-D`/, "SKILL.md's reap paragraph names `-D` — reap.sh deletes with `git update-ref -d`");
+  assert.doesNotMatch(p, /(?:^|[\s`])(?:git\s+branch\s+)?-D\b/, "SKILL.md's reap paragraph names `-D` — reap.sh deletes with `git update-ref -d`");
   assert.doesNotMatch(
     p,
-    /\bonly\s+by\b|\bnothing\s+else\b|\bsolely\b|\balone\b/,
+    /\bonly\s+by\b|\bnothing\s+else\b|\bsolely\b|\balone\b/i,
     "SKILL.md's reap paragraph makes one check the delete's only authorizer — reap.sh's worktree check stops that delete too",
   );
 });
