@@ -65,6 +65,14 @@ test("isCLI defaults to the live process.argv[1]", () => {
 // Each script refuses an unknown flag with exit 2 before it reads or writes
 // anything; a skipped main() exits 0. The real-path run is the control: the
 // symlinked run must match it, not merely be non-zero.
+//
+// Only the control puts `<name>.mjs` in a child's argv. The symlinked run and
+// the import below reach the script through a link with a basename of its own,
+// so a `pkill -f fleet-heartbeat.mjs` cannot SIGTERM them into `status: null`
+// (#2854). The control has to stay the real path to stay a control; it lives
+// only until the script rejects --bogus, and a kill landing in that window
+// fails its assertion with the signal named.
+const LINK_NAME = "script.mjs";
 const CLI_SCRIPTS = [
   "diff-stats", "fleet-heartbeat", "fleet-tick", "frontmatter-check", "main-checkout",
   "member-outcomes", "tier-check", "tier-outcomes", "tier-roles", "board", "dispositions-check", "recipe-prove",
@@ -75,10 +83,15 @@ for (const name of CLI_SCRIPTS) {
     const dir = tempDir("is-cli-run-");
     const linkDir = join(dir, "scripts-link");
     symlinkSync(SCRIPTS_DIR, linkDir);
-    const run = (script) => spawnSync(process.execPath, [script, "--bogus"], { cwd: dir, encoding: "utf8" });
+    // Through the linked directory, then renamed: the directory link alone
+    // keeps the script's basename.
+    const script = join(dir, LINK_NAME);
+    symlinkSync(join(linkDir, `${name}.mjs`), script);
+    assert.equal(script.includes(`${name}.mjs`), false, script);
+    const run = (path) => spawnSync(process.execPath, [path, "--bogus"], { cwd: dir, encoding: "utf8" });
     const real = run(join(SCRIPTS_DIR, `${name}.mjs`));
-    const linked = run(join(linkDir, `${name}.mjs`));
-    assert.equal(real.status, 2, real.stderr);
+    const linked = run(script);
+    assert.equal(real.status, 2, `signal ${real.signal}: ${real.stderr}`);
     assert.equal(linked.status, real.status, `via symlink: ${linked.stderr}`);
     assert.equal(linked.stderr, real.stderr);
   });
@@ -90,8 +103,11 @@ for (const name of CLI_SCRIPTS) {
 for (const name of CLI_SCRIPTS) {
   test(`${name}.mjs imported as a module does not run main()`, () => {
     const dir = tempDir("is-cli-import-");
-    const url = pathToFileURL(join(SCRIPTS_DIR, `${name}.mjs`)).href;
-    const run = spawnSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(url)});`], { cwd: dir, encoding: "utf8" });
+    const link = join(dir, LINK_NAME);
+    symlinkSync(join(SCRIPTS_DIR, `${name}.mjs`), link);
+    const source = `await import(${JSON.stringify(pathToFileURL(link).href)});`;
+    assert.equal(source.includes(`${name}.mjs`), false, source);
+    const run = spawnSync(process.execPath, ["--input-type=module", "-e", source], { cwd: dir, encoding: "utf8" });
     assert.equal(run.status, 0, run.stderr);
     assert.equal(run.stdout, "");
     assert.equal(run.stderr, "");
