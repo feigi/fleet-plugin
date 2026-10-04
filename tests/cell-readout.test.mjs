@@ -231,6 +231,40 @@ test("a repeated session+agent on the same cell is one Pull even when its other 
   assert.equal(of("smol-high").comparisons, 1);
 });
 
+test("a member-outcomes session+agent repeated with different fields is refused, naming both; the readout is not changed by whichever row came last", () => {
+  const w = world();
+  addComparisons(w, "task-low", 12, 6);
+  const [first] = w.members;
+  for (const conflict of [{ model: "" }, { cost: 7 }]) {
+    const dup = { ...w, members: [...w.members, { ...first, ...conflict }] };
+    const r = cli(dup);
+    assert.equal(r.status, 2, `${JSON.stringify(conflict)}: ${r.stderr}`);
+    assert.equal(r.stdout, "");
+    assert.ok(r.stderr.includes(`session ${first.session}`) && r.stderr.includes(`agent ${first.agent}`), r.stderr);
+    assert.throws(() => readout(parsed(dup)), (e) => e.message.includes(`session ${first.session}`) && e.message.includes(`agent ${first.agent}`));
+  }
+});
+
+test("an identical repeated member-outcomes row is one row, and one agent name in two sessions is two keys", () => {
+  const w = world();
+  addComparisons(w, "task-low", 12, 6);
+  const clean = cli(w);
+  assert.equal(clean.status, 0, clean.stderr);
+  assert.equal(clean.stdout, "task-low 12 6 claude-sonnet-5\n");
+  const repeated = cli({ ...w, members: [...w.members, { ...w.members[0] }] });
+  assert.deepEqual({ status: repeated.status, stdout: repeated.stdout, stderr: repeated.stderr }, { status: 0, stdout: clean.stdout, stderr: clean.stderr });
+  // A named member's agent stem repeats across sessions; that is not a repeated key.
+  const shared = world();
+  addRow(shared, { session: "sOne", date: "2026-10-01", cell: "task-high" });
+  addRow(shared, { session: "sOne", date: "2026-10-01", cell: "slow-high" });
+  addRow(shared, { session: "sTwo", date: "2026-10-02", cell: "task-high" });
+  addRow(shared, { session: "sTwo", date: "2026-10-02", cell: "slow-high" });
+  for (const rows of [shared.features, shared.members]) rows[2].agent = rows[0].agent;
+  const task = readout(parsed(shared)).cells.find((x) => x.cell === "task-high");
+  assert.equal(task.comparisons, 2);
+  assert.deepEqual(task.dates, ["2026-10-01", "2026-10-02"]);
+});
+
 test("a blank member-outcomes run_date is no date: its session is a comparison but adds nothing to the distinct-date count", () => {
   const w = world();
   addComparisons(w, "task-high", 4, 4);
