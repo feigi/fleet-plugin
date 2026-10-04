@@ -71,11 +71,12 @@ for (const [name, text, from, to] of slices) {
 // target's presence needs its own pin or the pointer orphans in silence. The end
 // anchor is the generic next-bullet marker, not the following bullet's wording,
 // which would make an unrelated rewrite of that bullet a boundary failure here.
-// Bounding is not optional: the glob occurs twice in that file, so an unbounded
-// pin would stay satisfied by the other occurrence with this bullet deleted.
+// Bounded to the bullet so that a copy of the phrase anywhere else in the file
+// cannot keep the pin satisfied with this bullet deleted.
 test("review-and-fix.md still hands specialists the command both guards point at", () => {
   const bullet = between(REVIEW_AND_FIX, "Give specialists a stack-free test command", "\n- **", "review-and-fix.md");
-  assert.match(bullet, phrase("node --test plugin/scripts/*.test.mjs"));
+  assert.match(bullet, phrase("the Test entrypoint, read off the Recipe cache"));
+  assert.match(bullet, phrase("`derive-testcmd.sh <worktree or main checkout> test` prints it"));
 });
 
 // #1150: any member that dispatches a child writes the child's absolute scratch
