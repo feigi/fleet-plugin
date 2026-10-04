@@ -48,7 +48,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
+import { between, paragraph, phrase, stripHashGutter } from "./prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..");
 const REAPING = readFileSync(
@@ -139,6 +139,58 @@ test("run-team/SKILL.md: the release deletes the branch with update-ref's compar
     /(?:deletes?|deleted)\s+(?:the\s+branch\s+)?(?:is\s+)?with\s+`(?:git\s+branch\s+)?-D`/,
     "SKILL.md's release section says the branch is deleted with `-D` — release-ticket.sh deletes it with `git update-ref -d`",
   );
+});
+
+// The reap paragraph's twin of the release pin above. reap.sh deletes a
+// `[gone]` branch with `git update-ref --no-deref -d refs/heads/<b> <tip>`,
+// never `-D`, and keeps a branch the cherry check cleared whenever a fresh
+// worktree check finds it held — so naming `-D`, or the cherry check as the
+// delete's only authorizer, is false as written.
+const reapParagraph = () =>
+  paragraph(RUN_TEAM, "`~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition", "run-team/SKILL.md's reap paragraph");
+
+test("run-team/SKILL.md: reap's cherry check authorizes the update-ref delete, with the fresh worktree check beside it", () => {
+  const p = reapParagraph();
+  assert.match(
+    p,
+    phrase("`git cherry origin/main` to authorize the `git update-ref -d` delete"),
+    "SKILL.md's reap paragraph no longer names the cherry check as authorizing the `git update-ref -d` delete",
+  );
+  assert.match(
+    p,
+    phrase("a fresh check that no worktree holds the branch"),
+    "SKILL.md's reap paragraph no longer names the fresh worktree check — reap.sh keeps a branch the cherry check cleared whenever a worktree holds it",
+  );
+  assert.doesNotMatch(p, /(?:^|[\s`])(?:git\s+branch\s+)?-D\b/, "SKILL.md's reap paragraph names `-D` — reap.sh deletes with `git update-ref -d`");
+  assert.doesNotMatch(
+    p,
+    /\bonly\s+by\b|\bnothing\s+else\b|\bsolely\b|\balone\b/i,
+    "SKILL.md's reap paragraph makes one check the delete's only authorizer — reap.sh's worktree check stops that delete too",
+  );
+});
+
+test("run-team/SKILL.md: the reap paragraph keeps the preconditions it already named", () => {
+  // Input the assertions above must ACCEPT: the corrected clause sits in a
+  // list whose other entries stay as they were.
+  const p = reapParagraph();
+  assert.match(p, phrase("`for-each-ref` for `[gone]`"));
+  assert.match(p, phrase("worktree removal without `--force`"));
+});
+
+test("reap.sh: the worktree check the reap paragraph names runs before the delete", () => {
+  // Live lines only: both names recur in comments, and a comment hit would
+  // read as the code.
+  const lines = readFileSync(join(REPO, "scripts", "reap.sh"), "utf8")
+    .split("\n")
+    .filter((l) => !/^\s*(?:#|echo\b)/.test(l));
+  const only = (re, what) => {
+    const hits = lines.flatMap((l, i) => (re.test(l) ? [i] : []));
+    assert.equal(hits.length, 1, `reap.sh: expected exactly one live line that ${what}, found ${hits.length}`);
+    return hits[0];
+  };
+  const check = only(/^\s*if\s+wt_holding\s+"refs\/heads\/\$b"/, "runs wt_holding on the branch");
+  const del = only(/\bgit\s+update-ref\s+--no-deref\s+-d\s+"refs\/heads\/\$b"\s+"\$tip"/, "runs `git update-ref -d` on the branch at its tip");
+  assert.ok(check < del, "reap.sh runs its worktree check after the delete, not before it");
 });
 
 test("run-team/SKILL.md: the by-hand fallback names worktree-audit.sh's no-argument contract", () => {
