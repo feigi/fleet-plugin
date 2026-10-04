@@ -169,7 +169,7 @@ rc=0
 framed=$(node -e '
 const fs = require("fs");
 const [file, field, open, close, lenFile] = process.argv.slice(1);
-const bad = (why) => { console.error(why); process.exit(2); };
+const bad = (why) => { console.error(why.replace(/\0/g, "")); process.exit(2); };
 let r;
 try { r = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { bad(`it does not parse: ${e.message}`); }
 if (r === null || typeof r !== "object" || Array.isArray(r)) bad("it is not a JSON object");
@@ -195,9 +195,17 @@ fi
 # cannot be started would otherwise leave a cache node really refused with an
 # empty reason and a stray "cat: command not found" line. Like `$(cat ...)`, the
 # substitution drops trailing newlines; `|| [ -n "$line" ]` keeps a last line
-# that has none.
+# that has none. A shell string cannot hold a NUL and a `read` loop stops at
+# one, where `cat` kept the rest, so node's `bad` above strips NULs from its
+# reason — a cache that holds NUL bytes is quoted back in its parse error.
+# Nothing here may end the script before `die`: a stderr file that cannot be
+# read back (opened, or read — bash's `read` leaves `line` unset on an error,
+# which `set -u` then trips on) fails the substitution, and the `||` names that
+# in the reason instead of aborting on the shell's own error, which under dash
+# would also be an exit outside 0/1/3.
 if [ "$rc" -ne 0 ]; then
-  reason=$(while IFS= read -r line || [ -n "$line" ]; do printf '%s\n' "$line"; done <"$errf")
+  reason=$({ while IFS= read -r line || [ -n "$line" ]; do printf '%s\n' "$line"; done <"$errf"; } 2>/dev/null) ||
+    reason="(node's reason could not be read back from $errf)"
   die "the Recipe cache at $cache is unusable: $reason — $derive"
 fi
 carriedmsg="node's stdout carried more than the framed Recipe value — expected exactly the value between '$open' and '$close', got '$framed'. The cache at $cache passed validation; the extra output comes from how node is launched here (a version-manager or proxy shim, a preload), and is refused rather than cut out of the command"

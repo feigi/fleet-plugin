@@ -371,16 +371,24 @@ test("a mktemp that runs and fails on its second call is exit 3, never the cache
 // the real read — killed, or no longer runnable. Nothing was read, so that is
 // exit 3 as well. Node's own refusal of the cache (its exit 2) and an uncaught
 // fault of its own (exit 1) are still the cache's exit 1, with node's reason.
+// The stripped PATH has no cat: node's reason is read back WITHOUT it, so every
+// refusal row also proves that. The rows that give a reason a shape (several
+// lines, no final newline, trailing newlines, a backslash and leading space)
+// pin what the read-back must still do as cat did.
 for (const [what, body, status, reason] of [
   ["is killed", "kill -9 $$", 3, /^derive-testcmd: node did not finish reading the Recipe cache \(exit 137\)/m],
   ["can no longer be run", "exit 127", 3, /^derive-testcmd: node did not finish reading the Recipe cache \(exit 127\)/m],
   ["refuses the cache itself", "echo 'it does not parse: boom' >&2; exit 2", 1, /is unusable: it does not parse: boom/],
   ["faults on its own", "echo 'TypeError: boom' >&2; exit 1", 1, /is unusable: TypeError: boom/],
+  ["refuses with a multi-line reason", "echo 'first line' >&2; echo 'second line' >&2; exit 2", 1, /is unusable: first line\nsecond line — run the Recipe/],
+  ["refuses with a last line without a newline", "printf 'no newline' >&2; exit 2", 1, /is unusable: no newline — run the Recipe/],
+  ["refuses with trailing newlines", "printf 'reason\\n\\n\\n' >&2; exit 2", 1, /is unusable: reason — run the Recipe/],
+  ["refuses with a backslash and leading space", "printf '  a\\\\nb\\n' >&2; exit 2", 1, /is unusable:   a\\nb — run the Recipe/],
 ]) {
   test(`a node that passes the probe and then ${what} is exit ${status}`, () => {
     const { dir, head } = repo();
     cache(dir, recipe(head, { test: "true" }));
-    const bin = shimPath({ node: false });
+    const bin = shimPath({ node: false, omit: "cat" });
     writeExecStub(join(bin, "node"), `#!/bin/sh\nif [ "$1" = -e ] && [ "$2" = 0 ]; then exit 0; fi\n${body}\n`);
     const r = derive(dir, "test", { ...process.env, PATH: bin });
     assert.equal(r.status, status, r.err);
@@ -426,15 +434,17 @@ test("a cat that runs and fails on the byte-count file is exit 1, carrying its r
 // empty reason. The cache is refused either way (exit 1), and node's own reason
 // survives, with no shell complaint about cat.
 const REFUSED = /is unusable: `installClean` is not true — the Install step was never proven to leave the tree clean — run the Recipe derivation step/;
-for (const [what, make] of [
-  ["is missing", (bin) => bin],
-  ["exits 127", (bin) => (writeExecStub(join(bin, "cat"), "#!/bin/sh\nexit 127\n"), bin)],
-  ["exits 126", (bin) => (writeExecStub(join(bin, "cat"), "#!/bin/sh\nexit 126\n"), bin)],
+for (const [what, stub] of [
+  ["is missing", null],
+  ["exits 127", "exit 127"],
+  ["exits 126", "exit 126"],
 ]) {
   test(`a cat that ${what} still lets a refused cache carry node's reason, exit 1`, () => {
     const { dir, head } = repo();
     cache(dir, recipe(head, { installClean: false }));
-    const r = derive(dir, "test", { ...process.env, PATH: make(shimPath({ node: true, omit: "cat" })) });
+    const bin = shimPath({ node: true, omit: "cat" });
+    if (stub) writeExecStub(join(bin, "cat"), `#!/bin/sh\n${stub}\n`);
+    const r = derive(dir, "test", { ...process.env, PATH: bin });
     assert.equal(r.status, 1, r.err);
     assert.equal(r.out, "");
     assert.match(r.err, REFUSED);
@@ -451,24 +461,62 @@ test("the same refused cache with cat present carries the same reason", () => {
   assert.match(r.err, REFUSED);
 });
 
-// What the read-back must still do as cat did: keep every line of a multi-line
-// reason, keep a last line that has no newline, and drop trailing newlines.
-for (const [what, body, reason] of [
-  ["keeps every line", "echo 'first line' >&2; echo 'second line' >&2; exit 2", /is unusable: first line\nsecond line — run the Recipe/],
-  ["keeps a last line without a newline", "printf 'no newline' >&2; exit 2", /is unusable: no newline — run the Recipe/],
-  ["drops trailing newlines", "printf 'reason\\n\\n\\n' >&2; exit 2", /is unusable: reason — run the Recipe/],
-  ["keeps a backslash and leading space as written", "printf '  a\\\\nb\\n' >&2; exit 2", /is unusable:   a\\nb — run the Recipe/],
-]) {
-  test(`node's reason ${what}`, () => {
-    const { dir, head } = repo();
-    cache(dir, recipe(head, { test: "true" }));
-    const bin = shimPath({ node: false, omit: "cat" });
-    writeExecStub(join(bin, "node"), `#!/bin/sh\nif [ "$1" = -e ] && [ "$2" = 0 ]; then exit 0; fi\n${body}\n`);
-    const r = derive(dir, "test", { ...process.env, PATH: bin });
-    assert.equal(r.status, 1, r.err);
-    assert.match(r.err, reason);
-  });
+// A cache holding a NUL byte is quoted back, NUL and all, in node's parse
+// error. A `read` loop stops at a NUL where cat kept the rest, so the reason
+// must reach the shell without one. Only a sh whose `read` stops there (the
+// bash 3.2 that is /bin/sh on macOS) loses the tail without that, so the pin
+// bites on such a host and passes elsewhere.
+test("a NUL byte in the cache does not cut node's parse reason short", () => {
+  const { dir } = repo();
+  cache(dir, '{"install":\u0000"x"}');
+  const r = derive(dir, "test");
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /is unusable: it does not parse: [^\n]*JSON[^\n]* — run the Recipe/);
+  assert.doesNotMatch(r.err, /\0/);
+});
+
+// Nothing on the way to the refusal may end the script before it: the file
+// node's reason was written to is the script's own mktemp, and one that cannot
+// be read back must still end in this script's refusal (exit 1, naming the
+// Recipe derivation step), not in the shell's own redirect error — which under
+// dash is an exit outside the documented 0/1/3.
+function mktempShim(bin, { firstArgs = "" } = {}) {
+  const real = execFileSync("sh", ["-c", "command -v mktemp"], { encoding: "utf8" }).trim();
+  const mark = join(bin, "errf-path");
+  writeExecStub(join(bin, "mktemp"), `#!/bin/sh\nif [ ! -e '${mark}' ]; then p=$('${real}' ${firstArgs} "$@") || exit $?; printf '%s' "$p" > '${mark}'; printf '%s\\n' "$p"; exit 0; fi\nexec '${real}' "$@"\n`);
+  return mark;
 }
+
+test("a stderr file that cannot be opened for the read-back still reaches the refusal", () => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head, { test: "true" }));
+  const bin = shimPath({ node: false, omit: "mktemp" });
+  const mark = mktempShim(bin);
+  // node writes its reason and then removes the file it wrote it to.
+  writeExecStub(join(bin, "node"), `#!/bin/sh\nif [ "$1" = -e ] && [ "$2" = 0 ]; then exit 0; fi\necho 'real reason' >&2\nread -r f < '${mark}'\nrm -f "$f"\nexit 2\n`);
+  const r = derive(dir, "test", { ...process.env, PATH: bin });
+  assert.equal(r.status, 1, r.err);
+  assert.equal(r.out, "");
+  assert.match(r.err, /^derive-testcmd: the Recipe cache at .* is unusable: \(node's reason could not be read back from [^)]+\) — /m);
+  assert.match(r.err, NAMES_STEP);
+  assert.doesNotMatch(r.err, /No such file|cannot open/);
+});
+
+// A stderr file that is a directory: bash's `read` fails there without
+// assigning `line`, and `set -u` then trips on the unbound variable inside the
+// read-back. The refusal must still be reached, with no complaint about it.
+test("a stderr file that is a directory still reaches the refusal", () => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head, { test: "true" }));
+  const bin = shimPath({ node: true, omit: "mktemp" });
+  mktempShim(bin, { firstArgs: "-d" });
+  const r = derive(dir, "test", { ...process.env, PATH: bin });
+  assert.equal(r.status, 1, r.err);
+  assert.equal(r.out, "");
+  assert.match(r.err, /^derive-testcmd: the Recipe cache at .* is unusable: /m);
+  assert.match(r.err, NAMES_STEP);
+  assert.doesNotMatch(r.err, /unbound variable/);
+});
 
 // `rm` is the reader's cleanup only, so it must not decide the outcome: with
 // it gone a good cache still reads cleanly — status 0 and nothing on stderr,
