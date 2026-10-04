@@ -2578,10 +2578,10 @@ a minute apart showed *different* mutants, so a member's report and any single
    the worktree unreadable. **Diverged:** the worktree's `HEAD` against your
    dispatch pin — the cause block's head-equality check below. Neither
    instrument above answers it: `git status --porcelain` reports no commits,
-   and the row's `ahead` is counted against `origin/main`, which a PR worktree
-   is always ahead of, so it cannot answer this. Three row shapes halt too,
-   each named in the report with the script's stderr line quoted where it
-   prints one: `readable:false` with `null` counts
+   and the row's `ahead` is counted against `origin/main`, which a healthy
+   worktree on an open, unmerged PR is ahead of too, so it cannot answer this.
+   Three row shapes halt too, each named in the report with the script's
+   stderr line quoted where it prints one: `readable:false` with `null` counts
    (`UNREADABLE: <wt> (<cause>)`) is *worktree unreadable*, `readable:false`
    with zero counts (`MISSING on disk: <wt>`) is *worktree missing*, and no
    row for this worktree at all is *worktree absent*. `git status` is no
