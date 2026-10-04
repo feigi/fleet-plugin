@@ -18,7 +18,7 @@
 //   roughly two hours; neither ever woke it. run-merge-bot.md's CI gate states
 //   the same rule as a rule — "whatever wakes you is external and may never
 //   come" — and cures it the same way this file does, by holding the wait
-//   inside one blocking command and re-issuing it.
+//   inside one blocking call.
 //
 //   So the heartbeat is not a Monitor, not a cron entry and not a paragraph of
 //   prose. A cron entry that ran the reconcile would print its rows to nobody:
@@ -66,9 +66,8 @@ export function interval({ quiet, base, ceiling, multiplier }) {
 // rule already states.
 //
 // So a long interval is served by SEVERAL holds, and the elapsed total is
-// persisted rather than counted in prose. That is the same remedy the CI gate
-// reached for, made mechanical: the script says how much remains, so the
-// controller re-issues without tracking arithmetic across turns.
+// persisted rather than counted in prose: the script says how much remains, so
+// the controller re-issues without tracking arithmetic across turns.
 export function heldThisCall({ elapsed, target, hold }) {
   return Math.min(hold, Math.max(0, target - elapsed));
 }
