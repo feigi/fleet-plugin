@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between as section, paragraph, phrase } from "./support/prose-pin.mjs";
+import { between as section, bullet, paragraph, phrase } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
@@ -160,7 +160,7 @@ test("the queue-depth table's empty row suggests /triage and asks nobody to tick
 test("the review-backlog definition states what the script actually counts", () => {
   // The gate's input. Left as the narrow definition alone, a controller reading
   // a HOLD cannot tell an over-count from a real review-bound pipeline.
-  const def = section(RUN_TEAM, "- **review backlog**", "\n\n**Defaults: 2 implementers, 6 reviewers", "review-backlog definition");
+  const def = bullet(RUN_TEAM, "- **review backlog**", "**Defaults: 2 implementers, 6 reviewers", "review-backlog definition");
   assert.match(def, /open PR without `ready-to-merge`/);
   // The review state now lives on the ledger (spec 2026-09-24 § 3 §7), so the
   // count is exact rather than a wider read held "earlier, never later": a PR
