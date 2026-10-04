@@ -60,9 +60,12 @@ export function classifyRole(signals) {
   // #1505: a dispatch that recorded `memory-housekeeper` books memory whatever
   // it called the member, so the eleven rows that shared one definition across
   // three buckets collapse to one. The NAME stays a signal beside it because a
-  // missing definition is a real category here rather than a hole — an
-  // untyped `task` dispatch records none at all — and the memory members named
-  // `memory-proxy-session-review-2-3` have nothing else to be classified on;
+  // definition that says nothing about the role is a real category here rather
+  // than a hole — an untyped dispatch records the generic `task` (the
+  // transcript's `session_init` writes it for the default agent; the field is
+  // blank only where that line itself is absent), which names no memory agent
+  // and matches none of the definition branches below — and the memory members
+  // named `memory-proxy-session-review-2-3` have nothing else to be classified on;
   // drop it and they fall to "other", which is the same defect wearing the
   // other shoe. `desc` is excluded on purpose: every memory-adjacent fleet
   // member's own prompt says "memory-proxy" somewhere, so blending the prose

@@ -177,13 +177,26 @@ test("the memory exclusion reads the recorded DEFINITION, so any member name boo
   assert.equal(classifyRole({ agentDefinition: "memory-proxy", memberName: "review-eval", spawnDepth: 2 }), "memory");
 });
 
-test("an untyped dispatch that recorded no definition still classifies by its NAME", () => {
-  // #1505's other half. A dispatch before typed agents existed records no
-  // definition at all — a closed category, not a hole — so the name is the only
-  // memory signal those members have. Measured over the sidecars on disk: three
-  // live members rest on this, and dropping it would put `memory-housekeeper`
-  // (named for its own definition, at depth 1) in the SPECIALIST bucket, which
-  // is the very defect #1505 reports.
+test("an untyped dispatch, recorded as the generic `task` or as no definition, still classifies by its NAME", () => {
+  // #1505's other half. The default agent records the literal `task` in
+  // `session_init`, and a transcript with no `session_init` line records no
+  // definition at all; neither names a memory agent or any fleet definition, so
+  // the name is the only memory signal those members have. Re-measured
+  // 2026-10-04: over the Claude Code `meta.json` sidecars under
+  // ~/.claude/projects (the reader #1505 fixed, since dropped from
+  // member-record.mjs) three members booked memory on their name alone, each
+  // with no definition recorded and none with `task`; over the omp members on
+  // disk none did, under `task` or without a definition. Dropping the name
+  // would put `memory-housekeeper` (named for its own definition, at depth 1)
+  // in the SPECIALIST bucket, which is the very defect #1505 reports.
+  assert.equal(foldOmpTranscript(JSON.stringify({ type: "session_init", agent: "task" }), "/fake/omp.jsonl").agent, "task");
+  assert.equal(foldOmpTranscript(JSON.stringify({ type: "session" }), "/fake/omp.jsonl").agent, null);
+  assert.equal(classifyRole({ agentDefinition: "task", memberName: "memory-proxy-session-review-2-3" }), "memory");
+  assert.equal(classifyRole({ agentDefinition: "task", memberName: "memory-housekeeper", spawnDepth: 1 }), "memory");
+  // `task` matches no definition branch, so with a name it is the name that
+  // decides and without one nothing does.
+  assert.equal(classifyRole({ agentDefinition: "task", memberName: "fix-pr-1380" }), "reviewer");
+  assert.equal(classifyRole({ agentDefinition: "task" }), "other");
   assert.equal(classifyRole({ agentDefinition: "", memberName: "memory-proxy-session-review-2-3" }), "memory");
   assert.equal(classifyRole({ agentDefinition: "", memberName: "memory-housekeeper", spawnDepth: 1 }), "memory");
   // ...and it is still not a guess: a name carrying no memory agent falls

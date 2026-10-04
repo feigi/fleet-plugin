@@ -19,8 +19,9 @@
 // alternate-tier pair from two members whose models already happened to
 // differ, and both readers keep it because it is derived rather than
 // authored and survives a regeneration. `""` is NOT the hole use; it means
-// the dispatch named no agent definition, the ordinary shape of an untyped
-// `task` call.
+// the transcript carried no `session_init` agent to read (no such line, or
+// one without a string `agent`). An untyped `task` dispatch is not that
+// shape: the omp reader records the generic `task` for it.
 import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, basename, relative, isAbsolute, sep } from "node:path";
 
