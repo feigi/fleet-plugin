@@ -27,19 +27,24 @@ const scanComment = () =>
 
 const NOTHING_ELSE = phrase("authorized by this check and by nothing else");
 
-test("reap.sh: the cherry-probe comment does not call the cherry check the delete's sole authorizer", () => {
+for (const [name, comment] of [
+  ["cherry-probe", probeComment],
+  ["cherry-scan", scanComment],
+]) {
+  test(`reap.sh: the ${name} comment does not call the cherry check the delete's sole authorizer`, () => {
+    assert.doesNotMatch(
+      comment(),
+      NOTHING_ELSE,
+      `reap.sh's ${name} comment says the delete is authorized by the cherry check and by nothing else — the worktree checks and \`wt_holding\` can stop the delete too`,
+    );
+  });
+}
+
+test("reap.sh: the cherry-probe comment does not quote the retired \"By nothing else\" sentence", () => {
   assert.doesNotMatch(
     probeComment(),
-    NOTHING_ELSE,
-    "reap.sh's cherry-probe comment says the delete is authorized by the cherry check and by nothing else — the worktree checks and `wt_holding` can stop the delete too",
-  );
-});
-
-test("reap.sh: the cherry-scan comment does not call the cherry check the delete's sole authorizer", () => {
-  assert.doesNotMatch(
-    scanComment(),
-    NOTHING_ELSE,
-    "reap.sh's cherry-scan comment says the delete is authorized by the cherry check and by nothing else — the worktree checks and `wt_holding` can stop the delete too",
+    phrase('"By nothing else" bounds'),
+    "reap.sh's cherry-probe comment says \"By nothing else\" bounds what ELSE authorizes the delete — the worktree checks and `wt_holding` can stop the delete too, and the sentence restates the sole-authorizer claim",
   );
 });
 
