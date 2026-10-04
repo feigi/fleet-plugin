@@ -19,7 +19,7 @@
 # and this file is sourced by the same scripts.
 #
 # Not folded into json.sh, which is scoped to JSON escaping: a filesystem
-# predicate and a `git` reader are neither. #725
+# predicate and a `git` reader are neither.
 
 # The byte `wt_listing` substitutes for a newline found INSIDE a worktree path.
 #
@@ -71,7 +71,7 @@ nl_path() {
 # split into two and every consumer's `substr($0,10)` truncated the path at the
 # newline. Measured on a real linked worktree at `.../wt/fix-33<LF>slug`, git
 # 2.50.1: three scripts each handed a downstream consumer a path not on disk,
-# and none of them refused. #551, the defect #185 fixed in inflight.sh.
+# and none of them refused — the defect already fixed in inflight.sh.
 #
 # `--porcelain -z` terminates every attribute with NUL instead, which needs git
 # 2.36.0 — a floor this repo already exceeds through no-undo-audit.sh's
@@ -80,7 +80,7 @@ nl_path() {
 # NOT `awk -v RS='\0'`. That is a gawk/BWK extension, and the awk this fleet
 # actually runs on macOS — /usr/bin/awk, BWK awk 20200816 — does not merely
 # ignore it: it stops dead at the first NUL and reports ONE record for a listing
-# of any length. Measured under #185, all three spellings, `-v RS='\0'`,
+# of any length. Measured, all three spellings, `-v RS='\0'`,
 # `-v RS='\000'` and `BEGIN{RS="\0"}`, every one of them `count=1`. No awk
 # program can hold a NUL byte either, so the swap has to happen before awk sees
 # the stream at all.
@@ -153,14 +153,14 @@ wt_listing() {
 # alone reads its absence as unknown, which is the permanent refusal the callers
 # exist to stop producing.
 #
-# `[ ! -L "$look" ]` in the loop condition, and it is the whole of #725. Every
+# `[ ! -L "$look" ]` in the loop condition, and it is the whole fix. Every
 # `test` primary except `-L` STATS, so it follows a symlink: on a dangling one
 # `-e` is false while `-L` is true, and the predicate answered established-absent
 # for a path `git worktree add` treats as occupied. Measured — worktree-audit.sh
 # reported such a path as `MISSING on disk` with `ahead=0, dirty=0`, which is
 # what the fleet controller reads to decide whether a replacement member would
-# redo work or destroy it. Same `-e`/lstat split #188 fixed one layer up in
-# claim-ticket.sh.
+# redo work or destroy it. Same `-e`/lstat split claim-ticket.sh guards one
+# layer up.
 #
 # In the LOOP condition rather than as a fourth clause on the result, because
 # that placement answers a second shape for free: a dangling symlink standing in
@@ -175,19 +175,19 @@ wt_listing() {
 # remove` that deleted a symlink's target, with no live claim; and
 # release-ticket.sh's rc-255 halt path, which leaves the link with the branch and
 # the `in-progress` label still alive — a live claim, mid-release, that failed
-# partway. "Not established-absent" is the only answer true of both. #728
+# partway. "Not established-absent" is the only answer true of both.
 #
-# `look=${look:-/}` INSIDE the loop, and that placement is the whole of #178:
+# `look=${look:-/}` INSIDE the loop, and that placement is the whole fix:
 # `${p%/*}` on `/x` yields the empty string, not `/`, so a path whose every
 # ancestor below the root is gone used to fall out on "" and answer unknown about
 # an absence the searchable root proves. The same restore written AFTER the loop
 # reads identically and is wrong — nothing enters the loop on an empty `$1`, so
 # it would rewrite that to `/` too and turn `gone ""` into established-absent.
-# Inside, it only ever rewrites what the loop just truncated. gone-walk.test.mjs
-# holds that matrix, `gone ""` included, because no caller can reach it: the
-# callers test the path non-empty first, and worktree-audit.sh reads its own off
-# `git worktree list`, which never emits an empty one — so a caller-level suite
-# alone cannot tell the two placements apart.
+# Inside, it only ever rewrites what the loop just truncated. The suite's direct
+# test of `gone` holds that matrix, `gone ""` included, because no caller can
+# reach it: the callers test the path non-empty first, and worktree-audit.sh
+# reads its own off `git worktree list`, which never emits an empty one — so a
+# caller-level suite alone cannot tell the two placements apart.
 #
 # `!=`, not a non-empty test: `${p%/*}` returns p unchanged when p holds no
 # slash, so the emptiness form spins forever on one. git emits absolute paths to
@@ -197,8 +197,8 @@ wt_listing() {
 # One definition, in one file, because every caller asks one question. Answered
 # separately they drift, and the halves of this fleet that protect a member's
 # work stop agreeing about whether there is any work there to protect — which is
-# exactly what #725 found: three copies, and only one compensating, at a call
-# site rather than in the predicate.
+# exactly what separate copies of it did: three, and only one compensating, at
+# a call site rather than in the predicate.
 #
 # 0 ONLY for established absent; 1 covers present AND cannot-stat, so a caller
 # needing those apart pairs this with its own `[ ! -e ]`, as release-ticket.sh's
@@ -217,7 +217,7 @@ gone() {
   # worktree on disk holding an uncommitted file and for which prune is a no-op
   # — the permanent-refusal shape the surrounding guards exist to prevent.
   # Refused in the predicate rather than at each call site for the reason the
-  # rest of this comment gives: answered separately, the callers drift. #551
+  # rest of this comment gives: answered separately, the callers drift.
   nl_path "$1" && return 1
   look=$1
   while [ ! -e "$look" ] && [ ! -L "$look" ] && [ "$look" != "${look%/*}" ]; do
@@ -259,11 +259,11 @@ gone() {
 # started from a detached HEAD is different: `BISECT_START` holds that HEAD's
 # full SHA, which the code below still turns into `refs/heads/<sha>` and
 # collects — matching only a branch literally named with that 40-hex string,
-# which nothing in this fleet's naming ever produces. #2218
+# which nothing in this fleet's naming ever produces.
 #
 # `2>/dev/null` on the admin-dir read, NOT the `2>&1` the fleet's message-text
-# captures fold in, because this capture is used as a PATH. Measured (PR #985
-# review): a `~/.gitconfig` with a key outside any section makes every git
+# captures fold in, because this capture is used as a PATH. Measured: a
+# `~/.gitconfig` with a key outside any section makes every git
 # command print `error: key does not contain a section: …` to stderr AT EXIT 0,
 # so `2>&1` returns that line glued in front of the git dir, every `[ -e ]`
 # below then matches nothing, and a worktree holding an interrupted rebase reads
@@ -274,7 +274,7 @@ gone() {
 # that is not there, and only the second is an answer.
 #
 # `wt_op` is this function's OUTPUT, read by the sourcing script; so is
-# `wt_op_held`, read by `wt_holding` below and by worktree-audit.sh (#2220) —
+# `wt_op_held`, read by `wt_holding` below and by worktree-audit.sh —
 # SC2034, as for `wt_listing`.
 #
 # The admin dir is normally found by asking git FROM $1 (`rev-parse
@@ -294,7 +294,7 @@ gone() {
 # the worktree path it was registered for, and that registry lives under this
 # repo's `.git`, never under the worktree — a directory `rm -rf`'d out from
 # under git leaves its bookkeeping, and whatever rebase or bisect state it
-# held, untouched. #2218
+# held, untouched.
 # shellcheck disable=SC2034
 wt_op_state() {
   wt_op=
@@ -357,7 +357,7 @@ wt_op_state() {
 # there, is marked `prunable` too — the two are not the same fault), is what
 # tells `wt_op_state` it may look for that admin dir a different way; the
 # ordinary route — asking git FROM the worktree's own directory — cannot,
-# because there is no directory left to ask from. #2218
+# because there is no directory left to ask from.
 #
 # A record naming neither a `branch` nor the literal `detached` line is a HEAD
 # git itself could not classify from the worktree's own directory — measured,
@@ -368,7 +368,7 @@ wt_op_state() {
 # is untouched — so this case resolves through the SAME registry route as a
 # gone worktree, unconditionally, rather than answering "cannot tell" for a
 # worktree that may hold nothing of this caller's at all. Only once even that
-# route cannot read an admin dir does this fall back to "cannot tell". #2218
+# route cannot read an admin dir does this fall back to "cannot tell".
 #
 # Each record is read whole before it is judged — `branch`, `detached`, and
 # the boundary that ends it — never decided line by line, because a record's
@@ -462,7 +462,7 @@ wt_h_settle() {
   fi
   # Neither a `branch` line nor the literal `detached` line: git could not
   # classify this record's HEAD from the worktree's own directory at all (a
-  # corrupted admin HEAD is the shape #2218 measured) — go straight to the
+  # corrupted admin HEAD is that shape, measured) — go straight to the
   # registry route, unconditionally, since the ordinary one already failed by
   # definition of being here.
   wt_h_check_op "$1" 1

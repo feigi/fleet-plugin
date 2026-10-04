@@ -1,6 +1,6 @@
 #!/bin/sh
 # Read one command of a repository's proven Recipe out of its Recipe cache:
-# `install` (the Install step) or `test` (the Test entrypoint). ADR 0015.
+# `install` (the Install step) or `test` (the Test entrypoint).
 #
 # The fleet keeps no table of technologies. A Recipe is DERIVED by an agent
 # reasoning over the repository and PROVEN before it is written — the Install
@@ -8,12 +8,12 @@
 # and showed real tests — so this script infers nothing. A missing cache is a
 # refusal naming the step that derives one, never a guess: a guessed command
 # that passes vacuously reads as a green suite to every consumer, which is the
-# #142 hazard the old inference already refused over.
+# hazard the old inference already refused over.
 #
 # The ONE reader of the cache — reused, not reimplemented, by claim-ticket.sh
 # (the Install step it runs and the Test entrypoint it bakes into the runner)
 # and by review-core.mjs's snapshot agent (the Test entrypoint handed to the
-# specialists). Two independent readers is what drifts; see #142.
+# specialists). Two independent readers is what drifts.
 #
 # THE CACHE is `<workspace>/.fleet/recipe.json`, where <workspace> is the
 # directory holding the repository's COMMON git dir — the main checkout, the
@@ -65,7 +65,7 @@ set -eu
 export LC_ALL=C
 
 # Below the locale pin, not above it with `set -eu`: `unset` touches no
-# byte-sensitive tool, but locale-pin-prose.test.mjs treats ANY line here that
+# byte-sensitive tool, but the locale-pin prose test treats ANY line here that
 # is not a comment, a blank, or `set -[eux]+` as work the pin must sit above,
 # and refuses on principle rather than on this line's own behaviour. Same
 # placement, same reason, as release-ticket.sh's copy.
@@ -81,7 +81,7 @@ export LC_ALL=C
 # and `--git-common-dir` consult no work tree. It stays on the line because the
 # pair is one hazard with one remedy, and "inert today" is a measurement of the
 # current call set, not a property of the script.
-# ambient-git-vars-prose.test.mjs pins the line itself.
+# A prose test pins the line itself.
 unset GIT_DIR GIT_WORK_TREE
 
 # shellcheck disable=SC2100 # literal name "derive-testcmd", not arithmetic — the unrelated $derive var assigned below is what the heuristic collides on, not this line
@@ -124,7 +124,7 @@ cache="${common%/*}/.fleet/recipe.json"
 # that ends it rather than anything about a parser.
 [ -e "$cache" ] || die "no Recipe cache at $cache — refusing to infer an Install step or a Test entrypoint; $derive"
 
-# An INVOCATION, not a name lookup (#1141): a version-manager shim satisfies
+# An INVOCATION, not a name lookup: a version-manager shim satisfies
 # `command -v node` and then fails, and its stderr would arrive below under the
 # cache's name — a corrupt-cache refusal for a cache nobody read.
 nodeerr=$(node -e 0 </dev/null 2>&1) || unrunnable "node is unusable, refusing to read the Recipe cache without the interpreter — $nodeerr"
@@ -137,10 +137,10 @@ nodeerr=$(node -e 0 </dev/null 2>&1) || unrunnable "node is unusable, refusing t
 # is guarded on its own:
 #
 #   stderr is kept APART — to a file, never merged into the capture — because
-#   NODE_OPTIONS or NODE_DEBUG chatter lands there (#752, #1175).
+#   NODE_OPTIONS or NODE_DEBUG chatter lands there.
 #
 #   stdout carries the value FRAMED, `recipe<` before it and `>recipe` after,
-#   and the WHOLE capture must be exactly that frame, byte for byte (#2217):
+#   and the WHOLE capture must be exactly that frame, byte for byte:
 #   the anchored match alone only proves the ends line up, so a shim whose
 #   own chatter happens to spell out `recipe<`/`>recipe` around the real
 #   frame would still pass it and splice that chatter into the value — node
@@ -237,7 +237,7 @@ value=${value%"$close"}
 # caller's "$@" as an unrelated top-level command instead of args reaching
 # the Test entrypoint, and one containing a `#`-led word swallows everything
 # after it, "$@" included, as a comment — measured on both. A trailing
-# newline is checked here too (#2217): the frame above lets a value keep one
+# newline is checked here too: the frame above lets a value keep one
 # where an unframed `$(…)` capture always dropped it silently, so a value
 # that used to read as `true;` now reads as `true;\n` and would otherwise
 # slip past a check written for the no-newline case. Checked on the raw
