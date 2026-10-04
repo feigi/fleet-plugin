@@ -1307,8 +1307,13 @@ test("CLI: every synchronous spawn in this file goes through spawnBounded (#2320
 // `pr list` for the open PRs, `issue view` for a behind-issue premise's state,
 // `pr view` for the state of a PR an in-flight review names that is no longer
 // on the open list, `issue list --label in-progress` for the stall report's
-// claimed count.
+// claimed count. `GH_HANG` names one of those (`pr list`, `issue view`, …) to
+// stall for `GH_HANG_S` seconds before answering as usual, so a tick that waits
+// a hang out still reads a normal reply. The sleep holds none of the stub's
+// pipes: killed at the tick's bound, the stub leaves no child keeping the
+// tick's read open.
 const GH_STUB = `#!/bin/sh
+[ -n "$GH_HANG" ] && [ "$1 $2" = "$GH_HANG" ] && sleep "$GH_HANG_S" </dev/null >/dev/null 2>&1
 case "$1 $2" in
   "pr list") [ -n "$PR_FAIL" ] && { echo "boom" >&2; exit 1; }; cat "$FIXTURE_PRS" ;;
   "issue view")
@@ -2328,4 +2333,112 @@ test("CLI: a busy, fully-staffed fleet is not reported STALLED just because the 
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stdout, /STALLED/);
   assert.match(r.stdout, /^implementers 2\/2 → AT CAP/m);
+});
+
+// Every gh spawn in the tick carries a bound: a gh that never answers is a
+// failed read on that call's own failure path, never a tick that hangs. Each
+// case stalls one gh call for 30s under a 1s override, so a spawn that lost its
+// bound waits the stall out, reads the stub's normal reply, and fails the
+// assertions on the disclosed timeout — inside spawnBounded's own backstop.
+import { ghBudget } from "./fleet-tick.mjs";
+
+const hang = (call, seconds = "30", budget = "1") => ({ GH_HANG: call, GH_HANG_S: seconds, FLEET_TICK_GH_TIMEOUT: budget });
+
+test("CLI: a hung gh pr list refuses the tick at the bound — a read that timed out is not an empty queue", () => {
+  const r = runCli([], { shortlist: shortlistText([]), env: hang("pr list") });
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /gh pr list failed: timed out after 1s — a failed read is not an empty queue/);
+});
+
+test("CLI: a hung probe of a mismatched ticket is disclosed at the bound and the hold stands", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([1, 2, 3]), ledger: { rows: ["#7 impl-7=tier-mismatch"], dispatched: ["impl-7=tier-mismatch"] },
+    issueStates: { 7: "CLOSED" }, env: hang("issue view"),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^implementers 0\/2 → HOLD \(tier mismatch impl-7\)/m);
+  assert.match(r.stderr, /fleet-tick: gh issue view 7 timed out after 1s — tier mismatch on #7 unconfirmed closed, hold stands/);
+});
+
+test("CLI: a hung behind-issue probe is disclosed at the bound and the exclusion stands", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([1, 2, 3]), refresh: shortlistText([1, 2, 3, 50]),
+    ledger: { rows: ["#50 excluded · behind-issue:#9"] }, issueStates: { 9: "CLOSED" }, env: hang("issue view"),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.refreshed, 0, "a probe that timed out cannot confirm the lift");
+  assert.match(r.stderr, /fleet-tick: gh issue view 9 timed out after 1s — behind-issue:#9 premise unconfirmed, exclusion stands/);
+});
+
+test("CLI: a hung probe of a PR off the open list is disclosed at the bound and its review keeps the slot", () => {
+  const r = runCli(["--reviewer-cap", "1", "--max-reviews", "1"], {
+    shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows([101]) }, prStates: { 101: "MERGED" },
+    env: hang("pr view"),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /fleet-tick: gh pr view 101 timed out after 1s — review on PR#101 unconfirmed finished, its slot stands/);
+  assert.match(r.stdout, /^reviewers +1\/1 → AT CAP/m);
+});
+
+test("CLI: a hung claimed-count read makes the stall report's count unknown at the bound", (t) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-stall-hung-")));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "heartbeat.json");
+  writeFileSync(path, beat(90 * 60_000, 1200));
+  const r = runCli(["--state", path], { ...IDLE, claimed: [{ number: 41 }], env: hang("issue list") });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /unknown ticket\(s\) claimed and in flight/);
+  assert.match(r.stderr, /fleet-tick: gh timed out after 1s — claimed ticket count unknown/);
+});
+
+// The one case that proves the DEFAULT is a bound, and pays it in full: an
+// override past the default is refused, so the hang is cut at 20s rather than
+// waited out at 40s.
+test("CLI: FLEET_TICK_GH_TIMEOUT cannot lengthen the default bound", () => {
+  const r = runCli([], { shortlist: shortlistText([]), env: hang("pr list", "40", "600") });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /gh pr list failed: timed out after 20s/);
+});
+
+// What the bound must ACCEPT: a gh that answers slowly, inside the bound, is a
+// normal read, not a failure.
+test("CLI: a slow gh that answers inside the bound is read as usual", () => {
+  const r = runCli([], {
+    shortlist: shortlistText([1, 2, 3]), ledger: { rows: ["#7 impl-7=tier-mismatch"], dispatched: ["impl-7=tier-mismatch"] },
+    issueStates: { 7: "CLOSED" }, env: hang("issue view", "2", "10"),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /timed out/);
+  assert.deepEqual(r.issueViews, ["7"]);
+  assert.match(r.stdout, /^implementers 0\/2 → PULL #1 #2 /m, "the slow CLOSED answer was read and lifted the hold");
+});
+
+// The cases above pin the gh spawns the tick has today; this pins the next
+// one, on the script's code with its comments blanked. Every call through
+// spawnSync or execFileSync that does not name process.execPath or git must
+// pass the shared bound — as `timeout: GH_TIMEOUT_MS` closed by a comma or a
+// brace, never a longer expression — before its call closes. A gh spawned
+// through any other function must name child_process again, and the import pin
+// fails on every line that does.
+test("CLI: every gh spawn in fleet-tick.mjs passes the shared bound", () => {
+  const code = readFileSync(SCRIPT, "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (c) => c.replace(/[^\n]/g, " "));
+  assert.deepEqual(code.split("\n").map((l) => l.trimEnd()).filter((l) => l.includes("child_process")),
+    ['import { execFileSync, spawnSync } from "node:child_process";'],
+    "the script spawns through something new — extend this sweep to it");
+  const lineOf = (i) => code.slice(0, i).split("\n").length;
+  const calls = [...code.matchAll(/\b(?:spawnSync|execFileSync)\(\s*(?=\S)(?!process\.execPath\b|["']git["'])/g)];
+  assert.ok(calls.length > 0, "no gh spawn found; this sweep has nothing to measure");
+  const unbounded = calls
+    .filter((m) => !/\btimeout:\s*GH_TIMEOUT_MS\s*[,}]/.test(code.slice(m.index, code.indexOf(");", m.index))))
+    .map((m) => `line ${lineOf(m.index)}`);
+  assert.deepEqual(unbounded, []);
+});
+
+test("ghBudget: the override only ever shortens, and anything but digits leaves the default", () => {
+  const cases = [
+    [undefined, 20_000], ["", 20_000], ["5", 5_000], ["1", 1_000], ["19", 19_000],
+    ["20", 20_000], ["600", 20_000], ["0", 20_000], ["-1", 20_000], ["3.5", 20_000], ["1e1", 20_000], [" 5", 20_000], ["abc", 20_000],
+  ];
+  for (const [override, ms] of cases) assert.equal(ghBudget(20, override), ms, JSON.stringify(override));
 });

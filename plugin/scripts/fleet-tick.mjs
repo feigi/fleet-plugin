@@ -912,6 +912,22 @@ const PR_LIMIT = 200;
 const CLAIMED_LIMIT = 200;
 const MAX_BUFFER = 64 * 1024 * 1024;
 const GIT_TIMEOUT_MS = 10_000;
+// Every gh spawn below is killed at this bound, so a gh that never answers is
+// a failed read on that call's own failure path — the open-PR read refuses the
+// tick, a probe leaves standing what it could not confirm, the claimed count
+// reads unknown — never a tick that does not return. The bound is per gh call,
+// not per tick: the probes run one after another, so a tick whose probes all
+// hang waits one bound for each of them. 20 s, shortlist.mjs's own gh bound.
+// FLEET_TICK_GH_TIMEOUT overrides it, in seconds, and can only ever
+// SHORTEN it — ledger.mjs's LEDGER_GIT_TIMEOUT rule: a value that is not a
+// positive whole number below the default leaves the default standing, in
+// silence. Exported for its own test; it touches nothing.
+export function ghBudget(defaultSeconds, override) {
+  const seconds = isDigits(String(override)) ? Number(override) : 0;
+  return (seconds > 0 && seconds < defaultSeconds ? seconds : defaultSeconds) * 1000;
+}
+const GH_TIMEOUT_MS = ghBudget(20, process.env.FLEET_TICK_GH_TIMEOUT);
+const TIMED_OUT = `timed out after ${GH_TIMEOUT_MS / 1000}s`;
 
 // die() shared with the other fleet scripts (writeSync-based, pipe-safe —
 // see arg.mjs for the #176/#328/#363 rationale). This file parses its own
@@ -979,12 +995,12 @@ function openPrs() {
   let out;
   try {
     out = execFileSync("gh", ["pr", "list", "--state", "open", "--limit", String(PR_LIMIT),
-      "--json", "number,labels,closingIssuesReferences,headRefOid"], { encoding: "utf8" });
+      "--json", "number,labels,closingIssuesReferences,headRefOid"], { encoding: "utf8", timeout: GH_TIMEOUT_MS });
   } catch (e) {
     // Never interpolates e.stderr or e.message: execFileSync already forwarded
     // the child's stderr to ours, and Node builds e.message out of it, so
     // either one emits every byte a second time (#176).
-    die(`gh pr list failed: ${e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)} — a failed read is not an empty queue`);
+    die(`gh pr list failed: ${e.code === "ETIMEDOUT" ? TIMED_OUT : e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)} — a failed read is not an empty queue`);
   }
   let prs;
   try {
@@ -1006,8 +1022,10 @@ function openPrs() {
   return prs;
 }
 
-// A child that did not exit 0, named with the last line it printed.
+// A child that did not exit 0, named with the last line it printed. A gh
+// killed at GH_TIMEOUT_MS ran and overran: "did not run" would misstate it.
 function failure(r, what) {
+  if (r.error?.code === "ETIMEDOUT") return `${what} ${TIMED_OUT}`;
   if (r.error) return `${what} did not run: ${r.error.code ?? r.error.message}`;
   const last = String(r.stderr ?? "").trim().split("\n").at(-1);
   return `${what} ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`}${last ? `: ${last}` : ""}`;
@@ -1077,7 +1095,7 @@ function liftedPremise(excluded, entries, prs) {
       if (kind === "issue") {
         // Scrubbed as shortlist.mjs's probeState() is: gh's remote resolution
         // follows GIT_DIR/GIT_WORK_TREE, and GH_REPO outranks both.
-        const r = spawnSync("gh", ["issue", "view", target, "--json", "state"], { encoding: "utf8", env: gitEnv({ GH_REPO: "" }) });
+        const r = spawnSync("gh", ["issue", "view", target, "--json", "state"], { encoding: "utf8", timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }) });
         if (r.error || r.status !== 0) {
           // Disclosed, not dropped: every other gh call in this file either
           // dies or logs its failure — a bare empty catch here would be the
@@ -1104,7 +1122,7 @@ function liftedPremise(excluded, entries, prs) {
 function closedTickets(mismatched) {
   const closed = new Set();
   for (const { number } of mismatched.map(parseMember)) {
-    const r = spawnSync("gh", ["issue", "view", String(number), "--json", "state"], { encoding: "utf8", env: gitEnv({ GH_REPO: "" }) });
+    const r = spawnSync("gh", ["issue", "view", String(number), "--json", "state"], { encoding: "utf8", timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }) });
     if (r.error || r.status !== 0) {
       console.error(`${NAME}: ${failure(r, `gh issue view ${number}`)} — tier mismatch on #${number} unconfirmed closed, hold stands`);
       continue;
@@ -1131,7 +1149,7 @@ function closedTickets(mismatched) {
 function finishedReviewPrs(offList) {
   const finished = new Set();
   for (const number of offList) {
-    const r = spawnSync("gh", ["pr", "view", String(number), "--json", "state"], { encoding: "utf8", env: gitEnv({ GH_REPO: "" }) });
+    const r = spawnSync("gh", ["pr", "view", String(number), "--json", "state"], { encoding: "utf8", timeout: GH_TIMEOUT_MS, env: gitEnv({ GH_REPO: "" }) });
     if (r.error || r.status !== 0) {
       console.error(`${NAME}: ${failure(r, `gh pr view ${number}`)} — review on PR#${number} unconfirmed finished, its slot stands`);
       continue;
@@ -1166,12 +1184,12 @@ function refresh() {
 // reporting "0 claimed" says the dead run stranded nothing.
 function claimed() {
   const r = spawnSync("gh", ["issue", "list", "--label", "in-progress", "--state", "open",
-    "--limit", String(CLAIMED_LIMIT), "--json", "number", "--jq", "length"], { encoding: "utf8" });
+    "--limit", String(CLAIMED_LIMIT), "--json", "number", "--jq", "length"], { encoding: "utf8", timeout: GH_TIMEOUT_MS });
   if (r.error || r.status !== 0) {
     // Disclosed, not dropped: a real gh failure must be distinguishable from
     // the deliberately-undiagnosed case.
-    const why = r.error
-      ? `gh did not run: ${r.error.code ?? r.error.message}`
+    const why = r.error?.code === "ETIMEDOUT" ? `gh ${TIMED_OUT}`
+      : r.error ? `gh did not run: ${r.error.code ?? r.error.message}`
       : `gh ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`}`;
     const tail = (r.stderr ?? "").trim().split("\n").slice(-5).join("\n");
     console.error(`${NAME}: ${why} — claimed ticket count unknown${tail ? `\n${tail}` : ""}`);
