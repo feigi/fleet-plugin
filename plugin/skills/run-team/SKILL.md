@@ -12,8 +12,7 @@ Run `next-ticket`, `review-and-fix`, `run-merge-bot` as one fleet. You are the
 hard cap — they become the tick's `--implementer-cap` and `--reviewer-cap`.
 Merge bot is at most one, not configurable.
 
-Rationale: `docs/specs/2026-07-22-run-team-agent-fleet-design.md`. The
-war story behind a rule ending `See references/<file>` lives in that file; load
+The war story behind a rule ending `See references/<file>` lives in that file; load
 it only when a member needs the *why*. A rule without that line carries its
 reasoning inline — nothing is missing.
 
@@ -93,8 +92,8 @@ See references/member-lifecycle.md.
 them before every gate decision.** Per-member worktrees and `./agent-test`'s port
 derivation protect members from each other; neither protects the main checkout,
 which you run every gate probe out of and which any member can edit — except
-through a `write`/`edit`/`ast_edit` the `member-write-guard` extension refuses
-(ADR 0020); a `bash` or `eval` write still lands (#2210). Measured: a
+through a `write`/`edit`/`ast_edit` the `member-write-guard` extension refuses;
+a `bash` or `eval` write still lands. Measured: a
 member edited two files there instead of in its worktree while the CI monitor was
 polling one of them every 120s and a live finisher was using it to decide a
 label. It caught itself; nothing in the fleet would have. That is the silent
@@ -172,7 +171,7 @@ against `849`, `850`, `852` on three lines:
 **Word the rule against the first row.** A warning spelled *never `for x in
 $(…)`* names the safe form as the hazard, so a reader avoids the form that works,
 keeps the one that collapses, and rewrites correct bounded polls on the way.
-#854 was filed carrying that inversion in its own remedy clause and in its title,
+A ticket was once filed carrying that inversion in its own remedy clause and in its title,
 and its filer measured both forms and retracted it; the corrected rule is this
 row. `$(…)` splits. Leave it alone.
 
@@ -233,7 +232,7 @@ restate this block there.
 
 ## Phase 0 — shortlist
 
-Once per run, at start. Supply is automatic after that (ADR 0013): the tick
+Once per run, at start. Supply is automatic after that: the tick
 refreshes the Shortlist itself, and every admission is a **Pull** — one ticket
 into one free implementer slot, the moment it frees (phase 1). Nothing in this
 phase, or in any later one, asks the maintainer which tickets to take.
@@ -273,7 +272,7 @@ phase, or in any later one, asks the maintainer which tickets to take.
    -uall` entries plus a content hash of every path they name. Your own
    uncommitted work is fine — it is in the baseline and holds nothing. From
    then on every `fleet-tick.mjs` compares the main checkout against it and
-   holds dispatch on any change (#2210): the backstop for the stray member
+   holds dispatch on any change: the backstop for the stray member
    writes `member-write-guard` cannot see — an `eval` cell, a `bash` that
    `cd`s or `git -C`s into this checkout. `.fleet/`, `.worktrees/` and
    `.agent-brain/` are gitignored and never trip it. Nor does this run's own
@@ -304,11 +303,11 @@ phase, or in any later one, asks the maintainer which tickets to take.
    write to the gate protecting this repo, so it needs the maintainer.
    Surface the diff and carry on. What it changes is what you may then claim:
    every statement this run makes about which checks must pass before a merge
-   is sourced from the spec plus ADR 0007 and is true of the live gate only
+   is sourced from the checked-in spec and is true of the live gate only
    while this check is green, so a 3 means saying "the gate requires X"
    without naming the drift is a false claim, and a 2 means you never learned
-   either way. Measured 2026-09-23 (#1710): four contexts ADR 0007 had
-   selected were required by the spec and by nothing live, and the gap sat
+   either way. Measured 2026-09-23: four contexts the spec required were
+   enforced by nothing live, and the gap sat
    there unnoticed because the only thing that ever read the live gate was a
    person choosing to.
 
@@ -318,9 +317,9 @@ phase, or in any later one, asks the maintainer which tickets to take.
    feed or update it, and it survives your own compaction. The launch is
    idempotent per workspace when the running cockpit answers the identity
    handshake: an already-served workspace's launch finds the running server
-   over HTTP, prints its URL, and exits 0 without starting a second one
-   (#1585) — nothing to skip. It opens nothing either: `--open` opens a tab
-   only from the launch that binds a port and starts the server (#1714), so a
+   over HTTP, prints its URL, and exits 0 without starting a second one —
+   nothing to skip. It opens nothing either: `--open` opens a tab
+   only from the launch that binds a port and starts the server, so a
    re-shortlist leaves the board tab you already have alone. A second fleet
    on another workspace collides with none of that: its own launch derives
    that workspace's own port and binds it when free, or scans to the next
@@ -328,9 +327,9 @@ phase, or in any later one, asks the maintainer which tickets to take.
    else — either way it gets its own board, just not always on the port its
    hash predicts.
 
-   The spend panel reads this workspace's own `~/.omp/agent/sessions` tree
-   (#1716), and is pinned to whichever session first writes a transcript on this
-   cockpit's own watch (#1583/#1679): it will not follow a workspace that
+   The spend panel reads this workspace's own `~/.omp/agent/sessions` tree,
+   and is pinned to whichever session first writes a transcript on this
+   cockpit's own watch: it will not follow a workspace that
    already had another session's transcripts sitting there at launch. If the
    panel is reading someone else's numbers, relaunch with `--spend-dir <path>`
    naming this run's own session directory to override the heuristic outright —
@@ -417,17 +416,17 @@ phase, or in any later one, asks the maintainer which tickets to take.
    both are reviewable work no member otherwise picks up, because the Shortlist
    holds ISSUES and nothing looks at inherited PRs. Queue each for review exactly as
    ticket work: same review workflow, same fix-applier, same finisher. Measured
-   2026-09-03 — #1222 arrived this way and its review found a defect its own PR
-   body called unreviewed, and #1237's review then caught two metrics rows the
+   2026-09-03 — a prior run's ticket PR arrived this way and its review found a defect its own PR
+   body called unreviewed, and a chore PR's review then caught two metrics rows the
    controller had missed in its own close-out, so a chore PR is not exempt from
    being wrong. Reviewing them next run is also what stops one pinning
-   `fleet-tick`'s backlog forever (#590): unreviewable AND uncounted is the state
+   `fleet-tick`'s backlog forever: unreviewable AND uncounted is the state
    that strands it.
 
 1. **Build the Shortlist** — `~/.fleet/bin/fleet-run shortlist.mjs`, then read
    `.fleet/shortlist.json`. The script runs the cheap filters and nothing else
    — no ticket body is read here, because a Pull reads one ticket in full at
-   the moment it admits it (ADR 0013 §1):
+   the moment it admits it:
 
    - **Candidate scan** — `candidates.mjs --require-label ready-for-agent`,
      oldest-first, never re-ranked. Its row count is `scanned`, the supply.
@@ -478,7 +477,7 @@ phase, or in any later one, asks the maintainer which tickets to take.
 **No multi-select, no maintainer tick.** Selection and ordering are batched —
 one scan, oldest first; admission never is. The invariant this replaces — one
 human decision per batch of admissions, zero unilateral grabs — is retired
-(ADR 0013): zero human decisions per admission, and every non-admission is a
+is retired: zero human decisions per admission, and every non-admission is a
 label or a premise the maintainer can read.
 
 ## Phase 1 — Pull: judge, then claim or relabel
@@ -486,9 +485,9 @@ label or a premise the maintainer can read.
 Serial, main checkout, one Pull at a time. Never parallel, never inside a member —
 concurrent `worktree add` and label writes race.
 
-One free implementer slot is one Pull. The tick names the heads — `PULL #412
-#415`, one per free slot — and each Pull runs this sequence on its head,
-terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
+One free implementer slot is one Pull. The tick names the heads — `PULL #<n>
+#<m>`, one per free slot — and each Pull runs this sequence on its head,
+terminating in exactly one dispatch or an empty shortlist:
 
 1. **Take the shortlist head** — the next `.fleet/shortlist.json` entry with no
    `impl-` row and no `excluded` row whose premise still holds, which is the
@@ -569,24 +568,24 @@ terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
    that no longer exists. Separate its two non-zero answers before citing
    either — exit 1 is the answer *not reachable*, while exit 128 with `Not a
    valid object name` is a sha this clone does not have at all, a probe that
-   could not look rather than an orphan (measured: #640's comment cites
+   could not look rather than an orphan (measured: one ticket's comment cited
    `35c0845` on a since-deleted branch, and 128 is what it exits here).
 
    **Both halves of that command are load-bearing.** Drop the `origin/main`
    argument and `git log -S` searches `HEAD`, contradicting the rule a paragraph
    up — and the two searches fail differently there. On a checkout behind the
    fix the prescribed **old**-string search names a *wrong* commit at exit 0,
-   the old string still being present in that tree: measured at #206's
+   the old string still being present in that tree: measured at
    `0dc39ef^`, `| head -1` names the rename `4fd2f73`, not the fix. It is the
    **new**-string search the paragraph above forbids that prints nothing at exit
    0 there, indistinguishable from "the change never landed"; the old-string
    search goes empty on a checkout that predates the old string's own arrival
-   at that path — behind that rename in #206's case, and with no rename in play
+   at that path — behind that rename in that case, and with no rename in play
    at all in this file's: measured at `647ae44^`, which already tracks this
    path under this name, `git log -S 'ls-tree origin/main'` prints nothing at
    exit 0.
    Add `--reverse` and you get the *oldest* count-changing commit, which is the
-   file's last rename whenever the string predates one — measured on #206's old
+   file's last rename whenever the string predates one — measured on a ticket's old
    wording, `--reverse` names `4fd2f73` ("move next-ticket and sizing-a-ticket
    into the plugin"), a refactor that clears an ancestry gate exactly as
    well as the real fix, while newest-first `| head -1` names `0dc39ef`, the
@@ -597,28 +596,28 @@ terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
    before citing it in the close, and treat empty output as an answer you did
    not get rather than a commit.
 
-   Measured, one run: #132's one-line remedy had shipped in `e7b11e6` ten days
-   earlier and #134's AC-2 asked for an exit code a later design (#64)
+   Measured, one run: one ticket's one-line remedy had shipped in `e7b11e6` ten days
+   earlier and another's AC-2 asked for an exit code a later design
    deliberately changed — neither commit carried a trailer back, so the tracker
-   showed both as open work. #132 cost a full claim, worktree and implementer
-   dispatch to learn this; #134 would have shipped a test asserting the opposite
+   showed both as open work. The one-line-remedy ticket cost a full claim, worktree and implementer
+   dispatch to learn this; the exit-code ticket would have shipped a test asserting the opposite
    of the shipped behaviour. The two probes that settled both took seconds.
    **A ticket deferred from a review is a claim about a tree that has since
    moved** — and the older the ticket, the more it has moved, so this bites
    hardest at exactly the head of an oldest-first queue.
 
    Measured again 2026-08-19: four stale in the 20 oldest, and the construct
-   probe caught **none** of the four. It **missed** #156 — the two pins and the
+   probe caught **none** of the four. It **missed** a ticket whose two pins and the
    `contentWords()` extraction it asks for had all landed (`d016414`, `1abd6c8`)
    while `overlap()`, the construct, sat right where the ticket said, so the
    probe passed the ticket through as live work and it cost a claim, a worktree
-   and a dispatch. It **missed** #205, whose `d:` scan `candidates.test.mjs`
+   and a dispatch. It **missed** a ticket whose `d:` scan the candidates test suite
    already pinned — `6d94451` and `43d6ac5` both added `.d` assertions, and the
-   ticket's own closing comment cites both. It **missed** #206, whose wording
+   ticket's own closing comment cites both. It **missed** a ticket whose wording
    defect `0dc39ef` had already fixed — by an **equivalent rewording**, not by
    the literal string the ticket proposed, which appears nowhere in
    `origin/main`; the ticket's **line number** had drifted too, `:95` → `:98`.
-   And #187 it could not read at all: that ticket's file is untracked in
+   And one ticket it could not read at all: that ticket's file is untracked in
    `origin/main`, the fatal-not-empty case above.
 
    **`staleness.mjs` runs that check for you, and answers in THREE values.**
@@ -632,7 +631,7 @@ terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
    for. Give exactly one — the direction is not inferable from the string, and
    the wrong one answers the opposite verdict with full confidence.
 
-   A needle that itself starts with `--` — #240's `--label ready-for-agent`
+   A needle that itself starts with `--` — `--label ready-for-agent`
    is one this backlog carries — needs the end-of-options separator: `--gone
    -- '<string>'`/`--present -- '<string>'`. Given bare, with no `--`
    immediately before it, the value guard still refuses it — `staleness:
@@ -654,7 +653,7 @@ terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
 
    What it refuses to answer is the point of it. It reads `origin/main` and
    nothing else — never the working tree, never anything on disk — so a path
-   this repo does not track is exit 2 rather than a clean read: that is #187's
+   this repo does not track is exit 2 rather than a clean read: that is the untracked-file
    case and the generated-artifact case together, `agent-test` being written
    into a claimed worktree by `claim-ticket.sh`'s heredoc, which makes every
    copy under `.worktrees/` a snapshot of whenever that worktree was claimed.
@@ -666,9 +665,9 @@ terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
    the string closes a live ticket.
 
    It does not run a reproduction. The general "is this still reproducible?"
-   oracle over the whole backlog is what #238 ruled out, and a reproduction run
+   oracle over the whole backlog is ruled out, and a reproduction run
    without a positive and a negative control misattributes causes rather than
-   merely missing defects — the #230 check needed a purpose-built fixture plus
+   merely missing defects — one such check needed a purpose-built fixture plus
    both. A ticket no single string settles is a `could not check`: admitted,
    annotated in the dispatch prompt (phase 2), never quietly dropped.
 
@@ -689,8 +688,7 @@ terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
 
    **This is a consumption gate**, priced for the seat where implementer
    divergence costs a claim, a worktree and a dispatch; the filing-time
-   counterpart was repriced to *is the defect confirmed* and states its own bar
-   inline — see `docs/adr/0001-filing-label-bar-is-defect-confirmed.md`.
+   counterpart was repriced to *is the defect confirmed* and states its own bar inline.
 
    No sizing agent here. `sizing-a-ticket` picks the *process path*, and that is
    phase 2's call, after the ticket is claimed.
@@ -724,7 +722,7 @@ terminating in exactly one dispatch or an empty shortlist (ADR 0013 Decision 2):
    refuses refuses every Pull.
 
 **The Pull table** — every verdict a Pull can reach, and the one thing each
-does (ADR 0013 Decision 2 and 4):
+does:
 
 | At the Pull | Action |
 |---|---|
@@ -908,12 +906,12 @@ still reads `refs/heads/<branch>` first and falls back to
 `refs/pull/<number>/head` only when that comes back empty; a cross-repo PR (a
 fork) skips the branch-ref read entirely and goes straight to the pull ref,
 because a fork's branch NAME can collide with an unrelated branch the base
-repo already carries under that name (#1616) — so a fork PR now gets this
+repo already carries under that name — so a fork PR now gets this
 operand populated in the ordinary case, and the skip is rare rather than the
 norm for forks. Its run log names the skip: `head ref (absent): head check
 SKIPPED`. A worktree you hand to an agent directly is not backstopped at all.
 Verify here anyway. **That backstop now compares against the same ref this
-bullet does** — #1513 moved its operand off `headRefOid` for the reason
+bullet does** — it moved its operand off `headRefOid` for the reason
 above — so it is a second
 chance to notice a stale snapshot on the one path it covers, never a reason
 to skip the ref compare here.
@@ -937,7 +935,7 @@ kernel and needs a `wait`, while a `task` job is process-level and its report
 auto-delivers on its own, like every other member's.
 
 **No per-call tier or effort anywhere on this path**: tier stays the agent
-definition's own frontmatter (ADR 0005), whichever `fleet-implementer-<cell>`
+definition's own frontmatter, whichever `fleet-implementer-<cell>`
 definition the Pull names, and a member's Resolved tier stays readable from its transcript.
 
 **Claim what you are about to dispatch; dispatch what you have just claimed.**
@@ -959,9 +957,9 @@ definition suffix — or names one with no `agents/<definition>.agent.md`,
 before the member is live; fix the row with `row` first.
 
 **The prompt carries only what varies.** Everything shared — the
-unattended-member block, the `edit`/`read` absolute-path rule (#1727), the
+unattended-member block, the `edit`/`read` absolute-path rule, the
 issue re-read and re-derive backstop, commit incrementally, no `git stash`, the
-shared `eval` kernel (#1447), enumerate-and-declare, sizing and the PR steps —
+shared `eval` kernel, enumerate-and-declare, sizing and the PR steps —
 is the body of every `agents/fleet-implementer-<cell>.agent.md`, byte-identical
 across all of them, and each harness injects it as the
 member's system prompt. Never re-paste it. The prompt fills that body's
@@ -980,7 +978,7 @@ controller's probe could not look.
 member to re-fetch it, and this still costs one `gh issue view` per ticket,
 never one per member.** The fresh-context design's isolation rationale — "every
 implementer re-reads its Agent Brief... from scratch"
-(`docs/specs/2026-07-22-run-team-agent-fleet-design.md:178-179`) — is about a member
+— is about a member
 never inheriting another ticket's context, not about where the bytes come from.
 Pasting the Pull's own read into the prompt keeps that: the member still gets the
 brief verbatim and re-derives nothing from a sibling. What it drops is the
@@ -1086,8 +1084,7 @@ a vendor id.** `@slow`, `@task`, `@smol` resolve through the operator's
 `modelRoles`, so an install with no Anthropic model still runs the fleet
 at whatever each role points at; the explicit `:<level>` suffix wins over
 the role's baked one, and the tier check judges a member against the
-role's own target (`modelRoles.<role>`), never a model family (ADR 0011,
-ADR 0014).
+role's own target (`modelRoles.<role>`), never a model family.
 
 Before the run's first dispatch run `~/.fleet/bin/fleet-run tier-roles.mjs
 --check`; exit 1 names every definition whose `model:` is not a route,
@@ -1097,7 +1094,7 @@ would clamp it silently), every
 `task.agentModelOverrides` entry that would shadow a fleet definition, and
 an `--agents` directory holding no `*.agent.md` definition,
 prints the exact remedy, and **stops the run** before any member is
-dispatched — the fleet reads that config and never writes it (ADR 0003).
+dispatched — the fleet reads that config and never writes it.
 
 **Every 5th Pull by ledger count goes at an exploration cell.** Count the `impl-`
 rows in `.fleet/ledger.md` at Pull time; the Pull that creates row 5, 10, 15 …
@@ -1157,8 +1154,8 @@ effort, because a deliberate dispatch whose two sides resolve to the same model
 
 **Why one in five within the run, not a week of one tier then a week of the other:**
 tier would then be confounded with calendar date and therefore with prompt
-evolution, which is exactly the state #864 documents and the reason the rows
-already on disk cannot answer the question they were collected for.
+evolution, which is exactly the state the rows already on disk are in, and why
+they cannot answer the question they were collected for.
 
 The raw split still favours the top tier — 3 failures in 11 `routine`/`sonnet`
 rows against 3 in 55 `routine`/`opus`. **Do not read that as a tier result.**
@@ -1166,9 +1163,9 @@ Tier remains largely confounded with calendar date and therefore with prompt
 evolution: 8 of the 11 `sonnet` rows fall on 2026-08-13 to 08-17, before the
 window in which 54 of the 55 `opus` rows were run, and the dispatch prompts
 gained rules throughout. The confound is **weakened, not resolved.** Three
-`sonnet` rows now break it rather than one — **#714** (2026-08-20, a
-maintainer-authorized deliberate control) and **#750** and **#751**
-(2026-08-21) — all three run against prompts of the same vintage as the `opus`
+`sonnet` rows now break it rather than one — a maintainer-authorized
+deliberate control (2026-08-20) and two more (2026-08-21) —
+all three run against prompts of the same vintage as the `opus`
 rows, and **all three passed**, which is the direction opposite the raw split.
 Three is still not a result. **What replaces this argument going forward is the
 within-run pairing above**: one implementer in five at the alternate tier makes
@@ -1182,7 +1179,7 @@ exist: condition a pair comparison on `sizing`/`profile`/`loc`/`files` before
 reading it as a tier result, never on the raw split.
 
 `minted_false_claim` **discriminates and no longer reads "always yes"** — 20 of
-the 66 `routine` rows carry `no`, 18 at `opus` and 2 at `sonnet` (#714, #750).
+the 66 `routine` rows carry `no`, 18 at `opus` and 2 at `sonnet`.
 Read it as a property of the TICKET before the tier: a pure code simplification
 need not add prose, while a correction ticket adds prose by construction. The
 honest summary is unchanged and is the reason this paragraph exists: the guard
@@ -1195,8 +1192,8 @@ they are gone, with only `rewrote row #N` on stderr to say so.
 
 `ledger.mjs read` is safe on a pipe as well as a redirect: its payload used to
 be abandoned at the pipe buffer and still exit 0, which is what left `board.mjs`
-reporting `ledger read parse failed` and serving a blind cockpit for a whole run
-(#246). Every use above is a recovery path, so a payload that arrives short
+reporting `ledger read parse failed` and serving a blind cockpit for a whole run.
+Every use above is a recovery path, so a payload that arrives short
 lands exactly where a settled `ruled:` is unrecoverable — which is why the
 script's own suite pins that `read`, `row`, `filed` and `ruled` each reach a
 pipe whole.
@@ -1204,8 +1201,8 @@ pipe whole.
 `check` reaches a pipe whole at both of its exits too. Its ALREADY FILED exit
 sits mid-branch, where falling through would run the near-miss ranking and the
 tracker search that exit exists to skip — so `check`'s branch is a function now,
-where `process.exitCode` carries the code and a `return` is what skips them
-(#808). No payload this script prints is abandoned to `process.exit()` any more,
+where `process.exitCode` carries the code and a `return` is what skips them.
+No payload this script prints is abandoned to `process.exit()` any more,
 and the suite drives both of `check`'s arms through a pipe on a payload the
 ledger sizes rather than argv. So trust that payload — and read `verdict`,
 because a searched-and-clean tracker and one that was never read share exit 0.
@@ -1214,12 +1211,12 @@ The consumer side raised its cliff rather than removing it. `board.mjs` reads
 `ledger.mjs read` with an explicit `maxBuffer`, so a payload past node's
 default is carried rather than killed mid-flight and reported as an
 unreachable tool — which is how the blind cockpit came back at HTTP 200 even
-after the pipe cut was gone (#807). That cap is deliberately bounded, so a
+after the pipe cut was gone. That cap is deliberately bounded, so a
 payload past it lands in the same blind cockpit — and so does a ledger that
 cannot be read at all, at any size. The read fails open to an empty ledger, and
 `board.json`'s `ledgerState` field now distinguishes a read that failed or
-didn't parse from one that succeeded (`unread`/`unparsed`/`read`, #816) —
-`spend` in the same payload carries its own error the same way (#874). Zeroes
+didn't parse from one that succeeded (`unread`/`unparsed`/`read`) —
+`spend` in the same payload carries its own error the same way. Zeroes
 on the cockpit are not yet proof the pipeline is idle.
 
 **Guard: accumulate per PR, never conclude inside one run.** The unit is the PR —
@@ -1249,7 +1246,7 @@ has to travel in the PR body rather than being something you already hold.
 `Sizing:` line typed in before the skill ever ran is byte-identical to one the
 skill produced, so the body cannot settle this alone and the member's report
 carries the second source: when it ran `sizing-a-ticket` relative to opening the
-PR (#1070, measured on a member that wrote the line first, caught itself, and
+PR (measured on a member that wrote the line first, caught itself, and
 corrected it). **Record `sizing` only when the report places that run before the
 PR AND the line carries its signal.** Ordering clause missing, verdict authored
 before the run with no corrected value reported, or body and report naming
@@ -1417,11 +1414,11 @@ one of the same class broken — a CRLF body **broken by** the fix for depth and
 split headings, a symlinked worktree after fixing locked and regular-file ones,
 an unreadable `refs/heads/<type>/` after fixing `refs/heads` itself, a bracketed
 file path after fixing typos and vendored ones. **All four failed to close their
-own ticket** — #65's acceptance criterion went unmet, and the other three left
+own ticket** — one's acceptance criterion went unmet, and the other three left
 the named defect reachable by a sibling spelling. Every one was caught by
 review, at review cost, which runs 3-5x the implementation it checks.
 
-**Prose-first** and **wrongly-REFUSE** are not padding — they are the #394 case,
+**Prose-first** and **wrongly-REFUSE** are not padding — they are the case
 which shipped with **enumerate-and-declare** already in its prompt. It missed a
 shape its own ticket named in passing, because it enumerated from the mechanism
 instead of the text; and it introduced a regression refusing every `node --test`
@@ -1532,7 +1529,7 @@ owes beyond its row:
 - **Monitor: `ready-to-merge` appears** → nothing to record; run the tick, and
   on `DISPATCH merge-bot` dispatch the next `merge-bot-<n>` (**Merge bot**).
   Catches hand-added labels as well as a finisher's own. The bot does not wait
-  for that finisher's report (ADR 0012 Decision 2): its rebase is server-side,
+  for that finisher's report: its rebase is server-side,
   `gh pr update-branch --rebase`, so nothing on the finisher's worktree has to
   happen first.
 - **Merge-bot pass reports done** → write each `held-behind-#<lower>` it reports
@@ -1605,7 +1602,7 @@ owes beyond its row:
   exactly the PR that needed no fixes.
 - **`ci-state.mjs --pr <N>` reads `verdict: "no-ci"`** → no workflow run will ever
   complete for this repo, so the CI-run-completion edge above never fires and
-  waiting for it stalls the whole PR — the same silent-stall shape #111 reported
+  waiting for it stalls the whole PR — the same silent-stall shape reported
   before this verdict existed. Dispatch the finisher off the reviewer's final
   verdict instead, the moment it lands — and, same as above, never while you still
   owe it a ruling — or hold anything else it has not received, a ruling you have
@@ -1654,7 +1651,7 @@ depth** guard table applied in code. Act on each line as it reads:
 - `DISPATCH merge-bot` — the next `merge-bot-<n>` (**Merge bot**).
 - `DISPATCH finisher PR#<M> …` — a finisher settled `labelled`, yet the open
   list shows PR M without `ready-to-merge`, and no `label-off=` (**Run ledger**)
-  accounts for the removal (#2331). Apply the finisher gate (**Reviewers**: the
+  accounts for the removal. Apply the finisher gate (**Reviewers**: the
   `check` job green on the current head), then dispatch the next-suffix
   finisher at that head — `ledger.mjs dispatch <M> finisher-pr-<M>-<x>`, one
   letter past the highest the PR has used. Never add the label yourself. A head
@@ -1709,7 +1706,7 @@ the `HOLD (tier unchecked impl-<N>)`. Nothing else in the loop owns it.
 the reviewer cap. It defaults to the reviewer cap, and the reviewer slots it
 leaves still serve fix-appliers. Leave it at its default: every review unit
 already counts against the session's single `task.maxConcurrency` semaphore,
-which queues at its ceiling rather than refusing (#1771), so reviews run up
+which queues at its ceiling rather than refusing, so reviews run up
 to the reviewer cap without a tighter explicit bound.
 
 **Why every wake.** A merge cascade is a firehose of merges, CI greens and
@@ -1718,7 +1715,7 @@ drains to 0 and stays there — 0 implementers emit no completion event, so a
 refill that waited for one would never fire. A tick on every wake you are
 already handling is what makes that drain visible. **Every wake is still an
 edge, so none covers a fully drained queue**: no members and no open PRs is no
-event at all, and the tick goes unrun. That state is the heartbeat's (#357).
+event at all, and the tick goes unrun. That state is the heartbeat's.
 
 **Beat when there is nothing to do, and never end your turn on a drained
 queue.** You cannot be woken. A backgrounded Monitor does not wake an idle
@@ -2003,7 +2000,7 @@ it assembles the result, and has `agent()` return **into the script**, so no
 report can go undelivered and you relay nothing — the delivery failure that
 cost one fleet five reports on one PR and four on another. None of it runs on
 your turn: a review takes 20-40 minutes, and a controller that held its turn
-for each one, one at a time, was what left implementer slots empty (map #1768).
+for each one, one at a time, was what left implementer slots empty.
 
 **Know the trim before you rely on it — it is wider than `docsOnly` suggests.**
 `diff-stats.mjs` calls a PR docs-only only when it touches **no** src, tests *or*
@@ -2015,17 +2012,17 @@ too big for the size tier now runs correctness+silent-failure+comments, not
 correctness+comments; and any `single-file` or `small` profile trims to
 correctness+silent-failure+comments, keeping tests only when a test file is in
 the diff. `comments` is on that floor
-unconditionally since #218 — it used to need a docs FILE, and `classify()` scores
+unconditionally — it used to need a docs FILE, and `classify()` scores
 any code extension `src` before it checks docs, so five production PRs whose whole
 substance was prose inside a `.js`/`.mjs`/`.sh` comment scored `docs: 0` and ran
 without the one specialist that fit them, `dimensionsUnrun` empty every time.
-That floor holds **regardless of `hasSrc`** (#236) — a one-file `.yml` or
+That floor holds **regardless of `hasSrc`** — a one-file `.yml` or
 `.github/` shell change gets silent-failure too, not correctness alone.
 It is the size **tier's** floor,
 so `tests-only` outranks it when the diff has no config file: that profile is
 assigned ahead of `single-file`/`small`, so a no-src, no-config diff that also
 touches a test file gets no silent-failure-hunter — a tests-only diff that also
-carries a config file keeps it (#739). `single-file` means one file at **any** size, so a
+carries a config file keeps it. `single-file` means one file at **any** size, so a
 one-file rewrite trims too. An unknown profile widens to the full six, the safe
 direction, so a trim is never something to count on in advance — and a full six
 is never something to assume.
@@ -2062,7 +2059,7 @@ reads every one off the file and makes every ruling on them
 and it is present on a healthy run as well as a degraded one, so there is
 nothing to notice by its absence. The snapshot is `git archive`d and then
 `git init`ed with one commit, and the block that cuts it compares that commit's
-tree hash against the reviewed commit's (#1056): verified, a suite run in the
+tree hash against the reviewed commit's: verified, a suite run in the
 snapshot collects and runs what a checkout does, and a red is a fact about the
 tree. UNVERIFIED, it is not — tests that ask git what ships decline or fail for
 the environment, and this field carries which line of the cut failed. The
@@ -2089,7 +2086,7 @@ evidence in `reason`, and you copy those entries to the ledger's `ruled` line
 specialist that dies contributes zero findings while its key stays in
 `dimensionsRun`; a review whose one shared test run executed nothing — the
 review runs the test command once, and every specialist reads that run instead
-of running its own (#2315) — leaves every key there with no suite behind it. So
+of running its own — leaves every key there with no suite behind it. So
 read the two together. A key
 in `dimensionsRun` and NOT in `dimensionsUnrun` ran a suite; every
 `dimensionsUnrun` entry is `{dimension, reason}` naming which failure it was.
@@ -2101,7 +2098,7 @@ the fallback below states for a killed specialist, for the same reason.
 The rule this replaces — treat any dimension with nothing in
 `survived`/`refuted`/`unverified` as unrun — was the workaround for having no
 such field, and it over-refuses in the direction that costs work: a dimension
-that ran clean has nothing in those three either (#137, #138).
+that ran clean has nothing in those three either.
 
 **`cwdAudit` is the specialist's own inherited-checkout audit, one entry per
 dispatched dimension: `{dimension, state, line}`, `state` one of**
@@ -2111,7 +2108,7 @@ returning and fold the result into a `CWD-AUDIT:` line — a convention, not
 schema, so a specialist that never emits it or misspells it still validates
 clean. This field is the runtime backstop that reads for the line regardless:
 `missing` is exactly as loud as `dirty`, and both name a checkout you should
-treat as a live scratch write until you have checked it (#1433/#1673).
+treat as a live scratch write until you have checked it.
 
 **A throw, an empty return, or a notification whose status is not `completed`
 is a failure event, not a clean review.** The review throws on missing
@@ -2162,7 +2159,7 @@ what lifts the tick's merge hold; a dispatched-but-live one does not, and
 hold and nothing else: survivors of a returned review the row also carries
 stay unanswered through its settle, so the tick prints `DISPATCH fix-pr
 PR#<M>` again once it lands, and that one — `dispatch` now prints `null` —
-is a review fix-applier, dispatched as above (#2328). The push moves the
+is a review fix-applier, dispatched as above. The push moves the
 head after `ready-to-merge`, so the next merge bot refuses it
 `head-moved-after-label-#<M>`: a fresh finisher, per **Failure handling**.
 
@@ -2554,8 +2551,8 @@ the current one.
 dispatch with the same weight as a ruling you have already made.** It does not
 feel like one — you have decided nothing yet, so the outbox reads empty — but a
 member waiting on you is a member that will push once you answer, and the SHA
-you are about to pin is exactly what that push moves. Measured on #488's run:
-`fix-pr-488` asked whether to add two pins, and the finisher was held until the
+you are about to pin is exactly what that push moves. Measured on one run:
+a `fix-pr-<M>` member asked whether to add two pins, and the finisher was held until the
 member acknowledged the answer. That worked because the controller chose to
 hold, not because a rule required it. Answer it, or tell the member you are not
 ruling and it should proceed on its own default — either empties the outbox.
@@ -2579,7 +2576,7 @@ a minute apart showed *different* mutants, so a member's report and any single
    healthy worktree. Two checks, each with the instrument that can answer it.
    **Dirty:** the row's `dirty` field, or `git status --porcelain -unormal`
    inside the worktree itself — the explicit mode, never bare `--porcelain`, or
-   `status.showUntrackedFiles = no` reads a dirty worktree as clean (#730). The
+   `status.showUntrackedFiles = no` reads a dirty worktree as clean. The
    row is the better read: in a worktree whose `.git` linkage is missing,
    `git status` answers for the enclosing repo at rc 0, where the audit reports
    the worktree unreadable. **Diverged:** the worktree's `HEAD` against your
@@ -2629,7 +2626,7 @@ a minute apart showed *different* mutants, so a member's report and any single
 
    **That range is right for the positive check and wrong for a negative one.**
    It spans the implementer's commits too, so a constraint of the form *file X
-   was not touched* has to be scoped to the apply commit. Measured on PR #776:
+   was not touched* has to be scoped to the apply commit. Measured on one PR:
    a controller wrote "neither document was touched" against
    `origin/main...HEAD` on a two-commit branch whose documents the IMPLEMENTER
    had correctly edited — the PR's whole point — and a finisher reading that
@@ -2641,7 +2638,7 @@ a minute apart showed *different* mutants, so a member's report and any single
    regex, delete the guard clause, flip the per-entry reset, run `<testCmd>`,
    watch it redden, discard — is the half of this duty reading a diff cannot
    do, and it stays. But it **writes**, and the PR's worktree belongs to
-   another member. Measured on #380: a finisher was inside that worktree at the
+   another member. Measured once: a finisher was inside that worktree at the
    instant the fix-applier announced one more clause to land, and neither
    ordering is detectable afterwards from the diff — a restore lands on the
    uncommitted clause and destroys it silently, or the mutant is still in the
@@ -2692,7 +2689,7 @@ a minute apart showed *different* mutants, so a member's report and any single
      that, and it is no licence to skip the read where they exist.
    - **(b) Add the label:** `gh pr edit <pr> --add-label ready-to-merge`. (a)
      passing labels nothing — it is the precondition, and this command is the
-     duty. Two finishers in one run (#2331) stopped at (a) and reported
+     duty. Two finishers in one run stopped at (a) and reported
      `labelled` on PRs that sat out of the merge queue.
 4. Report you the label (its post-add read-back: `gh pr view <pr> --json labels`
    run after 3(b), output as printed), the deferral issue numbers — a
@@ -2772,7 +2769,7 @@ it reached, so reading that summary alone reads a partial suite as a whole one:
 
 **Give the finisher duty 3 verbatim as well, as its two steps.** The finisher's
 agent definition carries no duty text, so this brief is the whole of duty 3 it
-sees. Two finishers in one run (#2331) read the release-label check as the
+sees. Two finishers in one run read the release-label check as the
 whole duty and reported `labelled` on a PR that never got the label:
 
 > **Duty 3 is two steps, and only the second one labels.**
@@ -2787,7 +2784,7 @@ whole duty and reported `labelled` on a PR that never got the label:
 
 **Once the label is on, take it off before you approve any push.** The label is a
 verdict on the tree the finisher read, and a GitHub label does not follow the
-branch — on #180 it survived a push and came to sit on a commit nobody had
+branch — on one PR it survived a push and came to sit on a commit nobody had
 audited. Write `label-off=<latest finisher attempt>` onto the PR's row first
 (`ledger.mjs row`, the row's whole text plus the token — **Run ledger**), then
 remove `ready-to-merge`, then approve. The token is how the tick tells your
@@ -2834,8 +2831,8 @@ finisher this verbatim, so it derives the cause itself instead of asking anyone:
 >   still differs from your pin, and `git reflog` in the worktree reads a plain
 >   `commit` at the move — no `reset`/rebase entry there, any of those sitting
 >   at or behind the pin as provenance. A member kept working and committed
->   after you were dispatched. Measured 2026-08-28 on #983, where the finisher
->   matched neither cause above and halted on its own judgement (#997).
+>   after you were dispatched. Measured 2026-08-28 on one PR, where the finisher
+>   matched neither cause above and halted on its own judgement.
 >   Halt, name `past-pin`, and report **the commit, and whether it
 >   is pushed, unpushed, or unknown**: `git log -1 --format='%h %s'` names it,
 >   and `git ls-remote origin <branch>` answers the rest — a non-zero exit or
@@ -2953,7 +2950,7 @@ after the same command finds a line known to match.** Prose fragments and
 code snippets routinely carry `\`, `.`, `*`, `[` or `$`, and without `-F` those
 are read as a pattern rather than as the text itself, so the command answers
 for a different string from the one the claim names — and a wrong zero is the
-benign-looking answer. Measured on #1087: `grep -c 'settled by:\s+x'` answers
+benign-looking answer. Measured once: `grep -c 'settled by:\s+x'` answers
 0 against a file holding that exact line, and `grep -cF` answers 1. A zero or
 an absence counts only after the same command, with the same flags, finds a
 line known to match: a command that cannot find a match settles nothing, and
@@ -3172,7 +3169,7 @@ ledger rows in the same step. See references/reaping.md.
 
 ## Worktree and claim model
 
-Ruled on #1315, measured 2026-09-09 in a throwaway clone (`/tmp/fleet-probe`)
+Measured 2026-09-09 in a throwaway clone (`/tmp/fleet-probe`)
 that never touched the real checkout.
 
 **Claim, release and reap are unchanged on omp.** `claim-ticket.sh`,
@@ -3208,24 +3205,24 @@ that session, so the recipe is the dispatch-prompt absolute path, plus
 `bash`'s own `cwd` parameter set to it on every call and absolute paths for
 `write`/`edit`.
 
-**The one open gap this ticket measured: `task` does not accept a per-dispatch
+**The one open gap that probe measured: `task` does not accept a per-dispatch
 working directory.** `omp://tools/task.md` documents non-isolated spawns as
 running `runSubprocess(...)` "directly with parent cwd" — no `cwd` field
 appears anywhere in the item schema — and the probe above confirms it in
 practice: the recipe is the absolute-path discipline above, not a placeholder
 for a `cwd` field that does not exist. The gap is now enforced rather than only
-written down: the plugin's `member-write-guard` omp extension (ADR 0020)
+written down: the plugin's `member-write-guard` omp extension
 refuses a fleet member's `write`/`edit`/`ast_edit` into the main checkout's
 non-ignored tree and an implementer's `bash` from a main-checkout cwd, and the
-missing field itself is requested upstream as can1357/oh-my-pi#13754.
+missing field itself is requested upstream in `can1357/oh-my-pi`.
 
 **The same gap reaches past the filesystem: `task`-dispatched members share one
-`eval` kernel.** Measured 2026-09-21 on #1447, in a live run rather than a
+`eval` kernel.** Measured 2026-09-21, in a live run rather than a
 probe clone: two sibling implementers dispatched in the same batch, and the
 controller that dispatched both, reported the same Python kernel pid and the
 same runner file under `$TMPDIR/omp-python-runner/`, and each read the others'
 top-level bindings out of its own `eval` cell — a bare `WT` bound by one member
-was read back by a sibling and by the controller, the collision #1447 was filed
+was read back by a sibling and by the controller, the collision a ticket was filed
 on as an unproven self-report. `omp://tools/eval.md` states the mechanism:
 retained kernels are keyed by `python:${sessionId}`, normalized cwd and
 interpreter — `js:${sessionId}` for the JS VM — and "Parent and ordinary task
@@ -3287,9 +3284,9 @@ where the controller itself runs from.
   yourself closes nothing and is left unlabelled for the maintainer, so no
   member of the fleet will ever review it, and counting it floors the backlog at
   a depth nothing in the run can drain — the implementer gate then holds for the
-  rest of the run against a queue of nothing (#590). GitHub's own linked-issue
-  set decides that, not a keyword regex over the body; see
-  `docs/agents/issue-tracker.md`. **That exemption is for the chore PR THIS run
+  rest of the run against a queue of nothing. GitHub's own linked-issue
+  set decides that, not a keyword regex over the body.
+  **That exemption is for the chore PR THIS run
   authors, never one a PRIOR run left open** — step 0 folds those into this
   run's review queue, so count one when you reason about backlog BY HAND. **The
   `fleet-tick.mjs` number still excludes it**: nothing in its filter
@@ -3352,7 +3349,7 @@ A main checkout that is not `clean` against its Phase 0 baseline outranks all
 of them, and every dispatching row besides: `HOLD (main checkout dirty)`,
 `HOLD (main checkout unknown)` or `HOLD (main checkout no baseline)` on the
 implementer, reviewer and merge-bot rows alike, beside the `MAIN-CHECKOUT-*`
-line that says why (#2210).
+line that says why.
 
 `/triage` is user-invoked only — suggest, never run. The suggestion is a report,
 not a blocking prompt. Counts come from cheap `gh issue list --search`, no bodies.
@@ -3405,9 +3402,9 @@ ticket over a failure a re-run would have cleared.
 held by another worktree, or strands the feature worktree on `main`. After the
 merge, `delete-merged-branch.sh <pr>` deletes the branch from `origin` and reads
 the deletion back; `reap.sh` takes the `[gone]` local branch and its worktree.
-No repo setting is relied on to do it (#2196). A branch another open PR still
+No repo setting is relied on to do it. A branch another open PR still
 uses as its head or base is kept instead — `branch-kept-#<that PR>` in the bot's
-report, a deliberate keep and not a failure (#2295).
+report, a deliberate keep and not a failure.
 The branch-delete step also releases the claim label: it drops `in-progress` from
 every issue the PR closes.
 
@@ -3416,7 +3413,7 @@ every issue the PR closes.
 Non-empty `git status --porcelain -unormal` → stop and report — the explicit
 mode, never bare `--porcelain`, or `status.showUntrackedFiles = no` reads an
 empty answer here and licenses the rebase over work this check exists to
-protect (#730). Stashing empties it either way, so that check and
+protect. Stashing empties it either way, so that check and
 `no-undo-audit.sh` both go quiet on work nothing else holds.
 
 **Cross-check what members report about their environment.** Wrong often enough
@@ -3435,8 +3432,8 @@ failures arrive as *wrong findings*, not errors:
   separate worktrees, but the process table is not partitioned by them and a
   test file's name is identical in every one, so a pattern naming a test file
   matches whichever member happens to be running it. Measured: an implementer
-  chasing its own stalled run issued `pkill -f "claim-ticket.test.mjs"` and
-  killed a `node --test claim-ticket.test.mjs inflight.test.mjs` that was not
+  chasing its own stalled run issued a `pkill -f` on its test file's name and
+  killed a `node --test` over two test files that was not
   its own.
 
   **What the victim's output looks like depends on the signal — and one of the
@@ -3574,7 +3571,6 @@ end of a 7-PR run. A mid-run tooling fix goes through a PR like every other
 change, and that PR faces every required check any other PR faces — the set
 `.github/rulesets/main.json` declares — so it carries a release label too.
 Plan it as a PR the run's own merge queue lands, never as an edit-and-continue.
-ADR 0007 records the gate and why it has no exemption.
 
 ## Failure handling
 
@@ -3613,7 +3609,7 @@ still holding its claim and its worktree, so the killed row above does not
 apply to it; mtimes unchanged at both are the dead signature.** Only the first
 of those two verdicts is conclusive — a member wedged on a call that writes
 nothing freezes its scratch dir too — so settle the dead one on the liveness
-read below, never on the two listings alone. Measured on #503: a refuter
+read below, never on the two listings alone. Measured once: a refuter
 wedged forever on `until grep -q` for a marker `node --test` never writes, its
 transcript's record counts unchanged across two polls while its own scratch
 files carried fresh mtimes throughout — alive the entire time it read as dead.
@@ -3657,11 +3653,11 @@ wrote it. Never rotate mid-run: it is phase 0's step alone.
 One line per ticket, rewritten in place (`ledger.mjs row <ticket> <text>`):
 
 ```
-#332 impl-332=PR#344 → PR#344 → MERGED 73b356de
-#324 impl-324=PR#346 → PR#346 · fix-pr-346 · ports=16324 · ruled:6-applies · held-behind:#313
-#351 impl-351 · tier=task-high
-#358 excluded · behind-pr:#346
-#360 excluded · behind-issue:#351
+#<t1> impl-<t1>=PR#<p1> → PR#<p1> → MERGED 73b356de
+#<t2> impl-<t2>=PR#<p2> → PR#<p2> · fix-pr-<p2> · ports=16<t2> · ruled:6-applies · held-behind:#<t3>
+#<t3> impl-<t3> · tier=task-high
+#<t4> excluded · behind-pr:#<p2>
+#<t5> excluded · behind-issue:#<t3>
 ```
 
 **A member's token is `<member>` while it is live and `<member>=<outcome>` once
@@ -3748,7 +3744,7 @@ Plus two append-only lists:
 filers append filings with `filed`; all writes are serialized by `<file>.lock`.**
 Every write rewrites the whole file from what it read, so without the lock two
 concurrent writers are last-writer-wins — measured, 8 concurrent `filed` kept
-2–5 of 8 rows (#531). A writer that cannot take the lock within 10 s exits 2
+2–5 of 8 rows. A writer that cannot take the lock within 10 s exits 2
 naming the holder's pid, having written nothing; a lock whose holder is dead is
 taken over, and a leftover `<file>.lock.reap` is never reclaimed. One other
 shape wedges the lock permanently the same way, needing the same fix: an empty
@@ -3768,7 +3764,7 @@ removal needed. The other two shapes do not clear on their own — remove
 **The gap the lock does not close:** `check` → `gh issue create` → `filed` is
 three commands, and the lock covers each one alone, so two filers can both read
 `clean` in the seconds before either records. Accepted — the measured
-same-run accidental duplicate, #298 → #302, was filed minutes apart — and no
+same-run accidental duplicate was filed minutes apart — and no
 claim/reserve step exists to close it.
 
 `check` exits **0** clean, **1** already in this run's filed list, **2** usage
@@ -3777,7 +3773,7 @@ those and decide. Exit **3** is scored: some row gh returned has to score above
 zero against the subject, because the ANDed query also matches issues the
 overlap rates 0.00, and every measured stop over those was survived only by a
 reader who overrode it and searched the tracker by hand — obeying it would have
-dropped a real deferral (#388). It also prints the closest filed rows with an overlap score.
+dropped a real deferral. It also prints the closest filed rows with an overlap score.
 Those never move the exit code — the same finding gets worded differently by
 whoever finds it second — but once the tracker read succeeds, a filed row at or
 above `NEAR_SOFT_HIT` in `ledger.mjs` does move the verdict to `soft-hit`, as
@@ -3795,8 +3791,7 @@ that was never read and from one whose rows you have to read yourself.
 The ledger half reports its own readability as its own field, `ledger.ok`, the
 peer of `tracker.ok`: false when the file did not exist, and false too when the
 path led to something that did not parse as a ledger — which is what tells a
-ledger that was read and held nothing filed from one there was nothing to read
-(#231). The absent case is the normal one for a run's first `check` — `.fleet/`
+ledger that was read and held nothing filed from one there was nothing to read. The absent case is the normal one for a run's first `check` — `.fleet/`
 is git-ignored and created lazily by the first write — so it stays `clean` at
 exit 0, and `ledger.ok` is the field that says why rather than the verdict
 moving. The stderr warning is deliberately narrower than the field: it fires on

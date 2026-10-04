@@ -755,7 +755,11 @@ test("the per-PR member is the fix-applier, in the Report example and through th
   // name is the fallback's; stop reading `fix-pr-<M>` as a member and nothing
   // is extracted at all.
   const ledger = section(RUN_TEAM, "One line per ticket, rewritten in place", "\nPlus two append-only lists", "run-team ledger example");
-  const reviewers = ledger.split("\n").filter((l) => /^#\d+\s/.test(l)).map((l) => parseRow(l))
+  // The doc's example rows carry placeholders (`#<t1>`, `PR#<p1>`) rather than
+  // real tracker numbers, so give each a concrete number before the parser sees
+  // it — the shape under test is the member token, not the digits.
+  const instantiate = (l) => l.replace(/<([tp])(\d)>/g, (_, kind, d) => `${kind === "t" ? 30 : 40}${d}`);
+  const reviewers = ledger.split("\n").map(instantiate).filter((l) => /^#\d+\s/.test(l)).map((l) => parseRow(l))
     .filter((p) => p?.pr != null).map((p) => p.agent).filter(Boolean);
   assert.ok(reviewers.length, "no ledger example row names a per-PR member that `compute-board.mjs` can extract");
   assert.deepEqual(
