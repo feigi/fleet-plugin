@@ -66,7 +66,7 @@ test("the blank-subagent_type wording says what blank means per harness: omp in 
   // dispatch. The claude rows are the other population — there blank IS an
   // untyped dispatch — and only the header describes them, so only it is held
   // to saying so.
-  const SRC = readFileSync(join(import.meta.dirname, "member-outcomes.mjs"), "utf8");
+  const SRC = readFileSync(join(REPO, "plugin", "scripts", "member-outcomes.mjs"), "utf8");
   for (const [where, text] of [["header", flat(HEADER)], ["script", flat(SRC)]]) {
     assert.match(text, /no `session_init` agent to read/, `${where}: blank's cause`);
     assert.match(text, /records the generic `task`/, `${where}: untyped dispatch's record`);

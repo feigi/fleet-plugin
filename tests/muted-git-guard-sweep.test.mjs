@@ -113,7 +113,7 @@ import { repoRoot, skipWithoutRepo, trackedShellScripts } from "../plugin/script
 const DIR = fileURLToPath(new URL("../plugin/scripts", import.meta.url));
 
 // Asks git what ships rather than walking the directory: an untracked scratch
-// script is not what ships, and a fleet script that moves out of this directory
+// script is not what ships, and a fleet script that moves out of plugin/scripts/
 // must not fall out of the sweep with it. Same rule, and same reason, as
 // unattended-git-sweep.test.mjs. Needs an ambient working tree, and answers
 // `null` rather than throwing where there is none (#1149).

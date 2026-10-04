@@ -60,7 +60,7 @@
 // inside one — and every git child gets `gitEnv()`, so an ambient GIT_DIR
 // cannot answer for another repository (#1599).
 //
-// Zero deps: `node --test plugin/scripts/member-write-guard.test.mjs`.
+// Zero deps: node builtins and sibling scripts only.
 
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";

@@ -74,8 +74,8 @@ const read = (f) => readFileSync(join(DIR, f), "utf8");
  * A git-invoking primitive in `.mjs` source: `spawnSync`/`execFileSync`
  * called with the literal string `"git"`, or a same-shaped wrapper
  * (`tryRun("git", …)`, `run("git", …)`) called the identical way — the
- * spelling every one of this directory's git callers actually uses, measured
- * against the whole directory (see this file's own final test). Comments are
+ * spelling every one of plugin/scripts/'s git callers actually uses, measured
+ * against all of plugin/scripts/ (see this file's own final test). Comments are
  * stripped first (`stripComments`), the same instrument
  * `ambient-git-vars-prose.test.mjs`'s own `codeLines` is for its shell
  * detector, so a call site named only in a paragraph cannot satisfy this.
@@ -284,7 +284,7 @@ const MJS_LEGACY_INLINE = {
     "(fleet-heartbeat.test.mjs); out of #1599's scope by the ticket's own words.",
   "ledger.mjs":
     "the tracker-query probe inside runCheck() — `const queryEnv = { ...process.env, GH_REPO: \"\" }` then two " +
-    "`delete`s, inline (predates this directory's `gitEnv()` helper; renamed from `gitEnv` to `queryEnv` so the " +
+    "`delete`s, inline (predates the `gitEnv()` helper in plugin/scripts/; renamed from `gitEnv` to `queryEnv` so the " +
     "local no longer shadows the module-level import). " +
     "Measured and covered in ledger.test.mjs, \"an inherited GIT_DIR or GH_REPO cannot retarget the query…\".",
 };
@@ -311,7 +311,7 @@ for (const [f, reason] of Object.entries(MJS_LEGACY_INLINE)) {
 
 // The unaccounted computation the closing census test below needs, factored
 // out so a regression fixture can drive it with a synthetic `scripts`/`read`
-// pair instead of writing a throwaway file into this real directory.
+// pair instead of writing a throwaway file into the real plugin/scripts/.
 const unaccountedGitUsers = (scripts, readSrc, accounted) =>
   scripts.filter((f) => usesGit(readSrc(f))).filter((f) => !accounted.has(f));
 
@@ -321,7 +321,7 @@ const unaccountedGitUsers = (scripts, readSrc, accounted) =>
 // `gitEnv()` and add it to COVERED_MJS with its own behavioural fixture, or
 // record why not — instead of inheriting the exposure by default.
 test("every .mjs script that invokes git either routes through gitEnv() or is recorded on the legacy-inline list", () => {
-  const scripts = readdirSync(DIR).filter((n) => n.endsWith(".mjs") && !n.endsWith(".test.mjs")).sort();
+  const scripts = readdirSync(DIR).filter((n) => n.endsWith(".mjs")).sort();
   assert.ok(scripts.length > 0, "fixture: no .mjs files found, so this scan would pass over nothing");
 
   const accounted = new Set([...Object.keys(COVERED_MJS), ...Object.keys(MJS_LEGACY_INLINE)]);
@@ -335,10 +335,10 @@ test("every .mjs script that invokes git either routes through gitEnv() or is re
     "measurement instead. Do not simply widen either list.");
 
   // Every COVERED_MJS/MJS_LEGACY_INLINE entry must really be a git-invoking
-  // .mjs file in this directory, or a rename/removal would leave its entry
+  // .mjs file in plugin/scripts/, or a rename/removal would leave its entry
   // pinning a file the scan above no longer sees.
   for (const f of accounted) {
-    assert.ok(scripts.includes(f), `${f} is recorded above but is not a .mjs file in this directory`);
+    assert.ok(scripts.includes(f), `${f} is recorded above but is not a .mjs file in plugin/scripts/`);
   }
 });
 

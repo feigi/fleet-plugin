@@ -26,15 +26,18 @@ const ROOT = repoRoot(import.meta.dirname);
 const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT, "the test-location check over the tracked tree");
 const SELF = "tests/test-location.test.mjs";
 
+/** The paths the suite command `node --test tests/*.test.mjs` reaches: a test file directly in `tests/`. */
+const IN_SUITE = /^tests\/[^/]+\.test\.mjs$/;
+
 /** The `*.test.mjs` paths among `paths` that the suite glob `tests/*.test.mjs` does not reach. */
 function misplacedTests(paths) {
-  return paths.filter((path) => path.endsWith(".test.mjs") && !/^tests\/[^/]+\.test\.mjs$/.test(path));
+  return paths.filter((path) => path.endsWith(".test.mjs") && !IN_SUITE.test(path));
 }
 
 const FILES = ROOT === null ? [] : trackedPaths(ROOT);
 
 test("the check sees the tree it is supposed to police", { skip: SKIP_WITHOUT_REPO }, () => {
-  const suite = FILES.filter((path) => /^tests\/[^/]+\.test\.mjs$/.test(path));
+  const suite = FILES.filter((path) => IN_SUITE.test(path));
   assert.ok(
     suite.length > 100,
     `trackedPaths(ROOT) holds only ${suite.length} test files under tests/ — too few to be this repo's real suite, and the check below would pass vacuously`,

@@ -68,7 +68,7 @@
 //   main-checkout.mjs --check    print the state. Exit 0 clean, 1 dirty,
 //                                2 unknown or no baseline.
 //
-// Zero deps: `node --test plugin/scripts/main-checkout.test.mjs`.
+// Zero deps: node builtins and sibling scripts only.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";

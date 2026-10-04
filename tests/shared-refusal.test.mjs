@@ -302,14 +302,14 @@ const DIGITS_RULE = new RegExp([
 // and so must be spelled out — a discovered set there shrinks silently when a
 // caller drops the call.
 //
-// Test files are excluded. A test may legitimately quote the rule to pin it,
-// and a pin is not a second implementation of it — the same `grep -v test`
-// scoping every sweep in arg.mjs's header uses.
+// Test files are not in plugin/scripts/ — they live under tests/ — so a test
+// that legitimately quotes the rule to pin it is never swept: a pin is not a
+// second implementation of it.
 const RULE_SITES = () => {
   const here = fileURLToPath(new URL("../plugin/scripts", import.meta.url));
   const sites = [];
   for (const name of readdirSync(here)) {
-    if (!/\.(mjs|js)$/.test(name) || name.endsWith(".test.mjs")) continue;
+    if (!/\.(mjs|js)$/.test(name)) continue;
     if (DIGITS_RULE.test(stripComments(readFileSync(join(here, name), "utf8")))) sites.push(name);
   }
   return sites.sort();
@@ -363,7 +363,7 @@ test("#878: isDigits reaches the same verdict on both historical spellings' inpu
 // call inline (`if (!numArg("pr"))`) before ever binding one.
 test("#878: every numArg() consumer tests absence with === null, never a bare falsy check", () => {
   const dir = fileURLToPath(new URL("../plugin/scripts", import.meta.url));
-  const files = readdirSync(dir).filter((f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs") && f !== "arg.mjs");
+  const files = readdirSync(dir).filter((f) => f.endsWith(".mjs") && f !== "arg.mjs");
   const consumers = [];
   for (const file of files) {
     const text = src(file);

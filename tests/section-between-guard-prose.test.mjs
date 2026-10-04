@@ -71,9 +71,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { stripComments } from "./support/strip-comments.mjs";
 
-// The tests, their support modules, and the scripts: the three directories
-// the tests and support modules shared with the scripts before they moved out
-// of the shipped surface.
+// The directories the walk covers: tests/, tests/support/ and plugin/scripts/.
+// The first two held, with the scripts, one directory (plugin/scripts/) until
+// #2232 moved them out of the shipped surface.
 const DIRS = [import.meta.dirname, join(import.meta.dirname, "support"), join(import.meta.dirname, "..", "plugin", "scripts")];
 const SELF = join(import.meta.dirname, "section-between-guard-prose.test.mjs");
 const PROSE_PIN = join(import.meta.dirname, "support", "prose-pin.mjs");

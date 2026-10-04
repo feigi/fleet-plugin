@@ -31,7 +31,7 @@
 // across them go red when the corresponding half is deleted.
 //
 // Also not pinned, and stated rather than left to be noticed: the `.mjs`
-// scripts in this directory. The scan below is `.sh`-only and the detector is a
+// scripts in plugin/scripts/. The scan below is `.sh`-only and the detector is a
 // shell line, so a Node caller's hazard and its remedy — an env object built
 // for the child, since there is no shell to `unset` in — are both invisible
 // here, and "a NEW script cannot join the exposed set in silence" holds for
@@ -187,6 +187,6 @@ test("every script that invokes git either unsets the ambient variables or is ex
   // leave its entry pinning a file that no longer exists while every
   // assertion above skipped it.
   for (const f of COVERED) {
-    assert.ok(scripts.includes(f), `${f} is listed in COVERED but is not a .sh file in this directory`);
+    assert.ok(scripts.includes(f), `${f} is listed in COVERED but is not a .sh file in plugin/scripts/`);
   }
 });
