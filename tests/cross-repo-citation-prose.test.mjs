@@ -143,12 +143,12 @@ test("the file names no tracker number, foreign or local, and its examples stay 
   // ACCEPT side. The shipped surface names nothing that does not ship, so the
   // convention is taught with placeholders (`owner/repo#N`, "a repo on a GHE
   // host") and the evidence is restated without the foreign repo's PR numbers
-  // or this repo's own. Neither a bare `#NN`, a qualified `owner/repo#NN`, nor
-  // a `PR NN` may creep back in; the placeholder form `owner/repo#N` must not
-  // trip the ban.
+  // or this repo's own. Neither a bare `#N` of any width, a qualified
+  // `owner/repo#NN`, nor a `PR NN` / `PR#NN` may creep back in; the
+  // placeholder form `owner/repo#N` must not trip the ban.
   assert.doesNotMatch(
     CORRECTIONS,
-    /(?<![\w/&$-])#\d{2,5}(?![0-9a-fA-F])|\b[\w.-]+\/[\w.-]+#\d+|\bPR \d{2,5}\b/,
+    /(?<![\w/&$-])#\d+(?![0-9a-fA-F])|\b[\w.-]+\/[\w.-]+#\d+|\bPR ?#?\d+\b/,
     "a concrete tracker number is back in correction-tickets.md — the convention is taught with placeholders, not with a number from either repo",
   );
   assert.match(
