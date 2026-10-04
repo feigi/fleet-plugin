@@ -2,12 +2,12 @@
 // mismatch means "re-materialize to be sure". Nothing re-materializes a
 // runner: the same comment says the runner is written once at claim time and
 // never rewritten, and a claim refuses a worktree that already exists. The
-// action it named was the retired bootstrap's, and the sweep that holds that
-// vocabulary out of the runbook reads only shipped markdown, so a code
-// comment was outside its reach.
+// action it named was the retired bootstrap's, and the sweep #2740 adds to
+// hold that vocabulary out of the runbook reads only shipped markdown, so a
+// code comment is outside its reach.
 //
 // Two pins. The sweep holds the retired verb out of every shipped file that
-// is not markdown and not a test — markdown is the runbook sweep's, and a
+// is not markdown and not a test — markdown is that sweep's, and a
 // test quotes the retired form to refuse it. The positive pin holds the
 // remedy the stamp comment names to the one a claim actually provides.
 
@@ -15,10 +15,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { between, phrase, stripHashGutter } from "./prose-pin.mjs";
+import { between, phrase, stripHashGutter } from "./support/prose-pin.mjs";
 
-const PLUGIN = fileURLToPath(new URL("../", import.meta.url));
+const PLUGIN = join(import.meta.dirname, "..", "plugin");
 const read = (rel) => readFileSync(join(PLUGIN, rel), "utf8");
 
 const REMATERIALIZE = /re-?materiali[sz]/i;
