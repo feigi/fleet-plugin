@@ -683,6 +683,21 @@ test("stopping rule: a ruled ticket's Pull at another cell with a blank or malfo
   }
 });
 
+// The same refusal when the undatable Pull sorts before the carrier in file
+// order: the check cannot depend on reading only the rows after the carrier.
+test("stopping rule: a ruled ticket's undatable Pull at another cell is refused when it precedes the carrier in file order", () => {
+  const added = { "smol-high": "2026-09-01" };
+  for (const bad of ["", "10/05/2026", "2026-10-5"]) {
+    const { w, ticket } = pulledTwice((w, t) => rePull(w, t, bad, "slow-high"));
+    w.features.unshift(w.features.pop());
+    assert.throws(
+      () => judged(w, added, "smol-high"),
+      new RegExp(`ticket #${ticket} \\(Pull impl-${ticket}-re at slow-high\\): run_date is '${bad}', expected YYYY-MM-DD`),
+      JSON.stringify(bad),
+    );
+  }
+});
+
 // What that refusal must NOT touch: a ticket with no ruling yet has no carrier
 // to place.
 test("stopping rule: an undatable Pull of a ticket with no ruling is not refused", () => {

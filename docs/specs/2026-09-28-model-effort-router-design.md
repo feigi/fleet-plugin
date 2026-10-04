@@ -298,7 +298,7 @@ definition). **Reinstatement** = the reverse PR, maintainer-only; the
 date filter above restarts the count.
 
 **Clarification from `#2725` (2026-10-04):** a ticket's verdict belongs to
-one cell, the cell of its § 1 carrier. The ticket's ruling is its
+one cell, the cell of its carrier (defined here). The ticket's ruling is its
 latest-dated `tier-outcomes.tsv` row (the later in file order on a tie, a
 both-blank row skipped); the carrier is the ticket's latest
 `ticket-features.tsv` row across all cells, `slow-high` included, dated ≤
@@ -541,8 +541,7 @@ Under stage 1 + burn-in at ~60 verdicts/week: n=20/cell in ≈1 week, n=60 in
 joined to verdicts per § 1 (member-outcomes on `session`+`agent`;
 tier-outcomes on `ticket`, split `+`; last row per ticket dated ≥ the
 `run_date` of the ticket's last input row wins, a row whose
-`closed_own_ticket` and `minted_false_claim` are both blank skipped — the
-rule the § 2 stopping rule applies), restricted
+`closed_own_ticket` and `minted_false_claim` are both blank skipped), restricted
 to **arm A rows plus Exploration rows** (`exploration_draw` non-blank). B
 non-exploration rows are excluded (they are the A/B's test set). No
 inverse-propensity weighting: within a stratum every `chosen_cell` is
