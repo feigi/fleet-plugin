@@ -34,7 +34,7 @@
 // anything else. A script renamed keeps the pin.
 //
 // CEILING, and it is the header's own. The header does not claim to NAME every
-// row its grep returns — `fleet-heartbeat.mjs`, for one, is in that output
+// row its grep returns — `shortlist.mjs`, for one, is in that output
 // and is not named, and the header says the scripts it names
 // "exemplify a way of qualifying, and were never the whole of it". So nothing
 // here demands a paragraph per row; the roster is the grep's output, and the
@@ -45,7 +45,7 @@
 // `shared-refusal.test.mjs`. Left there rather than re-pinned here.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -193,12 +193,15 @@ const probeArgv = (file, extra = [], tail = []) => {
 };
 const probeStray = (file) => probeArgv(file);
 
+// `s` made literal inside a RegExp source.
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // Whether `text` names the script `file` (`scripts/<name>`): its file name on
 // its own, never inside another name. A bare substring credits `prove.mjs` to a
 // text that names only `recipe-prove.mjs`, and a script named `newscr.mjs` to a
 // text that mentions only `newscr.mjs.bak`.
 const namesScript = (text, file) => {
-  const name = file.replace(/^scripts\//, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const name = escapeRe(file.replace(/^scripts\//, ""));
   return new RegExp(`(?<![\\w.-])${name}(?![\\w-])(?!\\.\\w)`).test(text);
 };
 
@@ -405,13 +408,13 @@ test("no roster row is silent: every row the roster grep returns names the stray
 // here — catching that shape is the silent-roster-row test's job, for makeDie
 // importers only.
 //
-// Whether a file binds makeDie is read off its whole import statement, not off
+// Whether a file binds `symbol` is read off its whole import statement, not off
 // the grep rows: a row filter sees only the closing row of a multi-line import
 // (`} from "./arg.mjs";`), and takes a trailing comment that mentions makeDie
 // for a binding.
-const bindsMakeDie = (file) => {
+const binds = (file, symbol, from = "./arg.mjs") => {
   const src = readFileSync(join(ROOT, file), "utf8").replace(/\/\/.*$/gm, "");
-  return /import\b[^;{]*\{[^}]*\bmakeDie\b[^}]*\}\s*from\s*["']\.\/arg\.mjs["']/.test(src);
+  return new RegExp(`import\\b[^;{]*\\{[^}]*\\b${escapeRe(symbol)}\\b[^}]*\\}\\s*from\\s*["']${escapeRe(from)}["']`).test(src);
 };
 
 // A dropped importer whose own guard answers a stray-only probe first — the
@@ -430,7 +433,7 @@ const DROPPED_GUARD_FIXTURE = {
 };
 
 test("every arg.mjs importer the makeDie filter drops is a module, or a script the header names", () => {
-  const dropped = scriptsOf(sh(IMPORT_GREP).stdout).filter((file) => file !== "scripts/arg.mjs" && !bindsMakeDie(file));
+  const dropped = scriptsOf(sh(IMPORT_GREP).stdout).filter((file) => file !== "scripts/arg.mjs" && !binds(file, "makeDie"));
   const unnamed = [];
   const guardFirst = [];
   for (const file of dropped) {
@@ -472,6 +475,28 @@ test("every arg.mjs importer the makeDie filter drops is a module, or a script t
     [],
     "a script imports arg.mjs without makeDie and refuses its own command line, yet arg.mjs's header does not name it — the roster grep cannot see it, so the header has to",
   );
+});
+
+// #2849. The header's paragraph on the scripts outside arg()/has() once named
+// fleet-tick.mjs as "the one script" there, while fleet-heartbeat.mjs parsed
+// with node:util's parseArgs in exactly the same shape. Derived, not listed:
+// every script that binds node:util's parseArgs and none of the factories that
+// carry arg()/has() is a second parser of the kind that paragraph argues
+// about, so it must name each one. candidates.mjs binds parseArgs too, but
+// also makeArg/makeHas — its own paragraph covers it, and this must not demand
+// it here.
+test("every script parsing with node:util's parseArgs outside arg()/has() is named where the header says so", () => {
+  const scripts = readdirSync(join(ROOT, "scripts")).filter((f) => f.endsWith(".mjs")).map((f) => `scripts/${f}`);
+  const reachesArg = (file) => ["makeArg", "makeHas", "defineFlags"].some((s) => binds(file, s));
+  const outside = scripts.filter((file) => binds(file, "parseArgs", "node:util") && !reachesArg(file));
+  assert.ok(binds("scripts/candidates.mjs", "parseArgs", "node:util"), "candidates.mjs no longer binds node:util's parseArgs — the accept case below proves nothing");
+  assert.ok(!outside.includes("scripts/candidates.mjs"), "candidates.mjs binds makeArg/makeHas, so arg()'s refusals reach it — it is not outside arg()/has()");
+  assert.ok(outside.length > 0, "no script parses with node:util's parseArgs outside arg()/has() — the derivation found nothing to check");
+  const paragraphs = stripSlashGutter(HEADER).split(/\n\s*\n/);
+  const here = paragraphs.filter((p) => p.includes("outside arg()/has()"));
+  assert.equal(here.length, 1, "arg.mjs's header should carry exactly one paragraph about the scripts outside arg()/has()");
+  const unnamed = outside.filter((file) => !namesScript(here[0], file));
+  assert.deepEqual(unnamed, [], "a script parses its flags with node:util's parseArgs and binds none of makeArg/makeHas/defineFlags, yet the header's paragraph on scripts outside arg()/has() does not name it");
 });
 
 test("candidates.mjs refuses --limit under arg()'s generated wording", () => {
