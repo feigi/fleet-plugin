@@ -129,9 +129,14 @@ test("run-team/SKILL.md: the release deletes the branch with update-ref's compar
     phrase("deletes the branch with `git update-ref -d` on the tip it read once"),
     "SKILL.md's release section no longer names `git update-ref -d` on a tip read once as the branch delete",
   );
+  assert.match(
+    section,
+    phrase("compare-and-swap that refuses if the branch has moved off that tip"),
+    "SKILL.md's release section no longer says the update-ref delete is a compare-and-swap that refuses if the branch has moved off the tip",
+  );
   assert.doesNotMatch(
     section,
-    /deletes\s+the\s+branch\s+with\s+`-D`/,
+    /(?:deletes?|deleted)\s+(?:the\s+branch\s+)?(?:is\s+)?with\s+`(?:git\s+branch\s+)?-D`/,
     "SKILL.md's release section says the branch is deleted with `-D` — release-ticket.sh deletes it with `git update-ref -d`",
   );
 });
