@@ -2213,10 +2213,10 @@ reads gates and never injects a fault.
 
 **Where `testCmd` comes from:** the repository's Test entrypoint, out of the
 Recipe cache phase 0's Recipe derivation step proved —
-`~/.fleet/bin/fleet-run derive-testcmd.sh . test` prints it, in this repo
-`node --test plugin/scripts/*.test.mjs` — and the one you hand specialists per
-**Give specialists a stack-free test command** above. Pass the same string to
-the review, to the fix-applier, and to the finisher — whose duty-2 mutation
+`~/.fleet/bin/fleet-run derive-testcmd.sh . test` prints it — and the one you
+hand specialists per **Give specialists a stack-free test command** above. Pass
+the same string to the review, to the fix-applier, and to the finisher — whose
+duty-2 mutation
 gate runs it too — so every gate runs one command. Omit it from the review args
 and the review (`review-core.mjs`, in a runner) reads the same cache itself,
 refusing outright when there is none; the fix-applier has no such fallback, so
