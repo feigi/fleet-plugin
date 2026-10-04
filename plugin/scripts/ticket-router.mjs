@@ -36,7 +36,7 @@ import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { CELL, POLICY_CELL, drawCell, parseMember } from "./ledger-grammar.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { DATE, parseTierOutcomes, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
+import { DATE, lastPullByTicket, parseTierOutcomes, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
 const NAME = "ticket-router";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -292,7 +292,7 @@ function verdictOf(rulings, ticket, pullDate) {
 
 /**
  * Per-ticket input rows: the ticket's features rows inside [window, cutoff],
- * attributed to its LAST row's cell and stratum, restricted to rows the
+ * attributed to its LAST row's (in file order) cell and stratum, restricted to rows the
  * free classifier routed plus exploration rows — a row a live B classifier
  * routed is the A/B's test set, not the fit's. Its verdict rules its last
  * input row. A fit over everything cuts at its latest features row's date;
@@ -316,9 +316,10 @@ function fitTickets({ features, members, verdicts, window, cutoff }) {
   // a string `<=` would drop 'abc' or '2027' unseen: it is left in, so `rulingFor`
   // refuses it when its ticket is an input, as `fit --due` does.
   const rulings = rulingsByTicket(verdicts.filter((r) => !DATE.test(r.run_date) || upToThrough(r)));
+  const lastPulls = lastPullByTicket(inRange);
   const out = [];
   for (const [ticket, rows] of byTicket) {
-    const last = rows[rows.length - 1];
+    const last = lastPulls.get(ticket);
     if (last.exploration_draw === "" && last.sizing_src !== "rule") continue;
     const verdict = verdictOf(rulings, ticket, last.run_date);
     const keys = new Set(rows.map((r) => `${r.session}\0${r.agent}`));
@@ -437,12 +438,11 @@ export function fitTable({ prior, features, members, verdicts, guard, cutoff }) 
   };
 }
 
-/** Merged PRs (tickets with a verdict on their last such row) among the features rows dated after `fitted_through`. */
+/** Merged PRs (tickets with a verdict on their last such row in file order) among the features rows dated after `fitted_through`. */
 export function mergedSince({ table, features, verdicts }) {
   const rulings = rulingsByTicket(verdicts);
   const after = features.filter((r) => (!table.window_start || r.run_date >= table.window_start) && (!table.fitted_through || r.run_date > table.fitted_through));
-  const pullDates = new Map(after.map((r) => [r.ticket, r.run_date]));
-  return [...pullDates].filter(([ticket, date]) => verdictOf(rulings, ticket, date)).length;
+  return [...lastPullByTicket(after)].filter(([ticket, p]) => verdictOf(rulings, ticket, p.run_date)).length;
 }
 
 // ---------------------------------------------------------------------------

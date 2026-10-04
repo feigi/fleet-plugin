@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { COLUMNS, LEGACY_WIDTH, TIER_SWITCH_DATE } from "../plugin/scripts/tier-outcomes.mjs";
+import { COLUMNS, LEGACY_WIDTH, TIER_SWITCH_DATE, lastPullByTicket, parseTierOutcomes, rulingFor, rulingsByTicket } from "../plugin/scripts/tier-outcomes.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
 import { sessionDate } from "../plugin/scripts/ticket-router.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
@@ -622,4 +622,25 @@ test("check --live: a run ledger that does not exist is refused, not read as emp
   const r = f.run("check", "--live");
   assert.equal(r.code, 2);
   assert.match(r.stderr, /ledger/);
+});
+
+// File order is the contract for both picks; a date only sets the floor.
+test("rulingFor: of two qualifying rulings, the later row in file order wins even when it is older-dated", () => {
+  const rows = parseTierOutcomes(HEADER + [
+    tierRow({ date: "2026-10-03", pr: 20, ticket: 10, tier: "default", closed: "yes", minted: "no" }),
+    tierRow({ date: "2026-10-02", pr: 21, ticket: 10, tier: "default", closed: "no", minted: "no" }),
+  ].join("\n"));
+  const v = rulingFor(rulingsByTicket(rows), "10", "2026-10-01");
+  assert.equal(v.pr, "21", "the earlier row, dated later, was picked");
+  assert.equal(rulingFor(rulingsByTicket(rows), "10", "2026-10-03").pr, "20", "a ruling dated before the Pull still counted");
+});
+
+test("lastPullByTicket: of two Pulls in reverse date order, the later row in file order is the ruling's date floor", () => {
+  const pull = (run_date, agent) => ({ run_date, session: "s1", agent, ticket: "10", chosen_cell: "slow-high" });
+  const later = pull("2026-10-01", "impl-10-2");
+  const pulls = lastPullByTicket([pull("2026-10-05", "impl-10"), later, { ...pull("2026-10-02", "impl-11"), ticket: "11" }]);
+  assert.equal(pulls.get("10"), later, "the whole later row, not the later-dated one");
+  assert.equal(pulls.get("11").agent, "impl-11", "a ticket with one Pull was dropped");
+  const rulings = rulingsByTicket(parseTierOutcomes(HEADER + tierRow({ date: "2026-10-03", pr: 20, ticket: 10, tier: "default" })));
+  assert.equal(rulingFor(rulings, "10", pulls.get("10").run_date)?.pr, "20", "the later-dated Pull set the floor");
 });

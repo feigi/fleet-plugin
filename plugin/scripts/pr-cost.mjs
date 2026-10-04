@@ -37,8 +37,8 @@
 // is counted as unpriced, and a Pull with no member row at all books 0 and is
 // listed as unbooked.
 //
-// A ticket's RULING is its last tier-outcomes.tsv row dated on or after its
-// first Pull in the window; that row names the PR and carries the quality
+// A ticket's RULING is its last tier-outcomes.tsv row in file order dated on or
+// after its first Pull in the window; that row names the PR and carries the quality
 // verdict. The PR's CELL is the `chosen_cell` of the last Pull dated on or
 // before the ruling, cross-checked against that Pull's member row: a
 // `subagent_type` other than `fleet-implementer-<cell>`, or an `effort` other
@@ -203,7 +203,7 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
     }
   }
 
-  // Rulings: per ticket, the last tier-outcomes row on or after its first Pull.
+  // Rulings: per ticket, the last tier-outcomes row in file order on or after its first Pull.
   const pullsByTicket = new Map();
   for (const p of pulls) {
     if (!pullsByTicket.has(p.ticket)) pullsByTicket.set(p.ticket, []);
