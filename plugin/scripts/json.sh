@@ -16,14 +16,15 @@
 # non-interactive shell outright, so `||` never runs. Measured on a missing
 # file with `set -e`: /bin/sh (macOS bash 3.2) and bash 3.2/`--posix` exit **1**
 # with the guard unfired, dash exits 2 unfired, and only Homebrew bash 5.3
-# reaches the `|| die`. Exit 1 is a VERDICT in FIVE of the eight callers here —
+# reaches the `|| die`. Exit 1 is a VERDICT in every caller that defines one —
 # inflight.sh reads it as "ticket taken", verify-sha.sh as "not reachable",
 # prove-merge.sh as "not proved", no-undo-audit.sh as "REFUSED, the worktree is
-# dirty", release-ticket.sh as "NOT released, blocked" — so a lib that merely
-# went missing would fabricate one. claim-ticket.sh, reap.sh and
-# worktree-audit.sh define no exit 1 at all, which is not safety: a bare 1 out
-# of them is a code their caller has no reading for. The `[ -r ]` catches that
-# before `.` can kill the shell; the `|| die` stays for the case `[ -r ]`
+# dirty", release-ticket.sh as "NOT released, blocked", delete-merged-branch.sh
+# as "the branch is STILL on origin" — so a lib that merely went missing would
+# fabricate one. claim-ticket.sh, reap.sh and worktree-audit.sh define no exit 1
+# at all, which is not safety: a bare 1 out of them is a code their caller has
+# no reading for. The `[ -r ]` catches that before `.` can kill the shell; the
+# `|| die` stays for the case `[ -r ]`
 # cannot see, and that case is live rather than theoretical — a DIRECTORY at
 # this path passes `[ -r ]` and `.` returns 1 with the arm firing (measured,
 # /bin/sh and bash 5.3; dash sources a directory at exit 0 instead). A lib that

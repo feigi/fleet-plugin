@@ -25,9 +25,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
@@ -361,4 +361,37 @@ test("jarr on empty stdin is empty, not a one-element array holding nothing", ()
   const { rc: rc2, out: out2 } = pipe("jarr_rewritten", "");
   assert.equal(rc2, 0);
   assert.equal(out2, "");
+});
+
+// ---------------------------------------------------------------- header
+
+test("json.sh's header names every script that sources it in the exit-1 list its own contract puts it in (#2818)", () => {
+  // The header's missing-lib paragraph sorts the callers into those that read
+  // exit 1 as a verdict and those that define no exit 1 at all. It once named
+  // a caller count and left delete-merged-branch.sh out of both lists. The
+  // callers are found the way the ticket measured them — the sourcing line
+  // from the usage block — and json.sh's own usage block is the positive
+  // control that the search string still matches anything.
+  const SOURCING = 'json_lib="$(dirname "$0")/json.sh"';
+  const dir = dirname(LIB);
+  const lib = readFileSync(LIB, "utf8");
+  assert.ok(lib.includes(SOURCING), "json.sh's usage block no longer carries the sourcing line this test searches for");
+  const callers = readdirSync(dir)
+    .filter((f) => f.endsWith(".sh") && f !== "json.sh")
+    .filter((f) => readFileSync(join(dir, f), "utf8").includes(SOURCING))
+    .sort();
+  assert.ok(callers.length > 0, "no script sources json.sh — the search is broken, not the header");
+
+  const header = lib.split("\n").filter((l) => l.startsWith("#")).map((l) => l.replace(/^# ?/, "")).join(" ");
+  const m = header.match(/Exit 1 is a VERDICT([\s\S]*?)so a lib that merely went missing([\s\S]*?)define no exit 1 at all/);
+  assert.ok(m, "json.sh's header no longer carries the exit-1 paragraph this test reads");
+  const named = (s) => (s.match(/[\w-]+\.sh/g) ?? []).sort();
+  const verdict = named(m[1]);
+  const noExit1 = named(m[2]);
+
+  // A caller whose own source says it defines "no exit 1" belongs in the
+  // second list; every other caller defines exit 1, and so belongs in the first.
+  const declaresNone = (f) => /no exit 1/i.test(readFileSync(join(dir, f), "utf8"));
+  assert.deepEqual(verdict, callers.filter((f) => !declaresNone(f)));
+  assert.deepEqual(noExit1, callers.filter(declaresNone));
 });
