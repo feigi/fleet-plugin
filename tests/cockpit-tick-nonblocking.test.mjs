@@ -100,7 +100,7 @@ function serveProcess(cwd, bin, home) {
   const port = new Promise((res, rej) => {
     p.stderr.on("data", (d) => {
       buf += d;
-      const m = buf.match(/cockpit on http:\/\/localhost:(\d+)/);
+      const m = buf.match(/cockpit on http:\/\/127\.0\.0\.1:(\d+)/);
       if (m) res(Number(m[1]));
     });
     p.on("exit", (code) => rej(new Error(`serve exited (${code}) before announcing: ${buf}`)));
@@ -133,7 +133,7 @@ async function until(what, ms, pred) {
 }
 
 const boardJson = async (port) => {
-  const res = await fetch(`http://localhost:${port}/board.json`);
+  const res = await fetch(`http://127.0.0.1:${port}/board.json`);
   if (!res.ok) { await res.arrayBuffer().catch(() => {}); return null; }
   return res.json();
 };
@@ -181,7 +181,7 @@ test("CLI: a relaunch that lands mid-gather() is answered within 1s and reuses t
       { cwd: repo, encoding: "utf8", env: childEnv(bin, home), timeout: 30000 });
     assert.equal(second.status, 0,
       `the reuse path must exit 0 — a backgrounded launch reports nothing else: ${second.stderr}`);
-    assert.match(second.stderr, new RegExp(`already running for this workspace on http://localhost:${expected}/`), second.stderr);
+    assert.match(second.stderr, new RegExp(`already running for this workspace on http://127\\.0\\.0\\.1:${expected}/`), second.stderr);
     assert.doesNotMatch(second.stderr, /cockpit on http/,
       `a second cockpit was started for one workspace: ${second.stderr}`);
 

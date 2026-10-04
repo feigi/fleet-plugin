@@ -52,6 +52,7 @@ import { fileURLToPath } from "node:url";
 import { isCLI } from "./is-cli.mjs";
 import { dirname, join, basename } from "node:path";
 import { createServer, request as httpRequest } from "node:http";
+import { connect } from "node:net";
 import { inspect } from "node:util";
 
 const NAME = "board";
@@ -1582,7 +1583,34 @@ function bindFailure(server, port) {
     const onListening = () => { server.removeListener("error", onError); resolve(null); };
     server.once("error", onError);
     server.once("listening", onListening);
-    server.listen(port);
+    server.listen(port, COCKPIT_HOST);
+  });
+}
+
+// Whether something already answers on COCKPIT_HOST:port, asked BEFORE the
+// bind rather than read off it: a 127.0.0.1 bind does not reliably fail when
+// the port is taken. On macOS/BSD, SO_REUSEADDR lets it succeed beside a
+// listener that holds every interface — a dev server, or a cockpit started
+// before the bind was narrowed to loopback — and the launch would then sit
+// on that holder's 127.0.0.1 traffic instead of stepping over it or reusing
+// it. Linux refuses that bind outright; this check gives both the same answer.
+// Resolves in bindFailure()'s vocabulary so the loop reads one shape: null
+// when the connection is refused (nothing holds the port), an EADDRINUSE
+// error when it connects or times out, and any other error as itself — a
+// fault of its own, like EACCES on a bind. A timeout counts as held because
+// a live holder whose accept backlog is full drops the SYN rather than
+// refusing it. The window between this check and the bind is a race the
+// loop accepts, like its others.
+function heldFailure(port) {
+  return new Promise((resolve) => {
+    const socket = connect({ host: COCKPIT_HOST, port });
+    const held = () => {
+      socket.destroy();
+      resolve(Object.assign(new Error(`port ${port} answers on ${COCKPIT_HOST}`), { code: "EADDRINUSE" }));
+    };
+    socket.setTimeout(PROBE_TIMEOUT_MS, held);
+    socket.once("connect", held);
+    socket.once("error", (e) => resolve(e.code === "ECONNREFUSED" ? null : e));
   });
 }
 
@@ -1605,12 +1633,16 @@ function bindFailure(server, port) {
 // ruled out as the fix for it — it would have to clear a gather(), which
 // charges every launch past a stranger-held port that much per candidate.
 const PROBE_TIMEOUT_MS = 1000;
-// 127.0.0.1 rather than `localhost`: no resolver in the path of a launch.
-// This is not the cockpit's bind address — bindFailure's listen() names no
-// host, so a cockpit binds every interface, not loopback alone — but
-// 127.0.0.1 is one of them, so every cockpit answers here. The announced URL
-// stays `localhost`, which is the operator's spelling, not this probe's.
-const PROBE_HOST = "127.0.0.1";
+// The one address a cockpit binds, and so the one address the probe and the
+// pre-bind check dial: whatever holds a candidate where this launch would
+// bind answers here. 127.0.0.1 rather than `localhost` keeps a resolver out
+// of the launch path, and loopback alone keeps the board — a read-only
+// mirror of the ledger — off every other machine on the network; remote
+// viewing goes through an `ssh -L` tunnel. IPv4 only: `::1` is left unbound,
+// which is why every URL printed below names 127.0.0.1 too. `localhost`
+// resolves `::1` first, and on `::1` a browser can reach some other process
+// that holds the same port.
+const COCKPIT_HOST = "127.0.0.1";
 // A holder is not necessarily a cockpit, and a second of localhost writes is
 // a lot of memory to accept from one. The board payload for a real run is
 // kilobytes; anything past this is not one, so it is refused as foreign
@@ -1663,7 +1695,7 @@ export function probeCockpitWorkspace(port, timeoutMs = PROBE_TIMEOUT_MS) {
         req.destroy();
         resolve(workspace);
       }
-      const req = httpRequest({ host: PROBE_HOST, port, path: "/board.json", method: "GET" }, (res) => {
+      const req = httpRequest({ host: COCKPIT_HOST, port, path: "/board.json", method: "GET" }, (res) => {
         if (res.statusCode !== 200) { finish(null); return; }
         let body = "";
         res.setEncoding("utf8");
@@ -1810,9 +1842,10 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // port with nothing a handshake could ever match, reopening the
   // dual-cockpit hazard.
   //
-  // Bind stays the FIRST thing tried per candidate: that is what lets two
-  // launches racing at start settle on one winner quickly, the winner's
-  // identity published (below) before it can block inside its own gather().
+  // Bind stays ahead of any handshake per candidate — only heldFailure()'s
+  // bare connect precedes it: that is what lets two launches racing at start
+  // settle on one winner quickly, the winner's identity published (below)
+  // before it can block inside its own gather().
   // But a successful bind is not the end of the story — once this process
   // holds a candidate, the REST of the window still gets checked for a
   // live cockpit that landed further along, exactly the shape a departed
@@ -1829,14 +1862,15 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   for (let i = 0; i < candidates.length; i++) {
     const candidate = candidates[i];
     const attempt = createBoardServer(stateDir);
-    const failure = await bindFailure(attempt, candidate);
+    // --port 0 asks the kernel for a port nobody holds; there is nothing to dial.
+    const failure = (candidate === 0 ? null : await heldFailure(candidate)) ?? await bindFailure(attempt, candidate);
     if (!failure) {
       const rest = scannable ? candidates.slice(i + 1) : [];
       const holders = await Promise.all(rest.map((p) => probeCockpitWorkspace(p)));
       const matchAt = holders.indexOf(instance.workspace);
       if (matchAt === -1) { server = attempt; break; }
       attempt.close();
-      const url = `http://localhost:${rest[matchAt]}/`;
+      const url = `http://${COCKPIT_HOST}:${rest[matchAt]}/`;
       console.error(`${NAME}: cockpit already running for this workspace on ${url}`);
       // Nothing is opened here, --open or not. This cockpit was
       // already running when this launch arrived, so its tab was the business
@@ -1852,14 +1886,15 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
       process.exit(0);
     }
     // Only a port that is TAKEN is a candidate for any of the below. EACCES
-    // on a privileged port, EADDRNOTAVAIL on an unusable address: those are
-    // faults of their own, and scanning past them would bury each one under
-    // an exhausted-range message at the end that names the wrong problem.
+    // on a privileged port, EADDRNOTAVAIL on an unusable address, a pre-bind
+    // connect that fails with anything but ECONNREFUSED: those are faults of
+    // their own, and scanning past them would bury each one under an
+    // exhausted-range message at the end that names the wrong problem.
     if (failure.code !== "EADDRINUSE") die(failure.message);
     if (!scannable) die(`port ${candidate} in use — pass --port <n>`);
     const holder = await probeCockpitWorkspace(candidate);
     if (holder === instance.workspace) {
-      const url = `http://localhost:${candidate}/`;
+      const url = `http://${COCKPIT_HOST}:${candidate}/`;
       console.error(`${NAME}: cockpit already running for this workspace on ${url}`);
       // Already running, so nothing opens — the same rule as the arm above.
       process.exit(0);
@@ -1894,11 +1929,11 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   //
   // Announce the port we GOT, not the one we asked for. They differ for the
   // one value `--port 0` newly permits: listen(0) binds an ephemeral port, so
-  // echoing the request prints — and --opens — http://localhost:0, which
+  // echoing the request prints — and --opens — http://127.0.0.1:0, which
   // reaches nothing while the board sits on a port nobody was told.
   // address() is only populated once listening, hence only here.
   const bound = server.address().port;
-  console.error(`${NAME}: cockpit on http://localhost:${bound}  (interval ${interval}s)`);
+  console.error(`${NAME}: cockpit on http://${COCKPIT_HOST}:${bound}  (interval ${interval}s)`);
 
   // Publish identity the instant this port is ours — before the
   // first tick, which is the one that can be slow (gather() shells out to
@@ -1948,7 +1983,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // return only when that browser exits, so a launcher awaited any earlier
   // could hold the first tick back for the whole session. openBrowser()
   // never throws; a launcher that is missing or fails is one warning line.
-  if (open) await openBrowser(`http://localhost:${bound}/`);
+  if (open) await openBrowser(`http://${COCKPIT_HOST}:${bound}/`);
   await new Promise(() => {}); // run until signalled
 }
 
