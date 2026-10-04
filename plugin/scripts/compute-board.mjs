@@ -21,14 +21,14 @@
 // carries a PR-bound signal —
 // an unsignaled row (no mention, no PR-bound member, no review=/reviewed=)
 // still gets pr: null here while fleet-tick.mjs's own row-key fallback keys
-// it to its ticket number regardless; see the amendment note below. The
+// it to its ticket number regardless; see the same paragraph below. The
 // regex is all this file takes from it: the tick's I/O and main() never run
 // here, main() being guarded on argv[1].
 import { assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
 import { parseToken, HALT_CAUSES } from "./ledger-grammar.mjs";
 import { PR_MENTION, REVIEWED, latestFinisherAttempts } from "./fleet-tick.mjs";
 
-// A ledger row is freeform, controller-authored text. Two real examples:
+// A ledger row is freeform, controller-authored text. Two example shapes:
 //   #<n> impl-<n>=PR#<m> → PR#<m> → MERGED 73b356de
 //   #<n> impl-<n>=PR#<m> → PR#<m> · fix-pr-<m> · ruled:6-applies · held-behind:#<k>
 // Extract by token, never by position — the controller reorders and appends
@@ -159,8 +159,8 @@ export function parseRow(row) {
   const finishers = []; // well-formed finisher tokens, for the row's PR below
   let anyImpl = false;
   let prMember = false;
-  let review = false; // any review= token: a PR-bound signal (amendment 2a)
-  let reviewLive = false; // one not settled `=failed` (amendment 5a)
+  let review = false; // any review= token: a PR-bound signal on a row with no impl token
+  let reviewLive = false; // one not settled `=failed`: a live review
   let reviewed = false;
   let reviewedHead = null;
   let runners = [];

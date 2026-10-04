@@ -216,7 +216,8 @@ function argSpendDir() {
 // rather than truncating. Here that failure is indistinguishable from an
 // unreachable tool: the read degrades to the caller's empty default and the
 // cockpit is served a BLANK board at HTTP 200 with only a stderr line — the
-// same symptom as before, which the raised ceiling moved up from the pipe buffer rather than removed.
+// same blank-board symptom the old pipe-buffer limit produced, which the raised
+// ceiling moved up rather than removed.
 // The ledger is append-mostly and shared by every fleet script, so the ceiling
 // arms itself over the life of a run and gives no second warning. Bounded, not
 // Infinity: a runaway child should still be stopped rather than allowed to
@@ -393,7 +394,7 @@ function hitLimit(parsed, limit) {
 // not a PR comes back null beside a NOT_FOUND error, and gh exits 1 with the
 // whole body on stdout (measured 2026-09-26, gh 2.101.0, which also names
 // the number on stderr). Refusing that body would let one such row — a
-// typo, or an amendment-2a row keyed by an issue number — put every other
+// typo, or a row with no impl token keyed by an issue number — put every other
 // row PR back in REVIEW on every tick. A null alias reads as not merged,
 // which is what a failed read means for that one PR.
 //
@@ -1989,9 +1990,8 @@ export function faultText(e) {
 //
 // A single writeSync call can also short-write — return the count it
 // managed and throw nothing at all — or throw EAGAIN outright, the same
-// failure die() (arg.mjs) has a bounded retry loop for, and staleness.mjs's
-// verdict() too. board.mjs has exactly one
-// writeSync call site — this one — and arg.mjs's die() and
+// failure arg.mjs's writeAll() has a bounded retry loop for. board.mjs has
+// exactly one writeSync call site — this one — and arg.mjs's die() and
 // staleness.mjs's verdict() use the shared writeAll() while
 // ci-state.mjs has no emit() of its own, so fault() is now the only script-level
 // function left hand-rolling this loop directly: it carries the largest
