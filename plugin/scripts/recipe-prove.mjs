@@ -329,7 +329,7 @@ function writeCache(cache, recipe, repo) {
       throw noVerdict(e.message);
     }
     if (!probe.ok) throw noVerdict(`git started but does not run: \`git --version\` did not exit 0${probe.err ? `: ${probe.err}` : " and wrote nothing to stderr"}`);
-    const said = (r.stderr || r.stdout).trim();
+    const said = r.stderr.trim() || r.stdout.trim();
     throw notProven(`the Recipe cache reader refuses what was proven: ${said || `it wrote nothing and exited with status ${r.status}`}`);
   }
 }
