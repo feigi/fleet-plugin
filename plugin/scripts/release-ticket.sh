@@ -1697,8 +1697,8 @@ else
     case $race_rc in
       0) ;;
       2)
-        done_branch=true
-        halt "$branch $wt_restore_why, and restoring it at $tip failed — the branch is deleted, restore it with: $wt_repair: $(printf '%s' "$wt_err" | tr '\n' ' ')"
+        [ -n "$wt_now" ] || done_branch=true
+        halt "$branch $wt_restore_why, and restoring it at $tip failed — $wt_restore_out: $(printf '%s' "$wt_err" | tr '\n' ' ')"
         ;;
       *) halt "$branch $wt_restore_why — branch restored, not deleted" ;;
     esac

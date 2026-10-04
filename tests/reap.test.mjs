@@ -64,6 +64,9 @@ const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8"
 const REAL_AWK = execFileSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).trim();
 const REAL_PASTE = execFileSync("sh", ["-c", "command -v paste"], { encoding: "utf8" }).trim();
 const REAL_GREP = execFileSync("sh", ["-c", "command -v grep"], { encoding: "utf8" }).trim();
+// And of `sleep`, which `wt_recheck_delete` waits with, for the fixture that
+// makes it fail.
+const REAL_SLEEP = execFileSync("sh", ["-c", "command -v sleep"], { encoding: "utf8" }).trim();
 
 /** Empty commit on the current branch; returns its sha. */
 const commit = (w, msg) => {
@@ -71,8 +74,11 @@ const commit = (w, msg) => {
   return git(w, "rev-parse", "HEAD");
 };
 
-/** Bare origin + working clone with one commit on main. Returns the clone dir. */
-function repo(t, dir = "w") {
+/**
+ * Bare origin + working clone with one commit on main. Returns the clone dir.
+ * `objectFormat` is the hash both repositories use.
+ */
+function repo(t, dir = "w", objectFormat = "sha1") {
   // realpathSync: macOS resolves /var through /private, so a path built from
   // the raw mkdtemp result would never string-equal what git itself reports
   // in `worktree list --porcelain` (git canonicalises). Resolved once here,
@@ -81,7 +87,7 @@ function repo(t, dir = "w") {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = join(root, "origin.git");
   const w = join(root, dir);
-  execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", "--bare", origin], { env: ENV });
+  execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", "--bare", `--object-format=${objectFormat}`, origin], { env: ENV });
   execFileSync("git", ["clone", "-q", origin, w], { env: ENV });
   commit(w, "root");
   git(w, "branch", "-M", "main");
@@ -2203,8 +2209,18 @@ test("a [gone] branch that gains a commit after its tip is read is kept, and the
  * real `update-ref -d` runs — between the holder check and the delete — and
  * then lets the delete through. `restoreFails` also fails the restore, the
  * create-only `update-ref <ref> <tip> <null>` that follows a caught race.
+ * `recreateBeforeRestore` instead lets the real restore run, after something
+ * else has recreated the branch at `origin/main`'s commit, so it fails the way
+ * git fails a create-only write over an existing ref.
  */
-function raceShim(t, raceWt, { restoreFails = false } = {}) {
+function raceShim(t, raceWt, { restoreFails = false, recreateBeforeRestore = false } = {}) {
+  const onRestore = recreateBeforeRestore
+    ? `${SHIM_FIRED}
+  "${REAL_GIT}" update-ref refs/heads/feature/raced "$("${REAL_GIT}" rev-parse refs/remotes/origin/main)"
+  false`
+    : restoreFails
+      ? "true"
+      : "false";
   return failOnlyShim(
     t,
     `{ if [ "$1" = update-ref ] && [ "$3" = -d ]; then
@@ -2212,7 +2228,7 @@ function raceShim(t, raceWt, { restoreFails = false } = {}) {
   "${REAL_GIT}" worktree add -q '${raceWt}' feature/raced >/dev/null 2>&1 || exit 99
   false
 elif [ "$1" = update-ref ] && [ $# -eq 4 ]; then
-  ${restoreFails ? "true" : "false"}
+  ${onRestore}
 else
   false
 fi; }`,
@@ -2267,6 +2283,55 @@ test("a restore that fails after the race is kept with the path, the tip, git's 
   assert.equal(branchExists(w, "feature/raced"), false, "the restore really did fail");
 });
 
+test("a restore that finds the branch recreated since the delete leaves it as it is and says so (#2275)", (t) => {
+  // The restore is create-only, so it never overwrites a ref someone else made
+  // in the meantime, and the keep must not claim the branch is deleted or hand
+  // out a repair command that would fail the same way.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/raced", "merged work");
+  const tip = git(w, "rev-parse", "feature/raced");
+  const other = git(w, "rev-parse", "refs/remotes/origin/main");
+  assert.notEqual(other, tip, "the recreated branch must sit at a different commit");
+  const raceWt = join(w, ".worktrees", "race");
+  const bin = raceShim(t, raceWt, { recreateBeforeRestore: true });
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assertShimFired(bin, "the branch must be recreated right before the restore", new RegExp(`^update-ref refs/heads/feature/raced ${tip} 0{40}$`, "m"));
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, []);
+  const kept = json.kept.filter((k) => k.branch === "feature/raced");
+  assert.equal(kept.length, 1, JSON.stringify(json.kept));
+  assert.match(
+    kept[0].reason,
+    new RegExp(`^feature/raced was checked out in worktree ${raceWt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} during the delete, and restoring it at ${tip} failed — the branch now exists at ${other}, recreated by something else and left as it is: .*reference already exists`),
+  );
+  assert.doesNotMatch(kept[0].reason, /the branch is deleted|restore it with/);
+  assert.equal(git(w, "rev-parse", "refs/heads/feature/raced"), other, "the commit someone else put there is still the branch's tip");
+});
+
+test("in a SHA-256 repository the restore after the race puts the branch back (#2275)", (t) => {
+  // The create-only restore passes a null id as the old value, and git rejects
+  // one of the wrong width — a 40-zero id never matches a SHA-256 repository.
+  const w = repo(t, "w", "sha256");
+  assert.equal(git(w, "rev-parse", "--show-object-format"), "sha256");
+  mergedGoneBranch(w, "feature/raced", "merged work");
+  const tip = git(w, "rev-parse", "feature/raced");
+  assert.equal(tip.length, 64);
+  const raceWt = join(w, ".worktrees", "race");
+  const bin = raceShim(t, raceWt);
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assertShimFired(bin, "the add must land between the holder check and the delete", /^update-ref --no-deref -d refs\/heads\/feature\/raced /m);
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, []);
+  assert.deepEqual(json.kept, [
+    { branch: "feature/raced", reason: `feature/raced was checked out in worktree ${raceWt} during the delete — branch restored, not deleted` },
+  ]);
+  assert.equal(git(w, "rev-parse", "refs/heads/feature/raced"), tip);
+});
+
 test("a worktree list that fails right after the delete restores and keeps the branch (#2275)", (t) => {
   // The re-read after the delete is the only thing that could see a worktree
   // the delete broke. One that cannot run has ruled nothing out, so the
@@ -2293,11 +2358,13 @@ test("a worktree list that fails right after the delete restores and keeps the b
 
 test("an add that never finishes initializing times out, and the branch is restored and kept naming it (#2275)", (t) => {
   // While `git worktree add` runs, git lists the new worktree `detached` and
-  // `locked initializing`, with no `branch` line yet — so a holder check
-  // there answers "not held" for an add that has already resolved the
-  // branch. The re-read after the delete waits that entry out; a lock that
-  // never clears (an add killed mid-way) runs the wait out and restores.
-  // Deterministic: the lock is set by hand and nothing clears it.
+  // `locked initializing`, with no `branch` line yet. The re-read after the
+  // delete waits that entry out so the holder check can name the add once it
+  // settles; a lock that never clears (an add killed mid-way) runs the wait
+  // out and restores. This fixture is a hand-locked `--detach` worktree whose
+  // `HEAD` resolves, which is not the mid-add shape: the real one has no admin
+  // `HEAD` yet and reads as "cannot tell". Deterministic: the lock is set by
+  // hand and nothing clears it.
   const w = repo(t);
   mergedGoneBranch(w, "feature/merged", "merged work");
   const tip = git(w, "rev-parse", "feature/merged");
@@ -2314,6 +2381,33 @@ test("an add that never finishes initializing times out, and the branch is resto
     {
       branch: "feature/merged",
       reason: `feature/merged could not be checked after the delete: worktree ${stale} was still being added (locked initializing) when the wait ran out — branch restored, not deleted`,
+    },
+  ]);
+  assert.equal(git(w, "rev-parse", "refs/heads/feature/merged"), tip);
+});
+
+test("a sleep that fails during the wait is reported as a wait that could not happen, not one that ran out (#2275)", (t) => {
+  // Same hand-locked `initializing` entry as the time-out above, so the re-read
+  // reaches the wait; the shim makes `sleep 0.1` fail on its first call. The
+  // branch is still restored and kept — only the reason differs.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const tip = git(w, "rev-parse", "feature/merged");
+  const stale = join(w, "..", "stale-add");
+  git(w, "worktree", "add", "-q", "--detach", stale, "main");
+  git(w, "worktree", "lock", "--reason", "initializing", stale);
+  const bin = toolFailShim(t, "sleep", REAL_SLEEP, `[ "$1" = 0.1 ]`, ["sleep: simulated failure"], 1);
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assertToolShimFired(bin, "sleep", "the wait must have called the shimmed sleep", /^0\.1$/m);
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, []);
+  const kept = json.kept.filter((k) => k.branch === "feature/merged");
+  assert.deepEqual(kept, [
+    {
+      branch: "feature/merged",
+      reason: `feature/merged could not be checked after the delete: could not wait for worktree ${stale} to finish being added (locked initializing) — branch restored, not deleted`,
     },
   ]);
   assert.equal(git(w, "rev-parse", "refs/heads/feature/merged"), tip);

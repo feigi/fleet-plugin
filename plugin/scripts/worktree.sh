@@ -489,13 +489,17 @@ wt_init_waits=20
 # after the delete sees it.
 #
 # While an add runs, git lists its worktree `detached` and `locked
-# initializing`, with no `branch` line, so `wt_holding` answers "not held" for
-# an add that has resolved the branch but not yet written `HEAD`. So the
-# listing is re-read while any such entry is listed, up to `wt_init_waits`
-# times; a wait that runs out, or a `sleep` that fails, restores the ref.
-# `wt_holding` itself is not taught to read that entry as "cannot tell"
-# before the delete: every concurrent `claim-ticket.sh` add is listed that
-# way while it runs, and that would halt deletes under ordinary fleet churn.
+# initializing`, with no `branch` line. Measured, git 2.50.1: while the add has
+# resolved the branch but not yet written the worktree's `HEAD`, `wt_holding`
+# answers "cannot tell" (the admin dir has no `HEAD` yet), so a check made
+# then would restore the ref under rc 3 with a reason that names no holder.
+# So the listing is re-read while any such entry is listed, up to
+# `wt_init_waits` times, until the add settles and `wt_holding` can name it; a
+# wait that runs out, or a `sleep` that fails, restores the ref.
+# `wt_holding` itself has no rule for a `locked initializing` entry: every
+# concurrent `claim-ticket.sh` add is listed that way while it runs, and
+# reading all of them as "cannot tell" would halt deletes under ordinary fleet
+# churn.
 #
 # The restore is create-only — the null id as the old value — so it never
 # overwrites a ref someone else created since. Measured, git 2.50.1: it fully
@@ -505,8 +509,12 @@ wt_init_waits=20
 # 0: no worktree holds the branch; the delete stands.
 # 1: a worktree held it — `wt_holder`/`wt_holder_how` as `wt_holding` sets
 #    them — and the ref is restored.
-# 2: the restore failed — `wt_err` carries git's message and `wt_repair` the
-#    command that restores the ref by hand.
+# 2: the restore failed — `wt_err` carries git's message. `wt_restore_out` says
+#    what state the branch is left in, as a clause to follow the failed
+#    restore in a message: deleted, with `wt_repair` the command that restores
+#    the ref by hand, or recreated by something else since the delete, in
+#    which case `wt_now` is the commit it resolves to and nothing was
+#    overwritten. `wt_now` is empty when the branch is deleted.
 # 3: no holder could be ruled out — an add still in progress when the wait
 #    ran out (`wt_holder` names that entry), a holder check that could not
 #    tell, or a listing that would not re-read — and the ref is restored.
@@ -517,6 +525,8 @@ wt_init_waits=20
 # shellcheck disable=SC2034
 wt_recheck_delete() {
   wt_restore_why=
+  wt_restore_out=
+  wt_now=
   wt_rd_waits=0
   while :; do
     if ! wt_listing; then
@@ -550,9 +560,15 @@ EOF
       esac
       break
     fi
-    if [ "$wt_rd_waits" -ge "$wt_init_waits" ] || ! sleep 0.1; then
+    if [ "$wt_rd_waits" -ge "$wt_init_waits" ]; then
       wt_holder=$wt_rd_init
       wt_restore_why="could not be checked after the delete: worktree $wt_rd_init was still being added (locked initializing) when the wait ran out"
+      wt_rd_rc=3
+      break
+    fi
+    if ! sleep 0.1; then
+      wt_holder=$wt_rd_init
+      wt_restore_why="could not be checked after the delete: could not wait for worktree $wt_rd_init to finish being added (locked initializing)"
       wt_rd_rc=3
       break
     fi
@@ -569,6 +585,12 @@ EOF
   wt_repair="git update-ref $1 $2 $wt_rd_null"
   if ! wt_err=$(git update-ref "$1" "$2" "$wt_rd_null" 2>&1); then
     [ -n "$wt_err" ] || wt_err="git update-ref failed"
+    if wt_now=$(git rev-parse -q --verify "$1" 2>/dev/null); then
+      wt_restore_out="the branch now exists at $wt_now, recreated by something else and left as it is"
+    else
+      wt_now=
+      wt_restore_out="the branch is deleted, restore it with: $wt_repair"
+    fi
     return 2
   fi
   wt_err=

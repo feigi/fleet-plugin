@@ -1446,7 +1446,7 @@ for b in $gone_branches; do
     case $race_rc in
       0) ;;
       2)
-        keep "$b" "$b $wt_restore_why, and restoring it at $tip failed — the branch is deleted, restore it with: $wt_repair: $(printf '%s' "$wt_err" | tr '\n' ' ')"
+        keep "$b" "$b $wt_restore_why, and restoring it at $tip failed — $wt_restore_out: $(printf '%s' "$wt_err" | tr '\n' ' ')"
         continue
         ;;
       *)

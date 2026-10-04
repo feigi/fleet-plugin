@@ -76,14 +76,19 @@ The invariant is **never destroy a commit that exists nowhere else**.
 ## Consequences
 
 - **Accepted residual window, measured:** between the fresh worktree re-read
-  and the `update-ref` call, a concurrent checkout can end up holding a
-  deleted branch. Measured (git 2.50.1): the worktree's branch goes unborn
-  (`git status -sb` reads "No commits yet"), and a commit made there after
-  the delete becomes a parentless root — history is severed, but the
-  original commit is not lost, only unreachable from the new branch. A
-  commit made there before the delete moves the ref off `$tip`, and the
-  compare-and-swap refuses. Git has no lock that stops a `worktree add` of
-  an existing branch, so this script cannot close the window.
+  and the `update-ref` call, a concurrent checkout can land on the branch.
+  Git has no lock that stops a `worktree add` of an existing branch, so this
+  script cannot close the window. Measured (git 2.50.1): the add moves no ref,
+  so the compare-and-swap succeeds and the worktree is left on a deleted
+  branch — it goes unborn (`git status -sb` reads "No commits yet"), and a
+  commit made there before the branch is back would become a parentless root:
+  history severed, but the original commit is not lost, only unreachable from
+  the new branch. Since #2275 `wt_recheck_delete` re-reads the listing right
+  after the delete and restores the branch at `$tip`, so that worktree
+  resolves its `HEAD` again; what the window still costs is a restore that
+  fails, which both scripts report with the repair command. A commit made
+  there before the delete moves the ref off `$tip`, and the compare-and-swap
+  refuses.
 - **Two holds `-D` refused are still outside that reader** (measured, git
   2.50.1): a branch listed in a `rebase --update-refs` run's
   `rebase-merge/update-refs`, and a bisect's starting branch in a worktree
