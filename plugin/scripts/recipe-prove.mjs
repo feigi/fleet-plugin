@@ -38,16 +38,18 @@
 // — <workspace> being the directory holding the repository's common git dir,
 // the place derive-testcmd.sh reads it from — and then read back through
 // derive-testcmd.sh for both fields. A cache the reader refuses is rolled
-// back to whatever stood before, so the reader stays the one authority on
-// what a usable cache is. A failed proof never touches an existing cache.
+// back to whatever stood before, as is one whose read-back is no verdict, so
+// the reader stays the one authority on what a usable cache is. A failed
+// proof never touches an existing cache.
 //
 // Exit 0: proven, cache written (its path and contents on stdout).
 // Exit 1: NOT PROVEN — no cache written; the reason on stderr.
 // Exit 2: no verdict on the proof — it could not be attempted (usage, not a
 //         repository, origin/main missing, the worktree could not be made), or
 //         a git or filesystem fault stopped it before the cache was settled
-//         (a git command could not be started; the cache or its temp file
-//         could not be written).
+//         (a git command could not be started, the reader's own git
+//         included, or the reader's `sh`; the cache or its temp file could
+//         not be written).
 
 import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
@@ -212,7 +214,11 @@ function prove(o, wt, logs) {
 }
 
 // Write, then read back through the one reader. A cache it refuses is undone:
-// the prior bytes restored, or the file removed when none stood before.
+// the prior bytes restored, or the file removed when none stood before. The
+// cache is undone just the same when the read-back is no verdict: an `sh` that
+// could not be started read nothing, and the reader runs git itself and reads
+// a git that will not start as no repository at all, so its refusal is a
+// verdict on what was proven only while git still starts.
 function writeCache(cache, recipe, repo) {
   mkdirSync(dirname(cache), { recursive: true });
   const prior = existsSync(cache) ? readFileSync(cache) : null;
@@ -226,11 +232,17 @@ function writeCache(cache, recipe, repo) {
   }
   for (const field of ["install", "test"]) {
     const r = spawnSync("sh", [READER, repo, field], { env: ENV, encoding: "utf8" });
-    if (r.status !== 0 || r.stdout.replace(/\n$/, "") !== recipe[field]) {
-      if (prior === null) unlinkSync(cache);
-      else writeFileSync(cache, prior);
-      throw notProven(`the Recipe cache reader refuses what was proven: ${(r.stderr || r.stdout).trim()}`);
+    if (r.status === 0 && r.stdout.replace(/\n$/, "") === recipe[field]) continue;
+    if (prior === null) unlinkSync(cache);
+    else writeFileSync(cache, prior);
+    if (r.error && !r.pid) throw cannot(`could not start sh to read the Recipe cache back: ${r.error.message}`);
+    try {
+      git(["--version"]);
+    } catch (e) {
+      if (!(e instanceof Refusal)) throw e;
+      throw cannot(`${e.message} — the Recipe cache reader runs git, so its refusal is no verdict on what was proven`);
     }
+    throw notProven(`the Recipe cache reader refuses what was proven: ${(r.stderr || r.stdout).trim()}`);
   }
 }
 
