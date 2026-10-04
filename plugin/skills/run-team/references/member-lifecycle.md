@@ -1,6 +1,6 @@
 # Member lifecycle: naming, fresh context, recovery
 
-Why member name load-bearing, why every member single-use, how killed/idle/truncated member recovered. Assertions these justify live in SKILL.md's "Rules that fail silently", Phase 3, Reviewers, Failure handling sections; evidence here.
+Why member name load-bearing, why every member single-use, how a member's job outcome (`completed`/`failed`/`cancelled`) and peer liveness (`running`/`idle`/`parked`) decide its recovery. Assertions these justify live in SKILL.md's "Rules that fail silently", Phase 3, Reviewers, Failure handling sections; evidence here.
 
 ## Every member is named
 
@@ -12,7 +12,7 @@ The name is the ledger token and the hub address (`hub send <name>`, `agent://<n
 
 ## Capability is not permission
 
-Members inherit standing *"Do not call the AgentTool unless the user requested it."* Else reviewer declines to dispatch specialists — correctly — you get thinner solo review, no error, no signal. Having tool (capability) not authorization to use it (permission); reviewer prompt must state full specialist set IS requested work.
+Holding the dispatch tool does not authorize using it: a reviewer not told the fan-out is requested work declines to dispatch specialists, and you get thinner solo review, no error, no signal. Having tool (capability) not authorization to use it (permission); reviewer prompt must state full specialist set IS requested work.
 
 ## The coordination contract
 

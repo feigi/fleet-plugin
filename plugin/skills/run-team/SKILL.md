@@ -1271,12 +1271,10 @@ for d in "$HOME/.omp/agent/sessions/$PROJECT_DIR"/*/; do
 done
 ```
 
-`encodeProjectDir` (`scripts/board.mjs`) encodes the cwd the way omp's own
-session directory naming does — every non-alphanumeric character becomes
-`-`, with a leading dot segment's dot PRESERVED rather than folded into the
-dash run (`member-record.test.mjs`'s regression case: `.claude` becomes
-`-.claude`, not `--claude`) — and hand-guessing that path is why the fleet's
-own panel once rendered nothing here. The trailing `/` on the glob matters:
+`encodeProjectDir` (defined in `scripts/member-record.mjs`, re-exported by
+`scripts/board.mjs`) encodes the cwd exactly as omp names its session
+directories — see its comment for the rule — and hand-guessing that path is why
+the fleet's own panel once rendered nothing here. The trailing `/` on the glob matters:
 the same encoded-cwd directory also holds this cwd's own top-level session
 transcripts as loose FILES sibling to the per-session directories, and a
 glob without it would try to scrape one of those as if it were a session.
@@ -1737,10 +1735,9 @@ It blocks, then prints one line. Which line it is, is the whole protocol:
   Run the tick above **with `--fold-unchanged`** and act on what it prints.
   Then arm the beat again.
 - `… Ns of Ms remain → re-issue this command now, do not end your turn` — no
-  command blocks for a whole interval (omp backgrounds one at
-  60s, which is why the
-  CI gate tells you to re-issue `gh run watch`). Issue it again. That is still
-  one blocking call per turn, never an idle turn.
+  command blocks for a whole interval (omp backgrounds one at 60s, which is
+  why the CI gate holds its wait in one `eval` cell polling `gh run view`).
+  Issue it again. That is still one blocking call per turn, never an idle turn.
 
 The interval doubles while the fleet asks for nothing and stops at `--ceiling`,
 so a quiet night costs ~26 wakes instead of ~96. **The ceiling is a real bound,
@@ -2981,8 +2978,9 @@ its own survivors, so the zero is what tells the tick no fix-applier is owed —
 and it reaches a finisher through the same gate as any other PR.
 
 **Authorize the fan-out explicitly.** State that the full specialist set IS the
-requested work — otherwise the reviewer inherits the standing "do not call the
-AgentTool unless requested" and silently downgrades to a thinner solo review.
+requested work — holding the dispatch tool is not authorization to use it, and
+a reviewer not told so declines the fan-out and silently downgrades to a
+thinner solo review.
 Nothing computes the count here, so apply the heuristic yourself: two or three
 specialists for annotation-only or single-file, the full set for production code.
 See references/member-lifecycle.md.

@@ -44,12 +44,11 @@ const CONSECUTIVE = [
 ];
 const ORPHAN = [result(["orphan", 100]), { kind: "assistant", cacheWrite: 50, tools: [] }];
 
-test("CONSECUTIVE result turns accumulate — that, not the multi-block turn, is the real shape", () => {
-  // Regression. Parallel tool calls do NOT arrive as one user turn carrying two
-  // tool_result blocks: across 45,062 real result-bearing turns, none carried
-  // two. They arrive as N single-result turns in a row (4,087 occurrences).
-  // Replacing `pending` per result turn dropped every batch but the last —
-  // 9.1% of all attributions — and made the proportional split above dead code.
+test("CONSECUTIVE result entries accumulate — that, not one multi-result entry, is the real shape", () => {
+  // Regression: parallel tool calls arrive as N single-result entries in a row,
+  // not as one entry carrying several results (see the attributeTools comment).
+  // Replacing `pending` per result entry dropped every batch but the last, and
+  // made the proportional split unreachable.
   const tools = attributeTools(CONSECUTIVE);
   const by = Object.fromEntries(tools.map((t) => [t.tool, t.cacheWrite]));
   assert.equal(by.Read, 750);

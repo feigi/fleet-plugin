@@ -60,7 +60,7 @@ test("both member-naming lists name every member, the finisher included", () => 
     assert.deepEqual(
       missing,
       [],
-      `${label}'s member-naming list no longer names ${missing.join(", ")} — a controller reading it names that member something else, and a misnamed member loses the Agent tool with no error`,
+      `${label}'s member-naming list no longer names ${missing.join(", ")} — a controller reading it names that member something else, and a misnamed member is invisible to the ledger and unreachable by \`hub send\``,
     );
   }
 });
