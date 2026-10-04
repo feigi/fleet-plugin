@@ -22,17 +22,20 @@ check:
 ```
 
 That run writes a verdict for a member whose transcript it finds under the
-named `session`: `tier-ok=`, or `tier-mismatch=` on a failure. With no
-transcript it records `tier-unverifiable=` (exit 3) only for a member settled
+named `session`: `tier-ok=`, or on a failure a tier-mismatch verdict (a live
+member is settled `tier-mismatch`; one already settled some other way carries
+a `tier-mismatch=` token on its row). With no transcript it records
+`tier-unverifiable=` (exit 3) only for a member settled
 `killed` or `released` whose `session` is an existing directory. Every other
 case with no transcript exits 2 and writes nothing: a live member, a member
 settled `PR#M`, `bailed` or `tier-mismatch` (it ran, so its transcript exists
 and the `session` is the wrong directory), and a `session` that is omitted,
-empty, missing or not a directory. The exit-2 text for a settled member names
+empty, missing or not a directory. The exit-2 text for a member settled
+`PR#M`, `bailed` or `tier-mismatch` under an existing session directory names
 the recovery: name the session directory that dispatched it. `tier-ok=` and
-`tier-unverifiable=` clear the hold directly. `tier-mismatch=` on a closed
-ticket is then dropped by the mismatch lift. Once the session that holds the
-transcript is named, one run is enough.
+`tier-unverifiable=` clear the hold directly. A tier-mismatch verdict on a
+closed ticket is then dropped by the mismatch lift. Once the session that
+holds the transcript is named, one run is enough.
 
 The check also never mattered only to its own ticket. The dispatch-time tier
 check (ADR 0005, layer 2) catches a definition, `modelRoles` or harness
