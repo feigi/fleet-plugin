@@ -804,30 +804,30 @@ install that rewrites the tree in a throwaway worktree corrupts it for everyone.
 No cache is phase 0's Recipe derivation step not having run; an invalid one is
 its re-derive-once rule.
 
-**Materialize the isolation envelope as a file, not a briefing.** The runner is
-tracked at the repo root since #55, so every checkout has one; it derives its
-ports from the worktree's own `<N>-slug` directory name (so collisions stay
-impossible) and materializes the current runner from the one emitter rather than
-carrying a copy of it. Brief members with `./agent-test
-<file-or-dir>` and nothing else — anyone who finds the worktree finds the
-runner, including grandchildren you never dispatched. A directory works too and
-expands to the test files under it; one holding none refuses rather than passing
-vacuously, so a mistyped file or directory path cannot come back green. See
+**Materialize the isolation envelope as a file, not a briefing.** The claim
+writes the runner, `agent-test`, into the fresh worktree it creates: an exec of
+the Recipe's Test entrypoint that exports one port triple derived from `<N>`
+(so collisions stay impossible), kept out of `git status` through the
+repository's exclude file. A repository that tracks its own `agent-test` keeps
+it byte-identical, with whatever isolation that repository built. Brief members
+with `./agent-test` and nothing else — anyone who finds the worktree finds the
+runner, including grandchildren you never dispatched. Its arguments land after
+the Test entrypoint, so what one may name — a test file, a test name — is that
+entrypoint's to say, and nothing in the runner refuses one that selects no
+test: a run of zero tests is a failed run, not a pass. See
 references/isolation.md.
 
-**A reused worktree may lack the runner** — no longer here, and still can
-elsewhere. `claim-ticket.sh` used to write `agent-test` only when it claimed a
-*fresh* worktree, so a worktree carried over from a prior run, or an already-open
-PR's worktree you sent a rebaser/resolver into, had no `./agent-test` and the
-member stalled on a missing script (observed with a rebase-resolver in a
-prior-run worktree). #55 tracked the runner, so any worktree checked out from
-`origin/main` now carries it. A tree that is NOT a checkout — a `git archive`
-snapshot, a `cp -R` subset — still has whatever was copied into it, and a repo
-that tracks no runner never had one: there, tell the member the runner is absent
-and to run docker-free suites directly — the Recipe's Test entrypoint
-(`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test` prints it) only
-when it brings up no shared stack to collide on, else that repo's own stack-free
-command.
+**A reused worktree may lack the runner.** `claim-ticket.sh` writes
+`agent-test` only into the fresh worktree it claims, so a tree no claim
+built — an already-open PR's worktree you sent a rebaser/resolver into,
+a `git archive` snapshot, a `cp -R` subset — has no `./agent-test`
+unless the repository tracks its own, and a member told to run one
+stalls on a missing script (observed with a rebase-resolver in a
+prior-run worktree). There, tell the member the runner is absent and to
+run docker-free suites directly — the Recipe's Test entrypoint
+(`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test` prints
+it) only when it brings up no shared stack to collide on, else that
+repo's own stack-free command.
 
 **A reused worktree may also be on the wrong COMMIT.** `git worktree add <path>
 <branch>` checks out the existing LOCAL branch and never consults the remote, so
@@ -2667,9 +2667,9 @@ a minute apart showed *different* mutants, so a member's report and any single
    because the dirt may be someone's only copy. Here nothing in it is anyone's.
    Nothing sweeps a leak for you either: `reap.sh`'s branchless sweep is bounded
    to the fleet's worktree home, so a tree under `<scratch>` is a `kept` entry
-   it reports and never collects. The tree you added is a checkout, so since #55
-   it carries the tracked `./agent-test` like any other — run either that or
-   `<testCmd>` in it, per **A reused worktree may lack the runner** above.
+   it reports and never collects. No claim built the tree you added, so it has
+   `./agent-test` only if the repository tracks one — run that or `<testCmd>`
+   in it, per **A reused worktree may lack the runner** above.
 
    **None of this licenses a write to the owned worktree.** Duty 1 is a read;
    you never restore that tree, because you never wrote to it. A controller
@@ -3465,10 +3465,10 @@ failures arrive as *wrong findings*, not errors:
   truncates, and the truncation reads as an absence): an invocation carrying an
   **absolute** path puts a member-unique string in argv, while one carrying
   repo-relative filenames is byte-identical across members. Which of the two you
-  get is not yours to choose — members are briefed on `./agent-test
-  <file-or-dir>` over the suite under `plugin/scripts/`, and that runner `exec`s
-  node with the file list its caller's shell already expanded, never a literal
-  glob. Clearing your own leftover process needs its PID, not a pattern.
+  get is not yours to choose — members are briefed on `./agent-test` with the
+  arguments the Test entrypoint takes, and the runner hands them on exactly as
+  its caller's shell expanded them. Clearing your own leftover process needs its
+  PID, not a pattern.
 
   Members report a stalled run to the controller instead of pattern-killing it,
   and the controller re-checks any measurement taken in the window.
@@ -3497,19 +3497,19 @@ failures arrive as *wrong findings*, not errors:
   It owns the object-store rule, the two-tree split, snapshot provisioning, and
   which suites a snapshot cannot validly run. Your only duty is to *not*
   contradict it.
-- **Filesystem isolation is not stack isolation.** A private copy of the tree and
-  a test command solve different problems; the compose project name comes from
-  the environment, not the working directory, so three agents on three snapshots
-  still collide on one postgres. "I'm on my own copy" is exactly the intuition
-  that skips the command — say both, every time. Which command depends on the
-  audience: a member in a worktree uses `./agent-test`; a specialist on a
-  snapshot does not — the runner that bootstrap materializes derives its
-  isolation triple from the directory name, and a snapshot is not a claimed
-  worktree, so every snapshot in the fleet gets the same fixed ports — and
-  takes the one `review-and-fix.md` hands out. The bootstrap itself now
-  SUCCEEDS there (the snapshot is a git repository since #1056), which is why
-  the reason to hand out a different command is the stack and not a
-  materialization failure. See references/isolation.md.
+- **Filesystem isolation is not stack isolation.** A private copy of the
+  tree and a test command solve different problems; the compose project
+  name comes from the environment, not the working directory, so three
+  agents on three snapshots still collide on one postgres. "I'm on my own
+  copy" is exactly the intuition that skips the command — say both, every
+  time. Which command depends on the audience: a member in a worktree
+  uses `./agent-test`; a specialist on a snapshot does not, and takes the
+  one `review-and-fix.md` hands out. Which runner the worktree holds
+  decides why: the runner a claim writes is untracked, so a `git archive`
+  snapshot never carries it; one the repository tracks does ride along,
+  but no claim exported ports into it — its isolation is whatever that
+  repository built, not one triple per snapshot. See
+  references/isolation.md.
 - **Scratchpad paths need two levels — the member's own partition, then one
   directory per child it dispatches — and nothing outside them.** An
   implementer partitions at `<scratch>/impl-<N>/`; the review side's partition
