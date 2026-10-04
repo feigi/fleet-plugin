@@ -794,13 +794,13 @@ test("createBoardServer serves board.json and the page", async () => {
 // The Host-header guard is a socket-level property, so these tests speak raw
 // HTTP over a real TCP connection to the loopback bind: a client library would
 // normalise or refuse the very headers under test (a missing Host, an
-// uppercase name). `host` undefined sends no Host line at all, which an
-// HTTP/1.1 request cannot do — Node answers that 400 itself — so that case
-// goes out as HTTP/1.0, the one version where Host is optional.
+// uppercase name). Every request goes out as HTTP/1.0, the one version where
+// Host is optional, so the no-Host case can be sent at all (Node answers an
+// HTTP/1.1 request without one 400 itself) and the reply is unchunked.
 async function rawStatus(port, path, host) {
-  const lines = [`GET ${path} HTTP/${host === undefined ? "1.0" : "1.1"}`];
+  const lines = [`GET ${path} HTTP/1.0`];
   if (host !== undefined) lines.push(`Host: ${host}`);
-  lines.push("Connection: close", "", "");
+  lines.push("", "");
   const socket = connect({ host: "127.0.0.1", port });
   let raw = "";
   socket.setEncoding("utf8");
@@ -809,21 +809,7 @@ async function rawStatus(port, path, host) {
   await new Promise((res, rej) => { socket.once("close", res); socket.once("error", rej); });
   const status = /^HTTP\/1\.[01] (\d{3})/.exec(raw);
   assert.ok(status, `no HTTP status line in ${JSON.stringify(raw)}`);
-  const head = raw.slice(0, raw.indexOf("\r\n\r\n"));
-  let body = raw.slice(head.length + 4);
-  // The server sets no content-length, so an HTTP/1.1 reply is chunked.
-  if (/transfer-encoding: chunked/i.test(head)) {
-    let decoded = "";
-    for (let i = 0; i < body.length;) {
-      const eol = body.indexOf("\r\n", i);
-      const size = parseInt(body.slice(i, eol), 16);
-      if (!size) break;
-      decoded += body.slice(eol + 2, eol + 2 + size);
-      i = eol + 2 + size + 2;
-    }
-    body = decoded;
-  }
-  return { status: Number(status[1]), body };
+  return { status: Number(status[1]), body: raw.slice(raw.indexOf("\r\n\r\n") + 4) };
 }
 
 async function withBoardServer(fn) {
@@ -837,7 +823,15 @@ async function withBoardServer(fn) {
 
 test("createBoardServer answers 403 to a Host that is not a loopback name, on every path", async () => {
   await withBoardServer(async (port) => {
-    for (const host of [`evil.example.com:${port}`, "rebound.attacker.test", `127.0.0.1.evil.test:${port}`, `localhost.evil.test:${port}`, `evil.test:${port}@localhost`, `[::2]:${port}`]) {
+    const foreign = [`evil.example.com:${port}`, "rebound.attacker.test", `127.0.0.1.evil.test:${port}`, `localhost.evil.test:${port}`, `evil.test:${port}@localhost`, `[::2]:${port}`];
+    // Names next to loopback that are not on the allow-list, and a loopback
+    // name embedded in a longer value: the allow-list is an exact match on a
+    // whole-value hostname, so none of these is a loopback Host.
+    const lookalikes = [`0.0.0.0:${port}`, "0.0.0.0", "::1", "evil.test:localhost", "x[::1]"];
+    // A loopback name with anything after it: only the end anchor of the Host
+    // grammar refuses these, so a regex that stops at the name accepts them.
+    const trailing = ["[::1]evil.test", `[::1]:${port}x`, "localhost/x", `localhost:${port}/x`, `localhost:${port} evil`, `127.0.0.1:${port} x`];
+    for (const host of [...foreign, ...lookalikes, ...trailing]) {
       for (const path of ["/board.json", "/board.html", "/", "/nope"]) {
         const r = await rawStatus(port, path, host);
         assert.equal(r.status, 403, `${host} ${path}`);

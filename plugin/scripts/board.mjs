@@ -1386,7 +1386,7 @@ const COCKPIT_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
 // A bracketed IPv6 literal or a bare name, then an optional `:port` — anything
 // else (userinfo, a second colon outside brackets, a path) is not a Host value.
 const HOST_HEADER = /^(\[[^\]]+\]|[^:[\]]+)(?::\d*)?$/;
-export function isCockpitHost(host) {
+function isCockpitHost(host) {
   const m = HOST_HEADER.exec(host ?? "");
   return m !== null && COCKPIT_HOSTNAMES.has(m[1].toLowerCase());
 }
