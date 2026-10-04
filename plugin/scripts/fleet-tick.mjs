@@ -915,8 +915,10 @@ const GIT_TIMEOUT_MS = 10_000;
 // Every gh spawn below is killed at this bound, so a gh that never answers is
 // a failed read on that call's own failure path — the open-PR read refuses the
 // tick, a probe leaves standing what it could not confirm, the claimed count
-// reads unknown — never a tick that does not return. 20 s, shortlist.mjs's own
-// gh bound. FLEET_TICK_GH_TIMEOUT overrides it, in seconds, and can only ever
+// reads unknown — never a tick that does not return. The bound is per gh call,
+// not per tick: the probes run one after another, so a tick whose probes all
+// hang waits one bound for each of them. 20 s, shortlist.mjs's own gh bound.
+// FLEET_TICK_GH_TIMEOUT overrides it, in seconds, and can only ever
 // SHORTEN it — ledger.mjs's LEDGER_GIT_TIMEOUT rule: a value that is not a
 // positive whole number below the default leaves the default standing, in
 // silence. Exported for its own test; it touches nothing.

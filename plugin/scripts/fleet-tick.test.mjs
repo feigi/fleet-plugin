@@ -2415,18 +2415,22 @@ test("CLI: a slow gh that answers inside the bound is read as usual", () => {
 });
 
 // The cases above pin the gh spawns the tick has today; this pins the next
-// one. Every gh spawned through spawnSync or execFileSync in the script must pass
-// the shared bound before its call closes. A gh spawned some other way walks
-// past it, which is why the imports are pinned too.
+// one, on the script's code with its comments blanked. Every call through
+// spawnSync or execFileSync that does not name process.execPath or git must
+// pass the shared bound — as `timeout: GH_TIMEOUT_MS` closed by a comma or a
+// brace, never a longer expression — before its call closes. A gh spawned
+// through any other function must name child_process again, and the import pin
+// fails on every line that does.
 test("CLI: every gh spawn in fleet-tick.mjs passes the shared bound", () => {
-  const src = readFileSync(SCRIPT, "utf8");
-  assert.match(src, /^import \{ execFileSync, spawnSync \} from "node:child_process";$/m,
+  const code = readFileSync(SCRIPT, "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (c) => c.replace(/[^\n]/g, " "));
+  assert.deepEqual(code.split("\n").map((l) => l.trimEnd()).filter((l) => l.includes("child_process")),
+    ['import { execFileSync, spawnSync } from "node:child_process";'],
     "the script spawns through something new — extend this sweep to it");
-  const lineOf = (i) => src.slice(0, i).split("\n").length;
-  const calls = [...src.matchAll(/\b(?:spawnSync|execFileSync)\(\s*"gh"/g)];
+  const lineOf = (i) => code.slice(0, i).split("\n").length;
+  const calls = [...code.matchAll(/\b(?:spawnSync|execFileSync)\(\s*(?=\S)(?!process\.execPath\b|["']git["'])/g)];
   assert.ok(calls.length > 0, "no gh spawn found; this sweep has nothing to measure");
   const unbounded = calls
-    .filter((m) => !src.slice(m.index, src.indexOf(");", m.index)).includes("timeout: GH_TIMEOUT_MS"))
+    .filter((m) => !/\btimeout:\s*GH_TIMEOUT_MS\s*[,}]/.test(code.slice(m.index, code.indexOf(");", m.index))))
     .map((m) => `line ${lineOf(m.index)}`);
   assert.deepEqual(unbounded, []);
 });
