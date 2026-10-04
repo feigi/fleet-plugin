@@ -46,7 +46,8 @@
 #
 # Exit status: 0 the command is printed; 1 a refusal about the cache, the
 # repository or the arguments; 3 a tool this script needs to read the cache
-# (node, mktemp, cat) could not be started or node died mid-read, so nothing
+# (git, node, mktemp, cat) could not be started, mktemp could not create its
+# temp file, git did not run to an answer, or node died mid-read, so nothing
 # was read and the cache's usability is unknown.
 set -eu
 
@@ -95,11 +96,11 @@ NAME=derive-testcmd
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 1; }
 
 # A refusal about the environment, not the cache: a tool this script needs to
-# read the cache (the interpreter, mktemp, cat) could not be started, or the
+# read the cache (git, the interpreter, mktemp, cat) could not be started,
+# mktemp could not create its temp file, git did not run to an answer, or the
 # interpreter died mid-read, so nothing was read and the cache's usability is
 # unknown. Exit 3, where every refusal about the cache, the repository or the
-# arguments is exit 1. A git that cannot be started is not told apart: it reads
-# as no repository, exit 1. A consumer that only tests for non-zero sees no
+# arguments is exit 1. A consumer that only tests for non-zero sees no
 # difference.
 unrunnable() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 3; }
 
@@ -126,7 +127,15 @@ esac
 repo=$1
 field=$2
 
-git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || die "$repo is not a git repository"
+# git's own fatal — no repository there, or no such directory — exits 128, the
+# one status that is a verdict on the repository. Any other non-zero status is
+# git not running to an answer: 126 or 127 from a git that cannot be started,
+# 128+N from a signal. Both git calls below tell the two apart.
+gitout=$(git -C "$repo" rev-parse --git-dir 2>&1) || {
+  gitrc=$?
+  case $gitrc in 128) die "$repo is not a git repository" ;; esac
+  unrunnable "git did not answer whether $repo is a git repository (exit $gitrc), so the Recipe cache was not read${gitout:+ — $gitout}"
+}
 
 case $field in
   install|test) ;;
@@ -144,8 +153,11 @@ fi
 # `--path-format=absolute` so the workspace is a real directory whatever the
 # caller's cwd; the workspace is the common dir's parent, the same rule
 # git-env.mjs's workspaceDirFromGitCommonDir() applies for the ledger.
-common=$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>&1) \
-  || die "cannot resolve the common git dir of $repo — $common"
+common=$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>&1) || {
+  gitrc=$?
+  case $gitrc in 128) die "cannot resolve the common git dir of $repo — $common" ;; esac
+  unrunnable "git did not resolve the common git dir of $repo (exit $gitrc), so the Recipe cache was not read${common:+ — $common}"
+}
 cache="${common%/*}/.fleet/recipe.json"
 
 # Absent is its own refusal, ahead of the interpreter probe: it is the one
