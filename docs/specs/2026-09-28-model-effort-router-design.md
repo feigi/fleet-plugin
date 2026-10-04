@@ -279,7 +279,10 @@ omp's indirection; rows pool across resolved models. Two warnings:
 X, verdicts = admissible `ticket-features.tsv` rows with `chosen_cell = X`
 and `run_date` ≥ the date `fleet-implementer-<cell>.agent.md` was most
 recently added, joined to `tier-outcomes.tsv` on `ticket` (last row per
-ticket). When verdicts ≥ 10 AND floor failures ÷ verdicts ≥ 0.80 (P ≈ 12%
+ticket dated ≥ the `run_date` of the ticket's last such row at X; a row
+whose `closed_own_ticket` and `minted_false_claim` are both blank was never
+ruled and is skipped; a ticket with no such row is no verdict). When
+verdicts ≥ 10 AND floor failures ÷ verdicts ≥ 0.80 (P ≈ 12%
 on one look, ≈13.5% cumulative across repeated close-out checks, at the
 measured 56.7% base rate — not the ≈5% a 50% assumption gives), the
 hook files one issue: title `Withdraw
@@ -522,7 +525,11 @@ Under stage 1 + burn-in at ~60 verdicts/week: n=20/cell in ≈1 week, n=60 in
 
 **Input rows:** `ticket-features.tsv` rows with `run_date ≥ window_start`,
 joined to verdicts per § 1 (member-outcomes on `session`+`agent`;
-tier-outcomes on `ticket`, split `+`; last row per ticket wins), restricted
+tier-outcomes on `ticket`, split `+`; last row per ticket dated ≥ the
+`run_date` of the ticket's last input row wins, a row whose
+`closed_own_ticket` and `minted_false_claim` are both blank skipped — the
+rule the § 2 stopping rule applies, which `verdictsByTicket` does not yet:
+it takes the plain last row per ticket, #2720), restricted
 to **arm A rows plus Exploration rows** (`exploration_draw` non-blank). B
 non-exploration rows are excluded (they are the A/B's test set). No
 inverse-propensity weighting: within a stratum every `chosen_cell` is
