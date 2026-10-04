@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { between, bullet, paragraph, phrase } from "./prose-pin.mjs";
+import { between, bullet, paragraph, phrase } from "./support/prose-pin.mjs";
 
 // The prose that describes the consumer repo as "whatever the Recipe says"
 // rather than as a Node project: every shipped runbook and the requirement
@@ -10,7 +10,7 @@ import { between, bullet, paragraph, phrase } from "./prose-pin.mjs";
 // names a Node package manager, a lockfile or a Node-only tool as the way a
 // consumer is installed or tested. Each pin below holds ONE contiguous clause
 // of that vocabulary inside the bounded slice that carries it.
-const PLUGIN = join(import.meta.dirname, "..");
+const PLUGIN = join(import.meta.dirname, "..", "plugin");
 const ROOT = join(PLUGIN, "..");
 const readPlugin = (rel) => readFileSync(join(PLUGIN, rel), "utf8");
 const readRoot = (rel) => readFileSync(join(ROOT, rel), "utf8");
