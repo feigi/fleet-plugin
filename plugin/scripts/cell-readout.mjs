@@ -66,7 +66,7 @@ import { readFileSync } from "node:fs";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { CELL, POLICY_CELL } from "./ledger-grammar.mjs";
-import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
+import { formatTsv as formatMemberTsv, parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { parseFeatures } from "./pr-cost.mjs";
 import { VERDICT, VERDICT_COLUMNS } from "./tier-outcomes.mjs";
 
@@ -103,16 +103,33 @@ function admissibleMember(pull, members) {
   return m;
 }
 
+// One member row per session+agent. A key repeated with different fields is
+// refused rather than collapsed to whichever row came last; an identical
+// repeat is one row.
+function indexMembers(members) {
+  const byKey = new Map();
+  for (const m of members) {
+    const k = key(m.session, m.agent);
+    const held = byKey.get(k);
+    if (held && formatMemberTsv([held]) !== formatMemberTsv([m])) {
+      throw new Error(`member-outcomes session ${m.session} agent ${m.agent} has two rows with different fields`);
+    }
+    if (!held) byKey.set(k, m);
+  }
+  return byKey;
+}
+
 /**
  * `cells`: one entry per cell other than the policy cell that has a
  * ticket-features row, `{ cell, comparisons, runDates, dates, models, gated }`,
  * sorted by cell. `dates` is the comparisons' distinct run_dates, sorted;
  * `models` maps each resolved model of the cell's admissible rows to its row
  * count, largest first. `unjoined` counts Pulls with no member row. Throws on
- * two ticket-features rows of one session+agent naming different cells.
+ * two ticket-features rows of one session+agent naming different cells, and on
+ * a member-outcomes session+agent repeated with different fields.
  */
 export function readout({ features, members }) {
-  const byKey = new Map(members.map((m) => [key(m.session, m.agent), m]));
+  const byKey = indexMembers(members);
   const pulls = pullsOf(features);
   const sessions = new Map();
   const cells = new Map();
@@ -152,11 +169,12 @@ export function readout({ features, members }) {
  * sorted by ticket, `run_date` the ruling's; `stop` is whether the stopping
  * rule withdraws the cell. `verdicts` are parsed tier-outcomes.tsv rows.
  * Throws on a counted ruling whose `closed_own_ticket` or `minted_false_claim`
- * is not `yes` or `no`, and on a non-blank ruling row of a Pulled ticket whose
- * `run_date` is not `YYYY-MM-DD`.
+ * is not `yes` or `no`, on a non-blank ruling row of a Pulled ticket whose
+ * `run_date` is not `YYYY-MM-DD`, and on a member-outcomes session+agent
+ * repeated with different fields.
  */
 export function stoppingRule({ features, members, verdicts, added }) {
-  const byKey = new Map(members.map((m) => [key(m.session, m.agent), m]));
+  const byKey = indexMembers(members);
   const rulings = new Map();
   for (const v of verdicts) {
     if (VERDICT_COLUMNS.every((c) => v[c] === "")) continue;
@@ -217,12 +235,21 @@ function main() {
     try { return parse(text); }
     catch (e) { die(`${path}: ${e.message}`); }
   };
-  const features = load(featuresPath, parseFeatures);
-  const members = load(membersPath, parseMemberTsv);
+  // A repeated session+agent naming different cells, or a member-outcomes one
+  // repeated with different fields, is refused while its file is loaded, so the
+  // refusal names the path that was read.
+  const features = load(featuresPath, (text) => {
+    const rows = parseFeatures(text);
+    pullsOf(rows);
+    return rows;
+  });
+  const members = load(membersPath, (text) => {
+    const rows = parseMemberTsv(text);
+    indexMembers(rows);
+    return rows;
+  });
 
-  let cells, unjoined;
-  try { ({ cells, unjoined } = readout({ features, members })); }
-  catch (e) { die(`${featuresPath}: ${e.message}`); }
+  const { cells, unjoined } = readout({ features, members });
   const lines = [];
   const notes = [];
   if (unjoined > 0) {
