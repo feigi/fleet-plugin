@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { slowTransport, SSH_URL } from "./slow-transport.mjs";
 import { writeExecStub } from "./exec-stub.mjs";
@@ -41,8 +41,14 @@ const ENV = {
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
 
+// `maintenance.auto=false` on every fixture call: fetch, commit and merge start
+// a detached `git maintenance run --auto`, whose `worktree-prune` task can erase
+// a deliberately faulted `gitdir` before the script under test reads the
+// registry, leaving the test to check a consistent registry instead of the
+// fault. Kept out of ENV, which also reaches reap.sh's own git calls and would
+// hide a lapse in net_git's own suppression.
 const git = (cwd, ...args) =>
-  execFileSync("git", args, { cwd, env: ENV, encoding: "utf8" }).trim();
+  execFileSync("git", ["-c", "maintenance.auto=false", ...args], { cwd, env: ENV, encoding: "utf8" }).trim();
 
 /** worktreeNames() of `w`'s listing: never its paths, which carry TMPDIR (#2531). */
 const listedNames = (w) => worktreeNames(git(w, "worktree", "list", "--porcelain"));
@@ -4398,3 +4404,29 @@ for (const m of SIBLING_MUTATIONS) {
     assert.equal(branchExists(w, "feature/free"), false);
   });
 }
+
+// The `maintenance.auto=false` the `git` helper carries (see the comment above
+// it) cannot be pinned by the gitdir fault fixtures: the race it prevents is
+// timing-dependent, so those stay green with the flag gone. What is
+// deterministic is the spawn itself — a commit or a fetch through the helper
+// must leave no `git maintenance run` in a GIT_TRACE. The trace is switched on
+// through ENV, the object the helper hands its child, because the helper takes
+// no env of its own; node:test runs a file's tests one at a time, so nothing
+// else spawns git while it is set. The first two assertions are the positive
+// control: without them a trace the child never wrote would pass the last.
+test("the fixture git() helper suppresses the detached auto-maintenance run", (t) => {
+  const w = repo(t);
+  const trace = join(dirname(w), "trace.txt");
+  writeFileSync(trace, "");
+  ENV.GIT_TRACE = trace;
+  try {
+    commit(w, "probe");
+    git(w, "fetch", "-q", "--prune", "origin");
+  } finally {
+    delete ENV.GIT_TRACE;
+  }
+  const traced = readFileSync(trace, "utf8");
+  assert.match(traced, /built-in: git commit/, "the trace reached the commit");
+  assert.match(traced, /built-in: git fetch/, "the trace reached the fetch");
+  assert.doesNotMatch(traced, /maintenance run/);
+});
