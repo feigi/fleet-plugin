@@ -678,3 +678,35 @@ test("stopping rule: a member-outcomes session+agent repeated with different fie
       (e) => e.message.includes(`session ${first.session}`) && e.message.includes(`agent ${first.agent}`));
   }
 });
+
+// A counted Pull whose date cannot be placed against the cell's definition
+// date must not vanish either: dropped, its ruling is uncounted and a floor
+// failure goes unreported.
+test("stopping rule: an admissible Pull at a live cell with a blank or malformed run_date is refused, naming the ticket", () => {
+  for (const bad of ["", "10/03/2026", "2026-10-3"]) {
+    const w = world();
+    addVerdicts(w, "smol-high", 1, 1);
+    const [p] = w.features;
+    p.run_date = bad;
+    assert.throws(
+      () => judged(w, { "smol-high": "2026-09-01" }, "smol-high"),
+      new RegExp(`ticket #${p.ticket} \\(Pull ${p.agent} at smol-high\\): run_date is '${bad}', expected YYYY-MM-DD`),
+      JSON.stringify(bad),
+    );
+  }
+});
+
+// What that refusal must NOT touch: a Pull the rule would never count has no
+// date to place.
+test("stopping rule: a blank-dated Pull at the policy cell, at a cell with no live definition, or with no admissible member row is not refused", () => {
+  const w = world();
+  addVerdicts(w, "smol-high", 1, 1);
+  const [real] = w.features.map((p) => p.ticket);
+  addVerdicts(w, "slow-high", 1, 1);
+  addVerdicts(w, "task-high", 1, 1);
+  addVerdicts(w, "smol-high", 1, 1, { effort: "medium" });
+  addVerdicts(w, "smol-high", 1, 1, { member: false });
+  for (const p of w.features.slice(1)) p.run_date = "";
+  const at = judged(w, { "smol-high": "2026-09-01" }, "smol-high");
+  assert.deepEqual(at.verdicts.map((v) => [v.ticket, v.failed]), [[real, true]]);
+});

@@ -55,7 +55,10 @@
 // counted ruling holding anything but `yes` or `no` in either column, one
 // blank included, is refused rather than read as a pass. So is a non-blank
 // ruling row of such a ticket whose `run_date` is not `YYYY-MM-DD`: it cannot
-// be placed against the Pull, and dropping it would uncount the ticket.
+// be placed against the Pull, and dropping it would uncount the ticket. So is
+// an admissible Pull at X whose `run_date` is not `YYYY-MM-DD`: it cannot be
+// placed against the day X's definition was added, and dropping it would
+// uncount its ruling.
 // X is to be withdrawn once it has at least STOP.verdicts verdicts and
 // floor failures ÷ verdicts is at least STOP.failRate.
 //
@@ -68,7 +71,7 @@ import { isCLI } from "./is-cli.mjs";
 import { CELL, POLICY_CELL } from "./ledger-grammar.mjs";
 import { formatTsv as formatMemberTsv, parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { parseFeatures } from "./pr-cost.mjs";
-import { rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
+import { DATE, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
 const NAME = "cell-readout";
 export const GATE = Object.freeze({ comparisons: 10, runDates: 5 });
@@ -168,8 +171,9 @@ export function readout({ features, members }) {
  * rule withdraws the cell. `verdicts` are parsed tier-outcomes.tsv rows.
  * Throws on a counted ruling whose `closed_own_ticket` or `minted_false_claim`
  * is not `yes` or `no`, on a non-blank ruling row of a Pulled ticket whose
- * `run_date` is not `YYYY-MM-DD`, and on a member-outcomes session+agent
- * repeated with different fields.
+ * `run_date` is not `YYYY-MM-DD`, on an admissible Pull at a cell named in
+ * `added` whose `run_date` is not `YYYY-MM-DD`, and on a member-outcomes
+ * session+agent repeated with different fields.
  */
 export function stoppingRule({ features, members, verdicts, added }) {
   const byKey = indexMembers(members);
@@ -178,7 +182,9 @@ export function stoppingRule({ features, members, verdicts, added }) {
   const charged = new Map(Object.keys(added).filter((c) => c !== POLICY_CELL).map((c) => [c, new Map()]));
   for (const p of features) {
     const pulls = charged.get(p.chosen_cell);
-    if (!pulls || p.run_date < added[p.chosen_cell] || !admissibleMember(p, byKey)) continue;
+    if (!pulls || !admissibleMember(p, byKey)) continue;
+    if (!DATE.test(p.run_date)) throw new Error(`ticket #${p.ticket} (Pull ${p.agent} at ${p.chosen_cell}): run_date is '${p.run_date}', expected YYYY-MM-DD`);
+    if (p.run_date < added[p.chosen_cell]) continue;
     pulls.set(p.ticket, p);
   }
   return [...charged].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([cell, pulls]) => {
