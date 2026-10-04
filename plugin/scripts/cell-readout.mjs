@@ -42,10 +42,13 @@
 // with an admissible Pull at X dated on or after the day X's
 // `fleet-implementer-<cell>` definition was most recently added, ruled by its
 // last tier-outcomes.tsv row (a `+`-joined `ticket` field rules each ticket
-// it names); a ticket counts once however many Pulls it took. A verdict FAILS
+// it names) dated on or after the ticket's last such Pull: a ruling never
+// predates the Pull it rules, and a row with both verdict columns blank was
+// never ruled, so it is skipped. A ticket with no such row is no verdict.
+// A ticket counts once however many Pulls it took. A verdict FAILS
 // the quality floor on `minted_false_claim=yes` or `closed_own_ticket=no`; a
-// counted ruling holding anything but `yes` or `no` in either column, blank
-// included, is refused rather than read as a pass.
+// counted ruling holding anything but `yes` or `no` in either column, one
+// blank included, is refused rather than read as a pass.
 // X is to be withdrawn once it has at least STOP.verdicts verdicts and
 // floor failures ÷ verdicts is at least STOP.failRate.
 //
@@ -130,24 +133,33 @@ export function readout({ features, members }) {
  */
 export function stoppingRule({ features, members, verdicts, added }) {
   const byKey = new Map(members.map((m) => [key(m.session, m.agent), m]));
-  const ruling = new Map();
-  for (const v of verdicts) for (const t of String(v.ticket).split("+")) ruling.set(t, v);
-  const judged = new Map(Object.keys(added).filter((c) => c !== POLICY_CELL).map((c) => [c, new Map()]));
-  for (const p of features) {
-    const tickets = judged.get(p.chosen_cell);
-    if (!tickets || p.run_date < added[p.chosen_cell] || !ruling.has(p.ticket) || !admissibleMember(p, byKey)) continue;
-    const v = ruling.get(p.ticket);
-    for (const c of VERDICT_COLUMNS) {
-      if (!VERDICT.includes(v[c])) throw new Error(`ticket #${p.ticket} (PR #${v.pr}): ${c} is '${v[c]}', expected yes or no`);
-    }
-    const failed = v.minted_false_claim === "yes" || v.closed_own_ticket === "no";
-    tickets.set(p.ticket, {
-      ticket: p.ticket, pr: v.pr, run_date: v.run_date,
-      closed_own_ticket: v.closed_own_ticket, minted_false_claim: v.minted_false_claim, failed,
-    });
+  const rulings = new Map();
+  for (const v of verdicts) {
+    if (VERDICT_COLUMNS.every((c) => v[c] === "")) continue;
+    for (const t of String(v.ticket).split("+")) (rulings.get(t) ?? rulings.set(t, []).get(t)).push(v);
   }
-  return [...judged].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([cell, tickets]) => {
-    const list = [...tickets.values()].sort((a, b) => Number(a.ticket) - Number(b.ticket));
+  // Per cell, each ticket's last admissible Pull: the one its ruling must follow.
+  const charged = new Map(Object.keys(added).filter((c) => c !== POLICY_CELL).map((c) => [c, new Map()]));
+  for (const p of features) {
+    const pulls = charged.get(p.chosen_cell);
+    if (!pulls || p.run_date < added[p.chosen_cell] || !admissibleMember(p, byKey)) continue;
+    pulls.set(p.ticket, p);
+  }
+  return [...charged].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([cell, pulls]) => {
+    const list = [];
+    for (const p of pulls.values()) {
+      const v = rulings.get(p.ticket)?.findLast((r) => r.run_date >= p.run_date);
+      if (!v) continue;
+      for (const c of VERDICT_COLUMNS) {
+        if (!VERDICT.includes(v[c])) throw new Error(`ticket #${p.ticket} (PR #${v.pr}): ${c} is '${v[c]}', expected yes or no`);
+      }
+      list.push({
+        ticket: p.ticket, pr: v.pr, run_date: v.run_date,
+        closed_own_ticket: v.closed_own_ticket, minted_false_claim: v.minted_false_claim,
+        failed: v.minted_false_claim === "yes" || v.closed_own_ticket === "no",
+      });
+    }
+    list.sort((a, b) => Number(a.ticket) - Number(b.ticket));
     const failures = list.filter((v) => v.failed).length;
     const stop = list.length >= STOP.verdicts && failures / list.length >= STOP.failRate;
     return { cell, since: added[cell], verdicts: list, failures, stop };

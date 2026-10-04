@@ -352,6 +352,16 @@ test("close-out: a gh that prints something other than JSON fails the duty namin
   assert.match(r.stderr, /stopping rule failed: gh issue list printed non-JSON \(.*\): "<html>rate limited<\/html>"$/m);
 });
 
+test("close-out --dry-run: a both-blank tier-outcomes row after a ticket's real ruling leaves the count as it was, and the router fit still runs", () => {
+  const rows = floorFailing();
+  rows.tiers.push(tier({ ticket: "100", pr: "1392", closed_own_ticket: "", minted_false_claim: "" }));
+  const f = fixture({ rows });
+  const r = f.run("close-out", ["--dry-run"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — would file "${escape(TITLE)}"`));
+  assert.match(r.stdout, /^run-team-local: router fit: /m);
+});
+
 // ---------------------------------------------------------------------------
 // close-out: the router re-fit cadence
 
