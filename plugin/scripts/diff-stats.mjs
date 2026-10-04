@@ -13,7 +13,7 @@
 // are chosen so the caller's selection is a clean expression over them.
 //
 // `classify` and `computeStats` are pure and exported so the classifier is
-// unit-tested (diff-stats.test.mjs) without a live `gh`; the CLI runs only when
+// unit-tested without a live `gh`; the CLI runs only when
 // this file is executed directly.
 
 import { execFileSync } from "node:child_process";
@@ -60,7 +60,7 @@ export function classify(p) {
 //
 // `changedFiles` is the PR's UNCAPPED file count, and it is a second argument
 // because `files` is capped: `gh pr view --json files` pages at 100 and exits 0
-// with no warning (measured on microsoft/vscode#329568 — `files` 100 against
+// with no warning (measured on a 124-file PR — `files` 100 against
 // `changedFiles` 124). Every fact below is then computed off a short list with
 // nothing in the blob contradicting it: `loc` under-counts, `docsOnly` can flip
 // because the src files fell off the end, and `paths` is what `review-core.mjs`
@@ -100,9 +100,9 @@ export function computeStats(files, changedFiles) {
 // --- CLI (runs only when executed directly, never on import) ---------------
 
 // die()/numArg() shared with the other fleet scripts — see arg.mjs for the
-// fail-open (#61/#169/#878) and pipe-safety (#176/#328) rationale. `--pr` is
+// fail-open and pipe-safety rationale. `--pr` is
 // the only flag read here, and numArg() rather than arg() because this file
-// was the live half of #840's defect: the `if (!pr)` below caught a trailing
+// was the live half of a defect: the `if (!pr)` below caught a trailing
 // `--pr` — `undefined` is falsy — but never a non-numeric one, so `--pr abc`
 // reached `gh pr view abc` and printed `{"pr":null,…}` at exit 0. Measured
 // against a stub gh that answers, which is what a real one does for `abc`:
@@ -111,7 +111,7 @@ export function computeStats(files, changedFiles) {
 const die = makeDie(NAME);
 const { numArg, sweep, stray } = defineFlags(die, { flags: { pr: "value" } });
 
-// #932. The one truncation rule for the raw gh value this script quotes into a
+// The one truncation rule for the raw gh value this script quotes into a
 // refusal: clip behind a visible marker, and only when the value was really
 // clipped. Unmarked — `raw.trim().slice(0, 120)`, what the die below used to do
 // — the length quoted is gh's, not this script's, so a 269 KB portal page and a
@@ -119,7 +119,7 @@ const { numArg, sweep, stray } = defineFlags(die, { flags: { pr: "value" } });
 // diagnostic from a cut one.
 //
 // HEAD, not tail, measured on this site's own payload rather than imported from
-// #638/PR #931's fix for the same unmarked clip in ledger.mjs. Those sites clip
+// the fix for the same unmarked clip in ledger.mjs. Those sites clip
 // STDERR, where warnings lead and the cause lands last; `run()` above passes no
 // `stdio`, so execFileSync forwards the child's stderr and returns stdout ALONE
 // — this clips stdout. Real gh (2.100.0) never puts non-JSON there: a missing
@@ -139,7 +139,7 @@ const { numArg, sweep, stray } = defineFlags(die, { flags: { pr: "value" } });
 // The marker counts against `n`, so `cut(s).length <= n` for every `n >=
 // MARKER.length` — the only regime the one call site below exercises, since
 // `cut` is module-private and always called with the default `n = 120`. This
-// is the one place it differs from ci-state.mjs's `cut` (#1479), whose marker
+// is the one place it differs from ci-state.mjs's `cut`, whose marker
 // sits past its `n`: `s.slice(0, n)` there appends the marker unconditionally,
 // measuring 133 characters against ci-state.mjs's own 120-char cap — and this
 // script's stderr is read by review-core.mjs's snapshot agent, markdown fed to a
@@ -167,7 +167,7 @@ function run(cmd, args) {
     // measured 7,700 B becoming 15,454 B, into review-core.mjs's snapshot agent,
     // which is markdown read by a model. `e.message` is the same string, not a
     // fallback — Node builds it as `Command failed: <cmd>\n<stderr>`. Three
-    // disjoint shapes: Node-aborted (ENOENT/ENOBUFS), signal, exit (#176).
+    // disjoint shapes: Node-aborted (ENOENT/ENOBUFS), signal, exit.
     die(
       `${cmd} failed: ${e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)}`,
     );
@@ -181,18 +181,18 @@ function main() {
   // file's own refusal and malformed is numArg()'s, per arg.mjs.
   const pr = numArg("pr");
   if (pr === null) die("usage: diff-stats.mjs --pr <number>");
-  // #365, weaker here for the same reason as pr-overlap.mjs: `--pr` is
+  // The misspelled-flag sweep, weaker here for the same reason as pr-overlap.mjs: `--pr` is
   // required, so a misspelled `--prr 5` already fell through to the usage die
   // above. What was silently ignored at exit 0 is a stray riding along with a
   // good `--pr` (`--pr 5 --base main`), and that is what this closes.
   //
   // Inside main(), never at module scope: computeStats() is imported by
-  // diff-stats.test.mjs and select-dimensions.test.mjs, and a module-scope
+  // the test suite, and a module-scope
   // sweep would read the IMPORTER's argv. (review-pr runs this script as a
   // CLI subprocess with its own argv, so it is not one of those importers.)
-  // Below the guard above, so `--pr --json` keeps #169's "--pr needs a value".
+  // Below the guard above, so `--pr --json` keeps "--pr needs a value".
   sweep();
-  // #463: sweep() only refuses a `--`-prefixed token; a bare or single-dash
+  // sweep() only refuses a `--`-prefixed token; a bare or single-dash
   // one (`--pr 42 basee`) rode along in silence the same way. This file
   // takes no positional, so any leftover token is a stray.
   stray();

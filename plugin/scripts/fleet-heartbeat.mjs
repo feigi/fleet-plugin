@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// The heartbeat. #3's item 2, filed as #357: the ONE fleet-tick trigger that
+// The heartbeat: the ONE fleet-tick trigger that
 // survives a fully drained queue.
 //
 // fleet-tick.mjs computes the deficit but only when something invokes it, and
 // every other invocation is a wake: a member report, a label, a CI run ending.
 // A drained fleet emits no wakes at all — no implementer completions, no merge
-// activity — so nothing calls the tick and the stall is silent again, which is
-// the state #3 was filed about. This script is the level-check that needs no
+// activity — so nothing calls the tick and the stall is silent again. This
+// script is the level-check that needs no
 // event: it holds the controller's turn for an interval and then tells it to
 // run the tick.
 //
@@ -22,7 +22,7 @@
 //
 //   So the heartbeat is not a Monitor, not a cron entry and not a paragraph of
 //   prose. A cron entry that ran the reconcile would print its rows to nobody:
-//   the tick reads the run for itself (#1803), but only the controller can act
+//   the tick reads the run for itself, but only the controller can act
 //   on what it prints. An external scheduler can only WAKE the controller,
 //   which is the one thing the measurement above says it cannot be trusted to
 //   do.
@@ -91,7 +91,7 @@ const OPTIONS = {
   base: { type: "string", default: "300" },
   // Single source of truth in fleet-state.mjs — assessBeat's own fallback
   // freshness window for a busy run's `ticked` mark is this same number
-  // (#1597 follow-up), and a duplicated "1200" here is the drift the module
+  // too, and a duplicated "1200" here is the drift the module
   // header's "never a copy of it" rule exists to close.
   ceiling: { type: "string", default: String(DEFAULT_CEILING_S) },
   multiplier: { type: "string", default: "2" },
@@ -100,7 +100,7 @@ const OPTIONS = {
   // the 5-6 minute CI cycle run-merge-bot.md's CI wait rule states. Raise
   // it only together with the tool call's own timeout.
   hold: { type: "string", default: "240" },
-  // The deliberate stop, #1597. No default and no boolean spelling: the flag
+  // The deliberate stop. No default and no boolean spelling: the flag
   // IS the reason, and a `--stop` that recorded an empty string would be the
   // abrupt-death case wearing a deliberate stop's clothes — a reader would
   // report a recorded reason and then print nothing for it.
@@ -170,7 +170,7 @@ function args() {
   return { base, ceiling, multiplier, hold, stop: values.stop?.trim(), state: values.state || statePath(NAME) };
 }
 
-// The mark, #1597: when this beat was seen and the interval that was in effect
+// The mark: when this beat was seen and the interval that was in effect
 // when it was. Built here rather than inline at each write so the two writes
 // below cannot disagree about the shape of a key only this script owns.
 //
@@ -241,7 +241,7 @@ function main() {
   // A failed write is itself a fire. With nothing persisting the remainder,
   // every invocation reads the same elapsed total, holds the same seconds and
   // prints the same remainder: the interval can never complete, so fleet-tick
-  // is never run at all — #357's own defect, reached through a line that reads
+  // is never run at all — the drained-queue stall itself, reached through a line that reads
   // like a working heartbeat. Beating too often is the harmless direction;
   // never beating is the one this script exists to prevent.
   //
@@ -249,7 +249,7 @@ function main() {
   // so on stderr, this process keeps beating, and a reader that never sees a
   // mark reports a stall it cannot explain — loud and wrong in the safe
   // direction — rather than this script dying to protect its own telemetry.
-  // A liveness mark that killed the beat it measures would be #357's defect
+  // A liveness mark that killed the beat it measures would be that same stall
   // wearing a new hat.
   const done = reached || !persisted;
 

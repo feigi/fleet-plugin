@@ -3,18 +3,18 @@
 // refill was wired as an EDGE — "a member finished → refill its slot". That
 // edge dies the moment live implementers reach 0, because 0 implementers emit
 // no completion event, and "free capacity + a non-empty pool" is a LEVEL
-// condition an edge-triggered loop cannot observe once it stops changing. #3:
+// condition an edge-triggered loop cannot observe once it stops changing. Measured:
 // implementers sat at 0/target with pool 1 and ~57 `ready-for-agent` in supply
 // until a human asked why nothing was being implemented. No error, no warning.
 //
 // So compute the deficit instead of remembering it. Every wake ends in one
 // invocation (spec 2026-09-24 § 6: record, tick, act, beat), and each prints
-// actual/target and a named ACTION per role — `PULL #412 #415`, `DISPATCH
-// fix-pr PR#346`, `DISPATCH review PR#350`, `DISPATCH merge-bot`, `HOLD (…)`,
+// actual/target and a named ACTION per role — `PULL #<n> #<n>`, `DISPATCH
+// fix-pr PR#<pr>`, `DISPATCH review PR#<pr>`, `DISPATCH merge-bot`, `HOLD (…)`,
 // `REFRESHED shortlist: …` — with run-team's guards applied in code rather than
 // recalled from its table. You cannot forget what a script prints at you.
 //
-// WHERE THE NUMBERS COME FROM — nobody states them (#1803, ADR 0012 Decision 5):
+// WHERE THE NUMBERS COME FROM — nobody states them:
 //
 //   ledger    `.fleet/ledger.md`, read through `ledger.mjs read` so the ledger
 //             keeps one parser, and its member tokens through
@@ -38,13 +38,13 @@
 //   gh        The open PRs, by label and by whether they close an issue — the
 //             merge queue, and which PRs are owed a review. Also, for each ticket
 //             holding the implementer row on a tier mismatch, whether its issue
-//             is CLOSED (`gh issue view`, #2485): a closed ticket's mismatch
+//             is CLOSED (`gh issue view`): a closed ticket's mismatch
 //             holds nothing. And, for each in-flight `review=` token whose PR
 //             the open list does not carry, whether that PR is MERGED or
 //             CLOSED (`gh pr view`): a review cannot be running against a
 //             finished PR, so its dangling token holds no reviewer slot.
 //   main      The main checkout against the run-start baseline
-//             `.fleet/main-checkout.sha`, through main-checkout.mjs (#2210).
+//             `.fleet/main-checkout.sha`, through main-checkout.mjs.
 //             Anything but `clean` — dirty, unknown, no baseline — prints one
 //             MAIN-CHECKOUT-* line and holds every dispatching row until the
 //             maintainer clears it; it never refuses the tick.
@@ -52,12 +52,12 @@
 //             --guard's verdict on the implementer cells. Printed as the
 //             `router` row and never acted on here: a missing or unreadable
 //             file reads DEFAULT-ONLY, the way the router (not in the tree
-//             yet; ADR 0016) is to read it. pr-cost.mjs writes the main
+//             yet) is to read it. pr-cost.mjs writes the main
 //             workspace's file by default, the one read here.
 //
 // The pure half below is `reconcile()` over the counts `deriveRun()` reads off
 // the ledger; main() does the I/O. Split so the guard table and the reading are
-// both unit-testable without a network — fleet-tick.test.mjs.
+// both unit-testable without a network.
 
 import { parseMember, parseToken } from "./ledger-grammar.mjs";
 
@@ -73,7 +73,7 @@ export function reconcile(s) {
   return [...mainCheckoutHold(s, [implementers(s, rev.left), ...rev.rows, mergeBot(s)]), ...shortlistRows(s), ...routerRows(s)];
 }
 
-// #2210: a main checkout changed since the run's baseline — or one the tick
+// A main checkout changed since the run's baseline — or one the tick
 // could not compare — holds every DISPATCHING row: one HOLD per role,
 // keeping its counts, in place of whatever it would have dispatched. Placed
 // over the computed rows rather than inside each role, so no role's own
@@ -84,7 +84,7 @@ export function reconcile(s) {
 // Phase 0 step, so that one asks it to act.
 const MAIN_CHECKOUT_HOLD = { dirty: "main checkout dirty", absent: "main checkout no baseline" };
 // The reason a main-checkout answer holds dispatch on, or null for `clean` —
-// the one wording the HOLD rows and the folded line (#2307) both carry.
+// the one wording the HOLD rows and the folded line both carry.
 function mainCheckoutHoldReason(mainCheckout) {
   const state = mainCheckout?.state ?? "unknown";
   if (state === "clean") return null;
@@ -103,13 +103,13 @@ function mainCheckoutHold(s, rows) {
 }
 
 // `acts` is on the row, set where the ACTION is chosen: the heartbeat backs off
-// on "nothing to act on" and never on "output unchanged" (ADR 0008 §6), and the
+// on "nothing to act on" and never on "output unchanged", and the
 // branch that picks the ACTION is the one place that knows which it is.
 const mkRow = (role, actual, target, detail) => (action, { acts = false, extra = "" } = {}) => ({
   role, actual, target, action, acts, detail: extra ? `${detail} — ${extra}` : detail,
 });
 
-// The clearing step a tier hold names in its detail (#2255). The tick reads no
+// The clearing step a tier hold names in its detail. The tick reads no
 // transcript and so does not know the session directory: `<session>` stays a
 // placeholder the controller fills in, as `<file>` does — one batch file, one
 // entry per held member (SKILL.md's phase-2 tier check).
@@ -148,16 +148,16 @@ function implementers(s, left) {
   if (s.draining !== null) return row("HOLD (draining)");
   // Held until a replacement at the right tier is dispatched (§ 6 §6). The
   // controller can fix this unattended, so the row asks it to — and names the
-  // replacement in its detail (#2255), since the step lives otherwise only in
+  // replacement in its detail, since the step lives otherwise only in
   // SKILL.md prose, which is what a compaction loses.
   if (s.tierMismatch.length) {
     return row(`HOLD (tier mismatch ${s.tierMismatch.join(" ")})`, { acts: true, extra: replaceStep(s.tierMismatch, s.implNames) });
   }
   // Held until tier-check.mjs has run on the newest implementer and written
-  // its verdict to the ledger (#1398) — a Pull on top of an unchecked
+  // its verdict to the ledger — a Pull on top of an unchecked
   // dispatch repeats whatever it got wrong. Running the check is the
   // controller's own step, so it is asked to act, with the command in the
-  // detail (#2255).
+  // detail.
   if (s.tierUnchecked.length) {
     return row(`HOLD (tier unchecked ${s.tierUnchecked.join(" ")})`, { acts: true, extra: tierCheckStep(s.tierUnchecked) });
   }
@@ -170,7 +170,7 @@ function implementers(s, left) {
   // still owed its review after this tick's dispatches AND no reviewer slot is
   // left for it. A deep backlog with free slots is a reviewer-row DISPATCH on
   // this same tick, not a reason to idle an implementer; the old
-  // `backlog >= 2` gate held there and starved implementers (#590's harm).
+  // `backlog >= 2` gate held there and starved implementers.
   // The merge queue never gates this row: a deep ready-to-merge queue adds no
   // rebases per PR.
   if (left.unreviewed >= 1 && left.free <= 0) return row("HOLD (review side saturated)");
@@ -184,7 +184,7 @@ function implementers(s, left) {
   return row("SUGGEST /triage, hold idle");
 }
 
-// Reviewer units (#1773 §3): an in-flight review = 1, each fix-applier = 1.
+// Reviewer units: an in-flight review = 1, each fix-applier = 1.
 // Named in priority order — fix-appliers first, then reviews, oldest first —
 // because finishing what is started beats starting more. Reviews are also
 // bounded by `--max-reviews`, left at its default (the reviewer cap) since
@@ -204,7 +204,7 @@ function reviewers(s) {
   const rows = [];
   if (fixes.length) rows.push(row(`DISPATCH fix-pr ${prs(fixes)}`, { acts: true }));
   if (reviews.length) rows.push(row(`DISPATCH review ${prs(reviews)}`, { acts: true }));
-  // #2331: a finisher settled `labelled` on a PR the open list shows without
+  // A finisher settled `labelled` on a PR the open list shows without
   // `ready-to-merge`. One such attempt since the controller's last deliberate
   // removal gets one fresh finisher; a second one escalates, never a third
   // dispatch. Finishers take no reviewer slot, so neither waits on the cap.
@@ -237,7 +237,7 @@ function mergeBot(s) {
   if (s.mergeQueue === 0) return row("IDLE OK");
   // `ready-to-merge` is the author's sign-off and nothing more. A bot
   // dispatched against a queue whose candidates are all held — behind a lower
-  // open PR, or on a conflict merge-bot already refused to force (#2064) —
+  // open PR, or on a conflict merge-bot already refused to force —
   // spends a whole member re-deriving a verdict already recorded.
   if (s.mergeQueue - s.mergeHeld <= 0) {
     const why = s.mergeConflictHeld ? "behind a lower PR or on a merge conflict no fix-pr has cleared" : "behind a lower PR";
@@ -250,9 +250,9 @@ function mergeBot(s) {
 // is actionable — supply arrived. One that changed nothing is not: every idle
 // heartbeat tick refreshes while the shortlist is short of the cap, and an
 // unconditionally actionable REFRESHED would pin the beat at its base interval
-// on exactly the quiet night ADR 0008 backs off on. A failed refresh IS
+// on exactly the quiet night the heartbeat backs off on. A failed refresh IS
 // actionable: a blind implementer row backing off tick after identical tick is
-// #3's stall exactly.
+// the drained-queue stall this tick exists to end, exactly.
 function shortlistRows(s) {
   const r = s.refresh;
   if (r === null) return [];
@@ -324,8 +324,8 @@ export function formatLines(rows) {
 }
 
 // Does this tick ask the controller for anything? Identity decides whether to
-// FOLD the output; only this decides whether to back off (ADR 0008 §6). A tick
-// printing `PULL #412` every five minutes because the controller has not acted
+// FOLD the output; only this decides whether to back off. A tick
+// printing `PULL #<n>` every five minutes because the controller has not acted
 // is byte-identical each time, and backing off there would stretch the
 // interval while work sat unclaimed.
 export function actionable(rows) {
@@ -354,19 +354,19 @@ export const PR_MENTION = /\bPR\s*#(\d+)\b/;
 // shortlist.mjs's own spelling of an Exclusion row and its premises.
 const EXCLUDED_ROW = /^#[0-9]+[ \t]+excluded(?=[ \t]|$)([\s\S]*)$/;
 const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
-// #1773 §7: `review=wf:<runId>` | `review=member:review-pr-<n>` |
+// `review=wf:<runId>` | `review=member:review-pr-<n>` |
 // `review=fallback:review-pr-<n>[-b]`, settled dead as `…=failed`; the result
 // is `reviewed=<head>:<survived>/<refuted>/<unverified>`.
 const REVIEW = /^review=(?:wf|member|fallback):[^=\s]+(=failed)?$/;
 export const REVIEWED = /^reviewed=([0-9a-f]{7,40}):(\d+)\/(\d+)\/(\d+)$/i;
 const HELD = /^held-behind[:-]#?(\d+)$/;
-// #2064: merge-bot's durable record that its local-rebase fallback hit a
+// Merge-bot's durable record that its local-rebase fallback hit a
 // conflict it would not force — written onto the held PR's own row at the
 // point run-merge-bot.md says to report and halt, and spelled like
 // `held-behind` so the two read alike. Distinct from an Exclusion, which
 // gates a ticket's claim; this gates a reviewed PR's merge.
 const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
-// #1398: tier-check.mjs's verdict on an implementer, `tier-ok=<member>:<def>`
+// tier-check.mjs's verdict on an implementer, `tier-ok=<member>:<def>`
 // or `tier-mismatch=<member>:<def>` — or `tier-unverifiable=<member>:no-transcript`
 // for a settled member whose transcript was never written.
 const TIER_VERDICT = /^tier-(ok|mismatch|unverifiable)=([^:\s]+):\S+$/;
@@ -413,7 +413,7 @@ export function currentDispositions(tokens, head) {
   return best === null ? null : { verdict: best.verdict, member: best.member.name };
 }
 
-// #2331: `label-off=<finisher-pr-M[-x]>` — written by the controller BEFORE it
+// `label-off=<finisher-pr-M[-x]>` — written by the controller BEFORE it
 // takes `ready-to-merge` off PR M on purpose (before approving a push; clearing
 // a label left on a moved head), naming the latest finisher attempt. A missing
 // label is a finisher's miss only when no such removal accounts for it.
@@ -440,10 +440,10 @@ export function rowNums(text) {
 // it, so the label shape stays the caller's (gh's `{name}` here, plain names in
 // compute-board.mjs). A PR's attempts are its `finisher-pr-M` tokens in
 // `## Dispatched` and on PR M's own rows; a copy on another PR's row is a
-// stray (#2329) that neither makes nor masks a miss. Settled anywhere among
+// stray that neither makes nor masks a miss. Settled anywhere among
 // those is settled. The STRETCH is the attempts whose retry suffix sorts after
 // the highest one a `label-off=` names — suffix order ("" < "b" < …), never
-// row position (#2083). `attempts` is the stretch in suffix order and `outcome`
+// row position. `attempts` is the stretch in suffix order and `outcome`
 // the outcome of its latest attempt (null while that one is live); a PR whose
 // stretch is empty is left out.
 //
@@ -488,7 +488,7 @@ export function latestFinisherAttempts({ rows, dispatched }, unqueued) {
   return out.sort((a, b) => a.pr - b.pr);
 }
 
-// #2331: PRs whose latest finisher attempt settled `labelled` while the open
+// PRs whose latest finisher attempt settled `labelled` while the open
 // list shows no `ready-to-merge` on them. `labelled` lists every attempt in the
 // stretch that settled so, the count the tick splits one repair from an
 // escalation on.
@@ -503,7 +503,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
   // One entry per member name across `## Dispatched` and every row. A member
   // settled ANYWHERE is settled: `settle` is the only writer of an outcome, and
   // a bare copy beside it is what a whole-line `row` rewrite leaves behind.
-  // The one narrowing (#2391): a PR-bound member (`fix-pr-M`, `finisher-pr-M`)
+  // The one narrowing: a PR-bound member (`fix-pr-M`, `finisher-pr-M`)
   // speaks for PR #M alone, so its outcome counts off `## Dispatched` or off
   // PR #M's own row, never off another PR's — `dispatch` and `settle` write it
   // onto PR #M's row only, so a settled copy elsewhere is a hand-written stray
@@ -528,7 +528,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
   const claimed = new Set();
   const excluded = [];
   const byPr = new Map();
-  // tier-check.mjs's verdict tokens (#1398), read off whichever row carries
+  // tier-check.mjs's verdict tokens, read off whichever row carries
   // them: `tier-ok=<member>:<definition>` on a pass, `tier-mismatch=<member>:…`
   // for a member found mismatched after it had already settled some other way
   // (a live one is settled `tier-mismatch` instead). Neither parses as a member
@@ -544,7 +544,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
   // rewrite put back, wherever that rewrite chose. Its landing is read off
   // the in-place copy (below), and off a bare one only when no row carries
   // one — settled in `## Dispatched` alone. Only a copy on its own PR's row
-  // counts, as in the fold (#2329): a settled stray on another PR's row must
+  // counts, as in the fold: a settled stray on another PR's row must
   // not keep the owner's bare copy from landing. A malformed token is skipped
   // here and refused by the fold below, in row order, as before.
   const settledInRow = new Set();
@@ -558,8 +558,8 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
   for (const text of rows) {
     const { keyNum, pr } = rowNums(text);
     const where = `row '${text}'`;
-    // One state per PR, shared by every row that resolves to it (#2283): a
-    // ticket row settled `impl-658=PR#724` sorts above PR 724's own `#724` row
+    // One state per PR, shared by every row that resolves to it: a
+    // ticket row settled `impl-<n>=PR#<pr>` sorts above PR <pr>'s own `#<pr>` row
     // whenever both exist, and either may carry that PR's tokens — ledger.mjs's
     // memberRowIndex() writes a PR-bound member onto the first row mentioning
     // its PR and onto `#<pr>` only when none does — so the second row continues
@@ -570,15 +570,15 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     // `reviewFixed`: a REVIEW fix-applier landed after the latest
     // `reviewed=` — one read while no hold stood unresolved. The one read
     // while a hold did is the conflict fix-applier `ledger.mjs dispatch` named
-    // a `fleet-implementer-<cell>` (#2299): it rebases and never sees the review file,
-    // so it clears the hold and answers no survivor (#2328). Each fix-applier
+    // a `fleet-implementer-<cell>`: it rebases and never sees the review file,
+    // so it clears the hold and answers no survivor. Each fix-applier
     // does one of those jobs once, so its landing folds once per PR
     // (`fixLanded`), however many copies of its token the rows carry.
     // `fixMembers`: every fix-applier on this PR, wherever its token sits —
     // one still unsettled anywhere holds the PR off fixDue, since `dispatch`
     // refuses a second live one on the PR.
     // `reviewedHead`: the latest `reviewed=<head>`. `pastPinHalt`: the latest
-    // finisher since that review settled `halted:past-pin` (#2083) — any
+    // finisher since that review settled `halted:past-pin` — any
     // later finisher attempt, live or settled, replaces it, and a later
     // returned review answers it. `unverified`: the latest `reviewed=`'s
     // unverified count. `dispositions`: every dispositions verdict a fix-pr
@@ -591,7 +591,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
     // retry suffix ("" < "b" < "c" …) the same way compute-board.mjs's
-    // laterAttempt does — never by row-text position (#2083 correction). A
+    // laterAttempt does — never by row-text position. A
     // `-b` retry can sit before an older `halted:past-pin` token after a row
     // rewrite, and text order must not read the stale one as the live
     // finisher's replacement. Reset at each `reviewed=`, since `pastPinHalt`
@@ -628,8 +628,8 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
         // recorded into `members` by the `note` above, so its outcome is this
         // token's own unless `## Dispatched` or an earlier row already settled
         // it — never a reason to fall back to the row's own copy. A
-        // `fix-pr-<M>` speaks for PR #M alone, as a `finisher-pr` does below
-        // (#2329): `dispatch` and `settle` write it onto PR #M's row only, so a
+        // `fix-pr-<M>` speaks for PR #M alone, as a `finisher-pr` does below:
+        // `dispatch` and `settle` write it onto PR #M's row only, so a
         // copy on another PR's row is a hand-written stray this PR reads as
         // absent, and which lends PR #M's own copies no outcome.
         if (t.family === "fix-pr" && t.number === pr) {
@@ -679,7 +679,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
           }
           // A fresh hold is unresolved whatever settled before it, the way a
           // fresh `reviewed=` resets `reviewFixed` above. A redundant re-hold
-          // (merge-bot retrying a PR it has already held, #2064) changes
+          // (merge-bot retrying a PR it has already held) changes
           // nothing a live fix-applier holds off: liveness is not read off
           // token order.
           st.conflictOpen = true;
@@ -693,7 +693,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     const ex = EXCLUDED_ROW.exec(text);
     if (ex && keyNum !== null) {
       const premises = [...ex[1].matchAll(PREMISE)].map(([, kind, target]) => ({ kind, target }));
-      // ADR 0013 §48: an `excluded` row claims its ticket only while its
+      // An `excluded` row claims its ticket only while its
       // premise still holds. Lifted here only when EVERY premise is a
       // verifiable, now-closed `behind-pr:#M` — the same rule a
       // `held-behind` merge hold uses — since a mixed or `behind-issue`
@@ -721,7 +721,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
   // say whether one exists; a settled member whose transcript was never
   // written gets `tier-unverifiable=` from it, which clears the hold here.
   const newest = impls.filter((m, i) => !impls.some((o, j) => j > i && o.number === m.number));
-  // A mismatch on a ticket whose issue is CLOSED holds nothing (#2485): there
+  // A mismatch on a ticket whose issue is CLOSED holds nothing: there
   // is nothing left for `impl-<N>-b` to replace, and a retired definition can
   // never re-check. `closed` is the ticket numbers the caller has probed; the
   // pure fold cannot probe, so none is the default and every mismatch holds.
@@ -776,7 +776,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     // a conflict hold no fix-applier has cleared, or a dispositions mismatch
     // no retry has answered — on a PR still open, with no fix-applier working
     // it and no newer review running. The first two are answered apart
-    // (#2328): a landed conflict fix-applier lifts the hold and leaves
+    // here: a landed conflict fix-applier lifts the hold and leaves
     // survivors it never read due for a review one.
     fixDue: [...byPr.entries()]
       .filter(([n, st]) => open.has(n)
@@ -785,8 +785,8 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
       .map(([n]) => n).sort(asc),
     // Open, not signed off, closing an issue (GitHub's own linked set — a
     // chore PR closing nothing is review work nobody in the run will ever be
-    // dispatched against, #590), with no live or returned review on record —
-    // or (#2083) a returned review its finisher halted `past-pin` against: the
+    // dispatched against), with no live or returned review on record —
+    // or a returned review its finisher halted `past-pin` against: the
     // head carries commits no reviewer read, so it is owed a review again
     // until one is running or has returned. A head that moved past
     // `reviewed=` with no such halt — a fix-applier's push — stays not due:
@@ -803,13 +803,13 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     mergeHeld: queued.filter((p) => heldBehind(state(p.number)) || conflictHeld(state(p.number))).length,
     // How many of those are conflict holds — the HOLD row's wording, no field.
     mergeConflictHeld: queued.filter((p) => conflictHeld(state(p.number))).length,
-    // #2331: finishers settled `labelled` on an open PR without the label.
+    // Finishers settled `labelled` on an open PR without the label.
     unlabelled: unlabelledFinishers({ rows, dispatched },
       new Set(prs.filter((p) => !isQueued(p)).map((p) => p.number))),
     // Every PR, open or not, on a conflict hold no fix-applier has cleared —
-    // the one reading of a hold (#2299): `ledger.mjs dispatch` names a
+    // the one reading of a hold: `ledger.mjs dispatch` names a
     // fix-applier's definition off this list, so it answers the same per-PR
-    // fold this tick holds the merge on, split rows (#2283) and a settle made
+    // fold this tick holds the merge on, split rows and a settle made
     // anywhere included, rather than re-deriving it from one row's text.
     conflictHeld: [...byPr.entries()].filter(([, st]) => conflictHeld(st)).map(([n]) => n).sort(asc),
     // Every PR, open or not, with a returned review: its latest `reviewed=`
@@ -834,7 +834,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     tierUnchecked,
     claimed,
     excluded,
-    // Who is live, by name, for a MAIN-CHECKOUT line (#2210): every unsettled
+    // Who is live, by name, for a MAIN-CHECKOUT line: every unsettled
     // member token, then each in-flight review by its PR — a `review=wf:`
     // run carries no member token of its own.
     live: [
@@ -930,7 +930,7 @@ const GH_TIMEOUT_MS = ghBudget(20, process.env.FLEET_TICK_GH_TIMEOUT);
 const TIMED_OUT = `timed out after ${GH_TIMEOUT_MS / 1000}s`;
 
 // die() shared with the other fleet scripts (writeSync-based, pipe-safe —
-// see arg.mjs for the #176/#328/#363 rationale). This file parses its own
+// see arg.mjs for the rationale). This file parses its own
 // options with node:util's parseArgs rather than arg()/has(), so die() and
 // the isDigits() rule int() calls are all it shares.
 const die = makeDie(NAME);
@@ -940,7 +940,7 @@ const die = makeDie(NAME);
 const OPTIONS = {
   // Defaults here, not threaded through int(): declared this way they still
   // go through the guard below, where a hand-passed default went round it.
-  // 2/6 (#1773): no hard cap on either role, defaults only.
+  // No hard cap on either role, defaults only.
   "implementer-cap": { type: "string", default: "2" },
   "reviewer-cap": { type: "string", default: "6" },
   // Reviews in flight at once. Default = the reviewer cap; run-team's own
@@ -969,7 +969,7 @@ function options() {
   }
   const int = (name) => {
     const raw = values[name];
-    // #878: the digits rule, called rather than restated. Digits, not
+    // The digits rule, called rather than restated. Digits, not
     // Number(): `Number("")` is 0, so `--max-reviews ""` — the shape an unset
     // shell variable produces — would otherwise read as a real number.
     if (!isDigits(String(raw).trim())) die(`--${name} must be a non-negative integer, got '${raw}'`);
@@ -999,7 +999,7 @@ function openPrs() {
   } catch (e) {
     // Never interpolates e.stderr or e.message: execFileSync already forwarded
     // the child's stderr to ours, and Node builds e.message out of it, so
-    // either one emits every byte a second time (#176).
+    // either one emits every byte a second time.
     die(`gh pr list failed: ${e.code === "ETIMEDOUT" ? TIMED_OUT : e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)} — a failed read is not an empty queue`);
   }
   let prs;
@@ -1010,7 +1010,7 @@ function openPrs() {
   }
   // closingIssuesReferences is checked, not defaulted: absent, it would read as
   // an empty list and drop every open PR from review work. headRefOid likewise
-  // (#2083): absent, a `halted:past-pin` PR would read as moved forever.
+  // — absent, a `halted:past-pin` PR would read as moved forever.
   if (!Array.isArray(prs) || prs.some((p) => !p || typeof p.number !== "number"
     || !Array.isArray(p.labels) || !Array.isArray(p.closingIssuesReferences)
     || typeof p.headRefOid !== "string")) {
@@ -1054,7 +1054,7 @@ function readLedger() {
 }
 
 // `.fleet/shortlist.json` beside the run's ledger: the workspace from `git
-// rev-parse --git-common-dir`, GIT_DIR/GIT_WORK_TREE scrubbed (#1599) so an
+// rev-parse --git-common-dir`, GIT_DIR/GIT_WORK_TREE scrubbed so an
 // ambient one cannot answer for another repository. null when unresolvable —
 // read as a missing shortlist, and the refresh then says why it could not run.
 function shortlistPath() {
@@ -1114,7 +1114,7 @@ function liftedPremise(excluded, entries, prs) {
 }
 
 // The tickets, of those holding the implementer row on a tier mismatch, whose
-// issue is CLOSED (#2485): the one live read deriveRun needs to lift a hold
+// issue is CLOSED: the one live read deriveRun needs to lift a hold
 // whose replacement has nothing left to replace. One `gh issue view` per
 // mismatched ticket, and none when nothing is mismatched. A probe that cannot
 // answer — a nonzero exit, or a reply carrying no issue state — is disclosed
@@ -1208,7 +1208,7 @@ function main() {
   // Beside the shortlist, off the same git probe rather than a second one.
   const router = readCostGuard(listPath === null ? null : join(dirname(listPath), "cost-guard.json"));
 
-  // The PRIOR run's liveness, before anything that can refuse — #1597. The gh
+  // The PRIOR run's liveness, before anything that can refuse. The gh
   // read and the ledger read below both exit 2 on failure, and a stall
   // announced after them is a stall a gh outage can silence. The supply it
   // reports is the local shortlist file's, which no outage can take away.
@@ -1256,8 +1256,8 @@ function main() {
     }
   }
 
-  // #2210: the main checkout against the run's baseline, on every tick — the
-  // backstop for what #1411's guard cannot see. Never a refusal of the tick:
+  // The main checkout against the run's baseline, on every tick — the
+  // backstop for what member-write-guard cannot see. Never a refusal of the tick:
   // every answer but `clean` is a hold on the dispatching rows plus one line
   // saying why, so the rest of the run keeps reporting.
   const mainCheckout = checkMainCheckout();
@@ -1276,13 +1276,13 @@ function main() {
   const prev = readState(path, NAME);
   const digest = createHash("sha256").update(lines.join("\n")).digest("hex");
   const acts = actionable(rows);
-  // `ticked`, fleet-tick's own liveness key (#1597 follow-up): written on
+  // `ticked`, fleet-tick's own liveness key: written on
   // every invocation unconditionally — this tick running IS the occurrence.
   writeState(path, NAME, prev, { quiet: acts ? 0 : prev.quiet + 1, digest, ticked: { at: Date.now() } });
 
   // Fold only when BOTH hold: nothing to act on, and nothing new to say. A
   // main-checkout hold still holding dispatch stays named on the folded line
-  // (#2307) — not actionable, so it never resets `quiet`, but the one reason
+  // — not actionable, so it never resets `quiet`, but the one reason
   // nothing dispatches must not drop out of view. Outside the digest, which
   // already covers it through the rows.
   if (fold && !acts && digest === prev.digest) {

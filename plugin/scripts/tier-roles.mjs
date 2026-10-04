@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// omp tier routing (ADR 0011, ADR 0014). `model: "@<role>:<level>"` in an
+// omp tier routing. `model: "@<role>:<level>"` in an
 // agent definition is a fleet tier route — never a vendor id — resolved
 // through the operator's `modelRoles.slow|task|smol`, with the explicit
 // `:<level>` suffix on the REFERRING alias winning over the role's own
 // baked one (`modelRoles.<role>` values carry their own baked suffix,
 // measured `smol: anthropic/claude-haiku-4-5:auto` on a real install).
 //
-// This file is CHECK-ONLY (ADR 0014): there is no generator and no
+// This file is CHECK-ONLY: there is no generator and no
 // operator-side override record to derive any more — `model:` in the
 // definition IS the route, and omp resolves the `@<role>` alias through
 // `modelRoles` natively (`omp://task-agent-discovery.md`). What is left to
@@ -16,9 +16,9 @@
 //   (b) every role a definition uses has a `modelRoles.<role>` that
 //       resolves to a model;
 //   (c) no `task.agentModelOverrides` entry shadows a fleet definition —
-//       that config is model-precedence #1 for task/eval dispatch (ADR
-//       0011), so a leftover `fleet-*` key there would silently win over
-//       the definition's own `model:`, which ADR 0014 retires as a lever;
+//       that config is model-precedence #1 for task/eval dispatch,
+//       so a leftover `fleet-*` key there would silently win over
+//       the definition's own `model:`, and that config is retired as a lever;
 //   (d) every definition's `:<level>` is one its role's current target
 //       runs at — in that model's `thinking` efforts in omp's own model
 //       catalog (`omp models --json`). omp clamps an unsupported level
@@ -47,7 +47,7 @@ const NAME = "tier-roles";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
-// pure core — unit-tested directly (tier-roles.test.mjs), no filesystem or
+// pure core — unit-tested directly, no filesystem or
 // process access below this line until main()
 // ---------------------------------------------------------------------------
 
@@ -127,7 +127,7 @@ export function modelsEqual(a, b) {
 
 // `omp config get <key> --json` reads the MERGED effective value (built-in
 // defaults, global config, project settings, `--config` overlays, runtime
-// overrides — measured for the retired pool-preflight.mjs, #1588) —
+// overrides — measured for the retired pool-preflight.mjs) —
 // `modelRoles.slow` dotted into a record is `Unknown setting` on this box,
 // so a record-valued key is always read whole. Never writes.
 export function readOmpConfigValue(key) {
@@ -180,10 +180,10 @@ export function catalogEntry(model, catalog) {
 }
 
 // Every fleet definition's `name:` carries this prefix — enforced in CI by
-// frontmatter-allowlist.json's agents `name` pattern (`^fleet-[^:]*$`,
-// #1303). It is the only way to tell a fleet-owned `task.agentModelOverrides`
-// entry (a pre-cutover install can still carry one — ADR 0014 retires the
-// config as a lever, it does not clear it) from the operator's own entry,
+// frontmatter-allowlist.json's agents `name` pattern (`^fleet-[^:]*$`).
+// It is the only way to tell a fleet-owned `task.agentModelOverrides`
+// entry (a pre-cutover install can still carry one — the config is retired
+// as a lever, not cleared) from the operator's own entry,
 // which this check never touches.
 const FLEET_NAME_PREFIX = "fleet-";
 
@@ -202,7 +202,7 @@ function kindOf(v) {
 
 // The operator's install (`modelRoles`, omp's model `catalog`, and any
 // leftover `task.agentModelOverrides`) against what the fleet's own
-// definitions need. `violations` stop a run (ADR 0014); `notices` never do —
+// definitions need. `violations` stop a run; `notices` never do —
 // they flag a hazard (two roles' cells measuring one model) that is legal
 // configuration, just probably not what the operator meant.
 export function checkRoutes({ agentsDir, agentsSource = `--agents ${agentsDir}`, modelRoles, overrides, catalog }) {

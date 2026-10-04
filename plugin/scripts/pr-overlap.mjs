@@ -19,7 +19,7 @@ import { makeDie, defineFlags } from "./arg.mjs";
 const NAME = "pr-overlap";
 
 // die()/numArg() shared with the other fleet scripts — see arg.mjs for the
-// fail-open (#61/#169/#878) and pipe-safety (#176/#328) rationale. `--a`/`--b`
+// fail-open and pipe-safety rationale. `--a`/`--b`
 // given trailing already died via the usage guard below — `undefined` is
 // falsy — so this file was never a silent-widening site on its own. But `--a`
 // given `--b` as its "value" (`pr-overlap.mjs --a --b 5`) was NOT caught that
@@ -28,7 +28,7 @@ const NAME = "pr-overlap";
 // here, by name, instead.
 //
 // numArg() rather than arg() because the falsy check missed the other half
-// too, and this file is why #878 could not be swept by grepping for
+// too, and this file is why the numArg() fix could not be swept by grepping for
 // `arg("pr")`: the same fail-open arrives here under `--a`/`--b`. Measured on
 // the pre-fix tree, `--a abc --b def` printed `{"a":null,"b":null,…}` at exit
 // 0 carrying a real `signal: "files"` verdict — `gh pr diff` resolves a
@@ -45,15 +45,16 @@ const { numArg, sweep, stray } = defineFlags(die, { flags: { a: "value", b: "val
 const a = numArg("a");
 const b = numArg("b");
 if (a === null || b === null) die("usage: pr-overlap.mjs --a <pr> --b <pr>");
-// #365, and here it is the WEAKER half of the fix: both flags are required,
-// so a misspelling of either (`--aa 5 --b 6`) already fell through to the
-// usage die above — refused, just never named. What was NOT refused is a
-// stray alongside two good values (`--a 5 --b 6 --quiet`), silently ignored
-// at exit 0. The sweep closes that and upgrades the first case's message from
-// a usage dump to the offending token. Below the usage guard so the usage
-// text still wins where it is the better answer; above the first gh call.
+// The misspelled-flag sweep, and here it is the WEAKER half of the fix: both
+// flags are required, so a misspelling of either (`--aa 5 --b 6`) already
+// fell through to the usage die above — refused, just never named. What was
+// NOT refused is a stray alongside two good values (`--a 5 --b 6 --quiet`),
+// silently ignored at exit 0. The sweep closes that and upgrades the first
+// case's message from a usage dump to the offending token. Below the usage
+// guard so the usage text still wins where it is the better answer; above
+// the first gh call.
 sweep();
-// #463: sweep() above only refuses a `--`-prefixed token; a bare or
+// sweep() above only refuses a `--`-prefixed token; a bare or
 // single-dash one (`--a 5 --b 6 stray`) rode along in silence the same way.
 // This file takes no positional, so any leftover token is a stray.
 stray();
@@ -70,7 +71,7 @@ function changedFiles(pr) {
     // (no `stdio` above), so interpolating it emits every byte twice, and this
     // is the biggest payload of the fleet scripts. `e.message` is the same
     // string, not a fallback: Node builds it as `Command failed:\n<stderr>`.
-    // Three disjoint shapes — Node-aborted (ENOENT/ENOBUFS), signal, exit (#176).
+    // Three disjoint shapes — Node-aborted (ENOENT/ENOBUFS), signal, exit.
     die(
       `gh pr diff ${pr} failed: ${
         e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)
@@ -115,30 +116,31 @@ const modulesOf = (fs) => fs.map(moduleOf).filter((m) => m !== null);
 // with nothing whatsoever in common.
 const dirsOf = (fs) => fs.map(dirname).filter((d) => d !== ".");
 
-// #705: the three signals above compare paths, modules and directories. They
+// The three signals above compare paths, modules and directories. They
 // are structurally blind to a coupling that lives in PROSE — one file naming
 // another. The measured case is `docs/metrics/tier-outcomes.tsv`: it is
 // append-only, so every fleet run produces a PR touching it, and the
 // paragraph that reads it lives in `run-team/SKILL.md`. A PR appending rows
 // and a PR rewriting that paragraph edit the same logical section from two
 // different files — run-merge-bot.md's own soft signal — and this script
-// answered `signal=none` on exactly that pair (#703 vs #704). The clearest
+// answered `signal=none` on exactly that pair of PRs. The clearest
 // output the tool has was the one that missed it, which is the dangerous
 // direction: `none` licenses a merge.
 //
 // Derived from the two diffs rather than declared in a `data file → its prose
 // consumers` table, because the table was already stale before it could be
-// written. #705 recorded ONE consumer of `tier-outcomes` (measured at
-// `e540e16`); at `ffa9026` there are eleven — `member-record.mjs`, four
-// `*-prose.test.mjs` guards, three specs and run-team's own SKILL.md. A map
-// seeded from that ticket would have shipped wrong on day one, which is
-// exactly the rot the ticket predicted of it.
+// written. The ticket asking for this signal recorded ONE consumer of
+// `tier-outcomes` (measured at `e540e16`); at `ffa9026` there are eleven,
+// among them `member-record.mjs`, four prose-pin test guards, three specs
+// and run-team's own SKILL.md. A map seeded from that ticket would have
+// shipped wrong on day one, which is exactly the rot the ticket predicted
+// of it.
 
 // Which files can be CITED, and which can carry a citation. Two explicit
 // extension lists, deliberately narrow and deliberately not a file table:
-// #705's own objection to deriving this signal is "a broad net and likely
-// false positives", so the net is bounded and its bounds are printed with the
-// verdict. An extension on neither list does not participate at all.
+// that ticket's own objection to deriving this signal is "a broad net and
+// likely false positives", so the net is bounded and its bounds are printed
+// with the verdict. An extension on neither list does not participate at all.
 //
 // Data side — an artifact whose meaning lives in prose somewhere else. A
 // `.ts` module's consumers are already found by `files`/`modules` above. `.md`
@@ -182,7 +184,7 @@ function trackedBasenameCounts() {
     // -z: a basename count must not be wrong about a path git would otherwise
     // quote. maxBuffer explicitly, for the reason diffOf() states below.
     //
-    // GIT_DIR/GIT_WORK_TREE scrubbed (#1599, gitEnv()): measured, an ambient
+    // GIT_DIR/GIT_WORK_TREE scrubbed (gitEnv()): measured, an ambient
     // GIT_DIR answers for a DIFFERENT repository regardless of `cwd`,
     // silently, at exit 0 — the count this guard's verdict is based on then
     // comes from whichever repository the ambient variable names, and a
@@ -203,7 +205,7 @@ function trackedBasenameCounts() {
   } catch (e) {
     // Same three disjoint shapes changedFiles() and diffOf() name: a git
     // failure with no captured reason is indistinguishable from a clean scan
-    // in unrunReasons, which is #705's own failure mode one level in.
+    // in unrunReasons, which is the missed-pair failure mode above one level in.
     basenameCounts = null;
     trackedPaths = null;
     basenameCountsUnrun = `git ls-files failed: ${
@@ -238,9 +240,9 @@ function tokensFor(dataFile) {
 // file names the data file SOMEWHERE — run-team/SKILL.md always does, in nine
 // places, so a whole-file read fires on every PR that touches it at all,
 // permanently. The question is whether THIS PR is editing the part that names
-// it. #703 touched SKILL.md and scored zero against those tokens in its own
-// diff, which is how merge-bot-9 cleared the pair by hand; grepping the diff
-// is that measurement, kept and automated.
+// it. One PR of the measured pair touched SKILL.md and scored zero against
+// those tokens in its own diff, which is how merge-bot-9 cleared the pair by
+// hand; grepping the diff is that measurement, kept and automated.
 //
 // Context lines count along with added and removed ones, deliberately: prose
 // being rewritten NEXT TO a citation is the hazard, and merge-bot-9's own
@@ -343,8 +345,7 @@ const modules = intersect(modulesOf(filesA), modulesOf(filesB));
 const dirs = intersect(dirsOf(filesA), dirsOf(filesB));
 
 // Both directions. Which PR holds the data and which holds the prose is not
-// knowable in advance — #704 appended the rows and #703 held the paragraph,
-// and the flags carry no such role.
+// knowable in advance, and the flags carry no such role.
 const ab = proseHits({ pr: a, files: filesA }, { pr: b, files: filesB });
 const ba = proseHits({ pr: b, files: filesB }, { pr: a, files: filesA });
 const prose = [...ab.hits, ...ba.hits].sort((x, y) =>
@@ -353,7 +354,7 @@ const prose = [...ab.hits, ...ba.hits].sort((x, y) =>
 // Non-null means `prose` is not a complete answer — the scan was reached and
 // could not cover what an empty array would otherwise claim. Without this
 // field a failed diff read prints `prose: []`, byte-identical to a clean
-// scan: #705's own failure mode — the clearest output being the one that
+// scan: the missed-pair failure mode — the clearest output being the one that
 // misses it — reintroduced one level in. Same reason run-team/SKILL.md reads
 // `dimensionsUnrun` beside `dimensionsRun`: an absence of findings is not
 // coverage.
@@ -397,7 +398,7 @@ if (signal === "modules") {
 // Keyed on the count, not on `signal`, unlike the two notes above: a prose
 // hit under a `dirs` verdict is stronger evidence than the verdict, and the
 // ladder would hide it. The caveat carries the witness because one read
-// disproves it — which is how merge-bot-9 settled #703 vs #704 by hand.
+// disproves it — which is how merge-bot-9 settled the measured pair by hand.
 if (prose.length) {
   console.error(
     `${NAME}: prose citation — the other PR's diff names a data file this one\n` +

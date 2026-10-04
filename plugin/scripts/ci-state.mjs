@@ -18,8 +18,7 @@ import { makeDie, defineFlags, writeAll } from "./arg.mjs";
 const NAME = "ci-state";
 
 // die()/arg()/numArg()/has() shared with the other fleet scripts — see
-// arg.mjs for the fail-open (#61/#169/#364/#878) and pipe-safety
-// (#176/#328/#363) rationale.
+// arg.mjs for the fail-open and pipe-safety rationale.
 // `base`/`workflow`/`workflow-file` below all fall back with `||`, so a
 // trailing `--base` (nothing after it) used to read as omitted and silently
 // compare against the DEFAULT base — `ci-state.mjs --pr 5 --base` gave a
@@ -49,7 +48,7 @@ const vlog = (...a) => {
   if (!quiet) console.error(...a);
 };
 
-// #262. A refusal from an exhausted REST quota reached the same arm as every
+// A refusal from an exhausted REST quota reached the same arm as every
 // other gh read failure, so a caller could not tell an outage that clears on
 // its own from a repo or token that will still be unreadable after any wait.
 // The cause is only ever in gh's own stderr, which execFileSync BOTH forwards
@@ -73,7 +72,7 @@ const RATE_LIMITED = /rate limit|abuse detection/i;
 // printed nothing at all. A caller reading only the exit code is unaffected;
 // one parsing stdout gets a named cause instead of the empty capture
 // `merge-gate.mjs` reads as `ci-unreadable` there: a probe that could not
-// look, never a reading about the PR (ADR 0012 Decision 3).
+// look, never a reading about the PR.
 //
 // It reports the refused query and nothing else. A quota refusal is a probe
 // that could not look, so every field this script would otherwise observe is
@@ -98,9 +97,9 @@ const RATE_LIMITED = /rate limit|abuse detection/i;
 // survives process.exit(). It also takes no newline of its own, which is why
 // every call site below embeds its own trailing newline in the string it passes to writeAll().
 //
-// #1549: this file used to carry its own copy of that write loop, called
+// This file used to carry its own copy of that write loop, called
 // emit(), and the copy had DRIFTED — of the three hand-mirrored copies it was
-// the only one that never grew #889's retry cap, so a reader that stayed open
+// the only one that never grew the retry cap, so a reader that stayed open
 // but never drained left it spinning forever. That is what a comment reading
 // "mirrors emit()" buys and what shared code buys instead. The loop, its cap
 // and its 1ms Atomics.wait are arg.mjs's now.
@@ -140,7 +139,7 @@ function spawn(cmd, args, { maxBuffer, capture = false } = {}) {
   return execFileSync(cmd, args, { encoding: "utf8", env: gitEnv(), ...(maxBuffer ? { maxBuffer } : {}), ...(capture ? { stdio: "pipe" } : {}) });
 }
 
-// Three disjoint shapes — Node-aborted (ENOENT/ENOBUFS), signal, exit (#176).
+// Three disjoint shapes — Node-aborted (ENOENT/ENOBUFS), signal, exit.
 const failureOf = (e) => e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`);
 
 // `recover(e)`, given, is handed a failed child and returns the stdout to use
@@ -158,7 +157,7 @@ function run(cmd, args, { maxBuffer, recover, why } = {}) {
     // failure stands. `e.message` is the same string, not a fallback: Node
     // builds it as `Command failed: <cmd>\n<stderr>`.
     if (recover && e.stderr) writeAll(2, e.stderr);
-    // A quota refusal names itself first (#262); every other cause reports
+    // A quota refusal names itself first; every other cause reports
     // exactly as it always has, on this same line and this same exit code.
     // `?? ""` stays — RegExp.test would coerce an absent stderr to the string
     // "undefined", which a future looser pattern could match. String() around
@@ -185,7 +184,7 @@ const cut = (s, n = 120) => (s.length > n ? `${s.slice(0, n)}… (truncated)` : 
 // The parse succeeding is not the shape succeeding: an error object where an
 // array of runs is expected, a run view missing its jobs, parse cleanly and
 // flow on unchecked until the first dereference throws — same exit-1-as-
-// verdict failure, one layer further in (#269). `shape`, given, is
+// verdict failure, one layer further in. `shape`, given, is
 // `(parsed) => string | null` — a reason the payload isn't what the caller
 // is about to read, or null when it's fine — checked here so each call site
 // declares what it expects instead of hand-rolling its own, the way the two
@@ -224,7 +223,7 @@ const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v)
 // guards below each cover three faults at once — the key absent, the value an
 // empty string, the value not a string — and the `jobs` guard two of the same
 // kind, and every one of them printed a single identical "missing" line
-// (#926, measured), so a reader went hunting for a key gh had in fact
+// (measured), so a reader went hunting for a key gh had in fact
 // returned as `""`, `42` or `null`. `saw` reports the value instead, and
 // claims absence only when the key really is absent.
 //
@@ -233,7 +232,7 @@ const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v)
 // 'in' operator"). Every call site refuses a non-object ahead of any field
 // check, so `in` would work there today — but a field guard reordered past
 // that refusal would turn this diagnostic into the very exit-1-as-verdict
-// crash the shape checks exist to prevent (#269), where `hasOwn` just answers
+// crash the shape checks exist to prevent, where `hasOwn` just answers
 // `false`.
 //
 // JSON.stringify, not the raw value: it is what makes `""` visible at all and
@@ -248,7 +247,7 @@ const saw = (obj, key) => {
   return `got ${cut(shown)}`;
 };
 
-// #840: `pr` was validated for truthiness alone, so `--pr abc` survived to
+// `pr` was once validated for truthiness alone, so `--pr abc` survived to
 // every payload site — each built `pr: Number(pr)`, and `JSON.stringify(NaN)`
 // is `null`. The normal path is the worse of them: an unidentifiable payload
 // at exit 0 with `verdict: "green"`, which is the verdict the fleet gates on.
@@ -259,7 +258,7 @@ const saw = (obj, key) => {
 // so `--pr abc` could return a genuine verdict for whatever PR that branch
 // belongs to.
 //
-// #878 moved the rule itself into arg.mjs's numArg(), because the identical
+// The rule itself lives in arg.mjs's numArg(), because the identical
 // shape was still live in diff-stats.mjs and pr-overlap.mjs and a fourth
 // spelling of it here is what the fix had to stop. What stays this file's own
 // is the usage line below — absent and malformed are different mistakes, and
@@ -268,7 +267,7 @@ const saw = (obj, key) => {
 // `=== null`, not `!pr`: numArg() returns a NUMBER, so `--pr 0` — a value the
 // caller did give — would otherwise be answered with a usage line claiming
 // `--pr` is required. `gh` answers it truthfully instead, as no such PR.
-// numArg() also no longer needs the placement #840's regex did: that one had
+// numArg() also no longer needs the placement the old regex check did: that one had
 // to sit below this die because test() coerces `null` to the string "null",
 // and numArg() never tests a value it did not read. It still lands above
 // sweep(), per arg.mjs — where both would refuse, the more specific wording
@@ -284,17 +283,17 @@ if (pr === null) {
 const base = arg("base") || "main";
 const workflow = arg("workflow") || "CI";
 // --declare-no-ci is the caller's opt-out, never inferred: without it, a repo
-// with no workflow file yields verdict=no-ci but still exits non-zero (#111),
+// with no workflow file yields verdict=no-ci but still exits non-zero,
 // so absence never silently reads as pass. Fits the argv-flag surface every
 // other option here already uses, rather than a repo-committed marker file
 // that would sit uncommitted or drift stale.
 const declareNoCi = has("declare-no-ci");
 
-// #365: every flag above is read by looking for its own name, so a name
+// Every flag above is read by looking for its own name, so a name
 // nothing reads was never looked for — `--basee main` left `base` on its
 // default and this file returned a real, wrong verdict at exit 0/1. That is
 // the verdict the fleet gates PR-green on. Placed below the reads, per
-// arg.mjs, so `--base --quiet` keeps #169's "--base needs a value"; still
+// arg.mjs, so `--base --quiet` keeps "--base needs a value"; still
 // above the first gh call, which is the next statement.
 //
 // `--workflow-file` is read here rather than where its value is first needed,
@@ -308,10 +307,10 @@ const workflowFileArg = arg("workflow-file");
 
 sweep();
 
-// #463: sweep() above only ever refuses a `--`-prefixed token, so a bare or
+// sweep() above only ever refuses a `--`-prefixed token, so a bare or
 // single-dash stray rode along in silence — `--pr 42 basee main` ignored
 // `basee`/`main` and still compared against the default base, the same
-// fail-open harm #365 closed for a misspelled FLAG name. This file takes no
+// fail-open harm sweep() closes for a misspelled FLAG name. This file takes no
 // positional of its own, so any leftover token is one.
 stray();
 
@@ -711,7 +710,7 @@ function requiredContexts(branchName) {
 // match the head, then take the newest survivor.
 //
 // Skipped entirely under no-ci: there is no workflow to bind a run to, and
-// asking anyway would spend the REST budget #262 is already tight on for a
+// asking anyway would spend the already-tight REST budget on a
 // question this repo cannot answer either way.
 const reasons = [];
 let jobs = [];
@@ -758,12 +757,12 @@ if (noCi) {
   };
   // Recency is the primary key — a newer run always outranks an older one,
   // tied or not. The tie-break below fires ONLY when createdAt is equal to
-  // the second: two runs GitHub started in the same instant (measured on PR
-  // #1402, both 6 jobs green — one `cancelled`, one `completed`, and the
+  // the second: two runs GitHub started in the same instant (measured: both
+  // 6 jobs green — one `cancelled`, one `completed`, and the
   // stable sort below previously let API order pick the loser). Ranking
   // conclusion ahead of createdAt here would let an older completed run beat
   // a newer in-progress one on an unrelated, untied pair — a fresh
-  // regression, not a fix (#1410 review) — so conclusion only ever compares
+  // regression, not a fix — so conclusion only ever compares
   // within a tie.
   const compareRuns = (x, y) => {
     const byCreatedAt = bySecond(y.createdAt).localeCompare(bySecond(x.createdAt));
@@ -783,7 +782,7 @@ if (noCi) {
       // done yet" — checked alone, not paired with a conclusion check.
       // An earlier version additionally required `r.conclusion === null`,
       // but live `gh run list --json conclusion` reports an empty string
-      // `""` for a non-completed run, never `null` (#1566) — that extra
+      // `""` for a non-completed run, never `null` — that extra
       // check silently never matched, so a still-running run fell through
       // to the bottom tier below, indistinguishable from a failed/
       // cancelled one. `status !== "completed"` alone is both sufficient
@@ -873,7 +872,7 @@ if (noCi) {
     for (const j of jobs) {
       // `??` only falls through on null/undefined; gh reports an empty
       // string `""` for an in-progress job's conclusion (same shape as the
-      // rank() tie-break bug this file fixed for #1566), so `??` alone
+      // rank() tie-break bug above), so `??` alone
       // would print the unreadable "job check is , not success". `||`
       // treats the empty string as absent too and falls through to status.
       if (j.conclusion !== "success") reasons.push(`job ${j.name} is ${j.conclusion || j.status}, not success`);
@@ -897,7 +896,7 @@ try {
   const cmpJson = tryRun("gh", ["api", "--hostname", host, `repos/${repoView.nameWithOwner}/compare/${base}...${prHead}`]);
   if (cmpJson !== null) {
     const cmp = JSON.parse(cmpJson);
-    // Shaped like every other gh read here (#269), but fail-SOFT: a compare
+    // Shaped like every other gh read here, but fail-SOFT: a compare
     // reply without a numeric `behind_by` — a 404 body from the wrong host
     // or base is the live case — leaves `behind` null, this block's
     // documented unknown, instead of `undefined`, which JSON.stringify drops

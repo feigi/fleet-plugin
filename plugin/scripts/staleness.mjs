@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Is a shortlisted ticket's defect still there? (#238)
+// Is a shortlisted ticket's defect still there?
 //
 // A backlog ticket is a claim about a tree that has since moved. Nothing
 // reconciles the two, so a ticket fixed as a side effect of an unrelated
-// commit stays open and `ready-for-agent` — the worked case is #199, closed
+// commit stays open and `ready-for-agent` — the worked case was fixed
 // by `b243b4e` while that commit was solving something else, and nobody
 // noticed. Phase 0 then counts it as supply and an implementer can claim it,
 // take the label, build a worktree and burn a slot before finding there is
@@ -35,10 +35,10 @@
 // The one code that must never be reached by accident is 1 — see the catch at
 // the foot of this file.
 //
-// What it deliberately does NOT do: run a reproduction. #230's check needed a
+// What it deliberately does NOT do: run a reproduction. One such check needed a
 // purpose-built fixture plus a positive and a negative control, and a
 // reproduction run without both misattributes causes rather than merely
-// missing defects. That is the general backlog oracle #238 rules out; this
+// missing defects. That is the general backlog oracle this probe is not; this
 // probe informs supply, and a human or a triage pass closes.
 
 import { execFileSync } from "node:child_process";
@@ -53,16 +53,16 @@ const { arg, sweep, stray } = defineFlags(die, {
   flags: { path: "value", gone: "value", present: "value" },
 });
 
-// #818: a needle QUOTED OUT OF A TICKET can legitimately start with `--`
-// (#240's is `--label ready-for-agent`), and arg()'s value guard refuses
-// that spelling outright (#61/#169 — see arg.mjs's isFlagLike for why the
+// A needle QUOTED OUT OF A TICKET can legitimately start with `--`
+// (`--label ready-for-agent`, for one), and arg()'s value guard refuses
+// that spelling outright (see arg.mjs's isFlagLike for why the
 // refusal itself stays). An end-of-options separator opts `--gone`/
 // `--present` into the literal reading: `--gone -- '--value'` is the POSIX
 // convention, explicit at the call site, no second input channel.
 //
 // Given bare, with no `--` immediately after the flag, a flag defers to arg()
 // unchanged — a `--`-prefixed value still dies "needs a value" exactly as
-// before #818; that refusal is what keeps a flag from swallowing the next
+// before the separator existed; that refusal is what keeps a flag from swallowing the next
 // flag as its own value, and it is not weakened here. The three tokens
 // (flag, separator, value) are spliced out of process.argv once read, so
 // sweep()/stray() below never see the swallowed `--` or a needle shaped like
@@ -71,7 +71,7 @@ const { arg, sweep, stray } = defineFlags(die, {
 // ONE left-to-right pass over argv, both names in it together and every
 // separator triple consumed before arg() reads anything. Position decides
 // which flag owns a token, never the order the reads are written in —
-// because the values #818 exists to carry are FLAG-SHAPED, so a
+// because the values the separator exists to carry are FLAG-SHAPED, so a
 // separator-quoted needle can spell this script's own flag names, and a
 // scan for one name over the whole argv matches the sibling's already-quoted
 // data. Measured against a `needleArg("gone")`-then-`needleArg("present")`
@@ -132,7 +132,7 @@ if (!path) die("--path <path> is required");
 // (separatedNeedles() above) is the opt-in past that, one flag at a time.
 sweep();
 
-// #463: the sweep above only ever refuses a `--`-prefixed token, so a bare
+// The sweep above only ever refuses a `--`-prefixed token, so a bare
 // or single-dash stray rode through in silence here too — measured, `--path
 // README.md --present needle JUNKTOKEN` returned a payload byte-identical to
 // the same invocation without it. This script takes no positional of its
@@ -161,7 +161,7 @@ const needle = gone ?? present;
 // rather than a fix for a live case — but the growing one is a metrics TSV
 // that only ever gets appended to.
 //
-// GIT_DIR/GIT_WORK_TREE scrubbed (#1599, gitEnv()): the ONE spawn primitive
+// GIT_DIR/GIT_WORK_TREE scrubbed (gitEnv()): the ONE spawn primitive
 // every git call in this file routes through, so scrubbing it here protects
 // all four call sites at once. Measured: an ambient GIT_WORK_TREE alone makes
 // the `rev-parse --show-toplevel` call below answer with the AMBIENT path
@@ -195,10 +195,10 @@ function verdict(v, extra) {
   // a race against the child's own exit — such a pin reports on timing rather
   // than on whether the downgrade works, and a flaky pin on a safety path is
   // worse than none. The measurement above is what stands behind it. Closing
-  // it properly needs a seam that makes fd 1 fail on demand, which is the same
-  // testability seam #822 turns on.
+  // it properly needs a seam that makes fd 1 fail on demand, which this file
+  // does not have.
   //
-  // The short-write/EAGAIN loop itself is arg.mjs's writeAll() (#1549). A
+  // The short-write/EAGAIN loop itself is arg.mjs's writeAll(). A
   // single writeSync can short-write — return the count it managed and throw
   // nothing at all — and this function used to hand-roll the resume, one of
   // three copies of the same loop held in step by a comment saying so.
@@ -264,9 +264,9 @@ function probe() {
   // reading that failure as "the file is gone, the fix landed" closes a live
   // ticket. And a GENERATED artifact is untracked by construction:
   // `.agent-test.sh` was claim-ticket.sh's heredoc output, materialized beside
-  // the tracked `agent-test` bootstrap on every run of it until ADR 0015, so
+  // the tracked `agent-test` bootstrap on every run of it, so
   // what is on disk is whatever the last run produced. Measured 2026-08-22 on
-  // `agent-test` itself, which was the generated one before #55 tracked it:
+  // `agent-test` itself, which was the generated one before it was tracked:
   // `git ls-tree origin/main -- <path>` prints nothing at exit 0 and `git show
   // origin/main:<path>` exits 128, while the file sits right there in the
   // checkout. A probe that resolved it by name would
@@ -333,7 +333,7 @@ function probe() {
   // The other two are `live`, and `live` is the safe direction: the ticket
   // stays offered. It still carries its bound in `why` — a fix that landed as
   // an EQUIVALENT REWORDING satisfies the ticket while failing a literal
-  // string test, measured on #206, whose defect `0dc39ef` had already fixed in
+  // string test, measured on a ticket whose defect `0dc39ef` had already fixed in
   // wording that appears nowhere in the ticket. So `live` means "this literal
   // string still says the defect is here", never "no fix landed".
   if (mode === "present" && !found) {
@@ -367,7 +367,7 @@ function probe() {
   // reachable from `origin/main` BY CONSTRUCTION and needs no
   // `merge-base --is-ancestor` after the fact. That check belongs to the other
   // shape — a sha quoted in a ticket, which can be a pre-rebase orphan that
-  // `git show` resolves happily. Measured on #199, against a path this repo
+  // `git show` resolves happily. Measured on the header's worked case, against a path this repo
   // no longer tracks: `git log -S 'decodeArgs' origin/main -- <path>` named
   // `b243b4e`, and `git merge-base --is-ancestor b243b4e origin/main` is true,
   // as it is for every commit this walk can reach.
@@ -375,7 +375,7 @@ function probe() {
   // Newest-first with `-n 1`, never `--reverse`: the oldest count-changing
   // commit is the file's last rename whenever the string predates one, and a
   // refactor clears an ancestry gate exactly as well as the real fix.
-  // (Measured on #206's old wording, `--reverse` names a move commit and
+  // (Measured on that reworded ticket's old wording, `--reverse` names a move commit and
   // newest-first names the commit that actually did it.)
   let record;
   try {
@@ -403,9 +403,9 @@ function probe() {
 
 // The one code this file must never reach by accident is 1. Node exits 1 on an
 // uncaught throw, and 1 here means "provably fixed" — so a bug in the probe
-// would silently retire a live ticket, the exact harm #238's evidence
+// would silently retire a live ticket, the exact harm this probe's evidence
 // criterion exists to prevent. `arg.mjs` records the same inversion from the
-// other side (#299/#328). Nothing above is allowed to escape: every failure is
+// other side. Nothing above is allowed to escape: every failure is
 // an `unknown`, this one included.
 try {
   probe();
