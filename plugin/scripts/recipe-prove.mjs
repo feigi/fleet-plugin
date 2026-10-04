@@ -148,11 +148,25 @@ function parseArgs(argv) {
 // proof that did not hold. Only a spawn that produced no process counts:
 // spawnSync also sets `error` for a git that ran and was killed — ENOBUFS,
 // when its output outgrows the default maxBuffer — and that is a failed git
-// command like any other, never a git that could not be started.
+// command, never a git that could not be started.
+//
+// A git killed by a signal (that buffer kill, an OOM kill, a timeout wrapper)
+// is still a failed command, never a throw: each caller maps a failed git to
+// its own refusal. But it has no exit status and mostly no stderr, so `err`
+// names the kill, after whatever git did write — a caller quoting `err` would
+// otherwise quote an empty reason.
 function git(args, cwd) {
   const r = spawnSync("git", args, { cwd, env: ENV, encoding: "utf8" });
   if (r.error && !r.pid) throw cannot(`could not start git: ${r.error.message}`);
-  return { ok: r.status === 0, out: (r.stdout ?? "").replace(/\n$/, ""), err: (r.stderr ?? "").trim() };
+  const err = (r.stderr ?? "").trim();
+  const killed = r.signal && `git was killed by ${r.signal}${killCause(r.error)}`;
+  return { ok: r.status === 0, out: (r.stdout ?? "").replace(/\n$/, ""), err: [err, killed].filter(Boolean).join("; ") };
+}
+
+function killCause(error) {
+  if (!error) return "";
+  if (error.code === "ENOBUFS") return " (ENOBUFS: its output outgrew the spawn buffer)";
+  return ` (${error.code ?? error.message})`;
 }
 
 // Run a Recipe command through `sh -c` from the worktree root, its output to
@@ -338,12 +352,13 @@ function removeLogs(logs) {
 
 function main(argv) {
   const o = parseArgs(argv);
-  if (!git(["rev-parse", "--git-dir"], o.repo).ok) throw cannot(`${o.repo} is not a git repository`);
+  const gitDir = git(["rev-parse", "--git-dir"], o.repo);
+  if (!gitDir.ok) throw cannot(`${o.repo} is not a git repository: ${gitDir.err}`);
   const common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], o.repo);
   const workspace = common.ok ? workspaceDirFromGitCommonDir(common.out, o.repo) : null;
   if (!workspace) throw cannot(`cannot resolve the common git dir of ${o.repo}: ${common.err}`);
   const sha = git(["rev-parse", "--verify", "origin/main^{commit}"], o.repo);
-  if (!sha.ok) throw cannot("origin/main does not resolve to a commit — fetch it; the proof runs against it");
+  if (!sha.ok) throw cannot(`origin/main does not resolve to a commit (${sha.err}) — fetch it; the proof runs against it`);
 
   const logs = mkdtempSync(join(tmpdir(), `${NAME}-`));
   const cache = join(workspace, ".fleet", "recipe.json");

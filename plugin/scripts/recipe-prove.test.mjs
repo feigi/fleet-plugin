@@ -506,6 +506,112 @@ test("a git whose output outgrows the spawn buffer is a failed command, not a gi
   assert.doesNotMatch(r.err, /could not start git/);
 });
 
+// A `git` first on PATH that runs `act` when its arguments match the sh `case`
+// pattern `when`, and otherwise execs the real one.
+function fakeGit(when, act) {
+  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  const bin = tempDir("recipe-prove-path-");
+  writeExecStub(join(bin, "git"), `#!/bin/sh\ncase "$*" in ${when}) ${act} ;; esac\nexec '${realGit}' "$@"\n`);
+  return `${bin}:${BIN}:${process.env.PATH}`;
+}
+
+const COUNT_PROOF = ["--install", "true", "--test", "echo 'tests 1'", "--count-line", "tests 1", "--test-count", "1"];
+
+// A git that ran and was killed has no exit status and, mostly, no stderr: its
+// failure must name the kill, or every caller quoting git's reason quotes an
+// empty one. Each caller keeps its own refusal class — NOT PROVEN (1) inside
+// the proof, no verdict (2) for the probes that come before it.
+const KILLED_GIT = [
+  {
+    name: "a git killed by SIGKILL reading the tree state",
+    when: "status*", act: "kill -9 $$",
+    status: 1, reason: /NOT PROVEN — could not read the tree state in the throwaway worktree: git was killed by SIGKILL; install output: /,
+  },
+  {
+    name: "a git killed by SIGTERM reading the tree state",
+    when: "status*", act: "kill -TERM $$",
+    status: 1, reason: /NOT PROVEN — could not read the tree state in the throwaway worktree: git was killed by SIGTERM; install output: /,
+  },
+  {
+    name: "a git killed for outgrowing the spawn buffer reading the tree state",
+    when: "status*", act: "yes | head -c 2000000; exit 0",
+    status: 1, reason: /NOT PROVEN — could not read the tree state in the throwaway worktree: git was killed by SIGTERM \(ENOBUFS: its output outgrew the spawn buffer\); install output: /,
+  },
+  {
+    name: "a git that wrote to stderr and was then killed",
+    when: "status*", act: "echo boom >&2; kill -9 $$",
+    status: 1, reason: /NOT PROVEN — could not read the tree state in the throwaway worktree: boom; git was killed by SIGKILL; install output: /,
+  },
+  {
+    name: "a git killed restoring the tree before the mutation",
+    when: "reset*", act: "kill -9 $$", files: GO_FILES, args: GO_PROOF,
+    status: 1, reason: /NOT PROVEN — could not restore the tree before the mutation: git was killed by SIGKILL; test output: /,
+  },
+  {
+    name: "a git killed reading what the mutation changed",
+    when: "diff*", act: "kill -9 $$", files: GO_FILES, args: GO_PROOF,
+    status: 1, reason: /NOT PROVEN — could not read what the mutation changed: git was killed by SIGKILL; its output: /,
+  },
+  {
+    name: "a git killed probing for the repository",
+    when: '"rev-parse --git-dir"', act: "kill -9 $$",
+    status: 2, reason: /^recipe-prove: .* is not a git repository: git was killed by SIGKILL$/m,
+  },
+  {
+    name: "a git killed resolving the common git dir",
+    when: '"rev-parse --path-format=absolute --git-common-dir"', act: "kill -9 $$",
+    status: 2, reason: /^recipe-prove: cannot resolve the common git dir of .*: git was killed by SIGKILL$/m,
+  },
+  {
+    name: "a git killed resolving origin/main",
+    when: '"rev-parse --verify"*', act: "kill -9 $$",
+    status: 2, reason: /^recipe-prove: origin\/main does not resolve to a commit \(git was killed by SIGKILL\) — fetch it/m,
+  },
+  {
+    name: "a git killed creating the throwaway worktree",
+    when: '"worktree add"*', act: "kill -9 $$",
+    status: 2, reason: /^recipe-prove: could not create the throwaway worktree: git was killed by SIGKILL$/m,
+  },
+];
+
+for (const c of KILLED_GIT) {
+  test(`${c.name} names the signal in its refusal`, () => {
+    const { dir } = repo(c.files ?? MAVEN_FILES);
+    const r = prove(dir, c.args ?? COUNT_PROOF, { env: { PATH: fakeGit(c.when, c.act) } });
+    assert.equal(r.status, c.status, r.err);
+    assert.match(r.err, c.reason);
+    assert.doesNotMatch(r.err, /could not start git/);
+    if (c.status === 2) assert.doesNotMatch(r.err, /NOT PROVEN/);
+  });
+}
+
+// The control: a git that ran and exited non-zero is quoted as it wrote, with
+// no kill named.
+test("a git that exits non-zero is refused with exactly its stderr, naming no signal", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, COUNT_PROOF, { env: { PATH: fakeGit("status*", "echo boom >&2; exit 3") } });
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /NOT PROVEN — could not read the tree state in the throwaway worktree: boom; install output: /);
+  assert.doesNotMatch(r.err, /killed/);
+});
+
+// A killed `worktree remove` is a failed one: cleanup falls back to the plain
+// delete, and the proof's own NOT PROVEN — which keeps its log directory,
+// the throwaway worktree's parent — stands.
+test("a git killed removing the throwaway worktree still leaves it deleted", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, ["--install", "false", "--test", "true", "--count-line", "x 1", "--test-count", "1"], {
+    env: { PATH: fakeGit('"worktree remove"*', "kill -9 $$") },
+  });
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /NOT PROVEN — the Install step 'false' failed/);
+  assert.doesNotMatch(r.err, /skipped git/);
+  const kept = logDirs(r.tmp);
+  assert.equal(kept.length, 1, `log directories in ${r.tmp}: ${kept}`);
+  assert.equal(existsSync(join(r.tmp, kept[0], "wt")), false, "the throwaway worktree is gone");
+  assert.equal(git(dir, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length, 1, "only the main worktree stays registered");
+});
+
 // A git that starts for the worktree removal and not for the prune after it:
 // the stub deletes itself once `worktree remove` has run. The proof's own
 // outcome is NOT PROVEN (the Install step fails), and the prune that cannot
