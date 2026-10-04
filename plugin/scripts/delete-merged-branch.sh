@@ -39,6 +39,21 @@
 # The lookups run only when there is a delete to guard — a branch already gone
 # has none, and is exit 0 whatever they would say.
 #
+# THE LABEL HALF. The same step also drops `in-progress` from every issue the
+# merged PR closes, by running its sibling `drop-merged-label.sh <pr> --apply`
+# through `sh`, resolved beside this file. It runs right after the MERGED gate,
+# before any branch-half validation, so every later exit already carries its
+# outcome; a PR that is not MERGED is refused (exit 2) with no `issue edit`. A
+# missing or unreadable sibling is exit 2 at startup, nothing touched. Its JSON
+# line and stderr go to this script's stderr; stdout carries only these failure
+# tokens, one per line, printed before the branch half's output:
+#   label-drop-failed-#<issue>  one per issue whose removal failed
+#   label-read-failed-#<pr>     the outcome could not be determined: the sibling
+#                               exited 2, exited 1 naming no issue, or ended any
+#                               other way (stderr names the raw exit code) —
+#                               never read as "nothing to drop"
+# A label failure never stops the branch delete from running.
+#
 # Exit 0: the branch is gone from origin (deleted here, already gone, or a fork
 #         PR's branch, which lives in another repository and is not ours to
 #         delete — `"skipped":"cross-repository"`).
@@ -55,6 +70,10 @@
 #         such PR (that PR's number, not the merged one's) instead of the JSON
 #         payload; stderr says which role each plays. A deliberate keep, not a
 #         failure: report the lines, never retry.
+# Exit 4: the branch half succeeded (what would be exit 0) but the label half
+#         printed at least one token. When the branch half exits 1, 2 or 3 that
+#         code wins and the tokens are still printed. Report every token line
+#         on any non-zero exit; never retry.
 set -eu
 
 # Ambient GIT_DIR/GIT_WORK_TREE would point `ls-remote origin` and the push at
@@ -76,6 +95,13 @@ net_lib="$(dirname "$0")/net.sh"
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=net.sh
 . "$net_lib" || die "$net_lib failed to load"
+
+# The label half is a sibling script, resolved from this file's own location —
+# not PATH, not the caller's cwd. Checked with the helper libraries, before
+# anything is touched: a partial install must never delete branches while
+# silently skipping the label.
+label_script="$(dirname "$0")/drop-merged-label.sh"
+[ -r "$label_script" ] || die "cannot read $label_script — refusing to delete a branch without the label drop that belongs to it"
 
 [ $# -eq 1 ] || die "usage: delete-merged-branch.sh <pr>"
 pr=$1
@@ -99,6 +125,49 @@ EOF
 
 # MERGED, not just closed: a PR closed unmerged still holds work nowhere else.
 [ "$state" = "MERGED" ] || die "PR #$pr is not merged (state=$state) — refusing to delete its branch"
+
+# The label half runs HERE — right after the MERGED gate and before any
+# branch-half validation — so every later exit (deleted, already gone, skipped,
+# kept, delete failed, a read that dies) already carries its outcome. A PR that
+# is not MERGED never reaches it. Its JSON line and stderr stay on stderr:
+# stdout carries only the tokens below and the branch half's own output, and a
+# label failure never stops the branch delete from running.
+label_failed=false
+label_token() { printf '%s\n' "$1"; label_failed=true; }
+
+echo "\$ sh $label_script $pr --apply" >&2
+label_rc=0
+label_out=$(sh "$label_script" "$pr" --apply) || label_rc=$?
+[ -z "$label_out" ] || printf '%s\n' "$label_out" >&2
+case "$label_rc" in
+  0) echo "$NAME: in-progress dropped from every issue PR #$pr closes (or none carried it)" >&2 ;;
+  1)
+    # The label script's own exit 1 is "one or more removals failed"; its
+    # `failed` array names them. Exit 1 with no number to extract is not an
+    # answer about any issue, so it reads as undetermined, never as clear.
+    if ! failed_issues=$(printf '%s\n' "$label_out" | sed -n 's/.*"failed":\[\([0-9][0-9,]*\)\].*/\1/p'); then
+      failed_issues=""
+    fi
+    if [ -z "$failed_issues" ]; then
+      echo "$NAME: $label_script exited 1 but named no failed issue — the label outcome is unknown" >&2
+      label_token "label-read-failed-#$pr"
+    else
+      for n in $(printf '%s\n' "$failed_issues" | tr ',' ' '); do
+        label_token "label-drop-failed-#$n"
+      done
+    fi
+    ;;
+  *)
+    echo "$NAME: $label_script exited $label_rc — the label outcome could not be determined" >&2
+    label_token "label-read-failed-#$pr"
+    ;;
+esac
+
+# Exit 4: the branch half succeeded but a label token was printed. The branch
+# half's own 1, 2 and 3 win; this only lifts a would-be 0.
+if [ "$label_failed" = true ]; then
+  trap 'exit_rc=$?; trap - EXIT; if [ "$exit_rc" -eq 0 ]; then exit 4; fi; exit "$exit_rc"' EXIT
+fi
 [ -n "$branch" ] && [ -n "$oid" ] || die "gh pr view $pr returned no head branch or head commit"
 case "$oid" in *[!0-9a-f]*) die "gh pr view $pr returned a head commit that is not a hex SHA: '$oid'";; esac
 [ "$branch" != "$base" ] || die "PR #$pr's head branch is its base branch '$base' — refusing to delete it"

@@ -21,9 +21,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/delete-merged-branch.sh", import.meta.url));
@@ -117,6 +117,8 @@ function ghStub(t, root) {
   const bin = join(root, "bin");
   mkdirSync(bin, { recursive: true });
   const log = join(root, "gh.log");
+  const labels = join(root, "labels");
+  mkdirSync(labels, { recursive: true });
   writeFileSync(log, "");
   writeFileSync(
     join(bin, "gh"),
@@ -126,6 +128,32 @@ case "$*" in
   "pr view "*" --json state,isCrossRepository,headRefName,headRefOid,baseRefName --jq "*)
     [ "\${GH_FAIL:-0}" = 0 ] || { echo "gh: simulated failure" >&2; exit 1; }
     printf '%s\\037%s\\037%s\\037%s\\037%s\\n' "\${PR_STATE:-MERGED}" "\${PR_CROSS:-false}" "\$PR_HEAD" "\$PR_OID" "\${PR_BASE:-main}"
+    exit 0
+    ;;
+  "pr view "*" --json state --jq .state")
+    printf '%s\\n' "\${PR_STATE:-MERGED}"
+    exit 0
+    ;;
+  "pr view "*" --json closingIssuesReferences "*)
+    [ "\${CLOSES_FAIL:-0}" = 0 ] || { echo "gh: simulated closing-issues failure" >&2; exit 1; }
+    [ -z "\${PR_CLOSES:-}" ] || printf '%s\\n' "$PR_CLOSES"
+    exit 0
+    ;;
+  "pr view "*" --json commits "*)
+    [ "\${COMMITS_FAIL:-0}" = 0 ] || { echo "gh: simulated commits failure" >&2; exit 1; }
+    [ -z "\${PR_COMMITS:-}" ] || printf '%s\\n' "$PR_COMMITS"
+    exit 0
+    ;;
+  "issue view "*" --json labels "*)
+    [ "\${ISSUE_VIEW_FAIL:-}" != "$3" ] || { echo "gh: simulated issue view failure" >&2; exit 1; }
+    [ -f "${labels}/$3" ] || { echo "gh: no such issue $3" >&2; exit 1; }
+    cat "${labels}/$3"
+    exit 0
+    ;;
+  "issue edit "*" --remove-label in-progress")
+    [ "\${ISSUE_EDIT_FAIL:-}" != "$3" ] || { echo "gh: simulated issue edit failure" >&2; exit 1; }
+    grep -vx in-progress "${labels}/$3" > "${labels}/$3.tmp" || true
+    mv "${labels}/$3.tmp" "${labels}/$3"
     exit 0
     ;;
   "pr list "*) ;;
@@ -156,6 +184,10 @@ printf '%s' "\${PR_LIST_JSON:-[]}" |
   return {
     bin,
     calls: () => readFileSync(log, "utf8").trim().split("\n").filter(Boolean),
+    edits: () => readFileSync(log, "utf8").split("\n").filter((l) => l.startsWith("issue edit ")),
+    /** Give issue `n` its labels, one per line — the state `issue view`/`issue edit` read and write. */
+    setLabels: (n, ...names) => writeFileSync(join(labels, String(n)), names.map((l) => `${l}\n`).join("")),
+    labelsOf: (n) => readFileSync(join(labels, String(n)), "utf8").split("\n").filter(Boolean),
     env: (extra = {}) => ({ ...ENV, PATH: `${bin}:${ENV.PATH}`, ...extra }),
   };
 }
@@ -169,11 +201,23 @@ const pr = (number, headRefName, baseRefName, state = "OPEN", isCrossRepository 
   isCrossRepository,
 });
 
-/** `json` is the script's one-line payload; exit 3 prints `branch-kept-#<n>` lines instead, read off `stdout`. */
-function run(cwd, args, env) {
-  const r = spawnSync("sh", [SCRIPT, ...args], { cwd, env, encoding: "utf8" });
-  const out = r.stdout.trim();
-  return { code: r.status, stdout: r.stdout, json: out.startsWith("{") ? JSON.parse(out) : null, stderr: r.stderr };
+/**
+ * `json` is the branch half's one-line payload, read off the LAST stdout line
+ * that starts with `{` — label-failure tokens print before it. Exit 3 prints
+ * `branch-kept-#<n>` lines instead; `tokens` is every stdout line that is a
+ * `label-*` token, in order.
+ */
+function run(cwd, args, env, script = SCRIPT) {
+  const r = spawnSync("sh", [script, ...args], { cwd, env, encoding: "utf8" });
+  const lines = r.stdout.split("\n").filter(Boolean);
+  const payload = lines.filter((l) => l.startsWith("{")).pop();
+  return {
+    code: r.status,
+    stdout: r.stdout,
+    json: payload ? JSON.parse(payload) : null,
+    tokens: lines.filter((l) => l.startsWith("label-")),
+    stderr: r.stderr,
+  };
 }
 
 test("a merged branch checked out in a .worktrees/<issue>-<slug> worktree is deleted from origin, and reap.sh then reaps it locally", (t) => {
@@ -573,4 +617,361 @@ test("a branch already gone is success even when an open-PR lookup would fail", 
 
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(r.json, { pr: 32, branch, deleted: false, alreadyGone: true });
+});
+
+// The label half. Running this step on a merged PR also drops `in-progress`
+// from every issue the PR closes, so a bot that runs it cannot skip the drop.
+// The label state lives in the gh stub's per-issue files, so "the label is
+// gone" is read off what `issue edit` actually did, never off a canned answer.
+
+const LABEL_SCRIPT = fileURLToPath(new URL("./drop-merged-label.sh", import.meta.url));
+const LABEL_EDIT = (n) => `issue edit ${n} --remove-label in-progress`;
+
+/** A merged PR whose branch is checked out in a worktree and still on origin, with a gh stub. */
+function mergedFixture(t, branch, wtName) {
+  const { root, origin, w } = repo(t);
+  const { oid } = mergedInWorktree(w, branch, wtName);
+  return { root, origin, w, oid, gh: ghStub(t, root) };
+}
+
+/**
+ * The host scripts copied beside a label script of the caller's choosing (or
+ * none), so a sibling that is missing, unreadable or misbehaving is under
+ * test. The host resolves the sibling from its own location.
+ */
+function hostCopy(t, labelBody) {
+  const dir = mkdtempSync(join(tmpdir(), "delete-merged-branch-copy-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  for (const f of ["delete-merged-branch.sh", "json.sh", "net.sh"]) {
+    writeFileSync(join(dir, f), readFileSync(fileURLToPath(new URL(`./${f}`, import.meta.url))));
+  }
+  if (labelBody !== null) writeFileSync(join(dir, "drop-merged-label.sh"), labelBody);
+  return join(dir, "delete-merged-branch.sh");
+}
+
+test("end to end: a bot that runs only this step leaves no in-progress on the issue the PR closes", (t) => {
+  const branch = "fix/2751-label";
+  const { origin, w, oid, gh } = mergedFixture(t, branch, "2751-label");
+  gh.setLabels(41, "in-progress", "bug");
+
+  const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41" }));
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json, { pr: 7, branch, deleted: true });
+  assert.equal(r.stdout.trim(), JSON.stringify({ pr: 7, branch, deleted: true }), "stdout carries only the branch half's payload");
+  assert.equal(onOrigin(origin, branch), false, "the branch is deleted exactly as before");
+  assert.deepEqual(gh.labelsOf(41), ["bug"], "in-progress is gone, the other label is untouched");
+  assert.deepEqual(gh.edits(), [LABEL_EDIT(41)]);
+  assert.match(r.stderr, /dropped in-progress/, "the label half's own output is on stderr");
+});
+
+test("an issue named only in a commit message loses the label too", (t) => {
+  const branch = "fix/2751-commit";
+  const { origin, w, oid, gh } = mergedFixture(t, branch, "2751-commit");
+  gh.setLabels(42, "in-progress");
+
+  const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_COMMITS: "Do the thing\n\nCloses #42" }));
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(onOrigin(origin, branch), false);
+  assert.deepEqual(gh.labelsOf(42), []);
+  assert.deepEqual(gh.edits(), [LABEL_EDIT(42)]);
+});
+
+test("every closing issue is released, from both signals at once", (t) => {
+  const branch = "fix/2751-both";
+  const { w, oid, gh } = mergedFixture(t, branch, "2751-both");
+  gh.setLabels(41, "in-progress");
+  gh.setLabels(42, "in-progress");
+
+  const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41", PR_COMMITS: "Fixes #42" }));
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(gh.edits(), [LABEL_EDIT(41), LABEL_EDIT(42)]);
+});
+
+// The label half runs right after the MERGED gate, so every later exit path
+// already carries its outcome.
+const OTHER_EXITS = [
+  {
+    name: "the branch is kept for another open PR (exit 3)",
+    code: 3,
+    arrange: (f) => ({
+      PR_LIST_JSON: JSON.stringify([pr(31, f.branch, "main")]),
+    }),
+    check: (r) => assert.equal(r.stdout, "branch-kept-#31\n"),
+  },
+  {
+    name: "the branch is already gone",
+    code: 0,
+    arrange: (f) => {
+      git(f.w, "push", "-q", "origin", "--delete", f.branch);
+      return {};
+    },
+    check: (r) => assert.equal(r.json.alreadyGone, true),
+  },
+  {
+    name: "the PR is cross-repository",
+    code: 0,
+    arrange: () => ({ PR_CROSS: "true" }),
+    check: (r) => assert.equal(r.json.skipped, "cross-repository"),
+  },
+  {
+    name: "the delete fails (exit 1)",
+    code: 1,
+    arrange: (f) => {
+      writeFileSync(join(f.origin, "hooks", "pre-receive"), "#!/bin/sh\necho 'deletes are protected' >&2\nexit 1\n", { mode: 0o755 });
+      return {};
+    },
+    check: (r) => assert.equal(r.json.deleted, false),
+  },
+  {
+    name: "a later read fails (exit 2)",
+    code: 2,
+    arrange: (f) => {
+      git(f.w, "remote", "set-url", "origin", join(f.root, "nowhere.git"));
+      return {};
+    },
+    check: (r) => assert.match(r.stderr, /git ls-remote failed/),
+  },
+  {
+    name: "the head commit is not a hex SHA (exit 2)",
+    code: 2,
+    arrange: () => ({ PR_OID: "not-a-sha" }),
+    check: (r) => assert.match(r.stderr, /not a hex SHA/),
+  },
+];
+
+for (const [i, c] of OTHER_EXITS.entries()) {
+  test(`the label is dropped when ${c.name}`, (t) => {
+    const branch = `fix/2751-exit-${i}`;
+    const f = { ...mergedFixture(t, branch, `2751-exit-${i}`), branch };
+    f.gh.setLabels(41, "in-progress");
+    const extra = c.arrange(f);
+
+    const r = run(f.w, ["7"], f.gh.env({ PR_HEAD: branch, PR_OID: f.oid, PR_CLOSES: "41", ...extra }));
+
+    assert.equal(r.code, c.code, r.stderr);
+    c.check(r);
+    assert.deepEqual(r.tokens, []);
+    assert.deepEqual(f.gh.labelsOf(41), []);
+    assert.deepEqual(f.gh.edits(), [LABEL_EDIT(41)]);
+  });
+}
+
+test("a PR that is not merged is refused with no issue edit", (t) => {
+  const branch = "fix/2751-open";
+  const { origin, w, oid, gh } = mergedFixture(t, branch, "2751-open");
+  gh.setLabels(41, "in-progress");
+
+  for (const state of ["OPEN", "CLOSED"]) {
+    const r = run(w, ["7"], gh.env({ PR_STATE: state, PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41" }));
+
+    assert.equal(r.code, 2, state);
+    assert.match(r.stderr, /not merged/);
+    assert.deepEqual(r.tokens, []);
+  }
+  assert.deepEqual(gh.edits(), []);
+  assert.deepEqual(gh.labelsOf(41), ["in-progress"]);
+  assert.ok(onOrigin(origin, branch));
+});
+
+test("a missing label script refuses with exit 2 before any gh call or push", (t) => {
+  const branch = "fix/2751-missing";
+  const { origin, w, oid, gh } = mergedFixture(t, branch, "2751-missing");
+  gh.setLabels(41, "in-progress");
+
+  const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41" }), hostCopy(t, null));
+
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /cannot read .*drop-merged-label\.sh/);
+  assert.deepEqual(gh.calls(), []);
+  assert.ok(onOrigin(origin, branch), "nothing was pushed");
+  assert.deepEqual(gh.labelsOf(41), ["in-progress"]);
+});
+
+test("an unreadable label script refuses the same way", { skip: process.getuid?.() === 0 }, (t) => {
+  const branch = "fix/2751-unreadable";
+  const { origin, w, oid, gh } = mergedFixture(t, branch, "2751-unreadable");
+  const host = hostCopy(t, "exit 0\n");
+  chmodSync(join(dirname(host), "drop-merged-label.sh"), 0o000);
+
+  const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid }), host);
+
+  assert.equal(r.code, 2);
+  assert.deepEqual(gh.calls(), []);
+  assert.ok(onOrigin(origin, branch));
+});
+
+test("a label script resolves beside the host, whatever the caller's cwd or PATH", (t) => {
+  const branch = "fix/2751-sibling";
+  const { w, oid, gh } = mergedFixture(t, branch, "2751-sibling");
+  gh.setLabels(41, "in-progress");
+  // A decoy on PATH under the sibling's name must never run in its place.
+  writeFileSync(join(gh.bin, "drop-merged-label.sh"), "#!/bin/sh\necho decoy >&2\nexit 0\n", { mode: 0o755 });
+  writeFileSync(join(w, "drop-merged-label.sh"), "echo cwd-decoy >&2\nexit 0\n");
+
+  const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41" }));
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /decoy/);
+  assert.deepEqual(gh.labelsOf(41), []);
+});
+
+test("a failed removal alone exits 4 and names the issue on stdout, before the branch output", (t) => {
+  const branch = "fix/2751-drop-failed";
+  const { origin, w, oid, gh } = mergedFixture(t, branch, "2751-drop-failed");
+  gh.setLabels(41, "in-progress");
+  gh.setLabels(43, "in-progress");
+
+  const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41\n43", ISSUE_EDIT_FAIL: "41" }));
+
+  assert.equal(r.code, 4, r.stderr);
+  assert.deepEqual(r.stdout.split("\n").filter(Boolean), ["label-drop-failed-#41", JSON.stringify({ pr: 7, branch, deleted: true })]);
+  assert.equal(onOrigin(origin, branch), false, "a label failure never stops the branch delete");
+  assert.deepEqual(gh.labelsOf(41), ["in-progress"]);
+  assert.deepEqual(gh.labelsOf(43), [], "the other issue is still released");
+});
+
+test("a failed removal together with a failed branch delete exits 1 and prints both", (t) => {
+  const branch = "fix/2751-both-failed";
+  const { origin, w, oid, gh } = mergedFixture(t, branch, "2751-both-failed");
+  gh.setLabels(41, "in-progress");
+  writeFileSync(join(origin, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+
+  const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41", ISSUE_EDIT_FAIL: "41" }));
+
+  assert.equal(r.code, 1, r.stderr);
+  assert.deepEqual(r.tokens, ["label-drop-failed-#41"]);
+  assert.equal(r.json.deleted, false);
+  assert.ok(onOrigin(origin, branch));
+});
+
+test("a failed removal with a kept branch exits 3 and prints the token and the keep lines", (t) => {
+  const branch = "fix/2751-kept-failed";
+  const { w, oid, gh } = mergedFixture(t, branch, "2751-kept-failed");
+  gh.setLabels(41, "in-progress");
+
+  const r = run(
+    w,
+    ["7"],
+    gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41", ISSUE_EDIT_FAIL: "41", PR_LIST_JSON: JSON.stringify([pr(31, branch, "main")]) }),
+  );
+
+  assert.equal(r.code, 3, r.stderr);
+  assert.equal(r.stdout, "label-drop-failed-#41\nbranch-kept-#31\n");
+});
+
+test("a failed removal with an unanswerable branch half exits 2 and still prints the token", (t) => {
+  const branch = "fix/2751-exit2-failed";
+  const { w, oid, gh } = mergedFixture(t, branch, "2751-exit2-failed");
+  gh.setLabels(41, "in-progress");
+
+  const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41", ISSUE_EDIT_FAIL: "41", PR_LIST_FAIL: "head" }));
+
+  assert.equal(r.code, 2, r.stderr);
+  assert.deepEqual(r.tokens, ["label-drop-failed-#41"]);
+});
+
+test("an issue whose labels cannot be read is a failed drop, never a clear one", (t) => {
+  const branch = "fix/2751-view-failed";
+  const { w, oid, gh } = mergedFixture(t, branch, "2751-view-failed");
+  gh.setLabels(41, "in-progress");
+
+  const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41", ISSUE_VIEW_FAIL: "41" }));
+
+  assert.equal(r.code, 4, r.stderr);
+  assert.deepEqual(r.tokens, ["label-drop-failed-#41"]);
+});
+
+for (const [name, extra] of [
+  ["closing-issues", { CLOSES_FAIL: "1" }],
+  ["commits", { COMMITS_FAIL: "1" }],
+]) {
+  test(`a failed ${name} read after the merge is confirmed prints label-read-failed-#<pr>, never "nothing to drop"`, (t) => {
+    const branch = `fix/2751-read-${name}`;
+    const { origin, w, oid, gh } = mergedFixture(t, branch, `2751-read-${name}`);
+    gh.setLabels(41, "in-progress");
+
+    const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41", ...extra }));
+
+    assert.equal(r.code, 4, r.stderr);
+    assert.deepEqual(r.tokens, ["label-read-failed-#7"]);
+    assert.match(r.stderr, /exited 2/, "stderr names the raw exit code");
+    assert.equal(onOrigin(origin, branch), false, "the branch delete still runs");
+    assert.deepEqual(gh.edits(), []);
+  });
+}
+
+for (const [name, body, rawCode] of [
+  ["exit 1 naming no issue", "echo '{}'\nexit 1\n", "1"],
+  ["an unknown exit code", "exit 7\n", "7"],
+  ["death by signal", "kill -TERM $$\nsleep 5\n", "143"],
+]) {
+  test(`a label script that ends with ${name} is label-read-failed-#<pr>`, (t) => {
+    const branch = "fix/2751-odd-label";
+    const { origin, w, oid, gh } = mergedFixture(t, branch, "2751-odd-label");
+
+    const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid }), hostCopy(t, body));
+
+    assert.equal(r.code, 4, r.stderr);
+    assert.deepEqual(r.tokens, ["label-read-failed-#7"]);
+    assert.match(r.stderr, new RegExp(`exited ${rawCode}`));
+    assert.equal(onOrigin(origin, branch), false);
+  });
+}
+
+test("an issue that no longer carries the label is left alone", (t) => {
+  const branch = "fix/2751-clear";
+  const { w, oid, gh } = mergedFixture(t, branch, "2751-clear");
+  gh.setLabels(41, "bug");
+
+  const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41" }));
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(gh.edits(), []);
+});
+
+test("running the host twice edits once and exits by the branch half alone", (t) => {
+  const branch = "fix/2751-twice";
+  const { w, oid, gh } = mergedFixture(t, branch, "2751-twice");
+  gh.setLabels(41, "in-progress");
+  const env = gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41" });
+
+  const first = run(w, ["7"], env);
+  const second = run(w, ["7"], env);
+
+  assert.equal(first.code, 0, first.stderr);
+  assert.equal(second.code, 0, second.stderr);
+  assert.deepEqual(second.json, { pr: 7, branch, deleted: false, alreadyGone: true });
+  assert.deepEqual(gh.edits(), [LABEL_EDIT(41)]);
+});
+
+test("the standalone label script before or after the host leaves one edit and no error", (t) => {
+  for (const order of ["before", "after"]) {
+    const branch = `fix/2751-standalone-${order}`;
+    const { w, oid, gh } = mergedFixture(t, branch, `2751-standalone-${order}`);
+    gh.setLabels(41, "in-progress");
+    const env = gh.env({ PR_HEAD: branch, PR_OID: oid, PR_CLOSES: "41" });
+    const standalone = () => spawnSync("sh", [LABEL_SCRIPT, "7", "--apply"], { cwd: w, env, encoding: "utf8" });
+
+    if (order === "before") assert.equal(standalone().status, 0);
+    const r = run(w, ["7"], env);
+    if (order === "after") assert.equal(standalone().status, 0);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(r.tokens, []);
+    assert.deepEqual(gh.edits(), [LABEL_EDIT(41)], order);
+  }
+});
+
+test("a merged PR that closes no issues leaves the host's exit and stdout unchanged", (t) => {
+  const branch = "fix/2751-none";
+  const { w, oid, gh } = mergedFixture(t, branch, "2751-none");
+
+  const r = run(w, ["7"], gh.env({ PR_HEAD: branch, PR_OID: oid }));
+
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.stdout, JSON.stringify({ pr: 7, branch, deleted: true }) + "\n");
+  assert.deepEqual(gh.edits(), []);
 });

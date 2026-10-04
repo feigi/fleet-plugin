@@ -30,13 +30,21 @@ function step4() {
   return start + rest.slice(0, end);
 }
 
-test("step 4 drops in-progress from every issue the merged PR closes", () => {
-  assert.match(step4(), /Drop `in-progress` from every issue this PR closes/);
-  assert.match(step4(), /drop-merged-label\.sh <pr> --apply/);
+test("step 4's branch-delete step also drops in-progress from every issue the merged PR closes", () => {
+  assert.match(step4(), /The same step also drops `in-progress` from every issue this PR closes/);
 });
 
-test("step 4 says a failed removal must be reported, never swallowed", () => {
-  assert.match(step4(), /a removal failed — report it as `label-drop-failed-#<issue>`, never swallow it/);
+test("step 4 carries the label drop in the branch-delete step alone, naming no separate command or script", () => {
+  assert.doesNotMatch(step4(), /drop-merged-label/);
+  assert.doesNotMatch(step4(), /fleet-run [^\n]*--apply/);
+});
+
+test("step 4 says a label failure must be reported, never swallowed", () => {
+  assert.match(step4(), /\*\*Exit 4 the branch half succeeded but the label half did not — report every token line the step printed on stdout, never swallow one\.\*\*/);
+  assert.match(step4(), /`label-drop-failed-#<issue>` is one issue whose removal failed/);
+  assert.match(step4(), /`label-read-failed-#<pr>` means what the PR closes could not be determined — never read it as "nothing to drop"/);
+  assert.match(step4(), /When the branch half exits 1, 2 or 3 that code wins, and the same token lines are still printed/);
+  assert.match(step4(), /On any non-zero exit, report every token line; never retry\./);
 });
 
 // #2196: the bot deletes the merged head branch itself rather than leaning on

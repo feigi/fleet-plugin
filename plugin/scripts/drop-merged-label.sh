@@ -9,8 +9,9 @@
 # Single writer, per the #170 ruling: the merge is the only moment the ticket
 # number and the fact of completion are known together, so only a PROVEN merge
 # triggers this — never reap (branches, not tickets), never a repo automation
-# (no attribution). Call this from run-merge-bot.md's step 4, after
-# prove-merge.sh, never before: the claim has not ended until the merge lands.
+# (no attribution). The merge bot's branch-delete step, delete-merged-branch.sh,
+# calls this script as a sibling with --apply, after its own MERGED gate: the
+# claim has not ended until the merge lands. Direct use is manual repair.
 #
 # #1617: `closingIssuesReferences` reflects `Closes #N` syntax in the PR's own
 # title/body, but NOT a commit-message-only reference — GitHub's real
