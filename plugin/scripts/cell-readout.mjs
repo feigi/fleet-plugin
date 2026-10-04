@@ -43,7 +43,9 @@
 // `fleet-implementer-<cell>` definition was most recently added, ruled by its
 // last tier-outcomes.tsv row (a `+`-joined `ticket` field rules each ticket
 // it names); a ticket counts once however many Pulls it took. A verdict FAILS
-// the quality floor on `minted_false_claim=yes` or `closed_own_ticket=no`.
+// the quality floor on `minted_false_claim=yes` or `closed_own_ticket=no`; a
+// counted ruling holding anything but `yes` or `no` in either column, blank
+// included, is refused rather than read as a pass.
 // X is to be withdrawn once it has at least STOP.verdicts verdicts and
 // floor failures ÷ verdicts is at least STOP.failRate.
 //
@@ -56,6 +58,7 @@ import { isCLI } from "./is-cli.mjs";
 import { CELL, POLICY_CELL } from "./ledger-grammar.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { parseFeatures } from "./pr-cost.mjs";
+import { VERDICT } from "./tier-outcomes.mjs";
 
 const NAME = "cell-readout";
 export const GATE = Object.freeze({ comparisons: 10, runDates: 5 });
@@ -122,6 +125,8 @@ export function readout({ features, members }) {
  * `[{ ticket, pr, run_date, closed_own_ticket, minted_false_claim, failed }]`
  * sorted by ticket, `run_date` the ruling's; `stop` is whether the stopping
  * rule withdraws the cell. `verdicts` are parsed tier-outcomes.tsv rows.
+ * Throws on a counted ruling whose `closed_own_ticket` or `minted_false_claim`
+ * is not `yes` or `no`.
  */
 export function stoppingRule({ features, members, verdicts, added }) {
   const byKey = new Map(members.map((m) => [key(m.session, m.agent), m]));
@@ -132,6 +137,9 @@ export function stoppingRule({ features, members, verdicts, added }) {
     const tickets = judged.get(p.chosen_cell);
     if (!tickets || p.run_date < added[p.chosen_cell] || !ruling.has(p.ticket) || !admissibleMember(p, byKey)) continue;
     const v = ruling.get(p.ticket);
+    for (const c of ["closed_own_ticket", "minted_false_claim"]) {
+      if (!VERDICT.includes(v[c])) throw new Error(`ticket #${p.ticket} (PR #${v.pr}): ${c} is '${v[c]}', expected yes or no`);
+    }
     const failed = v.minted_false_claim === "yes" || v.closed_own_ticket === "no";
     tickets.set(p.ticket, {
       ticket: p.ticket, pr: v.pr, run_date: v.run_date,

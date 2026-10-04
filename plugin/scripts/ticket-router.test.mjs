@@ -660,7 +660,7 @@ test("--check stays green when a verdict or member row lands after the fit, for 
   const fitted = readFileSync(p.table, "utf8");
   assert.equal(JSON.parse(fitted).fitted_through, "2026-10-01");
   // The ruling lands later and flips the ticket to a failure, and a fix round books against it.
-  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [verdictRow({ pr: "11", ticket: "1" }), verdictRow({ run_date: "2026-10-09", pr: "11", ticket: "1", minted_false_claim: "yes" })], true));
+  writeFileSync(p.verdicts, `# ${tsv(VERDICT_COLUMNS, [verdictRow({ pr: "11", ticket: "1" }), verdictRow({ run_date: "2026-10-09", pr: "11", ticket: "1", minted_false_claim: "yes" })], true)}`);
   writeFileSync(p.members, tsv(MEMBER_COLUMNS, [...members, { run_date: "2026-10-09", agent: "fix-pr-11", member: "fix-pr-11", ticket: "1", pr: "11" }].map(memberRow), true));
   const r = cli(["--check", ...p.fitArgs]);
   assert.equal(r.status, 0, r.stderr);

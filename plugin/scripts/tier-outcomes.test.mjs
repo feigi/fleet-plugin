@@ -29,8 +29,8 @@ function memberRow({ member, ticket, type, role = "implementer" }) {
   return MEMBER_COLUMNS.map((c) => r[c]).join("\t");
 }
 
-function tierRow({ date = TIER_SWITCH_DATE, pr, ticket, tier }) {
-  return [date, pr, ticket, "routine", tier, "yes", "no", "a note with spaces", "light", "production", "40", "2"].join("\t");
+function tierRow({ date = TIER_SWITCH_DATE, pr, ticket, tier, closed = "yes", minted = "no" }) {
+  return [date, pr, ticket, "routine", tier, closed, minted, "a note with spaces", "light", "production", "40", "2"].join("\t");
 }
 
 function ledgerText(rows = [], dispatched = []) {
@@ -465,6 +465,45 @@ test("check: a missing tier-outcomes.tsv file fails loudly instead of passing 0 
   const r = f.run("check");
   assert.equal(r.code, 2);
   assert.match(r.stderr, /no .*tier-outcomes\.tsv — no rows to check/);
+});
+
+// Every reader of the file judges the floor as `minted_false_claim === "yes" ||
+// closed_own_ticket === "no"`, so any other spelling would read as a pass.
+test("check: a verdict column that is not yes, no or blank is refused as malformed, on full and legacy rows", (t) => {
+  for (const [col, row] of [
+    ["closed_own_ticket", tierRow({ pr: 21, ticket: 11, tier: "default", closed: "No" })],
+    ["minted_false_claim", tierRow({ pr: 21, ticket: 11, tier: "default", minted: "YES" })],
+    ["minted_false_claim", tierRow({ pr: 21, ticket: 11, tier: "default", minted: "no " })],
+    ["closed_own_ticket", tierRow({ date: PRE_SWITCH, pr: 21, ticket: 11, tier: "opus", closed: "y" }).split("\t").slice(0, 8).join("\t")],
+  ]) {
+    const f = fixture(t, {
+      members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+      tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" }), row],
+    });
+    const r = f.run("check");
+    assert.equal(r.code, 2, `${row}\n${r.stdout}${r.stderr}`);
+    const value = row.split("\t")[col === "closed_own_ticket" ? 5 : 6];
+    assert.ok(r.stderr.includes(`malformed row: ${col} is '${value}', expected yes, no or blank`), r.stderr);
+    assert.equal(r.stdout, "");
+  }
+});
+
+// What the refusal must ACCEPT: the committed file carries never-ruled rows
+// with both verdict columns blank, and every reader parses the whole file.
+test("check: blank verdict columns and every yes/no pair parse, on full and legacy rows", (t) => {
+  const f = fixture(t, {
+    members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+    tierRows: [
+      tierRow({ date: PRE_SWITCH, pr: 19, ticket: 9, tier: "", closed: "", minted: "" }).split("\t").slice(0, 8).join("\t"),
+      tierRow({ pr: 20, ticket: 10, tier: "default", closed: "", minted: "" }),
+      tierRow({ pr: 21, ticket: 10, tier: "default", closed: "yes", minted: "yes" }),
+      tierRow({ pr: 22, ticket: 10, tier: "default", closed: "no", minted: "no" }),
+      tierRow({ pr: 23, ticket: 10, tier: "default", closed: "no", minted: "yes" }),
+    ],
+  });
+  const r = f.run("check");
+  assert.equal(r.code, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /4 checked, 0 failed/);
 });
 
 test("check --live: warns on each reviewed PR with no row, and the warning alone never fails", (t) => {
