@@ -474,14 +474,14 @@ test("stopping rule: a malformed ruling on a ticket with no counted Pull is not 
 // Which ruling is a Pull's: the last row dated on or after the Pull, a
 // both-blank (never ruled) row skipped.
 
-// A second admissible Pull of an existing ticket at `cell`, in its own session.
-function rePull(w, ticket, date, cell = "smol-high") {
+// A second admissible Pull of an existing ticket at smol-high, in its own session.
+function rePull(w, ticket, date) {
   const session = `2026-10-02T00-00-00-000Z_v${nextSession++}`;
   const agent = `impl-${ticket}-re`;
-  w.features.push(pull({ session, agent, ticket, chosen_cell: cell, run_date: date }));
+  w.features.push(pull({ session, agent, ticket, chosen_cell: "smol-high", run_date: date }));
   w.members.push(member({
     session, agent, run_date: date, ticket, model: "claude-sonnet-5",
-    effort: cell.split("-").slice(1).join("-"), subagentType: `fleet-implementer-${cell}`,
+    effort: "high", subagentType: "fleet-implementer-smol-high",
   }));
 }
 
@@ -513,9 +513,8 @@ test("stopping rule: a re-Pulled ticket is charged with the ruling after its las
     rePull(w, w.features[0].ticket, "2026-10-05");
     return w;
   };
-  const ticket = String(world().ticket);
-
   const unruled = build();
+  const { ticket } = unruled.features[0];
   assert.deepEqual(judged(unruled, added, "smol-high").verdicts, [], "the earlier ruling predates the re-Pull");
 
   const later = build();
@@ -550,4 +549,32 @@ test("stopping rule: a half-blank row after a real ruling is the ticket's ruling
     assert.throws(() => judged(w, { "smol-high": "2026-09-01" }, "smol-high"),
       new RegExp(`ticket #${ticket} \\(PR #1393\\): ${col} is '', expected yes or no`), col);
   }
+});
+
+// A filled ruling whose date cannot be placed against its Pull must not
+// vanish: dropped, its ticket is uncounted and a floor failure goes unreported.
+test("stopping rule: a filled ruling with a blank or malformed run_date is refused, naming the ticket", () => {
+  for (const bad of ["", "10/03/2026", "2026-10-3"]) {
+    const w = world();
+    addVerdicts(w, "smol-high", 1, 0);
+    const [{ ticket }] = w.features;
+    w.verdicts[0].run_date = bad;
+    assert.throws(
+      () => judged(w, { "smol-high": "2026-09-01" }, "smol-high"),
+      new RegExp(`ticket #${ticket} \\(PR #${w.verdicts[0].pr}\\): run_date is '${bad}', expected YYYY-MM-DD`),
+      JSON.stringify(bad),
+    );
+  }
+});
+
+// What that refusal must NOT touch: a never-ruled row has no date to place,
+// and a ticket no live cell's Pull names is not a verdict candidate.
+test("stopping rule: a both-blank row or an unPulled ticket's row needs no run_date", () => {
+  const w = world();
+  addVerdicts(w, "smol-high", 2, 0);
+  const [real, blank] = w.features.map((p) => p.ticket);
+  Object.assign(w.verdicts.find((v) => v.ticket === blank), { closed_own_ticket: "", minted_false_claim: "", run_date: "" });
+  w.verdicts.push(verdict({ ticket: "999", pr: "1", run_date: "n/a" }));
+  const at = judged(w, { "smol-high": "2026-09-01" }, "smol-high");
+  assert.deepEqual(at.verdicts.map((v) => v.ticket), [real]);
 });
