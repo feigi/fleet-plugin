@@ -17,11 +17,12 @@ import { interval, heldThisCall } from "../plugin/scripts/fleet-heartbeat.mjs";
 const REAL_SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-heartbeat.mjs", import.meta.url));
 
 // Every CLI case below spawns the script through a symlink, never by its own
-// name. A held CLI child lives a full second, and `pkill -f fleet-heartbeat.mjs`
+// name. Most CLI children live a second or more, and `pkill -f fleet-heartbeat.mjs`
 // — the line a controller runs to clear the heartbeat it backgrounded —
 // matches whole command lines machine-wide: it SIGTERMs these children too,
 // and spawnSync reports that as `status: null` in whichever case was running.
-// Measured: the failures land inside one 150ms window after such a sweep and
+// Observed in #2779: the failed spawnSync calls of one full-suite run landed
+// together in a single span under 100ms long, right after such a sweep, and
 // the file passes alone. The script resolves its own path by realpath (see
 // is-cli.mjs), so the link runs the same code and its argv carries no
 // `fleet-heartbeat.mjs` for a pattern kill to find.
