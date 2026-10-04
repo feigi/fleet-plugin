@@ -775,6 +775,13 @@ test("mergedSince: a ticket is merged only on a ruling dated on or after its las
   assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-03" })]), 1, "a ruling dated the day of the last features row rules it");
 });
 
+test("mergedSince: a ticket's last Pull is its last features row in file order, not its latest-dated one", () => {
+  const features = [featureRow({ ticket: "1", run_date: "2026-10-03" }), featureRow({ ticket: "1", run_date: "2026-10-01" })];
+  const count = (verdicts) => mergedSince({ table: baseTable(), features, verdicts });
+  assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-10-02" })]), 1, "the later row in file order is older-dated, and its date is the floor the ruling clears");
+  assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-09-30" })]), 0, "a ruling dated before even that floor rules nothing");
+});
+
 test("fit refuses an unreadable guard or input file at exit 2 and leaves the table alone", (t) => {
   const p = fitWorld(t, { features: [], members: [], verdicts: [], guard: null });
   const before = readFileSync(p.table, "utf8");
@@ -809,6 +816,18 @@ test("fit: a ticket's verdict is its last ruling dated on or after its last inpu
   const pass = ruled(1, 11, { run_date: "2026-10-03" });
   assert.deepEqual(fit([pass]), { ...fit([pass]), merged: 1, fail_rate: 0 }, "a ruling dated the day of the last input row rules it");
   assert.equal(fit([pass, ruled(1, 11, { run_date: "2026-10-05", minted_false_claim: "yes" })]).fail_rate, 1, "the last such ruling wins");
+});
+
+test("fit: a ticket's cell is its last input row in file order, not its latest-dated one, and that row's date is the ruling's floor", () => {
+  // Ticket 1's rows are in reverse date order; ticket 2, in another cell, carries the fit's cutoff past both.
+  const features = [
+    exploring({ ticket: "1", run_date: "2026-10-03", chosen_cell: "slow-high" }),
+    exploring({ ticket: "1", run_date: "2026-10-01", chosen_cell: "smol-high" }),
+    exploring({ ticket: "2", run_date: "2026-10-05", chosen_cell: "task-high" }),
+  ];
+  const estimates = fitDirect({ features, members: [], verdicts: [ruled(1, 11, { run_date: "2026-10-02" })] }).estimates["*"];
+  assert.equal(estimates["smol-high"]?.merged, 1, "the later row in file order is the older-dated: its cell takes the ruling, which clears only its floor");
+  assert.equal(estimates["slow-high"], undefined, "the latest-dated row does not set the ticket's cell");
 });
 
 test("fit refuses at exit 2 a ruling of an input ticket whose run_date is not YYYY-MM-DD, and leaves the table alone; one of a ticket outside the input is not refused", (t) => {

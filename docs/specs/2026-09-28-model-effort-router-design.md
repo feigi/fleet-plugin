@@ -103,16 +103,19 @@ would anchor and contaminate the label.
 **Record:** `docs/metrics/ticket-features.tsv`, one row per Pull, written
 by the router script at dispatch. Authored, append-only, never
 regenerated. A row with no `member-outcomes.tsv` match means dispatch
-failed. `run_date` = the UTC date in the session id (informational only,
-may differ from `member-outcomes.tsv`'s own `run_date` for the same
-session — that field derives from transcript mtime, which can cross UTC
-midnight; not part of any join).
+failed. `run_date` = the UTC date in the session id (may differ from
+`member-outcomes.tsv`'s own `run_date` for the same session — that field
+derives from transcript mtime, which can cross UTC midnight). A Pull's
+`run_date` is the floor its ruling's date must clear (§ 2); otherwise it is
+informational.
 
-**Joins:** `ticket-features.tsv` ↔ `tier-outcomes.tsv` on `ticket` alone
-(`tier-outcomes`'s `ticket` value split on `+`, no `run_date`); when a
-ticket is re-dispatched, the **last** row before the ruling carries the
-verdict — earlier rows are superseded attempts whose tokens still book to
-the PR. `ticket-features.tsv` ↔ `member-outcomes.tsv` on `session`+`agent`
+**Joins:** `ticket-features.tsv` ↔ `tier-outcomes.tsv` on `ticket`
+(`tier-outcomes`'s `ticket` value split on `+`); when a ticket is
+re-dispatched, cost booking takes every row up to the ruling: the **last**
+row in file order before the ruling is the attempt that was ruled, earlier
+rows are superseded attempts whose tokens still book to the PR. The verdict
+a Pull gets follows § 2.
+`ticket-features.tsv` ↔ `member-outcomes.tsv` on `session`+`agent`
 (`agent` ≠ `impl-<ticket>` in general: re-dispatches are named
 `impl-<N>-2`, alt pairs `impl-<N>b`, and `member-outcomes.tsv` leaves
 `ticket` blank for those names — `ticket-features.tsv`'s own `ticket`
@@ -279,7 +282,8 @@ omp's indirection; rows pool across resolved models. Two warnings:
 X, verdicts = admissible `ticket-features.tsv` rows with `chosen_cell = X`
 and `run_date` ≥ the date `fleet-implementer-<cell>.agent.md` was most
 recently added, joined to `tier-outcomes.tsv` on `ticket` (last row per
-ticket dated ≥ the `run_date` of the ticket's last such row at X; a row
+ticket in file order dated ≥ the `run_date` of the ticket's last such row at
+X in file order; a row
 whose `closed_own_ticket` and `minted_false_claim` are both blank was never
 ruled and is skipped; a ticket with no such row is no verdict). When
 verdicts ≥ 10 AND floor failures ÷ verdicts ≥ 0.80 (P ≈ 12%
@@ -303,11 +307,15 @@ last `tier-outcomes.tsv` row in file order (a both-blank row skipped); the
 carrier is the ticket's last `ticket-features.tsv` row in file order across
 all cells, `slow-high` included, dated ≤ the ruling. Both picks go by file
 order; dates only set the floor, and neither pick is the latest-dated row.
+A row's position in either file is its order: rows are never inserted mid-file
+or reordered, an in-place edit keeps its position, and a ruling meant to
+supersede an earlier one is appended.
 The ruling is a verdict for
 X only when the carrier is an admissible row at X dated ≥ the date
 `fleet-implementer-<cell>.agent.md` was most recently added; this replaces
-the "last row per ticket dated ≥ … the ticket's last such row at X" join
-above, under which one ruling dated after Pulls at two cells counted for
+the "last row per ticket in file order dated ≥ … the ticket's last such row at
+X in file order" join above, under which one ruling dated after Pulls at two
+cells counted for
 both. A carrier at the policy cell, or one that is not admissible or predates
 its cell's definition, charges nobody: the verdict does not fall back to an
 earlier Pull.
@@ -540,8 +548,8 @@ Under stage 1 + burn-in at ~60 verdicts/week: n=20/cell in ≈1 week, n=60 in
 
 **Input rows:** `ticket-features.tsv` rows with `run_date ≥ window_start`,
 joined to verdicts per § 1 (member-outcomes on `session`+`agent`;
-tier-outcomes on `ticket`, split `+`; last row per ticket dated ≥ the
-`run_date` of the ticket's last input row wins, a row whose
+tier-outcomes on `ticket`, split `+`; last row per ticket in file order
+dated ≥ the `run_date` of the ticket's last input row in file order wins, a row whose
 `closed_own_ticket` and `minted_false_claim` are both blank skipped), restricted
 to **arm A rows plus Exploration rows** (`exploration_draw` non-blank). B
 non-exploration rows are excluded (they are the A/B's test set). No

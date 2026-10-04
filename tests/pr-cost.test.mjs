@@ -495,6 +495,16 @@ test("a ticket's ruling is its LAST tier row: a re-ruling on a later PR decides 
   assert.deepEqual({ n_merged: slow.n_merged, n_pass: slow.n_pass }, { n_merged: 1, n_pass: 1 });
 });
 
+test("a ticket's ruling is its last tier row in file order even when an earlier row is dated later: dates only set the floor", () => {
+  const w = world();
+  w.features.push(pull({ ticket: "1", agent: "impl-1", chosen_cell: "slow-high" }));
+  w.members.push(member({ agent: "impl-1", cost: 1, effort: "high", subagentType: "fleet-implementer-slow-high" }));
+  w.tiers.push(tier({ pr: "101", ticket: "1", run_date: "2026-10-04", minted_false_claim: "yes" }), tier({ pr: "102", ticket: "1" }));
+  w.prs.push({ number: 101, state: "MERGED" }, { number: 102, state: "MERGED" });
+  const slow = computeReport(parsed(w)).cells.find((c) => c.cell === "slow-high");
+  assert.deepEqual({ n_merged: slow.n_merged, n_pass: slow.n_pass }, { n_merged: 1, n_pass: 1 }, "PR 102 is the later row, though the older-dated: it rules, and it passes");
+});
+
 test("two tickets ruled by one PR: the later-dated ruling carries the quality verdict, whichever ticket is read first", () => {
   const w = world();
   for (const t of [1, 2, 3, 4]) {

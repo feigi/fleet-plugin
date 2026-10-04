@@ -43,6 +43,11 @@
 // `opus`/`sonnet` spelling and are never checked; the header records the
 // switch and how the old values map.
 //
+// A row's position in the file is its order: rows are appended, never inserted
+// mid-file or reordered. An in-place edit (a re-judged `class`, a backfilled
+// verdict) keeps the row's position; a ruling meant to supersede an earlier one
+// is appended. Readers pick a ticket's ruling by file order, not by `run_date`.
+//
 // Exit codes: 0 ok, 1 `check` found a mismatch or checked nothing from the latest
 // run_date (see `check`), 2 usage or unreadable input.
 
@@ -63,8 +68,8 @@ const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
 
 // ---------------------------------------------------------------------------
 // pure core — exercised through the CLI by tier-outcomes.test.mjs; only
-// COLUMNS, LEGACY_WIDTH and TIER_SWITCH_DATE are imported directly, the rest
-// through argv
+// COLUMNS, LEGACY_WIDTH, TIER_SWITCH_DATE, parseTierOutcomes, rulingsByTicket,
+// rulingFor and lastPullByTicket are imported directly, the rest through argv
 // ---------------------------------------------------------------------------
 
 // APPENDED TO, never inserted into: every awk read-out in the file's header
@@ -144,12 +149,19 @@ export function rulingsByTicket(rows) {
   return by;
 }
 
+// Each ticket's last Pull of `pulls` (ticket-features.tsv rows), the whole row,
+// in file order: its `run_date` is the floor its ruling must clear.
+export function lastPullByTicket(pulls) {
+  return new Map(pulls.map((p) => [p.ticket, p]));
+}
+
 // The row ruling `ticket`'s Pull dated `pullDate`, from `rulingsByTicket`: its
-// last ruling dated on or after the Pull, since a ruling never predates the
-// Pull it rules — or null. Throws on a ruling of the ticket whose `run_date`
-// is not YYYY-MM-DD, which cannot be placed against the Pull and whose drop
-// would uncount the ticket, and on the ruling it picks holding anything but
-// `yes` or `no` in a verdict column, which would otherwise read as a pass.
+// last ruling in file order dated on or after the Pull, since a ruling never
+// predates the Pull it rules — or null. Throws on a ruling of the ticket whose
+// `run_date` is not YYYY-MM-DD, which cannot be placed against the Pull and
+// whose drop would uncount the ticket, and on the ruling it picks holding
+// anything but `yes` or `no` in a verdict column, which would otherwise read
+// as a pass.
 export function rulingFor(rulings, ticket, pullDate) {
   const own = rulings.get(String(ticket)) ?? [];
   for (const r of own) {
