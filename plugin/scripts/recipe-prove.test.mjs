@@ -442,6 +442,54 @@ test("a git that stops starting during cleanup does not replace the proof's own 
   assert.match(r.err, /skipped git worktree prune: could not start git/);
 });
 
+// A PATH holding exactly what the proof and the Recipe cache reader run — `sh`,
+// a `git` that execs the real one, `node`, and the reader's `mktemp`, `cat`
+// and `rm` — so the Test entrypoint can take git away by deleting it. With the
+// count proof no proof step runs git after the Test entrypoint, so the first
+// thing to meet the missing git is the reader, during the read-back.
+function readerPath() {
+  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  const bin = tempDir("recipe-prove-path-");
+  writeExecStub(join(bin, "git"), `#!/bin/sh\nexec '${realGit}' "$@"\n`);
+  symlinkSync("/bin/sh", join(bin, "sh"));
+  symlinkSync(process.execPath, join(bin, "node"));
+  for (const tool of ["mktemp", "cat", "rm"]) {
+    symlinkSync(execFileSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim(), join(bin, tool));
+  }
+  return bin;
+}
+
+test("a git that stops starting before the cache is read back is no verdict, never NOT PROVEN — and the prior cache is restored", () => {
+  // The control: the same PATH with git left in place is a proof that holds.
+  const kept = repo(MAVEN_FILES);
+  const ok = prove(kept.dir, ["--install", "true", "--test", "echo 'tests 1'", "--count-line", "tests 1", "--test-count", "1"], { env: { PATH: readerPath() } });
+  assert.equal(ok.status, 0, ok.err);
+  assert.match(ok.out, /^recipe-prove: PROVEN/);
+
+  const { dir } = repo(MAVEN_FILES);
+  mkdirSync(join(dir, ".fleet"));
+  writeFileSync(cachePath(dir), "prior bytes");
+  const bin = readerPath();
+  const r = prove(dir, ["--install", "true", "--test", `rm '${join(bin, "git")}'; echo 'tests 1'`, "--count-line", "tests 1", "--test-count", "1"], { env: { PATH: bin } });
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /^recipe-prove: could not start git: .*ENOENT — the Recipe cache reader runs git, so its refusal is no verdict/m);
+  assert.doesNotMatch(r.err, /NOT PROVEN/);
+  assert.doesNotMatch(r.err, /not a git repository/);
+  assert.equal(readFileSync(cachePath(dir), "utf8"), "prior bytes", "a cache the reader never settled is rolled back");
+});
+
+// The reader's own `sh`, taken away the same way: a read-back that never ran
+// read nothing, so it is no verdict either.
+test("an sh that stops starting before the cache is read back is no verdict, never NOT PROVEN — and no cache is left", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const bin = readerPath();
+  const r = prove(dir, ["--install", "true", "--test", `rm '${join(bin, "sh")}'; echo 'tests 1'`, "--count-line", "tests 1", "--test-count", "1"], { env: { PATH: bin } });
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /^recipe-prove: could not start sh to read the Recipe cache back: .*ENOENT/m);
+  assert.doesNotMatch(r.err, /NOT PROVEN/);
+  assert.equal(existsSync(cachePath(dir)), false, "a cache the reader never read is rolled back");
+});
+
 // Whether the process ignores file modes: root writes into a 0555 directory.
 const IGNORES_MODES = process.getuid?.() === 0 && "root ignores file modes";
 
