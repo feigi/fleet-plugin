@@ -707,6 +707,6 @@ test("stopping rule: a blank-dated Pull at the policy cell, at a cell with no li
   addVerdicts(w, "smol-high", 1, 1, { effort: "medium" });
   addVerdicts(w, "smol-high", 1, 1, { member: false });
   for (const p of w.features.slice(1)) p.run_date = "";
-  const at = judged(w, { "smol-high": "2026-09-01" }, "smol-high");
+  const at = judged(w, { "smol-high": "2026-09-01", "slow-high": "2026-09-01" }, "smol-high");
   assert.deepEqual(at.verdicts.map((v) => [v.ticket, v.failed]), [[real, true]]);
 });
