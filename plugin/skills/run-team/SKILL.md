@@ -3101,9 +3101,10 @@ included (phase 3, **Merge-bot pass reports done**). See references/reaping.md.
 
 `~/.fleet/bin/fleet-run reap.sh --apply` recomputes every precondition
 inside the same invocation as the delete — `for-each-ref` for `[gone]`, `git
-cherry origin/main` to authorize `-D`, worktree removal without `--force` — and
-reports reaped and kept-with-reason counts. Update the reaped tickets' ledger rows
-in the same step. See references/reaping.md.
+cherry origin/main` to authorize the `git update-ref -d` delete (plus a fresh
+check that no worktree holds the branch), worktree removal without `--force` —
+and reports reaped and kept-with-reason counts. Update the reaped tickets' ledger
+rows in the same step. See references/reaping.md.
 
 **It sweeps detached worktrees too — the shape a `[gone]` walk structurally
 cannot see.** Bounded to `.worktrees/`, so a checkout of yours outside it is
