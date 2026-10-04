@@ -33,7 +33,7 @@
 # parent that looks right.
 #
 # The payload splits the checks into three kinds, because a flat object could not
-# say which of its fields were load-bearing for the verdict it sits next to (#18):
+# say which of its fields were load-bearing for the verdict it sits next to:
 #
 #   preconditions — every `die` above the verdict. They exit 2 with NO payload, so
 #                   they never appear as a false field beside `proved`. `merge ∈
@@ -55,7 +55,7 @@ set -eu
 NAME=prove-merge
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
-# The escaping helpers (#119). json.sh's header holds the sourcing contract and
+# The escaping helpers. json.sh's header holds the sourcing contract and
 # the measurements behind it. Exit 1 out of THIS script means "the proof is a
 # no", which the merge bot reads as a reason to refuse a merge, so a missing
 # library must not be able to say it — which is why `[ -r ]` has to fire before
@@ -66,7 +66,7 @@ json_lib="$(dirname "$0")/json.sh"
 # shellcheck source=json.sh
 . "$json_lib" || die "$json_lib failed to load"
 
-# The bounded, prompt-suppressed git transport (#92, #346, #347). The fetch
+# The bounded, prompt-suppressed git transport. The fetch
 # below is unattended: with no bound it can prompt for a credential or a host
 # key, or stall on a transport that connects and then goes quiet, and either
 # holds a fleet slot until something outside kills it. net.sh's header holds the
@@ -116,7 +116,7 @@ for obj in "$pre" "$post" "$merge"; do
   git cat-file -e "${obj}^{commit}" || die "cannot resolve $obj to a commit in this repository"
   # -e above peels through a tag to reach the commit underneath, so an
   # annotated tag clears that line even though $obj itself is not a commit —
-  # only the object at the far end of the peel is (#585). $pre and $post are
+  # only the object at the far end of the peel is. $pre and $post are
   # then resolved UNPEELED by plain `git rev-parse` below, so a tag there hands
   # back the tag object's own sha rather than the commit's, and the identity
   # test later in this script compares that against a commit sha and can never
@@ -139,7 +139,7 @@ echo "\$ git merge-base --is-ancestor $merge $base" >&2
 # Assigned first, not tested inline: `die` inside `$(...)` exits the subshell,
 # and `[ ]` discards that status, so `set -e` never fires and a probe that could
 # not answer falls through to the disproof below — a verdict never established.
-# An assignment is a simple command, so its status is the substitution's (#267).
+# An assignment is a simple command, so its status is the substitution's.
 merge_anc=$(is_ancestor "$merge" "$base")
 [ "$merge_anc" = true ] || die "$merge is not reachable from $base — that merge did not land"
 
@@ -213,8 +213,8 @@ echo "$NAME: proved=$proved (path=$proof_path)" >&2
 # come from `git rev-parse`, 40 hex characters and nothing else, and
 # `$proof_path` is this script's own `rebase`/`no-rebase` literal. They go
 # through `jstr` for uniformity against a later edit that changes where a field
-# comes from, the same reason inflight.sh wraps `$pr`, and it costs nothing
-# (#119). Assigned before the printf, never inline in its argument list — a
+# comes from, the same reason inflight.sh wraps `$pr`, and it costs nothing.
+# Assigned before the printf, never inline in its argument list — a
 # `$()` there sits outside this `|| die`, contributes an empty argument on
 # failure, and printf still exits 0 with a malformed payload.
 second_j=$(jstr "$second") && first_j=$(jstr "$first") && path_j=$(jstr "$proof_path") \
