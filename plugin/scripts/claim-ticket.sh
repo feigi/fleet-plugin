@@ -224,8 +224,9 @@ runner_ports_applied=true
 # the runner execs is the Recipe cache's Test entrypoint, which this checksum
 # does not cover — two claims under one stamp exec different commands once the
 # Recipe is re-derived between them. So what the stamp covers is
-# this file's own bytes: a mismatch means "re-materialize to be sure", and a
-# match means only that this script has not changed.
+# this file's own bytes: a mismatch means only that they differ from the bytes
+# that wrote the runner, and a match means only that this script has not
+# changed. Either way, only a fresh claim writes the current runner.
 #
 # One command, not `cksum | cut`: the convention inflight.sh states in its own
 # comments — a pipeline reports only its last stage's status, so `set -eu`
