@@ -884,8 +884,8 @@ if (cmd === "read") {
   refuseStrayInId(issue, "an issue number");
   const subject = subjectParts.join(" ");
   const id = issue.replace(/^#/, "");
-  // isDigits() gates id the same way the sibling ticket/PR check gates key
-  // (line ~1527): left unvalidated, a non-digit id becomes a `#<id> ` prefix
+  // isDigits() gates id the same way runDispatch's `keyNum` check gates the
+  // ticket/PR key: left unvalidated, a non-digit id becomes a `#<id> ` prefix
   // subjectOf()'s digits-only regex cannot strip, so a near-duplicate
   // `check` against that row silently degrades from the hard "already
   // filed" block to a soft near-miss suggestion instead.
