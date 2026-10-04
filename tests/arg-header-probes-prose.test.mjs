@@ -371,6 +371,36 @@ test("no roster row is silent: every row the roster grep returns names the stray
   );
 });
 
+// #2781. The roster grep's makeDie filter drops every importer that binds no
+// die() from here, and the header used to say such an importer has no command
+// line — recipe-prove.mjs disproved that while the header said it. So the rows
+// the filter drops are RUN too, read off the header's own import grep: one
+// that refuses the stray flag has a command line the roster cannot see, and
+// the header must name it; one that exits 0 in silence is a module, and does
+// not need naming.
+test("every arg.mjs importer the makeDie filter drops is a module, or a script the header names", () => {
+  const dropped = [
+    ...new Set(
+      rows(sh(IMPORT_GREP).stdout)
+        .filter((r) => r.text.trimStart().startsWith("import ") && !r.text.includes("makeDie"))
+        .map((r) => r.file),
+    ),
+  ];
+  const unnamed = [];
+  for (const file of dropped) {
+    const { status, out } = probeStray(file);
+    if (status === 0 && out === "") continue;
+    assert.equal(status, 2, `${file} ${STRAY} exited ${status}, not 2 — a stray flag reached real work`);
+    assert.ok(!out.includes(SWEEP_PREFIX), `${file} binds no makeDie, yet answers ${STRAY} in sweep()'s wording`);
+    if (!FLAT.includes(file.replace(/^scripts\//, ""))) unnamed.push(file);
+  }
+  assert.deepEqual(
+    unnamed,
+    [],
+    "a script imports arg.mjs without makeDie and refuses its own command line, yet arg.mjs's header does not name it — the roster grep cannot see it, so the header has to",
+  );
+});
+
 test("candidates.mjs refuses --limit under arg()'s generated wording", () => {
   const got = sh(LIMIT_PROBE);
   assert.equal(got.status, 2, `${LIMIT_PROBE} exited ${got.status}, not 2`);
