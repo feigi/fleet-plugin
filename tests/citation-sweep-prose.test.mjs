@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { stripComments } from "./strip-comments.mjs";
+import { stripComments } from "./support/strip-comments.mjs";
 
 // #516. A scan over every tracked `.mjs`/`.sh`/`.js`/`.yml` file for
 // `path.ext:NNN` found 22 line-numbered citations (plus two bare `(:NNN)`
