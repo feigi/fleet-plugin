@@ -509,10 +509,14 @@ const FILES = [
       /re-issuing\s+(?:\/\/\s*)?it\b/,
       /same remedy the\s+(?:\/\/\s*)?CI gate/,
     ],
+    // #2677. Both comments once attributed omp's 300s command deadline to
+    // run-merge-bot.md's CI wait rule, which names no 300s — it names the ~60s
+    // auto-background and the 5-6 minute CI cycle. The 300s is stated as omp's
+    // own default now, and only the CI cycle still cites the rule.
     // One needle per SITE — either can revert independently of the other.
     live: [
-      "run-merge-bot.md's CI wait rule already states",
-      "run-merge-bot.md's CI wait rule measures",
+      "its command deadline defaults to 300s (the bash tool's default `timeout`)",
+      "the 5-6 minute CI cycle run-merge-bot.md's CI wait rule states",
     ],
   },
   {
