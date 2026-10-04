@@ -139,7 +139,7 @@ function spawn(cmd, args, { maxBuffer, capture = false } = {}) {
   return execFileSync(cmd, args, { encoding: "utf8", env: gitEnv(), ...(maxBuffer ? { maxBuffer } : {}), ...(capture ? { stdio: "pipe" } : {}) });
 }
 
-// Three disjoint shapes — Node-aborted (ENOENT/ENOBUFS), signal, exit (#176).
+// Three disjoint shapes — Node-aborted (ENOENT/ENOBUFS), signal, exit.
 const failureOf = (e) => e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`);
 
 // `recover(e)`, given, is handed a failed child and returns the stdout to use

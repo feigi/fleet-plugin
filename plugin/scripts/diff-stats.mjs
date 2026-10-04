@@ -167,7 +167,7 @@ function run(cmd, args) {
     // measured 7,700 B becoming 15,454 B, into review-core.mjs's snapshot agent,
     // which is markdown read by a model. `e.message` is the same string, not a
     // fallback — Node builds it as `Command failed: <cmd>\n<stderr>`. Three
-    // disjoint shapes: Node-aborted (ENOENT/ENOBUFS), signal, exit (#176).
+    // disjoint shapes: Node-aborted (ENOENT/ENOBUFS), signal, exit.
     die(
       `${cmd} failed: ${e.code ?? (e.signal ? `killed by ${e.signal}` : `exit ${e.status}`)}`,
     );
