@@ -270,8 +270,10 @@ reads carried 434 KB.`;
 
 // The step a missing Test entrypoint is derived by, named in the refusal so the
 // caller — a controller or a reviewer — knows what to run rather than what went
-// wrong (ADR 0015). derive-testcmd.sh's own refusals name the same step; this
-// one covers the case where the snapshot agent reported no reason at all.
+// wrong (ADR 0015). derive-testcmd.sh's refusals about the cache name the same
+// step; its exit-3 refusals name an environment fault instead, which the caller
+// fixes rather than deriving. This one covers the case where the snapshot agent
+// reported no reason at all.
 const DERIVATION_STEP =
   "run the Recipe derivation step (run-team phase 0, before the first claim — ADR 0015) to derive, prove and write the Recipe cache";
 
@@ -823,8 +825,9 @@ Then read this repository's Test entrypoint out of its Recipe cache:
 
 Report \`testCmd\` = its stdout ONLY if it exited 0. If it exited non-zero,
 report \`testCmdError\` = its stderr and omit \`testCmd\`. Never derive or
-guess a command yourself: a refusal names the step that writes the cache, and
-the caller acts on it.
+guess a command yourself: a refusal about the cache names the step that
+derives it; an exit-3 refusal names an environment fault, and the caller fixes
+that instead of deriving.
 
 Then size the diff:
 
