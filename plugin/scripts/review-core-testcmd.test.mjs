@@ -206,7 +206,13 @@ test("the snapshot agent is told a cache refusal names the derivation step and a
   const snapshot = between(CODE, "const snap = await agent(", "if (snap) {", "the snapshot agent dispatch");
   assert.match(snapshot, /a\s+refusal\s+about\s+the\s+cache\s+names\s+the\s+step\s+that\s+derives\s+it/);
   assert.match(snapshot, /an\s+exit-3\s+refusal\s+names\s+an\s+environment\s+fault,\s+and\s+the\s+caller\s+fixes\s+that\s+instead\s+of\s+deriving/);
-  assert.doesNotMatch(snapshot, /a\s+refusal\s+names\s+the\s+step/, "the prompt claims every refusal names the derivation step");
+  // The two clauses above are the only places the prompt may speak of a
+  // refusal: any other sentence about one, however worded or capitalised, is a
+  // fresh chance to say that every refusal names the derivation step.
+  const outside = snapshot
+    .replace(/a\s+refusal\s+about\s+the\s+cache\s+names\s+the\s+step\s+that\s+derives\s+it/, "")
+    .replace(/an\s+exit-3\s+refusal\s+names\s+an\s+environment\s+fault/, "");
+  assert.doesNotMatch(outside, /\brefusals?\b/i, "the prompt speaks of a refusal outside the two clauses that say which kind names the derivation step");
 });
 
 // #2315. The prompt that RUNS the command is the shared test run's — every
