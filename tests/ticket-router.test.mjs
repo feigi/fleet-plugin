@@ -782,6 +782,30 @@ test("mergedSince: a ticket's last Pull is its last features row in file order, 
   assert.equal(count([verdictRow({ ticket: "1", pr: "11", run_date: "2026-09-30" })]), 0, "a ruling dated before even that floor rules nothing");
 });
 
+test("mergedSince: a features row whose run_date is blank is no Pull, with neither bound set as with one set", () => {
+  // route() writes a blank run_date for a session id with no date prefix.
+  const features = [featureRow({ ticket: "2", run_date: "2026-10-03" }), featureRow({ ticket: "2", run_date: "" })];
+  const count = (verdicts, over = {}) => mergedSince({ table: baseTable(over), features, verdicts });
+  const early = verdictRow({ ticket: "2", pr: "22", run_date: "2026-01-01", minted_false_claim: "yes" });
+  assert.equal(count([early]), 0, "a ruling dated before the last dated row predates that Pull");
+  assert.equal(count([early], { window_start: "2026-01-01" }), 0, "the same with window_start set");
+  assert.equal(count([verdictRow({ ticket: "2", pr: "22", run_date: "2026-10-03" })]), 1, "a ruling on or after the last dated row still rules the ticket");
+  assert.equal(mergedSince({ table: baseTable(), features: [featureRow({ ticket: "3", run_date: "" })], verdicts: [verdictRow({ ticket: "3", pr: "33" })] }), 0, "a ticket whose only row is blank-dated has no Pull to rule");
+});
+
+test("mergedSince refuses a features row whose run_date is neither blank nor YYYY-MM-DD, with either bound set or neither, rather than dropping it", () => {
+  const dated = featureRow({ ticket: "2", run_date: "2026-10-03" });
+  for (const bad of ["10/01/2026", "2026-10-1", "2026", "abc"]) {
+    for (const over of [{}, { window_start: "2026-01-01" }, { fitted_through: "2026-01-01" }]) {
+      assert.throws(
+        () => mergedSince({ table: baseTable(over), features: [dated, featureRow({ ticket: "5", run_date: bad })], verdicts: [] }),
+        (e) => e.message.includes("ticket #5") && e.message.includes(`run_date is '${bad}', expected YYYY-MM-DD or blank`),
+        `${JSON.stringify(over)}, run_date ${bad}`,
+      );
+    }
+  }
+});
+
 test("fit refuses an unreadable guard or input file at exit 2 and leaves the table alone", (t) => {
   const p = fitWorld(t, { features: [], members: [], verdicts: [], guard: null });
   const before = readFileSync(p.table, "utf8");
@@ -828,6 +852,56 @@ test("fit: a ticket's cell is its last input row in file order, not its latest-d
   const estimates = fitDirect({ features, members: [], verdicts: [ruled(1, 11, { run_date: "2026-10-02" })] }).estimates["*"];
   assert.equal(estimates["smol-high"]?.merged, 1, "the later row in file order is the older-dated: its cell takes the ruling, which clears only its floor");
   assert.equal(estimates["slow-high"], undefined, "the latest-dated row does not set the ticket's cell");
+});
+
+test("fit: a features row whose run_date is blank is no input row, for the fit and for --check's re-fit at fitted_through", () => {
+  // route() writes a blank run_date for a session id with no date prefix; ticket 9's blank row sits in another cell.
+  const features = [
+    exploring({ ticket: "2", run_date: "2026-10-03" }),
+    exploring({ ticket: "2", run_date: "", chosen_cell: "smol-high" }),
+    exploring({ ticket: "9", run_date: "", chosen_cell: "task-high" }),
+  ];
+  const early = ruled(2, 22, { run_date: "2026-01-01", minted_false_claim: "yes" });
+  for (const cutoff of [undefined, "2026-10-03"]) {
+    const fit = (verdicts) => fitDirect({ features, members: [], verdicts, cutoff });
+    const t = fit([early, ruled(9, 99)]);
+    assert.deepEqual(Object.keys(t.estimates["*"]), ["slow-high"], `cutoff ${cutoff}: neither blank row sets a cell or adds a ticket`);
+    assert.equal(t.n_rows, 1, `cutoff ${cutoff}`);
+    assert.equal(t.estimates["*"]["slow-high"].merged, 0, `cutoff ${cutoff}: a ruling dated before the last dated row predates that Pull`);
+    assert.equal(fit([ruled(2, 22, { run_date: "2026-10-03" })]).estimates["*"]["slow-high"].merged, 1, `cutoff ${cutoff}: a ruling on or after the last dated row rules the ticket`);
+    assert.equal(t.fitted_through, "2026-10-03", `cutoff ${cutoff}`);
+  }
+});
+
+test("fit refuses a features row whose run_date is neither blank nor YYYY-MM-DD, for the fit and for --check's re-fit, rather than dropping it", () => {
+  const dated = exploring({ ticket: "1", run_date: "2026-10-03" });
+  for (const bad of ["10/01/2026", "2026-10-1", "2026", "abc"]) {
+    for (const cutoff of [undefined, "2026-10-03"]) {
+      assert.throws(
+        () => fitDirect({ features: [dated, exploring({ ticket: "7", run_date: bad })], members: [], verdicts: [], cutoff }),
+        (e) => e.message.includes("ticket #7") && e.message.includes(`run_date is '${bad}', expected YYYY-MM-DD or blank`),
+        `cutoff ${cutoff}, run_date ${bad}`,
+      );
+    }
+  }
+});
+
+test("fit, fit --due and --check refuse at exit 2 a features row whose run_date is neither blank nor YYYY-MM-DD, and leave the table alone; a blank one is not refused", (t) => {
+  const p = fitWorld(t, { features: [exploring({ ticket: "1" }), exploring({ ticket: "7", run_date: "10/01/2026" })], members: [], verdicts: [ruled(1, 11)] });
+  const before = readFileSync(p.table, "utf8");
+  const fitArgs = ["fit", ...p.fitArgs, "--guard", p.guard];
+  for (const args of [fitArgs, [...fitArgs, "--due"], ["--check", ...p.fitArgs]]) {
+    const r = cli(args);
+    assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
+    assert.match(r.stderr, /cannot join --features .* with --verdicts .*: ticket #7: a ticket-features row's run_date is '10\/01\/2026', expected YYYY-MM-DD or blank/);
+    assert.equal(r.stdout, "");
+  }
+  assert.equal(readFileSync(p.table, "utf8"), before);
+  writeFileSync(p.features, tsv(COLUMNS, [exploring({ ticket: "1" }), exploring({ ticket: "7", run_date: "" })], true));
+  for (const args of [[...fitArgs, "--due"], fitArgs]) {
+    const r = cli(args);
+    assert.equal(r.status, 0, `${args.join(" ")}: ${r.stderr}`);
+  }
 });
 
 test("fit refuses at exit 2 a ruling of an input ticket whose run_date is not YYYY-MM-DD, and leaves the table alone; one of a ticket outside the input is not refused", (t) => {

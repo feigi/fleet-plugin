@@ -546,7 +546,11 @@ Under stage 1 + burn-in at ~60 verdicts/week: n=20/cell in ≈1 week, n=60 in
 
 ### R5. Fit — `ticket-router.mjs fit`
 
-**Input rows:** `ticket-features.tsv` rows with `run_date ≥ window_start`,
+**Input rows:** `ticket-features.tsv` rows with a `YYYY-MM-DD` `run_date`
+`≥ window_start` (a blank `run_date`, written for a session id with no
+date, places the row against neither the window nor its ruling, so it is no
+input row and no Pull `--due` counts, `window_start` set or not; any other
+`run_date` that is not `YYYY-MM-DD` is a hand-edit, and `fit`, `--check` and `--due` refuse it at exit 2),
 joined to verdicts per § 1 (member-outcomes on `session`+`agent`;
 tier-outcomes on `ticket`, split `+`; last row per ticket in file order
 dated ≥ the `run_date` of the ticket's last input row in file order wins, a row whose
