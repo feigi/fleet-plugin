@@ -34,13 +34,13 @@
 # stays green. CI's `shellcheck -x -S warning` over `git ls-files '*.sh'` is
 # what catches it (SC1072/SC1073).
 #
-# `LC_ALL=C` is a per-command prefix on every tool below, never an export. Three
-# of the callers (verify-sha.sh, prove-merge.sh, claim-ticket.sh) do not pin the
-# locale, and exporting from a sourced lib would silently re-locale every OTHER
-# tool in them. The prefix is a no-op in the five that do pin it, and
-# closes the same hazard in the three that do not. It matters here because BSD
-# `tr` exits 1 on a byte that is not valid UTF-8 under a UTF-8 locale, and
-# `sed` emits nothing at all.
+# `LC_ALL=C` is a per-command prefix on every tool below, never an export. Some
+# of the callers (claim-ticket.sh, delete-merged-branch.sh, prove-merge.sh and
+# verify-sha.sh among them) do not pin the locale, and exporting from a sourced
+# lib would silently re-locale every OTHER tool in them. The prefix is a no-op
+# in the callers that do pin it, and closes the same hazard in those that do
+# not. It matters here because BSD `tr` exits 1 on a byte that is not valid
+# UTF-8 under a UTF-8 locale, and `sed` emits nothing at all.
 #
 # THE RULE ORDER. Backslash first, always: escaping the quote (or any short
 # form) before the backslash rule runs turns the backslash IT just introduced
