@@ -43,13 +43,15 @@
 // verdict. A PR ruling several tickets takes its verdict from the later of
 // their rulings in file order, whatever their dates. A ruling whose run_date is
 // not YYYY-MM-DD is an input error (exit 2), as is one whose verdict is not
-// yes or no. The PR's CELL is the `chosen_cell` of the last Pull dated on or
-// before the ruling, cross-checked against that Pull's member row: a
-// `subagent_type` other than `fleet-implementer-<cell>`, or an `effort` other
-// than the cell's level, lists the PR under `mismatch` and books it to no cell
-// at all. A PR still OPEN is pending and booked nowhere yet. A Pull with no
-// ruling books to its own `chosen_cell` as unmerged spend — unless its member
-// opened a PR that is still open, which is pending too.
+// yes or no. The PR's CELL is the `chosen_cell` of the last Pull booked to it
+// — tickets in the order of their first Pull, each ticket's Pulls in file
+// order, those dated on or before the ticket's ruling — cross-checked against
+// that Pull's member row: a `subagent_type` other than
+// `fleet-implementer-<cell>`, or an `effort` other than the cell's level,
+// lists the PR under `mismatch` and books it to no cell at all. A PR still
+// OPEN is pending and booked nowhere yet. A Pull with no ruling books to its
+// own `chosen_cell` as unmerged spend — unless its member opened a PR that is
+// still open, which is pending too.
 //
 // PER CELL: `n_pulls`; `n_merged`; `n_pass` (merged PRs passing the quality
 // floor — failure is `minted_false_claim=yes` or `closed_own_ticket=no`);
@@ -70,10 +72,7 @@ import { isCLI } from "./is-cli.mjs";
 import { CELL } from "./ledger-grammar.mjs";
 import { parseMemberName } from "./member-record.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { parseTierOutcomes, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
-
-// A tier-outcomes.tsv row `rulingFor` refuses; the CLI reports it as an input error.
-class RulingError extends Error {}
+import { RulingError, parseTierOutcomes, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
 const NAME = "pr-cost";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -222,9 +221,7 @@ export function computeReport({ members, tiers, features, prs, routerTable = nul
   const groups = new Map(); // pr -> { pr, tier, pulls[] }
   const unruled = [];
   for (const [ticket, ps] of pullsByTicket) {
-    let ruling;
-    try { ruling = rulingFor(rulings, ticket, ps[0].run_date); }
-    catch (e) { throw new RulingError(e.message); }
+    const ruling = rulingFor(rulings, ticket, ps[0].run_date);
     if (!ruling) { unruled.push(...ps); continue; }
     const g = groups.get(ruling.pr) ?? { pr: ruling.pr, tier: ruling, pulls: [] };
     if (fileOrder.get(ruling) > fileOrder.get(g.tier)) g.tier = ruling;

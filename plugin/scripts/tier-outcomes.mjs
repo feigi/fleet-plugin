@@ -155,22 +155,26 @@ export function lastPullByTicket(pulls) {
   return new Map(pulls.map((p) => [p.ticket, p]));
 }
 
+// A ruling row `rulingFor` refuses, as opposed to a bug in `rulingFor` itself:
+// a caller that reports bad input catches this class alone.
+export class RulingError extends Error {}
+
 // The row ruling `ticket`'s Pull dated `pullDate`, from `rulingsByTicket`: its
 // last ruling in file order dated on or after the Pull, since a ruling never
-// predates the Pull it rules — or null. Throws on a ruling of the ticket whose
-// `run_date` is not YYYY-MM-DD, which cannot be placed against the Pull and
-// whose drop would uncount the ticket, and on the ruling it picks holding
-// anything but `yes` or `no` in a verdict column, which would otherwise read
-// as a pass.
+// predates the Pull it rules — or null. Throws a `RulingError` on a ruling of
+// the ticket whose `run_date` is not YYYY-MM-DD, which cannot be placed against
+// the Pull and whose drop would uncount the ticket, and on the ruling it picks
+// holding anything but `yes` or `no` in a verdict column, which would otherwise
+// read as a pass.
 export function rulingFor(rulings, ticket, pullDate) {
   const own = rulings.get(String(ticket)) ?? [];
   for (const r of own) {
-    if (!DATE.test(r.run_date)) throw new Error(`ticket #${ticket} (PR #${r.pr}): run_date is '${r.run_date}', expected YYYY-MM-DD`);
+    if (!DATE.test(r.run_date)) throw new RulingError(`ticket #${ticket} (PR #${r.pr}): run_date is '${r.run_date}', expected YYYY-MM-DD`);
   }
   const v = own.findLast((r) => r.run_date >= pullDate);
   if (!v) return null;
   for (const c of VERDICT_COLUMNS) {
-    if (!VERDICT.includes(v[c])) throw new Error(`ticket #${ticket} (PR #${v.pr}): ${c} is '${v[c]}', expected yes or no`);
+    if (!VERDICT.includes(v[c])) throw new RulingError(`ticket #${ticket} (PR #${v.pr}): ${c} is '${v[c]}', expected yes or no`);
   }
   return v;
 }
