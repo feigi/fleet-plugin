@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { stripComments } from "./strip-comments.mjs";
 
 // #516. A scan over every tracked `.mjs`/`.sh`/`.js`/`.yml` file for
 // `path.ext:NNN` found 22 line-numbered citations (plus two bare `(:NNN)`
@@ -41,7 +42,8 @@ import { join } from "node:path";
 // construct the citation names must still be named. Neither reads the cited
 // file, so nothing in this table notices the TARGET losing the construct — the
 // direction #870 closes for probe 3's citation, in
-// inflight-citation-prose.test.mjs, and leaves open for every entry below.
+// inflight-citation-prose.test.mjs, and leaves open for every entry below
+// except where the next two paragraphs say otherwise.
 //
 // One target-side check runs here, for one citation shape only (#1757): a
 // `live` needle that names an ADR by number (`ADR 0010`) is a pointer, and the
@@ -51,8 +53,14 @@ import { join } from "node:path";
 // WTROOT gives: renumber or move the ADR and this reds; repoint the needle
 // alone and the needle reds against the citing file's unchanged prose. The
 // pointer names the ADR by number, so a retitle that keeps the number keeps
-// the pointer true and stays green. A construct needle is still never checked
-// against its target.
+// the pointer true and stays green.
+//
+// One construct needle is checked against its target too: ledger.mjs's
+// "runDispatch's `keyNum` check", a pointer that names a function and a
+// variable inside it. Rename either in the code and the comment points at
+// nothing while its needle stays satisfied by the comment's own words, so
+// runDispatchKeyNumFault reads comment-stripped ledger.mjs for both. Every
+// other construct needle is still never checked against its target.
 //
 // And two claims are held by what they say, not by how they were spelled:
 // ADR 0010's security release (#1928) and its count of releases in the 43
@@ -529,7 +537,8 @@ const FILES = [
     // #2516. The `filed` subcommand's isDigits() comment pointed at
     // "(line ~1527)" for the `keyNum` check it mirrors — a line that had
     // already drifted into an unrelated comment. It names the check by its
-    // enclosing function now.
+    // enclosing function now. runDispatchKeyNumFault below holds the cited
+    // side: the function and the check still exist under those names.
     stale: [/fleet-plugin-design\.md:200/, /candidates\.mjs:279/, /\blines?\s+~?\d+/],
     live: ["refuseIfCapped", "runDispatch's `keyNum` check"],
   },
@@ -845,6 +854,50 @@ for (const { path, stale, live } of FILES) {
     }
   }
 }
+
+// The cited side of ledger.mjs's "runDispatch's `keyNum` check" pointer: a
+// top-level `function runDispatch(` whose body, up to its closing brace at
+// column 0, still calls `isDigits(keyNum)`. Comments are stripped first, so
+// the pointer's own comment, or the check left behind commented out, cannot
+// stand in for the code. Null when both hold, else the reason.
+const RUN_DISPATCH = /^(?:async\s+)?function\s+runDispatch\s*\(/m;
+const KEYNUM_CHECK = /\bisDigits\(\s*keyNum\s*\)/;
+
+function runDispatchKeyNumFault(source) {
+  const code = stripComments(source);
+  const start = code.search(RUN_DISPATCH);
+  if (start === -1) return "no `function runDispatch(` outside comments";
+  const end = code.indexOf("\n}", start);
+  const body = code.slice(start, end === -1 ? undefined : end);
+  return KEYNUM_CHECK.test(body) ? null : "runDispatch() no longer calls `isDigits(keyNum)` outside comments";
+}
+
+test("ledger.mjs's pointer to runDispatch's `keyNum` check still lands on code", () => {
+  const fault = runDispatchKeyNumFault(read("scripts", "ledger.mjs"));
+  assert.equal(fault, null, `ledger.mjs's \`filed\` comment points at "runDispatch's \`keyNum\` check", but ${fault} — rename the pointer with its target`);
+});
+
+test("the runDispatch pointer reds once the function, the variable or the check's place changes", () => {
+  const check = "  const keyNum = key;\n  if (!isDigits(keyNum)) die();\n";
+  for (const source of [
+    `function runDispatchRow() {\n${check}}\n`,
+    "function runDispatch() {\n  const keyDigits = key;\n  if (!isDigits(keyDigits)) die();\n}\n",
+    `function runDispatch() {\n}\n\nfunction validate() {\n${check}}\n`,
+    "function runDispatch() {\n  const keyNum = key;\n  // if (!isDigits(keyNum)) die();\n}\n",
+    `/*\nfunction runDispatch() {\n${check}}\n*/\n`,
+  ]) {
+    assert.notEqual(runDispatchKeyNumFault(source), null, source);
+  }
+});
+
+test("the runDispatch pointer accepts a reflowed check and ignores the comment that cites it", () => {
+  for (const source of [
+    "// isDigits() gates id the same way runDispatch's `keyNum` check gates\nasync function runDispatch() {\n  if (keyNum !== null && !isDigits( keyNum )) die();\n}\n",
+    "function runDispatch() {\n  const keyNum = key;\n  if (!isDigits(keyNum)) die();\n}\n",
+  ]) {
+    assert.equal(runDispatchKeyNumFault(source), null, source);
+  }
+});
 
 test("an ADR pointer resolves by number alone, so a retitled ADR still answers to it", () => {
   assert.equal(adrFault("0010", ["0009-supported-platforms-are-macos-linux-wsl.md", "0010-a-retitled-ruling.md"]), null);
