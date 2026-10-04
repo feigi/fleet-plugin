@@ -821,10 +821,13 @@ const FILES = [
   // `#N`, not yet built" pointer that outlived its ticket's close: the
   // definitions and `stoppingRule` had shipped. The pointers are converted
   // to name what was built, so the stale forms are banned here and the
-  // stopping rule's export is the construct the entry still has to name.
+  // stopping rule's export is the construct the entry still has to name. The
+  // bans match the pointer with or without its backticks and in any case, so
+  // a plain "pending #2134" or a sentence-initial "Pending `#2134`" revert
+  // is caught as well.
   {
     path: ["..", "CONTEXT.md"],
-    stale: [/\bpending\s+`#2129`/, /\bpending\s+`#2134`/],
+    stale: [/\bpending\s+`?#2129(?!\d)`?/i, /\bpending\s+`?#2134(?!\d)`?/i],
     live: ["**Consumer floor** (ADR 0010)", "**Runtime pin** (ADR 0010)", "`stoppingRule`"],
   },
 ];
