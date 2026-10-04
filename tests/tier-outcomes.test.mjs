@@ -9,9 +9,10 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { COLUMNS, LEGACY_WIDTH, TIER_SWITCH_DATE } from "../plugin/scripts/tier-outcomes.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
+import { sessionDate } from "../plugin/scripts/ticket-router.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/tier-outcomes.mjs", import.meta.url));
@@ -37,7 +38,9 @@ function ledgerText(rows = [], dispatched = []) {
   return `# Fleet run ledger\n\n## Rows\n${rows.map((r) => `- ${r}\n`).join("")}\n## Dispatched\n${dispatched.map((d) => `- ${d}\n`).join("")}\n## Filed\n\n## Ruled\n`;
 }
 
-function fixture(t, { members = [], tierRows = [], ledger = null, closes = [10] } = {}) {
+// `clock` pins the child's `new Date()` to that instant and `tz` its TZ, so a
+// date `append` stamps is independent of the host's clock and zone.
+function fixture(t, { members = [], tierRows = [], ledger = null, closes = [10], clock = null, tz = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "tier-outcomes-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const bin = join(dir, "bin");
@@ -52,12 +55,24 @@ function fixture(t, { members = [], tierRows = [], ledger = null, closes = [10] 
   writeFileSync(f.tier, HEADER + tierRows.map((r) => `${r}\n`).join(""));
   writeFileSync(f.members, `# member facts\n${members.map((m) => `${memberRow(m)}\n`).join("")}`);
   if (ledger) writeFileSync(f.ledger, ledgerText(ledger.rows, ledger.dispatched));
+  const preload = join(dir, "clock.mjs");
+  if (clock) {
+    writeFileSync(preload, `const at = ${Date.parse(clock)};
+const Real = Date;
+globalThis.Date = class extends Real {
+  constructor(...a) { super(...(a.length ? a : [at])); }
+  static now() { return at; }
+};
+`);
+  }
   f.run = (...args) => {
-    const r = spawnSync(process.execPath, [SCRIPT, ...args, "--file", f.tier, "--member-outcomes", f.members, "--ledger", f.ledger], {
+    const node = clock ? ["--import", pathToFileURL(preload).href] : [];
+    const r = spawnSync(process.execPath, [...node, SCRIPT, ...args, "--file", f.tier, "--member-outcomes", f.members, "--ledger", f.ledger], {
       cwd: dir,
       encoding: "utf8",
       env: {
         ...process.env,
+        ...(tz ? { TZ: tz } : {}),
         PATH: `${bin}:${process.env.PATH}`,
         GH_LOG: f.ghLog,
         GH_JSON: JSON.stringify({ closingIssuesReferences: closes.map((number) => ({ number })) }),
@@ -78,8 +93,7 @@ const col = (name) => COLUMNS.indexOf(name);
 // append
 // ---------------------------------------------------------------------------
 
-const localDate = (d = new Date()) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const utcDate = (d = new Date()) => d.toISOString().slice(0, 10);
 
 test("append: the ledger's tier-ok token wins over member-outcomes.tsv", (t) => {
   const f = fixture(t, {
@@ -88,9 +102,9 @@ test("append: the ledger's tier-ok token wins over member-outcomes.tsv", (t) => 
     // alone would read `default`.
     members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
   });
-  const before = localDate();
+  const before = utcDate();
   const r = f.append();
-  const after = localDate();
+  const after = utcDate();
   assert.equal(r.code, 0, r.stderr);
   const rows = f.dataRows();
   assert.equal(rows.length, 1);
@@ -99,13 +113,33 @@ test("append: the ledger's tier-ok token wins over member-outcomes.tsv", (t) => 
   assert.equal(rows[0][col("ticket")], "10", "the ticket comes from gh's closingIssuesReferences");
   assert.equal(rows[0][col("tier")], "alt");
   assert.equal(rows[0][col("class")], "", "append writes the retired class column empty");
-  // Stamped at ruling: the day `append` ran, in local time — either side of a
+  // Stamped at ruling: the UTC day `append` ran — either side of a UTC
   // midnight the run straddled.
   assert.ok([before, after].includes(rows[0][col("run_date")]), `run_date ${rows[0][col("run_date")]} is not the day append ran`);
   assert.equal(rows[0][col("note")], "a note with spaces");
   assert.match(r.stderr, /tier-ok=impl-10:fleet-implementer-alt/);
   assert.deepEqual(f.ghCalls(), ["pr view 20 --json closingIssuesReferences"]);
 });
+
+// A Pull's `run_date` in ticket-features.tsv is the UTC date of its session
+// id, and cell-readout.mjs's stopping rule and pr-cost.mjs join a ruling to a
+// Pull with `run_date >=`. A ruling dated in the host's zone lands a day
+// before a same-instant Pull west of UTC, so the join drops it. Each instant
+// below is one where the zone's date and the UTC date differ.
+for (const [tz, clock] of [
+  ["America/Los_Angeles", "2026-10-05T03:30:00Z"],
+  ["Asia/Tokyo", "2026-10-04T20:30:00Z"],
+]) {
+  test(`append: under TZ=${tz} at ${clock} run_date is the UTC date a same-instant session id carries`, (t) => {
+    const local = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date(clock));
+    const session = `${clock.replace(/:/g, "-").replace("Z", "-000Z")}_abcdef12-3456-7890-abcd-ef1234567890`;
+    assert.notEqual(local, sessionDate(session), `${clock} is an instant where ${tz}'s date is the UTC date`);
+    const f = fixture(t, { members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer-alt" }], clock, tz });
+    const r = f.append();
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(f.dataRows()[0][col("run_date")], sessionDate(session));
+  });
+}
 
 test("append: the verdict of the member that opened the PR, not a replaced attempt's", (t) => {
   const f = fixture(t, {

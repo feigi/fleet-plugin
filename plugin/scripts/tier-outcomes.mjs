@@ -7,7 +7,7 @@
 //
 //   append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no
 //          --note <text> [--sizing light|heavy] [--profile <p>] [--loc <n>] [--files <n>]
-//     Fills `run_date` (today, the ruling date), `pr`, `ticket` (off
+//     Fills `run_date` (today's UTC date, the ruling date), `pr`, `ticket` (off
 //     `gh pr view --json closingIssuesReferences`) and `tier`. Idempotent by
 //     PR: a row already present is named and nothing is written, exit 0.
 //   check [--live]
@@ -388,10 +388,10 @@ function closingTicket(pr) {
   return String(numbers[0]);
 }
 
+// The UTC date, the convention of a session id's date and so of every Pull's
+// `run_date` a ruling is joined to.
 function today() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return new Date().toISOString().slice(0, 10);
 }
 
 function append(pr, paths) {
