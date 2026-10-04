@@ -791,6 +791,84 @@ test("createBoardServer serves board.json and the page", async () => {
   await new Promise((res) => server.close(res));
 });
 
+// The Host-header guard is a socket-level property, so these tests speak raw
+// HTTP over a real TCP connection to the loopback bind: a client library would
+// normalise or refuse the very headers under test (a missing Host, an
+// uppercase name). `host` undefined sends no Host line at all, which an
+// HTTP/1.1 request cannot do — Node answers that 400 itself — so that case
+// goes out as HTTP/1.0, the one version where Host is optional.
+async function rawStatus(port, path, host) {
+  const lines = [`GET ${path} HTTP/${host === undefined ? "1.0" : "1.1"}`];
+  if (host !== undefined) lines.push(`Host: ${host}`);
+  lines.push("Connection: close", "", "");
+  const socket = connect({ host: "127.0.0.1", port });
+  let raw = "";
+  socket.setEncoding("utf8");
+  socket.on("data", (c) => { raw += c; });
+  socket.write(lines.join("\r\n"));
+  await new Promise((res, rej) => { socket.once("close", res); socket.once("error", rej); });
+  const status = /^HTTP\/1\.[01] (\d{3})/.exec(raw);
+  assert.ok(status, `no HTTP status line in ${JSON.stringify(raw)}`);
+  const head = raw.slice(0, raw.indexOf("\r\n\r\n"));
+  let body = raw.slice(head.length + 4);
+  // The server sets no content-length, so an HTTP/1.1 reply is chunked.
+  if (/transfer-encoding: chunked/i.test(head)) {
+    let decoded = "";
+    for (let i = 0; i < body.length;) {
+      const eol = body.indexOf("\r\n", i);
+      const size = parseInt(body.slice(i, eol), 16);
+      if (!size) break;
+      decoded += body.slice(eol + 2, eol + 2 + size);
+      i = eol + 2 + size + 2;
+    }
+    body = decoded;
+  }
+  return { status: Number(status[1]), body };
+}
+
+async function withBoardServer(fn) {
+  const dir = tempDir("board-host-");
+  writeFileSync(join(dir, "board.json"), JSON.stringify({ generatedAt: 1, tickets: [], attention: [] }));
+  writeFileSync(join(dir, "board.html"), "<!doctype html><title>cockpit</title>");
+  const server = createBoardServer(dir);
+  await new Promise((res) => server.listen(0, "127.0.0.1", res));
+  try { await fn(server.address().port); } finally { await new Promise((res) => server.close(res)); }
+}
+
+test("createBoardServer answers 403 to a Host that is not a loopback name, on every path", async () => {
+  await withBoardServer(async (port) => {
+    for (const host of [`evil.example.com:${port}`, "rebound.attacker.test", `127.0.0.1.evil.test:${port}`, `localhost.evil.test:${port}`, `evil.test:${port}@localhost`, `[::2]:${port}`]) {
+      for (const path of ["/board.json", "/board.html", "/", "/nope"]) {
+        const r = await rawStatus(port, path, host);
+        assert.equal(r.status, 403, `${host} ${path}`);
+        assert.doesNotMatch(r.body, /generatedAt|cockpit/, `${host} ${path} leaked the board`);
+      }
+    }
+  });
+});
+
+test("createBoardServer answers 403 to a request with no Host header", async () => {
+  await withBoardServer(async (port) => {
+    const r = await rawStatus(port, "/board.json", undefined);
+    assert.equal(r.status, 403);
+    assert.doesNotMatch(r.body, /generatedAt/);
+  });
+});
+
+test("createBoardServer serves every loopback Host name, any port, any case", async () => {
+  await withBoardServer(async (port) => {
+    // The port is deliberately not compared (an ssh -L forward arrives under a
+    // different one), so a mismatched port and a missing port must both pass.
+    for (const host of [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`, `LOCALHOST:${port}`, `LocalHost:${port}`, `[::1]:1`, "127.0.0.1", "localhost"]) {
+      const j = await rawStatus(port, "/board.json", host);
+      assert.equal(j.status, 200, host);
+      assert.equal(JSON.parse(j.body).generatedAt, 1, host);
+      assert.equal((await rawStatus(port, "/board.html", host)).status, 200, host);
+      assert.equal((await rawStatus(port, "/nope", host)).status, 404, host);
+    }
+  });
+});
+
 // ── the spend transcript layer ────────────────────────────────────────────────
 // Both bugs this file now pins were invisible to the pure-module tests, because
 // both live in the I/O that feeds them: a wrong path and a wrong summation. Each
