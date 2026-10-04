@@ -378,17 +378,10 @@ function assertNoWorktreeLeft(tmp) {
   }
 }
 
-test("the proof leaves no worktree directory behind in its temp dir", () => {
-  const { dir } = repo(MAVEN_FILES);
-  const r = prove(dir, MAVEN_PROOF);
-  assert.equal(r.status, 0, r.err);
-  assertNoWorktreeLeft(r.tmp);
-});
-
 // The log directories the proof made in its TMPDIR.
 const logDirs = (tmp) => readdirSync(tmp).filter((n) => n.startsWith("recipe-prove-"));
 
-test("a proof that held leaves no log directory behind in its TMPDIR", () => {
+test("a proof that held leaves neither a worktree nor a log directory behind in its TMPDIR", () => {
   const { dir } = repo(MAVEN_FILES);
   const r = prove(dir, MAVEN_PROOF);
   assert.equal(r.status, 0, r.err);
@@ -406,6 +399,56 @@ test("a proof that did not hold keeps its log directory, with the log its refusa
   assert.equal(log[1], join(r.tmp, kept[0], "install.log"));
   assert.match(readFileSync(log[1], "utf8"), /fetching deps/);
   assertNoWorktreeLeft(r.tmp);
+});
+
+// Every refusal the proof stage throws names a log in the directory it keeps,
+// so a kept directory is never one the caller has no path to.
+const KEPT_REFUSALS = [
+  {
+    name: "an Install step that changed the tree",
+    files: MAVEN_FILES,
+    args: ["--install", ": > deps.lock", ...MAVEN_PROOF.slice(2)],
+    reason: /the Install step changed the tree/,
+    log: "install.log",
+  },
+  {
+    name: "a count line that lacks the claimed count",
+    files: MAVEN_FILES,
+    args: ["--install", "true", "--test", "mvn -q test", "--count-line", "Tests run: 1,", "--test-count", "7"],
+    reason: /does not carry the test count 7/,
+    log: "test.log",
+  },
+  {
+    name: "a mutation that changed no tracked file",
+    files: GO_FILES,
+    args: ["--install", "true", "--test", "go test ./...", "--mutate", ": > new_test.go", "--mutation", "adds a file"],
+    reason: /changed no tracked file/,
+    log: "mutate.log",
+  },
+];
+
+for (const c of KEPT_REFUSALS) {
+  test(`${c.name} keeps its log directory, and the refusal names the log in it`, () => {
+    const { dir } = repo(c.files);
+    const r = prove(dir, c.args);
+    assert.equal(r.status, 1, r.err);
+    assert.match(r.err, c.reason);
+    const kept = logDirs(r.tmp);
+    assert.equal(kept.length, 1, `log directories in ${r.tmp}: ${kept}`);
+    const log = join(r.tmp, kept[0], c.log);
+    assert.ok(r.err.includes(log), `${log} not named in: ${r.err}`);
+    assert.ok(existsSync(log), `${log} does not exist`);
+  });
+}
+
+test("a refusal that names no log leaves no log directory behind", () => {
+  // The Recipe cache reader refuses a Test entrypoint ending in `;` after the
+  // proof held, so no log in the directory is what the refusal is about.
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, ["--install", "true", "--test", "mvn -q test;", "--count-line", "Tests run: 1,", "--test-count", "1"]);
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /the Recipe cache reader refuses what was proven/);
+  assert.deepEqual(logDirs(r.tmp), []);
 });
 
 test("a throwaway worktree that cannot be made is exit 2 and leaves no log directory behind", () => {
@@ -442,7 +485,6 @@ test("a git that stops starting during the Install step is no verdict, never NOT
   assert.match(r.err, /could not start git: .*ENOENT/);
   assert.match(r.err, /skipped git worktree remove/);
   assert.doesNotMatch(r.err, /NOT PROVEN/);
-  assertNoWorktreeLeft(r.tmp);
   assert.deepEqual(logDirs(r.tmp), [], "no verdict keeps no logs");
 });
 
@@ -538,7 +580,7 @@ test("read-only install output cannot turn a proof that held into a crash", { sk
   const r = prove(dir, ["--install", READ_ONLY_INSTALL, ...MAVEN_PROOF.slice(2)]);
   assert.equal(r.status, 0, r.err);
   assert.equal(JSON.parse(readFileSync(cachePath(dir), "utf8")).derivedAt, head);
-  assertNoWorktreeLeft(r.tmp);
+  assert.deepEqual(logDirs(r.tmp), []);
   assert.equal(git(dir, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length, 1);
 });
 
