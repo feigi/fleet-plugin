@@ -6,7 +6,10 @@
 //
 // Inputs default to docs/metrics/ under the working directory. A Pull is a
 // ticket-features.tsv row; what it ran is the member-outcomes.tsv row with the
-// same `session` + `agent`.
+// same `session` + `agent`. Rows of one `session` + `agent` that name one
+// `chosen_cell` are one Pull; the readout refuses rows naming different cells,
+// naming the file, the session, the agent and both cells, since which cell ran
+// is then unknown.
 //
 // ADMISSIBLE ROW. A Pull counts only when its member row exists, was
 // dispatched as the drawn cell's own definition (`subagent_type` =
@@ -34,8 +37,10 @@
 // model by name, or `mixed (<model-a> n=…, <model-b> n=…)` when they span more
 // than one, because a role's target is operator config that can move under a
 // cell's history. A cell below the gate prints nothing on stdout and one
-// `below the gate` count on stderr. Nothing on either stream names a session,
-// ticket or member: the gate forbids reading a comparison early.
+// `below the gate` count on stderr. Neither the gate line nor that count names
+// a session, ticket or member: the gate forbids reading a comparison early.
+// Only the refusal of conflicting ticket-features rows names a session and an
+// agent, and it prints nothing on stdout.
 //
 // STOPPING RULE (exported as `stoppingRule`, not printed by this CLI). For a
 // cell X other than slow-high whose definition is live, a VERDICT is a ticket
@@ -74,6 +79,21 @@ export const STOP = Object.freeze({ verdicts: 10, failRate: 0.8 });
 const key = (session, agent) => `${session}\0${agent}`;
 const levelOf = (cell) => CELL.exec(cell)?.[2] ?? null;
 
+/**
+ * `features` keyed by session+agent. A repeat naming the same `chosen_cell`
+ * collapses into the first row; one naming another cell throws.
+ */
+function pullsOf(features) {
+  const pulls = new Map();
+  for (const p of features) {
+    const k = key(p.session, p.agent);
+    const prev = pulls.get(k);
+    if (!prev) pulls.set(k, p);
+    else if (prev.chosen_cell !== p.chosen_cell) throw new Error(`session ${p.session} agent ${p.agent} has two rows, chosen_cell '${prev.chosen_cell}' and '${p.chosen_cell}'`);
+  }
+  return pulls;
+}
+
 /** The join's member row for a Pull when the Pull is admissible, else null. */
 function admissibleMember(pull, members) {
   const m = members.get(key(pull.session, pull.agent));
@@ -88,13 +108,12 @@ function admissibleMember(pull, members) {
  * ticket-features row, `{ cell, comparisons, runDates, dates, models, gated }`,
  * sorted by cell. `dates` is the comparisons' distinct run_dates, sorted;
  * `models` maps each resolved model of the cell's admissible rows to its row
- * count, largest first. `unjoined` counts Pulls with no member row.
+ * count, largest first. `unjoined` counts Pulls with no member row. Throws on
+ * two ticket-features rows of one session+agent naming different cells.
  */
 export function readout({ features, members }) {
   const byKey = new Map(members.map((m) => [key(m.session, m.agent), m]));
-  // One Pull per session+agent: a re-dispatch lands on the same cell and the
-  // same member row.
-  const pulls = new Map(features.map((p) => [key(p.session, p.agent), p]));
+  const pulls = pullsOf(features);
   const sessions = new Map();
   const cells = new Map();
   let unjoined = 0;
@@ -201,7 +220,9 @@ function main() {
   const features = load(featuresPath, parseFeatures);
   const members = load(membersPath, parseMemberTsv);
 
-  const { cells, unjoined } = readout({ features, members });
+  let cells, unjoined;
+  try { ({ cells, unjoined } = readout({ features, members })); }
+  catch (e) { die(`${featuresPath}: ${e.message}`); }
   const lines = [];
   const notes = [];
   if (unjoined > 0) {
