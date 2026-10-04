@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, symlinkSync, chmodSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { tempDir } from "./support/temp-dir.mjs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { writeExecStub } from "./support/exec-stub.mjs";
 
 // derive-testcmd.sh is the ONE reader of a repository's Recipe cache (ADR
@@ -31,7 +31,10 @@ function repo(files = {}) {
   git("init", "-q");
   git("config", "user.email", "t@t");
   git("config", "user.name", "t");
-  for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), body);
+  for (const [name, body] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, name)), { recursive: true });
+    writeFileSync(join(dir, name), body);
+  }
   git("commit", "-q", "--allow-empty", "-m", "x");
   git("add", "-A");
   git("commit", "-q", "--allow-empty", "-m", "files");
@@ -194,7 +197,7 @@ test("a command whose binary is missing or not executable refuses as an invalid 
 // Recipe — this script never runs the command, so it cannot tell and must
 // not try. A relative script resolves from <repo>, not from the caller's cwd.
 test("a runnable command is accepted, however it is spelled — and a failing suite is not a stale Recipe", () => {
-  const { dir, head } = repo({ "run.sh": "#!/bin/sh\nexit 0\n" });
+  const { dir, head } = repo({ "run.sh": "#!/bin/sh\nexit 0\n", "plugin/scripts/a.test.mjs": "" });
   chmodSync(join(dir, "run.sh"), 0o755);
   for (const cmd of [
     "./run.sh",
@@ -211,6 +214,69 @@ test("a runnable command is accepted, however it is spelled — and a failing su
     assert.equal(r.status, 0, `${cmd}: ${r.err}`);
     assert.equal(r.out, cmd);
   }
+});
+
+// A pattern in the Test entrypoint that matches no tracked file selects no
+// tests: `node --test` over a glob that matches nothing reports `tests 0` and
+// exits 0, so every member handed the command gets a green run that tested
+// nothing. That is a stale Recipe — the suite moved — refused like a missing
+// binary. Tracked is the criterion, not present on disk: a fresh worktree has
+// only what is tracked.
+test("a test command whose glob matches no tracked file refuses as a stale Recipe", () => {
+  const { dir, head } = repo({ "plugin/scripts/run.sh": "", "tests/a.test.mjs": "" });
+  writeFileSync(join(dir, "untracked.test.mjs"), "");
+  for (const [cmd, pattern] of [
+    ["node --test plugin/scripts/*.test.mjs", "plugin/scripts/*.test.mjs"],
+    ["node --test *.test.mjs", "*.test.mjs"],
+    ["node --test tests/*.test.mjs gone/*.test.mjs", "gone/*.test.mjs"],
+    ["true && node --test t?sts/[!a].test.mjs", "t?sts/[!a].test.mjs"],
+  ]) {
+    cache(dir, recipe(head, { test: cmd }));
+    const r = derive(dir);
+    assert.equal(r.status, 1, `${cmd} must refuse: ${r.out}`);
+    assert.equal(r.out, "", `${cmd}: nothing may reach the caller`);
+    assert.ok(r.err.includes(`its test command's pattern '${pattern}' matches no file tracked in`), `${cmd}: ${r.err}`);
+    assert.match(r.err, NAMES_STEP, cmd);
+  }
+});
+
+// The must-ACCEPT half. A pattern matching a tracked file at any depth reads
+// cleanly. A word the shell does not glob as written — quoted, carrying an
+// expansion, an option or an `=` — is the program's own to read and cannot be
+// settled without running it, and neither can a path outside the repository
+// or a pattern after a `cd`, which no longer resolves from the repository. A
+// pattern under a path git ignores names generated output (a build the Install
+// step produces), which is never tracked. The Install step is not a Test
+// entrypoint, so a pattern there is not checked.
+test("a test command whose glob matches a tracked file, or that the tree cannot settle, is accepted", () => {
+  const { dir, head } = repo({ ".gitignore": "dist/\n*.gen.*\n", "tests/unit/a.test.mjs": "" });
+  for (const cmd of [
+    "node --test tests/*/*.test.mjs",
+    "node --test tests/**/*.test.mjs",
+    "node --test ./tests/unit/[a-z].test.mjs",
+    "node --test 'gone/**/*.test.mjs'",
+    `node --test "gone/*.test.mjs"`,
+    "node --test $SUITE/*.test.mjs",
+    "SKIP=gone/* node --test tests/unit/*.test.mjs",
+    "node --test --test-name-pattern=* tests/unit/a.test.mjs",
+    "node --test dist/*.test.js",
+    "node --test src/*.gen.test.js",
+    "[ -d tests ] && node --test tests/unit/*.test.mjs",
+    "cd tests/unit && node --test *.test.mjs",
+    "(cd tests/unit && node --test *.test.mjs)",
+    "node --test ../shared/*.test.mjs",
+    "node --test /opt/suite/*.test.mjs",
+  ]) {
+    cache(dir, recipe(head, { test: cmd }));
+    const r = derive(dir);
+    assert.equal(r.status, 0, `${cmd}: ${r.err}`);
+    assert.equal(r.out, cmd);
+    assert.equal(r.err, "", cmd);
+  }
+  cache(dir, recipe(head, { install: "cp gone/*.json ." }));
+  const i = derive(dir, "install");
+  assert.equal(i.status, 0, i.err);
+  assert.equal(i.out, "cp gone/*.json .");
 });
 
 // Both consumers append the runner's own arguments after this string
@@ -277,6 +343,24 @@ test("an ambient GIT_DIR does not read another repository's Recipe (#1020)", () 
   const r = derive(here.dir, "test", { ...process.env, GIT_DIR: join(elsewhere.dir, ".git") });
   assert.equal(r.status, 0, r.err);
   assert.equal(r.out, "true", "an ambient GIT_DIR must not answer for another repository");
+});
+
+// The other half of the same line: the vacuous-suite probe asks git whether a
+// pattern is ignored, and an ambient GIT_WORK_TREE naming another directory
+// answers from that directory's ignore rules — the control shows it does —
+// refusing a pattern this repository's own .gitignore covers.
+test("an ambient GIT_WORK_TREE does not refuse a pattern under this repository's ignored output", () => {
+  const here = repo({ ".gitignore": "dist/\n" });
+  const cmd = "node --test dist/*.test.js";
+  cache(here.dir, recipe(here.head, { test: cmd }));
+  const elsewhere = tempDir("derive-testcmd-worktree-");
+  const env = { ...FIXTURE_ENV, GIT_WORK_TREE: elsewhere };
+  const control = spawnSync("git", ["-C", here.dir, "check-ignore", "-q", "--no-index", "--", "dist/x.test.js"], { env });
+  assert.equal(control.status, 1, "fixture: the ambient work tree must change git's answer");
+
+  const r = derive(here.dir, "test", env);
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out, cmd);
 });
 
 // --- #1175: the cross-file invariant claim-ticket.sh's captures rest on. It

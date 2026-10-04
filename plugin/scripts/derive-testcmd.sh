@@ -77,10 +77,10 @@ export LC_ALL=C
 # runs it in a fresh worktree and bakes it into the runner, and review-core.mjs's
 # snapshot agent hands it to every specialist.
 #
-# GIT_WORK_TREE is unset alongside it and is INERT here: `rev-parse --git-dir`
-# and `--git-common-dir` consult no work tree. It stays on the line because the
-# pair is one hazard with one remedy, and "inert today" is a measurement of the
-# current call set, not a property of the script.
+# GIT_WORK_TREE is unset alongside it: the vacuous-suite probe's `check-ignore`
+# reads the ignore rules of whatever work tree git is pointed at, so an ambient
+# one naming another directory would refuse a Test entrypoint whose pattern
+# names this repository's gitignored build output.
 # A prose test pins the line itself.
 unset GIT_DIR GIT_WORK_TREE
 
@@ -298,5 +298,43 @@ case $1 in
       || die "the Recipe cache at $cache is invalid: its $field command '$1' is not found or not executable from $repo — a Recipe that cannot run is stale, not a finding; $derive"
     ;;
 esac
+
+# The vacuous-suite probe, for the Test entrypoint only. A pattern that
+# matches no tracked file selects no tests, and a runner handed one can pass
+# having run nothing: `node --test` over a glob that matches nothing reports
+# `tests 0` and exits 0. The suite moved and the Recipe did not, so it is
+# stale, refused like a binary that is gone. Tracked, not present on disk: a
+# fresh worktree holds only what is tracked. Only a word the shell globs as
+# written, from <repo>, can be settled without running the command: a word
+# carrying quoting or an expansion, an option, an `=` assignment or value, or a
+# path outside <repo> is the program's own to read and is accepted unprobed,
+# and the scan stops at a `cd`, past which a pattern no longer resolves from
+# <repo>. A pattern under a path git ignores names generated output, such as a
+# build the Install step produces, which is never tracked, so it is accepted
+# too. `[` is a pattern only with a `]` after it, so the `[` builtin is not.
+if [ "$field" = test ]; then
+  set -f
+  # shellcheck disable=SC2086 # field splitting is the point: scanning every word
+  for word in $value; do
+    case $word in
+      cd|pushd|*[\(\;\&\|]cd|*[\(\;\&\|]pushd) break ;;
+      -*|*=*|/*|*..*|*[\'\"\\\$\`\(\)\{\}\<\>\|\&\;\~]*) continue ;;
+      *'*'*|*'?'*|*'['*']'*) ;;
+      *) continue ;;
+    esac
+    listed=0
+    tracked=$(git -C "$repo" ls-files -- ":(glob)$word" 2>/dev/null) || listed=$?
+    [ "$listed" -eq 0 ] || { set +f; die "cannot list the files tracked in $repo to check its test command's pattern '$word' (git ls-files exit $listed)"; }
+    [ -z "$tracked" ] || continue
+    ignored=0
+    git -C "$repo" check-ignore -q --no-index -- "$word" 2>/dev/null || ignored=$?
+    case $ignored in
+      0) continue ;;
+      1) set +f; die "the Recipe cache at $cache is invalid: its test command's pattern '$word' matches no file tracked in $repo — a Test entrypoint that selects no tests passes having run nothing, so the Recipe is stale, not a finding; $derive" ;;
+      *) set +f; die "cannot ask git whether $repo ignores its test command's pattern '$word' (git check-ignore exit $ignored)" ;;
+    esac
+  done
+  set +f
+fi
 
 printf '%s\n' "$value"

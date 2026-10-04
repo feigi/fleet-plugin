@@ -1,11 +1,11 @@
-// #1020. Seven scripts carry `unset GIT_DIR GIT_WORK_TREE`, and for four of
-// them one HALF of that line has no behavioural detector at all.
+// #1020. Every script in COVERED below carries `unset GIT_DIR GIT_WORK_TREE`,
+// and for some of them one HALF of that line has no behavioural detector at all.
 //
 // That is the gap this file exists for, and it is measured, not assumed.
 // GIT_DIR and GIT_WORK_TREE break a script through different call sites, so
 // whether a given script can SHOW the damage depends on which calls it makes:
 //
-//   inflight.sh, derive-testcmd.sh  — GIT_WORK_TREE is inert. Their git calls
+//   inflight.sh                     — GIT_WORK_TREE is inert. Its git calls
 //     read refs and the object database (`for-each-ref`, `ls-remote`,
 //     `worktree list`, `ls-tree`, `show`); none consults a work tree, so no
 //     ambient value changes a byte of output.
@@ -27,7 +27,7 @@
 // What this file does NOT pin: per-script behaviour. That lives in
 // claim-ticket.test.mjs, derive-testcmd.test.mjs, inflight.test.mjs,
 // instruments.test.mjs, no-undo-audit.test.mjs, reap.test.mjs,
-// release-ticket.test.mjs and worktree-audit.test.mjs, and eleven fixtures
+// release-ticket.test.mjs and worktree-audit.test.mjs, and the fixtures
 // across them go red when the corresponding half is deleted.
 //
 // Also not pinned, and stated rather than left to be noticed: the `.mjs`
