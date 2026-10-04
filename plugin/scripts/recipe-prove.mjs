@@ -161,9 +161,9 @@ function parseArgs(argv) {
 //
 // A git killed by a signal (that buffer kill, an OOM kill, a timeout wrapper)
 // is still a failed command, never a throw: each caller maps a failed git to
-// its own refusal. But it has no exit status and mostly no stderr, so `err`
-// names the kill, after whatever git did write — a caller quoting `err` would
-// otherwise quote an empty reason.
+// its own refusal. But it has no exit status — `status` is null — and mostly
+// no stderr, so `err` names the kill, after whatever git did write — a caller
+// quoting `err` would otherwise quote an empty reason.
 //
 // A git that ignores the buffer kill can still exit 0, with no signal, after
 // its output was cut off: any `error` on a git that ran fails it, whatever its
@@ -174,7 +174,7 @@ function git(args, cwd) {
   const err = (r.stderr ?? "").trim();
   const failed = r.signal ? `git was killed by ${r.signal}` : r.error && `git exited ${r.status} after an error`;
   const note = failed && `${failed}${errorCause(r.error)}`;
-  return { ok: r.status === 0 && !r.error, out: (r.stdout ?? "").replace(/\n$/, ""), err: [err, note].filter(Boolean).join("; ") };
+  return { ok: r.status === 0 && !r.error, status: r.status, out: (r.stdout ?? "").replace(/\n$/, ""), err: [err, note].filter(Boolean).join("; ") };
 }
 
 function errorCause(error) {
@@ -328,7 +328,7 @@ function writeCache(cache, recipe, repo) {
       if (!(e instanceof Refusal)) throw e;
       throw noVerdict(e.message);
     }
-    if (!probe.ok) throw noVerdict(`git started but does not run: \`git --version\` did not exit 0${probe.err ? `: ${probe.err}` : " and wrote nothing to stderr"}`);
+    if (!probe.ok) throw noVerdict(`git started but does not run: \`git --version\` ${probe.status === null ? "did not exit 0" : `exited ${probe.status}`}${probe.err ? `: ${probe.err}` : " and wrote nothing to stderr"}`);
     const said = r.stderr.trim() || r.stdout.trim();
     throw notProven(`the Recipe cache reader refuses what was proven: ${said || `it wrote nothing and exited with status ${r.status}`}`);
   }
