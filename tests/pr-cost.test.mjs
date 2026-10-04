@@ -505,20 +505,72 @@ test("a ticket's ruling is its last tier row in file order even when an earlier 
   assert.deepEqual({ n_merged: slow.n_merged, n_pass: slow.n_pass }, { n_merged: 1, n_pass: 1 }, "PR 102 is the later row, though the older-dated: it rules, and it passes");
 });
 
-test("two tickets ruled by one PR: the later-dated ruling carries the quality verdict, whichever ticket is read first", () => {
+// Two tickets ruled by PR 101, each Pulled once; `rows` are their two tier rows, in file order.
+function onePrTwoTickets(rows) {
   const w = world();
-  for (const t of [1, 2, 3, 4]) {
+  for (const t of [1, 2]) {
     w.features.push(pull({ ticket: String(t), agent: `impl-${t}`, chosen_cell: "slow-high" }));
     w.members.push(member({ agent: `impl-${t}`, cost: 1, effort: "high", subagentType: "fleet-implementer-slow-high" }));
   }
-  const LATER = "2026-10-04";
-  // PR 101: the earlier ticket's ruling is the early failure, the later ticket's the late pass.
-  w.tiers.push(tier({ pr: "101", ticket: "1", minted_false_claim: "yes" }), tier({ pr: "101", ticket: "2", run_date: LATER }));
-  // PR 102: the earlier ticket's ruling is the late pass, the later ticket's the early failure.
-  w.tiers.push(tier({ pr: "102", ticket: "3", run_date: LATER }), tier({ pr: "102", ticket: "4", minted_false_claim: "yes" }));
-  w.prs.push({ number: 101, state: "MERGED" }, { number: 102, state: "MERGED" });
+  w.tiers.push(...rows);
+  w.prs.push({ number: 101, state: "MERGED" });
   const slow = computeReport(parsed(w)).cells.find((c) => c.cell === "slow-high");
-  assert.deepEqual({ n_merged: slow.n_merged, n_pass: slow.n_pass }, { n_merged: 2, n_pass: 2 });
+  return { n_merged: slow.n_merged, n_pass: slow.n_pass };
+}
+
+test("two tickets ruled by one PR: the ruling later in the file carries the quality verdict, whatever the run_dates", () => {
+  const LATER = "2026-10-04";
+  // The later row is the older-dated: pass, then fail.
+  assert.deepEqual(
+    onePrTwoTickets([tier({ pr: "101", ticket: "1", run_date: LATER }), tier({ pr: "101", ticket: "2", minted_false_claim: "yes" })]),
+    { n_merged: 1, n_pass: 0 });
+  // Fail, then pass.
+  assert.deepEqual(
+    onePrTwoTickets([tier({ pr: "101", ticket: "1", run_date: LATER, minted_false_claim: "yes" }), tier({ pr: "101", ticket: "2" })]),
+    { n_merged: 1, n_pass: 1 });
+});
+
+test("a failing ruling followed by a both-blank row of the same ticket on a later PR is still the failure", () => {
+  const w = world();
+  addPr(w, { ticket: 1, pr: 101, cell: "slow-high", usd: 10, fail: true });
+  w.tiers.push(tier({ pr: "102", ticket: "1", closed_own_ticket: "", minted_false_claim: "" }));
+  w.prs.push({ number: 102, state: "MERGED" });
+  const slow = computeReport(parsed(w)).cells.find((c) => c.cell === "slow-high");
+  assert.deepEqual({ n_merged: slow.n_merged, n_pass: slow.n_pass }, { n_merged: 1, n_pass: 0 });
+});
+
+test("a ticket whose only tier row is both-blank reports exactly as a ticket with no tier row", () => {
+  const unruled = (rows) => {
+    const w = world();
+    addPr(w, { ticket: 1, pr: 101, cell: "slow-high", usd: 10 });
+    w.tiers = rows;
+    w.prs.push({ number: 102, state: "MERGED" });
+    return computeReport(parsed(w));
+  };
+  const blank = unruled([tier({ pr: "102", ticket: "1", closed_own_ticket: "", minted_false_claim: "" })]);
+  assert.deepEqual(blank, unruled([]));
+  assert.equal(blank.cells.find((c) => c.cell === "slow-high").n_merged, 0);
+});
+
+test("a ruling of a Pulled ticket whose run_date is not YYYY-MM-DD is an input error naming tier-outcomes: exit 2, nothing on stdout, no guard file", () => {
+  const w = world();
+  const pulled = nextTicket;
+  addCell(w, "slow-high", MIN_N, 0, 10);
+  w.tiers.push(tier({ pr: "101", ticket: String(pulled), run_date: "2026-10-0x" }));
+  const r = runCli(w);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /tier-outcomes\.tsv: ticket #\d+ \(PR #101\): run_date is '2026-10-0x', expected YYYY-MM-DD/);
+  assert.equal(r.stdout, "");
+  assert.equal(r.guard, null);
+});
+
+test("a malformed run_date on a ticket with no Pull in the window is not refused", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N, 0, 10);
+  w.tiers.push(tier({ pr: "9", ticket: "7", run_date: "2026-10-0x" }));
+  const r = runCli(w);
+  assert.equal(r.status, 0);
+  assert.ok(r.guard);
 });
 
 test("a Pull whose member ran at another effort than its cell's level is a mismatch even when its subagent_type matches", () => {
