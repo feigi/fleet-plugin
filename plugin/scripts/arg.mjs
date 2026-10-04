@@ -60,15 +60,18 @@
 // the scripts named here, for the roster — the scripts this header names
 // exemplify a way of qualifying, and were never the whole of it.
 //
-// fleet-tick.mjs is the one script still outside arg()/has(), and
-// deliberately: it parses its flags with node:util's parseArgs, so its
-// unknown-flag, required-flag and range refusals are a separate edit site on
-// its own terms. Its integer guard is no longer one of them — the digits
-// grammar has its own predicate (isDigits() below) precisely because
-// isFlagLike() cannot express it, and int() now calls that instead of
-// hand-writing the third spelling. What stays fleet-tick's own there is the
-// `String(raw).trim()` its input needs and the wording of its refusal, not
-// the rule.
+// fleet-tick.mjs and fleet-heartbeat.mjs sit outside arg()/has(), and
+// deliberately: each parses its flags with node:util's parseArgs, so its
+// unknown-flag, missing-value and range refusals are a separate edit site on
+// its own terms. They are not the only scripts outside — every script that
+// binds none of makeArg, makeHas or defineFlags is — but the rest either
+// hand-roll their own argv reader or take no flags at all; these two are the
+// ones parsing with node:util's parseArgs. Their integer guards are no longer
+// among those refusals — the digits grammar has its own predicate (isDigits()
+// below) precisely because isFlagLike() cannot express it, and each script's
+// int() calls that rather than hand-writing the grammar. What stays each
+// script's own there is the trim() its input needs and the wording of its
+// refusal, not the rule.
 //
 // candidates.mjs qualifies the other way, which the reach test cannot express:
 // it binds makeArg/makeHas, so arg()'s refusals DO reach it — `node
