@@ -1375,8 +1375,28 @@ async function main() {
 
 import { copyFileSync, mkdirSync } from "node:fs";
 
+// The names a browser on this machine can legitimately put in `Host` to reach
+// a loopback-only cockpit. DNS rebinding points an attacker-chosen name at
+// 127.0.0.1, and the browser then sends THAT name as `Host`, so the hostname —
+// not the peer address, which is loopback either way — is what separates the
+// operator's own tab from a rebound page. The port is deliberately not
+// compared: an `ssh -L` forward reaches the cockpit under a different local
+// port, and the port tells a rebound page nothing it could not scan for.
+const COCKPIT_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
+// A bracketed IPv6 literal or a bare name, then an optional `:port` — anything
+// else (userinfo, a second colon outside brackets, a path) is not a Host value.
+const HOST_HEADER = /^(\[[^\]]+\]|[^:[\]]+)(?::\d*)?$/;
+function isCockpitHost(host) {
+  const m = HOST_HEADER.exec(host ?? "");
+  return m !== null && COCKPIT_HOSTNAMES.has(m[1].toLowerCase());
+}
+
 export function createBoardServer(dir) {
   return createServer((req, res) => {
+    // Checked before routing, so an unknown path on a foreign Host is as
+    // opaque as a known one: 403, never a 404 that tells a rebound page which
+    // paths exist.
+    if (!isCockpitHost(req.headers.host)) { res.writeHead(403); res.end("forbidden"); return; }
     const url = (req.url || "/").split("?")[0];
     const path = url === "/" || url === "/board.html" ? join(dir, "board.html")
       : url === "/board.json" ? join(dir, "board.json") : null;
