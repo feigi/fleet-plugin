@@ -40,10 +40,15 @@ const authorizers = () =>
   );
 
 test("reaping.md: the release delete's authorizer list names the fresh worktree-holds-branch check", () => {
+  // ONE contiguous span, not keywords: "fresh" and the negation each
+  // satisfied somewhere in the slice pass a clause with either one gutted
+  // ("a check that no worktree holds the branch" has no freshness; "a fresh
+  // check ... that a worktree holds the branch" has the opposite meaning).
+  // Only a span binds the two to each other.
   assert.match(
     authorizers(),
-    /(?:fresh|re-read|recheck|re-check)[^.]{0,160}worktree[^.]{0,80}holds?\s+the\s+branch|no\s+worktree\s+holds\s+the\s+branch/,
-    "reaping.md's release section closes its list of what authorizes the `update-ref` delete with \"and by nothing else\" but no longer names the worktree check — release-ticket.sh halts the delete when any worktree holds the branch, and that check alone stopped a delete in the race window",
+    phrase("a fresh check, re-read immediately before the delete, that no worktree holds the branch"),
+    "reaping.md's release section closes its list of what authorizes the `update-ref` delete with \"and by nothing else\" but no longer names the fresh worktree check — release-ticket.sh halts the delete when any worktree holds the branch, and that check alone stopped a delete in the race window",
   );
 });
 
@@ -55,12 +60,26 @@ test("reaping.md: the authorizer list still carries the three checks it always n
   assert.match(list, phrase("`ahead` recount re-run against `origin/main`"));
 });
 
+// release-ticket.sh's executable lines, comments and `echo` diagnostics
+// dropped. The delete is logged by an `echo` that spells the command out in
+// a form the real call does not take (the real call quotes its arguments),
+// and the check's name recurs in comments: an indexOf over the raw text lands
+// on either and reads as the code, so a real delete moved above the check, or
+// the check commented out, stays green.
+const liveLines = () => SCRIPT.split("\n").filter((l) => !/^\s*(?:#|echo\b)/.test(l));
+
+// The one live line matching `re`. Exactly one: a first-hit search would
+// bind the pin to whichever copy comes first.
+const liveLineOf = (re, what) => {
+  const hits = liveLines().flatMap((l, i) => (re.test(l) ? [i] : []));
+  assert.equal(hits.length, 1, `release-ticket.sh: expected exactly one live line that ${what}, found ${hits.length}`);
+  return hits[0];
+};
+
 test("release-ticket.sh: the worktree check the prose names sits before the delete", () => {
   // The prose names a check the script runs; pin that the script still does,
   // and runs it before the delete, so the prose cannot outlive the check.
-  const check = SCRIPT.indexOf('wt_holding "refs/heads/$branch"');
-  const del = SCRIPT.indexOf('git update-ref -d refs/heads/$branch $tip');
-  assert.notEqual(check, -1, "release-ticket.sh no longer runs wt_holding on the branch");
-  assert.notEqual(del, -1, "release-ticket.sh no longer runs `git update-ref -d` on the branch");
+  const check = liveLineOf(/^\s*if\s+wt_holding\s+"refs\/heads\/\$branch"/, 'runs wt_holding on the branch');
+  const del = liveLineOf(/\bgit\s+update-ref\s+-d\s+"refs\/heads\/\$branch"\s+"\$tip"/, 'runs `git update-ref -d` on the branch at its tip');
   assert.ok(check < del, "release-ticket.sh runs its worktree check after the delete, not before it");
 });
