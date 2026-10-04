@@ -179,7 +179,9 @@
 # AND THE TWO `run_date` COLUMNS DO NOT MEAN THE SAME THING. Here it is STAMPED
 # AT RULING — `tier-outcomes.mjs append` reads the clock when the controller
 # rules a PR's review, where before 2026-09-29 the controller typed it at that
-# same moment — so it records WHICH RUN THE PR BELONGS TO. In
+# same moment — so it records WHICH RUN THE PR BELONGS TO. `append` writes
+# that clock's UTC date, as `member-outcomes.mjs` and `ticket-router.mjs` date
+# theirs; rows appended before it did carry the host's local date. In
 # `member-outcomes.tsv` it is DERIVED in code: `member-outcomes.mjs` stamps
 # every row of a session from the NEWEST TRANSCRIPT MTIME in that session
 # directory rather than a clock read, so
