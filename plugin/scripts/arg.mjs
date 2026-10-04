@@ -47,15 +47,18 @@
 // scripts/*.mjs | grep -v test | grep -v defineFlags` leaves the
 // rows that hold their own. Anchoring on `^import` is load-bearing for the
 // same reason it is on the die() grep: unanchored, this very comment matches
-// itself. Requiring makeDie is what keeps the rows to SCRIPTS: every script
-// importing this file refuses its command line through a die() bound from
-// here, and a module that binds none has no command line to refuse a flag on
-// — review-core.mjs, which imports isDigits alone and is itself imported by
-// review-eval.mjs, joined the `scripts/*.mjs` glob when it was renamed from
-// `.js`. A future script that refuses WITHOUT makeDie falls out of this grep;
-// that is the price of the filter, named here rather than hidden. Read that output
-// for the roster — the scripts this header names exemplify a way of
-// qualifying, and were never the whole of it.
+// itself. Requiring makeDie keeps the rows to scripts that refuse through a
+// die() bound from here, and that is not every script importing this file.
+// recipe-prove.mjs imports isDigits alone, yet it has a command line: its own
+// parseArgs refuses an unknown flag by throwing its own usage refusal, so it
+// holds a refusal of its own and this grep drops it. review-core.mjs binds
+// no die() either and has no command line at all — it is imported by
+// review-eval.mjs, and joined the `scripts/*.mjs` glob when it was renamed
+// from `.js`. That is the price of the filter, named here rather than
+// hidden: a test runs every importer the filter drops, and one that refuses
+// its command line must be named in this header. Read the grep's output, plus
+// the scripts named here, for the roster — the scripts this header names
+// exemplify a way of qualifying, and were never the whole of it.
 //
 // fleet-tick.mjs is the one script still outside arg()/has(), and
 // deliberately: it parses its flags with node:util's parseArgs, so its
