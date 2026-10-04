@@ -275,6 +275,18 @@ function removeWorktree(wt, repo) {
   tryGit(["worktree", "prune"]);
 }
 
+// The log directory outlives the run only for a NOT PROVEN, the one outcome
+// whose reason can name a log in it for the caller to read. A proof that held
+// has its evidence in the cache, and a run with no verdict was stopped by a
+// fault no log records. Best-effort, as removeWorktree is.
+function removeLogs(logs) {
+  try {
+    rmSync(logs, { recursive: true, force: true });
+  } catch (e) {
+    process.stderr.write(`${NAME}: could not remove the log directory ${logs}: ${e.message}\n`);
+  }
+}
+
 function main(argv) {
   const o = parseArgs(argv);
   if (!git(["rev-parse", "--git-dir"], o.repo).ok) throw cannot(`${o.repo} is not a git repository`);
@@ -285,19 +297,26 @@ function main(argv) {
   if (!sha.ok) throw cannot("origin/main does not resolve to a commit — fetch it; the proof runs against it");
 
   const logs = mkdtempSync(join(tmpdir(), `${NAME}-`));
-  const wt = join(logs, "wt");
-  const add = git(["worktree", "add", "--detach", wt, sha.out], o.repo);
-  if (!add.ok) throw cannot(`could not create the throwaway worktree: ${add.err}`);
-  let proof;
+  let recipe, cache;
   try {
-    proof = prove(o, wt, logs);
-  } finally {
-    removeWorktree(wt, o.repo);
-  }
+    const wt = join(logs, "wt");
+    const add = git(["worktree", "add", "--detach", wt, sha.out], o.repo);
+    if (!add.ok) throw cannot(`could not create the throwaway worktree: ${add.err}`);
+    let proof;
+    try {
+      proof = prove(o, wt, logs);
+    } finally {
+      removeWorktree(wt, o.repo);
+    }
 
-  const recipe = { install: o.install, test: o.test, derivedAt: sha.out, installClean: true, ...proof };
-  const cache = join(workspace, ".fleet", "recipe.json");
-  writeCache(cache, recipe, o.repo);
+    recipe = { install: o.install, test: o.test, derivedAt: sha.out, installClean: true, ...proof };
+    cache = join(workspace, ".fleet", "recipe.json");
+    writeCache(cache, recipe, o.repo);
+  } catch (e) {
+    if (!(e instanceof Refusal && e.code === 1)) removeLogs(logs);
+    throw e;
+  }
+  removeLogs(logs);
   process.stdout.write(`${NAME}: PROVEN — Recipe cache written to ${cache}\n${JSON.stringify(recipe)}\n`);
 }
 

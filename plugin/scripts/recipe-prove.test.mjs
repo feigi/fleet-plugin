@@ -385,6 +385,40 @@ test("the proof leaves no worktree directory behind in its temp dir", () => {
   assertNoWorktreeLeft(r.tmp);
 });
 
+// The log directories the proof made in its TMPDIR.
+const logDirs = (tmp) => readdirSync(tmp).filter((n) => n.startsWith("recipe-prove-"));
+
+test("a proof that held leaves no log directory behind in its TMPDIR", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, MAVEN_PROOF);
+  assert.equal(r.status, 0, r.err);
+  assert.deepEqual(logDirs(r.tmp), []);
+});
+
+test("a proof that did not hold keeps its log directory, with the log its refusal names", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, ["--install", "echo fetching deps; exit 3", ...MAVEN_PROOF.slice(2)]);
+  assert.equal(r.status, 1, r.err);
+  const log = r.err.match(/install output: (\S+)/);
+  assert.ok(log, r.err);
+  const kept = logDirs(r.tmp);
+  assert.equal(kept.length, 1, `log directories in ${r.tmp}: ${kept}`);
+  assert.equal(log[1], join(r.tmp, kept[0], "install.log"));
+  assert.match(readFileSync(log[1], "utf8"), /fetching deps/);
+  assertNoWorktreeLeft(r.tmp);
+});
+
+test("a throwaway worktree that cannot be made is exit 2 and leaves no log directory behind", () => {
+  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  const { dir } = repo(MAVEN_FILES);
+  const bin = tempDir("recipe-prove-path-");
+  writeExecStub(join(bin, "git"), `#!/bin/sh\nif [ "$1" = worktree ] && [ "$2" = add ]; then echo 'fatal: no worktree here' >&2; exit 128; fi\nexec '${realGit}' "$@"\n`);
+  const r = prove(dir, MAVEN_PROOF, { env: { PATH: `${bin}:${BIN}:${process.env.PATH}` } });
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /could not create the throwaway worktree: fatal: no worktree here/);
+  assert.deepEqual(logDirs(r.tmp), []);
+});
+
 test("a git that cannot be started is named as such, not reported as a missing repository", () => {
   const { dir } = repo(MAVEN_FILES);
   const r = prove(dir, MAVEN_PROOF, { env: { PATH: "/nonexistent" } });
@@ -409,6 +443,7 @@ test("a git that stops starting during the Install step is no verdict, never NOT
   assert.match(r.err, /skipped git worktree remove/);
   assert.doesNotMatch(r.err, /NOT PROVEN/);
   assertNoWorktreeLeft(r.tmp);
+  assert.deepEqual(logDirs(r.tmp), [], "no verdict keeps no logs");
 });
 
 // A git that started and ran is never "could not start": here its status
@@ -527,6 +562,7 @@ test("a cache that cannot be written is exit 2 with its reason, never a stack tr
     assert.doesNotMatch(r.err, /\n\s+at /);
     assert.doesNotMatch(r.err, /NOT PROVEN/);
     assert.equal(r.out, "");
+    assert.deepEqual(logDirs(r.tmp), [], "no verdict keeps no logs");
   } finally {
     chmodSync(join(dir, ".fleet"), 0o755);
   }
