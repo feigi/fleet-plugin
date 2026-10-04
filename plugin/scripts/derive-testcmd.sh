@@ -37,6 +37,11 @@
 # is asked for must name something that resolves from <repo> (a builtin, a
 # PATH entry, an executable path). A red suite is a finding, not a stale
 # Recipe, so nothing here ever runs the command.
+#
+# Exit status: 0 the command is printed; 1 a refusal about the cache, the
+# repository or the arguments; 3 a tool this script needs to read the cache
+# (node, mktemp, cat) could not be started or node died mid-read, so nothing
+# was read and the cache's usability is unknown.
 set -eu
 
 # Byte semantics for every construct below that reads a string by bytes:
@@ -83,6 +88,15 @@ unset GIT_DIR GIT_WORK_TREE
 NAME=derive-testcmd
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 1; }
 
+# A refusal about the environment, not the cache: a tool this script needs to
+# read the cache (the interpreter, mktemp, cat) could not be started, or the
+# interpreter died mid-read, so nothing was read and the cache's usability is
+# unknown. Exit 3, where every refusal about the cache, the repository or the
+# arguments is exit 1. A git that cannot be started is not told apart: it reads
+# as no repository, exit 1. A consumer that only tests for non-zero sees no
+# difference.
+unrunnable() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 3; }
+
 # Named once: every refusal that sends the caller to re-derive names the same
 # step, so a controller or reviewer reading any of them knows what to run.
 derive="run the Recipe derivation step (run-team phase 0, before the first claim — ADR 0015) to derive, prove and write it"
@@ -113,7 +127,7 @@ cache="${common%/*}/.fleet/recipe.json"
 # An INVOCATION, not a name lookup (#1141): a version-manager shim satisfies
 # `command -v node` and then fails, and its stderr would arrive below under the
 # cache's name — a corrupt-cache refusal for a cache nobody read.
-nodeerr=$(node -e 0 </dev/null 2>&1) || die "node is unusable, refusing to read the Recipe cache without the interpreter — $nodeerr"
+nodeerr=$(node -e 0 </dev/null 2>&1) || unrunnable "node is unusable, refusing to read the Recipe cache without the interpreter — $nodeerr"
 
 # Validation and extraction in one pass, so a field is never printed out of a
 # cache the checks did not pass. rc 0 prints the value; anything else carries
@@ -143,11 +157,15 @@ nodeerr=$(node -e 0 </dev/null 2>&1) || die "node is unusable, refusing to read 
 #   newline now survives inside the frame, and the trailing-operator check
 #   below treats it exactly like a trailing `;` or `&`: refused, not
 #   silently accepted.
-errf=$(mktemp) || die "cannot create a temporary file to read the Recipe cache"
-lenf=$(mktemp) || die "cannot create a temporary file to read the Recipe cache"
-trap 'rm -f "$errf" "$lenf"' EXIT
+errf=$(mktemp) || unrunnable "cannot create a temporary file to read the Recipe cache"
+lenf=$(mktemp) || unrunnable "cannot create a temporary file to read the Recipe cache"
+# Cleanup decides nothing: an `rm` that cannot be started would otherwise
+# replace the script's own exit status with 127 (and print a line on the
+# success path), so the status the script was leaving with is kept.
+trap 'rc=$?; rm -f "$errf" "$lenf" 2>/dev/null || :; exit $rc' EXIT
 
 open='recipe<' close='>recipe'
+rc=0
 framed=$(node -e '
 const fs = require("fs");
 const [file, field, open, close, lenFile] = process.argv.slice(1);
@@ -166,13 +184,30 @@ if (!counted && !mutated) bad("it carries no proof of real tests — neither a p
 const value = r[field];
 fs.writeFileSync(lenFile, String(Buffer.byteLength(open + value + close)));
 process.stdout.write(open + value + close);
-' "$cache" "$field" "$open" "$close" "$lenf" 2>"$errf") || die "the Recipe cache at $cache is unusable: $(cat "$errf") — $derive"
+' "$cache" "$field" "$open" "$close" "$lenf" 2>"$errf") || rc=$?
+# node's own refusal of the cache is exit 2 (an uncaught fault is exit 1), the
+# reason on stderr either way; a status of 126 or above is the shell failing to
+# run node or the system killing it mid-read, which says nothing about the cache.
+if [ "$rc" -ge 126 ]; then
+  unrunnable "node did not finish reading the Recipe cache (exit $rc), so its usability is unknown"
+fi
+[ "$rc" -eq 0 ] || die "the Recipe cache at $cache is unusable: $(cat "$errf") — $derive"
 carriedmsg="node's stdout carried more than the framed Recipe value — expected exactly the value between '$open' and '$close', got '$framed'. The cache at $cache passed validation; the extra output comes from how node is launched here (a version-manager or proxy shim, a preload), and is refused rather than cut out of the command"
 case $framed in
   "$open"*"$close") ;;
   *) die "$carriedmsg" ;;
 esac
-framedlen=$(cat "$lenf")
+# A `cat` that cannot be started (126/127) is the environment's fault, as for
+# `node` above; a `cat` that ran and failed refuses with its own reason, and a
+# count file that was read but holds no digits is the corrupt-count refusal
+# below.
+rc=0
+framedlen=$(cat "$lenf" 2>"$errf") || rc=$?
+case $rc in
+  0) ;;
+  126|127) unrunnable "cat could not be started (exit $rc), so the Recipe cache cannot be read" ;;
+  *) die "the Recipe cache at $cache is unusable: cat failed reading node's byte-count file (exit $rc): $(cat "$errf" 2>/dev/null) — $derive" ;;
+esac
 case $framedlen in
   ''|*[!0-9]*) die "the Recipe cache at $cache is unusable: node's byte-count file is missing or corrupt — $derive" ;;
 esac
