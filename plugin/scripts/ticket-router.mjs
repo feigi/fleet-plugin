@@ -291,13 +291,29 @@ function verdictOf(rulings, ticket, pullDate) {
 }
 
 /**
+ * The features rows with a YYYY-MM-DD `run_date`, the rows that can be placed
+ * against the window, the cut and a ruling. A blank `run_date` (route writes one
+ * for a session id with no date) is no input row and is left out. Any other
+ * date is a hand-edit that cannot be placed and is refused, as `rulingFor`
+ * refuses a ruling's: dropping it would shrink the fit unseen.
+ */
+function datedRows(features) {
+  return features.filter((r) => {
+    if (DATE.test(r.run_date)) return true;
+    if (r.run_date !== "") throw new Error(`ticket #${r.ticket}: a ticket-features row's run_date is '${r.run_date}', expected YYYY-MM-DD or blank`);
+    return false;
+  });
+}
+
+/**
  * Per-ticket input rows: the ticket's features rows inside [window, cutoff],
  * attributed to its LAST row's (in file order) cell and stratum, restricted to rows the
  * free classifier routed plus exploration rows — a row a live B classifier
  * routed is the A/B's test set, not the fit's. Its verdict rules its last
- * input row. A row whose `run_date` is not YYYY-MM-DD (route writes a blank
- * one for a session id with no date) is no input row: it cannot be placed
- * against the window, the cut or its ruling, and a window bound drops it anyway.
+ * input row. A row with a blank `run_date` (route writes one for a session id
+ * with no date) is no input row: it cannot be placed against the window, the
+ * cut or its ruling, and a window bound drops it anyway. A `run_date` that is
+ * neither blank nor YYYY-MM-DD is refused (see `datedRows`).
  * A fit over everything cuts at its latest features row's date;
  * the verdict and member rows are cut at that same date, so `--check`'s
  * re-fit at the recorded `fitted_through` reads the rows the fit read and a
@@ -305,7 +321,7 @@ function verdictOf(rulings, ticket, pullDate) {
  * failing CI.
  */
 function fitTickets({ features, members, verdicts, window, cutoff }) {
-  const inRange = features.filter((r) => DATE.test(r.run_date) && (!window || r.run_date >= window)
+  const inRange = datedRows(features).filter((r) => (!window || r.run_date >= window)
     && (cutoff === undefined || (cutoff !== null && r.run_date <= cutoff)));
   const through = cutoff === undefined ? inRange.map((r) => r.run_date).sort().at(-1) ?? null : cutoff;
   const upToThrough = (r) => through === null || !r.run_date || r.run_date <= through;
@@ -444,7 +460,7 @@ export function fitTable({ prior, features, members, verdicts, guard, cutoff }) 
 /** Merged PRs (tickets with a verdict on their last such row in file order) among the YYYY-MM-DD-dated features rows dated after `fitted_through`. */
 export function mergedSince({ table, features, verdicts }) {
   const rulings = rulingsByTicket(verdicts);
-  const after = features.filter((r) => DATE.test(r.run_date) && (!table.window_start || r.run_date >= table.window_start) && (!table.fitted_through || r.run_date > table.fitted_through));
+  const after = datedRows(features).filter((r) => (!table.window_start || r.run_date >= table.window_start) && (!table.fitted_through || r.run_date > table.fitted_through));
   return [...lastPullByTicket(after)].filter(([ticket, p]) => verdictOf(rulings, ticket, p.run_date)).length;
 }
 
@@ -519,9 +535,9 @@ function main() {
   const features = read("features", parseFeatures);
   const members = read("members", parseMemberTsv);
   const verdicts = read("verdicts", parseTierOutcomes);
-  // The verdict join throws on a ruling of an input ticket it cannot place.
+  // The join throws on a features row it cannot place and on a ruling of an input ticket it cannot place.
   const joined = (fit) => {
-    try { return fit(); } catch (e) { die(`cannot read --verdicts ${need("verdicts")}: ${e.message}`); }
+    try { return fit(); } catch (e) { die(`cannot join --features ${need("features")} with --verdicts ${need("verdicts")}: ${e.message}`); }
   };
 
   if (mode === "check") {
