@@ -13,12 +13,22 @@ import { join } from "node:path";
 import { phrase, runAbove, stripHashGutter } from "./prose-pin.mjs";
 
 const RELEASE = readFileSync(join(import.meta.dirname, "release-ticket.sh"), "utf8");
-const REAP = readFileSync(join(import.meta.dirname, "reap.sh"), "utf8");
+// reap.sh's code lines only: a whole-line `#` comment that mentions a command
+// is neither a call nor a guard, so it must satisfy no check below and fail none.
+const REAP = readFileSync(join(import.meta.dirname, "reap.sh"), "utf8")
+  .split("\n")
+  .filter((line) => !/^\s*#/.test(line))
+  .join("\n");
 
-const deleteComment = () =>
-  stripHashGutter(
+const deleteComment = () => {
+  const comment = stripHashGutter(
     runAbove(RELEASE, 'echo "\\$ git update-ref -d refs/heads/$branch $tip" >&2', "release-ticket.sh branch delete", "#"),
   );
+  // runAbove returns "" rather than throwing when no comment run sits directly
+  // above the anchor; without this the negative pin would pass on nothing.
+  assert.notEqual(comment, "", "no comment run sits directly above release-ticket.sh's branch delete — the pins have nothing to read");
+  return comment;
+};
 
 test("release-ticket.sh: the delete comment does not say reap.sh deletes on `git cherry` alone", () => {
   assert.doesNotMatch(
@@ -45,5 +55,9 @@ test("reap.sh: the branch delete still follows a `wt_holding` check and has no `
   assert.ok(held !== -1, "reap.sh no longer checks `wt_holding` on the [gone] branch");
   assert.ok(del !== -1, "reap.sh no longer deletes the [gone] branch with a compare-and-swap `update-ref -d`");
   assert.ok(held < del, "reap.sh's `wt_holding` check no longer runs before its branch delete");
-  assert.doesNotMatch(REAP, /rev-list --count/, "reap.sh now counts commits ahead — release-ticket.sh's comment says it has no `ahead` count");
+  assert.doesNotMatch(
+    REAP,
+    /rev-list\b[^\n]*--count|--count[^\n]*rev-list/,
+    "reap.sh now counts commits ahead — release-ticket.sh's comment says it has no `ahead` count",
+  );
 });
