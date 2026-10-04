@@ -2577,6 +2577,106 @@ fi`,
   );
 });
 
+test("a branch checked out between the holder check and the delete is restored, and the release halts (#2275)", (t) => {
+  // The window the holder check above cannot close: `git worktree add` of an
+  // existing branch writes only the new worktree's `HEAD` and never moves the
+  // ref, so the compare-and-swap succeeds under it. Unfixed, the release
+  // reported success and left that worktree on a branch that no longer
+  // existed. The shim lands the add the instant before the real delete runs.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const tip = git(r.w, "rev-parse", c.branch);
+  const raceWt = join(r.w, "..", "race-wt");
+  gitShim(
+    r,
+    `if [ "$1 $2" = "update-ref -d" ]; then
+  '${REAL_GIT}' -C '${r.w}' worktree add -q '${raceWt}' '${c.branch}' >/dev/null 2>&1 || exit 99
+fi`,
+  );
+
+  const { code, json, stderr } = release(r, c);
+
+  assert.equal(code, 2, stderr);
+  assert.equal(json.released, false);
+  assert.match(
+    json.blockers[0],
+    /^fix\/9-release-ticket was checked out in worktree \S*race-wt during the delete — branch restored, not deleted/,
+  );
+  assert.equal(git(r.w, "rev-parse", `refs/heads/${c.branch}`), tip, "the branch is back at the tip the delete compared against");
+  assert.equal(git(raceWt, "rev-parse", "HEAD"), tip, "the worktree that raced the delete resolves its HEAD again");
+  assert.equal(git(raceWt, "status", "--porcelain"), "", "and reads clean");
+  assert.match(stderr, /branch deleted: false/);
+});
+
+test("a restore that fails after the race halts with the tip and the repair command (#2275)", (t) => {
+  // The restore is a second ref write, and it can fail. The branch is then
+  // really gone, so the receipt must say so and hand the operator the exact
+  // command that puts it back.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const tip = git(r.w, "rev-parse", c.branch);
+  const raceWt = join(r.w, "..", "race-wt");
+  gitShim(
+    r,
+    `if [ "$1 $2" = "update-ref -d" ]; then
+  '${REAL_GIT}' -C '${r.w}' worktree add -q '${raceWt}' '${c.branch}' >/dev/null 2>&1 || exit 99
+elif [ "$1" = update-ref ] && [ $# -eq 4 ]; then
+  echo "fatal: simulated restore failure" >&2
+  exit 128
+fi`,
+  );
+
+  const { code, json, stderr } = release(r, c);
+
+  assert.equal(code, 2, stderr);
+  assert.equal(json.released, false);
+  assert.ok(
+    json.blockers[0].includes(
+      `restoring it at ${tip} failed — the branch is deleted, restore it with: git update-ref refs/heads/${c.branch} ${tip} ${"0".repeat(40)}: fatal: simulated restore failure`,
+    ),
+    json.blockers[0],
+  );
+  assert.match(json.blockers[0], /^fix\/9-release-ticket was checked out in worktree \S*race-wt during the delete/);
+  assert.match(stderr, /PARTIALLY RELEASED/);
+  assert.match(stderr, /branch deleted: true/);
+  assert.equal(artefacts(r, c).branch, false, "the branch really is gone");
+});
+
+test("a restore that finds the branch recreated since the delete halts naming it, and leaves it as it is (#2275)", (t) => {
+  // The restore is create-only, so it never overwrites a ref someone else made
+  // in the meantime. The branch then is not deleted, so the receipt must not
+  // say it is, and the repair command that would fail the same way is not
+  // offered. The shim recreates it at a different commit right before the
+  // restore, which then runs for real and is refused by git.
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const tip = git(r.w, "rev-parse", c.branch);
+  const other = git(r.w, "commit-tree", `${tip}^{tree}`, "-p", tip, "-m", "someone else");
+  const raceWt = join(r.w, "..", "race-wt");
+  gitShim(
+    r,
+    `if [ "$1 $2" = "update-ref -d" ]; then
+  '${REAL_GIT}' -C '${r.w}' worktree add -q '${raceWt}' '${c.branch}' >/dev/null 2>&1 || exit 99
+elif [ "$1" = update-ref ] && [ $# -eq 4 ]; then
+  '${REAL_GIT}' -C '${r.w}' update-ref 'refs/heads/${c.branch}' '${other}'
+fi`,
+  );
+
+  const { code, json, stderr } = release(r, c);
+
+  assert.equal(code, 2, stderr);
+  assert.equal(json.released, false);
+  assert.ok(
+    json.blockers[0].includes(`restoring it at ${tip} failed — the branch now exists at ${other}, recreated by something else and left as it is: `),
+    json.blockers[0],
+  );
+  assert.match(json.blockers[0], /reference already exists/);
+  assert.doesNotMatch(json.blockers[0], /the branch is deleted|restore it with/);
+  assert.match(stderr, /PARTIALLY RELEASED/);
+  assert.match(stderr, /branch deleted: false/);
+  assert.equal(git(r.w, "rev-parse", `refs/heads/${c.branch}`), other, "the commit someone else put there is still the branch's tip");
+});
+
 /** A repo whose main is two commits deep and pushed, with ticket 9 claimed off it. */
 function deepenedClaim(t) {
   const r = repo(t);

@@ -468,3 +468,131 @@ wt_h_settle() {
   wt_h_check_op "$1" 1
   return $?
 }
+
+# How many times `wt_recheck_delete` re-reads a listing that still shows a
+# `git worktree add` in progress, 0.1s apart, before it stops waiting.
+wt_init_waits=20
+
+# After `git update-ref -d` has deleted branch ref $1 (`refs/heads/<b>`) at
+# tip $2: did a `git worktree add` check that branch out while the delete
+# ran? If so, or if that cannot be ruled out, put the ref back at $2.
+#
+# The holder check before a delete and the delete itself are two git calls,
+# and git has no lock that stops a `worktree add` of an existing branch
+# between them. Measured, git 2.50.1: such an add writes only the new
+# worktree's `HEAD` symref and never touches `refs/heads/<b>`, so the
+# compare-and-swap still succeeds and the new worktree is left on a branch
+# that no longer exists — `HEAD` unresolvable, and listed with a `branch` line
+# forever, so nothing that reads the listing later sees a stray. Once the ref
+# is gone a new add fails on `invalid reference`, so only an add that
+# resolved the branch before the delete can land this way, and this re-read
+# after the delete sees it.
+#
+# While an add runs, git lists its worktree `detached` and `locked
+# initializing`, with no `branch` line. Measured, git 2.50.1: while the add has
+# resolved the branch but not yet written the worktree's `HEAD`, `wt_holding`
+# answers "cannot tell" (the admin dir has no `HEAD` yet), so a check made
+# then would restore the ref under rc 3 with a reason that names no holder.
+# So the listing is re-read while any such entry is listed, up to
+# `wt_init_waits` times, until the add settles and `wt_holding` can name it; a
+# wait that runs out, or a `sleep` that fails, restores the ref.
+# `wt_holding` itself has no rule for a `locked initializing` entry: every
+# concurrent `claim-ticket.sh` add is listed that way while it runs, and
+# reading all of them as "cannot tell" would halt deletes under ordinary fleet
+# churn.
+#
+# The restore is create-only — the null id as the old value — so it never
+# overwrites a ref someone else created since. Measured, git 2.50.1: it fully
+# heals a worktree whose add finished before the delete (`HEAD` resolves,
+# status clean). The branch's reflog does not come back.
+#
+# 0: no worktree holds the branch; the delete stands.
+# 1: a worktree held it — `wt_holder`/`wt_holder_how` as `wt_holding` sets
+#    them — and the ref is restored.
+# 2: the restore failed — `wt_err` carries git's message. `wt_restore_out` says
+#    what state the branch is left in, as a clause to follow the failed
+#    restore in a message: deleted, with `wt_repair` the command that restores
+#    the ref by hand, or recreated by something else since the delete, in
+#    which case `wt_now` is the commit it resolves to and nothing was
+#    overwritten. `wt_now` is empty when the branch is deleted.
+# 3: no holder could be ruled out — an add still in progress when the wait
+#    ran out (`wt_holder` names that entry), a holder check that could not
+#    tell, or a listing that would not re-read — and the ref is restored.
+# On 1, 2 and 3, `wt_restore_why` says why, as a clause to follow the branch
+# name in a message.
+#
+# Condition context only, like `wt_holding`.
+# shellcheck disable=SC2034
+wt_recheck_delete() {
+  wt_restore_why=
+  wt_restore_out=
+  wt_now=
+  wt_rd_waits=0
+  while :; do
+    if ! wt_listing; then
+      wt_holder=
+      wt_restore_why="could not be checked against the worktree list after the delete: $(printf '%s' "$wt_err" | tr '\n' ' ')"
+      wt_rd_rc=3
+      break
+    fi
+    wt_rd_path=
+    wt_rd_init=
+    while IFS= read -r wt_rd_line; do
+      case $wt_rd_line in
+        "worktree "*) wt_rd_path=${wt_rd_line#worktree } ;;
+        "locked initializing") wt_rd_init=$wt_rd_path ;;
+      esac
+    done <<EOF
+$wt_list
+EOF
+    if [ -z "$wt_rd_init" ]; then
+      if wt_holding "$1"; then wt_rd_held=0; else wt_rd_held=$?; fi
+      case $wt_rd_held in
+        0)
+          wt_restore_why="was ${wt_holder_how#is } in worktree $wt_holder during the delete"
+          wt_rd_rc=1
+          ;;
+        1) return 0 ;;
+        *)
+          wt_restore_why="could not be checked against worktree $wt_holder after the delete"
+          wt_rd_rc=3
+          ;;
+      esac
+      break
+    fi
+    if [ "$wt_rd_waits" -ge "$wt_init_waits" ]; then
+      wt_holder=$wt_rd_init
+      wt_restore_why="could not be checked after the delete: worktree $wt_rd_init was still being added (locked initializing) when the wait ran out"
+      wt_rd_rc=3
+      break
+    fi
+    if ! sleep 0.1; then
+      wt_holder=$wt_rd_init
+      wt_restore_why="could not be checked after the delete: could not wait for worktree $wt_rd_init to finish being added (locked initializing)"
+      wt_rd_rc=3
+      break
+    fi
+    wt_rd_waits=$((wt_rd_waits + 1))
+  done
+  # The null id as long as the tip itself, so a SHA-256 repository gets its
+  # own width.
+  wt_rd_null=
+  wt_rd_t=$2
+  while [ -n "$wt_rd_t" ]; do
+    wt_rd_null=${wt_rd_null}0
+    wt_rd_t=${wt_rd_t#?}
+  done
+  wt_repair="git update-ref $1 $2 $wt_rd_null"
+  if ! wt_err=$(git update-ref "$1" "$2" "$wt_rd_null" 2>&1); then
+    [ -n "$wt_err" ] || wt_err="git update-ref failed"
+    if wt_now=$(git rev-parse -q --verify "$1" 2>/dev/null); then
+      wt_restore_out="the branch now exists at $wt_now, recreated by something else and left as it is"
+    else
+      wt_now=
+      wt_restore_out="the branch is deleted, restore it with: $wt_repair"
+    fi
+    return 2
+  fi
+  wt_err=
+  return "$wt_rd_rc"
+}

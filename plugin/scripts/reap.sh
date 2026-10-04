@@ -1397,10 +1397,12 @@ for b in $gone_branches; do
     # not read (#622). The dry run — printing `would reap` unconditionally
     # here — cannot predict any of those keeps either.
     #
-    # A window remains between this re-read and the delete, per the ruling on
-    # #1330 (Q2, ADR 0018): a checkout landing in it breaks that worktree but
-    # cannot lose a commit — a commit made there moves the ref off `$tip`, and
-    # the compare-and-swap refuses.
+    # A window remains between this re-read and the delete. A commit landing
+    # in it moves the ref off `$tip`, and the compare-and-swap refuses. A
+    # `git worktree add` of this branch landing in it moves nothing, so the
+    # delete goes through under it — and `wt_recheck_delete`, right after the
+    # delete, finds that worktree and restores the branch rather than leaving
+    # it broken and unreported.
     if ! wt_listing; then
       keep "$b" "cannot re-read the worktree list to check $b before the delete — not deleted: $(printf '%s' "$wt_err" | tr '\n' ' ')"
       continue
@@ -1437,6 +1439,21 @@ for b in $gone_branches; do
       keep "$b" "branch delete failed: $(printf '%s' "$err" | tr '\n' ' ')"
       continue
     fi
+    # The add that raced the delete, caught after it: a worktree that checked
+    # this branch out while the delete ran. Ahead of the config removal below,
+    # so a restored branch keeps its upstream and is selected again next pass.
+    if wt_recheck_delete "refs/heads/$b" "$tip"; then race_rc=0; else race_rc=$?; fi
+    case $race_rc in
+      0) ;;
+      2)
+        keep "$b" "$b $wt_restore_why, and restoring it at $tip failed — $wt_restore_out: $(printf '%s' "$wt_err" | tr '\n' ' ')"
+        continue
+        ;;
+      *)
+        keep "$b" "$b $wt_restore_why — branch restored, not deleted"
+        continue
+        ;;
+    esac
     # The `[branch "<b>"]` config section, which `-D` removed with the ref and
     # ref-only `update-ref` leaves behind. Measured, git 2.50.1: a later
     # `git branch --no-track <b>` inherits the stale upstream and reads
@@ -1524,6 +1541,20 @@ elif ! detached=$(printf '%s\n' "$wt_list" |
             END{if (p != "" && !skip) print h" "p}'); then
   keep "" "could not read the worktrees git listed — a branchless one would go unreported"
 else
+  # Read off this listing before the loop below, which re-reads it into the
+  # same `$wt_list` whenever a removal refuses: the worktrees checked out on a
+  # branch that no longer exists, for the backstop after that loop. A
+  # `branch` line with the null object id as its `HEAD` is that shape, and
+  # the backstop then asks git whether the ref really is gone. Status taken,
+  # for the reason given for `$detached` above.
+  if ! broken=$(printf '%s\n' "$wt_list" |
+         awk '/^worktree /{if (p != "" && b != "" && h ~ /^0+$/) print b" "h" "p; p=substr($0,10); h=""; b=""; next}
+              /^HEAD /{h=$2}
+              /^branch /{b=substr($0,8)}
+              END{if (p != "" && b != "" && h ~ /^0+$/) print b" "h" "p}'); then
+    keep "" "could not read the worktrees git listed — one checked out on a deleted branch would go unreported"
+    broken=
+  fi
   while IFS= read -r entry; do
     [ -n "$entry" ] || continue
     head=${entry%% *}
@@ -1735,6 +1766,41 @@ else
     removed="${removed}$(jfield "$wt"),"
   done <<EOF
 $detached
+EOF
+
+  # Backstop for a branch deleted under a worktree that checked it out: the
+  # delete raced a `git worktree add` that `wt_recheck_delete` could not see,
+  # or something outside this script deleted the ref. git lists such a
+  # worktree with its `branch` line forever, so the sweep above never sees it,
+  # and its `HEAD` does not resolve. Reported, never acted on: a worktree made
+  # with `git worktree add --orphan` looks the same, and only fleet worktrees,
+  # under `.worktrees/`, are reported — a fleet claim always branches from
+  # `origin/main`, so one of those on a ref that does not exist was broken.
+  # The likely tip is read from the worktree's own `HEAD` reflog, which
+  # survives the delete, and named as unverified: nothing here can prove it
+  # was the branch's tip.
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    ref=${entry%% *}
+    entry=${entry#* }
+    null=${entry%% *}
+    wt=${entry#* }
+    case "$wt" in
+      */.worktrees/*) ;;
+      *) continue ;;
+    esac
+    git rev-parse -q --verify "$ref" >/dev/null && continue
+    likely=
+    if ! nl_path "$wt" && admin=$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null); then
+      likely=$(awk '$2 !~ /^0+$/ {t = $2} END {print t}' "$admin/logs/HEAD" 2>/dev/null) || likely=
+    fi
+    if [ -n "$likely" ]; then
+      keep "" "worktree $wt is checked out on $ref, which no longer exists — its HEAD reflog last named $likely (unverified); if that was the tip, restore it with: git update-ref $ref $likely $null"
+    else
+      keep "" "worktree $wt is checked out on $ref, which no longer exists — no tip could be read from its HEAD reflog; restore it with: git update-ref $ref <tip> $null"
+    fi
+  done <<EOF
+$broken
 EOF
 fi
 
