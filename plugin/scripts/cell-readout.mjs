@@ -21,7 +21,8 @@
 // holding at least one admissible X row and at least one admissible slow-high
 // row whose resolved (`model`, `effort`) differ from that X row's. A session
 // counts once however many rows it holds, and its date is its member-outcomes
-// `run_date`.
+// `run_date`; a blank `run_date` means unknown, so that session is still a
+// comparison but adds no date to the distinct-date count.
 //
 // GATE. A cell is read only once it has at least GATE.comparisons comparisons
 // across at least GATE.runDates distinct run_dates. A gated cell prints one
@@ -94,7 +95,7 @@ export function readout({ features, members }) {
       const compared = rows.some((x) => x.cell === cell && base.some((s) => s.model !== x.model || s.effort !== x.effort));
       if (!compared) continue;
       comparisons++;
-      dates.add(runDate);
+      if (runDate) dates.add(runDate);
     }
     const models = new Map([...modelCounts].sort(([a, n], [b, k]) => k - n || (a < b ? -1 : a > b ? 1 : 0)));
     const runDates = dates.size;
@@ -135,7 +136,7 @@ function main() {
   if (unjoined > 0) {
     notes.push(`${unjoined} ticket-features row${unjoined === 1 ? " has" : "s have"} no member-outcomes row — never admissible`);
   }
-  if (cells.length === 0) notes.push(`no cell but ${POLICY_CELL} has a ticket-features row`);
+  if (cells.length === 0) notes.push(`no cell other than ${POLICY_CELL} has a ticket-features row`);
   for (const c of cells) {
     if (c.gated) lines.push(`${c.cell} ${c.comparisons} ${c.runDates} ${formatModels(c.models)}`);
     else notes.push(`${c.cell} below the gate: ${c.comparisons} comparisons across ${c.runDates} run_dates (needs ${GATE.comparisons} across ${GATE.runDates})`);

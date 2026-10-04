@@ -3,10 +3,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./temp-dir.mjs";
+import { paragraph, phrase, unemphasized } from "./prose-pin.mjs";
 import { formatTsv } from "./member-outcomes.mjs";
 import { FEATURE_COLUMNS } from "./pr-cost.mjs";
 import { readout, GATE } from "./cell-readout.mjs";
@@ -179,6 +180,105 @@ test("a run_date is the comparison session's member-outcomes run_date, not the t
   assert.equal(lineFor(r.stdout, "task-high"), "task-high 10 5 claude-sonnet-5");
 });
 
+test("a re-dispatched Pull is one Pull: two ticket-features rows for one session+agent count the member row once", () => {
+  const w = world();
+  addRow(w, { session: "sRe", date: "2026-10-01", cell: "task-high" });
+  addRow(w, { session: "sRe", date: "2026-10-01", cell: "slow-high" });
+  // The re-dispatch: the same Pull's features row again, on the same member row.
+  w.features.push({ ...w.features[0] });
+  // An unjoined Pull, likewise written twice.
+  addRow(w, { session: "sOrphan", date: "2026-10-01", cell: "smol-high", member: false });
+  w.features.push({ ...w.features[w.features.length - 1] });
+  const { cells, unjoined } = readout(parsed(w));
+  const task = cells.find((x) => x.cell === "task-high");
+  assert.equal(task.comparisons, 1);
+  assert.deepEqual([...task.models], [["claude-sonnet-5", 1]], "the member row behind a re-dispatched Pull is counted once");
+  assert.equal(unjoined, 1, "a re-dispatched Pull with no member row is one unjoined Pull");
+});
+
+test("a blank member-outcomes run_date is no date: its session is a comparison but adds nothing to the distinct-date count", () => {
+  const w = world();
+  addComparisons(w, "task-high", 4, 4);
+  for (let i = 0; i < 6; i++) {
+    const session = `sBlank${i}`;
+    addRow(w, { session, date: "", cell: "task-high" });
+    addRow(w, { session, date: "", cell: "slow-high" });
+  }
+  const task = readout(parsed(w)).cells.find((x) => x.cell === "task-high");
+  assert.equal(task.comparisons, 10);
+  assert.deepEqual([task.runDates, task.gated], [4, false], "ten comparisons over four real dates is below the five-date floor");
+  assert.ok(!task.dates.includes(""), "a blank run_date is listed as a date");
+});
+
+test("gated cells print sorted by cell name, not in ticket-features order", () => {
+  const w = world();
+  // Rows are added in reverse alphabetical order: task-high first, smol-high second.
+  addComparisons(w, "task-high", 10, 5);
+  addComparisons(w, "smol-high", 10, 5);
+  const r = cli(w);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(
+    r.stdout.split("\n").filter(Boolean),
+    ["smol-high 10 5 claude-sonnet-5", "task-high 10 5 claude-sonnet-5"],
+  );
+});
+
+test("equal per-model counts in a mixed cell list models alphabetically", () => {
+  const w = world();
+  // Reverse-alphabetical insertion order: sonnet rows first, then haiku, five each.
+  addComparisons(w, "task-high", 5, 5, { model: "claude-sonnet-5" });
+  addComparisons(w, "task-high", 5, 5, { model: "claude-haiku-4-5" });
+  const r = cli(w);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(lineFor(r.stdout, "task-high"), "task-high 10 5 mixed (claude-haiku-4-5 n=5, claude-sonnet-5 n=5)");
+});
+
+// run-team/SKILL.md sends the controller here for a cell's comparison count.
+// The prose is the only thing that does, and nothing else reads it: renaming
+// the script or pointing the floor back at another query leaves every test
+// above green. Each slice starts at an anchor that must occur exactly once and
+// ends at the paragraph's blank line, so a restatement elsewhere in the file
+// cannot satisfy a pin on the paragraph that carries the rule.
+const RUN_TEAM = readFileSync(join(import.meta.dirname, "..", "skills", "run-team", "SKILL.md"), "utf8");
+
+test("SKILL.md's floor names the script that prints a cell's count, and that script exists", () => {
+  const floor = unemphasized(paragraph(RUN_TEAM, "**Report the count the per-cell readout prints", "run-team's per-cell floor"));
+  const named = /`~\/\.fleet\/bin\/fleet-run (\S+\.mjs)`/.exec(floor)?.[1];
+  assert.ok(named, "the floor no longer tells the controller which script to run");
+  assert.equal(named, "cell-readout.mjs");
+  assert.ok(existsSync(join(dirname(SCRIPT), named)), `${named} is not a script beside cell-readout.mjs`);
+  assert.match(floor, phrase("prints `<cell> <comparisons> <run_dates> <resolved models>` for each cell past that floor"));
+  assert.match(floor, phrase("a cell below it only as a count on stderr"));
+});
+
+test("the line SKILL.md says the readout prints is the line it prints: four fields, a cell below the floor on stderr only", () => {
+  const gated = world();
+  addComparisons(gated, "task-high", 10, 5);
+  addComparisons(gated, "smol-high", 2, 2);
+  const r = cli(gated);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(lineFor(r.stdout, "task-high"), "task-high 10 5 claude-sonnet-5");
+  assert.equal(lineFor(r.stdout, "smol-high"), undefined, "a cell below the floor must not print on stdout");
+  assert.match(r.stderr, /smol-high below the gate: 2 comparisons/);
+});
+
+test("SKILL.md says the readout counts a pair only when the two rows ran a different model or effort, as the readout does", () => {
+  const deliberate = unemphasized(paragraph(RUN_TEAM, "**The readout counts DELIBERATE comparisons.**", "run-team's DELIBERATE paragraph"));
+  assert.match(deliberate, phrase("the two rows must actually have RUN a different model or effort"));
+  // Run, not read: the same model at the same level is no comparison, the same
+  // model at a different level is one, a different model at the same level is one.
+  const w = world();
+  addRow(w, { session: "sNone", date: "2026-10-01", cell: "task-high", model: "claude-opus-5" });
+  addRow(w, { session: "sNone", date: "2026-10-01", cell: "slow-high" });
+  addRow(w, { session: "sModel", date: "2026-10-02", cell: "task-high" });
+  addRow(w, { session: "sModel", date: "2026-10-02", cell: "slow-high" });
+  addRow(w, { session: "sEffort", date: "2026-10-03", cell: "slow-medium" });
+  addRow(w, { session: "sEffort", date: "2026-10-03", cell: "slow-high" });
+  const { cells } = readout(parsed(w));
+  const countOf = (cell) => cells.find((c) => c.cell === cell).comparisons;
+  assert.deepEqual([countOf("task-high"), countOf("slow-medium")], [1, 1]);
+});
+
 test("the output identifies no comparison: no session, ticket or agent appears on either stream", () => {
   const w = world();
   addComparisons(w, "task-high", 10, 5);
@@ -198,7 +298,7 @@ test("an empty ticket-features.tsv prints no line and says why, exit 0", () => {
   const r = cli(world());
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, "");
-  assert.match(r.stderr, /no cell but slow-high has a ticket-features row/);
+  assert.match(r.stderr, /no cell other than slow-high has a ticket-features row/);
 });
 
 test("usage and input errors exit 2 and print nothing on stdout", () => {
