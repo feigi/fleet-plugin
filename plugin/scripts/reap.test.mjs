@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { slowTransport, SSH_URL } from "./slow-transport.mjs";
 import { writeExecStub } from "./exec-stub.mjs";
@@ -4404,3 +4404,29 @@ for (const m of SIBLING_MUTATIONS) {
     assert.equal(branchExists(w, "feature/free"), false);
   });
 }
+
+// The `maintenance.auto=false` the `git` helper carries (see the comment above
+// it) cannot be pinned by the gitdir fault fixtures: the race it prevents is
+// timing-dependent, so those stay green with the flag gone. What is
+// deterministic is the spawn itself — a commit or a fetch through the helper
+// must leave no `git maintenance run` in a GIT_TRACE. The trace is switched on
+// through ENV, the object the helper hands its child, because the helper takes
+// no env of its own; node:test runs a file's tests one at a time, so nothing
+// else spawns git while it is set. The first two assertions are the positive
+// control: without them a trace the child never wrote would pass the last.
+test("the fixture git() helper suppresses the detached auto-maintenance run", (t) => {
+  const w = repo(t);
+  const trace = join(dirname(w), "trace.txt");
+  writeFileSync(trace, "");
+  ENV.GIT_TRACE = trace;
+  try {
+    commit(w, "probe");
+    git(w, "fetch", "-q", "--prune", "origin");
+  } finally {
+    delete ENV.GIT_TRACE;
+  }
+  const traced = readFileSync(trace, "utf8");
+  assert.match(traced, /built-in: git commit/, "the trace reached the commit");
+  assert.match(traced, /built-in: git fetch/, "the trace reached the fetch");
+  assert.doesNotMatch(traced, /maintenance run/);
+});
