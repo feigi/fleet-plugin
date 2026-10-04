@@ -42,10 +42,10 @@ test("the header states the blank, hand-edit, and superseded-generation rules", 
   // satisfied the pin.
   assert.match(HEADER, /BLANK MEANS UNKNOWN/);
   // …and the one column where it does not. Blank `subagent_type` means the
-  // dispatch named no agent definition — a closed category, not missing data.
-  // Read as "unknown" it turns thousands of pre-2026-08-28 rows into evidence
-  // someone believes a re-scrape could recover, which is how #1066's
-  // over-count got argued for in the first place.
+  // transcript carried no `session_init` agent to read — a closed category,
+  // not missing data. Read as "unknown" it turns thousands of pre-2026-08-28
+  // rows into evidence someone believes a re-scrape could recover, which is
+  // how #1066's over-count got argued for in the first place.
   assert.match(HEADER, /ITS BLANK IS NOT UNKNOWN/);
   assert.match(HEADER, /NEVER hand-edit a row/);
   assert.match(HEADER, /SUPERSEDED GENERATIONS ARE A SEPARATE POPULATION/);
@@ -53,6 +53,20 @@ test("the header states the blank, hand-edit, and superseded-generation rules", 
   // The corpus spans both transcript depths. A reader who assumes the flat half
   // only would under-count every review role by roughly half.
   assert.match(HEADER, /workflows\/wf_/);
+});
+
+test("the blank-subagent_type wording says what blank means on omp, in the header and the script alike", () => {
+  // An untyped dispatch records the generic `task`; blank is only a transcript
+  // with no `session_init` agent to read. Both places that restate the column
+  // must say so, and neither may call a blank an untyped dispatch.
+  const SRC = readFileSync(join(import.meta.dirname, "member-outcomes.mjs"), "utf8");
+  const flat = (s) => s.replace(/^\/\/ ?|^# ?/gm, "").replace(/\s+/g, " ");
+  for (const [where, text] of [["header", flat(HEADER)], ["script", flat(SRC)]]) {
+    assert.match(text, /no `session_init` agent to read/, `${where}: blank's cause`);
+    assert.match(text, /records the generic `task`/, `${where}: untyped dispatch's record`);
+    assert.doesNotMatch(text, /named no (agent )?definition/, `${where}: stale wording`);
+    assert.doesNotMatch(text, /untyped Task call/, `${where}: stale wording`);
+  }
 });
 
 test("the header's awk read-out indexes the column it names", () => {

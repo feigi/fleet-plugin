@@ -42,12 +42,14 @@
 # is the bare definition name (`fleet-implementer-alt`), not the
 # `fleet-ctl:`-prefixed spelling a dispatch writes.
 #
-# ITS BLANK IS NOT UNKNOWN. Blank means the dispatch named no definition at
-# all — an untyped Task call, which is every member before 2026-08-28 and
-# 8,124 of 8,909 rows as of 2026-09-12. That is a CLOSED category, not missing
-# data: no re-scrape can ever fill it, and it can never hold a deliberate
-# pair. Read as "unknown" it makes thousands of historical rows look like
-# evidence waiting to be recovered.
+# ITS BLANK IS NOT UNKNOWN. Blank means the transcript carried no
+# `session_init` agent to read (no such line, or one without a string `agent`).
+# An untyped dispatch is not that shape: omp records the generic `task` for it.
+# Every member before 2026-08-28 is blank, as were 8,124 of 8,909 rows as of
+# 2026-09-12. That is a CLOSED category, not missing data: no re-scrape can
+# ever fill it, and it can never hold a deliberate pair. Read as "unknown" it
+# makes thousands of historical rows look like evidence waiting to be
+# recovered.
 #
 # THE POPULATION IS BOTH TRANSCRIPT DEPTHS. A directly-dispatched member writes
 # subagents/agent-<id>.jsonl; a Workflow's fan-out writes
