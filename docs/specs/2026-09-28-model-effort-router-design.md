@@ -597,8 +597,8 @@ Per `#2089`'s ruling (maintainer, 2026-09-27), fleet-plugin's own run
 conventions — the metrics scrape, the chore/run-artifacts PR, and any
 repo-local doc cites — leave the plugin and move into a repo-local skill,
 `.omp/skills/run-team-local/SKILL.md`, called by `/fleet-ctl:run-team`
-through a named hook at fixed phases. That file does not exist yet in this
-repo (confirmed: no `.omp/` directory at all on `main` today) — this map's
+through a named hook at fixed phases. That file did not exist when this spec
+was written (no `.omp/` directory at all on `main` then) — this map's
 tickets (§ 8, T5) create it, since this repo dogfoods its own plugin. Its
 duties, all drawn from this spec:
 

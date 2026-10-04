@@ -394,6 +394,16 @@ test("stopping rule: ten verdicts with eight floor failures stop the cell; seven
   assert.equal(judged(under, added, "smol-high").stop, false);
 });
 
+test("stopping rule: a cell's verdicts are listed by ascending ticket number however the corpus orders them", () => {
+  const w = world();
+  w.ticket = 95; // 95..104 crosses a digit boundary: a string sort would put 100 before 95
+  addVerdicts(w, "smol-high", 10, 0);
+  w.features.reverse();
+  w.verdicts.reverse();
+  const at = judged(w, { "smol-high": "2026-09-01" }, "smol-high");
+  assert.deepEqual(at.verdicts.map((v) => v.ticket), ["95", "96", "97", "98", "99", "100", "101", "102", "103", "104"]);
+});
+
 test("stopping rule: only admissible Pulls on or after the definition was last added count, at a cell with a live definition other than the policy cell", () => {
   const w = world();
   addVerdicts(w, "smol-high", 10, 10, { date: "2026-10-02" });

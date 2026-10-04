@@ -1,6 +1,6 @@
 ---
 name: run-team-local
-description: fleet-plugin's own run-team hook — the metrics duties this repository runs at phase 0 and close-out of a /fleet-ctl:run-team run. Called by name at those two points, never by description match.
+description: fleet-plugin's own run-team hook — the metrics duties this repository has at phase 0 and close-out of a /fleet-ctl:run-team run. Called by name at those two points, never by description match.
 disable-model-invocation: true
 ---
 
@@ -9,8 +9,10 @@ disable-model-invocation: true
 fleet-plugin dogfoods its own plugin, so the run conventions that only make
 sense on this repository live here, not in the plugin it ships (#2089; duties
 from `docs/specs/2026-09-28-model-effort-router-design.md` § 5). The
-`/fleet-ctl:run-team` controller runs this at two fixed points. Every duty is
-`hook.mjs`, beside this file; run it from the main checkout:
+`/fleet-ctl:run-team` controller is to call this by name at two fixed points;
+that call is #2089's, so until it lands the fleet's operator runs it by hand at
+those points. Every duty is `hook.mjs`, beside this file; run it from the main
+checkout:
 
 ```bash
 node .omp/skills/run-team-local/hook.mjs phase-0
@@ -49,6 +51,9 @@ the run's artifacts are committed:
    `Withdraw exploration cell <cell>: <failures>/<verdicts> floor failures`,
    its body the verdict table — skipped when an open issue already carries
    that exact title. Withdrawing the cell is the maintainer's PR, not yours.
+   A definition no commit adds (a shallow clone, an uncommitted or renamed
+   file) cannot be judged: the duty reports the cells it could judge, then
+   fails naming the definition, so the router re-fit does not run.
 4. **Router re-fit:** once 50 PRs have merged since `router-table.json`'s
    `fitted_through`, `ticket-router.mjs fit` runs in a throwaway checkout of
    `origin/main` — against the committed corpus, because CI's

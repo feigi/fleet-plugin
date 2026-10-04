@@ -81,7 +81,8 @@ const agentMd = (cell) => {
 };
 
 // Answers `pr list` (pr-cost's merged-state read, or the open re-fit PR read),
-// `issue list`, and the three writes, from GH_FIXTURE; logs each argv to GH_LOG.
+// `issue list` (raw text instead of JSON when the fixture has `issuesRaw`),
+// and the two writes, from GH_FIXTURE; logs each argv to GH_LOG.
 const GH_STUB = `#!/usr/bin/env node
 const fs = require("node:fs");
 const args = process.argv.slice(2);
@@ -91,10 +92,10 @@ const json = args[args.indexOf("--json") + 1];
 const out = (v) => process.stdout.write(JSON.stringify(v));
 const cmd = args.slice(0, 2).join(" ");
 if (cmd === "pr list") out(json === "number,headRefName" ? fx.openPrs : fx.prs);
-else if (cmd === "issue list") out(fx.issues);
+else if (cmd === "issue list") { if (fx.issuesRaw !== undefined) process.stdout.write(fx.issuesRaw); else out(fx.issues); }
 else if (cmd === "issue create") console.log("https://github.com/o/r/issues/901");
 else if (cmd === "pr create") console.log("https://github.com/o/r/pull/902");
-else if (cmd !== "pr edit") { process.stderr.write("gh stub: unexpected " + args.join(" ")); process.exit(9); }
+else { process.stderr.write("gh stub: unexpected " + args.join(" ")); process.exit(9); }
 `;
 
 function write(root, rel, text) {
@@ -242,6 +243,39 @@ test("phase-0: the drift notice names a cell whose last admissible row ran anoth
   ]);
 });
 
+test("phase-0: a role with no target in modelRoles raises no notice for its cells, and the cells whose role resolves are still checked", () => {
+  const rows = corpus();
+  rows.members.push(
+    member({ agent: "impl-1", run_date: "2026-10-01", session: "s1", model: "claude-haiku-3", effort: "high", subagentType: "fleet-implementer-smol-high" }),
+    member({ agent: "impl-2", run_date: "2026-10-01", session: "s2", model: "claude-sonnet-4-5", effort: "high", subagentType: "fleet-implementer-task-high" }),
+  );
+  const f = fixture({ rows });
+  const { smol, ...withoutSmol } = MODEL_ROLES;
+  writeFileSync(join(f.root, "model-roles.json"), JSON.stringify(withoutSmol));
+  const r = f.run("phase-0");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.split("\n").filter((l) => l.startsWith("tier-roles: notice: ")), [
+    "tier-roles: notice: fleet-implementer-task-high last ran claude-sonnet-4-5; modelRoles.task now resolves anthropic/claude-sonnet-5 — cell history spans two models",
+  ]);
+});
+
+test("phase-0: of the rows dated the same day the drift notice follows the higher session, in whichever order the rows come", () => {
+  const rows = corpus();
+  const sameDay = (agent, session, model, cell) => member({ agent, run_date: "2026-10-02", session, model, effort: "high", subagentType: `fleet-implementer-${cell}` });
+  rows.members.push(
+    // The lower session ran another model and comes first.
+    sameDay("impl-1", "s1", "claude-haiku-3", "smol-high"),
+    sameDay("impl-2", "s2", "claude-haiku-4-5", "smol-high"),
+    // The higher session comes first.
+    sameDay("impl-3", "s4", "claude-sonnet-5", "task-high"),
+    sameDay("impl-4", "s3", "claude-sonnet-4-5", "task-high"),
+  );
+  const r = fixture({ rows }).run("phase-0");
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /tier-roles: notice:/);
+  assert.match(r.stdout, /drift notice: every cell's last admissible row ran its role's current target/);
+});
+
 // ---------------------------------------------------------------------------
 // close-out: the stopping rule
 
@@ -288,6 +322,8 @@ test("close-out: an open issue with the same title dedupes the withdrawal; an op
   const body = flag("--body").split("\n");
   assert.ok(body.includes(row(100, "yes", "fail")), flag("--body"));
   assert.ok(body.includes(row(109, "no", "pass")), flag("--body"));
+  const tickets = body.filter((l) => l.startsWith("| #")).map((l) => Number(l.match(/^\| #(\d+) /)[1]));
+  assert.deepEqual(tickets, [100, 101, 102, 103, 104, 105, 106, 107, 108, 109], "rows run in ascending ticket order");
 });
 
 test("close-out: the count restarts on the day a cell's definition was most recently added", () => {
@@ -296,6 +332,24 @@ test("close-out: the count restarts on the day a cell's definition was most rece
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /stopping rule: smol-high 0\/0 floor failures since 2026-10-04 — continues/);
   assert.deepEqual(calls(f, "issue list"), []);
+});
+
+test("close-out: a definition no commit adds fails the stopping rule naming it, after the cells that can be judged are reported, and the re-fit does not run", () => {
+  const f = fixture({ rows: floorFailing() });
+  // On disk beside the committed definitions, never committed.
+  writeFileSync(join(f.repo, "plugin", "agents", "fleet-implementer-smol-max.agent.md"), agentMd("smol-max"));
+  const r = f.run("close-out", ["--dry-run"]);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — would file "${escape(TITLE)}"`));
+  assert.match(r.stderr, /run-team-local: stopping rule failed: not judged — no commit adds fleet-implementer-smol-max\.agent\.md$/m);
+  assert.doesNotMatch(r.stdout, /router fit/);
+});
+
+test("close-out: a gh that prints something other than JSON fails the duty naming the gh command and what it printed", () => {
+  const f = fixture({ rows: floorFailing(), gh: { issuesRaw: "<html>rate limited</html>" } });
+  const r = f.run("close-out", ["--dry-run"]);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /stopping rule failed: gh issue list printed non-JSON \(.*\): "<html>rate limited<\/html>"$/m);
 });
 
 // ---------------------------------------------------------------------------
@@ -329,6 +383,13 @@ test("close-out --dry-run: fifty merged PRs since fitted_through run ticket-rout
   assert.deepEqual(calls(at, "pr create"), []);
 });
 
+test("close-out: a relative --repo reaches the re-fit as the absolute one does", () => {
+  const f = fixture({ rows: merged(FIT_EVERY_MERGED) });
+  const r = f.run("close-out", ["--repo", ".", "--dry-run"], { cwd: f.repo, repoFlag: false });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /router fit: DUE=yes MERGED=50\/50 — .*; would open a chore PR from chore\/router-fit-/);
+});
+
 test("close-out: a due re-fit is pushed to its own chore branch and opened as a PR labelled patch, never onto main — and not while an earlier re-fit PR is open", () => {
   const f = fixture({ rows: merged(FIT_EVERY_MERGED) });
   const r = f.run("close-out");
@@ -337,13 +398,13 @@ test("close-out: a due re-fit is pushed to its own chore branch and opened as a 
   assert.ok(branch, r.stdout);
   assert.equal(JSON.parse(git(f.origin, ["show", `${branch}:${TABLE}`])).fitted_through, "2026-10-05");
   assert.equal(JSON.parse(git(f.origin, ["show", `main:${TABLE}`])).fitted_through, "2026-10-01", "main itself is untouched");
-  const ghCmds = f.ghCalls().map((c) => c.slice(0, 2).join(" "));
-  assert.ok(ghCmds.indexOf("pr create") < ghCmds.indexOf("pr edit"), ghCmds.join(", "));
   const [create] = calls(f, "pr create");
   assert.equal(create[create.indexOf("--base") + 1], "main");
   assert.equal(create[create.indexOf("--head") + 1], branch);
-  const [edit] = calls(f, "pr edit");
-  assert.deepEqual(edit.slice(2), ["https://github.com/o/r/pull/902", "--add-label", "patch"]);
+  assert.equal(create[create.indexOf("--label") + 1], "patch", "labelled by the create itself, not by an edit that can fail after it");
+  assert.deepEqual(calls(f, "pr edit"), []);
+  assert.equal(git(f.repo, ["branch", "--list", "chore/*"]), "", "the checkout's repository keeps no local branch of the PR's");
+  assert.doesNotMatch(git(f.repo, ["config", "--local", "--list"]), /^branch\.chore/m, "and no upstream config for it");
   assert.equal(worktrees(f.repo), 1);
 
   const earlier = { number: 55, headRefName: "chore/router-fit-2026-10-01" };
@@ -364,4 +425,8 @@ test("usage: exactly one phase, and only the declared flags, else exit 2", () =>
     const r = spawnSync(process.execPath, [HOOK, ...extra, "--repo", f.repo], { encoding: "utf8", env: ENV });
     assert.equal(r.status, 2, `${extra.join(" ")}: ${r.stderr}`);
   }
+  // A flag's value that spells a phase is not the phase.
+  const value = spawnSync(process.execPath, [HOOK, "--repo", "phase-0", "--dry-run"], { encoding: "utf8", env: ENV, cwd: f.repo });
+  assert.equal(value.status, 2, value.stderr);
+  assert.match(value.stderr, /usage: hook\.mjs phase-0\|close-out/);
 });

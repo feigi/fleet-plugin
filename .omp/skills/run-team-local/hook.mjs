@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // fleet-plugin's own run-team-local hook: the metrics duties this repository
-// runs at two fixed points of a /fleet-ctl:run-team run. SKILL.md beside this
-// file says when the controller runs each phase and how to read what it prints.
+// has at two fixed points of a /fleet-ctl:run-team run (the controller's call
+// is #2089's; until it lands the hook is run by hand). SKILL.md beside this
+// file says when each phase runs and how to read what it prints.
 //
 //   hook.mjs phase-0|close-out [--dry-run] [--repo <dir>] [--agents <dir>]
 //            [--model-roles <json>] [--catalog <json>]
@@ -32,7 +33,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "../../../plugin/scripts/arg.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "../../../plugin/scripts/git-env.mjs";
@@ -72,7 +73,14 @@ function run(cmd, args, { cwd, what = `${cmd} ${args.slice(0, 2).join(" ")}` } =
 }
 const git = (cwd, args) => run("git", ["-C", cwd, ...args], { what: `git ${args[0]}` });
 const gh = (cwd, args) => run("gh", args, { cwd });
-const ghJson = (cwd, args) => JSON.parse(gh(cwd, args));
+function ghJson(cwd, args) {
+  const out = gh(cwd, args);
+  try {
+    return JSON.parse(out);
+  } catch (e) {
+    throw new Error(`gh ${args.slice(0, 2).join(" ")} printed non-JSON (${e.message}): ${JSON.stringify(out.slice(0, 80))}`);
+  }
+}
 const script = (name, args, cwd) => run(process.execPath, [join(SCRIPTS, name), ...args], { cwd, what: `${name} ${args[0]}` });
 
 /** The `fleet-implementer-<cell>` definitions in `agentsDir`, sorted by cell. */
@@ -126,7 +134,7 @@ function costGuard(repo) {
     cwd: repo, encoding: "utf8", env: gitEnv(), maxBuffer: MAX_BUFFER,
   });
   if (!GUARD_VERDICT_EXITS.has(r.status)) {
-    throw new Error(`pr-cost.mjs --guard exited ${r.status ?? r.signal}: ${String(r.stderr ?? "").trim()}`);
+    throw new Error(`pr-cost.mjs --guard exited ${r.error?.code ?? r.status ?? r.signal}: ${String(r.stderr ?? "").trim()}`);
   }
   const g = JSON.parse(readFileSync(out, "utf8"));
   const tripped = g.tripped.map((t) => (typeof t === "string" ? t : t?.cell));
@@ -184,12 +192,15 @@ function stopping(repo, agentsDir, dryRun) {
   const members = parseMemberTsv(metrics(repo, "member-outcomes.tsv"));
   const verdicts = parseTierOutcomes(metrics(repo, "tier-outcomes.tsv"));
   // The day each definition was most recently added: a reinstated cell's
-  // count restarts there.
+  // count restarts there. A definition no commit adds (a shallow clone, an
+  // uncommitted or renamed file, the wrong --agents dir) has no day to count
+  // from, so it cannot be judged.
   const added = {};
+  const unjudged = [];
   for (const d of definitions(agentsDir)) {
     const day = git(agentsDir, ["log", "--diff-filter=A", "-1", "--format=%cs", "--", d.file]).trim();
     if (day) added[d.cell] = day;
-    else warn(`stopping rule: ${d.cell} not judged — no commit adds ${d.file}`);
+    else unjudged.push(d.file);
   }
   for (const c of stoppingRule({ features, members, verdicts, added })) {
     const tally = `${c.cell} ${c.failures}/${c.verdicts.length} floor failures since ${c.since}`;
@@ -209,6 +220,7 @@ function stopping(repo, agentsDir, dryRun) {
       say(`stopping rule: ${tally} — filed ${url}`);
     }
   }
+  if (unjudged.length) throw new Error(`not judged — no commit adds ${unjudged.join(", ")}`);
 }
 
 function freeBranch(repo) {
@@ -246,12 +258,14 @@ function routerFit(repo, dryRun) {
     const branch = freeBranch(repo);
     if (dryRun) return say(`router fit: ${due} — ${fitted}; would open a chore PR from ${branch}`);
     const subject = `chore: re-fit router-table.json through ${JSON.parse(readFileSync(table, "utf8")).fitted_through}`;
-    git(tmp, ["switch", "--quiet", "-c", branch]);
     git(tmp, ["commit", "--quiet", "-m", subject, "--", TABLE]);
-    git(tmp, ["push", "--quiet", "-u", "origin", branch]);
-    const url = gh(tmp, ["pr", "create", "--base", "main", "--head", branch, "--title", subject,
+    // Pushed from the detached checkout, so the repository the hook runs in
+    // keeps no local branch and no upstream config of this PR's.
+    git(tmp, ["push", "--quiet", "origin", `HEAD:refs/heads/${branch}`]);
+    // Labelled by `create` itself: a separate edit that failed would leave an
+    // open unlabelled PR that every later run takes for the earlier re-fit.
+    const url = gh(tmp, ["pr", "create", "--base", "main", "--head", branch, "--label", "patch", "--title", subject,
       "--body", `Opened by the run-team-local hook at close-out (${due}).\n\n${fitted}\n`]).trim();
-    gh(tmp, ["pr", "edit", url, "--add-label", "patch"]);
     say(`router fit: ${due} — ${fitted}; opened ${url} from ${branch}`);
   } finally {
     spawnSync("git", ["-C", repo, "worktree", "remove", "--force", tmp], { env: gitEnv() });
@@ -272,10 +286,12 @@ function main() {
   });
   F.sweep();
   F.stray();
-  const phases = process.argv.slice(2).filter((a) => a === "phase-0" || a === "close-out");
-  if (phases.length !== 1) die("usage: hook.mjs phase-0|close-out [--dry-run] [--repo <dir>] [--agents <dir>] [--model-roles <json>] [--catalog <json>]");
-  const [phase] = phases;
-  let repo = F.arg("repo");
+  // The phase is the positional ahead of the flags, as the usage line spells
+  // it: filtering every argv token would take a flag's value for it.
+  const [, , phase] = process.argv;
+  if (phase !== "phase-0" && phase !== "close-out") die("usage: hook.mjs phase-0|close-out [--dry-run] [--repo <dir>] [--agents <dir>] [--model-roles <json>] [--catalog <json>]");
+  // Absolute: routerFit hands paths under it to a script running in another cwd.
+  let repo = F.arg("repo") === null ? null : resolve(F.arg("repo"));
   if (repo === null) {
     const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", env: gitEnv() });
     repo = r.status === 0 ? workspaceDirFromGitCommonDir(r.stdout) : null;
