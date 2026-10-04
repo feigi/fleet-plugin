@@ -4,7 +4,7 @@ Why reap runs after each merge pass, why `commit-commands:clean_gone` disqualifi
 
 ## Reap after each merge pass, not once at the end
 
-Merge deletes remote branch, leaves local branch `[gone]` with worktree — and its `node_modules` — still on disk. Stale worktree still answers `git worktree list`, so the in-flight probe (`inflight.sh`, run by the Shortlist and again by every Pull) reads already-merged ticket as taken and queue quietly shrinks as run goes on.
+Merge deletes remote branch, leaves local branch `[gone]` with worktree — and its installed dependencies — still on disk. Stale worktree still answers `git worktree list`, so the in-flight probe (`inflight.sh`, run by the Shortlist and again by every Pull) reads already-merged ticket as taken and queue quietly shrinks as run goes on.
 
 ## Why `commit-commands:clean_gone` is disqualified
 

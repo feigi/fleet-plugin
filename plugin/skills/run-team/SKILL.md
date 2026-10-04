@@ -824,9 +824,10 @@ prior-run worktree). #55 tracked the runner, so any worktree checked out from
 `origin/main` now carries it. A tree that is NOT a checkout — a `git archive`
 snapshot, a `cp -R` subset — still has whatever was copied into it, and a repo
 that tracks no runner never had one: there, tell the member the runner is absent
-and to run docker-free suites directly (`npx vitest run --config
-vitest.ci.config.ts <file>` — the CI unit config has no `globalSetup`, so there
-is no stack to collide on).
+and to run docker-free suites directly — the Recipe's Test entrypoint
+(`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test` prints it) only
+when it brings up no shared stack to collide on, else that repo's own stack-free
+command.
 
 **A reused worktree may also be on the wrong COMMIT.** `git worktree add <path>
 <branch>` checks out the existing LOCAL branch and never consults the remote, so
@@ -3095,7 +3096,7 @@ ancestry proof, post-rebase red triage. Do not restate them here.
 
 The merge bot deletes the remote branch after each merge (`delete-merged-branch.sh`,
 in `run-merge-bot.md` step 4), leaving the local branch `[gone]` with its
-worktree — and its `node_modules` — still on disk. Reap after **each** merge pass,
+worktree — and its installed dependencies — still on disk. Reap after **each** merge pass,
 not once at the end: a stale worktree still answers `git worktree list`, so the
 in-flight probe (`inflight.sh`, run by the Shortlist and by every Pull) reads an
 already-merged ticket as taken and the queue quietly shrinks. The trigger is the
@@ -3523,8 +3524,9 @@ failures arrive as *wrong findings*, not errors:
   under your own path. See references/isolation.md.
 - **IDE/harness diagnostics attribute by bare filename, with no path.** **Never
   relay a diagnostic without reproducing it in that member's specific worktree**
-  (`npx tsc --noEmit` from there): probe copies carry the real tree's filenames,
-  so a sibling's throwaway mutation reads exactly like a live worktree's error.
+  (re-run the check that raised it from there): probe copies carry the real
+  tree's filenames, so a sibling's throwaway mutation reads exactly like a live
+  worktree's error.
   See references/isolation.md.
 
 Suspect a neighbour before a member's own diff — for unexplained failures, and
@@ -3845,8 +3847,8 @@ Plus a queue-depth line: shortlist, supply, whether triage was suggested.
   Ask what scope it searched.
 - "Five implementers = five times throughput" → reviews are 3-5x longer. It means
   a backlog.
-- "`npm install` to set up the worktree" → the wrong install mutates the lockfile
-  for the whole repo.
+- "A quick install to set up the worktree" → the claim already ran the Recipe's
+  Install step; any other install can rewrite the lockfile for the whole repo.
 - "I'm on my own copy, so I'm isolated" → not from the docker stack.
 - "`commit-commands:clean_gone` printed nothing, the tree is clean" → its
   `[gone]` detection works fine; it just runs `-D`/`--force` with no merged
