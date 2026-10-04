@@ -3408,6 +3408,8 @@ the deletion back; `reap.sh` takes the `[gone]` local branch and its worktree.
 No repo setting is relied on to do it (#2196). A branch another open PR still
 uses as its head or base is kept instead — `branch-kept-#<that PR>` in the bot's
 report, a deliberate keep and not a failure (#2295).
+The branch-delete step also releases the claim label: it drops `in-progress` from
+every issue the PR closes.
 
 **Never force a rebase to start.** No `git clean`, `git checkout .`,
 `git reset --hard`, `git stash`. Uncommitted changes may exist nowhere else.

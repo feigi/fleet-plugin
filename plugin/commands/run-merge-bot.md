@@ -242,15 +242,7 @@ For each labeled PR clearing the hold rule, lowest first:
 
    **A `rebase-fallback-#<pr>` merge is expected to disprove here.** Step 1's fallback never lands a rebased head on the remote, so `pre == post` and `headWasCurrent` reads false — `prove-merge.sh` exits **1**, correctly (`prove-merge.test.mjs`'s `ATTACK: un-rebased head that merged cleanly still proves false` pins exactly this shape). That is the honest answer, not a script fault. Report the merge as **argued** — backed by the fallback's four checks — and never as `proved`; a merge whose ancestry was not proved is never reported as proved.
 
-   **Drop `in-progress` from every issue this PR closes** — the merge is the only point where the ticket number and the fact of completion are known together, and nothing else clears it:
-
-   ```bash
-   ~/.fleet/bin/fleet-run drop-merged-label.sh <pr> --apply
-   ```
-
-   Exit 0 done or nothing to close, **1 a removal failed — report it as `label-drop-failed-#<issue>`, never swallow it**: a merged ticket that keeps the label is invisible the moment it is reopened. Exit 2 means the PR was not actually MERGED yet — call this only after the merge is confirmed at the top of this step.
-
-   **Delete the head branch from `origin`** — this bot owns that step, and no repo setting does it for you (#2196). Without it a merged branch is never `[gone]`, so `reap.sh` never reaps it or its worktree:
+   **Delete the head branch from `origin`** — this bot owns that step, and no repo setting does it for you. Without it a merged branch is never `[gone]`, so `reap.sh` never reaps it or its worktree. The same step also drops `in-progress` from every issue this PR closes: the merge is the only point where the ticket number and the fact of completion are known together, and nothing else clears it.
 
    ```bash
    ~/.fleet/bin/fleet-run delete-merged-branch.sh <pr>
@@ -258,7 +250,9 @@ For each labeled PR clearing the hold rule, lowest first:
 
    Exit 0 the branch is gone from `origin` — `deleted`, `alreadyGone` (a repo that still auto-deletes), or `skipped` for a fork PR, whose branch is not ours. **1 the branch is still on `origin` — report it as `branch-delete-failed-#<pr>`, never swallow it**: either a push landed on it after the merge (the delete is leased to the merged head, so it refuses rather than destroy commits `main` never received) or the push failed. The script reads the deletion back from `origin` rather than trusting the push's exit status. Exit 2 could not tell what to delete — the PR is not MERGED, a `gh` or `ls-remote` read failed, or the lookup for other open PRs on the branch failed (nothing is deleted then); call this only after the merge is confirmed at the top of this step. **Exit 3 the branch is kept on purpose — another open PR uses it as its head or its base** (#2295): deleting it would close the PRs headed by it, and may close rather than retarget the PRs based on it. Nothing was pushed. Its stdout is one `branch-kept-#<pr>` line per such PR, naming that open PR, not the merged one — report each line as printed. A deliberate keep, not a failure: never retry it, and never report it as `branch-delete-failed`. The branch stays on `origin`, so it is not `[gone]` and `reap.sh` leaves it and its worktree in place.
 
-   It deletes the **remote** ref only, and that is why it exists instead of `gh pr merge --delete-branch`: that flag's local cleanup dies with `fatal: 'main' is already used by worktree at <path>` whenever the branch is checked out in a worktree — which every fleet-claimed branch is, at `.worktrees/<issue>-<slug>` — or strands the feature worktree on `main`, after the remote merge already succeeded. The local branch and its worktree are left `[gone]` for `reap.sh`, which removes the worktree before deleting the branch and keeps either when it holds anything unmerged.
+   **Exit 4 the branch half succeeded but the label half did not — report every token line the step printed on stdout, never swallow one.** `label-drop-failed-#<issue>` is one issue whose removal failed: a merged ticket that keeps the label is invisible the moment it is reopened. `label-read-failed-#<pr>` means what the PR closes could not be determined — never read it as "nothing to drop". When the branch half exits 1, 2 or 3 that code wins, and the same token lines are still printed ahead of the branch output. On any non-zero exit, report every token line; never retry.
+
+   The branch half deletes the **remote** ref only, and that is why it exists instead of `gh pr merge --delete-branch`: that flag's local cleanup dies with `fatal: 'main' is already used by worktree at <path>` whenever the branch is checked out in a worktree — which every fleet-claimed branch is, at `.worktrees/<issue>-<slug>` — or strands the feature worktree on `main`, after the remote merge already succeeded. The local branch and its worktree are left `[gone]` for `reap.sh`, which removes the worktree before deleting the branch and keeps either when it holds anything unmerged.
 
    Then re-fetch and **re-evaluate the queue from scratch** — labels and numbers move while CI runs, and a merge newly unblocks or blocks others.
 
@@ -268,7 +262,7 @@ Measured over one three-merge pass: the next queue member went 0 → 2 → 7 →
 
 **A PR whose heavy jobs have only ever `skipped` is getting its first real verification from your rebase.** Reviewers may legitimately have labelled on the checks that did run plus local evidence, saying so explicitly. When your post-rebase run finally executes those suites, treat a red there as a **genuine first result**, not a regression you caused — read the failing job before concluding, and do not hand it back as "the rebase broke it".
 
-Report merged / skipped-unlabeled / held-behind-#X / worktree-diverged-#X / head-moved-after-label-#X / label-drop-failed-#X / branch-delete-failed-#X / branch-kept-#X (X the open PR that keeps the merged branch — a keep, not a failure) / rebase-fallback-#X / instrument-set-changed-#X / `<reason>-#X` for any other gate refusal / blocked after the pass — a dispatched bot once, at exit, after its grace (**Grace, then one report**, below).
+Report merged / skipped-unlabeled / held-behind-#X / worktree-diverged-#X / head-moved-after-label-#X / label-drop-failed-#X / label-read-failed-#X / branch-delete-failed-#X / branch-kept-#X (X the open PR that keeps the merged branch — a keep, not a failure) / rebase-fallback-#X / instrument-set-changed-#X / `<reason>-#X` for any other gate refusal / blocked after the pass — a dispatched bot once, at exit, after its grace (**Grace, then one report**, below).
 
 ## No-undo audit (before every rebase)
 

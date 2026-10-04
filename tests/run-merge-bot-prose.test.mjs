@@ -30,13 +30,21 @@ function step4() {
   return start + rest.slice(0, end);
 }
 
-test("step 4 drops in-progress from every issue the merged PR closes", () => {
-  assert.match(step4(), /Drop `in-progress` from every issue this PR closes/);
-  assert.match(step4(), /drop-merged-label\.sh <pr> --apply/);
+test("step 4's branch-delete step also drops in-progress from every issue the merged PR closes", () => {
+  assert.match(step4(), /The same step also drops `in-progress` from every issue this PR closes/);
 });
 
-test("step 4 says a failed removal must be reported, never swallowed", () => {
-  assert.match(step4(), /a removal failed — report it as `label-drop-failed-#<issue>`, never swallow it/);
+test("step 4 carries the label drop in the branch-delete step alone, naming no separate command or script", () => {
+  assert.doesNotMatch(step4(), /drop-merged-label/);
+  assert.doesNotMatch(step4(), /fleet-run [^\n]*--apply/);
+});
+
+test("step 4 says a label failure must be reported, never swallowed", () => {
+  assert.match(step4(), /\*\*Exit 4 the branch half succeeded but the label half did not — report every token line the step printed on stdout, never swallow one\.\*\*/);
+  assert.match(step4(), /`label-drop-failed-#<issue>` is one issue whose removal failed/);
+  assert.match(step4(), /`label-read-failed-#<pr>` means what the PR closes could not be determined — never read it as "nothing to drop"/);
+  assert.match(step4(), /When the branch half exits 1, 2 or 3 that code wins, and the same token lines are still printed/);
+  assert.match(step4(), /On any non-zero exit, report every token line; never retry\./);
 });
 
 // #2196: the bot deletes the merged head branch itself rather than leaning on
@@ -785,6 +793,17 @@ test("run-team scopes the diverged-worktree row to the fallback, not to every me
     failureTable(),
     /\| Merge bot finds the worktree ahead of the PR head \*\*on the local-rebase fallback\*\* \|/,
   );
+});
+
+// The run-team skill's merge-path paragraph says the branch-delete step also
+// releases the claim label — the runbook pins above read run-merge-bot.md, so
+// without this the skill's own statement of it can be deleted with the suite
+// green. Sliced to that one paragraph, and the span is one contiguous clause.
+test("run-team's never-`--delete-branch` paragraph says the branch-delete step also releases the claim label", () => {
+  const para = paragraph(RUN_TEAM, "Never `--delete-branch` — the merge bot deletes the head branch itself.", "run-team/SKILL.md's never-`--delete-branch` paragraph", {
+    emphasisTolerant: true,
+  });
+  assert.match(para, phrase("The branch-delete step also releases the claim label: it drops `in-progress` from every issue the PR closes."));
 });
 
 // #903: the poll read `gh pr view <pr> --json headRefOid` — the one field that
