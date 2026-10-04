@@ -286,10 +286,11 @@ export function computeSpend({ agents = [], topN = 8 } = {}) {
 }
 
 // Per-TOOL attribution. Tokens are not billed per tool call, so this is a proxy
-// and is labelled as one everywhere it surfaces: a tool result arrives in a user
-// turn, and the NEXT assistant turn's cache_creation is the cost of writing that
-// result into the cache. When several results land before that turn, the cost is
-// split proportionally by result size, because that is what drove it.
+// and is labelled as one everywhere it surfaces: a tool result arrives as a
+// `toolResult` line, and the NEXT assistant turn's cache_creation is the cost
+// of writing that result into the cache. When several results land before that
+// turn, the cost is split proportionally by result size, because that is what
+// drove it.
 //
 // Those results arrive as CONSECUTIVE result lines, not as one turn carrying
 // several blocks: in omp transcripts each tool result sits on its own line

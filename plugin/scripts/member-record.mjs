@@ -46,10 +46,9 @@ import { classifyRole, canonicalMemberName, CANONICAL_MEMBER_NAME_PREFIXES } fro
 // (`/Users/x/.claude/a_b` under home `/Users/x` -> `-.claude-a_b`);
 // non-home paths are realpath-resolved (so `/tmp/x`,
 // a symlink to `/private/tmp/x` on macOS, encodes under the resolved name)
-// and wrapped in `--` (`/opt/a.b` -> `--opt-a.b--`). Both forms are measured against real
-// `~/.omp/agent/sessions/*` directory names - a
-// `~/dev/fleet-plugin`, `--private-tmp-fx685-scratch--` all exist on disk
-// today.
+// and wrapped in `--` (`/opt/a.b` -> `--opt-a.b--`). Both forms are measured
+// against real `~/.omp/agent/sessions/*` directory names: `-dev-fleet-plugin`
+// and `--private-tmp-fix685-scratch--` both exist on disk today.
 export function encodeProjectDir(cwd, { home = process.env.HOME, realpath = realpathSync } = {}) {
   const rel = relative(home, cwd);
   const isHome = !rel.startsWith("..") && !isAbsolute(rel);

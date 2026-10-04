@@ -1271,13 +1271,10 @@ for d in "$HOME/.omp/agent/sessions/$PROJECT_DIR"/*/; do
 done
 ```
 
-`encodeProjectDir` (`scripts/board.mjs`) encodes the cwd the way omp's own
-session directory naming does — a cwd under `$HOME` becomes `-` plus its
-home-relative path segments joined by `-`, and any other path is
-realpath-resolved and wrapped in `--`; every other character is kept, dots and
-underscores included (`$HOME/.claude/a_b` becomes `-.claude-a_b`, `/opt/a.b`
-becomes `--opt-a.b--`) — and hand-guessing that path
-is why the fleet's own panel once rendered nothing here. The trailing `/` on the glob matters:
+`encodeProjectDir` (defined in `scripts/member-record.mjs`, re-exported by
+`scripts/board.mjs`) encodes the cwd exactly as omp names its session
+directories — see its comment for the rule — and hand-guessing that path is why
+the fleet's own panel once rendered nothing here. The trailing `/` on the glob matters:
 the same encoded-cwd directory also holds this cwd's own top-level session
 transcripts as loose FILES sibling to the per-session directories, and a
 glob without it would try to scrape one of those as if it were a session.
