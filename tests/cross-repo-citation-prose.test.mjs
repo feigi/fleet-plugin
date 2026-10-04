@@ -130,7 +130,7 @@ test("the ordinal-verification mechanism is named as behavior, not in the source
   assert.doesNotMatch(
     section,
     /\bexpects?\b/i,
-    "the mechanism is scoped as foreign vocabulary again (`git grep 'expect(' HEAD` → zero hits here; this repo is `node:test` + `assert.*`), which invites a reader to discard a lesson that applies here unchanged",
+    "the mechanism is scoped as foreign vocabulary again (no test in this repo calls `expect(`; this repo is `node:test` + `assert.*`), which invites a reader to discard a lesson that applies here unchanged",
   );
   assert.match(
     section,
