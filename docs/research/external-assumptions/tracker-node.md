@@ -132,6 +132,6 @@ Read in full or by targeted range (all citations above are grounded in ranges ac
 - `plugin/scripts/tier-roles.mjs` — read in full (1–370)
 - `plugin/scripts/arg.mjs` — read in full (1–600)
 - `plugin/scripts/slow-transport.mjs` — read in full (1–72)
-- `plugin/scripts/node-floor-sweep.test.mjs` — targeted range (101–104), for row 44
+- `tests/node-floor-sweep.test.mjs` — targeted range (101–104), for row 44
 
 Not read (out of slice, referenced only by name in comments as callers/siblings): `ledger.mjs`, `ledger-grammar.mjs`, `board.mjs`, `instruments.sh`, `inflight.sh`, `claim-ticket.sh`, `release-ticket.sh`, `drop-merged-label.sh`, `net.sh`, `member-record.mjs`, `review-core.mjs`, `prose-pin.mjs`, `.github/rulesets/*`, `.github/workflows/*`, `frontmatter-allowlist.json`, `SKILL.md` files. Assumptions those files make about the external world are out of scope for this slice's file set, though several rows above cite them where this slice's own comments describe a shared contract (e.g. ledger row grammar, `.fleet/instruments.sha`, omp config semantics).
