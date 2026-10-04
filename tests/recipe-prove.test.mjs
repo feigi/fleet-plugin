@@ -732,6 +732,87 @@ test("an sh that stops starting before the cache is read back is no verdict, nev
   assert.equal(existsSync(cachePath(dir)), false, "a cache the reader never read is rolled back");
 });
 
+// An `sh` first on PATH that runs `act` when it is asked to run the Recipe
+// cache reader, and otherwise execs the real one — so the Install step and
+// Test entrypoint run as before and only the read-back meets `act`.
+function fakeReaderSh(act) {
+  const realSh = execFileSync("sh", ["-c", "command -v sh"], { encoding: "utf8" }).trim();
+  const bin = tempDir("recipe-prove-path-");
+  writeExecStub(join(bin, "sh"), `#!/bin/sh\ncase "$1" in *derive-testcmd.sh) ${act} ;; esac\nexec '${realSh}' "$@"\n`);
+  return `${bin}:${BIN}:${process.env.PATH}`;
+}
+
+// The control: the same `sh` in front of the reader, doing nothing to it, is
+// a proof that holds — so the refusals below are about the kill, not the stub.
+test("an sh stub in front of the Recipe cache reader that lets it run still proves", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, COUNT_PROOF, { env: { PATH: fakeReaderSh(":") } });
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, /^recipe-prove: PROVEN/);
+  assert.equal(existsSync(cachePath(dir)), true);
+});
+
+// The reader's `sh` killed mid-read has no exit status to read, so it reached
+// no verdict: exit 2, and the message names the signal rather than quoting an
+// empty reason.
+for (const signal of ["SIGKILL", "SIGTERM"]) {
+  test(`a reader sh killed by ${signal} is no verdict naming the signal, never NOT PROVEN — and the prior cache is restored`, () => {
+    const { dir } = repo(MAVEN_FILES);
+    mkdirSync(join(dir, ".fleet"));
+    writeFileSync(cachePath(dir), "prior bytes");
+    const path = fakeReaderSh(`kill -${signal.slice(3)} $$`);
+    const r = prove(dir, COUNT_PROOF, { env: { PATH: path } });
+    assert.equal(r.status, 2, r.err);
+    assert.match(r.err, new RegExp(`^recipe-prove: the Recipe cache reader's sh was killed by ${signal}, so it reached no verdict on what was proven$`, "m"));
+    assert.doesNotMatch(r.err, /NOT PROVEN/);
+    assert.equal(readFileSync(cachePath(dir), "utf8"), "prior bytes", "a cache the reader never settled is rolled back");
+    assert.deepEqual(logDirs(r.tmp), [], "no verdict keeps no logs");
+
+    const { dir: fresh } = repo(MAVEN_FILES);
+    const f = prove(fresh, COUNT_PROOF, { env: { PATH: path } });
+    assert.equal(f.status, 2, f.err);
+    assert.equal(existsSync(cachePath(fresh)), false, "no prior cache: the unsettled one is removed, not left");
+  });
+}
+
+// A reader whose output outgrows spawnSync's buffer is killed by it: SIGTERM
+// with an ENOBUFS `error`. The refusal names the signal and that cause, so it
+// does not read as an outside kill.
+test("a reader sh killed by an output overrun is no verdict naming the signal and ENOBUFS, never NOT PROVEN", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const path = fakeReaderSh("head -c 2000000 /dev/zero | tr '\\0' x; exit 0");
+  const r = prove(dir, COUNT_PROOF, { env: { PATH: path } });
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /^recipe-prove: the Recipe cache reader's sh was killed by SIGTERM \(ENOBUFS: its output outgrew the spawn buffer\), so it reached no verdict on what was proven$/m);
+  assert.doesNotMatch(r.err, /NOT PROVEN/);
+  assert.equal(existsSync(cachePath(dir)), false, "a cache the reader never settled is removed");
+});
+
+// A reader that refuses in silence is still the reader's refusal, but the
+// message names its exit status instead of ending on an empty reason. Two
+// codes, neither READER_COULD_NOT_RUN (which is no verdict): one code alone
+// cannot tell the reader's real status from a hardcoded one.
+for (const code of [1, 4]) {
+  test(`a reader that exits ${code} and writes nothing is NOT PROVEN naming its exit status, never an empty reason`, () => {
+    const { dir } = repo(MAVEN_FILES);
+    const r = prove(dir, COUNT_PROOF, { env: { PATH: fakeReaderSh(`exit ${code}`) } });
+    assert.equal(r.status, 1, r.err);
+    assert.match(r.err, new RegExp(`^recipe-prove: NOT PROVEN — the Recipe cache reader refuses what was proven: it wrote nothing and exited with status ${code}$`, "m"));
+    assert.equal(existsSync(cachePath(dir)), false);
+  });
+}
+
+// A reader whose stderr is only whitespace but whose stdout holds a reason did
+// write something: the reason is quoted, never the silent-refusal wording.
+test("a reader that writes whitespace to stderr and a reason to stdout is NOT PROVEN quoting the reason", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, COUNT_PROOF, { env: { PATH: fakeReaderSh("printf '  \\n' >&2; echo 'a real reason'; exit 1") } });
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /^recipe-prove: NOT PROVEN — the Recipe cache reader refuses what was proven: a real reason$/m);
+  assert.doesNotMatch(r.err, /it wrote nothing/);
+  assert.equal(existsSync(cachePath(dir)), false);
+});
+
 // The reader's other external tools, taken away the same way after the proof's
 // last step. The control is the same PATH with the tool left in place, which
 // proves — so the no verdict below is about the missing tool, not a PATH too
