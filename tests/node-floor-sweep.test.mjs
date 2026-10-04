@@ -322,7 +322,7 @@ function nonMjsRelativeImports(source) {
 // own gap) would leave a total count comfortably non-empty. And the shebang
 // half by NAME, not merely non-empty (#1884): a file is in it on its first
 // line alone, a line CI never needs — .github/scripts/install-and-smoke.sh
-// runs all three as `node <path>` (and skills/run-team/SKILL.md runs
+// runs all three as `node <path>` (and plugin/skills/run-team/SKILL.md runs
 // fleet-run that way too, in its cockpit launch line
 // `node ~/.fleet/bin/fleet-run board.mjs serve --open &`), so losing it
 // breaks only direct-exec callers

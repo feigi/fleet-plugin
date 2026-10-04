@@ -562,7 +562,8 @@ const FILES = [
     // for running fleet-run as `node <path>`; that line was unrelated text
     // before the citation was converted. Banned generally, for the reason the
     // run-merge-bot-prose.test.mjs entry gives. The needle is the quoted
-    // launch line itself.
+    // launch line itself; the run-team SKILL.md entry pins that same line on
+    // the cited side.
     path: ["..", "tests", "node-floor-sweep.test.mjs"],
     stale: [/SKILL\.md:\d/],
     live: ["`node ~/.fleet/bin/fleet-run board.mjs serve --open &`"],
@@ -645,9 +646,11 @@ const FILES = [
   // construct left to name here. Removed with the ticket that obsoleted it,
   // not left as a stale form for a future sweep to catch.
   {
+    // The second needle is the cockpit launch line node-floor-sweep.test.mjs
+    // cites by its quoted text, so the line cannot be reworded away unseen.
     path: ["skills", "run-team", "SKILL.md"],
     stale: [/board\.mjs:153/],
-    live: ["encodeProjectDir"],
+    live: ["encodeProjectDir", "`node ~/.fleet/bin/fleet-run board.mjs serve --open &`"],
   },
   // #1725 fixed this ADR's `ci.yml:269` citation by hand, replacing it with
   // the `# Blocking, every PR` comment anchor. Ban the general `\d+` form,
