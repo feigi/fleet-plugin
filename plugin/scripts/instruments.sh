@@ -97,7 +97,7 @@
 set -eu
 
 # Directly below `set -eu`, not below a locale pin: this script has none and is
-# deliberately off the suite's list of locale-pinned scripts. The five siblings
+# deliberately off the suite's list of locale-pinned scripts. The siblings
 # that DO carry a pin put this line under it instead, because the suite admits
 # only comments, blanks and `set -[eux]+` above the pin in those scripts.
 # Here the only constraint left is the real one: above the first git call.

@@ -321,10 +321,10 @@ net_stalled() {
 # call — its own `sleep` is a child, and an orphaned sleeper does not sit
 # harmlessly: it wakes at the end of its budget and fires net_kill_tree at a pid
 # this shell no longer owns, which after a budget's worth of pid churn can be an
-# unrelated process — and, since net_kill_tree walks the subtree, an unrelated
-# SUBTREE. It cannot leak onto
-# the caller's stderr whatever else it does, because the `>/dev/null 2>&1` below
-# is on the sleeper itself and both its descriptors are already closed.
+# unrelated process — and, because the kill walks every descendant, that
+# process's whole SUBTREE. It cannot leak onto the caller's stderr whatever else
+# it does, because the `>/dev/null 2>&1` below is on the sleeper itself and both
+# its descriptors are already closed.
 #
 # `wait` is captured through an explicit `|| net_status=$?`, and `set -e` is
 # why: a bare `wait` on a killed child aborts at that line, which is after the
