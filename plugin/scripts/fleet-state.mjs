@@ -284,9 +284,9 @@ export function writeState(path, name, prev, patch) {
 // reading two "stale" verdicts on one page should not have to learn two rules.
 export const BEAT_GRACE = 2;
 
-// fleet-heartbeat.mjs's own --ceiling default (1200s = 20 minutes), mirrored
-// here rather than the other way round: this module is the one both scripts
-// and both READERS already import, and a magic "1200" typed twice is exactly
+// fleet-heartbeat.mjs's --ceiling default (1200s = 20 minutes), defined once
+// here and imported there: every script that reads or writes the heartbeat
+// file already imports this module, and a magic "1200" typed twice is exactly
 // the drift the module header's "never a copy of it" rule exists to close.
 // It doubles as the freshness window for `ticked` below: fleet-tick's own
 // invocations carry no promised interval, so they are judged against the
