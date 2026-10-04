@@ -2,7 +2,7 @@
 
 Slice: `plugin/scripts/{candidates,shortlist,ci-state,merge-gate,staleness,pr-overlap,
 diff-stats,fleet-tick,fleet-state,fleet-heartbeat,repo-root,git-env,tier-check,
-tier-roles,arg,slow-transport,lift}.mjs`
+tier-roles,arg,slow-transport}.mjs`
 
 ## GitHub tracker — label names and semantics
 | # | Assumption | Evidence (file:line, quoted fragment) | Breaks if false |
@@ -66,7 +66,7 @@ tier-roles,arg,slow-transport,lift}.mjs`
 | 41 | omp lets no single foreground command block for the full 20-minute heartbeat ceiling: it auto-backgrounds at 60s (`bash.autoBackground`) with a ~300s command deadline | `fleet-heartbeat.mjs:63-66` "Nothing lets one command block for twenty minutes. Measured: omp auto-backgrounds any foreground command at 60s (`bash.autoBackground`), and its command deadline defaults to 300s" | A held command that actually could block 20 minutes would make `heldThisCall`'s multi-hold design unnecessary — or the assumption's violation would silently truncate a hold with no re-issue |
 | 42 | `Atomics.wait` on a `SharedArrayBuffer` reliably blocks the calling thread for the requested milliseconds without yielding the event loop (used for both `fleet-heartbeat.mjs`'s hold and `arg.mjs`'s 1ms EAGAIN backoff) | `fleet-heartbeat.mjs:128-134` `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000);`; `arg.mjs:106-109,148` `const IDLE = new Int32Array(new SharedArrayBuffer(4)); ... Atomics.wait(IDLE, 0, 0, 1);` | A JS runtime without synchronous `Atomics.wait` on the main thread (e.g. some sandboxes) breaks both the heartbeat hold and the write-retry backoff |
 | 43 | A single `writeSync(fd, buf)` to stdout/stderr can legitimately short-write (return < buf.length with no throw) and/or throw `EAGAIN` when the reader is a pipe whose buffer is full, and retrying is the correct response, bounded at 200 retries with a 1ms wait each | `arg.mjs:112-129,138-152` "A single writeSync fails two ways against a pipe whose reader has left it full... resumes from writeSync's own return value... EAGAIN retry is CAPPED (#889)" | On a platform/Node version where writeSync never short-writes or throws differently, the retry loop is dead code (harmless) or, if the failure mode differs, output could still be silently lost |
-| 44 | Node's own `RegExp.escape` first shipped in v24.0.0, above the floor this plugin's `package.json` declares (#1932), so `lift.mjs` hand-rolls its own escaper instead | `lift.mjs:3-7` "not `RegExp.escape`, which Node first shipped in v24.0.0, above the floor package.json declares (#1932)" | If the Node floor were raised to ≥24, the hand-rolled `escapeRe` would be redundant but not wrong |
+| 44 | Node's own `RegExp.escape` first shipped in v24.0.0, above the floor this plugin's `package.json` declares (#1932), so `node-floor-sweep.test.mjs` hand-rolls its own escaper instead (this row first cited `lift.mjs`, deleted in ed9f2967) | `node-floor-sweep.test.mjs:101-104` "not `RegExp.escape`, which Node first shipped in v24.0.0 (V8 13.6), above the floor this file polices." `const escapeRe = (s) => s.replace(/[.*+?^${}()\|[\]\\]/g, "\\$&");` | If the Node floor were raised to ≥24, the hand-rolled `escapeRe` would be redundant but not wrong |
 | 45 | macOS refuses to exec a shebang line ≥512 bytes (`ENOEXEC`); Linux silently truncates a shebang read to its first 255 bytes — used to size the "definitely not a shebang" cutoff at 4096 bytes | `repo-root.mjs:464-473` "measured, macOS refuses to exec a first line of 512 bytes or more (ENOEXEC), and Linux reads its first 255 and cuts the rest" | A kernel/OS with different shebang-length limits could make the 4096-byte cap wrong in either direction |
 | 46 | `#!/usr/bin/env node` and variants (`env -S`, `env -u`, `env -C`, assignment prefixes) are the only node-invoking shebang shapes that matter; only `-u`/`--unset` and `-C`/`--chdir` among `env`'s flags consume a following argument | `repo-root.mjs:444-458` `const NODE_SHEBANG = /^#!\s*(?:\S*\/)?(?:env(?:\s+...)?...)?node(?:\s\|$)/;` | A node-invoking shebang using another argument-consuming `env` flag would be mis-parsed as naming a different interpreter (or vice versa) |
 | 47 | A tracked file's first line, read as UTF-8, never gets cut mid multi-byte character within `SHEBANG_MAX_BYTES` in a way this code doesn't defend — actually explicitly grown/re-read to protect against exactly that | `repo-root.mjs:496-519` "A newline byte never falls inside a multi-byte UTF-8 character" (buffer-growth read loop) | A shebang test could false-negative on a boundary-straddling multi-byte character if the growth logic were wrong |
@@ -78,7 +78,7 @@ tier-roles,arg,slow-transport,lift}.mjs`
 | 49 | This plugin's own manifest lives at a fixed path relative to `scripts/`: `../.claude-plugin/plugin.json`, holding a `name` string field | `repo-root.mjs:127-140,155-172` `join(dirname(fileURLToPath(import.meta.url)), "..", ".claude-plugin", "plugin.json")`; `ownPluginName()` reads `.name` | `repoRoot()`'s self-identity check can't locate/parse the manifest, and every caller depending on it throws |
 | 50 | Identifying "this is fleet-plugin's own checkout" requires the running script file AND its manifest to both be tracked (`git ls-files --error-unmatch`) by the resolved root's OWN git — containment or name-equality alone is insufficient (an installed copy that sits inside an ambient repo is untracked there; the measured pre-cutover shape was the harness's own plugin cache inside the operator's dotfiles checkout) | `repo-root.mjs` `isTrackedBy`/`assertOwnRoot` "pre-cutover, self was under the harness's own plugin cache … (the installed copy sat inside the operator's dotfiles checkout)" | An installed plugin copy could be mistaken for (or excluded from) the real checkout depending on which check is wrong |
 | 51 | Every script this repo ships that node executes directly is either a `*.mjs` file, or one of three named extensionless entrypoints (`fleet-run`, `fleet-bootstrap`, `fleet-provenance`) carrying a node shebang; `*.test.mjs` files are never shipped | `repo-root.mjs:526-541` "the extensionless entrypoints `fleet-run`, `fleet-bootstrap` and `fleet-provenance` (#1855)... Test files — `*.test.mjs`... are not shipped" | A new extensionless entrypoint or a shipped `*.test.mjs` would be mis-swept |
-| 52 | `plugin/workflows/*.js` files are ESM run only inside a harness's Workflow sandbox, which forbids filesystem/Node.js APIs — so `review-pr.js` cannot be `import`ed and must instead be text-lifted (regex-extracted function/const declarations) by `lift.mjs`/`liftConst.mjs` | `lift.mjs:9-23` "review-pr.js runs a top-level `await pipeline(...)` and cannot be imported — `workflows/` scripts run inside the Workflow sandbox, which forbids the filesystem/Node.js APIs an `import` would need to resolve" | If the sandbox restriction were lifted or changed, the entire text-lift testing convention would be unnecessary scaffolding (or, if violated the other way, silently test stale/dead code per the hoisting-ceiling caveat) |
+| 52 | **Retired (ADR 0014):** described `plugin/workflows/*.js` as Workflow-sandbox-only ESM that `review-pr.js`'s tests had to text-lift through `lift.mjs` — moot now that `plugin/workflows/` holds no files at all and `lift.mjs` is deleted (ed9f2967). | — (cited the deleted `plugin/scripts/lift.mjs`) | — |
 | 53 | omp harness agent definitions live under a directory the CLI resolves as `<SCRIPT_DIR>/../agents`, each file named `*.agent.md` with a `---`-delimited frontmatter block containing a `model:` line — the one frontmatter key `parseFrontmatter` reads, its value the first non-blank text after `model:`, trimmed | `tier-roles.mjs:220` `readdirSync(agentsDir).filter((f) => f.endsWith(".agent.md"))`; `tier-roles.mjs:83-85` `parseFrontmatter`'s `model:` regex on `String(agentFileText ?? "").split("---")[1]`; `tier-roles.mjs:238-239` `if (!fm.role \|\| !fm.level)` … `is not @<role>:<level>` | A definition not named `*.agent.md` is silently skipped; one with no `model:` line between its first two `---` substrings (a `---` inside a value ahead of `model:` ends the block early) reads as model `null` and is reported as not `@<role>:<level>` |
 | 54 | omp's `modelRoles.<role>` values are always provider-prefixed (`anthropic/claude-haiku-4-5:auto`), while a plain `modelRoles` config entry from a human-edited file may not be, requiring separate normalisation before comparison | `tier-roles.mjs:119-126` `modelsEqual` "Tolerates a role value written without its provider prefix — omp's `resolvedModelIdentity` is always provider-prefixed" | An unprefixed model coming from omp itself (contrary to this assumption) would fail comparison silently |
 | 55 | omp session directories hold each member's transcript as a flat file named `<session>/<member>.jsonl`, one AgentId per path segment, matched exactly (not searched) | `tier-check.mjs:255-262` "session directories hold each member's transcript as a FLAT file named `<session>/<member>.jsonl`... The path IS that AgentId" | A nested/renamed session-transcript layout on omp breaks `resolveViaSession`, and members silently fall back to "no record" |
@@ -117,21 +117,21 @@ tier-roles,arg,slow-transport,lift}.mjs`
 Read in full or by targeted range (all citations above are grounded in ranges actually read):
 
 - `plugin/scripts/candidates.mjs` — read in full (1–674)
-- `plugin/scripts/shortlist.mjs` — read in full (1–355)
-- `plugin/scripts/ci-state.mjs` — read in full (1–767)
-- `plugin/scripts/merge-gate.mjs` — read in full (1–261)
-- `plugin/scripts/staleness.mjs` — read in full (1–415)
-- `plugin/scripts/pr-overlap.mjs` — read in full (1–419)
-- `plugin/scripts/diff-stats.mjs` — read in full (1–233)
-- `plugin/scripts/fleet-tick.mjs` — read in full (1–672)
-- `plugin/scripts/fleet-state.mjs` — read in full (1–400)
-- `plugin/scripts/fleet-heartbeat.mjs` — read in full (1–276)
-- `plugin/scripts/repo-root.mjs` — read in full (1–541)
+- `plugin/scripts/shortlist.mjs` — read in full (1–358)
+- `plugin/scripts/ci-state.mjs` — read in full (1–963)
+- `plugin/scripts/merge-gate.mjs` — read in full (1–262)
+- `plugin/scripts/staleness.mjs` — read in full (1–414)
+- `plugin/scripts/pr-overlap.mjs` — read in full (1–417)
+- `plugin/scripts/diff-stats.mjs` — read in full (1–231)
+- `plugin/scripts/fleet-tick.mjs` — read in full (1–1238)
+- `plugin/scripts/fleet-state.mjs` — read in full (1–422)
+- `plugin/scripts/fleet-heartbeat.mjs` — read in full (1–272)
+- `plugin/scripts/repo-root.mjs` — read in full (1–544)
 - `plugin/scripts/git-env.mjs` — read in full (1–124)
-- `plugin/scripts/tier-check.mjs` — read in full (1–415)
+- `plugin/scripts/tier-check.mjs` — read in full (1–535)
 - `plugin/scripts/tier-roles.mjs` — read in full (1–370)
-- `plugin/scripts/arg.mjs` — read in full (1–511)
-- `plugin/scripts/slow-transport.mjs` — read in full (1–69)
-- `plugin/scripts/lift.mjs` — read in full (1–75)
+- `plugin/scripts/arg.mjs` — read in full (1–600)
+- `plugin/scripts/slow-transport.mjs` — read in full (1–72)
+- `plugin/scripts/node-floor-sweep.test.mjs` — targeted range (101–104), for row 44
 
-Not read (out of slice, referenced only by name in comments as callers/siblings): `ledger.mjs`, `ledger-grammar.mjs`, `board.mjs`, `instruments.sh`, `inflight.sh`, `claim-ticket.sh`, `release-ticket.sh`, `drop-merged-label.sh`, `net.sh`, `member-record.mjs`, `review-pr.js`/`review-core.mjs`, `prose-pin.mjs`, `node-floor-sweep.test.mjs`, `.github/rulesets/*`, `.github/workflows/*`, `frontmatter-allowlist.json`, `SKILL.md` files. Assumptions those files make about the external world are out of scope for this slice's file set, though several rows above cite them where this slice's own comments describe a shared contract (e.g. ledger row grammar, `.fleet/instruments.sha`, omp config semantics).
+Not read (out of slice, referenced only by name in comments as callers/siblings): `ledger.mjs`, `ledger-grammar.mjs`, `board.mjs`, `instruments.sh`, `inflight.sh`, `claim-ticket.sh`, `release-ticket.sh`, `drop-merged-label.sh`, `net.sh`, `member-record.mjs`, `review-core.mjs`, `prose-pin.mjs`, `.github/rulesets/*`, `.github/workflows/*`, `frontmatter-allowlist.json`, `SKILL.md` files. Assumptions those files make about the external world are out of scope for this slice's file set, though several rows above cite them where this slice's own comments describe a shared contract (e.g. ledger row grammar, `.fleet/instruments.sha`, omp config semantics).
