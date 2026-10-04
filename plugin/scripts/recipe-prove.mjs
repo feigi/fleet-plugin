@@ -163,15 +163,20 @@ function parseArgs(argv) {
 // its own refusal. But it has no exit status and mostly no stderr, so `err`
 // names the kill, after whatever git did write — a caller quoting `err` would
 // otherwise quote an empty reason.
+//
+// A git that ignores the buffer kill can still exit 0, with no signal, after
+// its output was cut off: any `error` on a git that ran fails it, whatever its
+// exit status, and `err` names that error without claiming a kill.
 function git(args, cwd) {
   const r = spawnSync("git", args, { cwd, env: ENV, encoding: "utf8" });
   if (r.error && !r.pid) throw cannot(`could not start git: ${r.error.message}`);
   const err = (r.stderr ?? "").trim();
-  const killed = r.signal && `git was killed by ${r.signal}${killCause(r.error)}`;
-  return { ok: r.status === 0, out: (r.stdout ?? "").replace(/\n$/, ""), err: [err, killed].filter(Boolean).join("; ") };
+  const failed = r.signal ? `git was killed by ${r.signal}` : r.error && `git exited ${r.status} after an error`;
+  const note = failed && `${failed}${errorCause(r.error)}`;
+  return { ok: r.status === 0 && !r.error, out: (r.stdout ?? "").replace(/\n$/, ""), err: [err, note].filter(Boolean).join("; ") };
 }
 
-function killCause(error) {
+function errorCause(error) {
   if (!error) return "";
   if (error.code === "ENOBUFS") return " (ENOBUFS: its output outgrew the spawn buffer)";
   return ` (${error.code ?? error.message})`;
