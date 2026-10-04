@@ -595,6 +595,32 @@ test("a git that exits non-zero is refused with exactly its stderr, naming no si
   assert.doesNotMatch(r.err, /killed/);
 });
 
+// A `status` stub that ignores SIGTERM — and so does every command it starts —
+// writes `?? ` and then `bytes` x's, and exits 0.
+const trapTermStatus = (bytes) => `trap '' TERM; printf '?? '; head -c ${bytes} /dev/zero | tr '\\0' x; exit 0`;
+
+// Past spawnSync's default 1 MiB buffer the kill that ENOBUFS sends is
+// ignored: git exits 0 with no signal, but its output was cut off. That is a
+// failed git, refused with a reason naming the overrun — read as ok, the
+// truncated status would pass for a dirty tree.
+test("a git that exits 0 after outgrowing the spawn buffer is refused, naming the overrun", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, COUNT_PROOF, { env: { PATH: fakeGit("status*", trapTermStatus(2_000_000)) } });
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /NOT PROVEN — could not read the tree state in the throwaway worktree: git exited 0 after an error \(ENOBUFS: its output outgrew the spawn buffer\); install output: /);
+  assert.doesNotMatch(r.err, /killed|could not start git/);
+});
+
+// The control: the same stub writing 1000 bytes is a git that succeeded, its
+// output read whole — here, one untracked path the Install step left.
+test("the same SIGTERM-trapping git with small output is ok, its output intact", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const r = prove(dir, COUNT_PROOF, { env: { PATH: fakeGit("status*", trapTermStatus(997)) } });
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /NOT PROVEN — the Install step changed the tree \(first: \?\? x{997}\); /);
+  assert.doesNotMatch(r.err, /ENOBUFS|could not read the tree state/);
+});
+
 // A killed `worktree remove` is a failed one: cleanup falls back to the plain
 // delete, and the proof's own NOT PROVEN — which keeps its log directory,
 // the throwaway worktree's parent — stands.
