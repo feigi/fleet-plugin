@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-// The Shortlist (ADR 0013 §1, §3; docs/specs/2026-09-24-slot-based-fleet-loop-design.md
-// § 1): the ordered list of tickets the controller may admit, built from cheap
+// The Shortlist: the ordered list of tickets the controller may admit, built from cheap
 // filters only. No ticket body is read here — a Pull reads one ticket in full
-// at the moment it admits it (ADR 0013 §2); this file decides which tickets are
+// at the moment it admits it; this file decides which tickets are
 // worth that read, and in what order.
 //
 // The filters, in the order they run:
@@ -26,7 +25,7 @@
 //      non-zero exit is an in-flight check that could not answer, which is
 //      never "free". Both drop the ticket.
 //
-// ADR 0013 lists step 3 last. Steps 2-4 only intersect, so their order changes
+// Steps 2-4 only intersect, so their order changes
 // what they cost and nothing else: the ledger is a local read and a premise
 // one `gh` call, while inflight.sh is three network round-trips (measured at
 // 2.6 s a ticket against this repository, 23 live candidates), so it runs on
@@ -43,8 +42,7 @@
 // could not be resolved, a file that could not be written. An empty shortlist
 // written in any of those cases would read as "no work". Exit 0 is the file
 // written, an empty shortlist included — the empty queue is an answer. Never
-// exit 1: this script has no verdict to report (docs/specs/2026-07-23-fleet-plugin-design.md
-// § Script surface), and 1 is also Node's own code for a crash.
+// exit 1: this script has no verdict to report, and 1 is also Node's own code for a crash.
 //
 // The file is `<workspace>/.fleet/shortlist.json`, the workspace resolved from
 // `git rev-parse --git-common-dir` through git-env.mjs, exactly as ledger.mjs's
@@ -58,7 +56,7 @@
 //
 // The ledger is read through `ledger.mjs read`, never parsed here, so the
 // ledger keeps one parser. candidates.mjs's stderr passes straight through —
-// the per-candidate lines phase 0 always read, #1032's dependency-heading
+// the per-candidate lines phase 0 always read, the dependency-heading
 // notice among them. inflight.sh's and gh's are captured and summarised, one
 // line per dropped ticket.
 
@@ -345,7 +343,7 @@ async function main() {
   }
   log(`${NAME}: ${payload.shortlist.length} of ${payload.scanned} scanned → ${file}`);
   // Printed and left to drain, never followed by process.exit(): stdout on a
-  // pipe is async, and an exit would cut the payload mid-JSON (#246).
+  // pipe is async, and an exit would cut the payload mid-JSON.
   console.log(JSON.stringify({ file, ...payload }));
 }
 
