@@ -164,3 +164,40 @@ have no before-and-after comparison.
 **Revert:** reopen #2504; on all seven, restore `needs-triage` and drop the
 category, state and `onhold` labels this sweep added; delete this sweep's
 triage comments on each; close PR #2585 unmerged.
+
+## 2026-10-04 sweep
+
+**As-of 2026-10-04**, probed against `origin/main`@`f3c5eb4e`. A `/triage`
+pass over every open `needs-triage` issue (7), run with #593's procedure
+(probe `origin/main`, never the ticket's own cited line numbers). Each ticket
+was probed by its own agent, sized to the ticket: the four cite or wording
+tickets by a read-only scout, #2714, #2725 and #2732 by a full worker. A first
+round of the scouts read a stale picture of PR #2585 as unmerged; every
+verdict below was re-checked against `origin/main` after that.
+
+**Before:** 95 open issues; 7 `needs-triage` (#2695, #2696, #2697, #2709,
+#2714, #2725, #2732); every one carries `Deferred from PR #<n>` (#2695, #2696,
+#2697 from PR #2585; #2709 from PR #2700; #2714 from PR #2707; #2725 from
+PR #2710; #2732 from PR #2713).
+
+**Probed:**
+
+| # | Central claim | `origin/main` verdict | Outcome |
+|---|---|---|---|
+| #2695 | The `closed-ticket-tier-unchecked-lift` out-of-scope doc says the tier-check run "always writes a verdict" | Live: `tier-check.mjs` writes `tier-unverifiable=` only for a member settled `killed` or `released` with an existing session directory holding no transcript. A live member, one settled `PR#M`, `bailed` or `tier-mismatch`, or a bad `session` exits 2 and writes nothing | live-confirmed → `enhancement` + `ready-for-agent` (brief: reword the doc to the script's exit-status header; one PR with #2697) |
+| #2696 | The #2589 row of this log records `ready-for-agent`; the tracker now says `ready-for-human` | Row accurate at its as-of time: `ready-for-agent` applied 23:14:43Z, swapped to `ready-for-human` by the maintainer at 23:24:11Z. This log is append-only | refuted → `bug` + `wontfix`, closed; #2589 deliberately not relabelled |
+| #2697 | The same doc attributes "could load clean and silently run at the wrong tier" to ADR 0005 layer 2 | Live: the phrase is in the ADR's Context section; layer 2 is the dispatch-time readback | live-confirmed → `enhancement` + `ready-for-agent` (brief: fix the attribution in the out-of-scope doc only; one PR with #2695) |
+| #2709 | The slot-based-loop spec's `member-record.mjs:125` cite no longer points where it did | The spec header pins its line numbers to `6f2c654` and says they drift; the cite is correct at that commit | by design → `enhancement` + `ready-for-human`, decided with #2732's records-vs-maintained-docs question |
+| #2714 | A Recipe cache reader's `sh` killed by a signal reads as NOT PROVEN with an empty reason | Reproduced with a self-killing fake `sh` on `PATH`: exit 1, empty reason, cache rolled back. Distinct site from the `git()` signal case already briefed | live-confirmed → `bug` + `ready-for-agent` (brief: exit 2 naming the signal) |
+| #2725 | `stoppingRule` charges one PR's ruling to every cell a ticket was Pulled at | Reproduced with a probe: both cells charged 1/1; a later policy-cell Pull is never judged. The claim that rulings carry no cell is wrong for a ruling written from 2026-09-29: `tier-outcomes.mjs append` fills `tier` with the cell token from then on. At `f3c5eb4e` no row in `tier-outcomes.tsv` is dated that late, so every existing row's `tier` holds opus, sonnet or blank | live-confirmed → `bug` + `ready-for-human` (remedy needs a router-spec amendment) |
+| #2732 | No test resolves `prose.md`'s `path:N` cites | Confirmed; no guard exists and no out-of-scope record rejects one. The cite shapes make a naive checker red on day one | live-confirmed premise → `enhancement` + `ready-for-human` (remedy, scope and records-vs-maintained-docs open) |
+
+**After:** 94 open issues; 52 carrying `Deferred from PR #<n>`; 0
+`needs-triage` (`gh issue list --state open --label needs-triage --limit 500`
+returns `[]`). Open-count reconciliation: 95 before − 1 closed by this sweep
+(#2696) = 94. The deferred count was not measured before the sweep, so it has
+no before-and-after comparison.
+
+**Revert:** reopen #2696; on all seven, restore `needs-triage` and drop the
+category and state labels this sweep added; delete this sweep's triage
+comments on each.
