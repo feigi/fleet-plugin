@@ -96,7 +96,7 @@ test("review-and-fix's git archive bullet runs the Install step in the copy, rea
 });
 
 test("run-team: a tree with no runner gets the Recipe's Test entrypoint only when it brings up no shared stack", () => {
-  const p = paragraph(RUN_TEAM, "**A reused worktree may lack the runner** — no longer here", "run-team/SKILL.md reused-worktree runner paragraph");
+  const p = paragraph(RUN_TEAM, "**A reused worktree may lack the runner.**", "run-team/SKILL.md reused-worktree runner paragraph");
   assert.match(p, phrase("the Recipe's Test entrypoint (`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test` prints it) only when it brings up no shared stack to collide on, else that repo's own stack-free command."));
 });
 
