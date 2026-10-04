@@ -376,7 +376,7 @@ const REGION_BLOCKS = [
     golden: [
       "**The `eval` kernel is shared with every sibling member and with the",
       "controller that dispatched you — namespace every binding you make in it, and",
-      "never hand it a relative path.** Measured on #1447, live, three ways in one",
+      "never hand it a relative path.** Measured live, three ways in one",
       "run: two sibling implementers dispatched in the same batch, and the",
       "controller above them, reported the SAME Python kernel pid and the same",
       "runner file, and each could read the others' top-level variables — a bare",
@@ -440,7 +440,7 @@ const REGION_BLOCKS = [
       "never mentions — the last command of a script sets its exit status, a",
       "relocated line changes what `set -e` covers, a hoisted guard changes what runs",
       "first. **Ask which of the ticket's own acceptance criteria your restructuring",
-      "could newly violate, and test that path.** Measured: #265 required \"no path in",
+      "could newly violate, and test that path.** Measured: a ticket required \"no path in",
       "the script exits 1\", and the fix for it moved a guard to the file's end,",
       "regressing the default dry run from exit 0 to exit 1 — the ticket's exact",
       "defect, relocated onto the path nobody tested. The implementer had enumerated",

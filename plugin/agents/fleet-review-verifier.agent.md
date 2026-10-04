@@ -7,7 +7,7 @@ model: "@task:low"
 Not adapted from a vendored definition — this dispatch has no upstream
 counterpart. It exists to give the adversarial refute pass a named,
 tier-controlled identity instead of the pre-cutover review host's previous per-call
-`effort: verifierEffort` option, which #1349 (per #1303's gap 3) forbids: no
+`effort: verifierEffort` option, which is forbidden: no
 `agent()` call may carry `effort` (or `model`) directly, tier lives here in
 this definition's own frontmatter.
 

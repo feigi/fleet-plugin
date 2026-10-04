@@ -2978,8 +2978,8 @@ const LINKAGE_CLAUSE = "a worktree git does not answer for";
 const REF_CLAUSE = "a ref that does not resolve";
 const PROBE_CLAUSE = "a probe that could not run";
 const ESCAPE_CLAUSE = "a conflicting-path or at-risk array that could not be escaped (#119)";
-const BASE_REF_SHAPE_CLAUSE = "`BASE_REF` is not spelled `origin/<branch>` or `refs/remotes/<path>` (#1565)";
-const AUDITED_BRANCH_CLAUSE = "`BASE_REF` names the audited branch (#1565)";
+const BASE_REF_SHAPE_CLAUSE = "`BASE_REF` is not spelled `origin/<branch>` or `refs/remotes/<path>`";
+const AUDITED_BRANCH_CLAUSE = "`BASE_REF` names the audited branch";
 
 /**
  * Every clause representing a BASE_REF refusal, as a closed list.

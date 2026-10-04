@@ -42,7 +42,7 @@
 // stayed green.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { between, phrase } from "./support/prose-pin.mjs";
 
@@ -50,6 +50,8 @@ const REPO = join(import.meta.dirname, "..", "plugin");
 const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
 const REVIEW_AND_FIX = read("commands", "review-and-fix.md");
 const ROOT = join(import.meta.dirname, "..");
+// Step 5 ships and names no ADR, so the ADR is read by its own path here.
+const ADR_PATH = join(ROOT, "docs", "adr", "0002-filing-second-bar-worth-a-claim.md");
 
 const flat = (s) => s.replace(/\s+/g, " ");
 
@@ -94,14 +96,8 @@ test("step 5 keys the bar on the finding's claim, never its review band", () => 
   );
 });
 
-test("step 5 points at an ADR that exists, and the ADR keeps its pre-chosen guard", () => {
-  // Read the path out of the prose rather than restating it, so a rename that
-  // updates only one side reds.
-  const [, adrPath] = step5().match(/\(`(docs\/adr\/0002[^`]+)`\)/) ?? [];
-  assert.ok(adrPath, "step 5 no longer cites an ADR 0002 path under `docs/adr/`");
-  assert.ok(existsSync(join(ROOT, adrPath)), `step 5 points at \`${adrPath}\`, which does not exist`);
-
-  const adr = flat(readFileSync(join(ROOT, adrPath), "utf8"));
+test("ADR 0002 keeps its pre-chosen guard", () => {
+  const adr = flat(readFileSync(ADR_PATH, "utf8"));
   // Floor and both triggers as one span, 0001's precedent: chosen before any
   // data, and separate pins would let any one be retuned alone.
   assert.match(
@@ -138,9 +134,7 @@ test("the applied promotion path is stated in step 5 and read by the ADR's guard
   // contains it.
   const [, marker] = s.match(/comment on that record issue, opening `([^`]+)`/) ?? [];
   assert.ok(marker, "step 5 no longer gives the applied-promotion comment a fixed opening, so the guard has no mark to count");
-  const [, adrPath] = s.match(/\(`(docs\/adr\/0002[^`]+)`\)/) ?? [];
-  assert.ok(adrPath, "step 5 no longer cites an ADR 0002 path under `docs/adr/`");
-  const adr = flat(readFileSync(join(ROOT, adrPath), "utf8"));
+  const adr = flat(readFileSync(ADR_PATH, "utf8"));
   // Scoped to the Trigger A bullet, not the whole flattened ADR — an
   // unscoped search matches whichever `X` comment on it` substring appears
   // FIRST in the file, so narrowing Trigger A's own marker while an earlier

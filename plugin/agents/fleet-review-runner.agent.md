@@ -26,8 +26,8 @@ This agent's `spawns:` frontmatter above names the 9 agent types
 the 6 specialist dimensions, `fleet-review-verifier`) — an allowlist, not
 `"*"`, so a future dimension added to `review-core.mjs` without a matching
 update here fails loud (`Cannot spawn '<name>'. Allowed: ...`) instead of
-silently. Before #2102 this field was missing entirely and `tools` was never
-set either, so
+silently. Before this field existed, with `tools` never
+set either,
 the backward-compat `spawns` default (`omp://task-agent-discovery.md:38-39`
 — missing `spawns` defaults to `*` only when `tools` includes `task`) never
 fired: every spawn from this agent's cell was refused, 110+ times in one

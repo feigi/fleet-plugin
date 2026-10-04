@@ -7,7 +7,7 @@ model: "@task:high"
 <!-- Prompt adapted from Anthropic's vendored `silent-failure-hunter`
      agent
      (marketplace plugin `pr-review-toolkit`, agent file `silent-failure-hunter.md`),
-     which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
+     which this definition replaces.
      The vendor's frontmatter was `model: inherit` with no per-call override
      either, so it ran at whatever the session inherited — a value this port
      cannot reproduce (there is no "session model" a named definition can
