@@ -421,6 +421,55 @@ test("a cat that runs and fails on the byte-count file is exit 1, carrying its r
   assert.doesNotMatch(r.err, /could not be started/);
 });
 
+// node's refusal of the cache is read back WITHOUT cat: a cat that cannot be
+// started must not turn a cache node really refuses into a refusal with an
+// empty reason. The cache is refused either way (exit 1), and node's own reason
+// survives, with no shell complaint about cat.
+const REFUSED = /is unusable: `installClean` is not true — the Install step was never proven to leave the tree clean — run the Recipe derivation step/;
+for (const [what, make] of [
+  ["is missing", (bin) => bin],
+  ["exits 127", (bin) => (writeExecStub(join(bin, "cat"), "#!/bin/sh\nexit 127\n"), bin)],
+  ["exits 126", (bin) => (writeExecStub(join(bin, "cat"), "#!/bin/sh\nexit 126\n"), bin)],
+]) {
+  test(`a cat that ${what} still lets a refused cache carry node's reason, exit 1`, () => {
+    const { dir, head } = repo();
+    cache(dir, recipe(head, { installClean: false }));
+    const r = derive(dir, "test", { ...process.env, PATH: make(shimPath({ node: true, omit: "cat" })) });
+    assert.equal(r.status, 1, r.err);
+    assert.equal(r.out, "");
+    assert.match(r.err, REFUSED);
+    assert.doesNotMatch(r.err, /command not found|could not be started/);
+  });
+}
+
+// The control: the same stripped PATH with every tool present, same cache.
+test("the same refused cache with cat present carries the same reason", () => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head, { installClean: false }));
+  const r = derive(dir, "test", { ...process.env, PATH: shimPath({ node: true }) });
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, REFUSED);
+});
+
+// What the read-back must still do as cat did: keep every line of a multi-line
+// reason, keep a last line that has no newline, and drop trailing newlines.
+for (const [what, body, reason] of [
+  ["keeps every line", "echo 'first line' >&2; echo 'second line' >&2; exit 2", /is unusable: first line\nsecond line — run the Recipe/],
+  ["keeps a last line without a newline", "printf 'no newline' >&2; exit 2", /is unusable: no newline — run the Recipe/],
+  ["drops trailing newlines", "printf 'reason\\n\\n\\n' >&2; exit 2", /is unusable: reason — run the Recipe/],
+  ["keeps a backslash and leading space as written", "printf '  a\\\\nb\\n' >&2; exit 2", /is unusable:   a\\nb — run the Recipe/],
+]) {
+  test(`node's reason ${what}`, () => {
+    const { dir, head } = repo();
+    cache(dir, recipe(head, { test: "true" }));
+    const bin = shimPath({ node: false, omit: "cat" });
+    writeExecStub(join(bin, "node"), `#!/bin/sh\nif [ "$1" = -e ] && [ "$2" = 0 ]; then exit 0; fi\n${body}\n`);
+    const r = derive(dir, "test", { ...process.env, PATH: bin });
+    assert.equal(r.status, 1, r.err);
+    assert.match(r.err, reason);
+  });
+}
+
 // `rm` is the reader's cleanup only, so it must not decide the outcome: with
 // it gone a good cache still reads cleanly — status 0 and nothing on stderr,
 // the success-path invariant claim-ticket.sh relies on — and a refused cache

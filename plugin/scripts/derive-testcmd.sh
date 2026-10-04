@@ -191,7 +191,15 @@ process.stdout.write(open + value + close);
 if [ "$rc" -ge 126 ]; then
   unrunnable "node did not finish reading the Recipe cache (exit $rc), so its usability is unknown"
 fi
-[ "$rc" -eq 0 ] || die "the Recipe cache at $cache is unusable: $(cat "$errf") — $derive"
+# The reason is read back with the shell's own `read`, never `cat`: a cat that
+# cannot be started would otherwise leave a cache node really refused with an
+# empty reason and a stray "cat: command not found" line. Like `$(cat ...)`, the
+# substitution drops trailing newlines; `|| [ -n "$line" ]` keeps a last line
+# that has none.
+if [ "$rc" -ne 0 ]; then
+  reason=$(while IFS= read -r line || [ -n "$line" ]; do printf '%s\n' "$line"; done <"$errf")
+  die "the Recipe cache at $cache is unusable: $reason — $derive"
+fi
 carriedmsg="node's stdout carried more than the framed Recipe value — expected exactly the value between '$open' and '$close', got '$framed'. The cache at $cache passed validation; the extra output comes from how node is launched here (a version-manager or proxy shim, a preload), and is refused rather than cut out of the command"
 case $framed in
   "$open"*"$close") ;;
