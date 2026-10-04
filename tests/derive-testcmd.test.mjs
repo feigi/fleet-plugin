@@ -131,12 +131,13 @@ test("a non-repository directory refuses cleanly", () => {
   assert.match(gone.err, /^derive-testcmd: .*missing is not a git repository$/m);
 });
 
+const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+
 // A `git` first on PATH that runs `act` when its arguments end in `call`, and
 // otherwise execs the real one — so `git --version` and every other call pass.
 function fakeGit(call, act) {
-  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
   const bin = tempDir("derive-git-");
-  writeExecStub(join(bin, "git"), `#!/bin/sh\ncase "$*" in *"${call}") ${act} ;; esac\nexec '${realGit}' "$@"\n`);
+  writeExecStub(join(bin, "git"), `#!/bin/sh\ncase "$*" in *"${call}") ${act} ;; esac\nexec '${REAL_GIT}' "$@"\n`);
   return { ...process.env, PATH: `${bin}:${process.env.PATH}` };
 }
 
@@ -145,20 +146,21 @@ function fakeGit(call, act) {
 // signal — means git did not run to an answer, so the reader read nothing:
 // exit 3, naming the status, on either git call.
 const GIT_CALLS = [
-  { call: "rev-parse --git-dir", reason: (s) => new RegExp(`^derive-testcmd: git did not answer whether .* is a git repository \\(exit ${s}\\), so the Recipe cache was not read$`, "m"), refusal: /^derive-testcmd: .* is not a git repository$/m },
+  { call: "rev-parse --git-dir", reason: (s) => new RegExp(`^derive-testcmd: git did not answer whether .* is a git repository \\(exit ${s}\\), so the Recipe cache was not read(?: — .*)?$`, "m"), refusal: /^derive-testcmd: .* is not a git repository$/m },
   { call: "rev-parse --path-format=absolute --git-common-dir", reason: (s) => new RegExp(`^derive-testcmd: git did not resolve the common git dir of .* \\(exit ${s}\\), so the Recipe cache was not read`, "m"), refusal: /^derive-testcmd: cannot resolve the common git dir of /m },
 ];
 for (const g of GIT_CALLS) {
-  for (const [what, act, status] of [["is killed by SIGKILL", "kill -9 $$", 137], ["exits 126", "exit 126", 126], ["exits 127", "exit 127", 127]]) {
+  for (const [what, act, status] of [["is killed by SIGKILL", "kill -9 $$", 137], ["exits 126", "exit 126", 126], ["exits 127", "exit 127", 127], ["exits 1", "exit 1", 1]]) {
     test(`a git that passes --version but ${what} on \`${g.call}\` is the environment's refusal, exit 3, never the repository's`, () => {
       const { dir, head } = repo();
       cache(dir, recipe(head, { test: "true" }));
-      const env = fakeGit(g.call, act);
+      const env = fakeGit(g.call, `echo 'STUBERR-boom' >&2; ${act}`);
       assert.equal(spawnSync("git", ["--version"], { env }).status, 0, "the fixture is a git that passes --version");
       const r = derive(dir, "test", env);
       assert.equal(r.status, 3, r.err);
       assert.equal(r.out, "");
       assert.match(r.err, g.reason(status));
+      assert.match(r.err, /STUBERR-boom/, "git's own stderr says what happened, so it survives into the refusal");
       assert.doesNotMatch(r.err, /is not a git repository|cannot resolve the common git dir/);
     });
   }

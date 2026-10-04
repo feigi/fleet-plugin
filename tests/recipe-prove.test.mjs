@@ -541,12 +541,14 @@ test("a git whose output outgrows the spawn buffer is a failed command, not a gi
   assert.doesNotMatch(r.err, /could not start git/);
 });
 
-// A `git` first on PATH that runs `act` when its arguments match the sh `case`
-// pattern `when`, and otherwise execs the real one.
+const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+// The body of a `git` stub: runs `act` when the arguments match the sh `case`
+// pattern `when`, and otherwise execs the real git.
+const gitStub = (when, act) => `case "$*" in ${when}) ${act} ;; esac\nexec '${REAL_GIT}' "$@"`;
+// A `git` first on PATH with that body.
 function fakeGit(when, act) {
-  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
   const bin = tempDir("recipe-prove-path-");
-  writeExecStub(join(bin, "git"), `#!/bin/sh\ncase "$*" in ${when}) ${act} ;; esac\nexec '${realGit}' "$@"\n`);
+  writeExecStub(join(bin, "git"), `#!/bin/sh\n${gitStub(when, act)}\n`);
   return `${bin}:${BIN}:${process.env.PATH}`;
 }
 
@@ -720,7 +722,7 @@ test("a git that stops starting before the cache is read back is no verdict, nev
   const bin = readerPath();
   const r = prove(dir, ["--install", "true", "--test", `rm '${join(bin, "git")}'; echo 'tests 1'`, "--count-line", "tests 1", "--test-count", "1"], { env: { PATH: bin } });
   assert.equal(r.status, 2, r.err);
-  assert.match(r.err, /^recipe-prove: derive-testcmd: git did not answer whether .* is a git repository \(exit 127\), so the Recipe cache was not read — the Recipe cache reader could not run a tool it needs, so its refusal is no verdict on what was proven$/m);
+  assert.match(r.err, /^recipe-prove: derive-testcmd: git did not answer whether .* is a git repository \(exit 127\), so the Recipe cache was not read(?: — .*)? — the Recipe cache reader could not run a tool it needs, so its refusal is no verdict on what was proven$/m);
   assert.doesNotMatch(r.err, /NOT PROVEN/);
   assert.doesNotMatch(r.err, /not a git repository/);
   assert.equal(readFileSync(cachePath(dir), "utf8"), "prior bytes", "a cache the reader never settled is rolled back");
@@ -738,11 +740,10 @@ test("a git that stops starting before the cache is read back is no verdict, nev
 // unstartable-git test's. The Test entrypoint rewrites the stub's body, never
 // the stub: that is a hard link to exec-stub.mjs's shared, read-only
 // trampoline.
-const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
-const onlyOn = (call, act) => `case "$*" in *"${call}") ${act} ;; esac\nexec '${REAL_GIT}' "$@"`;
+const onlyOn = (call, act) => gitStub(`*"${call}"`, act);
 // The reader's own line, which the cache writer quotes: a shell that reports a
 // killed git writes its own notice ahead of it, so the quote may start there.
-const noAnswer = (status) => new RegExp(`^(?:recipe-prove: )?derive-testcmd: git did not answer whether .* is a git repository \\(exit ${status}\\), so the Recipe cache was not read — the Recipe cache reader could not run a tool it needs, so its refusal is no verdict on what was proven$`, "m");
+const noAnswer = (status) => new RegExp(`^(?:recipe-prove: )?derive-testcmd: git did not answer whether .* is a git repository \\(exit ${status}\\), so the Recipe cache was not read(?: — .*)? — the Recipe cache reader could not run a tool it needs, so its refusal is no verdict on what was proven$`, "m");
 const GIT_THAT_CANNOT_RUN = [
   { name: "exits 126 and writes nothing", body: "exit 126", reason: noAnswer(126) },
   { name: "exits 127 and writes to stderr", body: "echo boom >&2; exit 127", reason: noAnswer(127) },
@@ -753,12 +754,22 @@ const GIT_THAT_CANNOT_RUN = [
   {
     name: "passes --version and is killed resolving the common git dir",
     body: onlyOn("rev-parse --path-format=absolute --git-common-dir", "kill -9 $$"),
-    reason: /^(?:recipe-prove: )?derive-testcmd: git did not resolve the common git dir of .* \(exit 137\), so the Recipe cache was not read — the Recipe cache reader could not run a tool it needs, so its refusal is no verdict on what was proven$/m,
+    reason: /^(?:recipe-prove: )?derive-testcmd: git did not resolve the common git dir of .* \(exit 137\), so the Recipe cache was not read(?: — .*)? — the Recipe cache reader could not run a tool it needs, so its refusal is no verdict on what was proven$/m,
   },
   {
     name: "exits git's own 128 on every call",
     body: "exit 128",
     reason: /^recipe-prove: git started but does not run: `git --version` exited 128 and wrote nothing to stderr — the Recipe cache reader runs git, so its refusal is no verdict on what was proven$/m,
+  },
+  {
+    name: "exits git's own 128 on every call and writes to stderr",
+    body: "echo boom >&2; exit 128",
+    reason: /^recipe-prove: git started but does not run: `git --version` exited 128: boom — the Recipe cache reader runs git, so its refusal is no verdict on what was proven$/m,
+  },
+  {
+    name: "exits git's own 128 on rev-parse and is killed on `--version`",
+    body: `case "$*" in --version) kill -9 $$ ;; esac; exit 128`,
+    reason: /^recipe-prove: git started but does not run: `git --version` did not exit 0: git was killed by SIGKILL — the Recipe cache reader runs git, so its refusal is no verdict on what was proven$/m,
   },
 ];
 for (const c of GIT_THAT_CANNOT_RUN) {
