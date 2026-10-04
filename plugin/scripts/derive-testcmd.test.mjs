@@ -304,9 +304,10 @@ test("the success path writes nothing to stderr, even when node is chatty (#1175
 // cache. PATH is REPLACED with links to exactly what the script runs, so the
 // interpreter is really unreachable rather than shadowed.
 const SHIMMED = ["sh", "git", "mktemp", "cat", "rm"];
-function shimPath({ node }) {
+function shimPath({ node, omit }) {
   const bin = tempDir("derive-path-");
   for (const name of SHIMMED) {
+    if (name === omit) continue;
     const real = execFileSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).trim();
     symlinkSync(real, join(bin, name));
   }
@@ -314,11 +315,14 @@ function shimPath({ node }) {
   return bin;
 }
 
+// Exit 3, where every refusal about the cache, the repository or the arguments
+// is exit 1: the reader read nothing, so a caller can tell its own
+// environment's fault from a verdict on the cache.
 test("an unusable interpreter refuses in this script's own voice, never the cache's", () => {
   const { dir, head } = repo();
   cache(dir, recipe(head, { test: "true" }));
   const absent = derive(dir, "test", { ...process.env, PATH: shimPath({ node: false }) });
-  assert.equal(absent.status, 1);
+  assert.equal(absent.status, 3);
   assert.equal(absent.out, "");
   assert.match(absent.err, /^derive-testcmd: node is unusable/);
   assert.doesNotMatch(absent.err, /is unusable: it does not parse/);
@@ -329,6 +333,50 @@ test("an unusable interpreter refuses in this script's own voice, never the cach
   const present = derive(dir, "test", { ...process.env, PATH: shimPath({ node: true }) });
   assert.equal(present.status, 0, present.err);
   assert.equal(present.out, "true");
+});
+
+// The reader's other tools, taken away the same way. The control above is the
+// same stripped PATH with every tool present.
+for (const [tool, reason] of [
+  ["mktemp", /^derive-testcmd: cannot create a temporary file to read the Recipe cache$/m],
+  ["cat", /^derive-testcmd: cat could not be started \(exit 127\), so the Recipe cache cannot be read$/m],
+]) {
+  test(`a ${tool} that cannot be started is the environment's refusal, exit 3, never the cache's`, () => {
+    const { dir, head } = repo();
+    cache(dir, recipe(head, { test: "true" }));
+    const r = derive(dir, "test", { ...process.env, PATH: shimPath({ node: true, omit: tool }) });
+    assert.equal(r.status, 3, r.err);
+    assert.equal(r.out, "");
+    assert.match(r.err, reason);
+    assert.doesNotMatch(r.err, /is unusable|byte-count/);
+  });
+}
+
+// `rm` is the reader's cleanup only, so it must not decide the outcome: with
+// it gone a good cache still reads cleanly — status 0 and nothing on stderr,
+// the success-path invariant claim-ticket.sh relies on — and a refused cache
+// keeps its own status.
+test("an rm that cannot be started changes neither the value read nor the refusal's status", () => {
+  const { dir, head } = repo();
+  cache(dir, recipe(head, { test: "true" }));
+  const ok = derive(dir, "test", { ...process.env, PATH: shimPath({ node: true, omit: "rm" }) });
+  assert.equal(ok.status, 0, ok.err);
+  assert.equal(ok.out, "true");
+  assert.equal(ok.err, "");
+
+  cache(dir, "not json");
+  const refused = derive(dir, "test", { ...process.env, PATH: shimPath({ node: true, omit: "rm" }) });
+  assert.equal(refused.status, 1, refused.err);
+});
+
+// The false-positive class: a cache the reader really refuses stays exit 1
+// under the same stripped PATH, so exit 3 is not "any refusal".
+test("a cache that is refused stays exit 1 under the stripped PATH", () => {
+  const { dir } = repo();
+  cache(dir, "not json");
+  const r = derive(dir, "test", { ...process.env, PATH: shimPath({ node: true }) });
+  assert.equal(r.status, 1, r.err);
+  assert.match(r.err, /is unusable/);
 });
 
 // --- #2217: node's STDOUT is the capture itself, so the stream split above

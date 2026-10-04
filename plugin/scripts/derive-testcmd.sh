@@ -83,6 +83,14 @@ unset GIT_DIR GIT_WORK_TREE
 NAME=derive-testcmd
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 1; }
 
+# A refusal about the environment, not the cache: a tool this script needs
+# (the interpreter, mktemp, cat) could not be started, so nothing was read and
+# the cache's usability is unknown. Exit 3, where every refusal about the
+# cache, the repository or the arguments is exit 1 — a caller that must tell a
+# verdict on the cache from a fault of its own environment reads the status.
+# A consumer that only tests for non-zero sees no difference.
+unrunnable() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 3; }
+
 # Named once: every refusal that sends the caller to re-derive names the same
 # step, so a controller or reviewer reading any of them knows what to run.
 derive="run the Recipe derivation step (run-team phase 0, before the first claim — ADR 0015) to derive, prove and write it"
@@ -113,7 +121,7 @@ cache="${common%/*}/.fleet/recipe.json"
 # An INVOCATION, not a name lookup (#1141): a version-manager shim satisfies
 # `command -v node` and then fails, and its stderr would arrive below under the
 # cache's name — a corrupt-cache refusal for a cache nobody read.
-nodeerr=$(node -e 0 </dev/null 2>&1) || die "node is unusable, refusing to read the Recipe cache without the interpreter — $nodeerr"
+nodeerr=$(node -e 0 </dev/null 2>&1) || unrunnable "node is unusable, refusing to read the Recipe cache without the interpreter — $nodeerr"
 
 # Validation and extraction in one pass, so a field is never printed out of a
 # cache the checks did not pass. rc 0 prints the value; anything else carries
@@ -143,9 +151,12 @@ nodeerr=$(node -e 0 </dev/null 2>&1) || die "node is unusable, refusing to read 
 #   newline now survives inside the frame, and the trailing-operator check
 #   below treats it exactly like a trailing `;` or `&`: refused, not
 #   silently accepted.
-errf=$(mktemp) || die "cannot create a temporary file to read the Recipe cache"
-lenf=$(mktemp) || die "cannot create a temporary file to read the Recipe cache"
-trap 'rm -f "$errf" "$lenf"' EXIT
+errf=$(mktemp) || unrunnable "cannot create a temporary file to read the Recipe cache"
+lenf=$(mktemp) || unrunnable "cannot create a temporary file to read the Recipe cache"
+# Cleanup decides nothing: an `rm` that cannot be started would otherwise
+# replace the script's own exit status with 127 (and print a line on the
+# success path), so the status the script was leaving with is kept.
+trap 'rc=$?; rm -f "$errf" "$lenf" 2>/dev/null || :; exit $rc' EXIT
 
 open='recipe<' close='>recipe'
 framed=$(node -e '
@@ -172,7 +183,14 @@ case $framed in
   "$open"*"$close") ;;
   *) die "$carriedmsg" ;;
 esac
-framedlen=$(cat "$lenf")
+# A `cat` that cannot be started (126/127) is the environment's fault, as for
+# `node` above; a `cat` that ran and failed — the file gone — is the
+# corrupt-count refusal below.
+rc=0
+framedlen=$(cat "$lenf" 2>/dev/null) || rc=$?
+case $rc in
+  126|127) unrunnable "cat could not be started (exit $rc), so the Recipe cache cannot be read" ;;
+esac
 case $framedlen in
   ''|*[!0-9]*) die "the Recipe cache at $cache is unusable: node's byte-count file is missing or corrupt — $derive" ;;
 esac

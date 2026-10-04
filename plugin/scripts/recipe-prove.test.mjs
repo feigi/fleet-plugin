@@ -677,6 +677,48 @@ test("an sh that stops starting before the cache is read back is no verdict, nev
   assert.equal(existsSync(cachePath(dir)), false, "a cache the reader never read is rolled back");
 });
 
+// The reader's other external tools, taken away the same way after the proof's
+// last step. The control is the same PATH with the tool left in place, which
+// proves — so the no verdict below is about the missing tool, not a PATH too
+// thin for the reader to run at all. `rm` is the reader's cleanup only: it
+// decides nothing about the cache, so the verdict stands without it.
+const READER_TOOLS = [
+  { tool: "node", reason: /derive-testcmd: node is unusable, refusing to read the Recipe cache without the interpreter/ },
+  { tool: "mktemp", reason: /derive-testcmd: cannot create a temporary file to read the Recipe cache/ },
+  { tool: "cat", reason: /derive-testcmd: cat could not be started/ },
+];
+for (const c of READER_TOOLS) {
+  test(`a ${c.tool} that stops starting before the cache is read back is no verdict, never NOT PROVEN — and the prior cache is restored`, () => {
+    const args = (cmd) => ["--install", "true", "--test", cmd, "--count-line", "tests 1", "--test-count", "1"];
+    const kept = repo(MAVEN_FILES);
+    const ok = prove(kept.dir, args(`echo 'tests 1'`), { env: { PATH: readerPath() } });
+    assert.equal(ok.status, 0, ok.err);
+    assert.match(ok.out, /^recipe-prove: PROVEN/);
+
+    const { dir } = repo(MAVEN_FILES);
+    mkdirSync(join(dir, ".fleet"));
+    writeFileSync(cachePath(dir), "prior bytes");
+    const bin = readerPath();
+    const r = prove(dir, args(`rm '${join(bin, c.tool)}'; echo 'tests 1'`), { env: { PATH: bin } });
+    assert.equal(r.status, 2, r.err);
+    assert.match(r.err, c.reason);
+    assert.match(r.err, /the Recipe cache reader could not run a tool it needs, so its refusal is no verdict/);
+    assert.doesNotMatch(r.err, /NOT PROVEN/);
+    assert.equal(readFileSync(cachePath(dir), "utf8"), "prior bytes", "a cache the reader never settled is rolled back");
+    assert.deepEqual(logDirs(r.tmp), [], "no verdict keeps no logs");
+  });
+}
+
+test("an rm that stops starting before the cache is read back leaves the proof standing — the reader's verdict never depended on it", () => {
+  const { dir } = repo(MAVEN_FILES);
+  const bin = readerPath();
+  // `echo` leads the command: the reader refuses a Test entrypoint whose first word does not resolve, and `rm` would not once the PATH link is gone.
+  const r = prove(dir, ["--install", "true", "--test", `echo 'tests 1'; rm '${join(bin, "rm")}'`, "--count-line", "tests 1", "--test-count", "1"], { env: { PATH: bin } });
+  assert.equal(r.status, 0, r.err);
+  assert.match(r.out, /^recipe-prove: PROVEN/);
+  assert.equal(existsSync(cachePath(dir)), true);
+});
+
 // Whether the process ignores file modes: root writes into a 0555 directory.
 const IGNORES_MODES = process.getuid?.() === 0 && "root ignores file modes";
 
