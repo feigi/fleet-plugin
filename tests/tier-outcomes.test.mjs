@@ -93,7 +93,7 @@ const col = (name) => COLUMNS.indexOf(name);
 // append
 // ---------------------------------------------------------------------------
 
-const utcDate = (d = new Date()) => d.toISOString().slice(0, 10);
+const utcDate = () => new Date().toISOString().slice(0, 10);
 
 test("append: the ledger's tier-ok token wins over member-outcomes.tsv", (t) => {
   const f = fixture(t, {
