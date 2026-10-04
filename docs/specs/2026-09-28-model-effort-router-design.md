@@ -297,6 +297,20 @@ reachable and keeps the draw from ever naming a cell with no live
 definition). **Reinstatement** = the reverse PR, maintainer-only; the
 date filter above restarts the count.
 
+**Clarification from `#2725` (2026-10-04):** a ticket's verdict belongs to
+one cell, the cell of its § 1 carrier. The ticket's ruling is its
+latest-dated `tier-outcomes.tsv` row (the later in file order on a tie, a
+both-blank row skipped); the carrier is the ticket's latest
+`ticket-features.tsv` row across all cells, `slow-high` included, dated ≤
+the ruling (the later in file order on a tie). The ruling is a verdict for
+X only when the carrier is an admissible row at X dated ≥ the date
+`fleet-implementer-<cell>.agent.md` was most recently added; this replaces
+the "last row per ticket dated ≥ … the ticket's last such row at X" join
+above, under which one ruling dated after Pulls at two cells counted for
+both. A carrier at the policy cell, or one that is not admissible or predates
+its cell's definition, charges nobody: the verdict does not fall back to an
+earlier Pull.
+
 **Amendment from `#2038` (Router, resolved 2026-09-28):**
 1. **Burn-in:** while `router-table.json.burn_in` is true, **every** Pull
    draws — `drawCell({ …, policyCell: null, cells })` so E = all cells

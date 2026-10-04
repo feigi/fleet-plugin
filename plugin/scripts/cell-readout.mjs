@@ -42,23 +42,29 @@
 // Only the refusal of conflicting ticket-features rows names a session and an
 // agent, and it prints nothing on stdout.
 //
-// STOPPING RULE (exported as `stoppingRule`, not printed by this CLI). For a
-// cell X other than slow-high whose definition is live, a VERDICT is a ticket
-// with an admissible Pull at X dated on or after the day X's
-// `fleet-implementer-<cell>` definition was most recently added, ruled by its
-// last tier-outcomes.tsv row (a `+`-joined `ticket` field rules each ticket
-// it names) dated on or after the ticket's last such Pull: a ruling never
-// predates the Pull it rules, and a row with both verdict columns blank was
-// never ruled, so it is skipped. A ticket with no such row is no verdict.
-// A ticket counts once however many Pulls it took. A verdict FAILS
-// the quality floor on `minted_false_claim=yes` or `closed_own_ticket=no`; a
-// counted ruling holding anything but `yes` or `no` in either column, one
-// blank included, is refused rather than read as a pass. So is a non-blank
-// ruling row of such a ticket whose `run_date` is not `YYYY-MM-DD`: it cannot
-// be placed against the Pull, and dropping it would uncount the ticket. So is
-// an admissible Pull at X whose `run_date` is not `YYYY-MM-DD`: it cannot be
-// placed against the day X's definition was added, and dropping it would
-// uncount its ruling.
+// STOPPING RULE (exported as `stoppingRule`, not printed by this CLI). A
+// ticket's RULING is its latest-dated tier-outcomes.tsv row, the later in file
+// order on a tie (a `+`-joined `ticket` field rules each ticket it names); a
+// row with both verdict columns blank was never ruled, so it is skipped. Its
+// CARRIER is the ticket's latest Pull at any cell, slow-high included, dated
+// on or before the ruling, the later in file order on a tie. A Pull at X is
+// COUNTABLE when X is a cell other than slow-high whose definition is live
+// and the Pull is admissible and dated on or after the day X's
+// `fleet-implementer-<cell>` definition was most recently added. The ruling
+// is a VERDICT for the carrier's cell only, and only when the carrier is
+// countable. Otherwise it is no verdict for any cell, never one for an
+// earlier Pull of the ticket. A ticket with no ruling, or no Pull dated on or
+// before it, is no verdict. A ticket counts once however many Pulls it took,
+// at however many cells. A verdict FAILS the quality floor on
+// `minted_false_claim=yes` or `closed_own_ticket=no`. For a ticket with a
+// countable Pull, a ruling holding anything but `yes` or `no` in either
+// column, one blank included, is refused rather than read as a pass. So is a
+// non-blank ruling row of such a ticket whose `run_date` is not `YYYY-MM-DD`,
+// and, once it is ruled, a Pull of it at any cell whose `run_date` is not
+// `YYYY-MM-DD`: either cannot be placed to find the carrier, and dropping it
+// could move the verdict to another cell or uncount it. So is an admissible
+// Pull at X whose `run_date` is not `YYYY-MM-DD`: it cannot be placed against
+// the day X's definition was added, and dropping it would uncount its ruling.
 // X is to be withdrawn once it has at least STOP.verdicts verdicts and
 // floor failures ÷ verdicts is at least STOP.failRate.
 //
@@ -169,35 +175,50 @@ export function readout({ features, members }) {
  * `[{ ticket, pr, run_date, closed_own_ticket, minted_false_claim, failed }]`
  * sorted by ticket, `run_date` the ruling's; `stop` is whether the stopping
  * rule withdraws the cell. `verdicts` are parsed tier-outcomes.tsv rows.
- * Throws on a counted ruling whose `closed_own_ticket` or `minted_false_claim`
- * is not `yes` or `no`, on a non-blank ruling row of a Pulled ticket whose
- * `run_date` is not `YYYY-MM-DD`, on an admissible Pull at a cell named in
- * `added` whose `run_date` is not `YYYY-MM-DD`, and on a member-outcomes
- * session+agent repeated with different fields.
+ * A ticket's ruling is charged to the cell of its carrier, the ticket's latest
+ * Pull at any cell dated on or before the ruling, and only when that Pull is
+ * countable: admissible, at a cell named in `added` other than the policy
+ * cell, and dated on or after the day that cell's definition was added.
+ * Throws on the ruling of a ticket with a countable Pull whose
+ * `closed_own_ticket` or `minted_false_claim` is not `yes` or `no`, on a
+ * non-blank ruling row of such a ticket whose `run_date` is not `YYYY-MM-DD`,
+ * on an admissible Pull at a cell named in `added` whose `run_date` is not
+ * `YYYY-MM-DD`, on any Pull of a ruled ticket with a countable Pull whose
+ * `run_date` is not `YYYY-MM-DD`, and on a member-outcomes session+agent
+ * repeated with different fields.
  */
 export function stoppingRule({ features, members, verdicts, added }) {
   const byKey = indexMembers(members);
   const rulings = rulingsByTicket(verdicts);
-  // Per cell, each ticket's last admissible Pull: the one its ruling must follow.
-  const charged = new Map(Object.keys(added).filter((c) => c !== POLICY_CELL).map((c) => [c, new Map()]));
-  for (const p of features) {
-    const pulls = charged.get(p.chosen_cell);
-    if (!pulls || !admissibleMember(p, byKey)) continue;
+  const charged = new Map(Object.keys(added).filter((c) => c !== POLICY_CELL).map((c) => [c, []]));
+  const dated = (p) => {
     if (!DATE.test(p.run_date)) throw new Error(`ticket #${p.ticket} (Pull ${p.agent} at ${p.chosen_cell}): run_date is '${p.run_date}', expected YYYY-MM-DD`);
-    if (p.run_date < added[p.chosen_cell]) continue;
-    pulls.set(p.ticket, p);
+    return p.run_date;
+  };
+  const countable = new Set();
+  const pullsByTicket = new Map();
+  for (const p of features) {
+    (pullsByTicket.get(p.ticket) ?? pullsByTicket.set(p.ticket, []).get(p.ticket)).push(p);
+    if (!charged.has(p.chosen_cell) || !admissibleMember(p, byKey)) continue;
+    if (dated(p) >= added[p.chosen_cell]) countable.add(p);
   }
-  return [...charged].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([cell, pulls]) => {
-    const list = [];
-    for (const p of pulls.values()) {
-      const v = rulingFor(rulings, p.ticket, p.run_date);
-      if (!v) continue;
-      list.push({
-        ticket: p.ticket, pr: v.pr, run_date: v.run_date,
-        closed_own_ticket: v.closed_own_ticket, minted_false_claim: v.minted_false_claim,
-        failed: v.minted_false_claim === "yes" || v.closed_own_ticket === "no",
-      });
-    }
+  for (const [ticket, pulls] of pullsByTicket) {
+    if (!pulls.some((p) => countable.has(p))) continue;
+    // The ticket's ruling: its latest-dated row, the later in file order on a tie.
+    const latest = (rulings.get(String(ticket)) ?? []).reduce((d, r) => (r.run_date > d ? r.run_date : d), "");
+    const v = rulingFor(rulings, ticket, latest);
+    if (!v) continue;
+    // Its carrier: the latest Pull dated on or before the ruling, the later in file order on a tie.
+    let carrier = null;
+    for (const p of pulls) if (dated(p) <= v.run_date && (!carrier || p.run_date >= carrier.run_date)) carrier = p;
+    if (!carrier || !countable.has(carrier)) continue;
+    charged.get(carrier.chosen_cell).push({
+      ticket: carrier.ticket, pr: v.pr, run_date: v.run_date,
+      closed_own_ticket: v.closed_own_ticket, minted_false_claim: v.minted_false_claim,
+      failed: v.minted_false_claim === "yes" || v.closed_own_ticket === "no",
+    });
+  }
+  return [...charged].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([cell, list]) => {
     list.sort((a, b) => Number(a.ticket) - Number(b.ticket));
     const failures = list.filter((v) => v.failed).length;
     const stop = list.length >= STOP.verdicts && failures / list.length >= STOP.failRate;
