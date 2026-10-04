@@ -3222,7 +3222,7 @@ probe clone: two sibling implementers dispatched in the same batch, and the
 controller that dispatched both, reported the same Python kernel pid and the
 same runner file under `$TMPDIR/omp-python-runner/`, and each read the others'
 top-level bindings out of its own `eval` cell — a bare `WT` bound by one member
-was read back by a sibling and by the controller, the collision an earlier run had filed
+was read back by a sibling and by the controller, the collision a ticket was filed
 on as an unproven self-report. `omp://tools/eval.md` states the mechanism:
 retained kernels are keyed by `python:${sessionId}`, normalized cwd and
 interpreter — `js:${sessionId}` for the JS VM — and "Parent and ordinary task
