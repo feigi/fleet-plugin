@@ -19,8 +19,8 @@
 // reduction that did not apply, a capped result). 3 = the query succeeded,
 // returned at least one row, and every row was removed by the to-spec
 // filter — distinct from 1 so a caller such as run-team's phase 0 can say
-// "the only labeled items are specs, run to-tickets" instead of "no work"
-// (#64). Exit 3 describes the FINAL query attempt only — with
+// "the only labeled items are specs, run to-tickets" instead of "no work".
+// Exit 3 describes the FINAL query attempt only — with
 // `--allow-fallback`, a labeled all-specs pass that falls back to a
 // genuinely empty unfiltered pass is exit 1, not 3; the drop count is never
 // carried across the two attempts.
@@ -32,7 +32,7 @@ import { makeDie, makeArg, makeHas } from "./arg.mjs";
 const NAME = "candidates";
 
 // die()/arg()/has() shared with the other fleet scripts — see arg.mjs for
-// the fail-open (#61/#169/#364) and pipe-safety (#176/#328/#363) rationale.
+// the fail-open and pipe-safety rationale.
 // No caller of THIS file is a hand-typed CLI. Two are markdown re-read by a
 // model each run (next-ticket/SKILL.md, run-team/SKILL.md), which is why a
 // malformed invocation is more plausible here than the shared guard's shape
@@ -54,14 +54,14 @@ const limit = Number(arg("limit") ?? 500);
 if (!Number.isInteger(limit) || limit < 1) die(`--limit must be a positive integer, got '${arg("limit")}'`);
 
 // The accepted flag set, declared once, and the only check on flag NAMES.
-// Nothing checked them until #173: an unrecognised flag was ignored, so
+// Before this check, an unrecognised flag was ignored, so
 // `--label ready-for-agent` — the spelling run-team's own phase 0 rule carried
 // — ran the UNFILTERED query at exit 0, the widening `--require-label` exists
 // to prevent.
 //
 // Runs BELOW the value guards, deliberately: where both would refuse — notably
 // `--require-label` and `--limit` given with no value — arriving second leaves
-// the refusal to #169's wording above rather than Node's. Nothing above emits
+// the refusal to arg()'s wording above rather than Node's. Nothing above emits
 // output or runs a query, so refusing this late is still refusing before gh.
 //
 // The catch is unconditional, and THAT is the guard. Testing `e.code` for
@@ -96,8 +96,9 @@ try {
 
 if (allowFallback && !requireLabel) die("--allow-fallback is meaningless without --require-label");
 
-// #175's other half, and the half the fix below newly makes possible: the
-// label is QUOTED into the search term, so a `"` inside it closes that quote
+// The label quoting's other half, and the half that quoting (query() below)
+// newly makes possible: the label is QUOTED into the search term, so a `"`
+// inside it closes that quote
 // early and the remainder becomes free text — the same misparse, with the fix
 // applied. A `\` breaks the same term from the other side, because GitHub
 // DOES honour `\"` as an escaped quote inside a qualifier: measured against
@@ -108,7 +109,7 @@ if (allowFallback && !requireLabel) die("--allow-fallback is meaningless without
 // having eaten the closing quote and swallowed the whole following qualifier.
 // Doubling does not escape it. Here the label term is LAST, so a trailing
 // backslash leaves its value unterminated and the query answers zero rows at
-// HTTP 200, no error — #175's silent empty, with the fix applied. Neither
+// HTTP 200, no error — the unquoted label's silent empty, with the fix applied. Neither
 // character can be represented, so refuse both at exit 2 ("the query broke")
 // rather than send a query whose empty answer would read as exit 1.
 if (requireLabel && /["\\]/.test(requireLabel)) die(`--require-label cannot contain a double quote or a backslash, got '${requireLabel}'`);
@@ -117,7 +118,7 @@ if (requireLabel && /["\\]/.test(requireLabel)) die(`--require-label cannot cont
 // GitHub's search has no `-label:"wayfinder:*"` — and none is quoted despite
 // the colon each value carries. Measured 2026-09-08 against feigi/fleet-plugin:
 // negating `wayfinder:map` alone excludes exactly one more issue than the
-// unfiltered open count, and that issue is #1292 — a colon inside a label
+// unfiltered open count — a colon inside a label
 // value is parsed as part of the label, not as a delimiter that ends it early
 // and spills the remainder into free text, the failure mode `label:"…"`
 // quoting exists for a SPACE (see `query()`'s comment below). Stated as a
@@ -133,7 +134,7 @@ const EXCLUDE =
   "-label:in-progress -label:onhold -label:wontfix -label:needs-triage -label:needs-info -label:wayfinder:map -label:wayfinder:research -label:wayfinder:prototype -label:wayfinder:grilling -label:wayfinder:task";
 // `d` walks the body line by line rather than one regex over the whole
 // string, because RE2 (gojq's engine — gh applies `--jq` with gojq, not the
-// system jq this file's own tests stub; see #63) has no lookahead, so
+// system jq this file's own tests stub) has no lookahead, so
 // "capture every ref up to the next heading" cannot be expressed as a single
 // pattern. A heading line (`^#{1,6}[ \t]`) toggles a running "inside a
 // blocking section" flag on when its text DECLARES one: any of the verb
@@ -144,15 +145,15 @@ const EXCLUDE =
 // `:` aside. The noun form cannot be given the verb forms' tolerance:
 // `## Dependency injection` is an ordinary section title in a code repo, and
 // arming on it would turn every `#N` in its bullets into a blocker the body
-// never declared (#439 — the noun form is the heading #208's brief used, and
-// the gate named the verbs alone, so that section opened nothing).
+// never declared. The noun form cannot be dropped either: a real brief headed
+// its section with it, and a gate naming the verbs alone opened nothing there.
 //
 // Either form may carry EMPHASIS, which markdown puts outside the words:
 // `## **Dependencies**` names a dependency exactly as `## Dependencies` does,
 // and read without the `\*` runs it armed no section at all, so every ref its
-// bullets declared was dropped — exit 0, nothing on stderr, #439's silent
+// bullets declared was dropped — exit 0, nothing on stderr, a silent
 // wrong admission reached through this gate rather than through the inline
-// label separator #439 widened (#1031). The runs are
+// label separator. The runs are
 // `\**` rather than `\*{0,2}` because `*`, `**` and `***` are all emphasis a
 // heading is written with, and the noun form needs one on EACH side of its
 // optional colon: markdown closes the bold before it (`**Dependencies**:`)
@@ -162,8 +163,7 @@ const EXCLUDE =
 // the runs go AROUND it, and they match asterisks ONLY, so
 // `## **Dependency injection**` still arms nothing. Widen either run to a
 // general wildcard and that heading arms, which is the whole distinction the
-// anchor exists to hold; candidates.test.mjs pins both directions, on both
-// engines.
+// anchor exists to hold; a test pins both directions, on both engines.
 //
 // `after` is an inline label only, because `## After the migration` is
 // ordinary narrative and arming on it invents a blocker, while a heading that
@@ -182,7 +182,7 @@ const EXCLUDE =
 // match. The separator is a combined `[\s*]*` run rather than asterisk groups
 // flanking the colon: those groups sat ahead of the separating whitespace, so
 // they matched only asterisks flush against the phrase, and a space before the
-// bold — where markdown actually puts it — dropped the ref (#439). Both passes
+// bold — where markdown actually puts it — dropped the ref. Both passes
 // are strictly line-local, which the removed `(?:depends on|…)\s+#\d+` regex
 // was not: its `\s+` crossed newlines, so a
 // phrase ending one line with its ref opening the next was collected and now
@@ -192,20 +192,20 @@ const EXCLUDE =
 // restriction above closes. A ref elsewhere in the body — not under a
 // heading section, not after a label — is not collected: neither pass reaches
 // it. Verified against real gojq (`go install
-// github.com/itchyny/gojq/cmd/gojq@v0.12.19`) on every form in
-// candidates.test.mjs's dependency-forms fixtures, not only the system jq the
+// github.com/itchyny/gojq/cmd/gojq@v0.12.19`) on every form in the
+// suite's dependency-forms fixtures, not only the system jq the
 // STUB there execs. The engines now agree on every one of those forms,
 // including the ones that used to split. The separator is `[\t \p{Zs}*]*`
 // and not `[\s*]*`, so `Blocked by:<U+00A0>#12` collects `[12]` under BOTH
 // engines where it used to collect `[12]` under Oniguruma and `[]` under RE2
-// — #383 ruled the ref a real blocker, because GFM renders that line as
+// — the ref is ruled a real blocker, because GFM renders that line as
 // `Blocked by: #12` and autolinks the ref, so a reader sees a dependency and
 // an admission gate must not miss one. Since no fixture splits any more, the
 // gated tests can no longer identify their engine by disagreement: the STUB
 // records which binary it executed and they assert that recording is gojq.
 // The per-position rulings are set out above the JQ declaration below.
 //
-// `depmiss` is the diagnostic half (#1032), and it is deliberately LOOSER
+// `depmiss` is the diagnostic half, and it is deliberately LOOSER
 // than the gate: any heading MENTIONING the concept that the gate did not
 // arm. The gate's own pattern is named `armed` and both halves call it, so
 // "did not arm" is the exact complement of what opened the section rather
@@ -234,10 +234,10 @@ const EXCLUDE =
 // because the only whitespace that would disturb the line this prints is the
 // CR of a CRLF body (what GitHub's web textarea writes), and a regex there
 // would buy cosmetics at the price of one more regex position to rule on and
-// keep portable (#383). `dh` never reaches stdout: the payload is stripped of it
-// at the `JSON.stringify` below, because this is a stderr signal and #1032
-// rules a payload field out of scope.
-// ENGINE-PORTABLE CLASSES (#383). The program below contains no `\\s`, `\\d` or
+// keep portable. `dh` never reaches stdout: the payload is stripped of it
+// at the `JSON.stringify` below, because this is a stderr signal and a
+// payload field is ruled out of scope.
+// ENGINE-PORTABLE CLASSES. The program below contains no `\\s`, `\\d` or
 // `\\b`: every position spells an explicit class. It has to, because the suite
 // applies this expression with system jq (Oniguruma, all three Unicode-aware)
 // while gh applies it with its embedded gojq (Go RE2, where `\\s` is
@@ -267,7 +267,7 @@ const EXCLUDE =
 //       Unlike `armed`/`depmiss` above, this one also has to recognize a
 //       BARE marker-only heading — no title text follows, so `[ \t]` alone
 //       never matches it, and the old open section wrongly kept collecting
-//       refs past it (#383 over-collection). GFM still renders a bare `##`
+//       refs past it (over-collection). GFM still renders a bare `##`
 //       as a real (empty) `<h2>`, so it must still close the section: `$`
 //       admits end-of-line, `\r?` admits the same position just before a
 //       CRLF line's trailing `\r` (the one `split("\n")` leaves behind).
@@ -307,18 +307,18 @@ const EXCLUDE =
 // escaping below — jq's `\\p{Zs}` is `\\\\p{Zs}` in this JS source string.
 //
 // Measured over 24 fixtures on jq-1.7.1-apple and gojq 0.12.19: zero splits.
-// candidates.test.mjs pins the rows that used to split, on both engines, and
+// The suite pins the rows that used to split, on both engines, and
 // proves which engine each gated test actually reached.
 //
-// NATIVE EDGES (#1741). `d` is the UNION of the body scan above and the
+// NATIVE EDGES. `d` is the UNION of the body scan above and the
 // numbers on the issue's native "blocked by" edges, which ride the same
-// query as gh's `blockedBy` field — no extra round trip, the cost #58
-// deferred them on — merged and sorted by the final `unique`. Union, not
+// query as gh's `blockedBy` field — no extra round trip, the cost they were
+// once deferred on — merged and sorted by the final `unique`. Union, not
 // replacement: to-tickets still writes blockers only as body text, and a
 // hand-written body can name a blocker nobody wired as an edge, so dropping
 // the scan would silently un-block both. The edges close the opposite miss:
-// #593's body chains `**#531**` behind a parenthetical the scan cannot
-// cross, and only its native edge carries #531. `d` stays RAW — a closed
+// a body can chain its blocker as `**#N**` behind a parenthetical the scan
+// cannot cross, and then only the native edge carries it. `d` stays RAW — a closed
 // blocker's number is kept although the edge carries its state, exactly as
 // the scan keeps one, because the consumers (run-team / next-ticket step 2)
 // judge openness and a `d` whose two halves meant different things would
@@ -389,7 +389,7 @@ const JQ =
 
 function query(label) {
   // The label is a VALUE in GitHub's query language, not part of its syntax,
-  // so it is quoted rather than interpolated raw (#175). Unquoted, a value
+  // so it is quoted rather than interpolated raw. Unquoted, a value
   // ends at the FIRST SPACE and every word after it becomes a free-text term
   // instead — measured 2026-08-17, `label:ready-for-agent candidates` returns
   // strictly fewer issues here than `label:ready-for-agent`, and on
@@ -398,7 +398,7 @@ function query(label) {
   // the narrowed result as the label's own answer, and an empty one as exit 1,
   // "the query worked and there is no work" — against a queue that is not
   // empty. Reachable wherever a repo remapped its triage labels, which
-  // docs/agents/triage-labels.md exists to invite. Stated as relationships
+  // a per-repo triage-label mapping exists to invite. Stated as relationships
   // rather than counts on purpose: the queue churns hourly, so a pinned digit
   // is wrong within a day and reads as the fix having regressed.
   //
@@ -511,7 +511,7 @@ function refuseIfCapped(rows, description) {
 // worth a fence parser: every drop is logged by number, so a false positive is
 // loud rather than silent.
 //
-// #65: two shapes the predicate leaves undecided by accident, now decided.
+// Two shapes the predicate leaves undecided by accident, now decided.
 // Depth is `#{2,6}`, not `##` — two or more `#`, not exactly two, and capped
 // where CommonMark caps an ATX heading, same as `depnums`' own `#{1,6}` above:
 // a line of seven `#` is not a heading and must not read as the signature.
@@ -526,7 +526,7 @@ function refuseIfCapped(rows, description) {
 // tagged). The separator between marker and text is `[ \t]+` — horizontal
 // whitespace only, not `\s+` — so a heading can never span a line break: a
 // body whose line is exactly `##` with `User Stories` starting the next
-// line no longer reads as the same heading. That is also #383's ruling for
+// line no longer reads as the same heading. That is also the ruling for
 // this position, on GFM's own rule: only a space or a tab opens a heading, so
 // `##<U+00A0>User Stories` renders as a PARAGRAPH and is not a spec at all.
 //
@@ -538,7 +538,7 @@ function refuseIfCapped(rows, description) {
 // the `\r` of a CRLF body — what GitHub's web textarea writes — and leak that
 // spec silently. It is spelled out rather than left as `\s*` because `\s` is
 // the one construct here whose meaning changes with the engine (Oniguruma
-// reads it Unicode-aware, RE2 as `[\t\n\f\r ]`), and #383 ruled the position
+// reads it Unicode-aware, RE2 as `[\t\n\f\r ]`), and the position is ruled
 // by what GFM renders: `## User Stories` padded with U+00A0, EM SPACE or
 // IDEOGRAPHIC SPACE are all real `<h2>`s, so all three are still to-spec specs
 // and all three are dropped. `\p{Zs}` is exactly "renders as a blank" and both
@@ -548,8 +548,8 @@ function refuseIfCapped(rows, description) {
 // is not dropped. Before the ruling this position diverged — a U+00A0-padded
 // heading was a spec under the system jq the suite execs and NOT one under the
 // gojq gh applies, so in production dropSpecs never fired and the spec shipped
-// as a claimable ticket. Pinned against real gojq in candidates.test.mjs,
-// which now also pins which engine it reached.
+// as a claimable ticket. Pinned against real gojq by a test that also pins
+// which engine it reached.
 //
 // This is the ONLY line of defence — nothing downstream catches a spec. A
 // leaked one is decided and needs no human hands, so it passes both of phase
@@ -561,7 +561,7 @@ function refuseIfCapped(rows, description) {
 // unfiltered query is a SUPERSET of the labeled one, and every spec dropped in
 // pass 1 is dropped again in pass 2. Unattributed, that reads as the same spec
 // counted twice; named, a reader can tell "2 drops, 1 spec, seen both passes"
-// from "2 drops, 2 specs" at a glance. Deliberately not deduplicated — #133.
+// from "2 drops, 2 specs" at a glance. Deliberately not deduplicated.
 function dropSpecs(rows, pass) {
   const kept = [];
   for (const { spec, ...rest } of rows) {
@@ -582,13 +582,13 @@ refuseIfCapped(rows, requireLabel ? ` with label:${requireLabel}` : "");
 // After refuseIfCapped, never before: filtering first can shrink the array below
 // `limit` and the cap check would stop seeing a truncated list. Before the
 // emptiness test below, never after: a queue whose every row was filtered out
-// IS an empty queue — see #60. Telling that case apart from a genuinely empty
-// one, for a caller reading only the exit code, is #64 — closed by exit 3 at
+// IS an empty queue. Telling that case apart from a genuinely empty
+// one, for a caller reading only the exit code, is exit 3's job — set at
 // the foot of this file, which is what the raw count below is captured for.
 // Raw count captured just before the filter that can empty `rows` out, so
 // `allFilteredOut` below can tell "nothing came back" from "rows came back
 // and the filter ate them all". Reassigned wholesale in the fallback branch,
-// never OR'd/summed with pass 1's value — #64's edge case is exactly a pass 1
+// never OR'd/summed with pass 1's value — exit 3's edge case is exactly a pass 1
 // all-filtered (raw>0) whose fallback pass is genuinely empty (raw=0), which
 // must read as the fallback's own facts (exit 1), not a merge of the two.
 const rawCount1 = rows.length;
@@ -614,7 +614,7 @@ if (rows.length === 0 && allowFallback && requireLabel) {
 // next-ticket step 2), not here, and to-tickets publishes chains blockers-first
 // so lower numbers are the blockers anyway. `d` covers every body form
 // to-tickets publishes — heading + list, bold/inline label, the original bare
-// phrasings — see #58, and GitHub's native blocked-by edges too (#1741), so
+// phrasings — and GitHub's native blocked-by edges too, so
 // a chain wired only as edges reaches this sort with its blockers in `d`.
 // Native sub-issue links are still not read: parent/child is hierarchy, not
 // blocking, so a blocker recorded only as one reaches it with none.
@@ -622,7 +622,7 @@ rows.sort((a, b) => a.n - b.n);
 
 for (const r of rows) {
   console.error(`    #${r.n} [${r.l.join(",")}] ${r.t}${r.d.length ? `  deps:${r.d.join(";")}` : ""}`);
-  // #1032. A SECOND line, never a field on the row above: that row's format is
+  // A SECOND line, never a field on the row above: that row's format is
   // what phase 0 reads and it stays byte-identical, `deps:` suppressed on an
   // empty list and all. Indented under the row it belongs to, and repeating
   // `#N` so a reader who greps the wording still gets the candidate with it.
@@ -650,8 +650,8 @@ for (const r of rows) {
 //
 // `dh` is dropped here rather than never collected: the heading text exists
 // only inside gh's process, where the reduction runs, so the only way to it is
-// a field on the row — and #1032 rules a payload field out of scope, the
-// stderr signal being the whole of what it asks for. Here, and not in
+// a field on the row — and a payload field is ruled out of scope, the
+// stderr signal being the whole of what this diagnostic asks for. Here, and not in
 // `dropSpecs`' destructure where the row's other stderr-only field (`spec`)
 // leaves the payload: that runs BEFORE the per-candidate lines above, which
 // are what `dh` is for. A replacer, not a rebuilt array: it drops the key
@@ -662,7 +662,7 @@ console.log(JSON.stringify(rows, (k, v) => (k === "dh" ? undefined : v)));
 
 // Exit 1 for a successful query with no survivors, exit 3 when those zero
 // survivors are the filter's doing rather than the query's — see the
-// exit-code contract in the file header (#64). `allFilteredOut` already
+// exit-code contract in the file header. `allFilteredOut` already
 // describes only the final attempt (see above), so no further branching on
 // requireLabel/allowFallback is needed here.
 //
