@@ -99,7 +99,7 @@ unrunnable() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 3; }
 
 # Named once: every refusal that sends the caller to re-derive names the same
 # step, so a controller or reviewer reading any of them knows what to run.
-derive="run the Recipe derivation step (run-team phase 0, before the first claim — ADR 0015) to derive, prove and write it"
+derive="run the Recipe derivation step (run-team phase 0, before the first claim) to derive, prove and write it"
 
 [ $# -eq 2 ] || die "usage: derive-testcmd.sh <repo> <install|test>"
 repo=$1

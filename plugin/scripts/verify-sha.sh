@@ -11,7 +11,7 @@ set -eu
 NAME=verify-sha
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
-# The escaping helpers (#119). json.sh's header holds the sourcing contract and
+# The escaping helpers. json.sh's header holds the sourcing contract and
 # the measurements behind it. Exit 1 out of THIS script means "the sha is not
 # reachable", the one distinction it exists to make, so a missing library would
 # report a member's PR as sitting somewhere it does not — which is why `[ -r ]`
@@ -22,7 +22,7 @@ json_lib="$(dirname "$0")/json.sh"
 # shellcheck source=json.sh
 . "$json_lib" || die "$json_lib failed to load"
 
-# The bounded, prompt-suppressed git transport (#92, #346, #347). The fetch
+# The bounded, prompt-suppressed git transport. The fetch
 # below is unattended: with no bound it can prompt for a credential or a host
 # key, or stall on a transport that connects and then goes quiet, and either
 # holds a fleet slot until something outside kills it. net.sh's header holds the
@@ -43,7 +43,7 @@ sha=$2
 # leaves the die message asserting a cause the script cannot know. A bad remote
 # URL and a removed remote are both "cannot fetch"; only git can say which.
 #
-# `printf`, not `echo`, on THIS line alone (#484): `$branch` is still raw argv
+# `printf`, not `echo`, on THIS line alone: `$branch` is still raw argv
 # here — `[ $# -eq 2 ]` is the only guard it has passed — so a `\c` in it
 # truncated the trace AND swallowed its newline, welding git's own `fatal:`
 # onto the tail of a line that had already lied about the command being run.
@@ -65,7 +65,7 @@ if [ "$fetch_rc" -ne 0 ]; then
   die "cannot fetch origin/$branch"
 fi
 
-# --verify (#1146): without it, an unresolvable "origin/$branch" falls back to
+# --verify: without it, an unresolvable "origin/$branch" falls back to
 # treating the argument as a PATH — if a file or dir of that name sits in the
 # cwd, rev-parse prints it and exits 0, and this guard's `|| die` never fires.
 # Measured: a real ref still wins over a same-named path either way, so

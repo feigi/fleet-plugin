@@ -543,7 +543,7 @@ test("run-team claims a suite RAN from a key's absence from dimensionsUnrun, nev
 // `anchorAt`'s exactly-once guarantee, and an end bound at the paragraph rather
 // than one running past the block into the `return` below it.
 //
-// The positive pin runs out through `(#535).` for the SKILL.md pin's reason —
+// The positive pin runs out through `covered.` for the SKILL.md pin's reason —
 // the likelier regression is an editor softening rather than reverting, and a
 // pin stopping at `ran a suite` reads `ran a suite and is therefore covered` as
 // still present. The exclusion is whole-file and case-insensitive so the
@@ -555,7 +555,7 @@ test("review-core.mjs's own comment claims a suite RAN from a key's absence from
   const para = paragraph(prose, "`dimensionsRun` names what was DISPATCHED", "review-core.mjs");
   assert.match(
     para,
-    phrase("A key in the first and NOT in the second ran a suite — not that it is covered (#535)."),
+    phrase("A key in the first and NOT in the second ran a suite — not that it is covered."),
     "review-core.mjs's dimensionsRun/dimensionsUnrun comment no longer says a key absent from dimensionsUnrun ran a suite, full stop",
   );
   assert.doesNotMatch(

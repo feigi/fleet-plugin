@@ -60,7 +60,7 @@ function derive(dir, field = "test", env = process.env, cwd = tmpdir()) {
 
 // Every refusal that sends its reader to re-derive must say WHICH step does
 // that — the controller or reviewer reading it has no other pointer.
-const NAMES_STEP = /run the Recipe derivation step \(run-team phase 0, before the first claim — ADR 0015\)/;
+const NAMES_STEP = /run the Recipe derivation step \(run-team phase 0, before the first claim\)/;
 
 test("a proven cache yields the requested command, verbatim, and nothing on stderr", () => {
   const { dir, head } = repo();

@@ -1,5 +1,5 @@
-// review-eval.mjs — the shim for the PR review port (#1349, per #1303's
-// ruling on #1296). It is loaded (never review-core.mjs directly) through
+// review-eval.mjs — the shim for the PR review port. It is loaded (never
+// review-core.mjs directly) through
 // the Resolver, from an `eval` cell:
 //
 //   const path = (await Bun.$`~/.fleet/bin/fleet-run --path review-eval.mjs`.text()).trim();
@@ -8,9 +8,9 @@
 //
 // `scratch` is the scratch ROOT, never the review side's `<root>/pr<N>`:
 // runReview creates `pr<N>/` under it itself, and refuses a scratch that
-// already ends in one (#2323).
+// already ends in one.
 //
-// Since #1802 the cell that does this is the `review-pr-<pr#>` member's own —
+// The cell that does this is the `review-pr-<pr#>` member's own —
 // agents/fleet-review-runner.agent.md, off the controller's turn — and it calls
 // `runReviewToFile` (bottom of this file), which wraps `runReviewOnOmp` with the
 // one retry and writes the result file. A controller holding its own turn can
@@ -20,12 +20,12 @@
 // together under the same Install root) with a RELATIVE specifier, so the
 // Resolver is only needed ONCE, to find this file itself — the relationship
 // between the two is an ordinary same-install sibling import, which eval's
-// Bun VM permits without restriction (#1296 Q6). Never resolve
+// Bun VM permits without restriction. Never resolve
 // review-core.mjs's own path through the Resolver a second time — that would
 // be two doors where CONTEXT.md's Resolver entry says there is exactly one.
 //
-// No `model`/`effort` appears anywhere below (#1349 gap 3; audited by
-// review-tier-audit.test.mjs). Every dispatch names a bare fleet-owned
+// No `model`/`effort` appears anywhere below, and a suite audit holds it
+// there. Every dispatch names a bare fleet-owned
 // `agentType` from review-core.mjs's DEFAULT_DIMENSIONS or from
 // runReview's own snapshot/verifier dispatch, unmodified — omp's `agent()`
 // resolves a bare frontmatter `name:` exactly, which is already what those
@@ -34,7 +34,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { digestOf, runReview, runnerPrRefusal, runnerScratchRefusal } from "./review-core.mjs";
 
-// eval's `agent()` returns a HANDLE, not data (#1296 Q2): `agent(prompt,
+// eval's `agent()` returns a HANDLE, not data: `agent(prompt,
 // opts)` resolves near-instantly to an `AgentHandle` with `.wait()`, and only
 // `.wait()` unwraps the schema-validated `structuredOutput.data`. This
 // wrapper is what makes review-core.mjs's `await host.agent(...)` read like
@@ -45,7 +45,7 @@ import { digestOf, runReview, runnerPrRefusal, runnerScratchRefusal } from "./re
 // in review-core.mjs (`if (snap) {...}`, `unrunCrashed`, `verdictFor`) is
 // written against. eval's DEFAULT `schemaMode` is "permissive": an exhausted
 // structured-output retry is ACCEPTED anyway, carrying `schemaOverridden:
-// true` on invalid data (#1296 Q2) rather than nulling out. `schemaMode:
+// true` on invalid data rather than nulling out. `schemaMode:
 // "strict"` turns that same exhaustion into a thrown/rejected result
 // instead — still not a null — so this wrapper treats a REJECTED `.wait()`
 // as the crash signal (`agent()`'s only way to fail loudly under omp) and
@@ -56,7 +56,7 @@ import { digestOf, runReview, runnerPrRefusal, runnerScratchRefusal } from "./re
 // gave up correcting is not this shim's contract to relitigate.
 //
 // NO PER-CALL WORKING DIRECTORY HERE, AND WHY THE ISOLATION RULE LIVES IN THE
-// PROMPTS INSTEAD (#1433). Three PRs reviewed back-to-back from one eval cell
+// PROMPTS INSTEAD. Three PRs reviewed back-to-back from one eval cell
 // left FOUR files modified in the checkout that cell was standing in — a
 // specialist's mutation-test experiment reached through a RELATIVE path, in the
 // tree the controller reads instruments.sh, ci-state.mjs and every gate
@@ -101,7 +101,7 @@ async function ompAgent(prompt, opts) {
   }
 }
 
-// `pipeline()`/`parallel()` have no omp counterpart (#1296 Q3) — this is the
+// `pipeline()`/`parallel()` have no omp counterpart — this is the
 // same hand-rolled pair review-core.mjs exports as its own default (see
 // `defaultPipeline`/`defaultParallel` there), passed through explicitly here
 // rather than left to the default so a reader of THIS file, the one the
@@ -137,9 +137,8 @@ export async function runReviewOnOmp(args) {
   return runReview({ agent: ompAgent, phase, log, pipeline, parallel }, args);
 }
 
-// #1802 (spec 2026-09-24-slot-based-fleet-loop-design.md § 3 §1, §2, §5, §7).
 // The whole of the omp review runner's job, so the agent's own cell is three
-// lines and this contract can be run (review-runner.test.mjs): the full result
+// lines and this contract can be run by a test: the full result
 // object goes to `<scratch>/review-<pr>.json` — the one artefact handed to
 // the fix-applier — and only the digest comes back, because the digest is
 // all the controller reads and a 26–61 KB result is what the file exists to
@@ -150,7 +149,7 @@ export async function runReviewOnOmp(args) {
 // reviewer's name (`review-pr-<pr>-b`), and writes no file, so nothing reads a
 // half-review as a review. A dispatch mistake — a pr that is not a PR number, a
 // scratch that is not absolute (eval's cwd is the MAIN CHECKOUT, so a relative
-// one would put the file there), a scratch that already ends in `pr<N>` (#2323)
+// one would put the file there), a scratch that already ends in `pr<N>`
 // — throws before any run: it is not a review failure, and retrying or falling
 // back would only repeat it. `run` is the seam the test injects; nothing else
 // passes it.
@@ -173,7 +172,7 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
       errors.push(`attempt ${attempt}: ${e?.message ?? String(e)}`);
       continue;
     }
-    // #1813: `result.counts` is read below to build the digest and the ledger
+    // `result.counts` is read below to build the digest and the ledger
     // token, but that read happens AFTER `mkdir`/`writeFile` have already put
     // the file on disk — so a `run` that resolves to a truthy, object-shaped
     // result missing `.counts` would otherwise throw on the destructure below

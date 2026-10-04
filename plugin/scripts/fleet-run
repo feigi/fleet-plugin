@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// The Resolver (#1335, ADR 0003, ADR 0014, ADR 0021, CONTEXT.md § Install
+// The Resolver (CONTEXT.md § Install
 // "Resolver"). The single door between prose and an installed script: a prose
 // callsite names a SCRIPT, never a path, and this reads omp's own extension
 // package layout to find where that script actually lives right now.
 //
-// RESOLUTION POINT (ADR 0021): `~/.omp/plugins/node_modules/@feigi/fleet-ctl`. Every
+// RESOLUTION POINT: `~/.omp/plugins/node_modules/@feigi/fleet-ctl`. Every
 // omp install kind — marketplace, `omp plugin link`, npm — places an entry
 // there (a symlink for marketplace/link, a real directory for npm), and it is
 // the only path common to all three. Its realpath IS the Install root. The
@@ -37,7 +37,7 @@ const os = require("node:os");
 const { spawnSync } = require("node:child_process");
 
 const NAME = "fleet-run";
-const PLUGIN_KEY = "@feigi/fleet-ctl"; // ADR 0006 name; ADR 0021 — the node_modules package dir, no longer a qualified registry key.
+const PLUGIN_KEY = "@feigi/fleet-ctl"; // the plugin's package name, and its node_modules package dir, no longer a qualified registry key.
 
 function die(message) {
   process.stderr.write(`${NAME}: ${message}\n`);

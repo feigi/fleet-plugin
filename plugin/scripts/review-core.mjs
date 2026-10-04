@@ -1,5 +1,4 @@
-// review-core.mjs — the review body for PR review (#1349, per #1303's ruling
-// on #1296). Read that ruling before touching this file.
+// review-core.mjs — the review body for PR review.
 //
 // This file holds every host-independent declaration PR review needs: the
 // JSON schemas, `usableDiff`, `readRules`, `resolveTestCmd`,
@@ -22,15 +21,15 @@
 // `null`, which every guard here — `if (snap) {...}`, `unrunCrashed`,
 // `verdictFor` — is written against).
 //
-// Two imports. arg.mjs's isDigits(), added by #878: this file is an ordinary
+// Two imports. arg.mjs's isDigits(): this file is an ordinary
 // module, so it consumes the repo's digits rule directly rather than
-// declaring its own copy. node:path's `posix`, added by #2323, to normalise a
+// declaring its own copy. node:path's `posix`, to normalise a
 // scratch path before `runnerScratchRefusal` reads its last component.
 //
-// `.mjs`, not `.js` (#1763): this file was `review-core.js` until then, and
+// `.mjs`, not `.js`: this file was once `review-core.js`, and
 // nothing that ships declares a `type`, so Node below 20.19.0/22.7.0 —
 // inside the declared consumer floor — read it as CommonJS and
-// review-eval.mjs's import of it failed. node-floor-sweep.test.mjs keeps a
+// review-eval.mjs's import of it failed. A suite sweep keeps a
 // shipped `.mjs` from importing a relative module under any other extension.
 
 import { posix } from "node:path";
@@ -91,7 +90,7 @@ export const SNAPSHOT_SCHEMA = {
     path: { type: "string" },
     head: { type: "string" },
     pathVerified: { type: "boolean" },
-    // #1056. `pathVerified` says the tree is THERE; this says the tree is
+    // `pathVerified` says the tree is THERE; this says the tree is
     // MEASURABLE — that the snapshot is a git repository holding the reviewed
     // commit's tree. Required for `pathVerified`'s reason: an omitted boolean
     // must not read as a verified environment, because the whole defect was a
@@ -111,7 +110,7 @@ export const SNAPSHOT_SCHEMA = {
   },
 };
 
-// #2315. What the review's one shared test run reports back. `command` and the
+// What the review's one shared test run reports back. `command` and the
 // log path are NOT asked for: the caller handed both out, so it already knows
 // them, and an agent's echo of either could only disagree. Every count is
 // optional and stays absent when the log does not state it — an absent
@@ -133,7 +132,7 @@ export const TEST_RUN_SCHEMA = {
 };
 
 // --- Dimension catalog --------------------------------------------------
-// #1349, per #1303's gap 3: no dimension carries a `model`/`effort` field —
+// No dimension carries a `model`/`effort` field —
 // dispatch tier lives ONLY in each fleet-owned agent definition's own
 // frontmatter. `agentType` is a bare frontmatter `name:` (omp's native
 // `agent()` lookup is an exact match on one).
@@ -174,14 +173,14 @@ export const DEFAULT_DIMENSIONS = [
   },
 ];
 
-// #2102: the omp `fleet-review-runner` agent definition's `spawns:`
+// The omp `fleet-review-runner` agent definition's `spawns:`
 // frontmatter must allow exactly the agent types dispatched below (the
-// snapshot agent, the shared test run's agent (#2315), every
+// snapshot agent, the shared test run's agent, every
 // DEFAULT_DIMENSIONS entry, and the verifier) — omp denies every spawn by
 // default, and the runner declared no `spawns` at all until this fix.
 // Exporting the three literal-only types (snapshot/test-run/verifier have no
 // DEFAULT_DIMENSIONS entry of their own) plus the derived full set lets
-// review-runner-spawns.test.mjs pin the frontmatter against what this file
+// a test pin the frontmatter against what this file
 // actually dispatches, instead of a hand-copied list that can drift.
 export const SNAPSHOT_AGENT_TYPE = "fleet-review-snapshot";
 export const TEST_RUN_AGENT_TYPE = "fleet-review-test-run";
@@ -197,15 +196,17 @@ export const SPAWNED_AGENT_TYPES = [
 // computeStats owns both thresholds).
 export const SIZE_TIER_PROFILES = new Set(["single-file", "small"]);
 // The refuter-budget floor: `correctness`/`silent-failure` miss silently and
-// permanently; `comments` sits beside them for a different reason (#218).
+// permanently; `comments` sits beside them because a comment-only edit to a
+// code file classifies as `src`, never `docs`, and would otherwise get no
+// comment review at all.
 // Keyed on recoverability of a MISS, never on tier — `verifiersFor` takes a
 // severity and nothing else.
 export const SIZE_TIER_DIMS = new Set(["correctness", "silent-failure", "comments"]);
 
 // The refuter budget per severity, derived once per run from the caller's
 // own `A.verifiers`/`A.verifiersBySeverity` overrides (or the defaults) and
-// bound to a `(severity) => count` closure — `select-dimensions.test.mjs`
-// imports this directly rather than re-deriving it from a lifted copy.
+// bound to a `(severity) => count` closure — the suite imports this directly
+// rather than re-deriving it from a lifted copy.
 export function verifiersFor(A) {
   const verifiers = A.verifiers || 2;
   const by = A.verifiersBySeverity || { critical: verifiers, important: verifiers, suggestion: 0 };
@@ -214,8 +215,8 @@ export function verifiersFor(A) {
 
 // --- Pure functions -------------------------------------------------------
 // Every function below was ported byte-identical (function body) from this
-// repo's retired pre-cutover review workflow script's own declaration, before
-// ADR 0014 retired that file — see this repo's git history for the full
+// repo's pre-cutover review workflow script's own declaration, before that
+// file was retired — see this repo's git history for the full
 // historical rationale on each; it is not repeated here to avoid a second
 // copy of PROSE disconnecting the way this repo's own "recurring pin defect"
 // comment warns a second copy of CODE does.
@@ -270,12 +271,12 @@ reads carried 434 KB.`;
 
 // The step a missing Test entrypoint is derived by, named in the refusal so the
 // caller — a controller or a reviewer — knows what to run rather than what went
-// wrong (ADR 0015). derive-testcmd.sh's refusals about the cache name the same
+// wrong. derive-testcmd.sh's refusals about the cache name the same
 // step; its exit-3 refusals name an environment fault instead, which the caller
 // fixes rather than deriving. This one covers the case where the snapshot agent
 // reported no reason at all.
 const DERIVATION_STEP =
-  "run the Recipe derivation step (run-team phase 0, before the first claim — ADR 0015) to derive, prove and write the Recipe cache";
+  "run the Recipe derivation step (run-team phase 0, before the first claim) to derive, prove and write the Recipe cache";
 
 export function resolveTestCmd(explicit, snap) {
   if (explicit) return explicit;
@@ -323,12 +324,12 @@ export function selectDimensions(all, stats) {
 // documents `args.dimensions` as accepting "keys or dimension objects" — but
 // until now only objects worked: a key array passed straight through and
 // every dereference below (`d.key`, `d.prompt`, `d.agentType` — three) came
-// back `undefined`, with no throw and no warning (#113). Resolve strings
+// back `undefined`, with no throw and no warning. Resolve strings
 // against the workflow's own catalog, and check every object has the three
 // fields it REQUIRES AND that each of those is a string — presence alone let
 // a non-string field reach the specialist dispatch machinery downstream
 // instead of failing at this validated boundary. `model` is no longer a
-// fourth optional field (#1349): an override entry that still sends one is
+// fourth optional field: an override entry that still sends one is
 // refused outright, loudly, rather than silently accepted and ignored — see
 // the check below.
 // Anything unresolvable stops the run and names what was not recognised — a
@@ -394,7 +395,7 @@ export function snapshotMissing(snap, runRootPrefix) {
   return null;
 }
 
-// #1056. What a suite run inside the snapshot is evidence ABOUT, in one
+// What a suite run inside the snapshot is evidence ABOUT, in one
 // paragraph every specialist prompt and the returned payload both carry.
 //
 // `repoVerified` false is deliberately NOT a refusal (`snapshotMissing` says
@@ -434,7 +435,7 @@ validation of the tree: its counts are snapshot-measured, and a failure in it
 cannot be told apart from a regression.`;
 }
 
-// #2315. Every run-quality verdict below reads the review's ONE shared test
+// Every run-quality verdict below reads the review's ONE shared test
 // run — `{command, logPath, exitCode?, tests?, pass?, fail?, cancelled?,
 // skipped?, error?}`, `command`/`logPath` the caller's own and the rest the
 // test-run agent's report — never a specialist's own run: no specialist runs
@@ -474,7 +475,7 @@ function failingDesc(run) {
   return run.cancelled ? `${run.fail || 0} failing and ${run.cancelled} cancelled tests` : `${run.fail} failing tests`;
 }
 
-// Failing tests are owned by the review as a whole (#2315): `findings` is
+// Failing tests are owned by the review as a whole: `findings` is
 // every finding that reached the payload, and ONE from any dimension
 // satisfies the check for all — no dimension is asked to duplicate a
 // sibling's, and none is marked unrun because a sibling filed it. A refuted
@@ -509,7 +510,7 @@ function countsOf(run) {
     .join(", ");
 }
 
-// #2315. The Tests paragraph of every specialist prompt: the shared run's
+// The Tests paragraph of every specialist prompt: the shared run's
 // command, counts, exit status and log path, in place of the instruction to
 // run the full suite that each specialist used to follow — one review was up
 // to six full sweeps of one immutable snapshot. `owner` is the one dimension
@@ -547,7 +548,7 @@ bears on your own lens.`,
   return lines.join("\n");
 }
 
-// #1433 gap: the CWD-AUDIT line the Review dispatch below asks a specialist
+// The CWD-AUDIT line the Review dispatch below asks a specialist
 // to fold into `scope_searched` is a convention, not schema — FINDINGS_SCHEMA
 // accepts any string there, so a specialist that satisfies the schema while
 // never emitting the line, or misspelling it, produces a fully valid,
@@ -574,7 +575,7 @@ export function verdictFor(dispatched, votes) {
   return { verdict, votes: live, refutersDispatched: dispatched };
 }
 
-// #1802. One in-run re-dispatch for a crashed dispatch, before the result is
+// One in-run re-dispatch for a crashed dispatch, before the result is
 // assembled — the specialist call and the refuter PAIR are the two units it
 // wraps. `crashed(value)` says whether a settled first attempt counts as a
 // crash; a THROWN first attempt is handed to it as `null`, because a
@@ -589,21 +590,21 @@ export function retryCrashed(dispatch, crashed) {
     .then(again, () => again(null));
 }
 
-// omp has no cached-replay mechanism (ADR 0004/0005, #1349 gap 1): a fresh
+// omp has no cached-replay mechanism: a fresh
 // review re-dispatches every agent() live rather than only the crashed
 // legs, and the one re-dispatch this run gets was already spent in-run
-// (#1802) — a crashed finding is reported and deferred, never resumed.
+// — a crashed finding is reported and deferred, never resumed.
 export function resumeFor(unverified) {
   const crashed = unverified.filter((f) => f.refutersDispatched > 0);
   if (!crashed.length) return { crashed, resume: null };
   const claim =
     "Findings in `unverified` with `refutersDispatched` above zero and no surviving vote had every refuter die, and die again on the in-run retry — nothing looked at them. ";
   const verb =
-    "Defer them as crashed — reported, not acted on: omp's eval has no cached-replay mechanism (ADR 0004/0005, #1349 gap 1), so a fresh review re-dispatches every agent() live rather than only the crashed legs, and the in-run retry was this review's one re-dispatch. Re-run nothing for them.";
+    "Defer them as crashed — reported, not acted on: omp's eval has no cached-replay mechanism, so a fresh review re-dispatches every agent() live rather than only the crashed legs, and the in-run retry was this review's one re-dispatch. Re-run nothing for them.";
   return { crashed, resume: claim + verb };
 }
 
-// #1802. The digest: every field a controller acts on, and nothing bulky.
+// The digest: every field a controller acts on, and nothing bulky.
 // The result object LEADS with exactly these keys, in this order
 // (`runReview`'s return below) — historically so the pre-cutover harness's
 // ~8 KB inline `<result>` cut landed in the finding arrays, never in the
@@ -621,18 +622,17 @@ export function digestOf(result) {
   return Object.fromEntries(DIGEST_KEYS.map((k) => [k, result[k]]));
 }
 
-// #1802. The digits refusal review-eval.mjs's `runReviewToFile` runs before
+// The digits refusal review-eval.mjs's `runReviewToFile` runs before
 // its first attempt, so a dispatch mistake is refused once instead of being
 // retried and sent to the fallback reviewer. It lives here, not there, because
 // review-eval.mjs is a library and arg.mjs's `scripts/*.mjs` importers are its
-// CLI roster, each one probed to refuse a stray flag
-// (arg-header-probes-prose.test.mjs); this module already consumes the digits
-// rule on the review path. Null when `pr` is a PR number.
+// CLI roster, each one probed to refuse a stray flag; this module already
+// consumes the digits rule on the review path. Null when `pr` is a PR number.
 export function runnerPrRefusal(pr) {
   return isDigits(pr) ? null : `args.pr must be a PR number, got ${JSON.stringify(pr)}`;
 }
 
-// #2323. `runReview` owns the review side's `pr<N>/` partition — it appends
+// `runReview` owns the review side's `pr<N>/` partition — it appends
 // `/pr${pr}` to the scratch it is given — so a scratch whose last component
 // is already `pr` plus digits is a caller that partitioned too, and its run
 // roots would nest at `<root>/pr<N>/pr<N>/run-*`, below the snapshot prompt's
@@ -662,7 +662,7 @@ export function runnerScratchRefusal(scratch) {
 // contract every guard below is written against), `phase(title)`,
 // `log(message)`, and OPTIONALLY `pipeline`/`parallel` (see
 // defaultPipeline/defaultParallel below for the omp shim's implementation
-// of both, built from #1296 Q3's analysis).
+// of both).
 function defaultParallel(fns) {
   return Promise.all(fns.map((fn) => fn()));
 }
@@ -670,7 +670,7 @@ function defaultParallel(fns) {
 // Per-item independence, INCLUDING the null short-circuit: a stage-1 throw
 // or a stage-1 falsy result must land in the SAME null slot a stage-2 throw
 // would, so `unrunCrashed`'s index-aligned read of the pipeline result sees
-// one uniform shape for every crash cause (#1296 Q3).
+// one uniform shape for every crash cause.
 async function defaultPipeline(items, stage1, stage2) {
   return Promise.all(
     items.map(async (item) => {
@@ -710,7 +710,7 @@ export async function runReview(host, args) {
 
   if (!pr || !worktree) throw new Error("review-pr: args.pr and args.worktree are required");
 
-  // #878. The truthiness check above is what made the CLI fail-open REACHABLE:
+  // The truthiness check above is what made the CLI fail-open REACHABLE:
   // `pr` is interpolated into `gh pr diff ${pr}`, `gh pr view ${pr}` and
   // `diff-stats.mjs --pr ${pr}` in the snapshot prompt below, and a branch name
   // passes all three — `gh` resolves a non-numeric ref as a BRANCH, so the
@@ -771,7 +771,7 @@ both hashes — in \`repoError\`. The init is what makes the snapshot MEASURABLE
 the review runs this repository's own suite in there, and a suite with tests
 that need a working tree reports fewer passes and more failures in a bare
 extraction than in a checkout at the same commit, with nothing in the payload
-saying the measurement happened somewhere else (#1056). The tree-hash compare is
+saying the measurement happened somewhere else. The tree-hash compare is
 the verification: two commits whose trees hash the same hold byte-identical
 content, so a match settles that the snapshot IS the reviewed tree — a stronger
 check than reading a few files, and the reason the commit comes BEFORE the
@@ -785,7 +785,7 @@ every file in the tree rather than a couple of them. Do not modify ${worktree}.
 Every path in the block above is absolute or \`-C\`-anchored on purpose: this
 dispatch carries no working directory of its own either, so you start in the
 controller's own checkout, and a relative path — a \`tar -x\` with no \`-C\`, a
-bare \`git\` — reads or writes THERE (#1433). Add nothing relative to it, and
+bare \`git\` — reads or writes THERE. Add nothing relative to it, and
 chain a \`cd\` into "$RUN" or "$SNAP" for anything you run beyond it.
 
 Then capture the PR's diff for the specialists, plus the three facts the caller
@@ -811,7 +811,7 @@ as before. A cross-repo PR (a fork) skips the branch-ref read entirely and goes
 straight to 'refs/pull/${pr}/head' — the base repo's own copy of the PR head —
 because a fork's branch NAME is not guaranteed unique against the base
 repository, and a same-named hit on 'origin' would silently answer for the
-wrong repository rather than for the fork (#1616). The fallback to
+wrong repository rather than for the fork. The fallback to
 'refs/pull/${pr}/head' also still fires for a same-repo PR whose branch ref
 came back empty, unchanged from before. Omit \`refHead\` when every read this
 PR was entitled to came back empty or was skipped: an absent value is neither
@@ -886,7 +886,7 @@ a false repoVerified.`,
   );
   log(`agents dispatched ${dimensions.map((d) => `${d.key}=${d.agentType}`).join(" ")}`);
 
-  // #2315. The review's ONE run of the test command, before any specialist is
+  // The review's ONE run of the test command, before any specialist is
   // dispatched: every dimension used to run the full suite itself, so one
   // review was up to six full sweeps of one immutable snapshot. NOT wrapped in
   // `retryCrashed`: a crashed dispatch may already have launched the command,
@@ -946,7 +946,7 @@ learns the run produced none.`,
   const failureOwner = dimensions[0].key;
 
   const dimensionsUnrun = [];
-  // #1433. Per-dimension record of the specialist's own CWD-AUDIT line (see
+  // Per-dimension record of the specialist's own CWD-AUDIT line (see
   // `cwdAuditFrom` above) — `{dimension, state, line}`, `state` one of
   // "clean"/"dirty"/"unrepo"/"missing". Populated for every dispatched
   // review that returned at all (a crashed dispatch has nothing to audit,
@@ -955,10 +955,10 @@ learns the run produced none.`,
   // dead-ending inside `scope_searched`.
   const cwdAudit = [];
 
-  // #1433. Both prompts below carry the inherited-cwd rule, and it is stated in
+  // Both prompts below carry the inherited-cwd rule, and it is stated in
   // each rather than shared: review-eval.mjs's own header holds the measurement
   // and the reason this is prompt prose at all (no dispatch primitive takes a
-  // per-call cwd), and #496's brief rules the shared-source route out for
+  // per-call cwd), and the shared-source route is ruled out for
   // exactly these blocks. Three parts, in this order, because the last two are
   // inert without the first: the cwd the specialist starts in is NAMED as a
   // tree it must not write to, `pwd` fixes which directory that is, and the
@@ -968,7 +968,7 @@ learns the run produced none.`,
   phase("Review");
   const reviewed = await pipeline(
     dimensions,
-    // #1802: a crashed specialist (null or thrown) is re-dispatched once
+    // A crashed specialist (null or thrown) is re-dispatched once
     // before it counts as unrun. A specialist that RETURNED is never re-run
     // here — the shared run, not the specialist, is what `unrunEntries` judges.
     (d) =>
@@ -1022,7 +1022,7 @@ beginning \`CWD-AUDIT:\` — \`CWD-AUDIT: clean <path>\` when it printed nothing
 every run, clean or not: a clean tree is the result this check exists to
 produce, and an omitted line reads exactly like a check never run. Three PRs
 reviewed from one cell left four files modified in that checkout with nothing in
-any payload saying so (#1433), so a path you cannot account for is still yours
+any payload saying so, so a path you cannot account for is still yours
 to name.`,
             { label: `review:${d.key}${forPr}`, phase: "Review", agentType: d.agentType, schema: FINDINGS_SCHEMA },
           ),
@@ -1036,7 +1036,7 @@ to name.`,
         (review && review.findings ? review.findings : []).map((f, fi) => () => {
           const n = verifiersForRun(f.severity);
           if (n === 0) return Promise.resolve({ ...f, dimension: d.key, ...verdictFor(0, []) });
-          // #1802: a pair whose EVERY vote died (or whose dispatch threw) is
+          // A pair whose EVERY vote died (or whose dispatch threw) is
           // re-dispatched once, as a pair, before `verdictFor` reads it — one
           // live vote means the pair did not crash and is ruled on that vote.
           return retryCrashed(
@@ -1113,8 +1113,7 @@ Report it in \`reason\` as one line beginning \`CWD-AUDIT:\` —
 <what it printed>\` when it printed anything, \`CWD-AUDIT: unrepo <path>\` when
 git answered \`fatal: not a git repository\` — every run, clean or not: an
 omitted line reads exactly like a check never run, and applying a mutation is
-how three reviews from one cell left four files modified in that checkout
-(#1433).`,
+how three reviews from one cell left four files modified in that checkout.`,
                     { label: `verify:${d.key}${forPr}`, phase: "Verify", agentType: VERIFIER_AGENT_TYPE, schema: VERDICT_SCHEMA },
                   ),
                 ),
@@ -1122,7 +1121,7 @@ how three reviews from one cell left four files modified in that checkout
             (votes) => !(votes && votes.some(Boolean)),
           ).then(
             (votes) => ({ ...f, dimension: d.key, ...verdictFor(n, votes) }),
-            // #1813: a rejection here means retryCrashed's OWN final attempt
+            // A rejection here means retryCrashed's OWN final attempt
             // rejected — both dispatches of this finding's refuter pair
             // crashed, not just returned no votes. Left unhandled, that
             // rejection propagates into the shared `parallel()` above (a bare
@@ -1147,7 +1146,7 @@ how three reviews from one cell left four files modified in that checkout
   const refuted = all.filter((f) => f.verdict === "refuted");
   const unverified = all.filter((f) => f.verdict === "unverified");
 
-  // #2315. One verdict on the shared run, for every dimension whose chain did
+  // One verdict on the shared run, for every dimension whose chain did
   // not die — a crashed one is named below with its own reason instead, so no
   // key is listed twice. Read only once every dimension has been verified: the
   // failing-tests check reads the findings that reached the payload, across
@@ -1174,10 +1173,10 @@ how three reviews from one cell left four files modified in that checkout
   // `dimensionsRun` names what was DISPATCHED after the size trim: a trimmed
   // fan-out must say so, never read as full coverage. It is not a coverage claim
   // on its own and never was — a specialist can be dispatched and die, or the
-  // review's one shared test run can execute nothing (#2315) — so
+  // review's one shared test run can execute nothing — so
   // `dimensionsUnrun` names which of those keys did not cover their ground,
   // and why. A key in the first and NOT in the second ran a suite — not that
-  // it is covered (#535). `unrunReason` reads the shared run's counts and
+  // it is covered. `unrunReason` reads the shared run's counts and
   // quotes its command into its message; it never checks that the test-run
   // agent ran the command it was handed rather than a narrower one, so a
   // substituted runner is not classified unrun.
@@ -1187,7 +1186,7 @@ how three reviews from one cell left four files modified in that checkout
   // make a crashed dimension indistinguishable from one the size tier never
   // dispatched — this ticket set's own defect, moved one field over.
   //
-  // #1802. Digest first, in DIGEST_KEYS order, bulk last — see DIGEST_KEYS
+  // Digest first, in DIGEST_KEYS order, bulk last — see DIGEST_KEYS
   // above for why the order is the contract.
   return {
     pr,
@@ -1195,13 +1194,13 @@ how three reviews from one cell left four files modified in that checkout
     // The recovery, next to the fields a controller reads first; null unless
     // a refuter pair crashed again after the in-run retry.
     resume,
-    // #1056. Always present, in both regimes: a reader of this payload can
+    // Always present, in both regimes: a reader of this payload can
     // never be left unable to tell an environment artifact from a regression,
     // and that costs nothing when there is nothing wrong to report.
     testEnvironment: environmentNote(snap),
     dimensionsRun: dimensions.map((d) => d.key),
     dimensionsUnrun,
-    // #1433. `cwdAuditFrom`'s per-dimension read of the specialist's own
+    // `cwdAuditFrom`'s per-dimension read of the specialist's own
     // CWD-AUDIT line — the fact a dirty or unrepo'd inherited checkout is
     // otherwise reported into `scope_searched` and read by nothing.
     cwdAudit,

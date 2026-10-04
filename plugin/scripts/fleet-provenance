@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// The Provenance check (#1335, ADR 0003 point 4, ADR 0021, CONTEXT.md § Install
+// The Provenance check (CONTEXT.md § Install
 // "Provenance check"). Names the live Install root — the realpath of omp's
 // `node_modules/@feigi/fleet-ctl` package entry, the one path every install kind
-// places (ADR 0021) — its kind and recorded version, and hashes the placed
+// places — its kind and recorded version, and hashes the placed
 // Resolver (`~/.fleet/bin/fleet-run`) against the Install root's own copy and
 // refuses on drift. Writes nothing, mutates no config — every path below is
 // read-only.
 //
-// The `enabledProviders: ["claude-plugins"]` assertion retired here (ADR
-// 0021): omp's #11362 fix (shipped 18.2.1) exempts omp-origin installs from
+// The `enabledProviders: ["claude-plugins"]` assertion retired here: omp
+// 18.2.1 exempts omp-origin installs from
 // that provider gate, and the native package route never depended on it.
 // Asserting it refused correct setups.
 //
@@ -27,7 +27,7 @@ const os = require("node:os");
 const crypto = require("node:crypto");
 
 const NAME = "fleet-provenance";
-const PLUGIN_KEY = "@feigi/fleet-ctl"; // ADR 0006 name; ADR 0021 — the node_modules package dir.
+const PLUGIN_KEY = "@feigi/fleet-ctl"; // the plugin's package name, and its node_modules package dir.
 
 // Same resolution point as scripts/fleet-run (its header names the shape of
 // each install kind). Duplicated rather than shared because a module the
@@ -49,7 +49,7 @@ function resolveInstall(home) {
 }
 
 // Version lives in omp's runtime plugin lock, which every install kind writes
-// (ADR 0021 point 4) — a link records the manifest's own `package.json`
+// — a link records the manifest's own `package.json`
 // version (measured on 18.4.8: `0.0.0`, the placeholder), so the number never
 // identifies a link; `kind:` does. Read tolerantly: any shape problem degrades
 // to null, it never fails the check, because the version is informational.
@@ -67,7 +67,7 @@ function readLockVersion(home) {
 
 // Every regular file under `<root>/scripts`, repo-relative, sorted — a
 // filesystem walk rather than `git ls-files`: an installed copy need not
-// carry a .git at all (a directory-source install can exclude it, ADR 0003),
+// carry a .git at all (a directory-source install can exclude it),
 // so git is not an instrument this check can rely on being present.
 function walkFiles(dir, base = dir, out = []) {
   let entries;
@@ -182,7 +182,7 @@ function main() {
   }
 
   if (kind === "linked-checkout") {
-    // Not a failure: a link is the dev loop (ADR 0021). It is a NOTICE on
+    // Not a failure: a link is the dev loop. It is a NOTICE on
     // every other install's answer, because a linked root outranks an
     // installed copy of the same names in omp's own discovery — the check
     // above certified the LINK, not what a session without the link runs.
