@@ -29,12 +29,12 @@ set -eu
 # `tr` exits 1 on a byte that is not valid UTF-8, `paste` truncates its whole
 # output at it and still exits 0, and `grep` does one of TWO things: it drops
 # the offending line at rc 0/1, or it gives up on the scan and exits 2. Only
-# the first half was ever written down here, which is why the second read as a
-# clean no-match at all four call sites until #1419 — the reason `grep_probe`
-# below takes grep's own status apart from grep's verdict.
+# the first half was ever written down here, which is why the second once read
+# as a clean no-match at all four call sites — the reason `grep_probe` below
+# takes grep's own status apart from grep's verdict.
 #
-# `awk` is NOT immune, and reap.test.mjs's own #614 fixture measured the
-# earlier claim here false: it is byte-identical only when every rule matches
+# `awk` is NOT immune, and a fixture in this script's own test suite measured
+# the earlier claim here false: it is byte-identical only when every rule matches
 # at an ANCHOR before the bad byte, never needing to convert it. A rule that
 # must SCAN PAST the byte to decide — here, the `/^branch /` match against a
 # worktree's raw, unquoted registry path, one SIBLING entry away from the
@@ -42,28 +42,27 @@ set -eu
 # at rc 2 (`towc: multibyte conversion failure`), and this script runs under
 # `set -eu`, so that death TERMINATES the whole sweep rather than merely
 # mis-scoring one record. gawk and mawk (Linux CI) tolerate the same byte and
-# answer rc 0, which is why this is a macOS-only ceiling, not a portable fix —
-# #790. Such a byte reaches us from a fetched tree even where the local
-# filesystem refuses to hold the name. #582 measured the cost of leaving this
-# ambient in no-undo-audit.sh: a truncated list reported as a clean, confident
-# answer.
+# answer rc 0, which is why this is a macOS-only ceiling, not a portable fix.
+# Such a byte reaches us from a fetched tree even where the local filesystem
+# refuses to hold the name. Leaving this ambient in no-undo-audit.sh was
+# measured to cost a truncated list reported as a clean, confident answer.
 #
 # Safe as a global: nothing in this script sorts, folds case, or uses a `[a-z]`
 # range or a POSIX class, so collation and case-folding — the two things
 # `LC_ALL=C` otherwise changes — have nothing here to act on. "Nothing" is an
-# inventory, not a hope: locale-pin-prose.test.mjs enforces it (#612), because
+# inventory, not a hope: the suite's locale-pin prose test enforces it, because
 # this sentence shipped false in no-undo-audit.sh and a `sort` added below
 # would otherwise leave every test in this suite green.
 export LC_ALL=C
 
 # Below the locale pin, not above it with `set -eu`: `unset` touches no
-# byte-sensitive tool, but locale-pin-prose.test.mjs treats ANY line here that
+# byte-sensitive tool, but the locale-pin prose test treats ANY line here that
 # is not a comment, a blank, or `set -[eux]+` as work the pin must sit above,
 # and refuses on principle rather than on this line's own behaviour. Same
 # placement, same reason, as release-ticket.sh's copy.
 #
 # This is the script the class costs the most, and both halves are measured on
-# it (#1020).
+# it.
 #
 # GIT_DIR: nothing in the sweeps carries a `-C`. An ambient one therefore does
 # not merely misreport — it MOVES THE DELETIONS. Measured, `--apply` run from
@@ -86,8 +85,8 @@ unset GIT_DIR GIT_WORK_TREE
 NAME=reap
 die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 2; }
 
-# The escaping helpers (#119). json.sh's header holds the sourcing contract and
-# the measurements behind it. This script defines no exit 1 at all (#265), so a
+# The escaping helpers. json.sh's header holds the sourcing contract and the
+# measurements behind it. This script defines no exit 1 at all, so a
 # bare 1 out of it is a code its caller has no reading for. Placed here, above
 # the fetch, so a missing library refuses before anything is deleted rather than
 # partway through.
@@ -97,7 +96,7 @@ json_lib="$(dirname "$0")/json.sh"
 # shellcheck source=json.sh
 . "$json_lib" || die "$json_lib failed to load"
 
-# The bounded, prompt-suppressed git transport (#92, #346, #347). The fetch
+# The bounded, prompt-suppressed git transport. The fetch
 # below is unattended: with no bound it can prompt for a credential or a host
 # key, or stall on a transport that connects and then goes quiet, and either
 # holds a fleet slot until something outside kills it. net.sh's header holds the
@@ -109,7 +108,7 @@ net_lib="$(dirname "$0")/net.sh"
 # shellcheck source=net.sh
 . "$net_lib" || die "$net_lib failed to load"
 
-# The worktree readers (#551, #725). worktree.sh's header holds the sourcing
+# The worktree readers. worktree.sh's header holds the sourcing
 # contract and the measurements behind it, and json.sh's holds the `[ -r ]`
 # reasoning all three guards share. Sourced below json.sh so a lone copy of this
 # script still blames json.sh, the name its missing-library test pins, and above
@@ -125,7 +124,7 @@ wt_lib="$(dirname "$0")/worktree.sh"
 # passed whatever it said. Measured on the pre-fix script over identical
 # fixtures, `reap.sh --aply` and a bare `reap.sh` both exited 0 with
 # byte-identical stdout and stderr — same payload, same banner, same per-branch
-# lines — so nothing in the run said the flag had not been understood (#250).
+# lines — so nothing in the run said the flag had not been understood.
 # Both refusals sit above the fetch, so a rejected invocation reads nothing and
 # deletes nothing.
 apply=false
@@ -148,12 +147,12 @@ base=${BASE_REF:-origin/main}
 # and nothing at the delete refuses it: the compare-and-swap there refuses
 # only a ref that moved, and the holder check only a branch a worktree holds.
 #
-# It is also what makes the qualification below sound rather than a guess. #924
-# recorded qualifying as unavailable here precisely because BASE_REF might name
-# a tag, a sha or a local branch, leaving no prefix that is always correct;
-# restricting the input first removes that objection instead of working around
-# it. Placed with the argument guards above the fetch, so a rejected invocation
-# reads nothing and deletes nothing.
+# It is also what makes the qualification below sound rather than a guess.
+# Qualifying was once recorded as unavailable here precisely because BASE_REF
+# might name a tag, a sha or a local branch, leaving no prefix that is always
+# correct; restricting the input first removes that objection instead of
+# working around it. Placed with the argument guards above the fetch, so a
+# rejected invocation reads nothing and deletes nothing.
 case "$base" in
   origin/*|refs/remotes/*) ;;
   *) die "BASE_REF must be a remote-tracking ref, got '$base'";;
@@ -187,8 +186,8 @@ esac
 # DEFAULT, so no accept-list catches it; and `git rev-parse --verify "$base"`
 # exits 0 whichever ref it picked — git's own
 # `warning: refname 'origin/main' is ambiguous.` reaches stderr, where this
-# script reads nothing and an unattended run has no one to read it. #924, the
-# fix pattern proven in release-ticket.sh:264 (#760).
+# script reads nothing and an unattended run has no one to read it. The fix
+# pattern is the one proven in release-ticket.sh:264.
 #
 # refs/remotes/ leaves nothing to disambiguate, and the accept-list above
 # already establishes $base is spelled for that namespace. $base itself is
@@ -215,7 +214,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # below refuse this one path and report it as a `kept` finding, which is the
 # remedy an operator can act on — it is one `cd` away. Chdir-ing somewhere
 # durable at the foot of the file would cover the prune only, and the prune is
-# the LAST call that needs a cwd, not the only one. #992
+# the LAST call that needs a cwd, not the only one.
 #
 # `--show-toplevel`, never `pwd`: this script may be invoked from a
 # subdirectory, and that answers the worktree ROOT — the directory
@@ -223,13 +222,13 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # the listing echoes the path recorded at `worktree add` time, which a parent
 # turned symlink since leaves non-canonical, and which `core.precomposeunicode`
 # prints precomposed for a worktree whose on-disk name is NFD while git's own
-# answer is the NFD bytes (measured, git 2.50.1, Apple Git-155, #2072). So
+# answer is the NFD bytes (measured, git 2.50.1, Apple Git-155). So
 # `holds_cwd` below matches on the directory, not only the string.
 #
 # `2>/dev/null` and never `2>&1`, for the reason the in-progress guard below
 # records at its own `rev-parse`: this capture is used as a PATH, not as
 # message text, and a `~/.gitconfig` with a key outside any section makes every
-# git command print `error: key does not contain a section: …` AT EXIT 0 (#985)
+# git command print `error: key does not contain a section: …` AT EXIT 0
 # — folded in, that line would arrive glued in front of the path and match no
 # worktree ever again.
 #
@@ -242,16 +241,16 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # enumeration below skips a bare entry outright.
 #
 # Any OTHER failure of this probe is NOT that answer and must not be folded
-# into it. Doing so silently disables both cwd-delete guards below (#1441) —
-# every removal proceeds as though this run were standing in no worktree at
-# all, reproducing #992's own defect signature. Fail closed instead: die,
-# naming the probe that broke, so an operator chasing a downstream failure (a
-# prune refusal, a branch delete dying on
+# into it. Doing so silently disables both cwd-delete guards below — every
+# removal proceeds as though this run were standing in no worktree at all,
+# reproducing the very cwd deletion those guards exist to stop. Fail closed
+# instead: die, naming the probe that broke, so an operator chasing a
+# downstream failure (a prune refusal, a branch delete dying on
 # "Unable to read current working directory") lands on the real cause here
 # rather than the symptom.
 #
 # The success path keeps `2>/dev/null`, never `2>&1`: folding stderr in would
-# glue the #985 stray-gitconfig warning onto the path on a plain SUCCESS too.
+# glue the stray-gitconfig warning onto the path on a plain SUCCESS too.
 # Stderr is only re-captured, on a second call, once the first has already
 # failed — the classification never touches the value the guards compare
 # against. `self_wt_rc=…` (not `|| self_wt=`) keeps the check off `set -e`.
@@ -270,13 +269,13 @@ if [ "$self_wt_rc" -ne 0 ]; then
 fi
 
 # True when removing worktree `$1` would delete this run's cwd: `$self_wt` is
-# `$1` or lies anywhere beneath it (#1441's nested worktree). Asked of the
+# `$1` or lies anywhere beneath it (a nested worktree). Asked of the
 # DIRECTORY, not the string: `-ef` (same device and inode) of `$self_wt` and of
 # each of its parents in turn. The byte-boundary prefix match this replaces
 # missed the same directory spelled two ways — the symlinked parent and the NFD
 # name the header above records share no prefix with git's own answer — and
-# `--apply` deleted the cwd it was standing in, #992's signature (measured,
-# #2072). An empty `$self_wt` (no worktree) names no directory, so it matches
+# `--apply` deleted the cwd it was standing in (measured). An empty `$self_wt`
+# (no worktree) names no directory, so it matches
 # nothing; the walk ends when no `/` is left to strip.
 #
 # `elif` on `$?`, same refusing direction `wt_linkage_why` states for its own
@@ -285,7 +284,7 @@ fi
 # unreached today, not impossible — and unlike `wt_linkage_why`, nothing
 # downstream of THIS guard re-checks the directory it protects. Reading that
 # rc as a plain "not this one" would silently disable both cwd-delete guards
-# exactly the way an unrecognised `self_wt` failure would (#1441's note
+# exactly the way an unrecognised `self_wt` failure would (the probe's note
 # above), just one layer further in.
 holds_cwd() {
   hc_d=$self_wt
@@ -317,7 +316,7 @@ fi
 # measurement below uses, so it is the one whose existence has to be
 # established — and asking about it is also what turns a BASE_REF that only
 # resolves as a TAG into a refusal here rather than a merge probe answered by
-# the wrong commit (#924). The message names `$base`, the spelling the caller
+# the wrong commit. The message names `$base`, the spelling the caller
 # passed and the only one it can act on.
 git rev-parse --verify "$base_rev" >/dev/null || die "$base does not resolve"
 [ "$apply" = true ] || echo "$NAME: DRY RUN — nothing will be deleted. Pass --apply to act." >&2
@@ -329,13 +328,13 @@ warnings=""
 # not. One meaning, so the key needs no qualifier: the sweep below reaps
 # worktrees no `reaped` branch names, and a payload that recorded only those
 # would leave a reader guessing whether the branch sweep's removals were absent
-# because none happened or because nothing reports them (#381).
+# because none happened or because nothing reports them.
 removed=""
 # `jstr`'s output wrapped in the quotes JSON needs, or the literal `null` where
 # it could not render. `die` is the wrong answer at both call sites below: by
 # the time either accumulator is written this script may already have deleted
 # branches, and the payload printed at the end is the caller's only record of
-# that — the same reason #265 moved the printf ahead of the prune. Exiting here
+# that — the same reason the printf runs ahead of the prune. Exiting here
 # would destroy the record of work that already happened. So an unrenderable
 # field becomes `null` and the run still reports what it did, the ruling
 # inflight.sh's `add_evidence` records for the same shape.
@@ -351,12 +350,12 @@ removed=""
 # directly and never routes through `keep` at all. The branch name is the
 # demonstrated trigger — `git branch 'has"quote'` is a legal refname — and raw
 # it emitted a payload no parser accepts at exit 0, while the branch was
-# correctly kept (#119). The stderr lines stay raw: they are prose for an
+# correctly kept. The stderr lines stay raw: they are prose for an
 # operator, not JSON.
 #
-# A sixth joined the five above at #1419: grep's own stderr, `$gq_err`,
+# A sixth joined the five above later: grep's own stderr, `$gq_err`,
 # surfaced through `gp_why "$gq_err"` in `keep`'s message at the two cherry
-# checks and the two registry re-reads (reap.sh:635, 991, 1195, 1307) —
+# checks and the two registry re-reads —
 # arbitrary text on the same footing as `$cherry`, routed through the same
 # jfield/jstr escaping the paragraph above already covers. Left out of the
 # "eleven call sites" figure above, which still counts only the original
@@ -386,10 +385,10 @@ keep() {
 
 # Runs `git "$@"`, and unlike a bare `$(git … 2>/dev/null)` this keeps git's
 # stderr instead of discarding it — into $gp_err, never mixed into $gp_out,
-# with git's own exit status returned by this function. #625: this file's
-# worktree status probes used to throw stderr away, so a `fatal:` at rc 128 named
-# no cause and a `warning:` at rc 0 (measured, PR #726 review — a
-# permission-denied ignored directory) reached nobody. The wrong fix is
+# with git's own exit status returned by this function. This file's worktree
+# status probes used to throw stderr away, so a `fatal:` at rc 128 named no
+# cause and a `warning:` at rc 0 (measured — a permission-denied ignored
+# directory) reached nobody. The wrong fix is
 # `2>&1`: each of these probes is followed by a `[ -n "$gp_out" ]` dirty test,
 # which reads the captured text as content, so folding a warning in would make a
 # clean worktree with ANY git warning on it read as dirty forever.
@@ -408,7 +407,7 @@ keep() {
 # at, by two DIFFERENT rules for two DIFFERENT groups. Three call sites below
 # read `status --porcelain` (`-uall`, or `-unormal --ignored`) and are safe
 # because git quotes PATHS; a fourth, added after this comment was first
-# written (#1413), reads `for-each-ref --format='%(refname)
+# written, reads `for-each-ref --format='%(refname)
 # %(upstream:track)'` and is safe for an unrelated reason — a REFNAME,
 # unlike a path, can never contain the byte at all. Nothing in the body
 # checks either invariant.
@@ -422,7 +421,7 @@ keep() {
 #   backslash-002 inside quotes, never the raw byte. This does NOT hang on
 #   `core.quotePath`, which only demotes bytes >= 0x80 out of "unusual";
 #   "git quotes unusual bytes" is therefore the wrong claim to rest on,
-#   since #614 measured that exact escape hatch for the HIGH-BIT class (see
+#   since that exact escape hatch was measured for the HIGH-BIT class (see
 #   derive-testcmd.sh). Zero raw 0x02 out of `--porcelain -uall` and out of
 #   `--porcelain --ignored`, under core.quotePath true AND false.
 #
@@ -437,8 +436,8 @@ keep() {
 # refs/heads/"$(printf 'a\002b')" HEAD` — `refusing to update ref with bad
 # name`. `%(refname)` and `%(upstream:track)` can only ever answer with
 # bytes that already survived `check-ref-format` on the way in, so a raw
-# 0x02 can never reach either field to begin with. A fifth call site, added
-# by #2219, joins this ref group: `rev-parse --verify refs/heads/<b>`, where
+# 0x02 can never reach either field to begin with. A fifth call site joins
+# this ref group: `rev-parse --verify refs/heads/<b>`, where
 # `<b>` is a name the `for-each-ref` call site produced. Its stdout is an
 # object id in hex, and what it can put on stderr is git's own fixed prose
 # around that same validated refname.
@@ -448,7 +447,7 @@ keep() {
 # and nothing here catches a caller who drops it: a raw separator truncates
 # $gp_out at that byte and concatenates the rest of the real output onto
 # $gp_rc, which then reaches `return` as a non-numeric string (measured
-# against a stub git, PR #1209 review). It is one flag away from the path
+# against a stub git). It is one flag away from the path
 # group, not hypothetical — same git, same fixture: `status --porcelain
 # -uall -z` carries the raw 0x02 straight through, `-z` being the
 # machine-readable form that drops the quoting, and so does any command
@@ -458,7 +457,7 @@ keep() {
 # warning is really aimed at the path group and at any THIRD kind of call
 # site a future caller might add.
 #
-# Left unguarded anyway, deliberately (#1212): every call site is shaped
+# Left unguarded anyway, deliberately: every call site is shaped
 # `if ! git_probe …; then keep …`, so a garbled $gp_rc can never come back 0
 # and so can never turn a KEEP into a REAP. For a script whose only costly
 # failure is deleting something it should have kept, that is the direction
@@ -470,7 +469,7 @@ keep() {
 # `gp_o=$(...); gp_rc=$?`: under `set -e` a bare failing assignment aborts the
 # subshell before `gp_rc=$?` or the printf below ever run, and `gp_raw` comes
 # back empty — silently, at the one moment this function exists to not be
-# silent (measured on this exact shape, PR #1068 review).
+# silent (measured on this exact shape).
 gp_sep=$(printf '\002')
 git_probe() {
   gp_raw=$(
@@ -528,7 +527,7 @@ gp_cut_short() {
 # own scanner's stderr into `$gq_err`, and both need these same two guards.
 # Taken as an argument rather than by duplicating the stripper, so a fix to
 # either guard cannot land in one copy and miss the other. Every git-side call
-# site passes nothing and still reads `$gp_err`. #1419
+# site passes nothing and still reads `$gp_err`.
 gp_why() {
   gp_w=$(printf '%s' "${1-$gp_err}" | tr '\n' ' ')
   while :; do
@@ -553,7 +552,7 @@ gp_why() {
 # there reads clean over the work sitting in `$wt` — the dry run promised a
 # removal `--apply` could not perform, `git worktree remove`'s own back-pointer
 # and untracked-file checks being all that kept the work (measured on both
-# shapes, both sweeps, git 2.50.1, #2042). `--show-toplevel` names the tree git
+# shapes, both sweeps, git 2.50.1). `--show-toplevel` names the tree git
 # actually answers for, so it is compared against `$1`.
 #
 # Compared as a DIRECTORY (`-ef`, same device and inode), never as a string:
@@ -561,11 +560,11 @@ gp_why() {
 # git's own resolved spelling, and the two legitimately differ for one and the
 # same directory. A parent that was a plain directory at `worktree add` time
 # and is a symlink now leaves the listed path non-canonical while git's answer
-# is resolved (measured, #2042). And a worktree whose name is Unicode
+# is resolved (measured). And a worktree whose name is Unicode
 # NFD-composed (`cafe` + U+0301) is listed PRECOMPOSED by the
 # `core.precomposeunicode` git writes into every new repo on macOS, while
 # `--show-toplevel` answers the on-disk NFD bytes — visually identical,
-# byte-different, one directory (measured, git 2.50.1, Apple Git-155, #2072).
+# byte-different, one directory (measured, git 2.50.1, Apple Git-155).
 # `cd && pwd -P` canonicalises only the first: it echoes the spelling it was
 # given, so a byte compare against it kept every healthy NFD worktree forever.
 # `-ef` answers "same directory" for both and for any other spelling the
@@ -581,13 +580,13 @@ gp_why() {
 # trailing newline, so a `core.worktree` naming a sibling directory called
 # `<wt>` plus a newline byte — git accepts one as an ordinary path character —
 # would otherwise name `$1` itself and pass the redirect (measured; the shape
-# no-undo-audit.sh closed the same way, #2040). The sentinel leaves `$(...)`
+# no-undo-audit.sh closed the same way). The sentinel leaves `$(...)`
 # only git's own terminating newline to strip.
 #
 # What this does NOT cover, the boundary release-ticket.sh's copy of this
-# compare also states (#421): shapes that swap which git DIR answers while the
-# working tree stays `$1` — a `.git` naming a sibling worktree's admin dir
-# (#189), or a foreign git dir whose `core.worktree` points back at `$1`.
+# compare also states: shapes that swap which git DIR answers while the
+# working tree stays `$1` — a `.git` naming a sibling worktree's admin dir,
+# or a foreign git dir whose `core.worktree` points back at `$1`.
 # `--show-toplevel` answers `$1` for both. The dirty check reads `$1`'s real
 # files against the borrowed index, and `git worktree remove` refuses a
 # `.git` that does not point back at its admin dir, so neither is removed.
@@ -620,10 +619,8 @@ wt_linkage_why() {
 # could not look reads exactly like a measurement that looked and found
 # nothing. At the two merged-commit checks below, the no-match arm is what
 # authorizes the branch delete and `git worktree remove`, so this swallow spends
-# commits rather than merely miswording a reason: #1419 is the same
-# misattribution as #789 and #1413 one tool further down the pipeline, a
-# tool's own failure reported as a clean verdict about the thing it was
-# scanning.
+# commits rather than merely miswording a reason: a tool's own failure
+# reported as a clean verdict about the thing it was scanning.
 #
 # The shape, so no call site reaches the third outcome by accident: this
 # returns 0 whenever grep delivered a verdict at all — `$gq_rc` then holds 0
@@ -652,15 +649,15 @@ wt_linkage_why() {
 # needs `$gp_o` out as text too, and a command substitution's exit status and
 # its captured text both come from the SAME last command, so the moment
 # something runs after grep to print a value, that later command's own exit
-# status overwrites grep's. Grep's stderr is kept for #625's reason at
-# `git_probe` above — a probe that dies naming no cause reaches an operator as
+# status overwrites grep's. Grep's stderr is kept for the reason `git_probe`
+# above keeps git's — a probe that dies naming no cause reaches an operator as
 # a bare refusal — but keeping it costs nothing here: it IS the command
 # substitution's text, not a second thing smuggled alongside the rc.
 #
 # `if gq_err=$(...); then gq_rc=0; else gq_rc=$?; fi`, never a bare
 # `gq_err=$(...); gq_rc=$?`: under `set -e` a bare failing assignment would
 # abort the function before `gq_rc=$?` ever ran, the same measured reason
-# `git_probe` above takes the same shape (PR #1068 review). A command
+# `git_probe` above takes the same shape. A command
 # substitution used as an `if`'s condition is exempt from `set -e` by POSIX
 # definition, so `gq_rc=$?` always runs whether grep matched, didn't match, or
 # broke.
@@ -678,9 +675,8 @@ wt_linkage_why() {
 # report it as a clean no-match — this function's own defect, one layer down.
 #
 # Extra flags come AFTER the pattern (`grep_probe "$hay" "$pat" -xF`) so the
-# pattern keeps a fixed, non-optional slot no flag list can shift it out of:
-# #730 measured what a positional argument does when a flag is inserted ahead
-# of it.
+# pattern keeps a fixed, non-optional slot no flag list can shift it out of —
+# a flag inserted ahead of a positional argument was measured to displace it.
 grep_probe() {
   gq_hay=$1
   gq_pat=$2
@@ -699,7 +695,7 @@ grep_probe() {
 # four-way chain, `$wt_list`/`$gq_rc`/`$gq_err` and all, as two byte-identical
 # copies. One copy so a fix to the chain cannot land in one sweep and miss
 # the other, same reasoning as `gp_why` taking its guards as an argument
-# above. The two call sites still earn their own `#1419` test fixtures: both
+# above. The two call sites still earn their own test fixtures: both
 # pin that both sweeps actually CALL this, which one shared body cannot do by
 # itself.
 wt_reg_state() {
@@ -714,19 +710,19 @@ wt_reg_state() {
   fi
 }
 
-# The registry cross-check (#2078). The branch lookup below matches a
+# The registry cross-check. The branch lookup below matches a
 # `branch refs/heads/<b>` line, and an empty match lets the branch through to
 # the delete. Measured, git 2.50.1 (Apple Git-155): eight real admin-directory
-# faults leave `git worktree list --porcelain -z` at rc 0 — so the #622 guard
-# below never fires — while the held entry either loses its `branch` line or
-# leaves the listing entirely: `HEAD` garbage, empty, missing or chmod 000;
-# `gitdir` missing or chmod 000; the admin directory chmod 000; `.git/worktrees`
-# replaced by a file. `$wt` came back empty and `git branch -D` — the delete
-# then — deleted a branch a live worktree holds in all eight, its own "used by
-# worktree" refusal fooled by the same admin state. The delete is now
-# `git update-ref -d`, which consults no worktree at all, and the holder check
-# ahead of it (`wt_holding`) reads that same listing: measured against the
-# same eight, it answers "not held" for seven and "cannot tell" only for
+# faults leave `git worktree list --porcelain -z` at rc 0 — so the `wt_listing`
+# failure guard below never fires — while the held entry either loses its
+# `branch` line or leaves the listing entirely: `HEAD` garbage, empty, missing
+# or chmod 000; `gitdir` missing or chmod 000; the admin directory chmod 000;
+# `.git/worktrees` replaced by a file. `$wt` came back empty and `git branch -D`
+# — the delete then — deleted a branch a live worktree holds in all eight, its
+# own "used by worktree" refusal fooled by the same admin state. The delete is
+# now `git update-ref -d`, which consults no worktree at all, and the holder
+# check ahead of it (`wt_holding`) reads that same listing: measured against
+# the same eight, it answers "not held" for seven and "cannot tell" only for
 # `HEAD` missing, the one fault that leaves a `detached` line behind. No
 # backstop exists past this point, so the listing has to be checked against
 # the registry before its silence is read as "no worktree".
@@ -740,9 +736,9 @@ wt_reg_state() {
 #   inflight.sh's pair of the same names (inflight.sh `count_registry`,
 #   `count_linked`, the recount at `[ "$linked" -eq "$registered" ] || {
 #   count_registry && count_linked; }` and the two direction-named refusals
-#   after it) — the stray-`mkdir` skip, the count-what-`ls`-cannot-read rule
-#   (#697), the `[ -r ] && [ -x ]` unreadable-registry arm and the `-ge 1`
-#   floor (#699) all carry that copy's measurements. One tightening: `-d` joins
+#   after it) — the stray-`mkdir` skip, the count-what-`ls`-cannot-read rule,
+#   the `[ -r ] && [ -x ]` unreadable-registry arm and the `-ge 1` floor all
+#   carry that copy's measurements. One tightening: `-d` joins
 #   the unreadable arm, because a registry replaced by a mode-755 FILE passes
 #   `-r` and `-x`, globs to nothing, counts 0 against git's 0, and agrees.
 #
@@ -754,7 +750,7 @@ wt_reg_state() {
 #   the only one that can be `bare`) is excluded, and a missing `HEAD` line
 #   reads as null, the same rule the branchless sweep's null-object-id arm
 #   applies. That arm stays as it is: it reports the worktree, while this one
-#   protects the branches. No `/^bare$/` rule here, deliberately: the #993
+#   protects the branches. No `/^bare$/` rule here, deliberately: a test
 #   fixture selects that sweep's awk by it, and a second carrier would shim
 #   this one too.
 #
@@ -762,25 +758,27 @@ wt_reg_state() {
 # nameless entry says nothing about WHICH branch it held, so a healthy branch
 # with no worktree is exactly as unclearable as the tampered one. The check
 # runs on the listing each branch's own lookup reads — re-read per branch, as
-# the #622 comment below records — so a standing fault keeps every [gone]
-# branch in the pass, and a transient one keeps only the branches whose
-# listing it touched (the #622 transient fixture pins that granularity for
-# the listing failure; this guard follows it rather than latching).
+# the comment at the `wt_listing` failure guard below records — so a standing
+# fault keeps every [gone] branch in the pass, and a transient one keeps only
+# the branches whose listing it touched (a transient-fault fixture pins that
+# granularity for the listing failure; this guard follows it rather than
+# latching).
 #
-# Recount before refusing, exactly as inflight.sh does it (#1408, #1421): the
+# Recount before refusing, exactly as inflight.sh does it: the
 # registry scan and git's listing are two reads at two instants, and a
 # sibling's `worktree add`/`remove` landing between them makes the counts
 # disagree with nothing wrong. Same order as that copy, first pair and recount
 # alike: `count_registry` FIRST, git's listing SECOND — the loop takes the
-# first registry count just ahead of the #622 guard's `wt_listing`, which is
-# the first listing, so no extra listing is read per branch. A mutation landing
-# between the first count and the listing is already reflected in the listing,
-# so the recount's registry scan agrees with it; the recount re-takes BOTH, in
-# the same order, and re-reads the listing through `wt_listing`, so `$wt_list`
-# — which the lookup then scans — is the very listing the recount validated.
+# first registry count just ahead of the `wt_listing` failure guard, whose read
+# is the first listing, so no extra listing is read per branch. A mutation
+# landing between the first count and the listing is already reflected in the
+# listing, so the recount's registry scan agrees with it; the recount re-takes
+# BOTH, in the same order, and re-reads the listing through `wt_listing`, so
+# `$wt_list` — which the lookup then scans — is the very listing the recount
+# validated.
 # inflight.sh's copy recounts once (its `[ "$linked" -eq "$registered" ] ||
 # { count_registry && count_linked; }`); release-ticket.sh's bounds the same
-# loop at two passes (#1424) for a third-mutation window. This copy takes
+# loop at two passes for a third-mutation window. This copy takes
 # inflight.sh's single recount: a false refusal here costs one pass's wait,
 # never a deletion, and a genuinely dropped entry is a standing state that
 # survives every recount.
@@ -865,7 +863,7 @@ wt_registry_why() {
 # refuses `has space` as invalid), so the name is always the whole of $1, and a
 # branch with no upstream leaves $2 empty rather than matching. The tracking
 # forms that DO carry a space, `[ahead 1]` and its siblings, split so that $2
-# holds `[ahead` — not `[gone]` either way. #634
+# holds `[ahead` — not `[gone]` either way.
 # A command substitution inside a `for ... in` word list discards its own
 # exit status entirely, in every shell measured here (bash, dash, macOS
 # /bin/sh): `for x in $(false); do …; done` completes at the loop's own end,
@@ -875,8 +873,8 @@ wt_registry_why() {
 # `git for-each-ref` that dies still leaves awk scanning empty input, and
 # awk finishes that scan at rc 0 — the identical exit this loop sees on a
 # genuinely branchless repo. awk is not immune either, and this file's
-# header already documents an awk that cannot finish a scan (the #614/#790
-# multibyte trigger). Either failure, unguarded, reads as a clean sweep
+# header already documents an awk that cannot finish a scan (the multibyte
+# trigger). Either failure, unguarded, reads as a clean sweep
 # that never looked: no branches matched because none was ever seen,
 # indistinguishable from none being reapable.
 #
@@ -889,17 +887,17 @@ wt_registry_why() {
 # branchless sweep's own enumeration guard below (`if ! wt_listing`), for
 # the same reason — dying here would also abort the second sweep and the
 # final `worktree prune`, neither of which this enumeration failing has
-# anything to do with, over a failure this ticket rates mild. #789
+# anything to do with, over a failure that only defers reaping to a later pass.
 if ! git_probe for-each-ref --format='%(refname) %(upstream:track)' refs/heads; then
   keep "" "could not enumerate [gone] branches — none reaped, and none reported reapable either$(gp_why)"
   gone_branches=""
 else
   # git_probe captures git's stderr into $gp_err instead of leaving it on the
-  # real fd — the whole reason it exists (#625) — and every OTHER call site in
-  # this file reads $gp_err back out through a targeted check (gp_cut_short,
+  # real fd — the whole reason it exists — and every OTHER call site in this
+  # file reads $gp_err back out through a targeted check (gp_cut_short,
   # gp_why) before falling through. This call site's success path does
-  # neither: an rc-0 `for-each-ref` that still WARNS (PR #1413 review) used to
-  # reach the operator's stderr directly, back when this was a plain
+  # neither: an rc-0 `for-each-ref` that still WARNS used to reach the
+  # operator's stderr directly, back when this was a plain
   # `git … | awk …` pipeline with git's stderr inherited, and now reaches no
   # one unless forwarded here explicitly.
   [ -z "$gp_err" ] || printf '%s' "$gp_err" >&2
@@ -914,14 +912,14 @@ for b in $gone_branches; do
   # SHA rather than the live ref: the cherry below runs against `$tip`, and
   # the delete at the foot of this loop is `git update-ref -d refs/heads/$b
   # $tip`, which refuses unless the ref STILL equals `$tip` at that instant.
-  # Before #2219 the cherry read `refs/heads/$b` and the delete was
+  # The cherry once read `refs/heads/$b` and the delete was
   # `git branch -D "$b"`, a separate call that deletes whatever the ref holds
   # when it runs — so a commit landing between the two was force-deleted at
-  # rc 0: the check-then-delete gap release-ticket.sh closed in #1325
-  # (ADR 0018). A tip that cannot be read is a keep, never a delete.
+  # rc 0: the check-then-delete gap release-ticket.sh's own delete closes the
+  # same way. A tip that cannot be read is a keep, never a delete.
   #
   # `git_probe`, never `2>&1` into the capture: `$tip` is used as a SHA, and a
-  # stray `~/.gitconfig` warning git prints at rc 0 (#985) would arrive glued
+  # stray `~/.gitconfig` warning git prints at rc 0 would arrive glued
   # onto it. git's own words still reach the reason, through `gp_why`.
   if ! git_probe rev-parse --verify "refs/heads/$b"; then
     keep "$b" "cannot read the branch tip — not deleted$(gp_why)"
@@ -959,8 +957,8 @@ for b in $gone_branches; do
   # name the same commit — and it is the same key the worktree lookup below
   # already builds.
   #
-  # `$base_rev` is the other side of the same rule, and it was missing until
-  # #924: `$base` reached this `git cherry` exactly as BASE_REF spelled it, so a
+  # `$base_rev` is the other side of the same rule, and it was once missing:
+  # `$base` reached this `git cherry` exactly as BASE_REF spelled it, so a
   # local tag named `origin/main` outranked refs/remotes/origin/main and the
   # probe answered about the TAG while `git branch -D`, the delete then,
   # deleted the BRANCH — measured, an unmerged [gone] branch whose commit
@@ -969,7 +967,7 @@ for b in $gone_branches; do
   # records why the accept-list beside it is what makes prefixing sound. Being
   # the only merge check bounds what ELSE could catch an unmerged branch, not
   # whether this check itself can be wrong — which is why BOTH revs it
-  # consumes are qualified. #634
+  # consumes are qualified.
   if ! cherry=$(git cherry "$base_rev" "$tip" 2>&1); then
     keep "$b" "cherry probe failed — cannot tell if merged: $(printf '%s' "$cherry" | tr '\n' ' ')"
     continue
@@ -983,7 +981,7 @@ for b in $gone_branches; do
   #
   # What "grep's is the only status left to take" missed, and what this shape
   # exists for: taking it is not the same as READING it. grep answers three
-  # ways, and until #1419 the `if` had two arms — an rc 2 scan that never
+  # ways, and the `if` once had two arms — an rc 2 scan that never
   # examined `$cherry` fell into the merged arm, and no check between here and
   # the delete below asks whether the branch is merged. So the deletion went
   # ahead on a merge status no tool had established. `grep_probe` splits the two
@@ -1000,8 +998,8 @@ for b in $gone_branches; do
 
   # The registry is counted BEFORE the listing below is read — inflight.sh's
   # order, which `wt_registry_why`'s recount comment explains. A registry that
-  # cannot be read sets `reg_why` here and is refused after the #622 guard, so
-  # a listing failure still reports as one. #2078
+  # cannot be read sets `reg_why` here and is refused after the `wt_listing`
+  # failure guard, so a listing failure still reports as one.
   reg_why=
   count_registry || :
 
@@ -1021,26 +1019,27 @@ for b in $gone_branches; do
   # own. Keeping it strands every [gone] branch in this pass on one repo-level
   # failure, since the listing is re-read per branch (header: every
   # precondition is recomputed); reap runs after every merge pass, so each waits
-  # one pass with the cause named. #622
+  # one pass with the cause named.
   #
   # A genuine awk failure is a DIFFERENT fault from the listing failing, and is
   # guarded separately: it fires only when `wt_listing` itself succeeded — a
   # real, non-empty `$wt_list` — and awk could not finish scanning it (the
-  # #614/#790 multibyte trigger this file's header documents). Left bare, that
-  # failure aborted the whole script on awk's own diagnostic, with no
-  # `reap:`-prefixed line for a caller to grep stderr for — the same shape #243
-  # fixed in release-ticket.sh's own copy of this lookup. `keep`, not `die`:
+  # multibyte trigger this file's header documents). Left bare, that failure
+  # aborted the whole script on awk's own diagnostic, with no `reap:`-prefixed
+  # line for a caller to grep stderr for — the same shape release-ticket.sh's
+  # own copy of this lookup was fixed for. `keep`, not `die`:
   # nothing has mutated $b yet, and dying here would also discard whatever
   # earlier iterations of this loop already reaped — the same reason the
   # branchless sweep below keeps rather than dies on its own copy of this pipe,
-  # and the same reason the listing failure above keeps. #789
+  # and the same reason the listing failure above keeps.
   if ! wt_listing; then
     keep "$b" "worktree lookup failed — cannot tell whether $b has a worktree; kept until a pass that can read the registry: $(printf '%s' "$wt_err" | tr '\n' ' ')"
     continue
   fi
   # A listing that READ is not yet a listing that can be trusted: see
-  # `wt_registry_why` above. After the #622 guard, before the lookup, so the
-  # lookup scans the listing this check validated (a recount re-reads it). #2078
+  # `wt_registry_why` above. After the `wt_listing` failure guard, before the
+  # lookup, so the lookup scans the listing this check validated (a recount
+  # re-reads it).
   if ! wt_registry_why; then
     keep "$b" "worktree registry inconsistent — $reg_why; every [gone] branch is kept until a pass that reads a consistent registry"
     continue
@@ -1058,7 +1057,7 @@ for b in $gone_branches; do
   # made on the `branch` line, so only the path this sweep REPORTS and acts on
   # was wrong. `wt_listing` now delivers the whole path with the newline
   # substituted, and a substituted path is one no `git -C` or `worktree remove`
-  # here can name — so it is refused rather than acted on. #551
+  # here can name — so it is refused rather than acted on.
   #
   # `nl_path ""` is false, so a branch with no worktree falls through to the
   # `[ -n "$wt" ]` below exactly as before.
@@ -1078,8 +1077,7 @@ for b in $gone_branches; do
     #
     # `-e` is this `if`'s own condition, so existence is settled before any
     # git command runs through $wt: a genuinely deleted directory never
-    # reaches a status call that would fail on it and read as dirty forever
-    # (#83).
+    # reaches a status call that would fail on it and read as dirty forever.
     if [ -e "$wt" ]; then
       # Establish the .git linkage exists before trusting anything git says
       # through it. Delete a worktree's .git file outright and `git -C` does
@@ -1094,9 +1092,9 @@ for b in $gone_branches; do
       # `git worktree add` always writes `.git` as a regular file — so unlike
       # worktree-audit.sh this does not also need to accept a `.git`
       # directory. This `-f` test establishes only that the linkage EXISTS,
-      # the same gate release-ticket.sh (#74) and worktree-audit.sh (#128) carry;
+      # the same gate release-ticket.sh and worktree-audit.sh carry;
       # that it answers for `$wt` is established by the same-directory
-      # `--show-toplevel` compare right after it (`wt_linkage_why`, #2042).
+      # `--show-toplevel` compare right after it (`wt_linkage_why`).
       # The main checkout reaches here, and must be answered before the
       # linkage guard below sees it. `git worktree list --porcelain` emits a
       # `branch refs/heads/...` line for the main worktree too, so a `[gone]`
@@ -1113,7 +1111,7 @@ for b in $gone_branches; do
       # and say which, in the dry run and under --apply alike — the plain `-f`
       # guard printed a false cause,
       # and dropping it entirely leaves the dry run promising a reap that can
-      # never happen (#82).
+      # never happen.
       if [ -d "$wt/.git" ] && [ -f "$wt/.git/HEAD" ]; then
         keep "$b" "worktree $wt is the main checkout — cannot remove it or delete the branch checked out in it"
         continue
@@ -1144,30 +1142,30 @@ for b in $gone_branches; do
       #                   `--porcelain -uall` -> rc 0, `?? sub/deep.txt` …
       #
       # This is the one shape the fail-closed `if ! …` idiom structurally
-      # cannot see, because the status IS 0 — #730, the rc-0 sibling of the
-      # `git cherry` swallow (#264) this file's branch sweep already documents, where
-      # rc was non-zero and taking the status was the whole fix. Nor can #625's
-      # stderr work reach it: the config yields rc 0, empty stdout AND empty
-      # stderr, so there is nothing for `gp_cut_short` to match. Pinning the
-      # mode on the command line is the only fix: a probe whose EMPTY answer
-      # licenses an action pins an explicit mode; a probe that only reports
-      # after a gate has already refused need not (see below). `git worktree
-      # remove`'s own refusal is no backstop, being the same machinery the
-      # same config silences (measured at the --apply call below).
+      # cannot see, because the status IS 0 — the rc-0 sibling of the
+      # `git cherry` swallow this file's branch sweep already documents, where
+      # rc was non-zero and taking the status was the whole fix. Nor can
+      # `git_probe`'s stderr capture reach it: the config yields rc 0, empty
+      # stdout AND empty stderr, so there is nothing for `gp_cut_short` to
+      # match. Pinning the mode on the command line is the only fix: a probe
+      # whose EMPTY answer licenses an action pins an explicit mode; a probe
+      # that only reports after a gate has already refused need not (see
+      # below). `git worktree remove`'s own refusal is no backstop, being the
+      # same machinery the same config silences (measured at the --apply call
+      # below).
       #
       # The one bare `--porcelain` left in a SCRIPT is deliberate:
       # instruments.sh prints one to stderr to say WHAT changed, after a digest
       # over `git ls-files` has already refused. That digest covers TRACKED
       # files only, so no untracked file can trigger it and the silenced mode
       # cannot hide the thing being reported. A report, not a gate. (Prose
-      # instructions to an agent are a separate inventory — see SKILL.md and
-      # docs/specs/2026-07-22-run-team-agent-fleet-design.md, pinned
-      # alongside the scripts.)
+      # instructions to an agent are a separate inventory — see SKILL.md,
+      # pinned alongside the scripts.)
       #
       # `-uall` here, not `-unormal`: both override the config, but this probe
       # IS the dirty gate itself (unlike the `--ignored` reason-string probe
       # below, whose keep/reap verdict does not depend on per-file detail),
-      # and `-uall` is the form #730 measured against this site.
+      # and `-uall` is the form measured against this site.
       if ! git_probe -C "$wt" status --porcelain -uall; then
         keep "$b" "worktree $wt could not be read$(gp_why)"
         continue
@@ -1212,7 +1210,7 @@ for b in $gone_branches; do
           # fixture: under that config `--porcelain --ignored` answers 0
           # bytes at rc 0 — the `!!` lines are suppressed too, so a precious
           # ignored file reads as absent — while `--porcelain -unormal
-          # --ignored` lists both `??` and `!!` entries. #730.
+          # --ignored` lists both `??` and `!!` entries.
           #
           # `-unormal`, not `-uall`, here: this probe only builds the
           # human-readable "keep" reason string below, and the keep/reap
@@ -1229,8 +1227,8 @@ for b in $gone_branches; do
             continue
           fi
           # `--ignored` asks git to OPEN every ignored path to list what is
-          # inside it (measured, PR #726 review: a `chmod 000` ignored
-          # directory made this exact probe warn and exit 0). A precious
+          # inside it (measured: a `chmod 000` ignored directory made this
+          # exact probe warn and exit 0). A precious
           # ignored file under a path git could not open would never reach
           # $ignored, and `git worktree remove` deletes ignored files
           # silently — so a cut-short walk fails closed rather than report what
@@ -1241,7 +1239,7 @@ for b in $gone_branches; do
           fi
           # `paste`, not `awk`, used to be this substitution's last stage, so
           # the substitution reported PASTE's status only — an awk that could
-          # not finish scanning `$gp_out` (the #614/#790 trigger) failed
+          # not finish scanning `$gp_out` (the multibyte trigger) failed
           # silently AND invisibly: unlike the bare assignments above, nothing
           # here even reads as "empty means none", because the captured
           # pipeline still succeeds — paste has nothing of its own to fail on
@@ -1250,7 +1248,7 @@ for b in $gone_branches; do
           # `jstr`'s `sed | tr` ("EVERY FALLIBLE STAGE'S STATUS IS READ") and
           # the shape release-ticket.sh's own worktree lookups already take.
           # `keep`, not `die`, for the reason the worktree lookup above gives:
-          # this is per-branch and nothing has mutated $b yet. #789
+          # this is per-branch and nothing has mutated $b yet.
           if ! ignored_lines=$(printf '%s\n' "$gp_out" | awk '/^!! /{sub(/^!! /,""); print}'); then
             keep "$b" "worktree $wt ignored-files scan failed — treating it as unresolved rather than guessing it has none"
             continue
@@ -1271,9 +1269,9 @@ for b in $gone_branches; do
     fi
 
     # Refused before the removal below, and in the dry run as well as under
-    # `--apply`, for the reason the main-checkout guard above records (#82): a
+    # `--apply`, for the reason the main-checkout guard above records: a
     # `would remove worktree` line the next `--apply` refuses is a promise this
-    # script cannot keep. Unlike git's own refusals (#391) this one IS
+    # script cannot keep. Unlike git's own refusals this one IS
     # predictable — the cwd is known before anything is deleted.
     #
     # Below the probes rather than above them, so every reason already true of
@@ -1285,15 +1283,15 @@ for b in $gone_branches; do
     # `continue`, so the branch is kept with its worktree — the pairing the
     # main-checkout reason already states, and the holder check before the
     # delete would refuse a branch checked out in a surviving worktree anyway.
-    # #992
     #
     # Ancestor match, not exact equality: a worktree nested inside `$wt`
     # (a real, documented shape — SKILL.md names a member committing from a
     # nested worktree) has `$wt` as an ancestor on disk, so removing `$wt`
     # removes the nested one's files too — taking any uncommitted work in it
-    # along, the exact #992 signature one path further out — even though
-    # `$wt` itself never equals `$self_wt` in that shape (#1441). `holds_cwd`
-    # carries the match and why it is on the directory, not only the string.
+    # along, the same cwd deletion this guard exists for, one path further
+    # out — even though `$wt` itself never equals `$self_wt` in that shape.
+    # `holds_cwd` carries the match and why it is on the directory, not only
+    # the string.
     if holds_cwd "$wt"; then
       keep "$b" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
       continue
@@ -1311,7 +1309,7 @@ for b in $gone_branches; do
       # 2.50.1 (Apple Git-155), with a control: with `status.showUntrackedFiles
       # = no` set, removing a worktree holding an untracked file exits 0 and
       # takes the file with it; the identical fixture without that config exits
-      # 128 refusing. That is why the probes above pin `-uall` (#730) and why
+      # 128 refusing. That is why the probes above pin `-uall` and why
       # this line may not be read as a second opinion: the config that silences
       # them silences this too, so the gate above is the ONLY thing standing
       # here. The ignored-file gap it never covers under any config is handled
@@ -1331,12 +1329,12 @@ for b in $gone_branches; do
       # documents), and `chmod 555 .git/worktrees/<id>` deletes the whole
       # directory while the entry stays listed. So a cleared registration is no
       # evidence of an orphan, an intact one is no evidence that nothing was
-      # removed, and naming a filesystem state nobody probed would be this
-      # ticket's own defect — a reason naming something other than what was
-      # measured — committed inside its fix. #83, reap.sh and
-      # release-ticket.sh answering an unreadable worktree in opposite
-      # directions, is closed; a third filesystem probe here would reopen
-      # exactly that ground. `gone()` above is deliberately not reused: it
+      # removed, and naming a filesystem state nobody probed would be the very
+      # defect this re-read exists to fix — a reason naming something other
+      # than what was measured. reap.sh and release-ticket.sh once answered an
+      # unreadable worktree in opposite directions; that is closed, and a third
+      # filesystem probe here would reopen exactly that ground. `gone()` above
+      # is deliberately not reused: it
       # answers a harder question (established absence vs an unsearchable
       # prefix) that a registry read does not have, and cannot fail the way a
       # stat can.
@@ -1352,7 +1350,7 @@ for b in $gone_branches; do
       # as a measurement. Nothing on disk turns on it — both arms keep and
       # continue — which is exactly why it is a REASON bug and not a deletion
       # bug, and why the unanswerable arm here joins the existing
-      # unread-listing arm rather than inventing a third verdict. #1419
+      # unread-listing arm rather than inventing a third verdict.
       #
       # Still keep, still continue, and nothing on disk is touched either way:
       # one refusal must not strand the remaining branches of an unattended
@@ -1371,8 +1369,8 @@ for b in $gone_branches; do
 
   if [ "$apply" = true ]; then
     # What the compare-and-swap below does not give back: `git update-ref` is
-    # ref-only plumbing and, unlike `git branch -D` (the delete here until
-    # #2219), consults no worktree at all. `-D`'s own delete-time refusal on a
+    # ref-only plumbing and, unlike `git branch -D` (this sweep's former
+    # delete), consults no worktree at all. `-D`'s own delete-time refusal on a
     # branch a worktree holds is replaced by worktree.sh's `wt_holding`, over
     # the listing re-read here rather than the one the `$wt` lookup above
     # read: the `worktree remove` above has changed it since, and a
@@ -1382,19 +1380,19 @@ for b in $gone_branches; do
     # `$wt` lookup never binds because the listing prints no `branch` line for
     # it. Measured, git 2.50.1: `-D` refuses both, `update-ref -d` deletes
     # both, and the sibling's `rebase --continue` then fails on `cannot lock
-    # ref` (#1330, #2218). A worktree the reader cannot resolve is a keep,
+    # ref`. A worktree the reader cannot resolve is a keep,
     # never "not held".
     #
     # Under --apply only, like the delete it guards: in the dry run the
     # worktree the `$wt` lookup found is still registered, and would read as a
     # holder of the very branch it pairs with. The dry run therefore cannot
     # predict THIS branch's own refusal — but not "exactly as it could not
-    # predict `-D`'s" (#391): `-D`'s blind spot here was only ever this
+    # predict `-D`'s": `-D`'s blind spot here was only ever this
     # branch's own paired worktree. A registry read that fails closed for an
     # UNRELATED worktree elsewhere in the listing (reaping.md) keeps every
     # `[gone]` branch in the pass, a repo-wide case `-D` had no equivalent of
     # — it needed no registry answer at all and failed OPEN on one it could
-    # not read (#622). The dry run — printing `would reap` unconditionally
+    # not read. The dry run — printing `would reap` unconditionally
     # here — cannot predict any of those keeps either.
     #
     # A window remains between this re-read and the delete. A commit landing
@@ -1425,7 +1423,7 @@ for b in $gone_branches; do
     # landing since is refused with git's `cannot lock ref … is at <new> but
     # expected <tip>`, branch and commit intact. Never plain `git branch -d`:
     # upstream is gone, so it compares against a possibly-behind local HEAD
-    # and refuses everything here (#760).
+    # and refuses everything here.
     #
     # `--no-deref`: measured, git 2.50.1, `update-ref -d` on a branch that is
     # a symbolic ref deletes the branch it POINTS AT and leaves the symref
@@ -1433,8 +1431,7 @@ for b in $gone_branches; do
     #
     # `2>&1` into the capture, and update-ref prints nothing on stdout: a bare
     # "branch delete failed" names the step, never the fault, and git's own
-    # diagnosis is the only thing that tells an operator which remedy applies
-    # (#391).
+    # diagnosis is the only thing that tells an operator which remedy applies.
     if ! err=$(git update-ref --no-deref -d "refs/heads/$b" "$tip" 2>&1); then
       keep "$b" "branch delete failed: $(printf '%s' "$err" | tr '\n' ' ')"
       continue
@@ -1480,16 +1477,16 @@ done
 # line was never refused — it was never considered, which is why the
 # no-silent-caps rule did not fire either: no `would remove worktree` line, no
 # `kept` entry, and the directory left on disk while its branch was reaped
-# (#381, measured live during a merge pass). A stale worktree still answers
+# (measured live during a merge pass). A stale worktree still answers
 # `git worktree list` and inflight.sh reads one as a live claim, so an
 # already-merged ticket then reads as taken and the candidate queue shrinks
 # with nothing reporting it.
 #
 # What leaves a fleet worktree detached is NOT recorded here, deliberately. An
-# earlier draft of this comment blamed the merge bot's server-side rebase (#149)
-# and that mechanism is measured false: in a later pass the bot reported
-# `path=rebase` for #969, #970 and #972, and a `reap.sh` dry run immediately
-# after printed `would remove worktree` for all three — a line only an ATTACHED
+# earlier draft of this comment blamed the merge bot's server-side rebase and
+# that mechanism is measured false: in a later pass the bot reported
+# `path=rebase` for three PRs, and a `reap.sh` dry run immediately after
+# printed `would remove worktree` for all three — a line only an ATTACHED
 # worktree reaches. run-merge-bot.md says the same for that step: the API
 # rebased the remote, not your checkout, which is left attached and merely
 # stale. The shape is observed; the route to it is not established, and
@@ -1524,11 +1521,11 @@ if ! wt_listing; then
 #
 # Status taken, not swallowed: this pipeline's last command is the awk, so an
 # awk that could not run leaves `$detached` empty and every branchless worktree
-# goes unmentioned — this ticket's own defect, committed inside its fix. The
-# branch sweep above takes both statuses too — the listing's and its awk's —
-# and keeps the branch on either, since #622.
+# goes unmentioned — the very silence this sweep exists to end, committed
+# inside it. The branch sweep above takes both statuses too — the listing's
+# and its awk's — and keeps the branch on either.
 #
-# Pinned since #993, at the same arm the paragraph above admits to: reap.test.mjs
+# Pinned at the same arm the paragraph above admits to: a test in the suite
 # shims a failing `awk` onto PATH, selected by this program's own `/^bare$/`
 # rule, over a repo holding one detached worktree, and requires the decline
 # below with an EMPTY removal list. Swallow this status and that fixture's
@@ -1566,7 +1563,7 @@ else
     # `read -r` line above, so this sweep saw a prefix and, being the sweep that
     # deletes branchless worktrees, could authorise a removal against it.
     # `wt_listing` keeps the record and the line whole; the substituted byte is
-    # what no command here can name, so the entry is kept and reported. #551
+    # what no command here can name, so the entry is kept and reported.
     if nl_path "$wt"; then
       keep "" "worktree $wt holds a newline in its path — nothing here can stat it, so whether its work has landed is unknown"
       continue
@@ -1577,7 +1574,7 @@ else
     # It reaches this sweep whenever it is itself detached, it is never under
     # `.worktrees/`, and this test needs nothing the probes below establish —
     # both operands are false for a path that does not exist. Still ahead of the
-    # linkage test for the reason the branch sweep records (#82): that test would
+    # linkage test for the reason the branch sweep records: that test would
     # otherwise call the main checkout's `.git` DIRECTORY a broken linkage.
     if [ -d "$wt/.git" ] && [ -f "$wt/.git/HEAD" ]; then
       keep "" "worktree $wt is the main checkout — cannot remove it"
@@ -1590,14 +1587,15 @@ else
     # evidence to read: branchless, clean and patch-equivalent to `$base` also
     # describes a human's `git worktree add --detach` scratch checkout that was
     # never a fleet ticket, and without this bound `--apply` deleted it
-    # (measured, PR #985 review: the same fixture survives the branch-only
-    # script and is DELETED by the branchless one). `*/.worktrees/*` is the
-    # fleet's own worktree home — the set #381 describes — and the same key
+    # (measured: the same fixture survives the branch-only script and is
+    # DELETED by the branchless one). `*/.worktrees/*` is the fleet's own
+    # worktree home — the set this sweep exists for — and the same key
     # claim-ticket.sh builds its paths under.
     #
-    # A `keep`, never a silent `continue`: a directory this script looked at and
-    # walked past with nothing said is the exact defect #381 exists to end, and
-    # the reason has to survive being read by someone who expected a removal.
+    # A `keep`, never a silent `continue`: a directory this script looked at
+    # and walked past with nothing said is the exact defect this sweep exists
+    # to end, and the reason has to survive being read by someone who expected
+    # a removal.
     #
     # It is also why this sweep carries no `--ignored` probe, unlike the branch
     # sweep: that probe exists to protect a .env or a scratch note in a worktree
@@ -1614,7 +1612,7 @@ else
     # emits none for a worktree whose HEAD it could not resolve, which it
     # reports as the null object id — a `chmod 000` or garbage admin `HEAD`
     # file, a dangling symlink or a directory standing in for one. Those are
-    # the four routes #179 measured against release-ticket.sh's own lookup, and
+    # the four routes measured against release-ticket.sh's own lookup, and
     # they empty this key exactly as a detached HEAD does. Nothing about such a
     # worktree can be decided — there is no commit to probe for merged-ness —
     # so it is reported and left, the same fail-closed direction the cherry
@@ -1637,10 +1635,11 @@ else
     # upstream. Captured, never piped into `grep -q`, for the reason the branch
     # sweep above records: the pipeline would take grep's status and a probe
     # that died would read identically to a clean one. `$head` is a full object
-    # id, so no refname can shadow it the way #634 measured for a bare branch
-    # name — but the BASE side is a shorthand until it is qualified, and this
-    # sweep removes DIRECTORIES, so the #924 shadowing costs the files
-    # themselves here and not only a branch ref: measured, a local tag named
+    # id, so no refname can shadow it the way a tag was measured shadowing a
+    # bare branch name — but the BASE side is a shorthand until it is
+    # qualified, and this sweep removes DIRECTORIES, so the tag shadowing the
+    # top of the file records costs the files themselves here and not only a
+    # branch ref: measured, a local tag named
     # `origin/main` at a detached worktree's own tip made this probe read clean
     # and `--apply` deleted the worktree holding the only copy of that commit.
     # `$base_rev` is built at the top of the file; the branch sweep's copy of
@@ -1652,7 +1651,7 @@ else
     # Three-way, for the reason the branch sweep's copy of this check records
     # in full: grep's rc 2 is not its rc 1, and the no-match arm here reaches
     # `git worktree remove`, so the swallow cost DIRECTORIES in this sweep and
-    # not only a branch ref. #1419
+    # not only a branch ref.
     if ! grep_probe "$cherry" '^+'; then
       keep "" "cherry scan failed — cannot tell if worktree $wt is merged$(gp_why "$gq_err")"
       continue
@@ -1664,10 +1663,10 @@ else
     if [ -e "$wt" ]; then
       # The remaining guards the branch sweep above documents, in the same order
       # and for the same measured reasons — the main checkout already answered
-      # for above, the linkage established — present (#128), then answering
-      # for `$wt` itself (#2042) — before anything git says through `$wt` is
+      # for above, the linkage established — present, then answering
+      # for `$wt` itself — before anything git says through `$wt` is
       # trusted, and existence settled by this `if` so a deleted directory
-      # never reaches a status call that would read as dirty forever (#83).
+      # never reaches a status call that would read as dirty forever.
       if [ -x "$wt" ] && [ ! -f "$wt/.git" ]; then
         keep "" "worktree $wt has no .git linkage — git would answer for the enclosing repo, not this one"
         continue
@@ -1676,7 +1675,7 @@ else
         keep "" "worktree $wt $lk_why"
         continue
       fi
-      # `-uall`: #730, see the branch sweep's copy of this probe above for the
+      # `-uall`: see the branch sweep's copy of this probe above for the
       # full explanation. This sweep removes DIRECTORIES, so it is the arm
       # where the misread a bare `--porcelain` produces costs the files
       # themselves.
@@ -1729,12 +1728,11 @@ else
     # difference here is that there is no branch to keep with the directory.
     # After the ownership bound above, deliberately: a worktree this sweep would
     # never remove needs no word about where the script is standing, and the
-    # bound's own reason is the one true of it. #992
+    # bound's own reason is the one true of it.
     #
     # Ancestor match, not exact equality — same reasoning as the branch
     # sweep's copy of this guard: a worktree nested inside `$wt` is removed
     # along with it even though `$wt` never equals `$self_wt` in that shape.
-    # (#1441)
     if holds_cwd "$wt"; then
       keep "" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
       continue
@@ -1751,8 +1749,7 @@ else
         # `keep "$b"` names the subject, here the branch field is `null` and
         # git's own message for a locked worktree carries no path, so two
         # refusals in one run were byte-identical and an operator could not tell
-        # which worktree was kept (measured, PR #985 review, two locked
-        # worktrees).
+        # which worktree was kept (measured, two locked worktrees).
         keep "" "worktree $wt remove refused ($state): $(printf '%s' "$err" | tr '\n' ' ')"
         continue
       fi
@@ -1804,7 +1801,7 @@ $broken
 EOF
 fi
 
-# Payload first, prune after (#265): `git worktree prune` used to be the last
+# Payload first, prune after: `git worktree prune` used to be the last
 # command of the guard below — an AND-OR list then — so under `set -eu` ITS
 # OWN failure, not just a false `[ apply = true ]`, reached -e and aborted the
 # script before this printf ever ran, after the branches above were already
@@ -1824,12 +1821,12 @@ printf '{"applied":%s,"reaped":[%s],"worktreesRemoved":[%s],"kept":[%s],"warning
 # Captured, and quoted into the refusal the way `cherry probe failed` and
 # `worktree remove refused` above already are: bare, this printed a step name
 # and dropped git's stdout and stderr on the floor, so the operator read
-# `git worktree prune failed` and nothing about what git said (the class #578
-# catalogues at this script's other sites). Folded to one line by the same
+# `git worktree prune failed` and nothing about what git said (the class the
+# other sites here were already fixed for). Folded to one line by the same
 # `tr '\n' ' '` every reason here uses, so one failure stays one line. A
 # non-zero exit from this command now means the housekeeping genuinely failed:
 # the run standing in a worktree it was about to remove is refused above,
-# before any removal, rather than diagnosed here afterwards. #992
+# before any removal, rather than diagnosed here afterwards.
 if [ "$apply" = true ]; then
   if ! prune_err=$(git worktree prune 2>&1); then
     die "git worktree prune failed: $(printf '%s' "$prune_err" | tr '\n' ' ')"
