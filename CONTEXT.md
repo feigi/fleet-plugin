@@ -350,9 +350,8 @@ _Avoid_: mapping, override, translation
 **Cell**:
 An implementer routing target, `<role>-<level>` — a Declared tier scoped
 to the exploration grid and the Router below. One definition per cell
-(`plugin/agents/fleet-implementer-<cell>.agent.md`, five cells — pending
-`#2129`, not yet built); never a vendor model name in any cell token,
-definition, or prose.
+(`plugin/agents/fleet-implementer-<cell>.agent.md`); never a vendor model
+name in any cell token, definition, or prose.
 _Avoid_: tier (bare), alt-tier, model
 
 **Router**:
@@ -367,7 +366,8 @@ _Avoid_: fleet-router, sizer
 A member-outcomes row whose `subagent_type` is `fleet-implementer-<cell>` for
 the cell its Pull drew (`chosen_cell`), whose recorded effort equals that
 cell's level, and which has a resolved model on record — the only rows the
-readout script (`cell-readout.mjs`) and the per-cell stopping rule (pending
-`#2134`, not yet built) count. Whether the Resolved tier matched the Declared
-tier is the run ledger's check; the readout never makes it.
+readout script (`cell-readout.mjs`) and the per-cell stopping rule (its
+exported `stoppingRule`, run by the repo-local hook) count. Whether the
+Resolved tier matched the Declared tier is the run ledger's check; the readout
+never makes it.
 _Avoid_: verified row, valid row
