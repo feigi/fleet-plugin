@@ -193,12 +193,15 @@ const probeArgv = (file, extra = [], tail = []) => {
 };
 const probeStray = (file) => probeArgv(file);
 
+// `s` made literal inside a RegExp source.
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // Whether `text` names the script `file` (`scripts/<name>`): its file name on
 // its own, never inside another name. A bare substring credits `prove.mjs` to a
 // text that names only `recipe-prove.mjs`, and a script named `newscr.mjs` to a
 // text that mentions only `newscr.mjs.bak`.
 const namesScript = (text, file) => {
-  const name = file.replace(/^scripts\//, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const name = escapeRe(file.replace(/^scripts\//, ""));
   return new RegExp(`(?<![\\w.-])${name}(?![\\w-])(?!\\.\\w)`).test(text);
 };
 
@@ -411,10 +414,8 @@ test("no roster row is silent: every row the roster grep returns names the stray
 // for a binding.
 const binds = (file, symbol, from = "./arg.mjs") => {
   const src = readFileSync(join(ROOT, file), "utf8").replace(/\/\/.*$/gm, "");
-  const quote = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`import\\b[^;{]*\\{[^}]*\\b${quote(symbol)}\\b[^}]*\\}\\s*from\\s*["']${quote(from)}["']`).test(src);
+  return new RegExp(`import\\b[^;{]*\\{[^}]*\\b${escapeRe(symbol)}\\b[^}]*\\}\\s*from\\s*["']${escapeRe(from)}["']`).test(src);
 };
-const bindsMakeDie = (file) => binds(file, "makeDie");
 
 // A dropped importer whose own guard answers a stray-only probe first — the
 // stray flag is never named, so that probe cannot credit the script with an
@@ -432,7 +433,7 @@ const DROPPED_GUARD_FIXTURE = {
 };
 
 test("every arg.mjs importer the makeDie filter drops is a module, or a script the header names", () => {
-  const dropped = scriptsOf(sh(IMPORT_GREP).stdout).filter((file) => file !== "scripts/arg.mjs" && !bindsMakeDie(file));
+  const dropped = scriptsOf(sh(IMPORT_GREP).stdout).filter((file) => file !== "scripts/arg.mjs" && !binds(file, "makeDie"));
   const unnamed = [];
   const guardFirst = [];
   for (const file of dropped) {
