@@ -2032,9 +2032,12 @@ is never something to assume.
 `fix-pr-<pr#>` is one; a finisher and a CI wait are zero; and a PR holds at most
 one slot at a time. In-flight reviews are derived, never remembered: a row with
 `review=` and no `reviewed=` is one, which is why the token goes on before
-anything else. The defaults are 2 implementers and 6 reviewers, and neither is
-a hard cap. The cap bounds units, not the agents a review fans out to — 1
-snapshot + up to 6 specialists + 2 refuters per critical/important finding — and
+anything else. A review whose PR has left the open list is probed: when
+`gh pr view` reports that PR MERGED or CLOSED, the tick drops the review,
+since none runs against a finished PR, and a probe that
+cannot answer keeps the slot. The defaults are 2 implementers and 6 reviewers,
+and neither is a hard cap. The cap bounds units, not the agents a review fans
+out to — 1 snapshot + up to 6 specialists + 2 refuters per critical/important finding — and
 how many reviews may be in flight at once, inside it, is `--max-reviews`. The
 slots a review does not hold still serve fix-appliers.
 
@@ -3704,7 +3707,8 @@ written with `row` (**Reviewers**): `review=wf:<runId>` |
 `review=member:review-pr-<n>` | `review=fallback:review-pr-<n>[-b]` at launch,
 settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>`
 when the result lands. A row with `review=` and no `reviewed=` is a review in
-flight, and the tick counts it against the reviewer cap. `ci=<run-id>:<attempt>:<conclusion>`
+flight, and the tick counts it against the reviewer cap unless gh reports its PR
+MERGED or CLOSED. `ci=<run-id>:<attempt>:<conclusion>`
 and `held-behind:#<lower>` are row tokens the same way (Phase 3), and so is
 `conflict-hold:#<pr>` — the one row token the merge bot writes itself, naming
 the row's own PR (`run-merge-bot.md` step 1). It is not an Exclusion: that

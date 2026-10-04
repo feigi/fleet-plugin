@@ -201,8 +201,8 @@ const COVERED_MJS = {
   // children (`node candidates.mjs`, `node ledger.mjs`, `sh inflight.sh`)
   // name no git.
   "shortlist.mjs": 2,
-  // THREE. The first two are the pair shortlist.mjs carries (#1803), the
-  // third is below (#2485). `shortlistPath()`'s
+  // FOUR. The first two are the pair shortlist.mjs carries (#1803), the
+  // third is below (#2485), the fourth after it. `shortlistPath()`'s
   // `--git-common-dir` probe names the `.fleet/shortlist.json` the tick PULLs
   // from; an ambient GIT_DIR would read another repository's shortlist and
   // name its tickets. Measured in fleet-tick.test.mjs, "an ambient GIT_DIR
@@ -216,7 +216,11 @@ const COVERED_MJS = {
   // implementer's ticket is already closed, and resolves the repository the
   // same way; measured in fleet-tick.test.mjs, "an inherited GIT_DIR cannot
   // retarget the tier-mismatch closed-ticket probe".
-  "fleet-tick.mjs": 3,
+  // `finishedReviewPrs()`'s `gh pr view` asks whether a PR with a dangling
+  // in-flight review is already merged or closed, and resolves the repository
+  // the same way; measured in fleet-tick.test.mjs, "an inherited GIT_DIR
+  // cannot retarget the merged-PR review probe".
+  "fleet-tick.mjs": 4,
   // ONE spawn primitive, `git(args, cwd)`, behind both of the file's git calls
   // — `resolveMainRoot()`'s `rev-parse --git-common-dir` and `checkIgnored()`'s
   // `check-ignore` (#1411). An ambient GIT_DIR would answer the first for

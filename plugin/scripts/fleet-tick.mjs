@@ -39,7 +39,10 @@
 //             merge queue, and which PRs are owed a review. Also, for each ticket
 //             holding the implementer row on a tier mismatch, whether its issue
 //             is CLOSED (`gh issue view`, #2485): a closed ticket's mismatch
-//             holds nothing.
+//             holds nothing. And, for each in-flight `review=` token whose PR
+//             the open list does not carry, whether that PR is MERGED or
+//             CLOSED (`gh pr view`): a review cannot be running against a
+//             finished PR, so its dangling token holds no reviewer slot.
 //   main      The main checkout against the run-start baseline
 //             `.fleet/main-checkout.sha`, through main-checkout.mjs (#2210).
 //             Anything but `clean` — dirty, unknown, no baseline — prints one
@@ -496,7 +499,7 @@ export function unlabelledFinishers(ledger, unqueued) {
     .map((u) => ({ pr: u.pr, labelled: u.attempts.filter((a) => a.outcome === "labelled").map((a) => a.name) }));
 }
 
-export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set()) {
+export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), finished = new Set()) {
   // One entry per member name across `## Dispatched` and every row. A member
   // settled ANYWHERE is settled: `settle` is the only writer of an outcome, and
   // a bare copy beside it is what a whole-line `row` rewrite leaves behind.
@@ -752,11 +755,23 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set()) 
   // head that review read, and there is nothing more to review.
   const pastPinDue = (st, head) => st !== undefined && st.pastPinHalt && !st.inFlight && st.reviewedHead !== null
     && !String(head).toLowerCase().startsWith(st.reviewedHead);
+  // A `review=` token with no `reviewed=` after it reads as in flight, and the
+  // ledger alone never says otherwise: a review whose own `reviewed=` write
+  // never landed stays in flight after its PR merges, holding a reviewer slot
+  // for good. `finished` is the PR numbers the caller has found MERGED or
+  // CLOSED, and a finished PR has no review running against it. A PR on the
+  // open list is open whatever `finished` says, and none is the default, so a
+  // PR nobody has asked about keeps its review live.
+  const reviewing = [...byPr.entries()].filter(([, st]) => st.inFlight);
+  const liveReviews = reviewing.filter(([n]) => open.has(n) || !finished.has(n));
   return {
     implLive: live("impl"),
     fixLive: live("fix-pr"),
     mergeBotLive: live("merge-bot"),
-    reviewsLive: [...byPr.values()].filter((st) => st.inFlight).length,
+    reviewsLive: liveReviews.length,
+    // The in-flight reviews of PRs the open list does not carry: the ones
+    // `finished` could retire, so the caller asks gh about these and no others.
+    reviewsOffList: reviewing.filter(([n]) => !open.has(n)).map(([n]) => n).sort(asc),
     // A returned review whose survivors no review fix-applier has answered,
     // a conflict hold no fix-applier has cleared, or a dispositions mismatch
     // no retry has answered — on a PR still open, with no fix-applier working
@@ -824,7 +839,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set()) 
     // run carries no member token of its own.
     live: [
       ...all.filter((m) => m.outcome === null).map((m) => m.name),
-      ...[...byPr.entries()].filter(([, st]) => st.inFlight).map(([n]) => `review:PR#${n}`),
+      ...liveReviews.map(([n]) => `review:PR#${n}`),
     ],
   };
 }
@@ -1106,6 +1121,31 @@ function closedTickets(mismatched) {
   return closed;
 }
 
+// The PRs, of those whose review the ledger reads as in flight yet the open
+// list does not carry, that gh says are MERGED or CLOSED. A review cannot be
+// running against a finished PR, so the ledger's dangling `review=` token must
+// not hold a reviewer slot for good. A probe that cannot answer — a nonzero
+// exit, a reply carrying no state, a state that is none of the three — is
+// disclosed and the review keeps its slot: an unreadable state is never read
+// as finished. A PR gh calls OPEN keeps it quietly.
+function finishedReviewPrs(offList) {
+  const finished = new Set();
+  for (const number of offList) {
+    const r = spawnSync("gh", ["pr", "view", String(number), "--json", "state"], { encoding: "utf8", env: gitEnv({ GH_REPO: "" }) });
+    if (r.error || r.status !== 0) {
+      console.error(`${NAME}: ${failure(r, `gh pr view ${number}`)} — review on PR#${number} unconfirmed finished, its slot stands`);
+      continue;
+    }
+    let st = null;
+    try { st = JSON.parse(r.stdout).state; } catch { /* no state: disclosed below */ }
+    if (st === "MERGED" || st === "CLOSED") finished.add(number);
+    else if (st !== "OPEN") {
+      console.error(`${NAME}: gh pr view ${number} printed no PR state — review on PR#${number} unconfirmed finished, its slot stands`);
+    }
+  }
+  return finished;
+}
+
 // shortlist.mjs, run by the tick itself (§ 6 §3). Its per-ticket stderr is
 // captured and dropped rather than billed to the controller's context; only a
 // failure's last line rides along.
@@ -1166,7 +1206,8 @@ function main() {
     const ledger = readLedger();
     run = deriveRun(ledger, prs);
     const closed = closedTickets(run.tierMismatch);
-    if (closed.size) run = deriveRun(ledger, prs, closed);
+    const finished = finishedReviewPrs(run.reviewsOffList);
+    if (closed.size || finished.size) run = deriveRun(ledger, prs, closed, finished);
   } catch (e) {
     if (e instanceof LedgerError) die(e.message);
     throw e;

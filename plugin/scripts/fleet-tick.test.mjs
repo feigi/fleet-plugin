@@ -452,7 +452,7 @@ const pr = (number, labels = [], closes = [number + 1000], headRefOid = HEAD_B) 
   closingIssuesReferences: closes.map((n) => ({ number: n })),
   headRefOid,
 });
-const run = (ledger, prs = [], closed) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs, closed);
+const run = (ledger, prs = [], closed, finished) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs, closed, finished);
 
 test("deriveRun: live implementers are the unsettled impl- tokens — the #1692 shape, read rather than recited", () => {
   // #1692 was two sources disagreeing about the same fleet. There is one
@@ -504,6 +504,44 @@ test("deriveRun: live names every unsettled member and each in-flight review by 
     dispatched: ["fix-pr-21"],
   }, [pr(20), pr(21), pr(23)]);
   assert.deepEqual(r.live, ["fix-pr-21", "impl-15", "review:PR#20"], "run2 returned and run3 is dead, so neither is live");
+});
+
+// A review whose own `reviewed=` write never landed stays in flight in the
+// ledger forever. The ledger cannot say the PR has since merged; the caller's
+// probe can, and hands the merged or closed PR numbers to the fold.
+const ZOMBIE_ROWS = [20, 21, 22].map((n) => `#${n - 10} impl-${n - 10}=PR#${n} → PR#${n} · review=member:review-pr-${n}`);
+
+test("deriveRun: an in-flight review whose PR has left the open list is named for a probe, and still counts until the probe answers", () => {
+  const r = run({ rows: ZOMBIE_ROWS }, [pr(21)]);
+  assert.deepEqual(r.reviewsOffList, [20, 22], "only the in-flight reviews of PRs not on the open list");
+  assert.equal(r.reviewsLive, 3, "no probe answer: fail closed, every one still reads as live");
+  assert.deepEqual(r.live, ["review:PR#20", "review:PR#21", "review:PR#22"]);
+});
+
+test("deriveRun: reviewsOffList is ascending whatever order the ledger rows arrive in", () => {
+  const r = run({ rows: [...ZOMBIE_ROWS].reverse() }, [pr(21)]);
+  assert.deepEqual(r.reviewsOffList, [20, 22], "rows arrive 22, 21, 20: the sort, not ledger order, makes it ascending");
+});
+
+test("deriveRun: a review in flight on a PR the caller found merged or closed is not live", () => {
+  const r = run({ rows: ZOMBIE_ROWS }, [pr(21)], undefined, new Set([20, 22]));
+  assert.equal(r.reviewsLive, 1, "only PR 21's review, on the open list, is live");
+  assert.deepEqual(r.live, ["review:PR#21"]);
+});
+
+test("deriveRun: a review in flight on an OPEN PR is live whatever the finished set says", () => {
+  // A probe answer that contradicts the open list is not trusted to retire a
+  // review: the open list is the fold's own read of which PRs are open.
+  const r = run({ rows: ZOMBIE_ROWS }, [pr(20), pr(21), pr(22)], undefined, new Set([20, 21, 22]));
+  assert.equal(r.reviewsLive, 3);
+  assert.deepEqual(r.reviewsOffList, []);
+});
+
+test("deriveRun: a finished PR's returned review and settled members read as before", () => {
+  const rows = [...ZOMBIE_ROWS, "#40 impl-40=PR#50 → PR#50 · review=member:review-pr-50 reviewed=abc1234:0/0/0"];
+  const r = run({ rows }, [], undefined, new Set([20, 21, 22, 50]));
+  assert.deepEqual([r.reviewsLive, r.reviewsOffList, r.live], [0, [20, 21, 22], []]);
+  assert.deepEqual(r.reviewed.map((x) => x.pr), [50], "the returned review is still on record");
 });
 
 test("deriveRun: fix-pr is due on a returned review with survivors and no fix-applier since", () => {
@@ -1267,7 +1305,9 @@ test("CLI: every synchronous spawn in this file goes through spawnBounded (#2320
 });
 
 // `pr list` for the open PRs, `issue view` for a behind-issue premise's state,
-// `issue list --label in-progress` for the stall report's claimed count.
+// `pr view` for the state of a PR an in-flight review names that is no longer
+// on the open list, `issue list --label in-progress` for the stall report's
+// claimed count.
 const GH_STUB = `#!/bin/sh
 case "$1 $2" in
   "pr list") [ -n "$PR_FAIL" ] && { echo "boom" >&2; exit 1; }; cat "$FIXTURE_PRS" ;;
@@ -1280,6 +1320,15 @@ case "$1 $2" in
     # scrub them lifts an exclusion the case's own repository still holds.
     [ -n "$GIT_DIR$GIT_WORK_TREE$GH_REPO" ] && { echo '{"state":"CLOSED"}'; exit 0; }
     exec jq -c --arg n "$3" '{state: (.[$n] // error("no such issue"))}' "$FIXTURE_ISSUE_STATES" ;;
+  "pr view")
+    echo "$3" >> "$PR_VIEW_LOG"
+    [ -n "$PR_VIEW_FAIL" ] && { echo "gh: pr view failed" >&2; exit 1; }
+    [ -n "$PR_VIEW_BODY" ] && { printf '%s\n' "$PR_VIEW_BODY"; exit 0; }
+    # Real gh answers for the repository an inherited GIT_DIR or GH_REPO names;
+    # this one answers MERGED for every PR there, so a probe that forgot to
+    # scrub them retires a review the case's own repository still holds.
+    [ -n "$GIT_DIR$GIT_WORK_TREE$GH_REPO" ] && { echo '{"state":"MERGED"}'; exit 0; }
+    exec jq -c --arg n "$3" '{state: (.[$n] // error("no such pull request"))}' "$FIXTURE_PR_STATES" ;;
   "issue list")
     [ -n "$CLAIMED_FAIL" ] && { echo "boom" >&2; exit 1; }
     expr=""
@@ -1320,7 +1369,7 @@ const shortlistText = (ns, scanned = ns.length) => JSON.stringify({ scanned, sho
 // through info/exclude so no tracked file says so.
 function runCli(args = [], {
   prs = [], ledger, shortlist, refresh = shortlistText([]), refreshFail = false,
-  issueStates = {}, claimed = [], env: extraEnv = {}, defaultState = false, keep = false, beforeRun = () => {},
+  issueStates = {}, prStates = {}, claimed = [], env: extraEnv = {}, defaultState = false, keep = false, beforeRun = () => {},
   baseline = true, afterBaseline = () => {},
 } = {}) {
   // On macOS tmpdir() is /var -> /private/var; resolving it up front makes
@@ -1355,6 +1404,7 @@ function runCli(args = [], {
     afterBaseline(repo);
     const refreshLog = fx("refresh.log", "");
     const issueViewLog = fx("issue-view.log", "");
+    const prViewLog = fx("pr-view.log", "");
     // Every case gets its own state file unless it names one: the default path
     // resolves against the git common dir, and a shared streak and digest would
     // make the fold cases order-dependent. `defaultState` opts out for the case
@@ -1367,14 +1417,16 @@ function runCli(args = [], {
         FIXTURE_PRS: fx("prs.json", JSON.stringify(prs)),
         FIXTURE_CLAIMED: fx("claimed.json", JSON.stringify(claimed)),
         FIXTURE_ISSUE_STATES: fx("issue-states.json", JSON.stringify(issueStates)),
+        FIXTURE_PR_STATES: fx("pr-states.json", JSON.stringify(prStates)),
         FIXTURE_REFRESH: fx("refresh.json", refresh),
-        REFRESH_LOG: refreshLog, ISSUE_VIEW_LOG: issueViewLog,
+        REFRESH_LOG: refreshLog, ISSUE_VIEW_LOG: issueViewLog, PR_VIEW_LOG: prViewLog,
         ...(refreshFail ? { REFRESH_FAIL: "1" } : {}),
         ...extraEnv,
       },
     });
     r.refreshed = readFileSync(refreshLog, "utf8").split("\n").filter(Boolean).length;
     r.issueViews = readFileSync(issueViewLog, "utf8").split("\n").filter(Boolean);
+    r.prViews = readFileSync(prViewLog, "utf8").split("\n").filter(Boolean);
     r.repo = repo;
     r.dir = dir;
     returned = true;
@@ -1841,6 +1893,82 @@ test("CLI: an inherited GIT_DIR cannot retarget the behind-issue premise probe",
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(r.issueViews, ["9"], "the probe must still run");
   assert.equal(r.refreshed, 0, "#9 is OPEN in the case's own repository — the exclusion stands");
+});
+
+// A review whose `reviewed=` write never landed stays in flight in the ledger
+// after its PR merges. Each such row holds one reviewer slot unless the tick
+// asks gh about the PR and finds it finished.
+const zombieRows = (numbers) => numbers.map((n) => `#${n - 90} impl-${n - 90}=PR#${n} → PR#${n} · review=member:review-pr-${n}`);
+const ZOMBIES = Array.from({ length: 10 }, (_, i) => 101 + i);
+const REVIEW_DUE = pr(500, [], [1500], HEAD_B);
+const CAPS = ["--reviewer-cap", "10", "--max-reviews", "10"];
+
+test("CLI: dangling in-flight reviews of merged PRs do not starve review dispatch", () => {
+  const r = runCli(CAPS, {
+    shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows(ZOMBIES) },
+    prStates: Object.fromEntries(ZOMBIES.map((n) => [n, "MERGED"])),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.prViews.map(Number).sort((a, b) => a - b), ZOMBIES, "each off-list PR is asked about");
+  assert.match(r.stdout, /^reviewers +0\/10 → DISPATCH review PR#500/m);
+});
+
+test("CLI: a CLOSED PR's dangling review is released too", () => {
+  const r = runCli(["--reviewer-cap", "1", "--max-reviews", "1"], {
+    shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows([101]) }, prStates: { 101: "CLOSED" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^reviewers +0\/1 → DISPATCH review PR#500/m);
+});
+
+test("CLI: an in-flight review on an open PR keeps its slot and is never probed", () => {
+  const r = runCli(["--reviewer-cap", "1", "--max-reviews", "1"], {
+    shortlist: shortlistText([]), prs: [pr(101, [], [1101]), REVIEW_DUE], ledger: { rows: zombieRows([101]) },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.prViews, [], "an open PR needs no probe");
+  assert.match(r.stdout, /^reviewers +1\/1 → AT CAP/m);
+  assert.doesNotMatch(r.stdout, /DISPATCH review/);
+});
+
+test("CLI: a PR off the open list that gh still calls OPEN keeps its review's slot", () => {
+  const r = runCli(["--reviewer-cap", "1", "--max-reviews", "1"], {
+    shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows([101]) }, prStates: { 101: "OPEN" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.prViews, ["101"]);
+  assert.match(r.stdout, /^reviewers +1\/1 → AT CAP/m);
+  assert.doesNotMatch(r.stdout, /DISPATCH review/);
+});
+
+test("CLI: a PR gh cannot answer for is not read as merged - the slot is held and the failure disclosed", () => {
+  const cases = [
+    ["a nonzero exit", { PR_VIEW_FAIL: "1" }, /gh pr view 101 exited 1: gh: pr view failed/],
+    ["a reply with no state", { PR_VIEW_BODY: "<html>proxy error</html>" }, /gh pr view 101 printed no PR state/],
+    ["a state that is not MERGED or CLOSED", { PR_VIEW_BODY: JSON.stringify({ state: "merged" }) }, /gh pr view 101 printed no PR state/],
+  ];
+  for (const [what, env, shown] of cases) {
+    const r = runCli(["--reviewer-cap", "1", "--max-reviews", "1"], {
+      shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows([101]) }, prStates: { 101: "MERGED" }, env,
+    });
+    assert.equal(r.status, 0, `${what}: ${r.stderr}`);
+    assert.match(r.stderr, shown, what);
+    assert.match(r.stdout, /^reviewers +1\/1 → AT CAP/m, what);
+    assert.doesNotMatch(r.stdout, /DISPATCH review/, what);
+  }
+});
+
+test("CLI: an inherited GIT_DIR cannot retarget the merged-PR review probe", (t) => {
+  const decoy = realpathSync(mkdtempSync(join(tmpdir(), "fleet-tick-decoy-pr-")));
+  t.after(() => rmSync(decoy, { recursive: true, force: true }));
+  spawnBounded("git", ["init", "-q", decoy]);
+  const r = runCli(["--reviewer-cap", "1", "--max-reviews", "1"], {
+    shortlist: shortlistText([]), prs: [REVIEW_DUE], ledger: { rows: zombieRows([101]) }, prStates: { 101: "OPEN" },
+    env: { GIT_DIR: join(decoy, ".git"), GH_REPO: "someone/else" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.prViews, ["101"], "the probe must still run");
+  assert.match(r.stdout, /^reviewers +1\/1 → AT CAP/m, "101 is OPEN in the case's own repository - its review keeps the slot");
 });
 
 // #2210, end to end: a real repo, a real baseline, a real stray write.
