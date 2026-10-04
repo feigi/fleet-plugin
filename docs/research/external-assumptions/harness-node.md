@@ -178,7 +178,7 @@ Scanned in full or via targeted `grep` + follow-up `read` of every matched regio
 - `plugin/scripts/strip-comments.mjs` (43 lines at `a7cb31d0`) — read in full
 - `plugin/scripts/frontmatter-check.mjs` (250 lines at `a7cb31d0`) — read in full
 - `plugin/scripts/frontmatter-allowlist.json` (76 lines at `a7cb31d0`) — read in full
-- `plugin/scripts/prose-pin.mjs` (845 lines at `a7cb31d0`) — exports listed via grep, gutter-stripping functions read directly; remaining exports are internal prose-pinning machinery with no external-world assumptions
+- `plugin/scripts/prose-pin.mjs` (845 lines at `a7cb31d0`) — exports listed via grep, `DIALECT_TOKENS`/gutter-stripping functions read directly; remaining exports are internal prose-pinning machinery with no external-world assumptions beyond the dialect table already captured (row 34, retired — `ed9f2967` removed the `DIALECT_TOKENS` export)
 - `plugin/scripts/cwd-isolation-pins.mjs` (86 lines at `a7cb31d0`) — read in full
 - `plugin/.claude-plugin/plugin.json` (9 lines at `a7cb31d0`) — read in full
 - `.omp-plugin/marketplace.json` (21 lines at `ed9f2967`; deleted by `15c8b32b`) — read in full as `.claude-plugin/marketplace.json` (22 lines at `a7cb31d0`), which `ed9f2967` renamed to this path
