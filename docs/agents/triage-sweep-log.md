@@ -123,3 +123,44 @@ before-and-after comparison.
 **Revert:** reopen #2473 and #2474; on all six, restore `needs-triage` and drop
 the category and state labels this sweep added; delete this sweep's triage
 comments on each; close PR #2489 unmerged.
+
+## 2026-10-03 sweep, second pass
+
+**As-of 2026-10-03T22:30Z**, probed against `origin/main`@`5cd8b625`. A
+`/triage` pass over every open `needs-triage` issue, run with #593's
+procedure (probe `origin/main` in a throwaway worktree, never the working
+tree or the ticket's cited line numbers). Each ticket was probed by its own
+agent, sized to the ticket: #2550 small, #2571 medium, #2551 medium-high,
+#2504 and #2568 high.
+
+**Before:** 5 `needs-triage` (#2504, #2550, #2551, #2568, #2571); 4 carry
+`Deferred from PR #<n>` (all but #2568, which was filed from two CI failures).
+
+**Probed:**
+
+| # | Central claim | `origin/main` verdict | Outcome |
+|---|---|---|---|
+| #2504 | A CLOSED ticket's unchecked replacement (`impl-<N>-b`) still reads `HOLD (tier unchecked …)` | Reproduced, but as designed: one `tier-check.mjs --batch` run always clears it (a `tier-mismatch=` verdict is then lifted by the closed-ticket mismatch lift), and the check guards the next Pull against a definition or `modelRoles` fault, not the closed ticket | refuted → `enhancement` + `wontfix`, closed; recorded in `.out-of-scope/closed-ticket-tier-unchecked-lift.md` (PR #2585) |
+| #2550 | `recipe-prove` leaves its log directory in `$TMPDIR` after `PROVEN` | Reproduced. Nothing reads the logs after `PROVEN` (the cache carries the proof); `NOT PROVEN` refusals name a log path | live-confirmed → `bug` + `ready-for-agent` (brief: remove on `PROVEN` and exit 2, keep on `NOT PROVEN`) |
+| #2551 | `recipe-prove` runs Install, Test and mutation with no timeout | Reproduced a hang (only an outer alarm ended it). Also found that a SIGTERM-trapping command keeps a `timeout`-only `spawnSync` from ever returning | live-confirmed → `bug` + `ready-for-agent` (brief: 20-minute bound per command, shorten-only `RECIPE_PROVE_TIMEOUT`, `SIGKILL`, `NOT PROVEN` refusal naming the bound) |
+| #2568 | `reap.test.mjs`'s `gitdir missing` / `gitdir chmod 000` rows flake in CI | Root-caused: on git ≥ 2.54 the fixture's own `git fetch --prune` starts detached auto-maintenance whose `worktree-prune` task erases the fault before reap.sh reads it. Reproduced locally by enabling that task on git 2.50.1; about 1.4% of CI runs | live-confirmed → `bug` + `ready-for-agent` (brief: `-c maintenance.auto=false` in the test's fixture `git()` helper only) |
+| #2571 | `recipe-prove`'s `git()` cannot tell a signal-killed git from a non-zero exit | Reproduced: `kill -9`, `kill -TERM` and an over-`maxBuffer` git each end in a `NOT PROVEN` message with an empty reason | live-confirmed → `bug` + `ready-for-agent` (brief: name the signal and `error.code` in `err`; do not throw) |
+
+**Filed mid-sweep:** #2587 (2026-10-03T23:06:26Z, `needs-triage`, deferred
+from open PR #2581) and #2589 (2026-10-03T23:08:46Z, `needs-triage`, filed by
+the fleet controller for a decision), probed after the five above:
+
+| # | Central claim | Verdict | Outcome |
+|---|---|---|---|
+| #2587 | `writeCache`'s `git --version` probe catches only a git that cannot start, so a git that starts and exits 126 reads `NOT PROVEN` | The probe is not on `origin/main`@`5cd8b625`; it exists only on PR #2581's head `6e3a9464`, as #2100's construct did. Reproduced there: an exit-126 git stub gives `NOT PROVEN — the Recipe cache reader refuses what was proven: … is not a git repository`, exit 1 | live-confirmed → `bug` + `ready-for-agent` + `onhold` until PR #2581 merges (brief: a non-zero `git --version` maps to exit 2; `git()` unchanged) |
+| #2589 | A merge bot can skip `drop-merged-label.sh`, leaving `in-progress` on closed issues unnoticed | Confirmed: the drop is its own step in the merge-bot runbook, no script calls it, and nothing else drops the label after a merge. The 113 leaked closed-issue labels had already been cleared (0 at probe time) | maintainer chose option 3 (make the step un-skippable; the merge stays the single writer) → `bug` + `ready-for-agent` (brief: `delete-merged-branch.sh` runs the label drop on every MERGED path, with a distinct failure signal) |
+
+**After (as-of 2026-10-03T23:15Z):** 0 `needs-triage` (`gh issue list --state
+open --label needs-triage --limit 500` returns `[]`). The fleet was filing
+issues throughout the sweep, so a later filing is outside this entry. The
+open-issue and deferred counts were not measured before the sweep, so they
+have no before-and-after comparison.
+
+**Revert:** reopen #2504; on all seven, restore `needs-triage` and drop the
+category, state and `onhold` labels this sweep added; delete this sweep's
+triage comments on each; close PR #2585 unmerged.
