@@ -2,7 +2,12 @@
 
 **Status:** Accepted. Ruled 2026-09-29 on #1330 by the maintainer, from a
 grilling session. Implemented in `release-ticket.sh` by `901b857b` (#1325);
-the checked-out gap is #2218, and `reap.sh` is #2219.
+the checked-out gap is #2218, and `reap.sh` is #2219. Amended by #2275: the
+residual window stays, but a `git worktree add` landing in it no longer
+breaks that worktree silently — it moves no ref, so the delete goes through,
+and `wt_recheck_delete` re-reads the listing after the delete and restores
+the branch at `$tip` (reap keeps the branch, release halts); `reap.sh` also
+reports any `.worktrees/` worktree left on a branch that no longer exists.
 
 ## Context
 

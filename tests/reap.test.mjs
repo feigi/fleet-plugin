@@ -2198,6 +2198,227 @@ test("a [gone] branch that gains a commit after its tip is read is kept, and the
   assert.equal(git(w, "log", "-1", "--format=%s", "refs/heads/feature/raced"), "race", "the commit that landed in the window is still the branch's tip");
 });
 
+/**
+ * A `git` that checks `feature/raced` out at `raceWt` the instant before the
+ * real `update-ref -d` runs — between the holder check and the delete — and
+ * then lets the delete through. `restoreFails` also fails the restore, the
+ * create-only `update-ref <ref> <tip> <null>` that follows a caught race.
+ */
+function raceShim(t, raceWt, { restoreFails = false } = {}) {
+  return failOnlyShim(
+    t,
+    `{ if [ "$1" = update-ref ] && [ "$3" = -d ]; then
+  ${SHIM_FIRED}
+  "${REAL_GIT}" worktree add -q '${raceWt}' feature/raced >/dev/null 2>&1 || exit 99
+  false
+elif [ "$1" = update-ref ] && [ $# -eq 4 ]; then
+  ${restoreFails ? "true" : "false"}
+else
+  false
+fi; }`,
+    ["fatal: simulated restore failure"],
+    128,
+  );
+}
+
+test("a [gone] branch checked out between the holder check and the delete is restored and kept (#2275)", (t) => {
+  // `git worktree add <p> <existing-branch>` writes only the new worktree's
+  // `HEAD` and never moves the ref, so the compare-and-swap succeeds under it.
+  // Unfixed: `reaped`, nothing in `kept`, and the worktree left on a branch
+  // that no longer existed — unresolvable `HEAD`, and invisible to both sweeps
+  // on every later pass.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/raced", "merged work");
+  const tip = git(w, "rev-parse", "feature/raced");
+  const raceWt = join(w, ".worktrees", "race");
+  const bin = raceShim(t, raceWt);
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assertShimFired(bin, "the add must land between the holder check and the delete", /^update-ref --no-deref -d refs\/heads\/feature\/raced /m);
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, []);
+  assert.deepEqual(json.kept, [
+    { branch: "feature/raced", reason: `feature/raced was checked out in worktree ${raceWt} during the delete — branch restored, not deleted` },
+  ]);
+  assert.equal(git(w, "rev-parse", "refs/heads/feature/raced"), tip, "the branch is back at the tip the delete compared against");
+  assert.equal(git(raceWt, "rev-parse", "HEAD"), tip, "the worktree that raced the delete resolves its HEAD again");
+  assert.equal(git(raceWt, "status", "--porcelain"), "", "and reads clean");
+  assert.equal(git(w, "config", "branch.feature/raced.remote"), "origin", "a kept branch keeps its config section, so the next pass selects it again");
+});
+
+test("a restore that fails after the race is kept with the path, the tip, git's error and the repair command (#2275)", (t) => {
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/raced", "merged work");
+  const tip = git(w, "rev-parse", "feature/raced");
+  const raceWt = join(w, ".worktrees", "race");
+  const bin = raceShim(t, raceWt, { restoreFails: true });
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, []);
+  const kept = json.kept.filter((k) => k.branch === "feature/raced");
+  assert.equal(kept.length, 1, JSON.stringify(json.kept));
+  assert.equal(
+    kept[0].reason,
+    `feature/raced was checked out in worktree ${raceWt} during the delete, and restoring it at ${tip} failed — the branch is deleted, restore it with: git update-ref refs/heads/feature/raced ${tip} ${"0".repeat(40)}: fatal: simulated restore failure`,
+  );
+  assert.equal(branchExists(w, "feature/raced"), false, "the restore really did fail");
+});
+
+test("a worktree list that fails right after the delete restores and keeps the branch (#2275)", (t) => {
+  // The re-read after the delete is the only thing that could see a worktree
+  // the delete broke. One that cannot run has ruled nothing out, so the
+  // branch goes back. Call 1 is the lookup, call 2 the holder check, call 3
+  // the re-read after the delete.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const tip = git(w, "rev-parse", "feature/merged");
+
+  const { bin } = worktreeListFailsOnCall(t, "-eq 3");
+
+  const { code, json } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(code, 0);
+  assert.deepEqual(json.reaped, []);
+  assert.deepEqual(json.kept, [
+    {
+      branch: "feature/merged",
+      reason: "feature/merged could not be checked against the worktree list after the delete: fatal: worktree list exploded — branch restored, not deleted",
+    },
+  ]);
+  assert.equal(git(w, "rev-parse", "refs/heads/feature/merged"), tip);
+});
+
+test("an add that never finishes initializing times out, and the branch is restored and kept naming it (#2275)", (t) => {
+  // While `git worktree add` runs, git lists the new worktree `detached` and
+  // `locked initializing`, with no `branch` line yet — so a holder check
+  // there answers "not held" for an add that has already resolved the
+  // branch. The re-read after the delete waits that entry out; a lock that
+  // never clears (an add killed mid-way) runs the wait out and restores.
+  // Deterministic: the lock is set by hand and nothing clears it.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/merged", "merged work");
+  const tip = git(w, "rev-parse", "feature/merged");
+  const stale = join(w, "..", "stale-add");
+  git(w, "worktree", "add", "-q", "--detach", stale, "main");
+  git(w, "worktree", "lock", "--reason", "initializing", stale);
+
+  const { code, json, stderr } = runReap(w, ["--apply"]);
+
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, []);
+  const kept = json.kept.filter((k) => k.branch === "feature/merged");
+  assert.deepEqual(kept, [
+    {
+      branch: "feature/merged",
+      reason: `feature/merged could not be checked after the delete: worktree ${stale} was still being added (locked initializing) when the wait ran out — branch restored, not deleted`,
+    },
+  ]);
+  assert.equal(git(w, "rev-parse", "refs/heads/feature/merged"), tip);
+});
+
+test("an add still in progress at the delete is waited out and caught as a holder, not timed out (#2275)", (t) => {
+  // The real concurrent shape. A `reference-transaction` hook stops the add
+  // after it has resolved the branch, at the point it is about to write its
+  // `HEAD` — listed `locked initializing`, no `branch` line. The shim runs the
+  // real delete there, then lets the add go on; the hook holds it half a
+  // second more, so the re-read after the delete first finds it still
+  // initializing and has to wait it out to see its `branch` line. A hook
+  // that ran the delete INSIDE the add would keep the add blocked for the
+  // whole wait and only re-cover the time-out above.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/raced", "merged work");
+  const tip = git(w, "rev-parse", "feature/raced");
+  const raceWt = join(w, ".worktrees", "race");
+  const ctl = mkdtempSync(join(tmpdir(), "reap-race-ctl-"));
+  const fifoA = join(ctl, "a");
+  const fifoB = join(ctl, "b");
+  const addRc = join(ctl, "add.rc");
+  const addLog = join(ctl, "add.log");
+  execFileSync("mkfifo", [fifoA, fifoB]);
+  writeExecStub(
+    join(w, ".git", "hooks", "reference-transaction"),
+    `#!/bin/sh
+[ "$1" = prepared ] || exit 0
+hit=
+while read -r old new ref; do
+  [ "$ref" = HEAD ] && [ "$new" = ref:refs/heads/feature/raced ] && hit=1
+done
+[ -n "$hit" ] || exit 0
+echo go > '${fifoA}'
+read x < '${fifoB}'
+sleep 0.5
+exit 0
+`,
+  );
+  const bin = failOnlyShim(
+    t,
+    `{ [ "$1" = update-ref ] && [ "$3" = -d ] && {
+  ${SHIM_FIRED}
+  ( "${REAL_GIT}" worktree add -q '${raceWt}' feature/raced; echo $? > '${addRc}' ) </dev/null >'${addLog}' 2>&1 &
+  read x < '${fifoA}'
+  "${REAL_GIT}" "$@"; rc=$?
+  echo go > '${fifoB}'
+  exit $rc
+}; }`,
+    [],
+  );
+  t.after(() => {
+    // The add must finish before the fixture goes, or its directory is
+    // removed under a git still writing into it.
+    for (let i = 0; i < 100 && !existsSync(addRc); i++) spawnSync("sleep", ["0.1"]);
+    rmSync(ctl, { recursive: true, force: true });
+  });
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin), 60_000);
+
+  for (let i = 0; i < 100 && !existsSync(addRc); i++) spawnSync("sleep", ["0.1"]);
+  assertShimFired(bin, "the delete must run while the add is held", /^update-ref --no-deref -d refs\/heads\/feature\/raced /m);
+  assert.equal(readFileSync(addRc, "utf8").trim(), "0", `the add itself succeeded: ${readFileSync(addLog, "utf8")}`);
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, []);
+  assert.deepEqual(
+    json.kept,
+    [{ branch: "feature/raced", reason: `feature/raced was checked out in worktree ${raceWt} during the delete — branch restored, not deleted` }],
+    "a holder found once the add finished — not the time-out, which would name the entry as still being added",
+  );
+  assert.equal(git(raceWt, "rev-parse", "HEAD"), tip, "the worktree resolves its HEAD at the restored tip");
+});
+
+test("a fleet worktree left on a branch that no longer exists is reported, never removed (#2275)", (t) => {
+  // The backstop for a break the re-read after the delete could not see.
+  // git keeps listing the worktree's `branch` line, so the branchless sweep
+  // never reaches it, and the branch sweep has no ref to select. Reported
+  // under `.worktrees/` only, with the tip its own `HEAD` reflog last named.
+  // The same shape outside `.worktrees/` — what `git worktree add --orphan`
+  // produces too — is not this backstop's to report.
+  const w = repo(t);
+  const inside = join(w, ".worktrees", "broken");
+  const outside = join(w, "..", "outside");
+  git(w, "worktree", "add", "-q", inside, "-b", "feature/broken", "main");
+  git(w, "worktree", "add", "-q", outside, "-b", "feature/outside", "main");
+  const tip = git(w, "rev-parse", "feature/broken");
+  git(w, "update-ref", "-d", "refs/heads/feature/broken");
+  git(w, "update-ref", "-d", "refs/heads/feature/outside");
+
+  for (const args of [[], ["--apply"]]) {
+    const { code, json, stderr } = runReap(w, args);
+
+    assert.equal(code, 0, stderr);
+    assert.deepEqual(json.kept, [
+      {
+        branch: null,
+        reason: `worktree ${inside} is checked out on refs/heads/feature/broken, which no longer exists — its HEAD reflog last named ${tip} (unverified); if that was the tip, restore it with: git update-ref refs/heads/feature/broken ${tip} ${"0".repeat(40)}`,
+      },
+    ]);
+    assert.equal(existsSync(inside), true, `reported, never removed (${args.join(" ") || "dry run"})`);
+  }
+  git(w, "update-ref", "refs/heads/feature/broken", tip, "0".repeat(40));
+  assert.equal(git(inside, "rev-parse", "HEAD"), tip, "the reported repair command heals it");
+});
+
 /** Real git with stdio captured, so a rebase's `Stopped at` prose stays out of the test output. */
 const quietGit = (cwd, ...args) => execFileSync("git", args, { cwd, env: ENV, stdio: "pipe" });
 
@@ -2418,18 +2639,19 @@ test("a transient `git worktree list` failure keeps only the branch it hit — n
   // pass exactly as well as a genuine per-iteration re-read.
   //
   // Three branches, alphabetical so `for-each-ref`'s default refname sort
-  // fixes the iteration order; the shim fails ONLY the THIRD `worktree list`
+  // fixes the iteration order; the shim fails ONLY the FOURTH `worktree list`
   // call — the second branch's lookup, since under --apply each reaped
-  // branch reads the listing twice, at the lookup and again at the holder
-  // check before its delete (#2219). If the guard truly re-reads per branch,
-  // the first and third branches see a healthy listing and reap normally —
-  // only the second, the one whose own call hit the fault, is kept.
+  // branch reads the listing three times: at the lookup, at the holder check
+  // before its delete (#2219), and again right after the delete (#2275). If
+  // the guard truly re-reads per branch, the first and third branches see a
+  // healthy listing and reap normally — only the second, the one whose own
+  // call hit the fault, is kept.
   const w = repo(t);
   mergedGoneBranch(w, "feature/a-first", "a work");
   mergedGoneBranch(w, "feature/b-second", "b work");
   mergedGoneBranch(w, "feature/c-third", "c work");
 
-  const { bin } = worktreeListFailsOnCall(t, "-eq 3");
+  const { bin } = worktreeListFailsOnCall(t, "-eq 4");
 
   const { code, json } = runReap(w, ["--apply"], withShim(bin));
 

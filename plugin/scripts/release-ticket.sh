@@ -1646,14 +1646,14 @@ else
     # separate git invocation, and nothing here can ask `update-ref` to verify
     # it atomically with the delete the way `-D` verified its own.
     #
-    # What that window can cost, per the maintainer's ruling: a checkout
-    # landing in it leaves that worktree holding a deleted branch, which
-    # breaks the worktree. It cannot lose a commit. A commit made there before
-    # the delete moves the ref off $tip, and the compare-and-swap below then
-    # refuses. Measured, git 2.50.1: with a commit made in the window,
-    # `update-ref -d` exits 1 on `is at <new> but expected <tip>` and the
-    # branch keeps the commit; with none, the delete lands and that worktree
-    # reads `No commits yet` on its branch.
+    # What that window can cost: a commit made there before the delete moves
+    # the ref off $tip, and the compare-and-swap below refuses. A checkout
+    # landing in it moves nothing — `git worktree add` of an existing branch
+    # writes only the new worktree's `HEAD` — so the delete goes through and
+    # leaves that worktree on a branch that no longer exists. That is what
+    # `wt_recheck_delete` after the delete catches: it finds the worktree and
+    # restores the branch at $tip, and the release halts exactly as it does
+    # on a holder caught before the delete.
     #
     # Held by either route `-D` refused on, not only the porcelain `branch`
     # line: a worktree stopped mid `rebase -i` or mid `git bisect` on this
@@ -1693,6 +1693,15 @@ else
     if ! err=$(git update-ref -d "refs/heads/$branch" "$tip" 2>&1); then
       halt "git update-ref -d refused $branch: $(printf '%s' "$err" | tr '\n' ' ')"
     fi
+    if wt_recheck_delete "refs/heads/$branch" "$tip"; then race_rc=0; else race_rc=$?; fi
+    case $race_rc in
+      0) ;;
+      2)
+        done_branch=true
+        halt "$branch $wt_restore_why, and restoring it at $tip failed — the branch is deleted, restore it with: $wt_repair: $(printf '%s' "$wt_err" | tr '\n' ' ')"
+        ;;
+      *) halt "$branch $wt_restore_why — branch restored, not deleted" ;;
+    esac
     done_branch=true
   fi
 
