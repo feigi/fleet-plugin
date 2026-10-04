@@ -295,16 +295,19 @@ function verdictOf(rulings, ticket, pullDate) {
  * attributed to its LAST row's (in file order) cell and stratum, restricted to rows the
  * free classifier routed plus exploration rows — a row a live B classifier
  * routed is the A/B's test set, not the fit's. Its verdict rules its last
- * input row. A fit over everything cuts at its latest features row's date;
+ * input row. A row whose `run_date` is not YYYY-MM-DD (route writes a blank
+ * one for a session id with no date) is no input row: it cannot be placed
+ * against the window, the cut or its ruling, and a window bound drops it anyway.
+ * A fit over everything cuts at its latest features row's date;
  * the verdict and member rows are cut at that same date, so `--check`'s
  * re-fit at the recorded `fitted_through` reads the rows the fit read and a
  * verdict or member row that lands later waits for the next fit instead of
  * failing CI.
  */
 function fitTickets({ features, members, verdicts, window, cutoff }) {
-  const inRange = features.filter((r) => (!window || r.run_date >= window)
+  const inRange = features.filter((r) => DATE.test(r.run_date) && (!window || r.run_date >= window)
     && (cutoff === undefined || (cutoff !== null && r.run_date <= cutoff)));
-  const through = cutoff === undefined ? inRange.map((r) => r.run_date).filter(Boolean).sort().at(-1) ?? null : cutoff;
+  const through = cutoff === undefined ? inRange.map((r) => r.run_date).sort().at(-1) ?? null : cutoff;
   const upToThrough = (r) => through === null || !r.run_date || r.run_date <= through;
   members = members.filter(upToThrough);
   const byTicket = new Map();
@@ -423,7 +426,7 @@ export function fitTable({ prior, features, members, verdicts, guard, cutoff }) 
       if (!cells.includes(cell) && cells.includes(survives) && !tripped.has(survives)) cells.push(cell);
     }
   }
-  const dates = used.map((r) => r.run_date).filter(Boolean).sort();
+  const dates = used.map((r) => r.run_date).sort();
   return {
     window_start: window,
     fitted_through: dates.length ? dates[dates.length - 1] : prior.fitted_through ?? null,
@@ -438,10 +441,10 @@ export function fitTable({ prior, features, members, verdicts, guard, cutoff }) 
   };
 }
 
-/** Merged PRs (tickets with a verdict on their last such row in file order) among the features rows dated after `fitted_through`. */
+/** Merged PRs (tickets with a verdict on their last such row in file order) among the YYYY-MM-DD-dated features rows dated after `fitted_through`. */
 export function mergedSince({ table, features, verdicts }) {
   const rulings = rulingsByTicket(verdicts);
-  const after = features.filter((r) => (!table.window_start || r.run_date >= table.window_start) && (!table.fitted_through || r.run_date > table.fitted_through));
+  const after = features.filter((r) => DATE.test(r.run_date) && (!table.window_start || r.run_date >= table.window_start) && (!table.fitted_through || r.run_date > table.fitted_through));
   return [...lastPullByTicket(after)].filter(([ticket, p]) => verdictOf(rulings, ticket, p.run_date)).length;
 }
 
