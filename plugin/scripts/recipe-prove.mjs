@@ -58,10 +58,11 @@
 //         a git or filesystem fault stopped it before the cache was settled
 //         (a git command could not be started, the reader's own git
 //         included, or that git started and could not run; the reader's `sh`,
-//         `node`, `mktemp` or `cat` could not be started, or its `node` died
-//         mid-read — a `cat` that ran and failed stays the reader's refusal,
-//         exit 1; the cache or its temp file could not be written). The log
-//         directory under $TMPDIR is removed.
+//         `node`, `mktemp` or `cat` could not be started, its `sh` was killed
+//         by a signal, or its `node` died mid-read — a `cat` that ran and
+//         failed stays the reader's refusal, exit 1; the cache or its temp
+//         file could not be written). The log directory under $TMPDIR is
+//         removed.
 
 import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
@@ -291,7 +292,8 @@ function prove(o, wt, logs) {
 // Write, then read back through the one reader. A cache it refuses is undone:
 // the prior bytes restored, or the file removed when none stood before. The
 // cache is undone just the same when the read-back is no verdict: an `sh` that
-// could not be started read nothing; a reader that exits READER_COULD_NOT_RUN
+// could not be started read nothing; an `sh` killed by a signal has no exit
+// status and reached no verdict; a reader that exits READER_COULD_NOT_RUN
 // could not start its `node`, `mktemp` or `cat`, or lost its `node` mid-read;
 // and the reader runs git itself and reads a git that will not run as no
 // repository at all, so its refusal is a verdict on what was proven only while
@@ -317,6 +319,7 @@ function writeCache(cache, recipe, repo) {
     else writeFileSync(cache, prior);
     if (r.error && !r.pid) throw cannot(`could not start sh to read the Recipe cache back: ${r.error.message}`);
     if (r.status === READER_COULD_NOT_RUN) throw cannot(`${r.stderr.trim()} — the Recipe cache reader could not run a tool it needs, so its refusal is no verdict on what was proven`);
+    if (r.signal) throw cannot(`the Recipe cache reader's sh was killed by ${r.signal}${errorCause(r.error)}, so it reached no verdict on what was proven`);
     const noVerdict = (why) => cannot(`${why} — the Recipe cache reader runs git, so its refusal is no verdict on what was proven`);
     let probe;
     try {
@@ -326,7 +329,8 @@ function writeCache(cache, recipe, repo) {
       throw noVerdict(e.message);
     }
     if (!probe.ok) throw noVerdict(`git started but does not run: \`git --version\` did not exit 0${probe.err ? `: ${probe.err}` : " and wrote nothing to stderr"}`);
-    throw notProven(`the Recipe cache reader refuses what was proven: ${(r.stderr || r.stdout).trim()}`);
+    const said = (r.stderr || r.stdout).trim();
+    throw notProven(`the Recipe cache reader refuses what was proven: ${said || `it wrote nothing and exited with status ${r.status}`}`);
   }
 }
 
