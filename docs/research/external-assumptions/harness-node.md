@@ -162,28 +162,28 @@ Scope: `plugin/scripts/{board.mjs,board.html,compute-board.mjs,compute-spend.mjs
 
 ## Coverage
 
-Scanned in full or via targeted `grep` + follow-up `read` of every matched region (large files were not read byte-for-byte outside grep hit windows, but every hit's surrounding context — including all header/doc comments — was read):
+Scanned in full or via targeted `grep` + follow-up `read` of every matched region (large files were not read byte-for-byte outside grep hit windows, but every hit's surrounding context — including all header/doc comments — was read). Each count is `wc -l` at the revision named beside it, the revision that bullet's description refers to; it is not re-measured when the file changes:
 
-- `plugin/scripts/board.mjs` (2035 lines) — read via multi-pattern grep across the whole file plus targeted range reads (gh/graphql query block, port-derivation block, probe/serve block, ci-state invocation, labelsOf)
-- `plugin/scripts/board.html` (471 lines) — read in full, plus targeted grep for fetch/poll/interval logic in the inline `<script>`
-- `plugin/scripts/compute-board.mjs` (599 lines) — header (1-30), label/column-derivation logic (30-450), end (440-530, the file's last line when this range was last set; the count is a later `wc -l` re-measure and the lines past 530 were not part of that read) read directly
-- `plugin/scripts/compute-spend.mjs` (370 lines) — read in full (header, `classifyRole`, `computeSpend`, `attributeTools`/`mergeTools` headers)
-- `plugin/scripts/ledger.mjs` (1919 lines) — read via multi-pattern grep across the whole file plus targeted range reads (git-common-dir resolution, ledger section grammar, lock timeout, GH_REPO scrub, tracker query)
-- `plugin/scripts/ledger-grammar.mjs` (175 lines) — read in full
-- `plugin/scripts/member-record.mjs` (641 lines) — read via multi-pattern grep across the whole file plus targeted range reads (header, cwd encoder, model normalisation, omp transcript fold, omp session reader, end/readMembers)
-- `plugin/scripts/member-outcomes.mjs` (239 lines) — read via grep + full first-53-line read plus surrounding context
-- `plugin/scripts/review-core.mjs` (1211 lines) — read via multi-pattern grep plus targeted range reads (header/sandbox-restriction comment, DEFAULT_DIMENSIONS, snapshot shell block, resumeFor/digest, environmentNote/testCmd)
-- `plugin/scripts/review-eval.mjs` (204 lines) — read in full
-- `plugin/scripts/prompt-renderer.mjs` (40 lines) — read in full
-- `plugin/scripts/strip-comments.mjs` (44 lines) — read in full
-- `plugin/scripts/frontmatter-check.mjs` (257 lines) — read in full
-- `plugin/scripts/frontmatter-allowlist.json` (64 lines) — read in full
-- `plugin/scripts/prose-pin.mjs` — exports listed via grep, gutter-stripping functions read directly; remaining exports are internal prose-pinning machinery with no external-world assumptions
-- `plugin/scripts/cwd-isolation-pins.mjs` (83 lines) — read in full
-- `plugin/.claude-plugin/plugin.json` (9 lines) — read in full
-- `.omp-plugin/marketplace.json` (21 lines) — read in full
-- `package.json` (5 lines) — read in full
-- `.nvmrc` (1 line) — read in full
-- `renovate.json` (18 lines) — read in full
+- `plugin/scripts/board.mjs` (2201 lines at `a7cb31d0`) — read via multi-pattern grep across the whole file plus targeted range reads (gh/graphql query block, port-derivation block, probe/serve block, ci-state invocation, labelsOf)
+- `plugin/scripts/board.html` (456 lines at `a7cb31d0`) — read in full, plus targeted grep for fetch/poll/interval logic in the inline `<script>`
+- `plugin/scripts/compute-board.mjs` (509 lines at `a7cb31d0`) — header (1-30), label/column-derivation logic (30-450), end (440-509) read directly; `75d5ed8e` later re-set the end range to 440-530, the file's last line there (530 lines at `75d5ed8e`)
+- `plugin/scripts/compute-spend.mjs` (332 lines at `a7cb31d0`) — read in full (header, `classifyRole`, `computeSpend`, `attributeTools`/`mergeTools` headers)
+- `plugin/scripts/ledger.mjs` (1670 lines at `a7cb31d0`) — read via multi-pattern grep across the whole file plus targeted range reads (git-common-dir resolution, ledger section grammar, lock timeout, GH_REPO scrub, tracker query)
+- `plugin/scripts/ledger-grammar.mjs` (79 lines at `a7cb31d0`) — read in full
+- `plugin/scripts/member-record.mjs` (610 lines at `e96a359a`) — read via multi-pattern grep across the whole file plus targeted range reads (header, cwd encoder, model normalisation, omp transcript fold, omp session reader, end/readMembers)
+- `plugin/scripts/member-outcomes.mjs` (307 lines at `a7cb31d0`) — read via grep + full first-53-line read plus surrounding context
+- `plugin/scripts/review-core.mjs` (1019 lines at `a7cb31d0`) — read via multi-pattern grep plus targeted range reads (header/sandbox-restriction comment, DEFAULT_DIMENSIONS, snapshot shell block, resumeFor/digest, environmentNote/testCmd)
+- `plugin/scripts/review-eval.mjs` (198 lines at `a7cb31d0`) — read in full
+- `plugin/scripts/prompt-renderer.mjs` (39 lines at `a7cb31d0`) — read in full
+- `plugin/scripts/strip-comments.mjs` (43 lines at `a7cb31d0`) — read in full
+- `plugin/scripts/frontmatter-check.mjs` (250 lines at `a7cb31d0`) — read in full
+- `plugin/scripts/frontmatter-allowlist.json` (76 lines at `a7cb31d0`) — read in full
+- `plugin/scripts/prose-pin.mjs` (845 lines at `a7cb31d0`) — exports listed via grep, gutter-stripping functions read directly; remaining exports are internal prose-pinning machinery with no external-world assumptions
+- `plugin/scripts/cwd-isolation-pins.mjs` (86 lines at `a7cb31d0`) — read in full
+- `plugin/.claude-plugin/plugin.json` (9 lines at `a7cb31d0`) — read in full
+- `.omp-plugin/marketplace.json` (21 lines at `ed9f2967`; deleted by `15c8b32b`) — read in full as `.claude-plugin/marketplace.json` (22 lines at `a7cb31d0`), which `ed9f2967` renamed to this path
+- `package.json` (5 lines at `a7cb31d0`) — read in full
+- `.nvmrc` (1 line at `a7cb31d0`) — read in full
+- `renovate.json` (18 lines at `a7cb31d0`) — read in full
 
 Not read: modules imported by files in this slice but outside its assigned file list (e.g. `git-env.mjs`, `fleet-state.mjs`, `fleet-tick.mjs`, `arg.mjs`) — cited only where a file in scope quotes/describes their behaviour directly (e.g. board.mjs's own comments about `workspaceDirFromGitCommonDir()`, `statePath()`); their own internal grammars were not independently verified and are out of this slice's scope.
