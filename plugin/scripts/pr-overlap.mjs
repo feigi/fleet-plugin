@@ -45,13 +45,14 @@ const { numArg, sweep, stray } = defineFlags(die, { flags: { a: "value", b: "val
 const a = numArg("a");
 const b = numArg("b");
 if (a === null || b === null) die("usage: pr-overlap.mjs --a <pr> --b <pr>");
-// The misspelled-flag sweep, and here it is the WEAKER half of the fix: both flags are required,
-// so a misspelling of either (`--aa 5 --b 6`) already fell through to the
-// usage die above — refused, just never named. What was NOT refused is a
-// stray alongside two good values (`--a 5 --b 6 --quiet`), silently ignored
-// at exit 0. The sweep closes that and upgrades the first case's message from
-// a usage dump to the offending token. Below the usage guard so the usage
-// text still wins where it is the better answer; above the first gh call.
+// The misspelled-flag sweep, and here it is the WEAKER half of the fix: both
+// flags are required, so a misspelling of either (`--aa 5 --b 6`) already
+// fell through to the usage die above — refused, just never named. What was
+// NOT refused is a stray alongside two good values (`--a 5 --b 6 --quiet`),
+// silently ignored at exit 0. The sweep closes that and upgrades the first
+// case's message from a usage dump to the offending token. Below the usage
+// guard so the usage text still wins where it is the better answer; above
+// the first gh call.
 sweep();
 // sweep() above only refuses a `--`-prefixed token; a bare or
 // single-dash one (`--a 5 --b 6 stray`) rode along in silence the same way.
@@ -128,17 +129,18 @@ const dirsOf = (fs) => fs.map(dirname).filter((d) => d !== ".");
 //
 // Derived from the two diffs rather than declared in a `data file → its prose
 // consumers` table, because the table was already stale before it could be
-// written. The ticket asking for this signal recorded ONE consumer of `tier-outcomes` (measured at
-// `e540e16`); at `ffa9026` there are eleven — `member-record.mjs`, four
-// prose-pin test guards, three specs and run-team's own SKILL.md. A map
-// seeded from that ticket would have shipped wrong on day one, which is
-// exactly the rot the ticket predicted of it.
+// written. The ticket asking for this signal recorded ONE consumer of
+// `tier-outcomes` (measured at `e540e16`); at `ffa9026` there are eleven,
+// among them `member-record.mjs`, four prose-pin test guards, three specs
+// and run-team's own SKILL.md. A map seeded from that ticket would have
+// shipped wrong on day one, which is exactly the rot the ticket predicted
+// of it.
 
 // Which files can be CITED, and which can carry a citation. Two explicit
 // extension lists, deliberately narrow and deliberately not a file table:
-// that ticket's own objection to deriving this signal is "a broad net and likely
-// false positives", so the net is bounded and its bounds are printed with the
-// verdict. An extension on neither list does not participate at all.
+// that ticket's own objection to deriving this signal is "a broad net and
+// likely false positives", so the net is bounded and its bounds are printed
+// with the verdict. An extension on neither list does not participate at all.
 //
 // Data side — an artifact whose meaning lives in prose somewhere else. A
 // `.ts` module's consumers are already found by `files`/`modules` above. `.md`
@@ -238,9 +240,9 @@ function tokensFor(dataFile) {
 // file names the data file SOMEWHERE — run-team/SKILL.md always does, in nine
 // places, so a whole-file read fires on every PR that touches it at all,
 // permanently. The question is whether THIS PR is editing the part that names
-// it. One PR of the measured pair touched SKILL.md and scored zero against those tokens in its own
-// diff, which is how merge-bot-9 cleared the pair by hand; grepping the diff
-// is that measurement, kept and automated.
+// it. One PR of the measured pair touched SKILL.md and scored zero against
+// those tokens in its own diff, which is how merge-bot-9 cleared the pair by
+// hand; grepping the diff is that measurement, kept and automated.
 //
 // Context lines count along with added and removed ones, deliberately: prose
 // being rewritten NEXT TO a citation is the hazard, and merge-bot-9's own

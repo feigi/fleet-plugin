@@ -158,8 +158,8 @@ export function expectedDefinition(rowText) {
 // unresolved is `conflictHeld`, the caller's to supply from fleet-tick.mjs's
 // deriveRun() — the reading the tick holds the merge on, which folds every
 // row of the PR, never one row's text alone. Throws whatever
-// expectedDefinition throws, and on a family this switch has no case for
-// it: null is the review fix-applier's deliberate answer, so a
+// expectedDefinition throws, and throws on a family this switch has no case
+// for: null is the review fix-applier's deliberate answer, so a
 // `default: return null` would print a new family as a generic `task`
 // without anyone having decided it is one.
 /** @returns {string|null} the definition name; null only for a review fix-applier. */

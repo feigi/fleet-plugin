@@ -339,7 +339,7 @@ function writeLedgerRow(ledgerFile, ticket, text) {
 // text as ONE ` · `-joined note, so appendedLedgerText's trailing-segment
 // idempotency covers a re-run of the whole verdict, and the member is
 // settled `tier-mismatch` here rather than left to the controller — the
-// hand step measured never taken.
+// hand step that was measured never being taken.
 function recordImplementer(ledgerFile, r) {
   const data = readLedger(ledgerFile);
   const existing = rowText(data, r.ticket);
