@@ -226,8 +226,8 @@ number of this repo in any form, no foreign tracker number, no repo-internal
 `docs/adr`, `docs/specs`, `docs/research`, `docs/agents` or `docs/requirements`
 path, no ADR number, no test-file name — it states the claim instead, and
 provenance lives
-in git history (ADR 0019). `tests/`, where the suite lives once #2232 moves it out
-of `plugin/`, is not part of it and the rule does not apply there.
+in git history (ADR 0019). `tests/`, where the suite and its support modules
+live, is not part of it and the rule does not apply there.
 _Avoid_: package, bundle, distribution
 
 ### Coordination

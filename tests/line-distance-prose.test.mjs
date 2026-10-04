@@ -1,0 +1,249 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join, extname, basename } from "node:path";
+
+// #765 swept comments that located a construct by counting lines ("two-lines-up",
+// "one-line-later", "a-few-lines-down"). Every one had rotted: the count was
+// wrong because something had been inserted since. #769 then swept the same
+// defect spelled with no numeral at all — a bare "the-line-above" — which no
+// numeral-word alternation can reach however many synonyms it lists. This gate
+// keeps both out; the remedy for either is to name the construct, carrying the
+// file when the construct lives in another one.
+//
+// Comment blocks are STITCHED before matching. One site escaped four separate
+// single-line enumerations because its phrase straddled a comment break — the
+// count ended one line and the direction began the next, so no line-oriented
+// grep could see it. Joining consecutive comment lines first is the whole point
+// of this file; a per-line scan reproduces the miss.
+//
+// Everything hyphenated in this header for the same reason the pattern below is
+// assembled from parts: spelled normally, the gate would trip on its own
+// rationale. That is asserted, not hoped for.
+//
+// Out of class, and deliberately unreachable by the pattern: counts over named
+// units ("the-two-cases-above") count semantic units and survive reflow;
+// ordinal forms ("first-line", "last-line") describe output data rather than
+// pointing at source; a size ("the-same-40-lines") is not a position.
+//
+// Scope is this repo's code files, every directory holding one of MARKER's
+// extensions. Markdown prose (skills/, commands/, agents/) stays out of reach:
+// it has no comment marker to stitch blocks from, so covering it means scanning
+// whole files — a different gate. #769 swept it by grep instead.
+
+const DIR = fileURLToPath(new URL("../plugin/scripts", import.meta.url));
+const SELF = basename(fileURLToPath(import.meta.url));
+// The CI helpers carry the same prose and the same
+// rot, and so do the tests and their support modules, which this walk read
+// inside the scripts directory until they moved to tests/. Scoping to one
+// directory is what let #769's sites sit outside the
+// previous gate's reach, so DIRS names every directory holding a scannable
+// file — pinned by name in the walk test below, not left to this list.
+const DIRS = [
+  DIR,
+  fileURLToPath(new URL("../.github/scripts/", import.meta.url)),
+  import.meta.dirname,
+  join(import.meta.dirname, "support"),
+];
+
+// #1311: COUNT only enumerated single numeral words, so a compound count
+// ("two-hundred-lines-above") broke the COUNT-lines adjacency — "two"
+// matched COUNT, but the next token was "hundred", not "lines". MULTIPLIER
+// lets every existing numeral word (or a bare digit) take an optional
+// hundred/thousand suffix without touching the required
+// numeral-immediately-before-"lines" adjacency that keeps bare temporal
+// "before"/"after" out of this arm. The initial landing attached it to only
+// three of five numeral alternatives (missing "a few" and "several") — the
+// exact evasion this PR exists to close, just on different words; MULTIPLIER
+// is now factored over the whole numeral-word group instead of per-arm so
+// that gap cannot reopen one alternative at a time.
+//
+// "a couple" is new to this arm — the base gate had no "couple" arm at all —
+// so its multiplier is REQUIRED, not optional: without that, this PR would
+// silently widen the gate to catch bare "a couple lines below" too, coverage
+// nobody asked for and nothing pinned. Bare "a hundred"/"a thousand" (no
+// numeral word at all) gets its own arm for the same reason: it is a
+// genuinely different shape, not a suffix on an existing word.
+//
+// Measured against the whole tree before landing (#1311): zero new hits —
+// the pre-existing whole-tree matches are out of this gate's scope: markdown
+// or tsv prose (a different gate's job per the header above), JSDoc `/**`
+// -style lines this gate's `//`-only MARKER never reads, or plain
+// string-literal fixture text inside unrelated *.test.mjs files' assertions
+// (e.g. ci-completes-premise-prose.test.mjs) that this gate, which only
+// reads comment lines, never touches — so the widening was not shown to buy
+// any false positive here.
+const MULTIPLIER = "(?:\\s+(?:hundred|thousand))?";
+const REQUIRED_MULTIPLIER = "\\s+(?:hundred|thousand)";
+const COUNT = `(?:(?:one|two|three|four|five|six|seven|eight|nine|ten|a\\s+few|several|\\d+)${MULTIPLIER}|a\\s+couple${REQUIRED_MULTIPLIER}|a${REQUIRED_MULTIPLIER})`;
+// The bare form takes no numeral, so it needs its own arm. Narrower direction
+// set on purpose: "the-line-up" is not English, and widening it buys nothing
+// while risking prose that never pointed at a line.
+const BARE = "(?:above|below|before|after)";
+// The counted arm carries BARE's directions too, or the gate reads a direction
+// as line-relative only while the count is absent — "N-lines-before" would walk
+// through the arm built to catch counted distances. Union, not a second list,
+// so the two arms cannot drift apart again. Safe only because COUNT pins a
+// numeral immediately before "lines": bare temporal "before"/"after" prose,
+// which is everywhere, never reaches this arm.
+const WHERE = `(?:${BARE}|up|down|later|earlier|further\\s+(?:up|down))`;
+// Assembled from parts, never written out as a literal instance, so this file
+// can scan itself without tripping — proven by the self-scan assertion below.
+const IDIOM = new RegExp(`\\b(?:${COUNT}\\s+lines?\\s+${WHERE}|the\\s+lines?\\s+${BARE})\\b`, "i");
+
+const MARKER = { ".sh": "#", ".mjs": "//", ".js": "//" };
+
+function commentBlocks(src, marker) {
+  const re = new RegExp(`^\\s*${marker}\\s?(.*)$`);
+  // A trailing comment is its own one-line block, never stitched to the next
+  // line's. Whole-line-only is the stripper bug this repo has already been
+  // bitten by: a gate that kills `<marker> whole-line` is walked straight
+  // through by `code; <marker> trailing`, and the idiom reads the same in both.
+  // Leading whitespace is required before the marker so `$#`, `${#v}`, `#!` and
+  // a `//` inside a URL are not read as comment openers.
+  const trail = new RegExp(`\\s${marker}\\s?(.*)$`);
+  const out = [];
+  let cur = null;
+  const close = () => { if (cur) out.push({ line: cur.line, text: cur.parts.join(" ") }); cur = null; };
+  src.split("\n").forEach((line, i) => {
+    const m = line.match(re);
+    if (m) { (cur ??= { line: i + 1, parts: [] }).parts.push(m[1]); return; }
+    close();
+    const t = line.match(trail);
+    if (t) out.push({ line: i + 1, text: t[1] });
+  });
+  close();
+  return out;
+}
+
+function hitsIn(src, marker) {
+  return commentBlocks(src, marker).filter((b) => IDIOM.test(b.text));
+}
+
+// Returns the files it actually opened, not just a count, so the walk test
+// below can pin coverage against the walk itself.
+function sweep(dirs, skipSelf = true) {
+  const hits = [];
+  const files = [];
+  for (const dir of dirs) {
+    for (const f of readdirSync(dir)) {
+      if (skipSelf && f === SELF) continue;
+      const marker = MARKER[extname(f)];
+      if (!marker) continue;
+      files.push(f);
+      for (const b of hitsIn(readFileSync(join(dir, f), "utf8"), marker)) {
+        const m = b.text.match(IDIOM);
+        hits.push(`${f}:${b.line}  …${b.text.slice(Math.max(0, m.index - 45), m.index + m[0].length + 15)}…`);
+      }
+    }
+  }
+  return { hits, files };
+}
+
+test("no comment locates a construct by a line distance", () => {
+  const { hits, files } = sweep(DIRS);
+  // Without this the whole gate passes vacuously the day the walk reads nothing.
+  assert.ok(files.length > 50, `swept only ${files.length} files — the walk is not reaching these directories`);
+  assert.deepEqual(hits, [], `line-distance comment(s) reintroduced — name the construct, drop the distance:\n${hits.join("\n")}`);
+});
+
+// The walk must reach every directory holding a scannable file, not just this
+// one. Asserted against what sweep OPENED, by name: re-deriving the listing
+// here would pin DIRS and MARKER while a sweep that skipped a whole directory
+// stayed green — measured, dropping .github/scripts/ moves the count 136 → 134,
+// far above the vacuity floor above. By name, not by count, so landing another
+// file in any of these directories does not red the gate.
+test("the walk reaches the CI helpers too", () => {
+  const { files } = sweep(DIRS);
+  for (const f of ["apply-ruleset.sh", "review-core.mjs", "arg.test.mjs", "prose-pin.mjs"]) {
+    assert.ok(files.includes(f), `not swept: ${f} — the walk opened ${files.length} files`);
+  }
+});
+
+// The pattern must be invisible to its own text, or this file's rationale above
+// would have to avoid the vocabulary it exists to forbid.
+test("the gate does not trip on its own source", () => {
+  assert.deepEqual(sweep(DIRS, false).hits, []);
+});
+
+// Discrimination, both directions. Built by joining tokens so no line of this
+// file ever carries a live instance for the self-scan above to find.
+const D = ["the", "line", "above"].join(" ");
+const TAIL = ["line", "above"].join(" ");
+
+test("the bare form reds however it is spelled", () => {
+  const red = {
+    "whole-line #": [`# captured ${D} — so the hazard does not apply`, "#"],
+    "whole-line //": [`// captured ${D} — so the hazard does not apply`, "//"],
+    "trailing #": [`x=1  # captured ${D} here`, "#"],
+    "trailing //": [`const x = 1;  // captured ${D} here`, "//"],
+    "wrapped across a # break": [`# captured the\n# ${TAIL} here`, "#"],
+    "wrapped across a // break": [`// captured the\n// ${TAIL} here`, "//"],
+    "plural": [`# ${["the", "lines", "below"].join(" ")} assert it`, "#"],
+    "before/after spelling": [`# ${["the", "line", "after"].join(" ")} collided`, "#"],
+    // The counted arm's own before/after: caught by WHERE's union with BARE,
+    // and the reason that union exists rather than two hand-kept lists.
+    "counted before/after": [`# it broke ${["two", "lines", "before"].join(" ")} this guard`, "#"],
+  };
+  for (const [name, [src, marker]] of Object.entries(red)) {
+    assert.equal(hitsIn(src, marker).length, 1, `missed the bare form: ${name}`);
+  }
+});
+
+// #1311's planted evasion and its near relatives: a numeral word carrying a
+// hundred/thousand multiplier, still immediately before "lines" + WHERE.
+// "a few" and "several" only gained the suffix here — the initial #1311
+// landing attached MULTIPLIER to three of five numeral alternatives and
+// missed these two, the same evasion class on different words. Bare
+// "a hundred"/"a thousand" (no numeral word) is its own arm, not a
+// numeral-plus-suffix, and needs its own probe.
+test("the counted arm reds for compound numerals", () => {
+  const red = {
+    "two hundred": [`# and it must not be re-asserted ${["two", "hundred", "lines", "above"].join(" ")} it`, "#"],
+    "a couple hundred": [`// drifted ${["a", "couple", "hundred", "lines", "below"].join(" ")} the call`, "//"],
+    "three thousand": [`# moved ${["three", "thousand", "lines", "earlier"].join(" ")} in the file`, "#"],
+    "a few hundred": [`# reordered ${["a", "few", "hundred", "lines", "above"].join(" ")} the header`, "#"],
+    "several hundred": [`// shifted ${["several", "hundred", "lines", "below"].join(" ")} the marker`, "//"],
+    "bare a hundred": [`# it sat ${["a", "hundred", "lines", "above"].join(" ")} the fix`, "#"],
+    "bare a thousand": [`// spans ${["a", "thousand", "lines", "below"].join(" ")} the call`, "//"],
+  };
+  for (const [name, [src, marker]] of Object.entries(red)) {
+    assert.equal(hitsIn(src, marker).length, 1, `missed the compound numeral form: ${name}`);
+  }
+});
+
+// Each case carries its own marker, like the red table above. Asserting a
+// `#` source under the `//` marker cannot fail: no marker means no comment
+// block, so the assertion holds whatever the pattern does — six of twelve here
+// were unfalsifiable that way. The URL case is the one that genuinely needs
+// `//`: it is the only guard on the leading `\s` in commentBlocks' trail regex.
+test("the widened gate still refuses to fire on the out-of-class forms", () => {
+  const green = {
+    "a count with no direction": ["# it sits two lines from here", "#"],
+    "a count over named units": ["# the two cases above disagree", "#"],
+    "an ordinal over output data": ["# the first line of stdout is the header", "#"],
+    "a size, not a position": ["# the same ~40 lines were copy-pasted", "#"],
+    "a // inside a URL": [`curl https://ex.test/x ${D}`, "//"],
+    "a bare direction word with no line": ["# the guard above already fired", "#"],
+    // Temporal before/after, the prose the counted arm's widening had to stay
+    // clear of: a direction word with no count and no line is not a position.
+    "a temporal direction word": ["# it ran before the fetch landed", "#"],
+    // "lines" present but not adjacent to the numeral: guards against a
+    // widening that dropped the numeral-immediately-before-"lines"
+    // requirement instead of adding an optional suffix to it (the shape
+    // #1301's review measured producing false positives on unrelated
+    // temporal prose). The fixture must itself carry "lines" — one with no
+    // "lines" substring at all (as this case previously read) stays green
+    // under that exact regression too, so it never exercised the claim.
+    "a compound count with lines out of adjacency": ["# it deleted a couple hundred blank lines above the cutoff", "#"],
+    // "a couple" is new to COUNT and its multiplier is required, not
+    // optional (see the COUNT comment above): unlike "a few" and "several",
+    // which already matched bare before this PR, bare "a couple" is new
+    // territory this PR must not silently claim.
+    "a bare 'a couple' with no multiplier": ["# it sits a couple lines below the guard", "#"],
+  };
+  for (const [name, [src, marker]] of Object.entries(green)) {
+    assert.deepEqual(hitsIn(src, marker), [], `false positive: ${name}`);
+  }
+});

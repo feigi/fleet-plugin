@@ -246,7 +246,7 @@ jobs:
       # 'the runner's directory expansion ran vendored tests' was a `find` in
       # the runner — see agent-test, which says so itself: "this
       # walk, not node, is what keeps vendored tests out". There is no
-      # vendored tree under plugin/scripts/ anyway.
+      # vendored tree under tests/ anyway.
       # The suite stubs `gh` and sets its own git identity, so it needs no auth
       # and no network.
       # `failglob` because the bare glob is exactly the silent green this repo
@@ -264,7 +264,7 @@ jobs:
           GOJQ_BIN: ${{ runner.temp }}/gojq/gojq
         run: |
           shopt -s failglob
-          node --test plugin/scripts/*.test.mjs
+          node --test tests/*.test.mjs
 
   # #1314's ruling, #1293's findings on what "loaded" can mean headlessly,
   # ADR 0021's native route: links this checkout with `omp plugin link` and

@@ -4,6 +4,10 @@
 grilling session; the work it orders is tracked as #2230. Amended by ADR 0021
 only in mechanism: what ships `plugin/` is now the npm package's `files` list
 instead of a `git-subdir` marketplace entry — the rule stands untouched.
+Amended by #2232: Decision 4's list of test-only support modules was short
+three — `exec-stub.mjs`, `temp-dir.mjs` and `worktree-porcelain.mjs` have no
+importer outside the tests either, and moved to `tests/support/` with the six
+it names.
 
 ## Context
 

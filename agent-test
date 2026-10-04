@@ -11,7 +11,7 @@
 # the plugin's one technology-specific runner and left the plugin with the
 # other Node arms, so it lives here now, whole, with no emitter to ask.
 #
-# What it adds over the Test entrypoint (`node --test plugin/scripts/*.test.mjs`):
+# What it adds over the Test entrypoint (`node --test tests/*.test.mjs`):
 # `./agent-test <file-or-dir>…` runs just those, a directory expanding to the
 # test files under it; a bare `./agent-test` runs every test file under this
 # checkout; anything that would pass vacuously — a directory holding no tests,

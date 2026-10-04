@@ -10,6 +10,11 @@
 > unchanged: the release workflow publishes the version `release.yml`
 > already computes, it never edits a manifest.
 
+> Amended by #2232: the config/workflow contract test the Status line names
+> as `plugin/scripts/renovate-release-contract.test.mjs` is now
+> `tests/renovate-release-contract.test.mjs`; the suite left the shipped
+> surface.
+
 ## Context
 
 `.nvmrc` holds an exact version and is the single source of truth for the target

@@ -97,7 +97,7 @@
 //                                  loudly instead of waiting on each caller's
 //                                  guard to notice.
 //
-// Zero deps: `node --test plugin/scripts/repo-root.test.mjs`.
+// Zero deps: node builtins and sibling scripts only.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { gitEnv } from "./git-env.mjs";
