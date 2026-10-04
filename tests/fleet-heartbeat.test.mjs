@@ -4,17 +4,31 @@
 // really does survive being served by several short holds, and that this script
 // cannot clobber fleet-tick's half of the shared state file.
 
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, symlinkSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { interval, heldThisCall } from "../plugin/scripts/fleet-heartbeat.mjs";
 
-const SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-heartbeat.mjs", import.meta.url));
+const REAL_SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-heartbeat.mjs", import.meta.url));
+
+// Every CLI case below spawns the script through a symlink, never by its own
+// name. A held CLI child lives a full second, and `pkill -f fleet-heartbeat.mjs`
+// — the line a controller runs to clear the heartbeat it backgrounded —
+// matches whole command lines machine-wide: it SIGTERMs these children too,
+// and spawnSync reports that as `status: null` in whichever case was running.
+// Measured: the failures land inside one 150ms window after such a sweep and
+// the file passes alone. The script resolves its own path by realpath (see
+// is-cli.mjs), so the link runs the same code and its argv carries no
+// `fleet-heartbeat.mjs` for a pattern kill to find.
+const LINK_DIR = mkdtempSync(join(tmpdir(), "hb-cli-"));
+const SCRIPT = join(LINK_DIR, "beat.mjs");
+symlinkSync(REAL_SCRIPT, SCRIPT);
+after(() => rmSync(LINK_DIR, { recursive: true, force: true }));
 
 function run(args, { state } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "fleet-heartbeat-"));
@@ -447,4 +461,37 @@ test("CLI: an unreadable mark degrades to no mark and does not stop the beat", (
   // Replaced by this beat's own mark, never left as the junk it read.
   assert.equal(typeof r.state.beat, "object");
   assert.equal(r.state.beat.stopped, "");
+});
+
+test("CLI: a running child's command line carries no fleet-heartbeat.mjs for a pattern kill to find", async () => {
+  const KILL_PATTERN = /fleet-heartbeat\.mjs/;
+  // Positive control: the pattern does match the script's own path, so a
+  // command line free of it is the link's doing and not a typo in the regex.
+  assert.match(REAL_SCRIPT, KILL_PATTERN);
+
+  const dir = mkdtempSync(join(tmpdir(), "fleet-heartbeat-argv-"));
+  // A hold long enough that the child is alive for as long as this test needs
+  // to look at it; it is killed through its own handle once seen, so the hold
+  // is never waited out and no wall time is being raced.
+  const child = spawn(process.execPath,
+    [SCRIPT, "--base", "600", "--ceiling", "1200", "--hold", "60", "--state", join(dir, "heartbeat.json")],
+    { stdio: "ignore" });
+  const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
+  try {
+    let seen = "";
+    // Looks until `ps` reports the child's real command line, not until a
+    // deadline. An exit before that is the failure.
+    let alive = true;
+    exited.then(() => { alive = false; });
+    while (alive && !seen.includes(SCRIPT)) {
+      seen = spawnSync("ps", ["-ww", "-o", "command=", "-p", String(child.pid)], { encoding: "utf8" }).stdout;
+      if (!seen.includes(SCRIPT)) await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.ok(seen.includes(SCRIPT), `the child exited before ps showed its command line: ${JSON.stringify(seen)}`);
+    assert.doesNotMatch(seen, KILL_PATTERN);
+  } finally {
+    child.kill("SIGKILL");
+    await exited;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
