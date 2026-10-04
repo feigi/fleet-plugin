@@ -98,7 +98,7 @@ test("the convention splits by host, and both branches name what to write", () =
 
 test("the convention carves out this repo's own references instead of banning bare `#N`", () => {
   // The REFUSE half. Stated as "never write a bare `#N`" the rule condemns
-  // every local reference in the repo, this file's own `PR #32` included.
+  // every local reference in the repo.
   assert.match(
     conventionSection(),
     /own issues and PRs stay bare `#N`/,
@@ -139,17 +139,21 @@ test("the ordinal-verification mechanism is named as behavior, not in the source
   );
 });
 
-test("local references in the same file are still bare — the convention did not get applied to them", () => {
-  // ACCEPT side. `PR #32` is this repo's own, MERGED, and correct as written;
-  // an over-applied convention rewrites it to `feigi/claude-config#32`.
-  assert.match(
-    CORRECTIONS,
-    /PR #32 measured/,
-    "the local `PR #32` reference was rewritten — the convention covers foreign evidence only, and qualifying a local reference is the false positive it must not produce",
-  );
+test("the file names no tracker number, foreign or local, and its examples stay placeholders", () => {
+  // ACCEPT side. The shipped surface names nothing that does not ship, so the
+  // convention is taught with placeholders (`owner/repo#N`, "a repo on a GHE
+  // host") and the evidence is restated without the foreign repo's PR numbers
+  // or this repo's own. Neither a bare `#NN`, a qualified `owner/repo#NN`, nor
+  // a `PR NN` may creep back in; the placeholder form `owner/repo#N` must not
+  // trip the ban.
   assert.doesNotMatch(
     CORRECTIONS,
-    /feigi\/claude-config#/,
-    "a local reference got the cross-repo qualified form; bare `#N` is correct and required for this repo's own issues and PRs",
+    /(?<![\w/&$-])#\d{2,5}(?![0-9a-fA-F])|\b[\w.-]+\/[\w.-]+#\d+|\bPR \d{2,5}\b/,
+    "a concrete tracker number is back in correction-tickets.md — the convention is taught with placeholders, not with a number from either repo",
+  );
+  assert.match(
+    conventionSection(),
+    /`owner\/repo#N`/,
+    "the placeholder form of the qualified citation is gone from the convention",
   );
 });

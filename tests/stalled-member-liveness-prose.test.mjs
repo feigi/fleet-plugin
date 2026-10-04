@@ -77,7 +77,7 @@ still holding its claim and its worktree, so the killed row above does not
 apply to it; mtimes unchanged at both are the dead signature.** Only the first
 of those two verdicts is conclusive — a member wedged on a call that writes
 nothing freezes its scratch dir too — so settle the dead one on the liveness
-read below, never on the two listings alone. Measured on #503: a refuter
+read below, never on the two listings alone. Measured once: a refuter
 wedged forever on \`until grep -q\` for a marker \`node --test\` never writes, its
 transcript's record counts unchanged across two polls while its own scratch
 files carried fresh mtimes throughout — alive the entire time it read as dead.`;

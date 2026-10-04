@@ -33,7 +33,7 @@
 // slices; a rationale indexed to wording rots with the wording.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { between, phrase } from "./support/prose-pin.mjs";
 
@@ -94,7 +94,7 @@ test("step 5 states its own bar instead of delegating to phase 0's criterion", (
   );
 });
 
-test("phase 0 marks decided? as a consumption gate and names an ADR that exists", () => {
+test("phase 0 marks decided? as a consumption gate and states the filing-time bar inline", () => {
   const s = decidedNote();
   // Contiguous span again: "consumption gate" and "the filing-time counterpart
   // was repriced" pin nothing apart. The gate label is only meaningful bound to
@@ -106,12 +106,9 @@ test("phase 0 marks decided? as a consumption gate and names an ADR that exists"
     ),
     "phase 0's `decided?` note no longer marks it a consumption gate with a repriced filing-time counterpart",
   );
-  // Read the path out of the prose rather than restating it, so a rename that
-  // updates only one side reds. A pointer into a document that is not there
-  // fails silently for every reader.
-  const [, adr] = s.match(/see `(docs\/adr\/[^`]+)`/) ?? [];
-  assert.ok(adr, "phase 0's `decided?` note no longer points at an ADR under `docs/adr/`");
-  assert.ok(existsSync(join(ROOT, adr)), `phase 0 points at \`${adr}\`, which does not exist`);
+  // The shipped skill states the bar inline and does not point into `docs/adr/`,
+  // which is not shipped to the plugin's consumers (ADR 0019).
+  assert.doesNotMatch(s, /docs\/adr\//, "phase 0's `decided?` note points into `docs/adr/`, which the plugin does not ship");
 });
 
 test("the ADR keeps its pre-chosen guard and its #211 relationship", () => {

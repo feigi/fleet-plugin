@@ -16,7 +16,7 @@ Holding the dispatch tool does not authorize using it: a reviewer not told the f
 
 ## The coordination contract
 
-Stated once, in the vocabulary #1316 fixed — *dispatch* (start a member),
+Stated once, in this fixed vocabulary — *dispatch* (start a member),
 *send* (message a live one), *wake* (a send that resumes a finished
 member's transcript), *settle* (a member's job reaching a terminal
 outcome), *consume* (the controller deliberately taking a settled result):

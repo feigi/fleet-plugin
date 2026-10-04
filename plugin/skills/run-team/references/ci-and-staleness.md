@@ -44,7 +44,7 @@ never that anyone verified anything.
 
 Why controller needs the verdict by name: no workflow run will ever complete
 here, so the CI-run-completion edge never fires and waiting on it stalls the
-whole PR — the silent-stall shape #111 reported before this verdict existed.
+whole PR — the silent-stall shape reported before this verdict existed.
 SKILL.md's `no-ci` edge therefore dispatches the finisher off the reviewer's
 final verdict instead — that edge, not this file, carries the conditions on it.
 Under `no-ci` the script reads no run list and no run view: no workflow, nothing
