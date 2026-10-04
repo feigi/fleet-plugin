@@ -167,9 +167,11 @@ git rev-parse --verify "origin/main^{commit}" >/dev/null \
 # Recipe cache by derive-testcmd.sh — the one reader, reused rather than
 # reimplemented, so the claim and the review snapshot cannot disagree about
 # the cache's shape or what makes it usable. Nothing here infers either
-# command: an absent, unproven or unrunnable cache is derive-testcmd.sh's own
-# refusal, passed through in its own words, which name the step that derives
-# the Recipe.
+# command: every derive-testcmd.sh refusal is passed through in its own words.
+# A refusal about the cache (absent, unproven or invalid) names the step that
+# derives the Recipe; an exit-3 refusal names an environment fault, and the
+# caller fixes that instead of deriving. Both leave here as this script's exit
+# 2, so only the words tell them apart.
 #
 # `2>&1` so the reason travels: the child refuses on its STDERR and `$(...)`
 # captures stdout only, so without the merge `die` fires with an empty

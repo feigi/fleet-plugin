@@ -199,6 +199,16 @@ test("the snapshot agent is told to derive testCmd AND the schema declares it", 
   );
 });
 
+// derive-testcmd.sh's exit-3 refusals are about the environment and name no
+// derivation step, so the prompt must not tell the snapshot agent that every
+// refusal does.
+test("the snapshot agent is told a cache refusal names the derivation step and an exit-3 refusal names an environment fault", () => {
+  const snapshot = between(CODE, "const snap = await agent(", "if (snap) {", "the snapshot agent dispatch");
+  assert.match(snapshot, /a\s+refusal\s+about\s+the\s+cache\s+names\s+the\s+step\s+that\s+derives\s+it/);
+  assert.match(snapshot, /an\s+exit-3\s+refusal\s+names\s+an\s+environment\s+fault,\s+and\s+the\s+caller\s+fixes\s+that\s+instead\s+of\s+deriving/);
+  assert.doesNotMatch(snapshot, /a\s+refusal\s+names\s+the\s+step/, "the prompt claims every refusal names the derivation step");
+});
+
 // #2315. The prompt that RUNS the command is the shared test run's — every
 // specialist used to run it, which made one review up to six full sweeps.
 // Bounded at both ends: an unbounded slice runs to EOF, where the specialist
