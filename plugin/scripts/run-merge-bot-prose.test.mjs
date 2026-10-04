@@ -1273,9 +1273,8 @@ test("step 3 waits on an unfinished run instead of skipping the PR, and only the
 // registered a run for the rebased head: `ci.runId` and `ci.status` both read
 // `null`, which the arm above's "`ci.status` not `completed`" condition also
 // matches — collapsed together, a bot reading this prose is sent to wait on
-// `ci.runId` (step 2) with a `null` id, i.e. `gh run watch null` / `gh run
-// view null`. This pins the no-run case as its own arm, never routed through
-// step 2's blocking wait.
+// `ci.runId` (step 2) with a `null` id, i.e. `gh run view null`. This pins
+// the no-run case as its own arm, never routed through step 2's blocking wait.
 test("step 3 waits and re-gates on a null ci.runId instead of routing it into step 2's wait", () => {
   const s = step3();
   assert.match(
@@ -1285,7 +1284,7 @@ test("step 3 waits and re-gates on a null ci.runId instead of routing it into st
   );
   assert.match(
     s,
-    phrase("never route this into step 2's `gh run watch`/`gh run view <run-id>` with a null id"),
+    phrase("never route this into step 2's `gh run view <run-id>` poll with a null id"),
     "step 3 no longer warns against waiting on step 2's blocking call with a null run id",
   );
   assert.match(
