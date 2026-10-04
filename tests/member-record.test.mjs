@@ -191,12 +191,11 @@ test("readOmpMember: subagent_type is `task` for an untyped dispatch, blank when
     sessionEvt("/Users/chris/dev/fleet-plugin"), thinkingEvt("xhigh"), init,
     assistantEvt("claude-sonnet-5", { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 }),
   ].join("\n"), "/fake/path.jsonl", stem).subagent_type;
-  const initWithAgent = (agent) => evt({ type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-08T15:11:49.495Z", task: "Implement ticket 580", resolvedModelIdentity: "anthropic/claude-sonnet-5", agent });
 
   assert.equal(readType(sessionInitEvt("Implement ticket 580", "anthropic/claude-sonnet-5", "task"), "Untyped1"), "task");
   assert.equal(readType(sessionInitEvt("Implement ticket 580", "anthropic/claude-sonnet-5"), "NoAgent1"), "");
-  assert.equal(readType(initWithAgent(null), "NullAgent1"), "");
-  assert.equal(readType(initWithAgent(7), "NumberAgent1"), "");
+  assert.equal(readType(sessionInitEvt("Implement ticket 580", "anthropic/claude-sonnet-5", null), "NullAgent1"), "");
+  assert.equal(readType(sessionInitEvt("Implement ticket 580", "anthropic/claude-sonnet-5", 7), "NumberAgent1"), "");
 });
 
 test("readOmpMember: cost and tokens sum across turns — one usage object per turn, no fold-back", () => {
