@@ -528,8 +528,7 @@ joined to verdicts per § 1 (member-outcomes on `session`+`agent`;
 tier-outcomes on `ticket`, split `+`; last row per ticket dated ≥ the
 `run_date` of the ticket's last input row wins, a row whose
 `closed_own_ticket` and `minted_false_claim` are both blank skipped — the
-rule the § 2 stopping rule applies, which `verdictsByTicket` does not yet:
-it takes the plain last row per ticket, #2720), restricted
+rule the § 2 stopping rule applies), restricted
 to **arm A rows plus Exploration rows** (`exploration_draw` non-blank). B
 non-exploration rows are excluded (they are the A/B's test set). No
 inverse-propensity weighting: within a stratum every `chosen_cell` is
