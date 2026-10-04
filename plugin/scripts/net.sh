@@ -1,5 +1,5 @@
 # shellcheck shell=sh
-# The fleet's bounded, prompt-suppressed git transport (#92, #346, #347).
+# The fleet's bounded, prompt-suppressed git transport.
 # Sourced, never executed — no shebang, and the `shell=sh` directive above is
 # what tells shellcheck what to check it as.
 #
@@ -16,19 +16,19 @@
 # builtin, so failing to open its operand aborts a non-interactive shell before
 # any `||` on the line can run.
 #
-# WHY A LIB. #346 landed this mechanism inside inflight.sh's probe 2, for the
+# WHY A LIB. This mechanism first landed inside inflight.sh's probe 2, for the
 # one call that probe makes. Every other unattended `git` network call in the
 # fleet — release-ticket.sh's pushed-branch lookup, and the fetches in
 # prove-merge.sh, reap.sh and verify-sha.sh — still ran raw, so each of them
 # could prompt on a credential or a host key, or stall on a transport that
-# connects and then goes quiet, holding a fleet slot indefinitely (#347). The
+# connects and then goes quiet, holding a fleet slot indefinitely. The
 # alternative considered was copying the transport flags to each call site; it
 # is what this file exists to avoid, and it would not have bounded the connect
 # phase in any case, since git exposes no knob for it. So the mechanism moved
 # here whole and probe 2 became its first caller rather than its owner.
 #
-# `gh` calls are deliberately NOT routed through this. Measured during the
-# PR #332 review, `gh issue view` against a silent listener failed on its own at
+# `gh` calls are deliberately NOT routed through this. Measured: `gh issue
+# view` against a silent listener failed on its own at
 # 10.0s with `net/http: TLS handshake timeout` — `gh` is already bounded, and
 # wrapping it would buy a second bound over the first.
 #
@@ -41,7 +41,7 @@
 # The override exists so the tests can buy a short budget instead of paying the
 # default one per case. It can only ever SHORTEN: a knob that could lengthen it
 # would be one more way for configuration to remove the bound, which is the
-# defect the ssh half of #346 reports, and reproducing it here to be convenient
+# defect this lib exists to close, and reproducing it here to be convenient
 # would be its own bug. A value that is not a positive integer is not an error
 # and not a bound either — the default stands.
 #
@@ -100,11 +100,12 @@ net_fetch_budget() {
 # reparents its children and the links this walk follows are gone by then.
 #
 # Ceiling: with no `ps` to read, this falls back to the named process alone and
-# a helper can survive it. That is the pre-#346 behaviour for that one case, not
-# a new failure, and it is preferred over signalling a set derived from nothing.
+# a helper can survive it. That is the old named-process-only kill for that
+# one case, not a new failure, and it is preferred over signalling a set
+# derived from nothing.
 # But it is not silent: the fallback records itself in $net_wdfile so the reason
 # printed downstream can say the bound may not have held. A degraded kill that
-# reads exactly like a clean one is the defect #346 asks this script not to
+# reads exactly like a clean one is a defect this script must not
 # have — measured, `ps` shimmed to exit 127 produced byte-identical stderr to
 # the healthy run while a `git remote-https` survived and held the caller for
 # its whole cap. `${net_wdfile:-/dev/null}` because net_kill_tree also runs
@@ -126,7 +127,7 @@ net_fetch_budget() {
 # parents first, which is exactly why every end-to-end case here stays green on
 # that mutant.
 #
-# What holds it is the descending-pid chain in net.test.mjs's net_kill_tree
+# What holds it is the descending-pid chain in the suite's net_kill_tree
 # case — each child's pid BELOW its parent's, the shape pid wraparound produces.
 # Feeding the rows in a different order does not hold it: the hash order is not
 # the input order, and measured, the same key set fed parents-first and
@@ -234,7 +235,7 @@ net_stalled() {
 # above: it gates the banner exchange, not only the TCP handshake, so a peer
 # that accepts the connection and then never speaks is cut off at
 # ConnectTimeout. Measured against that exact case (OpenSSH_10.2p1, the
-# accept-then-silent listener the test at inflight.test.mjs uses) — both
+# suite's accept-then-silent listener) — both
 # options set: "Connection timed out during banner exchange" at 10.0s;
 # ConnectTimeout alone, ServerAlive dropped: 10.0s, identical; ServerAlive
 # alone, ConnectTimeout dropped: still running at 30s, killed from outside.
@@ -269,9 +270,9 @@ net_stalled() {
 # asked for, and terminates only where that value does. Measured on the same
 # listener: a user ConnectTimeout of 0 is accepted, wins by the same rule and
 # left the call still connecting at 40s, where the 10s set here cut at 10.2s —
-# unbounded, through the user's own config, which is the #92 hang again. The
+# unbounded, through the user's own config, which is the unattended hang again. The
 # watchdog below is what now bounds that case, since it bounds the call rather
-# than the transport and so does not depend on any value ssh resolved (#346).
+# than the transport and so does not depend on any value ssh resolved.
 # Ordering these first would bound the call at its own value instead,
 # at the cost of silently overriding a deliberate proxy or timeout config: a
 # real regression traded for a hypothetical one, so it is not done.
@@ -283,7 +284,7 @@ net_stalled() {
 # the BatchMode=yes set here alone, an unknown host key fails at once ("Host key
 # verification failed"); with a user's BatchMode=no ahead of it and a terminal
 # reachable, ssh sat on "Are you sure you want to continue connecting" until
-# killed — the unattended hang #92 exists to stop. Reachable is the operative
+# killed — the unattended hang this lib exists to stop. Reachable is the operative
 # word: with no terminal available it aborts rather than waiting. Honoured
 # anyway, because it is the user's explicit setting; this records what that
 # costs rather than warning about a choice they made on purpose. The watchdog
@@ -291,7 +292,7 @@ net_stalled() {
 # the prompt is ssh's, so no git-side variable reaches it, and the setting that
 # opens it is the user's own, so overriding it is not on offer either. No test
 # covers this one — the exposure needs a reachable terminal, and the harness
-# runs without one, where ssh aborts at once instead of asking (#346).
+# runs without one, where ssh aborts at once instead of asking.
 #
 # http: lowSpeedLimit/lowSpeedTime is git's (curl's) own bound for a transfer
 # that goes quiet — abort if it sits under 1000 bytes/s for 10s.
@@ -308,7 +309,7 @@ net_stalled() {
 # script does not set and cannot shorten.
 #
 # Hence the watchdog below, and hence these knobs are no longer the bound. They
-# stay anyway, and that is a decision rather than an oversight (#346): each one
+# stay anyway, and that is a decision rather than an oversight: each one
 # fails earlier than the watchdog and in git's own words, which is the more
 # useful thing to read on a terminal, and dropping them would make every ssh
 # stall wait out the full budget where ConnectTimeout ends it in a fraction of
@@ -320,7 +321,8 @@ net_stalled() {
 # call — its own `sleep` is a child, and an orphaned sleeper does not sit
 # harmlessly: it wakes at the end of its budget and fires net_kill_tree at a pid
 # this shell no longer owns, which after a budget's worth of pid churn can be an
-# unrelated process — and, since #346, an unrelated SUBTREE. It cannot leak onto
+# unrelated process — and, since net_kill_tree walks the subtree, an unrelated
+# SUBTREE. It cannot leak onto
 # the caller's stderr whatever else it does, because the `>/dev/null 2>&1` below
 # is on the sleeper itself and both its descriptors are already closed.
 #
@@ -352,7 +354,7 @@ net_git() {
   # sends TERM then KILL with no pause, so whichever one reaps the job first is
   # a race, not a property either shell owns. What the shell DOES fix is the
   # FORM — bash-as-sh names the job (the long form); dash's notice is bare, just
-  # `<signal>: <n>`. Measured for #1042 by replaying net_git's own mechanism
+  # `<signal>: <n>`. Measured by replaying net_git's own mechanism
   # against a plain `sleep`: on this machine, `/bin/sh` (bash 3.2.57) and
   # `/bin/dash` both gave TERM, every run — a quiet-system sample, not a signal
   # either shell is owed, which is why a caller has to accept either.
@@ -379,7 +381,7 @@ net_git() {
   # worktree directory, HEAD, or anything else in the entry — is pruned on
   # sight: the 3-month floor bounds staleness git can measure from the
   # entry's own files, and a missing pointer gives it nothing to measure,
-  # so the floor does not apply. Measured (#2078): a fixture with exactly
+  # so the floor does not apply. Measured: a fixture with exactly
   # that fault, fetched through this function unmodified, loses the
   # registry entry between the fetch returning and the caller's own next
   # read of it — a worktree whose fault is seconds old, not months.
