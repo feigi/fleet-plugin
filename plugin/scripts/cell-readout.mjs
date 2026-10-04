@@ -6,7 +6,9 @@
 //
 // Inputs default to docs/metrics/ under the working directory. A Pull is a
 // ticket-features.tsv row; what it ran is the member-outcomes.tsv row with the
-// same `session` + `agent`.
+// same `session` + `agent`. Rows of one `session` + `agent` that name one
+// `chosen_cell` are one Pull; rows naming different cells are refused, naming
+// the session, agent and both cells, since which cell ran is then unknown.
 //
 // ADMISSIBLE ROW. A Pull counts only when its member row exists, was
 // dispatched as the drawn cell's own definition (`subagent_type` =
@@ -74,6 +76,22 @@ export const STOP = Object.freeze({ verdicts: 10, failRate: 0.8 });
 const key = (session, agent) => `${session}\0${agent}`;
 const levelOf = (cell) => CELL.exec(cell)?.[2] ?? null;
 
+/**
+ * `rows` keyed by session+agent. A repeat agreeing on every column in `fields`
+ * collapses into the first row; one that differs on any of them throws.
+ */
+function oneRowPer(rows, file, fields) {
+  const byKey = new Map();
+  for (const r of rows) {
+    const k = key(r.session, r.agent);
+    const prev = byKey.get(k);
+    if (!prev) { byKey.set(k, r); continue; }
+    const f = fields.find((c) => prev[c] !== r[c]);
+    if (f) throw new Error(`${file}: session ${r.session} agent ${r.agent} has two rows, ${f} '${prev[f]}' and '${r[f]}'`);
+  }
+  return byKey;
+}
+
 /** The join's member row for a Pull when the Pull is admissible, else null. */
 function admissibleMember(pull, members) {
   const m = members.get(key(pull.session, pull.agent));
@@ -88,13 +106,12 @@ function admissibleMember(pull, members) {
  * ticket-features row, `{ cell, comparisons, runDates, dates, models, gated }`,
  * sorted by cell. `dates` is the comparisons' distinct run_dates, sorted;
  * `models` maps each resolved model of the cell's admissible rows to its row
- * count, largest first. `unjoined` counts Pulls with no member row.
+ * count, largest first. `unjoined` counts Pulls with no member row. Throws on
+ * two ticket-features rows of one session+agent naming different cells.
  */
 export function readout({ features, members }) {
   const byKey = new Map(members.map((m) => [key(m.session, m.agent), m]));
-  // One Pull per session+agent: a re-dispatch lands on the same cell and the
-  // same member row.
-  const pulls = new Map(features.map((p) => [key(p.session, p.agent), p]));
+  const pulls = oneRowPer(features, "ticket-features.tsv", ["chosen_cell"]);
   const sessions = new Map();
   const cells = new Map();
   let unjoined = 0;
@@ -201,7 +218,10 @@ function main() {
   const features = load(featuresPath, parseFeatures);
   const members = load(membersPath, parseMemberTsv);
 
-  const { cells, unjoined } = readout({ features, members });
+  let result;
+  try { result = readout({ features, members }); }
+  catch (e) { die(e.message); }
+  const { cells, unjoined } = result;
   const lines = [];
   const notes = [];
   if (unjoined > 0) {

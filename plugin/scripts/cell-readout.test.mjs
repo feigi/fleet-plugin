@@ -196,6 +196,40 @@ test("a re-dispatched Pull is one Pull: two ticket-features rows for one session
   assert.equal(unjoined, 1, "a re-dispatched Pull with no member row is one unjoined Pull");
 });
 
+test("two ticket-features rows for one session+agent naming different cells are refused, naming the session, agent and both cells", () => {
+  const w = world();
+  addRow(w, { session: "sTorn", date: "2026-10-01", cell: "task-high" });
+  addRow(w, { session: "sTorn", date: "2026-10-01", cell: "slow-high" });
+  // The same Pull's row again, drawn at another cell: which cell ran is unknown.
+  w.features.push({ ...w.features[0], chosen_cell: "smol-high" });
+  const r = cli(w);
+  assert.equal(r.status, 2, r.stderr);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /cell-readout: ticket-features\.tsv: session sTorn agent impl-100 has two rows, chosen_cell 'task-high' and 'smol-high'\n$/);
+  assert.throws(() => readout(parsed(w)), /session sTorn agent impl-100 has two rows, chosen_cell 'task-high' and 'smol-high'/);
+});
+
+// What the refusal must ACCEPT: a repeat that agrees on the cell, whatever else
+// it differs on, and one agent name reused in another session.
+test("a repeated session+agent on the same cell is one Pull even when its other columns differ, and the key is the session+agent pair", () => {
+  const w = world();
+  addRow(w, { session: "sSame", date: "2026-10-01", cell: "task-high" });
+  addRow(w, { session: "sSame", date: "2026-10-01", cell: "slow-high" });
+  w.features.push({ ...w.features[0], run_date: "2026-10-02", brief_chars: "200" });
+  // impl-100 again, in another session and at another cell: a different Pull.
+  addRow(w, { session: "sOther", date: "2026-10-02", cell: "smol-high" });
+  w.features.at(-1).agent = "impl-100";
+  w.members.at(-1).agent = "impl-100";
+  w.members.at(-1).member = "impl-100";
+  addRow(w, { session: "sOther", date: "2026-10-02", cell: "slow-high" });
+  const r = cli(w);
+  assert.equal(r.status, 0, r.stderr);
+  const { cells } = readout(parsed(w));
+  const of = (cell) => cells.find((c) => c.cell === cell);
+  assert.deepEqual([of("task-high").comparisons, [...of("task-high").models]], [1, [["claude-sonnet-5", 1]]]);
+  assert.equal(of("smol-high").comparisons, 1);
+});
+
 test("a blank member-outcomes run_date is no date: its session is a comparison but adds nothing to the distinct-date count", () => {
   const w = world();
   addComparisons(w, "task-high", 4, 4);
