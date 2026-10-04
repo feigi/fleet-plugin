@@ -63,7 +63,8 @@ const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
 
 // ---------------------------------------------------------------------------
 // pure core — exercised through the CLI by tier-outcomes.test.mjs; only
-// COLUMNS and TIER_SWITCH_DATE are imported directly, the rest through argv
+// COLUMNS, LEGACY_WIDTH and TIER_SWITCH_DATE are imported directly, the rest
+// through argv
 // ---------------------------------------------------------------------------
 
 // APPENDED TO, never inserted into: every awk read-out in the file's header
@@ -81,6 +82,11 @@ export const TIER_SWITCH_DATE = "2026-09-29";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const BASE_DEFINITION = "fleet-implementer";
+// The two quality-floor columns `append` writes. Every reader fails the floor
+// on exactly `minted_false_claim=yes` or `closed_own_ticket=no`, so any other
+// spelling would read as a pass.
+export const VERDICT = Object.freeze(["yes", "no"]);
+export const VERDICT_COLUMNS = Object.freeze(["closed_own_ticket", "minted_false_claim"]);
 
 // `fleet-implementer` -> `default`, `fleet-implementer-<x>` -> `<x>`, anything
 // else (a generic `task`, a blank pre-#1066 subagent_type) -> null.
@@ -94,6 +100,11 @@ export function shortName(definition) {
 // Data rows as objects keyed by COLUMNS, plus the raw `line`. A row of any
 // width but the legacy or the full one is refused: a tab typed into `note`
 // shifts every field after it, and a reader keyed by position cannot tell.
+// So is a verdict column holding anything but `yes`, `no` or blank — blank
+// because a row backfilled without a ruling leaves both empty, so a row with
+// exactly one of the two blank is refused too: it was never written whole, and
+// a blanked `closed_own_ticket=no` or `minted_false_claim=yes` would read as a
+// pass.
 export function parseTierOutcomes(text) {
   return String(text ?? "").split("\n")
     .filter((l) => l.trim() && !l.startsWith("#"))
@@ -104,6 +115,15 @@ export function parseTierOutcomes(text) {
       }
       const row = { line };
       COLUMNS.forEach((c, i) => { row[c] = cells[i] ?? ""; });
+      for (const c of VERDICT_COLUMNS) {
+        if (row[c] !== "" && !VERDICT.includes(row[c])) {
+          throw new Error(`malformed row: ${c} is '${row[c]}', expected yes, no or blank — ${line.slice(0, 60)}`);
+        }
+      }
+      const [first, second] = VERDICT_COLUMNS;
+      if ((row[first] === "") !== (row[second] === "")) {
+        throw new Error(`malformed row: ${first} is '${row[first]}' but ${second} is '${row[second]}', expected both blank or both yes or no — ${line.slice(0, 60)}`);
+      }
       return row;
     });
 }
@@ -388,8 +408,8 @@ function append(pr, paths) {
   for (const [col, value] of Object.entries(fields)) {
     if (/[\t\r\n]/.test(value)) die(`--${col.replaceAll("_", "-")} holds a tab or newline — it would shift every field after it`);
   }
-  for (const col of ["closed_own_ticket", "minted_false_claim"]) {
-    if (!["yes", "no"].includes(fields[col])) die(`--${col.replaceAll("_", "-")} must be yes or no, got '${fields[col]}'`);
+  for (const col of VERDICT_COLUMNS) {
+    if (!VERDICT.includes(fields[col])) die(`--${col.replaceAll("_", "-")} must be yes or no, got '${fields[col]}'`);
   }
   if (fields.sizing && !["light", "heavy"].includes(fields.sizing)) die(`--sizing must be light or heavy, got '${fields.sizing}'`);
   for (const col of ["loc", "files"]) {

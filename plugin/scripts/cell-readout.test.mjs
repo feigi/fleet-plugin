@@ -441,3 +441,31 @@ test("stopping rule: a ticket counts once, judged by its last tier-outcomes row,
   assert.equal(at.verdicts.find((v) => v.ticket === second.ticket).failed, true);
   assert.equal(at.stop, true);
 });
+
+// A verdict that is neither `yes` nor `no` matches neither floor half, so read
+// as a pass it would lower the failure rate and keep the cell alive unreported.
+test("stopping rule: a counted ruling whose closed_own_ticket or minted_false_claim is not exactly yes or no is refused, naming the ticket", () => {
+  for (const [col, value] of [["closed_own_ticket", "No"], ["minted_false_claim", "YES"], ["closed_own_ticket", ""], ["minted_false_claim", ""], ["closed_own_ticket", "yes "]]) {
+    const w = world();
+    addVerdicts(w, "smol-high", 10, 0);
+    const bad = w.verdicts[3];
+    bad[col] = value;
+    assert.throws(() => judged(w, { "smol-high": "2026-09-01" }, "smol-high"),
+      new RegExp(`ticket #${bad.ticket} \\(PR #${bad.pr}\\): ${col} is '${value}', expected yes or no`), `${col}=${JSON.stringify(value)}`);
+  }
+});
+
+// What the refusal must ACCEPT: a malformed ruling on a ticket the rule does not
+// count, and every yes/no combination on one it does.
+test("stopping rule: a malformed ruling on a ticket with no counted Pull is not read, and all four yes/no pairs are", () => {
+  const w = world();
+  addVerdicts(w, "smol-high", 4, 0);
+  [["yes", "no"], ["yes", "yes"], ["no", "no"], ["no", "yes"]].forEach(([closed, minted], i) => {
+    Object.assign(w.verdicts[i], { closed_own_ticket: closed, minted_false_claim: minted });
+  });
+  w.verdicts.push(verdict({ ticket: "1381", pr: "1392", closed_own_ticket: "", minted_false_claim: "" }));
+  w.verdicts.push(verdict({ ticket: "7", pr: "8", closed_own_ticket: "No", minted_false_claim: "YES" }));
+  const at = judged(w, { "smol-high": "2026-09-01" }, "smol-high");
+  assert.equal(at.verdicts.length, 4);
+  assert.deepEqual(at.verdicts.map((v) => v.failed), [false, true, true, true]);
+});
