@@ -11,8 +11,9 @@ itself is still alive when nothing else is left to report.
 1. **Reap after every merge pass** (never per-claim).
    [`reap.sh`](../../plugin/scripts/reap.sh) recomputes `git branch -v`
    for `[gone]` upstreams, confirms each via `git cherry origin/main`
-   (authorizing `-D`, never `-d`), and sweeps orphaned worktree
-   directories the same pass.
+   (one of several checks that must pass before it deletes the branch
+   with a compare-and-swap `git update-ref -d`), and sweeps orphaned
+   worktree directories the same pass.
 2. **Release a claim that never became a PR** with
    [`release-ticket.sh`](../../plugin/scripts/release-ticket.sh): checks
    four preconditions (0 commits ahead of `origin/main`, no unique
@@ -44,8 +45,8 @@ itself is still alive when nothing else is left to report.
   from *outside* the fleet, with no event the controller could
   otherwise observe.
 - **Reap and release are two different scripts on purpose.** Reap
-  authorizes a destructive `-D` off git's own evidence at fleet-wide,
-  post-merge cadence; release authorizes deletion off a *specific
-  claim's* preconditions at a different trigger (drain, abort) —
+  authorizes a destructive `git update-ref -d` off git's own evidence at
+  fleet-wide, post-merge cadence; release authorizes deletion off a
+  *specific claim's* preconditions at a different trigger (drain, abort) —
   conflating them was measured to let one silently borrow the other's
   authorization.

@@ -938,23 +938,26 @@ for b in $gone_branches; do
   # enough) prints nothing, grep sees empty input and exits 1 — the identical
   # verdict a genuinely clean cherry produces, so "merged" is indistinguishable
   # from "the probe could not answer". An unmerged branch is never the ambiguous
-  # one: its `+` line makes grep exit 0 and always keeps. The delete is
-  # authorized by this check and by nothing else — its compare-and-swap refuses
-  # a ref that moved off `$tip`, never a `$tip` that is unmerged — so an
-  # unanswerable probe must KEEP, the same fail-closed shape the worktree
-  # `status` check below already uses.
+  # one: its `+` line makes grep exit 0 and always keeps. Of the checks that
+  # must pass before the delete, this is the only one that asks whether `$tip`
+  # is merged — the worktree checks below and the `worktree remove` refusal
+  # can each keep the branch, but none of them looks at its commits, and the
+  # compare-and-swap refuses a ref that moved off `$tip`, never a `$tip` that
+  # is unmerged — so an unanswerable probe must KEEP, the same fail-closed
+  # shape the worktree `status` check below already uses.
   # `refs/heads/$b`, never a bare `$b`, where the tip is read above. Restoring
   # the bare name makes a branch that shares its name with a tag ambiguous AS A
   # REV again, and git resolves an ambiguous one by preferring refs/tags/ over
   # refs/heads/ (measured, git 2.50.1 Apple Git-155). This probe would then
   # answer about the TAG's commit while the delete below removes the BRANCH —
   # and a tag sitting on a merged commit reports clean for a branch whose
-  # commits exist nowhere else. The delete is authorized by this check and by
-  # nothing else, so that reads straight through to destroying them: measured
-  # on a fixture, the enumeration fix alone turned a branch this script
-  # currently KEEPS into `REAPED`, at exit 0, with an empty kept[]. Qualifying
-  # changes nothing for an ordinary branch — both spellings name the same
-  # commit — and it is the same key the worktree lookup below already builds.
+  # commits exist nowhere else. No other check before the delete asks whether
+  # those commits are merged, so that reads straight through to destroying
+  # them: measured on a fixture, the enumeration fix alone turned a branch
+  # this script currently KEEPS into `REAPED`, at exit 0, with an empty
+  # kept[]. Qualifying changes nothing for an ordinary branch — both spellings
+  # name the same commit — and it is the same key the worktree lookup below
+  # already builds.
   #
   # `$base_rev` is the other side of the same rule, and it was missing until
   # #924: `$base` reached this `git cherry` exactly as BASE_REF spelled it, so a
@@ -963,10 +966,10 @@ for b in $gone_branches; do
   # deleted the BRANCH — measured, an unmerged [gone] branch whose commit
   # existed nowhere else REAPED at exit 0 with an empty kept[]. The
   # qualification is built at the top of the file, where its own comment
-  # records why the accept-list beside it is what makes prefixing sound. "By
-  # nothing else" bounds what ELSE authorizes the delete, not whether this
-  # check itself can be wrong — which is why BOTH revs it consumes are
-  # qualified. #634
+  # records why the accept-list beside it is what makes prefixing sound. Being
+  # the only merge check bounds what ELSE could catch an unmerged branch, not
+  # whether this check itself can be wrong — which is why BOTH revs it
+  # consumes are qualified. #634
   if ! cherry=$(git cherry "$base_rev" "$tip" 2>&1); then
     keep "$b" "cherry probe failed — cannot tell if merged: $(printf '%s' "$cherry" | tr '\n' ' ')"
     continue
@@ -981,9 +984,9 @@ for b in $gone_branches; do
   # What "grep's is the only status left to take" missed, and what this shape
   # exists for: taking it is not the same as READING it. grep answers three
   # ways, and until #1419 the `if` had two arms — an rc 2 scan that never
-  # examined `$cherry` fell into the merged arm, and the delete below is
-  # authorized by this check and by nothing else. So the deletion went ahead on
-  # a merge status no tool had established. `grep_probe` splits the two
+  # examined `$cherry` fell into the merged arm, and no check between here and
+  # the delete below asks whether the branch is merged. So the deletion went
+  # ahead on a merge status no tool had established. `grep_probe` splits the two
   # questions; the answers are ruled on here, in the order that makes the
   # unanswerable case fail CLOSED like every other could-not-check in this
   # file: scan first, verdict second.
