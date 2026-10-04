@@ -93,7 +93,7 @@ const col = (name) => COLUMNS.indexOf(name);
 // append
 // ---------------------------------------------------------------------------
 
-const utcDate = () => new Date().toISOString().slice(0, 10);
+const utcDate = (d = new Date()) => d.toISOString().slice(0, 10);
 
 test("append: the ledger's tier-ok token wins over member-outcomes.tsv", (t) => {
   const f = fixture(t, {
@@ -138,6 +138,25 @@ for (const [tz, clock] of [
     const r = f.append();
     assert.equal(r.code, 0, r.stderr);
     assert.equal(f.dataRows()[0][col("run_date")], sessionDate(session));
+  });
+}
+
+// A Pull's `run_date` in ticket-features.tsv is the UTC date of its session id
+// (`sessionDate`), and the fit's and cell-readout's join drops a ruling dated
+// before the Pull it rules. A ruling stamped with the host's zone date lands a
+// day before a same-instant Pull west of UTC, so the join drops it. At any
+// instant, one of these two zones is on a different calendar day than UTC.
+for (const tz of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
+  test(`append: under TZ=${tz} run_date is the UTC date`, (t) => {
+    const f = fixture(t, {
+      ledger: { rows: ["#10 impl-10=PR#20 · class=routine · tier=alt · tier-ok=impl-10:fleet-implementer-alt"], dispatched: ["impl-10=PR#20"] },
+      tz,
+    });
+    const before = utcDate();
+    const r = f.append();
+    const after = utcDate();
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok([before, after].includes(f.dataRows()[0][col("run_date")]), `run_date ${f.dataRows()[0][col("run_date")]} is not the UTC day append ran`);
   });
 }
 

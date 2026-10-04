@@ -80,7 +80,7 @@ export const LEGACY_WIDTH = COLUMNS.length - 4;
 // date of the header's switch note.
 export const TIER_SWITCH_DATE = "2026-09-29";
 
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
+export const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const BASE_DEFINITION = "fleet-implementer";
 // The two quality-floor columns `append` writes. Every reader fails the floor
 // on exactly `minted_false_claim=yes` or `closed_own_ticket=no`, so any other
@@ -148,8 +148,8 @@ export function rulingsByTicket(rows) {
 // last ruling dated on or after the Pull, since a ruling never predates the
 // Pull it rules — or null. Throws on a ruling of the ticket whose `run_date`
 // is not YYYY-MM-DD, which cannot be placed against the Pull and whose drop
-// would uncount the ticket, and on a ruling holding anything but `yes` or
-// `no` in a verdict column, which would otherwise read as a pass.
+// would uncount the ticket, and on the ruling it picks holding anything but
+// `yes` or `no` in a verdict column, which would otherwise read as a pass.
 export function rulingFor(rulings, ticket, pullDate) {
   const own = rulings.get(String(ticket)) ?? [];
   for (const r of own) {

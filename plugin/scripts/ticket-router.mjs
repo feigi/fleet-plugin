@@ -36,7 +36,7 @@ import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { CELL, POLICY_CELL, drawCell, parseMember } from "./ledger-grammar.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { parseTierOutcomes, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
+import { DATE, parseTierOutcomes, rulingFor, rulingsByTicket } from "./tier-outcomes.mjs";
 
 const NAME = "ticket-router";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -312,7 +312,10 @@ function fitTickets({ features, members, verdicts, window, cutoff }) {
     if (!byTicket.has(r.ticket)) byTicket.set(r.ticket, []);
     byTicket.get(r.ticket).push(r);
   }
-  const rulings = rulingsByTicket(verdicts.filter(upToThrough));
+  // A ruling whose date is not YYYY-MM-DD cannot be placed against the cut, and
+  // a string `<=` would drop 'abc' or '2027' unseen: it is left in, so `rulingFor`
+  // refuses it when its ticket is an input, as `fit --due` does.
+  const rulings = rulingsByTicket(verdicts.filter((r) => !DATE.test(r.run_date) || upToThrough(r)));
   const out = [];
   for (const [ticket, rows] of byTicket) {
     const last = rows[rows.length - 1];

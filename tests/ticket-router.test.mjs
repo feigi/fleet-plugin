@@ -830,6 +830,54 @@ test("fit refuses at exit 2 a ruling of an input ticket whose run_date is not YY
   assert.equal(readFileSync(p.table, "utf8"), before);
 });
 
+test("fit refuses at exit 2 a ruling of an input ticket whose run_date is not YYYY-MM-DD even when it sorts after the fit's cut, as fit --due does", (t) => {
+  const features = [exploring({ ticket: "1" })];
+  const p = fitWorld(t, { features, members: [], verdicts: [ruled(1, 11)] });
+  const before = readFileSync(p.table, "utf8");
+  // Each of these is `>` the cut ("2026-10-01"), so a string `<=` would drop it before `rulingFor` saw it.
+  for (const bad of ["abc", "zzz", "2027", "2026-13-45x"]) {
+    writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [ruled(1, 11, { run_date: bad })].map(verdictRow)));
+    for (const mode of [[], ["--due"]]) {
+      const r = cli(["fit", ...p.fitArgs, "--guard", p.guard, ...mode]);
+      assert.equal(r.status, 2, `run_date ${bad}, fit ${mode.join(" ")}: ${r.stderr}`);
+      assert.match(r.stderr, new RegExp(`ticket #1 \\(PR #11\\): run_date is '${bad}', expected YYYY-MM-DD`));
+      assert.equal(r.stdout, "");
+    }
+  }
+  assert.equal(readFileSync(p.table, "utf8"), before);
+  // The same junk on a ticket outside the input is still not refused.
+  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [ruled(1, 11), ruled(2, 12, { run_date: "zzz" })].map(verdictRow)));
+  assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard]).status, 0);
+});
+
+test("fit: a ruling's run_date with trailing or leading junk is refused, not read as the date inside it", () => {
+  const features = [exploring({ ticket: "1", run_date: "2026-10-01" }), exploring({ ticket: "2", run_date: "2026-10-05", chosen_cell: "task-high" })];
+  for (const bad of ["2026-10-01x", "x2026-10-01"]) {
+    assert.throws(
+      () => fitDirect({ features, members: [], verdicts: [ruled(1, 11, { run_date: bad })] }),
+      { message: new RegExp(`ticket #1 \\(PR #11\\): run_date is '${bad}', expected YYYY-MM-DD`) },
+    );
+  }
+});
+
+test("fit: a ruling with closed_own_ticket no and no minted false claim still fails the floor", () => {
+  const features = [exploring({ ticket: "1" })];
+  const next = fitDirect({ features, members: [], verdicts: [ruled(1, 11, { closed_own_ticket: "no", minted_false_claim: "no" })] });
+  assert.deepEqual(next.estimates["*"]["slow-high"], { ...next.estimates["*"]["slow-high"], merged: 1, fail_rate: 1 });
+});
+
+test("--check refuses at exit 2 a ruling of an input ticket whose run_date is not YYYY-MM-DD, not as a mismatch with the table", (t) => {
+  const features = [exploring({ ticket: "1" })];
+  const p = fitWorld(t, { features, members: [], verdicts: [ruled(1, 11)] });
+  assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard]).status, 0);
+  assert.equal(cli(["--check", ...p.fitArgs]).status, 0);
+  writeFileSync(p.verdicts, tsv(VERDICT_COLUMNS, [ruled(1, 11, { run_date: "10/01/2026" })].map(verdictRow)));
+  const r = cli(["--check", ...p.fitArgs]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /ticket #1 \(PR #11\): run_date is '10\/01\/2026', expected YYYY-MM-DD/);
+  assert.equal(r.stdout, "");
+});
+
 test("fit: a ticket's cell and stratum are its last features row's", () => {
   const features = [
     exploring({ ticket: "1", chosen_cell: "task-high", brief_chars: "100" }),
