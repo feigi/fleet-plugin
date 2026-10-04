@@ -1679,9 +1679,11 @@ else
 
     # update-ref, authorized by the `ahead` and `git cherry` guards above,
     # this recount, and the worktree check above — and carrying its own
-    # compare-and-swap on $tip on top, which `-D` never had. reap.sh
-    # authorizes its own [gone] deletes with `git cherry` ALONE — not this
-    # pairing. `-d` measures against HEAD and the branch's upstream, and a
+    # compare-and-swap on $tip on top, which `-D` never had. reap.sh asks
+    # whether its own [gone] branches are merged with `git cherry` alone — no
+    # `ahead` count, no recount — so not this pairing, though it too
+    # re-checks the worktree with `wt_holding` before its own compare-and-swap
+    # delete. `-d` measures against HEAD and the branch's upstream, and a
     # claim has no upstream until its first push (claim-ticket.sh passes
     # --no-track), so `-d` falls back to local HEAD alone and refuses a
     # pristine claim whenever local main is behind origin/main —
