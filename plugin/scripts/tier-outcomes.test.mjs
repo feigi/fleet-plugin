@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { COLUMNS, TIER_SWITCH_DATE } from "./tier-outcomes.mjs";
+import { COLUMNS, LEGACY_WIDTH, TIER_SWITCH_DATE } from "./tier-outcomes.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "./member-outcomes.mjs";
 import { writeExecStub } from "./exec-stub.mjs";
 
@@ -275,6 +275,24 @@ test("append: --class is refused as an unknown flag before anything is written",
   assert.deepEqual(f.ghCalls(), [], "refused before gh was asked");
 });
 
+test("append: a verdict that is not exactly yes or no is refused naming the flag, before gh is asked or anything is written", (t) => {
+  for (const [flag, closed, minted] of [
+    ["closed-own-ticket", "YES", "no"],
+    ["closed-own-ticket", "yes ", "no"],
+    ["minted-false-claim", "yes", "No"],
+    ["minted-false-claim", "yes", "maybe"],
+  ]) {
+    const f = fixture(t, { members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }] });
+    const before = readFileSync(f.tier, "utf8");
+    const r = f.run("append", "20", "--closed-own-ticket", closed, "--minted-false-claim", minted, "--note", "n");
+    const got = flag === "closed-own-ticket" ? closed : minted;
+    assert.equal(r.code, 2, `${flag}=${JSON.stringify(got)}\n${r.stdout}${r.stderr}`);
+    assert.ok(r.stderr.includes(`--${flag} must be yes or no, got '${got}'`), r.stderr);
+    assert.equal(readFileSync(f.tier, "utf8"), before);
+    assert.deepEqual(f.ghCalls(), [], "refused before gh was asked");
+  }
+});
+
 // ---------------------------------------------------------------------------
 // check
 // ---------------------------------------------------------------------------
@@ -474,7 +492,7 @@ test("check: a verdict column that is not yes, no or blank is refused as malform
     ["closed_own_ticket", tierRow({ pr: 21, ticket: 11, tier: "default", closed: "No" })],
     ["minted_false_claim", tierRow({ pr: 21, ticket: 11, tier: "default", minted: "YES" })],
     ["minted_false_claim", tierRow({ pr: 21, ticket: 11, tier: "default", minted: "no " })],
-    ["closed_own_ticket", tierRow({ date: PRE_SWITCH, pr: 21, ticket: 11, tier: "opus", closed: "y" }).split("\t").slice(0, 8).join("\t")],
+    ["closed_own_ticket", tierRow({ date: PRE_SWITCH, pr: 21, ticket: 11, tier: "opus", closed: "y" }).split("\t").slice(0, LEGACY_WIDTH).join("\t")],
   ]) {
     const f = fixture(t, {
       members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
@@ -482,7 +500,7 @@ test("check: a verdict column that is not yes, no or blank is refused as malform
     });
     const r = f.run("check");
     assert.equal(r.code, 2, `${row}\n${r.stdout}${r.stderr}`);
-    const value = row.split("\t")[col === "closed_own_ticket" ? 5 : 6];
+    const value = row.split("\t")[COLUMNS.indexOf(col)];
     assert.ok(r.stderr.includes(`malformed row: ${col} is '${value}', expected yes, no or blank`), r.stderr);
     assert.equal(r.stdout, "");
   }
@@ -494,7 +512,7 @@ test("check: blank verdict columns and every yes/no pair parse, on full and lega
   const f = fixture(t, {
     members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
     tierRows: [
-      tierRow({ date: PRE_SWITCH, pr: 19, ticket: 9, tier: "", closed: "", minted: "" }).split("\t").slice(0, 8).join("\t"),
+      tierRow({ date: PRE_SWITCH, pr: 19, ticket: 9, tier: "", closed: "", minted: "" }).split("\t").slice(0, LEGACY_WIDTH).join("\t"),
       tierRow({ pr: 20, ticket: 10, tier: "default", closed: "", minted: "" }),
       tierRow({ pr: 21, ticket: 10, tier: "default", closed: "yes", minted: "yes" }),
       tierRow({ pr: 22, ticket: 10, tier: "default", closed: "no", minted: "no" }),
@@ -504,6 +522,26 @@ test("check: blank verdict columns and every yes/no pair parse, on full and lega
   const r = f.run("check");
   assert.equal(r.code, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /4 checked, 0 failed/);
+});
+
+// A row with ONE verdict column blank is what a hand-edit leaves when it blanks
+// a failing value; `append` never writes it and a no-ruling backfill blanks both.
+test("check: a row with exactly one verdict column blank is refused as malformed, on full and legacy rows", (t) => {
+  for (const [closed, minted] of [["", "no"], ["", "yes"], ["yes", ""], ["no", ""]]) {
+    for (const legacy of [false, true]) {
+      const full = tierRow({ date: legacy ? PRE_SWITCH : TIER_SWITCH_DATE, pr: 21, ticket: 11, tier: "default", closed, minted });
+      const row = legacy ? full.split("\t").slice(0, LEGACY_WIDTH).join("\t") : full;
+      const f = fixture(t, {
+        members: [{ member: "impl-10", ticket: 10, type: "fleet-implementer" }],
+        tierRows: [tierRow({ pr: 20, ticket: 10, tier: "default" }), row],
+      });
+      const r = f.run("check");
+      const label = `${JSON.stringify({ closed, minted, legacy })}\n${r.stdout}${r.stderr}`;
+      assert.equal(r.code, 2, label);
+      assert.ok(r.stderr.includes(`malformed row: closed_own_ticket is '${closed}' but minted_false_claim is '${minted}', expected both blank or both yes or no`), label);
+      assert.equal(r.stdout, "");
+    }
+  }
 });
 
 test("check --live: warns on each reviewed PR with no row, and the warning alone never fails", (t) => {

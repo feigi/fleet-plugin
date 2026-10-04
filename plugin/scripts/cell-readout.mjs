@@ -58,7 +58,7 @@ import { isCLI } from "./is-cli.mjs";
 import { CELL, POLICY_CELL } from "./ledger-grammar.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
 import { parseFeatures } from "./pr-cost.mjs";
-import { VERDICT } from "./tier-outcomes.mjs";
+import { VERDICT, VERDICT_COLUMNS } from "./tier-outcomes.mjs";
 
 const NAME = "cell-readout";
 export const GATE = Object.freeze({ comparisons: 10, runDates: 5 });
@@ -137,7 +137,7 @@ export function stoppingRule({ features, members, verdicts, added }) {
     const tickets = judged.get(p.chosen_cell);
     if (!tickets || p.run_date < added[p.chosen_cell] || !ruling.has(p.ticket) || !admissibleMember(p, byKey)) continue;
     const v = ruling.get(p.ticket);
-    for (const c of ["closed_own_ticket", "minted_false_claim"]) {
+    for (const c of VERDICT_COLUMNS) {
       if (!VERDICT.includes(v[c])) throw new Error(`ticket #${p.ticket} (PR #${v.pr}): ${c} is '${v[c]}', expected yes or no`);
     }
     const failed = v.minted_false_claim === "yes" || v.closed_own_ticket === "no";

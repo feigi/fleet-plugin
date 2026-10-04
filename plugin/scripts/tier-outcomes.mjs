@@ -63,7 +63,8 @@ const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
 
 // ---------------------------------------------------------------------------
 // pure core — exercised through the CLI by tier-outcomes.test.mjs; only
-// COLUMNS and TIER_SWITCH_DATE are imported directly, the rest through argv
+// COLUMNS, LEGACY_WIDTH and TIER_SWITCH_DATE are imported directly, the rest
+// through argv
 // ---------------------------------------------------------------------------
 
 // APPENDED TO, never inserted into: every awk read-out in the file's header
@@ -85,7 +86,7 @@ const BASE_DEFINITION = "fleet-implementer";
 // on exactly `minted_false_claim=yes` or `closed_own_ticket=no`, so any other
 // spelling would read as a pass.
 export const VERDICT = Object.freeze(["yes", "no"]);
-const VERDICT_COLUMNS = Object.freeze(["closed_own_ticket", "minted_false_claim"]);
+export const VERDICT_COLUMNS = Object.freeze(["closed_own_ticket", "minted_false_claim"]);
 
 // `fleet-implementer` -> `default`, `fleet-implementer-<x>` -> `<x>`, anything
 // else (a generic `task`, a blank pre-#1066 subagent_type) -> null.
@@ -100,7 +101,10 @@ export function shortName(definition) {
 // width but the legacy or the full one is refused: a tab typed into `note`
 // shifts every field after it, and a reader keyed by position cannot tell.
 // So is a verdict column holding anything but `yes`, `no` or blank — blank
-// because a row backfilled without a ruling leaves both empty.
+// because a row backfilled without a ruling leaves both empty, so a row with
+// exactly one of the two blank is refused too: it was never written whole, and
+// a blanked `closed_own_ticket=no` or `minted_false_claim=yes` would read as a
+// pass.
 export function parseTierOutcomes(text) {
   return String(text ?? "").split("\n")
     .filter((l) => l.trim() && !l.startsWith("#"))
@@ -115,6 +119,10 @@ export function parseTierOutcomes(text) {
         if (row[c] !== "" && !VERDICT.includes(row[c])) {
           throw new Error(`malformed row: ${c} is '${row[c]}', expected yes, no or blank — ${line.slice(0, 60)}`);
         }
+      }
+      const [first, second] = VERDICT_COLUMNS;
+      if ((row[first] === "") !== (row[second] === "")) {
+        throw new Error(`malformed row: ${first} is '${row[first]}' but ${second} is '${row[second]}', expected both blank or both yes or no — ${line.slice(0, 60)}`);
       }
       return row;
     });
