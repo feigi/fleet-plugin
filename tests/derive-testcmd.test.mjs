@@ -292,7 +292,10 @@ test("a test command whose glob matches a tracked file, or that the tree cannot 
     "true|cd tests/unit && node --test *.test.mjs",
     "(cd tests/unit && node --test *.test.mjs )",
     "true;pushd tests/unit && node --test *.test.mjs",
-    "pushd tests/unit && node --test *.test.mjs",
+    // Led by `true`, not `pushd`: pushd is a bash builtin, absent from dash
+    // (Ubuntu's /bin/sh), where a command led by it cannot run at all and is
+    // refused by the leading-word probe before the scan is reached.
+    "true && pushd tests/unit && node --test *.test.mjs",
     "node --test ../shared/*.test.mjs",
     "node --test /opt/suite/*.test.mjs",
   ]) {
