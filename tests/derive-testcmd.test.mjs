@@ -230,6 +230,7 @@ test("a test command whose glob matches no tracked file refuses as a stale Recip
     ["node --test *.test.mjs", "*.test.mjs"],
     ["node --test tests/*.test.mjs gone/*.test.mjs", "gone/*.test.mjs"],
     ["true && node --test t?sts/[!a].test.mjs", "t?sts/[!a].test.mjs"],
+    ["node --test gone/*/", "gone/*/"],
   ]) {
     cache(dir, recipe(head, { test: cmd }));
     const r = derive(dir);
@@ -238,6 +239,19 @@ test("a test command whose glob matches no tracked file refuses as a stale Recip
     assert.ok(r.err.includes(`its test command's pattern '${pattern}' matches no file tracked in`), `${cmd}: ${r.err}`);
     assert.match(r.err, NAMES_STEP, cmd);
   }
+});
+
+// `set -f` keeps the scan from globbing the command against the CALLER's
+// working directory: a file there that the stale pattern happens to match
+// would turn the pattern into its own name and slip past the check.
+test("a stale pattern is still refused when the caller's working directory holds a file it matches", () => {
+  const { dir, head } = repo({ "tests/a.test.mjs": "" });
+  const here = tempDir("derive-testcmd-cwd-");
+  writeFileSync(join(here, "nope1.mjs"), "");
+  cache(dir, recipe(head, { test: "node --test nope*.mjs" }));
+  const r = derive(dir, "test", process.env, here);
+  assert.equal(r.status, 1, `nothing in <repo> matches the pattern: ${r.out}`);
+  assert.ok(r.err.includes("its test command's pattern 'nope*.mjs' matches no file tracked in"), r.err);
 });
 
 // The must-ACCEPT half. A pattern matching a tracked file at any depth reads
@@ -259,11 +273,22 @@ test("a test command whose glob matches a tracked file, or that the tree cannot 
     "node --test $SUITE/*.test.mjs",
     "SKIP=gone/* node --test tests/unit/*.test.mjs",
     "node --test --test-name-pattern=* tests/unit/a.test.mjs",
+    "node --test --test-name-pattern foo* tests/unit/a.test.mjs",
+    "node --test --grep foo* tests/unit/a.test.mjs",
+    "node --test tests/*",
+    "node --test tests/*/",
+    "node --test -x*.js",
     "node --test dist/*.test.js",
     "node --test src/*.gen.test.js",
     "[ -d tests ] && node --test tests/unit/*.test.mjs",
     "cd tests/unit && node --test *.test.mjs",
     "(cd tests/unit && node --test *.test.mjs)",
+    "true;cd tests/unit && node --test *.test.mjs",
+    "true&&cd tests/unit&&node --test *.test.mjs",
+    "true|cd tests/unit && node --test *.test.mjs",
+    "(cd tests/unit && node --test *.test.mjs )",
+    "true;pushd tests/unit && node --test *.test.mjs",
+    "pushd tests/unit && node --test *.test.mjs",
     "node --test ../shared/*.test.mjs",
     "node --test /opt/suite/*.test.mjs",
   ]) {
@@ -279,7 +304,74 @@ test("a test command whose glob matches a tracked file, or that the tree cannot 
   assert.equal(i.out, "cp gone/*.json .");
 });
 
-// Both consumers append the runner's own arguments after this string
+// An ambient GIT_INDEX_FILE is the third variable that outranks `-C "$repo"`:
+// the probe's `ls-files` reads the index it names, which can be another
+// repository's or an empty one, and a good Recipe would be refused as stale.
+test("an ambient GIT_INDEX_FILE does not refuse a pattern that a tracked file matches", () => {
+  const { dir, head } = repo({ "tests/a.test.mjs": "" });
+  const cmd = "node --test tests/*.test.mjs";
+  cache(dir, recipe(head, { test: cmd }));
+  const env = { ...FIXTURE_ENV, GIT_INDEX_FILE: join(tempDir("derive-testcmd-index-"), "empty-index") };
+  const control = spawnSync("git", ["-C", dir, "ls-files", "--", ":(glob)tests/*.test.mjs"], { encoding: "utf8", env });
+  assert.equal(control.stdout, "", "fixture: the ambient index must change what ls-files lists");
+  const r = derive(dir, "test", env);
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out, cmd);
+});
+
+// A glob through a tracked symlink to a directory lists nothing (the index
+// holds the link, not what is beneath it) and `check-ignore` exits 128 on it
+// ("beyond a symbolic link"), yet the shell follows the link and the command
+// runs its tests.
+test("a test command whose glob goes through a tracked symlink is accepted, not refused as an environment fault", () => {
+  const { dir, head } = repo({ "plugin/scripts/real.test.mjs": "" });
+  symlinkSync("plugin/scripts", join(dir, "suite"));
+  execFileSync("git", ["add", "suite"], { cwd: dir, stdio: "pipe", env: FIXTURE_ENV });
+  execFileSync("git", ["commit", "-q", "-m", "link"], { cwd: dir, stdio: "pipe", env: FIXTURE_ENV });
+  const cmd = "node --test suite/*.test.mjs";
+  const control = spawnSync("git", ["-C", dir, "check-ignore", "-q", "--no-index", "--", "suite/*.test.mjs"], { encoding: "utf8", env: FIXTURE_ENV });
+  assert.equal(control.status, 128, "fixture: git must refuse to look beyond the symlink");
+  cache(dir, recipe(head, { test: cmd }));
+  const r = derive(dir);
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out, cmd);
+});
+
+// The probe's two git calls each have a refusal for git itself failing, in
+// the script's own words with git's reason appended. The stub fails one
+// subcommand and hands every other call to the real git, so the cache read
+// before the probe is unaffected and only the call under test breaks.
+function gitFailing(subcommand) {
+  const bin = tempDir("derive-testcmd-git-");
+  const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  writeExecStub(join(bin, "git"), `#!/bin/sh\nfor a in "$@"; do\n  if [ "$a" = '${subcommand}' ]; then echo 'git: injected ${subcommand} failure' >&2; exit 128; fi\ndone\nexec '${real}' "$@"\n`);
+  return { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+}
+
+test("a git that cannot list the tracked files refuses, naming its exit status and reason", () => {
+  const { dir, head } = repo({ "tests/a.test.mjs": "" });
+  cache(dir, recipe(head, { test: "node --test tests/*.test.mjs" }));
+  const control = derive(dir);
+  assert.equal(control.status, 0, `fixture: without the stub the pattern is accepted: ${control.err}`);
+  const r = derive(dir, "test", gitFailing("ls-files"));
+  assert.equal(r.status, 1, r.err);
+  assert.equal(r.out, "", "nothing may reach the caller");
+  assert.match(r.err, /^derive-testcmd: cannot list the files tracked in .* to check its test command's pattern 'tests\/\*\.test\.mjs' \(git ls-files exit 128\): git: injected ls-files failure$/m);
+});
+
+test("a git that cannot say whether a path is ignored refuses, naming its exit status and reason", () => {
+  const { dir, head } = repo({ "tests/a.test.mjs": "" });
+  cache(dir, recipe(head, { test: "node --test gone/*.test.mjs" }));
+  const control = derive(dir);
+  assert.equal(control.status, 1, "fixture: without the stub the pattern is refused as stale");
+  assert.ok(control.err.includes("matches no file tracked in"), control.err);
+  const r = derive(dir, "test", gitFailing("check-ignore"));
+  assert.equal(r.status, 1, r.err);
+  assert.equal(r.out, "", "nothing may reach the caller");
+  assert.match(r.err, /^derive-testcmd: cannot ask git whether .* ignores its test command's pattern 'gone\/\*\.test\.mjs' \(git check-ignore exit 128\): git: injected check-ignore failure$/m);
+});
+
+// claim-ticket.sh appends the runner's own arguments after this string
 // textually (`exec sh -c '<cmd> "$@"' agent-test "$@"`), so a command ending
 // in `;` or `&` lets a real shell read those arguments as an unrelated
 // top-level command, and a `#`-led word swallows everything after it,

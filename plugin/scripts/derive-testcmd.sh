@@ -231,12 +231,14 @@ esac
 value=${framed#"$open"}
 value=${value%"$close"}
 
-# Both consumers append the runner's own arguments after this string
-# textually (claim-ticket.sh's `exec sh -c '<cmd> "$@"' agent-test "$@"`), so
-# a command ending in `;`, `&`, or a newline lets a real shell read the
-# caller's "$@" as an unrelated top-level command instead of args reaching
-# the Test entrypoint, and one containing a `#`-led word swallows everything
-# after it, "$@" included, as a comment — measured on both. A trailing
+# claim-ticket.sh appends the runner's own arguments after this string
+# textually (`exec sh -c '<cmd> "$@"' agent-test "$@"`), so a command ending in
+# `;`, `&`, or a newline lets a real shell read the caller's "$@" as an
+# unrelated top-level command instead of args reaching the Test entrypoint, and
+# one containing a `#`-led word swallows everything after it, "$@" included, as
+# a comment. review-core.mjs's snapshot agent appends no arguments but embeds
+# the string in `{ cd <dir> && <cmd>; }`, where the same endings and `#` word
+# break the wrapper as a syntax error — measured on both. A trailing
 # newline is checked here too: the frame above lets a value keep one
 # where an unframed `$(…)` capture always dropped it silently, so a value
 # that used to read as `true;` now reads as `true;\n` and would otherwise
@@ -309,29 +311,55 @@ esac
 # carrying quoting or an expansion, an option, an `=` assignment or value, or a
 # path outside <repo> is the program's own to read and is accepted unprobed,
 # and the scan stops at a `cd`, past which a pattern no longer resolves from
-# <repo>. A pattern under a path git ignores names generated output, such as a
-# build the Install step produces, which is never tracked, so it is accepted
-# too. `[` is a pattern only with a `]` after it, so the `[` builtin is not.
+# <repo>. So is a word right after an option unless it has a `/` or a `.`: it
+# may be that option's value, which names no path. A pattern under a path git
+# ignores names generated output, such as a build the Install step produces,
+# which is never tracked, so it is accepted too, and so is one through a
+# symlink, which git declines to be asked about and the shell follows. `[` is a
+# pattern only with a `]` after it, so the `[` builtin is not. The probe is
+# git's `:(glob)` pathspec, whose `*` and `?` match a leading dot where the
+# shell's do not, so a pattern whose only tracked matches are dotfiles is
+# accepted though the shell would match nothing.
 if [ "$field" = test ]; then
+  # An ambient index would answer `ls-files` for whatever repository or commit
+  # the caller is in the middle of, not for <repo>'s tracked files.
+  unset GIT_INDEX_FILE
   set -f
+  prev=
   # shellcheck disable=SC2086 # field splitting is the point: scanning every word
   for word in $value; do
+    before=$prev
+    prev=$word
     case $word in
       cd|pushd|*[\(\;\&\|]cd|*[\(\;\&\|]pushd) break ;;
       -*|*=*|/*|*..*|*[\'\"\\\$\`\(\)\{\}\<\>\|\&\;\~]*) continue ;;
       *'*'*|*'?'*|*'['*']'*) ;;
       *) continue ;;
     esac
-    listed=0
-    tracked=$(git -C "$repo" ls-files -- ":(glob)$word" 2>/dev/null) || listed=$?
-    [ "$listed" -eq 0 ] || { set +f; die "cannot list the files tracked in $repo to check its test command's pattern '$word' (git ls-files exit $listed)"; }
+    case $before in
+      -*=*) ;;
+      -*) case $word in */*|*.*) ;; *) continue ;; esac ;;
+    esac
+    # The second pathspec is the directories the word matches: the shell hands
+    # `tests/*` the directory `tests/unit`, which ls-files lists only as the
+    # prefix of the files beneath it.
+    tracked=$(git -C "$repo" ls-files -- ":(glob)$word" ":(glob)${word%/}/**" 2>"$errf") || {
+      listed=$?
+      set +f
+      die "cannot list the files tracked in $repo to check its test command's pattern '$word' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)"
+    }
     [ -z "$tracked" ] || continue
+    lead=${word%%[*?[]*}
+    while :; do
+      case $lead in */*) lead=${lead%/*} ;; *) break ;; esac
+      [ ! -L "$repo/$lead" ] || continue 2
+    done
     ignored=0
-    git -C "$repo" check-ignore -q --no-index -- "$word" 2>/dev/null || ignored=$?
+    git -C "$repo" check-ignore -q --no-index -- "$word" 2>"$errf" || ignored=$?
     case $ignored in
-      0) continue ;;
+      0) ;;
       1) set +f; die "the Recipe cache at $cache is invalid: its test command's pattern '$word' matches no file tracked in $repo — a Test entrypoint that selects no tests passes having run nothing, so the Recipe is stale, not a finding; $derive" ;;
-      *) set +f; die "cannot ask git whether $repo ignores its test command's pattern '$word' (git check-ignore exit $ignored)" ;;
+      *) set +f; die "cannot ask git whether $repo ignores its test command's pattern '$word' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
     esac
   done
   set +f
