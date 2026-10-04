@@ -7,14 +7,14 @@ model: "@task:medium"
 <!-- Prompt adapted from Anthropic's vendored `pr-test-analyzer`
      agent
      (marketplace plugin `pr-review-toolkit`, agent file `pr-test-analyzer.md`),
-     which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
+     which this definition replaces.
      Its `model:` is the `@task:medium` route, which resolves through the
      operator's `modelRoles`. The pre-cutover review host's PREVIOUS per-call
      override for this dimension was `sonnet` (the vendor's own frontmatter
      was `model: inherit` with no pin to preserve) — the "recoverable miss"
      downgrade argued in the DEFAULT_DIMENSIONS comment of the pre-cutover
      `plugin/workflows/review-pr.js` (as of a08fe810^): a weak `tests` pass
-     leaves something a later run or a reader still catches. #1349's port
+     leaves something a later run or a reader still catches. The port
      (a08fe810) cut it from that comment; review-core.mjs's SIZE_TIER_DIMS comment
      keeps the other half, naming the dimensions that miss silently and
      permanently. -->

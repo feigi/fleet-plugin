@@ -7,8 +7,7 @@ model: "@smol:low"
 Not adapted from a vendored definition — this dispatch has no upstream
 counterpart. It exists to give the snapshot step in `review-core.mjs` a named,
 tier-controlled identity instead of falling through
-to a session default; #1349 (per #1303's gap 3) forbids sending `model` on
-the `agent()` call itself.
+to a session default; the `agent()` call itself may not carry `model`.
 
 `model: "@smol:low"`, which resolves through the operator's `modelRoles`, replaces
 the pre-cutover review host's previous `A.snapshotModel` default of `haiku` —

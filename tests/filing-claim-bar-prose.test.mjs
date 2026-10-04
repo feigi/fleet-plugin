@@ -18,13 +18,14 @@
 // its routing, and its band-exclusion are stated; they cannot prove a later
 // sentence in the same slice does not carve out an exception.
 //
-// Measured as of this commit, on the working tree with restore after each: six
-// mutations — the bar sentence deleted, its verdict inverted (never → keeps),
-// the record routing redirected to an own open issue, the band-exclusion
-// sentence deleted, the ADR pointer renamed in the prose, and the ADR's guard
-// floor retuned 20 → 50 — each reddened its own pin and no other. Controls: an
-// unpinned step-5 sentence reworded and the ADR's guard bullets rewrapped both
-// stayed green.
+// Measured as of this commit, on the working tree with restore after each:
+// the bar sentence deleted, its verdict inverted (never → keeps), the record
+// routing redirected to an own open issue, the band-exclusion sentence
+// deleted, and the ADR's guard floor retuned 20 → 50 each reddened its own pin
+// and no other. Controls: an unpinned step-5 sentence reworded and the ADR's
+// guard bullets rewrapped both stayed green. A renamed ADR pointer in the
+// prose was measured too, until step 5 stopped citing an ADR: that pin went
+// with the citation, and the ADR is now read by a fixed path in this file.
 //
 // #1113 added the applied-promotion pin. Trigger A counts entries "promoted",
 // and the filed path leaves a citation on the record while the fix-applier's
@@ -42,7 +43,7 @@
 // stayed green.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { between, phrase } from "./support/prose-pin.mjs";
 
@@ -50,6 +51,8 @@ const REPO = join(import.meta.dirname, "..", "plugin");
 const read = (...p) => readFileSync(join(REPO, ...p), "utf8");
 const REVIEW_AND_FIX = read("commands", "review-and-fix.md");
 const ROOT = join(import.meta.dirname, "..");
+// Step 5 ships and names no ADR, so the ADR is read by its own path here.
+const ADR_PATH = join(ROOT, "docs", "adr", "0002-filing-second-bar-worth-a-claim.md");
 
 const flat = (s) => s.replace(/\s+/g, " ");
 
@@ -94,14 +97,8 @@ test("step 5 keys the bar on the finding's claim, never its review band", () => 
   );
 });
 
-test("step 5 points at an ADR that exists, and the ADR keeps its pre-chosen guard", () => {
-  // Read the path out of the prose rather than restating it, so a rename that
-  // updates only one side reds.
-  const [, adrPath] = step5().match(/\(`(docs\/adr\/0002[^`]+)`\)/) ?? [];
-  assert.ok(adrPath, "step 5 no longer cites an ADR 0002 path under `docs/adr/`");
-  assert.ok(existsSync(join(ROOT, adrPath)), `step 5 points at \`${adrPath}\`, which does not exist`);
-
-  const adr = flat(readFileSync(join(ROOT, adrPath), "utf8"));
+test("ADR 0002 keeps its pre-chosen guard", () => {
+  const adr = flat(readFileSync(ADR_PATH, "utf8"));
   // Floor and both triggers as one span, 0001's precedent: chosen before any
   // data, and separate pins would let any one be retuned alone.
   assert.match(
@@ -138,9 +135,7 @@ test("the applied promotion path is stated in step 5 and read by the ADR's guard
   // contains it.
   const [, marker] = s.match(/comment on that record issue, opening `([^`]+)`/) ?? [];
   assert.ok(marker, "step 5 no longer gives the applied-promotion comment a fixed opening, so the guard has no mark to count");
-  const [, adrPath] = s.match(/\(`(docs\/adr\/0002[^`]+)`\)/) ?? [];
-  assert.ok(adrPath, "step 5 no longer cites an ADR 0002 path under `docs/adr/`");
-  const adr = flat(readFileSync(join(ROOT, adrPath), "utf8"));
+  const adr = flat(readFileSync(ADR_PATH, "utf8"));
   // Scoped to the Trigger A bullet, not the whole flattened ADR — an
   // unscoped search matches whichever `X` comment on it` substring appears
   // FIRST in the file, so narrowing Trigger A's own marker while an earlier

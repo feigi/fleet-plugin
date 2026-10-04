@@ -38,7 +38,7 @@ read off the exit code rather than a second rule.
 
 Use `d` array. Blocker open → drop ticket, or surface blocker instead. Cut to oldest 3–5 here — step 3 runs per candidate. Count is next-ticket's own; fleet Phase 0 sets its own.
 
-Cut runs on step 1 data alone — number, title, labels, `d` — never the Agent Brief; a candidate the Brief would have promoted into survivors is dropped here, before that Brief is ever fetched (#22).
+Cut runs on step 1 data alone — number, title, labels, `d` — never the Agent Brief; a candidate the Brief would have promoted into survivors is dropped here, before that Brief is ever fetched.
 
 ## 3. In-flight check (all three, per candidate) — then fetch
 
@@ -50,7 +50,7 @@ Runs all three — a PR about the ticket, a remote branch, a local worktree or b
 
 Title + body + comments, survivors only: `gh issue view <N> --json title,body,comments --jq '.title, .body, (.comments[]|.author.login + ": " + .body)'`. `## Agent Brief` comment outranks body. Blocker named only in brief still drops ticket — step 1 `d` array won't have it. Not `--json body` (body only, brief invisible) nor bare `--comments` (comments only, nothing at all when none, exit 0 — silent loss).
 
-Probes take only `<N>`, so they go first — fetching first spends ~6.4 KB (measured once, on #7) on a candidate about to be dropped. Step 1 already excludes `in-progress`, so step 3 catches the claim that never reached the label rather than the common case; the reorder is cheaper either way. They do not go earlier than this: the script makes three network round-trips (`gh issue view`, `gh pr list`, `git ls-remote`; the local probe is free) — so it stays behind step 2's cut and never runs over the whole step 1 list.
+Probes take only `<N>`, so they go first — fetching first spends ~6.4 KB (measured once, on one issue) on a candidate about to be dropped. Step 1 already excludes `in-progress`, so step 3 catches the claim that never reached the label rather than the common case; the reorder is cheaper either way. They do not go earlier than this: the script makes three network round-trips (`gh issue view`, `gh pr list`, `git ls-remote`; the local probe is free) — so it stays behind step 2's cut and never runs over the whole step 1 list.
 
 ## 4. Suggest — then stop
 
@@ -60,7 +60,7 @@ Probes take only `<N>`, so they go first — fetching first spends ~6.4 KB (meas
 
 FIFO. Never rank by size — that axis is gone. Never by "unblocks #X" either:
 step 2 already dropped anything with an open blocker named in the body — heading,
-bold-label, or inline form (#58) — or wired as a native blocked-by edge (#1741),
+bold-label, or inline form — or wired as a native blocked-by edge,
 so everything here is free to start unless the blocker lives only in a native
 sub-issue link, which the scan does not read, or it is body text alone whose
 phrase and `#N` sit on different lines — both body passes are line-local.
@@ -111,11 +111,11 @@ the push above is the correct one.
 
 `--force-with-lease` matters only on a re-push: step 7 rebases immediately before pushing, so re-entering step 7 after an earlier push needs the force to land the rebased commits. On a re-push the force is load-bearing: stop and report the denial, never retry with a plain `--force`; a denial on a branch that has never been pushed is safe to route around with a plain `git push -u origin HEAD` instead.
 
-`Closes #N` closes issue on merge — as does any closing keyword (`close`, `fixes`, `resolved`, …) sitting directly before an issue reference, wherever it appears in the body. Write one `Closes #M` per issue you mean to close, so `Closes #971, closes #864` closes both; give every other issue mention a word in front of it — `closed issue #M`, or the issue named without the `#`. A keyword before a list links only the first reference in that list, never the rest: `Closes #971, #864` closes only issue 971.
+`Closes #N` closes issue on merge — as does any closing keyword (`close`, `fixes`, `resolved`, …) sitting directly before an issue reference, wherever it appears in the body. Write one `Closes #M` per issue you mean to close, so `Closes #A, closes #B` closes both; give every other issue mention a word in front of it — `closed issue #M`, or the issue named without the `#`. A keyword before a list links only the first reference in that list, never the rest: `Closes #A, #B` closes only issue A.
 
 Repo gating on release label → exactly one of `patch`/`minor`/`major`; `validate-release-label` fails without it.
 
-**Never fold `--label` into the create.** A `gh pr create` that outruns the caller's tool timeout is backgrounded with the PR already open and its flags unapplied, and a timeout carries no exit status for anything to react to — so the label goes missing and every later gate reads the PR as correctly opened (#375). Written as its own command it has its own exit status and fails loudly; `gh pr edit` with no PR argument resolves the current branch's PR, so it lands even when the create's own output was lost to the timeout. Failed → run it again before reporting the PR.
+**Never fold `--label` into the create.** A `gh pr create` that outruns the caller's tool timeout is backgrounded with the PR already open and its flags unapplied, and a timeout carries no exit status for anything to react to — so the label goes missing and every later gate reads the PR as correctly opened. Written as its own command it has its own exit status and fails loudly; `gh pr edit` with no PR argument resolves the current branch's PR, so it lands even when the create's own output was lost to the timeout. Failed → run it again before reporting the PR.
 
 **Session ends here.** Merge happens later, elsewhere: `/review-and-fix` → maintainer adds `ready-to-merge` → `/run-merge-bot` merges in numeric order. Never merge, never add `ready-to-merge` (author's sign-off), never watch CI for merge that won't happen this session.
 

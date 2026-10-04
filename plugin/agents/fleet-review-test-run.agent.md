@@ -7,10 +7,9 @@ model: "@smol:low"
 Not adapted from a vendored definition — this dispatch has no upstream
 counterpart. It exists to give the shared test run in `review-core.mjs` a
 named, tier-controlled identity instead of falling through to a session
-default; #1349 (per #1303's gap 3) forbids sending `model` on the `agent()`
-call itself.
+default; the `agent()` call itself may not carry `model`.
 
-It replaced one full-suite run per review dimension (#2315): every specialist
+It replaced one full-suite run per review dimension: every specialist
 used to run the test command itself, so one review ran the suite up to six
 times on the same immutable snapshot. Now this dispatch runs it once and every
 specialist reads its counts and log.

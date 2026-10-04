@@ -7,7 +7,7 @@ model: "@task:medium"
 <!-- Prompt adapted from Anthropic's vendored `comment-analyzer`
      agent
      (marketplace plugin `pr-review-toolkit`, agent file `comment-analyzer.md`),
-     which this definition replaces (#1349, per #1303's ruling on #1296/#1303).
+     which this definition replaces.
      Its `model:` is the `@task:medium` route, which resolves through the
      operator's `modelRoles`. The pre-cutover review host's PREVIOUS per-call
      override for this dimension was `sonnet` (the vendor's own frontmatter

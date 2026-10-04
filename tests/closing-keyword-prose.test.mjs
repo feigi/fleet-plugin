@@ -155,10 +155,10 @@ const step7 = (text = NEXT_TICKET) =>
 test("next-ticket step 7 says one keyword per intended close, and that several such closes are fine", () => {
   // The per-issue half and the multi-close example are one span: a rewrite to
   // "only one closing keyword per body" is the plausible over-correction, and
-  // it forbids the deliberate `Closes #971, closes #864` this sentence allows.
+  // it forbids the deliberate `Closes #A, closes #B` this sentence allows.
   assert.match(
     step7(),
-    phrase("Write one `Closes #M` per issue you mean to close, so `Closes #971, closes #864` closes both"),
+    phrase("Write one `Closes #M` per issue you mean to close, so `Closes #A, closes #B` closes both"),
     "step 7 lost the one-keyword-per-intended-close rule, or narrowed it so a deliberate multi-issue close reads as wrong",
   );
 });
@@ -188,6 +188,6 @@ test("the step-7 pins survive a reflow of the rule", () => {
   );
   assert.notEqual(rewrapped, NEXT_TICKET, "the rewrap fixture no longer matches step 7 — update it");
   const s = step7(rewrapped);
-  assert.match(s, phrase("Write one `Closes #M` per issue you mean to close, so `Closes #971, closes #864` closes both"));
+  assert.match(s, phrase("Write one `Closes #M` per issue you mean to close, so `Closes #A, closes #B` closes both"));
   assert.match(s, phrase("A keyword before a list links only the first reference in that list, never the rest"));
 });
