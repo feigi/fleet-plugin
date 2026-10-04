@@ -283,9 +283,7 @@ X, verdicts = admissible `ticket-features.tsv` rows with `chosen_cell = X`
 and `run_date` ≥ the date `fleet-implementer-<cell>.agent.md` was most
 recently added, joined to `tier-outcomes.tsv` on `ticket` (last row per
 ticket in file order dated ≥ the `run_date` of the ticket's last such row at
-X in file order; a row's position in either file is its order — rows are
-never inserted mid-file or reordered, an in-place edit keeps its position, and
-a ruling meant to supersede an earlier one is appended; a row
+X in file order; a row
 whose `closed_own_ticket` and `minted_false_claim` are both blank was never
 ruled and is skipped; a ticket with no such row is no verdict). When
 verdicts ≥ 10 AND floor failures ÷ verdicts ≥ 0.80 (P ≈ 12%
@@ -309,11 +307,15 @@ last `tier-outcomes.tsv` row in file order (a both-blank row skipped); the
 carrier is the ticket's last `ticket-features.tsv` row in file order across
 all cells, `slow-high` included, dated ≤ the ruling. Both picks go by file
 order; dates only set the floor, and neither pick is the latest-dated row.
+A row's position in either file is its order: rows are never inserted mid-file
+or reordered, an in-place edit keeps its position, and a ruling meant to
+supersede an earlier one is appended.
 The ruling is a verdict for
 X only when the carrier is an admissible row at X dated ≥ the date
 `fleet-implementer-<cell>.agent.md` was most recently added; this replaces
-the "last row per ticket dated ≥ … the ticket's last such row at X" join
-above, under which one ruling dated after Pulls at two cells counted for
+the "last row per ticket in file order dated ≥ … the ticket's last such row at
+X in file order" join above, under which one ruling dated after Pulls at two
+cells counted for
 both. A carrier at the policy cell, or one that is not admissible or predates
 its cell's definition, charges nobody: the verdict does not fall back to an
 earlier Pull.
