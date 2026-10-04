@@ -67,7 +67,7 @@ test("isCLI defaults to the live process.argv[1]", () => {
 // symlinked run must match it, not merely be non-zero.
 const CLI_SCRIPTS = [
   "diff-stats", "fleet-heartbeat", "fleet-tick", "frontmatter-check", "main-checkout",
-  "member-outcomes", "tier-check", "tier-outcomes", "tier-roles", "board", "dispositions-check",
+  "member-outcomes", "tier-check", "tier-outcomes", "tier-roles", "board", "dispositions-check", "recipe-prove",
 ];
 
 for (const name of CLI_SCRIPTS) {
