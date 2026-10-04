@@ -37,6 +37,16 @@
 // `below the gate` count on stderr. Nothing on either stream names a session,
 // ticket or member: the gate forbids reading a comparison early.
 //
+// STOPPING RULE (exported as `stoppingRule`, not printed by this CLI). For a
+// cell X other than slow-high whose definition is live, a VERDICT is a ticket
+// with an admissible Pull at X dated on or after the day X's
+// `fleet-implementer-<cell>` definition was most recently added, ruled by its
+// last tier-outcomes.tsv row (a `+`-joined `ticket` field rules each ticket
+// it names); a ticket counts once however many Pulls it took. A verdict FAILS
+// the quality floor on `minted_false_claim=yes` or `closed_own_ticket=no`.
+// X is to be withdrawn once it has at least STOP.verdicts verdicts and
+// floor failures ÷ verdicts is at least STOP.failRate.
+//
 // Exit 0 whatever the counts; 2 on a usage error or an unreadable or
 // malformed input, with nothing on stdout.
 
@@ -49,6 +59,7 @@ import { parseFeatures } from "./pr-cost.mjs";
 
 const NAME = "cell-readout";
 export const GATE = Object.freeze({ comparisons: 10, runDates: 5 });
+export const STOP = Object.freeze({ verdicts: 10, failRate: 0.8 });
 
 const key = (session, agent) => `${session}\0${agent}`;
 const levelOf = (cell) => CELL.exec(cell)?.[2] ?? null;
@@ -102,6 +113,37 @@ export function readout({ features, members }) {
     return { cell, comparisons, runDates, dates: [...dates].sort(), models, gated: comparisons >= GATE.comparisons && runDates >= GATE.runDates };
   });
   return { cells: out, unjoined };
+}
+
+/**
+ * One entry per cell named in `added` (cell → the `YYYY-MM-DD` its definition
+ * was most recently added) other than the policy cell, sorted by cell:
+ * `{ cell, since, verdicts, failures, stop }`. `verdicts` is
+ * `[{ ticket, pr, run_date, closed_own_ticket, minted_false_claim, failed }]`
+ * sorted by ticket, `run_date` the ruling's; `stop` is whether the stopping
+ * rule withdraws the cell. `verdicts` are parsed tier-outcomes.tsv rows.
+ */
+export function stoppingRule({ features, members, verdicts, added }) {
+  const byKey = new Map(members.map((m) => [key(m.session, m.agent), m]));
+  const ruling = new Map();
+  for (const v of verdicts) for (const t of String(v.ticket).split("+")) ruling.set(t, v);
+  const judged = new Map(Object.keys(added).filter((c) => c !== POLICY_CELL).map((c) => [c, new Map()]));
+  for (const p of features) {
+    const tickets = judged.get(p.chosen_cell);
+    if (!tickets || p.run_date < added[p.chosen_cell] || !ruling.has(p.ticket) || !admissibleMember(p, byKey)) continue;
+    const v = ruling.get(p.ticket);
+    const failed = v.minted_false_claim === "yes" || v.closed_own_ticket === "no";
+    tickets.set(p.ticket, {
+      ticket: p.ticket, pr: v.pr, run_date: v.run_date,
+      closed_own_ticket: v.closed_own_ticket, minted_false_claim: v.minted_false_claim, failed,
+    });
+  }
+  return [...judged].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([cell, tickets]) => {
+    const list = [...tickets.values()].sort((a, b) => Number(a.ticket) - Number(b.ticket));
+    const failures = list.filter((v) => v.failed).length;
+    const stop = list.length >= STOP.verdicts && failures / list.length >= STOP.failRate;
+    return { cell, since: added[cell], verdicts: list, failures, stop };
+  });
 }
 
 // Only a gated cell is formatted, and a comparison needs an admissible row at

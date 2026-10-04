@@ -10,7 +10,7 @@ import { tempDir } from "./temp-dir.mjs";
 import { paragraph, phrase, unemphasized } from "./prose-pin.mjs";
 import { formatTsv } from "./member-outcomes.mjs";
 import { FEATURE_COLUMNS } from "./pr-cost.mjs";
-import { readout, GATE } from "./cell-readout.mjs";
+import { readout, stoppingRule, GATE, STOP } from "./cell-readout.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./cell-readout.mjs", import.meta.url));
 
@@ -339,3 +339,95 @@ function parsed(w) {
     members: w.members.map((r) => ({ ...r })),
   };
 }
+
+// ---------------------------------------------------------------------------
+// The per-cell stopping rule: admissible Pulls at a cell, joined to their
+// ticket's last tier-outcomes row.
+
+const verdict = (o) => ({
+  run_date: "2026-10-03", pr: "", ticket: "", class: "", tier: "", closed_own_ticket: "yes",
+  minted_false_claim: "no", note: "n", sizing: "", profile: "", loc: "", files: "", ...o,
+});
+// `n` admissible Pulls at `cell` on `date`, each ruled; the first `failures` fail the floor,
+// alternating between its two halves.
+function addVerdicts(w, cell, n, failures, { date = "2026-10-02", ...rowOpts } = {}) {
+  w.verdicts ??= [];
+  for (let i = 0; i < n; i++) {
+    addRow(w, { session: `2026-10-02T00-00-00-000Z_v${nextSession++}`, date, cell, ...rowOpts });
+    const p = w.features.at(-1);
+    p.run_date = date;
+    const fail = i < failures;
+    w.verdicts.push(verdict({
+      ticket: p.ticket, pr: String(Number(p.ticket) + 5000),
+      minted_false_claim: fail && i % 2 === 0 ? "yes" : "no", closed_own_ticket: fail && i % 2 === 1 ? "no" : "yes",
+    }));
+  }
+}
+const stop = (w, added) => stoppingRule({ ...parsed(w), verdicts: (w.verdicts ?? []).map((r) => ({ ...r })), added });
+const judged = (w, added, cell) => stop(w, added).find((c) => c.cell === cell);
+
+test("stopping rule: ten verdicts with eight floor failures stop the cell; seven, or nine verdicts all failing, do not", () => {
+  const added = { "smol-high": "2026-09-01" };
+  const eight = world();
+  addVerdicts(eight, "smol-high", 10, 8);
+  const at = judged(eight, added, "smol-high");
+  assert.equal(at.verdicts.length, STOP.verdicts);
+  assert.equal(at.failures, 8, "both floor halves count: minted_false_claim=yes and closed_own_ticket=no");
+  assert.equal(at.stop, true);
+  assert.equal(at.since, "2026-09-01");
+  assert.deepEqual(Object.keys(at.verdicts[0]).sort(), ["closed_own_ticket", "failed", "minted_false_claim", "pr", "run_date", "ticket"]);
+
+  const seven = world();
+  addVerdicts(seven, "smol-high", 10, 7);
+  assert.equal(judged(seven, added, "smol-high").stop, false, "70% is under the 80% floor-failure rate");
+
+  const nine = world();
+  addVerdicts(nine, "smol-high", 9, 9);
+  assert.equal(judged(nine, added, "smol-high").stop, false, "nine verdicts are under the ten the rule needs");
+
+  // Past ten verdicts the rate alone decides: 28 of 35 is 80%, 27 of 35 under it.
+  const exact = world();
+  addVerdicts(exact, "smol-high", 35, 28);
+  assert.equal(judged(exact, added, "smol-high").stop, true);
+  const under = world();
+  addVerdicts(under, "smol-high", 35, 27);
+  assert.equal(judged(under, added, "smol-high").stop, false);
+});
+
+test("stopping rule: only admissible Pulls on or after the definition was last added count, at a cell with a live definition other than the policy cell", () => {
+  const w = world();
+  addVerdicts(w, "smol-high", 10, 10, { date: "2026-10-02" });
+  addVerdicts(w, "task-high", 10, 10, { effort: "medium" });
+  addVerdicts(w, "task-high", 2, 2, { subagentType: "task" });
+  addVerdicts(w, "slow-high", 10, 10);
+  addVerdicts(w, "task-max", 10, 10);
+  const out = stop(w, { "smol-high": "2026-10-03", "task-high": "2026-09-01", "slow-high": "2026-09-01" });
+  assert.deepEqual(out.map((c) => c.cell), ["smol-high", "task-high"], "slow-high is the policy cell; task-max has no definition");
+  assert.equal(out[0].verdicts.length, 0, "every Pull predates the definition's re-add");
+  assert.equal(out[1].verdicts.length, 0, "a clamped effort or a generic dispatch is not admissible");
+  assert.equal(out[0].stop, false);
+
+  const reAdded = stop(w, { "smol-high": "2026-10-02" });
+  assert.equal(reAdded[0].verdicts.length, 10, "a Pull dated the day the definition was added counts");
+  assert.equal(reAdded[0].stop, true);
+});
+
+test("stopping rule: a ticket counts once, judged by its last tier-outcomes row, and a `+`-joined ticket field rules each ticket", () => {
+  const w = world();
+  addVerdicts(w, "smol-high", 10, 10);
+  const [first, second] = w.features;
+  // A re-dispatch of the first ticket in its own session: same ticket, same cell.
+  addRow(w, { session: first.session, date: "2026-10-02", cell: "smol-high" });
+  Object.assign(w.features.at(-1), { ticket: first.ticket, agent: `impl-${first.ticket}-2`, run_date: "2026-10-02" });
+  Object.assign(w.members.at(-1), { ticket: first.ticket, agent: `impl-${first.ticket}-2`, member: `impl-${first.ticket}-2` });
+  // A later ruling of the first ticket passes the floor, and the second ticket's
+  // only ruling now shares a row with another ticket.
+  w.verdicts.push(verdict({ ticket: first.ticket, pr: "9001" }));
+  w.verdicts.find((v) => v.ticket === second.ticket).ticket = `77+${second.ticket}`;
+  const at = judged(w, { "smol-high": "2026-09-01" }, "smol-high");
+  assert.equal(at.verdicts.length, 10, "the re-dispatch adds no second verdict");
+  assert.equal(at.failures, 9, "the first ticket's last ruling passed");
+  assert.equal(at.verdicts.find((v) => v.ticket === first.ticket).pr, "9001");
+  assert.equal(at.verdicts.find((v) => v.ticket === second.ticket).failed, true);
+  assert.equal(at.stop, true);
+});
