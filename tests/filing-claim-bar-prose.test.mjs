@@ -18,13 +18,14 @@
 // its routing, and its band-exclusion are stated; they cannot prove a later
 // sentence in the same slice does not carve out an exception.
 //
-// Measured as of this commit, on the working tree with restore after each: six
-// mutations — the bar sentence deleted, its verdict inverted (never → keeps),
-// the record routing redirected to an own open issue, the band-exclusion
-// sentence deleted, the ADR pointer renamed in the prose, and the ADR's guard
-// floor retuned 20 → 50 — each reddened its own pin and no other. Controls: an
-// unpinned step-5 sentence reworded and the ADR's guard bullets rewrapped both
-// stayed green.
+// Measured as of this commit, on the working tree with restore after each:
+// the bar sentence deleted, its verdict inverted (never → keeps), the record
+// routing redirected to an own open issue, the band-exclusion sentence
+// deleted, and the ADR's guard floor retuned 20 → 50 each reddened its own pin
+// and no other. Controls: an unpinned step-5 sentence reworded and the ADR's
+// guard bullets rewrapped both stayed green. A renamed ADR pointer in the
+// prose was measured too, until step 5 stopped citing an ADR: that pin went
+// with the citation, and the ADR is now read by a fixed path in this file.
 //
 // #1113 added the applied-promotion pin. Trigger A counts entries "promoted",
 // and the filed path leaves a citation on the record while the fix-applier's
