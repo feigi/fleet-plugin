@@ -83,7 +83,10 @@ if (Number.isNaN(SINCE) || Number.isNaN(UNTIL)) die("--since/--until must be ISO
 const CACHE = flag("cache", path.join(os.tmpdir(), "in-flight-cycle-time-stages-cache", REPO.replace("/", "__")));
 if (!/^[\w.-]+\/[\w.-]+$/.test(REPO)) die(`--repo must be owner/name, got ${REPO}`);
 if (!Number.isInteger(N) || N < 1) die(`--population must be a positive integer`);
-if (path.resolve(CACHE).startsWith(process.cwd() + path.sep) && fs.existsSync(path.join(process.cwd(), ".git"))) die(`--cache ${CACHE} is inside the repository; keep raw JSON out of the tree`);
+// Refuse a cache inside the repository from whatever directory the script runs:
+// walk up from cwd to the nearest `.git` (a directory, or a worktree's file).
+const repoRoot = (() => { for (let d = process.cwd(); ; d = path.dirname(d)) { if (fs.existsSync(path.join(d, ".git"))) return d; if (path.dirname(d) === d) return null; } })();
+if (repoRoot !== null && (path.resolve(CACHE) + path.sep).startsWith(repoRoot + path.sep)) die(`--cache ${CACHE} is inside the repository at ${repoRoot}; keep raw JSON out of the tree`);
 fs.mkdirSync(CACHE, { recursive: true });
 
 // ------------------------------------------------------------ transport ----
@@ -214,6 +217,13 @@ for (const pr of pop) {
   const postOpenCommits = sorted(pr.commits.map((c) => T(c.commit.author.date)).filter((t) => t > pr.created));
   const reviewComments = sorted(pr.comments.filter((c) => REVIEW_COMMENT.test(c.body) && T(c.created_at) < pr.merged).map((c) => T(c.created_at)));
   const haltComments = pr.comments.filter((c) => /^finisher-pr-\d+(?:-[a-z])? halted/i.test(c.body)).map((c) => T(c.created_at));
+  // A rebase re-dates every commit: `commit.committer.date` becomes the moment
+  // of the force push that lands it. A `head_ref_force_pushed` whose time is
+  // within 2 min of a committer date on this PR is therefore a rebase (the
+  // merge bot's `gh pr update-branch --rebase`, or a member's rebase before
+  // its push), not a plain amend-and-force.
+  const committerDates = pr.commits.map((c) => T(c.commit.committer.date));
+  const rebasePushIn = (lo, hi) => pushes.some((pt) => pt > lo && pt <= hi && committerDates.some((cd) => Math.abs(cd - pt) <= 2 * MIN));
   pr.label1 = labels[0] ?? null;
   pr.labelLast = labels.length ? labels[labels.length - 1] : null;
   pr.labelCount = labels.length;
@@ -241,7 +251,7 @@ for (const pr of pop) {
     const pushInside = pushes.some(inside) || postOpenCommits.some(inside);
     const commentInside = pr.comments.some((c) => inside(T(c.created_at)));
     const pushBefore = pushes.some((t) => t > prevLabel && t <= u) || postOpenCommits.some((t) => t > prevLabel && t <= u);
-    const rec = { unlabel: u, relabel, gap, pushBefore, pushInside, halt: haltComments.some((t) => t > prevLabel && t <= (relabel ?? pr.merged)) };
+    const rec = { unlabel: u, relabel, gap, pushBefore, pushInside, rebaseBefore: rebasePushIn(prevLabel, u), halt: haltComments.some((t) => t > prevLabel && t <= (relabel ?? pr.merged)) };
     if (relabel === null) { rec.shape = "merged-unlabelled"; pr.churns.push(rec); }
     else if (gap <= 60e3 && !pushInside && !commentInside) pr.flips.push(rec);
     else { rec.shape = classifyChurn(rec); pr.churns.push(rec); }
@@ -402,7 +412,7 @@ P();
 const shapes = [...new Set(pop.flatMap((p) => p.churns.map((c) => c.shape)))].sort();
 P(`Churn windows by legible shape (all buckets): ${shapes.map((s) => { const ws = pop.flatMap((p) => p.churns.filter((c) => c.shape === s)); return `**${s}** ${ws.length} (PRs #${[...new Set(pop.filter((p) => p.churns.some((c) => c.shape === s)).map((p) => p.n))].join(", #")}; label-off ${ws.filter((w) => w.gap !== null).length ? `median ${fmtH(median(ws.filter((w) => w.gap !== null).map((w) => w.gap)))}` : "n/a"})`; }).join("; ")}.`);
 P();
-P(`Re-pin flips: ${pop.reduce((s, p) => s + p.flips.length, 0)} in ${pop.filter((p) => p.flips.length).length} PRs; gap median ${(median(pop.flatMap((p) => p.flips.map((f) => f.gap))) / 1e3).toFixed(0)} s, max ${(Math.max(0, ...pop.flatMap((p) => p.flips.map((f) => f.gap))) / 1e3).toFixed(0)} s; ${pop.flatMap((p) => p.flips).filter((f) => f.pushBefore).length} follow a push that landed after the previous label (the merge bot's own rebase, by its committer dates); the flip precedes the merge by median ${fmtH(median(pop.flatMap((p) => p.flips.map((f) => p.merged - f.relabel))))}.`);
+P(`Re-pin flips: ${pop.reduce((s, p) => s + p.flips.length, 0)} in ${pop.filter((p) => p.flips.length).length} PRs; gap median ${(median(pop.flatMap((p) => p.flips.map((f) => f.gap))) / 1e3).toFixed(0)} s, max ${(Math.max(0, ...pop.flatMap((p) => p.flips.map((f) => f.gap))) / 1e3).toFixed(0)} s; ${pop.flatMap((p) => p.flips).filter((f) => f.pushBefore).length} follow a push that landed after the previous label, ${pop.flatMap((p) => p.flips).filter((f) => f.rebaseBefore).length} of them a rebase by signature (a \`head_ref_force_pushed\` within 2 min of a \`commit.committer.date\` on the PR — \`gh pr update-branch --rebase\` re-dates every commit it lands); the flip precedes the merge by median ${fmtH(median(pop.flatMap((p) => p.flips.map((f) => p.merged - f.relabel))))}.`);
 P();
 P(`### (c) against the queue ahead`);
 P();
@@ -457,14 +467,63 @@ P(`Per stage in live time, log-hours on depth + same-day arrivals: ${[stageRegLi
 P();
 P(`Live (c) against the queue ahead: ${[[0, 0], [1, 2], [3, 5], [6, Infinity]].map(([lo, hi]) => { const xs = qa(lo, hi); return `${hi === Infinity ? `${lo}+` : lo === hi ? `${lo}` : `${lo}-${hi}`} lower open → ${stat(xs.map((p) => p.cLive))} (n=${xs.length})`; }).join("; ")}.`);
 P();
+
+// ------------------------------------------------ alternative reading ----
+// Little's law: with arrivals steady, PRs pile up exactly when merges have
+// been slow, so depth at arrival may be a symptom of a slow Pass — which would
+// also lengthen the arriving PR's own (c) — rather than a cause of the wait.
+// (i) hold the Pass's recent throughput fixed; (ii) split (c) into PRs served
+// ahead × per-merge pace: a queue raises `served` with depth and leaves pace
+// flat, a slow bot raises pace; (iii) split the queue ahead into lower PRs
+// already labelled (the Pass's own queue, `run-merge-bot.md`: lowest number
+// first) and lower PRs merely open (in the way only when related: held-behind).
+const LOOKBACK = 2 * H;
+for (const pr of pop) {
+  pr.mergesBefore = pop.filter((q) => q.merged >= pr.created - LOOKBACK && q.merged < pr.created).length;
+  pr.preLive = liveSpan(pr.created - LOOKBACK, pr.created) === LOOKBACK;
+  pr.served = pr.label1 === null ? null : pop.filter((q) => q !== pr && q.merged > pr.label1 && q.merged < pr.merged).length;
+  pr.pace = pr.c === null ? null : pr.c / (pr.served + 1);
+  pr.paceLive = pr.cLive === null ? null : pr.cLive / (pr.served + 1);
+  pr.labelledAhead = pr.label1 === null ? null : pop.filter((q) => q.n < pr.n && q.label1 !== null && q.label1 <= pr.label1 && q.merged > pr.label1).length;
+  pr.unlabelledAhead = pr.label1 === null ? null : pr.lowerOpenAtLabel - pr.labelledAhead;
+}
+const hasC = pop.filter((p) => p.c !== null);
+const preLive = pop.filter((p) => p.preLive);
+const sp = (xs, f, g) => spearman(xs.map(f), xs.map(g)).toFixed(2);
+P(`### Alternative reading tested: depth as a symptom of a slow merge side`);
+P();
+P(`Little's law: with arrivals steady, PRs pile up exactly when merges have been slow, so depth at arrival could be a symptom of a slow Pass rather than a cause of a long wait — and a slow Pass would lengthen the arriving PR's own (c) too. (i) The Pass's recent throughput: population PRs with \`merged_at\` in [created − ${LOOKBACK / H} h, created); the regression runs on PRs whose preceding ${LOOKBACK / H} h were fully fleet-live (no dormant stretch inside), so a sleeping fleet cannot pose as a slow bot. (ii) (c) split into PRs served ahead (population \`merged_at\` inside (first label, merged)) and per-merge pace ((c) ÷ (served + 1)). (iii) The queue ahead split into lower-numbered PRs already carrying \`ready-to-merge\` and unmerged at this PR's first label (the Pass's own queue, lowest number first) and lower PRs merely open at that moment (in the Pass's way only when related — \`held-behind\`).`);
+P();
+P(`- (i) Spearman(depth, merges in prior ${LOOKBACK / H} h): ${sp(pop, (p) => p.depth, (p) => p.mergesBefore)} (all ${pop.length}), ${sp(preLive, (p) => p.depth, (p) => p.mergesBefore)} (fully-live preceding window, n=${preLive.length}); Spearman(merges in prior ${LOOKBACK / H} h, cycle): ${sp(pop, (p) => p.mergesBefore, (p) => p.cycle)} (all), ${sp(preLive, (p) => p.mergesBefore, (p) => p.cycle)} (fully-live).`);
+{
+  const yW = preLive.map((p) => Math.log(hours(p.cycle))), yV = preLive.map((p) => Math.log(Math.max(hours(p.cycleLive), 1 / 60)));
+  const zD = zscore(preLive.map((p) => p.depth)), zM = zscore(preLive.map((p) => p.mergesBefore)), X2 = preLive.map((_, i) => [zD[i], zM[i]]);
+  P(`- (i) OLS on the fully-live subset (n=${preLive.length}; predictors re-standardised within it): log(cycle) on depth alone ${fm(ols(yW, zD.map((v) => [v])), ["depth"])}; on depth + prior merges ${fm(ols(yW, X2), ["depth", "prior merges"])}. log(live cycle): depth alone ${fm(ols(yV, zD.map((v) => [v])), ["depth"])}; depth + prior merges ${fm(ols(yV, X2), ["depth", "prior merges"])}.`);
+}
+P();
+P(table(["bucket", "n (with a label)", "merges in prior 2 h (median)", "served ahead during (c) (median / p90)", "pace (c)/(served+1) (median / p90)", "live pace (median / p90)", "(c) (median / p90)"],
+  [...BUCKETS, "all"].map((b) => { const xs = (b === "all" ? pop : byBucket(b)).filter((p) => p.c !== null); return [b, xs.length, median(xs.map((p) => p.mergesBefore)), stat(xs.map((p) => p.served), (v) => v.toFixed(1)), stat(xs.map((p) => p.pace)), stat(xs.map((p) => p.paceLive)), stat(xs.map((p) => p.c))]; })));
+P();
+P(`- (ii) Spearman(depth, served ahead): ${sp(hasC, (p) => p.depth, (p) => p.served)}; Spearman(depth, pace): ${sp(hasC, (p) => p.depth, (p) => p.pace)}; Spearman(depth, live pace): ${sp(hasC, (p) => p.depth, (p) => p.paceLive)}; Spearman(lower open at label, served ahead): ${sp(hasC, (p) => p.lowerOpenAtLabel, (p) => p.served)}; Spearman(lower open at label, pace): ${sp(hasC, (p) => p.lowerOpenAtLabel, (p) => p.pace)}. Pace by bucket in minutes per merge, mean: ${BUCKETS.map((b) => `${b} ${(byBucket(b).filter((p) => p.c !== null).reduce((s, p) => s + p.pace, 0) / byBucket(b).filter((p) => p.c !== null).length / MIN).toFixed(0)}`).join(", ")}.`);
+P();
+const la = (lo, hi) => hasC.filter((p) => p.labelledAhead >= lo && p.labelledAhead <= hi);
+P(table(["lower PRs already labelled and unmerged at first label", "n", "(c) median / p90", "live (c) median / p90", "served ahead (median)", "lower PRs open but unlabelled at first label (median)", "depth-at-arrival median"],
+  [[0, 0], [1, 1], [2, 3], [4, Infinity]].map(([lo, hi]) => { const xs = la(lo, hi); return [hi === Infinity ? `${lo}+` : lo === hi ? `${lo}` : `${lo}-${hi}`, xs.length, stat(xs.map((p) => p.c)), stat(xs.map((p) => p.cLive)), xs.length ? median(xs.map((p) => p.served)) : "—", xs.length ? median(xs.map((p) => p.unlabelledAhead)) : "—", xs.length ? median(xs.map((p) => p.depth)) : "—"]; })));
+P();
+{
+  const yC = hasC.map((p) => Math.log(Math.max(hours(p.c), 1 / 60)));
+  const zL = zscore(hasC.map((p) => p.labelledAhead)), zU = zscore(hasC.map((p) => p.unlabelledAhead)), zD = zscore(hasC.map((p) => p.depth));
+  P(`- (iii) Spearman((c), lower labelled ahead): ${sp(hasC, (p) => p.labelledAhead, (p) => p.c)}; Spearman((c), lower open but unlabelled): ${sp(hasC, (p) => p.unlabelledAhead, (p) => p.c)}; Spearman(lower labelled ahead, lower open unlabelled): ${sp(hasC, (p) => p.labelledAhead, (p) => p.unlabelledAhead)}. OLS of log((c) hours) on standardised predictors (n=${hasC.length}): labelled + unlabelled ${fm(ols(yC, hasC.map((_, i) => [zL[i], zU[i]])), ["labelled ahead", "open unlabelled ahead"])}; labelled + unlabelled + depth ${fm(ols(yC, hasC.map((_, i) => [zL[i], zU[i], zD[i]])), ["labelled ahead", "open unlabelled ahead", "depth"])}.`);
+}
+P();
 P(`### Per-PR rows`);
 P();
-P(`<details><summary>${pop.length} rows: PR, created (UTC), depth, bucket, same-day arrivals, cycle h, live cycle h, (0) claim→open h, (a) h, (b) h, (c) h, (c'') h, evidence kind, ready-to-merge label count, re-pin flips, churn windows (shape:gap min), lower-numbered PRs open at first label</summary>`);
+P(`<details><summary>${pop.length} rows: PR, created (UTC), depth, bucket, same-day arrivals, cycle h, live cycle h, (0) claim→open h, (a) h, (b) h, (c) h, (c'') h, evidence kind, ready-to-merge label count, re-pin flips, churn windows (shape:gap min), lower-numbered PRs open at first label, of which already labelled, population PRs merged during (c)</summary>`);
 P();
-P(table(["PR", "created", "depth", "bucket", "same-day", "cycle", "live cycle", "(0)", "(a)", "(b)", "(c)", "(c'')", "evidence", "labels", "flips", "churn", "lower@label"],
+P(table(["PR", "created", "depth", "bucket", "same-day", "cycle", "live cycle", "(0)", "(a)", "(b)", "(c)", "(c'')", "evidence", "labels", "flips", "churn", "lower@label", "labelled@label", "served"],
   pop.map((p) => [`#${p.n}`, new Date(p.created).toISOString().slice(5, 16).replace("T", " "), p.depth, p.bucket, p.sameDay, hours(p.cycle).toFixed(2), hours(p.cycleLive).toFixed(2),
     p.claim !== null ? hours(p.created - p.claim).toFixed(2) : "—", p.a !== null ? hours(p.a).toFixed(2) : "—", p.b !== null ? hours(p.b).toFixed(2) : "—", p.c !== null ? hours(p.c).toFixed(2) : "—", p.cSubst !== null ? hours(p.cSubst).toFixed(2) : "—",
-    p.evidenceKind ?? "—", p.labelCount, p.flips.length, p.churns.map((c) => `${c.shape}:${c.gap === null ? "∞" : (c.gap / MIN).toFixed(0)}`).join(" ") || "—", p.lowerOpenAtLabel ?? "—"])));
+    p.evidenceKind ?? "—", p.labelCount, p.flips.length, p.churns.map((c) => `${c.shape}:${c.gap === null ? "∞" : (c.gap / MIN).toFixed(0)}`).join(" ") || "—", p.lowerOpenAtLabel ?? "—", p.labelledAhead ?? "—", p.served ?? "—"])));
 P();
 P(`</details>`);
 console.log(out.join("\n"));
