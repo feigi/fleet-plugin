@@ -26,7 +26,8 @@
 //                         of the population (default: all of them).
 //   --bound B             the proposed In-flight bound (default 8).
 //   --cache DIR           raw-JSON cache dir (default <os.tmpdir()>/in-flight-
-//                         baseline-cache). Never inside the repo.
+//                         baseline-cache). Never inside the repo: a DIR under
+//                         any git checkout is refused (exit 1).
 //   --refresh             ignore cached pages and refetch everything.
 //   --transport auto|gh|curl   force a transport (default auto).
 //   --no-token            never send GITHUB_TOKEN with curl.
@@ -108,6 +109,11 @@ function die(msg, code = 1) { process.stderr.write(`in-flight-baseline: ${msg}\n
 function log(msg) { process.stderr.write(`${msg}\n`); }
 
 // ------------------------------------------------------------ transport ----
+// Raw JSON never belongs in a checkout: refuse a cache dir that sits inside one.
+for (let d = path.resolve(flags.cache); ; d = path.dirname(d)) {
+  if (fs.existsSync(path.join(d, ".git"))) die(`--cache ${flags.cache} is inside the git checkout at ${d}; use a directory outside any repo (default ${path.join(os.tmpdir(), "in-flight-baseline-cache")})`);
+  if (path.dirname(d) === d) break;
+}
 const repoCacheDir = path.join(flags.cache, flags.repo.replace("/", "__"));
 fs.mkdirSync(repoCacheDir, { recursive: true });
 
@@ -421,6 +427,55 @@ const evWindow = evRows.length ? { newest: byMergedDesc[0], oldest: byMergedDesc
 const l2mByDay = new Map();
 for (const e of withLabel) { const k = day(e.merged); (l2mByDay.get(k) || l2mByDay.set(k, []).get(k)).push(e.merged - e.last); }
 
+// ----------------------------------------------------- confounder checks ----
+// Could the depth↔cycle gradient (§ 2's bucket medians, § 3's held-vs-rest
+// gap) be an artefact of WHICH DAY a PR arrived (day of week, a stall day), or
+// of the merge gate's serialization (one merge per CI run)? Stratify by UTC
+// day of creation, demean by day, decompose the cycle at the labels, and read
+// the inter-merge spacing and the ready-queue depth at label time.
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const dow = (t) => DOW[new Date(t).getUTCDay()];
+const isWeekend = (t) => { const w = new Date(t).getUTCDay(); return w === 0 || w === 6; };
+const BUCKETS = [["0–2", 0, 2], ["3–5", 3, 5], ["6–9", 6, 9], ["10+", 10, Infinity]];
+const inBucket = (r, [, lo, hi]) => r.depth >= lo && r.depth <= hi;
+const medOf = (xs) => median(sortedNum(xs));
+const fmtSignedMin = (ms) => `${ms < 0 ? "−" : "+"}${Math.round(Math.abs(ms) / MIN)} min`;
+function spearman(xs, ys) {            // rank correlation, ties averaged
+  const rank = (a) => { const idx = a.map((v, i) => [v, i]).sort((p, q) => p[0] - q[0]); const r = new Array(a.length); for (let i = 0; i < idx.length;) { let j = i; while (j + 1 < idx.length && idx[j + 1][0] === idx[i][0]) j++; for (let k = i; k <= j; k++) r[idx[k][1]] = (i + j) / 2 + 1; i = j + 1; } return r; };
+  const rx = rank(xs), ry = rank(ys), mx = rx.reduce((a, b) => a + b, 0) / rx.length, my = ry.reduce((a, b) => a + b, 0) / ry.length;
+  let sxy = 0, sxx = 0, syy = 0;
+  for (let i = 0; i < rx.length; i++) { sxy += (rx[i] - mx) * (ry[i] - my); sxx += (rx[i] - mx) ** 2; syy += (ry[i] - my) ** 2; }
+  return sxx && syy ? sxy / Math.sqrt(sxx * syy) : NaN;
+}
+const rho = (list, fx, fy) => list.length >= 3 ? spearman(list.map(fx), list.map(fy)).toFixed(2) : "—";
+const createdDays = [...new Set(rows.map((r) => day(r.created)))].sort();
+const rowsOfDay = (d) => rows.filter((r) => day(r.created) === d);
+const dayMedian = new Map(createdDays.map((d) => [d, medOf(rowsOfDay(d).map((r) => r.cycle))]));
+const demeaned = (r) => r.cycle - dayMedian.get(day(r.created));
+const heldDays = createdDays.filter((d) => rowsOfDay(d).filter((r) => r.depth >= flags.bound).length >= 10);
+const strata = [
+  ["Weekend (Sat/Sun, UTC)", rows.filter((r) => isWeekend(r.created))],
+  ["Weekday", rows.filter((r) => !isWeekend(r.created))],
+  [`Days with ≥10 arrivals at depth ≥ ${flags.bound} (${heldDays.join(", ") || "none"})`, rows.filter((r) => heldDays.includes(day(r.created)))],
+  ["Other days", rows.filter((r) => !heldDays.includes(day(r.created)))],
+  ["All", rows],
+];
+const bucketCells = (list, f = (r) => r.cycle, fmt = fmtH) => BUCKETS.map((b) => { const c = list.filter((r) => inBucket(r, b)); return c.length ? `${fmt(medOf(c.map(f)))} (n=${c.length})` : "— (n=0)"; });
+const heldVsRest = (list) => { const h = list.filter((r) => r.depth >= flags.bound), o = list.filter((r) => r.depth < flags.bound); return `${h.length ? fmtH(medOf(h.map((r) => r.cycle))) : "—"} (n=${h.length}) vs ${o.length ? fmtH(medOf(o.map((r) => r.cycle))) : "—"} (n=${o.length})`; };
+// Inter-merge spacing (Query P).
+const mergeTimes = sortedNum(rows.map((r) => r.merged));
+const gaps = mergeTimes.slice(1).map((t, i) => t - mergeTimes[i]);
+const closestPair = (() => { let best = 0; for (let i = 1; i < gaps.length; i++) if (gaps[i] < gaps[best]) best = i; const a = rows.filter((r) => r.merged === mergeTimes[best]), b = rows.filter((r) => r.merged === mergeTimes[best + 1]); return gaps.length ? `#${a[0].number} → #${b[0].number}` : "—"; })();
+const minutesWithTwoMerges = (() => { const m = new Map(); for (const t of mergeTimes) { const k = Math.floor(t / MIN); m.set(k, (m.get(k) || 0) + 1); } return [...m.values()].filter((v) => v >= 2).length; })();
+const busiestMergeDays = [...new Set(rows.map((r) => day(r.merged)))].map((d) => { const m = sortedNum(rows.filter((r) => day(r.merged) === d).map((r) => r.merged)); const g = sortedNum(m.slice(1).map((t, i) => t - m[i])); return { d, n: m.length, g }; }).sort((a, b) => b.n - a.n).slice(0, 3);
+// Ready-queue depth at the last label: other PRs (with events read) labelled at
+// or before that instant and not yet merged at it — what the Pass had ahead.
+for (const e of withLabel) e.readyQueue = withLabel.filter((o) => o !== e && o.last <= e.last && o.merged > e.last).length;
+const RQ = [["0", 0, 0], ["1", 1, 1], ["2", 2, 2], ["3–4", 3, 4], ["5+", 5, Infinity]];
+const rqCells = RQ.map(([, lo, hi]) => { const c = withLabel.filter((e) => e.readyQueue >= lo && e.readyQueue <= hi); return c.length ? `${fmtMin(medOf(c.map((e) => e.merged - e.last)))} (n=${c.length})` : "— (n=0)"; });
+const evByNum = new Map(evRows.map((e) => [e.number, e]));
+const labelledRows = rows.filter((r) => evByNum.get(r.number)?.last != null).map((r) => ({ ...r, ...evByNum.get(r.number) }));
+
 // --------------------------------------------------------------- output ----
 const out = [];
 const P = (s = "") => out.push(s);
@@ -522,6 +577,50 @@ if (evRows.length) {
   table(["Day (UTC)", "n", "median", "p90", "> 90 min"], [...l2mByDay.entries()].sort().map(([k, v]) => { const s = sortedNum(v); return [k, String(s.length), fmtMin(median(s)), fmtMin(pct(s, 0.9)), String(s.filter((x) => x > 90 * MIN).length)]; }));
   P();
 }
+P(`## 6. Confounder checks — is the depth↔cycle gradient a day artefact, or the merge gate's serialization? (Query P; Query E where named)`);
+P();
+P(`### Cycle median by depth at arrival, per UTC day of creation (Query P)`);
+P();
+table(["Day (UTC)", "n", "All depths", ...BUCKETS.map((b) => b[0]), "ρ(depth, cycle)"], [
+  ...createdDays.map((d) => { const xs = rowsOfDay(d); return [`${d} ${dow(ts(d))}`, String(xs.length), fmtH(dayMedian.get(d)), ...bucketCells(xs), xs.length >= 20 ? rho(xs, (r) => r.depth, (r) => r.cycle) : "— (n<20)"]; }),
+  ...strata.map(([name, xs]) => [`**${name}**`, String(xs.length), xs.length ? fmtH(medOf(xs.map((r) => r.cycle))) : "—", ...bucketCells(xs), rho(xs, (r) => r.depth, (r) => r.cycle)]),
+]);
+P();
+P(`### Day-demeaned: cycle − the median cycle of the PR's own creation day (Query P)`);
+P();
+table(["Measure", "Value"], [
+  ["ρ(depth at arrival, cycle), all", rho(rows, (r) => r.depth, (r) => r.cycle)],
+  ["ρ(depth at arrival, cycle − day median), all", rho(rows, (r) => r.depth, demeaned)],
+  [`Median (cycle − day median) by depth bucket ${BUCKETS.map((b) => b[0]).join(" / ")}`, bucketCells(rows, demeaned, fmtSignedMin).join(" / ")],
+  [`Cycle median, depth ≥ ${flags.bound} vs < ${flags.bound}, on the days with ≥10 held arrivals only`, heldVsRest(strata[2][1])],
+  [`… on the other days`, heldVsRest(strata[3][1])],
+]);
+P();
+if (withLabel.length) {
+  P(`### Where in the cycle the gradient sits (Query E, the ${withLabel.length} labelled PRs with events read)`);
+  P();
+  table(["Depth at arrival", "n", "created → first label, median", "first label → merged, median", "last label → merged, median", "last label → merged, p90"], BUCKETS.map((b) => {
+    const c = labelledRows.filter((r) => inBucket(r, b));
+    return [b[0], String(c.length), c.length ? fmtH(medOf(c.map((r) => r.first - r.created))) : "—", c.length ? fmtMin(medOf(c.map((r) => r.merged - r.first))) : "—", c.length ? fmtMin(medOf(c.map((r) => r.merged - r.last))) : "—", c.length ? fmtMin(pct(sortedNum(c.map((r) => r.merged - r.last)), 0.9)) : "—"];
+  }));
+  P();
+  table(["Rank correlation (Spearman ρ)", "Value"], [
+    ["ρ(depth at arrival, created → first label)", rho(labelledRows, (r) => r.depth, (r) => r.first - r.created)],
+    ["ρ(depth at arrival, last label → merged)", rho(labelledRows, (r) => r.depth, (r) => r.merged - r.last)],
+    ["ρ(ready-queue depth at last label, last label → merged)", rho(labelledRows, (r) => r.readyQueue, (r) => r.merged - r.last)],
+    ["ρ(depth at arrival, ready-queue depth at last label)", rho(labelledRows, (r) => r.depth, (r) => r.readyQueue)],
+  ]);
+  P();
+}
+P(`### Merge-gate serialization (Query P; Query E for the ready queue)`);
+P();
+table(["Measure", "Value"], [
+  [`Inter-merge gap, all ${gaps.length} gaps: min / median; gaps < 5 min / < 10 min`, `${(Math.min(...gaps) / 1000).toFixed(0)} s (${closestPair}) / ${fmtMin(medOf(gaps))}; ${gaps.filter((g) => g < 5 * MIN).length} / ${gaps.filter((g) => g < 10 * MIN).length}`],
+  ["UTC minutes holding ≥ 2 merges", String(minutesWithTwoMerges)],
+  ...busiestMergeDays.map(({ d, n, g }) => [`${d} ${dow(ts(d))}: merges; gap min / p10 / median; gaps < 5 min / < 10 min`, `${n}; ${g.length ? `${(g[0] / 1000).toFixed(0)} s / ${fmtMin(pct(g, 0.1))} / ${fmtMin(medOf(g))}; ${g.filter((x) => x < 5 * MIN).length} / ${g.filter((x) => x < 10 * MIN).length}` : "—"}`]),
+  ...(withLabel.length ? [[`Last label → merged by ready-queue depth at the last label (${RQ.map((q) => q[0]).join(" / ")} other labelled PRs ahead)`, rqCells.join(" / ")]] : []),
+]);
+P();
 P(`## Population list (Query P)`);
 P();
 P(`<details><summary>${rows.length} PRs: number, created_at, merged_at, depth at arrival, cycle (h)</summary>`);
@@ -552,6 +651,13 @@ if (flags.json) {
     cycleH: { median: median(cycles) / H, p75: pct(cycles, 0.75) / H, p90: pct(cycles, 0.9) / H, max: cycles[cycles.length - 1] / H, min: cycles[0] / H, buckets: buckets.map((b) => ({ ...b, median: b.median / H, p90: b.p90 / H })) },
     bound: { value: flags.bound, heldN: held.length, heldShare: held.length / rows.length, held: { ...heldStat, median: heldStat.median / H, p75: heldStat.p75 / H, p90: heldStat.p90 / H, max: heldStat.max / H }, rest: { ...restStat, median: restStat.median / H, p75: restStat.p75 / H, p90: restStat.p90 / H, max: restStat.max / H } },
     throughput,
+    confounders: {
+      perCreatedDay: createdDays.map((d) => { const xs = rowsOfDay(d); return { day: d, dow: dow(ts(d)), n: xs.length, medianH: dayMedian.get(d) / H, bucketMedianH: BUCKETS.map((b) => { const c = xs.filter((r) => inBucket(r, b)); return c.length ? medOf(c.map((r) => r.cycle)) / H : null; }), rho: xs.length >= 20 ? spearman(xs.map((r) => r.depth), xs.map((r) => r.cycle)) : null }; }),
+      heldDays, rhoDepthCycle: spearman(rows.map((r) => r.depth), rows.map((r) => r.cycle)), rhoDepthCycleDemeaned: spearman(rows.map((r) => r.depth), rows.map(demeaned)),
+      demeanedBucketMedianMin: BUCKETS.map((b) => { const c = rows.filter((r) => inBucket(r, b)); return c.length ? medOf(c.map(demeaned)) / MIN : null; }),
+      interMergeGapMin: { min: Math.min(...gaps) / MIN, median: medOf(gaps) / MIN, under5: gaps.filter((g) => g < 5 * MIN).length, under10: gaps.filter((g) => g < 10 * MIN).length, minutesWithTwoMerges },
+      readyQueue: withLabel.length ? RQ.map(([label, lo, hi]) => { const c = withLabel.filter((e) => e.readyQueue >= lo && e.readyQueue <= hi); return { label, n: c.length, lastToMergeMedianMin: c.length ? medOf(c.map((e) => e.merged - e.last)) / MIN : null }; }) : null,
+    },
     labels: evRows.length ? { n: evRows.length, withLabel: withLabel.length, noLabel: noLabel.map((e) => e.number), lastToMergeMin: { median: median(lastToMerge) / MIN, p75: pct(lastToMerge, 0.75) / MIN, p90: pct(lastToMerge, 0.9) / MIN, max: lastToMerge[lastToMerge.length - 1] / MIN, over90: over90, over180 }, createdToFirstH: { median: median(createdToFirst) / H, p75: pct(createdToFirst, 0.75) / H, p90: pct(createdToFirst, 0.9) / H, max: createdToFirst[createdToFirst.length - 1] / H }, relabelled: relabelled.map((e) => e.number) } : null,
     rows: rows.map((r) => ({ number: r.number, created: iso(r.created), merged: iso(r.merged), depth: r.depth, cycleH: r.cycle / H })),
   }, null, 2));

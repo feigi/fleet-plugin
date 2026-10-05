@@ -50,8 +50,15 @@ another's creation is not counted open at it; days and clock hours are UTC;
 hours are shown to two decimals, minutes rounded.
 
 Script: `docs/research/in-flight-baseline-derive.mjs` (zero dependencies,
-Node ≥ 18; § Reproduction). Its stdout is markdown and every table in
-§ Results is pasted from it unedited.
+Node ≥ 18; § Reproduction). Its stdout is markdown; every table in § Results
+and § Caveats is pasted from it unedited, except the latest-150 table in § 5,
+which condenses the `--events 150` run's § 5 table (same values, shorter row
+labels). The comparison table in § Hypothesis check is hand-written from
+those outputs.
+
+**Reproduced 2026-10-05T12:32Z** by the skeptic's re-run of § Reproduction
+on a cold cache: Query P returned the same 400 PRs on the same pages (no PR
+had closed since 12:14Z), and every table below came out identical.
 
 ## Results
 
@@ -135,7 +142,9 @@ By depth at arrival (Query P):
 | 10+ | 37 | 1.82 h (109 min) | 3.45 h (207 min) |
 
 The median rises monotonically with depth at arrival (+0.66 h from the 0–2 to
-the 10+ bucket). The p90 does not: the tail is not a depth phenomenon. The 40
+the 10+ bucket) — but about half of that rise is *which day* the PR arrived,
+not its depth; see § Caveats before reading it as causal. The p90 does not
+rise: the tail is not a depth phenomenon. The 40
 PRs above the overall p90 (5.23 h) arrived at depths 0–10, 13 of them at
 depth ≤ 3; the six longest (27–37.5 h: #2248, #2271, #2278, #2280, #2281,
 #2285) arrived at depths 3–6 on 09-29/09-30, and five of them merged between
@@ -156,9 +165,10 @@ the merge gate was saturated.
 
 The 90 held arrivals cluster: 5 on 09-28, 3 on 10-01, **33 on 10-03 and 49 on
 10-04** — the two highest-throughput days (62 and 102 merges). PRs that
-arrived at depth ≥ 8 took 0.36 h longer at the median than the rest, and had
-a *shorter* p90 (3.59 h against 5.88 h), because the long tail lives in the
-quiet days, at low depth. Read against standing decision 6: 8 sits above the
+arrived at depth ≥ 8 took 0.36 h longer at the median than the rest (a gap
+that survives controlling for the day: 1.61 h against 1.29 h inside
+10-03/10-04 alone, § Caveats), and had a *shorter* p90 (3.59 h against
+5.88 h), because the long tail lives in the quiet days, at low depth. Read against standing decision 6: 8 sits above the
 measured mean (5.02) and p75 (7) and below the peak (15), as the decision
 says; it would have held roughly one Pull in four or five over this window
 and almost all of those on the two busiest days.
@@ -261,8 +271,10 @@ not visible on GitHub (§ What could NOT be derived).
 Relabelling is a 2026-10-03/04 phenomenon: 31 of the 45 relabelled PRs are
 in the latest 150, and all three triple-labelled PRs (#2757, #2780, #2808)
 merged on 10-04 within two minutes of their third label. The timelines show
-`unlabeled` → `labeled` pairs (46 PRs carry an `unlabeled`), i.e. the label
-was removed and re-applied rather than applied twice; a fix-applier settling
+`unlabeled` → `labeled` pairs (46 PRs carry an `unlabeled`; 45 of them are
+the relabelled PRs, and the one exception, #2468, lost its label 92 s before
+its merge and never got it back), i.e. the label was removed and re-applied
+rather than applied twice; a fix-applier settling
 a Conflict hold and re-queueing the PR produces exactly this shape, but the
 events name no cause, so that is a reading, not a measurement. #2065's second
 label was applied 2 min *after* its merge (15:15:16Z against merged_at
@@ -275,8 +287,14 @@ The charting read's window — "the 400 most recently merged PRs #1826–#2865,
 created 2026-09-25 → merged 2026-10-04" — is this population to within one
 PR at the edge: the 400 most recently *merged* would swap #1827 (merged
 2026-09-25T20:00:22Z) for the carry-in #1825 (merged 20:15:51Z, created
-before #1826). Both readings span #1826–#2865 and no figure below moves on
-that swap.
+before #1826). Both readings span #1826–#2865. Re-cut by `merged_at` from the
+same Query P pages (checked by hand, not a script flag), the depth figures do
+not move — mean 5.02, max 15, at-arrival 5 / 7 / 9, 90 held — but the cycle
+median reads 1.39 h for 1.38 h and the 0–2 bucket median 1.20 h for 1.16 h,
+because #1825's 1.43 h cycle enters at depth 0 and lifts the early arrivals'
+depths by one. The charting read's 1.1 h for that bucket therefore matches
+*this* (by-created) population, not a by-merged one; no verdict below
+changes.
 
 | Signal | Charting read | Measured here | Verdict |
 |---|---|---|---|
@@ -312,6 +330,115 @@ Beyond the hypothesis, two things the Notes do not yet say:
   rest; their p90 was lower (3.59 h vs 5.88 h).
 - **Throughput 2.72 merged PRs per active clock hour** (147 active hours of
   218.7 wall); 1.89/h on the sweep's open-time clock; 40 per active day.
+
+## Caveats — can the depth↔cycle reading be refuted?
+
+Two alternative explanations for § 2's rising bucket medians and § 3's
+held-vs-rest gap were tried (script § 6; Query P, and Query E where named;
+tables below pasted from the 400-PR run).
+
+**Which day a PR arrived explains about half of the gradient.** The fleet ran
+at weekends: 271 of the 400 arrivals and 36 of the 37 depth-10+ arrivals fall
+on the four Saturdays and Sundays. The weekend's bucket medians rise 0.81 →
+0.89 → 1.40 → 1.83 h; the weekdays' do not (1.42 / 2.76 / 2.32 h, one 10+
+PR), and the weekdays are the slow days at *every* depth (median 2.04 h
+against 1.14 h) because they hold § 2's Pass gaps while being shallow. So it
+is not weekend-versus-weekday that inflates the deep buckets; it is that the
+deep buckets are 10-03/10-04 and the shallow ones are 09-26/09-27 — two
+weekends with different medians (1.33–1.51 h against 0.78–0.91 h).
+Subtracting each creation day's own median cycle leaves −2 / 0 / 0 / +18 min
+across the four buckets and takes ρ(depth, cycle) from 0.20 to 0.06; within
+single days ρ is 0.33 on 10-04 (n=92), −0.02 on 10-03 (n=65) and −0.03 on
+09-26 (n=69). What survives the day control: § 3's held-vs-rest gap holds
+inside the two held days themselves (1.61 h against 1.29 h over their 157
+arrivals), and the 10+ bucket is the slowest on every cut that has one. Read
+§ 2's "rises monotonically" as a between-day effect for depths 0–9 and a
+within-day effect only from about 10 up.
+
+**The merge gate's serialization is the within-day mechanism, and depth at
+arrival is a weak proxy for it.** Decomposed at the labels (Query E), created
+→ first `ready-to-merge` is flat across the buckets (0.86 / 0.75 / 0.96 /
+0.90 h, ρ = 0.08): implementation and review do not slow with depth. The rise
+sits after the label — first label → merged 11 / 16 / 25 / 30 min. Merges are
+serialized: no UTC minute holds two merges, and on the three busiest days no
+two merges are closer than 4.1 min (median gap 8–9 min; the window's one 2 s
+gap, #2223 → #2222, is the closed-as-merged PR of § What could NOT be
+derived) — one merge per CI run, as ADR 0007's `strict` ruleset with a
+merge-bot cap of 1 dictates and ADR 0012's one-at-a-time Pass performs (ADR
+0007 prices CI at 6 min). What a PR waits for is the number of labelled PRs
+ahead of it at the gate: last label → merged medians 8 / 15 / 18 / 29 / 49
+min for 0 / 1 / 2 / 3–4 / 5+ ahead (ρ = 0.48; 0.65 on the latest-150 cut,
+where the queue is counted over those 150 only), against ρ = 0.14 for depth
+at arrival (0.01 on the latest 150); depth at arrival and ready-queue depth
+correlate at only 0.31. For the bound this means: the ~0.3 h the held Pulls
+lost at the median is real and survives the day control, but it is a
+merge-gate queue of roughly one CI run per PR ahead. A bound on in-flight
+depth shortens that queue only by trimming arrivals; it does not speed the
+gate, and depth at arrival is a loose predictor of which Pull will queue.
+
+### Cycle median by depth at arrival, per UTC day of creation (Query P)
+
+| Day (UTC) | n | All depths | 0–2 | 3–5 | 6–9 | 10+ | ρ(depth, cycle) |
+|---|---|---|---|---|---|---|---|
+| 2026-09-25 Fri | 14 | 2.06 h | 1.11 h (n=3) | 2.06 h (n=6) | 2.11 h (n=5) | — (n=0) | — (n<20) |
+| 2026-09-26 Sat | 69 | 0.78 h | 0.80 h (n=12) | 0.81 h (n=47) | 0.62 h (n=10) | — (n=0) | -0.03 |
+| 2026-09-27 Sun | 45 | 0.91 h | 0.91 h (n=17) | 0.91 h (n=26) | 1.29 h (n=2) | — (n=0) | 0.11 |
+| 2026-09-28 Mon | 29 | 2.31 h | 2.71 h (n=4) | 2.82 h (n=11) | 2.02 h (n=13) | 1.17 h (n=1) | -0.30 |
+| 2026-09-29 Tue | 31 | 2.29 h | 1.48 h (n=6) | 2.84 h (n=19) | 2.95 h (n=6) | — (n=0) | 0.49 |
+| 2026-09-30 Wed | 6 | 28.50 h | — (n=0) | 28.50 h (n=4) | 15.81 h (n=2) | — (n=0) | — (n<20) |
+| 2026-10-01 Thu | 14 | 9.46 h | 13.07 h (n=1) | 10.82 h (n=6) | 5.87 h (n=7) | — (n=0) | — (n<20) |
+| 2026-10-02 Fri | 35 | 1.42 h | 1.39 h (n=21) | 1.54 h (n=12) | 9.36 h (n=2) | — (n=0) | 0.12 |
+| 2026-10-03 Sat | 65 | 1.33 h | 2.52 h (n=3) | 1.15 h (n=12) | 1.42 h (n=42) | 1.08 h (n=8) | -0.02 |
+| 2026-10-04 Sun | 92 | 1.51 h | 0.32 h (n=1) | 1.18 h (n=27) | 1.60 h (n=36) | 1.88 h (n=28) | 0.33 |
+| **Weekend (Sat/Sun, UTC)** | 271 | 1.14 h | 0.81 h (n=33) | 0.89 h (n=112) | 1.40 h (n=90) | 1.83 h (n=36) | 0.35 |
+| **Weekday** | 129 | 2.04 h | 1.42 h (n=35) | 2.76 h (n=58) | 2.32 h (n=35) | 1.17 h (n=1) | 0.31 |
+| **Days with ≥10 arrivals at depth ≥ 8 (2026-10-03, 2026-10-04)** | 157 | 1.48 h | 1.63 h (n=4) | 1.16 h (n=39) | 1.52 h (n=78) | 1.83 h (n=36) | 0.19 |
+| **Other days** | 243 | 1.32 h | 1.16 h (n=64) | 1.32 h (n=131) | 1.96 h (n=47) | 1.17 h (n=1) | 0.24 |
+| **All** | 400 | 1.38 h | 1.16 h (n=68) | 1.27 h (n=170) | 1.62 h (n=125) | 1.82 h (n=37) | 0.20 |
+
+### Day-demeaned: cycle − the median cycle of the PR's own creation day (Query P)
+
+| Measure | Value |
+|---|---|
+| ρ(depth at arrival, cycle), all | 0.20 |
+| ρ(depth at arrival, cycle − day median), all | 0.06 |
+| Median (cycle − day median) by depth bucket 0–2 / 3–5 / 6–9 / 10+ | −2 min (n=68) / −0 min (n=170) / +0 min (n=125) / +18 min (n=37) |
+| Cycle median, depth ≥ 8 vs < 8, on the days with ≥10 held arrivals only | 1.61 h (n=82) vs 1.29 h (n=75) |
+| … on the other days | 1.76 h (n=8) vs 1.30 h (n=235) |
+
+### Where in the cycle the gradient sits (Query E, the 398 labelled PRs with events read)
+
+| Depth at arrival | n | created → first label, median | first label → merged, median | last label → merged, median | last label → merged, p90 |
+|---|---|---|---|---|---|
+| 0–2 | 68 | 0.86 h | 11 min | 10 min | 41 min |
+| 3–5 | 169 | 0.75 h | 16 min | 15 min | 63 min |
+| 6–9 | 124 | 0.96 h | 25 min | 22 min | 97 min |
+| 10+ | 37 | 0.90 h | 30 min | 11 min | 59 min |
+
+| Rank correlation (Spearman ρ) | Value |
+|---|---|
+| ρ(depth at arrival, created → first label) | 0.08 |
+| ρ(depth at arrival, last label → merged) | 0.14 |
+| ρ(ready-queue depth at last label, last label → merged) | 0.48 |
+| ρ(depth at arrival, ready-queue depth at last label) | 0.31 |
+
+### Merge-gate serialization (Query P; Query E for the ready queue)
+
+| Measure | Value |
+|---|---|
+| Inter-merge gap, all 399 gaps: min / median; gaps < 5 min / < 10 min | 2 s (#2223 → #2222) / 9 min; 58 / 204 |
+| UTC minutes holding ≥ 2 merges | 0 |
+| 2026-10-04 Sun: merges; gap min / p10 / median; gaps < 5 min / < 10 min | 102; 287 s / 6 min / 8 min; 4 / 65 |
+| 2026-09-26 Sat: merges; gap min / p10 / median; gaps < 5 min / < 10 min | 64; 246 s / 4 min / 8 min; 19 / 33 |
+| 2026-10-03 Sat: merges; gap min / p10 / median; gaps < 5 min / < 10 min | 62; 284 s / 5 min / 9 min; 2 / 31 |
+| Last label → merged by ready-queue depth at the last label (0 / 1 / 2 / 3–4 / 5+ other labelled PRs ahead) | 8 min (n=161) / 15 min (n=94) / 18 min (n=67) / 29 min (n=57) / 49 min (n=19) |
+
+"Ready-queue depth at the last label" counts the other PRs, among those whose
+events were read, labelled `ready-to-merge` at or before that instant and not
+yet merged at it — what the Pass had ahead of this PR. On the full 400 it is
+exact; on the `--events 150` cut it misses PRs merged before the cut, so
+that cut's figures (ρ = 0.65; 2 / 14 / 17 / 31 / 68 min) understate the queue
+and are quoted only as a direction.
 
 ## What could NOT be derived, or is degraded
 
@@ -356,10 +483,14 @@ Beyond the hypothesis, two things the Notes do not yet say:
   PR comment, or a label naming the hold) would split the 45 by cause.
 - **GitHub timeline quirk, one PR.** #2222 has `merged_at`
   2026-09-29T16:34:01Z and a `merge_commit_sha`, but its timeline records
-  `closed` (with that commit id) and no `merged` event. `merged_at` from
-  Query P is used throughout, so no number depends on the `merged` event;
-  the script reports the count of such PRs so a later window can tell
-  whether this recurs.
+  `closed` (with that commit id) and no `merged` event. Its `merged_at` is
+  2 s after #2223's (16:33:59Z → 16:34:01Z) — the only two merges in the
+  window closer than 4 min (script § 6) — which is the shape GitHub leaves
+  when a PR's commits land through another PR and it is closed as merged
+  without passing the merge gate itself; a reading, not a measurement.
+  `merged_at` from Query P is used throughout, so no number depends on the
+  `merged` event; the script reports the count of such PRs so a later window
+  can tell whether this recurs.
 - **Window edges.** Two carry-in PRs (#1824, #1825) were open at the window
   start; adding them to the sweep moves no headline figure (§ 1's
   sensitivity row). The window ends at the last merge, so no PR open at
@@ -390,9 +521,11 @@ Requires Node ≥ 18 and either `gh` authenticated against the repo (used
 automatically when `gh auth status` succeeds) or `curl` (used otherwise,
 with `GITHUB_TOKEN` when set; an invalid token is detected on `/rate_limit`
 and dropped with a warning). Raw JSON is cached under `--cache` (default
-`<os.tmpdir()>/in-flight-baseline-cache/`, never inside the repo); a cached
+`<os.tmpdir()>/in-flight-baseline-cache/`, never inside the repo — a
+`--cache` under any git checkout is refused with exit 1); a cached
 run of the two commands above takes seconds and is byte-identical below the
-derived-at stamp in its title line. The
+derived-at stamp in its title line (verified 2026-10-05: two runs differ in
+that line only). `--events 0` skips Query E for a depth-only run. The
 listing pages are *positional* — page 1 is "the newest 100 closed PRs" at
 read time — so **pass `--refresh` (or a fresh `--cache` dir) whenever the
 window should move**; the script prints when the cached listing was read and
