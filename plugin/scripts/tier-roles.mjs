@@ -51,10 +51,10 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 // process access below this line until main()
 // ---------------------------------------------------------------------------
 
-// Role names in print order — a fixed list, not derived from anything: ADR
-// 0014 retired the tier->role map this used to come from (OMP_ROLE_FOR_MODEL
-// with its opus/sonnet/haiku keys), and the fleet only ever names these
-// three roles.
+// Role names in print order — a fixed list, not derived from anything: making
+// omp the only harness retired the tier->role map this used to come from
+// (OMP_ROLE_FOR_MODEL with its opus/sonnet/haiku keys), and the fleet only
+// ever names these three roles.
 const ROLE_ORDER = ["slow", "task", "smol"];
 
 const MODEL_ROUTE_RE = /^@(slow|task|smol):(minimal|low|medium|high|xhigh|max)$/;
