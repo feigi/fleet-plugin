@@ -849,11 +849,17 @@ wt_counts() {
 # registered for, and the listing derives each worktree's path from exactly
 # that file — so for the listed path it reads `$1/.git` byte for byte, and
 # through a link to ANOTHER worktree it names that one (measured: a link `A`
-# to sibling `B` reaches `worktrees/B`, whose `gitdir` names `B/.git`). A
-# string compare, because `-ef` is what cannot see this. Asked only of a link:
-# a link standing in for the worktree's OWN renamed directory reaches its own
-# admin dir and passes, and a plain directory never needs it — the NFD
-# spelling `-ef` exists for would fail a string compare.
+# to sibling `B` reaches `worktrees/B`, whose `gitdir` names `B/.git`). Under
+# `worktree.useRelativePaths` git writes that file relative to the admin dir
+# (measured: `../../../../B/.git`), so a relative one is resolved against it
+# first. Then the registered path and $1 are compared as directory ENTRIES:
+# the last component by bytes, because `-ef` on it would follow the link and
+# is what cannot see this, and the parent by `-ef`, so a parent spelled
+# through a symlink (`/tmp` for `/private/tmp`, or `..` segments) still names
+# the same entry. Asked only of a link: a link standing in for the worktree's
+# OWN renamed directory reaches its own admin dir and passes, and a plain
+# directory never needs it — the NFD spelling `-ef` exists for would fail a
+# byte compare.
 #
 # `&& echo x` inside the substitution, then `%?x`: `$(...)` strips EVERY
 # trailing newline, so a `core.worktree` naming a sibling directory called $1
@@ -919,8 +925,18 @@ EOF
     wt_lk_back=${wt_lk_back%x}
     wt_lk_back=${wt_lk_back%"
 "}
-    if [ "${wt_lk_back%/.git}" != "$1" ]; then
-      wt_why="$1 is a symbolic link to another worktree's directory — its .git linkage reaches the admin dir registered for ${wt_lk_back%/.git}, not for $1"
+    wt_lk_back=${wt_lk_back%/.git}
+    case $wt_lk_back in
+      /*) ;;
+      *) wt_lk_back=${wt_lk_admin%?x}/$wt_lk_back ;;
+    esac
+    case $1 in
+      */*) wt_lk_up=${1%/*} ;;
+      *) wt_lk_up=. ;;
+    esac
+    # shellcheck disable=SC3013 # -ef as below; a `[` that cannot evaluate it fails the `!`, so it refuses
+    if [ "${wt_lk_back##*/}" != "${1##*/}" ] || ! [ "${wt_lk_back%/*}/" -ef "$wt_lk_up/" ]; then
+      wt_why="$1 is a symbolic link to another worktree's directory — its .git linkage reaches the admin dir registered for $wt_lk_back, not for $1"
       return 1
     fi
   fi
