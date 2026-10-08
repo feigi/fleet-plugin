@@ -58,9 +58,8 @@ import { fileURLToPath } from "node:url";
 import { isCLI } from "./is-cli.mjs";
 import { makeDie, defineFlags, isDigits } from "./arg.mjs";
 import { parseTsv as parseMemberTsv } from "./member-outcomes.mjs";
-import { parseMember, parseToken, memberTokens } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr } from "./ledger-grammar.mjs";
 import { rowText } from "./tier-check.mjs";
-import { PR_MENTION } from "./fleet-tick.mjs";
 
 const NAME = "tier-outcomes";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -321,16 +320,16 @@ export function checkRows(rows, memberRows) {
 }
 
 // The ledger half of `check`: every PR a run-ledger row marks `reviewed=` that
-// has no row here. The row's PR is read the way fleet-tick.mjs reads it — a
-// `PR#M` mention, else the row's own key.
+// has no row here. The row's PR is read the way fleet-tick.mjs reads it —
+// ledger-grammar.mjs's rowPr(), else the row's own key.
 export function unrecordedReviewedPrs(ledger, rows) {
   const have = new Set(rows.map((r) => r.pr));
   const missing = new Set();
   for (const text of ledger?.rows ?? []) {
     if (!text.split(/\s+/).some((t) => t.startsWith("reviewed="))) continue;
     const key = text.split(/\s/)[0];
-    const mention = PR_MENTION.exec(text);
-    const pr = mention ? mention[1] : /^#[0-9]+$/.test(key) ? key.slice(1) : null;
+    const own = rowPr(text);
+    const pr = own !== null ? String(own) : /^#[0-9]+$/.test(key) ? key.slice(1) : null;
     if (pr && !have.has(pr)) missing.add(Number(pr));
   }
   return [...missing].sort((a, b) => a - b);

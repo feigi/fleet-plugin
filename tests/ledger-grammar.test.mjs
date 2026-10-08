@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseMember, parseToken, memberTokens, nextMergeBot, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, nextMergeBot, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -129,6 +129,19 @@ test("memberTokens reads a row's members in order and skips its free text", () =
     [["impl-324", "PR#346"], ["fix-pr-346", null]],
   );
   assert.deepEqual(memberTokens("#7 nothing member-shaped here"), []);
+});
+
+test("rowPr: an impl row is its first settled =PR#M token's PR; any other row its first PR# mention", () => {
+  // An impl token, malformed included, gates out every prose mention.
+  assert.equal(rowPr("#480 → PR#481 · impl-480=PR#470"), 470);
+  assert.equal(rowPr("#480 impl-480=bailed · PR#481"), null);
+  assert.equal(rowPr("#480 impl-480=PR#0470 · PR#481"), null);
+  assert.equal(rowPr("#480 impl-480=PR#470 · impl-480-b=PR#471"), 470);
+  assert.equal(rowPr("#480 impl-480-b=PR#471 · impl-480=PR#470"), 471, "row order, as a first-mention scan read it");
+  // No impl token: the first mention, spelled with or without a space.
+  assert.equal(rowPr("#40 PR #44 · PR#45"), 44);
+  assert.equal(rowPr("#40 fix-pr-44 · APR#44"), null, "a mention inside a longer word is none");
+  assert.equal(rowPr("#350 review=wf:x"), null);
 });
 
 // "n = 1 + the number of `merge-bot-` entries" — settled ones included, since

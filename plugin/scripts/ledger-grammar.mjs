@@ -81,6 +81,28 @@ export function memberTokens(text) {
   return text.split(/\s+/).filter(Boolean).map(parseToken).filter(Boolean);
 }
 
+// `PR#<n>` as a word of a row's text, `PR #<n>` too.
+const PR_MENTION = /\bPR\s*#(\d+)\b/;
+
+/**
+ * The PR a row's text is about, or null when it names none of its own — the
+ * one reading of it every ledger reader keys PR state by. A row carrying an
+ * `impl-` token, live, settled or malformed, is its first well-formed settled
+ * `impl-<N>=PR#<M>` token's PR in row order, and no PR while it has none: a
+ * `PR#` mention in its prose, an `→ PR#M` arrow included, never decides it,
+ * wherever it sits. A row with no `impl-` token is its first `PR#<n>`
+ * mention's. Falling back to the row's `#<n>` key is each caller's own.
+ */
+export function rowPr(text) {
+  const impls = memberTokens(text).filter((t) => t.family === "impl");
+  if (impls.length > 0) {
+    const settled = impls.find((t) => t.error === null && t.outcome?.startsWith("PR#"));
+    return settled ? Number(settled.outcome.slice("PR#".length)) : null;
+  }
+  const m = PR_MENTION.exec(text);
+  return m ? Number(m[1]) : null;
+}
+
 /** The name the next merge bot takes: 1 + the `merge-bot-` entries in
  * `## Dispatched`, settled ones included. One ledger per run, so n restarts
  * at 1 with every run. */
