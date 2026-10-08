@@ -20,7 +20,7 @@
 // out of this repo's reach.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const COMMANDS = join(import.meta.dirname, "..", "plugin", "commands");
@@ -81,11 +81,21 @@ test("the tie rule reproduces the measured picker rows", () => {
 });
 
 test("the tie rule accepts a command that only shares a shorter prefix", () => {
-  // `teamwork` beats the skill at `/tea` but loses to the exact hyphen-segment
-  // match at `/team`; only a command named `team` itself ties there.
+  // `teamwork` ties the skill at `/tea` (900 each, so the popup stays
+  // command-only) but loses to the exact hyphen-segment match at `/team`; only
+  // a command named `team` itself ties there.
+  assert.equal(skillShown("tea", "run-team", ["teamwork"]), false);
   assert.equal(skillShown("team", "run-team", ["teamwork"]), true);
   assert.equal(skillShown("team", "run-team", ["team"]), false);
   assert.equal(skillShown("run-t", "run-team", ["run-merge-bot", "review-and-fix"]), true);
+});
+
+test("the skill's bare name matches only from the start of a hyphen segment", () => {
+  // A prefix landing mid-segment is no match at all, so the skill stays out of
+  // the popup even when no command competes for it.
+  assert.equal(skillShown("eam", "run-team", []), false);
+  assert.equal(skillShown("un", "run-team", []), false);
+  assert.equal(skillShown("team", "run-team", []), true);
 });
 
 test("no shipped command hides skill:run-team at a prefix README.md documents", () => {
@@ -93,4 +103,11 @@ test("no shipped command hides skill:run-team at a prefix README.md documents", 
   assert.ok(names.includes("run-merge-bot"), `plugin/commands/ listing looks wrong: ${names}`);
   const hidden = DOCUMENTED_PREFIXES.filter((p) => !skillShown(p, "run-team", names));
   assert.deepEqual(hidden, [], `skill:run-team is hidden at /${hidden.join(", /")} by ${names}`);
+});
+
+test("README.md still sends users to the prefixes this test checks", () => {
+  const readme = readFileSync(join(import.meta.dirname, "..", "README.md"), "utf8");
+  for (const p of ["/team", "/run-t…"]) {
+    assert.ok(readme.includes(`\`${p}\``), `README.md no longer names \`${p}\`: update DOCUMENTED_PREFIXES with it`);
+  }
 });
