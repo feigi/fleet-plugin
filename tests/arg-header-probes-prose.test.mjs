@@ -185,11 +185,12 @@ const rows = (out) =>
 
 const scriptsOf = (out) => [...new Set(rows(out).map((r) => r.file))];
 
-// Throws when spawnSync never got an answer out of `file`: a spawn error, a
-// signal kill, or no exit status. Such a probe has empty or meaningless output,
-// and returned as a normal result it would read as a silent script, a wrong
-// exit code, or a clean exit-0 module.
-const assertProbeRan = (file, r) => {
+// Throws when spawnSync never got an answer out of `what`, a script or the
+// shell command `sh` runs: a spawn error, a signal kill, or no exit status.
+// Such a probe has empty or meaningless output, and returned as a normal
+// result it would read as a silent script, a wrong exit code, or a clean
+// exit-0 module.
+const assertProbeRan = (what, r) => {
   const fault = r.error
     ? `spawn error ${[r.error.code, r.error.message].filter(Boolean).join(": ")}`
     : r.signal
@@ -197,7 +198,7 @@ const assertProbeRan = (file, r) => {
       : r.status === null
         ? "no exit status"
         : null;
-  if (fault) throw new Error(`${file}: the probe itself faulted (${fault}) — an infrastructure fault, not a verdict on the script`);
+  if (fault) throw new Error(`${what}: the probe itself faulted (${fault}) — an infrastructure fault, not a verdict on the script or command`);
 };
 
 // Runs a script the way a stray flag reaches it, and reports what it
@@ -608,7 +609,7 @@ test("sh refuses a command whose shell faulted, and still returns a command's ow
   const selfKill = "kill -9 $$";
   assert.throws(
     () => sh(selfKill),
-    (e) => e.message.includes(selfKill) && e.message.includes("killed by SIGKILL") && e.message.includes("not a verdict"),
+    (e) => e.message.includes(selfKill) && e.message.includes("killed by SIGKILL") && e.message.includes("not a verdict on the script or command"),
     "a command whose shell was killed by a signal was not refused as an infrastructure fault",
   );
   for (const code of [0, 1, 2]) {
