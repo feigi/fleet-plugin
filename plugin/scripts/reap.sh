@@ -300,8 +300,8 @@ warnings=""
 # because none happened or because nothing reports them.
 removed=""
 # `jstr`'s output wrapped in the quotes JSON needs, or the literal `null` where
-# it could not render. `die` is the wrong answer at both call sites below: by
-# the time either accumulator is written this script may already have deleted
+# it could not render. `die` is the wrong answer at every call site below: by
+# the time any accumulator is written this script may already have deleted
 # branches, and the payload printed at the end is the caller's only record of
 # that — the same reason the printf runs ahead of the prune. Exiting here
 # would destroy the record of work that already happened. So an unrenderable
@@ -314,8 +314,9 @@ removed=""
 #
 # Five interpolations converge on this function: the branch name, `dirty
 # worktree $wt`, `ignored files present in $wt: $ignored`, `cherry probe
-# failed …: $cherry` (arbitrary git stderr) — the first four via `keep`, at
-# eleven call sites — and the `reaped` accumulator, which calls `jfield`
+# failed …: $cherry` (arbitrary git stderr) — the first four via `keep`, whose
+# own `jfield "$1"` / `jfield "$2"` every `keep` call carrying one of them
+# reaches — and the `reaped` accumulator, which calls `jfield`
 # directly and never routes through `keep` at all. The branch name is the
 # demonstrated trigger — `git branch 'has"quote'` is a legal refname — and raw
 # it emitted a payload no parser accepts at exit 0, while the branch was
@@ -323,12 +324,10 @@ removed=""
 # operator, not JSON.
 #
 # A sixth joined the five above later: grep's own stderr, `$gq_err`,
-# surfaced through `gp_why "$gq_err"` in `keep`'s message at the two cherry
-# checks and the two registry re-reads —
+# surfaced through `gp_why "$gq_err"` in `keep`'s message at the cherry
+# checks and the registry re-reads —
 # arbitrary text on the same footing as `$cherry`, routed through the same
-# jfield/jstr escaping the paragraph above already covers. Left out of the
-# "eleven call sites" figure above, which still counts only the original
-# five; four more now carry grep's stderr specifically.
+# jfield/jstr escaping the paragraph above already covers.
 jfield() {
   if jf=$(jstr "$1"); then
     printf '"%s"' "$jf"
