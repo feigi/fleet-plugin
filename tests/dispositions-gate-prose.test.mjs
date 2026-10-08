@@ -156,6 +156,17 @@ test("step 5 says a mismatch names the filing row, and that an unreadable tracke
   assert.match(s, phrase("with nothing else broken the verdict is `unchecked` — never `ok`, and it exits 1 — so run the check again once `gh` answers."));
 });
 
+// Step 5's relabel duty: one line, bounded by the record duties' opener.
+const relabelStep = () =>
+  between(REVIEW_AND_FIX, "**A duplicate that should hold an open deferral is relabelled up, never down.**", "\n   **Name where each deferral went", "review-and-fix.md");
+
+test("step 5 relabels a needs-triage duplicate up to ready-for-agent citing the refuters, never down, and refiles a closed one", () => {
+  const s = relabelStep();
+  assert.match(s, phrase("relabel it with `gh issue edit <N> --remove-label needs-triage --add-label ready-for-agent`, and cite the refuters' verdict in the comment you leave there."));
+  assert.match(s, phrase("Never relabel `ready-for-agent` down to `needs-triage`"));
+  assert.match(s, phrase("A closed one cannot hold it: file a new open issue citing it"));
+});
+
 test("the gate refuses a finisher on an unchecked verdict, which re-running the check answers", () => {
   assert.match(gate(), phrase(
     "It names a `dispositions-unchecked=` verdict too — no rule broke, but the check could not read where a deferral was filed, `gh` unreachable or an issue unreadable: run the check again for that fix-applier once `gh` answers (an issue that does not exist is unreadable too, and no re-run answers that one: the check's stderr names it, and the record's issue number needs correcting); the tick offers no fix-applier for it.",

@@ -79,24 +79,28 @@
 //     mismatch names the row the entry broke:
 //
 //       row  finding                                             home
-//       1    survived, deferred for an allowed reason other      open, ready-for-agent
-//            than false-rationale
-//       2    survived, deferred false-rationale                  closed suggestion-band record
+//       1    survived, in scope, deferred for an allowed         open, ready-for-agent
+//            reason other than false-rationale
+//       2    survived, in scope, deferred false-rationale        closed suggestion-band record
 //       3    unverified, its refuters dispatched and crashed     open, needs-triage
 //       4    in-scope suggestion, its refuter refuted it         closed suggestion-band record
 //       5    in-scope suggestion, its refuter let it survive     applied, or deferred as row 1
 //       6    out-of-scope suggestion alleging wrong behavior     open, needs-triage
 //       7    claimKind shape, below the claim bar                closed suggestion-band record
+//       8    survived, out of scope, whatever its reason         open, ready-for-agent
 //
 //     Row 4 outranks row 7, and row 7 every other row. A row-5 deferral is
 //     held to row 1's reasons: one of ALLOWED_DEFER other than
-//     false-rationale, `remedy-outside-diff` under the rule above. An open
-//     home carries its row's triage label and not the other one; the closed
-//     suggestion-band record is the closed issue titled `PR #<pr> review: the
-//     suggestion band, checked`, labelled `wontfix`. `claimKind` is trusted:
-//     the script never judges whether a claim is about shape. A survived
-//     finding out of scope has no row, and its deferral's filing is not
-//     judged.
+//     false-rationale, `remedy-outside-diff` under the rule above. A row-8
+//     deferral is held to no reason and escalates nothing, whatever its
+//     severity. An open home carries exactly one triage label, its row's or
+//     a stronger one: `ready-for-agent` answers a `needs-triage` row, and
+//     `needs-triage` never answers a `ready-for-agent` one. The closed
+//     suggestion-band record is the closed issue titled `PR #<pr> review:
+//     the suggestion band, checked`, labelled `wontfix`. `claimKind` is
+//     trusted: the script never judges whether a claim is about shape. A
+//     deferral no row holds — a reversed refutation whose claim is about
+//     behavior — is a mismatch naming no filing-table row.
 //
 // Unchecked: `gh` unreachable, or a deferral's issue it cannot read, leaves
 // that entry's filing unjudged. With no rule broken and nothing escalated the
@@ -151,29 +155,44 @@ const BUCKETS = [...COVERED, "refuted"];
 const ENUMS = { scope: ["in", "out"], claimKind: ["behavior", "shape"], disposition: ["apply", "defer"] };
 
 // The filing table: a deferral's home by its finding's state. `record` is the
-// closed suggestion-band record; `open` the triage label an open home carries.
+// closed suggestion-band record; `open` the weakest triage label an open home may carry.
 export const FILING_ROWS = Object.freeze({
-  1: { finding: "a survived finding deferred for an allowed reason other than false-rationale", open: "ready-for-agent" },
-  2: { finding: "a survived finding deferred false-rationale", record: true },
+  1: { finding: "an in-scope survived finding deferred for an allowed reason other than false-rationale", open: "ready-for-agent" },
+  2: { finding: "an in-scope survived finding deferred false-rationale", record: true },
   3: { finding: "an unverified finding whose refuters crashed", open: "needs-triage" },
   4: { finding: "an in-scope suggestion its refuter refuted", record: true },
   5: { finding: "an in-scope suggestion its refuter let survive", open: "ready-for-agent" },
   6: { finding: "an out-of-scope suggestion alleging wrong behavior", open: "needs-triage" },
   7: { finding: "a finding whose claim is about shape, below the claim bar", record: true },
+  8: { finding: "an out-of-scope survived finding, whatever its reason", open: "ready-for-agent" },
 });
+// Strongest first: an open home may carry a label above its row's, never below.
 const TRIAGE_LABELS = ["ready-for-agent", "needs-triage"];
 // Row 1's reasons, which a row-5 deferral is held to.
 const ROW_1_DEFER = ALLOWED_DEFER.filter((r) => r !== "false-rationale");
 export const recordTitle = (pr) => `PR #${pr} review: the suggestion band, checked`;
 
 function homeText(row, pr) {
-  return row.record ? `the closed "${recordTitle(pr)}" issue, labelled wontfix` : `an open issue labelled ${row.open}`;
+  if (row.record) return `the closed "${recordTitle(pr)}" issue, labelled wontfix`;
+  return `an open issue labelled ${TRIAGE_LABELS.slice(0, TRIAGE_LABELS.indexOf(row.open) + 1).reverse().join(" or ")}`;
 }
 
 // Whether an issue `{state, title, labels}` is `row`'s home on PR `pr`.
 function homeHolds(row, { state, title, labels }, pr) {
   if (row.record) return state === "CLOSED" && title.trim() === recordTitle(pr) && labels.includes("wontfix");
-  return state === "OPEN" && labels.includes(row.open) && !labels.includes(TRIAGE_LABELS.find((l) => l !== row.open));
+  const triage = labels.filter((l) => TRIAGE_LABELS.includes(l));
+  return state === "OPEN" && triage.length === 1 && TRIAGE_LABELS.indexOf(triage[0]) <= TRIAGE_LABELS.indexOf(row.open);
+}
+
+// The row a deferral's finding state puts it on, by precedence, or null when
+// no row holds it. `refuted` is an in-scope suggestion's refuter verdict, null
+// for any other finding.
+function filingRow({ bucket, inScope, crashed, refuted, shape, reason }) {
+  if (refuted === true) return 4;
+  if (shape) return 7;
+  if (bucket === "survived") return !inScope ? 8 : reason === "false-rationale" ? 2 : 1;
+  if (bucket === "unverified") return crashed ? 3 : !inScope ? 6 : refuted === false ? 5 : null;
+  return null;
 }
 
 function describeIssue({ state, title, labels }) {
@@ -402,15 +421,14 @@ export function checkDispositions({ review, record, recordProblem = null, touche
       at(bucket, index, `malformed entry — ${errors.join("; ")}`);
       return;
     }
-    if (bucket === "refuted") {
-      if (!e.reason?.trim()) at(bucket, index, "a reversed refutation names its evidence in reason, and this one names none");
+    if (bucket === "refuted" && !e.reason?.trim()) {
+      at(bucket, index, "a reversed refutation names its evidence in reason, and this one names none");
       return;
     }
-    if (bucket === "survived" && e.disposition !== "defer") return;
+    if (bucket !== "unverified" && e.disposition !== "defer") return;
     const finding = review[bucket][index];
     const presumed = presumedInScope(finding, touched, roots);
     const inScope = presumed !== null || e.scope === "in";
-    if (bucket === "survived" && !inScope) return;
     const why = presumed === null ? "its entry declares scope in" : `${presumed}, so it is in scope whatever its entry declares`;
     const crashed = bucket === "unverified" && finding.refutersDispatched > 0;
     // An in-scope suggestion's refuter verdict is the evidence a refuter ran.
@@ -435,8 +453,9 @@ export function checkDispositions({ review, record, recordProblem = null, touche
     const shape = e.claimKind === "shape";
     // A finding that stands defers only for a reason: an in-scope survivor
     // for one of ALLOWED_DEFER, a suggestion its refuter let through for one
-    // of row 1's — unless row 7 takes it.
-    if (bucket === "survived" || (refuted === false && !shape)) {
+    // of row 1's — unless row 7 takes it. An out-of-scope survivor defers for
+    // any reason, and escalates nothing.
+    if ((bucket === "survived" && inScope) || (refuted === false && !shape)) {
       const allowed = bucket === "survived" ? ALLOWED_DEFER : ROW_1_DEFER;
       if (!allowed.includes(e.reason)) {
         const reason = e.reason === undefined || e.reason === "" ? "no reason" : `reason ${JSON.stringify(e.reason)}`;
@@ -460,9 +479,11 @@ export function checkDispositions({ review, record, recordProblem = null, touche
       }
     }
     // Where the deferral must be filed. `claimKind` is trusted, never judged.
-    const rowNo = refuted === true ? 4 : shape ? 7
-      : bucket === "survived" ? (e.reason === "false-rationale" ? 2 : 1)
-      : crashed ? 3 : inScope ? 5 : 6;
+    const rowNo = filingRow({ bucket, inScope, crashed, refuted, shape, reason: e.reason });
+    if (rowNo === null) {
+      at(bucket, index, `no filing-table row holds a deferred ${bucket} finding, scope ${inScope ? "in" : "out"}, claimKind ${e.claimKind} — the table names no home for it`);
+      return;
+    }
     const row = FILING_ROWS[rowNo];
     const { pr, issue: readIssue } = filingOf();
     if (e.issue === undefined) {
