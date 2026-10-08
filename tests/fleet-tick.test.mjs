@@ -544,7 +544,7 @@ test("deriveRun: a finished PR's returned review and settled members read as bef
   assert.deepEqual(r.reviewed.map((x) => x.pr), [50], "the returned review is still on record");
 });
 
-test("deriveRun: fix-pr is due on a returned review with survivors and no fix-applier since", () => {
+test("deriveRun: fix-pr is due on a returned review with survived or unverified findings and no fix-applier since", () => {
   const r = run({
     rows: [
       "#10 impl-10=PR#20 → PR#20 · review=wf:a reviewed=abc1234:2/0/0",
@@ -554,10 +554,26 @@ test("deriveRun: fix-pr is due on a returned review with survivors and no fix-ap
       "#13 impl-13=PR#23 → PR#23 · review=wf:d reviewed=abc1234:1/0/0 · fix-pr-23=applied:def5678 review=wf:e reviewed=def5678:1/0/0",
       // A closed PR is nobody's work.
       "#14 impl-14=PR#24 → PR#24 · review=wf:f reviewed=abc1234:4/0/0",
+      // Everything refuted: nothing for a fix-applier to rule on.
+      "#15 impl-15=PR#25 → PR#25 · review=wf:g reviewed=abc1234:0/3/0",
     ],
     dispatched: ["fix-pr-22=applied:def5678", "fix-pr-23=applied:def5678"],
-  }, [pr(20), pr(21), pr(22), pr(23)]);
-  assert.deepEqual(r.fixDue, [20, 23]);
+  }, [pr(20), pr(21), pr(22), pr(23), pr(25)]);
+  assert.deepEqual(r.fixDue, [20, 21, 23]);
+});
+
+// #2877: `ledger.mjs dispatch` gates a finisher on an unverified finding as
+// well as a survived one, and only a review fix-applier's verdict answers it —
+// so a review counting only unverified findings must be fix-due, or its PR
+// strands with neither a fix-applier nor a finisher ever named.
+test("deriveRun: a review counting only unverified findings is fix-due until a review fix-applier lands", () => {
+  const at = (tail) => run({ rows: [`#20 impl-20=PR#21 → PR#21 · review=wf:a reviewed=abc1234:0/2/6${tail}`] }, [pr(21)]);
+  const due = at("");
+  assert.deepEqual(due.fixDue, [21]);
+  assert.equal(row(state({ fixDue: due.fixDue }), "reviewers").action, "DISPATCH fix-pr PR#21");
+  assert.deepEqual(at(" · fix-pr-21").fixDue, [], "a live fix-applier is not re-offered");
+  assert.deepEqual(at(" · fix-pr-21=no-op · dispositions-ok=fix-pr-21:abc1234").fixDue, [], "a landed no-op answers it");
+  assert.deepEqual(at(" · fix-pr-21=failed").fixDue, [21], "a dead one leaves it due for a replacement");
 });
 
 test("deriveRun: review is due on open PRs that close an issue and carry no review token, oldest first", () => {

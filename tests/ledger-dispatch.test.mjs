@@ -790,6 +790,20 @@ test("a PR whose latest review counts no survived and no unverified finding disp
   assert.deepEqual(read().dispatched, ["finisher-pr-40", "finisher-pr-41"]);
 });
 
+// #2877, the gate's half: the tick names a fix-applier for a review counting
+// only unverified findings (pinned in fleet-tick.test.mjs), and its `no-op`
+// with an ok verdict is what opens this gate.
+test("a PR whose latest review counts only unverified findings dispatches a finisher once a no-op fix-applier's verdict is ok", (t) => {
+  const { ok, read, refused } = fixture(t);
+  ok("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${GATE_HEAD.slice(0, 7)}:0/2/6`);
+  refused(["dispatch", "40", "finisher-pr-40"], /dispositions unchecked/);
+  ok("dispatch", "40", "fix-pr-40");
+  ok("settle", "fix-pr-40", "no-op");
+  ok("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${GATE_HEAD.slice(0, 7)}:0/2/6 · fix-pr-40=no-op · dispositions-ok=fix-pr-40:${GATE_HEAD}`);
+  assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+  assert.deepEqual(read().dispatched, ["fix-pr-40=no-op", "finisher-pr-40"]);
+});
+
 test("the current verdict is the highest-suffixed fix-applier's, in either text order", (t) => {
   const { ok, read, refused } = fixture(t);
   const a = `dispositions-mismatch=fix-pr-40:${GATE_HEAD}`;

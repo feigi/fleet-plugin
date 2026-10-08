@@ -571,7 +571,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     // `reviewed=` — one read while no hold stood unresolved. The one read
     // while a hold did is the conflict fix-applier `ledger.mjs dispatch` named
     // a `fleet-implementer-<cell>`: it rebases and never sees the review file,
-    // so it clears the hold and answers no survivor. Each fix-applier
+    // so it clears the hold and answers no finding. Each fix-applier
     // does one of those jobs once, so its landing folds once per PR
     // (`fixLanded`), however many copies of its token the rows carry.
     // `fixMembers`: every fix-applier on this PR, wherever its token sits —
@@ -601,7 +601,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
       const t = parseToken(tok);
       if (t) {
         note(t, where, pr);
-        // A settled `failed`/`killed` fix-applier leaves survivors or a
+        // A settled `failed`/`killed` fix-applier leaves review findings or a
         // conflict unfixed and no successor dispatched — the PR stays fix-due
         // for a `-b` replacement. Only a live attempt, or one that actually
         // landed (`applied:`/`no-op`), holds it off. Read the outcome off the
@@ -613,7 +613,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
         // must not un-settle what actually landed. Which job a landed one did
         // is read off where its token sits:
         // after an unresolved hold it was the conflict fix-applier and clears
-        // that hold; otherwise it answered the latest review's survivors. A
+        // that hold; otherwise it answered the latest review's findings. A
         // hold reopens `conflictOpen` below and a `reviewed=` resets
         // `reviewFixed`, so only a fix-applier after the latest of each ever
         // counts. Only ONE copy says where: the first in-place settled one,
@@ -621,7 +621,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
         // folding again would land the one member twice: a stale bare copy
         // after the hold its member's in-place copy preceded clearing that
         // hold, or a second copy after the first cleared the hold answering
-        // survivors the conflict fix-applier never read. Liveness is not read
+        // findings the conflict fix-applier never read. Liveness is not read
         // here at all: a bare copy read before a later row settles its member
         // reads unsettled at that point, so `fixMembers` is judged once every
         // row has been read. A copy reaching this branch has just been
@@ -772,15 +772,16 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     // The in-flight reviews of PRs the open list does not carry: the ones
     // `finished` could retire, so the caller asks gh about these and no others.
     reviewsOffList: reviewing.filter(([n]) => !open.has(n)).map(([n]) => n).sort(asc),
-    // A returned review whose survivors no review fix-applier has answered,
-    // a conflict hold no fix-applier has cleared, or a dispositions mismatch
-    // no retry has answered — on a PR still open, with no fix-applier working
-    // it and no newer review running. The first two are answered apart
-    // here: a landed conflict fix-applier lifts the hold and leaves
-    // survivors it never read due for a review one.
+    // A returned review whose survived or unverified findings no review
+    // fix-applier has answered — `ledger.mjs dispatch` refuses a finisher
+    // on either until one has — a conflict hold no fix-applier has cleared,
+    // or a dispositions mismatch no retry has answered — on a PR still open,
+    // with no fix-applier working it and no newer review running. The first
+    // two are answered apart here: a landed conflict fix-applier lifts the
+    // hold and leaves findings it never read due for a review one.
     fixDue: [...byPr.entries()]
       .filter(([n, st]) => open.has(n)
-        && ((st.survived > 0 && !st.reviewFixed) || conflictHeld(st) || mismatchDue(st))
+        && (((st.survived > 0 || st.unverified > 0) && !st.reviewFixed) || conflictHeld(st) || mismatchDue(st))
         && !fixRunning(st) && !st.inFlight)
       .map(([n]) => n).sort(asc),
     // Open, not signed off, closing an issue (GitHub's own linked set — a
