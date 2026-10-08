@@ -1,9 +1,9 @@
 // #2243, the gate ADR 0019 orders last (#2230). Everything under `plugin/`
 // ships to consumers, so it names nothing that does not ship: no issue or PR
 // number of this repo in any form, no foreign tracker number, no ADR number,
-// no repo-internal `docs/` record path, no test-file name. The ten sweep
-// slices (#2233-#2242) and this ticket emptied the scan; this file keeps it
-// empty.
+// no repo-internal `docs/` record path, no test-file name, no dated-spec or
+// section pointer. The ten sweep slices (#2233-#2242) and this ticket
+// emptied the scan; this file keeps it empty.
 //
 // WHOLE FILE, every tracked file under `plugin/`, every type. Not a comment
 // scan: ADR 0019 puts runtime strings in scope beside prose and comments, and
@@ -31,6 +31,10 @@
 //     `${var#12}` (shell prefix removal) is exempt.
 //   - a github.com issue or pull URL. No hits.
 //   - `ADR-NNNN` and `ADRs NNNN`. One hit, a real citation (`pre-ADR-0015`).
+//   - a dated spec or section pointer, `spec 2026-09-24`, `spec § N` or
+//     `§ N §M`: a pointer into a spec that does not ship. It survived in six
+//     shipped files (five scripts and run-team/SKILL.md) before this ticket's
+//     sweep.
 // Left out on purpose: `docs/components/` and `tests/` paths, which ADR 0019's
 // enumerated list does not name; widening the rule is the maintainer's call.
 //
@@ -63,6 +67,7 @@ import { repoRoot, skipWithoutRepo, trackedPaths } from "../plugin/scripts/repo-
 const ROOT = repoRoot(fileURLToPath(new URL("../plugin/scripts", import.meta.url)));
 const SKIP_WITHOUT_REPO = skipWithoutRepo(ROOT, "the shipped-surface reference scan of plugin/");
 const FILES = ROOT === null ? [] : trackedPaths(ROOT, ["plugin"]);
+const SCRIPTS_MJS = FILES.filter((f) => /^plugin\/scripts\/[^/]+\.mjs$/.test(f));
 const readRel = (relPath) => readFileSync(join(ROOT, relPath), "utf8");
 
 const BOARD_HTML = "plugin/scripts/board.html";
@@ -74,6 +79,12 @@ const CLAIM_TICKET = "plugin/scripts/claim-ticket.sh";
 // gutter — the wrap a `PR` / `ADR` and its number may straddle.
 const GAP = String.raw`(?:[ \t]+|[ \t]*\r?\n[ \t]*(?:\/\/+|#+|\*+|>+)?[ \t]*)`;
 
+// A dated spec, `spec 2026-09-24`, is `docs/specs/2026-09-24-*.md` with the
+// directory elided; `spec § N` and the `§ N §M` rule pointer it spawns point
+// into one. `§ N §M` is a pointer whatever precedes it; a lone `§ N` after a
+// shipped or harness document's name is not one.
+const SPEC_POINTER = String.raw`\b[Ss]pec(?:${GAP}\d{4}-\d{2}-\d{2}\b|${GAP}?§)|§${GAP}?\d+${GAP}?§${GAP}?\d+`;
+
 const PATTERNS = [
   ["bare #N", String.raw`(?<![\w/&$])#\d{2,}`],
   ["owner/repo#N", String.raw`\b[\w.-]+\/[\w.-]+#\d+`],
@@ -83,6 +94,7 @@ const PATTERNS = [
   ["ADR NNNN", String.raw`\bADRs?(?:-|${GAP})?\d{3,4}\b`],
   ["docs/ record path", String.raw`\bdocs\/(?:adr|specs|research|agents|requirements)\b`],
   ["test-file name", String.raw`[\w.-]+\.test\.mjs\b`],
+  ["spec-section pointer", SPEC_POINTER],
 ].map(([kind, source]) => [kind, new RegExp(source, "g")]);
 
 // A CSS hex colour: 3, 4, 6 or 8 hex digits, ending at a non-name character.
@@ -144,6 +156,14 @@ function lineWhere(lines, predicate, what) {
   return i;
 }
 
+// Index of the first body prose line — past the frontmatter, so it is prose
+// rather than a YAML key; fails loudly when the frontmatter never closes.
+function bodyProseLine(relPath, lines) {
+  const bodyStart = lines[0] === "---" ? lines.indexOf("---", 1) + 1 : 0;
+  assert.ok(bodyStart > 0 || lines[0] !== "---", `${relPath}'s frontmatter never closes`);
+  return lineWhere(lines, (l, n) => n >= bodyStart && /^[A-Za-z]/.test(l), `a body prose line in ${relPath}`);
+}
+
 // The scan of `relPath` after `mutate` rewrites line `i`: must report a new
 // offence ON that line, where the unmutated file reports none at all.
 function assertMutationReds(relPath, text, i, mutate) {
@@ -174,7 +194,7 @@ test("no tracked file under plugin/ names an issue, PR, ADR, docs/ record or tes
 });
 
 test("a (#1234) in a comment of every plugin/scripts/*.mjs turns the scan red", { skip: SKIP_WITHOUT_REPO }, () => {
-  const scripts = FILES.filter((f) => /^plugin\/scripts\/[^/]+\.mjs$/.test(f));
+  const scripts = SCRIPTS_MJS;
   assert.ok(scripts.length > 20, `only ${scripts.length} plugin/scripts/*.mjs found`);
   for (const relPath of scripts) {
     const text = readRel(relPath);
@@ -191,12 +211,33 @@ test("a (#1234) in a review-core.mjs prompt literal turns the scan red", { skip:
 
 test("a (#1234) in run-team/SKILL.md prose turns the scan red", { skip: SKIP_WITHOUT_REPO }, () => {
   const text = readRel(RUN_TEAM_SKILL);
-  const lines = text.split("\n");
-  // Past the frontmatter, so the line is body prose rather than a YAML key.
-  const bodyStart = lines[0] === "---" ? lines.indexOf("---", 1) + 1 : 0;
-  assert.ok(bodyStart > 0 || lines[0] !== "---", `${RUN_TEAM_SKILL}'s frontmatter never closes`);
-  const i = lineWhere(lines, (l, n) => n >= bodyStart && /^[A-Za-z]/.test(l), "a body prose line");
+  const i = bodyProseLine(RUN_TEAM_SKILL, text.split("\n"));
   assertMutationReds(RUN_TEAM_SKILL, text, i, (l) => `${l} (#1234)`);
+});
+
+test("a spec 2026-09-24 § 6 pointer in every plugin/scripts/*.mjs comment and plugin/skills/ markdown file turns the scan red", { skip: SKIP_WITHOUT_REPO }, () => {
+  const scripts = SCRIPTS_MJS;
+  assert.ok(scripts.length > 20, `only ${scripts.length} plugin/scripts/*.mjs found`);
+  for (const relPath of scripts) {
+    const text = readRel(relPath);
+    const i = lineWhere(text.split("\n"), (l) => /^\s*(?:\/\/|\*)\s*\S/.test(l), `a comment line in ${relPath}`);
+    assertMutationReds(relPath, text, i, (l) => `${l} (spec 2026-09-24 § 6)`);
+  }
+  const skills = FILES.filter((f) => /^plugin\/skills\/.+\.md$/.test(f));
+  assert.ok(skills.includes(RUN_TEAM_SKILL), `${RUN_TEAM_SKILL} is not among the plugin/skills/ markdown files`);
+  for (const relPath of skills) {
+    const text = readRel(relPath);
+    const i = bodyProseLine(relPath, text.split("\n"));
+    assertMutationReds(relPath, text, i, (l) => `${l} (spec 2026-09-24 § 6)`);
+  }
+});
+
+test("a spec 2026-09-24 § 6 pointer wrapped across a comment line break turns the scan red", { skip: SKIP_WITHOUT_REPO }, () => {
+  const relPath = "plugin/scripts/fleet-tick.mjs";
+  const text = readRel(relPath);
+  const i = lineWhere(text.split("\n"), (l) => /^\/\/ \S/.test(l), `a comment line in ${relPath}`);
+  assertMutationReds(relPath, text, i, (l) => `${l} (spec\n// 2026-09-24 § 6)`);
+  assertMutationReds(relPath, text, i, (l) => `${l} (§ 6\n// §5)`);
 });
 
 test("' — ADR 0015' restored inside claim-ticket.sh's rederive string and a die string turns the scan red", { skip: SKIP_WITHOUT_REPO }, () => {
@@ -240,6 +281,16 @@ test("every banned form is caught, a wrapped PR or ADR reference included", () =
     ["plugin/x.md", "docs/agents/x.md", "docs/ record path"],
     ["plugin/scripts/x.sh", 'die "see claim-ticket.test.mjs"', "test-file name"],
     ["plugin/x.md", "`color:#30363d` outside board.html", "bare #N"],
+    ["plugin/scripts/x.mjs", "// invocation (spec 2026-09-24 § 6: record, tick)", "spec-section pointer"],
+    ["plugin/scripts/x.mjs", "// `model:` is `@<role>:<level>` (spec 2026-09-28).", "spec-section pointer"],
+    ["plugin/scripts/x.mjs", "// The draw (spec § 2): uniform", "spec-section pointer"],
+    ["plugin/scripts/x.mjs", "// Spec § 3 §7's result token", "spec-section pointer"],
+    ["plugin/scripts/x.mjs", "// held until a replacement (§ 6 §6). The", "spec-section pointer"],
+    ["plugin/scripts/x.mjs", "// the spec\n// 2026-09-24 § 6", "spec-section pointer"],
+    ["plugin/x.md", "the spec §\n6 says", "spec-section pointer"],
+    ["plugin/x.md", "≈ 1.95·I (spec 2026-09-24 § 3\n§3, medians", "spec-section pointer"],
+    ["plugin/scripts/x.mjs", "// per the Spec § 3 rule", "spec-section pointer"],
+    ["plugin/scripts/x.mjs", "// per the Spec 2026-09-24 § 6 rule", "spec-section pointer"],
   ];
   for (const [relPath, text, kind] of caught) {
     const found = offences(relPath, text);
@@ -266,6 +317,13 @@ test("what the scan must accept: placeholders, interpolation, entities, shell, U
     [BOARD_HTML, "<style>\n  :root { --bg:#0d1117; --panel:#161b22; }\n  .a { color:#000; background: #2d1618 }\n</style>"],
     [BOARD_HTML, "<style>\n  .a { color:#00000080; background:#fff8 }\n</style>"],
     [BOARD_HTML, "<STYLE>\n  .a { color:#000000; }\n</STYLE>"],
+    ["plugin/scripts/x.mjs", "//     § `agent()`), per omp://tools/eval.md"],
+    ["plugin/scripts/fleet-run", "// The Resolver (CONTEXT.md § Install"],
+    ["plugin/scripts/x.mjs", "// with `jq` (review-and-fix.md § The review result file), so"],
+    ["plugin/scripts/x.mjs", "// dispatches the ticket (shortlist.mjs's own header, §3),"],
+    ["plugin/x.md", "the spec says; a spec-compliant reader; inspect 2026-09-24"],
+    ["plugin/scripts/x.mjs", "// the aspec § 6 and respec 2026-09-24 forms"],
+    ["plugin/x.md", "spec 2026-09-244 is not a date"],
   ];
   for (const [relPath, text] of accepted) {
     assert.deepEqual(offences(relPath, text), [], `${JSON.stringify(text)} in ${relPath} was refused`);

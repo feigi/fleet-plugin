@@ -8,7 +8,7 @@
 // until a human asked why nothing was being implemented. No error, no warning.
 //
 // So compute the deficit instead of remembering it. Every wake ends in one
-// invocation (spec 2026-09-24 § 6: record, tick, act, beat), and each prints
+// invocation (record, tick, act, beat), and each prints
 // actual/target and a named ACTION per role — `PULL #<n> #<n>`, `DISPATCH
 // fix-pr PR#<pr>`, `DISPATCH review PR#<pr>`, `DISPATCH merge-bot`, `HOLD (…)`,
 // `REFRESHED shortlist: …` — with run-team's guards applied in code rather than
@@ -143,10 +143,10 @@ function implementers(s, left) {
     `unclaimed=${s.heads.length} supply=${s.supply ?? "?"} unreviewed=${left.unreviewed}`
     + (s.shortlistStatus === "ok" ? "" : ` shortlist=${s.shortlistStatus}`));
 
-  // Drain stops supply and nothing else (spec § 6 §5). Read from the file, so
+  // Drain stops supply and nothing else. Read from the file, so
   // a replacement controller that never saw the drain is held by it too.
   if (s.draining !== null) return row("HOLD (draining)");
-  // Held until a replacement at the right tier is dispatched (§ 6 §6). The
+  // Held until a replacement at the right tier is dispatched. The
   // controller can fix this unattended, so the row asks it to — and names the
   // replacement in its detail, since the step lives otherwise only in
   // SKILL.md prose, which is what a compaction loses.
@@ -165,7 +165,7 @@ function implementers(s, left) {
   const deficit = s.implCap - s.implLive;
   if (deficit <= 0) return row("AT CAP");
 
-  // The review-backlog gate, NARROWED (§ 6 §4): more PRs into a review-bound
+  // The review-backlog gate, NARROWED: more PRs into a review-bound
   // pipeline buy nothing — but the pipeline is review-bound only when a PR is
   // still owed its review after this tick's dispatches AND no reviewer slot is
   // left for it. A deep backlog with free slots is a reviewer-row DISPATCH on
@@ -877,7 +877,7 @@ export function parseShortlist(text) {
   return { status: "ok", scanned: d.scanned, entries: d.shortlist.map(({ n, t }) => ({ n, t })) };
 }
 
-// Why this tick refreshes the shortlist, or null (§ 6 §3). The premise-lifted
+// Why this tick refreshes the shortlist, or null. The premise-lifted
 // trigger costs gh calls, so main() asks it only when these answer null.
 export function refreshWhy({ draining, status, entries, unclaimed: k, implCap }) {
   if (draining !== null) return null;
@@ -1174,7 +1174,7 @@ function finishedReviewPrs(offList) {
   return finished;
 }
 
-// shortlist.mjs, run by the tick itself (§ 6 §3). Its per-ticket stderr is
+// shortlist.mjs, run by the tick itself. Its per-ticket stderr is
 // captured and dropped rather than billed to the controller's context; only a
 // failure's last line rides along.
 function refresh() {

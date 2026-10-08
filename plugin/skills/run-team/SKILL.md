@@ -3308,8 +3308,8 @@ where the controller itself runs from.
   such a PR's review is dispatched by hand.
 
 **Defaults: 2 implementers, 6 reviewers — no hard cap on either.** Reviewer
-slots in use ≈ I·(T_review + 0.94·T_fix)/T_impl ≈ 1.95·I (spec 2026-09-24 § 3
-§3, medians since 2026-08-07: T_impl 19.3 min, T_fix 21.0 min, T_review ~18
+slots in use ≈ I·(T_review + 0.94·T_fix)/T_impl ≈ 1.95·I (medians since
+2026-08-07: T_impl 19.3 min, T_fix 21.0 min, T_review ~18
 min, 0.94 fix-appliers per review), so at the default about four of the six
 are busy, and an idle slot costs nothing. Re-derive it from the map's guard
 once 20 or more PRs have merged under it, never from one run's rows.

@@ -90,7 +90,7 @@ export function nextMergeBot(dispatched) {
 
 // An implementer cell is `<role>-<level>` — an omp role and a thinking
 // level — and each cell is one definition, `fleet-implementer-<cell>`, whose
-// `model:` is `@<role>:<level>` (spec 2026-09-28 § 2). Nothing is named
+// `model:` is `@<role>:<level>`. Nothing is named
 // `fleet-implementer` alone, so CELL_DEF is the whole implementer family:
 // derived from CELL rather than spelled twice, so a level added to one cannot
 // be missing from the other.
@@ -102,7 +102,7 @@ export const CELL_DEF = new RegExp(`^fleet-implementer-${CELL.source.slice(1)}`)
 // ticket-router.mjs defaults to the same cell this file maps a bare row to.
 export const POLICY_CELL = "slow-high";
 
-// The Exploration Pull's draw (spec § 2): uniform over every cell but
+// The Exploration Pull's draw: uniform over every cell but
 // `policyCell`, keyed off the row's own `session` and `ticket`, so the draw
 // is reproducible from the row and a re-dispatch of the same ticket in the
 // same session lands on the same cell. No RNG and no seed token. `k` is the
