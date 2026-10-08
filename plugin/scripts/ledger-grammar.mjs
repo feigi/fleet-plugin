@@ -96,7 +96,7 @@ const PR_MENTION = /\bPR\s*#(\d+)\b/;
 export function rowPr(text) {
   const impls = memberTokens(text).filter((t) => t.family === "impl");
   if (impls.length > 0) {
-    const settled = impls.find((t) => t.error === null && t.outcome !== null && t.outcome.startsWith("PR#"));
+    const settled = impls.find((t) => t.error === null && t.outcome?.startsWith("PR#"));
     return settled ? Number(settled.outcome.slice("PR#".length)) : null;
   }
   const m = PR_MENTION.exec(text);
