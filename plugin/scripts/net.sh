@@ -33,8 +33,8 @@
 # wrapping it would buy a second bound over the first.
 #
 # `LC_ALL=C` is a per-command prefix below, never an export, for json.sh's
-# reason: some callers (delete-merged-branch.sh, prove-merge.sh and verify-sha.sh
-# among them) do not pin the locale; an export here would re-locale their other tools.
+# reason: some callers (delete-merged-branch.sh, prove-merge.sh, verify-sha.sh
+# among them) do not pin the locale; an export would re-locale the other tools.
 
 # net_budget <default> <override> — print the budget a call gets, in seconds.
 #
