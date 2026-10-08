@@ -47,8 +47,9 @@
 # Exit status: 0 the command is printed; 1 a refusal about the cache, the
 # repository or the arguments; 3 a tool this script needs to read the cache
 # (git, node, mktemp, cat) could not be started, mktemp could not create its
-# temp file, git did not run to an answer, or node died mid-read, so nothing
-# was read and the cache's usability is unknown.
+# temp file, git did not run to an answer, node died mid-read, or node exited
+# non-zero with no reason and a status other than 2, its only verdict on the
+# cache, so nothing was read and the cache's usability is unknown.
 set -eu
 
 # Byte semantics for every construct below that reads a string by bytes:
@@ -98,10 +99,10 @@ die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 1; }
 # A refusal about the environment, not the cache: a tool this script needs to
 # read the cache (git, the interpreter, mktemp, cat) could not be started,
 # mktemp could not create its temp file, git did not run to an answer, or the
-# interpreter died mid-read, so nothing was read and the cache's usability is
-# unknown. Exit 3, where every refusal about the cache, the repository or the
-# arguments is exit 1. A consumer that only tests for non-zero sees no
-# difference.
+# interpreter died mid-read or failed without a reason before passing the
+# cache, so nothing was read and the cache's usability is unknown. Exit 3,
+# where every refusal about the cache, the repository or the arguments is
+# exit 1. A consumer that only tests for non-zero sees no difference.
 unrunnable() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 3; }
 
 # Named once: every refusal that sends the caller to re-derive names the same
@@ -229,6 +230,8 @@ process.stdout.write(open + value + close);
 # node's own refusal of the cache is exit 2 (an uncaught fault is exit 1), the
 # reason on stderr either way; a status of 126 or above is the shell failing to
 # run node or the system killing it mid-read, which says nothing about the cache.
+# Only status 2 is node's verdict on the cache: every check above refuses
+# through `bad`, so any other status is a fault outside those checks.
 if [ "$rc" -ge 126 ]; then
   unrunnable "node did not finish reading the Recipe cache (exit $rc), so its usability is unknown"
 fi
@@ -244,16 +247,26 @@ fi
 # which `set -u` then trips on) fails the substitution, and the `||` names that
 # in the reason instead of aborting on the shell's own error, which under dash
 # would also be an exit outside 0/1/3. A stderr that was read back but held
-# nothing, only newlines, or only blanks (spaces, tabs, CRs) names the exit
-# status instead of a reason that reads as blank. The blank set is spelled out,
-# not a `[:space:]` class: this script's locale inventory stays what the pin
-# comment above says it is. The `.` guards the newline that `$(…)` would strip.
+# nothing, only newlines, or only blanks (spaces, tabs, CRs) is no reason: with
+# status 2 it names the exit status instead of a reason that reads as blank;
+# with any other status node failed before passing the cache and said nothing
+# about it, so the cache's usability is unknown and that is exit 3.
+# The blank set is spelled out, not a `[:space:]` class: this script's locale
+# inventory stays what the pin comment above says it is. The `.` guards the
+# newline that `$(…)` would strip.
 if [ "$rc" -ne 0 ]; then
   reason=$({ while IFS= read -r line || [ -n "$line" ]; do printf '%s\n' "$line"; done <"$errf"; } 2>/dev/null) ||
     reason="(node's reason could not be read back from $errf)"
   blank=$(printf ' \t\r\n.')
   blank=${blank%.}
-  case $reason in *[!"$blank"]*) ;; *) reason="(node gave no reason, exit $rc)" ;; esac
+  case $reason in
+    *[!"$blank"]*) ;;
+    *)
+      [ "$rc" -eq 2 ] ||
+        unrunnable "node exited $rc without a reason before passing the Recipe cache, so its usability is unknown — an environment fault, not a verdict on the cache"
+      reason="(node gave no reason, exit $rc)"
+      ;;
+  esac
   die "the Recipe cache at $cache is unusable: $reason — $derive"
 fi
 carriedmsg="node's stdout carried more than the framed Recipe value — expected exactly the value between '$open' and '$close', got '$framed'. The cache at $cache passed validation; the extra output comes from how node is launched here (a version-manager or proxy shim, a preload), and is refused rather than cut out of the command"

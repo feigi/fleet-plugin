@@ -63,10 +63,10 @@
 //         included, or that git started and could not run; the reader's `sh`,
 //         `node`, `mktemp` or `cat` could not be started, its `mktemp` could
 //         not create its temp file, its `sh` was killed by a signal, or its
-//         `node` died mid-read — a `cat` that ran and failed stays the
-//         reader's refusal, exit 1; the cache or its temp file could not be
-//         written). The log directory under $TMPDIR is
-//         removed.
+//         `node` died mid-read or exited without a reason and a status other
+//         than 2 — a `cat` that ran and failed stays the reader's refusal,
+//         exit 1; the cache or its temp file could not be written). The log
+//         directory under $TMPDIR is removed.
 
 import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
@@ -120,7 +120,8 @@ const notProven = (message) => new Refusal(1, message);
 
 // The exit status derive-testcmd.sh uses for a refusal about its own
 // environment — a tool it needs would not start, git did not run to an answer,
-// or node died mid-read — where every refusal about the cache is 1.
+// or node died mid-read or failed without a reason before passing the cache —
+// where every refusal about the cache is 1.
 const READER_COULD_NOT_RUN = 3;
 
 function parseArgs(argv) {
