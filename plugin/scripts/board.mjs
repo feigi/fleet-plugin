@@ -560,14 +560,16 @@ async function runCiState(scriptDir, pr) {
 // path, so a bare-key Set would let one channel's warning consume the other's
 // line for that file — a behaviour change, not a refactor. NUL joins them
 // because no channel name or path can hold one, so no two distinct (channel,
-// key) pairs can collide. Every caller keys on a PR, a path, or the fault's
-// own message, so `key` is never empty.
+// key) pairs can collide. Every caller keys on a PR, a path, the fault's own
+// message, or a refused Host's rendering, so `key` is never empty. Returns
+// whether it wrote, for a caller that bounds how many keys it spends.
 const warnedOnce = new Set();
 function warnOnce(channel, key, msg) {
   const k = `${channel}\0${key}`;
-  if (warnedOnce.has(k)) return;
+  if (warnedOnce.has(k)) return false;
   warnedOnce.add(k);
   console.error(`${NAME}: ${msg}`);
+  return true;
 }
 
 // The `ci-parse` gate is keyed on the PR, not on the payload: `serve` rebuilds
@@ -1391,12 +1393,44 @@ function isCockpitHost(host) {
   return m !== null && COCKPIT_HOSTNAMES.has(m[1].toLowerCase());
 }
 
+// A refused Host is the operator's only clue to why the tab shows a 403 — an
+// unlisted spelling of loopback, or a rebound page probing the port — so the
+// refusal goes to stderr, once per distinct Host. The value is the client's,
+// so it is rendered as a JSON string (quotes, backslashes and C0 controls
+// escaped), with the C1 controls JSON leaves bare escaped too, and cut to a
+// bounded length: it cannot split or forge a log line. A rebound page can
+// send unlimited distinct Hosts, so each server logs at most
+// REFUSED_HOST_LOG_CAP of them, then one notice, then nothing new.
+const REFUSED_HOST_LOG_CAP = 16;
+const REFUSED_HOST_SHOWN = 100;
+const COCKPIT_HOST_LIST = [...COCKPIT_HOSTNAMES].join(", ");
+function renderRefusedHost(host) {
+  if (host === undefined) return "a request with no Host header";
+  const json = JSON.stringify(host.slice(0, REFUSED_HOST_SHOWN))
+    .replace(/[\u007f-\u009f\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+  return `Host ${json}${host.length > REFUSED_HOST_SHOWN ? `… (${host.length} chars)` : ""}`;
+}
+
 export function createBoardServer(dir) {
+  let refusedHostsLogged = 0;
+  function logRefusedHost(host) {
+    if (refusedHostsLogged > REFUSED_HOST_LOG_CAP) return;
+    if (refusedHostsLogged === REFUSED_HOST_LOG_CAP) {
+      refusedHostsLogged++;
+      console.error(`${NAME}: ${REFUSED_HOST_LOG_CAP} distinct Hosts refused; further refused Hosts are not logged`);
+      return;
+    }
+    const shown = renderRefusedHost(host);
+    if (warnOnce("host-refused", shown, `refused ${shown} — not a loopback name (${COCKPIT_HOST_LIST}); answered 403`)) refusedHostsLogged++;
+  }
   return createServer((req, res) => {
     // Checked before routing, so an unknown path on a foreign Host is as
     // opaque as a known one: 403, never a 404 that tells a rebound page which
     // paths exist.
-    if (!isCockpitHost(req.headers.host)) { res.writeHead(403); res.end("forbidden"); return; }
+    if (!isCockpitHost(req.headers.host)) {
+      logRefusedHost(req.headers.host);
+      res.writeHead(403); res.end("forbidden"); return;
+    }
     const url = (req.url || "/").split("?")[0];
     const path = url === "/" || url === "/board.html" ? join(dir, "board.html")
       : url === "/board.json" ? join(dir, "board.json") : null;
