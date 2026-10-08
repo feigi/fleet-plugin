@@ -2,7 +2,7 @@
 
 Slice: `plugin/scripts/{candidates,shortlist,ci-state,merge-gate,staleness,pr-overlap,
 diff-stats,fleet-tick,fleet-state,fleet-heartbeat,repo-root,git-env,tier-check,
-tier-roles,arg,slow-transport}.mjs`
+tier-roles,arg}.mjs` plus `tests/support/slow-transport.mjs`
 
 ## GitHub tracker — label names and semantics
 | # | Assumption | Evidence (file:line, quoted fragment) | Breaks if false |
