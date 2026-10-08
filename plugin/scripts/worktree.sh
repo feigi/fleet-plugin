@@ -632,11 +632,12 @@ wt_occupied() { [ -e "$1" ] || [ -L "$1" ]; }
 # once per run — the git dir does not move under a running script. 1 with
 # `$wt_why` when git cannot name the common directory.
 #
-# `2>/dev/null`, never `2>&1`: the answer is used as a PATH, and a
-# `~/.gitconfig` with a key outside any section makes every git command print
-# `error: key does not contain a section: …` on stderr AT EXIT 0, which `2>&1`
-# would glue in front of it. Git's own words are fetched with a second call,
-# only on the path that refuses.
+# `2>/dev/null`, never `2>&1`, on the capture that answers: it is used as a
+# PATH, and a `~/.gitconfig` with a key outside any section makes every git
+# command print `error: key does not contain a section: …` on stderr AT EXIT
+# 0, which `2>&1` would glue in front of it. Git's own words are fetched with
+# a second call, only on the path that refuses, and there stdout is discarded
+# so `2>&1` has no path to glue onto.
 wt_root=
 # shellcheck disable=SC2034
 wt_registry_root() {

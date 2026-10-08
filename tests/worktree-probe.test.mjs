@@ -439,6 +439,13 @@ test("wt_registry_root refuses with the bare reason when git fails without a wor
   assert.equal(p.out, "rc=1\nroot=\nwhy=cannot resolve the git common directory\n");
 });
 
+test("wt_registry_root flattens a multi-line message from git onto the reason's one line", (t) => {
+  const r = repo(t);
+  const bin = commonDirShim(t, `printf 'fatal: first\\nhint: second\\n' >&2; exit 1`);
+  const p = probe(r.w, `PATH="$1:$PATH"\n${REGISTRY_ROOT}`, bin);
+  assert.equal(p.out, "rc=1\nroot=\nwhy=cannot resolve the git common directory: fatal: first hint: second\n");
+});
+
 test("wt_registry_root keeps a warning git prints at exit 0 out of the path it answers", (t) => {
   const r = repo(t);
   const bin = commonDirShim(t, `echo "warning: noise on stderr" >&2`);
