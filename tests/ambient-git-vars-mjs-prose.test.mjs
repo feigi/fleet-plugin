@@ -165,14 +165,18 @@ const COVERED_MJS = {
   // workspace, silently, at exit 0. Measured in fleet-dir.test.mjs, "an
   // ambient GIT_DIR naming another repository does not move the answer".
   "fleet-dir.mjs": 1,
-  // ONE git-invoking primitive, `readInstruments()`'s `rev-parse
-  // --git-common-dir`, which names the checkout instruments.sh is sent to
-  // audit. An ambient GIT_DIR answers it for a DIFFERENT repository, so the
-  // gate would certify that tree's instrument set, at exit 0. Measured in
+  // TWO git-invoking primitives. `readInstruments()`'s `rev-parse
+  // --git-common-dir` names the checkout instruments.sh is sent to audit. An
+  // ambient GIT_DIR answers it for a DIFFERENT repository, so the gate would
+  // certify that tree's instrument set, at exit 0. Measured in
   // merge-gate.test.mjs, "an ambient GIT_DIR cannot move the audited
-  // instrument set into another repository". Its other children (gh,
-  // `node ci-state.mjs`, `sh instruments.sh`) name no git.
-  "merge-gate.mjs": 1,
+  // instrument set into another repository". `gitRead()` runs the
+  // rebase-carry proof's cat-file, merge-base and diff-tree; an ambient
+  // GIT_DIR would prove a carry from another repository's objects and
+  // `origin/main`. Measured in merge-gate.test.mjs, "an ambient GIT_DIR
+  // cannot answer the carry proof for another repository". Its other
+  // children (gh, `node ci-state.mjs`, `sh instruments.sh`) name no git.
+  "merge-gate.mjs": 2,
   // ONE spawn primitive, `git(args, cwd)`, behind both of the file's git calls
   // — `resolveMainRoot()`'s `rev-parse --git-common-dir` and `checkIgnored()`'s
   // `check-ignore` (#1411). An ambient GIT_DIR would answer the first for
