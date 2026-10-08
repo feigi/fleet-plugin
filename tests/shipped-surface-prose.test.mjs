@@ -36,8 +36,9 @@
 //
 // THE ONE CARVE-OUT is ADR 0019's: CSS hex colours in board.html, and only
 // inside its `<style>` element, in a declaration's value. A colour anywhere
-// else — another file, board.html's script, a CSS comment — is scanned like
-// any text. No allowlist and no per-line opt-out marker, by the same ruling.
+// else — another file, board.html's script, a CSS comment, a selector, a quoted
+// string or a `url(...)` inside a value — is scanned like any text. No
+// allowlist and no per-line opt-out marker, by the same ruling.
 //
 // Beside citation-sweep-prose.test.mjs, not inside it: that file is a table of
 // per-file stale/live spelling pairs over code files in `plugin/` and `tests/`;
@@ -87,16 +88,36 @@ const PATTERNS = [
 // A CSS hex colour: 3, 4, 6 or 8 hex digits, ending at a non-name character.
 const CSS_HEX = /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})(?![\w-])/g;
 
+// What the style scan steps over untouched: a CSS comment, a quoted string, a
+// `url(...)`. Each may hold a `;`, `{`, `}` or `:` that is not CSS syntax.
+const CSS_OPAQUE = String.raw`\/\*[\s\S]*?\*\/|"[^"]*"|'[^']*'|url\([^)]*\)`;
+
+// A run of style text up to the next `;`, `{` or `}` and that terminator.
+const CSS_SEGMENT = new RegExp(String.raw`((?:${CSS_OPAQUE}|[^;{}])*)([;{}]?)`, "g");
+const CSS_VALUE_TOKEN = new RegExp(`${CSS_OPAQUE}|:|${CSS_HEX.source}`, "g");
+
+// One declaration: blank each hex colour after its first `:`, outside any
+// comment, string or `url(...)`.
+function blankValueColours(declaration) {
+  let inValue = false;
+  return declaration.replace(CSS_VALUE_TOKEN, (token) => {
+    if (token === ":") inValue = true;
+    return inValue && token.startsWith("#") ? " ".repeat(token.length) : token;
+  });
+}
+
 /**
  * board.html's text with every CSS hex colour in a `<style>` declaration value
- * replaced by spaces of the same length, so offsets and line numbers hold. A
- * CSS comment is skipped over untouched — a reference inside one is scanned.
+ * replaced by spaces of the same length, so offsets and line numbers hold. Only
+ * a segment ended by `;` or `}` is a declaration: one ended by `{` is a
+ * selector or at-rule prelude, so `a:hover #1234 {` blanks nothing. A CSS
+ * comment, a quoted string and a `url(...)` are skipped over untouched — a
+ * reference inside one is scanned.
  */
 export function blankStyleColours(text) {
   return text.replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (_, open, body, close) =>
     open
-    + body.replace(/\/\*[\s\S]*?\*\/|:(?:(?!\/\*)[^;{}])*/g, (chunk) =>
-      chunk.startsWith("/*") ? chunk : chunk.replace(CSS_HEX, (hex) => " ".repeat(hex.length)))
+    + body.replace(CSS_SEGMENT, (_segment, run, end) => (end === "{" ? run : blankValueColours(run)) + end)
     + close);
 }
 
@@ -194,26 +215,37 @@ test("every banned form is caught, a wrapped PR or ADR reference included", () =
     ["plugin/x.md", "#12 at line start", "bare #N"],
     ["plugin/x.md", "see feigi/claude-config#903", "owner/repo#N"],
     ["plugin/x.md", "see oh-my-pi#412", "name#N"],
+    ["plugin/x.md", "see oh-my-pi#12", "name#N"],
     ["plugin/scripts/x.mjs", "// the `→ PR#346` arrow", "name#N"],
     ["plugin/x.md", "https://github.com/feigi/fleet-plugin/pull/866", "issue or PR URL"],
+    ["plugin/x.md", "https://github.com/feigi/fleet-plugin/issues/12", "issue or PR URL"],
     ["plugin/x.md", "measured on PR 866", "PR N"],
+    ["plugin/x.md", "measured on PR 12", "PR N"],
+    ["plugin/x.md", "measured on PRs 12", "PR N"],
     ["plugin/scripts/x.mjs", "// measured on PR\n// 866", "PR N"],
+    ["plugin/x.md", "> measured on PR\n> 866", "PR N"],
     ["plugin/x.md", "per ADR 0015", "ADR NNNN"],
     ["plugin/x.md", "the pre-ADR-0015 bootstrap", "ADR NNNN"],
     ["plugin/x.md", "ADRs 0014 and", "ADR NNNN"],
+    ["plugin/x.md", "per ADR 014", "ADR NNNN"],
     ["plugin/scripts/x.mjs", "  // per ADR\n  // 0015", "ADR NNNN"],
+    ["plugin/scripts/x.mjs", "// per ADR\r\n// 0015", "ADR NNNN"],
     ["plugin/scripts/x.sh", "# per ADR\n#   0015", "ADR NNNN"],
     ["plugin/scripts/x.mjs", " * per ADR\n * 0015", "ADR NNNN"],
     ["plugin/x.md", "per ADR\n0015, which", "ADR NNNN"],
     ["plugin/x.md", "see docs/requirements.md §3.2", "docs/ record path"],
     ["plugin/x.md", "docs/adr/0019-x.md", "docs/ record path"],
+    ["plugin/x.md", "docs/specs/x.md", "docs/ record path"],
+    ["plugin/x.md", "docs/research/x.md", "docs/ record path"],
+    ["plugin/x.md", "docs/agents/x.md", "docs/ record path"],
     ["plugin/scripts/x.sh", 'die "see claim-ticket.test.mjs"', "test-file name"],
     ["plugin/x.md", "`color:#30363d` outside board.html", "bare #N"],
   ];
   for (const [relPath, text, kind] of caught) {
+    const found = offences(relPath, text);
     assert.ok(
-      offences(relPath, text).some((o) => o.kind === kind),
-      `${JSON.stringify(text)} in ${relPath} not caught as ${kind}: ${describe(offences(relPath, text))}`,
+      found.some((o) => o.kind === kind),
+      `${JSON.stringify(text)} in ${relPath} not caught as ${kind}: ${describe(found)}`,
     );
   }
 });
@@ -225,12 +257,15 @@ test("what the scan must accept: placeholders, interpolation, entities, shell, U
     ["plugin/x.md", "a single digit: `#5`, `CI#1`, `PR 7`"],
     ["plugin/x.html", "&#39; and &#x27;"],
     ["plugin/scripts/x.sh", 'n="$#"; len=${#arr[@]}; tail=${var#12}; s=${x##*/}'],
+    ["plugin/scripts/x.sh", "echo $#12"],
     ["plugin/x.md", "https://example.com/page/#12 and a/#34"],
     ["plugin/x.md", "`docs/metrics/tier-outcomes.tsv`, `docs/…` branches, a `*.test.mjs` glob"],
     ["plugin/x.md", "`plugin/package.json#omp.extensions`"],
     ["plugin/x.md", "PRs touch it; ADRs stay in the repo"],
     ["plugin/x.md", "#!/bin/sh"],
     [BOARD_HTML, "<style>\n  :root { --bg:#0d1117; --panel:#161b22; }\n  .a { color:#000; background: #2d1618 }\n</style>"],
+    [BOARD_HTML, "<style>\n  .a { color:#00000080; background:#fff8 }\n</style>"],
+    [BOARD_HTML, "<STYLE>\n  .a { color:#000000; }\n</STYLE>"],
   ];
   for (const [relPath, text] of accepted) {
     assert.deepEqual(offences(relPath, text), [], `${JSON.stringify(text)} in ${relPath} was refused`);
@@ -239,14 +274,29 @@ test("what the scan must accept: placeholders, interpolation, entities, shell, U
 
 test("the board.html carve-out is a CSS declaration colour and nothing else", () => {
   const style = (body) => `<style>\n${body}\n</style>`;
+  // Each text holds one `#1234` reference the carve-out must not hide.
   const red = [
     style("  /* the fix for #1234 */\n  .a { color:#000; }"),
     style("  .a { color: #000 /* see #1234 */; }"),
+    style('  .a::after { content: "fixed in #1234"; }'),
+    style("  .a::after { content: 'fixed in #1234'; color:#000; }"),
+    style('  .a::after { content: "a; fixed in #1234"; }'),
+    style("  .a:hover #1234 { color:#000; }"),
+    style("  .a:hover, .b:focus #1234 /* x */ { color:#000; }"),
+    style("  .a { #1234; color:#000; }"),
     `${style("  .a { color:#000; }")}\n<script>\n  // fixed in (#1234)\n</script>`,
     `${style("  .a { color:#000; }")}\n<p>see #1234</p>`,
   ];
   for (const text of red) {
     assert.ok(offences(BOARD_HTML, text).some((o) => o.match === "#1234"), `${JSON.stringify(text)} in board.html was not refused`);
+  }
+  // A `url(...)` fragment is scanned too: the digits are named, whatever kind.
+  const url = style("  .a { background: url(x.svg#1234); }");
+  assert.notDeepEqual(offences(BOARD_HTML, url), [], `${JSON.stringify(url)} in board.html was not refused`);
+  // A run of digits or a hyphenated tail is not a colour, so it stays visible.
+  for (const value of ["#12345", "#123456abc", "#123-x"]) {
+    const text = style(`  .a { color:${value}; }`);
+    assert.ok(offences(BOARD_HTML, text).some((o) => value.startsWith(o.match)), `${JSON.stringify(text)} in board.html was not refused`);
   }
   // The same colour declaration outside board.html is not carved out.
   assert.notDeepEqual(offences("plugin/scripts/other.html", style("  .a { color:#000; }")), []);
