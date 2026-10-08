@@ -35,7 +35,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition, CELL, tierValues } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition, CELL, tierValues, rowPr } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
 import { stateFileIn, readState, assessBeat, stallsAt } from "./fleet-state.mjs";
 
@@ -1584,15 +1584,6 @@ function rowKey(r) {
   return r.split(/\s/)[0];
 }
 
-// A row's PR is its first `PR#<n>` mention: the `→ PR#<n>` arrow or the
-// implementer's settled `impl-<N>=PR#<n>` token, which name the same PR.
-// compute-board.mjs parseRow() reads the settled token, so the row a
-// PR-bound member lands on is the card the cockpit shows that PR on.
-function rowPr(r) {
-  const m = /\bPR\s*#(\d+)\b/.exec(r);
-  return m ? Number(m[1]) : null;
-}
-
 // Whether a row carries the member's token — live only, settled only, or
 // either when `live` is not given.
 function carries(row, name, live) {
@@ -1600,8 +1591,9 @@ function carries(row, name, live) {
 }
 
 // The row a member's token belongs on: an implementer's is its ticket's row; a
-// PR-bound member's is the row whose PR is its PR, else one keyed by that PR's
-// own number (a PR this run's implementers did not open). -1 when there is
+// PR-bound member's is the row whose PR is its PR — ledger-grammar.mjs's
+// rowPr(), the reading the tick folds that PR's state by — else one keyed by
+// that PR's own number (a PR this run's implementers did not open). -1 when there is
 // none yet. A merge bot works no ticket and never has one.
 function memberRowIndex(member) {
   if (member.bound === null) return -1;
@@ -1876,10 +1868,11 @@ function runSettle() {
   // Fold that row's tokens onto this one, in order, so later PR-bound writes
   // find the one row through rowPr(). Only
   // an implementer settles to `PR#M` (ledger-grammar.mjs), and only when the
-  // settling row named NO PR before this write: `rowPr()` and the tick's
-  // `PR_MENTION` both read the FIRST `PR#` mention on a row, so a row that
-  // already named one — this PR via a hand-written `→ PR#M` arrow, or a
-  // different PR from an earlier attempt — would let the fold misattribute
+  // settling row named NO PR before this write: `rowPr()` is the tick's
+  // reading of a row's PR too, so a row that
+  // already named one — this PR via a hand-written `→ PR#M` arrow on a row
+  // with no impl token, or a different PR from an earlier attempt's settled
+  // token — would let the fold misattribute
   // its content to the wrong PR, or bury the row's own fresher
   // `review=`/`reviewed=` state under the folded row's older one (the tick
   // reads only the LAST). The candidate row must itself carry a live or

@@ -150,20 +150,21 @@ nobody. The uppercase `KILLED`/`BLOCKED`/`SHA-OFF-BRANCH` cause tokens
 (Enrichment tier, below) still apply.
 
 **The row's PR.** On a row with an `impl` token it is the latest `impl` token's
-`=PR#M` outcome and nothing else: the `→ PR#M` arrow there is human-readable
-only. `fleet-tick.mjs`'s `PR_MENTION` is a blind `PR#<n>` text scan that in
-practice also lands on the impl token's embedded value, because that
-precedes the arrow in every row this run writes — but nothing enforces that
-order, so on such a row the arrow is never a value either reader may rely on.
+`=PR#M` outcome and nothing else: the `→ PR#M` arrow, or any other `PR#`
+mention in the row's prose, is human-readable only. Every other reader takes
+the same rule from `ledger-grammar.mjs`'s `rowPr()` (#2888): a row carrying an
+`impl` token is its first settled `impl-<N>=PR#<M>` token's PR, never a prose
+mention's, wherever either sits. The two differ only on a row carrying more
+than one `impl` token, where the card follows the latest attempt.
 
 Amendment 2a (#1820, implemented by #1839): a row with **no** `impl` token —
 the `#<pr> <member>` row `ledger.mjs dispatch <pr> fix-pr-<pr>` /
 `finisher-pr-<pr>` appends for a PR this run's implementers did not open —
 has no outcome to read, so once it carries a PR-bound signal (a `PR#M`
 mention, a `fix-pr-M`/`finisher-pr-M` member, `review=` or `reviewed=`) it
-takes the tick's PR: its first `PR_MENTION`, else its row key when the row's
-first word is exactly `#N`. `compute-board.mjs` imports `PR_MENTION` from
-`fleet-tick.mjs` rather than restating it, so the two readers name the same PR
+takes the tick's PR: `rowPr()`'s first `PR#` mention, else its row key when the row's
+first word is exactly `#N`. `compute-board.mjs` imports `rowPr()` from
+`ledger-grammar.mjs` rather than restating it, so the two readers name the same PR
 for the same row text once it carries a signal; an unsignaled row (no
 mention, no PR-bound member, no `review=`/`reviewed=`) stays `pr: null` here
 while `fleet-tick.mjs`'s own row-key fallback still keys it to its ticket

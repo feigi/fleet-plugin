@@ -59,7 +59,7 @@
 // the ledger; main() does the I/O. Split so the guard table and the reading are
 // both unit-testable without a network.
 
-import { parseMember, parseToken } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, rowPr } from "./ledger-grammar.mjs";
 
 // Every role's TARGET is its configured cap. Availability of work belongs in
 // the ACTION, not the target: a reviewer target that shrank to the backlog
@@ -340,17 +340,6 @@ export function actionable(rows) {
 
 export class LedgerError extends Error {}
 
-// A row's PR is its first `PR#<n>` mention — ledger.mjs rowPr()'s reading, so
-// both the `→ PR#<n>` arrow and a settled `impl-<N>=PR#<n>` name it. A row
-// with none is keyed by the PR's own number when it is about a PR at all (a PR
-// this run's implementers did not open) — this is ledger.mjs's
-// memberRowIndex() fallback specifically, which gates on the member being
-// PR-bound before it ever reaches this fallback. deriveRun below applies the
-// same row-key fallback to every row's own bookkeeping unconditionally,
-// signal or not; only memberRowIndex()'s caller already knows it holds a
-// PR-bound member. Ticket and PR numbers share GitHub's one number
-// space, so a ticket's key never names an open PR.
-export const PR_MENTION = /\bPR\s*#(\d+)\b/;
 // shortlist.mjs's own spelling of an Exclusion row and its premises.
 const EXCLUDED_ROW = /^#[0-9]+[ \t]+excluded(?=[ \t]|$)([\s\S]*)$/;
 const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
@@ -429,13 +418,22 @@ export function labelOffMember(tok) {
   return m !== null && m.family === "finisher-pr" ? m : null;
 }
 
-// A row's key number and its PR, per the comment above PR_MENTION: the PR
-// every PR-bound token on the row speaks for.
+// A row's key number and its PR: the PR every PR-bound token on the row
+// speaks for. That PR is ledger-grammar.mjs's rowPr(): on a row carrying an
+// `impl-` token, its settled `impl-<N>=PR#<n>` token's PR, never a prose
+// `PR#` mention; on any other row, its first `PR#<n>` mention. A row with
+// none is keyed by the PR's own number when it is about a PR at all (a PR
+// this run's implementers did not open) — this is ledger.mjs's
+// memberRowIndex() fallback specifically, which gates on the member being
+// PR-bound before it ever reaches this fallback. deriveRun below applies the
+// same row-key fallback to every row's own bookkeeping unconditionally,
+// signal or not; only memberRowIndex()'s caller already knows it holds a
+// PR-bound member. Ticket and PR numbers share GitHub's one number
+// space, so a ticket's key never names an open PR.
 export function rowNums(text) {
   const key = text.split(/\s/)[0];
   const keyNum = /^#[0-9]+$/.test(key) ? Number(key.slice(1)) : null;
-  const mention = PR_MENTION.exec(text);
-  return { keyNum, pr: mention ? Number(mention[1]) : keyNum };
+  return { keyNum, pr: rowPr(text) ?? keyNum };
 }
 
 // PRs whose finisher attempts are read off the ledger while the open list shows

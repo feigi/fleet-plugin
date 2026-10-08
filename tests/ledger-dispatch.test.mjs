@@ -89,14 +89,19 @@ test("a PR-bound member lands on the row carrying its PR, named by PR or by tick
   });
   // By the ticket number whose row carries that PR.
   assert.equal(ok("dispatch", "324", "finisher-pr-346").line, "#324 impl-324=PR#346 · fix-pr-346 · finisher-pr-346");
-  // The human-readable arrow a `row` call writes is found the same way.
-  ok("row", "330", "impl-330 → PR#350");
+  // The human-readable arrow is found the same way on a row with no impl
+  // token, which is read by its first `PR#` mention...
+  ok("row", "330", "→ PR#350");
   assert.equal(ok("dispatch", "350", "fix-pr-350").ticket, "#330");
+  // ...never on a live implementer's row, whose PR is its settled token's
+  // alone (#2888): that PR gets a row of its own.
+  ok("row", "331", "impl-331 → PR#351");
+  assert.equal(ok("dispatch", "351", "fix-pr-351").ticket, "#351");
   // A PR no row carries gets a row of its own.
   assert.deepEqual(ok("dispatch", "777", "fix-pr-777"), {
-    member: "fix-pr-777", agent: null, ticket: "#777", line: "#777 fix-pr-777", created: true, total: 5,
+    member: "fix-pr-777", agent: null, ticket: "#777", line: "#777 fix-pr-777", created: true, total: 6,
   });
-  assert.equal(read().rows.length, 3);
+  assert.equal(read().rows.length, 5);
 });
 
 test("dispatch refuses a call that would record the wrong member, and writes nothing", (t) => {
@@ -606,8 +611,8 @@ test("settle to PR#42 does not fold an unrelated row keyed #420", (t) => {
 });
 
 // #1876 follow-up: a row that already names a PR before this settle writes
-// to it must never be folded from — `rowPr()` and the tick's `PR_MENTION`
-// read only the FIRST `PR#` mention on a row, so folding here would let a
+// to it must never be folded from — `rowPr()`, the tick's reading too, takes
+// the FIRST settled `impl-<N>=PR#<M>` token on a row, so folding here would let a
 // second PR's content ride on the first PR's identity (a replacement
 // implementer opening a second, different PR for the same ticket), or bury
 // the row's own fresher `review=` state under an older one the tick reads
