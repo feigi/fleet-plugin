@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { COLUMNS, LEGACY_WIDTH, TIER_SWITCH_DATE, lastPullByTicket, parseTierOutcomes, rulingFor, rulingsByTicket } from "../plugin/scripts/tier-outcomes.mjs";
+import { COLUMNS, LEGACY_WIDTH, RulingError, TIER_SWITCH_DATE, lastPullByTicket, parseTierOutcomes, rulingFor, rulingsByTicket } from "../plugin/scripts/tier-outcomes.mjs";
 import { COLUMNS as MEMBER_COLUMNS } from "../plugin/scripts/member-outcomes.mjs";
 import { sessionDate } from "../plugin/scripts/ticket-router.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
@@ -633,6 +633,37 @@ test("rulingFor: of two qualifying rulings, the later row in file order wins eve
   const v = rulingFor(rulingsByTicket(rows), "10", "2026-10-01");
   assert.equal(v.pr, "21", "the earlier row, dated later, was picked");
   assert.equal(rulingFor(rulingsByTicket(rows), "10", "2026-10-03").pr, "20", "a ruling dated before the Pull still counted");
+});
+
+// Built by hand, since parseTierOutcomes refuses these verdicts before rulingFor sees them.
+const ruling = (run_date, pr, closed_own_ticket, minted_false_claim) => ({ run_date, pr: String(pr), ticket: "10", closed_own_ticket, minted_false_claim });
+
+test("rulingFor: a malformed verdict on any ruling of the ticket is refused, not only on the picked one", () => {
+  const valid = ruling("2026-10-05", 21, "no", "yes");
+  for (const [label, rows, pullDate, pr, col, value] of [
+    ["superseded by a later valid ruling", [ruling("2026-10-03", 20, "maybe", "no"), valid], "2026-10-01", 20, "closed_own_ticket", "maybe"],
+    ["dated before the Pull's floor", [ruling("2026-09-20", 20, "yes", "YES"), valid], "2026-10-01", 20, "minted_false_claim", "YES"],
+    ["with no ruling clearing the floor", [ruling("2026-09-20", 20, "", "no")], "2026-10-01", 20, "closed_own_ticket", ""],
+    ["the picked ruling itself", [valid, ruling("2026-10-06", 22, "yes", "No")], "2026-10-01", 22, "minted_false_claim", "No"],
+  ]) {
+    assert.throws(() => rulingFor(new Map([["10", rows]]), "10", pullDate),
+      (e) => e instanceof RulingError && e.message === `ticket #10 (PR #${pr}): ${col} is '${value}', expected yes or no`, label);
+  }
+});
+
+// What the refusal must ACCEPT: every yes/no pair on a superseded or pre-floor ruling.
+test("rulingFor: superseded and pre-floor rulings holding every yes/no pair leave the pick unchanged", () => {
+  const rows = [
+    ruling("2026-09-20", 19, "no", "yes"),
+    ruling("2026-10-04", 20, "yes", "yes"),
+    ruling("2026-10-03", 21, "no", "no"),
+    ruling("2026-10-02", 22, "yes", "no"),
+    ruling("2026-09-21", 23, "no", "yes"),
+  ];
+  const rulings = new Map([["10", rows]]);
+  assert.equal(rulingFor(rulings, "10", "2026-10-01"), rows[3], "the last qualifying row in file order");
+  assert.equal(rulingFor(rulings, "10", "2026-10-05"), null, "no row clears the floor");
+  assert.equal(rulingFor(rulings, "11", "2026-10-01"), null, "an unruled ticket");
 });
 
 test("lastPullByTicket: of two Pulls in reverse date order, the later row in file order is the ruling's date floor", () => {
