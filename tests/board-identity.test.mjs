@@ -9,11 +9,12 @@
 // snapshot that could not say which of two workspaces it came from.
 //
 // Driven through the real CLI, out of process: gather() reads process.argv
-// directly and resolveCockpitInstance()'s git probe is a spawn, so the join
-// under test only exists in a child. The page half is lifted out of
-// board.html's source text and called as a pure function — the page is served
-// as one self-contained file with no build step and no DOM harness, the same
-// seam spend-view.test.mjs and ledger-read-require-file.test.mjs already use.
+// directly and the workspace the cockpit resolves through fleetFile() is a
+// git spawn, so the join under test only exists in a child. The page half is
+// lifted out of board.html's source text and called as a pure function — the
+// page is served as one self-contained file with no build step and no DOM
+// harness, the same seam spend-view.test.mjs and
+// ledger-read-require-file.test.mjs already use.
 //
 // A separate file rather than more of board.test.mjs, for the reason
 // board-prev-shape.test.mjs gives: the fleet runs several implementers at
@@ -104,7 +105,7 @@ test("CLI: a built snapshot names the workspace it describes and the port that w
     // the exported seam rather than hardcoded, so the hash algorithm stays
     // free to be tested where it is defined, but the real CLI reached it
     // through a real `git rev-parse`, which is the join under test.
-    const expected = resolveCockpitInstance({ cwd: repo, gitCommonDir: ".git" });
+    const expected = resolveCockpitInstance({ cwd: repo, workspace: repo });
     assert.equal(board.port, expected.port);
     assert.notEqual(board.port, null);
   } finally { for (const d of [bin, repo]) rmSync(d, { recursive: true, force: true }); }

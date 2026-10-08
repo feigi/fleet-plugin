@@ -48,17 +48,14 @@
 // (see COVERED_MJS's own comments) and it cannot silently drop without this
 // file noticing — a deleted call changes the count.
 //
-// Also pinned: the two pre-existing inline scrub sites — `fleet-state.mjs`'s
-// `statePath()` and `ledger.mjs`'s tracker-query probe — the "two-name-only
-// exemption list" the second design question above answers with. Neither is
-// migrated to call `gitEnv()`: `fleet-state.mjs` is explicitly out of #1599's
-// scope (already fixed and covered, by PR #1598) and `ledger.mjs`'s
-// tracker-query scrub is likewise already measured and covered
-// (`ledger.test.mjs`, "an inherited GIT_DIR or GH_REPO cannot retarget the
-// query…") — touching either to satisfy this file's own detector would be
-// churn with no behavioural change. `MJS_LEGACY_INLINE` records both by name
-// with the measurement that already settled each, so a reader does not have
-// to re-derive why they are not `gitEnv(` call sites.
+// Also pinned: the pre-existing inline scrub site — `ledger.mjs`'s
+// tracker-query probe — the "two-name-only exemption list" the second design
+// question above answers with. It is not migrated to call `gitEnv()`: it is
+// already measured and covered (`ledger.test.mjs`, "an inherited GIT_DIR or
+// GH_REPO cannot retarget the query…") — touching it to satisfy this file's
+// own detector would be churn with no behavioural change. `MJS_LEGACY_INLINE`
+// records it by name with the measurement that already settled it, so a
+// reader does not have to re-derive why it is not a `gitEnv(` call site.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -160,24 +157,14 @@ const COVERED_MJS = {
   "staleness.mjs": 1,
   // ONE spawn primitive, `trackedBasenameCounts()`'s own `git ls-files -z`.
   "pr-overlap.mjs": 1,
-  // ONE of `ledger.mjs`'s TWO git-invoking primitives — `defaultLedgerPath()`,
-  // #1599's own measured hazard (an ambient GIT_DIR relocated the run's
-  // ledger into another repository, silently, at exit 0). The file's OTHER
-  // primitive, the tracker-query probe, is `MJS_LEGACY_INLINE` below, not a
-  // second `gitEnv(` call — it predates the helper and is already covered on
-  // its own terms.
-  "ledger.mjs": 1,
-  // ONE git-invoking primitive, `gitCommonDir()` — the probe behind #1582's
-  // cockpit instance resolution. Same hazard defaultLedgerPath() carries
-  // directly above, one seam further on: an ambient GIT_DIR answers
-  // `--git-common-dir` for a DIFFERENT repository, so the cockpit derives
-  // ITS workspace — state directory and port both — from someone else's
-  // checkout and writes board.json there, at exit 0 and in silence.
-  // Measured in board.test.mjs, "an ambient GIT_DIR cannot move the cockpit
-  // into another repository's workspace". The file's other children (gh,
-  // `node ci-state.mjs`, `--open`'s browser launcher) go through `tryRun` or
-  // `openBrowser`, which name no git and are not git-invoking primitives.
-  "board.mjs": 1,
+  // ONE git-invoking primitive, `fleetFile()`'s `rev-parse --git-common-dir`
+  // — the probe behind every `.fleet/`-rooted file a run keeps: the ledger,
+  // the heartbeat's state, the shortlist, the cost guard and the cockpit's
+  // state directory. An ambient GIT_DIR answers it for a DIFFERENT
+  // repository, which would put the run's file in that repository's
+  // workspace, silently, at exit 0. Measured in fleet-dir.test.mjs, "an
+  // ambient GIT_DIR naming another repository does not move the answer".
+  "fleet-dir.mjs": 1,
   // ONE git-invoking primitive, `readInstruments()`'s `rev-parse
   // --git-common-dir`, which names the checkout instruments.sh is sent to
   // audit. An ambient GIT_DIR answers it for a DIFFERENT repository, so the
@@ -186,41 +173,6 @@ const COVERED_MJS = {
   // instrument set into another repository". Its other children (gh,
   // `node ci-state.mjs`, `sh instruments.sh`) name no git.
   "merge-gate.mjs": 1,
-  // TWO git-invoking primitives. `shortlistPath()`'s `--git-common-dir` probe —
-  // defaultLedgerPath()'s resolution for `.fleet/shortlist.json` (#1798) —
-  // carries the hazard of writing the run's shortlist into another
-  // repository's workspace; measured in shortlist.test.mjs, "an ambient
-  // GIT_DIR naming another repository cannot move the shortlist there".
-  // `probeState()`'s `gh … view` call carries the identical hazard one layer
-  // up — gh's own remote resolution follows GIT_DIR/GIT_WORK_TREE too
-  // (ledger.mjs's tracker-query probe measured this first, and GH_REPO
-  // besides) — so an ambient GIT_DIR could flip a blocker or
-  // exclusion-premise verdict while the shortlist file still lands in the
-  // right workspace; measured in shortlist.test.mjs, "an inherited GIT_DIR
-  // cannot retarget probeState's gh calls to another repository". Its other
-  // children (`node candidates.mjs`, `node ledger.mjs`, `sh inflight.sh`)
-  // name no git.
-  "shortlist.mjs": 2,
-  // FOUR. The first two are the pair shortlist.mjs carries (#1803), the
-  // third is below (#2485), the fourth after it. `shortlistPath()`'s
-  // `--git-common-dir` probe names the `.fleet/shortlist.json` the tick PULLs
-  // from; an ambient GIT_DIR would read another repository's shortlist and
-  // name its tickets. Measured in fleet-tick.test.mjs, "an ambient GIT_DIR
-  // naming another repository cannot move the shortlist read".
-  // `liftedPremise()`'s `gh issue view` asks whether a `behind-issue:#M`
-  // premise has closed, and gh's remote resolution follows GIT_DIR too;
-  // measured in fleet-tick.test.mjs, "an inherited GIT_DIR cannot retarget
-  // the behind-issue premise probe". Its other children (`gh pr list`,
-  // `node ledger.mjs`, `node shortlist.mjs`) are not git-invoking primitives.
-  // `closedTickets()`'s `gh issue view` asks whether a tier-mismatched
-  // implementer's ticket is already closed, and resolves the repository the
-  // same way; measured in fleet-tick.test.mjs, "an inherited GIT_DIR cannot
-  // retarget the tier-mismatch closed-ticket probe".
-  // `finishedReviewPrs()`'s `gh pr view` asks whether a PR with a dangling
-  // in-flight review is already merged or closed, and resolves the repository
-  // the same way; measured in fleet-tick.test.mjs, "an inherited GIT_DIR
-  // cannot retarget the merged-PR review probe".
-  "fleet-tick.mjs": 4,
   // ONE spawn primitive, `git(args, cwd)`, behind both of the file's git calls
   // — `resolveMainRoot()`'s `rev-parse --git-common-dir` and `checkIgnored()`'s
   // `check-ignore` (#1411). An ambient GIT_DIR would answer the first for
@@ -237,15 +189,13 @@ const COVERED_MJS = {
   // main-checkout.test.mjs, "an ambient GIT_DIR naming another repository
   // does not change the answer (#1599)".
   "main-checkout.mjs": 1,
-  // ONE spawn primitive, `git(repo, args, what)`, behind all four of the
-  // file's git calls — the merge-base against `origin/main`, the diff the
-  // touched lines come from, `rev-parse --show-toplevel` (#2342), and
-  // `rev-parse --git-common-dir`, which locates the ledger. An ambient GIT_DIR
-  // would answer all four for another repository and judge the record against
-  // that repository's diff and write its verdict to that repository's ledger.
-  // Measured in dispositions-check.test.mjs, "an ambient GIT_DIR naming
-  // another repository does not change the answer" (the diff and merge-base)
-  // and "… does not change which ledger is found" (the common dir). A second
+  // ONE spawn primitive, `git(repo, args, what)`, behind every one of the
+  // file's git calls — the merge-base against `origin/main`, the diffs the
+  // touched lines come from, and `rev-parse --show-toplevel` (#2342). An
+  // ambient GIT_DIR would answer each of them for another repository and
+  // judge the record against that repository's diff. Measured in
+  // dispositions-check.test.mjs, "an ambient GIT_DIR naming another
+  // repository does not change the answer". A second
   // `gitEnv(` call scrubs the `gh issue view` child that reads back where each
   // deferral was filed: gh resolves its repository from the cwd's git
   // remotes, so an ambient GIT_DIR would read another repository's tracker.
@@ -264,18 +214,6 @@ const COVERED_MJS = {
   // cache reader child gets the same env but unsets both itself, so no
   // fixture can tell its env apart.
   "recipe-prove.mjs": 1,
-  // TWO scrubbed children. `defaultGuardPath()`'s `rev-parse --git-common-dir`
-  // names the workspace the guard file is written into: an ambient GIT_DIR
-  // would answer for ANOTHER repository, and the verdict would land in its
-  // `.fleet/` at exit 0 while fleet-tick reads this one's. Measured in
-  // pr-cost.test.mjs, "an ambient GIT_DIR naming another repository cannot move
-  // the guard file out of the repository pr-cost runs in". The `gh pr list`
-  // child is the second: gh's remote resolution follows GIT_DIR too (measured
-  // for shortlist.mjs's `probeState()` above), so merged state could be read
-  // for another repository's PRs; the gh stub in pr-cost.test.mjs, "an ambient
-  // GIT_DIR does not reach the gh child that reads merged state", records
-  // that the child sees no GIT_DIR.
-  "pr-cost.mjs": 2,
   // ONE spawn primitive, `git(args, ok)`, behind every git call the main-gain
   // check makes — the head and base reads, the PR's own author dates, the
   // merge-tree, both diffs and the blame. An ambient GIT_DIR would answer all
@@ -292,9 +230,6 @@ const COVERED_MJS = {
 // fixture, predating this helper, and retrofitting either to satisfy this
 // file's detector would be churn with no behavioural change.
 const MJS_LEGACY_INLINE = {
-  "fleet-state.mjs":
-    "statePath() — `{ ...process.env }` then two `delete`s, inline. Fixed and covered by PR #1598 " +
-    "(fleet-heartbeat.test.mjs); out of #1599's scope by the ticket's own words.",
   "ledger.mjs":
     "the tracker-query probe inside runCheck() — `const queryEnv = { ...process.env, GH_REPO: \"\" }` then two " +
     "`delete`s, inline (predates the `gitEnv()` helper in plugin/scripts/; renamed from `gitEnv` to `queryEnv` so the " +

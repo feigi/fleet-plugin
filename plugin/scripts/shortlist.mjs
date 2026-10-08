@@ -44,10 +44,10 @@
 // written, an empty shortlist included — the empty queue is an answer. Never
 // exit 1: this script has no verdict to report, and 1 is also Node's own code for a crash.
 //
-// The file is `<workspace>/.fleet/shortlist.json`, the workspace resolved from
-// `git rev-parse --git-common-dir` through git-env.mjs, exactly as ledger.mjs's
-// defaultLedgerPath() resolves `.fleet/ledger.md` — so the controller, the tick
-// and a member in its own worktree all name one file. Unlike the ledger there
+// The file is `<workspace>/.fleet/shortlist.json`, resolved by fleet-dir.mjs's
+// fleetFile() exactly as ledger.mjs resolves `.fleet/ledger.md` — so the
+// controller, the tick and a member in its own worktree all name one file.
+// Unlike the ledger there
 // is no cwd-relative degrade: outside a repository inflight.sh cannot answer
 // for a single ticket either, so there is nothing honest to write. The payload
 // is `{scanned, shortlist: [{n, t}]}`, written to a sibling temp file and
@@ -65,7 +65,8 @@ import { mkdirSync, writeFileSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, writeAll, isDigits } from "./arg.mjs";
-import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { gitEnv } from "./git-env.mjs";
+import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 
 const NAME = "shortlist";
 const die = makeDie(NAME);
@@ -81,10 +82,9 @@ const CLOSED = new Set(["MERGED", "CLOSED"]);
 // whatever order the probes finish in.
 const IN_FLIGHT = 4;
 // Bounds on children that could otherwise never return. None is a stopwatch:
-// each is far past the healthy case (a `rev-parse` answers in milliseconds, a
-// `gh … view` in under a second, inflight.sh in ~2.6 s), and each timeout
-// lands on the same fail-closed path as any other failed probe.
-const GIT_TIMEOUT_MS = 10_000;
+// each is far past the healthy case (a `gh … view` in under a second,
+// inflight.sh in ~2.6 s), and each timeout lands on the same fail-closed path
+// as any other failed probe.
 const GH_TIMEOUT_MS = 20_000;
 const INFLIGHT_TIMEOUT_MS = 120_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -140,14 +140,12 @@ async function eachLimited(items, fn) {
 }
 
 function shortlistPath() {
-  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], {
-    encoding: "utf8", timeout: GIT_TIMEOUT_MS, env: gitEnv(),
-  });
-  const workspace = workspaceDirFromGitCommonDir(r.stdout);
-  if (workspace === null) {
-    die(`could not resolve the workspace — git rev-parse --git-common-dir: ${describe(r)}`);
+  try {
+    return fleetFile("shortlist.json");
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
+    die(e.message);
   }
-  return join(workspace, ".fleet", "shortlist.json");
 }
 
 function scan() {
@@ -217,7 +215,7 @@ const premiseLabel = ({ kind, target }) => `behind-${kind}:#${target}`;
 async function probeState(kind, target) {
   // gh's own remote resolution follows GIT_DIR/GIT_WORK_TREE exactly as git's
   // does, and GH_REPO outranks even that (ledger.mjs's tracker-query probe,
-  // measured) — so this call needs the same scrub shortlistPath()'s git call
+  // measured) — so this call needs the same scrub fleetFile()'s git call
   // gets, or an ambient one of the three silently answers for a different
   // repository while `.fleet/shortlist.json` still lands in the right one.
   const r = await run("gh", [kind, "view", target, "--json", "state"], {

@@ -440,9 +440,10 @@ phase, or in any later one, asks the maintainer which tickets to take.
      free. Both drop the ticket, logged by number.
 
    It writes the survivors, in order, to `.fleet/shortlist.json` —
-   `{scanned, shortlist: [{n, t}]}` — resolved against the git common dir
-   exactly as `ledger.mjs` resolves `.fleet/ledger.md`, so you, the tick and a
-   member in its own worktree all name one file. **Exit 0 is the file written,
+   `{scanned, shortlist: [{n, t}]}` — resolved against the git common dir by
+   `fleet-dir.mjs`, the one locator `ledger.mjs` resolves `.fleet/ledger.md`
+   with too, so you, the tick and a member in its own worktree all name one
+   file. **Exit 0 is the file written,
    an empty shortlist included** — the empty queue is an answer. **Exit 2 is a
    refusal**: the scan, the ledger read or the write did not answer, and the
    previous file stands untouched, because an empty file written then would

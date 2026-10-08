@@ -62,12 +62,13 @@
 // bootstrap 95% interval on `mean_usd` minus the baseline's — printed to be
 // read, never judged on.
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags, isDigits } from "./arg.mjs";
-import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { gitEnv } from "./git-env.mjs";
+import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { CELL } from "./ledger-grammar.mjs";
 import { parseMemberName } from "./member-record.mjs";
@@ -428,12 +429,16 @@ export function guardFile(report, computedAt) {
 // CLI
 // ---------------------------------------------------------------------------
 
-// `.fleet/cost-guard.json` in the main workspace — the git common dir's parent,
+// `.fleet/cost-guard.json` in the main workspace — fleet-dir.mjs's fleetFile(),
 // where fleet-tick reads it — not in the cwd, which from a linked worktree is a
 // different directory the tick never looks in. The cwd when git cannot answer.
 function defaultGuardPath() {
-  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", env: gitEnv() });
-  return join(workspaceDirFromGitCommonDir(r.stdout) ?? ".", ".fleet", "cost-guard.json");
+  try {
+    return fleetFile("cost-guard.json");
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
+    return join(".", ".fleet", "cost-guard.json");
+  }
 }
 
 function main() {

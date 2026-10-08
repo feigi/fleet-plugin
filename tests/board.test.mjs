@@ -2324,57 +2324,32 @@ test("CLI: serve refuses a stray positional the same way build does", () => {
 
 // ---------------------------------------------------------------------------
 // #1582: cockpit instance resolution. A cockpit instance is identified by its
-// WORKSPACE — the directory holding the shared git dir, the same
-// `--git-common-dir` rule ledger.mjs's defaultLedgerPath() already resolves
-// the run's one ledger with — so two workspaces get two boards on two ports
-// and one workspace gets the SAME port on every run, making the URL
-// bookmarkable across runs, reboots and node versions.
+// WORKSPACE — the directory holding the shared git dir, resolved by
+// fleet-dir.mjs's fleetFile() exactly as the run's one ledger is — so two
+// workspaces get two boards on two ports and one workspace gets the SAME port
+// on every run, making the URL bookmarkable across runs, reboots and node
+// versions.
 //
-// resolveCockpitInstance() takes the git-common-dir string as an ARGUMENT
-// rather than reading it, which is what turns the worktree case and the
-// resolution-failed case into plain rows here instead of two fixture
-// repositories apiece.
+// resolveCockpitInstance() takes the already-resolved workspace as an
+// ARGUMENT rather than resolving it, which is what turns the resolved case
+// and the resolution-failed case into plain rows here instead of fixture
+// repositories apiece. How a `--git-common-dir` answer becomes a workspace —
+// a relative answer, the trailing newline, a linked worktree, a symlinked
+// route — is git-env.test.mjs's and fleet-dir.test.mjs's to pin.
 //
 // Why these rows and not only a live probe: every serve() spawn above runs
 // with PATH stripped to an empty dir, so git is unreachable and all of them
 // take the DEGRADE arm. A green CLI section above is evidence about that arm
 // and no other — the resolved arm is reached in the rows below, and
-// end-to-end by the two spawns at the bottom, which put a git shim back on
-// PATH on purpose.
+// end-to-end by the spawns further down, which put a git shim back on PATH on
+// purpose.
 // ---------------------------------------------------------------------------
 
-for (const [name, args, stateDir, workspace] of [
-  ["an absolute --git-common-dir names the checkout holding it",
-    { cwd: "/w/repo", gitCommonDir: "/w/repo/.git" }, "/w/repo/.fleet", "/w/repo"],
-  // git answers RELATIVE from a checkout's top level, and the cwd it is
-  // relative to is an argument here — a resolve() that reached for
-  // process.cwd() instead would put the board under the test runner.
-  ["a relative --git-common-dir resolves against the passed cwd, not process.cwd()",
-    { cwd: "/w/repo", gitCommonDir: ".git" }, "/w/repo/.fleet", "/w/repo"],
-  // Not a `.trim()` pin, despite the name's old claim: `dirname()` discards
-  // the newline together with the rest of the final path segment it rides
-  // on, wholesale, whether or not `.trim()` ran first — mutation-verified
-  // (#1656 review: removing `.trim()` here leaves every row in this table
-  // green). `.trim()`'s one load-bearing case is a value that is WHOLLY
-  // whitespace, pinned by the degrade rows below instead. Kept as a
-  // realistic-shape check: git really does answer `--git-common-dir` with a
-  // trailing newline, and this is what that answer resolves to.
-  ["a real git answer's trailing newline still resolves to the parent directory",
-    { cwd: "/w/repo", gitCommonDir: "/w/repo/.git\n" }, "/w/repo/.fleet", "/w/repo"],
-  // `--git-common-dir` answers with the MAIN checkout's git dir from inside a
-  // linked worktree — that is the whole reason the rule is this one and not
-  // `--git-dir`, which names the worktree's own admin directory. Two
-  // worktrees therefore share one state directory, matching the ledger's
-  // one-run-one-workspace model rather than giving every member its own board.
-  ["a linked worktree resolves to the main checkout, never its own directory",
-    { cwd: "/w/repo/.worktrees/t", gitCommonDir: "/w/repo/.git" }, "/w/repo/.fleet", "/w/repo"],
-]) {
-  test(`resolveCockpitInstance: ${name}`, () => {
-    const r = resolveCockpitInstance(args);
-    assert.equal(r.stateDir, stateDir);
-    assert.equal(r.workspace, workspace);
-  });
-}
+test("resolveCockpitInstance: the state directory follows the workspace, never the cwd", () => {
+  const r = resolveCockpitInstance({ cwd: "/w/repo/.worktrees/t", workspace: "/w/repo" });
+  assert.equal(r.stateDir, "/w/repo/.fleet");
+  assert.equal(r.workspace, "/w/repo");
+});
 
 // The window is written out literally rather than imported from board.mjs:
 // these two numbers ARE the contract. BASE is the port the cockpit served on
@@ -2385,10 +2360,10 @@ const PORT_BASE = 8123, PORT_SPAN = 512;
 
 for (const dir of ["/w/one", "/w/two", "/srv/fleet-plugin", "/Users/x/dev/repo"]) {
   test(`resolveCockpitInstance: ${dir} derives one stable port inside [${PORT_BASE}, ${PORT_BASE + PORT_SPAN})`, () => {
-    const first = resolveCockpitInstance({ cwd: dir, gitCommonDir: join(dir, ".git") });
+    const first = resolveCockpitInstance({ cwd: dir, workspace: dir });
     // Same workspace, different cwd: the port follows the workspace, so a
     // member running from elsewhere in the tree must land on the same board.
-    const again = resolveCockpitInstance({ cwd: "/somewhere/else", gitCommonDir: join(dir, ".git") });
+    const again = resolveCockpitInstance({ cwd: "/somewhere/else", workspace: dir });
     assert.equal(first.port, again.port, "the port must follow the workspace, not the cwd");
     assert.equal(first.derived, true, "nothing forced this port, so it is a derived one");
     assert.ok(first.port >= PORT_BASE && first.port < PORT_BASE + PORT_SPAN,
@@ -2407,7 +2382,7 @@ for (const dir of ["/w/one", "/w/two", "/srv/fleet-plugin", "/Users/x/dev/repo"]
 test("resolveCockpitInstance: different workspaces derive different ports", () => {
   const seen = new Map();
   for (const dir of ["/w/one", "/w/two", "/w/three", "/w/four", "/w/five", "/w/six"]) {
-    const { port } = resolveCockpitInstance({ cwd: dir, gitCommonDir: join(dir, ".git") });
+    const { port } = resolveCockpitInstance({ cwd: dir, workspace: dir });
     assert.ok(!seen.has(port),
       `${dir} and ${seen.get(port)} both derived ${port} — a hash that cannot separate two workspaces cannot give them two boards`);
     seen.set(port, dir);
@@ -2423,31 +2398,9 @@ test("resolveCockpitInstance: different workspaces derive different ports", () =
 // Math.imul -> `*` mutation changes this key's hash and port (8337 -> 8355),
 // so — unlike the uniqueness test above — this one does catch it.
 test("resolveCockpitInstance: a fixed workspace pins the FNV-1a-with-Math.imul port exactly", () => {
-  const { port } = resolveCockpitInstance({ cwd: "/fixed/workspace", gitCommonDir: join("/fixed/workspace", ".git") });
+  const { port } = resolveCockpitInstance({ cwd: "/fixed/workspace", workspace: "/fixed/workspace" });
   assert.equal(port, 8337,
     "port drifted off the hand-computed FNV-1a value for this fixed key — the hash algorithm itself changed");
-});
-
-// Without the realpath, a route to the workspace through a symlink — a
-// symlinked home, /var vs /private/var on this very platform — derives a
-// SECOND port and a second state directory for a workspace already being
-// served, which is the collision this ticket exists to prevent.
-test("resolveCockpitInstance: a symlinked route to one workspace derives the canonical form's port", () => {
-  const root = tempDir("board-ws-link-");
-  try {
-    const real = join(root, "repo");
-    mkdirSync(join(real, ".git"), { recursive: true });
-    const link = join(root, "link");
-    symlinkSync(real, link);
-    const direct = resolveCockpitInstance({ cwd: real, gitCommonDir: join(real, ".git") });
-    const viaLink = resolveCockpitInstance({ cwd: link, gitCommonDir: join(link, ".git") });
-    assert.equal(viaLink.workspace, direct.workspace, "the symlinked route must canonicalise onto the same workspace key");
-    assert.equal(viaLink.port, direct.port);
-    assert.equal(viaLink.stateDir, direct.stateDir);
-    // …and the key is the CANONICAL path, not merely the two sides agreeing
-    // because neither was canonicalised at all.
-    assert.equal(direct.workspace, realpathSync(real));
-  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 // The false-positive half of this ticket. Deriving is the new behaviour, and
@@ -2459,7 +2412,7 @@ test("resolveCockpitInstance: a symlinked route to one workspace derives the can
 // can tell a forced one from a derived one there.
 for (const port of [0, 8123, 65535]) {
   test(`resolveCockpitInstance: --port ${port} is returned verbatim and marked not derived`, () => {
-    const r = resolveCockpitInstance({ cwd: "/w/cwd", gitCommonDir: "/w/repo/.git", port });
+    const r = resolveCockpitInstance({ cwd: "/w/cwd", workspace: "/w/repo", port });
     assert.equal(r.port, port);
     assert.equal(r.derived, false);
     // Forcing the port forces the port — the state directory still follows
@@ -2468,19 +2421,19 @@ for (const port of [0, 8123, 65535]) {
   });
 }
 
-// An unresolvable shared git dir degrades to a cwd-relative state directory
-// with a null workspace and says so; a non-git or otherwise unusual checkout
-// never dies for it. The wording is defaultLedgerPath()'s own — one dialect
-// for one failure, so an operator who has seen the ledger's line recognises
-// this one rather than learning a second phrasing of it.
-for (const [name, gitCommonDir] of [
-  ["git exited non-zero, so the probe handed back nothing", ""],
-  ["no probe ran at all", undefined],
-  ["whitespace is not a path", "  \n "],
+// No resolved workspace degrades to a cwd-relative state directory with a
+// null workspace and says so; a non-git or otherwise unusual checkout never
+// dies for it. The wording is the ledger's own — one dialect for one failure,
+// so an operator who has seen the ledger's line recognises this one rather
+// than learning a second phrasing of it.
+for (const [name, workspace] of [
+  ["the workspace could not be resolved", null],
+  ["no workspace was passed at all", undefined],
+  ["the empty string is not an identity", ""],
 ]) {
   test(`resolveCockpitInstance: ${name} — degrades to cwd, warns, never throws`, () => {
     let r;
-    const errs = withStderr(() => { r = resolveCockpitInstance({ cwd: "/w/cwd", gitCommonDir }); });
+    const errs = withStderr(() => { r = resolveCockpitInstance({ cwd: "/w/cwd", workspace }); });
     assert.equal(r.workspace, null, "no workspace was established, so none may be claimed");
     assert.equal(r.stateDir, "/w/cwd/.fleet", "the fallback is cwd-relative — the behaviour this file had before #1582");
     assert.equal(r.port, PORT_BASE, "with no workspace to hash there is nothing to derive from, so the port is the familiar default");
@@ -2496,7 +2449,7 @@ for (const [name, gitCommonDir] of [
 // passed --port outside a git checkout would silently get 8123 instead.
 test("resolveCockpitInstance: an explicit port survives the degrade path too", () => {
   let r;
-  const errs = withStderr(() => { r = resolveCockpitInstance({ cwd: "/w/cwd", gitCommonDir: "", port: 4242 }); });
+  const errs = withStderr(() => { r = resolveCockpitInstance({ cwd: "/w/cwd", workspace: null, port: 4242 }); });
   assert.equal(r.port, 4242);
   assert.equal(r.derived, false);
   assert.equal(errs.length, 1, "the state directory still degraded, so the warning still belongs");
@@ -2560,9 +2513,9 @@ const withTimeout = (pr, ms, what) => Promise.race([
   new Promise((_, rej) => setTimeout(() => rej(new Error(`timed out waiting for ${what}`)), ms).unref()),
 ]);
 
-function serveProcess(cwd, bin, args = ["--port", "0", "--interval", "3600"], node = []) {
+function serveProcess(cwd, bin, args = ["--port", "0", "--interval", "3600"], node = [], env = {}) {
   const p = spawn(process.execPath, [...node, ...serveArgs(args)],
-    { cwd, env: { ...process.env, PATH: bin }, stdio: ["ignore", "ignore", "pipe"] });
+    { cwd, env: { ...process.env, ...env, PATH: bin }, stdio: ["ignore", "ignore", "pipe"] });
   p.stderr.setEncoding("utf8");
   let buf = "";
   const url = new Promise((res, rej) => {
@@ -2598,6 +2551,30 @@ async function untilBuiltBoard(url) {
     await new Promise((res) => setTimeout(res, 50));
   }
 }
+
+// The `canonicalise` opt-in is this caller's alone: without it a symlinked
+// route to one workspace — a symlinked home, /var vs /private/var on this very
+// platform — derives a SECOND port and a second state directory for a
+// workspace already being served (#1582). How fleetFile() canonicalises is
+// fleet-dir.test.mjs's to pin; this pins that the cockpit ASKS for it. git
+// resolves a symlinked cwd itself, so the symlinked spelling reaches the
+// answer through GIT_COMMON_DIR instead, which git echoes back verbatim — run
+// from a plain repository of its own, since that override from inside a
+// linked worktree collides with the worktree's own admin files.
+test("CLI: a symlinked route to the workspace is served under the canonical workspace's identity", async () => {
+  const bin = gitOnlyPath(), real = gitRepo("board-ws-real-"), from = gitRepo("board-ws-from-");
+  const link = `${real}-link`;
+  symlinkSync(real, link);
+  const server = serveProcess(from, bin, undefined, [], { GIT_COMMON_DIR: join(link, ".git") });
+  try {
+    const body = await untilBuiltBoard(await withTimeout(server.url, 20000, "the cockpit to announce its URL"));
+    assert.equal(body.workspace, realpathSync(real),
+      `the symlinked route must canonicalise onto the real workspace key: ${server.stderr()}`);
+  } finally {
+    server.p.kill();
+    for (const d of [bin, real, from, link]) rmSync(d, { recursive: true, force: true });
+  }
+});
 
 // The end-to-end claim, and the one no pure row can make: two workspaces
 // served AT ONCE are two live boards, each writing only its own state
@@ -2883,7 +2860,7 @@ async function untilLaunched(rig, count) {
 // opened the existing board again, one more tab per pass.
 test("CLI: a second launch for the same workspace reuses the live cockpit, opens nothing, and exits 0", async () => {
   const rig = launcherBin(ALL_LAUNCHERS), repo = gitRepo("board-ws-reuse-");
-  const instance = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
+  const instance = resolveCockpitInstance({ cwd: repo, workspace: realpathSync(repo) });
   const expected = await firstFreePort(cockpitPorts(instance));
   const first = serveProcess(repo, rig.bin, ["--interval", "3600", "--open"]);
   try {
@@ -2920,7 +2897,7 @@ test("CLI: a second launch for the same workspace reuses the live cockpit, opens
 // probe would read it as silent rather than as this workspace's.
 test("CLI: a launch whose post-bind scan finds this workspace's cockpit further along opens nothing", async () => {
   const rig = launcherBin(ALL_LAUNCHERS), repo = gitRepo("board-ws-scan-reuse-");
-  const instance = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
+  const instance = resolveCockpitInstance({ cwd: repo, workspace: realpathSync(repo) });
   const ports = cockpitPorts(instance);
   const free = await firstFreePort(ports);
   const further = await firstFreePort(ports.slice(ports.indexOf(free) + 1));
@@ -3028,7 +3005,7 @@ for (const [platform, launchers, ran, warns] of [
 // So the stranger has to still be the one answering there afterwards.
 test("CLI: a holder reporting a different workspace is not adopted — the launch serves elsewhere", async (t) => {
   const bin = gitOnlyPath(), repo = gitRepo("board-ws-foreign-");
-  const { port: derived } = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
+  const { port: derived } = resolveCockpitInstance({ cwd: repo, workspace: realpathSync(repo) });
   const dir = boardDir(JSON.stringify({ tickets: [], workspace: "/some/other/workspace" }));
   const { server, port: held } = await holderOn(dir, derived);
   const launch = held === null ? null : serveProcess(repo, bin, ["--interval", "3600"]);
@@ -3060,7 +3037,7 @@ test("CLI: a holder reporting a different workspace is not adopted — the launc
 // above gives.
 test("CLI: this workspace's cockpit holding every interface on the derived port is reused, not shadowed", async (t) => {
   const rig = launcherBin(ALL_LAUNCHERS), repo = gitRepo("board-ws-wild-reuse-");
-  const instance = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
+  const instance = resolveCockpitInstance({ cwd: repo, workspace: realpathSync(repo) });
   const dir = boardDir(JSON.stringify({ tickets: [], workspace: instance.workspace }));
   const { server, port: held } = await holderOn(dir, instance.port);
   const p = held === null ? null : spawn(process.execPath, serveArgs(["--interval", "3600", "--open"]),
@@ -3194,7 +3171,7 @@ test("CLI: a pre-bind connect that never completes counts as a held port", async
 // holder to really answer use serveProcess(), which leaves the loop free.
 test("CLI: an exhausted derived range exits non-zero and names the ports it tried", async (t) => {
   const bin = gitOnlyPath(), repo = gitRepo("board-ws-full-");
-  const instance = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
+  const instance = resolveCockpitInstance({ cwd: repo, workspace: realpathSync(repo) });
   const ports = cockpitPorts(instance);
   const dir = boardDir(undefined);
   const blockers = [];

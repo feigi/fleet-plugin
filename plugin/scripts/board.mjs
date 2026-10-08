@@ -31,22 +31,22 @@
 // <path>` is how an operator names the right one: it overrides the
 // heuristic outright.
 
-import { execFile, spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync, renameSync, existsSync, readdirSync, statSync, writeSync } from "node:fs";
 import { classifyRole, computeSpend, attributeTools, mergeTools } from "./compute-spend.mjs";
 import {
   encodeProjectDir, isOmpSessionDirName, ompSessionTranscripts, foldOmpTranscript, ompMemberRecord,
 } from "./member-record.mjs";
 import { makeDie, defineFlags } from "./arg.mjs";
-import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { mergedReadPrs } from "./compute-board.mjs";
 // The heartbeat's liveness mark, read here and never written. The
 // cockpit is a READER of that key — the heartbeat is its only writer — and it
 // reaches the file through the module that owns the filename rather than
 // spelling `heartbeat.json` a second time. The PATH still comes from this
-// file's own resolveCockpitInstance(), not from statePath(): that probe is
-// already run once per launch here, with the `canonicalise` opt-in only this
-// caller takes, and a second probe could answer differently.
+// file's own resolveCockpitInstance(), not from statePath(): the workspace is
+// already resolved once per launch here, with the `canonicalise` opt-in only
+// this caller takes, and a second resolution could answer differently.
 import { readState, stateFileIn } from "./fleet-state.mjs";
 import { fileURLToPath } from "node:url";
 import { isCLI } from "./is-cli.mjs";
@@ -1349,7 +1349,7 @@ async function main() {
     // writes no state directory, so the argument that moved serve()'s default
     // onto the workspace does not reach it, and changing it would change what
     // an existing `build` reads.
-    const instance = resolveCockpitInstance({ cwd: process.cwd(), gitCommonDir: gitCommonDir() });
+    const instance = resolveCockpitInstance({ cwd: process.cwd(), workspace: cockpitWorkspace(process.cwd()) });
     const model = computeBoard(await gather({
       ledgerFile: ledgerFile || ".fleet/ledger.md", prevFile,
       // The heartbeat's file, from the SAME instance the identity
@@ -1460,11 +1460,12 @@ function workspaceHash(key) {
 //
 // A non-empty string, and nothing more: no trim(). A wholly-whitespace
 // answer to `--git-common-dir` is already refused one layer down, by
-// git-env.mjs's workspaceDirFromGitCommonDir(), so no identity reaching
-// either call site can be whitespace — the construction side gets that
-// function's return value and the parsing side gets a payload some process
-// wrote from it. A second whitespace rule here would be one more guard of
-// exactly the kind this predicate exists to stop writing.
+// git-env.mjs's workspaceDirFromGitCommonDir() inside fleet-dir.mjs's
+// fleetFile(), so no identity reaching either call site can be whitespace —
+// the construction side gets the workspace fleetFile() resolved and the
+// parsing side gets a payload some process wrote from it. A second whitespace
+// rule here would be one more guard of exactly the kind this predicate exists
+// to stop writing.
 //
 // Not exported, for workspaceHash()'s reason above it: nothing outside this
 // file asks the question, and every widening of it is already pinned from
@@ -1482,52 +1483,36 @@ function isWorkspaceId(v) {
 }
 
 /**
- * The cockpit's instance seam, and the only one. Given a cwd, the string
- * `git rev-parse --git-common-dir` answered with — INJECTED, never read in
- * here, which is what keeps the worktree case and the resolution-failed case
- * both plain table rows — and an explicitly requested port if there was one,
- * decide which state directory this cockpit serves and which port it binds.
+ * The cockpit's instance seam, and the only one. Given a cwd, the workspace
+ * this cockpit belongs to — INJECTED, already resolved, or null when it could
+ * not be — and an explicitly requested port if there was one, decide which
+ * state directory this cockpit serves and which port it binds.
  *
- * Pure: it listens to nothing, spawns nothing and writes nothing, so every
- * branch below is reachable from a test with no git repo and no socket. The
- * one thing it reads is realpath — asked for by `canonicalise: true` below,
- * and unable to fail the call either way.
+ * Pure: it listens to nothing, spawns nothing, reads nothing and writes
+ * nothing, so every branch below is reachable from a test with no git repo
+ * and no socket.
  *
- * `--git-common-dir` answers with the MAIN checkout's git dir from inside a
- * linked worktree, so every worktree of one repo resolves to ONE state
- * directory. That resolution is not spelled here: it is
- * git-env.mjs's workspaceDirFromGitCommonDir(), the same function
- * ledger.mjs's defaultLedgerPath() and fleet-state.mjs's statePath() resolve
- * the run's single ledger and single heartbeat with — so the board, the
- * ledger and the heartbeat cannot disagree about which run they belong to.
- * The `canonicalise` opt-in is this caller's alone: it is what makes a
- * symlinked route to one workspace derive that workspace's port instead of a
- * second, private one, and neither of the other two takes it (canonicalising
- * their answer would change the path each of them prints without changing
- * which file it names).
+ * The workspace comes from fleet-dir.mjs's fleetFile(), the same locator the
+ * run's ledger and heartbeat are resolved with — so the board, the ledger and
+ * the heartbeat cannot disagree about which run they belong to — asked with
+ * the `canonicalise` opt-in only this caller takes: a symlinked route to one
+ * workspace must derive that workspace's port instead of a second, private
+ * one.
  */
-export function resolveCockpitInstance({ cwd = process.cwd(), gitCommonDir, port } = {}) {
+export function resolveCockpitInstance({ cwd = process.cwd(), workspace, port } = {}) {
   // `port != null`, never truthiness: --port 0 is a real request (an
   // ephemeral bind) and reading it as "absent" would derive a port
   // straight over the top of one the caller explicitly asked for.
   const forced = port != null;
-  const workspace = workspaceDirFromGitCommonDir(gitCommonDir, cwd, { canonicalise: true });
   // Asked as `!isWorkspaceId(...)` rather than `=== null`: the question this
   // arm answers is "was an identity established", and what counts as one is
   // the predicate above — the same one the probe parses with, so the two
-  // sides cannot answer it differently. The behaviour is today's exactly:
-  // workspaceDirFromGitCommonDir() answers null for every unusable
-  // `--git-common-dir` and dirname() cannot answer "". It is the SHAPE of
-  // the question that stops being written out twice.
+  // sides cannot answer it differently.
   if (!isWorkspaceId(workspace)) {
     // Degrade, never die: a non-git or otherwise unusual checkout still gets
-    // a board. The wording is defaultLedgerPath()'s rather than a second
-    // dialect for the same failure, trailing parenthetical included — that
-    // parenthetical names what is degraded HERE, which is not what is
-    // degraded there. No cause is interpolated where the ledger interpolates
-    // one: this function never ran the probe, so it has none to name, and the
-    // ledger's own template already emits exactly this arm when its cause is
-    // empty.
+    // a board. The wording is the ledger's rather than a second dialect for
+    // the same failure, trailing parenthetical included — that parenthetical
+    // names what is degraded HERE, which is not what is degraded there.
     console.error(`${NAME}: WARNING could not resolve --git-common-dir; using cwd-relative .fleet (a second cockpit in another workspace may collide on this port and this state directory)`);
     // Absolute, like the resolved arm, but anchored on the cwd — which is
     // what "cwd-relative" resolves to and what this script's fs calls did
@@ -1544,18 +1529,17 @@ export function resolveCockpitInstance({ cwd = process.cwd(), gitCommonDir, port
   };
 }
 
-// The impure half, deliberately outside the seam above. Bounded for the
-// reason the ledger's identical probe is bounded: an unbounded git that
-// never returns hangs serve() before it binds anything, with nothing on
-// stderr to say why. Ambient GIT_DIR/GIT_WORK_TREE scrubbed — either
-// one answers `--git-common-dir` for a DIFFERENT repository, which would
-// serve this cockpit out of someone else's workspace at exit 0, in silence.
-// A non-zero exit, a stall and git missing entirely all land on "" and take
-// the degrade arm above; the seam is total over whatever comes back.
-const GIT_TIMEOUT_MS = 10_000;
-function gitCommonDir() {
-  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: GIT_TIMEOUT_MS, env: gitEnv() });
-  return r.status === 0 ? r.stdout : "";
+// The impure half, deliberately outside the seam above: the workspace
+// fleetFile() resolves from `cwd`, or null when it cannot — which takes the
+// degrade arm above, so a non-git checkout, a stalled git and git missing
+// entirely all still get a board.
+function cockpitWorkspace(cwd) {
+  try {
+    return dirname(fleetFile(null, { cwd, canonicalise: true }));
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
+    return null;
+  }
 }
 
 // How many ports one launch may try before it gives up, and the whole cost
@@ -1773,7 +1757,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // through `serve` at all was the real CLI — no test exercised it.
   const spendPin = spendDirPin(spendDir ?? argSpendDir());
   const { computeBoard } = await import("./compute-board.mjs");
-  const instance = resolveCockpitInstance({ cwd: process.cwd(), gitCommonDir: gitCommonDir(), port: portGiven });
+  const instance = resolveCockpitInstance({ cwd: process.cwd(), workspace: cockpitWorkspace(process.cwd()), port: portGiven });
   const stateDir = instance.stateDir;
   const jsonPath = join(stateDir, "board.json");
   // The ledger's own default (ledger.mjs's defaultLedgerPath()) is

@@ -34,7 +34,7 @@ import { dirname, resolve, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
-import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition, CELL, tierValues } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
 import { stateFileIn, readState, assessBeat, stallsAt } from "./fleet-state.mjs";
@@ -132,45 +132,27 @@ const GIT_TIMEOUT_MS = gitBudget(10, process.env.LEDGER_GIT_TIMEOUT);
 // There is ONE ledger per run, and it lives in the main checkout. Members run
 // from their own worktrees, where a cwd-relative `.fleet/ledger.md` does not
 // exist — `check` then warns and reports every subject as safe to file, which
-// is precisely the duplicate-filing guard failing open. Resolve against the
-// git COMMON dir (shared by every worktree) rather than the cwd, via
-// git-env.mjs's workspaceDirFromGitCommonDir() — the resolution itself is
-// shared with fleet-state.mjs and board.mjs, and only the
-// filename and the warning below are this caller's own. No canonicalisation
+// is precisely the duplicate-filing guard failing open. fleet-dir.mjs's
+// fleetFile() resolves it against the git COMMON dir (shared by every
+// worktree) instead, with GIT_DIR/GIT_WORK_TREE scrubbed so an ambient one
+// cannot put the run's ledger under another repository; only the bound, the
+// warning and the fallback below are this caller's own. No canonicalisation
 // is asked for: that is board.mjs's opt-in, and taking it here would change
-// the path this function RETURNS (and `check` prints) without changing which
-// file it names.
+// the path `check` prints without changing which file it names.
 function defaultLedgerPath() {
-  // GIT_DIR/GIT_WORK_TREE scrubbed (gitEnv()): unlike the tracker-query
-  // probe below in this same file, this call used to pass no env at all.
-  // An ambient GIT_DIR answers `--git-common-dir` for a DIFFERENT repository,
-  // so the ONE ledger every run's duplicate-filing guard reads gets resolved
-  // underneath THAT repository instead of the caller's own — measured
-  // directly against a checkout of this repo: `GIT_DIR=/tmp/other/.git node
-  // ledger.mjs row 357 "…"` wrote `/tmp/other/.fleet/ledger.md`, silently, at
-  // exit 0, and `check` then reads whatever ledger (or absence of one) lives
-  // there and reports every subject safe to file.
-  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: GIT_TIMEOUT_MS, env: gitEnv() });
-  // No separate `r.status === 0` gate: every failure mode reproducible here
-  // (no repository, an unresolvable GIT_DIR, a permission-denied `.git`, a
-  // corrupt worktree pointer, a missing `git` binary, a timed-out probe)
-  // leaves `r.stdout` empty, which workspaceDirFromGitCommonDir() already
-  // reads as `null` on its own — see its own docstring for that contract.
-  const workspace = workspaceDirFromGitCommonDir(r.stdout);
-  if (workspace === null) {
+  try {
+    return fleetFile("ledger.md", { timeoutMs: GIT_TIMEOUT_MS });
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
     // Could not resolve the shared git dir → fall back to a cwd-relative path.
     // That re-opens the worktree fail-open this resolution exists to close (a
     // member reads a cwd-local ledger, not the run's), so say so rather than
-    // degrading the duplicate-filing guard in silence. This probe
-    // is bounded too, and an ETIMEDOUT stall prints byte-identical stderr to
-    // an instant "not a repository" failure without naming which — the
-    // sibling probe in runCheck() already names it via cause(); match that
-    // shape here rather than leaving this one generic.
-    const why = cause(r.error && r.error.message, r.stderr);
-    console.error(`${NAME}: WARNING could not resolve --git-common-dir${why ? `: ${why}` : ""}; using cwd-relative .fleet/ledger.md (duplicate-filing guard may be degraded)`);
+    // degrading the duplicate-filing guard in silence. The message names the
+    // cause, so an ETIMEDOUT stall does not read like an instant "not a
+    // repository" failure.
+    console.error(`${NAME}: WARNING ${e.message}; using cwd-relative .fleet/ledger.md (duplicate-filing guard may be degraded)`);
     return ".fleet/ledger.md";
   }
-  return join(workspace, ".fleet", "ledger.md");
 }
 
 const argv = process.argv.slice(2);

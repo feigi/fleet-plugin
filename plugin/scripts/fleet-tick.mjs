@@ -899,7 +899,8 @@ import { fileURLToPath } from "node:url";
 import { isCLI } from "./is-cli.mjs";
 import { parseArgs } from "node:util";
 import { makeDie, isDigits } from "./arg.mjs";
-import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { gitEnv } from "./git-env.mjs";
+import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { statePath, readState, writeState, assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
 import { checkMainCheckout, describe } from "./main-checkout.mjs";
 
@@ -915,7 +916,6 @@ const PR_LIMIT = 200;
 // behind. So it discloses instead — the line says the count is a floor.
 const CLAIMED_LIMIT = 200;
 const MAX_BUFFER = 64 * 1024 * 1024;
-const GIT_TIMEOUT_MS = 10_000;
 // Every gh spawn below is killed at this bound, so a gh that never answers is
 // a failed read on that call's own failure path — the open-PR read refuses the
 // tick, a probe leaves standing what it could not confirm, the claimed count
@@ -1057,14 +1057,20 @@ function readLedger() {
   return d;
 }
 
-// `.fleet/shortlist.json` beside the run's ledger: the workspace from `git
-// rev-parse --git-common-dir`, GIT_DIR/GIT_WORK_TREE scrubbed so an
-// ambient one cannot answer for another repository. null when unresolvable —
-// read as a missing shortlist, and the refresh then says why it could not run.
+// `.fleet/shortlist.json` beside the run's ledger, through fleet-dir.mjs's
+// fleetFile(). null when unresolvable — read as a missing shortlist, and the
+// refresh then says why it could not run. Announced here first: a missing
+// shortlist is also what an empty queue looks like, and "outside a
+// repository" is not "no candidates yet". main() calls this once per tick,
+// so a workspace that stays unresolvable warns once per tick.
 function shortlistPath() {
-  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: GIT_TIMEOUT_MS, env: gitEnv() });
-  const workspace = workspaceDirFromGitCommonDir(r.stdout);
-  return workspace === null ? null : join(workspace, ".fleet", "shortlist.json");
+  try {
+    return fleetFile("shortlist.json");
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
+    console.error(`${NAME}: WARNING ${e.message}; reading the shortlist as missing`);
+    return null;
+  }
 }
 
 function readShortlist(path) {
