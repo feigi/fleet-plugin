@@ -364,14 +364,15 @@ const prEdit = (repo) => {
   writeFileSync(join(repo, "bin.dat"), BIN_X);
 };
 
-function carryRepo(t) {
-  const repo = mktemp(t, "merge-gate-carry-");
+// An empty repository and `at(base, edit)`: a commit on `base` (detached)
+// after `edit`; null commits onto the empty main.
+function fixtureRepo(t, prefix) {
+  const repo = mktemp(t, prefix);
   git(repo, "init", "-q", "-b", "main");
   git(repo, "config", "user.name", "fixture");
   git(repo, "config", "user.email", "fixture@example.invalid");
   git(repo, "config", "commit.gpgsign", "false");
   git(repo, "config", "core.fileMode", "true");
-  // A commit on `base` (detached) after `edit`; null commits onto the empty main.
   const at = (base, edit) => {
     if (base !== null) git(repo, "checkout", "-q", "--detach", base);
     edit(repo);
@@ -379,6 +380,12 @@ function carryRepo(t) {
     git(repo, "commit", "-q", "-m", "fixture");
     return git(repo, "rev-parse", "HEAD").trim();
   };
+  const main = (sha) => git(repo, "update-ref", "refs/remotes/origin/main", sha);
+  return { repo, at, main };
+}
+
+function carryRepo(t) {
+  const { repo, at, main } = fixtureRepo(t, "merge-gate-carry-");
   const m0 = at(null, (r) => {
     writeFileSync(join(r, "f.txt"), `${LINES.join("\n")}\n`);
     writeFileSync(join(r, "bin.dat"), Buffer.from([0, 1, 2, 0x41, 0x41, 0x41, 0x41]));
@@ -390,7 +397,6 @@ function carryRepo(t) {
     swapLine(r, "line1", "line0 main\nline1");
     writeFileSync(join(r, "main.txt"), "main\n");
   });
-  const main = (sha) => git(repo, "update-ref", "refs/remotes/origin/main", sha);
   main(m1);
   // PRE_HEAD's edit replayed onto `base`, then `extra` on top of it.
   const carry = (extra = () => {}, base = m1) =>
@@ -398,7 +404,7 @@ function carryRepo(t) {
       prEdit(r);
       extra(r);
     });
-  return { repo, at, main, m0, m1, preHead, carry };
+  return { repo, at, main, m1, preHead, carry };
 }
 
 // The gate run in the fixture repository, with gh and ci-state both on `head`
@@ -506,6 +512,148 @@ test("a rebase over a main edit inside the hunk's context, or a conflict resolve
   binary.main(mb2);
   const kept = carryGate(t, binary, binary.at(mb2, big(p2, s)), { argv: ["--pr", "42", "--pre", labelled] });
   assertRow(kept, 1, "blocked", "head-moved-after-label");
+});
+
+// An edit made somewhere else in the file is not the labelled head's change,
+// though every added, removed and context line reads the same once the hunk
+// headers' line numbers and function context are dropped. Two functions have
+// identical bodies, and the labelled head edits one; the moved head edits the
+// other. `top` is what main prepends to the file meanwhile — empty leaves the
+// file's blob untouched on main, so a real rebase would keep the hunk's place.
+function relocationRepo(t, top) {
+  const { repo, at, main } = fixtureRepo(t, "merge-gate-reloc-");
+  const body = (name, ret) => `int ${name}(void) {\n  int a = 1;\n  int b = 2;\n  int c = 3;\n  ${ret}\n  int d = 4;\n  int e = 5;\n  int f = 6;\n}\n`;
+  const file = (head, admin, guest) => (r) => writeFileSync(join(r, "auth.c"), `${head}${body("allow_admin", admin)}\n${body("allow_guest", guest)}`);
+  const CHECK = "return CHECK;";
+  const m0 = at(null, file("", CHECK, CHECK));
+  const preHead = at(m0, file("", "return 0;", CHECK));
+  const m1 = at(m0, (r) => {
+    file(top, CHECK, CHECK)(r);
+    writeFileSync(join(r, "main.txt"), "main\n");
+  });
+  main(m1);
+  return {
+    repo,
+    preHead,
+    carried: at(m1, file(top, "return 0;", CHECK)),
+    relocated: at(m1, file(top, CHECK, "return 0;")),
+  };
+}
+
+test("the labelled edit made at a different place in the file is no carry → 1 head-moved-after-label", (t) => {
+  for (const [name, top] of [
+    ["main left the file alone", ""],
+    ["main prepended a line to the file", "/* main */\n"],
+  ]) {
+    const fx = relocationRepo(t, top);
+    // Control: the same edit where it was made is a carry.
+    const control = carryGate(t, fx, fx.carried);
+    assertRow(control, 0, "mergeable", null);
+    assert.deepEqual(control.json.rebaseCarry, { labelled: fx.preHead, accepted: fx.carried }, name);
+    const r = carryGate(t, fx, fx.relocated);
+    assertRow(r, 1, "blocked", "head-moved-after-label");
+    assert.equal(r.json.rebaseCarry, null, name);
+  }
+});
+
+test("a rename is compared as the deletion and addition it is → 1 head-moved-after-label", (t) => {
+  // The labelled head renames r.txt; main appends to it, and the moved head
+  // renames the result. Both are a 100% rename of the same two paths, so with
+  // rename detection on the patch text is the same, and only the lines each
+  // deletion removes tell them apart. The merge reproduces the moved tree
+  // either way, so this refusal is the text proof's alone.
+  const rename = (mainEdit) => {
+    const { repo, at, main } = fixtureRepo(t, "merge-gate-rename-");
+    const m0 = at(null, (r) => writeFileSync(join(r, "r.txt"), "alpha\nbeta\n"));
+    const preHead = at(m0, (r) => git(r, "mv", "r.txt", "s.txt"));
+    const m1 = at(m0, mainEdit);
+    main(m1);
+    return { repo, preHead, moved: at(m1, (r) => git(r, "mv", "r.txt", "s.txt")) };
+  };
+  // Control: main left r.txt alone, so the same rename is a carry.
+  const control = rename((r) => writeFileSync(join(r, "main.txt"), "main\n"));
+  assertRow(carryGate(t, control, control.moved), 0, "mergeable", null);
+  const edited = rename((r) => writeFileSync(join(r, "r.txt"), "alpha\nbeta\ngamma\n"));
+  const r = carryGate(t, edited, edited.moved);
+  assertRow(r, 1, "blocked", "head-moved-after-label");
+  assert.equal(r.json.rebaseCarry, null);
+});
+
+test("a head with no net change is no carry, even of another head with none → 1 head-moved-after-label", (t) => {
+  const fx = carryRepo(t);
+  const empty = (msg) => {
+    git(fx.repo, "checkout", "-q", "--detach", fx.m1);
+    git(fx.repo, "commit", "-q", "--allow-empty", "-m", msg);
+    return git(fx.repo, "rev-parse", "HEAD").trim();
+  };
+  const preHead = empty("labelled");
+  const moved = empty("moved");
+  const r = carryGate(t, { ...fx, preHead }, moved);
+  assertRow(r, 1, "blocked", "head-moved-after-label");
+  assert.equal(r.json.rebaseCarry, null);
+});
+
+test("a head with more than one merge base with origin/main is no carry → 1 head-moved-after-label", (t) => {
+  // Two branches merged into each other leave their descendants two merge
+  // bases with a main that holds one of the merges. The head is the labelled
+  // head and one empty commit, so every other part of the proof holds.
+  const { repo, at, main } = fixtureRepo(t, "merge-gate-criss-");
+  const root = at(null, (r) => writeFileSync(join(r, "f.txt"), `${LINES.join("\n")}\n`));
+  const b1 = at(root, (r) => writeFileSync(join(r, "b1.txt"), "b1\n"));
+  const b2 = at(root, (r) => writeFileSync(join(r, "b2.txt"), "b2\n"));
+  const cross = (into, from) => {
+    git(repo, "checkout", "-q", "--detach", into);
+    git(repo, "merge", "-q", "--no-ff", "-m", "cross", from);
+    return git(repo, "rev-parse", "HEAD").trim();
+  };
+  const c1 = cross(b1, b2);
+  const c2 = cross(b2, b1);
+  main(c1);
+  assert.equal(git(repo, "merge-base", "--all", c1, c2).trim().split("\n").length, 2, "fixture: two merge bases");
+  const preHead = at(c2, (r) => swapLine(r, "line10", "line10 changed"));
+  git(repo, "commit", "-q", "--allow-empty", "-m", "moved");
+  const moved = git(repo, "rev-parse", "HEAD").trim();
+  const r = carryGate(t, { repo, preHead }, moved);
+  assertRow(r, 1, "blocked", "head-moved-after-label");
+  assert.equal(r.json.rebaseCarry, null);
+});
+
+test("a context line differing from the labelled head's only in its bytes is no carry → 1 head-moved-after-label", (t) => {
+  // Main rewrites the last line of g.txt, which the PR's hunk carries as a
+  // context line, separated from the edit itself by unchanged lines, so the merge is clean and
+  // the moved head's tree is exactly the labelled change on main's base — only
+  // the context line differs. Each case is a difference one decoding or one
+  // filtered line class would erase.
+  const context = (last, mainLast) => {
+    const { repo, at, main } = fixtureRepo(t, "merge-gate-ctx-");
+    const g = (line17, end) => (r) =>
+      writeFileSync(
+        join(r, "g.txt"),
+        Buffer.concat([Buffer.from([...LINES.slice(0, 16).map((l) => `g${l}`), line17, "g18", "g19", ""].join("\n")), end]),
+      );
+    const m0 = at(null, g("g17", last));
+    const preHead = at(m0, g("g17 changed", last));
+    const m1 = at(m0, (r) => {
+      g("g17", mainLast)(r);
+      writeFileSync(join(r, "main.txt"), "main\n");
+    });
+    main(m1);
+    return { repo, preHead, moved: at(m1, g("g17 changed", mainLast)) };
+  };
+  const cases = [
+    ["a missing newline at the end of the file", Buffer.from("z"), Buffer.from("z\n")],
+    // Two different invalid UTF-8 bytes both decode to U+FFFD under utf8.
+    ["two different invalid UTF-8 bytes", Buffer.from([0x80, 0x0a]), Buffer.from([0x81, 0x0a])],
+  ];
+  for (const [name, last, mainLast] of cases) {
+    // Control: main's change leaves line 20 as it was, so the head is a carry.
+    const control = context(last, last);
+    assertRow(carryGate(t, control, control.moved), 0, "mergeable", null);
+    const fx = context(last, mainLast);
+    const r = carryGate(t, fx, fx.moved);
+    assertRow(r, 1, "blocked", "head-moved-after-label");
+    assert.equal(r.json.rebaseCarry, null, name);
+  }
 });
 
 test("a proof that cannot complete is no carry → 1 head-moved-after-label, never mergeable", (t) => {

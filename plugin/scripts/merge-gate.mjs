@@ -70,10 +70,11 @@
 // the PR, and the response is stop-and-report like every other 2.
 //
 // A rebase-carry is a head outside {pre, post} whose net change is the
-// labelled head's: the label binds to the change it audited, not to one SHA,
+// labelled head's and whose tree is exactly that change merged onto the moved
+// head's own base: the label binds to the change it audited, not to one SHA,
 // so a conflict-free rebase keeps it. Anything the proof cannot establish —
-// a missing object, an unresolvable base, a git failure — is no carry, and the
-// head row blocks exactly as it does for any other moved head.
+// a missing object, an unresolvable base, a git failure, a merge conflict — is
+// no carry, and the head row blocks exactly as it does for any other moved head.
 
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -143,8 +144,20 @@ const heads = new Set([pre, post ?? pre]);
 //
 // latin1 decodes every byte to its own code unit, so two different invalid
 // UTF-8 sequences can never decode to the same replacement character and
-// compare equal. Read-only: cat-file, merge-base and diff-tree write no ref,
-// index or worktree.
+// compare equal.
+//
+// The text comparison alone cannot place a hunk: its header's line numbers and
+// function context are dropped, so the same edit made somewhere else in the
+// file reads as the same change. It is therefore the first of two proofs, and
+// the second is the exact one: a three-way merge of the labelled head into the
+// moved head's own merge base, with the labelled head's merge base as the
+// common ancestor, must produce the moved head's tree. A clean rebase is
+// precisely that merge; an edit relocated, added or dropped anywhere else
+// yields a different tree, and a merge that conflicts yields none.
+//
+// Read-only: cat-file, merge-base, diff-tree and rev-parse write nothing,
+// and merge-tree writes no ref, index or worktree — only the unreachable tree
+// and blob objects of the merge it computes, as main-gain.mjs's does.
 const GIT = gitEnv({ LC_ALL: "C" });
 
 function gitRead(root, args) {
@@ -166,7 +179,7 @@ function netChange(root, head) {
   // line can start that way — every one carries a ` `, `+`, `-` or `\` prefix,
   // and a binary patch line has no space in it.
   const blocks = diff.split(/^(?=diff --git )/m);
-  return blocks
+  const text = blocks
     .map((block) => {
       const lines = block.split("\n");
       if (lines.includes("GIT binary patch")) return block;
@@ -179,6 +192,7 @@ function netChange(root, head) {
         .join("\n");
     })
     .join("");
+  return { base: base[0], text };
 }
 
 function proveCarry(root, prView) {
@@ -186,7 +200,11 @@ function proveCarry(root, prView) {
   const labelled = netChange(root, pre);
   if (labelled === null) return null;
   const moved = netChange(root, prView.headRefOid);
-  return moved === labelled ? { labelled: pre, accepted: prView.headRefOid } : null;
+  if (moved === null || moved.text !== labelled.text) return null;
+  const merged = gitRead(root, ["merge-tree", "--write-tree", `--merge-base=${labelled.base}`, moved.base, pre]);
+  const tree = gitRead(root, ["rev-parse", "--verify", `${prView.headRefOid}^{tree}`]);
+  if (merged === null || tree === null || merged.split("\n")[0] !== tree.trim()) return null;
+  return { labelled: pre, accepted: prView.headRefOid };
 }
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);

@@ -23,6 +23,12 @@ full fresh-finisher pass, and the controller worked around it by hand.
   force-push produced (measured on #2923); the head it replaced is GraphQL's
   `HeadRefForcePushedEvent.beforeCommit`. A plain push between the label and
   that force-push leaves no timeline entry once the force-push orphans it.
+- With each hunk header's line numbers and function context dropped, the same
+  edit made at a different place in the file reads as the same change;
+  measured with git 2.50.1, two functions with identical bodies gave an
+  identical text for an edit to either, though a rebase would have kept the
+  hunk where the labelled head put it. The text cannot place a hunk, so it
+  cannot be the whole proof.
 
 ## Decision
 
@@ -33,11 +39,16 @@ full fresh-finisher pass, and the controller worked around it by hand.
    text file's blob ids. Every added, removed and context line, every mode
    line, symlink target, submodule pointer and a binary file's whole block,
    blob ids included, must match. Renames are compared as the deletion and
-   addition they are.
+   addition they are. That text proof is necessary, not sufficient: the
+   labelled head must also merge onto the moved head's own merge base —
+   `git merge-tree --write-tree` with the labelled head's merge base as the
+   common ancestor — into exactly the moved head's tree. An edit made at a
+   different place, or one more or fewer anywhere, gives another tree; a
+   merge that conflicts gives none.
 2. **The proof is a merge-gate row, fail-closed.** `merge-gate.mjs` runs it in
    the main checkout, read-only, for the head `gh pr view` read when that head
    is outside `{pre, post}`. A missing object, a base that is not exactly one
-   merge base, or any git failure is no carry, and the row stays
+   merge base, a merge that conflicts, or any git failure is no carry, and the row stays
    `head-moved-after-label` (exit 1). The head `ci-state` reads must be `pre`,
    `post` or that same carried head. Every other row, and the row order, is
    unchanged; CI must still be green on the actual current head.
@@ -55,6 +66,9 @@ full fresh-finisher pass, and the controller worked around it by hand.
 
 - A conflict-free rebase no longer needs a fresh finisher; review fixes,
   conflict resolutions and edited commits still do.
+- `merge-tree` writes the unreachable tree and blob objects of the merge it
+  computes into the main checkout's object store, as `main-gain.mjs` does; no
+  ref, index or worktree entry moves.
 - A rebase over a `main` edit inside a hunk's context window changes a context
   line and is refused. That false negative is accepted rather than loosening
   the comparison.
