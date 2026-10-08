@@ -71,8 +71,8 @@ function shimPath(mark) {
 }
 
 // realpath, not the bare mkdtemp path: on darwin $TMPDIR lives under /var,
-// which is a symlink to /private/var, and resolveCockpitInstance canonicalises
-// the workspace it derives.
+// which is a symlink to /private/var, and the cockpit canonicalises the
+// workspace it resolves.
 function gitRepo(prefix) {
   const dir = realpathSync(tempDir(prefix));
   // GIT_DIR/GIT_WORK_TREE scrubbed off the fixture: under an ambient one `git
@@ -151,7 +151,7 @@ test("CLI: a relaunch that lands mid-gather() is answered within 1s and reuses t
   const mark = join(tempDir("tick-mark-"), "gathering");
   const bin = shimPath(mark);
   const home = tempDir("tick-home-");
-  const instance = resolveCockpitInstance({ cwd: repo, gitCommonDir: join(repo, ".git") });
+  const instance = resolveCockpitInstance({ cwd: repo, workspace: repo });
   const expected = await firstFreePort(cockpitPorts(instance));
   const first = serveProcess(repo, bin, home);
   try {
