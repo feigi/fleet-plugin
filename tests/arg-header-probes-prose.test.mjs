@@ -45,7 +45,8 @@
 // `shared-refusal.test.mjs`. Left there rather than re-pinned here.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -564,5 +565,33 @@ test("a probe that faulted is refused as an infrastructure fault, never read as 
   for (const code of [0, 2]) {
     const r = spawnSync("node", ["-e", `process.exit(${code})`], { encoding: "utf8" });
     assert.doesNotThrow(() => assertProbeRan(file, r), `a probe whose script exited ${code} was refused as a fault`);
+  }
+});
+
+// The helper above is only worth anything if the probe path runs it: a healthy
+// script never faults, so no roster probe would notice the call gone from
+// `probeArgv`. This drives `probeArgv` and `probeStray` themselves against a
+// script that kills its own process, given by absolute path, and against one
+// that answers normally.
+test("probeArgv and probeStray refuse a script whose probe faulted, and still return a script's own answer", () => {
+  const dir = mkdtempSync(join(tmpdir(), "arg-header-probe-"));
+  try {
+    const selfKill = join(dir, "self-kill.mjs");
+    writeFileSync(selfKill, "process.kill(process.pid, 'SIGKILL');\n");
+    const answers = join(dir, "answers.mjs");
+    writeFileSync(answers, "process.stderr.write('refused\\n'); process.exit(2);\n");
+    for (const probe of [() => probeArgv(selfKill), () => probeStray(selfKill)]) {
+      assert.throws(
+        probe,
+        (e) =>
+          e.message.includes(selfKill) &&
+          e.message.includes("killed by SIGKILL") &&
+          e.message.includes("not a verdict on the script"),
+        "a probe whose script was killed by a signal was not refused as an infrastructure fault",
+      );
+    }
+    assert.deepEqual(probeStray(answers), { status: 2, out: "refused\n" }, "a script that answered was not returned as it answered");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
