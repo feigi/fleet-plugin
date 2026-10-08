@@ -180,6 +180,21 @@ const rows = (out) =>
 
 const scriptsOf = (out) => [...new Set(rows(out).map((r) => r.file))];
 
+// Throws when spawnSync never got an answer out of `file`: a spawn error, a
+// signal kill, or no exit status. Such a probe has empty or meaningless output,
+// and returned as a normal result it would read as a silent script, a wrong
+// exit code, or a clean exit-0 module.
+const assertProbeRan = (file, r) => {
+  const fault = r.error
+    ? `spawn error ${[r.error.code, r.error.message].filter(Boolean).join(": ")}`
+    : r.signal
+      ? `killed by ${r.signal}`
+      : r.status === null
+        ? "no exit status"
+        : null;
+  if (fault) throw new Error(`${file}: the probe itself faulted (${fault}) — an infrastructure fault, not a verdict on the script`);
+};
+
 // Runs a script the way a stray flag reaches it, and reports what it
 // answered. `extra` supplies argv ahead of the stray flag — needed to clear a
 // script's own required-arg guard so a probe can reach its unknown-flag check
@@ -189,6 +204,7 @@ const scriptsOf = (out) => [...new Set(rows(out).map((r) => r.file))];
 // one left to answer.
 const probeArgv = (file, extra = [], tail = []) => {
   const r = spawnSync("node", [file, ...extra, STRAY, ...tail], { cwd: ROOT, encoding: "utf8" });
+  assertProbeRan(file, r);
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 };
 const probeStray = (file) => probeArgv(file);
@@ -520,4 +536,33 @@ test("candidates.mjs refuses --bogus under its own parseArgs", () => {
     !got.stderr.includes(SWEEP_PREFIX),
     `${BOGUS_PROBE} now answers in sweep()'s wording — candidates.mjs routes through the shared sweep after all, and the header argues at refuseUnknown() that it deliberately does not`,
   );
+});
+
+// A probe that never ran the script — a spawn error, a signal kill, no exit
+// status — has no answer to read, and its empty output would otherwise pass as
+// a silent script or a wrong exit code. Fed real spawnSync results, so the
+// check is against what spawnSync actually reports for each fault.
+test("a probe that faulted is refused as an infrastructure fault, never read as a script's answer", () => {
+  const file = "scripts/some-probed.mjs";
+  const faulted = [
+    { fault: "ENOENT", r: spawnSync("fleet-no-such-interpreter-zz", [], { encoding: "utf8" }) },
+    { fault: "SIGKILL", r: spawnSync("node", ["-e", "process.kill(process.pid, 'SIGKILL')"], { encoding: "utf8" }) },
+    { fault: "no exit status", r: { status: null, signal: null, stdout: "", stderr: "" } },
+  ];
+  for (const { fault, r } of faulted) {
+    assert.throws(
+      () => assertProbeRan(file, r),
+      (e) =>
+        e.message.includes(file) &&
+        e.message.includes(fault) &&
+        e.message.includes("not a verdict on the script") &&
+        !e.message.includes("never names a stray flag") &&
+        !e.message.includes("stray flag reached real work"),
+      `a probe faulted with ${fault} was not refused as an infrastructure fault naming ${file} and ${fault}`,
+    );
+  }
+  for (const code of [0, 2]) {
+    const r = spawnSync("node", ["-e", `process.exit(${code})`], { encoding: "utf8" });
+    assert.doesNotThrow(() => assertProbeRan(file, r), `a probe whose script exited ${code} was refused as a fault`);
+  }
 });
