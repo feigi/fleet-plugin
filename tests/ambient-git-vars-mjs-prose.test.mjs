@@ -271,6 +271,14 @@ const COVERED_MJS = {
   // GIT_DIR does not reach the gh child that reads merged state", records
   // that the child sees no GIT_DIR.
   "pr-cost.mjs": 2,
+  // ONE spawn primitive, `git(args, ok)`, behind every git call the main-gain
+  // check makes — the head and base reads, the PR's own author dates, the
+  // merge-tree, both diffs and the blame. An ambient GIT_DIR would answer all
+  // of them for another repository, which need not hold the head at all, and
+  // the hit the fixture plants would go unnamed. Measured in
+  // main-gain.test.mjs, "an ambient GIT_DIR naming another repository cannot
+  // move the check there".
+  "main-gain.mjs": 1,
 };
 
 // The two-name-only exemption list #1599's second design question answers

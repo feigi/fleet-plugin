@@ -25,7 +25,9 @@ lifetime is one **Pass**.
    fix-applier dispatched against it settles as landed.
 5. **Gate twice:** [`merge-gate.mjs`](../../plugin/scripts/merge-gate.mjs)
    (a read-only conjunction of [Instruments](instruments.md), `gh pr
-   view`, and [CI State](ci-state.md)) runs once, waits on CI if in
+   view`, the main-gain check
+   [`main-gain.mjs`](../../plugin/scripts/main-gain.mjs), and
+   [CI State](ci-state.md)) runs once, waits on CI if in
    progress, then runs again immediately before `gh pr merge` — merging
    only on that **second** exit 0.
 6. **Grace, then exit.** Once nothing is left to merge, hold a
@@ -72,7 +74,11 @@ flowchart TD
   job is checklist work, and
   [`no-undo-audit.sh`](../../plugin/scripts/no-undo-audit.sh), run
   before every rebase, is the deterministic backstop that catches a
-  wrongly-resolved conflict regardless of tier.
+  wrongly-resolved conflict regardless of tier. Its post-rebase
+  counterpart is the gate's main-gain row, which refuses a merge that
+  would remove lines `main` gained after the PR's work began unless the
+  PR body acknowledges them
+  ([ADR 0023](../adr/0023-main-gain-check-is-a-merge-gate-row.md)).
 - **GitHub's native merge queue is rejected.** Its `merge_group` event
   has no workflow in this repo, and a behind PR would enter the queue
   with a red `rebase-check` by design — the fleet's own label+hold-rule
