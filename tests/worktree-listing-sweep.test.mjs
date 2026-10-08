@@ -15,15 +15,15 @@
 // shell script reads the worktree listing raw. A read added tomorrow, at a site
 // nobody has thought of yet, fails here rather than silently truncating.
 //
-// The two files allowed their own `git worktree list`, each with its reason:
+// One file is allowed its own `git worktree list`, and why:
 //
 //   worktree.sh   IS the reader — `wt_listing`, `--porcelain -z` into a temp
 //                 file, then `tr '\n\000' '\001\n'`.
-//   inflight.sh   carries its own copy of that shape, landed by #185 and named
-//                 by #551 as the reference implementation and out of scope.
-//                 Its read is `-z` already, so it is not the defect; folding it
-//                 into worktree.sh is a separate change with its own risk, and
-//                 this gate would notice if someone did fold it.
+//
+// inflight.sh carried its own copy of that shape, landed by #185 and named by
+// #551 as the reference implementation; #2146 folded it into worktree.sh's
+// Registration probe, so it now reads the listing through `wt_listing` like
+// every other script and this gate polices it with them.
 //
 // Zero deps: `node --test tests/worktree-listing-sweep.test.mjs`.
 
@@ -141,7 +141,7 @@ function invocations(src) {
     .map(([n, line]) => [n, line]);
 }
 
-const ALLOWED = ["plugin/scripts/worktree.sh", "plugin/scripts/inflight.sh"];
+const ALLOWED = ["plugin/scripts/worktree.sh"];
 
 // A guard on the guard, and the half the skip above leans on: a bad glob, a
 // moved directory or a `git ls-files` that answers nothing turns the two
@@ -158,7 +158,7 @@ test("the sweep sees the scripts it is supposed to police", { skip: SKIP_WITHOUT
   }
 });
 
-test("only worktree.sh and inflight.sh read the worktree listing directly", { skip: SKIP_WITHOUT_REPO }, () => {
+test("only worktree.sh reads the worktree listing directly", { skip: SKIP_WITHOUT_REPO }, () => {
   const offenders = SHELL_SCRIPTS
     .filter((f) => !ALLOWED.includes(f))
     .flatMap((f) => invocations(readFileSync(join(ROOT, f), "utf8")).map(([n, l]) => `${f}:${n}: ${l.trim()}`));
@@ -173,7 +173,7 @@ test("only worktree.sh and inflight.sh read the worktree listing directly", { sk
 // over a tree where NOTHING reads the listing at all — a `wt_listing` deleted,
 // or an `ALLOWED` entry that has stopped being a reader — and the gate would be
 // pinning the absence of a feature rather than the shape of one.
-test("the two allowed readers really do read it, and both read it -z", { skip: SKIP_WITHOUT_REPO }, () => {
+test("the allowed reader really does read it, and reads it -z", { skip: SKIP_WITHOUT_REPO }, () => {
   for (const f of ALLOWED) {
     const src = readFileSync(join(ROOT, f), "utf8");
     const calls = invocations(src);
@@ -192,7 +192,7 @@ test("the two allowed readers really do read it, and both read it -z", { skip: S
 // BWK awk 20200816 stops at the first NUL and reports ONE record for a listing
 // of any length, in all three spellings — which would have made inflight.sh
 // refuse every ticket. It reads like the obvious way to consume `-z` output, so
-// the next person to touch either reader will reach for it.
+// the next person to touch the reader will reach for it.
 //
 // Any `RS=` at all, not only one spelled with a literal `\0`. The separator has
 // no other use in this tree — no script sets `RS` for any reason today — so the

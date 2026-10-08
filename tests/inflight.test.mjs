@@ -985,7 +985,7 @@ esac`);
   const json = JSON.parse(r.stdout);
   assert.deepEqual(json.hits, []);
   assert.deepEqual(json.unknown, ["local"], "#96: exit 2 now carries a payload naming the probe");
-  assert.match(r.stderr, /git listed no worktrees at all for #8/);
+  assert.match(r.stderr, /^inflight: git listed no worktrees at all/m);
   assert.match(r.stderr, /not even the main checkout/);
   assert.doesNotMatch(r.stderr, /-1 worktrees/,
     "the whole point: no branch below may report a negative tally");
@@ -997,8 +997,8 @@ esac`);
  * Shims `git` so that `mutation` runs on the ONE call that reads the worktree
  * registry, then hands off to the real binary.
  *
- * Shimmed rather than slept: this is the window between inflight.sh's own
- * on-disk count and git's read of the same registry, measured at ~10ms, and a
+ * Shimmed rather than slept: this is the window between worktree.sh's on-disk
+ * registry count and git's read of the same registry, measured at ~10ms, and a
  * test that tries to hit it with a sleep is a flake generator. Firing on the
  * call itself lands the mutation inside the window every time.
  *
@@ -1084,14 +1084,15 @@ test("probe 3: a sibling worktree REMOVE between the two reads is absorbed, not 
  * the original count/listing gap: `before` runs ahead of the real
  * `worktree list --porcelain -z` call, exactly as `registryRaceShim`'s
  * mutation does, and `after` runs once that call has returned but before
- * anything downstream re-scans the registry — the gap the recount itself
- * opens while only `registered`, and not `linked`, is re-taken. #1421
+ * anything downstream re-scans the registry — the gap the recount would open
+ * if it re-took only `registered` and left `linked` pinned to the first
+ * listing (`wt_count_pair` in worktree.sh re-takes both together). #1421
  *
  * One shot, gated the same way and for the same reason `registryRaceShim` is:
  * the suite's own cleanup shells out to git too, and a shim that kept firing
  * would never let the run converge. Mirrors release-ticket.test.mjs's
- * `twoMutationShim`, which covers the same window in that script's copy of
- * this recount (#1408).
+ * `twoMutationShim`, which covers the same window through the `wt_counts`
+ * that release-ticket.sh shares with this script (#1408).
  */
 function twoMutationShim(bin, before, after) {
   const fired = join(bin, "two-mutation-fired");
@@ -1191,19 +1192,15 @@ test("probe 3: a SECOND mutation inside the recount's own window is absorbed too
 });
 
 /**
- * Targets the retake PAIR's own window, not either window above: those two
- * calls (`{ count_registry && count_linked; }`, inflight.sh:884) are still
- * two reads, not one, and the narrow gap they open BETWEEN themselves — after
- * the retake's `count_registry` has already re-scanned the registry, before
- * its `count_linked` re-lists — is the one this recount narrows but cannot
- * close. `first` fires ahead of the FIRST `worktree list --porcelain -z`
- * call, to manufacture the mismatch that makes the recount run at all;
- * `second` fires ahead of the SECOND call — the retake's own — landing
- * exactly in that residual window. #1421
- *
- * One shot per slot, for the reason `registryRaceShim`'s is: a shim that kept
- * firing on every later listing (the suite's own cleanup shells out to git
- * too) would never let the run converge.
+ * Targets the retake PAIR's own window, not either window above: a retake's
+ * registry count and its listing are still two reads, not one, and the narrow
+ * gap they open BETWEEN themselves — after the retake has re-scanned the
+ * registry, before it re-lists — is one a single recount narrows but cannot
+ * close. `first` fires ahead of the FIRST `worktree list --porcelain -z` call,
+ * to manufacture the mismatch that makes the recount run at all; `second`
+ * fires ahead of every LATER call, so the first retake's own listing lands
+ * exactly in that residual window. Every later firing of an add that already
+ * landed fails quietly, so the run can still converge. #1421
  */
 function retakeGapShim(bin, first, second) {
   const seen = join(bin, "retake-gap-seen");
@@ -1221,20 +1218,17 @@ esac`);
   return fired;
 }
 
-test("probe 3: a mutation inside the RETAKE PAIR's own window still escapes it, add then add (#1421)", (t) => {
+test("probe 3: a mutation inside the RETAKE PAIR's own window is absorbed by the second recount pass, add then add (#1421)", (t) => {
   // What the two tests above do NOT cover: both drive their second mutation
   // through `twoMutationShim`, which is one-shot and so only ever brackets
   // the FIRST `worktree list --porcelain -z` call — the retake's own second
   // call runs untouched in both of those cases. This fixture instead lands a
-  // mutation on that SECOND call, i.e. inside the gap the retake pair opens
-  // between its own `count_registry` and `count_linked` (inflight.sh:884).
-  // That gap is real and untested until now: `registered` is re-taken first,
-  // so a sibling add landing after it but before `count_linked` re-lists is
-  // missed by the registry scan that already ran and IS seen by the git
-  // listing still to come, same shape as the ORIGINAL pair's escape this
-  // whole recount exists to close — just narrower. Pinning it, not chasing
-  // it: the recount closing every window a further recount could still miss
-  // is not what #1421 claims.
+  // mutation on that SECOND call, inside the gap the retake pair opens
+  // between its own registry count and its listing: the registry scan that
+  // already ran misses the add and the listing still to come sees it, so the
+  // first retake disagrees in the MORE-listed direction. A single recount
+  // refused there; worktree.sh's `wt_counts` re-takes the pair up to two
+  // passes, and the second reads a settled state.
   const { repo, env, bin } = fixture(t, 8, {});
   const siblingA = join(repo, "..", "sibling-a");
   const siblingB = join(repo, "..", "sibling-b");
@@ -1247,12 +1241,9 @@ test("probe 3: a mutation inside the RETAKE PAIR's own window still escapes it, 
   assert.ok(existsSync(fired), "the shim fired: the second add landed inside the retake's own window");
   assert.equal(existsSync(siblingA), true, "fixture: the first add really landed before git's first listing");
   assert.equal(existsSync(siblingB), true, "fixture: the second add really landed inside the retake's own window");
-  assert.equal(r.status, 2, "the retake pair cannot close a window inside itself");
-  assert.match(r.stderr, /git listed 2 worktrees but only 1 registry entries were counted/,
-    "MORE listed than registered: the retake's own git listing sees the second add before its own registry re-scan does");
-  assert.doesNotMatch(r.stderr, /the listing is incomplete/,
-    "a landed add must never surface under the dropped-entry message");
-  assert.equal(JSON.parse(r.stdout).unknown[0], "local");
+  assert.equal(r.status, 0, `two benign adds straddling both windows are not an unanswerable probe: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /registry entries/, "no mismatch is reported at all — the second recount pass absorbed it");
+  assert.equal(JSON.parse(r.stdout).taken, false);
 });
 
 // --- probe 3, the branch half's SPELLING (#915).
@@ -1758,7 +1749,7 @@ test("probe 3: a worktree COUNT that could not run is unknown, never a bogus tal
 
   const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
   assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
-  assert.match(r.stderr, /could not count the worktrees git listed for #77/);
+  assert.match(r.stderr, /^inflight: could not count the worktrees git listed$/m);
   assert.doesNotMatch(r.stderr, /-1 worktrees/,
     "a counter that could not run never reports a count at all");
   const json = JSON.parse(r.stdout);
@@ -1915,7 +1906,7 @@ test("probe 3: a worktree listing that could not run names its own cause, not a 
   const r = spawnSync("sh", [SCRIPT, "77"], { cwd: repo, env, encoding: "utf8" });
   assert.equal(r.status, 2, "unanswerable is exit 2, not the exit 0 that means free");
   assert.match(r.stderr,
-    /git worktree list failed, or its output could not be written to \S+, so whether #77 has a worktree is unknown/);
+    /^inflight: could not read the worktree list for #77: git worktree list failed$/m);
   assert.doesNotMatch(r.stderr, /listed no worktrees at all/,
     "the lookup that failed names itself; the downstream count never speaks for it");
   const json = JSON.parse(r.stdout);

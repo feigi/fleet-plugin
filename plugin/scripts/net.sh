@@ -385,8 +385,8 @@ net_git() {
   # that fault, fetched through this function unmodified, loses the
   # registry entry between the fetch returning and the caller's own next
   # read of it — a worktree whose fault is seconds old, not months.
-  # reap.sh's registry recount (`count_registry`/`count_linked`,
-  # `wt_registry_why`) reads the very corruption this detached run erases:
+  # reap.sh's registry recount (worktree.sh's `wt_counts`) reads the very
+  # corruption this detached run erases:
   # with the entry gone, the registry count drops to match the listing's
   # linked count, in lockstep, and the guard a stray `git worktree add`
   # mid-run is built to catch sees no mismatch to refuse on — both branches

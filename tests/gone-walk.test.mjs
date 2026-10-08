@@ -35,7 +35,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -122,6 +122,103 @@ test("the caller inventory matches the tree", () => {
     counts["release-ticket.sh"] > counts["worktree-audit.sh"],
     "release-ticket.sh asks gone() more often than worktree-audit.sh",
   );
+});
+
+// --- The Registration probe (#2146): the same two pins, extended to every
+// verdict worktree.sh now owns and to the scripts that ask them.
+//
+// Each probe function, and the scripts that must reach it by sourcing rather
+// than by a copy. Spelled out for CALLERS' reason: a discovered set shrinks
+// silently when a script drops its call.
+const PROBE = {
+  wt_counts: ["reap.sh", "release-ticket.sh", "inflight.sh"],
+  wt_linkage: ["reap.sh", "release-ticket.sh", "no-undo-audit.sh"],
+  wt_holds_cwd: ["reap.sh", "release-ticket.sh"],
+  wt_find_branch: ["reap.sh", "release-ticket.sh"],
+  wt_outcome: ["release-ticket.sh"],
+  wt_occupied: ["release-ticket.sh"],
+};
+
+// The private copies the probe replaced. A script defining one of these again
+// is the fork the probe exists to end, whatever comment arrives with it.
+const RETIRED = ["holds_cwd", "wt_linkage_why", "count_registry", "count_linked",
+  "release_outcome", "ro_registered", "occupied"];
+
+const scriptsDir = fileURLToPath(new URL("../plugin/scripts/", import.meta.url));
+const SHELL = readdirSync(scriptsDir).filter((f) => f.endsWith(".sh"));
+
+/** `src` without its whole-line comments, so prose naming a function never reads as a definition. */
+const code = (src) => src.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+
+/**
+ * A regexp matching every spelling of defining shell function `name`:
+ * `name() {`, `function name {` and `function name() {`, each at the head of a
+ * line or after a `;`, `&` or `{` on one. `\b` after the keyword form keeps
+ * `function wt_counts_passes` from reading as `wt_counts`.
+ */
+const defRe = (name, flags = "m") =>
+  new RegExp(`(?:^|[;&{])\\s*(?:function\\s+${name}\\b|${name}\\s*\\(\\))`, flags);
+
+/** Does `src` define shell function `name`, in any of those spellings? */
+const defines = (src, name) => defRe(name).test(code(src));
+
+test("every probe verdict is defined once in the tree, in worktree.sh", () => {
+  for (const name of Object.keys(PROBE)) {
+    const all = code(read(HOME)).match(defRe(name, "gm"));
+    assert.equal(all?.length, 1, `${HOME} must define ${name}() exactly once`);
+    for (const f of SHELL.filter((s) => s !== HOME)) {
+      assert.equal(defines(read(f), name), false,
+        `${f} must source ${HOME}, never redefine ${name}() — a local copy forks the verdict`);
+    }
+  }
+});
+
+test("no script brings back a private copy the probe retired", () => {
+  for (const f of SHELL) {
+    for (const name of RETIRED) {
+      assert.equal(defines(read(f), name), false, `${f} defines ${name}(), a copy worktree.sh's probe replaced`);
+    }
+  }
+});
+
+test("every probe caller sources worktree.sh and calls what it is listed for", () => {
+  for (const [name, callers] of Object.entries(PROBE)) {
+    for (const f of callers) {
+      const src = read(f);
+      assert.match(src, /\. "\$wt_lib" \|\| die/, `${f} must source ${HOME}`);
+      assert.match(src, new RegExp(`^[^#\\n]*(?<![$\\w])${name}\\b(?!\\(\\)|=)`, "m"),
+        `${f} is listed as a caller of ${name} but never calls it — drop it from PROBE or restore the call`);
+    }
+  }
+});
+
+// Derived from the tree rather than listed: a script that deletes a worktree or
+// a branch, or prunes the registry, is one a lost `.` line would leave running
+// its deletes with nothing answering the probe's questions — so any such
+// script, today's or tomorrow's, must source the module. The accept side is
+// asserted too: the scan has to find the delete scripts it exists for.
+test("every script that deletes a worktree or a branch sources worktree.sh", () => {
+  const DELETES = /\bworktree\s+(?:remove|prune)\b|\bupdate-ref\s+(?:-d|--delete)\b|\bbranch\s+(?:-[a-zA-Z]*[dD]|--delete\b)/;
+  // The scan is only as good as its pattern: every spelling of a delete git
+  // accepts must read as one, or a script using it escapes the sourcing rule.
+  for (const spelling of [
+    "git branch -d x", "git branch -D x", "git branch -fd x", "git branch -df x", "git branch --delete x",
+    "git -C d worktree remove x", "git worktree  remove x", "git worktree prune",
+    "git update-ref -d refs/heads/x", "git update-ref --delete refs/heads/x", "git branch -D x # tail",
+  ]) {
+    assert.match(spelling, DELETES, `the delete-script scan must read \`${spelling}\` as a delete`);
+  }
+  for (const spelling of ["git branch --show-current", "git branch -vv", "git branch --list", "git worktree list"]) {
+    assert.doesNotMatch(spelling, DELETES, `the delete-script scan must not read \`${spelling}\` as a delete`);
+  }
+  const deleters = SHELL.filter((f) => f !== HOME && read(f).split("\n")
+    .some((l) => !/^\s*#/.test(l) && DELETES.test(l)));
+  for (const f of ["reap.sh", "release-ticket.sh"]) {
+    assert.ok(deleters.includes(f), `the delete-script scan must find ${f}: ${deleters}`);
+  }
+  for (const f of deleters) {
+    assert.match(read(f), /\. "\$wt_lib" \|\| die/, `${f} deletes worktrees or branches and must source ${HOME}`);
+  }
 });
 
 /**

@@ -74,6 +74,23 @@ A registered worktree matching this claim's directory name but not on the claim'
 branch. A registry-visible condition — never an Orphaned worktree directory, which by
 definition has no registration to be seen through.
 
+**Registration probe**:
+The one place the fleet's shell scripts ask git about a worktree before they delete
+one, delete a branch, or read an absence as free — `worktree.sh`, sourced, never
+copied. Each verdict returns a status and a reason; the caller decides what a refusal
+means for it. Its verdicts:
+- **Recount** — the registry entries on disk counted against the linked worktrees git
+  listed, re-taken before a disagreement is believed. A listing that dropped an entry
+  cannot be trusted for any absence.
+- **Linkage** — whether a worktree's `.git` answers for that directory itself, rather
+  than for another tree it was redirected or symlinked to.
+- **Lookup** — which worktree holds a given branch, read off a listing the Recount
+  validated; a scan that could not finish is never "no worktree".
+- **Cwd guard** — whether removing a worktree would delete the caller's own working
+  directory.
+- **Release outcome** — which named state a removal left behind (below).
+_Avoid_: worktree check, registry guard, linkage check helper
+
 ### Consumer repo
 
 **Recipe**:

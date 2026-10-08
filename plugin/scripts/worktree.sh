@@ -1,6 +1,8 @@
 # shellcheck shell=sh
 # Reading worktree state for the fleet's shell scripts: the porcelain listing,
-# path predicates more than one script asks, and in-progress operation state.
+# path predicates more than one script asks, in-progress operation state, and
+# the Registration probe — the verdicts every script that deletes a worktree or
+# a branch, or reads an absence as "free", asks git before it acts.
 # Sourced, never executed — no shebang, and the `shell=sh` directive above is
 # what tells shellcheck what to check it as.
 #
@@ -595,4 +597,499 @@ EOF
   fi
   wt_err=
   return "$wt_rd_rc"
+}
+
+# ---------------------------------------------------------------------------
+# The Registration probe: every verdict a script asks of git about a worktree
+# before it deletes one, a branch, or reads an absence as "free". One
+# definition per verdict, so a fix lands once and reaches every caller.
+#
+# Contract shared by every function below. Each returns a status and writes
+# named output variables; none prints, none exits, and none decides what a
+# refusal means — the caller maps it onto its own reporting shape (keep a
+# branch, die, block, record an unknown). A refusal's reason is prose in
+# `$wt_why`, written to stand in a receipt field verbatim; each function
+# clears `$wt_why` on entry, so it is empty after every answer that is not a
+# refusal. Condition context only, like `gone`: a non-zero return exits a
+# `set -e` caller.
+#
+# The outputs are read by the sourcing script and never again in here, which
+# is what SC2034 sees on this file's standalone shellcheck run — the
+# disables below, as for `wt_listing`.
+# ---------------------------------------------------------------------------
+
+# Is anything at all occupying $1? Not the same question as `gone`, which asks
+# whether an absence is established; this one asks whether the path is taken.
+# `-e` alone FOLLOWS symlinks, so a DANGLING one reads as absent while it still
+# occupies the path and still fails the next `git worktree add` (`fatal: '...'
+# already exists`) — and that is residue a removal can leave: where a symlink
+# POINTS AT the registered worktree directory, `git worktree remove` deletes
+# that directory and returns 0, leaving the link behind and now dangling (git
+# 2.50.1).
+wt_occupied() { [ -e "$1" ] || [ -L "$1" ]; }
+
+# Resolve the worktree registry, `<git-common-dir>/worktrees`, into `$wt_root`
+# once per run — the git dir does not move under a running script. 1 with
+# `$wt_why` when git cannot name the common directory.
+#
+# `2>/dev/null`, never `2>&1`: the answer is used as a PATH, and a
+# `~/.gitconfig` with a key outside any section makes every git command print
+# `error: key does not contain a section: …` on stderr AT EXIT 0, which `2>&1`
+# would glue in front of it.
+wt_root=
+# shellcheck disable=SC2034
+wt_registry_root() {
+  wt_why=
+  [ -z "$wt_root" ] || return 0
+  if ! wt_rr_common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+    wt_why="cannot resolve the git common directory"
+    return 1
+  fi
+  wt_root="$wt_rr_common/worktrees"
+}
+
+# Count the registry entries on disk into `$wt_registered`.
+#
+# `worktree list --porcelain` reads `<git-common-dir>/worktrees`, the admin
+# directory git writes one subdir per linked worktree into. When that
+# directory — or any file git needs inside one of its entries — cannot be read,
+# git does not error: it silently drops the affected entries and still exits 0
+# (git 2.50.1). Predicting which reads git needs is one level too shallow:
+# `chmod 000` on the `gitdir` FILE inside an entry passes every permission test
+# a script could make on the entry itself and still drops the worktree from the
+# listing — measured. So count instead: one registry entry on disk per linked
+# worktree, against what git reported.
+#
+# Absent entirely answers nothing: a repo whose worktrees were removed and
+# pruned (or never existed) has no `worktrees` dir, and zero entries against
+# the main worktree alone is a match. Present but unreadable is a refusal, and
+# not redundant with the count: unreadable, the glob below expands to nothing,
+# and zero-on-disk would AGREE with the empty listing git returns for the same
+# reason. `-d` joins `-r` and `-x` there because a registry replaced by a
+# mode-755 FILE passes both, globs to nothing, counts 0 against git's 0, and
+# agrees.
+#
+# A registry entry is a directory; anything else in here is not git's. And an
+# EMPTY directory is skipped: that is an operator's stray `mkdir`, which git
+# ignores — counting one refuses every pass in the repo, forever (measured, git
+# 2.50.1: git lists 2 worktrees where a bare `-d` count said 2 registered
+# against 1 linked). Emptiness, NOT the absence of a `gitdir` file: git drops
+# an entry whose `gitdir` was deleted, so keying the skip on that file lets the
+# entry through as "not git's" and the counts agree over a checkout that may
+# still be on disk (measured: listed 1 → linked 0, and a gitdir-keyed count
+# returns 0 to match). A corrupt entry still holds git's own files —
+# commondir, HEAD, index, logs, refs — so emptiness separates it from a stray.
+#
+# `ls`'s STATUS, not just its output: an entry that could not be LISTED is not
+# an empty one, and `2>/dev/null` hides the difference. A stray `mkdir` lists
+# empty at rc 0; an entry chmod'd 000 or 0111 fails EACCES and prints nothing
+# just the same. Reading only the output skips that entry — and git drops it
+# too, so the counts AGREE over a member's uncommitted work (measured, against
+# release-ticket.sh: exit 0, `released:true`, branch deleted). Could not read
+# it, so it is counted, and the mismatch refuses.
+# shellcheck disable=SC2034
+wt_count_registry() {
+  wt_registered=0
+  wt_registry_root || return 1
+  [ -e "$wt_root" ] || return 0
+  [ -d "$wt_root" ] && [ -r "$wt_root" ] && [ -x "$wt_root" ] || {
+    wt_why="worktree registry $wt_root could not be read"
+    return 1
+  }
+  for wt_cr_entry in "$wt_root"/*; do
+    [ -d "$wt_cr_entry" ] || continue
+    if wt_cr_ls=$(ls -A "$wt_cr_entry" 2>/dev/null) && [ -z "$wt_cr_ls" ]; then continue; fi
+    wt_registered=$((wt_registered + 1))
+  done
+  return 0
+}
+
+# Count the linked worktrees in `$wt_list` as it stands into `$wt_linked`.
+#
+# awk, not `grep -c … || true`: `grep -c` exits 1 on zero matches, and the
+# `|| true` that absorbs it absorbs a grep that could not RUN just as happily,
+# leaving the count empty and `$((listed - 1))` at -1. This program holds no
+# `exit`, so its status is the counter's own. The main worktree is always
+# listed first and has no registry entry of its own, hence the -1 — and the
+# `-ge 1` floor, because a listing with no main checkout at all comes only
+# from a broken or shimmed git and reads as -1 linked otherwise. A newline
+# inside a path never moves this count: `wt_listing` has already swapped it,
+# so every record contributes exactly one `worktree ` line.
+# shellcheck disable=SC2034
+wt_count_linked() {
+  if ! wt_cl_n=$(printf '%s\n' "$wt_list" | LC_ALL=C awk '/^worktree /{c++} END{print c+0}'); then
+    wt_why="could not count the worktrees git listed"
+    return 1
+  fi
+  if [ "$wt_cl_n" -lt 1 ]; then
+    wt_why="git listed no worktrees at all — not even the main checkout, so the listing cannot be trusted"
+    return 1
+  fi
+  wt_linked=$((wt_cl_n - 1))
+}
+
+# One count pair: the registry first, then a fresh listing, then its count.
+# 0 counted (agreeing or not), 1 a count refused (`$wt_why`), 2 the listing
+# could not be read (`$wt_why` carries `$wt_err`).
+wt_count_pair() {
+  wt_count_registry || return 1
+  if ! wt_listing; then
+    wt_why=$(printf '%s' "$wt_err" | tr '\n' ' ')
+    return 2
+  fi
+  wt_count_linked || return 1
+}
+
+# Is the listing COMPLETE — does git list exactly as many linked worktrees as
+# the registry holds entries? A listing that silently dropped an entry hands
+# every lookup over it "no worktree" for a branch a live worktree holds, at
+# rc 0, so its absences cannot be trusted until this agrees.
+#
+# Reads the listing itself, through `wt_listing`, and leaves it in `$wt_list`:
+# the caller's lookups then scan the very listing the counts validated. Sets
+# `$wt_registered`, `$wt_linked` and `$wt_root`.
+#
+# 0: the counts agree.
+# 1: refused — `$wt_why` names the cause: the common directory or the
+#    registry could not be read, the listing could not be counted, or the
+#    counts still disagree, named by the DIRECTION observed. FEWER listed than
+#    registered is git dropping an entry it could not read — the fault this
+#    check exists to catch. MORE listed than registered is the reverse, the
+#    registry read missing entries, which under a parallel fleet is a
+#    sibling's `git worktree add` landing between the two reads. One message
+#    cannot serve both: they send the reader to opposite places.
+# 2: the listing itself could not be read — `$wt_why` is `wt_listing`'s cause,
+#    flattened to one line, and `$wt_err` holds it as read.
+#
+# Recount before refusing. The registry scan and git's listing are two reads
+# at two instants, not one atomic read, and a sibling agent's `git worktree
+# add` or `remove` landing in the gap makes them disagree with nothing wrong —
+# measured on the per-script copy of this recount that release-ticket.sh once
+# held: 3/100 dry-run releases aborted on the cross-check under a throttled
+# churner, 48-66/80 unthrottled, all with zero real faults. A mismatch
+# therefore re-takes BOTH counts, in the same order — registry first, listing
+# second. Re-taking the registry alone leaves the linked count pinned to the
+# first listing, and a second mutation landing after that listing inflates the
+# registry count and flips which direction is reported (measured on the copy
+# inflight.sh once held). A mutation landing between a pair's registry count
+# and its listing is already reflected in that listing, so a re-taken pair
+# needs a mutation inside its own narrower window to escape (measured on that
+# inflight.sh copy while it re-took the registry alone: 1.99% -> 0.00% at 2
+# mutations/s, 56.6% -> 1.29% saturated).
+#
+# That window is still a gap between two reads, so a further mutation inside a
+# re-taken pair escapes it the same way; closing that for good would need an
+# atomic snapshot of registry and listing together, which git does not offer.
+# Each extra pass demands one more precisely-timed mutation to defeat, while a
+# genuinely dropped entry is a standing state that survives every pass — so
+# the re-take is bounded at two passes (`wt_counts_passes`) rather than chased.
+# A false refusal costs one wait; a guessed agreement costs a deletion.
+wt_counts_passes=2
+# shellcheck disable=SC2034
+wt_counts() {
+  wt_why=
+  wt_count_pair || return $?
+  wt_ct_left=$wt_counts_passes
+  while [ "$wt_linked" -ne "$wt_registered" ] && [ "$wt_ct_left" -gt 0 ]; do
+    wt_count_pair || return $?
+    wt_ct_left=$((wt_ct_left - 1))
+  done
+  if [ "$wt_linked" -lt "$wt_registered" ]; then
+    wt_why="git listed $wt_linked worktrees for $wt_registered registry entries in $wt_root — the listing is incomplete, so no absence it reports can be trusted"
+    return 1
+  elif [ "$wt_linked" -gt "$wt_registered" ]; then
+    wt_why="git listed $wt_linked worktrees but only $wt_registered registry entries were counted in $wt_root — the registry read missed entries git can see, so no absence it reports can be trusted"
+    return 1
+  fi
+  return 0
+}
+
+# Does $1's `.git` linkage answer for $1 itself? 0 when it does; 1 with
+# `$wt_why` when git cannot answer through it, when it answers for another
+# directory, when $1 is itself a symlink, or when `[` cannot evaluate the
+# compare. Call it once the caller has established the linkage EXISTS (a
+# regular `$1/.git` file), and before any git command run through $1 is
+# believed — the dirty check first among them.
+#
+# Existing is not answering. Two shapes keep `.git` a well-formed regular file
+# and move git's WORKING TREE elsewhere: a `.git` naming a foreign git dir not
+# called `.git` whose `core.worktree` is another directory, and `core.worktree`
+# set in the worktree's own `config.worktree` under `extensions.worktreeConfig`,
+# `.git` untouched. `git -C "$1" status` then reads THAT tree, so a clean one
+# there reads clean over the work sitting in $1 (measured on both shapes, git
+# 2.50.1). `--show-toplevel` names the tree git actually answers for, so it is
+# compared against $1.
+#
+# Compared as a DIRECTORY (`-ef`, same device and inode), never as a string:
+# $1 is the path `worktree list --porcelain` echoes and `--show-toplevel` is
+# git's own resolved spelling, and the two legitimately differ for one and the
+# same directory. A parent that was a plain directory at `worktree add` time
+# and is a symlink now leaves the listed path non-canonical while git's answer
+# is resolved (measured). And a worktree whose name is Unicode NFD-composed
+# (`cafe` + U+0301) is listed PRECOMPOSED by the `core.precomposeunicode` git
+# writes into every new repo on macOS, while `--show-toplevel` answers the
+# on-disk NFD bytes — visually identical, byte-different, one directory
+# (measured, git 2.50.1, Apple Git-155). `cd && pwd -P` canonicalises only
+# the first: it echoes the spelling it was given, so a byte compare against it
+# refused every healthy NFD worktree. `-ef` answers "same directory" for both
+# and for any other spelling the filesystem aliases, and still refuses every
+# redirect — each names a different directory. POSIX.1-2017's `test` does not
+# define `-ef`; it is a ksh-derived extension bash, dash and BSD sh share, and
+# POSIX.1-2024 adds it as a base primary. A `[` that cannot evaluate it
+# returns 2 or more, and that is refused, never read as "not this one".
+#
+# $1 ITSELF a symlink needs one more question first, because `-ef` follows the
+# link on both sides. A worktree directory replaced by a symlink to a
+# different, healthy, registered worktree has git answering for the target and
+# `-ef` agreeing, so the compare passes over a directory that is not the one
+# registered — and `git worktree remove` then refuses it on its own
+# back-pointer check, so a dry run promised what `--apply` cannot do (measured,
+# git 2.50.1). So ask that back-pointer here: the admin dir git reaches
+# through $1 holds a `gitdir` file naming the `.git` of the worktree it was
+# registered for, and the listing derives each worktree's path from exactly
+# that file — so for the listed path it reads `$1/.git` byte for byte, and
+# through a link to ANOTHER worktree it names that one (measured: a link `A`
+# to sibling `B` reaches `worktrees/B`, whose `gitdir` names `B/.git`). A
+# string compare, because `-ef` is what cannot see this. Asked only of a link:
+# a link standing in for the worktree's OWN renamed directory reaches its own
+# admin dir and passes, and a plain directory never needs it — the NFD
+# spelling `-ef` exists for would fail a string compare.
+#
+# `&& echo x` inside the substitution, then `%?x`: `$(...)` strips EVERY
+# trailing newline, so a `core.worktree` naming a sibling directory called $1
+# plus a newline byte — git accepts one as an ordinary path character — would
+# otherwise name $1 itself and pass the redirect (measured). The sentinel
+# leaves `$(...)` only git's own terminating newline to strip.
+# `2>/dev/null` on that capture, for `wt_registry_root`'s reason; git's own
+# words are fetched with a second call, only on the path that refuses.
+#
+# What this does NOT cover: shapes that swap which git DIR answers while the
+# working tree stays $1 — a `.git` naming a sibling worktree's admin dir, or a
+# foreign git dir whose `core.worktree` points back at $1. `--show-toplevel`
+# answers $1 for both. A dirty check then reads $1's real files against the
+# borrowed index, and `git worktree remove` refuses a `.git` that does not
+# point back at its admin dir.
+#
+# Asked of the listing too, because the link check above needs $1 to BE the
+# link, and under `worktree.useRelativePaths` it never is: git stores the
+# back-pointer relative and resolves it, for the swapped entry, to the
+# TARGET's directory, so the listing reports the swapped worktree at the
+# target's path — two records naming one directory, the path the caller holds
+# is the target's real directory, and no `-L` fires on it (measured, git
+# 2.50.1: the sibling's live, clean worktree was then the one `reap --apply`
+# removed). So when `$wt_list` holds more than one record for $1, which
+# worktree stands there is unknown and $1 is refused. A caller that has read no
+# listing (`$wt_list` empty or unset) skips this question. Counted in shell,
+# line by line, so the question adds no external command whose failure would
+# be a new way for a caller to refuse.
+# shellcheck disable=SC2034
+wt_linkage() {
+  wt_why=
+  wt_lk_n=0
+  if [ -n "${wt_list:-}" ]; then
+    # Whole records, one per line (`wt_listing` swapped any newline inside a
+    # path), so equality against `worktree $1` is the path compare, and a path
+    # that merely starts with $1 never counts. The heredoc keeps the loop in
+    # this shell.
+    while IFS= read -r wt_lk_l; do
+      if [ "$wt_lk_l" = "worktree $1" ]; then wt_lk_n=$((wt_lk_n + 1)); fi
+    done <<EOF
+$wt_list
+EOF
+    if [ "$wt_lk_n" -gt 1 ]; then
+      wt_why="the worktree listing names $1 for $wt_lk_n worktrees — a symbolic link standing in for another worktree's directory, so which one stands there is unknown"
+      return 1
+    fi
+  fi
+  if ! wt_lk_top=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null && echo x); then
+    wt_lk_err=$(git -C "$1" rev-parse --show-toplevel 2>&1 >/dev/null) || :
+    wt_lk_err=$(printf '%s' "$wt_lk_err" | tr '\n' ' ') || wt_lk_err=
+    wt_why="cannot read the git repository at $1 — its .git linkage (the .git file or the gitdir it names) does not resolve${wt_lk_err:+: $wt_lk_err}"
+    return 1
+  fi
+  wt_lk_top=${wt_lk_top%?x}
+  if [ -L "$1" ]; then
+    if ! wt_lk_admin=$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null && echo x) ||
+        ! wt_lk_back=$(cat "${wt_lk_admin%?x}/gitdir" 2>/dev/null && echo x); then
+      wt_why="$1 is a symbolic link whose admin dir's gitdir back-pointer could not be read, so which worktree it stands for is unknown"
+      return 1
+    fi
+    # `cat` adds no newline of its own, so the sentinel alone comes off, then
+    # the one newline git writes after the path, if it is there.
+    wt_lk_back=${wt_lk_back%x}
+    wt_lk_back=${wt_lk_back%"
+"}
+    if [ "${wt_lk_back%/.git}" != "$1" ]; then
+      wt_why="$1 is a symbolic link to another worktree's directory — its .git linkage reaches the admin dir registered for ${wt_lk_back%/.git}, not for $1"
+      return 1
+    fi
+  fi
+  # shellcheck disable=SC3013,SC2319 # -ef is a ksh-derived extension bash/dash/BSD sh share, base in POSIX.1-2024; the else's $? is deliberately the `[ -ef ]` test's own rc, read before anything else runs
+  if [ "$wt_lk_top" -ef "$1" ]; then return 0; else wt_lk_rc=$?; fi
+  if [ "$wt_lk_rc" -ge 2 ]; then
+    wt_why="could not compare $1 with $wt_lk_top, the working tree git answers for through it (test -ef exited $wt_lk_rc)"
+    return 1
+  fi
+  wt_why="$1's .git linkage does not point at $1 — git answers for the working tree at $wt_lk_top, not $1"
+  return 1
+}
+
+# Would removing the directory $1 delete the working directory $2? True when
+# $2 is $1 or lies anywhere beneath it (a nested worktree). Removing a
+# worktree a script stands in deletes that process's cwd, and every git call
+# after it then dies with `fatal: Unable to read current working directory`
+# (measured, git 2.50.1, Apple Git-155).
+#
+# Asked of the DIRECTORY, not the string: `-ef` of $2 and of each of its
+# parents in turn. A byte-boundary prefix match missed the same directory
+# spelled two ways — a symlinked parent, and the NFD name `wt_linkage`
+# records — and a removal deleted the cwd it was standing in (measured). An
+# empty $2 names no directory and matches nothing; the walk ends when no `/`
+# is left to strip, so a $2 with no slash is compared once and never spins.
+#
+# A `[` that cannot evaluate `-ef` (2 or more) answers TRUE: fail closed.
+# Nothing downstream of this guard re-checks the directory it protects, so
+# reading that rc as "not this one" would disable the guard silently.
+#
+# Returns 0 or 1 only, and sets no `$wt_why`: the caller names the refusal,
+# because only the caller knows whose cwd $2 is.
+wt_holds_cwd() {
+  wt_hc_d=$2
+  while :; do
+    # shellcheck disable=SC3013,SC2319 # -ef as in wt_linkage; the else's $? is the `[ -ef ]` test's own rc, read before anything else runs, to fail closed on rc>=2
+    if [ "$wt_hc_d" -ef "$1" ]; then return 0; else wt_hc_rc=$?; fi
+    [ "$wt_hc_rc" -lt 2 ] || return 0
+    case "$wt_hc_d" in
+      */*) wt_hc_d=${wt_hc_d%/*} ;;
+      *) return 1 ;;
+    esac
+  done
+}
+
+# Which worktree holds branch $1 (the short name, `refs/heads/` added here)?
+# Reads `$wt_list` as `wt_listing` (or `wt_counts`) last left it and sets
+# `$wt_path` to the path of every record whose `branch` line names it — the
+# main checkout included, one per line in listing order, empty when none.
+#
+# 1 with `$wt_why`, and `$wt_path` empty, whenever the answer is not one the
+# listing established, because an empty `$wt_path` is "no worktree" to every
+# caller and a delete follows it:
+#   - $1 empty: `refs/heads/` names no branch, and matching nothing would
+#     read as "no worktree";
+#   - `$wt_list` empty: a listing read always holds the main checkout, so an
+#     empty one was never read, or died before the caller got here;
+#   - awk could not finish the scan (a multibyte conversion failure, killed):
+#     its empty output is not an answer;
+#   - a holder's path lies inside the worktree registry itself. git resolves a
+#     `gitdir` file holding something other than an absolute path relative to
+#     the entry's admin dir, so a garbage `gitdir` lists the worktree at
+#     `<registry>/<entry>/<garbage>` — measured, git 2.50.1: `not a path` in
+#     `gitdir` lists `…/.git/worktrees/<entry>/not a path`, a path nothing is
+#     at, while the real checkout stands where it always did. Read as an
+#     absent worktree, its registration was cleared and its branch reaped,
+#     leaving the checkout orphaned. No `git worktree add` places a worktree
+#     inside the registry, so such a path is never where the checkout is.
+#
+# `-v b=`: awk processes escapes in a `-v` value, which is safe here only
+# because a ref name cannot hold a backslash (`git check-ref-format` refuses
+# one). The match is on the `branch` line, the path the whole rest of the
+# `worktree` line — never `$2`, which a space in the path would truncate.
+# shellcheck disable=SC2034
+wt_find_branch() {
+  wt_path=
+  wt_why=
+  if [ -z "$1" ]; then
+    wt_why="no branch name was given to look up, and an empty one matches no worktree"
+    return 1
+  fi
+  if [ -z "$wt_list" ]; then
+    wt_why="the worktree listing was not read, so whether $1 has a worktree is unknown"
+    return 1
+  fi
+  if ! wt_fb_hit=$(printf '%s\n' "$wt_list" |
+      awk -v b="refs/heads/$1" '/^worktree /{w=substr($0,10)} /^branch /&&$2==b{print w}'); then
+    wt_why="could not scan the worktree listing for $1"
+    return 1
+  fi
+  if [ -n "$wt_fb_hit" ]; then
+    wt_registry_root || return 1
+    # One holder per line: `wt_listing` swapped any newline INSIDE a path, so
+    # every line here is one whole path. The heredoc keeps the loop in this
+    # shell, so its `return` answers for the function.
+    while IFS= read -r wt_fb_p; do
+      case "$wt_fb_p" in
+        "$wt_root"/*)
+          wt_why="git lists $1's worktree at $wt_fb_p, inside the worktree registry $wt_root — its gitdir file names no worktree, so where the checkout stands is unknown"
+          return 1
+          ;;
+      esac
+    done <<EOF
+$wt_fb_hit
+EOF
+  fi
+  wt_path=$wt_fb_hit
+}
+
+# Which release outcome does $1 hold — measured, never inferred from the rc of
+# the `git worktree remove` that preceded it? git drops the registration BEFORE
+# the directory and does not restore it when the directory delete fails, so
+# one call has three landing shapes and its exit code separates none of them.
+# All measured on git 2.50.1:
+#
+#   dirty worktree                     rc 128, registration and directory kept
+#   symlink standing in for the dir    rc 255, registration CLEARED, path kept
+#   unwritable .git/worktrees          rc 255, registration and directory gone
+#
+# Writes `$wt_outcome`, one of CONTEXT.md's four Release outcome states:
+# `Unreleased` (registration and directory both present), `Deregistered`
+# (registration cleared, directory on disk), `Released` (both gone) or
+# `Indeterminate`, and `$wt_why` when Indeterminate for a reason git or awk
+# named. A registration that survived a directory that did not has no name of
+# its own and reports Indeterminate rather than being squeezed into
+# Unreleased. Returns 0 whatever the outcome — the answer is the variable.
+#
+# A FRESH listing, never the caller's `$wt_list`: that one was captured before
+# the mutation this measures. `$wt_list` is put back before returning, because
+# the caller's guards read their pre-mutation capture off it. Called as a bare
+# statement, never inside `$( )`: a subshell would take `$wt_why` with it.
+#
+# The registration is read with an `ENVIRON`-keyed awk, because a `-v`
+# assignment mangles a backslash in the path and the compare then falls to the
+# permissive answer. Its exit status is three-valued: 0 listed, 1 ran and found
+# nothing, 2 or more could not run — and that last one must not fold into "not
+# registered", which is what put a false Deregistered into a receipt for a
+# registration nothing established was cleared (measured). The directory is
+# `wt_occupied` composed with `gone`, the pairing `gone`'s own contract
+# prescribes for a caller that needs present and cannot-stat apart.
+# shellcheck disable=SC2034
+wt_outcome() {
+  wt_why=
+  wt_oc_prior=$wt_list
+  if ! wt_listing; then
+    wt_list=$wt_oc_prior
+    wt_outcome=Indeterminate
+    wt_why=$(printf '%s' "$wt_err" | tr '\n' ' ')
+    return 0
+  fi
+  wt_oc_now=$wt_list
+  wt_list=$wt_oc_prior
+  if printf '%s\n' "$wt_oc_now" |
+      P="$1" awk '/^worktree /{if (substr($0,10)==ENVIRON["P"]) f=1} END{exit !f}'; then
+    wt_oc_rc=0
+  else
+    wt_oc_rc=$?
+  fi
+  if [ "$wt_oc_rc" -eq 0 ]; then
+    if wt_occupied "$1"; then wt_outcome=Unreleased; else wt_outcome=Indeterminate; fi
+  elif [ "$wt_oc_rc" -ne 1 ]; then
+    wt_outcome=Indeterminate
+    wt_why="could not tell whether $1 is still registered"
+  elif wt_occupied "$1"; then
+    wt_outcome=Deregistered
+  elif gone "$1"; then
+    wt_outcome=Released
+  else
+    wt_outcome=Indeterminate
+  fi
+  return 0
 }

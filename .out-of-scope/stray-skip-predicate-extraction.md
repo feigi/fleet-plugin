@@ -1,5 +1,18 @@
 # Stray-Skip Predicate Extraction
 
+> **Superseded in part (2026-10-08).** #2146 (PR #2903) moved the registry count
+> into the sourced module `plugin/scripts/worktree.sh`. The `count_registry()` and
+> `count_linked()` copies in `inflight.sh` and `release-ticket.sh` are deleted;
+> both scripts (and `reap.sh`) now call the module's `wt_counts`, which retakes
+> `wt_count_registry` and the listing count together. The conditional below
+> therefore exists **once**, inside `wt_count_registry`, still inline and still not
+> a named predicate — so the "byte-identical twice" premise and the "shared module
+> sourced by both" form this record left unanswered are now the shipped state, and
+> the refusal to extract a predicate stands on the remaining arguments (the
+> measured rationale and the pinning test). Everything below describes the
+> pre-change scripts: its function names, `inflight.sh` line references and
+> "both copies" wording are history, not a map of the current tree.
+
 A worktree registry entry is classified as a droppable operator stray by one
 conditional. **That conditional exists twice, byte-identically**, in
 `plugin/scripts/inflight.sh` and `plugin/scripts/release-ticket.sh`:

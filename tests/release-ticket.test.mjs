@@ -555,7 +555,7 @@ test("a receipt that cannot be written still leaves the die reason and exit 2 (#
 // as its own colon-delimited field followed by a message — `(?:^|:)` tolerates
 // zsh's prefix and a prefix-less abort alike, and the trailing `\s+\S` requires
 // the message to exist. Verified non-firing against the usage line (with and
-// without its angle brackets), `count_linked`'s `for #$issue: $wt_err` die, the
+// without its angle brackets), the `could not read the worktree list for #$issue: $wt_why` die, the
 // `no JSON receipt for #%s` arm, and a `{"issue":9,…}` receipt leaked to stderr
 // by bash 3.2 — and firing on all five aborts above plus an invented sixth
 // wording (`issue: is unset and no default given`) that the old alternation let
@@ -2136,6 +2136,29 @@ test("a symlink standing in for the worktree directory, whose real target ends i
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
 });
 
+// #2074's shape, reached through release-ticket.sh: the claim's worktree
+// directory swapped for a symlink to ANOTHER claim's healthy worktree. `-ef`
+// follows the link on both sides, so the linkage compare used to agree, and
+// the dirty check then read the other claim's tree. worktree.sh's
+// `wt_linkage` asks the back-pointer of a symlinked worktree, so this refuses
+// as unknown, naming the worktree the link reaches — before any mutation.
+test("a symlink to ANOTHER claim's worktree, standing in for this one, is refused by the linkage check (#2074)", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+  const other = claim(r.w, 10, "other-member");
+  rmSync(c.wt, { recursive: true, force: true });
+  symlinkSync(other.wt, c.wt);
+
+  const { code, json, stderr } = release(r, c);
+  assert.equal(code, 2, `unknown, not released and not merely blocked: ${stderr}`);
+  assert.equal(json.released, false);
+  assert.match(json.blockers[0], /exists but is not a directory/, "the -L blocker above still fires first");
+  assert.match(json.blockers.at(-1), /is a symbolic link to another worktree's directory — its \.git linkage reaches the admin dir registered for .*10-other-member/);
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing was touched");
+  assert.equal(existsSync(join(other.wt, ".git")), true, "the other claim's worktree is untouched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
 test("a dangling symlink at the worktree path blocks, not a mid-flight refusal", (t) => {
   // The other symlink shape, and the one the guard's own comment cites: -e is
   // false through a dangling link, so `gone` reports it established-absent and
@@ -3122,7 +3145,7 @@ test("a removal that cleared the registration is a partial release, never `nothi
 });
 
 test("a registration probe that could not run asserts Indeterminate, never a false Deregistered (#798)", (t) => {
-  // `release_outcome`'s own middle arm: is $1 still listed in the FRESH
+  // worktree.sh's `wt_outcome`, its middle arm: is $1 still listed in the FRESH
   // post-removal listing? Awk answers that through its own exit status alone —
   // 0 found, 1 not found — so an awk that could not run at all (rc >= 2:
   // killed, OOM, a broken interpreter) used to land on the same false side as
@@ -3136,7 +3159,7 @@ test("a registration probe that could not run asserts Indeterminate, never a fal
   //
   // The symlink-swap fixture from the Deregistered case above is the only
   // route that reaches this arm at all: a healthy `git worktree remove` never
-  // calls `release_outcome`, and a dirty refusal that DOES reach it with the
+  // calls `wt_outcome`, and a dirty refusal that DOES reach it with the
   // registration still intact — the "none"/GIT_FAIL:"worktree remove"
   // sub-case of "the halt headline names what landed" further up — measures
   // Unreleased there, not this arm; nothing else short of the symlink swap
@@ -3155,7 +3178,7 @@ test("a registration probe that could not run asserts Indeterminate, never a fal
     stderr.includes(`worktree ${wt} is Indeterminate — what the removal landed could not be measured`),
     `the detail line must name Indeterminate, not a guessed Deregistered: ${stderr}`,
   );
-  assert.match(stderr, /could not tell whether .* is still registered for #9/,
+  assert.match(stderr, /could not tell whether .* is still registered/,
     "and it must name WHY, the same half #551 already guards for the listing-failure arm");
   assert.equal(json.released, false);
   assert.match(json.blockers[0], /is Indeterminate/, "and the receipt carries it for a caller without stderr");
@@ -3332,6 +3355,32 @@ test("the orphan probe is anchored at the checkout, never at the caller's cwd", 
   assert.equal(existsSync(c.wt), true, "and the orphan is still there to be inspected");
 });
 
+// The cwd guard worktree.sh's `wt_holds_cwd` gives this script (#2146): a
+// member releasing its own claim from inside that claim's worktree would have
+// the cwd every later git call needs deleted under it. Refused as a blocker
+// before anything is touched — from the worktree itself and from a directory
+// nested in it. The case above is the accept side: a cwd inside ANOTHER
+// member's worktree releases as before.
+for (const nested of [false, true]) {
+  test(`a release run from inside the claim's own worktree${nested ? ", nested," : ""} is blocked, nothing touched`, (t) => {
+    const r = repo(t);
+    const c = claim(r.w, 9, "release-ticket");
+    const cwd = nested ? join(c.wt, "sub") : c.wt;
+    if (nested) mkdirSync(cwd);
+
+    const { code, json, stderr } = release(r, c, { cwd });
+
+    assert.equal(code, 1, `blocked, not released: ${stderr}`);
+    assert.equal(json.released, false);
+    assert.ok(
+      json.blockers.some((b) => b.includes("holds the working directory this run was started in")),
+      JSON.stringify(json.blockers),
+    );
+    assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing was touched");
+    assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+  });
+}
+
 test("a worktree directory the script may not stat is unknown, never a release", (t) => {
   if (EUID0) return t.skip(NO_DENIAL);
   // -e is false for a directory that is not there and for one inside a prefix
@@ -3395,7 +3444,7 @@ esac`,
   assert.match(json.blockers[0], /is Indeterminate/);
 
   // And WHY it could not be measured, which is the half that used to be lost.
-  // `release_outcome` reads the listing through `wt_listing`, which captures
+  // `wt_outcome` reads the listing through `wt_listing`, which captures
   // git's stderr into `$wt_err`; echoing the state out of a `$( )` put the whole
   // body in a subshell and that capture died with it. So the one halt whose
   // headline degrades to "could not be measured" was the one halt reaching the
@@ -4130,9 +4179,10 @@ test("a sibling worktree ADD between the registry count and git's listing is abs
   // The registry count above and git's own listing taken for `wt_listing` are
   // two reads at two instants, not one atomic read. A sibling agent's
   // `git worktree add` landing in that gap makes the counts disagree with
-  // nothing actually wrong — see the recount comment in release-ticket.sh for
-  // the measured rate. Before this ticket that disagreement was fatal on the
-  // first read; the recount is what tells this moment from a real drop.
+  // nothing actually wrong — see the recount comment on wt_counts in
+  // worktree.sh for the measured rate. Before this ticket that disagreement
+  // was fatal on the first read; the recount is what tells this moment from a
+  // real drop.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   // A path outside the checkout, mirroring inflight.test.mjs's own fixture: a
@@ -4255,15 +4305,15 @@ test("a SECOND mutation inside the recount's own window still names the correct 
 
 /**
  * Like `twoMutationShim` above, but for the recount's OWN internal window:
- * the gap between the recount's `count_registry` call and its `count_linked`
- * call (#1424, deferred from #1408's own review). `mutationA` fires ahead of
+ * the gap between the recount's registry count and its listing (#1424,
+ * deferred from #1408's own review). `mutationA` fires ahead of
  * the FIRST `worktree list --porcelain -z` call, mirroring
  * `registryRaceShim`'s own single mutation — it is what puts `linked` and
  * `registered` out of agreement in the first place, since without it there is
  * nothing for the recount below to even attempt. `mutationB` fires ahead of
  * the SECOND `worktree list --porcelain -z` call: the one inside the
- * recount's own `count_linked`, reached only after the recount's
- * `count_registry` has already re-scanned. Landing there is landing
+ * recount's own listing, reached only after the recount's registry count
+ * has already re-scanned. Landing there is landing
  * precisely in the gap #1424 names — narrower than `twoMutationShim`'s own,
  * since nothing shells out to another process between those two calls. Two
  * shots, gated independently the same way `twoMutationShim` gates its one:
@@ -4292,7 +4342,7 @@ esac`,
 test("a THIRD mutation inside the recount's OWN window still converges, add then add then add (#1424)", (t) => {
   // mutationA creates the initial mismatch (the #694 window, same shape as
   // registryRaceShim's own); mutationB lands inside the recount's own gap
-  // between count_registry and count_linked — the #1424 window this ticket
+  // between the registry count and the listing — the #1424 window this ticket
   // names, narrower than the one #1408 closed. Before the bounded retry loop
   // this landed, this reproduced the wrong-direction "registry read missed
   // entries" die for what is really three ordinary concurrent adds; the
@@ -4369,7 +4419,7 @@ test("a worktree COUNT that could not run refuses, never a bogus tally (#395)", 
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 2, "unanswerable is exit 2, not the exit 0 that releases");
   assert.equal(json, null, "refused before any mutation");
-  assert.match(stderr, /could not count the worktrees git listed for #9/);
+  assert.match(stderr, /^release-ticket: could not count the worktrees git listed$/m);
   assert.doesNotMatch(stderr, /-1 worktrees/,
     "a counter that could not run never reports a count at all");
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
@@ -4394,7 +4444,7 @@ test("an EMPTY but successful listing refuses without ever printing -1 worktrees
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 2, "a listing that cannot be trusted is exit 2, not the exit 0 that releases");
   assert.equal(json, null, "refused before any mutation");
-  assert.match(stderr, /git listed no worktrees at all for #9/);
+  assert.match(stderr, /^release-ticket: git listed no worktrees at all/m);
   assert.match(stderr, /not even the main checkout/);
   assert.doesNotMatch(stderr, /-1 worktrees/,
     "the whole point: no branch below may report a negative tally");
@@ -4903,7 +4953,7 @@ test("a worktree LOOKUP that could not run refuses in the script's own voice (#2
   const { code, json, stderr } = release(r, c);
   assert.equal(code, 2, "unanswerable is exit 2, not the exit 0 that releases");
   assert.equal(json, null, "refused before any mutation");
-  assert.match(stderr, /^release-ticket: .*worktree git listed for #9/m,
+  assert.match(stderr, /^release-ticket: could not scan the worktree listing for \S*9-release-ticket$/m,
     "the script says which lookup could not answer, in the voice its callers grep for");
   assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing was touched");
   assert.deepEqual(r.calls(), [], "and the tracker is never asked");
