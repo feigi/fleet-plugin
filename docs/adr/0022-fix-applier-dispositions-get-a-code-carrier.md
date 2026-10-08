@@ -12,7 +12,10 @@ The `claimKind: shape` row outranks every survivor row, the new one
 included. A deferral no row holds is a mismatch naming no filing-table row,
 so a gap in the table surfaces as a retry and then an escalation (Decision
 9), never as a pass. An open issue labelled `ready-for-agent` also answers a
-`needs-triage` row; a weaker label never answers a `ready-for-agent` row.
+`needs-triage` row; a weaker label never answers a `ready-for-agent` row. The
+body below stands as ruled: read Decision 5's table with that row added, and
+the gap the Consequences section records for #2404 as closed by this
+amendment.
 
 ## Context
 

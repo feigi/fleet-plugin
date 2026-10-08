@@ -185,14 +185,17 @@ function homeHolds(row, { state, title, labels }, pr) {
 }
 
 // The row a deferral's finding state puts it on, by precedence, or null when
-// no row holds it. `refuted` is an in-scope suggestion's refuter verdict, null
-// for any other finding.
+// no row holds it: only a reversed refutation (the refuted bucket) whose claim
+// is not about shape. `refuted` is an in-scope suggestion's refuter verdict,
+// null for any other finding.
 function filingRow({ bucket, inScope, crashed, refuted, shape, reason }) {
   if (refuted === true) return 4;
   if (shape) return 7;
-  if (bucket === "survived") return !inScope ? 8 : reason === "false-rationale" ? 2 : 1;
-  if (bucket === "unverified") return crashed ? 3 : !inScope ? 6 : refuted === false ? 5 : null;
-  return null;
+  if (bucket === "refuted") return null;
+  if (crashed) return 3;
+  if (!inScope) return bucket === "survived" ? 8 : 6;
+  if (bucket === "unverified") return 5;
+  return reason === "false-rationale" ? 2 : 1;
 }
 
 function describeIssue({ state, title, labels }) {

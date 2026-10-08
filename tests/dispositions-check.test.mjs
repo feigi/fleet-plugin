@@ -1104,6 +1104,13 @@ test("filing row 7 outranks every row but row 4: a shape claim's deferral is fil
   assert.match(tableCore(deferred("unverified", 1, { claimKind: "shape", verdictPath: REFUTED_V }), { 9: OPEN_NT })[0], /: filing row 4 \(/);
 });
 
+test("filing row 3 outranks row 6: a crashed unverified finding is named row 3 though it is out of scope", () => {
+  const entry = deferred("unverified", 0, { scope: "out" });
+  assert.deepEqual(tableCore(entry, { 9: OPEN_NT }), []);
+  assert.match(tableCore(entry, { 9: closed(OPEN_NT) })[0], /^unverified\[0\]: filing row 3 \(/);
+  assert.match(tableCore(entry, { 9: RECORD })[0], /^unverified\[0\]: filing row 3 \(/);
+});
+
 test("an out-of-scope survivor is filed open ready-for-agent whatever its reason, and escalates nothing at any severity", () => {
   for (const reason of [undefined, "", "false-rationale", "mutual-exclusion", "remedy-worse", "remedy-outside-diff", "outside-ticket-files"]) {
     const r = tableRun(deferred("survived", 1, { scope: "out", reason }), { 9: OPEN_RFA });
