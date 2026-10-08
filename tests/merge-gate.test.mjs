@@ -38,7 +38,7 @@ const POST = "b".repeat(40);
 const THIRD = "c".repeat(40);
 const DIGEST = "d".repeat(64);
 
-const PR_VIEW = { labels: [{ name: "patch" }, { name: "ready-to-merge" }], reviewDecision: "APPROVED", headRefOid: PRE };
+const PR_VIEW = { labels: [{ name: "patch" }, { name: "ready-to-merge" }], reviewDecision: "APPROVED", headRefOid: PRE, body: "" };
 
 // Shaped like ci-state.mjs's own payload (its `payload` literal, plus
 // `jobs`/`missing` outside --quiet), green at exit 0.
@@ -69,6 +69,18 @@ process.exitCode = Number(process.env.CI_EXIT);
 const INSTRUMENTS_STUB = `printf 'instruments.sh %s\\n' "$*" >> "$CALL_LOG"
 [ -z "$INSTR_STDOUT" ] || printf '%s\\n' "$INSTR_STDOUT"
 exit "$INSTR_EXIT"
+`;
+
+// main-gain.mjs, resolved beside the gate like the other two. It logs its
+// argv and cwd, keeps the stdin it was handed, and answers MG_STDOUT at
+// MG_EXIT — by default a clean payload about the head it was asked for.
+const MAIN_GAIN_STUB = `import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+const argv = process.argv.slice(2);
+appendFileSync(process.env.CALL_LOG, "main-gain.mjs " + argv.join(" ") + " (cwd " + process.cwd() + ")\\n");
+writeFileSync(process.env.MG_STDIN_FILE, readFileSync(0));
+const head = argv[argv.indexOf("--head") + 1];
+process.stdout.write(process.env.MG_STDOUT ?? JSON.stringify({ head, base: "origin/main", since: null, hits: [], acknowledged: [], unchecked: [], reason: null }) + "\\n");
+process.exitCode = Number(process.env.MG_EXIT);
 `;
 
 const GH_STUB = `#!/bin/sh
@@ -123,6 +135,8 @@ function gate(
     ciOut = JSON.stringify(CI_GREEN),
     ciExit = 0,
     ciStderr = "",
+    mgOut = null,
+    mgExit = 0,
     instrOut = DIGEST,
     instrExit = 0,
     cwd = null,
@@ -138,6 +152,7 @@ function gate(
   writeFileSync(script, readFileSync(SCRIPT));
   for (const [name, path] of SIBLING_MODULES) writeFileSync(join(scripts, name), readFileSync(path));
   writeFileSync(join(scripts, "ci-state.mjs"), CI_STATE_STUB);
+  writeFileSync(join(scripts, "main-gain.mjs"), MAIN_GAIN_STUB);
   // The cross-workspace cases run the REAL instruments.sh beside the copied
   // gate — the two-tree contract lives in that script, and a stub can only
   // echo a verdict, never produce one. The stub stays the default: every
@@ -153,6 +168,7 @@ function gate(
   writeFileSync(log, "");
   writeFileSync(join(root, "pr-view.json"), prView);
   writeFileSync(join(root, "ci.out"), ciOut);
+  writeFileSync(join(root, "mg.stdin"), "");
 
   const repo = join(root, "repo");
   mkdirSync(repo);
@@ -176,6 +192,9 @@ function gate(
       CI_STDERR: ciStderr,
       INSTR_STDOUT: instrOut,
       INSTR_EXIT: String(instrExit),
+      MG_STDIN_FILE: join(root, "mg.stdin"),
+      MG_EXIT: String(mgExit),
+      ...(mgOut === null ? {} : { MG_STDOUT: mgOut }),
       ...env,
     },
   });
@@ -185,6 +204,7 @@ function gate(
     stderr: res.stderr,
     json: res.stdout.trim() ? JSON.parse(res.stdout) : null,
     calls: readFileSync(log, "utf8").split("\n").filter(Boolean),
+    mgStdin: readFileSync(join(root, "mg.stdin"), "utf8"),
     root,
     repo,
   };
@@ -203,7 +223,9 @@ function assertRow(r, code, verdict, reason) {
 
 // --- exit 0 ----------------------------------------------------------------
 
-test("every check holds → 0 mergeable, one JSON line with every field, three read-only calls in spec order", (t) => {
+const MG_CLEAN = { head: PRE, base: "origin/main", since: null, hits: [], acknowledged: [], unchecked: [], reason: null };
+
+test("every check holds → 0 mergeable, one JSON line with every field, four read-only calls in spec order", (t) => {
   const r = gate(t);
   assertRow(r, 0, "mergeable", null);
   assert.equal(r.stdout.split("\n").length, 2, "stdout must be exactly one line");
@@ -216,13 +238,16 @@ test("every check holds → 0 mergeable, one JSON line with every field, three r
     post: null,
     behind: 0,
     instruments: DIGEST,
+    mainGain: MG_CLEAN,
     ci: CI_GREEN,
   });
-  // The whole call log: nothing merges, labels or rebases, and the three
-  // reads run in the order the spec names.
+  // The whole call log: nothing merges, labels or rebases, and the four
+  // reads run in the order the spec names — main-gain against the head gh
+  // read, in the main checkout.
   assert.deepEqual(r.calls, [
     `instruments.sh --repo ${r.repo}`,
-    "gh pr view 42 --json labels,reviewDecision,headRefOid",
+    "gh pr view 42 --json labels,reviewDecision,headRefOid,body",
+    `main-gain.mjs --head ${PRE} --body-file - (cwd ${r.repo})`,
     CI_CALL,
   ]);
 });
@@ -422,7 +447,9 @@ test("gh pr view misparses → 2 pr-unreadable", (t) => {
     ["non-JSON body at exit 0", "<html>502 Bad Gateway</html>"],
     ["labels missing", JSON.stringify({ reviewDecision: "APPROVED", headRefOid: PRE })],
     ["headRefOid empty", JSON.stringify({ ...PR_VIEW, headRefOid: "" })],
-    ["reviewDecision missing", JSON.stringify({ labels: PR_VIEW.labels, headRefOid: PRE })],
+    ["reviewDecision missing", JSON.stringify({ labels: PR_VIEW.labels, headRefOid: PRE, body: "" })],
+    ["body missing", JSON.stringify({ labels: PR_VIEW.labels, reviewDecision: "APPROVED", headRefOid: PRE })],
+    ["body null", JSON.stringify({ ...PR_VIEW, body: null })],
   ];
   for (const [what, prView] of shapes) {
     const r = gate(t, { prView });
@@ -436,6 +463,87 @@ test("only CHANGES_REQUESTED blocks: reviewDecision \"\" (no review required), n
     const r = gate(t, { prView: JSON.stringify({ ...PR_VIEW, reviewDecision }) });
     assert.equal(r.code, 0, `${JSON.stringify(reviewDecision)}: ${r.stdout}`);
   }
+});
+
+// --- main-gain -------------------------------------------------------------------
+
+const HIT = {
+  path: "tests/gate.test.mjs",
+  key: "#7",
+  landed: "f".repeat(40),
+  lines: [{ line: 12, text: "test('kept', () => {});" }],
+  ack: "main-gain-removal: tests/gate.test.mjs #7 - <why>",
+};
+const mg = (patch) => JSON.stringify({ ...MG_CLEAN, ...patch });
+
+test("main-gain exit 1 → 1 main-gain-removed:<first path>, the hit list echoed in mainGain", (t) => {
+  const payload = mg({ hits: [HIT, { ...HIT, path: "second.txt" }], reason: "main-gain-removed:tests/gate.test.mjs" });
+  const r = gate(t, { mgOut: payload, mgExit: 1 });
+  assertRow(r, 1, "blocked", "main-gain-removed:tests/gate.test.mjs");
+  assert.deepEqual(r.json.mainGain, JSON.parse(payload));
+});
+
+test("main-gain-removed wins over ci: and behind:, and loses to head-moved-after-label", (t) => {
+  const hit = { mgOut: mg({ hits: [HIT] }), mgExit: 1 };
+  const notGreen = gate(t, { ...hit, ciOut: ci({ verdict: "not-green", reasons: ["job check failed"], behind: 3 }), ciExit: 1 });
+  assertRow(notGreen, 1, "blocked", "main-gain-removed:tests/gate.test.mjs");
+  const behind = gate(t, { ...hit, ciOut: ci({ behind: 3 }) });
+  assertRow(behind, 1, "blocked", "main-gain-removed:tests/gate.test.mjs");
+  const moved = gate(t, { mgOut: mg({ head: THIRD, hits: [HIT] }), mgExit: 1, prView: JSON.stringify({ ...PR_VIEW, headRefOid: THIRD }) });
+  assertRow(moved, 1, "blocked", "head-moved-after-label");
+  const ciMoved = gate(t, { ...hit, ciOut: ci({ prHead: THIRD, runHeadSha: THIRD }) });
+  assertRow(ciMoved, 1, "blocked", "head-moved-after-label");
+});
+
+test("main-gain exit 0 with acknowledged removals → 0 mergeable, the acknowledgements echoed in mainGain", (t) => {
+  const payload = mg({ acknowledged: [{ ...HIT, reason: "superseded by the new suite" }], unchecked: ["logo.png"] });
+  const r = gate(t, { mgOut: payload });
+  assertRow(r, 0, "mergeable", null);
+  assert.deepEqual(r.json.mainGain, JSON.parse(payload));
+});
+
+test("the PR body gh read reaches main-gain on stdin", (t) => {
+  const body = "Drops the block.\r\n\r\nmain-gain-removal: tests/gate.test.mjs #7 - superseded\r\n";
+  const r = gate(t, { prView: JSON.stringify({ ...PR_VIEW, body }) });
+  assertRow(r, 0, "mergeable", null);
+  assert.equal(r.mgStdin, body);
+});
+
+test("main-gain exit 2 → 2 main-gain-unanswerable, its own reason echoed", (t) => {
+  const payload = mg({ reason: "head-unreadable" });
+  const r = gate(t, { mgOut: payload, mgExit: 2 });
+  assertRow(r, 2, "unknown", "main-gain-unanswerable");
+  assert.deepEqual(r.json.mainGain, JSON.parse(payload));
+});
+
+test("a main-gain payload its exit code does not back → 2 main-gain-unanswerable, never a verdict", (t) => {
+  const shapes = [
+    ["exit 0, zero bytes", "", 0],
+    ["exit 0, not JSON", "{\"head\":", 0],
+    ["exit 0 with a hit", mg({ hits: [HIT] }), 0],
+    ["exit 1 with no hit", mg({}), 1],
+    ["exit 1, a hit with no path", mg({ hits: [{ ...HIT, path: "" }] }), 1],
+    ["exit 0, about another head", mg({ head: POST }), 0],
+    ["exit 0, hits missing", JSON.stringify({ ...MG_CLEAN, hits: undefined }), 0],
+    ["exit 0, unchecked missing", JSON.stringify({ ...MG_CLEAN, unchecked: undefined }), 0],
+  ];
+  for (const [what, mgOut, mgExit] of shapes) {
+    const r = gate(t, { mgOut, mgExit });
+    assert.equal(r.code, 2, `${what}: exit ${r.code}\n${r.stdout}`);
+    assert.equal(r.json.reason, "main-gain-unanswerable", what);
+  }
+});
+
+test("main-gain-unanswerable sits with the unknown rows: a blocked row still wins over it", (t) => {
+  const r = gate(t, { mgOut: "", mgExit: 2, ciOut: ci({ behind: 2 }) });
+  assertRow(r, 1, "blocked", "behind:2");
+});
+
+test("a gh read with no head or body never runs main-gain → 2 pr-unreadable", (t) => {
+  const r = gate(t, { prView: JSON.stringify({ labels: PR_VIEW.labels, reviewDecision: "APPROVED", headRefOid: PRE }) });
+  assertRow(r, 2, "unknown", "pr-unreadable");
+  assert.deepEqual(r.calls.filter((c) => c.startsWith("main-gain.mjs")), []);
+  assert.equal(r.json.mainGain, null);
 });
 
 // --- precedence ----------------------------------------------------------------
@@ -468,6 +576,7 @@ test("from a linked worktree, instruments.sh audits the main checkout (--git-com
   const r = gate(t, { cwd: wt });
   assertRow(r, 0, "mergeable", null);
   assert.deepEqual(r.calls.filter((c) => c.startsWith("instruments.sh")), [`instruments.sh --repo ${main}`]);
+  assert.deepEqual(r.calls.filter((c) => c.startsWith("main-gain.mjs")), [`main-gain.mjs --head ${PRE} --body-file - (cwd ${main})`]);
 });
 
 test("an ambient GIT_DIR cannot move the audited instrument set into another repository", (t) => {

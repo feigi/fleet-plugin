@@ -12,7 +12,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
-import { between, paragraph, phrase } from "./support/prose-pin.mjs";
+import { between, bullet, paragraph, phrase } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const DOC = readFileSync(join(REPO, "commands", "run-merge-bot.md"), "utf8");
@@ -1429,4 +1429,37 @@ test("the same-docs-section bullet points at signal 4 and keeps symbols human", 
     phrase("a bare symbol or key name is still yours to read"),
     "the same-section bullet no longer keeps bare symbol and config-key matching a human read",
   );
+});
+
+// The main-gain check (#2743). A deletion of lines `main` gained, written into
+// a branch commit, replays cleanly through every rebase, so the fallback's
+// four checks and the no-undo audit can all pass it. The fallback's verdict is
+// "verified" only on a clean main-gain result against the local rebased head.
+const mainGainFallback = () =>
+  paragraph(DOC, "**The fallback's \"verified\" needs a clean main-gain check", "run-merge-bot.md's fallback main-gain paragraph", "2. Watch checks settle");
+
+test("AC4: the fallback's verified verdict requires a clean main-gain result on the local rebased head", () => {
+  const s = mainGainFallback();
+  assert.match(s, phrase("needs a clean main-gain check on the local rebased head"), "the paragraph no longer ties the verdict to the local rebased head");
+  assert.match(s, phrase("Exit 0 is the only clean result"), "the paragraph no longer requires exit 0");
+  assert.match(
+    s,
+    phrase("is reported inside `rebase-fallback-#<pr>` — the hits and each one's `ack` line to copy, or the `reason` it could not answer — and the fallback is never reported verified"),
+    "a hit or an unknown result is no longer kept out of the verified verdict",
+  );
+  assert.ok(fallbackBlock().includes(s), "the main-gain paragraph left the fallback block");
+});
+
+test("step 3's reasons list carries main-gain-removed with its skip-and-report arm", () => {
+  const s = bullet(DOC, "- **`main-gain-removed:<path>`**", "- **`main-gain-unanswerable`**", "step 3's main-gain-removed reason");
+  assert.match(
+    s,
+    phrase("Skip the PR, leave the label alone, and report `main-gain-removed:<path>-#<pr>` with the hit list and the keys"),
+    "the reason no longer says skip, leave the label, and report",
+  );
+});
+
+// Bounded to the Report line, as the other vocabulary pins above are.
+test("the report vocabulary includes main-gain-removed", () => {
+  assert.match(DOC, /^Report merged [^\n]*main-gain-removed:<path>-#X/m);
 });

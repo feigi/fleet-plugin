@@ -315,6 +315,7 @@ const GUARD_FIRST_FIXTURE = {
   "scripts/ci-state.mjs": ["--pr", "1"],
   "scripts/diff-stats.mjs": ["--pr", "1"],
   "scripts/dispositions-check.mjs": ["--member", "fix-pr-1", "--scratch", "1"],
+  "scripts/main-gain.mjs": ["--head", "1"],
   "scripts/merge-gate.mjs": ["--pr", "1", "--pre", "0".repeat(40)],
   "scripts/pr-overlap.mjs": ["--a", "1", "--b", "1"],
   "scripts/staleness.mjs": ["--path", "1", "--gone", "1"],

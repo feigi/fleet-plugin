@@ -4,12 +4,14 @@
 //   merge-gate.mjs --pr <n> --pre <sha> [--post <sha>] [--out <path>]
 //
 // Runs, in order, `instruments.sh --repo <main checkout>`, `gh pr view <n>
-// --json labels,reviewDecision,headRefOid` and `ci-state.mjs --pr <n>
-// --declare-no-ci`, then answers the conjunction. All three run on every
-// call, whatever the earlier ones said, so the JSON line carries every field
-// that was read. It never merges, labels, rebases or waits: the merge bot
-// runs it once before any wait and once immediately before `gh pr merge`, and
-// merges only on that second exit 0.
+// --json labels,reviewDecision,headRefOid,body`, `main-gain.mjs` against the
+// PR head in the main checkout, and `ci-state.mjs --pr <n> --declare-no-ci`,
+// then answers the conjunction. All four run on every call, whatever the
+// earlier ones said — except main-gain.mjs, which needs the head and body gh
+// read and is skipped when that read failed — so the JSON line carries every
+// field that was read. It never merges, labels, rebases or waits: the merge
+// bot runs it once before any wait and once immediately before `gh pr
+// merge`, and merges only on that second exit 0.
 //
 // `--pre` is the labelled head, `--post` the head the bot's own
 // `gh pr update-branch --rebase` produced; omitted, it is `--pre` (the
@@ -20,8 +22,10 @@
 // guesses it.
 //
 // Stdout: exactly one JSON line, `{pr, verdict, reason, head, pre, post,
-// behind, instruments, ci}`. Stderr: the children's own diagnostics, passed
-// straight through and never folded into stdout.
+// behind, instruments, mainGain, ci}`, `mainGain` echoing main-gain.mjs's own
+// payload — hits, acknowledged removals and unchecked files — or null when
+// it did not run or printed nothing usable. Stderr: the children's own
+// diagnostics, passed straight through and never folded into stdout.
 //
 // Exit vocabulary — the same three-way contract as inflight.sh, prove-merge.sh
 // and staleness.mjs:
@@ -39,13 +43,22 @@
 //   label `ready-to-merge` absent            1  label-pulled
 //   reviewDecision CHANGES_REQUESTED         1  changes-requested
 //   PR head not in {pre, post}               1  head-moved-after-label
+//   main-gain.mjs exit 1                     1  main-gain-removed:<first path>
 //   ci-state exit 1 (not-green)              1  ci:<first entry of ci.reasons>
 //   ci.behind > 0                            1  behind:<n>
 //   ci-state payload rate-limited/unusable   2  rate-limited / ci-unreadable
 //   ci.behind === null                       2  behind-unknown
 //   instruments.sh exit 1                    2  instrument-set-changed
 //   instruments.sh any other failure         2  instruments-unanswerable
+//   main-gain.mjs exit 2 or unusable payload 2  main-gain-unanswerable
 //   gh pr view fails or misparses            2  pr-unreadable
+//
+// main-gain.mjs answers which lines merging the head would remove that `main`
+// gained after the PR's work began. It reads `origin/main` in the main
+// checkout as it stands, so the caller fetches first. On the server-side
+// rebase path the PR object can lag at the pre-rebase head for a while;
+// checking that head gives the same verdict as the rebased one, because
+// `git merge-tree` against `main` lands the same content either way.
 //
 // An instrument change is 2, not 1: a changed instrument says nothing about
 // the PR, and the response is stop-and-report like every other 2.
@@ -114,25 +127,26 @@ const CHILD = { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] };
 // `--repo` locates the baseline only; the baseline itself names the tree to
 // audit, so a workspace that does not track `plugin/…` still reaches a
 // verdict over the checkout its run pinned — no flag here repoints it.
+// `root` is returned too: main-gain.mjs reads the same main checkout.
 function readInstruments() {
   const common = spawnSync("git", ["rev-parse", "--git-common-dir"], { ...CHILD, env: gitEnv() });
   const root = common.error || common.status !== 0 ? null : workspaceDirFromGitCommonDir(common.stdout);
-  if (root === null) return { exit: null, digest: null };
+  if (root === null) return { exit: null, digest: null, root };
   const r = spawnSync("sh", [join(SCRIPT_DIR, "instruments.sh"), "--repo", root], CHILD);
   const digest = (r.stdout ?? "").trim().split("\n")[0] || null;
-  if (r.error || r.signal) return { exit: null, digest };
+  if (r.error || r.signal) return { exit: null, digest, root };
   // An exit 0 that printed no digest compared nothing it can show, so it is
   // not taken as "unchanged". instruments.sh prints the digest on both of its
   // answering paths (0 and 1) before it exits.
-  if (r.status === 0 && !/^[0-9a-f]{64}$/.test(digest ?? "")) return { exit: null, digest };
-  return { exit: r.status, digest };
+  if (r.status === 0 && !/^[0-9a-f]{64}$/.test(digest ?? "")) return { exit: null, digest, root };
+  return { exit: r.status, digest, root };
 }
 
 // --- gh pr view -----------------------------------------------------------
-// null for anything that is not the three fields in their gh shapes: a parse
+// null for anything that is not the four fields in their gh shapes: a parse
 // that succeeds on the wrong shape must not reach a check that reads it.
 function readPr() {
-  const r = spawnSync("gh", ["pr", "view", String(pr), "--json", "labels,reviewDecision,headRefOid"], CHILD);
+  const r = spawnSync("gh", ["pr", "view", String(pr), "--json", "labels,reviewDecision,headRefOid,body"], CHILD);
   if (r.error || r.status !== 0) return null;
   let v;
   try {
@@ -146,7 +160,40 @@ function readPr() {
   // same way. Anything else is not a decision gh would give.
   if (!Object.hasOwn(v, "reviewDecision") || (v.reviewDecision !== null && typeof v.reviewDecision !== "string")) return null;
   if (typeof v.headRefOid !== "string" || !/^[0-9a-f]{40}$/.test(v.headRefOid)) return null;
+  // The body carries the main-gain acknowledgements. gh answers `""` for an
+  // empty one, so a missing field is a read that did not happen.
+  if (typeof v.body !== "string") return null;
   return v;
+}
+
+// --- main-gain.mjs --------------------------------------------------------
+// Against the head gh just read, in the main checkout, with the body on
+// stdin. Not run without both, and its row then stays silent:
+// instruments-unanswerable or pr-unreadable names the missing input. As with
+// ci-state below, the payload decides and the exit code has to agree with
+// it — exit 0 with a hit, or exit 1 without one, is not a verdict. `payload`
+// is whatever object the child printed, kept for the output line's echo
+// (an exit 2 names what it could not read); decide() reads it only when
+// `usable`.
+function readMainGain(root, prView) {
+  if (root === null || prView === null) return { usable: false, exit: null, payload: null };
+  const r = spawnSync(
+    process.execPath,
+    [join(SCRIPT_DIR, "main-gain.mjs"), "--head", prView.headRefOid, "--body-file", "-"],
+    { ...CHILD, stdio: ["pipe", "pipe", "inherit"], cwd: root, input: prView.body },
+  );
+  let v = null;
+  try {
+    v = JSON.parse(r.stdout ?? "");
+  } catch {
+    v = null;
+  }
+  const payload = isObject(v) ? v : null;
+  const read = (usable) => ({ usable, exit: r.status, payload });
+  if (r.error || r.signal || payload === null || payload.head !== prView.headRefOid) return read(false);
+  if (![payload.hits, payload.acknowledged, payload.unchecked].every(Array.isArray)) return read(false);
+  if (!payload.hits.every((h) => isObject(h) && typeof h.path === "string" && h.path !== "")) return read(false);
+  return read((r.status === 0 && payload.hits.length === 0) || (r.status === 1 && payload.hits.length > 0));
 }
 
 // --- ci-state.mjs ---------------------------------------------------------
@@ -195,7 +242,7 @@ function readCi() {
 }
 
 // --- the conjunction ------------------------------------------------------
-function decide(instruments, prView, ciRead) {
+function decide(instruments, prView, mainGain, ciRead) {
   const blocked = (reason) => ({ verdict: "blocked", reason });
   const unknown = (reason) => ({ verdict: "unknown", reason });
   const { validated, usable } = ciRead;
@@ -209,12 +256,14 @@ function decide(instruments, prView, ciRead) {
   // own CI judged here while the label's audit belongs to the tree before it,
   // so the same row applies to ci-state's reading too.
   if (usable && !heads.has(validated.prHead)) return blocked("head-moved-after-label");
+  if (mainGain.usable && mainGain.exit === 1) return blocked(`main-gain-removed:${mainGain.payload.hits[0].path}`);
   if (usable && ciRead.notGreen) return blocked(`ci:${validated.reasons[0]}`);
   if (usable && validated.behind > 0) return blocked(`behind:${validated.behind}`);
   if (!usable) return unknown(ciRead.rateLimited ? "rate-limited" : "ci-unreadable");
   if (validated.behind === null) return unknown("behind-unknown");
   if (instruments.exit === 1) return unknown("instrument-set-changed");
   if (instruments.exit !== 0) return unknown("instruments-unanswerable");
+  if (prView !== null && !mainGain.usable) return unknown("main-gain-unanswerable");
   if (prView === null) return unknown("pr-unreadable");
   return { verdict: "mergeable", reason: null };
 }
@@ -227,8 +276,9 @@ const EXIT = { mergeable: 0, blocked: 1, unknown: 2 };
 try {
   const instruments = readInstruments();
   const prView = readPr();
+  const mainGain = readMainGain(instruments.root, prView);
   const ciRead = readCi();
-  const { verdict, reason } = decide(instruments, prView, ciRead);
+  const { verdict, reason } = decide(instruments, prView, mainGain, ciRead);
   const line = `${JSON.stringify({
     pr,
     verdict,
@@ -238,6 +288,7 @@ try {
     post,
     behind: ciRead.usable ? ciRead.ci.behind : null,
     instruments: instruments.digest,
+    mainGain: mainGain.payload,
     ci: ciRead.ci,
   })}\n`;
   // The file first: if it cannot be written, the gate refuses (exit 2)

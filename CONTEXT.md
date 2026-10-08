@@ -162,6 +162,26 @@ human-owned rule still requires it; jobs it adds are covered because every job
 the run reports must succeed. Applies the **Merge gate** to the tooling (#2332).
 _Avoid_: required checks (that is *required* alone), the job list
 
+**No-undo audit**:
+`no-undo-audit.sh`, run by the merge bot before a rebase: it refuses a dirty
+worktree, previews the rebase's conflicts, and names what `main` gained in the
+conflicting files since the branch forked — the work a careless resolution
+would eat. It sees only what conflicts, so a deletion that replays cleanly is
+outside it; that is the **Main gain** check's.
+_Avoid_: rebase audit, conflict audit
+
+**Main gain**:
+A line on `main` that landed there — by `git blame --first-parent` on
+`origin/main`, its landing commit's committer date — after the PR's reference
+point R, the earliest author date among the PR's own commits. A main gain the
+PR's merge would remove is a hit: `merge-gate.mjs` — the merge bot's
+pre-merge conjunction, not the **Merge gate** ruleset — refuses it as
+`main-gain-removed:<path>` until it is undone or
+acknowledged in the PR body as `main-gain-removal: <path> <key> - <why>`, a
+second sign-off scoped to one file and one landing source (ADR 0023). The
+post-rebase counterpart of the **No-undo audit**.
+_Avoid_: lost work, reverted lines, regression
+
 ### Triage
 
 **Review deferral**:
