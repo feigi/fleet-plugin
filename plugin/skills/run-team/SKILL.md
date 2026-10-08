@@ -2536,7 +2536,9 @@ the fix-applier that answered the review, as the Fix-applier report edge
 states, then dispatch again. It names a `dispositions-unchecked=` verdict too —
 no rule broke, but the check could not read where a deferral was filed, `gh`
 unreachable or an issue unreadable: run the check again for that fix-applier
-once `gh` answers; the tick offers no fix-applier for it. `dispositions
+once `gh` answers (an issue that does not exist is unreadable too, and no re-run
+answers that one: the check's stderr names it, and the record's issue number
+needs correcting); the tick offers no fix-applier for it. `dispositions
 mismatch` — no finisher: the tick prints `DISPATCH fix-pr PR#<M>` for it, and
 the next-suffix fix-applier answers it (**Then dispatch a fix-applier**).
 `dispositions escalate` — no finisher, no

@@ -158,6 +158,6 @@ test("step 5 says a mismatch names the filing row, and that an unreadable tracke
 
 test("the gate refuses a finisher on an unchecked verdict, which re-running the check answers", () => {
   assert.match(gate(), phrase(
-    "It names a `dispositions-unchecked=` verdict too — no rule broke, but the check could not read where a deferral was filed, `gh` unreachable or an issue unreadable: run the check again for that fix-applier once `gh` answers; the tick offers no fix-applier for it.",
+    "It names a `dispositions-unchecked=` verdict too — no rule broke, but the check could not read where a deferral was filed, `gh` unreachable or an issue unreadable: run the check again for that fix-applier once `gh` answers (an issue that does not exist is unreadable too, and no re-run answers that one: the check's stderr names it, and the record's issue number needs correcting); the tick offers no fix-applier for it.",
   ));
 });

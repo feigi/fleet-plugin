@@ -784,7 +784,7 @@ test("a finisher is refused as unchecked on a dispositions-unchecked verdict ans
   const { ok, refused } = fixture(t);
   ok("row", "10", gateRow("1/0/0", `dispositions-unchecked=fix-pr-40:${GATE_HEAD}`));
   refused(["dispatch", "40", "finisher-pr-40"],
-    /finisher-pr-40: dispositions unchecked — fix-pr-40's check of review [0-9a-f]+ could not read where a deferral was filed .* run dispositions-check\.mjs --member fix-pr-40 --scratch <scratch> again once gh answers/);
+    /finisher-pr-40: dispositions unchecked — fix-pr-40's check of review [0-9a-f]+ could not read where a deferral was filed .* an issue that does not exist is unreadable too, and no re-run answers that one.* run dispositions-check\.mjs --member fix-pr-40 --scratch <scratch> again once gh answers/);
   ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_HEAD}`));
   assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
 });

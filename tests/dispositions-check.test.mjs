@@ -961,6 +961,20 @@ test("a record that breaks a rule is a mismatch even when it also escalates, and
   assert.equal(r.json.token, `dispositions-mismatch=fix-pr-40:${f.head}`);
 });
 
+test("an escalation outranks an issue gh cannot read: the verdict is escalate, a human rules, and the unread issue is still reported", (t) => {
+  const f = fixture(t);
+  withSeverity(f, "critical");
+  deferOutside(f, ["src/b.js"]);
+  const entries = JSON.parse(readFileSync(join(f.scratch, "dispositions-40.json"), "utf8")).entries;
+  entries[2] = f.entry("unverified", 0, { scope: "out", disposition: "defer", issue: 404 });
+  f.writeRecord(entries);
+  const r = f.check();
+  escalated(r);
+  assert.equal(r.json.token, `dispositions-escalate=fix-pr-40:${f.head}`);
+  assert.match(r.stderr, /^fix-pr-40: survived\[0\]: a critical finding deferred remedy-outside-diff/m);
+  assert.match(r.stderr, /unverified\[0\]: where it was filed is unchecked — #404 could not be read through gh/);
+});
+
 test("a re-check after an escalation replaces it with the member's new verdict, and the finisher then dispatches", (t) => {
   const f = fixture(t);
   deferOutside(f, ["src/b.js"]);
@@ -1180,6 +1194,28 @@ test("gh is run from the repository with no ambient GIT_DIR", (t) => {
   assert.deepEqual(calls, [{ argv: ["issue", "view", "77", "--json", "labels,state,title"], cwd: realpathSync(f.repo), GIT_DIR: null }]);
 });
 
+test("an issue two entries name is read through gh once", (t) => {
+  const f = fixture(t);
+  f.setIssues({ 81: openIssue("ready-for-agent") });
+  const entries = f.baseEntries();
+  entries[0] = f.entry("survived", 0, { disposition: "defer", reason: "mutual-exclusion", issue: 81 });
+  entries[1] = f.entry("survived", 1, { scope: "in", disposition: "defer", reason: "remedy-worse", issue: 81 });
+  f.writeRecord(entries);
+  const log = join(f.dir, "gh.log");
+  okVerdict(f.check("fix-pr-40", { ...cleanEnv(), FAKE_GH_LOG: log }));
+  const read = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l).argv[2]);
+  assert.deepEqual(read.filter((n) => n === "81"), ["81"], read.join(","));
+});
+
+test("the closed suggestion-band record is found by its title past surrounding whitespace", (t) => {
+  const f = fixture(t);
+  f.setIssues({ 81: { ...bandRecord(), title: `  ${recordTitle(40)}\n` } });
+  const entries = f.baseEntries();
+  entries[0] = f.entry("survived", 0, { disposition: "defer", reason: "false-rationale", issue: 81 });
+  f.writeRecord(entries);
+  okVerdict(f.check());
+});
+
 test("gh unreachable writes dispositions-unchecked, the finisher is refused naming dispositions unchecked, and a re-run once gh answers writes ok", (t) => {
   const f = fixture(t);
   f.writeRecord(f.baseEntries());
@@ -1245,6 +1281,7 @@ test("an in-scope suggestion with no verdictPath, a missing file, one outside th
     [f.writeVerdict({ refuted: true, reason: "r" }, "1", join(f.scratch, "pr40", "elsewhere")), /is not under a fix-applier run root/],
     [f.writeVerdict({ refuted: true, reason: "r" }, "1", join(f.dir, "pr40", "fix-Ab12Cd34")), /is not under a fix-applier run root/],
     [join(f.scratch, "pr40", "fix-Ab12Cd34", "1"), /is not under a fix-applier run root/],
+    [(() => { const d = join(f.scratch, "pr40", "fix-Ab12Cd34", "6", "verdict.json"); mkdirSync(d, { recursive: true }); return d; })(), /names something that is not a file/],
     [f.writeVerdict("{not json", "3"), /cannot be read as JSON/],
     [f.writeVerdict({ refuted: "yes", reason: "r" }, "4"), /fails the refuter verdict schema — it has a refuted that is not a boolean/],
     [f.writeVerdict({ refuted: true }, "5"), /fails the refuter verdict schema — it has no reason/],

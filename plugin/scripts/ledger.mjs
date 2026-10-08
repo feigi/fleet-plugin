@@ -1667,7 +1667,8 @@ function dispositionsRefusal(pr, review) {
   }
   if (v.verdict === "unchecked") {
     return `dispositions unchecked — ${v.member}'s check of review ${review.head} could not read where a deferral was filed (gh unreachable, `
-      + `or an issue unreadable); run dispositions-check.mjs --member ${v.member} --scratch <scratch> again once gh answers, `
+      + "or an issue unreadable — an issue that does not exist is unreadable too, and no re-run answers that one: the check's stderr names "
+      + `it, and the record's issue number needs correcting); run dispositions-check.mjs --member ${v.member} --scratch <scratch> again once gh answers, `
       + "then dispatch the finisher again";
   }
   if (v.verdict === "mismatch") {
