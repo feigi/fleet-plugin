@@ -790,7 +790,7 @@ test("a mktemp that runs and fails on its second call is exit 3, never the cache
 // exit 3 as well. Node's own refusal of the cache (its exit 2) and an uncaught
 // fault of its own (exit 1) are still the cache's exit 1, with node's reason.
 // Only status 2 is node's verdict on the cache, so a non-2 status that leaves
-// no reason is exit 3 too: node failed before passing the cache.
+// no reason is exit 3 too: node failed without saying anything about the cache.
 // The stripped PATH has no cat: node's reason is read back WITHOUT it, so every
 // refusal row also proves that. The rows that give a reason a shape (several
 // lines, no final newline, trailing newlines, a backslash and leading space)
@@ -807,9 +807,9 @@ for (const [what, body, status, reason] of [
   ["refuses with a last line without a newline", "printf 'no newline' >&2; exit 2", 1, /is unusable: no newline — run the Recipe/],
   ["refuses with trailing newlines", "printf 'reason\\n\\n\\n' >&2; exit 2", 1, /is unusable: reason — run the Recipe/],
   ["refuses with a backslash and leading space", "printf '  a\\\\nb\\n' >&2; exit 2", 1, /is unusable:   a\\nb — run the Recipe/],
-  ["exits 1 with nothing on stderr", "exit 1", 3, /^derive-testcmd: node exited 1 without a reason before passing the Recipe cache, so its usability is unknown — an environment fault, not a verdict on the cache$/m],
-  ["exits 1 with only blanks on stderr", "printf '  \\n\\t\\r\\n' >&2; exit 1", 3, /^derive-testcmd: node exited 1 without a reason before passing the Recipe cache, so its usability is unknown/m],
-  ["exits 5 with nothing on stderr", "exit 5", 3, /^derive-testcmd: node exited 5 without a reason before passing the Recipe cache, so its usability is unknown/m],
+  ["exits 1 with nothing on stderr", "exit 1", 3, /^derive-testcmd: node exited 1 without a reason, so its usability is unknown — an environment fault, not a verdict on the cache$/m],
+  ["exits 1 with only blanks on stderr", "printf '  \\n\\t\\r\\n' >&2; exit 1", 3, /^derive-testcmd: node exited 1 without a reason, so its usability is unknown/m],
+  ["exits 5 with nothing on stderr", "exit 5", 3, /^derive-testcmd: node exited 5 without a reason, so its usability is unknown/m],
   ["exits 2 with nothing on stderr", "exit 2", 1, /is unusable: \(node gave no reason, exit 2\) — run the Recipe/],
   ["exits 2 with only blank lines on stderr", "printf '\\n\\n' >&2; exit 2", 1, /is unusable: \(node gave no reason, exit 2\) — run the Recipe/],
   ["exits 2 with only spaces and a tab on stderr", "printf '   \\t\\n' >&2; exit 2", 1, /is unusable: \(node gave no reason, exit 2\) — run the Recipe/],

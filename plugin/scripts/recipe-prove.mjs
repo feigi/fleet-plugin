@@ -120,7 +120,7 @@ const notProven = (message) => new Refusal(1, message);
 
 // The exit status derive-testcmd.sh uses for a refusal about its own
 // environment — a tool it needs would not start, git did not run to an answer,
-// or node died mid-read or failed without a reason before passing the cache —
+// or node died mid-read or failed without a reason —
 // where every refusal about the cache is 1.
 const READER_COULD_NOT_RUN = 3;
 
@@ -301,7 +301,8 @@ function prove(o, wt, logs) {
 // status and reached no verdict; a reader that exits READER_COULD_NOT_RUN
 // could not start its git, `node`, `mktemp` or `cat`, could not create its
 // temp file, saw git end on any status but git's own 128, or lost its `node`
-// mid-read; and the reader reads a git that ends on 128 as no repository at
+// mid-read or saw it exit without a reason on a status other than 2; and the
+// reader reads a git that ends on 128 as no repository at
 // all, so its refusal is a verdict on what was proven only while git still
 // runs. `git --version` is the probe for that exit-1 refusal: a working git
 // always passes it, so a git that cannot be started fails it, and so does one

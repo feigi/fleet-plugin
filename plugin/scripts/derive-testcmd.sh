@@ -99,8 +99,8 @@ die() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 1; }
 # A refusal about the environment, not the cache: a tool this script needs to
 # read the cache (git, the interpreter, mktemp, cat) could not be started,
 # mktemp could not create its temp file, git did not run to an answer, or the
-# interpreter died mid-read or failed without a reason before passing the
-# cache, so nothing was read and the cache's usability is unknown. Exit 3,
+# interpreter died mid-read or failed without a reason, so nothing was read
+# and the cache's usability is unknown. Exit 3,
 # where every refusal about the cache, the repository or the arguments is
 # exit 1. A consumer that only tests for non-zero sees no difference.
 unrunnable() { printf '%s: %s\n' "$NAME" "$1" >&2; exit 3; }
@@ -249,8 +249,8 @@ fi
 # would also be an exit outside 0/1/3. A stderr that was read back but held
 # nothing, only newlines, or only blanks (spaces, tabs, CRs) is no reason: with
 # status 2 it names the exit status instead of a reason that reads as blank;
-# with any other status node failed before passing the cache and said nothing
-# about it, so the cache's usability is unknown and that is exit 3.
+# with any other status node failed and said nothing about the cache, so its
+# usability is unknown and that is exit 3.
 # The blank set is spelled out, not a `[:space:]` class: this script's locale
 # inventory stays what the pin comment above says it is. The `.` guards the
 # newline that `$(…)` would strip.
@@ -263,7 +263,7 @@ if [ "$rc" -ne 0 ]; then
     *[!"$blank"]*) ;;
     *)
       [ "$rc" -eq 2 ] ||
-        unrunnable "node exited $rc without a reason before passing the Recipe cache, so its usability is unknown — an environment fault, not a verdict on the cache"
+        unrunnable "node exited $rc without a reason, so its usability is unknown — an environment fault, not a verdict on the cache"
       reason="(node gave no reason, exit $rc)"
       ;;
   esac
