@@ -8,10 +8,10 @@
 // PR head in the main checkout, and `ci-state.mjs --pr <n> --declare-no-ci`,
 // then answers the conjunction. All four run on every call, whatever the
 // earlier ones said — except main-gain.mjs, which needs the head and body gh
-// read and is skipped when that read failed — so the JSON line carries every
-// field that was read. It never merges, labels, rebases or waits: the merge
-// bot runs it once before any wait and once immediately before `gh pr
-// merge`, and merges only on that second exit 0.
+// read and the main checkout, and is skipped when either could not be had — so
+// the JSON line carries every field that was read. It never merges, labels,
+// rebases or waits: the merge bot runs it once before any wait and once
+// immediately before `gh pr merge`, and merges only on that second exit 0.
 //
 // `--pre` is the labelled head, `--post` the head the bot's own
 // `gh pr update-branch --rebase` produced; omitted, it is `--pre` (the
@@ -24,8 +24,9 @@
 // Stdout: exactly one JSON line, `{pr, verdict, reason, head, pre, post,
 // behind, instruments, mainGain, ci}`, `mainGain` echoing main-gain.mjs's own
 // payload — hits, acknowledged removals and unchecked files — or null when
-// it did not run or printed nothing usable. Stderr: the children's own
-// diagnostics, passed straight through and never folded into stdout.
+// it did not run or printed no JSON object; an unusable payload is still
+// echoed. Stderr: the children's own diagnostics, passed straight through
+// and never folded into stdout.
 //
 // Exit vocabulary — the same three-way contract as inflight.sh, prove-merge.sh
 // and staleness.mjs:
@@ -50,8 +51,8 @@
 //   ci.behind === null                       2  behind-unknown
 //   instruments.sh exit 1                    2  instrument-set-changed
 //   instruments.sh any other failure         2  instruments-unanswerable
-//   main-gain.mjs exit 2 or unusable payload 2  main-gain-unanswerable
 //   gh pr view fails or misparses            2  pr-unreadable
+//   main-gain.mjs exit 2 or unusable payload 2  main-gain-unanswerable
 //
 // main-gain.mjs answers which lines merging the head would remove that `main`
 // gained after the PR's work began. It reads `origin/main` in the main
@@ -180,8 +181,13 @@ function readMainGain(root, prView) {
   const r = spawnSync(
     process.execPath,
     [join(SCRIPT_DIR, "main-gain.mjs"), "--head", prView.headRefOid, "--body-file", "-"],
-    { ...CHILD, stdio: ["pipe", "pipe", "inherit"], cwd: root, input: prView.body },
+    // A PR that removes a large main-gained file prints every removed line:
+    // past spawnSync's 1 MiB default the read fails ENOBUFS and the verdict
+    // that PR earned reads as unanswerable. main-gain.mjs's own git reads
+    // carry the same 1 GiB bound.
+    { ...CHILD, stdio: ["pipe", "pipe", "inherit"], cwd: root, input: prView.body, maxBuffer: 1 << 30 },
   );
+  if (r.error) writeAll(2, `merge-gate: main-gain.mjs could not be read: ${r.error.code ?? r.error.message}\n`);
   let v = null;
   try {
     v = JSON.parse(r.stdout ?? "");
@@ -263,8 +269,8 @@ function decide(instruments, prView, mainGain, ciRead) {
   if (validated.behind === null) return unknown("behind-unknown");
   if (instruments.exit === 1) return unknown("instrument-set-changed");
   if (instruments.exit !== 0) return unknown("instruments-unanswerable");
-  if (prView !== null && !mainGain.usable) return unknown("main-gain-unanswerable");
   if (prView === null) return unknown("pr-unreadable");
+  if (!mainGain.usable) return unknown("main-gain-unanswerable");
   return { verdict: "mergeable", reason: null };
 }
 

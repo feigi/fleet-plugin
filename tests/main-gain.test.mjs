@@ -77,8 +77,8 @@ function landPr(w, n, prNumber, files) {
   git(w, "push", "-q", "origin", "main");
 }
 
-/** The shared timeline above, left checked out on `feat`. */
-function world(t) {
+/** The shared timeline above, left checked out on `feat`; `landAt` moves pr7's work (its merge lands one second later). */
+function world(t, landAt = 2) {
   const root = mkdtempSync(join(tmpdir(), "main-gain-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = join(root, "origin.git");
@@ -95,7 +95,7 @@ function world(t) {
   write(w, "feat.txt", "feature\n");
   git(w, "add", "feat.txt");
   gitAt(1, w, "commit", "-q", "-m", "feat work");
-  landPr(w, 2, 7, { "tests.txt": OLD + BLOCK });
+  landPr(w, landAt, 7, { "tests.txt": OLD + BLOCK });
   git(w, "checkout", "-q", "feat");
   return { root, w };
 }
@@ -360,4 +360,127 @@ test("it never fetches, writes or changes refs", (t) => {
   assert.equal(refs(), before);
   assert.equal(git(w, "status", "--porcelain"), status);
   assert.equal(readFileSync(join(w, "tests.txt"), "utf8"), OLD);
+});
+
+// --- boundaries and hardening ---------------------------------------------------
+
+test("a landing at exactly R is not after R → 0", (t) => {
+  // pr7's merge is committed at T1, the same second as the PR's first commit.
+  const { w } = world(t, 0);
+  rewriteAt(4, w, "rebase", "-q", "origin/main");
+  write(w, "tests.txt", OLD);
+  const r = run(w, commitFeat(w, 5, "drop the block"));
+  expect(r, 0);
+  assert.equal(r.json.since, new Date((T0 + 1000) * 1000).toISOString());
+  assert.deepEqual(r.json.hits, []);
+});
+
+test("a well-formed --base that names no remote ref → 2 base-unreadable, never a clean answer", (t) => {
+  const { w, head } = deleteAfterRebase(t);
+  const r = run(w, head, { args: ["--base", "origin/gone"] });
+  expect(r, 2);
+  assert.equal(r.json.reason, "base-unreadable");
+  assert.deepEqual(r.json.hits, []);
+});
+
+test("a blame git cannot answer → 2 blame-failed:<path>, never a clean answer", (t) => {
+  const { w, head } = deleteAfterRebase(t);
+  // A repository setting git refuses at blame time.
+  git(w, "config", "blame.date", "bogus");
+  const r = run(w, head);
+  expect(r, 2);
+  assert.equal(r.json.reason, "blame-failed:tests.txt");
+  assert.deepEqual(r.json.hits, []);
+});
+
+// Not pinned, because real git cannot reach them: the history read's integer
+// check, the merge-tree sha check and the blame completeness check each guard
+// a git that exits 0 with output it does not print.
+
+test("a blame.ignoreRevsFile naming a file that is not there cannot blind the check → 1", (t) => {
+  const { w, head } = deleteAfterRebase(t);
+  git(w, "config", "blame.ignoreRevsFile", ".git-blame-ignore-revs");
+  const r = run(w, head);
+  expect(r, 1);
+  assert.equal(r.json.hits[0].key, "#7");
+});
+
+test("a local tag or branch literally named origin/main cannot answer for the remote one", (t) => {
+  const { w, head } = deleteAfterRebase(t);
+  // Unqualified, `origin/main` would resolve to this tag — the head itself, and
+  // against the head the deletion is no change at all.
+  git(w, "tag", "origin/main", head);
+  assert.equal(git(w, "rev-parse", "origin/main"), head);
+  const r = run(w, head);
+  expect(r, 1);
+  assert.equal(r.json.hits[0].key, "#7");
+  git(w, "tag", "-d", "origin/main");
+  git(w, "branch", "origin/main", head);
+  const b = run(w, head);
+  expect(b, 1);
+  assert.equal(b.json.hits[0].key, "#7");
+});
+
+test("a file whose name holds glob characters is a name, never a pattern", (t) => {
+  const { w } = world(t);
+  landPr(w, 4, 9, { "[a]*.txt": "x1\nx2\n", "ab.txt": "y1\ny2\ny3\ny4\n" });
+  git(w, "checkout", "-q", "feat");
+  rewriteAt(6, w, "rebase", "-q", "origin/main");
+  unlinkSync(join(w, "[a]*.txt"));
+  unlinkSync(join(w, "ab.txt"));
+  const r = run(w, commitFeat(w, 7));
+  expect(r, 1);
+  assert.deepEqual(r.json.hits.map((h) => [h.path, h.key, h.lines.length]).sort(), [["[a]*.txt", "#9", 2], ["ab.txt", "#9", 4]]);
+});
+
+test("an uppercase --head names the same commit → read as lowercase", (t) => {
+  const { w, head } = deleteAfterRebase(t);
+  const r = run(w, head.toUpperCase());
+  expect(r, 1);
+  assert.equal(r.json.head, head);
+});
+
+// --- diff reading ------------------------------------------------------------------
+
+test("removals in two hunks of one file each carry their own line number", (t) => {
+  const { w } = world(t);
+  const lines = Array.from({ length: 20 }, (_, i) => `l${i + 1}`);
+  landPr(w, 4, 9, { "long.txt": `${lines.join("\n")}\n` });
+  git(w, "checkout", "-q", "feat");
+  rewriteAt(6, w, "rebase", "-q", "origin/main");
+  write(w, "long.txt", `${lines.filter((l) => l !== "l2" && l !== "l19").join("\n")}\n`);
+  const r = run(w, commitFeat(w, 7));
+  expect(r, 1);
+  assert.deepEqual(r.json.hits.map((h) => [h.path, h.lines]), [["long.txt", [{ line: 2, text: "l2" }, { line: 19, text: "l19" }]]]);
+});
+
+test("a line text added back once covers only one removal of that text", (t) => {
+  const { w } = world(t);
+  landPr(w, 4, 9, { "dup.txt": "dup\na\nb\nc\nd\ndup\n" });
+  git(w, "checkout", "-q", "feat");
+  rewriteAt(6, w, "rebase", "-q", "origin/main");
+  // Both `dup` lines are removed — the one diff alignment there is — and one
+  // `dup` is added between b and c: one removal moved, the other is gone.
+  write(w, "dup.txt", "a\nb\ndup\nc\nd\n");
+  const r = run(w, commitFeat(w, 7));
+  expect(r, 1);
+  assert.deepEqual(r.json.hits.map((h) => [h.path, h.lines]), [["dup.txt", [{ line: 6, text: "dup" }]]]);
+});
+
+test("a submodule is listed in unchecked[], never read line by line", (t) => {
+  const { w } = world(t);
+  git(w, "checkout", "-q", "main");
+  git(w, "checkout", "-q", "-b", "pr9");
+  git(w, "update-index", "--add", "--cacheinfo", `160000,${"1".repeat(40)},sub`);
+  gitAt(4, w, "commit", "-q", "-m", "pr9 work");
+  git(w, "checkout", "-q", "main");
+  gitAt(5, w, "merge", "-q", "--no-ff", "pr9", "-m", "Merge pull request #9 from o/pr9");
+  git(w, "push", "-q", "origin", "main");
+  git(w, "checkout", "-q", "feat");
+  rewriteAt(6, w, "rebase", "-q", "origin/main");
+  git(w, "update-index", "--force-remove", "sub");
+  const r = run(w, commitFeat(w, 7));
+  expect(r, 0);
+  assert.deepEqual(r.json.unchecked, ["sub"]);
+  assert.deepEqual(r.json.hits, []);
 });

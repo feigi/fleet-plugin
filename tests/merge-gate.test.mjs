@@ -4,14 +4,14 @@
 //
 // Zero deps: `node --test tests/merge-gate.test.mjs`.
 //
-// `gh` is stubbed on PATH. ci-state.mjs and instruments.sh are resolved beside
-// merge-gate.mjs itself (its SCRIPT_DIR), so each fixture runs a COPY of the
-// gate out of a stub scripts directory holding stub siblings — the pattern
-// fleet-tick.test.mjs uses for candidates.mjs — with every module the gate
-// imports copied alongside. All three stubs append to one call log, which is
-// how the "ci-state runs on every call, with --declare-no-ci" and "read-only"
-// assertions are made. The cwd is a real `git init`-ed repository, because
-// the gate derives instruments.sh's `--repo` from `git rev-parse
+// `gh` is stubbed on PATH. ci-state.mjs, instruments.sh and main-gain.mjs are
+// resolved beside merge-gate.mjs itself (its SCRIPT_DIR), so each fixture runs
+// a COPY of the gate out of a stub scripts directory holding stub siblings —
+// the pattern fleet-tick.test.mjs uses for candidates.mjs — with every module
+// the gate imports copied alongside. All four stubs append to one call log,
+// which is how the "ci-state runs on every call, with --declare-no-ci" and
+// "read-only" assertions are made. The cwd is a real `git init`-ed repository,
+// because the gate derives instruments.sh's `--repo` from `git rev-parse
 // --git-common-dir`.
 //
 // Each row gets a case that proves it blocks ON ITS OWN, the discipline
@@ -74,12 +74,14 @@ exit "$INSTR_EXIT"
 // main-gain.mjs, resolved beside the gate like the other two. It logs its
 // argv and cwd, keeps the stdin it was handed, and answers MG_STDOUT at
 // MG_EXIT — by default a clean payload about the head it was asked for.
+// MG_PAD leading spaces, which a JSON parse ignores, stand in for a payload
+// too large for spawnSync's default buffer without passing it through the env.
 const MAIN_GAIN_STUB = `import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 const argv = process.argv.slice(2);
 appendFileSync(process.env.CALL_LOG, "main-gain.mjs " + argv.join(" ") + " (cwd " + process.cwd() + ")\\n");
 writeFileSync(process.env.MG_STDIN_FILE, readFileSync(0));
 const head = argv[argv.indexOf("--head") + 1];
-process.stdout.write(process.env.MG_STDOUT ?? JSON.stringify({ head, base: "origin/main", since: null, hits: [], acknowledged: [], unchecked: [], reason: null }) + "\\n");
+process.stdout.write(" ".repeat(Number(process.env.MG_PAD ?? 0)) + (process.env.MG_STDOUT ?? JSON.stringify({ head, base: "origin/main", since: null, hits: [], acknowledged: [], unchecked: [], reason: null })) + "\\n");
 process.exitCode = Number(process.env.MG_EXIT);
 `;
 
@@ -514,6 +516,12 @@ test("main-gain exit 2 → 2 main-gain-unanswerable, its own reason echoed", (t)
   const r = gate(t, { mgOut: payload, mgExit: 2 });
   assertRow(r, 2, "unknown", "main-gain-unanswerable");
   assert.deepEqual(r.json.mainGain, JSON.parse(payload));
+});
+
+test("a main-gain payload past spawnSync's 1 MiB default still decides → 1 main-gain-removed, never main-gain-unanswerable", (t) => {
+  const r = gate(t, { mgOut: mg({ hits: [HIT], reason: "main-gain-removed:tests/gate.test.mjs" }), mgExit: 1, env: { MG_PAD: String(2 << 20) } });
+  assertRow(r, 1, "blocked", "main-gain-removed:tests/gate.test.mjs");
+  assert.deepEqual(r.json.mainGain.hits, [HIT]);
 });
 
 test("a main-gain payload its exit code does not back → 2 main-gain-unanswerable, never a verdict", (t) => {

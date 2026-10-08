@@ -20,6 +20,12 @@
 // merge-only, so that is the first-parent commit that brought it in. A line
 // is a main gain when it landed after R.
 //
+// R misses two windows. The time between the fork and the PR's first commit
+// is before R. And a branch rewritten into fresh commits (`git reset --soft
+// <base>` and a new commit, or a squash that resets the author) carries new
+// author dates, so R moves past a landing and a deletion replayed from the
+// rewrite reads clean. Only a rebase or an amend keeps R.
+//
 // Removed lines are read off the merge the head would actually produce:
 // `git merge-tree --write-tree <base> <head>`, diffed against `<base>` with
 // rename detection on. That is right for a head that is behind `<base>` too,
@@ -138,18 +144,12 @@ function fileDiff(tree, oldPath, newPath) {
       inHunk = false;
       continue;
     }
-    if (!inHunk) {
-      if (line.startsWith("Binary files ")) return { binary: true };
-      const h = /^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/.exec(line);
-      if (h) {
-        inHunk = true;
-        oldLine = Number(h[1]);
-      }
-      continue;
-    }
     const h = /^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/.exec(line);
     if (h) {
+      inHunk = true;
       oldLine = Number(h[1]);
+    } else if (!inHunk) {
+      if (line.startsWith("Binary files ")) return { binary: true };
     } else if (line.startsWith("-")) {
       removed.push({ line: oldLine++, text: line.slice(1) });
     } else if (line.startsWith("+")) {
@@ -169,7 +169,7 @@ function blame(path, lines) {
     else spans.push([line, line]);
   }
   const ranges = spans.flatMap(([from, to]) => ["-L", `${from},${to}`]);
-  const r = git(["blame", "--first-parent", "--line-porcelain", "--ignore-revs-file=", ...ranges, baseRev, "--", path]);
+  const r = git(["blame", "--first-parent", "--line-porcelain", "--no-ignore-revs-file", ...ranges, baseRev, "--", path]);
   if (r === null) unanswerable(`blame-failed:${path}`);
   const out = new Map();
   let cur = null;

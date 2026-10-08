@@ -1444,6 +1444,11 @@ test("AC4: the fallback's verified verdict requires a clean main-gain result on 
   assert.match(s, phrase("Exit 0 is the only clean result"), "the paragraph no longer requires exit 0");
   assert.match(
     s,
+    phrase("Exit 1 (a line `main` gained after the PR began would be removed) or exit 2 (it could not answer)"),
+    "the paragraph no longer says what exit 1 and exit 2 each mean",
+  );
+  assert.match(
+    s,
     phrase("is reported inside `rebase-fallback-#<pr>` — the hits and each one's `ack` line to copy, or the `reason` it could not answer — and the fallback is never reported verified"),
     "a hit or an unknown result is no longer kept out of the verified verdict",
   );
