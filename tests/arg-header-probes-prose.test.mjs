@@ -93,7 +93,11 @@ const PROBES = [
 ];
 const [DIE_GREP, IMPORT_GREP, ROSTER_GREP, LIMIT_PROBE, BOGUS_PROBE] = PROBES;
 
-const sh = (cmd) => spawnSync("sh", ["-c", cmd], { cwd: ROOT, encoding: "utf8" });
+const sh = (cmd) => {
+  const r = spawnSync("sh", ["-c", cmd], { cwd: ROOT, encoding: "utf8" });
+  assertProbeRan(cmd, r);
+  return r;
+};
 
 // A flag no script accepts, and no prefix of one: `sweep()` and `parseArgs`
 // both match a flag NAME exactly, so a token nothing declares is refused by
@@ -593,5 +597,21 @@ test("probeArgv and probeStray refuse a script whose probe faulted, and still re
     assert.deepEqual(probeStray(answers), { status: 2, out: "refused\n" }, "a script that answered was not returned as it answered");
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The header's greps and the two candidates.mjs probes run through `sh`, so
+// the same holds there: a shell that kills itself is refused as a fault naming
+// the command, while a grep's clean no-match (exit 1) and a refusal (exit 2)
+// still come back as the command's own answer.
+test("sh refuses a command whose shell faulted, and still returns a command's own answer", () => {
+  const selfKill = "kill -9 $$";
+  assert.throws(
+    () => sh(selfKill),
+    (e) => e.message.includes(selfKill) && e.message.includes("killed by SIGKILL") && e.message.includes("not a verdict"),
+    "a command whose shell was killed by a signal was not refused as an infrastructure fault",
+  );
+  for (const code of [0, 1, 2]) {
+    assert.equal(sh(`echo out; exit ${code}`).status, code, `a command that exited ${code} was not returned as it answered`);
   }
 });
