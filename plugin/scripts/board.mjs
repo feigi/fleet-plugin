@@ -1397,14 +1397,15 @@ function isCockpitHost(host) {
 // unlisted spelling of loopback, or a rebound page probing the port — so the
 // refusal goes to stderr, once per distinct Host. The value is the client's,
 // so it is rendered as a JSON string (quotes, backslashes and C0 controls
-// escaped), with the C1 controls JSON leaves bare escaped too, and cut to a
-// bounded length: it cannot split or forge a log line. A rebound page can
+// escaped), with DEL, the C1 controls and the U+2028/U+2029 line separators,
+// which JSON leaves bare, escaped too, and cut to a bounded length: it cannot
+// split or forge a log line. A rebound page can
 // send unlimited distinct Hosts, so each server logs at most
 // REFUSED_HOST_LOG_CAP of them, then one notice, then nothing new.
 const REFUSED_HOST_LOG_CAP = 16;
 const REFUSED_HOST_SHOWN = 100;
 const COCKPIT_HOST_LIST = [...COCKPIT_HOSTNAMES].join(", ");
-function renderRefusedHost(host) {
+export function renderRefusedHost(host) {
   if (host === undefined) return "a request with no Host header";
   const json = JSON.stringify(host.slice(0, REFUSED_HOST_SHOWN))
     .replace(/[\u007f-\u009f\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);

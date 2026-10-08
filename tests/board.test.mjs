@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { createServer, connect } from "node:net";
 import { fileURLToPath } from "node:url";
-import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, spendDirPin, gatherSpend, faultText, resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "../plugin/scripts/board.mjs";
+import { createBoardServer, renderRefusedHost, mapCi, encodeProjectDir, findSubagentsDir, spendDirPin, gatherSpend, faultText, resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "../plugin/scripts/board.mjs";
 import { readOmpMember } from "../plugin/scripts/member-record.mjs";
 import { stripComments } from "./support/strip-comments.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
@@ -893,17 +893,52 @@ test("createBoardServer renders a refused Host escaped and truncated, on one lin
   });
 });
 
-test("createBoardServer stops logging new refused Hosts at a fixed cap, with one notice", async () => {
+test("renderRefusedHost escapes DEL, every C1 control and both line separators, and nothing next to them", () => {
+  // The bytes of a Host header reach the server one code unit each (latin1),
+  // so U+2028/U+2029 and DEL cannot arrive through a raw request: the
+  // renderer is the only place the full set is pinned.
+  for (const c of ["\u007f", "\u0080", "\u0085", "\u009f", "\u2028", "\u2029"]) {
+    const hex = c.charCodeAt(0).toString(16).padStart(4, "0");
+    assert.equal(renderRefusedHost(`a${c}b`), `Host "a\\u${hex}b"`, hex);
+  }
+  for (const c of ["~", "\u00a0"]) assert.equal(renderRefusedHost(`a${c}b`), `Host "a${c}b"`, c.charCodeAt(0).toString(16));
+});
+
+test("createBoardServer cuts a refused Host after exactly 100 characters", async () => {
   await withBoardServer(async (port, logged) => {
+    const at100 = `${"b".repeat(95)}.test`;
+    const at101 = `${"b".repeat(96)}.test`;
+    for (const host of [at100, at101]) assert.equal((await rawStatus(port, "/", host)).status, 403, host);
+    assert.equal(logged.length, 2, logged.join("\n"));
+    assert.match(logged[0], new RegExp(`^board: refused Host "${"b".repeat(95)}\\.test" — `));
+    assert.match(logged[1], new RegExp(`^board: refused Host "${"b".repeat(96)}\\.tes"… \\(101 chars\\) — `));
+  });
+});
+
+test("createBoardServer keys the once-per-Host gate on the cut rendering, so two Hosts alike for 100 characters and in length log one line", async () => {
+  await withBoardServer(async (port, logged) => {
+    for (const host of [`${"c".repeat(100)}X.test`, `${"c".repeat(100)}Y.test`]) assert.equal((await rawStatus(port, "/", host)).status, 403, host);
+    assert.equal(logged.length, 1, logged.join("\n"));
+    assert.match(logged[0], new RegExp(`^board: refused Host "${"c".repeat(100)}"… \\(106 chars\\) — `));
+  });
+});
+
+test("createBoardServer stops logging new refused Hosts at a fixed cap of 16, with one notice", async () => {
+  await withBoardServer(async (port, logged) => {
+    // A Host repeated past the cap spends one slot, not twenty: it leaves no
+    // notice behind, and the distinct Hosts after it are still logged.
+    for (let i = 0; i < 20; i++) assert.equal((await rawStatus(port, "/", "cap-repeat.test")).status, 403);
+    assert.equal(logged.length, 1, logged.join("\n"));
     for (let i = 0; i < 100; i++) assert.equal((await rawStatus(port, "/", `cap-${i}.test`)).status, 403);
-    const refused = logged.filter((l) => l.startsWith("board: refused Host "));
-    const notices = logged.filter((l) => !l.startsWith("board: refused Host "));
-    assert.ok(refused.length > 0 && refused.length < 100, `${refused.length} refused-Host lines`);
-    assert.deepEqual(refused, refused.map((_, i) => `board: refused Host "cap-${i}.test" — not a loopback name (127.0.0.1, localhost, [::1]); answered 403`));
-    assert.deepEqual(notices, [`board: ${refused.length} distinct Hosts refused; further refused Hosts are not logged`]);
+    const line = (h) => `board: refused Host "${h}" — not a loopback name (127.0.0.1, localhost, [::1]); answered 403`;
+    const distinct = Array.from({ length: 15 }, (_, i) => `cap-${i}.test`);
+    assert.deepEqual(logged, [
+      ...["cap-repeat.test", ...distinct].map(line),
+      "board: 16 distinct Hosts refused; further refused Hosts are not logged",
+    ]);
     // Past the cap, a Host already logged is still not logged again.
     assert.equal((await rawStatus(port, "/", "cap-0.test")).status, 403);
-    assert.equal(logged.length, refused.length + 1);
+    assert.equal(logged.length, 17);
   });
 });
 
