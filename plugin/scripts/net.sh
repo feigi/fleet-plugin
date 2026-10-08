@@ -32,9 +32,9 @@
 # 10.0s with `net/http: TLS handshake timeout` — `gh` is already bounded, and
 # wrapping it would buy a second bound over the first.
 #
-# `LC_ALL=C` is a per-command prefix below, never an export, for the reason
-# json.sh gives: prove-merge.sh and verify-sha.sh do not pin the locale, and
-# exporting from a sourced lib would silently re-locale every other tool in them.
+# `LC_ALL=C` is a per-command prefix below, never an export, for json.sh's
+# reason: some callers (delete-merged-branch.sh, prove-merge.sh, verify-sha.sh
+# among them) do not pin the locale; an export would re-locale the other tools.
 
 # net_budget <default> <override> — print the budget a call gets, in seconds.
 #
