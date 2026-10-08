@@ -2,7 +2,20 @@
 
 **Status:** Accepted. Ruled 2026-10-02 on #2244 by the maintainer, from a
 grilling session. The rulings were filed as #2341 (this ADR) and its
-implementation tickets #2342–#2346.
+implementation tickets #2342–#2346. Amended by #2404 (ruled 2026-10-04 by
+the maintainer, from a grilling session): Decision 5's table gains a row — a
+`survived` finding out of scope goes open, `ready-for-agent`, whatever reason
+its entry gives; the `false-rationale` row holds in-scope survivors only. A
+`critical` or `important` survivor on that row does not escalate: filing it
+`ready-for-agent` is the whole obligation, since the defect predates the PR.
+The `claimKind: shape` row outranks every survivor row, the new one
+included. A deferral no row holds is a mismatch naming no filing-table row,
+so a gap in the table surfaces as a retry and then an escalation (Decision
+9), never as a pass. An open issue labelled `ready-for-agent` also answers a
+`needs-triage` row; a weaker label never answers a `ready-for-agent` row. The
+body below stands as ruled: read Decision 5's table with that row added, and
+the gap the Consequences section records for #2404 as closed by this
+amendment.
 
 ## Context
 

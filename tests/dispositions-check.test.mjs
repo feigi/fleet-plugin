@@ -224,7 +224,7 @@ test("a touched line is in scope whatever the record declares; an untouched one 
 
   // survived[1] sits on untouched line 12: declared out, it defers with no reason.
   const out = f.baseEntries();
-  out[1] = f.entry("survived", 1, { scope: "out", disposition: "defer", issue: 90 });
+  out[1] = f.entry("survived", 1, { scope: "out", disposition: "defer", issue: 81 });
   f.writeRecord(out);
   okVerdict(f.check());
   // Declared in, the same deferral is a mismatch.
@@ -246,7 +246,7 @@ test("a fix-applier commit that shifts line numbers after the review head does n
   const f = fixture(t);
   // survived[1], line 12, is untouched at the review head: declared out, deferred.
   const entries = f.baseEntries();
-  entries[1] = f.entry("survived", 1, { scope: "out", disposition: "defer" });
+  entries[1] = f.entry("survived", 1, { scope: "out", disposition: "defer", issue: 81 });
   f.writeRecord(entries);
   okVerdict(f.check());
   // The fix-applier's commit rewrites line 12 and inserts lines above it: at
@@ -269,7 +269,7 @@ test("what the check accepts: applied survivors, out-of-scope deferrals, unverif
   f.setIssues({ 13: bandRecord() });
   f.writeRecord([
     f.entry("survived", 0),
-    f.entry("survived", 1, { scope: "out", claimKind: "shape", disposition: "defer", issue: 12 }),
+    f.entry("survived", 1, { scope: "out", claimKind: "shape", disposition: "defer", issue: 13 }),
     f.entry("unverified", 0, { disposition: "defer", reason: "anything", issue: 13, verdictPath: f.writeVerdict({ refuted: true, reason: "r" }) }),
     f.entry("refuted", 0, { reason: "re-ran the refuter's probe at the head and the defect reproduces", remedyFiles: ["src/b.js"] }),
   ]);
@@ -641,10 +641,11 @@ test("repoPath reads an absolute finding path relative to the snapshot or the re
 
 test("checkDispositions reads an absolute snapshot path onto the diff's touched lines", () => {
   const review = { head: "abc1234", survived: [{ file: "/snap/src/a.js", line: 5 }], unverified: [], refuted: [] };
-  const record = { head: "abc1234", entries: [{ bucket: "survived", index: 0, scope: "out", claimKind: "behavior", disposition: "defer" }] };
+  const record = { head: "abc1234", entries: [{ bucket: "survived", index: 0, scope: "out", claimKind: "behavior", disposition: "defer", issue: 9 }] };
   const touched = new Map([["src/a.js", new Set([5])]]);
-  assert.equal(checkDispositions({ review, record, touched, roots: ["/snap"] }).violations.length, 1);
-  assert.equal(checkDispositions({ review, record, touched: new Map(), roots: ["/snap"] }).violations.length, 0);
+  const filing = { pr: 40, issue: () => ({ state: "OPEN", title: "a deferred finding", labels: ["ready-for-agent"] }) };
+  assert.equal(checkDispositions({ review, record, touched, roots: ["/snap"], filing }).violations.length, 1);
+  assert.equal(checkDispositions({ review, record, touched: new Map(), roots: ["/snap"], filing }).violations.length, 0);
 });
 
 test("withVerdict replaces only the same member's verdict for the same head", () => {
@@ -670,7 +671,7 @@ function advance(f, files, survived) {
   f.writeReview({ ...f.review, head, counts: { ...f.review.counts, survived: survived.length, unverified: 0 }, survived, unverified: [] });
   return head;
 }
-const declaredOut = (f, n) => Array.from({ length: n }, (_, i) => f.entry("survived", i, { scope: "out", disposition: "defer" }));
+const declaredOut = (f, n) => Array.from({ length: n }, (_, i) => f.entry("survived", i, { scope: "out", disposition: "defer", issue: 81 }));
 const flagged = (r) => r.json.violations.map((v) => v.index);
 const finding = (file, line) => ({ severity: "important", file, line, claim: "c", evidence: "e" });
 
@@ -808,14 +809,14 @@ test("the record's head answers the review's as a prefix in either direction, ne
 });
 
 test("a finding with a line and no file is in scope; a reversed refutation's whitespace reason names no evidence", () => {
-  const out = { ...applied, scope: "out", disposition: "defer" };
+  const out = { ...applied, scope: "out", disposition: "defer", issue: 9 };
   assert.match(core([out], { survived: [{ line: 5 }] })[0], /^survived\[0\]: .* it has no file, so it is in scope/);
   assert.deepEqual(core([applied, { ...applied, bucket: "refuted", reason: " \t" }]),
     ["refuted[0]: a reversed refutation names its evidence in reason, and this one names none"]);
 });
 
 test("an absolute path into a copy of the tree no root names is read by the touched file it ends in", () => {
-  const out = { ...applied, scope: "out", disposition: "defer" };
+  const out = { ...applied, scope: "out", disposition: "defer", issue: 9 };
   // A specialist's own copy of the snapshot, and a /tmp alias of a root.
   for (const file of ["/tmp/specialist-copy/src/a.js", "/private/snap/src/a.js"]) {
     assert.match(core([out], { survived: [{ file, line: 5 }] })[0] ?? "", /^survived\[0\]: .*src\/a\.js:5 is a line the PR's diff touched/, file);
@@ -989,7 +990,7 @@ test("a re-check after an escalation replaces it with the member's new verdict, 
 test("an out-of-scope deferral, an unverified one and an applied remedy need no remedy file and escalate nothing", (t) => {
   const f = fixture(t);
   const entries = f.baseEntries();
-  entries[1] = f.entry("survived", 1, { scope: "out", disposition: "defer", reason: "remedy-outside-diff", issue: 12 });
+  entries[1] = f.entry("survived", 1, { scope: "out", disposition: "defer", reason: "remedy-outside-diff", issue: 81 });
   entries[2] = f.entry("unverified", 0, { scope: "out", disposition: "defer", reason: "remedy-outside-diff", issue: 13 });
   f.setIssues({ 13: openIssue("needs-triage") });
   f.writeRecord(entries);
@@ -1025,9 +1026,11 @@ test("withVerdict replaces an escalation with the same member's later verdict fo
 // ---------------------------------------------------------------------------
 
 // The core's review for the table: survived[0] on touched src/a.js:5;
-// unverified[0] a finding whose refuters crashed; unverified[1] a suggestion
-// on touched src/a.js:5, so in scope; unverified[2] a suggestion on an
-// untouched line.
+// survived[1] a critical finding on untouched src/a.js:30; unverified[0] a
+// finding whose refuters crashed; unverified[1] a suggestion on touched
+// src/a.js:5, so in scope; unverified[2] a suggestion on an untouched line;
+// refuted[0] the core's refuted finding.
+const TABLE_SURVIVED = [{ file: "src/a.js", line: 5 }, { file: "src/a.js", line: 30, severity: "critical" }];
 const TABLE_UNVERIFIED = [
   { file: "src/a.js", line: 9, severity: "important", refutersDispatched: 2 },
   { file: "src/a.js", line: 5, severity: "suggestion", refutersDispatched: 0 },
@@ -1041,17 +1044,20 @@ const OPEN_NT = { state: "OPEN", title: "a deferred finding", labels: ["needs-tr
 const RECORD = { state: "CLOSED", title: "PR #40 review: the suggestion band, checked", labels: ["wontfix"] };
 const closed = (issue) => ({ ...issue, state: "CLOSED" });
 const reopened = (issue) => ({ ...issue, state: "OPEN" });
+const BOTH = { ...OPEN_RFA, labels: ["ready-for-agent", "needs-triage"] };
 // Every finding of the table's review answered without a deferral, `entry`
 // standing in for the one it names.
 const tableRun = (entry, issues = {}) => {
   const fill = [
     { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "apply" },
+    { bucket: "survived", index: 1, scope: "out", claimKind: "behavior", disposition: "apply" },
     { bucket: "unverified", index: 0, scope: "in", claimKind: "behavior", disposition: "apply" },
     { bucket: "unverified", index: 1, scope: "in", claimKind: "behavior", disposition: "apply", verdictPath: STOOD_V },
     { bucket: "unverified", index: 2, scope: "out", claimKind: "behavior", disposition: "apply" },
   ];
-  return coreRun(fill.map((e) => (e.bucket === entry.bucket && e.index === entry.index ? entry : e)),
-    { unverified: TABLE_UNVERIFIED, issues, verdicts: TABLE_VERDICTS });
+  const answered = fill.some((e) => e.bucket === entry.bucket && e.index === entry.index);
+  return coreRun(answered ? fill.map((e) => (e.bucket === entry.bucket && e.index === entry.index ? entry : e)) : [...fill, entry],
+    { survived: TABLE_SURVIVED, unverified: TABLE_UNVERIFIED, issues, verdicts: TABLE_VERDICTS });
 };
 const tableCore = (entry, issues) => tableRun(entry, issues).violations.map(formatViolation);
 const deferred = (bucket, index, more = {}) => ({ bucket, index, scope: "in", claimKind: "behavior", disposition: "defer", issue: 9, ...more });
@@ -1060,16 +1066,19 @@ const deferred = (bucket, index, more = {}) => ({ bucket, index, scope: "in", cl
 // the wrong state among them.
 const ROWS = [
   [1, deferred("survived", 0, { reason: "mutual-exclusion" }), OPEN_RFA,
-    [["labelled needs-triage", OPEN_NT], ["closed", closed(OPEN_RFA)], ["carrying both triage labels", { ...OPEN_RFA, labels: ["ready-for-agent", "needs-triage"] }]]],
+    [["labelled needs-triage", OPEN_NT], ["closed", closed(OPEN_RFA)], ["carrying both triage labels", BOTH]]],
   [2, deferred("survived", 0, { reason: "false-rationale" }), RECORD,
     [["labelled needs-triage, not wontfix", { ...RECORD, labels: ["needs-triage"] }], ["open", reopened(RECORD)],
       ["another PR's record", { ...RECORD, title: "PR #41 review: the suggestion band, checked" }]]],
-  [3, deferred("unverified", 0), OPEN_NT, [["labelled ready-for-agent", OPEN_RFA], ["closed", closed(OPEN_NT)]]],
+  [3, deferred("unverified", 0), OPEN_NT, [["labelled nothing", { ...OPEN_NT, labels: [] }], ["closed", closed(OPEN_NT)], ["carrying both triage labels", BOTH]]],
   [4, deferred("unverified", 1, { verdictPath: REFUTED_V }), RECORD, [["labelled needs-triage, not wontfix", { ...RECORD, labels: ["needs-triage"] }], ["open", OPEN_NT]]],
   [5, deferred("unverified", 1, { verdictPath: STOOD_V, reason: "remedy-worse" }), OPEN_RFA, [["labelled needs-triage", OPEN_NT], ["closed", closed(OPEN_RFA)]]],
-  [6, deferred("unverified", 2, { scope: "out" }), OPEN_NT, [["labelled ready-for-agent", OPEN_RFA], ["closed", closed(OPEN_NT)]]],
+  [6, deferred("unverified", 2, { scope: "out" }), OPEN_NT, [["labelled nothing", { ...OPEN_NT, labels: [] }], ["closed", closed(OPEN_NT)], ["carrying both triage labels", BOTH]]],
   [7, deferred("survived", 0, { claimKind: "shape", reason: "remedy-worse" }), RECORD,
     [["labelled needs-triage, not wontfix", { ...RECORD, labels: ["needs-triage"] }], ["open", reopened(RECORD)]]],
+  // false-rationale is row 2's reason only in scope: out of scope it is row 8.
+  [8, deferred("survived", 1, { scope: "out", reason: "false-rationale" }), OPEN_RFA,
+    [["labelled needs-triage", OPEN_NT], ["closed", closed(OPEN_RFA)], ["the closed suggestion-band record", RECORD], ["carrying both triage labels", BOTH]]],
 ];
 for (const [n, entry, home, wrong] of ROWS) {
   test(`filing row ${n}: its home passes, and the wrong label or the wrong state is a mismatch naming the row`, () => {
@@ -1084,18 +1093,61 @@ for (const [n, entry, home, wrong] of ROWS) {
 
 test("filing row 7 outranks every row but row 4: a shape claim's deferral is filed to the closed record whatever its state", () => {
   for (const entry of [deferred("survived", 0, { claimKind: "shape", reason: "false-rationale" }), deferred("unverified", 0, { claimKind: "shape" }),
-    deferred("unverified", 1, { claimKind: "shape", verdictPath: STOOD_V }), deferred("unverified", 2, { scope: "out", claimKind: "shape" })]) {
+    deferred("unverified", 1, { claimKind: "shape", verdictPath: STOOD_V }), deferred("unverified", 2, { scope: "out", claimKind: "shape" }),
+    deferred("survived", 1, { scope: "out", claimKind: "shape" }), deferred("survived", 1, { scope: "out", claimKind: "shape", reason: "false-rationale" }),
+    deferred("refuted", 0, { scope: "out", claimKind: "shape", reason: "re-ran the probe" })]) {
     assert.deepEqual(tableCore(entry, { 9: RECORD }), [], JSON.stringify(entry));
     assert.match(tableCore(entry, { 9: OPEN_NT })[0], /: filing row 7 \(/, JSON.stringify(entry));
+    assert.match(tableCore(entry, { 9: OPEN_RFA })[0], /: filing row 7 \(/, JSON.stringify(entry));
   }
   // A refuted suggestion is row 4 whatever its claimKind; the home is the same.
   assert.match(tableCore(deferred("unverified", 1, { claimKind: "shape", verdictPath: REFUTED_V }), { 9: OPEN_NT })[0], /: filing row 4 \(/);
 });
 
+test("filing row 3 outranks row 6: a crashed unverified finding is named row 3 though it is out of scope", () => {
+  const entry = deferred("unverified", 0, { scope: "out" });
+  assert.deepEqual(tableCore(entry, { 9: OPEN_NT }), []);
+  assert.match(tableCore(entry, { 9: closed(OPEN_NT) })[0], /^unverified\[0\]: filing row 3 \(/);
+  assert.match(tableCore(entry, { 9: RECORD })[0], /^unverified\[0\]: filing row 3 \(/);
+});
+
+test("an out-of-scope survivor is filed open ready-for-agent whatever its reason, and escalates nothing at any severity", () => {
+  for (const reason of [undefined, "", "false-rationale", "mutual-exclusion", "remedy-worse", "remedy-outside-diff", "outside-ticket-files"]) {
+    const r = tableRun(deferred("survived", 1, { scope: "out", reason }), { 9: OPEN_RFA });
+    assert.deepEqual([r.violations, r.escalations, r.unchecked], [[], [], []], String(reason));
+  }
+  // survived[1] is critical, and its remedy sits outside the diff: still no escalation.
+  const r = tableRun(deferred("survived", 1, { scope: "out", reason: "remedy-outside-diff", remedyFiles: ["src/b.js"] }), { 9: OPEN_RFA });
+  assert.deepEqual([r.violations, r.escalations], [[], []]);
+  // Declared out on a touched line it is in scope, so false-rationale is row 2's, not row 8's.
+  assert.match(tableCore(deferred("survived", 0, { scope: "out", reason: "false-rationale" }), { 9: OPEN_RFA })[0], /^survived\[0\]: filing row 2 \(/);
+});
+
+test("an open ready-for-agent issue answers a needs-triage row; an open needs-triage one never answers a ready-for-agent row", () => {
+  for (const entry of [deferred("unverified", 0), deferred("unverified", 2, { scope: "out" })]) {
+    assert.deepEqual(tableCore(entry, { 9: OPEN_RFA }), [], JSON.stringify(entry));
+  }
+  for (const entry of [deferred("survived", 0, { reason: "mutual-exclusion" }), deferred("unverified", 1, { verdictPath: STOOD_V, reason: "remedy-worse" }),
+    deferred("survived", 1, { scope: "out" })]) {
+    assert.match(tableCore(entry, { 9: OPEN_NT })[0] ?? "",
+      /: filing row [158] \(.*\): it belongs in an open issue labelled ready-for-agent, and #9 is open, titled "a deferred finding", labelled needs-triage$/, JSON.stringify(entry));
+  }
+});
+
+test("a deferral no filing-table row holds is a mismatch naming no filing-table row, never a pass", () => {
+  const reversed = deferred("refuted", 0, { scope: "out", reason: "re-ran the probe" });
+  const rule = "refuted[0]: no filing-table row holds a deferred refuted finding, scope out, claimKind behavior — the table names no home for it";
+  for (const home of [OPEN_RFA, OPEN_NT, RECORD]) assert.deepEqual(tableCore(reversed, { 9: home }), [rule], JSON.stringify(home));
+  const { issue: _, ...unfiled } = reversed;
+  assert.deepEqual(tableCore(unfiled), [rule]);
+  // Applied, a reversed refutation is never filed, so no row is asked for.
+  assert.deepEqual(tableCore({ ...reversed, disposition: "apply" }, { 9: closed(OPEN_NT) }), []);
+});
+
 test("a deferral that names no issue is a mismatch naming its row and home", () => {
   const { issue: _, ...entry } = deferred("unverified", 2, { scope: "out" });
   assert.deepEqual(tableCore(entry), [
-    `unverified[2]: filing row 6 (${FILING_ROWS[6].finding}): a deferral names the issue it was filed to, and this entry names none — it belongs in an open issue labelled needs-triage`,
+    `unverified[2]: filing row 6 (${FILING_ROWS[6].finding}): a deferral names the issue it was filed to, and this entry names none — it belongs in an open issue labelled needs-triage or ready-for-agent`,
   ]);
 });
 
@@ -1132,16 +1184,17 @@ test("an in-scope suggestion needs refuter evidence whether applied or deferred;
   assert.deepEqual(tableCore(deferred("unverified", 1, { disposition: "apply", verdictPath: STOOD_V })), [], "row 5: applied");
 });
 
-test("what the filing check never reads: an applied finding, an out-of-scope survivor, a crashed finding or an out-of-scope suggestion applied", () => {
+test("what the filing check never reads: an applied finding, a crashed finding or an out-of-scope suggestion applied, a reversed refutation applied", () => {
   const filing = { pr: 40, issue: () => assert.fail("the tracker was read"), verdict: () => assert.fail("a verdict was read") };
   const entries = [
     { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "apply", issue: 9 },
-    { bucket: "survived", index: 1, scope: "out", claimKind: "behavior", disposition: "defer", issue: 9 },
+    { bucket: "survived", index: 1, scope: "out", claimKind: "behavior", disposition: "apply", issue: 9 },
     { bucket: "unverified", index: 0, scope: "in", claimKind: "behavior", disposition: "apply", issue: 9 },
     { bucket: "unverified", index: 1, scope: "out", claimKind: "behavior", disposition: "apply", issue: 9 },
+    { bucket: "refuted", index: 0, scope: "out", claimKind: "behavior", disposition: "apply", reason: "re-ran the probe", issue: 9 },
   ];
   const r = checkDispositions({
-    review: { head: H40, survived: [{ file: "src/a.js", line: 5 }, { file: "src/a.js", line: 30 }], refuted: [],
+    review: { head: H40, survived: [{ file: "src/a.js", line: 5 }, { file: "src/a.js", line: 30 }], refuted: [{ file: "src/b.js", line: 1 }],
       unverified: [TABLE_UNVERIFIED[0], TABLE_UNVERIFIED[2]] },
     record: { head: H40, entries }, touched: new Map([["src/a.js", new Set([5])]]), diffFiles: ["src/a.js"], roots: [], filing,
   });
@@ -1174,12 +1227,32 @@ test("a confirmed defect deferred for an allowed reason and filed needs-triage i
   entries[0] = f.entry("survived", 0, { disposition: "defer", reason: "mutual-exclusion", issue: 81 });
   f.writeRecord(entries);
   const r = f.check();
-  mismatch(r, /^fix-pr-40: survived\[0\]: filing row 1 \(a survived finding deferred for an allowed reason other than false-rationale\): it belongs in an open issue labelled ready-for-agent, and #81 is open, titled "a deferred finding", labelled needs-triage$/m);
+  mismatch(r, /^fix-pr-40: survived\[0\]: filing row 1 \(an in-scope survived finding deferred for an allowed reason other than false-rationale\): it belongs in an open issue labelled ready-for-agent, and #81 is open, titled "a deferred finding", labelled needs-triage$/m);
   assert.equal(r.json.violations.length, 1);
   assert.match(f.ledgerCli("dispatch", "40", "finisher-pr-40").stderr, /dispositions mismatch/);
   f.setIssues({ 81: openIssue("ready-for-agent") });
   okVerdict(f.check());
   assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+});
+
+test("a critical out-of-scope survivor filed open ready-for-agent is ok, never escalate; filed needs-triage or to the record it is a mismatch naming row 8", (t) => {
+  const f = fixture(t);
+  f.writeReview({ ...f.review, survived: [f.review.survived[0], { ...f.review.survived[1], severity: "critical" }] });
+  f.setIssues({ 13: bandRecord() });
+  const entries = f.baseEntries();
+  entries[1] = f.entry("survived", 1, { scope: "out", disposition: "defer", reason: "remedy-outside-diff", remedyFiles: ["src/b.js"], issue: 81 });
+  f.writeRecord(entries);
+  const r = f.check();
+  okVerdict(r);
+  assert.deepEqual(r.json.escalations, []);
+  assert.ok(f.row().includes(`dispositions-ok=fix-pr-40:${f.head}`), f.row());
+  for (const [issue, is] of [[77, "open, titled \"a deferred finding\", labelled needs-triage"], [13, "closed, titled \"PR #40 review: the suggestion band, checked\", labelled wontfix"]]) {
+    for (const reason of ["remedy-outside-diff", "false-rationale"]) {
+      entries[1] = f.entry("survived", 1, { scope: "out", disposition: "defer", reason, issue });
+      f.writeRecord(entries);
+      mismatch(f.check(), new RegExp(`^fix-pr-40: survived\\[1\\]: filing row 8 \\(an out-of-scope survived finding, whatever its reason\\): it belongs in an open issue labelled ready-for-agent, and #${issue} is ${is.replace(/[()]/g, "\\$&")}$`, "m"));
+    }
+  }
 });
 
 test("gh is run from the repository with no ambient GIT_DIR", (t) => {
