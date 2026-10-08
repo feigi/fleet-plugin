@@ -160,22 +160,20 @@ export class RulingError extends Error {}
 
 // The row ruling `ticket`'s Pull dated `pullDate`, from `rulingsByTicket`: its
 // last ruling in file order dated on or after the Pull, since a ruling never
-// predates the Pull it rules — or null. Throws a `RulingError` on a ruling of
-// the ticket whose `run_date` is not YYYY-MM-DD, which cannot be placed against
-// the Pull and whose drop would uncount the ticket, and on the ruling it picks
-// holding anything but `yes` or `no` in a verdict column, which would otherwise
+// predates the Pull it rules — or null. Throws a `RulingError` on any ruling of
+// the ticket, picked or not, whose `run_date` is not YYYY-MM-DD, which cannot be
+// placed against the Pull and whose drop would uncount the ticket, or which
+// holds anything but `yes` or `no` in a verdict column, which would otherwise
 // read as a pass.
 export function rulingFor(rulings, ticket, pullDate) {
   const own = rulings.get(String(ticket)) ?? [];
   for (const r of own) {
     if (!DATE.test(r.run_date)) throw new RulingError(`ticket #${ticket} (PR #${r.pr}): run_date is '${r.run_date}', expected YYYY-MM-DD`);
+    for (const c of VERDICT_COLUMNS) {
+      if (!VERDICT.includes(r[c])) throw new RulingError(`ticket #${ticket} (PR #${r.pr}): ${c} is '${r[c]}', expected yes or no`);
+    }
   }
-  const v = own.findLast((r) => r.run_date >= pullDate);
-  if (!v) return null;
-  for (const c of VERDICT_COLUMNS) {
-    if (!VERDICT.includes(v[c])) throw new RulingError(`ticket #${ticket} (PR #${v.pr}): ${c} is '${v[c]}', expected yes or no`);
-  }
-  return v;
+  return own.findLast((r) => r.run_date >= pullDate) ?? null;
 }
 
 // Every member-outcomes.tsv row for the ticket's implementer, of ANY agent

@@ -182,9 +182,9 @@ export function readout({ features, members }) {
  * before the ruling, and only when that Pull is
  * countable: admissible, at a cell named in `added` other than the policy
  * cell, and dated on or after the day that cell's definition was added.
- * Throws on the ruling of a ticket with a countable Pull whose
- * `closed_own_ticket` or `minted_false_claim` is not `yes` or `no`, on a
- * non-blank ruling row of such a ticket whose `run_date` is not `YYYY-MM-DD`,
+ * Throws on a non-blank ruling row of a ticket with a countable Pull whose
+ * `closed_own_ticket` or `minted_false_claim` is not `yes` or `no` or whose
+ * `run_date` is not `YYYY-MM-DD`,
  * on an admissible Pull at a cell named in `added` whose `run_date` is not
  * `YYYY-MM-DD`, on any Pull of a ruled ticket with a countable Pull whose
  * `run_date` is not `YYYY-MM-DD`, and on a member-outcomes session+agent
