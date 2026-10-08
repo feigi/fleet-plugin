@@ -879,16 +879,23 @@ wt_counts() {
 # 2.50.1: the sibling's live, clean worktree was then the one `reap --apply`
 # removed). So when `$wt_list` holds more than one record for $1, which
 # worktree stands there is unknown and $1 is refused. A caller that has read no
-# listing (`$wt_list` empty) skips this question.
+# listing (`$wt_list` empty or unset) skips this question. Counted in shell,
+# line by line, so the question adds no external command whose failure would
+# be a new way for a caller to refuse.
 # shellcheck disable=SC2034
 wt_linkage() {
   wt_why=
-  if [ -n "$wt_list" ]; then
-    if ! wt_lk_n=$(printf '%s\n' "$wt_list" |
-        P="$1" LC_ALL=C awk '/^worktree /{if (substr($0,10)==ENVIRON["P"]) c++} END{print c+0}'); then
-      wt_why="could not scan the worktree listing for $1, so whether one worktree stands there is unknown"
-      return 1
-    fi
+  wt_lk_n=0
+  if [ -n "${wt_list:-}" ]; then
+    # Whole records, one per line (`wt_listing` swapped any newline inside a
+    # path), so equality against `worktree $1` is the path compare, and a path
+    # that merely starts with $1 never counts. The heredoc keeps the loop in
+    # this shell.
+    while IFS= read -r wt_lk_l; do
+      if [ "$wt_lk_l" = "worktree $1" ]; then wt_lk_n=$((wt_lk_n + 1)); fi
+    done <<EOF
+$wt_list
+EOF
     if [ "$wt_lk_n" -gt 1 ]; then
       wt_why="the worktree listing names $1 for $wt_lk_n worktrees — a symbolic link standing in for another worktree's directory, so which one stands there is unknown"
       return 1
