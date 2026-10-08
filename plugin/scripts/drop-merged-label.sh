@@ -94,8 +94,9 @@ esac
 # entirely — the exact "commits close nothing" misreading the label scan
 # below already guards against. `awk '{print $0+0}'` strips any
 # leading zeros before the final sort, so a
-# commit-message "#007" reaches the JSON payload below as the bare,
-# valid-JSON integer `7` — and correctly dedupes against a plain `7` named
+# zero-padded commit-message ref (`007` after its `#`) reaches the JSON
+# payload below as the bare, valid-JSON integer `7` — and correctly dedupes
+# against a plain `7` named
 # by the other signal.
 if union=$(printf '%s\n%s\n' "$issues" "$commit_issues" | grep -Eo '[0-9]+'); then
   union_rc=0

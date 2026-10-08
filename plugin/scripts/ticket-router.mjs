@@ -351,7 +351,7 @@ function fitTickets({ features, members, verdicts, window, cutoff }) {
       if (UNBOOKED(name)) continue;
       if (!(keys.has(`${mr.session}\0${mr.agent}`) || mr.ticket === ticket || (verdict && verdict.pr && mr.pr === verdict.pr))) continue;
       booked++;
-      // `cost` is a priced member-outcomes column (#2132); a row without it makes
+      // `cost` is a priced member-outcomes column; a row without it makes
       // the ticket's $ unknown, so the fit adopts nothing off a TSV that lacks the column.
       if (mr.cost === undefined || mr.cost === "" || !Number.isFinite(Number(mr.cost))) costKnown = false;
       else cost += Number(mr.cost);

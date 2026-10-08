@@ -1602,8 +1602,8 @@ function rowKey(r) {
   return r.split(/\s/)[0];
 }
 
-// A row's PR is its first `PR#<n>` mention: the `→ PR#346` arrow or the
-// implementer's settled `impl-324=PR#346` token, which name the same PR.
+// A row's PR is its first `PR#<n>` mention: the `→ PR#<n>` arrow or the
+// implementer's settled `impl-<N>=PR#<n>` token, which name the same PR.
 // compute-board.mjs parseRow() reads the settled token, so the row a
 // PR-bound member lands on is the card the cockpit shows that PR on.
 function rowPr(r) {
@@ -1827,8 +1827,8 @@ function runDispatch() {
 
 function runSettle() {
   const usage = "usage: ledger.mjs settle <member> <outcome>";
-  // `settle impl-412 PR#420`, or the one token it writes — `settle
-  // impl-412=PR#420` — which is how the spec's record-before-tick table
+  // `settle impl-<N> PR#<n>`, or the one token it writes — `settle
+  // impl-<N>=PR#<n>` — which is how the spec's record-before-tick table
   // spells every settlement.
   if (!(rest.length === 2 || (rest.length === 1 && rest[0].includes("=")))) die(usage);
   refuseStrayInId(rest[0], "a member name");

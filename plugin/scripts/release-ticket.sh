@@ -252,9 +252,9 @@ esac
 # and its unpushed commit go at exit 0, "released":true, no blockers.
 # Measured on a real bare-origin fixture; `git rev-parse origin/main` prints the
 # tag's OID under git's own `refname 'origin/main' is ambiguous` warning, which
-# nothing here reads. Pre-#760 `-d` refused this ("not fully merged") — the
-# guards were already vacuous under it, so `-d` was the sole backstop, and this
-# is the one class its removal reopened.
+# nothing here reads. The `-d` delete this script once used refused this
+# ("not fully merged") — the guards were already vacuous under it, so `-d` was
+# the sole backstop, and this is the one class its removal reopened.
 #
 # The fix is to stop MEASURING against a shorthand: the accept-list already
 # establishes $base names a remote-tracking ref, so qualify it to the full
@@ -1518,7 +1518,7 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   fi
   # Ignored files are deliberately not a blocker: the runner claim-ticket.sh
   # writes into a claimed worktree is excluded (ignored) there, and older
-  # checkouts hold a `.gitignore`'d `.agent-test.sh` from the pre-ADR-0015
+  # checkouts hold a `.gitignore`'d `.agent-test.sh` from a since-replaced
   # bootstrap, so blocking on ignored files would strand every
   # claim. `git worktree remove` deletes ignored files
   # silently and refuses on modified and untracked ones (verified, git 2.50.1) —

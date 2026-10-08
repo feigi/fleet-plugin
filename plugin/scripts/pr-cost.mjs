@@ -21,7 +21,7 @@
 //   2  input error — nothing is written
 //
 // The exit status is the guard's carrier: the verdict never lives only in
-// prose. The router (not in the tree yet; ADR 0016) is to read the file, and
+// prose. The router (not in the tree yet) is to read the file, and
 // fleet-tick's `router` row prints it today; a missing or unparseable file
 // means the default cell only, so deleting it cannot evade the guard.
 //

@@ -341,7 +341,7 @@ export function actionable(rows) {
 export class LedgerError extends Error {}
 
 // A row's PR is its first `PR#<n>` mention — ledger.mjs rowPr()'s reading, so
-// both the `→ PR#346` arrow and a settled `impl-324=PR#346` name it. A row
+// both the `→ PR#<n>` arrow and a settled `impl-<N>=PR#<n>` name it. A row
 // with none is keyed by the PR's own number when it is about a PR at all (a PR
 // this run's implementers did not open) — this is ledger.mjs's
 // memberRowIndex() fallback specifically, which gates on the member being
