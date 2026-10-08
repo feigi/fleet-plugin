@@ -1,7 +1,10 @@
 # 0021 — The native omp install route replaces the marketplace distribution
 
 **Status:** Accepted. Ruled 2026-09-30 on #1430 by the maintainer, from a
-grilling session against fresh measurements on omp 18.4.4.
+grilling session against fresh measurements on omp 18.4.4. Amended by #1381:
+run-team-help deleted — on omp 18.8.5 the picker hides skill:run-team through a
+name tie with plugin commands, not through disable-model-invocation; /team and
+/skill:run surface it.
 
 ## Context
 

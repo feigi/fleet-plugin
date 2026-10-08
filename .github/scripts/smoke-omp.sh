@@ -312,7 +312,7 @@ for _ in $(seq 50); do
   sleep 0.2
 done
 [ -n "$MOCK_PORT" ] || { echo "::error::smoke-omp: scripted mock never reported a bound port — mock output: $(tail -n 5 "$SCRATCH/mock.err" | tr '\n' ' ')"; exit 1; }
-for cmd in run-team-help review-and-fix run-merge-bot; do
+for cmd in review-and-fix run-merge-bot; do
   # probe_substitution prints its own cause-specific ::error:: line.
   probe_substitution "$cmd" || fail=1
 done
