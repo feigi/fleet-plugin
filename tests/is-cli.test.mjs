@@ -78,6 +78,19 @@ const CLI_SCRIPTS = [
   "member-outcomes", "tier-check", "tier-outcomes", "tier-roles", "board", "dispositions-check", "recipe-prove",
 ];
 
+// A guard that wrongly runs main() on import leaves a child that need never
+// exit, and a synchronous spawn blocks this file's event loop, so no
+// --test-timeout can stop it: the bound has to be the spawn's own. SIGKILL,
+// not the default SIGTERM, which a child can trap and keep spawnSync waiting.
+// The timeout is read first: spawnSync reports it as an ETIMEDOUT `error`
+// beside `status: null`.
+const SPAWN_TIMEOUT_MS = 30_000;
+function spawnNode(label, argv, cwd) {
+  const r = spawnSync(process.execPath, argv, { cwd, encoding: "utf8", timeout: SPAWN_TIMEOUT_MS, killSignal: "SIGKILL" });
+  assert.notEqual(r.error?.code, "ETIMEDOUT", `${label} still running at the ${SPAWN_TIMEOUT_MS}ms spawn timeout, killed`);
+  return r;
+}
+
 for (const name of CLI_SCRIPTS) {
   test(`${name}.mjs run through a symlinked path still runs main()`, () => {
     const dir = tempDir("is-cli-run-");
@@ -88,9 +101,8 @@ for (const name of CLI_SCRIPTS) {
     const script = join(dir, LINK_NAME);
     symlinkSync(join(linkDir, `${name}.mjs`), script);
     assert.equal(script.includes(`${name}.mjs`), false, script);
-    const run = (path) => spawnSync(process.execPath, [path, "--bogus"], { cwd: dir, encoding: "utf8" });
-    const real = run(join(SCRIPTS_DIR, `${name}.mjs`));
-    const linked = run(script);
+    const real = spawnNode(`${name}.mjs`, [join(SCRIPTS_DIR, `${name}.mjs`), "--bogus"], dir);
+    const linked = spawnNode(`${name}.mjs via symlink`, [script, "--bogus"], dir);
     assert.equal(real.status, 2, `signal ${real.signal}: ${real.stderr}`);
     assert.equal(linked.status, real.status, `via symlink: ${linked.stderr}`);
     assert.equal(linked.stderr, real.stderr);
@@ -107,7 +119,7 @@ for (const name of CLI_SCRIPTS) {
     symlinkSync(join(SCRIPTS_DIR, `${name}.mjs`), link);
     const source = `await import(${JSON.stringify(pathToFileURL(link).href)});`;
     assert.equal(source.includes(`${name}.mjs`), false, source);
-    const run = spawnSync(process.execPath, ["--input-type=module", "-e", source], { cwd: dir, encoding: "utf8" });
+    const run = spawnNode(`${name}.mjs imported`, ["--input-type=module", "-e", source], dir);
     assert.equal(run.status, 0, run.stderr);
     assert.equal(run.stdout, "");
     assert.equal(run.stderr, "");
