@@ -1521,7 +1521,7 @@ owes beyond its row:
   whichever point the ticket fails them.
 - **A review result lands** → see the result file written (by you or by the
   runner — **Reviewers** says which, per harness) and record `reviewed=` off its
-  digest, then run the tick: a PR with survivors prints as
+  digest, then run the tick: a PR with survived or unverified findings prints as
   `DISPATCH fix-pr PR#<M>`. Nothing survived and nothing to file → skip the
   fix-applier and dispatch the **finisher** directly: no member will touch that
   PR, so no push is coming and nothing will wake you. A review that failed is
@@ -2125,7 +2125,8 @@ cap. A runner member that is killed rather than failed follows **Failure
 handling** (fresh name, inherited state stated).
 
 **Then dispatch a fix-applier** — on `DISPATCH fix-pr PR#<M>`, which the tick
-prints for a PR whose `reviewed=` counts survivors that no review fix-applier
+prints for a PR whose `reviewed=` counts survived or unverified findings that
+no review fix-applier
 has landed `applied:`/`no-op` on since, with no fix-applier live on it — one
 named member per PR, `fix-pr-<pr#>` (the next suffix when that name is already
 on record), never the PR's
@@ -2526,7 +2527,10 @@ latest `reviewed=` counts a survived or unverified finding, unless the
 dispositions verdict answering that review's head is `ok`**: among the
 `dispositions-*=fix-pr-<M>[-x]:<head>` tokens whose head matches it, the one
 from the highest-suffixed fix-applier. A PR whose latest review counts
-`0/<n>/0` is not gated. The refusal names its cause. `dispositions
+`0/<n>/0` is not gated. One counting `0/<n>/<u>` with `<u>` above zero is
+gated like survivors, and the tick prints `DISPATCH fix-pr PR#<M>` for it: that
+fix-applier's `no-op` and its `ok` verdict are what open the finisher. The
+refusal names its cause. `dispositions
 unchecked` — no verdict answers that head: run `dispositions-check.mjs` for
 the fix-applier that answered the review, as the Fix-applier report edge
 states, then dispatch again. `dispositions mismatch` — no finisher: the tick
@@ -2975,7 +2979,8 @@ touch, and to read each corrected sentence literally, clause by clause. It then
 does the fix-applier's job too:
 apply, defer, file, push, report, exit. On its report, record
 `reviewed=<head>:0/<refuted>/<deferred>` against the head it pushed — it applied
-its own survivors, so the zero is what tells the tick no fix-applier is owed —
+its own survivors, so the zero is what tells the tick no fix-applier is owed for
+them; a nonzero `<deferred>` is still fix-due, as any review's unverified band is —
 and it reaches a finisher through the same gate as any other PR.
 
 **Authorize the fan-out explicitly.** State that the full specialist set IS the

@@ -772,15 +772,16 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     // The in-flight reviews of PRs the open list does not carry: the ones
     // `finished` could retire, so the caller asks gh about these and no others.
     reviewsOffList: reviewing.filter(([n]) => !open.has(n)).map(([n]) => n).sort(asc),
-    // A returned review whose survivors no review fix-applier has answered,
-    // a conflict hold no fix-applier has cleared, or a dispositions mismatch
-    // no retry has answered — on a PR still open, with no fix-applier working
-    // it and no newer review running. The first two are answered apart
-    // here: a landed conflict fix-applier lifts the hold and leaves
-    // survivors it never read due for a review one.
+    // A returned review whose survived or unverified findings no review
+    // fix-applier has answered — `ledger.mjs dispatch` refuses a finisher
+    // on either until one has — a conflict hold no fix-applier has cleared,
+    // or a dispositions mismatch no retry has answered — on a PR still open,
+    // with no fix-applier working it and no newer review running. The first
+    // two are answered apart here: a landed conflict fix-applier lifts the
+    // hold and leaves findings it never read due for a review one.
     fixDue: [...byPr.entries()]
       .filter(([n, st]) => open.has(n)
-        && ((st.survived > 0 && !st.reviewFixed) || conflictHeld(st) || mismatchDue(st))
+        && (((st.survived > 0 || st.unverified > 0) && !st.reviewFixed) || conflictHeld(st) || mismatchDue(st))
         && !fixRunning(st) && !st.inFlight)
       .map(([n]) => n).sort(asc),
     // Open, not signed off, closing an issue (GitHub's own linked set — a
