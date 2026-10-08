@@ -4,8 +4,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
@@ -250,6 +250,21 @@ test("--guard: with no --out the file lands in the main workspace, where fleet-t
   const file = join(r.dir, "main", ".fleet", "cost-guard.json");
   assert.equal(readCostGuard(file).status, "ok", "the tick's reader accepts the file where it looks for it");
   assert.equal(existsSync(join(r.dir, "wt", ".fleet")), false, "nothing is written under the worktree's own cwd");
+});
+
+test("--guard: outside any repository with no --out, the cwd-relative fallback is announced with the reason, not taken in silence", () => {
+  const w = world();
+  addCell(w, "slow-high", MIN_N - 1, 0, 10);
+  const r = runCli(w, null, {
+    at: (dir) => ({
+      cwd: dir, env: { GIT_CEILING_DIRECTORIES: dirname(realpathSync(dir)) },
+      args: ["--guard"],
+    }),
+  });
+  assert.equal(r.status, 4, r.stderr);
+  assert.match(r.stderr, /pr-cost: WARNING could not resolve --git-common-dir: \S/, "the reason must follow, not only the fact of the failure");
+  assert.match(r.stderr, /cwd-relative \.fleet\/cost-guard\.json/);
+  assert.equal(existsSync(r.guardPath), true, "the fallback is still where the guard file lands");
 });
 
 test("an ambient GIT_DIR naming another repository cannot move the guard file out of the repository pr-cost runs in", () => {

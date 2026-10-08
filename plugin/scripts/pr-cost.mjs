@@ -431,12 +431,14 @@ export function guardFile(report, computedAt) {
 
 // `.fleet/cost-guard.json` in the main workspace — fleet-dir.mjs's fleetFile(),
 // where fleet-tick reads it — not in the cwd, which from a linked worktree is a
-// different directory the tick never looks in. The cwd when git cannot answer.
+// different directory the tick never looks in. The cwd when git cannot answer,
+// announced on stderr rather than degraded to in silence, with git's reason.
 function defaultGuardPath() {
   try {
     return fleetFile("cost-guard.json");
   } catch (e) {
     if (!(e instanceof FleetDirUnresolvable)) throw e;
+    console.error(`${NAME}: WARNING ${e.message}; writing the guard to cwd-relative .fleet/cost-guard.json`);
     return join(".", ".fleet", "cost-guard.json");
   }
 }

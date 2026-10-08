@@ -33,7 +33,7 @@ import {
   mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, existsSync, rmSync, realpathSync, readdirSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
@@ -356,6 +356,17 @@ test("a failed scan, an unreadable ledger or a stray argument refuses at exit 2 
   assert.equal(unread.status, 2, unread.stderr);
   assert.match(unread.stderr, /shortlist: ledger\.mjs read exited 2/);
   assert.equal(readFileSync(f.shortlistFile, "utf8"), before);
+});
+
+// The refusal names what failed: an operator watching a stalled run has to be
+// able to tell "outside a repository" from "no candidates yet", and the reason
+// is fleet-dir.mjs's message, which carries git's own.
+test("outside any repository the shortlist refuses at exit 2 naming the failed resolution and git's reason", (t) => {
+  const f = fixture(t);
+  const outside = join(f.root, "bin");
+  const r = f.run({ cwd: outside, env: { GIT_CEILING_DIRECTORIES: dirname(f.root) } });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /shortlist: could not resolve --git-common-dir: \S/);
 });
 
 test("a shortlist directory that cannot be created is reported as the write failure, not an unexpected one", (t) => {

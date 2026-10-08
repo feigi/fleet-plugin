@@ -142,3 +142,69 @@ test("a git that never answers is killed at timeoutMs and reported as unresolvab
   });
   assert.ok(Date.now() - started < 10_000, "the probe was not held to timeoutMs");
 });
+
+// A fake `git` first on PATH, answering `rev-parse` with `body` (a /bin/sh
+// script). The module under test spawns the real binary by name, so this is
+// the only way to give it a git that fails in a chosen way.
+function shimGit(t, prefix, body) {
+  const bin = tempDir(t, prefix);
+  const shim = join(bin, "git");
+  writeFileSync(shim, `#!/bin/sh\n${body}\n`);
+  chmodSync(shim, 0o755);
+  return bin;
+}
+
+function unresolvable(bin, options) {
+  let thrown = null;
+  withEnv({ PATH: `${bin}:${process.env.PATH}` }, () => {
+    try {
+      fleetFile("ledger.md", { cwd: bin, ...options });
+    } catch (e) {
+      thrown = e;
+    }
+  });
+  assert.ok(thrown instanceof FleetDirUnresolvable, `expected FleetDirUnresolvable, got ${thrown}`);
+  return thrown;
+}
+
+test("a git that fails silently still has its exit status named", (t) => {
+  const e = unresolvable(shimGit(t, "fleet-dir-exit-", "exit 7"));
+  assert.match(e.message, /exit 7/, "a silent non-zero exit would otherwise leave the message naming no cause");
+});
+
+test("a git killed by a signal has the signal named", (t) => {
+  const e = unresolvable(shimGit(t, "fleet-dir-signal-", "kill -9 $$"));
+  assert.match(e.message, /SIGKILL/, "a kill that is not the bound's own timeout must still say how git ended");
+});
+
+test("whitespace-only stderr falls through to the exit status rather than naming nothing", (t) => {
+  const e = unresolvable(shimGit(t, "fleet-dir-blank-", "printf '  \\n\\n' >&2\nexit 3"));
+  assert.match(e.message, /exit 3/);
+});
+
+test("git's stderr is trimmed before it is named", (t) => {
+  const e = unresolvable(shimGit(t, "fleet-dir-trim-", "printf '\\n  boom-reason  \\n\\n' >&2\nexit 128"));
+  assert.equal(e.message, "could not resolve --git-common-dir: boom-reason");
+});
+
+test("a long stderr is capped, keeping the END where git says why it stopped", (t) => {
+  const e = unresolvable(shimGit(t, "fleet-dir-long-",
+    "printf 'HEADMARK%s' \"$(awk 'BEGIN{for(i=0;i<1500;i++)printf \"x\"}')\" >&2\nprintf 'TAILMARK' >&2\nexit 128"));
+  const prefix = "could not resolve --git-common-dir: ";
+  assert.ok(e.message.startsWith(prefix));
+  assert.ok(e.message.length - prefix.length <= 500, `the cause was not capped: ${e.message.length - prefix.length} chars`);
+  assert.ok(e.message.endsWith("TAILMARK"), "the cap must keep the tail, not the head");
+  assert.ok(!e.message.includes("HEADMARK"), "the head of a long stderr must be dropped");
+});
+
+// The one case that has to pay the default bound in full: a shim that would
+// outlive it by a wide margin, with no `timeoutMs` passed. Raising the default
+// to a practically unbounded value turns the ETIMEDOUT into a 20 s wait that
+// ends in a different error.
+test("with no timeoutMs a git that never answers is still killed, by the default bound", (t) => {
+  const bin = shimGit(t, "fleet-dir-default-hang-", "exec sleep 20");
+  const started = Date.now();
+  const e = unresolvable(bin, {});
+  assert.match(e.message, /ETIMEDOUT/, "the default bound must fire and name itself");
+  assert.ok(Date.now() - started < 18_000, "the default bound did not hold the probe");
+});

@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, symlinkSync, existsSync, realpathSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, symlinkSync, existsSync, realpathSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -591,6 +591,25 @@ test("a ledger path that cannot be looked up is a fault, never a standalone run"
   r = standalone(f);
   assert.equal(r.status, 2, r.stderr);
   assert.equal(existsSync(join(f.dir, "nowhere.md")), false, "nothing was created through the link");
+});
+
+// The default ledger is looked up through fleet-dir.mjs's fleetFile(), and a
+// failure of that lookup refuses at exit 2 with ITS message: what failed and
+// git's reason. The repository is a real one (the merge-base probes before it
+// answer), so the shim refuses only the `--git-common-dir` question.
+test("a default ledger whose location cannot be resolved is a fault naming the failed resolution and its reason", (t) => {
+  const f = fixture(t);
+  f.writeRecord(f.baseEntries());
+  const real = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  const shimDir = join(f.dir, "git-shim");
+  mkdirSync(shimDir);
+  writeFileSync(join(shimDir, "git"),
+    `#!/bin/sh\ncase " $* " in *" --git-common-dir "*) echo "shim-refusal" >&2; exit 1 ;; esac\nexec '${real}' "$@"\n`);
+  chmodSync(join(shimDir, "git"), 0o755);
+  const r = spawnSync(process.execPath, [SCRIPT, "--member", "fix-pr-40", "--scratch", f.scratch, "--repo", f.repo],
+    { encoding: "utf8", env: f.env({ ...cleanEnv(), PATH: `${shimDir}:${process.env.PATH}` }), cwd: f.dir });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /dispositions-check: could not resolve --git-common-dir: shim-refusal/);
 });
 
 test("an ambient GIT_DIR naming another repository does not change the answer", (t) => {

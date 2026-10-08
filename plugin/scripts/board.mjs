@@ -1349,7 +1349,7 @@ async function main() {
     // writes no state directory, so the argument that moved serve()'s default
     // onto the workspace does not reach it, and changing it would change what
     // an existing `build` reads.
-    const instance = resolveCockpitInstance({ cwd: process.cwd(), workspace: cockpitWorkspace(process.cwd()) });
+    const instance = resolveCockpitInstance({ cwd: process.cwd(), ...cockpitWorkspace(process.cwd()) });
     const model = computeBoard(await gather({
       ledgerFile: ledgerFile || ".fleet/ledger.md", prevFile,
       // The heartbeat's file, from the SAME instance the identity
@@ -1498,8 +1498,12 @@ function isWorkspaceId(v) {
  * the `canonicalise` opt-in only this caller takes: a symlinked route to one
  * workspace must derive that workspace's port instead of a second, private
  * one.
+ *
+ * `why` is fleetFile()'s message when it could not answer — it names what
+ * failed, and the degrade warning below carries it, as the ledger's does.
+ * Absent, the warning names the failure without a reason.
  */
-export function resolveCockpitInstance({ cwd = process.cwd(), workspace, port } = {}) {
+export function resolveCockpitInstance({ cwd = process.cwd(), workspace, why, port } = {}) {
   // `port != null`, never truthiness: --port 0 is a real request (an
   // ephemeral bind) and reading it as "absent" would derive a port
   // straight over the top of one the caller explicitly asked for.
@@ -1513,7 +1517,7 @@ export function resolveCockpitInstance({ cwd = process.cwd(), workspace, port } 
     // a board. The wording is the ledger's rather than a second dialect for
     // the same failure, trailing parenthetical included — that parenthetical
     // names what is degraded HERE, which is not what is degraded there.
-    console.error(`${NAME}: WARNING could not resolve --git-common-dir; using cwd-relative .fleet (a second cockpit in another workspace may collide on this port and this state directory)`);
+    console.error(`${NAME}: WARNING ${why || "could not resolve --git-common-dir"}; using cwd-relative .fleet (a second cockpit in another workspace may collide on this port and this state directory)`);
     // Absolute, like the resolved arm, but anchored on the cwd — which is
     // what "cwd-relative" resolves to and what this script's fs calls did
     // with the bare `.fleet` they used before. No workspace was established,
@@ -1529,16 +1533,17 @@ export function resolveCockpitInstance({ cwd = process.cwd(), workspace, port } 
   };
 }
 
-// The impure half, deliberately outside the seam above: the workspace
-// fleetFile() resolves from `cwd`, or null when it cannot — which takes the
-// degrade arm above, so a non-git checkout, a stalled git and git missing
-// entirely all still get a board.
+// The impure half, deliberately outside the seam above: the `{ workspace }`
+// fleetFile() resolves from `cwd`, or `{ workspace: null, why }` when it
+// cannot — which takes the degrade arm above, so a non-git checkout, a stalled
+// git and git missing entirely all still get a board, with the reason on its
+// warning. Spread into resolveCockpitInstance()'s arguments.
 function cockpitWorkspace(cwd) {
   try {
-    return dirname(fleetFile(null, { cwd, canonicalise: true }));
+    return { workspace: dirname(fleetFile(null, { cwd, canonicalise: true })) };
   } catch (e) {
     if (!(e instanceof FleetDirUnresolvable)) throw e;
-    return null;
+    return { workspace: null, why: e.message };
   }
 }
 
@@ -1757,7 +1762,7 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
   // through `serve` at all was the real CLI — no test exercised it.
   const spendPin = spendDirPin(spendDir ?? argSpendDir());
   const { computeBoard } = await import("./compute-board.mjs");
-  const instance = resolveCockpitInstance({ cwd: process.cwd(), workspace: cockpitWorkspace(process.cwd()), port: portGiven });
+  const instance = resolveCockpitInstance({ cwd: process.cwd(), ...cockpitWorkspace(process.cwd()), port: portGiven });
   const stateDir = instance.stateDir;
   const jsonPath = join(stateDir, "board.json");
   // The ledger's own default (ledger.mjs's defaultLedgerPath()) is

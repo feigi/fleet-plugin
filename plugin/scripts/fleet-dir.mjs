@@ -53,6 +53,14 @@ function cause(...candidates) {
   return raw.length > CAUSE_MAX ? `…${raw.slice(-(CAUSE_MAX - 1))}` : raw;
 }
 
+// A git that fails with nothing on stderr and no spawn error — a silent
+// non-zero exit, a kill by a signal other than the bound's own — would
+// otherwise leave the message naming no cause at all.
+function ended(r) {
+  if (r.signal) return `killed by ${r.signal}`;
+  return r.status === null ? "" : `exit ${r.status}`;
+}
+
 /**
  * The absolute path of `name` under the run's `.fleet/` directory, resolved
  * from `cwd` — or the `.fleet/` directory itself when `name` is null.
@@ -80,7 +88,7 @@ export function fleetFile(name, { cwd = process.cwd(), timeoutMs, canonicalise =
   // empty, which workspaceDirFromGitCommonDir() reads as `null` on its own.
   const workspace = workspaceDirFromGitCommonDir(r.stdout, cwd, { canonicalise });
   if (workspace === null) {
-    const why = cause(r.error && r.error.message, r.stderr);
+    const why = cause(r.error && r.error.message, r.stderr) || ended(r);
     throw new FleetDirUnresolvable(`could not resolve --git-common-dir${why ? `: ${why}` : ""}`);
   }
   return name === null ? join(workspace, ".fleet") : join(workspace, ".fleet", name);

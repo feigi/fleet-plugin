@@ -124,7 +124,7 @@ test("CLI: a build with no resolvable workspace still carries both keys — null
     // Without this the row passes vacuously: a cwd that turned out to be
     // inside some repository would take the resolved arm and never reach the
     // degrade this test is about.
-    assert.match(r.stderr, /could not resolve --git-common-dir/, r.stderr);
+    assert.match(r.stderr, /could not resolve --git-common-dir: \S/, `the warning must carry git's reason, as the ledger's does: ${r.stderr}`);
     const board = JSON.parse(r.stdout);
     assert.ok("workspace" in board && "port" in board,
       `both identity keys must be present even when there is no instance: ${r.stdout.slice(0, 200)}`);

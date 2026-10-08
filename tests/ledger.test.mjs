@@ -2919,8 +2919,14 @@ test("a git that never answers the repository probe is bounded, not waited on (#
 // ever chosen.
 test("a git that never answers the ledger-path resolution is bounded too (#1199)", (t) => {
   const check = gitFixture(t, GIT_HANGS);
+  const started = Date.now();
   const r = check(PROBE_SUBJECT, { extraEnv: { LEDGER_GIT_TIMEOUT: "2" }, noFile: true });
+  const elapsed = Date.now() - started;
 
+  // fleet-dir.mjs's own default is 10 s: a ledger that stopped passing its
+  // budget through would still be bounded, only by the wrong number, and every
+  // assertion below would hold.
+  assert.ok(elapsed < 8_000, `the ledger's own LEDGER_GIT_TIMEOUT=2 was not what bounded the probe: ${elapsed} ms`);
   assert.equal(r.error, undefined,
     `the run was held to the CALLER's backstop — defaultLedgerPath()'s git is unbounded: ${JSON.stringify(r.error)}`);
   assert.match(r.stderr, /could not resolve --git-common-dir/,

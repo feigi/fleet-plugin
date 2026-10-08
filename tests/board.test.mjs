@@ -2444,6 +2444,15 @@ for (const [name, workspace] of [
   });
 }
 
+// The reason fleetFile() gave rides on the warning, as it does on the ledger's.
+test("resolveCockpitInstance: the degrade warning carries the reason it was handed", () => {
+  const errs = withStderr(() => {
+    resolveCockpitInstance({ cwd: "/w/cwd", workspace: null, why: "could not resolve --git-common-dir: spawnSync git ETIMEDOUT" });
+  });
+  assert.equal(errs.length, 1);
+  assert.match(errs[0], /WARNING could not resolve --git-common-dir: spawnSync git ETIMEDOUT; using cwd-relative/);
+});
+
 // The degrade arm has its own copy of the forced/derived decision, so a
 // mutation that drops it there is invisible to the rows above: a caller who
 // passed --port outside a git checkout would silently get 8123 instead.

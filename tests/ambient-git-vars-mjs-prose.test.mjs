@@ -12,13 +12,13 @@
 //   scrubbed env" has no single-line anchor the way `unset GIT_DIR
 //   GIT_WORK_TREE` is one in shell — env objects are built in as many shapes
 //   as there are call sites (compare `ledger.mjs`'s pre-existing inline
-//   `delete gitEnv.GIT_DIR` against `repo-root.mjs`'s three separate spawns,
+//   `delete queryEnv.GIT_DIR` against `repo-root.mjs`'s three separate spawns,
 //   each merging its own extra keys). `git-env.mjs`'s `gitEnv()` helper turns
 //   the detector back into a one-name grep — does a file's git-invoking
 //   primitive route its env through `gitEnv(`? — the same job `unset GIT_DIR
 //   GIT_WORK_TREE` does for shell. See git-env.mjs's own header for the rest
-//   of that reasoning, including why the two pre-existing inline sites below
-//   are not retroactively migrated to call it.
+//   of that reasoning, including why the pre-existing inline site below is
+//   not retroactively migrated to call it.
 //
 //   Per-site ruling. Six files were uncensused; measuring each (not copying
 //   one script's reason across the set — #1020's own PR found a prescribed
@@ -49,7 +49,7 @@
 // file noticing — a deleted call changes the count.
 //
 // Also pinned: the pre-existing inline scrub site — `ledger.mjs`'s
-// tracker-query probe — the "two-name-only exemption list" the second design
+// tracker-query probe — the exemption list (two names when it was posed) the second design
 // question above answers with. It is not migrated to call `gitEnv()`: it is
 // already measured and covered (`ledger.test.mjs`, "an inherited GIT_DIR or
 // GH_REPO cannot retarget the query…") — touching it to satisfy this file's
@@ -224,11 +224,12 @@ const COVERED_MJS = {
   "main-gain.mjs": 1,
 };
 
-// The two-name-only exemption list #1599's second design question answers
-// with: sites that scrub GIT_DIR/GIT_WORK_TREE without calling `gitEnv()`,
-// because each already carries its own measurement and its own behavioural
-// fixture, predating this helper, and retrofitting either to satisfy this
-// file's detector would be churn with no behavioural change.
+// The exemption list #1599's second design question answers with — two names
+// when it was posed, `ledger.mjs`'s tracker-query probe alone now: sites that
+// scrub GIT_DIR/GIT_WORK_TREE without calling `gitEnv()`, because each
+// already carries its own measurement and its own behavioural fixture,
+// predating this helper, and retrofitting one to satisfy this file's detector
+// would be churn with no behavioural change.
 const MJS_LEGACY_INLINE = {
   "ledger.mjs":
     "the tracker-query probe inside runCheck() — `const queryEnv = { ...process.env, GH_REPO: \"\" }` then two " +

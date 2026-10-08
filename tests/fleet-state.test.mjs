@@ -14,7 +14,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, linkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, linkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -78,6 +78,23 @@ test("statePath: an ambient GIT_COMMON_DIR is not canonicalised — this caller 
     assert.equal(r.stdout, join(link, ".fleet", "heartbeat.json"),
       "statePath() must keep the symlinked spelling — canonicalising here is board.mjs's opt-in alone");
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("statePath: outside any repository it warns with git's reason and falls back to the cwd-relative heartbeat file", () => {
+  // A ceiling at the fixture's parent, so a temp directory that happens to sit
+  // inside some repository cannot answer for it.
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "fleet-state-norepo-")));
+  try {
+    const cwd = join(parent, "bare");
+    mkdirSync(cwd);
+    const r = spawnSync(process.execPath,
+      ["-e", 'import(process.argv[1]).then((m) => { process.stdout.write(m.statePath("fleet-state-test")); });', SCRIPT],
+      { cwd, encoding: "utf8", env: { ...process.env, GIT_CEILING_DIRECTORIES: parent } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, join(".fleet", "heartbeat.json"), "the fallback is the cwd-relative file the beat used before it was resolved");
+    assert.match(r.stderr, /fleet-state-test: WARNING could not resolve --git-common-dir: \S/, "the warning names the cause, not only the failure");
+    assert.match(r.stderr, /using cwd-relative \.fleet\/heartbeat\.json/);
+  } finally { rmSync(parent, { recursive: true, force: true }); }
 });
 
 // --------------------------------------------------------------------------
