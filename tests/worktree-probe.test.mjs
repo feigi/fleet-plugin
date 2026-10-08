@@ -401,6 +401,51 @@ test("wt_linkage refuses a .git git cannot resolve, with git's own words", (t) =
   assert.match(p.out, /^why=cannot read the git repository at .* — its \.git linkage .* does not resolve: \S/m);
 });
 
+// --- wt_registry_root
+
+const REGISTRY_ROOT = `if wt_registry_root; then echo rc=0; else echo "rc=$?"; fi
+printf 'root=%s\\nwhy=%s\\n' "$wt_root" "$wt_why"`;
+
+/** A `git` ahead of the real one on PATH that runs `onCommonDir` (a /bin/sh snippet) for `rev-parse --git-common-dir` and passes everything else through. */
+function commonDirShim(t, onCommonDir) {
+  const bin = mkdtempSync(join(tmpdir(), "wt-probe-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  const realGit = execFileSync("/bin/sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  writeFileSync(join(bin, "git"),
+    `#!/bin/sh\ncase "$*" in rev-parse*--git-common-dir*)\n${onCommonDir}\n;; esac\nexec '${realGit}' "$@"\n`,
+    { mode: 0o755 });
+  return bin;
+}
+
+test("wt_registry_root refuses outside a repository with git's own words on the reason's line", (t) => {
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "wt-probe-")));
+  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  const dir = join(parent, "not-a-repo");
+  mkdirSync(dir);
+  const env = { ...ENV, GIT_CEILING_DIRECTORIES: parent };
+  // Git's words as this git prints them, so no version's wording is pinned.
+  const g = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: dir, env, encoding: "utf8" });
+  assert.notEqual(g.status, 0, "the fixture directory must be outside any repository");
+  const gitWords = g.stderr.replace(/\n+$/, "").replace(/\n/g, " ");
+  assert.notEqual(gitWords, "", "git explains why it cannot answer");
+  const p = probe(dir, `GIT_CEILING_DIRECTORIES="$1"; export GIT_CEILING_DIRECTORIES\n${REGISTRY_ROOT}`, parent);
+  assert.equal(p.out, `rc=1\nroot=\nwhy=cannot resolve the git common directory: ${gitWords}\n`);
+});
+
+test("wt_registry_root refuses with the bare reason when git fails without a word", (t) => {
+  const r = repo(t);
+  const bin = commonDirShim(t, "exit 1");
+  const p = probe(r.w, `PATH="$1:$PATH"\n${REGISTRY_ROOT}`, bin);
+  assert.equal(p.out, "rc=1\nroot=\nwhy=cannot resolve the git common directory\n");
+});
+
+test("wt_registry_root keeps a warning git prints at exit 0 out of the path it answers", (t) => {
+  const r = repo(t);
+  const bin = commonDirShim(t, `echo "warning: noise on stderr" >&2`);
+  const p = probe(r.w, `PATH="$1:$PATH"\n${REGISTRY_ROOT}`, bin);
+  assert.equal(p.out, `rc=0\nroot=${r.w}/.git/worktrees\nwhy=\n`);
+});
+
 // --- wt_counts
 
 test("wt_counts agrees on a repo with no registry and on one with a linked worktree", (t) => {
