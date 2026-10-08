@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { createServer, connect } from "node:net";
 import { fileURLToPath } from "node:url";
-import { createBoardServer, mapCi, encodeProjectDir, findSubagentsDir, spendDirPin, gatherSpend, faultText, resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "../plugin/scripts/board.mjs";
+import { createBoardServer, renderRefusedHost, mapCi, encodeProjectDir, findSubagentsDir, spendDirPin, gatherSpend, faultText, resolveCockpitInstance, cockpitPorts, probeCockpitWorkspace } from "../plugin/scripts/board.mjs";
 import { readOmpMember } from "../plugin/scripts/member-record.mjs";
 import { stripComments } from "./support/strip-comments.mjs";
 import { gitEnv } from "../plugin/scripts/git-env.mjs";
@@ -805,20 +805,32 @@ async function rawStatus(port, path, host) {
   let raw = "";
   socket.setEncoding("utf8");
   socket.on("data", (c) => { raw += c; });
-  socket.write(lines.join("\r\n"));
+  // latin1, so a char in U+0080..U+00FF goes out as the one obs-text byte a
+  // header value may carry, which is how Node hands it back to the handler.
+  socket.write(lines.join("\r\n"), "latin1");
   await new Promise((res, rej) => { socket.once("close", res); socket.once("error", rej); });
   const status = /^HTTP\/1\.[01] (\d{3})/.exec(raw);
   assert.ok(status, `no HTTP status line in ${JSON.stringify(raw)}`);
   return { status: Number(status[1]), body: raw.slice(raw.indexOf("\r\n\r\n") + 4) };
 }
 
+// The server runs in this process, so its refusal log lands on this
+// console.error: every Host-guard test captures it, hands the lines to `fn`,
+// and keeps them off the test runner's stderr. The once-per-Host gate is
+// process-wide, so each test refuses Host values no other test sends.
 async function withBoardServer(fn) {
   const dir = tempDir("board-host-");
   writeFileSync(join(dir, "board.json"), JSON.stringify({ generatedAt: 1, tickets: [], attention: [] }));
   writeFileSync(join(dir, "board.html"), "<!doctype html><title>cockpit</title>");
   const server = createBoardServer(dir);
   await new Promise((res) => server.listen(0, "127.0.0.1", res));
-  try { await fn(server.address().port); } finally { await new Promise((res) => server.close(res)); }
+  const logged = [];
+  const original = console.error;
+  console.error = (...args) => { logged.push(args.join(" ")); };
+  try { await fn(server.address().port, logged); } finally {
+    console.error = original;
+    await new Promise((res) => server.close(res));
+  }
 }
 
 test("createBoardServer answers 403 to a Host that is not a loopback name, on every path", async () => {
@@ -841,16 +853,97 @@ test("createBoardServer answers 403 to a Host that is not a loopback name, on ev
   });
 });
 
-test("createBoardServer answers 403 to a request with no Host header", async () => {
-  await withBoardServer(async (port) => {
-    const r = await rawStatus(port, "/board.json", undefined);
-    assert.equal(r.status, 403);
-    assert.doesNotMatch(r.body, /generatedAt/);
+test("createBoardServer answers 403 to a request with no Host header, and logs it once under a placeholder", async () => {
+  await withBoardServer(async (port, logged) => {
+    for (let i = 0; i < 3; i++) {
+      const r = await rawStatus(port, "/board.json", undefined);
+      assert.equal(r.status, 403);
+      assert.equal(r.body, "forbidden");
+    }
+    assert.deepEqual(logged, ["board: refused a request with no Host header — not a loopback name (127.0.0.1, localhost, [::1]); answered 403"]);
   });
 });
 
-test("createBoardServer serves every loopback Host name, any port, any case", async () => {
-  await withBoardServer(async (port) => {
+test("createBoardServer logs each refused Host once on stderr and still answers 403 forbidden", async () => {
+  await withBoardServer(async (port, logged) => {
+    const hosts = ["evil.com", "localhost.", `[0:0:0:0:0:0:0:1]:${port}`];
+    for (const host of hosts) {
+      for (let i = 0; i < 5; i++) {
+        const r = await rawStatus(port, i % 2 ? "/nope" : "/board.json", host);
+        assert.equal(r.status, 403, host);
+        assert.equal(r.body, "forbidden", host);
+      }
+    }
+    assert.deepEqual(logged, hosts.map((h) => `board: refused Host ${JSON.stringify(h)} — not a loopback name (127.0.0.1, localhost, [::1]); answered 403`));
+  });
+});
+
+test("createBoardServer renders a refused Host escaped and truncated, on one line", async () => {
+  await withBoardServer(async (port, logged) => {
+    const quoted = 'q"uo\\te\tx';
+    // U+0085 is NEL, a C1 control JSON.stringify leaves bare.
+    const c1 = "nel\u0085x";
+    const long = `${"a".repeat(300)}.test`;
+    for (const host of [quoted, c1, long]) assert.equal((await rawStatus(port, "/", host)).status, 403, host);
+    assert.equal(logged.length, 3, logged.join("\n"));
+    for (const line of logged) assert.doesNotMatch(line, /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/, line);
+    assert.match(logged[0], /^board: refused Host "q\\"uo\\\\te\\tx" — /);
+    assert.match(logged[1], /^board: refused Host "nel\\u0085x" — /);
+    assert.match(logged[2], new RegExp(`^board: refused Host "${"a".repeat(100)}"… \\(305 chars\\) — `));
+  });
+});
+
+test("renderRefusedHost escapes DEL, every C1 control and both line separators, and nothing next to them", () => {
+  // The bytes of a Host header reach the server one code unit each (latin1),
+  // so U+2028/U+2029 and DEL cannot arrive through a raw request: the
+  // renderer is the only place the full set is pinned.
+  for (const c of ["\u007f", "\u0080", "\u0085", "\u009f", "\u2028", "\u2029"]) {
+    const hex = c.charCodeAt(0).toString(16).padStart(4, "0");
+    assert.equal(renderRefusedHost(`a${c}b`), `Host "a\\u${hex}b"`, hex);
+  }
+  for (const c of ["~", "\u00a0"]) assert.equal(renderRefusedHost(`a${c}b`), `Host "a${c}b"`, c.charCodeAt(0).toString(16));
+});
+
+test("createBoardServer cuts a refused Host after exactly 100 characters", async () => {
+  await withBoardServer(async (port, logged) => {
+    const at100 = `${"b".repeat(95)}.test`;
+    const at101 = `${"b".repeat(96)}.test`;
+    for (const host of [at100, at101]) assert.equal((await rawStatus(port, "/", host)).status, 403, host);
+    assert.equal(logged.length, 2, logged.join("\n"));
+    assert.match(logged[0], new RegExp(`^board: refused Host "${"b".repeat(95)}\\.test" — `));
+    assert.match(logged[1], new RegExp(`^board: refused Host "${"b".repeat(96)}\\.tes"… \\(101 chars\\) — `));
+  });
+});
+
+test("createBoardServer keys the once-per-Host gate on the cut rendering, so two Hosts alike for 100 characters and in length log one line", async () => {
+  await withBoardServer(async (port, logged) => {
+    for (const host of [`${"c".repeat(100)}X.test`, `${"c".repeat(100)}Y.test`]) assert.equal((await rawStatus(port, "/", host)).status, 403, host);
+    assert.equal(logged.length, 1, logged.join("\n"));
+    assert.match(logged[0], new RegExp(`^board: refused Host "${"c".repeat(100)}"… \\(106 chars\\) — `));
+  });
+});
+
+test("createBoardServer stops logging new refused Hosts at a fixed cap of 16, with one notice", async () => {
+  await withBoardServer(async (port, logged) => {
+    // A Host repeated past the cap spends one slot, not twenty: it leaves no
+    // notice behind, and the distinct Hosts after it are still logged.
+    for (let i = 0; i < 20; i++) assert.equal((await rawStatus(port, "/", "cap-repeat.test")).status, 403);
+    assert.equal(logged.length, 1, logged.join("\n"));
+    for (let i = 0; i < 100; i++) assert.equal((await rawStatus(port, "/", `cap-${i}.test`)).status, 403);
+    const line = (h) => `board: refused Host "${h}" — not a loopback name (127.0.0.1, localhost, [::1]); answered 403`;
+    const distinct = Array.from({ length: 15 }, (_, i) => `cap-${i}.test`);
+    assert.deepEqual(logged, [
+      ...["cap-repeat.test", ...distinct].map(line),
+      "board: 16 distinct Hosts refused; further refused Hosts are not logged",
+    ]);
+    // Past the cap, a Host already logged is still not logged again.
+    assert.equal((await rawStatus(port, "/", "cap-0.test")).status, 403);
+    assert.equal(logged.length, 17);
+  });
+});
+
+test("createBoardServer serves every loopback Host name, any port, any case, and logs nothing for them", async () => {
+  await withBoardServer(async (port, logged) => {
     // The port is deliberately not compared (an ssh -L forward arrives under a
     // different one), so a mismatched port and a missing port must both pass.
     for (const host of [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`, `LOCALHOST:${port}`, `LocalHost:${port}`, `[::1]:1`, "127.0.0.1", "localhost"]) {
@@ -860,6 +953,7 @@ test("createBoardServer serves every loopback Host name, any port, any case", as
       assert.equal((await rawStatus(port, "/board.html", host)).status, 200, host);
       assert.equal((await rawStatus(port, "/nope", host)).status, 404, host);
     }
+    assert.deepEqual(logged, []);
   });
 });
 
