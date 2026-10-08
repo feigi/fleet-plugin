@@ -4614,7 +4614,8 @@ const UNSAFE_REGISTRY = [
       const reg = join(w, ".git", "worktrees");
       renameSync(reg, join(w, ".git", "worktrees.moved"));
       // Mode 755: a file `-r` and `-x` both pass, so only the `-d` arm
-      // refuses it — the tightening over inflight.sh's copy this row pins.
+      // refuses it — the guard the old inflight.sh and release-ticket.sh
+      // registry reads lacked (`-r`/`-x` only), which this row pins.
       writeFileSync(reg, "not a directory\n", { mode: 0o755 });
     } },
 ];
@@ -4835,6 +4836,35 @@ for (const apply of [false, true]) {
     assert.match(kept[0].reason, /is a symbolic link to another worktree's directory — its \.git linkage reaches the admin dir registered for .*feature\/b-real/);
     assert.equal(branchExists(w, "feature/a-swap"), true);
     assert.ok(!(json.reaped ?? []).includes("feature/a-swap"));
+  });
+}
+
+// The same swap under `worktree.useRelativePaths`: git stores the back-pointer
+// relative and resolves the swapped entry to the TARGET's directory, so the
+// listing names that directory twice and the path reap holds is a real
+// directory, never the link. Without the listing check the held branch was
+// reaped by removing the SIBLING's directory.
+for (const apply of [false, true]) {
+  test(`a worktree swapped for a symlink under worktree.useRelativePaths keeps its branch and the sibling's directory, ${apply ? "--apply" : "dry run"}`, (t) => {
+    const w = repo(t);
+    git(w, "config", "worktree.useRelativePaths", "true");
+    const a = mergedGoneBranchWithWorktree(w, "feature/a-swap", "swapped work");
+    const b = mergedGoneBranchWithWorktree(w, "feature/b-real", "real work");
+    if (!/^gitdir: \.\.\//.test(readFileSync(join(a, ".git"), "utf8"))) {
+      return t.skip("this git does not write relative worktree paths, so the shape cannot exist");
+    }
+    rmSync(a, { recursive: true, force: true });
+    symlinkSync(realpathSync(b), a);
+
+    const { code, json, stderr } = runReap(w, apply ? ["--apply"] : []);
+
+    assert.equal(code, 0, stderr);
+    const kept = keptFor(json, "feature/a-swap");
+    assert.equal(kept.length, 1, JSON.stringify(json));
+    assert.match(kept[0].reason, /the worktree listing names .* for 2 worktrees — a symbolic link standing in for another worktree's directory/);
+    assert.equal(branchExists(w, "feature/a-swap"), true);
+    assert.ok(!(json.reaped ?? []).includes("feature/a-swap"));
+    assert.equal(existsSync(join(b, ".git")), true, "the sibling's worktree directory must still stand");
   });
 }
 

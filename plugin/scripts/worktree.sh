@@ -764,17 +764,18 @@ wt_count_pair() {
 # Recount before refusing. The registry scan and git's listing are two reads
 # at two instants, not one atomic read, and a sibling agent's `git worktree
 # add` or `remove` landing in the gap makes them disagree with nothing wrong —
-# measured against release-ticket.sh's copy: 3/100 dry-run releases aborted on
-# the cross-check under a throttled churner, 48-66/80 unthrottled, all with
-# zero real faults. A mismatch therefore re-takes BOTH counts, in the same
-# order — registry first, listing second. Re-taking the registry alone leaves
-# the linked count pinned to the first listing, and a second mutation landing
-# after that listing inflates the registry count and flips which direction is
-# reported (measured on inflight.sh's copy). A mutation landing between a
-# pair's registry count and its listing is already reflected in that listing,
-# so a re-taken pair needs a mutation inside its own narrower window to escape
-# (measured on inflight.sh's copy while it re-took the registry alone: 1.99% ->
-# 0.00% at 2 mutations/s, 56.6% -> 1.29% saturated).
+# measured on the per-script copy of this recount that release-ticket.sh once
+# held: 3/100 dry-run releases aborted on the cross-check under a throttled
+# churner, 48-66/80 unthrottled, all with zero real faults. A mismatch
+# therefore re-takes BOTH counts, in the same order — registry first, listing
+# second. Re-taking the registry alone leaves the linked count pinned to the
+# first listing, and a second mutation landing after that listing inflates the
+# registry count and flips which direction is reported (measured on the copy
+# inflight.sh once held). A mutation landing between a pair's registry count
+# and its listing is already reflected in that listing, so a re-taken pair
+# needs a mutation inside its own narrower window to escape (measured on that
+# inflight.sh copy while it re-took the registry alone: 1.99% -> 0.00% at 2
+# mutations/s, 56.6% -> 1.29% saturated).
 #
 # That window is still a gap between two reads, so a further mutation inside a
 # re-taken pair escapes it the same way; closing that for good would need an
@@ -868,9 +869,31 @@ wt_counts() {
 # answers $1 for both. A dirty check then reads $1's real files against the
 # borrowed index, and `git worktree remove` refuses a `.git` that does not
 # point back at its admin dir.
+#
+# Asked of the listing too, because the link check above needs $1 to BE the
+# link, and under `worktree.useRelativePaths` it never is: git stores the
+# back-pointer relative and resolves it, for the swapped entry, to the
+# TARGET's directory, so the listing reports the swapped worktree at the
+# target's path — two records naming one directory, the path the caller holds
+# is the target's real directory, and no `-L` fires on it (measured, git
+# 2.50.1: the sibling's live, clean worktree was then the one `reap --apply`
+# removed). So when `$wt_list` holds more than one record for $1, which
+# worktree stands there is unknown and $1 is refused. A caller that has read no
+# listing (`$wt_list` empty) skips this question.
 # shellcheck disable=SC2034
 wt_linkage() {
   wt_why=
+  if [ -n "$wt_list" ]; then
+    if ! wt_lk_n=$(printf '%s\n' "$wt_list" |
+        P="$1" LC_ALL=C awk '/^worktree /{if (substr($0,10)==ENVIRON["P"]) c++} END{print c+0}'); then
+      wt_why="could not scan the worktree listing for $1, so whether one worktree stands there is unknown"
+      return 1
+    fi
+    if [ "$wt_lk_n" -gt 1 ]; then
+      wt_why="the worktree listing names $1 for $wt_lk_n worktrees — a symbolic link standing in for another worktree's directory, so which one stands there is unknown"
+      return 1
+    fi
+  fi
   if ! wt_lk_top=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null && echo x); then
     wt_lk_err=$(git -C "$1" rev-parse --show-toplevel 2>&1 >/dev/null) || :
     wt_lk_err=$(printf '%s' "$wt_lk_err" | tr '\n' ' ') || wt_lk_err=

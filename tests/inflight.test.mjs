@@ -997,8 +997,8 @@ esac`);
  * Shims `git` so that `mutation` runs on the ONE call that reads the worktree
  * registry, then hands off to the real binary.
  *
- * Shimmed rather than slept: this is the window between inflight.sh's own
- * on-disk count and git's read of the same registry, measured at ~10ms, and a
+ * Shimmed rather than slept: this is the window between worktree.sh's on-disk
+ * registry count and git's read of the same registry, measured at ~10ms, and a
  * test that tries to hit it with a sleep is a flake generator. Firing on the
  * call itself lands the mutation inside the window every time.
  *
@@ -1084,14 +1084,15 @@ test("probe 3: a sibling worktree REMOVE between the two reads is absorbed, not 
  * the original count/listing gap: `before` runs ahead of the real
  * `worktree list --porcelain -z` call, exactly as `registryRaceShim`'s
  * mutation does, and `after` runs once that call has returned but before
- * anything downstream re-scans the registry — the gap the recount itself
- * opens while only `registered`, and not `linked`, is re-taken. #1421
+ * anything downstream re-scans the registry — the gap the recount would open
+ * if it re-took only `registered` and left `linked` pinned to the first
+ * listing (`wt_count_pair` in worktree.sh re-takes both together). #1421
  *
  * One shot, gated the same way and for the same reason `registryRaceShim` is:
  * the suite's own cleanup shells out to git too, and a shim that kept firing
  * would never let the run converge. Mirrors release-ticket.test.mjs's
- * `twoMutationShim`, which covers the same window in that script's copy of
- * this recount (#1408).
+ * `twoMutationShim`, which covers the same window through the `wt_counts`
+ * that release-ticket.sh shares with this script (#1408).
  */
 function twoMutationShim(bin, before, after) {
   const fired = join(bin, "two-mutation-fired");

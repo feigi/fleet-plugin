@@ -4179,9 +4179,10 @@ test("a sibling worktree ADD between the registry count and git's listing is abs
   // The registry count above and git's own listing taken for `wt_listing` are
   // two reads at two instants, not one atomic read. A sibling agent's
   // `git worktree add` landing in that gap makes the counts disagree with
-  // nothing actually wrong — see the recount comment in release-ticket.sh for
-  // the measured rate. Before this ticket that disagreement was fatal on the
-  // first read; the recount is what tells this moment from a real drop.
+  // nothing actually wrong — see the recount comment on wt_counts in
+  // worktree.sh for the measured rate. Before this ticket that disagreement
+  // was fatal on the first read; the recount is what tells this moment from a
+  // real drop.
   const r = repo(t);
   const c = claim(r.w, 9, "release-ticket");
   // A path outside the checkout, mirroring inflight.test.mjs's own fixture: a

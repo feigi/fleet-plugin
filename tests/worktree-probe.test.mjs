@@ -17,7 +17,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -158,6 +158,23 @@ test("wt_holds_cwd matches the directory and anything beneath it, by inode, and 
   }
 });
 
+test("wt_holds_cwd fails closed when `[` cannot evaluate -ef (rc 2 or more)", (t) => {
+  // No input makes a real `[` answer 2 for `-ef`, and `[` cannot be a function
+  // in every /bin/sh. An alias names the stand-in before the library is read,
+  // so every `[` the library parses is the stand-in: -ef answers 2, all else
+  // is the real builtin.
+  const r = repo(t);
+  const wt = linked(r, "feat");
+  for (const cwd of [wt, join(wt, "no", "such", "dir"), "relative-no-slash"]) {
+    const p = spawnSync("/bin/sh", ["-c", `wt_stub() { case "$2" in -ef) return 2 ;; esac; command [ "$@"; }
+alias [=wt_stub
+. "$0" || exit 99
+unalias [
+if wt_holds_cwd "$1" "$2"; then echo 0; else echo 1; fi`, LIB, wt, cwd], { cwd: r.w, env: ENV, encoding: "utf8", timeout: 30_000 });
+    assert.equal(p.stdout.trim(), "0", `cwd ${JSON.stringify(cwd)}: ${p.stderr}`);
+  }
+});
+
 // --- wt_linkage
 
 test("wt_linkage accepts a healthy worktree and refuses a symlink to a different worktree (#2074)", (t) => {
@@ -172,6 +189,30 @@ test("wt_linkage accepts a healthy worktree and refuses a symlink to a different
   const bad = probe(r.w, `if wt_linkage "$1"; then echo rc=0; else echo "rc=$?"; printf 'why=%s\\n' "$wt_why"; fi`, a);
   assert.match(bad.out, /^rc=1$/m);
   assert.ok(bad.out.includes(`why=${a} is a symbolic link to another worktree's directory — its .git linkage reaches the admin dir registered for ${b}, not for ${a}`), bad.out);
+});
+
+test("wt_linkage refuses a path the listing names for two worktrees — a swap under worktree.useRelativePaths", (t) => {
+  // With relative back-pointers git resolves the swapped entry to the TARGET's
+  // directory, so the listing names that directory twice and the path a caller
+  // holds is a real directory, not a link: `-L` never fires on it.
+  const r = repo(t);
+  git(r.w, "config", "worktree.useRelativePaths", "true");
+  const a = linked(r, "a");
+  const b = linked(r, "b");
+  if (!/^gitdir: \.\.\//.test(readFileSync(join(a, ".git"), "utf8"))) {
+    return t.skip("this git does not write relative worktree paths, so the shape cannot exist");
+  }
+  const body = `wt_listing || exit 3
+if wt_linkage "$1"; then echo rc=0; else echo "rc=$?"; fi
+printf 'why=%s\\n' "$wt_why"`;
+  const ok = probe(r.w, body, b);
+  assert.match(ok.out, /^rc=0$/m, ok.out);
+
+  renameSync(a, `${a}-real`);
+  symlinkSync(b, a);
+  const bad = probe(r.w, body, b);
+  assert.match(bad.out, /^rc=1$/m, bad.out);
+  assert.ok(bad.out.includes(`why=the worktree listing names ${b} for 2 worktrees — a symbolic link standing in for another worktree's directory`), bad.out);
 });
 
 test("wt_linkage accepts a symlink standing in for the worktree's own renamed directory", (t) => {
@@ -299,4 +340,60 @@ printf 'outcome=%s\\nwhy=%s\\nlist=%s\\n' "$wt_outcome" "$wt_why" "$wt_list"`, w
   assert.match(p.out, /^outcome=Indeterminate$/m);
   assert.match(p.out, /^why=fatal: listing exploded/m);
   assert.match(p.out, /^list=kept$/m);
+});
+
+/** A `git` ahead of the real one on PATH that answers `worktree list` through `listing` (a /bin/sh snippet) and passes everything else through. */
+function listShim(t, listing) {
+  const bin = mkdtempSync(join(tmpdir(), "wt-probe-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  const realGit = execFileSync("/bin/sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  writeFileSync(join(bin, "git"),
+    `#!/bin/sh\nif [ "$1" = worktree ] && [ "$2" = list ]; then\nREAL='${realGit}'\n${listing}\nfi\nexec '${realGit}' "$@"\n`,
+    { mode: 0o755 });
+  return bin;
+}
+
+const COUNTS = `if wt_counts; then echo rc=0; else echo "rc=$?"; fi
+printf 'registered=%s linked=%s\\nwhy=%s\\n' "$wt_registered" "$wt_linked" "$wt_why"`;
+
+test("wt_counts re-takes a pair that disagreed once and answers the agreeing one", (t) => {
+  const r = repo(t);
+  linked(r, "feat");
+  const state = join(r.root, "calls");
+  // First listing drops the linked worktree (a sibling's `add` landing between the two reads); every later one is git's own.
+  const bin = listShim(t, `n=$(cat '${state}' 2>/dev/null || echo 0)
+echo $((n + 1)) >'${state}'
+if [ "$n" = 0 ]; then printf 'worktree /main\\000HEAD 1111111111111111111111111111111111111111\\000branch refs/heads/main\\000\\000'; exit 0; fi`);
+  const p = probe(r.w, `PATH="$2:$PATH"\n${COUNTS}`, "", bin);
+  assert.match(p.out, /^rc=0$/m, p.out);
+  assert.match(p.out, /^registered=1 linked=1$/m);
+});
+
+test("wt_counts refuses a listing that holds MORE worktrees than the registry, naming the registry read", (t) => {
+  const r = repo(t);
+  const bin = listShim(t, `"$REAL" "$@"; rc=$?
+printf 'worktree /nowhere\\000HEAD 2222222222222222222222222222222222222222\\000detached\\000\\000'
+exit $rc`);
+  const p = probe(r.w, `PATH="$2:$PATH"\n${COUNTS}`, "", bin);
+  assert.match(p.out, /^rc=1$/m, p.out);
+  assert.match(p.out, /^registered=0 linked=1$/m);
+  assert.match(p.out, /^why=git listed 1 worktrees but only 0 registry entries were counted in .*registry read missed entries/m);
+});
+
+test("wt_counts refuses a listing with no worktree at all, not even the main checkout", (t) => {
+  const r = repo(t);
+  const bin = listShim(t, `exit 0`);
+  const p = probe(r.w, `PATH="$2:$PATH"\n${COUNTS}`, "", bin);
+  assert.match(p.out, /^rc=1$/m, p.out);
+  assert.match(p.out, /^why=git listed no worktrees at all — not even the main checkout/m);
+});
+
+test("wt_occupied answers for anything standing at the path, a dangling symlink included", (t) => {
+  const r = repo(t);
+  const dangling = join(r.root, "dangling");
+  symlinkSync(join(r.root, "nowhere"), dangling);
+  const body = `if wt_occupied "$1"; then echo occupied; else echo free; fi`;
+  assert.equal(probe(r.w, body, dangling).out.trim(), "occupied");
+  assert.equal(probe(r.w, body, r.w).out.trim(), "occupied");
+  assert.equal(probe(r.w, body, join(r.root, "absent")).out.trim(), "free");
 });

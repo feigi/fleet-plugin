@@ -147,13 +147,25 @@ const RETIRED = ["holds_cwd", "wt_linkage_why", "count_registry", "count_linked"
 const scriptsDir = fileURLToPath(new URL("../plugin/scripts/", import.meta.url));
 const SHELL = readdirSync(scriptsDir).filter((f) => f.endsWith(".sh"));
 
-/** Does `src` define shell function `name` — any spelling of `name() {`? */
-const defines = (src, name) => new RegExp(`^\\s*${name}\\s*\\(\\)\\s*\\{?`, "m").test(src);
+/** `src` without its whole-line comments, so prose naming a function never reads as a definition. */
+const code = (src) => src.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+
+/**
+ * A regexp matching every spelling of defining shell function `name`:
+ * `name() {`, `function name {` and `function name() {`, each at the head of a
+ * line or after a `;`, `&` or `{` on one. `\b` after the keyword form keeps
+ * `function wt_counts_passes` from reading as `wt_counts`.
+ */
+const defRe = (name, flags = "m") =>
+  new RegExp(`(?:^|[;&{])\\s*(?:function\\s+${name}\\b|${name}\\s*\\(\\))`, flags);
+
+/** Does `src` define shell function `name`, in any of those spellings? */
+const defines = (src, name) => defRe(name).test(code(src));
 
 test("every probe verdict is defined once in the tree, in worktree.sh", () => {
   for (const name of Object.keys(PROBE)) {
-    const all = read(HOME).match(new RegExp(`^${name}\\(\\) \\{`, "gm"));
-    assert.equal(all?.length, 1, `${HOME} must define ${name}() exactly once, at column 0`);
+    const all = code(read(HOME)).match(defRe(name, "gm"));
+    assert.equal(all?.length, 1, `${HOME} must define ${name}() exactly once`);
     for (const f of SHELL.filter((s) => s !== HOME)) {
       assert.equal(defines(read(f), name), false,
         `${f} must source ${HOME}, never redefine ${name}() — a local copy forks the verdict`);
@@ -186,7 +198,19 @@ test("every probe caller sources worktree.sh and calls what it is listed for", (
 // script, today's or tomorrow's, must source the module. The accept side is
 // asserted too: the scan has to find the delete scripts it exists for.
 test("every script that deletes a worktree or a branch sources worktree.sh", () => {
-  const DELETES = /\bworktree (?:remove|prune)\b|\bupdate-ref -d\b|\bbranch -[dD]\b/;
+  const DELETES = /\bworktree\s+(?:remove|prune)\b|\bupdate-ref\s+(?:-d|--delete)\b|\bbranch\s+(?:-[a-zA-Z]*[dD]|--delete\b)/;
+  // The scan is only as good as its pattern: every spelling of a delete git
+  // accepts must read as one, or a script using it escapes the sourcing rule.
+  for (const spelling of [
+    "git branch -d x", "git branch -D x", "git branch -fd x", "git branch -df x", "git branch --delete x",
+    "git -C d worktree remove x", "git worktree  remove x", "git worktree prune",
+    "git update-ref -d refs/heads/x", "git update-ref --delete refs/heads/x", "git branch -D x # tail",
+  ]) {
+    assert.match(spelling, DELETES, `the delete-script scan must read \`${spelling}\` as a delete`);
+  }
+  for (const spelling of ["git branch --show-current", "git branch -vv", "git branch --list", "git worktree list"]) {
+    assert.doesNotMatch(spelling, DELETES, `the delete-script scan must not read \`${spelling}\` as a delete`);
+  }
   const deleters = SHELL.filter((f) => f !== HOME && read(f).split("\n")
     .some((l) => !/^\s*#/.test(l) && DELETES.test(l)));
   for (const f of ["reap.sh", "release-ticket.sh"]) {
