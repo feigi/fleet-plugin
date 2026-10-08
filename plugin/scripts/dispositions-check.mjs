@@ -14,6 +14,8 @@
 //                                                or a rule broke and an earlier
 //                                                fix-applier's record on the same
 //                                                review already had
+//   dispositions-unchecked=fix-pr-<M>[-x]:<head> no rule broke, but where a deferral was
+//                                                filed could not be read
 //
 // `<head>` is the review file's `head` — the review the record answers — so a
 // verdict on one review never answers a later one.
@@ -61,12 +63,52 @@
 //     is escalated rather than passed: the verdict is `escalate`, and the
 //     output names each such finding. A `suggestion` passes as `ok`. A record
 //     that also breaks a rule is a `mismatch`, its escalations printed too.
+//   - Refuter evidence: an in-scope suggestion — an `unverified` finding no
+//     refuter was dispatched against (`refutersDispatched` zero or absent),
+//     in scope by the presumption above or by its entry — needs
+//     `verdictPath`: an absolute path to a file under the fix-applier's own
+//     run root, `<scratch>/pr<N>/fix-XXXXXXXX/<finding>/`, holding a JSON
+//     object that validates against the refuter verdict schema
+//     `{refuted, reason}`. No `verdictPath`, a path outside that root, a file
+//     missing, or one failing the schema is a mismatch. `refuted: true` puts
+//     the finding on filing row 4, where applying it is a mismatch too;
+//     `refuted: false` on row 5.
+//   - Filing: every deferral names in `issue` the issue it was filed to, and
+//     that issue — read back through `gh issue view --json
+//     labels,state,title` — must be its finding's home in this table. A
+//     mismatch names the row the entry broke:
 //
-// Exit status: 0 ok; 1 mismatch or escalate; 2 nothing judged and nothing
-// written — a bad flag, an unreadable or malformed review file, a record file
-// that exists but cannot be read, a git or ledger failure. A missing or
-// unparseable RECORD is judged, not refused: the fix-applier wrote nothing a
-// reader can use, so every finding it had to cover is dropped.
+//       row  finding                                             home
+//       1    survived, deferred for an allowed reason other      open, ready-for-agent
+//            than false-rationale
+//       2    survived, deferred false-rationale                  closed suggestion-band record
+//       3    unverified, its refuters dispatched and crashed     open, needs-triage
+//       4    in-scope suggestion, its refuter refuted it         closed suggestion-band record
+//       5    in-scope suggestion, its refuter let it survive     applied, or deferred as row 1
+//       6    out-of-scope suggestion alleging wrong behavior     open, needs-triage
+//       7    claimKind shape, below the claim bar                closed suggestion-band record
+//
+//     Row 4 outranks row 7, and row 7 every other row. A row-5 deferral is
+//     held to row 1's reasons: one of ALLOWED_DEFER other than
+//     false-rationale, `remedy-outside-diff` under the rule above. An open
+//     home carries its row's triage label and not the other one; the closed
+//     suggestion-band record is the closed issue titled `PR #<pr> review: the
+//     suggestion band, checked`, labelled `wontfix`. `claimKind` is trusted:
+//     the script never judges whether a claim is about shape. A survived
+//     finding out of scope has no row, and its deferral's filing is not
+//     judged.
+//
+// Unchecked: `gh` unreachable, or a deferral's issue it cannot read, leaves
+// that entry's filing unjudged. With no rule broken and nothing escalated the
+// verdict is `unchecked`, which `ledger.mjs dispatch` refuses a finisher on —
+// never ok, and never a mismatch, since the record broke nothing. Run the
+// check again once `gh` answers.
+//
+// Exit status: 0 ok; 1 mismatch, escalate or unchecked; 2 nothing judged and
+// nothing written — a bad flag, an unreadable or malformed review file, a
+// record file that exists but cannot be read, a git or ledger failure. A
+// missing or unparseable RECORD is judged, not refused: the fix-applier wrote
+// nothing a reader can use, so every finding it had to cover is dropped.
 //
 // Without a ledger the record is judged all the same and the exit status is
 // the whole verdict: no token is written, no row is read, and `token` in the
@@ -83,15 +125,16 @@
 // written. `--no-ledger` names that state outright: no ledger is looked for,
 // whatever the repository holds, and it contradicts `--ledger`.
 
-import { readFileSync, existsSync, lstatSync } from "node:fs";
+import { readFileSync, existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join, dirname, isAbsolute, relative, posix } from "node:path";
+import { join, dirname, isAbsolute, relative, posix, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
 import { parseMember, memberTokens } from "./ledger-grammar.mjs";
 import { dispositionsToken, rowNums, sameHead } from "./fleet-tick.mjs";
+import { VERDICT_SCHEMA } from "./review-core.mjs";
 
 const NAME = "dispositions-check";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -106,6 +149,51 @@ export const ALLOWED_DEFER = Object.freeze(["false-rationale", "mutual-exclusion
 const COVERED = ["survived", "unverified"];
 const BUCKETS = [...COVERED, "refuted"];
 const ENUMS = { scope: ["in", "out"], claimKind: ["behavior", "shape"], disposition: ["apply", "defer"] };
+
+// The filing table: a deferral's home by its finding's state. `record` is the
+// closed suggestion-band record; `open` the triage label an open home carries.
+export const FILING_ROWS = Object.freeze({
+  1: { finding: "a survived finding deferred for an allowed reason other than false-rationale", open: "ready-for-agent" },
+  2: { finding: "a survived finding deferred false-rationale", record: true },
+  3: { finding: "an unverified finding whose refuters crashed", open: "needs-triage" },
+  4: { finding: "an in-scope suggestion its refuter refuted", record: true },
+  5: { finding: "an in-scope suggestion its refuter let survive", open: "ready-for-agent" },
+  6: { finding: "an out-of-scope suggestion alleging wrong behavior", open: "needs-triage" },
+  7: { finding: "a finding whose claim is about shape, below the claim bar", record: true },
+});
+const TRIAGE_LABELS = ["ready-for-agent", "needs-triage"];
+// Row 1's reasons, which a row-5 deferral is held to.
+const ROW_1_DEFER = ALLOWED_DEFER.filter((r) => r !== "false-rationale");
+export const recordTitle = (pr) => `PR #${pr} review: the suggestion band, checked`;
+
+function homeText(row, pr) {
+  return row.record ? `the closed "${recordTitle(pr)}" issue, labelled wontfix` : `an open issue labelled ${row.open}`;
+}
+
+// Whether an issue `{state, title, labels}` is `row`'s home on PR `pr`.
+function homeHolds(row, { state, title, labels }, pr) {
+  if (row.record) return state === "CLOSED" && title.trim() === recordTitle(pr) && labels.includes("wontfix");
+  return state === "OPEN" && labels.includes(row.open) && !labels.includes(TRIAGE_LABELS.find((l) => l !== row.open));
+}
+
+function describeIssue({ state, title, labels }) {
+  return `${state.toLowerCase()}, titled ${JSON.stringify(title)}, labelled ${labels.length === 0 ? "nothing" : labels.join(", ")}`;
+}
+
+// Why `value` is not a refuter verdict, or null when it is: the shape
+// VERDICT_SCHEMA declares, checked key by key.
+export function verdictProblem(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return "is not a JSON object";
+  for (const key of VERDICT_SCHEMA.required) {
+    if (!(key in value)) return `has no ${key}`;
+  }
+  for (const [key, v] of Object.entries(value)) {
+    const declared = VERDICT_SCHEMA.properties[key];
+    if (declared === undefined) return `carries ${key}, which a refuter verdict does not`;
+    if (typeof v !== declared.type) return `has a ${key} that is not a ${declared.type}`;
+  }
+  return null;
+}
 
 // Why `review` is not a review file this check can judge a record against,
 // or null when it is: a 7-40 hex `head`, every bucket a list of finding
@@ -248,20 +336,31 @@ function shapeErrors(e) {
 /**
  * Every rule the record breaks against the review, as `violations` of
  * `{bucket, index, rule}` — `bucket`/`index` null for a rule about the record
- * as a whole — and every deferral that needs a human, as `escalations` of
- * `{bucket, index, severity, files}`. Empty `violations` means the record
- * holds every rule. `record` is the parsed record, or null when there is none
- * to read (`recordProblem` then says why). `touched` is touchedLines() for the
- * review's head; `diffFiles` every file name `git diff <merge-base>...<head>`
- * lists, required only when an entry defers `remedy-outside-diff`; `roots` the
- * directories an absolute finding or remedy path is read relative to.
+ * as a whole — every deferral that needs a human, as `escalations` of
+ * `{bucket, index, severity, files}`, and every deferral whose filing could
+ * not be read, as `unchecked` of `{bucket, index, issue, problem}`. Empty
+ * `violations` means the record holds every rule. `record` is the parsed
+ * record, or null when there is none to read (`recordProblem` then says why).
+ * `touched` is touchedLines() for the review's head; `diffFiles` every file
+ * name `git diff <merge-base>...<head>` lists, required only when an entry
+ * defers `remedy-outside-diff`; `roots` the directories an absolute finding
+ * or remedy path is read relative to. `filing` is `{pr, issue(n), verdict(path)}`,
+ * required only when an entry defers or is an in-scope suggestion: `issue`
+ * answers `{state, title, labels}` — `state` upper-case, `labels` names — or
+ * `{problem}` when the tracker cannot say; `verdict` answers `{refuted}` for
+ * a refuter verdict path or `{problem}` when it is no usable evidence.
  * `review` must pass reviewProblem() — a bucket missing or holding a
  * non-object is a TypeError here, not a violation.
  */
-export function checkDispositions({ review, record, recordProblem = null, touched, diffFiles = null, roots = [] }) {
+export function checkDispositions({ review, record, recordProblem = null, touched, diffFiles = null, roots = [], filing = null }) {
   const violations = [];
   const escalations = [];
+  const unchecked = [];
   const at = (bucket, index, rule) => violations.push({ bucket, index, rule });
+  const filingOf = () => {
+    if (filing === null) throw new TypeError("checkDispositions: an entry is judged against the tracker or a verdict file and no filing was given");
+    return filing;
+  };
 
   let entries = [];
   if (record === null) {
@@ -307,27 +406,77 @@ export function checkDispositions({ review, record, recordProblem = null, touche
       if (!e.reason?.trim()) at(bucket, index, "a reversed refutation names its evidence in reason, and this one names none");
       return;
     }
-    if (bucket !== "survived" || e.disposition !== "defer") return;
-    const presumed = presumedInScope(review[bucket][index], touched, roots);
-    if (presumed === null && e.scope === "out") return;
-    if (!ALLOWED_DEFER.includes(e.reason)) {
-      const why = presumed === null ? "its entry declares scope in" : `${presumed}, so it is in scope whatever its entry declares`;
-      const reason = e.reason === undefined || e.reason === "" ? "no reason" : `reason ${JSON.stringify(e.reason)}`;
-      at(bucket, index, `an in-scope survived finding deferred with ${reason} — ${why}; it defers only for ${ALLOWED_DEFER.join(", ")}`);
+    if (bucket === "survived" && e.disposition !== "defer") return;
+    const finding = review[bucket][index];
+    const presumed = presumedInScope(finding, touched, roots);
+    const inScope = presumed !== null || e.scope === "in";
+    if (bucket === "survived" && !inScope) return;
+    const why = presumed === null ? "its entry declares scope in" : `${presumed}, so it is in scope whatever its entry declares`;
+    const crashed = bucket === "unverified" && finding.refutersDispatched > 0;
+    // An in-scope suggestion's refuter verdict is the evidence a refuter ran.
+    let refuted = null;
+    if (bucket === "unverified" && !crashed && inScope) {
+      if (e.verdictPath === undefined) {
+        at(bucket, index, `an in-scope suggestion carries no refuter evidence — its entry names no verdictPath; ${why}`);
+        return;
+      }
+      const v = filingOf().verdict(e.verdictPath);
+      if (v.problem !== undefined) {
+        at(bucket, index, `an in-scope suggestion carries no refuter evidence — verdictPath ${JSON.stringify(e.verdictPath)} ${v.problem}`);
+        return;
+      }
+      refuted = v.refuted;
+      if (refuted && e.disposition === "apply") {
+        at(bucket, index, `filing row 4 (${FILING_ROWS[4].finding}): applied, though its verdict is refuted: true — it belongs in ${homeText(FILING_ROWS[4], filing.pr)}`);
+        return;
+      }
+    }
+    if (e.disposition !== "defer") return;
+    const shape = e.claimKind === "shape";
+    // A finding that stands defers only for a reason: an in-scope survivor
+    // for one of ALLOWED_DEFER, a suggestion its refuter let through for one
+    // of row 1's — unless row 7 takes it.
+    if (bucket === "survived" || (refuted === false && !shape)) {
+      const allowed = bucket === "survived" ? ALLOWED_DEFER : ROW_1_DEFER;
+      if (!allowed.includes(e.reason)) {
+        const reason = e.reason === undefined || e.reason === "" ? "no reason" : `reason ${JSON.stringify(e.reason)}`;
+        at(bucket, index, bucket === "survived"
+          ? `an in-scope survived finding deferred with ${reason} — ${why}; it defers only for ${allowed.join(", ")}`
+          : `filing row 5 (${FILING_ROWS[5].finding}): deferred with ${reason} — it is applied, or deferred as row 1, for ${allowed.join(", ")}`);
+        return;
+      }
+      if (e.reason === REMEDY_OUTSIDE_DIFF) {
+        if (diffFiles === null) throw new TypeError("checkDispositions: an entry defers remedy-outside-diff and no diffFiles was given");
+        const inDiff = new Set(diffFiles);
+        const named = (e.remedyFiles ?? []).map((f) => f.trim()).filter((f) => f !== "");
+        const outside = named.map((f) => posix.normalize(repoPath(f, roots, inDiff))).filter((f) => !inDiff.has(f));
+        if (outside.length === 0) {
+          const what = named.length === 0 ? "remedyFiles names no file" : "every file remedyFiles names is in the PR's diff";
+          at(bucket, index, `reason remedy-outside-diff needs a remedy file absent from the PR's diff — ${what}`);
+          return;
+        }
+        const severity = finding.severity;
+        if (severity !== "suggestion") escalations.push({ bucket, index, severity: severity ?? null, files: outside });
+      }
+    }
+    // Where the deferral must be filed. `claimKind` is trusted, never judged.
+    const rowNo = refuted === true ? 4 : shape ? 7
+      : bucket === "survived" ? (e.reason === "false-rationale" ? 2 : 1)
+      : crashed ? 3 : inScope ? 5 : 6;
+    const row = FILING_ROWS[rowNo];
+    const { pr, issue: readIssue } = filingOf();
+    if (e.issue === undefined) {
+      at(bucket, index, `filing row ${rowNo} (${row.finding}): a deferral names the issue it was filed to, and this entry names none — it belongs in ${homeText(row, pr)}`);
       return;
     }
-    if (e.reason !== REMEDY_OUTSIDE_DIFF) return;
-    if (diffFiles === null) throw new TypeError("checkDispositions: an entry defers remedy-outside-diff and no diffFiles was given");
-    const inDiff = new Set(diffFiles);
-    const named = (e.remedyFiles ?? []).map((f) => f.trim()).filter((f) => f !== "");
-    const outside = named.map((f) => posix.normalize(repoPath(f, roots, inDiff))).filter((f) => !inDiff.has(f));
-    if (outside.length === 0) {
-      const what = named.length === 0 ? "remedyFiles names no file" : "every file remedyFiles names is in the PR's diff";
-      at(bucket, index, `reason remedy-outside-diff needs a remedy file absent from the PR's diff — ${what}`);
+    const issue = readIssue(e.issue);
+    if (issue.problem !== undefined) {
+      unchecked.push({ bucket, index, issue: e.issue, problem: issue.problem });
       return;
     }
-    const severity = review[bucket][index].severity;
-    if (severity !== "suggestion") escalations.push({ bucket, index, severity: severity ?? null, files: outside });
+    if (!homeHolds(row, issue, pr)) {
+      at(bucket, index, `filing row ${rowNo} (${row.finding}): it belongs in ${homeText(row, pr)}, and #${e.issue} is ${describeIssue(issue)}`);
+    }
   });
 
   for (const bucket of COVERED) {
@@ -335,7 +484,7 @@ export function checkDispositions({ review, record, recordProblem = null, touche
       if (!seen.has(`${bucket}[${index}]`)) at(bucket, index, "no entry — a finding with no entry is a dropped finding");
     });
   }
-  return { violations, escalations };
+  return { violations, escalations, unchecked };
 }
 
 export function formatViolation({ bucket, index, rule }) {
@@ -352,7 +501,7 @@ export function formatEscalation({ bucket, index, severity, files }) {
 // one. Separators a removal leaves doubled are folded.
 export function withVerdict(rowText, token) {
   const mine = dispositionsToken(token);
-  if (mine === null) throw new Error(`withVerdict: '${token}' is not a dispositions-ok=/dispositions-mismatch=/dispositions-escalate= token`);
+  if (mine === null) throw new Error(`withVerdict: '${token}' is not a dispositions-ok=/dispositions-mismatch=/dispositions-escalate=/dispositions-unchecked= token`);
   const words = String(rowText).trim().split(/\s+/).filter(Boolean);
   const kept = words.filter((w) => {
     const d = dispositionsToken(w);
@@ -365,13 +514,14 @@ export function withVerdict(rowText, token) {
 
 // Whether a fix-applier on PR `pr` with a lower retry suffix than `member`
 // already has a mismatch or escalate on the ledger for `head` — on any row
-// that resolves to the PR, since a row can be split. A verdict on another
-// review head counts for nothing, so a new review starts the count again.
+// that resolves to the PR, since a row can be split. An unchecked verdict is
+// no failure of a record, and a verdict on another review head counts for
+// nothing, so a new review starts the count again.
 export function failedBefore(rows, pr, member, head) {
   const mine = member.retry ?? "";
   return rows.some((r) => rowNums(r).pr === pr && r.split(/\s+/).some((w) => {
     const d = dispositionsToken(w);
-    return d !== null && d.verdict !== "ok" && d.member.number === pr
+    return d !== null && (d.verdict === "mismatch" || d.verdict === "escalate") && d.member.number === pr
       && (d.member.retry ?? "") < mine && sameHead(d.head, head);
   }));
 }
@@ -404,6 +554,75 @@ function runLedger(ledgerFile, args, what) {
   } catch (e) {
     die(`could not ${what}: ${e.stderr?.trim() || e.message}`);
   }
+}
+
+// Where a deferral was filed, as checkDispositions' `filing.issue` reads it:
+// `gh issue view <n> --json labels,state,title`, each number read once, run
+// from `repo` so gh resolves the tracker from that repository's remotes —
+// under the same scrubbed GIT_DIR and GIT_WORK_TREE as the git primitive,
+// which would otherwise point gh at another repository's remotes. Anything
+// short of an answer in that shape is `{problem}`: the filing goes unchecked,
+// never judged.
+function issueReader(repo) {
+  const cache = new Map();
+  const read = (n) => {
+    let out;
+    try {
+      out = execFileSync("gh", ["issue", "view", String(n), "--json", "labels,state,title"], {
+        cwd: repo, encoding: "utf8", env: gitEnv(), stdio: ["ignore", "pipe", "pipe"], timeout: 60_000,
+      });
+    } catch (e) {
+      return { problem: e.code === "ENOENT" ? "gh is not on PATH" : e.stderr?.toString().trim() || e.message };
+    }
+    let j;
+    try {
+      j = JSON.parse(out);
+    } catch (e) {
+      return { problem: `gh printed no JSON — ${e.message}` };
+    }
+    if (typeof j?.state !== "string" || typeof j.title !== "string" || !Array.isArray(j.labels)
+      || !j.labels.every((l) => typeof l?.name === "string")) {
+      return { problem: "gh printed no {labels, state, title}" };
+    }
+    return { state: j.state.toUpperCase(), title: j.title, labels: j.labels.map((l) => l.name) };
+  };
+  return (n) => {
+    if (!cache.has(n)) cache.set(n, read(n));
+    return cache.get(n);
+  };
+}
+
+// A refuter verdict, as checkDispositions' `filing.verdict` reads it: an
+// absolute path to a file under `<scratch>/pr<pr>/fix-XXXXXXXX/<finding>/`,
+// both sides resolved through symlinks, holding JSON in the refuter verdict
+// schema. Anything else is `{problem}` — no evidence a refuter ran.
+function verdictReader(scratch, pr) {
+  const runs = join(scratch, `pr${pr}`);
+  const notUnder = `is not under a fix-applier run root, ${runs}/fix-XXXXXXXX/<finding>/`;
+  return (path) => {
+    if (!isAbsolute(path)) return { problem: "is not an absolute path" };
+    let file, root;
+    try {
+      file = realpathSync(path);
+    } catch {
+      return { problem: "names no file that exists" };
+    }
+    try {
+      root = realpathSync(runs);
+    } catch {
+      return { problem: notUnder };
+    }
+    if (!/^fix-[^/]+\/[^/]+\/./.test(relative(root, file).split(sep).join("/"))) return { problem: notUnder };
+    let value;
+    try {
+      if (!statSync(file).isFile()) return { problem: "names something that is not a file" };
+      value = JSON.parse(readFileSync(file, "utf8"));
+    } catch (e) {
+      return { problem: `cannot be read as JSON — ${e.message}` };
+    }
+    const why = verdictProblem(value);
+    return why === null ? { refuted: value.refuted } : { problem: `fails the refuter verdict schema — it ${why}` };
+  };
 }
 
 // The ledger file this run writes its verdict to, or null when there is none:
@@ -495,8 +714,9 @@ function main() {
     `list the files of ${base}..${head}`).split("\0").filter(Boolean);
   const ledgerFile = standalone ? null : ledgerInUse(arg("ledger"), repo);
 
-  const { violations, escalations } = checkDispositions({
+  const { violations, escalations, unchecked } = checkDispositions({
     review, record, recordProblem, touched: touchedLines(diff), diffFiles, roots: [review.snapshot, top],
+    filing: { pr, issue: issueReader(repo), verdict: verdictReader(scratch, pr) },
   });
   // The verdict lands on the row carrying the member on its own PR's row —
   // where `ledger.mjs dispatch` wrote it, and where the gate reads PR M's
@@ -506,9 +726,11 @@ function main() {
   const data = ledgerFile === null ? null : JSON.parse(runLedger(ledgerFile, ["read"], "read the ledger"));
   // A mismatch an earlier fix-applier already drew on this review makes this
   // one the second: it is written as an escalate, which no fix-applier answers.
+  // A broken rule outranks an escalation, and an escalation a filing the
+  // tracker could not answer.
   const secondMismatch = violations.length > 0 && data !== null && failedBefore(data.rows, pr, member, head);
   const verdict = violations.length > 0 ? (secondMismatch ? "escalate" : "mismatch")
-    : escalations.length > 0 ? "escalate" : "ok";
+    : escalations.length > 0 ? "escalate" : unchecked.length > 0 ? "unchecked" : "ok";
   const token = `dispositions-${verdict}=${member.name}:${head}`;
 
   if (data !== null) {
@@ -524,10 +746,13 @@ function main() {
 
   for (const v of violations) console.error(`${member.name}: ${formatViolation(v)}`);
   for (const x of escalations) console.error(`${member.name}: ${formatEscalation(x)}`);
+  for (const u of unchecked) {
+    console.error(`${member.name}: ${u.bucket}[${u.index}]: where it was filed is unchecked — #${u.issue} could not be read through gh: ${u.problem}`);
+  }
   if (secondMismatch) {
     console.error(`${member.name}: escalate — an earlier fix-applier's record on review ${head} already failed this check; no further fix-applier answers PR #${pr}, a human does`);
   }
-  console.log(JSON.stringify({ member: member.name, pr, head, verdict, token: ledgerFile === null ? null : token, violations, escalations }));
+  console.log(JSON.stringify({ member: member.name, pr, head, verdict, token: ledgerFile === null ? null : token, violations, escalations, unchecked }));
   // exitCode, not exit(): stdout to a pipe is written asynchronously, and an
   // exit() here could cut the payload off.
   process.exitCode = verdict === "ok" ? 0 : 1;

@@ -1473,7 +1473,7 @@ for a token on a ticket's line — never a hand edit.
 |---|---|
 | Implementer report | `verify-sha.sh`; `ledger.mjs settle impl-<N>=PR#<M>`, or `=bailed` and relabel by cause (**Implementer bails before implementing**, below) |
 | Review workflow notification / `review-pr-<n>` report | write `<scratch>/review-<pr>.json`; `reviewed=<head>:<survived>/<refuted>/<unverified>` on the PR's row (**Reviewers**) |
-| Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; for a fix-applier that answered a review — not one that cleared a conflict hold, which has no review file — `~/.fleet/bin/fleet-run dispositions-check.mjs --member <that member> --scratch <scratch>`, from the checkout root: it judges `<scratch>/dispositions-<M>.json` against `<scratch>/review-<M>.json`, writes `dispositions-ok=`, `dispositions-mismatch=` or `dispositions-escalate=<member>:<head>` onto the PR's row itself, and exits 1 on a mismatch or an escalation, naming each violating or escalated entry's bucket and index, a violation its rule too — **Then dispatch a fix-applier** says what a mismatch asks of you, the gate paragraph below what an escalation does; copy the refutations it reversed — the record's `refuted` entries — to `ruled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
+| Fix-applier report | `ledger.mjs settle fix-pr-<M>=…`; for a fix-applier that answered a review — not one that cleared a conflict hold, which has no review file — `~/.fleet/bin/fleet-run dispositions-check.mjs --member <that member> --scratch <scratch>`, from the checkout root: it judges `<scratch>/dispositions-<M>.json` against `<scratch>/review-<M>.json`, writes `dispositions-ok=`, `dispositions-mismatch=`, `dispositions-escalate=` or `dispositions-unchecked=<member>:<head>` onto the PR's row itself, and exits 1 on a mismatch, an escalation or an unchecked, naming each violating or escalated entry's bucket and index, a violation its rule too, and each entry whose filed issue `gh` could not read — **Then dispatch a fix-applier** says what a mismatch asks of you, the gate paragraph below what an escalation or an unchecked does; copy the refutations it reversed — the record's `refuted` entries — to `ruled`; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Finisher report | `ledger.mjs settle finisher-pr-<M>=labelled` as reported, even when its read-back lacks `ready-to-merge` — the tick's `DISPATCH finisher PR#<M>` catches that next. A **repair** finisher's (one sent on that line) read-back lacking it also gets `gh pr comment <M>` with both finishers' read-backs: the one-shot escalation, where halts comment. `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line |
 | Finisher report (halted) | `ledger.mjs settle finisher-pr-<M>=halted:<cause>`; `gh pr comment <M>` with the finisher's halt report, cause and evidence; `ledger.mjs filed <N> "<subject>"` for each `unrecorded:` line; then the per-cause rule (**Resolving a finisher halt**, below) |
 | Finisher report (failed / killed) | `ledger.mjs settle finisher-pr-<M>=failed` for a finisher that crashed or gave up, `=killed` for one that was killed; no label, and the tick prints no dispatch for it. The cockpit flags the PR `finisher:failed` / `finisher:killed` at severity 4 and you resolve it by hand (**Resolving a finisher that died**, below) |
@@ -2533,9 +2533,13 @@ fix-applier's `no-op` and its `ok` verdict are what open the finisher. The
 refusal names its cause. `dispositions
 unchecked` — no verdict answers that head: run `dispositions-check.mjs` for
 the fix-applier that answered the review, as the Fix-applier report edge
-states, then dispatch again. `dispositions mismatch` — no finisher: the tick
-prints `DISPATCH fix-pr PR#<M>` for it, and the next-suffix fix-applier answers
-it (**Then dispatch a fix-applier**). `dispositions escalate` — no finisher, no
+states, then dispatch again. It names a `dispositions-unchecked=` verdict too —
+no rule broke, but the check could not read where a deferral was filed, `gh`
+unreachable or an issue unreadable: run the check again for that fix-applier
+once `gh` answers; the tick offers no fix-applier for it. `dispositions
+mismatch` — no finisher: the tick prints `DISPATCH fix-pr PR#<M>` for it, and
+the next-suffix fix-applier answers it (**Then dispatch a fix-applier**).
+`dispositions escalate` — no finisher, no
 retry and no further fix-applier: either a `critical` or `important` finding was
 deferred `remedy-outside-diff`, or a second mismatch was drawn on one review, and
 only a human can rule on either. Post the check's output, which names each

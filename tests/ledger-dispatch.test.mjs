@@ -759,7 +759,7 @@ test("a finisher is refused on a dispositions mismatch and recorded on a disposi
 
 test("a finisher is refused as unchecked while no verdict answers the latest review's head", (t) => {
   const { ok, refused } = fixture(t);
-  const unchecked = /finisher-pr-40: dispositions unchecked — no dispositions-ok=\/dispositions-mismatch=\/dispositions-escalate= token .* run dispositions-check\.mjs --member fix-pr-40/;
+  const unchecked = /finisher-pr-40: dispositions unchecked — no dispositions-ok=\/dispositions-mismatch=\/dispositions-escalate=\/dispositions-unchecked= token .* run dispositions-check\.mjs --member fix-pr-40/;
   // No token at all.
   ok("row", "10", gateRow("1/0/0"));
   refused(["dispatch", "40", "finisher-pr-40"], unchecked);
@@ -778,6 +778,15 @@ test("a finisher is refused as unchecked while no verdict answers the latest rev
   // Another PR's fix-applier's verdict is no answer for this PR.
   ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-41:${GATE_HEAD}`));
   refused(["dispatch", "40", "finisher-pr-40"], unchecked);
+});
+
+test("a finisher is refused as unchecked on a dispositions-unchecked verdict answering the latest review's head, until a re-run writes ok", (t) => {
+  const { ok, refused } = fixture(t);
+  ok("row", "10", gateRow("1/0/0", `dispositions-unchecked=fix-pr-40:${GATE_HEAD}`));
+  refused(["dispatch", "40", "finisher-pr-40"],
+    /finisher-pr-40: dispositions unchecked — fix-pr-40's check of review [0-9a-f]+ could not read where a deferral was filed .* run dispositions-check\.mjs --member fix-pr-40 --scratch <scratch> again once gh answers/);
+  ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_HEAD}`));
+  assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
 });
 
 test("a PR whose latest review counts no survived and no unverified finding dispatches a finisher with no verdict", (t) => {
