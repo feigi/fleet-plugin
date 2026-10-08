@@ -935,6 +935,20 @@ test("currentDispositions: escalate parses, and outranks mismatch which outranks
   assert.deepEqual(heads("dispositions-escalate=fix-pr-21:abc1234", "dispositions-ok=fix-pr-21-b:abc1234"), { verdict: "ok", member: "fix-pr-21-b" });
 });
 
+test("currentDispositions: unchecked parses, outranks ok and is outranked by mismatch at one retry suffix, and is never fix-due", () => {
+  assert.deepEqual(dispositionsToken("dispositions-unchecked=fix-pr-21-b:abc1234")?.verdict, "unchecked");
+  assert.equal(dispositionsToken("dispositions-unchecked=finisher-pr-21:abc1234"), null);
+  const heads = (...s) => currentDispositions(s.map(dispositionsToken), "abc1234");
+  assert.deepEqual(heads("dispositions-ok=fix-pr-21:abc1234", "dispositions-unchecked=fix-pr-21:abc1234"), { verdict: "unchecked", member: "fix-pr-21" });
+  assert.deepEqual(heads("dispositions-unchecked=fix-pr-21:abc1234", "dispositions-mismatch=fix-pr-21:abc1234"), { verdict: "mismatch", member: "fix-pr-21" });
+  assert.deepEqual(heads("dispositions-unchecked=fix-pr-21:abc1234", "dispositions-ok=fix-pr-21-b:abc1234"), { verdict: "ok", member: "fix-pr-21-b" });
+  // A landed fix-applier whose check could not read the tracker is answered
+  // by running the check again, never by another fix-applier.
+  const due = (verdict) => run({ rows: [`#20 impl-20=PR#21 → PR#21 · reviewed=abc1234:2/0/0 · fix-pr-21=applied:abc1234 · dispositions-${verdict}=fix-pr-21:abc1234`] }, [pr(21)]).fixDue;
+  assert.deepEqual(due("mismatch"), [21], "control: a mismatch on the same row is fix-due");
+  assert.deepEqual(due("unchecked"), []);
+});
+
 test("deriveRun: a newer review's survivors are not offered beside a live fix-applier, and are due once it settles", () => {
   // `dispatch` would refuse a second live one. Settled, it was dispatched
   // before that review, so it never answered the newer survivors.

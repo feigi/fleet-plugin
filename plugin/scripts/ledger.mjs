@@ -1661,9 +1661,15 @@ function dispositionsRefusal(pr, review) {
   if (review.survived === 0 && review.unverified === 0) return null;
   const v = review.dispositions;
   if (v === null) {
-    return `dispositions unchecked — no dispositions-ok=/dispositions-mismatch=/dispositions-escalate= token answers PR #${pr}'s latest review, `
+    return `dispositions unchecked — no dispositions-ok=/dispositions-mismatch=/dispositions-escalate=/dispositions-unchecked= token answers PR #${pr}'s latest review, `
       + `reviewed=${review.head}; run dispositions-check.mjs --member fix-pr-${pr}[-<x>] --scratch <scratch> for the fix-applier `
       + "that answered that review, then dispatch the finisher again";
+  }
+  if (v.verdict === "unchecked") {
+    return `dispositions unchecked — ${v.member}'s check of review ${review.head} could not read where a deferral was filed (gh unreachable, `
+      + "or an issue unreadable — an issue that does not exist is unreadable too, and no re-run answers that one: the check's stderr names "
+      + `it, and the record's issue number needs correcting); run dispositions-check.mjs --member ${v.member} --scratch <scratch> again once gh answers, `
+      + "then dispatch the finisher again";
   }
   if (v.verdict === "mismatch") {
     return `dispositions mismatch — ${v.member}'s disposition record fails the check against review ${review.head}; `

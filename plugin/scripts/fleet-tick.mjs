@@ -372,15 +372,18 @@ const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
 const TIER_VERDICT = /^tier-(ok|mismatch|unverifiable)=([^:\s]+):\S+$/;
 // dispositions-check.mjs's verdict on a review fix-applier's disposition
 // record: `dispositions-ok=fix-pr-<M>[-x]:<head>`,
-// `dispositions-mismatch=…` or `dispositions-escalate=…` (a critical or
+// `dispositions-mismatch=…`, `dispositions-escalate=…` (a critical or
 // important deferral, or a second mismatch on one review, that a human rules
-// on), `<head>` the head of the review the record answers. `ledger.mjs
-// dispatch` refuses a finisher on a mismatch or an escalate. A mismatch
-// returns the PR to fixDue for one retry; an escalate is a hold only a human
-// answers, so the tick never re-offers the PR for it. A token outside this
-// shape is no verdict at all, which the gate reads as unchecked: fail closed.
+// on) or `dispositions-unchecked=…` (no rule broke, but where a deferral was
+// filed could not be read), `<head>` the head of the review the record
+// answers. `ledger.mjs dispatch` refuses a finisher on anything but an ok. A
+// mismatch returns the PR to fixDue for one retry; an escalate is a hold only
+// a human answers, so the tick never re-offers the PR for it; an unchecked is
+// answered by running the check again, so the tick never offers a
+// fix-applier for it either. A token outside this shape is no verdict at all,
+// which the gate reads as unchecked: fail closed.
 export function dispositionsToken(tok) {
-  const m = /^dispositions-(ok|mismatch|escalate)=([^:\s]+):([0-9a-f]{7,40})$/i.exec(tok);
+  const m = /^dispositions-(ok|mismatch|escalate|unchecked)=([^:\s]+):([0-9a-f]{7,40})$/i.exec(tok);
   if (!m) return null;
   const member = parseMember(m[2]);
   if (member === null || member.family !== "fix-pr") return null;
@@ -393,14 +396,14 @@ export const sameHead = (a, b) => a.startsWith(b) || b.startsWith(a);
 
 // Which verdict outranks which when one fix-applier carries more than one for
 // a head: the stricter reading wins.
-const VERDICT_RANK = { ok: 0, mismatch: 1, escalate: 2 };
+const VERDICT_RANK = { ok: 0, unchecked: 1, mismatch: 2, escalate: 3 };
 
 // A PR's current dispositions verdict against its latest review head: among
 // the tokens answering that head, the one from the fix-applier with the
 // highest retry suffix ("" < "b" < "c" …) — never row-text position, which a
 // `row` rewrite can reorder. One fix-applier carrying two verdicts for one
 // head reads as the stricter one. null when no token answers the head.
-/** @returns {{verdict: "ok"|"mismatch"|"escalate", member: string}|null} */
+/** @returns {{verdict: "ok"|"unchecked"|"mismatch"|"escalate", member: string}|null} */
 export function currentDispositions(tokens, head) {
   let best = null;
   for (const t of tokens) {

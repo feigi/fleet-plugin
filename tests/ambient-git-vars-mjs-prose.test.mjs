@@ -245,8 +245,13 @@ const COVERED_MJS = {
   // that repository's diff and write its verdict to that repository's ledger.
   // Measured in dispositions-check.test.mjs, "an ambient GIT_DIR naming
   // another repository does not change the answer" (the diff and merge-base)
-  // and "… does not change which ledger is found" (the common dir).
-  "dispositions-check.mjs": 1,
+  // and "… does not change which ledger is found" (the common dir). A second
+  // `gitEnv(` call scrubs the `gh issue view` child that reads back where each
+  // deferral was filed: gh resolves its repository from the cwd's git
+  // remotes, so an ambient GIT_DIR would read another repository's tracker.
+  // Measured in dispositions-check.test.mjs, "gh is run from the repository
+  // with no ambient GIT_DIR".
+  "dispositions-check.mjs": 2,
   // ONE scrubbed env, built once and handed to every child — the `git(args,
   // cwd)` primitive behind the common-dir, origin/main, worktree, status and
   // diff calls, AND the one `sh -c` runner of the Install step, the Test

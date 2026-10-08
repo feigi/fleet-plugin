@@ -137,3 +137,27 @@ test("step 6 has a standalone member pass --no-ledger: no token is written and t
     "without the flag it exits 2 for a ledger with no row for you",
   ));
 });
+
+// Step 5's record duties: one line, bounded by step 6's opener.
+const filingStep = () =>
+  between(REVIEW_AND_FIX, "**Name where each deferral went, in the disposition record.**", "\n6. Diff-check green", "review-and-fix.md");
+
+test("step 5 has every deferred entry name in issue where it went, and an in-scope suggestion's entry its refuter verdict file", () => {
+  const s = filingStep();
+  assert.match(s, phrase("Every entry you defer carries `issue`: the number of the issue you filed it to, commented it onto, or appended it to"));
+  assert.match(s, phrase(
+    "An in-scope `suggestion`'s entry — an `unverified` finding with `refutersDispatched` of zero — also carries `verdictPath`, applied or deferred: the absolute path of a file holding its refuter's verdict as JSON, `{\"refuted\": <boolean>, \"reason\": \"<string>\"}`, under your own `<scratch>/pr<N>/fix-XXXXXXXX/<finding>/` run root.",
+  ));
+});
+
+test("step 5 says a mismatch names the filing row, and that an unreadable tracker is unchecked, never ok", () => {
+  const s = filingStep();
+  assert.match(s, phrase("`dispositions-check.mjs` reads each named issue back through `gh issue view --json labels,state,title` and each verdict file off disk; a mismatch names the row of its filing table the entry broke"));
+  assert.match(s, phrase("with nothing else broken the verdict is `unchecked` — never `ok`, and it exits 1 — so run the check again once `gh` answers."));
+});
+
+test("the gate refuses a finisher on an unchecked verdict, which re-running the check answers", () => {
+  assert.match(gate(), phrase(
+    "It names a `dispositions-unchecked=` verdict too — no rule broke, but the check could not read where a deferral was filed, `gh` unreachable or an issue unreadable: run the check again for that fix-applier once `gh` answers (an issue that does not exist is unreadable too, and no re-run answers that one: the check's stderr names it, and the record's issue number needs correcting); the tick offers no fix-applier for it.",
+  ));
+});

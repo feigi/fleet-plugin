@@ -4,20 +4,49 @@
 //
 // Every CLI case runs against a real git repository built in a temp dir —
 // `origin/main` a ref, the PR head one commit past it — so the touched lines
-// are git's own answer, not a fixture's restatement of one.
+// are git's own answer, not a fixture's restatement of one. The tracker is a
+// `gh` stub first on PATH, answering `issue view` from a JSON file the
+// fixture writes: no case reaches the network.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, symlinkSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, symlinkSync, existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveRun } from "../plugin/scripts/fleet-tick.mjs";
-import { touchedLines, checkDispositions, withVerdict, repoPath, formatViolation, failedBefore } from "../plugin/scripts/dispositions-check.mjs";
+import {
+  touchedLines, checkDispositions, withVerdict, repoPath, formatViolation, failedBefore, verdictProblem, recordTitle, FILING_ROWS,
+} from "../plugin/scripts/dispositions-check.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/dispositions-check.mjs", import.meta.url));
 const LEDGER = fileURLToPath(new URL("../plugin/scripts/ledger.mjs", import.meta.url));
+
+// The `gh` stub: `issue view <n> --json labels,state,title` answered from
+// FAKE_GH_ISSUES, an issue it does not hold answered the way gh answers one
+// that does not exist. FAKE_GH_DOWN answers every call as an unreachable API.
+// FAKE_GH_LOG, when set, gets one line per call: its argv, cwd and GIT_DIR.
+const GH_STUB = `#!${process.execPath}
+const fs = require("node:fs");
+const argv = process.argv.slice(2);
+const { FAKE_GH_ISSUES, FAKE_GH_DOWN, FAKE_GH_LOG } = process.env;
+if (FAKE_GH_LOG) fs.appendFileSync(FAKE_GH_LOG, JSON.stringify({ argv, cwd: process.cwd(), GIT_DIR: process.env.GIT_DIR ?? null }) + "\\n");
+if (FAKE_GH_DOWN) { process.stderr.write("error connecting to api.github.com\\n"); process.exit(1); }
+const [cmd, sub, n, flag, fields] = argv;
+if (argv.length !== 5 || cmd !== "issue" || sub !== "view" || flag !== "--json" || fields !== "labels,state,title") {
+  process.stderr.write("gh stub: unexpected call " + JSON.stringify(argv) + "\\n");
+  process.exit(2);
+}
+const issue = JSON.parse(fs.readFileSync(FAKE_GH_ISSUES, "utf8"))[n];
+if (!issue) {
+  process.stderr.write("GraphQL: Could not resolve to an issue or pull request with the number of " + n + ". (repository.issue)\\n");
+  process.exit(1);
+}
+process.stdout.write(JSON.stringify({ labels: issue.labels.map((name) => ({ name })), state: issue.state, title: issue.title }));
+`;
+const openIssue = (label) => ({ state: "OPEN", title: "a deferred finding", labels: [label] });
+const bandRecord = (pr = 40) => ({ state: "CLOSED", title: recordTitle(pr), labels: ["wontfix"] });
 
 const cleanEnv = (extra = {}) => {
   const env = { ...process.env, ...extra };
@@ -82,18 +111,46 @@ function fixture(t) {
   const writeReview = (r = review) => writeFileSync(join(scratch, "review-40.json"), JSON.stringify(r));
   writeReview();
   const entry = (bucket, index, more = {}) => ({ bucket, index, scope: "in", claimKind: "behavior", disposition: "apply", ...more });
-  // Every finding answered, every in-scope survivor applied: an ok record.
-  const baseEntries = () => [entry("survived", 0), entry("survived", 1), entry("unverified", 0, { disposition: "defer", issue: 77 })];
+  // Every finding answered, every in-scope survivor applied, the out-of-scope
+  // suggestion filed open `needs-triage` (row 6): an ok record.
+  const baseEntries = () => [entry("survived", 0), entry("survived", 1), entry("unverified", 0, { scope: "out", disposition: "defer", issue: 77 })];
   const writeRecord = (entries, recHead = head) =>
     writeFileSync(join(scratch, "dispositions-40.json"), JSON.stringify({ head: recHead, entries }));
 
-  const check = (member = "fix-pr-40", env = cleanEnv(), script = SCRIPT, extra = []) => {
+  // The tracker the `gh` stub answers from, issue number → {state, title, labels}.
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "gh"), GH_STUB, { mode: 0o755 });
+  const issuesFile = join(dir, "issues.json");
+  // 77 is the base record's row-6 home; 81 the row-1 home a deferred survivor
+  // in these cases is filed to.
+  const issues = { 77: openIssue("needs-triage"), 81: openIssue("ready-for-agent") };
+  const setIssues = (more) => {
+    Object.assign(issues, more);
+    writeFileSync(issuesFile, JSON.stringify(issues));
+  };
+  setIssues({});
+  // Any env, with the stub first on PATH.
+  const env = (base = cleanEnv(), extra = {}) => ({ ...base, PATH: `${bin}:${base.PATH ?? ""}`, FAKE_GH_ISSUES: issuesFile, ...extra });
+  // A refuter verdict under the fix-applier's run root, as step 2 writes it;
+  // `value` an object written as JSON, or a string written as it stands.
+  const writeVerdict = (value, finding = "1", runRoot = join(scratch, "pr40", "fix-Ab12Cd34")) => {
+    const path = join(runRoot, finding, "verdict.json");
+    mkdirSync(join(runRoot, finding), { recursive: true });
+    writeFileSync(path, typeof value === "string" ? value : JSON.stringify(value));
+    return path;
+  };
+
+  const check = (member = "fix-pr-40", base = cleanEnv(), script = SCRIPT, extra = []) => {
     const r = spawnSync(process.execPath, [script, "--member", member, "--scratch", scratch, "--repo", repo, "--ledger", ledger, ...extra],
-      { encoding: "utf8", env, cwd: dir });
+      { encoding: "utf8", env: env(base), cwd: dir });
     return { ...r, json: r.status === 0 || r.status === 1 ? JSON.parse(r.stdout) : null };
   };
   const row = () => okLedger("read").rows.find((r) => r.startsWith("#10 "));
-  return { dir, repo, head, scratch, review, writeReview, entry, baseEntries, writeRecord, check, row, ledgerCli, okLedger };
+  return {
+    dir, repo, head, scratch, review, writeReview, entry, baseEntries, writeRecord, check, row, ledgerCli, okLedger,
+    env, setIssues, writeVerdict,
+  };
 }
 
 const mismatch = (r, re) => {
@@ -138,6 +195,7 @@ test("each allowed reason passes an in-scope survivor's deferral, writes disposi
   for (const reason of ["false-rationale", "mutual-exclusion", "remedy-worse"]) {
     const f = fixture(t);
     const entries = f.baseEntries();
+    f.setIssues({ 81: reason === "false-rationale" ? bandRecord() : openIssue("ready-for-agent") });
     entries[0] = f.entry("survived", 0, { disposition: "defer", reason, issue: 81 });
     f.writeRecord(entries);
     okVerdict(f.check());
@@ -208,10 +266,11 @@ test("a fix-applier commit that shifts line numbers after the review head does n
 
 test("what the check accepts: applied survivors, out-of-scope deferrals, unverified deferrals, reversed refutations with evidence", (t) => {
   const f = fixture(t);
+  f.setIssues({ 13: bandRecord() });
   f.writeRecord([
     f.entry("survived", 0),
     f.entry("survived", 1, { scope: "out", claimKind: "shape", disposition: "defer", issue: 12 }),
-    f.entry("unverified", 0, { disposition: "defer", reason: "anything", issue: 13, verdictPath: "/tmp/v.json" }),
+    f.entry("unverified", 0, { disposition: "defer", reason: "anything", issue: 13, verdictPath: f.writeVerdict({ refuted: true, reason: "r" }) }),
     f.entry("refuted", 0, { reason: "re-ran the refuter's probe at the head and the defect reproduces", remedyFiles: ["src/b.js"] }),
   ]);
   const r = f.check();
@@ -363,7 +422,7 @@ test("nothing is judged or written when the review file or the git history canno
 // not exist under its git common dir.
 function standalone(f, ...extra) {
   const r = spawnSync(process.execPath, [SCRIPT, "--member", "fix-pr-40", "--scratch", f.scratch, ...extra],
-    { encoding: "utf8", env: cleanEnv(), cwd: f.repo });
+    { encoding: "utf8", env: f.env(), cwd: f.repo });
   return { ...r, json: r.status === 0 || r.status === 1 ? JSON.parse(r.stdout) : null };
 }
 
@@ -554,7 +613,7 @@ test("an ambient GIT_DIR naming another repository does not change which ledger 
   git(other, "init", "-q", "-b", "main");
   f.writeRecord(f.baseEntries());
   const r = spawnSync(process.execPath, [SCRIPT, "--member", "fix-pr-40", "--scratch", f.scratch, "--repo", f.repo],
-    { encoding: "utf8", env: { ...cleanEnv(), GIT_DIR: join(other, ".git"), GIT_WORK_TREE: other }, cwd: f.dir });
+    { encoding: "utf8", env: f.env({ ...cleanEnv(), GIT_DIR: join(other, ".git"), GIT_WORK_TREE: other }), cwd: f.dir });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(JSON.parse(r.stdout).token, `dispositions-ok=fix-pr-40:${f.head}`);
   assert.match(readFileSync(ledger, "utf8"), new RegExp(`dispositions-ok=fix-pr-40:${f.head}`));
@@ -696,12 +755,22 @@ test("nothing is judged or written for a review finding that is no object, an un
 
 // The pure core, on one review: survived[0] on touched src/a.js:5, one refuted finding.
 const H40 = "abc1234abc1234abc1234abc1234abc1234abcde";
-const coreRun = (entries, { head = H40, reviewHead = H40, survived = [{ file: "src/a.js", line: 5 }], record, diffFiles = ["src/a.js"] } = {}) => checkDispositions({
-  review: { head: reviewHead, survived, unverified: [], refuted: [{ file: "src/b.js", line: 1 }] },
+// `issues` the tracker by number — an issue it does not hold is an open
+// `ready-for-agent` one — and `verdicts` the refuter verdicts by path.
+const coreRun = (entries, {
+  head = H40, reviewHead = H40, survived = [{ file: "src/a.js", line: 5 }], unverified = [], record, diffFiles = ["src/a.js"],
+  issues = {}, verdicts = {},
+} = {}) => checkDispositions({
+  review: { head: reviewHead, survived, unverified, refuted: [{ file: "src/b.js", line: 1 }] },
   record: record === undefined ? { head, entries } : record,
   touched: new Map([["src/a.js", new Set([5])]]),
   diffFiles,
   roots: ["/snap"],
+  filing: {
+    pr: 40,
+    issue: (n) => issues[n] ?? { state: "OPEN", title: "a deferred finding", labels: ["ready-for-agent"] },
+    verdict: (p) => verdicts[p] ?? { problem: "names no file that exists" },
+  },
 });
 const core = (entries, opts) => coreRun(entries, opts).violations.map(formatViolation);
 const applied = { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "apply" };
@@ -782,7 +851,7 @@ test("withVerdict leaves a row already carrying only the token unchanged, folds 
   assert.equal(withVerdict(`${ok} · impl-10=PR#40`, ok), `${ok} · impl-10=PR#40`);
   assert.equal(withVerdict(`dispositions-mismatch=fix-pr-40:${H40}`, ok), ok);
   assert.equal(withVerdict(`· dispositions-mismatch=fix-pr-40:${H40} ·`, ok), ok);
-  assert.throws(() => withVerdict(`impl-10=PR#40 · ${ok}`, "garbage"), /'garbage' is not a dispositions-ok=\/dispositions-mismatch=\/dispositions-escalate= token/);
+  assert.throws(() => withVerdict(`impl-10=PR#40 · ${ok}`, "garbage"), /'garbage' is not a dispositions-ok=\/dispositions-mismatch=\/dispositions-escalate=\/dispositions-unchecked= token/);
 });
 
 // ---------------------------------------------------------------------------
@@ -892,6 +961,20 @@ test("a record that breaks a rule is a mismatch even when it also escalates, and
   assert.equal(r.json.token, `dispositions-mismatch=fix-pr-40:${f.head}`);
 });
 
+test("an escalation outranks an issue gh cannot read: the verdict is escalate, a human rules, and the unread issue is still reported", (t) => {
+  const f = fixture(t);
+  withSeverity(f, "critical");
+  deferOutside(f, ["src/b.js"]);
+  const entries = JSON.parse(readFileSync(join(f.scratch, "dispositions-40.json"), "utf8")).entries;
+  entries[2] = f.entry("unverified", 0, { scope: "out", disposition: "defer", issue: 404 });
+  f.writeRecord(entries);
+  const r = f.check();
+  escalated(r);
+  assert.equal(r.json.token, `dispositions-escalate=fix-pr-40:${f.head}`);
+  assert.match(r.stderr, /^fix-pr-40: survived\[0\]: a critical finding deferred remedy-outside-diff/m);
+  assert.match(r.stderr, /unverified\[0\]: where it was filed is unchecked — #404 could not be read through gh/);
+});
+
 test("a re-check after an escalation replaces it with the member's new verdict, and the finisher then dispatches", (t) => {
   const f = fixture(t);
   deferOutside(f, ["src/b.js"]);
@@ -907,7 +990,8 @@ test("an out-of-scope deferral, an unverified one and an applied remedy need no 
   const f = fixture(t);
   const entries = f.baseEntries();
   entries[1] = f.entry("survived", 1, { scope: "out", disposition: "defer", reason: "remedy-outside-diff", issue: 12 });
-  entries[2] = f.entry("unverified", 0, { disposition: "defer", reason: "remedy-outside-diff", issue: 13 });
+  entries[2] = f.entry("unverified", 0, { scope: "out", disposition: "defer", reason: "remedy-outside-diff", issue: 13 });
+  f.setIssues({ 13: openIssue("needs-triage") });
   f.writeRecord(entries);
   const r = f.check();
   okVerdict(r);
@@ -915,7 +999,7 @@ test("an out-of-scope deferral, an unverified one and an applied remedy need no 
 });
 
 test("checkDispositions: escalation is every severity but suggestion, a missing severity included; diffFiles is required when a deferral needs it", () => {
-  const entry = { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "defer", reason: "remedy-outside-diff", remedyFiles: ["src/b.js"] };
+  const entry = { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "defer", reason: "remedy-outside-diff", remedyFiles: ["src/b.js"], issue: 81 };
   for (const [severity, expected] of [["critical", 1], ["important", 1], [undefined, 1], ["suggestion", 0]]) {
     const r = coreRun([entry], { survived: [{ file: "src/a.js", line: 5, severity }] });
     assert.deepEqual(r.violations, [], String(severity));
@@ -933,4 +1017,299 @@ test("withVerdict replaces an escalation with the same member's later verdict fo
   const ok = `dispositions-ok=fix-pr-40:${H40}`;
   assert.equal(withVerdict(`impl-10=PR#40 · ${esc}`, ok), `impl-10=PR#40 · ${ok}`);
   assert.equal(withVerdict(`impl-10=PR#40 · ${ok}`, esc), `impl-10=PR#40 · ${esc}`);
+});
+
+// ---------------------------------------------------------------------------
+// The filing table: where each deferral was filed, read back from the
+// tracker, and the refuter verdict an in-scope suggestion carries.
+// ---------------------------------------------------------------------------
+
+// The core's review for the table: survived[0] on touched src/a.js:5;
+// unverified[0] a finding whose refuters crashed; unverified[1] a suggestion
+// on touched src/a.js:5, so in scope; unverified[2] a suggestion on an
+// untouched line.
+const TABLE_UNVERIFIED = [
+  { file: "src/a.js", line: 9, severity: "important", refutersDispatched: 2 },
+  { file: "src/a.js", line: 5, severity: "suggestion", refutersDispatched: 0 },
+  { file: "src/a.js", line: 30, severity: "suggestion", refutersDispatched: 0 },
+];
+const REFUTED_V = "/scratch/pr40/fix-Ab12Cd34/2/verdict.json";
+const STOOD_V = "/scratch/pr40/fix-Ab12Cd34/3/verdict.json";
+const TABLE_VERDICTS = { [REFUTED_V]: { refuted: true }, [STOOD_V]: { refuted: false } };
+const OPEN_RFA = { state: "OPEN", title: "a deferred finding", labels: ["ready-for-agent"] };
+const OPEN_NT = { state: "OPEN", title: "a deferred finding", labels: ["needs-triage"] };
+const RECORD = { state: "CLOSED", title: "PR #40 review: the suggestion band, checked", labels: ["wontfix"] };
+const closed = (issue) => ({ ...issue, state: "CLOSED" });
+const reopened = (issue) => ({ ...issue, state: "OPEN" });
+// Every finding of the table's review answered without a deferral, `entry`
+// standing in for the one it names.
+const tableRun = (entry, issues = {}) => {
+  const fill = [
+    { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "apply" },
+    { bucket: "unverified", index: 0, scope: "in", claimKind: "behavior", disposition: "apply" },
+    { bucket: "unverified", index: 1, scope: "in", claimKind: "behavior", disposition: "apply", verdictPath: STOOD_V },
+    { bucket: "unverified", index: 2, scope: "out", claimKind: "behavior", disposition: "apply" },
+  ];
+  return coreRun(fill.map((e) => (e.bucket === entry.bucket && e.index === entry.index ? entry : e)),
+    { unverified: TABLE_UNVERIFIED, issues, verdicts: TABLE_VERDICTS });
+};
+const tableCore = (entry, issues) => tableRun(entry, issues).violations.map(formatViolation);
+const deferred = (bucket, index, more = {}) => ({ bucket, index, scope: "in", claimKind: "behavior", disposition: "defer", issue: 9, ...more });
+
+// Each row: its entry, its home, and homes that break it — the wrong label and
+// the wrong state among them.
+const ROWS = [
+  [1, deferred("survived", 0, { reason: "mutual-exclusion" }), OPEN_RFA,
+    [["labelled needs-triage", OPEN_NT], ["closed", closed(OPEN_RFA)], ["carrying both triage labels", { ...OPEN_RFA, labels: ["ready-for-agent", "needs-triage"] }]]],
+  [2, deferred("survived", 0, { reason: "false-rationale" }), RECORD,
+    [["labelled needs-triage, not wontfix", { ...RECORD, labels: ["needs-triage"] }], ["open", reopened(RECORD)],
+      ["another PR's record", { ...RECORD, title: "PR #41 review: the suggestion band, checked" }]]],
+  [3, deferred("unverified", 0), OPEN_NT, [["labelled ready-for-agent", OPEN_RFA], ["closed", closed(OPEN_NT)]]],
+  [4, deferred("unverified", 1, { verdictPath: REFUTED_V }), RECORD, [["labelled needs-triage, not wontfix", { ...RECORD, labels: ["needs-triage"] }], ["open", OPEN_NT]]],
+  [5, deferred("unverified", 1, { verdictPath: STOOD_V, reason: "remedy-worse" }), OPEN_RFA, [["labelled needs-triage", OPEN_NT], ["closed", closed(OPEN_RFA)]]],
+  [6, deferred("unverified", 2, { scope: "out" }), OPEN_NT, [["labelled ready-for-agent", OPEN_RFA], ["closed", closed(OPEN_NT)]]],
+  [7, deferred("survived", 0, { claimKind: "shape", reason: "remedy-worse" }), RECORD,
+    [["labelled needs-triage, not wontfix", { ...RECORD, labels: ["needs-triage"] }], ["open", reopened(RECORD)]]],
+];
+for (const [n, entry, home, wrong] of ROWS) {
+  test(`filing row ${n}: its home passes, and the wrong label or the wrong state is a mismatch naming the row`, () => {
+    assert.deepEqual(tableCore(entry, { 9: home }), [], "its home");
+    for (const [what, issue] of wrong) {
+      const v = tableCore(entry, { 9: issue });
+      assert.equal(v.length, 1, `${what}: ${v}`);
+      assert.match(v[0], new RegExp(`^${entry.bucket}\\[${entry.index}\\]: filing row ${n} \\(${FILING_ROWS[n].finding}\\): it belongs in .*, and #9 is `), what);
+    }
+  });
+}
+
+test("filing row 7 outranks every row but row 4: a shape claim's deferral is filed to the closed record whatever its state", () => {
+  for (const entry of [deferred("survived", 0, { claimKind: "shape", reason: "false-rationale" }), deferred("unverified", 0, { claimKind: "shape" }),
+    deferred("unverified", 1, { claimKind: "shape", verdictPath: STOOD_V }), deferred("unverified", 2, { scope: "out", claimKind: "shape" })]) {
+    assert.deepEqual(tableCore(entry, { 9: RECORD }), [], JSON.stringify(entry));
+    assert.match(tableCore(entry, { 9: OPEN_NT })[0], /: filing row 7 \(/, JSON.stringify(entry));
+  }
+  // A refuted suggestion is row 4 whatever its claimKind; the home is the same.
+  assert.match(tableCore(deferred("unverified", 1, { claimKind: "shape", verdictPath: REFUTED_V }), { 9: OPEN_NT })[0], /: filing row 4 \(/);
+});
+
+test("a deferral that names no issue is a mismatch naming its row and home", () => {
+  const { issue: _, ...entry } = deferred("unverified", 2, { scope: "out" });
+  assert.deepEqual(tableCore(entry), [
+    `unverified[2]: filing row 6 (${FILING_ROWS[6].finding}): a deferral names the issue it was filed to, and this entry names none — it belongs in an open issue labelled needs-triage`,
+  ]);
+});
+
+test("an in-scope suggestion its refuter let survive defers only as row 1, for a reason other than false-rationale", () => {
+  for (const reason of [undefined, "", "false-rationale", "outside-ticket-files"]) {
+    const v = tableCore(deferred("unverified", 1, { verdictPath: STOOD_V, reason }), { 9: OPEN_RFA });
+    assert.equal(v.length, 1, String(reason));
+    assert.match(v[0], /^unverified\[1\]: filing row 5 \(an in-scope suggestion its refuter let survive\): deferred with .* — it is applied, or deferred as row 1, for mutual-exclusion, remedy-worse, remedy-outside-diff$/);
+  }
+  // remedy-outside-diff holds it to the remedy rule, and a suggestion escalates nothing.
+  const r = tableRun(deferred("unverified", 1, { verdictPath: STOOD_V, reason: "remedy-outside-diff", remedyFiles: ["src/b.js"] }), { 9: OPEN_RFA });
+  assert.deepEqual([r.violations, r.escalations], [[], []]);
+  assert.match(tableCore(deferred("unverified", 1, { verdictPath: STOOD_V, reason: "remedy-outside-diff", remedyFiles: ["src/a.js"] }), { 9: OPEN_RFA })[0],
+    /^unverified\[1\]: reason remedy-outside-diff needs a remedy file absent from the PR's diff/);
+});
+
+test("an in-scope suggestion needs refuter evidence whether applied or deferred; refuted, applying it breaks row 4", () => {
+  for (const disposition of ["apply", "defer"]) {
+    const { verdictPath: _, ...bare } = deferred("unverified", 1, { disposition });
+    assert.deepEqual(tableCore(bare, { 9: RECORD }),
+      ["unverified[1]: an in-scope suggestion carries no refuter evidence — its entry names no verdictPath; src/a.js:5 is a line the PR's diff touched, so it is in scope whatever its entry declares"]);
+    assert.deepEqual(tableCore({ ...bare, verdictPath: "/scratch/pr40/fix-Ab12Cd34/9/nothing.json" }, { 9: RECORD }),
+      ['unverified[1]: an in-scope suggestion carries no refuter evidence — verdictPath "/scratch/pr40/fix-Ab12Cd34/9/nothing.json" names no file that exists']);
+  }
+  // In scope by its entry alone: an untouched line declared in.
+  assert.match(tableCore(deferred("unverified", 2), { 9: OPEN_NT })[0], /^unverified\[2\]: an in-scope suggestion carries no refuter evidence — its entry names no verdictPath; its entry declares scope in$/);
+  // A finding with no refutersDispatched at all is a suggestion too.
+  const r = coreRun([{ bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "apply" }, deferred("unverified", 0)],
+    { unverified: [{ file: "src/a.js", line: 5, severity: "suggestion" }] });
+  assert.match(r.violations.map(formatViolation)[0], /^unverified\[0\]: an in-scope suggestion carries no refuter evidence/);
+  assert.deepEqual(tableCore(deferred("unverified", 1, { disposition: "apply", verdictPath: REFUTED_V })), [
+    `unverified[1]: filing row 4 (${FILING_ROWS[4].finding}): applied, though its verdict is refuted: true — it belongs in the closed "PR #40 review: the suggestion band, checked" issue, labelled wontfix`,
+  ]);
+  assert.deepEqual(tableCore(deferred("unverified", 1, { disposition: "apply", verdictPath: STOOD_V })), [], "row 5: applied");
+});
+
+test("what the filing check never reads: an applied finding, an out-of-scope survivor, a crashed finding or an out-of-scope suggestion applied", () => {
+  const filing = { pr: 40, issue: () => assert.fail("the tracker was read"), verdict: () => assert.fail("a verdict was read") };
+  const entries = [
+    { bucket: "survived", index: 0, scope: "in", claimKind: "behavior", disposition: "apply", issue: 9 },
+    { bucket: "survived", index: 1, scope: "out", claimKind: "behavior", disposition: "defer", issue: 9 },
+    { bucket: "unverified", index: 0, scope: "in", claimKind: "behavior", disposition: "apply", issue: 9 },
+    { bucket: "unverified", index: 1, scope: "out", claimKind: "behavior", disposition: "apply", issue: 9 },
+  ];
+  const r = checkDispositions({
+    review: { head: H40, survived: [{ file: "src/a.js", line: 5 }, { file: "src/a.js", line: 30 }], refuted: [],
+      unverified: [TABLE_UNVERIFIED[0], TABLE_UNVERIFIED[2]] },
+    record: { head: H40, entries }, touched: new Map([["src/a.js", new Set([5])]]), diffFiles: ["src/a.js"], roots: [], filing,
+  });
+  assert.deepEqual([r.violations, r.escalations, r.unchecked], [[], [], []]);
+});
+
+test("an issue the tracker cannot answer leaves that filing unchecked, never a violation", () => {
+  const r = tableRun(deferred("unverified", 2, { scope: "out" }), { 9: { problem: "error connecting to api.github.com" } });
+  assert.deepEqual(r.violations, []);
+  assert.deepEqual(r.unchecked, [{ bucket: "unverified", index: 2, issue: 9, problem: "error connecting to api.github.com" }]);
+});
+
+test("verdictProblem holds a refuter verdict to its schema", () => {
+  assert.equal(verdictProblem({ refuted: true, reason: "r" }), null);
+  assert.equal(verdictProblem({ refuted: false, reason: "", counter_evidence: "ran x" }), null);
+  for (const [value, problem] of [
+    [null, "is not a JSON object"], [[], "is not a JSON object"], ["refuted", "is not a JSON object"],
+    [{ reason: "r" }, "has no refuted"], [{ refuted: true }, "has no reason"],
+    [{ refuted: "true", reason: "r" }, "has a refuted that is not a boolean"], [{ refuted: true, reason: 1 }, "has a reason that is not a string"],
+    [{ refuted: true, reason: "r", verdict: "survived" }, "carries verdict, which a refuter verdict does not"],
+  ]) assert.equal(verdictProblem(value), problem, JSON.stringify(value));
+});
+
+// The CLI against the stubbed tracker.
+
+test("a confirmed defect deferred for an allowed reason and filed needs-triage is a mismatch naming row 1; relabelled ready-for-agent it is ok", (t) => {
+  const f = fixture(t);
+  f.setIssues({ 81: openIssue("needs-triage") });
+  const entries = f.baseEntries();
+  entries[0] = f.entry("survived", 0, { disposition: "defer", reason: "mutual-exclusion", issue: 81 });
+  f.writeRecord(entries);
+  const r = f.check();
+  mismatch(r, /^fix-pr-40: survived\[0\]: filing row 1 \(a survived finding deferred for an allowed reason other than false-rationale\): it belongs in an open issue labelled ready-for-agent, and #81 is open, titled "a deferred finding", labelled needs-triage$/m);
+  assert.equal(r.json.violations.length, 1);
+  assert.match(f.ledgerCli("dispatch", "40", "finisher-pr-40").stderr, /dispositions mismatch/);
+  f.setIssues({ 81: openIssue("ready-for-agent") });
+  okVerdict(f.check());
+  assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+});
+
+test("gh is run from the repository with no ambient GIT_DIR", (t) => {
+  const f = fixture(t);
+  const other = join(f.dir, "other");
+  mkdirSync(other);
+  git(other, "init", "-q", "-b", "main");
+  f.writeRecord(f.baseEntries());
+  const log = join(f.dir, "gh.log");
+  okVerdict(f.check("fix-pr-40", { ...cleanEnv(), GIT_DIR: join(other, ".git"), GIT_WORK_TREE: other, FAKE_GH_LOG: log }));
+  const calls = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(calls, [{ argv: ["issue", "view", "77", "--json", "labels,state,title"], cwd: realpathSync(f.repo), GIT_DIR: null }]);
+});
+
+test("an issue two entries name is read through gh once", (t) => {
+  const f = fixture(t);
+  f.setIssues({ 81: openIssue("ready-for-agent") });
+  const entries = f.baseEntries();
+  entries[0] = f.entry("survived", 0, { disposition: "defer", reason: "mutual-exclusion", issue: 81 });
+  entries[1] = f.entry("survived", 1, { scope: "in", disposition: "defer", reason: "remedy-worse", issue: 81 });
+  f.writeRecord(entries);
+  const log = join(f.dir, "gh.log");
+  okVerdict(f.check("fix-pr-40", { ...cleanEnv(), FAKE_GH_LOG: log }));
+  const read = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l).argv[2]);
+  assert.deepEqual(read.filter((n) => n === "81"), ["81"], read.join(","));
+});
+
+test("the closed suggestion-band record is found by its title past surrounding whitespace", (t) => {
+  const f = fixture(t);
+  f.setIssues({ 81: { ...bandRecord(), title: `  ${recordTitle(40)}\n` } });
+  const entries = f.baseEntries();
+  entries[0] = f.entry("survived", 0, { disposition: "defer", reason: "false-rationale", issue: 81 });
+  f.writeRecord(entries);
+  okVerdict(f.check());
+});
+
+test("gh unreachable writes dispositions-unchecked, the finisher is refused naming dispositions unchecked, and a re-run once gh answers writes ok", (t) => {
+  const f = fixture(t);
+  f.writeRecord(f.baseEntries());
+  const r = f.check("fix-pr-40", cleanEnv({ FAKE_GH_DOWN: "1" }));
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(r.json.verdict, "unchecked");
+  assert.deepEqual(r.json.violations, []);
+  assert.equal(r.json.token, `dispositions-unchecked=fix-pr-40:${f.head}`);
+  assert.match(r.stderr, /^fix-pr-40: unverified\[0\]: where it was filed is unchecked — #77 could not be read through gh: error connecting to api\.github\.com$/m);
+  assert.ok(f.row().includes(`dispositions-unchecked=fix-pr-40:${f.head}`), f.row());
+  const before = readFileSync(join(f.dir, "ledger.md"), "utf8");
+  const d = f.ledgerCli("dispatch", "40", "finisher-pr-40");
+  assert.equal(d.status, 2);
+  assert.match(d.stderr, /finisher-pr-40: dispositions unchecked — fix-pr-40's check of review [0-9a-f]+ could not read where a deferral was filed/);
+  assert.equal(readFileSync(join(f.dir, "ledger.md"), "utf8"), before, "a refused dispatch writes nothing");
+  assert.deepEqual(dueUntilFixed(f), [40], "control");
+  assert.deepEqual(fixDueFor(f), [], "an unchecked verdict is answered by re-running the check, never by a fix-applier");
+
+  okVerdict(f.check());
+  const row = f.row();
+  assert.equal(row.match(/dispositions-/g).length, 1, row);
+  assert.equal(f.okLedger("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
+});
+
+test("an issue gh cannot read is unchecked too, a broken rule outranks it, and with no ledger the exit status says so", (t) => {
+  const f = fixture(t);
+  const entries = f.baseEntries();
+  entries[2] = f.entry("unverified", 0, { scope: "out", disposition: "defer", issue: 404 });
+  f.writeRecord(entries);
+  const r = f.check();
+  assert.equal(r.json.verdict, "unchecked", r.stderr);
+  assert.match(r.stderr, /unverified\[0\]: where it was filed is unchecked — #404 could not be read through gh: GraphQL: Could not resolve to an issue/);
+
+  entries[0] = f.entry("survived", 0, { disposition: "defer" });
+  f.writeRecord(entries);
+  const broken = f.check("fix-pr-40", cleanEnv({ FAKE_GH_DOWN: "1" }));
+  mismatch(broken, /^fix-pr-40: survived\[0\]: an in-scope survived finding deferred with no reason/m);
+  assert.match(broken.stderr, /unverified\[0\]: where it was filed is unchecked/);
+
+  f.writeRecord(f.baseEntries());
+  const alone = spawnSync(process.execPath, [SCRIPT, "--member", "fix-pr-40", "--scratch", f.scratch, "--no-ledger"],
+    { encoding: "utf8", env: f.env(cleanEnv(), { FAKE_GH_DOWN: "1" }), cwd: f.repo });
+  assert.equal(alone.status, 1, alone.stderr);
+  assert.deepEqual([JSON.parse(alone.stdout).verdict, JSON.parse(alone.stdout).token], ["unchecked", null]);
+});
+
+test("an in-scope suggestion with no verdictPath, a missing file, one outside the run root, or one failing the schema is a mismatch", (t) => {
+  const f = fixture(t);
+  f.setIssues({ 78: bandRecord() });
+  // unverified[0], an untouched line declared in scope: an in-scope suggestion.
+  const deferWith = (verdictPath) => {
+    const entries = f.baseEntries();
+    entries[2] = f.entry("unverified", 0, { disposition: "defer", issue: 78, ...(verdictPath === undefined ? {} : { verdictPath }) });
+    f.writeRecord(entries);
+    return f.check();
+  };
+  const noEvidence = /^fix-pr-40: unverified\[0\]: an in-scope suggestion carries no refuter evidence — /m;
+  mismatch(deferWith(undefined), /unverified\[0\]: an in-scope suggestion carries no refuter evidence — its entry names no verdictPath; its entry declares scope in/);
+  const good = f.writeVerdict({ refuted: true, reason: "the probe ran clean" });
+  for (const [path, why] of [
+    [join(f.scratch, "pr40", "fix-Ab12Cd34", "2", "verdict.json"), /names no file that exists/],
+    ["pr40/fix-Ab12Cd34/1/verdict.json", /is not an absolute path/],
+    [f.writeVerdict({ refuted: true, reason: "r" }, "1", join(f.scratch, "pr40", "elsewhere")), /is not under a fix-applier run root/],
+    [f.writeVerdict({ refuted: true, reason: "r" }, "1", join(f.dir, "pr40", "fix-Ab12Cd34")), /is not under a fix-applier run root/],
+    [join(f.scratch, "pr40", "fix-Ab12Cd34", "1"), /is not under a fix-applier run root/],
+    [(() => { const d = join(f.scratch, "pr40", "fix-Ab12Cd34", "6", "verdict.json"); mkdirSync(d, { recursive: true }); return d; })(), /names something that is not a file/],
+    [f.writeVerdict("{not json", "3"), /cannot be read as JSON/],
+    [f.writeVerdict({ refuted: "yes", reason: "r" }, "4"), /fails the refuter verdict schema — it has a refuted that is not a boolean/],
+    [f.writeVerdict({ refuted: true }, "5"), /fails the refuter verdict schema — it has no reason/],
+  ]) {
+    const r = deferWith(path);
+    mismatch(r, noEvidence);
+    assert.match(r.stderr, why, path);
+  }
+  okVerdict(deferWith(good));
+  // Reached through a symlink, the run root is still the run root.
+  const alias = join(f.dir, "alias");
+  symlinkSync(f.scratch, alias);
+  okVerdict(deferWith(join(alias, "pr40", "fix-Ab12Cd34", "1", "verdict.json")));
+});
+
+test("an in-scope suggestion refuted and filed as an open issue, or applied, is a mismatch naming row 4; filed to the closed record it is ok", (t) => {
+  const f = fixture(t);
+  const verdictPath = f.writeVerdict({ refuted: true, reason: "the probe ran clean" });
+  const entries = f.baseEntries();
+  // Issue 77 is open, labelled needs-triage — where #2226 and #2227 went.
+  entries[2] = f.entry("unverified", 0, { disposition: "defer", issue: 77, verdictPath });
+  f.writeRecord(entries);
+  mismatch(f.check(), /^fix-pr-40: unverified\[0\]: filing row 4 \(an in-scope suggestion its refuter refuted\): it belongs in the closed "PR #40 review: the suggestion band, checked" issue, labelled wontfix, and #77 is open/m);
+  entries[2] = f.entry("unverified", 0, { verdictPath });
+  f.writeRecord(entries);
+  mismatch(f.check(), /^fix-pr-40: unverified\[0\]: filing row 4 \(an in-scope suggestion its refuter refuted\): applied, though its verdict is refuted: true/m);
+  f.setIssues({ 78: bandRecord() });
+  entries[2] = f.entry("unverified", 0, { disposition: "defer", issue: 78, verdictPath });
+  f.writeRecord(entries);
+  okVerdict(f.check());
 });
