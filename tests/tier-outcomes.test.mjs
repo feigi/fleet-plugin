@@ -636,17 +636,17 @@ test("rulingFor: of two qualifying rulings, the later row in file order wins eve
 });
 
 // Built by hand, since parseTierOutcomes refuses these verdicts before rulingFor sees them.
-const ruling = (run_date, pr, closed_own_ticket, minted_false_claim) => ({ run_date, pr: String(pr), ticket: "10", closed_own_ticket, minted_false_claim });
+const ruling = (run_date, pr, closed_own_ticket, minted_false_claim) => ({ run_date, pr: String(pr), closed_own_ticket, minted_false_claim });
 
 test("rulingFor: a malformed verdict on any ruling of the ticket is refused, not only on the picked one", () => {
   const valid = ruling("2026-10-05", 21, "no", "yes");
-  for (const [label, rows, pullDate, pr, col, value] of [
-    ["superseded by a later valid ruling", [ruling("2026-10-03", 20, "maybe", "no"), valid], "2026-10-01", 20, "closed_own_ticket", "maybe"],
-    ["dated before the Pull's floor", [ruling("2026-09-20", 20, "yes", "YES"), valid], "2026-10-01", 20, "minted_false_claim", "YES"],
-    ["with no ruling clearing the floor", [ruling("2026-09-20", 20, "", "no")], "2026-10-01", 20, "closed_own_ticket", ""],
-    ["the picked ruling itself", [valid, ruling("2026-10-06", 22, "yes", "No")], "2026-10-01", 22, "minted_false_claim", "No"],
+  for (const [label, rows, pr, col, value] of [
+    ["superseded by a later valid ruling", [ruling("2026-10-03", 20, "maybe", "no"), valid], 20, "closed_own_ticket", "maybe"],
+    ["dated before the Pull's floor", [ruling("2026-09-20", 20, "yes", "YES"), valid], 20, "minted_false_claim", "YES"],
+    ["with no ruling clearing the floor", [ruling("2026-09-20", 20, "", "no")], 20, "closed_own_ticket", ""],
+    ["the picked ruling itself", [valid, ruling("2026-10-06", 22, "yes", "No")], 22, "minted_false_claim", "No"],
   ]) {
-    assert.throws(() => rulingFor(new Map([["10", rows]]), "10", pullDate),
+    assert.throws(() => rulingFor(new Map([["10", rows]]), "10", "2026-10-01"),
       (e) => e instanceof RulingError && e.message === `ticket #10 (PR #${pr}): ${col} is '${value}', expected yes or no`, label);
   }
 });
