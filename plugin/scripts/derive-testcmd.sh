@@ -243,10 +243,12 @@ fi
 # read back (opened, or read — bash's `read` leaves `line` unset on an error,
 # which `set -u` then trips on) fails the substitution, and the `||` names that
 # in the reason instead of aborting on the shell's own error, which under dash
-# would also be an exit outside 0/1/3.
+# would also be an exit outside 0/1/3. A stderr that was read back but held
+# nothing, or only newlines, names the exit status instead of a blank reason.
 if [ "$rc" -ne 0 ]; then
   reason=$({ while IFS= read -r line || [ -n "$line" ]; do printf '%s\n' "$line"; done <"$errf"; } 2>/dev/null) ||
     reason="(node's reason could not be read back from $errf)"
+  if [ -z "$reason" ]; then reason="(node gave no reason, exit $rc)"; fi
   die "the Recipe cache at $cache is unusable: $reason — $derive"
 fi
 carriedmsg="node's stdout carried more than the framed Recipe value — expected exactly the value between '$open' and '$close', got '$framed'. The cache at $cache passed validation; the extra output comes from how node is launched here (a version-manager or proxy shim, a preload), and is refused rather than cut out of the command"

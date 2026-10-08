@@ -802,6 +802,9 @@ for (const [what, body, status, reason] of [
   ["refuses with a last line without a newline", "printf 'no newline' >&2; exit 2", 1, /is unusable: no newline — run the Recipe/],
   ["refuses with trailing newlines", "printf 'reason\\n\\n\\n' >&2; exit 2", 1, /is unusable: reason — run the Recipe/],
   ["refuses with a backslash and leading space", "printf '  a\\\\nb\\n' >&2; exit 2", 1, /is unusable:   a\\nb — run the Recipe/],
+  ["exits 1 with nothing on stderr", "exit 1", 1, /is unusable: \(node gave no reason, exit 1\) — run the Recipe/],
+  ["exits 2 with nothing on stderr", "exit 2", 1, /is unusable: \(node gave no reason, exit 2\) — run the Recipe/],
+  ["exits 2 with only blank lines on stderr", "printf '\\n\\n' >&2; exit 2", 1, /is unusable: \(node gave no reason, exit 2\) — run the Recipe/],
 ]) {
   test(`a node that passes the probe and then ${what} is exit ${status}`, () => {
     const { dir, head } = repo();
