@@ -244,11 +244,16 @@ fi
 # which `set -u` then trips on) fails the substitution, and the `||` names that
 # in the reason instead of aborting on the shell's own error, which under dash
 # would also be an exit outside 0/1/3. A stderr that was read back but held
-# nothing, or only newlines, names the exit status instead of a blank reason.
+# nothing, only newlines, or only blanks (spaces, tabs, CRs) names the exit
+# status instead of a reason that reads as blank. The blank set is spelled out,
+# not a `[:space:]` class: this script's locale inventory stays what the pin
+# comment above says it is. The `.` guards the newline that `$(…)` would strip.
 if [ "$rc" -ne 0 ]; then
   reason=$({ while IFS= read -r line || [ -n "$line" ]; do printf '%s\n' "$line"; done <"$errf"; } 2>/dev/null) ||
     reason="(node's reason could not be read back from $errf)"
-  if [ -z "$reason" ]; then reason="(node gave no reason, exit $rc)"; fi
+  blank=$(printf ' \t\r\n.')
+  blank=${blank%.}
+  case $reason in *[!"$blank"]*) ;; *) reason="(node gave no reason, exit $rc)" ;; esac
   die "the Recipe cache at $cache is unusable: $reason — $derive"
 fi
 carriedmsg="node's stdout carried more than the framed Recipe value — expected exactly the value between '$open' and '$close', got '$framed'. The cache at $cache passed validation; the extra output comes from how node is launched here (a version-manager or proxy shim, a preload), and is refused rather than cut out of the command"

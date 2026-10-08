@@ -792,7 +792,9 @@ test("a mktemp that runs and fails on its second call is exit 3, never the cache
 // The stripped PATH has no cat: node's reason is read back WITHOUT it, so every
 // refusal row also proves that. The rows that give a reason a shape (several
 // lines, no final newline, trailing newlines, a backslash and leading space)
-// pin what the read-back must still do as cat did.
+// pin what the read-back must still do as cat did; the rows whose stderr is
+// empty, newline-only or blank-only (spaces, a tab, a CR) pin the
+// "(node gave no reason, exit N)" placeholder that stands in for it.
 for (const [what, body, status, reason] of [
   ["is killed", "kill -9 $$", 3, /^derive-testcmd: node did not finish reading the Recipe cache \(exit 137\)/m],
   ["can no longer be run", "exit 127", 3, /^derive-testcmd: node did not finish reading the Recipe cache \(exit 127\)/m],
@@ -805,6 +807,9 @@ for (const [what, body, status, reason] of [
   ["exits 1 with nothing on stderr", "exit 1", 1, /is unusable: \(node gave no reason, exit 1\) — run the Recipe/],
   ["exits 2 with nothing on stderr", "exit 2", 1, /is unusable: \(node gave no reason, exit 2\) — run the Recipe/],
   ["exits 2 with only blank lines on stderr", "printf '\\n\\n' >&2; exit 2", 1, /is unusable: \(node gave no reason, exit 2\) — run the Recipe/],
+  ["exits 2 with only spaces and a tab on stderr", "printf '   \\t\\n' >&2; exit 2", 1, /is unusable: \(node gave no reason, exit 2\) — run the Recipe/],
+  ["exits 2 with only a carriage return on stderr", "printf '\\r\\n' >&2; exit 2", 1, /is unusable: \(node gave no reason, exit 2\) — run the Recipe/],
+  ["exits 2 with only blanks spread over several lines on stderr", "printf '  \\n\\t\\n \\n' >&2; exit 2", 1, /is unusable: \(node gave no reason, exit 2\) — run the Recipe/],
 ]) {
   test(`a node that passes the probe and then ${what} is exit ${status}`, () => {
     const { dir, head } = repo();
