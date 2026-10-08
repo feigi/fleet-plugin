@@ -4601,12 +4601,12 @@ const UNSAFE_REGISTRY = [
   { name: "HEAD chmod 000", chmod: true, cause: /linked worktree with a null HEAD and no branch/,
     fault: ({ admin }) => chmodSync(join(admin, "HEAD"), 0o000),
     restore: ({ admin }) => chmodSync(join(admin, "HEAD"), 0o644) },
-  { name: "gitdir missing", cause: /git listed 0 linked worktrees for 1 registry entries/,
+  { name: "gitdir missing", cause: /git listed 0 worktrees for 1 registry entries/,
     fault: ({ admin }) => rmSync(join(admin, "gitdir")) },
-  { name: "gitdir chmod 000", chmod: true, cause: /git listed 0 linked worktrees for 1 registry entries/,
+  { name: "gitdir chmod 000", chmod: true, cause: /git listed 0 worktrees for 1 registry entries/,
     fault: ({ admin }) => chmodSync(join(admin, "gitdir"), 0o000),
     restore: ({ admin }) => existsSync(join(admin, "gitdir")) && chmodSync(join(admin, "gitdir"), 0o644) },
-  { name: "admin dir chmod 000", chmod: true, cause: /git listed 0 linked worktrees for 1 registry entries/,
+  { name: "admin dir chmod 000", chmod: true, cause: /git listed 0 worktrees for 1 registry entries/,
     fault: ({ admin }) => chmodSync(admin, 0o000),
     restore: ({ admin }) => chmodSync(admin, 0o755) },
   { name: ".git/worktrees replaced by a file", cause: /worktree registry .* could not be read/,
@@ -4652,19 +4652,22 @@ for (const f of UNSAFE_REGISTRY) {
 // still answering safely — the listing keeps the held entry's `branch` line,
 // so the counts agree, no HEAD is null, and the registry guard must not fire.
 // This is the half that pins what the guard must ACCEPT: `feature/free` is
-// still reaped, and `feature/held` is kept for what its worktree actually
-// holds, exactly as before the guard.
+// still reaped, and `feature/held` is kept, exactly as before the guard.
 //
-// `gitdir garbage` is the exception on `feature/held`, and not one this guard
-// decides: the listing names the held branch at the garbage path, which reap's
-// own absent-worktree arm reads as a removed checkout — measured before and
-// after #2078 alike, it clears the registration and reaps the branch. The row
-// stays to pin that the guard leaves `feature/free` alone there.
+// `gitdir garbage` keeps `feature/held` for a different reason than the rest
+// (#2144): git resolves the garbage against the entry's admin dir and lists
+// the held branch at a path inside `.git/worktrees/`, where nothing is.
+// Read as a removed checkout, that cleared the registration and reaped the
+// branch while the real checkout stood orphaned; the branch lookup now refuses
+// a holder listed inside the registry, so the branch is kept with that cause.
+// The row stays here to pin that the registry guard leaves `feature/free`
+// alone there.
 const SAFE_REGISTRY = [
-  { name: "baseline (no fault)", heldKept: true, fault: () => {} },
-  { name: "gitdir garbage", heldKept: false, fault: ({ admin }) => writeFileSync(join(admin, "gitdir"), "not a path\n") },
-  { name: "commondir missing", heldKept: true, fault: ({ admin }) => rmSync(join(admin, "commondir")) },
-  { name: "lock file present", heldKept: true, fault: ({ admin }) => writeFileSync(join(admin, "locked"), "held by a test\n") },
+  { name: "baseline (no fault)", fault: () => {} },
+  { name: "gitdir garbage", heldWhy: /inside the worktree registry .*gitdir file names no worktree/,
+    fault: ({ admin }) => writeFileSync(join(admin, "gitdir"), "not a path\n") },
+  { name: "commondir missing", fault: ({ admin }) => rmSync(join(admin, "commondir")) },
+  { name: "lock file present", fault: ({ admin }) => writeFileSync(join(admin, "locked"), "held by a test\n") },
 ];
 
 for (const f of SAFE_REGISTRY) {
@@ -4678,11 +4681,12 @@ for (const f of SAFE_REGISTRY) {
     for (const k of json.kept) assert.doesNotMatch(k.reason, /worktree registry inconsistent/);
     assert.equal(json.reaped[0], "feature/free", "the guard does not refuse a registry the listing matches");
     assert.equal(branchExists(fx.w, "feature/free"), false);
-    if (f.heldKept) {
-      assert.deepEqual(json.reaped, ["feature/free"]);
-      assert.equal(keptFor(json, "feature/held").length, 1);
-      assert.equal(branchExists(fx.w, "feature/held"), true);
-    }
+    assert.deepEqual(json.reaped, ["feature/free"]);
+    const held = keptFor(json, "feature/held");
+    assert.equal(held.length, 1, JSON.stringify(json.kept));
+    if (f.heldWhy) assert.match(held[0].reason, f.heldWhy);
+    assert.equal(branchExists(fx.w, "feature/held"), true);
+    assert.equal(existsSync(join(fx.wt, "untracked.txt")), true, "the held checkout's work survives");
   });
 }
 
@@ -4720,6 +4724,136 @@ for (const m of SIBLING_MUTATIONS) {
     assert.equal(branchExists(w, "feature/free"), false);
   });
 }
+
+/**
+ * A PATH `git` that lands mutations around reap's `worktree list` calls, one
+ * shot per slot so the run can converge. `before` runs ahead of the FIRST
+ * listing and `after` once that listing has returned — inflight.test.mjs's
+ * `twoMutationShim`. `second`, when given, runs ahead of the SECOND listing:
+ * inside the recount's own registry-then-listing pair, the window a single
+ * recount cannot close (inflight.test.mjs's `retakeGapShim`).
+ */
+function listingMutationShim(t, { before = ":", after = ":", second = ":" }) {
+  const bin = mkdtempSync(join(tmpdir(), "reap-git-mutation-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+  writeExecStub(
+    join(bin, "git"),
+    `#!/bin/sh\n` +
+      `if [ "$1" = worktree ] && [ "$2" = list ]; then\n` +
+      `  if [ ! -e "$0.first" ]; then\n` +
+      `    : > "$0.first"\n` +
+      `    ${before}\n` +
+      `    "${REAL_GIT}" "$@"; rc=$?\n` +
+      `    ${after}\n` +
+      `    exit $rc\n` +
+      `  elif [ ! -e "$0.second" ]; then\n` +
+      `    : > "$0.second"\n` +
+      `    ${second}\n` +
+      `  fi\n` +
+      `fi\n` +
+      `exec "${REAL_GIT}" "$@"\n`,
+  );
+  return bin;
+}
+
+const addSibling = (sib) => `"${REAL_GIT}" worktree add -q --detach "${sib}" main >/dev/null 2>&1`;
+
+// The two-mutation shapes inflight.test.mjs pins for its copy of this recount,
+// pinned here for reap's: a second sibling mutation landing just AFTER the
+// first listing returns. Re-taking the registry count alone would flip the
+// add-then-add case into "the listing is incomplete" and leave the
+// remove-then-add case disagreeing in that same direction; re-taking both
+// counts settles them on one state.
+const TWO_MUTATIONS = [
+  { name: "add then add", pre: false,
+    before: (s) => addSibling(s.a), after: (s) => addSibling(s.b) },
+  { name: "remove then add", pre: true,
+    before: (s) => `"${REAL_GIT}" worktree remove --force "${s.pre}" >/dev/null 2>&1`,
+    after: (s) => `${addSibling(s.b)} && ${addSibling(s.c)}` },
+];
+
+for (const m of TWO_MUTATIONS) {
+  test(`a SECOND sibling mutation after the first listing is absorbed by the recount, ${m.name}`, (t) => {
+    const w = repo(t);
+    mergedGoneBranch(w, "feature/free", "free work");
+    const s = { pre: join(w, "..", "sib-pre"), a: join(w, "..", "sib-a"), b: join(w, "..", "sib-b"), c: join(w, "..", "sib-c") };
+    if (m.pre) git(w, "worktree", "add", "-q", "--detach", s.pre, "main");
+    const bin = listingMutationShim(t, { before: m.before(s), after: m.after(s) });
+
+    const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+    assert.equal(existsSync(join(bin, "git.first")), true, "the shim fired on the first listing");
+    assert.equal(existsSync(s.b), true, "fixture: the second mutation really landed after the first listing");
+    assert.equal(code, 0, stderr);
+    assert.deepEqual(json.reaped, ["feature/free"], JSON.stringify(json.kept));
+    for (const k of json.kept) assert.doesNotMatch(k.reason, /worktree registry inconsistent/);
+    assert.equal(branchExists(w, "feature/free"), false);
+  });
+}
+
+test("a mutation inside the recount's OWN pair is absorbed by the second recount pass", (t) => {
+  // One mutation ahead of the first listing makes the counts disagree; a second
+  // lands ahead of the recount's listing, after its registry count — so the
+  // first recount disagrees again, in the other direction. Only a second
+  // recount pass reads a settled pair; a single recount kept the branch on
+  // "the registry read missed entries git can see" for two ordinary adds.
+  const w = repo(t);
+  mergedGoneBranch(w, "feature/free", "free work");
+  const a = join(w, "..", "sib-a");
+  const b = join(w, "..", "sib-b");
+  const bin = listingMutationShim(t, { before: addSibling(a), second: addSibling(b) });
+
+  const { code, json, stderr } = runReap(w, ["--apply"], withShim(bin));
+
+  assert.equal(existsSync(join(bin, "git.second")), true, "the shim fired inside the recount's own pair");
+  assert.equal(existsSync(b), true, "fixture: the second add really landed inside the recount");
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(json.reaped, ["feature/free"], JSON.stringify(json.kept));
+  for (const k of json.kept) assert.doesNotMatch(k.reason, /worktree registry inconsistent/);
+});
+
+// #2074: a worktree directory replaced by a symlink to a DIFFERENT healthy,
+// registered worktree. `-ef` follows the link on both sides of the linkage
+// compare, so it agreed, and the dry run promised a removal `--apply` could not
+// perform — git's own back-pointer check refused it. The linkage guard now asks
+// that back-pointer of a symlinked worktree, so both modes keep the branch for
+// the same reason. `feature/a-swap` sorts first, so it is judged while its
+// link's target still stands.
+for (const apply of [false, true]) {
+  test(`a worktree swapped for a symlink to another worktree is kept, ${apply ? "--apply" : "dry run"}`, (t) => {
+    const w = repo(t);
+    const a = mergedGoneBranchWithWorktree(w, "feature/a-swap", "swapped work");
+    const b = mergedGoneBranchWithWorktree(w, "feature/b-real", "real work");
+    rmSync(a, { recursive: true, force: true });
+    symlinkSync(realpathSync(b), a);
+
+    const { code, json, stderr } = runReap(w, apply ? ["--apply"] : []);
+
+    assert.equal(code, 0, stderr);
+    const kept = keptFor(json, "feature/a-swap");
+    assert.equal(kept.length, 1, JSON.stringify(json));
+    assert.match(kept[0].reason, /is a symbolic link to another worktree's directory — its \.git linkage reaches the admin dir registered for .*feature\/b-real/);
+    assert.equal(branchExists(w, "feature/a-swap"), true);
+    assert.ok(!(json.reaped ?? []).includes("feature/a-swap"));
+  });
+}
+
+// A worktree whose own directory was renamed and a symlink left at the
+// registered path reaches its OWN admin dir through the link: the back-pointer
+// names the listed path, so the linkage guard accepts it, and the removal is
+// left to git — which clears the registration and refuses the delete, the
+// partial-removal shape the `symlinkStandIn` tests above pin.
+test("a symlink standing in for a worktree's own renamed directory passes the linkage guard", (t) => {
+  const w = repo(t);
+  const wt = mergedGoneBranchWithWorktree(w, "feature/merged", "merged work");
+  symlinkStandIn(wt);
+
+  const { json, stderr } = runReap(w, []);
+
+  assert.ok(json, stderr);
+  for (const k of json.kept) assert.doesNotMatch(k.reason, /symbolic link|linkage/, JSON.stringify(json.kept));
+  assert.match(stderr, /would remove worktree/);
+});
 
 // The `maintenance.auto=false` the `git` helper carries (see the comment above
 // it) cannot be pinned by the gitdir fault fixtures: the race it prevents is

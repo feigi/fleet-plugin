@@ -236,6 +236,16 @@ json_lib="$(dirname "$0")/json.sh"
 # shellcheck source=json.sh
 . "$json_lib" || die "$json_lib failed to load"
 
+# The worktree readers and the Registration probe, for the linkage compare
+# below. worktree.sh's header holds the sourcing contract and the measurements
+# behind it; the `[ -r ]` comes first for json.sh's reason above, since exit 1
+# here is a verdict too.
+wt_lib="$(dirname "$0")/worktree.sh"
+[ -r "$wt_lib" ] || die "cannot read $wt_lib — refusing to act without the worktree readers"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=worktree.sh
+. "$wt_lib" || die "$wt_lib failed to load"
+
 # Every string that reaches the JSON goes through `jstr`/`jarr` from json.sh —
 # `$wt` is argv and therefore a filesystem path, which may hold a `"`, a `\`
 # or a control byte that git's ref rules would reject. The rule list, its
@@ -532,39 +542,29 @@ fi
 # `git worktree move`, under `worktree.useRelativePaths`, on a submodule, a
 # `--separate-git-dir` clone and a `core.worktree` naming $wt itself.
 #
-# Compared as a DIRECTORY (`-ef`, same device and inode), never as a string,
-# for reap.sh's reason: a worktree whose name is Unicode NFD-composed
-# (`cafe` + U+0301), passed in the PRECOMPOSED spelling `worktree list
-# --porcelain` echoes under the `core.precomposeunicode` git writes into every
-# new repo on macOS, keeps that spelling through `cd && pwd -P`, while
-# `--show-toplevel` answers the on-disk NFD bytes — visually identical,
-# byte-different, one directory (measured, git 2.50.1, Apple Git-155).
-# A byte compare refused every such healthy worktree. `-ef` answers "same
-# directory" for both and for any other spelling the filesystem aliases, and
-# still refuses every redirect — each names a different directory.
-# POSIX.1-2017's `test` does not define `-ef`; it is a ksh-derived extension
-# bash, dash and BSD sh share, and POSIX.1-2024 adds it. A `[` that cannot
-# evaluate it fails, which is the refusing direction.
-#
-# `$top` is compared as git spells it, NOT canonicalised through `cd`, which
-# `-ef` does not need and which would add two holes: a `core.worktree` naming
-# a missing or unsearchable directory still answers at rc 0 (measured), so the
-# `cd` fails and `set -e` exits 1 — the DIRTY verdict — over a tree nothing
-# looked at; and an empty `$top` makes `cd ""` a no-op in the caller's cwd,
-# which may be $wt. `-ef` over a missing or empty `$top` is false, not an
-# error: the refusing direction, exit 2.
+# worktree.sh's `wt_linkage` asks it — the compare reap.sh and release-ticket.sh
+# make before their own dirty checks — as a DIRECTORY compare (`-ef`): a worktree
+# whose name is Unicode NFD-composed, passed in the PRECOMPOSED spelling
+# `worktree list --porcelain` echoes, keeps that spelling through
+# `cd && pwd -P` while `--show-toplevel` answers the on-disk NFD bytes, and a
+# byte compare refused every such healthy worktree; its comment carries the
+# measurement. `$top` is never canonicalised through `cd`, which `-ef` does
+# not need and which would add two holes: a `core.worktree` naming a missing
+# or unsearchable directory still answers at rc 0 (measured), so the `cd`
+# fails and `set -e` exits 1 — the DIRTY verdict — over a tree nothing looked
+# at; and an empty `$top` makes `cd ""` a no-op in the caller's cwd, which may
+# be $wt. `-ef` over a missing or empty `$top` is false, not an error: the
+# refusing direction, exit 2. Asked of `$wt_real`, which holds no symlink, so
+# the probe's question about a linked worktree directory replaced by a symlink
+# never turns a caller's symlinked spelling of $wt into a refusal here.
 #
 # Not refused, because git does not honour them and `status` reads $wt
 # (measured): `core.worktree` in the COMMON config seen from a linked worktree,
 # one reached through `include.path`, and one passed as GIT_CONFIG_COUNT or
 # GIT_CONFIG_PARAMETERS. The check keys on git's answer, not on the config, so
 # it cannot refuse a setting git ignores.
-top=$(git -C "$wt" rev-parse --show-toplevel && echo x) \
-  || die "git will not name the working tree answering for $wt — cannot verify its linkage"
-top=${top%?x}
-# shellcheck disable=SC3013 # -ef is a ksh-derived extension bash/dash/BSD sh share, base in POSIX.1-2024; this file targets dash too and -ef is verified there
-[ "$top" -ef "$wt_real" ] \
-  || die "git answers for the working tree at $top, not $wt — cannot tell a clean worktree from a dirty one"
+wt_linkage "$wt_real" \
+  || die "$wt_why — cannot tell a clean worktree from a dirty one"
 
 git -C "$wt" rev-parse --verify "$base_rev" >/dev/null || die "$base does not resolve as $base_rev"
 # Left unchecked, merge-tree below fails silently and "no conflicting files" is

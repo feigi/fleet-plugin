@@ -290,252 +290,26 @@ git rev-parse --verify "$base_rev" >/dev/null || die "$base does not resolve"
 # script stats. So establish the listing is COMPLETE before trusting an absence
 # it reports — not by guarding its exit status, which stays 0 throughout.
 #
-# Do not try to predict which reads git needs: stat'ing each entry directory is
-# one level too shallow, because naming an entry needs read+execute on the
-# PARENT only. `chmod 000` on the `gitdir` FILE inside an entry passes every
-# permission test this script could make on the entry itself and still drops
-# the worktree from the listing — measured. Count
-# instead: one registry entry on disk per linked worktree, against what git
-# reported. A mismatch is a silent drop, whichever file inside was unreadable.
-#
-# Absent entirely is fine and answers nothing here: a repo where a worktree
-# was removed and pruned (or never had one) has no `worktrees` dir at all, and
-# that emptiness is real, not a permission problem — zero entries against the
-# main worktree alone is a match, so the release goes through.
-common=$(git rev-parse --path-format=absolute --git-common-dir) ||
-  die "cannot resolve the git common directory"
-wtroot="$common/worktrees"
-
-# A function, not inline, because the count is taken more than once: here, and
-# again by the recount loop below, up to `recount_tries` times, while the
-# cross-check disagrees with git's own listing. It mirrors inflight.sh's own
-# count_registry, adapted for the difference that matters: that copy returns a
-# status into an accumulate-and-continue probe; this one dies, so an unreadable
-# registry still just dies here rather than returning past it.
-count_registry() {
-  registered=0
-  [ -e "$wtroot" ] || return 0
-  # The parent needs its own check even so, and this is not redundant with the
-  # count: unreadable, the glob below expands to nothing, and zero-on-disk would
-  # AGREE with the empty listing git returns for the same reason.
-  [ -r "$wtroot" ] && [ -x "$wtroot" ] ||
-    die "worktree registry $wtroot could not be read — whether #$issue has a worktree is unknown"
-  # A registry entry is a directory; anything else in here is not git's and must
-  # not be counted as a worktree git failed to report.
-  for entry in "$wtroot"/*; do
-    [ -d "$entry" ] || continue
-    # Skip only an EMPTY directory. That is an operator's stray `mkdir`, which
-    # git ignores — and counting one refuses EVERY release of every ticket in
-    # the repo, forever, over something git is right to ignore (measured, git
-    # 2.50.1: git lists 2 worktrees where a bare `-d` count said 2 registered
-    # against 1 linked). A stray FILE was already skipped by the `-d` above; a
-    # stray directory was not, which is why the file case shipped green.
-    #
-    # Emptiness, NOT the absence of a `gitdir` file, and the difference is a
-    # wrong "free": git drops an entry whose `gitdir` was deleted, so keying the
-    # skip on that file lets the entry through as "not git's", the count agrees,
-    # no refusal fires, and the release proceeds while the checkout may still be
-    # on disk (measured: listed 1 → linked 0, and a gitdir-keyed count returns 0
-    # to match). A corrupt entry still holds git's own files — commondir, HEAD,
-    # index, logs, refs — so emptiness separates it from a stray where the
-    # missing `gitdir` does not.
-    #
-    # `ls`'s STATUS, not just its output, and that is the whole point: an entry
-    # we could not LIST is not an empty one, and `2>/dev/null` hides the
-    # difference. A stray `mkdir` lists empty at rc 0; an entry chmod'd 000
-    # (unsearchable) OR 0111 (searchable, so an `-x` test passes it, but not
-    # readable) fails EACCES and prints nothing just the same. Reading only the
-    # output skips that entry as "not git's" — and git drops it too, so the
-    # counts AGREE, no refusal fires, and the claim is freed with the member's
-    # uncommitted work still on disk (measured: exit 0, `released:true`,
-    # `blockers:[]`, branch deleted, in-progress label dropped, checkout
-    # standing). Could not read it, so we cannot tell → count it and let the
-    # mismatch below fire.
-    if contents=$(ls -A "$entry" 2>/dev/null) && [ -z "$contents" ]; then continue; fi
-    registered=$((registered + 1))
-  done
-  return 0
-}
-count_registry
-
-# The path is the whole rest of the line, never $2: `worktree list --porcelain`
-# prints it raw, so any checkout living under a directory with a space in it —
-# ordinary on macOS — would otherwise be truncated at the first one.
-#
-# A newline in that path was the same truncation one byte further out: the plain
-# porcelain ends every attribute with one, so the record split and every
-# `substr($0,10)` below stopped at the newline. `wt_listing` reads `-z` and
-# swaps the separators, so a record ends where git says it ends.
-#
-# `|| die`, where this was a bare assignment: left bare the read died on `set -e`
-# under git's own diagnostic, with no line carrying the `release-ticket:` prefix
-# a caller greps stderr for — the very reason every lookup OVER this listing is
-# already guarded that way.
-#
-# A function, not inline, because the recount below needs this whole
-# pair — git's own read and the count derived from it — re-taken TOGETHER, not
-# just re-assigned in isolation. `linked` and `wt_list`/`wt_err` are this
-# function's OUTPUT, exactly as `registered` is `count_registry`'s.
-count_linked() {
-  wt_listing || die "could not read the worktree list for #$issue: $wt_err"
-  # The main worktree is always listed first and has no registry entry of its own,
-  # hence the -1.
-  #
-  # awk, not `grep -c … || true`. `grep -c` exits 1 on zero matches — legitimate,
-  # and `set -e` would read it as fatal — so a `|| true` has to absorb it, and
-  # that same `|| true` absorbs a grep that could not RUN AT ALL just as happily.
-  # The count is then the empty string, `$((listed - 1))` is -1 (measured), and
-  # the mismatch report below blames `git worktree list` for a count no listing
-  # can produce — sending the operator after git when the fault was a fork
-  # failure. awk needs no such case separated out: the program contains no `exit`,
-  # so it returns 0 whether or not anything matched, and every non-zero status is
-  # a real failure. This script already removed exactly this shape elsewhere.
-  #
-  # What this count does NOT cover, stated because it reads as though it might: a
-  # path with a newline in it never moved this number. The orphaned continuation
-  # line the plain porcelain produced did not begin `worktree `, so `listed - 1`
-  # still equalled `registered` and the cross-check AGREED with a read that had
-  # truncated the path. Re-measured on a real linked worktree added at
-  # `…/wt/fix-33<LF>slug`, git 2.50.1 (Apple Git-155):
-  #
-  #   git worktree add -b fix/33-slug "../wt/$(printf 'fix-33\nslug')"
-  #   git worktree list --porcelain | awk '/^worktree /{n++} END{print n+0}'
-  #   ls .git/worktrees | wc -l
-  #
-  # `listed - 1` equals `registered` while the same listing's `substr($0,10)` hands
-  # back `…/wt/fix-33`, a path `[ -d ]` says is not there. The blindness is the
-  # point, not the arithmetic: the orphan line adds no `worktree ` line, so no
-  # count over this listing can see the truncation. It is a count of records against
-  # registry entries and catches an entry git DROPPED; the path inside a record it
-  # does keep is `nl_path`'s to refuse, below. Under `-z` the count is now right by
-  # construction — one `worktree ` line per record, whatever the path holds.
-  listed=$(printf '%s\n' "$wt_list" | LC_ALL=C awk '/^worktree /{c++} END{print c+0}') ||
-    die "could not count the worktrees git listed for #$issue"
-  # The `|| die` above closes only the route where awk could not RUN. An empty but
-  # SUCCESSFUL listing reaches the same -1: awk exits 0 printing `0`, the guard
-  # cannot fire, and the mismatch report below blames `git worktree list` for the
-  # very count the guard above exists to keep out of an operator's face. One
-  # comparison closes it for every branch below at once. `-ge 1`, not `-gt 1`:
-  # `listed=1` is the main checkout alone, `linked=0`, the ordinary repo with no
-  # linked worktree at all — a guard that refused that would refuse most releases
-  # in this repo. Real `git worktree list --porcelain` always prints the main
-  # worktree, so reaching this needs a broken or shimmed git; the refusal
-  # direction was already right, only the number was nonsense.
-  [ "$listed" -ge 1 ] ||
-    die "git listed no worktrees at all for #$issue — not even the main checkout, so the listing cannot be trusted"
-  linked=$((listed - 1))
-}
-count_linked
-# Name the direction actually observed. The two disagreements have opposite
-# causes and send the reader to opposite places, so one message cannot serve
-# both: FEWER listed than registered is git silently dropping an entry it could
-# not read, which is the fault this whole check exists to catch. MORE listed
-# than registered is the reverse — the on-disk count is the stale read, a
-# sibling agent's `git worktree add` having landed between the two, which in a
-# parallel fleet is routine rather than exotic. Calling that "the listing is
-# incomplete" sends an operator hunting a permissions fault that is not there.
-# Recount before refusing. The registry scan above and git's listing
-# just taken are two reads at two different instants, not one atomic read, and
-# a sibling agent's `git worktree add` or `remove` landing in the gap makes the
-# two counts disagree with nothing actually wrong — measured against this
-# script directly: 3/100 dry-run releases aborted on this cross-check under a
-# throttled churner, 48-66/80 unthrottled, all with zero real faults among them.
-#
-# inflight.sh already recounts here into its own accumulate-and-continue
-# probe; this script's whole contract is `die` on any unmet precondition
-# instead, so the port keeps that shape rather than inheriting the accumulator.
-# Both copies recount BOTH `registered` and `linked`, which closes the same
-# window in each.
-# Re-taking `registered` alone leaves `linked` pinned to the FIRST `wt_listing`
-# call: a second sibling mutation landing after that call returns but before
-# the lone recount re-scans the registry inflates `registered` without touching
-# `linked`, which can flip which branch fires below and name the wrong cause —
-# reporting "the listing is incomplete" (implying a fault) for what is,
-# underneath, the same benign race the elif below already names correctly.
-# Verified against this script directly with a shim landing a second mutation
-# in exactly that window.
-#
-# A mutation landing between the FIRST count and git's listing is already
-# reflected in that listing, so the second count agrees with it — that is the
-# invariant the ORIGINAL pair above relies on. Recounting `registered` and
-# `linked` together, in the same order (`count_registry` first, `count_linked`
-# second, mirroring lines 364-434 above), gives the RECOUNT pair that same
-# invariant: escaping it needs a mutation inside the narrower window these two
-# calls open between themselves, not the whole span back to the first
-# `wt_listing` (measured on inflight.sh's copy while it was still
-# registered-only, the same shape of window: 1.99% -> 0.00% at 2 mutations/s,
-# 56.6% -> 1.29% saturated). A genuinely dropped entry is a standing state, not
-# a moment, so it survives every recount below and still refuses.
-#
-# The order is kept the same as the original pair for THIS argument's sake —
-# it lets the invariant above carry over instead of being re-derived for a
-# different order — not because a different order would be wrong. Verified
-# directly: swapping the recount to `count_linked` first then
-# `count_registry` still passes all four tests below (the two single-mutation
-# absorptions and the two regression cases) unchanged. Both functions
-# only read — neither writes anything the other observes — so whichever runs
-# first merely trades which of the two symmetric windows (before the first
-# call, between the two, after the second) a same-shaped mutation would need
-# to land in; it does not change whether the pair converges. Nothing below
-# depends on this order for correctness; it is kept fixed only so this
-# comment's own reasoning stays about one order instead of two.
-#
-# The unreadable-registry case above is unaffected: `count_registry`'s own
-# `[ -r ] && [ -x ]` guard on $wtroot dies the same way on every call, before
-# any recount is ever reached. The cannot-read-inside case is NOT unaffected
-# the same way — an entry inside $wtroot that `ls -A` cannot read is counted as
-# registered rather than dying (above), so a stale one survives every recount
-# too, but what fires on it is the mismatch below, not `count_registry` itself:
-# a different guard, a different exit code, under "the listing is incomplete" —
-# a cause that is not actually what happened.
-#
-# The recount pair above is itself two reads at two different instants, not
-# one atomic read: a THIRD sibling mutation landing between the recount's own
-# `count_registry` and `count_linked` calls escapes the single-recount
-# invariant the same way a second mutation once escaped the original pair,
-# and mislabels the same benign race under one of the two `die`s below.
-# Verified directly with a shim landing a
-# first mutation ahead of the initial listing and a second squarely inside the
-# recount's own gap: the wrong-direction message reproduced against this
-# script before the loop below existed.
-#
-# Closing that for good needs a single atomic snapshot of the registry and
-# git's listing together, and this repo has no primitive for one: git exposes
-# no combined read, and building one would mean a lock held not just here but
-# in every other script that mutates the registry (claim-ticket.sh, reap.sh,
-# and any other `git worktree add`/`remove` caller in the fleet) — a
-# repo-wide locking protocol this script has no authority to impose on
-# siblings it does not control, for a window that already needs three
-# precisely-timed mutations landing in gaps with no subprocess call in them at
-# all. Disproportionate, so not attempted.
-#
-# What IS cheap: recounting more than once. Each additional pass demands one
-# MORE precisely-timed sibling mutation to defeat, compounding against the
-# same mutation being both willing and able to land in an ever-later gap
-# within this one invocation — while a genuine corruption is a standing
-# state, not a moment, and still survives every pass and still refuses once
-# the loop below runs out. `recount_tries` bounds it at one more attempt than
-# the single recount already took (closing the specific residual without turning
-# this into an open-ended chase) rather than a
-# measured constant — sustained real churn settling in two extra reads is not
-# something this fixture can measure a percentage for, unlike the numbers
-# above.
-recount_tries=2
-while [ "$linked" -ne "$registered" ] && [ "$recount_tries" -gt 0 ]; do
-  count_registry
-  count_linked
-  recount_tries=$((recount_tries - 1))
-done
-if [ "$linked" -lt "$registered" ]; then
-  die "git listed $linked worktrees for $registered registry entries in $wtroot — the listing is incomplete, so no absence it reports can be trusted"
-elif [ "$linked" -gt "$registered" ]; then
-  die "git listed $linked worktrees but only $registered registry entries were counted in $wtroot — the registry read missed entries git can see, so no absence it reports can be trusted"
+# worktree.sh's `wt_counts` establishes it: it counts the registry entries on
+# disk against the linked worktrees git listed, recounts before refusing, and
+# names the direction a standing disagreement runs. Each refusal is this
+# script's precondition `die`; a listing git could not produce at all names
+# git's own cause. Absent entirely is fine and answers nothing: zero registry
+# entries against the main worktree alone is a match, so the release goes
+# through. The listing it validated is the `$wt_list` every lookup below scans.
+if wt_counts; then :; else
+  case $? in
+    2) die "could not read the worktree list for #$issue: $wt_why" ;;
+    *) die "$wt_why" ;;
+  esac
 fi
 
 # Every lookup ASSIGNED from the listing is guarded, for the reason the worktree
 # counter above is: left bare, an awk that could not answer ends the run on its
 # own diagnostic, with no line carrying the `release-ticket:` prefix a caller
-# greps stderr for. The lookups OVER it are guarded too, but never this way —
+# greps stderr for. The branch lookup is worktree.sh's `wt_find_branch`, which
+# refuses rather than answering "no worktree" for a scan it could not finish.
+# The lookups OVER it are guarded too, but never this way —
 # `locked` and `unresolved_head` below read the same `$wt_list` through awk and
 # answer THROUGH its exit status, where telling "could not run" from "no match"
 # needs more than a `|| die`. Each captures that status itself and refuses above
@@ -556,11 +330,23 @@ fi
 # absent worktree stays the answer the checks below expect. The predicates are
 # the opposite case — their `exit` is how they answer at all — which is why the
 # same sentence cannot be written about them and why their guard is not this one.
-wt=$(printf '%s\n' "$wt_list" |
-     awk -v b="refs/heads/$branch" '/^worktree /{w=substr($0,10);n++} /^branch /&&$2==b&&n>1{print w}') ||
-  die "could not read the worktree git listed for #$issue"
 main_branch=$(printf '%s\n' "$wt_list" | awk '/^worktree /{n++} n==1&&/^branch /{print $2; exit}') ||
   die "could not read the main checkout's branch from git's listing for #$issue"
+# Only a LINKED worktree is ours, and `wt_find_branch` answers for every record
+# the main checkout included, one path per line in listing order. The main
+# checkout is always the first record, so when it holds the branch its path is
+# the first line, and it is dropped here; the main-checkout blocker below
+# refuses that shape on its own.
+wt_find_branch "$branch" || die "$wt_why"
+wt=$wt_path
+if [ "$main_branch" = "refs/heads/$branch" ]; then
+  case $wt in
+    *"
+"*) wt=${wt#*"
+"} ;;
+    *) wt= ;;
+  esac
+fi
 # The main checkout's path, and the anchor the orphan probe below reconstructs a
 # claim's directory from. Off git's own listing rather than $PWD: this script is
 # routinely run from inside a member's worktree, where a cwd-relative
@@ -651,7 +437,7 @@ branch_j=$(jstr "$branch") && branch_rw=$(jrewritten "$branch") \
 # fails (measured, git 2.50.1). Its exit code therefore answers for neither, and
 # `nothing landed` over a cleared registration was a positive assertion that was
 # false. So `wt_outcome` carries a measured release outcome — CONTEXT.md's four
-# states — taken by `release_outcome` after the call rather than read off its rc.
+# states — taken by worktree.sh's `wt_outcome` after the call rather than read off its rc.
 #
 # `Unreleased` to start because nothing has been attempted yet, and the line is
 # not printed at all when this claim has no worktree of ours: a state whose
@@ -807,129 +593,16 @@ unresolved_head() {
   return 1
 }
 
-# Is anything at all occupying $1? Not the same question as `gone`, which asks
-# whether an absence is established; this one asks whether the path is taken.
-# `-e` alone FOLLOWS symlinks, so a DANGLING one reads as absent while it still
-# occupies the path and still fails the next `git worktree add` (`fatal: '...'
-# already exists`) — and that is residue this very script can leave: where a
-# symlink POINTS AT the registered worktree directory, `git worktree remove`
-# deletes that directory and returns 0, leaving the link behind and now dangling.
-# NOT the symlink standing in for the directory: that is the rc-255 row of the
-# table below, and there the target survives emptied, so `-e` alone already sees
-# it. Both measured, git 2.50.1. Same reason the non-directory precondition
-# below tests -L separately.
-#
-# Neither shape impeaches the rc-0 fast path at the removal, so nothing there
-# needs re-measuring: no shape measured returns 0 with the path git was asked to
-# delete still occupied — the dangling residue sits on the LINK, which is a
-# different path and reaches this predicate through the orphan probe.
-occupied() { [ -e "$1" ] || [ -L "$1" ]; }
-
-# The registration PROBE at the heart of the arm below: is $1 still listed in
-# $now, the fresh post-removal listing? `locked` and `unresolved_head`
-# read their own awk's exit status STRAIGHT as the answer — 0 true, 1 false —
-# so an awk that could not run (rc >= 2: killed, OOM, a broken interpreter) and
-# an awk that ran fine and found no match (rc 1, the genuine "not registered")
-# both land on the false side of the same elif, and it was measured what that
-# fold did here: with nothing left to distinguish them, the run fell through to
-# `elif occupied "$1"; then wt_outcome=Deregistered` and wrote a false
-# Deregistered into the JSON receipt for a registration nothing established was
-# actually cleared.
-#
-# `locked` and `unresolved_head`'s own fix is not enough copied
-# verbatim: both `die` on an awk that could not run, which is right for a
-# precondition gate — abort before any mutation is attempted — and wrong here.
-# `release_outcome` runs AFTER `git worktree remove` has already run, is called
-# as a bare statement rather than inside a `$( )`, and its caller reads
-# `$wt_outcome` right after the call returns; a `die` here would abort the
-# function with nothing set — worse than the defect it replaces. Nor can the
-# status be captured with a bare pipeline followed by a separate `reg=$?` line:
-# measured, that does not survive this script's `set -eu` either — `set -e`
-# kills the script on the pipeline itself before the assignment is ever
-# reached. So this stays a boolean predicate in the `locked`/`unresolved_head`
-# shape — a non-final AND-OR element (`… && return 0`), never a bare pipeline
-# whose status a later line reads — but the "could not run" case is carried out
-# through `$wt_why` instead of `die`, for `release_outcome` to route to
-# Indeterminate exactly as it already does for a listing git could not
-# produce, one arm up. 0 registered, 1 genuinely not registered (`$wt_why`
-# stays empty, already cleared by the caller before this runs), anything else
-# could not be told apart from "not registered" by rc alone (`$wt_why` is set
-# to say so, straight into the field the caller already reserves for it).
-ro_registered() {
-  printf '%s\n' "$now" |
-    P="$1" awk '/^worktree /{if (substr($0,10)==ENVIRON["P"]) f=1} END{exit !f}' && return 0
-  [ $? = 1 ] || wt_why="could not tell whether $1 is still registered for #$issue"
-  return 1
-}
-
-# Which release outcome does $1 hold after a `git worktree remove` that refused?
-# Measured, never inferred from the rc — recording the rc instead of what landed is the defect this exists to remove.
-# git drops the registration BEFORE the directory and does not restore it when
-# the directory delete fails, so one call has three landing shapes and the exit
-# code separates none of them. All measured on git 2.50.1:
-#
-#   dirty worktree                     rc 128, registration and directory kept
-#   symlink standing in for the dir    rc 255, registration CLEARED, path kept
-#   unwritable .git/worktrees          rc 255, registration and directory gone
-#
-# A FRESH listing, never `wt_list`: that one was captured before any mutation,
-# so answering from it would re-read the state this function exists to
-# re-measure. Read with the same ENVIRON-keyed awk `locked` uses, and for the
-# same reason — a `-v` assignment mangles a backslash in the path, and the
-# comparison then falls to the permissive answer.
-#
-# The tri-valued directory probe is `occupied` composed with `gone`, exactly the
-# pairing `gone`'s own contract prescribes for a caller that needs present and
-# cannot-stat apart. No second predicate and no third value inside `gone`: it is
-# now a single definition in worktree.sh that every caller in the fleet shares,
-# so a third value added for this one caller lands in all of them — and this file
-# already carries two answers on unreadable worktrees from a concept that
-# got duplicated.
-#
-# Only the four named states, so the two cells CONTEXT.md has no name for are
-# not asserted: a registration that survived a directory that did not is
-# reported Indeterminate rather than squeezed into Unreleased, whose definition
-# is that BOTH are still present.
-# Writes `$wt_outcome`, and `$wt_why` whenever the answer is Indeterminate for a
-# reason git named. It does NOT echo the state: a `$( )` around the call would
-# put the whole body in a subshell, and the cause — which `wt_listing` leaves in
-# `$wt_err` — would die with it. That is not hypothetical, it is what this
-# function did: the one case where the headline degrades to "what landed could
-# not be measured" was the one case whose cause never reached the operator, on
-# stderr or in the receipt. Assigning globals is what carries it out.
-release_outcome() {
-  # `wt_listing` writes the shared `$wt_list`, and this function must not disturb
-  # the pre-mutation capture the guards above read off it. Saved and put back in
-  # the same breath — and now load-bearing rather than defensive, because without
-  # the subshell there is nothing else keeping the two reads apart.
-  ro_prior=$wt_list
-  ro_read=true
-  wt_listing || ro_read=false
-  ro_err=$wt_err
-  now=$wt_list
-  wt_list=$ro_prior
-  wt_why=
-  if [ "$ro_read" = false ]; then
-    # The listing is how the registration is read, so a listing git could not
-    # produce leaves the registration unknown — not absent. `$ro_err` is git's
-    # own prose for why it could not, flattened to one line for the receipt.
-    wt_outcome=Indeterminate
-    wt_why=$(printf '%s' "$ro_err" | tr '\n' ' ')
-  elif ro_registered "$1"; then
-    if occupied "$1"; then wt_outcome=Unreleased; else wt_outcome=Indeterminate; fi
-  elif [ -n "$wt_why" ]; then
-    # awk could not run at all (rc >= 2), which is a different fact from
-    # "ran fine and found nothing" — the latter alone means Deregistered is on
-    # the table below.
-    wt_outcome=Indeterminate
-  elif occupied "$1"; then
-    wt_outcome=Deregistered
-  elif gone "$1"; then
-    wt_outcome=Released
-  else
-    wt_outcome=Indeterminate
-  fi
-}
+# Whether a path is taken at all (`wt_occupied`, which a dangling link still
+# answers true for) and which release outcome a refused `git worktree remove`
+# left behind (`wt_outcome`) are worktree.sh's, with the measurements behind
+# both. The symlink standing in for a worktree directory is the rc-255 row of
+# `wt_outcome`'s table, and its target survives emptied, so `-e` alone already
+# sees it; the non-directory precondition below tests `-L` for the same reason
+# `wt_occupied` does. No shape measured returns 0 from the removal with the
+# path git was asked to delete still occupied — the dangling residue sits on
+# the LINK, which is a different path and reaches `wt_occupied` through the
+# orphan probe — so the rc-0 fast path records `Released` without re-measuring.
 
 # A path holding a newline, refused rather than acted on. `wt_listing` delivers
 # it whole with the newline substituted, and the substituted byte is one no
@@ -965,7 +638,7 @@ fi
 # and rewrites the entry's `gitdir` file to follow it, but never renames the
 # ENTRY (both measured, git 2.50.1) — so a moved claim whose HEAD git cannot
 # resolve, invisible to `wt` and to the suffix key alike, is still reachable
-# through `$wtroot/$issue-$slug/gitdir`. That file holds `<worktree path>/.git`,
+# through `$wt_root/$issue-$slug/gitdir`. That file holds `<worktree path>/.git`,
 # and the path git prints in the porcelain is its content with `/.git` stripped,
 # echoed VERBATIM with no canonicalisation of its own (measured: a hand-written
 # `gitdir` naming a path through a symlink is printed back through the symlink),
@@ -1073,22 +746,22 @@ shquote() {
 # pasted into a shell and a path is not shell text: under double quotes a `$`
 # in the path expands again when the operator runs it and the search comes back
 # EMPTY at rc 1 — no entry reported while the entry is right there, this arm's
-# own defect one step further out — and an unquoted `$wtroot/*/gitdir` splits
+# own defect one step further out — and an unquoted `$wt_root/*/gitdir` splits
 # on a space. Through `shquote`, because quoting a path is not the same as
 # wrapping it in quotes: the one character that defeats a quoted string is the
 # quote, and git accepts one in a worktree directory name.
 #
-# Empty on the entry key, which read `$wtroot/$issue-$slug/gitdir` itself and
+# Empty on the entry key, which read `$wt_root/$issue-$slug/gitdir` itself and
 # puts that name in `$stray_own`: searching for what it already measured would
 # be the step backwards. Assigned before that key can answer, so `$stray` here
 # is the suffix key's or nothing.
 shquote "$stray/.git"
 stray_needle=$shq
-shquote "$wtroot"
+shquote "$wt_root"
 stray_find="; find that entry with: grep -Fxl $stray_needle $shq/*/gitdir"
-if [ -z "$wt" ] && [ -z "$stray" ] && [ -r "$wtroot/$issue-$slug/gitdir" ]; then
-  entry_wt=$(cat "$wtroot/$issue-$slug/gitdir") ||
-    die "could not read the worktree registry entry $wtroot/$issue-$slug/gitdir for #$issue"
+if [ -z "$wt" ] && [ -z "$stray" ] && [ -r "$wt_root/$issue-$slug/gitdir" ]; then
+  entry_wt=$(cat "$wt_root/$issue-$slug/gitdir") ||
+    die "could not read the worktree registry entry $wt_root/$issue-$slug/gitdir for #$issue"
   entry_wt=${entry_wt%/.git}
   entry_stray=$(printf '%s\n' "$wt_list" |
                 E="$entry_wt" awk '/^worktree /{n++; p=substr($0,10)
@@ -1174,7 +847,7 @@ if [ -z "$wt" ] && [ -n "$stray" ]; then
   elif gone "$stray"; then
     block "worktree $stray $stray_own and its directory is gone — git worktree prune to clear the registration"
   elif unresolved_head "$stray"; then
-    block "worktree $stray $stray_own but git could not read its HEAD, so its branch is unknown — inspect its entry's HEAD file under $wtroot by hand$stray_find"
+    block "worktree $stray $stray_own but git could not read its HEAD, so its branch is unknown — inspect its entry's HEAD file under $wt_root by hand$stray_find"
   else
     block "worktree $stray $stray_own but is not on $branch — release it by hand"
   fi
@@ -1210,12 +883,12 @@ fi
 # Nor an automatic delete: a refusal is a finding to report, and nothing here
 # has inspected what is in that directory.
 #
-# Absence is ESTABLISHED by `gone`, never inferred from `occupied` alone, for
+# Absence is ESTABLISHED by `gone`, never inferred from `wt_occupied` alone, for
 # the reason the dirty check gives: read as "no orphan", a `.worktrees` this
 # script may not search would release the claim over one.
 if [ -z "$wt" ] && [ -z "$stray" ]; then
   orphan="$main_wt/.worktrees/$issue-$slug"
-  if occupied "$orphan"; then
+  if wt_occupied "$orphan"; then
     block "worktree directory $orphan is this claim's and has no registration — inspect it and remove the directory by hand"
   elif ! gone "$orphan"; then
     block "cannot tell whether an orphaned worktree directory is at $orphan, so whether #$issue can be released is unknown"
@@ -1237,7 +910,7 @@ if [ -z "$wt" ] && [ -z "$stray" ]; then
     #
     # The `-z "$blockers"` conjunct is load-bearing, not dead weight (a prior
     # round of this comment argued the opposite and was wrong): `$blockers` can
-    # be non-empty here even though this arm's own occupied/gone siblings above
+    # be non-empty here even though this arm's own wt_occupied/gone siblings above
     # did not fire. `git checkout --orphan release/5-foo` on the MAIN checkout
     # points HEAD at refs/heads/release/5-foo before any commit exists, so
     # `main_branch` (read off `git worktree list --porcelain`) already equals
@@ -1329,7 +1002,7 @@ fi
 # branch deleted, label dropped, exit 0, `"blockers":[]` — with the member's
 # uncommitted work still on disk and now orphaned.
 #
-# `occupied`, where this read `[ ! -e "$wt" ]`: `gone` reports a path that EXISTS
+# `wt_occupied`, where this read `[ ! -e "$wt" ]`: `gone` reports a path that EXISTS
 # as not-established-absent, which is the same answer it gives for one it cannot
 # stat, and only the second is unknown — so the existence test has to be the one
 # that agrees with `gone` about what "exists" means. It did not. Every `test`
@@ -1339,18 +1012,18 @@ fi
 # exactly, and which the stand-in blocker below already answers. Measured on
 # the release-ticket tests' own dangling-link fixture, which is what caught it.
 #
-# `! occupied && ! gone` is the tri-valued pairing `gone`'s contract prescribes,
-# and the same one `release_outcome` composes: present or link-present is not
+# `! wt_occupied && ! gone` is the tri-valued pairing `gone`'s contract prescribes,
+# and the same one `wt_outcome` composes: present or link-present is not
 # unknown, established-absent is not unknown, and what is left over is.
 #
-# `! nl_path` for the same reason the dangling link needed `occupied`, and it is
+# `! nl_path` for the same reason the dangling link needed `wt_occupied`, and it is
 # the same trap a second time: `gone` now refuses a substituted path too,
 # so without this exemption the pairing reads it as "cannot tell" and dies — for
 # a path the newline blocker above has already answered in the operator's own
 # terms, downgrading a receipt-carrying `NOT released` verdict to an exit-2 die
 # that says nothing the receipt did not. Measured on a worktree registered at a
 # path holding a newline.
-if [ -n "$wt" ] && ! nl_path "$wt" && ! occupied "$wt" && ! gone "$wt"; then
+if [ -n "$wt" ] && ! nl_path "$wt" && ! wt_occupied "$wt" && ! gone "$wt"; then
   die "cannot tell whether $wt exists, so whether it holds uncommitted work is unknown"
 fi
 
@@ -1457,52 +1130,25 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   # tampering, `git worktree` never writes one, and a stricter check here was
   # ruled not worth its code.
   #
-  # Compared as a DIRECTORY (`-ef`, same device and inode), never as a string,
-  # or this false-refuses a HEALTHY worktree: `$wt` is the path `worktree list
-  # --porcelain` echoes and `--show-toplevel` is git's own resolved spelling,
-  # and the two legitimately differ for one and the same directory. A parent
-  # that was a plain dir at `worktree add` time and is a symlink now leaves the
-  # listed path non-canonical while git's answer is resolved (measured). And a
-  # path holding a Unicode NFD-composed name (`cafe` + U+0301) is listed
-  # PRECOMPOSED by the `core.precomposeunicode` git writes into every new repo
-  # on macOS, while `--show-toplevel` answers the on-disk NFD bytes — visually
-  # identical, byte-different, one directory (measured, git 2.50.1, Apple
-  # Git-155; reap.sh's copy of this compare compares as a directory too). Under bash —
-  # macOS's own `/bin/sh` — `cd "$wt" && pwd -P` canonicalised only the
-  # first: it echoes the spelling it was given, so a byte compare against it
-  # refused every healthy NFD worktree at exit 2 there; dash's own `pwd -P`
-  # resolves through to the on-disk NFD bytes instead, so that shell's old
-  # byte compare would not have refused the same worktree. `-ef`
-  # answers "same directory" for both and for any other spelling the
-  # filesystem aliases, and still refuses every redirect above — each names a
-  # different directory. POSIX.1-2017's `test` does not define `-ef`; it is a
-  # ksh-derived extension bash, dash and BSD sh share, and POSIX.1-2024 adds it.
-  # A `[` that cannot evaluate it fails, and so does a `--show-toplevel` naming
-  # a path that does not exist: both are the refusing direction.
-  #
-  # `&& echo x` inside the substitution, then `%?x`: `$(...)` strips EVERY
-  # trailing newline, so a `core.worktree` naming a sibling directory called
-  # `$wt` plus a newline byte — git accepts one as an ordinary path character —
-  # would otherwise name `$wt` itself and pass the redirect, the dirty check
-  # then reading that sibling's clean copy over $wt's work (measured;
-  # the shape no-undo-audit.sh closed the same way, and reap.sh's copy
-  # of this compare). The sentinel leaves `$(...)` only git's own
-  # terminating newline to strip.
+  # worktree.sh's `wt_linkage` asks it, as a DIRECTORY compare (`-ef`) — a
+  # string compare false-refuses a HEALTHY worktree whose parent became a
+  # symlink or whose name is NFD — with a sentinel against a newline-suffixed
+  # sibling; its comment carries the measurements. Under bash — macOS's own
+  # `/bin/sh` — `cd "$wt" && pwd -P` canonicalised only the symlinked parent:
+  # it echoes the spelling it was given, so a byte compare against it refused
+  # every healthy NFD worktree at exit 2 there; dash's own `pwd -P` resolves
+  # through to the on-disk NFD bytes instead.
   #
   # A $wt whose own leaf was replaced by a symlink — never `git worktree add`'s
-  # own shape, hand tampering only — still reaches this compare, because the
+  # own shape, hand tampering only — still reaches this check, because the
   # `-L` guard just above `block`s rather than `die`s (see its own comment).
-  # `-ef` follows the link, and `--show-toplevel` resolves through it to the
-  # same real, possibly newline-suffixed, directory, so the two compare equal
-  # and that case stays exactly as blocked — "not a directory" at exit 1 — never
-  # a fabricated "does not point at itself" mismatch at exit 2.
-  if [ -f "$wt/.git" ]; then
-    toplevel=$(git -C "$wt" rev-parse --show-toplevel && echo x) ||
-      die "cannot read the git repository at $wt (its .git file or the gitdir it names), so whether it holds uncommitted work is unknown"
-    toplevel=${toplevel%?x}
-    # shellcheck disable=SC3013 # -ef is a ksh-derived extension bash/dash/BSD sh share, base in POSIX.1-2024; this file targets dash too and -ef is verified there
-    [ "$toplevel" -ef "$wt" ] ||
-      die "$wt's .git does not point at $wt — it resolves to $toplevel — so whether it holds uncommitted work is unknown"
+  # A link standing in for this claim's own renamed directory reaches this
+  # claim's admin dir, whose back-pointer names $wt, and `-ef` resolves both
+  # sides to the same real directory — so that case stays exactly as blocked,
+  # "not a directory" at exit 1, never a fabricated mismatch at exit 2. A link
+  # to ANOTHER worktree reaches that worktree's admin dir and is refused here.
+  if [ -f "$wt/.git" ] && ! wt_linkage "$wt"; then
+    die "$wt_why, so whether it holds uncommitted work is unknown"
   fi
 
   # Same reason: folded-in stderr would be counted as uncommitted changes.
@@ -1529,6 +1175,24 @@ if [ -n "$wt" ] && [ -d "$wt" ]; then
   # stands between the member's work and the delete.
   n=$(printf '%s' "$dirty" | grep -c . || true)
   [ "$n" -eq 0 ] || block "worktree $wt has $n uncommitted change(s)"
+fi
+
+# The release removes `$wt`, and a run standing inside it — the member whose
+# claim this is, releasing from its own shell — would have its cwd deleted
+# under it, after which every git call dies with `fatal: Unable to read current
+# working directory` (measured on reap.sh, whose sweeps refuse the same path).
+# Asked of the directory, not the string, by worktree.sh's `wt_holds_cwd`,
+# which also answers true when `[` cannot evaluate the compare. `pwd -P`, not
+# `$PWD`: an inherited `PWD` naming some other directory is one POSIX leaves
+# the shell free to keep. The sentinel keeps a trailing newline in the path.
+# A blocker, not a die: what stands in the way is known, and one `cd` away.
+if [ -n "$wt" ]; then
+  rt_cwd=$(pwd -P && echo x) ||
+    die "cannot read the working directory this run was started in, so whether releasing $wt would delete it is unknown"
+  rt_cwd=${rt_cwd%?x}
+  if wt_holds_cwd "$wt" "$rt_cwd"; then
+    block "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
+  fi
 fi
 
 # Report the blockers before asking GitHub anything. The answer cannot change —
@@ -1597,7 +1261,7 @@ else
     # failure. Re-measuring here would also make the happy path answerable by a
     # probe that can return Indeterminate, refusing releases that plainly worked.
     if ! err=$(git worktree remove "$wt" 2>&1); then
-      release_outcome "$wt"
+      wt_outcome "$wt"
       halt "git worktree remove refused $wt: $(printf '%s' "$err" | tr '\n' ' ')"
     fi
     wt_outcome=Released

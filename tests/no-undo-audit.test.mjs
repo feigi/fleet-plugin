@@ -26,7 +26,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -2454,7 +2454,9 @@ function refusedAsRedirected(c, target) {
   assert.equal(r.status, 2, `a core.worktree redirect must be unanswerable, not clean: got ${r.status} ${r.stdout}`);
   assert.equal(r.stdout, "", "an unanswerable audit must not emit a payload");
   assert.doesNotMatch(r.stderr, /status --porcelain/, "the refusal must land before the audit runs");
-  assert.ok(r.stderr.includes(`git answers for the working tree at ${target}, not ${c.w}`), r.stderr);
+  // The linkage compare is asked of `$wt_real`, the symlink-free spelling, so
+  // the refusal names that one.
+  assert.ok(r.stderr.includes(`git answers for the working tree at ${target}, not ${realpathSync(c.w)}`), r.stderr);
 }
 
 /** extensions.worktreeConfig on in `repoDir`, then `core.worktree` set for `w` alone. */
@@ -2941,7 +2943,7 @@ const nonZeroCell = () => {
  * does — the slice is the size of the claim.
  */
 const EXIT2_ENUMERATION =
-  "exit 2 the question is unanswerable — bad argument, no such worktree, a worktree git does not answer for (its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir, against another directory's files when `core.worktree` moves the working tree there), `BASE_REF` is not spelled `origin/<branch>` or `refs/remotes/<path>` (#1565), `BASE_REF` names the audited branch (#1565), a ref that does not resolve, a probe that could not run — with the stash reflog's path resolution the exception (#570): that one failing reports `unknown` on the payload at the verdict's own exit code rather than withholding the audit, the same rule `worktree`/`branch` follow below — a conflicting path no pathspec can name, `json.sh` missing, unreadable or failed to load, a conflicting-path or at-risk array that could not be escaped (#119) — and no payload is emitted, or the audit itself could not be written (#1472) — that one can fail after the payload has already begun printing, so stdout carries it truncated and unparseable, which that exit code and the named stderr line are what distinguish from a complete answer.";
+  "exit 2 the question is unanswerable — bad argument, no such worktree, a worktree git does not answer for (its linkage is broken, and git still answers at rc 0 — for the enclosing repo when the `.git` is gone, from another worktree's HEAD and index when it names that worktree's admin dir, against another directory's files when `core.worktree` moves the working tree there), `BASE_REF` is not spelled `origin/<branch>` or `refs/remotes/<path>` (#1565), `BASE_REF` names the audited branch (#1565), a ref that does not resolve, a probe that could not run — with the stash reflog's path resolution the exception (#570): that one failing reports `unknown` on the payload at the verdict's own exit code rather than withholding the audit, the same rule `worktree`/`branch` follow below — a conflicting path no pathspec can name, `json.sh` or `worktree.sh` missing, unreadable or failed to load, a conflicting-path or at-risk array that could not be escaped (#119) — and no payload is emitted, or the audit itself could not be written (#1472) — that one can fail after the payload has already begun printing, so stdout carries it truncated and unparseable, which that exit code and the named stderr line are what distinguish from a complete answer.";
 
 /**
  * Everything in the cell AFTER `EXIT2_ENUMERATION`, verbatim: the
@@ -2973,7 +2975,7 @@ const EXIT2_TAIL =
  * inline they would sit in two places with no constant holding them together,
  * which is the drift the rest of this block exists to stop.
  */
-const LIBRARY_CLAUSE = "`json.sh` missing, unreadable or failed to load";
+const LIBRARY_CLAUSE = "`json.sh` or `worktree.sh` missing, unreadable or failed to load";
 const LINKAGE_CLAUSE = "a worktree git does not answer for";
 const REF_CLAUSE = "a ref that does not resolve";
 const PROBE_CLAUSE = "a probe that could not run";
@@ -3007,6 +3009,8 @@ const BASE_REF_CLAUSES = [BASE_REF_SHAPE_CLAUSE, AUDITED_BRANCH_CLAUSE];
 const CAUSES = new Map([
   ["cannot read $json_lib — refusing to act without the JSON escaping helpers", LIBRARY_CLAUSE],
   ["$json_lib failed to load", LIBRARY_CLAUSE],
+  ["cannot read $wt_lib — refusing to act without the worktree readers", LIBRARY_CLAUSE],
+  ["$wt_lib failed to load", LIBRARY_CLAUSE],
   ["usage: no-undo-audit.sh <worktree> <branch>", "bad argument"],
   ["worktree $wt does not exist", "no such worktree"],
   ["$wt is not a git worktree", LINKAGE_CLAUSE],
@@ -3017,8 +3021,7 @@ const CAUSES = new Map([
   ["$gd/gitdir names a directory that does not resolve — cannot verify $wt's linkage", LINKAGE_CLAUSE],
   ["$wt's .git names another worktree's admin dir — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
   ["$wt's .git names $gd, whose worktree is $owner, not $wt — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
-  ["git will not name the working tree answering for $wt — cannot verify its linkage", LINKAGE_CLAUSE],
-  ["git answers for the working tree at $top, not $wt — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
+  ["$wt_why — cannot tell a clean worktree from a dirty one", LINKAGE_CLAUSE],
   ["BASE_REF must be spelled origin/<branch> or refs/remotes/<path>, got '$base'", BASE_REF_SHAPE_CLAUSE],
   ["BASE_REF must not name the audited branch, got '$base'", AUDITED_BRANCH_CLAUSE],
   ["$base does not resolve as $base_rev", REF_CLAUSE],

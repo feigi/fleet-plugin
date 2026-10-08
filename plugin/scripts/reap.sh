@@ -223,7 +223,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || die "not inside a git repository"
 # turned symlink since leaves non-canonical, and which `core.precomposeunicode`
 # prints precomposed for a worktree whose on-disk name is NFD while git's own
 # answer is the NFD bytes (measured, git 2.50.1, Apple Git-155). So
-# `holds_cwd` below matches on the directory, not only the string.
+# worktree.sh's `wt_holds_cwd` matches on the directory, not only the string.
 #
 # `2>/dev/null` and never `2>&1`, for the reason the in-progress guard below
 # records at its own `rev-parse`: this capture is used as a PATH, not as
@@ -267,37 +267,6 @@ if [ "$self_wt_rc" -ne 0 ]; then
     ;;
   esac
 fi
-
-# True when removing worktree `$1` would delete this run's cwd: `$self_wt` is
-# `$1` or lies anywhere beneath it (a nested worktree). Asked of the
-# DIRECTORY, not the string: `-ef` (same device and inode) of `$self_wt` and of
-# each of its parents in turn. The byte-boundary prefix match this replaces
-# missed the same directory spelled two ways — the symlinked parent and the NFD
-# name the header above records share no prefix with git's own answer — and
-# `--apply` deleted the cwd it was standing in (measured). An empty `$self_wt`
-# (no worktree) names no directory, so it matches
-# nothing; the walk ends when no `/` is left to strip.
-#
-# `elif` on `$?`, same refusing direction `wt_linkage_why` states for its own
-# `-ef`: every shell this file targets (dash, bash, ksh — all three tested)
-# implements it, so a `[` that cannot evaluate it (rc 2) is
-# unreached today, not impossible — and unlike `wt_linkage_why`, nothing
-# downstream of THIS guard re-checks the directory it protects. Reading that
-# rc as a plain "not this one" would silently disable both cwd-delete guards
-# exactly the way an unrecognised `self_wt` failure would (the probe's note
-# above), just one layer further in.
-holds_cwd() {
-  hc_d=$self_wt
-  while :; do
-    # shellcheck disable=SC3013,SC2319 # -ef is a ksh-derived extension bash/dash/BSD sh share, base in POSIX.1-2024; the else's $? is deliberately the `[ -ef ]` test's own rc, read before anything else runs, to fail closed (return 0) on rc>=2 same as wt_linkage_why below
-    if [ "$hc_d" -ef "$1" ]; then hc_rc=0; else hc_rc=$?; fi
-    if [ "$hc_rc" -eq 0 ] || [ "$hc_rc" -ge 2 ]; then return 0; fi
-    case "$hc_d" in
-      */*) hc_d=${hc_d%/*} ;;
-      *) return 1 ;;
-    esac
-  done
-}
 
 echo "\$ git fetch --prune origin" >&2
 fetch_budget=$(net_fetch_budget)
@@ -539,75 +508,6 @@ gp_why() {
   if [ -n "$gp_w" ]; then printf ': %s' "$gp_w"; fi
 }
 
-# True when `$1`'s `.git` answers for `$1` itself; otherwise false, with the
-# reason in `$lk_why`. Both sweeps call it once their `-f "$wt/.git"` test has
-# established the linkage EXISTS, and before any git command run through `$wt`
-# is believed — the dirty check first among them.
-#
-# Existing is not answering. Two shapes keep `.git` a well-formed regular file
-# and move git's WORKING TREE elsewhere: a `.git` naming a foreign git dir not
-# called `.git` whose `core.worktree` is another directory, and `core.worktree`
-# set in the worktree's own `config.worktree` under `extensions.worktreeConfig`,
-# `.git` untouched. `git -C "$wt" status` then reads THAT tree, so a clean one
-# there reads clean over the work sitting in `$wt` — the dry run promised a
-# removal `--apply` could not perform, `git worktree remove`'s own back-pointer
-# and untracked-file checks being all that kept the work (measured on both
-# shapes, both sweeps, git 2.50.1). `--show-toplevel` names the tree git
-# actually answers for, so it is compared against `$1`.
-#
-# Compared as a DIRECTORY (`-ef`, same device and inode), never as a string:
-# `$1` is the path `worktree list --porcelain` echoes and `--show-toplevel` is
-# git's own resolved spelling, and the two legitimately differ for one and the
-# same directory. A parent that was a plain directory at `worktree add` time
-# and is a symlink now leaves the listed path non-canonical while git's answer
-# is resolved (measured). And a worktree whose name is Unicode
-# NFD-composed (`cafe` + U+0301) is listed PRECOMPOSED by the
-# `core.precomposeunicode` git writes into every new repo on macOS, while
-# `--show-toplevel` answers the on-disk NFD bytes — visually identical,
-# byte-different, one directory (measured, git 2.50.1, Apple Git-155).
-# `cd && pwd -P` canonicalises only the first: it echoes the spelling it was
-# given, so a byte compare against it kept every healthy NFD worktree forever.
-# `-ef` answers "same directory" for both and for any other spelling the
-# filesystem aliases, and still refuses every redirect — each names a
-# different directory. POSIX.1-2017's own `test` page does not define `-ef`
-# at all, XSI or otherwise — it is a ksh-derived extension bash, dash, and
-# BSD sh already share; POSIX.1-2024 (Austin Group bug 375) is what actually
-# adds it, as a base utility primary. A `[` that cannot evaluate it fails,
-# which is the refusing direction, as is a `--show-toplevel` naming a path
-# that does not exist.
-#
-# `&& echo x` inside the substitution, then `%?x`: `$(...)` strips EVERY
-# trailing newline, so a `core.worktree` naming a sibling directory called
-# `<wt>` plus a newline byte — git accepts one as an ordinary path character —
-# would otherwise name `$1` itself and pass the redirect (measured; the shape
-# no-undo-audit.sh closed the same way). The sentinel leaves `$(...)`
-# only git's own terminating newline to strip.
-#
-# What this does NOT cover, the boundary release-ticket.sh's copy of this
-# compare also states: shapes that swap which git DIR answers while the
-# working tree stays `$1` — a `.git` naming a sibling worktree's admin dir,
-# or a foreign git dir whose `core.worktree` points back at `$1`.
-# `--show-toplevel` answers `$1` for both. The dirty check reads `$1`'s real
-# files against the borrowed index, and `git worktree remove` refuses a
-# `.git` that does not point back at its admin dir, so neither is removed.
-#
-# A git that cannot answer at all is a refusal, never a pass: the reason is
-# fetched with a second call only on that path, the way the cwd guard at the
-# top of this file fetches its own, so the answer the compare reads never
-# carries stderr.
-wt_linkage_why() {
-  if ! lk_top=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null && echo x); then
-    lk_why="has a .git linkage git cannot resolve$(gp_why "$(git -C "$1" rev-parse --show-toplevel 2>&1 >/dev/null)")"
-    return 1
-  fi
-  lk_top=${lk_top%?x}
-  # `if`, never `[ ! … ] || return 0`: a `[` that errors (rc 2) must refuse.
-  # shellcheck disable=SC3013 # -ef is a ksh-derived extension bash/dash/BSD sh share, base in POSIX.1-2024; this file targets dash too and -ef is verified there
-  if [ "$lk_top" -ef "$1" ]; then return 0; fi
-  lk_why="has a .git linkage that answers for $lk_top, not for it — its dirty check would read that tree"
-  return 1
-}
-
 # Runs `grep -q` over CAPTURED text and hands back grep's own status separately
 # from the verdict grep was asked for.
 #
@@ -727,20 +627,12 @@ wt_reg_state() {
 # backstop exists past this point, so the listing has to be checked against
 # the registry before its silence is read as "no worktree".
 #
-# `wt_registry_why` sets `reg_why` and returns 1 when the listing cannot be
-# trusted. Two checks, because the fault families differ in what they leave:
+# Two checks, because the fault families differ in what they leave:
 #
 #   (a) COUNT. The `gitdir`/admin-dir/registry-file faults DROP the entry, so
 #   fewer linked worktrees are listed than are registered under
-#   `<git-common-dir>/worktrees/`. `count_registry` and `count_linked` mirror
-#   inflight.sh's pair of the same names (inflight.sh `count_registry`,
-#   `count_linked`, the recount at `[ "$linked" -eq "$registered" ] || {
-#   count_registry && count_linked; }` and the two direction-named refusals
-#   after it) — the stray-`mkdir` skip, the count-what-`ls`-cannot-read rule,
-#   the `[ -r ] && [ -x ]` unreadable-registry arm and the `-ge 1` floor all
-#   carry that copy's measurements. One tightening: `-d` joins
-#   the unreadable arm, because a registry replaced by a mode-755 FILE passes
-#   `-r` and `-x`, globs to nothing, counts 0 against git's 0, and agrees.
+#   `<git-common-dir>/worktrees/`. worktree.sh's `wt_counts` answers that,
+#   with its recount and the measurements behind both.
 #
 #   (b) NULL HEAD. The `HEAD` faults keep the entry, so the counts AGREE and
 #   (a) sees nothing: git lists it with the null object id and no `branch`
@@ -752,82 +644,17 @@ wt_reg_state() {
 #   applies. That arm stays as it is: it reports the worktree, while this one
 #   protects the branches. No `/^bare$/` rule here, deliberately: a test
 #   fixture selects that sweep's awk by it, and a second carrier would shim
-#   this one too.
+#   this one too. `null_head_why` below sets `reg_why` and returns 1 on it.
 #
 # Either finding keeps the branch under lookup, whichever it is: a dropped or
 # nameless entry says nothing about WHICH branch it held, so a healthy branch
-# with no worktree is exactly as unclearable as the tampered one. The check
-# runs on the listing each branch's own lookup reads — re-read per branch, as
-# the comment at the `wt_listing` failure guard below records — so a standing
-# fault keeps every [gone] branch in the pass, and a transient one keeps only
-# the branches whose listing it touched (a transient-fault fixture pins that
-# granularity for the listing failure; this guard follows it rather than
-# latching).
-#
-# Recount before refusing, exactly as inflight.sh does it: the
-# registry scan and git's listing are two reads at two instants, and a
-# sibling's `worktree add`/`remove` landing between them makes the counts
-# disagree with nothing wrong. Same order as that copy, first pair and recount
-# alike: `count_registry` FIRST, git's listing SECOND — the loop takes the
-# first registry count just ahead of the `wt_listing` failure guard, whose read
-# is the first listing, so no extra listing is read per branch. A mutation
-# landing between the first count and the listing is already reflected in the
-# listing, so the recount's registry scan agrees with it; the recount re-takes
-# BOTH, in the same order, and re-reads the listing through `wt_listing`, so
-# `$wt_list` — which the lookup then scans — is the very listing the recount
-# validated.
-# inflight.sh's copy recounts once (its `[ "$linked" -eq "$registered" ] ||
-# { count_registry && count_linked; }`); release-ticket.sh's bounds the same
-# loop at two passes for a third-mutation window. This copy takes
-# inflight.sh's single recount: a false refusal here costs one pass's wait,
-# never a deletion, and a genuinely dropped entry is a standing state that
-# survives every recount.
-wtroot=
-count_registry() {
-  registered=0
-  if [ -z "$wtroot" ]; then
-    wt_common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
-      { reg_why="could not resolve the git common directory to read the worktree registry"; return 1; }
-    wtroot="$wt_common/worktrees"
-  fi
-  [ -e "$wtroot" ] || return 0
-  [ -d "$wtroot" ] && [ -r "$wtroot" ] && [ -x "$wtroot" ] ||
-    { reg_why="worktree registry $wtroot could not be read"; return 1; }
-  for entry in "$wtroot"/*; do
-    [ -d "$entry" ] || continue
-    if contents=$(ls -A "$entry" 2>/dev/null) && [ -z "$contents" ]; then continue; fi
-    registered=$((registered + 1))
-  done
-  return 0
-}
-
-# Counts `$wt_list` as it stands; the caller decides whether to re-read it.
-count_linked() {
-  listed=$(printf '%s\n' "$wt_list" | awk '/^worktree /{c++} END{print c+0}') ||
-    { reg_why="could not count the worktrees git listed"; return 1; }
-  [ "$listed" -ge 1 ] ||
-    { reg_why="git listed no worktrees at all — not even the main checkout"; return 1; }
-  linked=$((listed - 1))
-}
-
-# Reads the first `count_registry` the loop took ahead of the listing: an
-# unreadable registry there has already set `reg_why`.
-wt_registry_why() {
-  [ -z "$reg_why" ] || return 1
-  count_linked || return 1
-  if [ "$linked" -ne "$registered" ]; then
-    count_registry || return 1
-    wt_listing ||
-      { reg_why="the recount could not re-read the worktree listing: $(printf '%s' "$wt_err" | tr '\n' ' ')"; return 1; }
-    count_linked || return 1
-  fi
-  if [ "$linked" -lt "$registered" ]; then
-    reg_why="git listed $linked linked worktrees for $registered registry entries in $wtroot — the listing dropped an entry, and a dropped entry names no branch"
-    return 1
-  elif [ "$linked" -gt "$registered" ]; then
-    reg_why="git listed $linked linked worktrees but only $registered registry entries were counted in $wtroot — the registry read missed entries git can see"
-    return 1
-  fi
+# with no worktree is exactly as unclearable as the tampered one. Both run on
+# the listing each branch's own lookup reads — re-read per branch, as the
+# comment at the lookup below records — so a standing fault keeps every [gone]
+# branch in the pass, and a transient one keeps only the branches whose
+# listing it touched (a transient-fault fixture pins that granularity for the
+# listing failure; this guard follows it rather than latching).
+null_head_why() {
   if ! nameless=$(printf '%s\n' "$wt_list" | awk '
       function flush() { if (n > 1 && !br && h !~ /[^0]/ && hit == "") hit = w }
       /^worktree /{ flush(); n++; w = substr($0, 10); h = ""; br = 0; next }
@@ -996,17 +823,10 @@ for b in $gone_branches; do
     continue
   fi
 
-  # The registry is counted BEFORE the listing below is read — inflight.sh's
-  # order, which `wt_registry_why`'s recount comment explains. A registry that
-  # cannot be read sets `reg_why` here and is refused after the `wt_listing`
-  # failure guard, so a listing failure still reports as one.
-  reg_why=
-  count_registry || :
-
-  # The path is the whole rest of the line, never awk's $2: `worktree list
-  # --porcelain` prints it raw, so a checkout living under a directory with a
-  # space in it — ordinary on macOS — was otherwise truncated at the first
-  # one, and every check below then ran against a wrong, nonexistent path.
+  # The listing is read per branch, through worktree.sh's `wt_counts`, which
+  # counts the registry, reads the listing, checks the two agree, and leaves
+  # that listing in `$wt_list` for the lookup below — so the lookup scans the
+  # very listing the counts validated.
   #
   # A listing that cannot be read fails CLOSED, like every other could-not-check
   # in this file: `$wt` would be empty, every guard under `[ -n "$wt" ]` below
@@ -1019,36 +839,38 @@ for b in $gone_branches; do
   # own. Keeping it strands every [gone] branch in this pass on one repo-level
   # failure, since the listing is re-read per branch (header: every
   # precondition is recomputed); reap runs after every merge pass, so each waits
-  # one pass with the cause named.
+  # one pass with the cause named. A listing that READ is not yet one that can
+  # be trusted — see the registry cross-check above — so a disagreeing registry
+  # keeps the branch the same way, under its own cause.
   #
-  # A genuine awk failure is a DIFFERENT fault from the listing failing, and is
-  # guarded separately: it fires only when `wt_listing` itself succeeded — a
-  # real, non-empty `$wt_list` — and awk could not finish scanning it (the
-  # multibyte trigger this file's header documents). Left bare, that failure
-  # aborted the whole script on awk's own diagnostic, with no `reap:`-prefixed
-  # line for a caller to grep stderr for — the same shape release-ticket.sh's
-  # own copy of this lookup was fixed for. `keep`, not `die`:
-  # nothing has mutated $b yet, and dying here would also discard whatever
-  # earlier iterations of this loop already reaped — the same reason the
-  # branchless sweep below keeps rather than dies on its own copy of this pipe,
-  # and the same reason the listing failure above keeps.
-  if ! wt_listing; then
-    keep "$b" "worktree lookup failed — cannot tell whether $b has a worktree; kept until a pass that can read the registry: $(printf '%s' "$wt_err" | tr '\n' ' ')"
+  # `wt_find_branch` refuses rather than answering "no worktree" whenever its
+  # scan did not establish that: awk that could not finish (the multibyte
+  # trigger this file's header documents), or a holder git lists at a path
+  # inside its own registry. `keep`, not `die`: nothing has mutated $b yet, and
+  # dying here would also discard whatever earlier iterations of this loop
+  # already reaped — the same reason the branchless sweep below keeps rather
+  # than dies on its own listing read, and the same reason the listing failure
+  # above keeps.
+  if wt_counts; then :; else
+    case $? in
+      2)
+        keep "$b" "worktree lookup failed — cannot tell whether $b has a worktree; kept until a pass that can read the registry: $wt_why"
+        ;;
+      *)
+        keep "$b" "worktree registry inconsistent — $wt_why; every [gone] branch is kept until a pass that reads a consistent registry"
+        ;;
+    esac
     continue
   fi
-  # A listing that READ is not yet a listing that can be trusted: see
-  # `wt_registry_why` above. After the `wt_listing` failure guard, before the
-  # lookup, so the lookup scans the listing this check validated (a recount
-  # re-reads it).
-  if ! wt_registry_why; then
+  if ! null_head_why; then
     keep "$b" "worktree registry inconsistent — $reg_why; every [gone] branch is kept until a pass that reads a consistent registry"
     continue
   fi
-  if ! wt=$(printf '%s\n' "$wt_list" |
-            awk -v b="refs/heads/$b" '/^worktree /{w=substr($0,10)} /^branch /&&$2==b{print w}'); then
-    keep "$b" "could not scan the worktree listing for $b — treating it as unresolved rather than guessing it has none"
+  if ! wt_find_branch "$b"; then
+    keep "$b" "$wt_why — treating it as unresolved rather than guessing it has none"
     continue
   fi
+  wt=$wt_path
 
   # A newline in that path used to end the porcelain record before
   # `substr($0,10)` could read past it, so `$wt` was a prefix of the real path —
@@ -1094,7 +916,7 @@ for b in $gone_branches; do
       # directory. This `-f` test establishes only that the linkage EXISTS,
       # the same gate release-ticket.sh and worktree-audit.sh carry;
       # that it answers for `$wt` is established by the same-directory
-      # `--show-toplevel` compare right after it (`wt_linkage_why`).
+      # `--show-toplevel` compare right after it (worktree.sh's `wt_linkage`).
       # The main checkout reaches here, and must be answered before the
       # linkage guard below sees it. `git worktree list --porcelain` emits a
       # `branch refs/heads/...` line for the main worktree too, so a `[gone]`
@@ -1123,8 +945,8 @@ for b in $gone_branches; do
       # Gated on `-f` rather than on "not kept above": an unsearchable `$wt`
       # fails `-f` too, and is left to the status probe below, which keeps it
       # with git's own "Permission denied" instead of a cause invented here.
-      if [ -f "$wt/.git" ] && ! wt_linkage_why "$wt"; then
-        keep "$b" "worktree $wt $lk_why"
+      if [ -f "$wt/.git" ] && ! wt_linkage "$wt"; then
+        keep "$b" "$wt_why"
         continue
       fi
       # `-uall`, never a bare `--porcelain`: the untracked mode is CONFIG, and
@@ -1290,9 +1112,9 @@ for b in $gone_branches; do
     # removes the nested one's files too — taking any uncommitted work in it
     # along, the same cwd deletion this guard exists for, one path further
     # out — even though `$wt` itself never equals `$self_wt` in that shape.
-    # `holds_cwd` carries the match and why it is on the directory, not only
-    # the string.
-    if holds_cwd "$wt"; then
+    # worktree.sh's `wt_holds_cwd` carries the match and why it is on the
+    # directory, not only the string.
+    if wt_holds_cwd "$wt" "$self_wt"; then
       keep "$b" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
       continue
     fi
@@ -1670,8 +1492,8 @@ else
         keep "" "worktree $wt has no .git linkage — git would answer for the enclosing repo, not this one"
         continue
       fi
-      if [ -f "$wt/.git" ] && ! wt_linkage_why "$wt"; then
-        keep "" "worktree $wt $lk_why"
+      if [ -f "$wt/.git" ] && ! wt_linkage "$wt"; then
+        keep "" "$wt_why"
         continue
       fi
       # `-uall`: see the branch sweep's copy of this probe above for the
@@ -1732,7 +1554,7 @@ else
     # Ancestor match, not exact equality — same reasoning as the branch
     # sweep's copy of this guard: a worktree nested inside `$wt` is removed
     # along with it even though `$wt` never equals `$self_wt` in that shape.
-    if holds_cwd "$wt"; then
+    if wt_holds_cwd "$wt" "$self_wt"; then
       keep "" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
       continue
     fi
