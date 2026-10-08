@@ -1522,7 +1522,7 @@ owes beyond its row:
 - **A review result lands** → see the result file written (by you or by the
   runner — **Reviewers** says which, per harness) and record `reviewed=` off its
   digest, then run the tick: a PR with survived or unverified findings prints as
-  `DISPATCH fix-pr PR#<M>`. Nothing survived and nothing to file → skip the
+  `DISPATCH fix-pr PR#<M>`. No survived or unverified finding and nothing to file → skip the
   fix-applier and dispatch the **finisher** directly: no member will touch that
   PR, so no push is coming and nothing will wake you. A review that failed is
   not a result — **Reviewers** says who retries it and what takes over.
@@ -1643,7 +1643,7 @@ depth** guard table applied in code. Act on each line as it reads:
   blind until it can.
 - `SUGGEST /triage, hold idle` — nothing is admissible after the refresh.
   Suggest, never run (**Queue depth**).
-- `DISPATCH fix-pr PR#<M> …` — a fix-applier per PR, for a review's survivors,
+- `DISPATCH fix-pr PR#<M> …` — a fix-applier per PR, for a review's survived or unverified findings,
   a dispositions mismatch no retry has answered, or a merge bot's `conflict-hold:#<M>` (**Reviewers**). Printed
   ahead of reviews on purpose: finishing what is started beats starting more.
 - `DISPATCH review PR#<M> …` — a review per PR, oldest first, off your turn
@@ -2157,7 +2157,7 @@ bring `<branch>` current with `origin/main`, resolving every conflict by
 head. Settle it `applied:<head>` — `no-op` if no conflict was left — which is
 what lifts the tick's merge hold; a dispatched-but-live one does not, and
 `failed`/`killed` leave the PR fix-due for a replacement. It answers the
-hold and nothing else: survivors of a returned review the row also carries
+hold and nothing else: survived or unverified findings of a returned review the row also carries
 stay unanswered through its settle, so the tick prints `DISPATCH fix-pr
 PR#<M>` again once it lands, and that one — `dispatch` now prints `null` —
 is a review fix-applier, dispatched as above. The push moves the

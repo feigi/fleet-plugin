@@ -571,7 +571,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     // `reviewed=` — one read while no hold stood unresolved. The one read
     // while a hold did is the conflict fix-applier `ledger.mjs dispatch` named
     // a `fleet-implementer-<cell>`: it rebases and never sees the review file,
-    // so it clears the hold and answers no survivor. Each fix-applier
+    // so it clears the hold and answers no finding. Each fix-applier
     // does one of those jobs once, so its landing folds once per PR
     // (`fixLanded`), however many copies of its token the rows carry.
     // `fixMembers`: every fix-applier on this PR, wherever its token sits —
@@ -601,7 +601,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
       const t = parseToken(tok);
       if (t) {
         note(t, where, pr);
-        // A settled `failed`/`killed` fix-applier leaves survivors or a
+        // A settled `failed`/`killed` fix-applier leaves review findings or a
         // conflict unfixed and no successor dispatched — the PR stays fix-due
         // for a `-b` replacement. Only a live attempt, or one that actually
         // landed (`applied:`/`no-op`), holds it off. Read the outcome off the
@@ -613,7 +613,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
         // must not un-settle what actually landed. Which job a landed one did
         // is read off where its token sits:
         // after an unresolved hold it was the conflict fix-applier and clears
-        // that hold; otherwise it answered the latest review's survivors. A
+        // that hold; otherwise it answered the latest review's findings. A
         // hold reopens `conflictOpen` below and a `reviewed=` resets
         // `reviewFixed`, so only a fix-applier after the latest of each ever
         // counts. Only ONE copy says where: the first in-place settled one,
@@ -621,7 +621,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
         // folding again would land the one member twice: a stale bare copy
         // after the hold its member's in-place copy preceded clearing that
         // hold, or a second copy after the first cleared the hold answering
-        // survivors the conflict fix-applier never read. Liveness is not read
+        // findings the conflict fix-applier never read. Liveness is not read
         // here at all: a bare copy read before a later row settles its member
         // reads unsettled at that point, so `fixMembers` is judged once every
         // row has been read. A copy reaching this branch has just been

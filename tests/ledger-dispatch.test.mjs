@@ -790,8 +790,9 @@ test("a PR whose latest review counts no survived and no unverified finding disp
   assert.deepEqual(read().dispatched, ["finisher-pr-40", "finisher-pr-41"]);
 });
 
-// #2877: the tick names a fix-applier for a review counting only unverified
-// findings, and its `no-op` with an ok verdict is what opens the gate.
+// #2877, the gate's half: the tick names a fix-applier for a review counting
+// only unverified findings (pinned in fleet-tick.test.mjs), and its `no-op`
+// with an ok verdict is what opens this gate.
 test("a PR whose latest review counts only unverified findings dispatches a finisher once a no-op fix-applier's verdict is ok", (t) => {
   const { ok, read, refused } = fixture(t);
   ok("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${GATE_HEAD.slice(0, 7)}:0/2/6`);

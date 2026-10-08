@@ -64,6 +64,16 @@ test("the gate refuses a finisher unless the verdict answering the latest review
     "That `dispatch` refuses a finisher — exit 2, nothing written — on a PR whose latest `reviewed=` counts a survived or unverified finding, unless the dispositions verdict answering that review's head is `ok`**",
   ));
   assert.match(s, phrase("A PR whose latest review counts `0/<n>/0` is not gated."));
+  assert.match(s, phrase(
+    "One counting `0/<n>/<u>` with `<u>` above zero is gated like survivors, and the tick prints `DISPATCH fix-pr PR#<M>` for it: that fix-applier's `no-op` and its `ok` verdict are what open the finisher.",
+  ));
+});
+
+test("the tick prints DISPATCH fix-pr for a review counting survived or unverified findings no review fix-applier has answered", () => {
+  const s = paragraph(SKILL, "Then dispatch a fix-applier — on `DISPATCH fix-pr PR#<M>`", "run-team/SKILL.md", "A `DISPATCH fix-pr PR#<M>` on a conflict hold", { emphasisTolerant: true });
+  assert.match(s, phrase(
+    "which the tick prints for a PR whose `reviewed=` counts survived or unverified findings that no review fix-applier has landed `applied:`/`no-op` on since, with no fix-applier live on it",
+  ));
 });
 
 test("the gate says what each refusal asks of the controller", () => {
