@@ -3,13 +3,17 @@
 // every non-skill command name does — a tie keeps the popup command-only.
 // `disable-model-invocation` plays no part in it. So a shipped command whose
 // name shares a prefix with `run-team` hides `skill:run-team` at that prefix:
-// `run-team-help` did, from `/run-t` through `/run-tea`.
+// the `run-team-…` help command the plugin used to ship did, from `/run-t`
+// through `/run-tea`.
 //
 // The rule below is a copy of pi-tui's `collapseSkillNamespace`,
 // `commandBreakoutTier` and `skillBareNameBreakoutTier`
 // (`src/autocomplete.ts`, read on omp 18.8.5). The predicate cases are the
 // rows the issue measured with omp's own `CombinedAutocompleteProvider`, so a
 // drift between this copy and the measured behaviour fails here first.
+// `run-team-x` stands in for the deleted help command: every measured prefix
+// relates to the two names alike (neither equals it, both start with it or
+// neither does).
 //
 // THE CEILING: only this plugin's own commands are checked. omp's built-in
 // commands, and any other plugin's, sit in the same tier comparison and are
@@ -60,19 +64,19 @@ const shippedCommands = () =>
     .map((f) => f.slice(0, -".md".length));
 
 test("the tie rule reproduces the measured picker rows", () => {
-  const today = ["review-and-fix", "run-merge-bot", "run-team-help"];
-  const without = ["review-and-fix", "run-merge-bot"];
+  const before = ["review-and-fix", "run-merge-bot", "run-team-x"];
+  const after = ["review-and-fix", "run-merge-bot"];
   for (const p of ["run", "run-", "run-t", "run-tea"]) {
-    assert.equal(skillShown(p, "run-team", today), false, `/${p} with run-team-help`);
+    assert.equal(skillShown(p, "run-team", before), false, `/${p} with the help command`);
   }
   for (const p of ["run-team", "team"]) {
-    assert.equal(skillShown(p, "run-team", today), true, `/${p} with run-team-help`);
+    assert.equal(skillShown(p, "run-team", before), true, `/${p} with the help command`);
   }
   for (const p of ["run", "run-"]) {
-    assert.equal(skillShown(p, "run-team", without), false, `/${p} without run-team-help`);
+    assert.equal(skillShown(p, "run-team", after), false, `/${p} without the help command`);
   }
   for (const p of ["run-t", "run-tea", "run-team", "team"]) {
-    assert.equal(skillShown(p, "run-team", without), true, `/${p} without run-team-help`);
+    assert.equal(skillShown(p, "run-team", after), true, `/${p} without the help command`);
   }
 });
 

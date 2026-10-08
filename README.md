@@ -58,9 +58,9 @@ non-configurable merge bot:
 /skill:run-team [implementers] [reviewers]
 ```
 
-`run-team` is invoke-only and hidden from the `/` picker — type
-the command above exactly rather than selecting it; if it doesn't show up,
-`/run-team-help` prints the exact invocation for you.
+`run-team` is invoke-only: the model never starts it. In the `/` picker, type
+`/team`, `/run-t…`, or `/skill:run` to find it, or type the invocation above
+directly.
 
 This runs `next-ticket` (claim and size a ticket), `review-and-fix` (review a
 PR, apply recommended actions, push, watch checks), and `run-merge-bot`
