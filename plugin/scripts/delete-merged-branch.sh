@@ -1,7 +1,7 @@
 #!/bin/sh
-# Delete a merged PR's head branch from `origin` (#2196). The merge bot owns
+# Delete a merged PR's head branch from `origin`. The merge bot owns
 # this step: run-merge-bot.md's step 4 calls it after the merge is confirmed.
-# Until #2196 nothing did — the fleet leaned on the repo setting "Automatically
+# Until this script nothing did — the fleet leaned on the repo setting "Automatically
 # delete head branches", which nothing here enforced or checked, so a repo with
 # it off accumulated every merged branch, and reap.sh (which reaps only a local
 # branch whose upstream is `[gone]`) never saw one to reap.
@@ -10,7 +10,7 @@
 # post-merge LOCAL cleanup dies with `fatal: 'main' is already used by worktree
 # at <path>` whenever the head branch is checked out in a git worktree, and every
 # fleet-claimed ticket's branch is, by construction
-# (`.worktrees/<issue>-<slug>`, docs/requirements.md §3.2). This script runs no
+# (`.worktrees/<issue>-<slug>`). This script runs no
 # local branch or worktree command at all: it deletes the ref on `origin`, which
 # leaves the local branch `[gone]` with its worktree still on disk — exactly the
 # state reap.sh already reaps, worktree first and branch second. So the local
@@ -29,7 +29,7 @@
 # push — the repo still has auto-delete on, or a re-run — is the same success:
 # the outcome this step exists for already holds.
 #
-# KEPT while another open PR uses the branch (#2295). Deleting a branch closes
+# KEPT while another open PR uses the branch. Deleting a branch closes
 # every open PR headed by it, and may close rather than retarget every open PR
 # based on it — GitHub retargets stacked PRs when IT deletes a merged head, and
 # nobody has observed whether a push-delete triggers the same. So just before

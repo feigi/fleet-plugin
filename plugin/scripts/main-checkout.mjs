@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Main-checkout dirty detection (#2210) — the backstop behind #1411's
+// Main-checkout dirty detection — the backstop behind the
 // member-write-guard. The guard refuses a member's `write`/`edit` into the
 // main checkout before it runs; it cannot see an `eval` cell (the shared
 // kernel's cwd IS the main checkout, and `eval` takes no cwd), `bash` command
@@ -19,11 +19,12 @@
 // hash that changes: `dirty`.
 //
 // THE PROTECTED SET is exactly the non-ignored paths of the main checkout —
-// what #1411's guard protects. `.fleet/`, `.worktrees/` and `.agent-brain/`
-// are gitignored in a fleet repo, so run state, members' worktrees and
-// agent-brain's cache never appear in porcelain and never trip this.
+// what the member-write-guard protects. `.fleet/`, `.worktrees/` and
+// `.agent-brain/` are gitignored in a fleet repo, so run state, members'
+// worktrees and agent-brain's cache never appear in porcelain and never trip
+// this.
 // Explicit `-uall`, never bare `--porcelain`: `status.showUntrackedFiles=no`
-// silences untracked files otherwise (#730).
+// silences untracked files otherwise.
 //
 // THE RUN'S OWN BOOKKEEPING IS NOT A STRAY WRITE. Two tracked files in the
 // main checkout are written by the controller itself mid-run:
@@ -48,7 +49,7 @@
 //   absent   — no baseline at all: the run never recorded one. A refusal
 //              ("record at run start"), never `clean`.
 //
-// RE-BASELINING OVERWRITES, IT DOES NOT COMPARE (#1058). `--record` writes
+// RE-BASELINING OVERWRITES, IT DOES NOT COMPARE. `--record` writes
 // whatever the tree looks like now, so it is the maintainer's clear only
 // AFTER the stray paths are resolved. Over `unknown` it would walk the run
 // from "could not look" to "certified clean" in one step, so it refuses on
@@ -59,7 +60,7 @@
 // (git-env.mjs's `workspaceDirFromGitCommonDir`, as fleet-tick.mjs resolves
 // the shortlist) — never `--show-toplevel`, which answers a WORKTREE's root
 // from inside one — and every git child gets `gitEnv()`, so an ambient
-// GIT_DIR/GIT_WORK_TREE cannot answer for another repository (#1599).
+// GIT_DIR/GIT_WORK_TREE cannot answer for another repository.
 //
 // CLI:
 //   main-checkout.mjs --record   write the baseline (Phase 0; or the
@@ -88,7 +89,7 @@ const NAME = "main-checkout";
 const die = makeDie(NAME);
 
 // The one git primitive. `gitEnv()` drops an ambient GIT_DIR/GIT_WORK_TREE
-// (#1599); LC_ALL=C keeps a failure's last line readable as git wrote it.
+// and LC_ALL=C keeps a failure's last line readable as git wrote it.
 // `what` names the call in a failure, since `why` is printed to the operator.
 function git(what, args, cwd, env) {
   const r = spawnSync("git", args, {
@@ -168,7 +169,7 @@ export function formatBaseline(entries) {
  * `{status: "unreadable", why}`. ABSENT is only "nothing at that name": a
  * dangling symlink is present-but-broken, and an unsearchable `.fleet/`
  * answers EACCES rather than ENOENT, so neither can fall through to
- * "no baseline" (#1058's mislabel) — both are `unreadable`.
+ * "no baseline" (a mislabel this once made) — both are `unreadable`.
  */
 export function readBaseline(path) {
   let text;
@@ -262,7 +263,7 @@ export function describe(check, live = null) {
 /**
  * Write the baseline: `{ok, path, entries}` or `{ok: false, why}`. Refuses
  * over a baseline that exists but cannot be read — overwriting it blind
- * discards evidence nobody read (#1058) — and on any failed read of the tree.
+ * discards evidence nobody read — and on any failed read of the tree.
  * Written to a temporary name and renamed, so a reader never sees half of it.
  */
 export function recordBaseline({ cwd = process.cwd(), env = process.env } = {}) {

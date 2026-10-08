@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Writer and checker for docs/metrics/tier-outcomes.tsv (#2207, split off
-// #1398). The `tier` column used to be typed by hand from what the controller
-// MEANT to dispatch and was never compared with what ran: #1445 and #1446 say
-// `opus` for two implementers dispatched as a generic `task` that ran
+// Writer and checker for docs/metrics/tier-outcomes.tsv. The `tier` column
+// used to be typed by hand from what the controller
+// MEANT to dispatch and was never compared with what ran: two rows said
+// `opus` for implementers dispatched as a generic `task` that ran
 // sonnet/high, which is neither tier arm.
 //
 //   append <pr> --closed-own-ticket yes|no --minted-false-claim yes|no
@@ -37,9 +37,9 @@
 // `impl-<N>=tier-mismatch` outcome, tier-check.mjs's main path for a mismatch
 // caught while the member is still live.
 //
-// Values are definition SHORT NAMES (ADR 0011: never a vendor family):
+// Values are definition SHORT NAMES, never a vendor family:
 // `fleet-implementer` is `default`, `fleet-implementer-<x>` is `<x>` (`alt`,
-// or a #2030 per-cell name). Rows dated before TIER_SWITCH_DATE hold the old
+// or a per-cell name). Rows dated before TIER_SWITCH_DATE hold the old
 // `opus`/`sonnet` spelling and are never checked; the header records the
 // switch and how the old values map.
 //
@@ -67,7 +67,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const LEDGER_SCRIPT = join(SCRIPT_DIR, "ledger.mjs");
 
 // ---------------------------------------------------------------------------
-// pure core — exercised through the CLI by tier-outcomes.test.mjs; only
+// pure core — exercised through the CLI by its tests; only
 // COLUMNS, LEGACY_WIDTH, TIER_SWITCH_DATE, parseTierOutcomes, rulingsByTicket,
 // rulingFor and lastPullByTicket are imported directly, the rest through argv
 // ---------------------------------------------------------------------------
@@ -94,7 +94,7 @@ export const VERDICT = Object.freeze(["yes", "no"]);
 export const VERDICT_COLUMNS = Object.freeze(["closed_own_ticket", "minted_false_claim"]);
 
 // `fleet-implementer` -> `default`, `fleet-implementer-<x>` -> `<x>`, anything
-// else (a generic `task`, a blank pre-#1066 subagent_type) -> null.
+// else (a generic `task`, a blank subagent_type on an older row) -> null.
 export function shortName(definition) {
   const d = String(definition ?? "");
   if (d === BASE_DEFINITION) return "default";

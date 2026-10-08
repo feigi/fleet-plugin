@@ -1,6 +1,6 @@
-// The fleet's member write boundary, enforced (#1411, ADR 0020). An omp
+// The fleet's member write boundary, enforced. An omp
 // extension: `plugin/package.json#omp.extensions` names this file, and a
-// native install (link/npm — ADR 0021; a marketplace cache install loads it
+// native install (link/npm; a marketplace cache install loads it
 // the same way) loads it into every omp session on the box — the
 // controller's, every member's, and every unrelated session's — rebinding the
 // factory below into each subagent session the `task` tool spawns.
@@ -32,7 +32,8 @@
 //     says it is not ignored. `.worktrees/`, `.fleet/` and `.agent-brain/` are
 //     ignored in a fleet repo, so worktrees, run state and agent-brain's cache
 //     stay writable, and what is protected is exactly what the main
-//     checkout's `git status` would show dirty (#2210 watches the same set).
+//     checkout's `git status` would show dirty (main-checkout.mjs watches the
+//     same set).
 //   - `bash` cwd, for every `fleet-implementer-<cell>` (ledger-grammar.mjs's
 //     `CELL_DEF`), and for a fix-applier's own id (`fix-pr-<n>`) directly,
 //     since a review fix-applier is a generic `task`: refuse when
@@ -44,7 +45,7 @@
 //     none of them gets this rule.
 // Never a rewrite: a refusal names the resolved path and tells the member to
 // re-issue it absolute under its worktree. Relative READS and `eval` are not
-// guarded here; #2210's detection covers `eval`.
+// guarded here; main-checkout.mjs's dirty detection covers `eval`.
 //
 // WHEN IT CANNOT DECIDE. A cwd outside any git repository is allowed — there
 // is no main checkout to protect. A git that fails while resolving the main
@@ -58,7 +59,7 @@
 // `workspaceDirFromGitCommonDir`, as `fleet-tick.mjs` resolves the run's
 // workspace) — never `--show-toplevel`, which answers a WORKTREE's root from
 // inside one — and every git child gets `gitEnv()`, so an ambient GIT_DIR
-// cannot answer for another repository (#1599).
+// cannot answer for another repository.
 //
 // Zero deps: node builtins and sibling scripts only.
 
@@ -202,7 +203,7 @@ export async function decide({ toolName, input, cwd, agent, mainRoot, isIgnored,
 
 // The one git primitive, async so a guarded call never stalls the other
 // sessions sharing omp's process. `gitEnv()` drops an ambient GIT_DIR /
-// GIT_WORK_TREE (#1599); LC_ALL=C keeps "not a git repository" matchable.
+// GIT_WORK_TREE, and LC_ALL=C keeps "not a git repository" matchable.
 function git(args, cwd) {
   return new Promise((done) => {
     let stdout = "";

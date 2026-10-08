@@ -167,7 +167,7 @@ const EXCLUDE =
 //
 // `after` is an inline label only, because `## After the migration` is
 // ordinary narrative and arming on it invents a blocker, while a heading that
-// really does declare one (`## After #12 lands`) still resolves through the
+// really does declare one (`## After #N lands`) still resolves through the
 // inline pass below. The flag clears at ANY following heading (blocking or
 // not); inside such a section only LIST-ITEM lines are read — that is the
 // `## Blocked by` + list form to-tickets publishes, and the restriction is
@@ -177,7 +177,7 @@ const EXCLUDE =
 // queue. Independently, any line — inside a section or not — carrying the
 // phrase, then any run of whitespace and asterisks around an optional `:`,
 // then one or more `#N` refs on that same line is read too — to-tickets'
-// local-file `**Blocked by:** #12`, the markdown `Blocked by **#179**` that
+// local-file `**Blocked by:** #N`, the markdown `Blocked by **#N**` that
 // bolds the REF, and the bare `depends on #5` are all instances of that one
 // match. The separator is a combined `[\s*]*` run rather than asterisk groups
 // flanking the colon: those groups sat ahead of the separating whitespace, so
@@ -196,10 +196,10 @@ const EXCLUDE =
 // suite's dependency-forms fixtures, not only the system jq the
 // STUB there execs. The engines now agree on every one of those forms,
 // including the ones that used to split. The separator is `[\t \p{Zs}*]*`
-// and not `[\s*]*`, so `Blocked by:<U+00A0>#12` collects `[12]` under BOTH
-// engines where it used to collect `[12]` under Oniguruma and `[]` under RE2
+// and not `[\s*]*`, so `Blocked by:<U+00A0>#N` collects `[N]` under BOTH
+// engines where it used to collect `[N]` under Oniguruma and `[]` under RE2
 // — the ref is ruled a real blocker, because GFM renders that line as
-// `Blocked by: #12` and autolinks the ref, so a reader sees a dependency and
+// `Blocked by: #N` and autolinks the ref, so a reader sees a dependency and
 // an admission gate must not miss one. Since no fixture splits any more, the
 // gated tests can no longer identify their engine by disagreement: the STUB
 // records which binary it executed and they assert that recording is gojq.
@@ -272,7 +272,7 @@ const EXCLUDE =
 //       admits end-of-line, `\r?` admits the same position just before a
 //       CRLF line's trailing `\r` (the one `split("\n")` leaves behind).
 //   list-item indent and marker gap — `[ \t]*` … `[ \t]`
-//       Same GFM rule one level down: `-<U+00A0>#12` and `-<FF>#12` render as
+//       Same GFM rule one level down: `-<U+00A0>#N` and `-<FF>#N` render as
 //       paragraphs, so neither is a bullet and neither declares a blocker.
 //   end of a heading line — `[\t\f\r \p{Zs}]*` before the anchor
 //       `armed`'s `dependenc(?:y|ies)` arm and the `spec` predicate. Padding a
@@ -281,13 +281,13 @@ const EXCLUDE =
 //       keeps CRLF bodies working; VERTICAL TAB stays EXCLUDED, because GFM
 //       renders it as U+FFFD and a replacement character is not blank.
 //   inline label/ref separators — `[\t\f\r \p{Zs}*]*`
-//       `Blocked by:<U+00A0>#12` renders as `Blocked by: #12` and GitHub
+//       `Blocked by:<U+00A0>#N` renders as `Blocked by: #N` and GitHub
 //       autolinks the ref, so a reader sees a blocker — and an admission gate
 //       must not be the one thing that misses it. Matches the end-of-heading
 //       -line class above for the same reasons and the same characters:
 //       `\f` is stripped by GFM, `\r` keeps CRLF bodies working. Missing
 //       either one here silently drops a chained ref (`Blocked by
-//       #12,\f#13` losing `#13`) — the opposite, worse direction from the
+//       #M,\f#N` losing `#N`) — the opposite, worse direction from the
 //       over-collection above: an admission gate must never MISS a blocker.
 //   every digit run — `[0-9]`
 //       Arabic-Indic digits are not refs anyone is trying to support, and this
