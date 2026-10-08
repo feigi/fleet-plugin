@@ -241,7 +241,9 @@ test("wt_linkage refuses a .git git cannot resolve, with git's own words", (t) =
   writeFileSync(join(wt, ".git"), "gitdir: /nonexistent-admin-dir\n");
   const p = probe(r.w, `if wt_linkage "$1"; then echo rc=0; else echo "rc=$?"; printf 'why=%s\\n' "$wt_why"; fi`, wt);
   assert.match(p.out, /^rc=1$/m);
-  assert.match(p.out, /^why=cannot read the git repository at .* — its \.git linkage .* does not resolve: .*nonexistent-admin-dir/m);
+  // The probe's own words are pinned, and that a diagnostic from git follows;
+  // not which words git chose — older git prints `(null)` where newer git echoes the path.
+  assert.match(p.out, /^why=cannot read the git repository at .* — its \.git linkage .* does not resolve: \S/m);
 });
 
 // --- wt_counts
