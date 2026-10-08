@@ -224,6 +224,53 @@ test("wt_linkage accepts a symlink standing in for the worktree's own renamed di
   assert.equal(p.out.trim(), "rc=0");
 });
 
+test("wt_linkage resolves a relative back-pointer against its admin dir — accepts the worktree's own renamed directory, refuses a sibling's", (t) => {
+  const r = repo(t);
+  git(r.w, "config", "worktree.useRelativePaths", "true");
+  const wt = linked(r, "feat");
+  const b = linked(r, "b");
+  if (!/^\.\.\//.test(readFileSync(join(r.w, ".git", "worktrees", "feat", "gitdir"), "utf8"))) {
+    return t.skip("this git does not write relative worktree paths, so the shape cannot exist");
+  }
+  const body = `if wt_linkage "$1"; then echo rc=0; else echo "rc=$?"; printf 'why=%s\\n' "$wt_why"; fi`;
+  renameSync(wt, `${wt}-real`);
+  symlinkSync(`${wt}-real`, wt);
+  const own = probe(r.w, body, wt);
+  assert.equal(own.out.trim(), "rc=0", own.out);
+
+  // No listing read, so the back-pointer compare alone must refuse the swap.
+  const a = linked(r, "a");
+  renameSync(a, `${a}-real`);
+  symlinkSync(b, a);
+  const bad = probe(r.w, body, a);
+  assert.match(bad.out, /^rc=1$/m, bad.out);
+  assert.ok(bad.out.includes(`why=${a} is a symbolic link to another worktree's directory`), bad.out);
+  assert.ok(bad.out.includes(`/b, not for ${a}`), bad.out);
+});
+
+test("wt_linkage accepts the worktree's own renamed directory spelled through a symlinked parent", (t) => {
+  const r = repo(t);
+  const wt = linked(r, "feat");
+  renameSync(wt, `${wt}-real`);
+  symlinkSync(`${wt}-real`, wt);
+  const link = `${r.root}-link`;
+  symlinkSync(r.root, link);
+  t.after(() => rmSync(link, { force: true }));
+  const p = probe(r.w, `if wt_linkage "$1"; then echo rc=0; else echo "rc=$? why=$wt_why"; fi`, join(link, "feat"));
+  assert.equal(p.out.trim(), "rc=0", p.out);
+});
+
+test("wt_linkage refuses a symlink carrying a worktree's name in another directory", (t) => {
+  const r = repo(t);
+  const wt = linked(r, "feat");
+  mkdirSync(join(r.root, "other"));
+  const imposter = join(r.root, "other", "feat");
+  symlinkSync(wt, imposter);
+  const p = probe(r.w, `if wt_linkage "$1"; then echo rc=0; else echo "rc=$?"; printf 'why=%s\\n' "$wt_why"; fi`, imposter);
+  assert.match(p.out, /^rc=1$/m, p.out);
+  assert.ok(p.out.includes(`why=${imposter} is a symbolic link to another worktree's directory — its .git linkage reaches the admin dir registered for ${wt}, not for ${imposter}`), p.out);
+});
+
 test("wt_linkage refuses a core.worktree redirect, naming the tree git answers for", (t) => {
   const r = repo(t);
   const wt = linked(r, "feat");
