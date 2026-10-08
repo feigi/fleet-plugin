@@ -270,34 +270,42 @@ test("wt_linkage resolves a relative back-pointer against its admin dir — acce
 
 // `wt_linkage` with and without a listing read first, for each spelling of $1.
 const LINKAGE_LISTED = `wt_listing || exit 3\n${LINKAGE_PROBE}`;
-const SLASHED = (p) => [`${p}/`, `${p}//`, `${p}///`];
+// Trailing slashes and `/.` components, each of which follows a link where the
+// bare path would not.
+const TRAILING = (p) => [`${p}/`, `${p}//`, `${p}///`, `${p}/.`, `${p}/./`, `${p}/.//.`];
 
-test("wt_linkage gives a path spelled with trailing slashes the verdict and reason of the bare path", (t) => {
+// `a`, swapped for a link to a sibling worktree, is refused with the same
+// reason under every spelling, with and without a listing.
+function assertSwappedLinkRefused(r, a) {
+  for (const body of [LINKAGE_PROBE, LINKAGE_LISTED]) {
+    const bare = probe(r.w, body, a);
+    assert.match(bare.out, /^rc=1$/m, bare.out);
+    assert.ok(bare.out.includes(`why=${a} is a symbolic link to another worktree's directory`), bare.out);
+    for (const p of TRAILING(a)) assert.equal(probe(r.w, body, p).out, bare.out, p);
+  }
+}
+
+test("wt_linkage gives a path spelled with trailing slashes or `/.` the verdict and reason of the bare path", (t) => {
   const r = repo(t);
   const a = linked(r, "a");
   const b = linked(r, "b");
   for (const body of [LINKAGE_PROBE, LINKAGE_LISTED]) {
-    for (const p of SLASHED(b)) {
+    for (const p of TRAILING(b)) {
       assert.equal(probe(r.w, body, p).out.trim(), "rc=0", `${p}: a real linked worktree`);
     }
   }
 
   renameSync(a, `${a}-real`);
   symlinkSync(b, a);
-  for (const body of [LINKAGE_PROBE, LINKAGE_LISTED]) {
-    const bare = probe(r.w, body, a);
-    assert.match(bare.out, /^rc=1$/m, bare.out);
-    assert.ok(bare.out.includes(`why=${a} is a symbolic link to another worktree's directory`), bare.out);
-    for (const p of SLASHED(a)) assert.equal(probe(r.w, body, p).out, bare.out, p);
-  }
+  assertSwappedLinkRefused(r, a);
 
-  // A bare name judged against the cwd, slashed the same way.
+  // A bare name judged against the cwd, spelled the same ways.
   const rel = probe(r.root, LINKAGE_PROBE, "a");
   assert.match(rel.out, /^rc=1$/m, rel.out);
-  for (const p of SLASHED("a")) assert.equal(probe(r.root, LINKAGE_PROBE, p).out, rel.out, p);
+  for (const p of TRAILING("a")) assert.equal(probe(r.root, LINKAGE_PROBE, p).out, rel.out, p);
 });
 
-test("wt_linkage gives trailing-slash spellings the bare path's verdict under worktree.useRelativePaths", (t) => {
+test("wt_linkage gives trailing-slash and `/.` spellings the bare path's verdict under worktree.useRelativePaths", (t) => {
   const r = repo(t);
   git(r.w, "config", "worktree.useRelativePaths", "true");
   const a = linked(r, "a");
@@ -308,30 +316,25 @@ test("wt_linkage gives trailing-slash spellings the bare path's verdict under wo
   renameSync(a, `${a}-real`);
   symlinkSync(b, a);
   // The link itself, refused on its back-pointer with or without a listing.
-  for (const body of [LINKAGE_PROBE, LINKAGE_LISTED]) {
-    const bare = probe(r.w, body, a);
-    assert.match(bare.out, /^rc=1$/m, bare.out);
-    assert.ok(bare.out.includes(`why=${a} is a symbolic link to another worktree's directory`), bare.out);
-    for (const p of SLASHED(a)) assert.equal(probe(r.w, body, p).out, bare.out, p);
-  }
+  assertSwappedLinkRefused(r, a);
   // The target's real directory, which the listing now names twice.
   const twice = probe(r.w, LINKAGE_LISTED, b);
   assert.match(twice.out, /^rc=1$/m, twice.out);
   assert.ok(twice.out.includes(`why=the worktree listing names ${b} for 2 worktrees`), twice.out);
-  for (const p of SLASHED(b)) assert.equal(probe(r.w, LINKAGE_LISTED, p).out, twice.out, p);
+  for (const p of TRAILING(b)) assert.equal(probe(r.w, LINKAGE_LISTED, p).out, twice.out, p);
 });
 
-test("wt_linkage accepts the worktree's own renamed directory spelled with trailing slashes, and keeps a lone / as /", (t) => {
+test("wt_linkage accepts the worktree's own renamed directory spelled with trailing slashes or `/.`, and keeps a lone / as /", (t) => {
   const r = repo(t);
   const wt = linked(r, "feat");
   renameSync(wt, `${wt}-real`);
   symlinkSync(`${wt}-real`, wt);
   for (const body of [LINKAGE_PROBE, LINKAGE_LISTED]) {
-    for (const p of [wt, ...SLASHED(wt)]) {
+    for (const p of [wt, ...TRAILING(wt)]) {
       assert.equal(probe(r.w, body, p).out.trim(), "rc=0", `${p}: its own renamed directory`);
     }
   }
-  for (const p of ["feat", ...SLASHED("feat")]) {
+  for (const p of ["feat", ...TRAILING("feat")]) {
     assert.equal(probe(r.root, LINKAGE_PROBE, p).out.trim(), "rc=0", `${p}: its own renamed directory`);
   }
 
@@ -341,6 +344,15 @@ test("wt_linkage accepts the worktree's own renamed directory spelled with trail
     const root = probe(r.w, LINKAGE_PROBE, p);
     assert.match(root.out, /^rc=1$/m, root.out);
     assert.ok(root.out.includes("why=cannot read the git repository at / —"), `${p}: ${root.out}`);
+  }
+});
+
+test("wt_linkage terminates on an empty path and refuses it, naming the empty path", (t) => {
+  const r = repo(t);
+  for (const body of [LINKAGE_PROBE, LINKAGE_LISTED]) {
+    const empty = probe(r.w, body, "");
+    assert.match(empty.out, /^rc=1$/m, empty.out);
+    assert.ok(empty.out.includes("why=an empty path names no worktree"), empty.out);
   }
 });
 
