@@ -86,14 +86,15 @@ Three units with clean boundaries:
 
    Which `.fleet/` and which port are **derived from the workspace** (#1582),
    not from the cwd: the workspace is the directory holding the shared git dir
-   (`git rev-parse --git-common-dir`), the rule `ledger.mjs` already resolves
-   the run's one ledger with, so a cockpit started from a linked worktree
-   serves its main checkout's state and the board can never disagree with the
-   ledger about which run it belongs to. The port is a stable hash of that
-   workspace inside a small window above the original default, which keeps the
-   URL bookmarkable across runs while letting two workspaces hold two live
-   boards at once. An unresolvable git dir degrades to a cwd-relative `.fleet/`
-   and warns, in `defaultLedgerPath()`'s wording; it never dies.
+   (`git rev-parse --git-common-dir`), resolved by `fleet-dir.mjs`'s
+   `fleetFile()` — the one locator the run's ledger is resolved with too — so
+   a cockpit started from a linked worktree serves its main checkout's state
+   and the board can never disagree with the ledger about which run it belongs
+   to. The port is a stable hash of that workspace inside a small window above
+   the original default, which keeps the URL bookmarkable across runs while
+   letting two workspaces hold two live boards at once. An unresolvable git dir
+   degrades to a cwd-relative `.fleet/` and warns, in the ledger's wording; it
+   never dies.
 
    **Launching twice is a no-op that succeeds** (#1585). A derived port that
    is already held is not a failure by itself, so the launch asks the holder

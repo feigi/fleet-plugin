@@ -135,7 +135,8 @@ import { join, dirname, isAbsolute, relative, posix, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
-import { gitEnv, workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { gitEnv } from "./git-env.mjs";
+import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 import { parseMember, memberTokens } from "./ledger-grammar.mjs";
 import { dispositionsToken, rowNums, sameHead } from "./fleet-tick.mjs";
 import { VERDICT_SCHEMA } from "./review-core.mjs";
@@ -650,21 +651,26 @@ function verdictReader(scratch, pr) {
 }
 
 // The ledger file this run writes its verdict to, or null when there is none:
-// `--ledger`, else the run's `.fleet/ledger.md` under the git common dir of
-// `repo` — the workspace every worktree of one repository shares, which is
-// where `ledger.mjs dispatch` wrote the member's row. The path is handed to
-// `ledger.mjs` as `--file`, so the existence probe and the calls that follow
-// answer for one file. Only ENOENT means "there is none": any other failure
-// to look the path up is a fault, not a standalone run. An absent path named
-// by `--ledger` is announced on stderr; an absent default path is not.
+// `--ledger`, else the run's `.fleet/ledger.md` resolved from `repo` by
+// fleet-dir.mjs's fleetFile() — the workspace every worktree of one
+// repository shares, which is where `ledger.mjs dispatch` wrote the member's
+// row. The path is handed to `ledger.mjs` as `--file`, so the existence probe
+// and the calls that follow answer for one file. Only ENOENT means "there is
+// none": any other failure to look the path up is a fault, not a standalone
+// run. An absent path named by `--ledger` is announced on stderr; an absent
+// default path is not.
 // `lstat`, not `stat`, so a dangling symlink is a ledger that cannot be read
 // rather than an absent one.
 function ledgerInUse(explicit, repo) {
-  const file = explicit ?? join(
-    workspaceDirFromGitCommonDir(git(repo, ["rev-parse", "--git-common-dir"], "find the git common dir"), repo)
-      ?? die("could not find the git common dir: git printed none"),
-    ".fleet", "ledger.md",
-  );
+  let file = explicit;
+  if (file == null) {
+    try {
+      file = fleetFile("ledger.md", { cwd: repo });
+    } catch (e) {
+      if (!(e instanceof FleetDirUnresolvable)) throw e;
+      die(e.message);
+    }
+  }
   try {
     lstatSync(file);
     return file;

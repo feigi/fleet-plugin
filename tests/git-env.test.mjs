@@ -73,12 +73,12 @@ test("with no base given, process.env itself is read — not a frozen or empty s
 
 // ---------------------------------------------------------------------------
 // workspaceDirFromGitCommonDir() — the resolution the three callers of #1658
-// used to hand-spell one apiece: ledger.mjs's defaultLedgerPath(),
-// fleet-state.mjs's statePath() and board.mjs's resolveCockpitInstance().
+// used to hand-spell one apiece (ledger.mjs, fleet-state.mjs, board.mjs), now
+// reached through fleet-dir.mjs's fleetFile() for every `.fleet/` file.
 // What is observable: which directory a given `--git-common-dir` answer
 // names, that an answer carrying nothing is `null` rather than a
-// plausible-looking path, and that canonicalisation is an opt-in the two
-// non-board callers deliberately do not take.
+// plausible-looking path, and that canonicalisation is an opt-in only the
+// cockpit among those callers takes.
 
 test("an absolute --git-common-dir names the directory holding it", () => {
   assert.equal(workspaceDirFromGitCommonDir("/w/repo/.git", "/elsewhere"), "/w/repo");

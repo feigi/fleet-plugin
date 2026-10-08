@@ -16,22 +16,18 @@
 // reach back into the caller's environment") do not transfer: a spawned
 // child's env object is already private to it, never the calling process's.
 //
-// `fleet-state.mjs`'s `statePath()` and `ledger.mjs`'s tracker-query probe
-// each spell the same three lines inline — `{ ...process.env }` then two
-// `delete`s — predating this module, and that duplication is exactly the
-// reason a THIRD hand-spelled copy (the hazard measured here, `ledger.mjs`'s
-// `defaultLedgerPath()`) should not become a fourth.
-// A shared helper also turns "does this call scrub the ambient vars" back
-// into a one-name grep, `gitEnv(`, the way `unset GIT_DIR GIT_WORK_TREE` is
-// one for shell.
+// `ledger.mjs`'s tracker-query probe spells the same three lines inline —
+// `{ ...process.env }` then two `delete`s — predating this module, and a
+// hand-spelled copy per call site is exactly the duplication this module
+// replaces. A shared helper also turns "does this call scrub the ambient
+// vars" back into a one-name grep, `gitEnv(`, the way `unset GIT_DIR
+// GIT_WORK_TREE` is one for shell.
 //
-// The two pre-existing inline sites are deliberately NOT migrated to call
-// this. Both are already fixed and covered by tests of their own —
-// `fleet-state.mjs`'s `statePath()`, and `ledger.mjs`'s tracker-query scrub
-// ("an inherited GIT_DIR or GH_REPO cannot retarget the query…") — and
-// touching either to satisfy a detector would be churn with no behavioural
-// change. The suite's census of ambient-var scrubs carries both of them by
-// name instead of by import.
+// That pre-existing inline site is deliberately NOT migrated to call this. It
+// is already fixed and covered by a test of its own ("an inherited GIT_DIR or
+// GH_REPO cannot retarget the query…"), and touching it to satisfy a detector
+// would be churn with no behavioural change. The suite's census of
+// ambient-var scrubs carries it by name instead of by import.
 
 import { realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -56,24 +52,20 @@ export function gitEnv(overrides = {}, base = process.env) {
 
 // Every fleet script that needs to know WHERE the run's files live asks git
 // the same question — `rev-parse --git-common-dir` — and then resolves the
-// answer the same way, because the answer is the same shape in all three:
-// the common dir is shared by every worktree of one repository (git answers
-// with the MAIN checkout's git dir from inside a linked worktree), so its
-// PARENT is the one workspace a run has, whichever worktree asked. That is
-// why a member running from `.worktrees/<n>-slug` and the controller running
-// from the checkout root agree about the run's single ledger, its single
-// heartbeat and its single board.
+// answer the same way, because the answer is the same shape wherever it is
+// asked: the common dir is shared by every worktree of one repository (git
+// answers with the MAIN checkout's git dir from inside a linked worktree), so
+// its PARENT is the one workspace a run has, whichever worktree asked. That
+// is why a member running from `.worktrees/<n>-slug` and the controller
+// running from the checkout root agree about the run's single ledger, its
+// single heartbeat and its single board.
 //
-// Three callers hand-spelled that resolution, one apiece, before this function:
-// `ledger.mjs`'s `defaultLedgerPath()`, `fleet-state.mjs`'s `statePath()` and
-// `board.mjs`'s `resolveCockpitInstance()` — and `fleet-state.mjs`'s own
-// comment had already written down the trigger ("if a third file ever needs
-// this, the resolution itself should move"), which the third caller's arrival tripped.
-// What is NOT shared is the part each caller owns: the filename it joins on
-// (`ledger.md`, `heartbeat.json`, `.fleet`), the wording of the warning it
-// degrades with, and what its own degraded answer is. Hence the seam: this
-// function answers the directory or `null`, and every caller composes the
-// rest around it.
+// For a run's `.fleet/` files the question is asked in one place,
+// fleet-dir.mjs's fleetFile(), which spawns the probe and hands its answer to
+// this function. What is NOT shared is the part each caller owns: the
+// filename it joins on, the wording of the warning it degrades with, and what
+// its own degraded answer is. Hence the seam: this function answers the
+// directory or `null`, and every caller composes the rest around it.
 
 /**
  * The workspace directory a `git rev-parse --git-common-dir` answer names —
@@ -82,28 +74,28 @@ export function gitEnv(overrides = {}, base = process.env) {
  *
  * `null` is the signal every caller's degrade arm branches on, and the reason
  * this returns it rather than a cwd-relative fallback of its own: what a
- * degraded answer should be is the caller's to say (a cwd-relative filename
- * for the ledger, an absolute cwd-anchored `.fleet` for the board), and so is
- * the warning that must accompany it — a degrade nobody announces is the
- * failure class all three of those warnings exist to close.
+ * degraded answer should be is the caller's to say (fleet-dir.mjs turns it
+ * into a thrown error its own callers each degrade from in their own way),
+ * and so is the warning that must accompany it — a degrade nobody announces
+ * is the failure class those warnings exist to close.
  *
  * `resolve(cwd, …)` rather than resolve()'s implicit `process.cwd()`: git
  * answers this RELATIVE — a bare `.git` — when it runs from a checkout's top
  * level, and the cwd that was relative to is an argument here, not ambient,
- * so a caller that injects the answer (board.mjs, which takes it as a
- * parameter so its worktree and resolution-failed cases stay plain test rows)
- * can inject the cwd too. `cwd` defaults to `process.cwd()`, which is what
- * the callers that spawn git themselves already resolved against.
+ * so a caller that spawned git in a cwd of its choosing (fleet-dir.mjs's
+ * `cwd` option) resolves the answer against that same cwd. `cwd` defaults to
+ * `process.cwd()`, which is what a caller that spawns git without one
+ * resolved against.
  *
  * The `trim()` is what makes a newline-only answer the `null` case rather
  * than a path; a trailing newline riding on a real answer would be discarded
  * by `dirname()` anyway, together with the rest of the final segment.
  *
- * `canonicalise` is OPT-IN, and deliberately so. Only `board.mjs`
- * takes it: a symlinked route to one workspace derives a SECOND port and a
- * second state directory for a cockpit already being served, so the
- * cockpit's key has to be the canonical form. `ledger.mjs` and
- * `fleet-state.mjs` do not — both PRINT the path they resolve (the ledger in
+ * `canonicalise` is OPT-IN, and deliberately so. The cockpit takes it,
+ * through fleet-dir.mjs: a symlinked route to one workspace derives a SECOND
+ * port and a second state directory for a cockpit already being served, so
+ * the cockpit's key has to be the canonical form. The ledger and the
+ * heartbeat do not — both PRINT the path they resolve (the ledger in
  * `check`'s JSON, both in their degrade warnings), and realpath would change
  * that output without changing which file they reach, since the canonical and
  * symlinked spellings of one path are one file. Left off, this function reads

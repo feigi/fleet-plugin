@@ -9,11 +9,12 @@
 // snapshot that could not say which of two workspaces it came from.
 //
 // Driven through the real CLI, out of process: gather() reads process.argv
-// directly and resolveCockpitInstance()'s git probe is a spawn, so the join
-// under test only exists in a child. The page half is lifted out of
-// board.html's source text and called as a pure function — the page is served
-// as one self-contained file with no build step and no DOM harness, the same
-// seam spend-view.test.mjs and ledger-read-require-file.test.mjs already use.
+// directly and the workspace the cockpit resolves through fleetFile() is a
+// git spawn, so the join under test only exists in a child. The page half is
+// lifted out of board.html's source text and called as a pure function — the
+// page is served as one self-contained file with no build step and no DOM
+// harness, the same seam spend-view.test.mjs and
+// ledger-read-require-file.test.mjs already use.
 //
 // A separate file rather than more of board.test.mjs, for the reason
 // board-prev-shape.test.mjs gives: the fleet runs several implementers at
@@ -104,7 +105,7 @@ test("CLI: a built snapshot names the workspace it describes and the port that w
     // the exported seam rather than hardcoded, so the hash algorithm stays
     // free to be tested where it is defined, but the real CLI reached it
     // through a real `git rev-parse`, which is the join under test.
-    const expected = resolveCockpitInstance({ cwd: repo, gitCommonDir: ".git" });
+    const expected = resolveCockpitInstance({ cwd: repo, workspace: repo });
     assert.equal(board.port, expected.port);
     assert.notEqual(board.port, null);
   } finally { for (const d of [bin, repo]) rmSync(d, { recursive: true, force: true }); }
@@ -123,7 +124,7 @@ test("CLI: a build with no resolvable workspace still carries both keys — null
     // Without this the row passes vacuously: a cwd that turned out to be
     // inside some repository would take the resolved arm and never reach the
     // degrade this test is about.
-    assert.match(r.stderr, /could not resolve --git-common-dir/, r.stderr);
+    assert.match(r.stderr, /could not resolve --git-common-dir: \S/, `the warning must carry git's reason, as the ledger's does: ${r.stderr}`);
     const board = JSON.parse(r.stdout);
     assert.ok("workspace" in board && "port" in board,
       `both identity keys must be present even when there is no instance: ${r.stdout.slice(0, 200)}`);

@@ -1291,7 +1291,7 @@ const SCRIPT = fileURLToPath(new URL("../plugin/scripts/fleet-tick.mjs", import.
 // or transitive — and ledger.mjs with its own, because the tick reads the
 // ledger through `ledger.mjs read`. An unlisted sibling is a module-not-found
 // at startup: exit 1, a shape no case below expects.
-const SIBLING_MODULES = ["arg.mjs", "fleet-state.mjs", "git-env.mjs", "is-cli.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs"].map(
+const SIBLING_MODULES = ["arg.mjs", "fleet-dir.mjs", "fleet-state.mjs", "git-env.mjs", "is-cli.mjs", "ledger.mjs", "ledger-grammar.mjs", "main-checkout.mjs"].map(
   (m) => [m, fileURLToPath(new URL(`../plugin/scripts/${m}`, import.meta.url))],
 );
 
@@ -1902,6 +1902,29 @@ test("CLI: an ambient GIT_DIR naming another repository cannot move the shortlis
   const r = runCli([], { shortlist: shortlistText([7, 8]), env: { GIT_DIR: join(decoy, ".git") } });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^implementers 0\/2 → PULL #7 #8 /m);
+});
+
+// A missing shortlist is also what an empty queue looks like, so a workspace
+// the tick could not resolve has to say so — once, not once per retry — or an
+// operator watching a stalled run cannot tell "outside a repository" from "no
+// candidates yet". The git shim answers every call but the workspace probe,
+// and lands after the baseline so the record itself still resolves.
+test("CLI: a workspace the tick cannot resolve is announced once, and the shortlist reads as missing", () => {
+  const realGit = spawnBounded("sh", ["-c", "command -v git"]).stdout.trim();
+  assert.ok(realGit, "test setup: no git on PATH to wrap");
+  const r = runCli([], {
+    shortlist: shortlistText([7, 8]),
+    afterBaseline: (repo) => writeExecStub(join(repo, "..", "bin", "git"), [
+      "#!/bin/sh",
+      `[ "$1 $2" = "rev-parse --git-common-dir" ] && { echo "fatal: simulated unresolvable workspace" >&2; exit 128; }`,
+      `exec '${realGit}' "$@"`,
+    ].join("\n") + "\n"),
+  });
+  const warnings = r.stderr.split("\n").filter((l) => l.startsWith("fleet-tick: WARNING could not resolve --git-common-dir"));
+  assert.deepEqual(warnings, ["fleet-tick: WARNING could not resolve --git-common-dir: fatal: simulated unresolvable workspace; reading the shortlist as missing"],
+    `expected exactly one warning naming git's reason: ${r.stderr}`);
+  assert.equal(r.refreshed, 1, "a missing shortlist must still trigger the refresh");
+  assert.doesNotMatch(r.stdout, /PULL #7 #8/, "the shortlist on disk was unreachable, so its entries must not be pulled");
 });
 
 test("CLI: an inherited GIT_DIR cannot retarget the tier-mismatch closed-ticket probe", (t) => {

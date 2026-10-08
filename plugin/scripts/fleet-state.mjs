@@ -33,15 +33,14 @@
 // correct, and neither script is in a position to hold one.
 
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
-import { workspaceDirFromGitCommonDir } from "./git-env.mjs";
+import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
 
 // The filename, in one place, because the liveness mark gave this file a SECOND resolver.
 // board.mjs already resolves the run's workspace for itself — it has to, since
 // its own `canonicalise` opt-in is what keeps a symlinked route from deriving
 // a second port — so it reaches the state file by joining onto the
-// `.fleet` directory it already holds rather than re-running the probe below.
+// `.fleet` directory it already holds rather than resolving it again.
 // What it must NOT do is spell `heartbeat.json` a second time: a filename in
 // two places is the drift this module's header exists to prevent, and a
 // cockpit reading a file the heartbeat does not write is a liveness panel
@@ -54,48 +53,20 @@ export function stateFileIn(fleetDir) {
 // Members run from their own worktrees, where a cwd-relative `.fleet/` does not
 // exist, so a cwd-relative path would give every worktree a private back-off
 // streak and a private elapsed total — the run's beat would be whichever
-// worktree happened to call last.
-//
-// This is ledger.mjs's defaultLedgerPath() resolution applied to a second file
-// for the same reason (there, a cwd-local ledger silently degraded the
-// duplicate-filing guard). The third file this comment used to predict arrived
-// as board.mjs's resolveCockpitInstance(), so the resolution itself
-// moved, as promised, though into git-env.mjs beside gitEnv() rather than into
-// this module: board.mjs and ledger.mjs both already import that one, and a
-// cockpit reaching into the heartbeat's state module for a path rule would be
-// a stranger dependency than either has now. Only the filename and the
-// warning below are this caller's own.
+// worktree happened to call last. fleet-dir.mjs's fleetFile() resolves it the
+// way it resolves the ledger, scrubbed and bounded: a `git` that never answers
+// is killed rather than holding the beat. Only the warning and the fallback
+// below are this caller's own.
 export function statePath(name) {
-  // GIT_DIR and GIT_WORK_TREE scrubbed, never inherited: an ambient GIT_DIR
-  // answers `--git-common-dir` for a DIFFERENT repository, which relocates the
-  // ONE file this whole design rests on. It fails in exactly the direction the
-  // common-dir resolution exists to close — a private streak and a private
-  // elapsed total per environment — and it fails SILENTLY, because a resolved
-  // path inside another repo looks like any other resolved path. Same scrub
-  // run-merge-bot.md performs on the identical command in shell (`env -u
-  // GIT_DIR -u GIT_WORK_TREE git rev-parse --git-common-dir`); spelled as an
-  // env object here because there is no shell to spell it in.
-  // Migrating this inline scrub to gitEnv() — imported in this file
-  // for the path rule above, not for the env — stays out of scope: it is
-  // recorded with its own measurement and its own behavioural fixture in
-  // the test suite's MJS_LEGACY_INLINE list.
-  const env = { ...process.env };
-  delete env.GIT_DIR;
-  delete env.GIT_WORK_TREE;
-  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", env });
-  // No separate `r.status === 0` gate: every failure mode reproducible here
-  // (no repository, an unresolvable GIT_DIR, a permission-denied `.git`, a
-  // corrupt worktree pointer, a missing `git` binary) leaves `r.stdout`
-  // empty, which workspaceDirFromGitCommonDir() already reads as `null` on
-  // its own — see its own docstring for that contract.
-  const workspace = workspaceDirFromGitCommonDir(r.stdout);
-  if (workspace === null) {
+  try {
+    return stateFileIn(fleetFile(null));
+  } catch (e) {
+    if (!(e instanceof FleetDirUnresolvable)) throw e;
     // Announced, never silent: a cwd-relative fallback re-opens exactly the
     // per-worktree split this resolution exists to close.
-    console.error(`${name}: WARNING could not resolve --git-common-dir; using cwd-relative .fleet/heartbeat.json`);
+    console.error(`${name}: WARNING ${e.message}; using cwd-relative .fleet/heartbeat.json`);
     return stateFileIn(".fleet");
   }
-  return stateFileIn(join(workspace, ".fleet"));
 }
 
 // An unreadable or corrupt state file is NOT fatal, and the direction of the
