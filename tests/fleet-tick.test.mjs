@@ -672,6 +672,31 @@ test("deriveRun: a ticket row settled =PR#M shares PR M's state with M's own row
   }
 });
 
+// #2888: a prose `PR#` mention on a row carrying an `impl-` token is not the
+// row's PR — the settled `impl-<N>=PR#<M>` token is, wherever either sits.
+test("deriveRun: a ticket row's review state is its settled impl PR's, whatever PR# its prose mentions", () => {
+  const prs = [pr(470, [], [480]), pr(481, [], [490])];
+  const other = "#481 review=wf:b reviewed=abc1234:0/0/0";
+  for (const ticket of [
+    "#480 correction: PR#481 was wrong · impl-480=PR#470 · review=wf:a reviewed=abc1234:1/0/0",
+    "#480 impl-480=PR#470 · review=wf:a reviewed=abc1234:1/0/0 · note: the PR#481 guards",
+  ]) {
+    for (const rows of [[ticket, other], [other, ticket]]) {
+      const r = run({ rows }, prs);
+      assert.deepEqual(r.reviewed.map((x) => [x.pr, x.survived]).sort((a, b) => a[0] - b[0]), [[470, 1], [481, 0]], `${rows}`);
+      assert.deepEqual(r.fixDue, [470], `${rows}`);
+      assert.deepEqual(r.reviewDue, [], `${rows}`);
+    }
+  }
+});
+
+test("deriveRun: a live implementer's row is keyed by its ticket, never by a PR# its prose mentions", () => {
+  const r = run({ rows: ["#480 impl-480 · PR#481 closed unmerged · review=wf:a reviewed=abc1234:1/0/0"] }, [pr(481, [], [490])]);
+  assert.deepEqual(r.reviewed.map((x) => x.pr), [480]);
+  assert.deepEqual(r.fixDue, []);
+  assert.deepEqual(r.reviewDue, [481], "PR 481 carries no review of its own");
+});
+
 // #2331: a finisher can settle `labelled` without ever adding the label. The
 // open-PR list the tick already reads says so; a `label-off=<attempt>` token
 // marks the controller's own deliberate removals, so they never read as a miss.
