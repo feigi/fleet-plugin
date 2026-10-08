@@ -888,10 +888,28 @@ wt_counts() {
 # listing (`$wt_list` empty or unset) skips this question. Counted in shell,
 # line by line, so the question adds no external command whose failure would
 # be a new way for a caller to refuse.
+#
+# Trailing slashes and `/.` components come off $1 first, a lone `/` kept:
+# `[ -L "link/" ]` and `[ -L "link/." ]` follow the link and are false, and
+# `worktree link/` is no listing record, so such a spelling would skip both
+# questions above and pass the `-ef` compare.
 # shellcheck disable=SC2034
 wt_linkage() {
+  while :; do
+    case $1 in
+      ?*/) set -- "${1%/}" ;;
+      ?*/.) set -- "${1%/.}" ;;
+      *) break ;;
+    esac
+  done
   wt_why=
   wt_lk_n=0
+  # `git -C ""` reads the cwd's own repository, so an empty path is refused
+  # here, named, rather than judged as the cwd.
+  if [ -z "$1" ]; then
+    wt_why="an empty path names no worktree"
+    return 1
+  fi
   if [ -n "${wt_list:-}" ]; then
     # Whole records, one per line (`wt_listing` swapped any newline inside a
     # path), so equality against `worktree $1` is the path compare, and a path
