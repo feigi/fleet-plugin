@@ -25,7 +25,7 @@
 //       silently (`claude-haiku-4-5` has no `max`, so `@smol:max` would run
 //       at something else), tier-check would then read a level the
 //       definition never declared, and every row the definition ran would
-//       be inadmissible (spec 2026-09-28 § 2). A target the catalog does
+//       be inadmissible. A target the catalog does
 //       not list cannot be checked, so it fails too;
 //   (e) `modelRoles.slow`/`modelRoles.task` resolving to the same model is
 //       flagged as a notice — legal, but every `slow-*` cell then measures

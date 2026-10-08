@@ -1676,10 +1676,10 @@ function runDispatch() {
   // including `nextMergeBot()`'s own read of it.
   refuseMalformedDispatched();
 
-  // `merge-bot` bare is the merge-bot case of this command (spec § 4 item 2,
-  // which § 6 folds `dispatched` into): the ledger names the bot, 1 + the
-  // merge-bot entries already in `## Dispatched`, so the controller never
-  // counts. An explicit `merge-bot-<n>` is accepted only when it is that one.
+  // `merge-bot` bare is the merge-bot case of this command: the ledger names
+  // the bot, 1 + the merge-bot entries already in `## Dispatched`, so the
+  // controller never counts. An explicit `merge-bot-<n>` is accepted only
+  // when it is that one.
   const member = parseMember(name === "merge-bot" ? nextMergeBot(data.dispatched) : name);
   if (!member) die(unknownMember(name));
   if (member.bound === null) {
@@ -1693,7 +1693,7 @@ function runDispatch() {
   if (keyNum !== null && !isDigits(keyNum)) die(`'${key}' is not a ticket or PR number`);
 
   // Draining stops supply and nothing else: fix-appliers, finishers and merge
-  // bots keep going until the open PRs are merged (spec § 6 §5). Read from
+  // bots keep going until the open PRs are merged. Read from
   // the file, so a replacement controller that never saw the drain is held by
   // it all the same.
   if (member.family === "impl" && data.drain !== null) {
@@ -1712,7 +1712,7 @@ function runDispatch() {
 
   // A replacement (`-b`, `-c` …) works the same ticket or PR as its
   // predecessor: two live tokens for one family+number would double-count
-  // liveness ("live implementers = unsettled impl- tokens", spec § 6 §2).
+  // liveness, since live implementers are the unsettled impl- tokens.
   // Checked across both places a token can be live — `## Dispatched` and a
   // row `row` wrote directly — so the refusal holds regardless of which one
   // last wrote it.

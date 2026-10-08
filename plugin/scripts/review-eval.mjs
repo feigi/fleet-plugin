@@ -192,7 +192,7 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
     return {
       status: "completed",
       path,
-      // Spec § 3 §7's result token, ready for `ledger.mjs row`.
+      // The review's result token, ready for `ledger.mjs row`.
       ledger: `reviewed=${result.head}:${survived}/${refuted}/${unverified}`,
       attempts: attempt,
       errors,
