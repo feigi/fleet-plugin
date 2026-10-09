@@ -22,9 +22,10 @@
 //      execute"/"not found". A red suite is not a failed proof by itself.
 //   3. Real tests must be shown to have executed, by at least one of:
 //      - the count proof: `--count-line` is a literal the run's own output
-//        must contain (the runner's summary line, read off a previous run),
-//        carrying `--test-count`, a positive integer. `tests 0` is a failed
-//        proof however honestly the runner reports it.
+//        must contain (text off the runner's summary line, read off a
+//        previous run), carrying `--test-count`, a positive integer, as its
+//        one number. `tests 0` is a failed proof however honestly the runner
+//        reports it.
 //      - the mutation proof: the unmutated run must be green; `--mutate` is a
 //        shell command that must change a tracked file (the deliberate
 //        failing mutation of one test, or of the code one test covers) — run
@@ -259,8 +260,13 @@ function prove(o, wt, logs) {
   if (o.countLine !== undefined) {
     const n = Number(o.testCount);
     if (n === 0) throw notProven(`vacuous: a test count of 0 is a run that executed no tests; ${where}`);
-    if (!new RegExp(`(^|[^0-9])0*${n}([^0-9]|$)`).test(o.countLine)) {
-      throw notProven(`the count line '${o.countLine}' does not carry the test count ${n}; ${where}`);
+    // The claim must be the line's ONE number, never merely one of its numbers:
+    // a summary line carrying several can carry the claim as its skipped count
+    // while the run itself executed none. Its first number is no rule either —
+    // a runner may print its skips before its count.
+    const numbers = o.countLine.match(/[0-9]+/g) ?? [];
+    if (numbers.length !== 1 || BigInt(numbers[0]) !== BigInt(o.testCount)) {
+      throw notProven(`the count line '${o.countLine}' does not carry the test count ${n} as its one number (it carries ${numbers.length ? numbers.join(", ") : "none"}) — trim it to the number of tests that ran; ${where}`);
     }
     if (!readFileSync(testLog, "utf8").includes(o.countLine)) {
       throw notProven(`vacuous: the Test entrypoint's output does not contain the count line '${o.countLine}' — no evidence any test ran; ${where}`);
