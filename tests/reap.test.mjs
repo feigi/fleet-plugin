@@ -598,9 +598,9 @@ test("BASE_REF must be a remote-tracking ref (#924)", (t) => {
 
   // Fourth pin on the design spec's script-surface row, same reason as the
   // three others: the row states this script's exit-2 contract in prose, and a
-  // reader trusting it draws safety conclusions about a script settings.json's
-  // autoMode allowlist lets run unattended. Taken from the real refusal rather
-  // than typed here — a hand-copied phrase drifts.
+  // reader trusting it draws safety conclusions about a script that runs
+  // unattended. Taken from the real refusal rather than typed here — a
+  // hand-copied phrase drifts.
   const label = /^reap: (.+?), got '/m.exec(stderr);
   assert.ok(label, `fixture must reach the accept-list refusal: ${stderr}`);
   const row = specRow();
@@ -853,9 +853,8 @@ test("two arguments still refuse via the arity path (#250)", (t) => {
 // Third pin on the same table row, for the same reason as the two below: the
 // row states this script's exit-2 contract in prose, #114 audited it while the
 // guard was arity-only, and a reader trusting it draws a conclusion about a
-// script that settings.json's autoMode allowlist lets run unattended. Taken
-// from a real refusal rather than typed here — a hand-copied phrase drifts
-// exactly the way the row did.
+// script that runs unattended. Taken from a real refusal rather than typed
+// here — a hand-copied phrase drifts exactly the way the row did.
 test("the design spec's script-surface row carries the argument refusal this script emits (#250)", (t) => {
   const w = repo(t);
 
@@ -878,10 +877,9 @@ test("the design spec's script-surface row carries the argument refusal this scr
 // "the merged check reads a `git cherry` that failed as 'no unmerged commits'
 // and reaps the branch". Fixing that is one edited row; this is the part that
 // keeps the next one from rotting silently — a reader trusting the table would
-// draw the opposite safety conclusion about a script that settings.json's
-// autoMode allowlist lets run unattended. Derived from a real run, never from a
-// phrase typed here: a hand-copied phrase drifts from the script exactly the way
-// the row did.
+// draw the opposite safety conclusion about a script that runs unattended.
+// Derived from a real run, never from a phrase typed here: a hand-copied phrase
+// drifts from the script exactly the way the row did.
 // Sibling pin, same table, same reason: no-undo-audit.test.mjs.
 test("the design spec's script-surface row carries the keep reason this script actually emits", (t) => {
   const w = repo(t);
@@ -2929,12 +2927,11 @@ test("a registry probe that itself fails is reported as unknown, never as 'clear
 });
 
 // Same reason as the cherry-probe pin above, and the same derivation: the
-// script-surface table is what a reader trusts about a script that
-// settings.json's autoMode allowlist lets run unattended, and #264 spent its
-// whole life with that table asserting the bug as the behaviour. The two state
-// phrases are the part a reader would otherwise have to guess at, so they are
-// taken from real runs rather than typed here — a hand-copied phrase drifts
-// exactly the way the row did.
+// script-surface table is what a reader trusts about a script that runs
+// unattended, and #264 spent its whole life with that table asserting the bug
+// as the behaviour. The two state phrases are the part a reader would
+// otherwise have to guess at, so they are taken from real runs rather than
+// typed here — a hand-copied phrase drifts exactly the way the row did.
 test("the design spec's script-surface row carries both refusal states this script emits (#391)", (t) => {
   const states = ["locked", "symlink"].map((shape) => {
     const w = repo(t, `w-${shape}`);

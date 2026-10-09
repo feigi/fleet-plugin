@@ -289,10 +289,8 @@ test("the fourth cause — an absent refs/stash beside a live reflog — is name
 // denied unpredictably by the auto-mode classifier — 2 allowed / 2 denied on
 // byte-identical invocations in one session — sometimes stranding a rebased
 // head that never reached the remote, so `gh pr merge` landed the stale one.
-// settings.json has carried an `autoMode.allow` entry for that exact command
-// since 1dadc5d, so adding one is not the fix for a denial here; the classifier
-// judges per invocation. Step 1 now rebases server-side first: an API call, not
-// a push, so the classifier is never consulted for it.
+// Step 1 now rebases server-side first: an API call, not a push, so the
+// classifier is never consulted for it.
 //
 // THE CEILING: same as step4() above — presence, not correctness, and not
 // that the fallback runs the way it's written.
