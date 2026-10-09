@@ -322,6 +322,30 @@ test("a stale pattern is still refused when the caller's working directory holds
   assert.ok(r.err.includes("its test command's pattern 'nope*.mjs' matches no file tracked in"), r.err);
 });
 
+// A program's own directory option does not stop the scan: whether it moves
+// where the program resolves a pattern is the program's to say, not the
+// tree's. `git -C web` resolves a pattern under `web`, so an unquoted one is
+// still probed from the repository root and refused, and the refusal says to
+// quote it; quoted, it is accepted unprobed.
+test("a pattern a program resolves under its own directory option is refused unquoted, with the fix named, and accepted quoted", () => {
+  const { dir, head } = repo({ "web/x.test.ts": "" });
+  const control = spawnSync("sh", ["-c", "git -C web ls-files -- '*.test.ts'"], { cwd: dir, encoding: "utf8", env: FIXTURE_ENV });
+  assert.equal(control.stdout, "x.test.ts\n", "fixture: git resolves the pattern under its -C directory");
+  cache(dir, recipe(head, { test: "git -C web ls-files -- *.test.ts" }));
+  const r = derive(dir);
+  assert.equal(r.status, 1, `nothing tracked at the root matches the pattern: ${r.out}`);
+  assert.equal(r.out, "", "nothing may reach the caller");
+  assert.ok(r.err.includes("its test command's pattern '*.test.ts' matches no file tracked in"), r.err);
+  assert.ok(r.err.includes("a pattern that a program resolves under its own directory option, such as git -C, must be quoted"), r.err);
+  assert.match(r.err, NAMES_STEP);
+  const quoted = "git -C web ls-files -- '*.test.ts'";
+  cache(dir, recipe(head, { test: quoted }));
+  const q = derive(dir);
+  assert.equal(q.status, 0, q.err);
+  assert.equal(q.out, quoted);
+  assert.equal(q.err, "");
+});
+
 // The must-ACCEPT half. A pattern matching a tracked file at any depth reads
 // cleanly. A word the shell does not glob as written — quoted, carrying an
 // expansion, an option or an `=` — is the program's own to read and cannot be
