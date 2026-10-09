@@ -19,7 +19,7 @@ import { writeExecStub } from "./support/exec-stub.mjs";
 const SCRIPT = join(import.meta.dirname, "..", "plugin", "scripts", "diff-stats.mjs");
 const CLI = readFileSync(SCRIPT, "utf8");
 
-test("classifier priority: test > code-ext > docs/config-dir", () => {
+test("classifier priority: test > docs/config > src residue", () => {
   // src is the residue
   assert.equal(classify("src/a.ts"), "src");
   assert.equal(classify("scripts/review-core.mjs"), "src");
@@ -39,6 +39,34 @@ test("classifier priority: test > code-ext > docs/config-dir", () => {
   assert.equal(classify("docs/examples/deploy.ts"), "src");
   assert.equal(classify(".github/scripts/action.mjs"), "src");
   assert.equal(classify("packages/x/docs/gen.mjs"), "src");
+});
+
+// No runnable-code extension list: a path no docs/config/test rule claims is
+// `src` whatever its language, and test names are recognised for any extension.
+test("classifier is language-neutral: non-JS source and test files", () => {
+  assert.equal(classify("src/main/java/X.java"), "src");
+  assert.equal(classify("pkg/x.go"), "src");
+  assert.equal(classify("src/test/java/XTest.java"), "test");
+  assert.equal(classify("tests/test_x.py"), "test");
+  assert.equal(classify("Cargo.lock"), "config");
+  // test by name alone, outside any test directory
+  assert.equal(classify("pkg/x_test.go"), "test");
+  assert.equal(classify("app/test_x.py"), "test");
+  assert.equal(classify("com/acme/FooTest.java"), "test");
+  assert.equal(classify("lib/foo_spec.rb"), "test");
+  // a script under docs/ or .github/ is code, like its .js equivalent
+  assert.equal(classify("docs/gen.py"), "src");
+  assert.equal(classify(".github/scripts/check.py"), "src");
+});
+
+// The test-name rules must not claim a source file whose name merely contains
+// "test": the CamelCase `Test` suffix is case-sensitive and needs a word before
+// it, and `test_` must start the basename.
+test("classifier: a name containing 'test' is not a test name", () => {
+  assert.equal(classify("pkg/latest.go"), "src");
+  assert.equal(classify("src/Contest.java"), "src");
+  assert.equal(classify("app/attest_x.py"), "src");
+  assert.equal(classify("app/testing.py"), "src");
 });
 
 test("computeStats: profile ladder", () => {

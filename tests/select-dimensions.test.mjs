@@ -57,8 +57,8 @@ test("a production diff runs everything, less `tests` when the diff has none", (
 // --- so these values are mutually exclusive and cannot race `docsOnly`.
 // #218: `comments` is part of the size-tier floor, so this row carries it. This
 // single `.js` file whose whole substance is prose scores `docs: 0`, because
-// `classify()` returns `src` for any code extension before it checks `isDocs`
-// — one shape of the diffs #218 measured in production (four of them, below).
+// `classify()` calls docs only a prose extension and leaves a `.js` file in the
+// `src` residue — one shape of the diffs #218 measured in production (four of them, below).
 test("a single-file source diff trims to correctness + silent-failure + comments", () => {
   assert.deepEqual(dimensionKeys([f("scripts/review-core.mjs", 3, 2)]), [
     "correctness",
@@ -100,9 +100,9 @@ test("a single-file config diff keeps the silent-failure floor", () => {
     "silent-failure",
     "comments",
   ]);
-  // Shell under `.github/` is the ticket's other named case, and it classifies
-  // `config` for the same reason. A `.sh` ANYWHERE ELSE is classify()'s `src`
-  // residue, so it always had silent-failure and is not part of this class.
+  // Shell under `.github/` is the ticket's other named case. It is classify()'s
+  // `src` residue like a `.sh` anywhere else, so it reaches silent-failure as
+  // source rather than through the config floor.
   assert.deepEqual(dimensionKeys([f(".github/scripts/release.sh", 4, 2)]), [
     "correctness",
     "silent-failure",
