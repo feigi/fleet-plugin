@@ -3973,6 +3973,39 @@ test("the branchless sweep keeps the outer worktree when cwd is a worktree NESTE
   assert.match(outerFinding.reason, /holds the working directory this run was started in/);
 });
 
+// The guard fails closed when `[` cannot evaluate `-ef` at all, and that
+// refusal is a compare that could not be made, not a cwd it matched. No input
+// makes a real `[` answer 2 for `-ef`, so the run sources this script under an
+// alias whose stand-in answers 2 for an `-ef` whose left side is the main
+// checkout — the cwd these runs start in, so only the cwd guard's compare
+// meets it — and is the real builtin for everything else.
+function runReapEfFault(w, args) {
+  const r = spawnSync("sh", ["-c", `wt_stub() { case "$2" in -ef) case "$1" in "$WT_EF_FAULT") return 2 ;; esac ;; esac; command [ "$@"; }
+alias [=wt_stub
+. "$0"`, SCRIPT, ...args], { cwd: w, env: { ...ENV, WT_EF_FAULT: realpathSync(w) }, encoding: "utf8" });
+  return { code: r.status, json: r.stdout.trim() ? JSON.parse(r.stdout) : null, stderr: r.stderr };
+}
+
+for (const sweep of ["branch", "branchless"]) {
+  test(`the ${sweep} sweep names an -ef compare it could not make, never a cwd match, and keeps the worktree`, (t) => {
+    const w = repo(t);
+    const wt = sweep === "branch"
+      ? mergedGoneBranchWithWorktree(w, "feature/here", "work that landed")
+      : detachedMergedWorktree(w, "docs/79-brief", "work that landed");
+
+    const { code, json, stderr } = runReapEfFault(w, ["--apply"]);
+
+    assert.equal(code, 0, stderr);
+    assert.equal(existsSync(wt), true, "fail closed: the worktree is not removed");
+    assert.deepEqual(json.worktreesRemoved, []);
+    assert.equal(json.kept.length, 1, `exactly one finding: ${JSON.stringify(json.kept)}`);
+    assert.equal(json.kept[0].branch, sweep === "branch" ? "feature/here" : null);
+    assert.match(json.kept[0].reason, /^could not compare .* \(test -ef exited 2\)/);
+    assert.ok(json.kept[0].reason.includes(wt), json.kept[0].reason);
+    assert.doesNotMatch(json.kept[0].reason, /holds the working directory/, "no match was established");
+  });
+}
+
 test("a [gone] branch whose worktree path holds a newline is kept, never reaped (#551)", (t) => {
   // The branch sweep matched on the `branch` line, so the MATCH was never
   // affected — only the path it reported and acted on, which the plain

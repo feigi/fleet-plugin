@@ -3381,6 +3381,31 @@ for (const nested of [false, true]) {
   });
 }
 
+// The guard fails closed when `[` cannot evaluate `-ef` at all, and that
+// blocker is a compare that could not be made, not a cwd it matched. No input
+// makes a real `[` answer 2 for `-ef`, so the run sources this script under an
+// alias whose stand-in answers 2 for an `-ef` whose left side is the checkout
+// the run starts in — so only the cwd guard's compare meets it — and is the
+// real builtin for everything else.
+test("a release whose cwd compare cannot be evaluated is blocked naming that compare, never a cwd match", (t) => {
+  const r = repo(t);
+  const c = claim(r.w, 9, "release-ticket");
+
+  const res = spawnSync("sh", ["-c", `wt_stub() { case "$2" in -ef) case "$1" in "$WT_EF_FAULT") return 2 ;; esac ;; esac; command [ "$@"; }
+alias [=wt_stub
+. "$0"`, SCRIPT, ...c.args, "--apply"], { cwd: r.w, env: r.env({ WT_EF_FAULT: realpathSync(r.w) }), encoding: "utf8" });
+  const json = JSON.parse(res.stdout);
+
+  assert.equal(res.status, 1, `blocked, not released: ${res.stderr}`);
+  assert.equal(json.released, false);
+  assert.equal(json.blockers.length, 1, JSON.stringify(json.blockers));
+  assert.match(json.blockers[0], /^could not compare .* \(test -ef exited 2\)/);
+  assert.ok(json.blockers[0].includes(realpathSync(c.wt)), json.blockers[0]);
+  assert.doesNotMatch(json.blockers[0], /holds the working directory/, "no match was established");
+  assert.deepEqual(artefacts(r, c), { dir: true, worktree: true, branch: true }, "nothing was touched");
+  assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+});
+
 test("a worktree directory the script may not stat is unknown, never a release", (t) => {
   if (EUID0) return t.skip(NO_DENIAL);
   // -e is false for a directory that is not there and for one inside a prefix
