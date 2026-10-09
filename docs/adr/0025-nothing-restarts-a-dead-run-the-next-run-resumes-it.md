@@ -67,29 +67,34 @@ Measured before ruling (omp 18.8.5, Node 26, macOS):
 2. **One controller per checkout.** Runs in other checkouts or on other
    machines are out of scope; nothing here detects or arbitrates them.
 3. **A controller record proves death; the Liveness mark only reports.**
-   Phase 0's rotation step writes `controller {pid, lstart}` to
-   `.fleet/heartbeat.json` once per run, as its last act, whether or not
-   there was a ledger to rotate. `pid` is the
-   nearest ancestor of the writing script, at any depth, whose program or
-   first argument has the file name `omp`; `lstart` is that process's start
-   time. No environment variable or `$PPID` is a source. With no such
-   ancestor, nothing is written. A recorded controller is **dead** when the
-   shared `isDead` predicate says so or its start time no longer matches;
-   the start time closes the pid-reuse gap the ledger lock tolerates, because
-   a lock lives seconds and this record lives days.
+   Phase 0's rotation step owns `controller {pid, lstart, prior}` in
+   `.fleet/heartbeat.json`. It judges the record it finds **once**, before
+   writing anything — `dead`, `ancestor`, `none`, or alive (Decision 4
+   refuses that) — and as its last act, whether or not there was a ledger to
+   rotate, replaces the record with this run's: `pid` is the nearest ancestor
+   of the writing script, at any depth, whose program or first argument has
+   the file name `omp`; `lstart` is that process's start time; `prior` is the
+   verdict it judged. No environment variable or `$PPID` is a source. With no
+   such ancestor it **removes** the key, so an older run's record never
+   outlives the run that should have replaced it. A recorded controller is
+   **dead** when the shared `isDead` predicate says so or its start time no
+   longer matches; the start time closes the pid-reuse gap the ledger lock
+   tolerates, because a lock lives seconds and this record lives days.
 4. **Only the record gates an action.**
    - *Rotation* refuses while the recorded controller is alive, its start
-     time matches, and it is not an ancestor of the caller — so the same
-     session's next run rotates, and another session's live run is never
-     rotated away.
-   - *Stranded claims:* when the recorded controller is dead, phase 0 lists
-     every `in-progress` ticket with no open PR and resumes each under the
-     in-run Member-killed rule — a new member with a new name, the same
-     ticket, the existing worktree and branch, and the inherited state in its
-     prompt. A worktree outside this checkout is reported, not resumed.
-   - Claims left by the same session's earlier run (the recorded pid is an
-     ancestor) are left alone: their members may still be live, and the
-     Member-killed transcript-mtime check covers them.
+     time matches, and it is not an ancestor of the caller, whatever the
+     mark says — so the same session's next run rotates, and another
+     session's live run is never rotated away.
+   - *Stranded claims:* the step after rotation reads `prior`, never the new
+     record's own pid, which is always this run's live ancestor. On `dead`,
+     phase 0 lists every `in-progress` ticket with no open PR and resumes
+     each under the in-run Member-killed rule — a new member with a new name,
+     the same ticket, the existing worktree and branch, and the inherited
+     state in its prompt. A worktree outside this checkout is reported, not
+     resumed.
+   - On `ancestor` (the same session's earlier run) its claims are left
+     alone: their members may still be live, and the Member-killed
+     transcript-mtime check covers them.
    - The Liveness mark's verdict (`assessBeat`) decides nothing; it feeds
      the Stall report alone.
 5. **The Stall report names which kind of stall it sees.** Alive with a
@@ -97,9 +102,10 @@ Measured before ruling (omp 18.8.5, Node 26, macOS):
    mismatched: stalled, controller gone; the next run resumes its claims.
    No record: today's wording.
 6. **No record proves nothing.** On the first run after this ships, or when
-   no omp ancestor is found, rotation keeps the mark-based check, the
-   stranded-claim step reports and resumes nothing, and the Stall report keeps
-   today's wording.
+   the last run found no omp ancestor, rotation keeps the mark-based check
+   and judges `none`; a step that finds no record at all — this run found no
+   ancestor — reads it as `none` too. On `none` the stranded-claim step
+   reports and resumes nothing, and the Stall report keeps today's wording.
 
 ## Consequences
 
@@ -107,9 +113,9 @@ Measured before ruling (omp 18.8.5, Node 26, macOS):
   other script writes it. `fleet-heartbeat` keeps `beat`, `fleet-tick` keeps
   `quiet` and `digest`. If run state moves to another store, the key moves
   with it under the same single-writer rule.
-- A controller killed between its rotation and its record write leaves no
-  record, so its stranded claims are reported, not resumed — the fail-closed
-  direction of Decision 6.
+- A controller killed between its rotation and its record write leaves the
+  record it found in place; the next run judges that one again, finds it
+  dead, and resumes what both runs stranded.
 - An omp installed some other way than bun (npm global, a compiled binary)
   may not match the ancestor rule; it then degrades to Decision 6 rather than
   misidentifying a controller. Unmeasured.
