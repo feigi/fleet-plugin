@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
-  appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync,
+  appendFileSync, chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -177,6 +177,28 @@ test("the run's bookkeeping exemption is the main checkout's paths, not a nested
   assert.deepEqual(check(dir).changed, ["nested/"]);
 });
 
+test("a nested repository whose .git is a file — a linked worktree, a submodule — is hashed like one whose .git is a directory", (t) => {
+  const dir = repo(t);
+  const wt = join(dir, "wt");
+  git(dir, "worktree", "add", "-q", "-b", "wtb", wt);
+  const src = realpathSync(mkdtempSync(join(tmpdir(), "main-checkout-src-")));
+  t.after(() => rmSync(src, { recursive: true, force: true }));
+  git(src, "init", "-q");
+  writeFileSync(join(src, "f"), "committed\n");
+  git(src, "add", "f");
+  git(src, "commit", "-qm", "init");
+  git(dir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", src, "sm");
+  git(dir, "commit", "-qm", "sm");
+  writeFileSync(join(wt, "tracked.txt"), "mine, uncommitted\n");
+  writeFileSync(join(dir, "sm", "f"), "mine, uncommitted\n");
+  for (const p of [join(wt, ".git"), join(dir, "sm", ".git")]) assert.ok(lstatSync(p).isFile(), `${p} is not a file`);
+  record(dir);
+  assert.equal(check(dir).state, "clean");
+  appendFileSync(join(wt, "tracked.txt"), "a member's line\n");
+  appendFileSync(join(dir, "sm", "f"), "a member's line\n");
+  assert.deepEqual(check(dir).changed, ["sm", "wt/"]);
+});
+
 test("a nested repository git cannot read is unknown, never clean", (t) => {
   const dir = repo(t);
   const sub = nested(dir);
@@ -187,6 +209,21 @@ test("a nested repository git cannot read is unknown, never clean", (t) => {
   assert.equal(c.state, "unknown");
   assert.equal(c.cause, "read");
   assert.match(c.why, /^cannot hash nested\/: git status --porcelain -uall exited \d+/);
+  const r = recordBaseline({ cwd: dir });
+  assert.equal(r.ok, false);
+});
+
+test("a nested repository whose HEAD git cannot resolve is unknown, never clean", (t) => {
+  const dir = repo(t);
+  const sub = nested(dir);
+  record(dir);
+  // HEAD names a branch git rejects as a ref name: `git status` still answers
+  // (`nested/` clean), while `rev-parse HEAD` and `symbolic-ref HEAD` both fail.
+  writeFileSync(join(sub, ".git", "HEAD"), "ref: refs/heads/..bad\n");
+  const c = check(dir);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "read");
+  assert.match(c.why, /^cannot hash nested\/: git symbolic-ref HEAD exited \d+/);
   const r = recordBaseline({ cwd: dir });
   assert.equal(r.ok, false);
 });
