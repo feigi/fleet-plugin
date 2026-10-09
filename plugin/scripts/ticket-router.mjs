@@ -333,7 +333,12 @@ function fitTickets({ features, members, verdicts, window, cutoff }) {
   }
   // A ruling whose date is not YYYY-MM-DD cannot be placed against the cut, and
   // a string `<=` would drop 'abc' or '2027' unseen: it is left in, so `rulingFor`
-  // refuses it when its ticket is an input, as `fit --due` does.
+  // refuses it when its ticket is an input ticket. An input ticket is one the
+  // fit reads — its last in-range row is an exploration row or has `sizing_src`
+  // `rule`, which the skip below keeps — not every ticket with an in-range
+  // features row. `fit --due` also refuses for a ticket the skip drops:
+  // `mergedSince` calls `verdictOf` on every ticket with an in-window row dated
+  // after `fitted_through`, with no such skip.
   const rulings = rulingsByTicket(verdicts.filter((r) => !DATE.test(r.run_date) || upToThrough(r)));
   const lastPulls = lastPullByTicket(inRange);
   const out = [];
@@ -536,6 +541,10 @@ function main() {
   const members = read("members", parseMemberTsv);
   const verdicts = read("verdicts", parseTierOutcomes);
   // The join throws on a features row it cannot place and on a ruling of an input ticket it cannot place.
+  // For `fit` and `--check` an input ticket is one `fitTickets` reads (its last in-range row is an
+  // exploration row or has `sizing_src` `rule`), not every ticket with an in-range features row. `fit --due` also
+  // covers a ticket `fitTickets` skips, because `mergedSince` calls `verdictOf` on every ticket with an in-window
+  // row dated after `fitted_through`, with no such skip.
   const joined = (fit) => {
     try { return fit(); } catch (e) { die(`cannot join --features ${need("features")} with --verdicts ${need("verdicts")}: ${e.message}`); }
   };
