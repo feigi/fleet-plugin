@@ -146,8 +146,9 @@ jobs:
       # The allow-list checker (#1314, #1347). frontmatter-check.mjs enforces
       # frontmatter-allowlist.json's three key sets (agents, skills, commands)
       # in BOTH directions — unknown keys rejected, required keys enforced —
-      # plus a forbidden class for keys that ARE documented but
-      # silently reroute a member's tier, tree, or dispatch. One
+      # plus a forbidden class for keys that read as configuration but are
+      # silently ignored by omp, or silently reroute a member's tier, tree, or
+      # dispatch. One
       # check-tracked.sh call per kind: each glob's own non-vacuity refusal
       # covers the day one of the three directories goes missing entirely,
       # the same discipline every other step here already uses.

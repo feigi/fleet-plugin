@@ -1,16 +1,21 @@
 {
-  "_comment": "The allow-list data. One allow-list per artefact kind (agents, skills, commands) for omp's documented keys (`omp://task-agent-discovery.md`, `omp://skills.md`). Enforced by frontmatter-check.mjs: unknown keys are rejected, required keys are enforced, and `forbidden` catches a key that reads as configuration but silently reroutes a member's tier, tree, or dispatch.",
+  "_comment": "The allow-list data. One allow-list per artefact kind (agents, skills, commands) for omp's documented keys (`omp://task-agent-discovery.md`, `omp://skills.md`). Enforced by frontmatter-check.mjs: unknown keys are rejected, required keys are enforced, and `forbidden` catches a key that reads as configuration but is either silently ignored by omp or silently reroutes a member's tier, tree, or dispatch.",
 
   "agents": {
     "required": ["name", "description", "model"],
     "allowed": [
-      "tools", "disallowedTools", "skills", "maxTurns", "background", "color", "memory",
-      "spawns", "output", "read-summarize", "blocking", "autoloadSkills"
+      "tools", "spawns", "output", "read-summarize", "blocking", "autoloadSkills"
     ],
     "forbidden": {
       "thinking-level": "the level rides on model's `@<role>:<level>` suffix — one spelling only",
       "thinking": "the level rides on model's `@<role>:<level>` suffix — one spelling only",
       "effort": "retired Claude Code key — silently ignored by omp",
+      "disallowedTools": "Claude Code key — not in omp's agent frontmatter, silently ignored",
+      "skills": "Claude Code key — not in omp's agent frontmatter, silently ignored",
+      "maxTurns": "Claude Code key — not in omp's agent frontmatter, silently ignored",
+      "background": "Claude Code key — not in omp's agent frontmatter, silently ignored",
+      "color": "Claude Code key — not in omp's agent frontmatter, silently ignored",
+      "memory": "Claude Code key — not in omp's agent frontmatter, silently ignored",
       "prewalk": "silent mid-run model hand-off — a tier degradation the fleet forbids",
       "advisor": "silent mid-run model hand-off — a tier degradation the fleet forbids",
       "isolation": "members never use harness isolation: omp builds the workspace outside the claimed worktree and patch-applies into the controller's checkout"
