@@ -126,6 +126,7 @@ export const TEST_RUN_SCHEMA = {
     tests: { type: "integer" },
     pass: { type: "integer" },
     fail: { type: "integer" },
+    expectedFail: { type: "integer", description: "Tests the runner reports as failing by design (vitest's `expected fail`), never folded into `fail`." },
     cancelled: { type: "integer" },
     skipped: { type: "integer" },
     error: { type: "string", description: "Only when no summary was printed: what happened instead." },
@@ -437,10 +438,11 @@ cannot be told apart from a regression.`;
 }
 
 // Every run-quality verdict below reads the review's ONE shared test
-// run — `{command, logPath, exitCode?, tests?, pass?, fail?, cancelled?,
-// skipped?, error?}`, `command`/`logPath` the caller's own and the rest the
-// test-run agent's report — never a specialist's own run: no specialist runs
-// the full suite any more, so a verdict on one would judge a copy of this.
+// run — `{command, logPath, exitCode?, tests?, pass?, fail?, expectedFail?,
+// cancelled?, skipped?, error?}`, `command`/`logPath` the caller's own and the
+// rest the test-run agent's report — never a specialist's own run: no
+// specialist runs the full suite any more, so a verdict on one would judge a
+// copy of this.
 // `run` null is a caller holding no run at all — runReview always hands one
 // over, a null or thrown test-run dispatch arriving as `{error}` — and `tests`
 // absent is a run that returned without a count. Both are "no counts", and
@@ -455,8 +457,9 @@ function testRunReason(run) {
   if (typeof run.tests !== "number")
     return `\`${cmd}\` produced no counts — the shared test run crashed, hit its deadline, or printed no summary${run.error ? ` (${run.error})` : ""} — a failed run, not a pass`;
   if (!run.tests) return `\`${cmd}\` produced 0 tests — a failed run, not a pass`;
-  if (run.pass === 0 && !run.fail) return `\`${cmd}\` passed nothing and failed nothing — every test skipped, not a pass`;
-  const executed = run.pass + (run.fail ?? 0);
+  // An expected fail ran: the runner executed it and it failed as declared.
+  const executed = run.pass + (run.fail ?? 0) + (run.expectedFail ?? 0);
+  if (run.pass === 0 && executed === 0) return `\`${cmd}\` passed nothing and failed nothing — every test skipped, not a pass`;
   if (typeof run.pass === "number" && executed * 2 < run.tests)
     return `\`${cmd}\` passed ${run.pass} and failed ${run.fail ?? 0} of the ${run.tests} tests it collected — most of what it collected never ran`;
   if (typeof run.exitCode !== "number")
@@ -505,7 +508,7 @@ export function unrunCrashed(reviewed, dimensions) {
 }
 
 function countsOf(run) {
-  return ["tests", "pass", "fail", "cancelled", "skipped"]
+  return ["tests", "pass", "fail", "expectedFail", "cancelled", "skipped"]
     .filter((k) => typeof run[k] === "number")
     .map((k) => `${k} ${run[k]}`)
     .join(", ");
@@ -938,11 +941,12 @@ knows what the full tree reports.
 Then read the summary the runner printed at the end of the log —
 \`tail -n 40 "${logPath}"\`, ignoring any color escapes — and report
 \`exitCode\` = the TEST_RUN_EXIT value, and \`tests\`, \`pass\`, \`fail\`,
-\`cancelled\`, \`skipped\` = the counts that summary states, each copied as
-printed; omit any the runner does not print. Copy the counts, never judge them:
-'tests 0' is a FAILED run, not a pass, and 0 passes with no failures is
-everything skipped — report both exactly as printed, and the caller reports
-every dimension unrun for them.
+\`expectedFail\`, \`cancelled\`, \`skipped\` = the counts that summary states, each
+copied as printed; omit any the runner does not print. A test the runner reports
+as failing by design (vitest's \`expected fail\`) goes in \`expectedFail\`, never in
+\`fail\`. Copy the counts, never judge them: 'tests 0' is a FAILED run, not a
+pass, and 0 passes with no failures is everything skipped — report both
+exactly as printed, and the caller reports every dimension unrun for them.
 
 If the command hit its deadline, crashed before printing a summary, or printed
 no counts at all, omit every count and say what happened in \`error\`. Never

@@ -256,6 +256,44 @@ test("a run with failing tests and a finding from ONE dimension is NOT unrun", (
   assert.equal(unrunReason({ ...run, fail: 0, cancelled: 2, pass: 742 }, [{ severity: "suggestion", claim: "x", evidence: "y", verdict: "unverified" }]), null);
 });
 
+// #2879: vitest prints an `it.fails` test as its own `N expected fail` token,
+// not as a failure. It ran, so it counts toward what the run executed; it
+// failed by design, so it is nothing for the review to file. The `tests: 4`
+// fixture clears the half floor ONLY through its expected fails (1 pass of 4
+// collected), and the `pass: 0` fixture clears the all-skipped clause only
+// through them — so dropping `expectedFail` from the executed sum reads each
+// fixture unrun.
+test("a run whose only non-pass is an expected fail is NOT unrun, and its expected fails count as executed", () => {
+  for (const run of [
+    { command: "vitest run", exitCode: 0, tests: 121, pass: 120, fail: 0, expectedFail: 1 },
+    { command: "vitest run", exitCode: 0, tests: 4, pass: 1, fail: 0, expectedFail: 2 },
+    { command: "vitest run", exitCode: 0, tests: 1, pass: 0, expectedFail: 1 },
+  ]) {
+    assert.equal(unrunReason(run, []), null, `a run whose non-passes are all expected fails (${JSON.stringify(run)}) must stay clean`);
+  }
+});
+
+// The expected fails weigh one each against the half floor: 2 passes and 2
+// expected fails of 10 collected is 4 executed and unrun, 3 and 2 is exactly
+// half and clean — a weight other than one moves one of the two.
+test("an expected fail counts once toward the half floor", () => {
+  assert.match(unrunReason({ command: "vitest run", exitCode: 0, tests: 10, pass: 2, fail: 0, expectedFail: 2 }, []) ?? "", /most of what it collected never ran/);
+  assert.equal(unrunReason({ command: "vitest run", exitCode: 0, tests: 10, pass: 3, fail: 0, expectedFail: 2 }, []), null);
+});
+
+// The other half: an expected fail is never failing, so it neither hides a
+// real failure nor accounts for a non-zero exit, and a zero count of them
+// leaves an all-skipped run unrun exactly as an absent one does.
+test("an expected fail beside a real failure, a non-zero exit, or as a zero count changes no verdict", () => {
+  const failing = { command: "vitest run", exitCode: 1, tests: 10, pass: 8, fail: 1, expectedFail: 1 };
+  assert.match(unrunReason(failing, []) ?? "", /1 failing tests and no selected dimension/, "an expected fail hid a real failure nobody reported");
+  assert.equal(unrunReason(failing, [{ severity: "critical", claim: "x", evidence: "y" }]), null);
+  const exitOnly = { command: "vitest run", exitCode: 1, tests: 10, pass: 9, fail: 0, expectedFail: 1 };
+  assert.match(unrunReason(exitOnly, []) ?? "", /exited 1 but reported no failing or cancelled tests/, "an expected fail accounted for a non-zero exit");
+  const skipped = { command: "vitest run", exitCode: 0, tests: 2, pass: 0, fail: 0, expectedFail: 0 };
+  assert.match(unrunReason(skipped, []) ?? "", /every test skipped/, "a zero expected-fail count read an all-skipped run clean");
+});
+
 // `pass`/`fail` are optional, so a run that reported only a count must still
 // come back clean rather than tripping the predicate on a field the runner
 // never printed.

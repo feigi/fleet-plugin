@@ -216,6 +216,20 @@ test("a shared run with cancelled tests and no failing count hands the owner the
   assert.deepEqual((await run(filed.host)).dimensionsUnrun, []);
 });
 
+// #2879: vitest's `expected fail` is reported in its own field — the counts
+// line carries it, and with `fail 0` there is nothing for the owner to file,
+// so the review is clean without a finding.
+test("a shared run whose only non-pass is an expected fail reads fail 0 and hands no one a failure to file", async () => {
+  const { host, prompts } = scriptedHost(script({ "test-run": [{ exitCode: 0, tests: 121, pass: 120, fail: 0, expectedFail: 1 }] }));
+  const result = await run(host);
+  assert.deepEqual(result.dimensionsUnrun, []);
+  for (const k of ALL) {
+    const p = prompts[`review:${k}`][0];
+    assert.match(p, /counts: {2}tests 121, pass 120, fail 0, expectedFail 1\n/, `${k}'s prompt lacks the expected-fail count`);
+    assert.doesNotMatch(p, /failing tests|NOT usable/, `${k}'s prompt reads an expected fail as a failure`);
+  }
+});
+
 // A crashed specialist is named once, with its own reason — never a second
 // entry for the shared run's verdict on top.
 test("a crashed dimension is listed once, with its crash reason, beside the shared run's verdict for the rest", async () => {
