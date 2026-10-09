@@ -8,7 +8,7 @@
 //
 // `scratch` is the scratch ROOT, never the review side's `<root>/pr<N>`:
 // runReview creates `pr<N>/` under it itself, and refuses a scratch that
-// already ends in one.
+// already ends in one or that is not an absolute path.
 //
 // The cell that does this is the `review-pr-<pr#>` member's own —
 // agents/fleet-review-runner.agent.md, off the controller's turn — and it calls

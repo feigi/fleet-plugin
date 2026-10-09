@@ -24,7 +24,8 @@
 // Two imports. arg.mjs's isDigits(): this file is an ordinary
 // module, so it consumes the repo's digits rule directly rather than
 // declaring its own copy. node:path's `posix`, to normalise a
-// scratch path before `runnerScratchRefusal` reads its last component.
+// scratch path before `runnerScratchRefusal` reads its last component, and
+// its `isAbsolute`, to refuse a scratch that is not an absolute path.
 //
 // `.mjs`, not `.js`: this file was once `review-core.js`, and
 // nothing that ships declares a `type`, so Node below 20.19.0/22.7.0 —
@@ -699,7 +700,7 @@ export async function runReview(host, args) {
   const pr = A.pr;
   const branch = A.branch;
   const worktree = A.worktree;
-  const scratch = A.scratch || `/tmp/review-pr-${pr}`;
+  const scratch = A.scratch === undefined ? `/tmp/review-pr-${pr}` : A.scratch;
   const runRootParent = `${scratch}/pr${pr}`;
   const runRootPrefix = `${runRootParent}/run-`;
   // Every dispatch label ends in `:pr${pr}`: the member id the harness derives
@@ -735,12 +736,14 @@ export async function runReview(host, args) {
   const scratchRefusal = runnerScratchRefusal(scratch);
   if (scratchRefusal) throw new Error(`review-pr: ${scratchRefusal}`);
 
-  // `runnerScratchRefusal` passes any non-string by contract, so a truthy
-  // number or array — or a relative path — would otherwise be interpolated
-  // into the snapshot prompt's paths. Refused, never coerced. Below the
+  // `runnerScratchRefusal` passes any non-string by contract, so a number or
+  // array — or a relative path — would otherwise be interpolated into the
+  // snapshot prompt's paths. Refused, never coerced: only an absent `scratch`
+  // takes the default above, so a falsy one (`0`, `false`, `""`, `null`) is
+  // refused here like any other value that is not an absolute path. Below the
   // suffix check so a relative `pr<N>` still hears that it is partitioned.
   if (typeof scratch !== "string" || !isAbsolute(scratch)) {
-    throw new Error(`review-runner: args.scratch must be an absolute path, got ${JSON.stringify(scratch)}`);
+    throw new Error(`review-pr: args.scratch must be an absolute path, got ${JSON.stringify(scratch)}`);
   }
 
   const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS);

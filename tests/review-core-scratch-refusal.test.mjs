@@ -13,6 +13,7 @@
 // rejection alone does not show nothing was dispatched first.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { inspect } from "node:util";
 import { runReview } from "../plugin/scripts/review-core.mjs";
 import { ARGS, SNAP, pipeline, parallel, review, scriptedHost } from "./support/review-host-fixture.mjs";
 
@@ -45,15 +46,18 @@ for (const [scratch, reason] of refused) {
   });
 }
 
-// A scratch that is present but not an absolute string — a number, a relative
-// path, an array — is refused before any dispatch, naming the value: every one
-// of them would otherwise be interpolated into the snapshot prompt's paths.
-// The absolute and omitted cases it must still accept are in the loop below.
-for (const scratch of [3, "42", ["a"]]) {
-  test(`scratch ${JSON.stringify(scratch)} is refused before any dispatch as not an absolute path`, async () => {
+// A scratch that is present but not an absolute string — a relative path, a
+// number, an array, or any falsy value (only an absent one takes the default) —
+// is refused before any dispatch, naming the value: every one of them would
+// otherwise be interpolated into the snapshot prompt's paths or silently
+// replaced. A non-string whose `String()` form is an absolute path is in the
+// list too: only the `typeof` half of the guard refuses it. The absolute and
+// omitted cases it must still accept are in the loop below.
+for (const scratch of [3, "42", ["a"], 0, false, "", null, Number.NaN, ["/tmp/x"], { toString: () => "/tmp/x" }]) {
+  test(`scratch ${inspect(scratch)} is refused before any dispatch as not an absolute path`, async () => {
     const { host, calls } = scriptedHost({ snapshot: [SNAP], "review:correctness": [review([])] });
     await assert.rejects(runReview({ ...host, pipeline, parallel }, { ...ARGS, pr: PR, scratch }), (err) => {
-      assert.match(err.message, /args\.scratch must be an absolute path/, `refused for the wrong reason: ${err.message}`);
+      assert.match(err.message, /^review-pr: args\.scratch must be an absolute path/, `refused for the wrong reason: ${err.message}`);
       assert.ok(err.message.includes(JSON.stringify(scratch)), `the refusal does not name the scratch it was given: ${err.message}`);
       return true;
     });
