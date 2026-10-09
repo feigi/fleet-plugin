@@ -308,14 +308,17 @@ function columnOf(whitespace) {
 }
 
 // Where a list item's text starts: past the marker and its gap, or one column
-// past the marker when the gap is over 4 (the rest is an indented code block).
-// A line with no marker has no item to bound, so it throws.
+// past the marker when the gap is over 4 (the rest is an indented code block)
+// or when nothing follows the marker on its line (CommonMark: a bare marker's
+// content starts on the next line, at marker width + 1). A line with no marker
+// has no item to bound, so it throws.
 function contentColumn(line, from, what) {
-  const item = line.match(/^([ \t]*(?:[-*+]|\d+[.)]))([ \t]+)/);
+  const item = line.match(/^([ \t]*(?:[-*+]|\d+[.)]))([ \t]*$|[ \t]+)/);
   assert.ok(item, `${what}: anchor is not on a list-item line: "${from}" — update this test`);
   const marker = columnOf(item[1]);
   const gap = columnOf(item[1] + item[2]) - marker;
-  return gap > 4 ? marker + 1 : marker + gap;
+  const bare = item[0].length === line.length;
+  return bare || gap > 4 ? marker + 1 : marker + gap;
 }
 
 // A marker with nothing after it on its own line (content on the next,

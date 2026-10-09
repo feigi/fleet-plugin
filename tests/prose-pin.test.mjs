@@ -247,6 +247,15 @@ test("bullet throws when the anchor is not on a list-item line", () => {
   }
 });
 
+// A marker with nothing after it on its own line is still a list-item line: its
+// content starts on the next line, one column past the marker, so the indented
+// line under it is the item's own and the next sibling marker ends it.
+test("bullet takes a bare-marker anchor as a list-item line", () => {
+  assert.equal(bullet("-\n  **A** body\n- b\nEND", "-\n  **A**", "END", "the fixture"), "-\n  **A** body");
+  assert.equal(bullet("1.\n   **A** body\n2. b\nEND", "1.\n   **A**", "END", "the fixture"), "1.\n   **A** body");
+  assert.equal(bullet("-  \n  **A** body\n\n  - deep child\n- b\nEND", "-  \n  **A**", "END", "the fixture"), "-  \n  **A** body\n\n  - deep child");
+});
+
 // #2077: a restatement need not be a list item to escape the item. A paragraph
 // after a blank line, or a heading, quote, fence or rule, written shallower than
 // the item's content ends the item in markdown, so it ends the slice too —
