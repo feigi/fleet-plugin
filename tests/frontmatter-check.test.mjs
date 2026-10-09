@@ -322,6 +322,31 @@ test("CLI: a forbidden key exits 1 and prints file:line: key — reason", () => 
   assert.equal(r.stdout.trim(), `agents/x.agent.md:5: thinking-level — ${FIXTURE_ALLOWLIST.agents.forbidden["thinking-level"]}`);
 });
 
+const CLAUDE_CODE_ONLY_REASON = "Claude Code key — not in omp's agent frontmatter, silently ignored";
+
+test("CLI: the real shipped allow-list rejects maxTurns as a Claude Code-only key", () => {
+  const d = dir();
+  mkdirSync(join(d, "agents"), { recursive: true });
+  writeFileSync(join(d, "agents", "x.agent.md"), "---\nname: fleet-x\ndescription: d\nmodel: \"@slow:xhigh\"\nmaxTurns: 5\n---\nbody\n");
+  const r = runCli(["--allowlist", REAL_ALLOWLIST_PATH, "agents/x.agent.md"], d);
+  assert.equal(r.status, 1, `${r.stdout}${r.stderr}`);
+  assert.equal(r.stdout.trim(), `agents/x.agent.md:5: maxTurns — ${CLAUDE_CODE_ONLY_REASON}`);
+});
+
+test("checkFields: the real shipped allow-list forbids every Claude Code-only agent key, and allows none of them", () => {
+  const { allowlist } = parseAllowlist(readFileSync(REAL_ALLOWLIST_PATH, "utf8"));
+  for (const key of ["disallowedTools", "skills", "maxTurns", "background", "color", "memory"]) {
+    assert.ok(!allowlist.agents.allowed.includes(key), `${key} is not in agents.allowed`);
+    const fields = [
+      { key: "name", value: "fleet-x", line: 2 },
+      { key: "description", value: "d", line: 3 },
+      { key: "model", value: "@slow:xhigh", line: 4 },
+      { key, value: "x", line: 5 },
+    ];
+    assert.deepEqual(checkFields("agents", allowlist, fields), [{ line: 5, key, reason: CLAUDE_CODE_ONLY_REASON }]);
+  }
+});
+
 test("CLI: a missing allow-list exits 2, never 0 or 1 — a missing list must fail loudly, not pass with an empty ruleset", () => {
   const { file, d } = agentFixtureDir();
   writeFileSync(file, "---\nname: fleet-x\ndescription: d\nmodel: \"@slow:xhigh\"\n---\n");
