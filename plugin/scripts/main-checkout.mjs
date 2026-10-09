@@ -112,11 +112,13 @@ export function resolveMainCheckout(cwd = process.cwd(), env = process.env) {
 
 export const baselinePath = (root) => join(root, ".fleet", BASELINE_FILE);
 
-// A content hash of one path porcelain named, relative to the main checkout.
-// Gone is an answer (a deleted tracked file is a ` D` entry), and so is a
-// directory (an untracked nested repository is listed as `dir/`); anything
-// else that fails to read throws, and the caller's answer is `unknown`.
-function hashPath(root, rel) {
+// A content hash of one path porcelain named, relative to `root`. Gone is an
+// answer (a deleted tracked file is a ` D` entry); anything else that fails
+// to read throws, and the caller's answer is `unknown`. A directory holding
+// `.git` is a nested repository (an untracked one is listed as `dir/`, a
+// submodule by its own path), hashed as `nestedHash` below; any other
+// directory hashes as `dir`.
+function hashPath(root, rel, env) {
   const abs = join(root, rel);
   let st;
   try {
@@ -125,11 +127,36 @@ function hashPath(root, rel) {
     if (e?.code === "ENOENT" || e?.code === "ENOTDIR") return "absent";
     throw e;
   }
-  const sha = (buf) => createHash("sha256").update(buf).digest("hex");
   if (st.isSymbolicLink()) return `link:${sha(readlinkSync(abs))}`;
-  if (st.isDirectory()) return "dir";
+  if (st.isDirectory()) {
+    try {
+      lstatSync(join(abs, ".git"));
+    } catch (e) {
+      if (e?.code === "ENOENT") return "dir";
+      throw e;
+    }
+    return nestedHash(abs, env);
+  }
   if (st.isFile()) return `sha256:${sha(readFileSync(abs))}`;
   return "other";
+}
+
+const sha = (buf) => createHash("sha256").update(buf).digest("hex");
+
+// A nested repository's own snapshot — its porcelain entries and the hash of
+// every path they name, so a further edit to a file already dirty in it moves
+// the hash where its status line would not — folded with its HEAD, so a
+// commit in it moves the hash too. A commitless repository's HEAD is the
+// branch it names. Nothing is left out: the run's bookkeeping is the main
+// checkout's two paths, not a nested repository's. Any git that fails
+// throws: `unknown`, never a hash that reads clean.
+function nestedHash(abs, env) {
+  const now = entriesAt(abs, env, new Set());
+  if (!now.ok) throw new Error(now.why);
+  let head = git("git rev-parse HEAD", ["rev-parse", "-q", "--verify", "HEAD^{commit}"], abs, env);
+  if (!head.ok) head = git("git symbolic-ref HEAD", ["symbolic-ref", "-q", "HEAD"], abs, env);
+  if (!head.ok) throw new Error(head.why);
+  return `repo:${sha(`${head.stdout}${formatBaseline(now.entries)}`)}`;
 }
 
 /**
@@ -141,6 +168,11 @@ function hashPath(root, rel) {
  * `--no-renames` so every entry names exactly one path.
  */
 export function snapshot(root, env = process.env) {
+  return entriesAt(root, env, RUN_BOOKKEEPING);
+}
+
+// `snapshot` of the repository at `root`, leaving out the paths in `skip`.
+function entriesAt(root, env, skip) {
   const r = git("git status --porcelain -uall", ["--no-optional-locks", "status", "--porcelain", "-uall", "-z", "--no-renames"], root, env);
   if (!r.ok) return r;
   const entries = new Map();
@@ -148,9 +180,9 @@ export function snapshot(root, env = process.env) {
     if (!line) continue;
     if (line.length < 4 || line[2] !== " ") return { ok: false, why: `git status printed an entry it does not document: ${JSON.stringify(line)}` };
     const rel = line.slice(3);
-    if (RUN_BOOKKEEPING.has(rel)) continue;
+    if (skip.has(rel)) continue;
     try {
-      entries.set(line, hashPath(root, rel));
+      entries.set(line, hashPath(root, rel, env));
     } catch (e) {
       return { ok: false, why: `cannot hash ${rel}: ${e?.code ?? e?.message ?? e}` };
     }

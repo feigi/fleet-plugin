@@ -118,6 +118,79 @@ test("staging a change is a change", (t) => {
   assert.deepEqual(check(dir).changed, ["tracked.txt"]);
 });
 
+// A repository nested in the main checkout, with one committed file `f`:
+// untracked, porcelain lists it as `nested/`; `gitlink: true` commits it to
+// the main checkout as a submodule's gitlink, listed as `nested` once dirty.
+function nested(dir, { gitlink = false } = {}) {
+  const sub = join(dir, "nested");
+  mkdirSync(sub);
+  git(sub, "init", "-q");
+  writeFileSync(join(sub, "f"), "committed\n");
+  git(sub, "add", "f");
+  git(sub, "commit", "-qm", "init");
+  if (gitlink) {
+    git(dir, "-c", "advice.addEmbeddedRepo=false", "add", "nested");
+    git(dir, "commit", "-qm", "gitlink");
+  }
+  return sub;
+}
+
+test("a further edit inside a nested repository already dirty at the baseline is dirty", (t) => {
+  for (const gitlink of [false, true]) {
+    const dir = repo(t);
+    const sub = nested(dir, { gitlink });
+    writeFileSync(join(sub, "f"), "mine, uncommitted\n");
+    record(dir);
+    assert.equal(check(dir).state, "clean");
+    appendFileSync(join(sub, "f"), "a member's line\n");
+    assert.deepEqual(check(dir).changed, [gitlink ? "nested" : "nested/"]);
+  }
+});
+
+test("a commit inside a nested repository is dirty, though its status reads the same", (t) => {
+  const dir = repo(t);
+  const sub = nested(dir);
+  record(dir);
+  git(sub, "commit", "-q", "--allow-empty", "-m", "a member's commit");
+  assert.deepEqual(check(dir).changed, ["nested/"]);
+});
+
+test("a nested repository left alone is clean, a commitless one too", (t) => {
+  const dir = repo(t);
+  nested(dir);
+  const bare = join(dir, "fresh");
+  mkdirSync(bare);
+  git(bare, "init", "-q");
+  writeFileSync(join(bare, "draft.txt"), "x\n");
+  record(dir);
+  assert.equal(check(dir).state, "clean");
+  appendFileSync(join(bare, "draft.txt"), "y\n");
+  assert.deepEqual(check(dir).changed, ["fresh/"]);
+});
+
+test("the run's bookkeeping exemption is the main checkout's paths, not a nested repository's", (t) => {
+  const dir = repo(t);
+  const sub = nested(dir);
+  record(dir);
+  mkdirSync(join(sub, "docs", "metrics"), { recursive: true });
+  writeFileSync(join(sub, "docs", "metrics", "tier-outcomes.tsv"), "x\n");
+  assert.deepEqual(check(dir).changed, ["nested/"]);
+});
+
+test("a nested repository git cannot read is unknown, never clean", (t) => {
+  const dir = repo(t);
+  const sub = nested(dir);
+  writeFileSync(join(sub, "f"), "mine, uncommitted\n");
+  record(dir);
+  writeFileSync(join(sub, ".git", "index"), "not an index");
+  const c = check(dir);
+  assert.equal(c.state, "unknown");
+  assert.equal(c.cause, "read");
+  assert.match(c.why, /^cannot hash nested\/: git status --porcelain -uall exited \d+/);
+  const r = recordBaseline({ cwd: dir });
+  assert.equal(r.ok, false);
+});
+
 test("a write under a gitignored directory is clean — run state, agent-brain's cache", (t) => {
   const dir = repo(t);
   record(dir);
