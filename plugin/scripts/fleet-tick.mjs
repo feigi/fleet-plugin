@@ -59,7 +59,7 @@
 // the ledger; main() does the I/O. Split so the guard table and the reading are
 // both unit-testable without a network.
 
-import { parseMember, parseToken, rowPr } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, rowPr, premisesOf } from "./ledger-grammar.mjs";
 
 // Every role's TARGET is its configured cap. Availability of work belongs in
 // the ACTION, not the target: a reviewer target that shrank to the backlog
@@ -340,9 +340,6 @@ export function actionable(rows) {
 
 export class LedgerError extends Error {}
 
-// shortlist.mjs's own spelling of an Exclusion row and its premises.
-const EXCLUDED_ROW = /^#[0-9]+[ \t]+excluded(?=[ \t]|$)([\s\S]*)$/;
-const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
 // `review=wf:<runId>` | `review=member:review-pr-<n>` |
 // `review=fallback:review-pr-<n>[-b]`, settled dead as `…=failed`; the result
 // is `reviewed=<head>:<survived>/<refuted>/<unverified>`.
@@ -691,9 +688,8 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
         if (d && d.member.number === pr) st.dispositions.push(d);
       }
     }
-    const ex = EXCLUDED_ROW.exec(text);
-    if (ex && keyNum !== null) {
-      const premises = [...ex[1].matchAll(PREMISE)].map(([, kind, target]) => ({ kind, target }));
+    const premises = premisesOf(text);
+    if (premises !== null) {
       // An `excluded` row claims its ticket only while its
       // premise still holds. Lifted here only when EVERY premise is a
       // verifiable, now-closed `behind-pr:#M` — the same rule a

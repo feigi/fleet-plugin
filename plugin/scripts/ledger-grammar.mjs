@@ -1,13 +1,15 @@
-// The run ledger's member grammar: a member's token is `<member>` while it is live and
+// The run ledger's grammar: its sections on disk, a row's Exclusion and its
+// PR, and its members. A member's token is `<member>` while it is live and
 // `<member>=<outcome>` once settled. `ledger.mjs dispatch` writes the bare
 // token and `ledger.mjs settle` rewrites it, so a reader derives every
 // liveness count from the ledger file alone instead of from the controller's
 // memory of what it dispatched.
 //
 // A module of its own, not a function inside ledger.mjs, because ledger.mjs is
-// a CLI that parses argv and exits on import — and `fleet-tick.mjs` is to read
-// this same grammar. A second copy of it there would be two readings
-// of which members are live, free to drift apart.
+// a CLI that parses argv and exits on import — and `fleet-tick.mjs`,
+// `compute-board.mjs` and `shortlist.mjs` read this same grammar. A second
+// copy of it in any of them would be two readings of one row, free to drift
+// apart.
 //
 // Rows stay freeform text. Only a token whose name part is a member name is
 // claimed here; everything else a row carries (`class=routine`, `ports=`,
@@ -101,6 +103,49 @@ export function rowPr(text) {
   }
   const m = PR_MENTION.exec(text);
   return m ? Number(m[1]) : null;
+}
+
+// A ticket row is `#N <text>`; it is an Exclusion when `excluded` is the
+// text's first word — `impl-N · … excluded …` is a row about something else.
+// `#N excluded · behind-pr:#M` / `behind-issue:#M`: `#M` is an issue or PR
+// number, or the branch name recorded before that PR existed.
+const EXCLUDED_ROW = /^#[0-9]+[ \t]+excluded(?=[ \t]|$)([\s\S]*)$/;
+const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
+
+/** The `{kind, target}` premises an Exclusion row names, in row order and
+ * possibly none, or null for any other row. */
+export function premisesOf(row) {
+  const m = EXCLUDED_ROW.exec(row);
+  if (!m) return null;
+  return [...m[1].matchAll(PREMISE)].map(([, kind, target]) => ({ kind, target }));
+}
+
+export const ROWS = "## Rows";
+export const DISPATCHED = "## Dispatched";
+export const FILED = "## Filed";
+export const RULED = "## Ruled";
+export const DRAIN = "## Drain";
+
+// What a section header looks like on disk, defined once because a second
+// copy drifts: ledger.mjs slices sections with it, and sets its readability
+// flag from it. Anchored to a real line start (or string start), not
+// a bare substring search — otherwise an escaped entry that merely CONTAINS
+// the text "## Filed" (never a physical line, just a run of characters inside
+// a one-line entry) is found by indexOf() before the genuine header and the
+// whole section is sliced from the wrong offset.
+export const headerRe = (name) => new RegExp(`(^|\\n)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\n|$)`);
+
+// One entry is always exactly one physical line on disk. Escape backslash
+// first, then newline, so a `\` in entry text can never be mistaken for the
+// start of an escape sequence introduced by this encoding. Without this, an
+// entry containing a real newline — or a line that happens to look like
+// `## Filed` or `- #<issue> ...` — gets misparsed on reload: real records
+// silently drop, or phantom ones get injected.
+export function escapeText(s) {
+  return s.replace(/\\/g, "\\\\").replace(/\n/g, "\\n");
+}
+export function unescapeText(s) {
+  return s.replace(/\\(\\|n)/g, (_, c) => (c === "n" ? "\n" : "\\"));
 }
 
 /** The name the next merge bot takes: 1 + the `merge-bot-` entries in
