@@ -994,14 +994,22 @@ EOF
 # Nothing downstream of this guard re-checks the directory it protects, so
 # reading that rc as "not this one" would disable the guard silently.
 #
-# Returns 0 or 1 only, and sets no `$wt_why`: the caller names the refusal,
-# because only the caller knows whose cwd $2 is.
+# Returns 0 or 1 only. A match, and every 1, leave `$wt_why` empty: the caller
+# names that refusal, because only the caller knows whose cwd $2 is. The
+# fail-closed 0 instead sets `$wt_why` to the compare that could not be made,
+# and the caller reports that in place of its own wording, which would claim
+# a match nothing established. Cleared on entry, so a reason left by an
+# earlier probe never stands in for a match.
 wt_holds_cwd() {
+  wt_why=
   wt_hc_d=$2
   while :; do
     # shellcheck disable=SC3013,SC2319 # -ef as in wt_linkage; the else's $? is the `[ -ef ]` test's own rc, read before anything else runs, to fail closed on rc>=2
     if [ "$wt_hc_d" -ef "$1" ]; then return 0; else wt_hc_rc=$?; fi
-    [ "$wt_hc_rc" -lt 2 ] || return 0
+    if [ "$wt_hc_rc" -ge 2 ]; then
+      wt_why="could not compare $wt_hc_d with $1 (test -ef exited $wt_hc_rc), so whether removing $1 would delete the working directory is unknown"
+      return 0
+    fi
     case "$wt_hc_d" in
       */*) wt_hc_d=${wt_hc_d%/*} ;;
       *) return 1 ;;

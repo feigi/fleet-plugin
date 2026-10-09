@@ -1182,7 +1182,8 @@ fi
 # under it, after which every git call dies with `fatal: Unable to read current
 # working directory` (measured on reap.sh, whose sweeps refuse the same path).
 # Asked of the directory, not the string, by worktree.sh's `wt_holds_cwd`,
-# which also answers true when `[` cannot evaluate the compare. `pwd -P`, not
+# which also answers true when `[` cannot evaluate the compare, naming that
+# fault in `$wt_why`, reported in place of the match. `pwd -P`, not
 # `$PWD`: an inherited `PWD` naming some other directory is one POSIX leaves
 # the shell free to keep. The sentinel keeps a trailing newline in the path.
 # A blocker, not a die: what stands in the way is known, and one `cd` away.
@@ -1191,7 +1192,7 @@ if [ -n "$wt" ]; then
     die "cannot read the working directory this run was started in, so whether releasing $wt would delete it is unknown"
   rt_cwd=${rt_cwd%?x}
   if wt_holds_cwd "$wt" "$rt_cwd"; then
-    block "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
+    block "${wt_why:-worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it}"
   fi
 fi
 

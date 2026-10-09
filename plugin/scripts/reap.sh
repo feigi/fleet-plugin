@@ -1108,9 +1108,10 @@ for b in $gone_branches; do
     # along, the same cwd deletion this guard exists for, one path further
     # out — even though `$wt` itself never equals `$self_wt` in that shape.
     # worktree.sh's `wt_holds_cwd` carries the match and why it is on the
-    # directory, not only the string.
+    # directory, not only the string; a compare it could not make comes back
+    # in `$wt_why`, reported in place of the match this wording claims.
     if wt_holds_cwd "$wt" "$self_wt"; then
-      keep "$b" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
+      keep "$b" "${wt_why:-worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it}"
       continue
     fi
 
@@ -1550,7 +1551,7 @@ else
     # sweep's copy of this guard: a worktree nested inside `$wt` is removed
     # along with it even though `$wt` never equals `$self_wt` in that shape.
     if wt_holds_cwd "$wt" "$self_wt"; then
-      keep "" "worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it"
+      keep "" "${wt_why:-worktree $wt holds the working directory this run was started in — removing it would delete the cwd every git call after it needs; rerun from outside it}"
       continue
     fi
 

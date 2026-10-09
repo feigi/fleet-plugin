@@ -153,26 +153,44 @@ test("wt_holds_cwd matches the directory and anything beneath it, by inode, and 
     [wt, "relative-no-slash", 1, "a cwd with no slash: compared once, never spun on"],
   ];
   for (const [dir, cwd, want, why] of cases) {
-    const p = probe(r.w, `if wt_holds_cwd "$1" "$2"; then echo 0; else echo 1; fi`, dir, cwd);
-    assert.equal(p.out.trim(), String(want), `${why}: ${p.err}`);
+    // Seeded, so a reason left by an earlier probe would show through.
+    const p = probe(r.w, `wt_why=stale; if wt_holds_cwd "$1" "$2"; then echo 0; else echo 1; fi; printf 'why=%s\\n' "$wt_why"`, dir, cwd);
+    assert.equal(p.out, `${want}\nwhy=\n`, `${why}: a match and a non-match both leave no reason: ${p.err}`);
   }
 });
 
-test("wt_holds_cwd fails closed when `[` cannot evaluate -ef (rc 2 or more)", (t) => {
+test("wt_holds_cwd fails closed when `[` cannot evaluate -ef (rc 2 or more), and names that fault", (t) => {
   // No input makes a real `[` answer 2 for `-ef`, and `[` cannot be a function
   // in every /bin/sh. An alias names the stand-in before the library is read,
-  // so every `[` the library parses is the stand-in: -ef answers 2, all else
+  // so every `[` the library parses is the stand-in: -ef answers 2 when its
+  // left side is `$WT_EF_FAULT` (every left side when that is empty), all else
   // is the real builtin.
   const r = repo(t);
   const wt = linked(r, "feat");
-  for (const cwd of [wt, join(wt, "no", "such", "dir"), "relative-no-slash"]) {
-    const p = spawnSync("/bin/sh", ["-c", `wt_stub() { case "$2" in -ef) return 2 ;; esac; command [ "$@"; }
+  const run = (cwd, fault = "") =>
+    spawnSync("/bin/sh", ["-c", `wt_stub() { case "$2" in -ef) case "$WT_EF_FAULT" in "" | "$1") return 2 ;; esac ;; esac; command [ "$@"; }
 alias [=wt_stub
 . "$0" || exit 99
 unalias [
-if wt_holds_cwd "$1" "$2"; then echo 0; else echo 1; fi`, LIB, wt, cwd], { cwd: r.w, env: ENV, encoding: "utf8", timeout: 30_000 });
-    assert.equal(p.stdout.trim(), "0", `cwd ${JSON.stringify(cwd)}: ${p.stderr}`);
+wt_why=stale
+if wt_holds_cwd "$1" "$2"; then echo 0; else echo 1; fi
+printf 'why=%s\\n' "$wt_why"`, LIB, wt, cwd], { cwd: r.w, env: { ...ENV, WT_EF_FAULT: fault }, encoding: "utf8", timeout: 30_000 });
+  for (const cwd of [wt, join(wt, "no", "such", "dir"), "relative-no-slash"]) {
+    const p = run(cwd);
+    assert.equal(
+      p.stdout,
+      `0\nwhy=could not compare ${cwd} with ${wt} (test -ef exited 2), so whether removing ${wt} would delete the working directory is unknown\n`,
+      `cwd ${JSON.stringify(cwd)}: refused, with the compare named in place of a match: ${p.stderr}`,
+    );
   }
+  // The fault on an ANCESTOR compare: the first compare answers "not this
+  // one", and the reason names the parent that could not be compared.
+  const p = run(join(r.w, "elsewhere"), r.w);
+  assert.equal(
+    p.stdout,
+    `0\nwhy=could not compare ${r.w} with ${wt} (test -ef exited 2), so whether removing ${wt} would delete the working directory is unknown\n`,
+    p.stderr,
+  );
 });
 
 // The probe body most `wt_linkage` tests run: the verdict, and the reason on a refusal.
