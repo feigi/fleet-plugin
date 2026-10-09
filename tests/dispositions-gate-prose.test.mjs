@@ -18,12 +18,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph, phrase } from "./support/prose-pin.mjs";
+import { between, bullet, paragraph, phrase, stripQuoteGutter, stripSlashGutter } from "./support/prose-pin.mjs";
 import { ALLOWED_DEFER } from "../plugin/scripts/dispositions-check.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
 const SKILL = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const CHECK = readFileSync(join(REPO, "scripts", "dispositions-check.mjs"), "utf8");
 
 // Step 2's record paragraph: one line, bounded by step 3's opener.
 const recordStep = () =>
@@ -171,4 +172,35 @@ test("the gate refuses a finisher on an unchecked verdict, which re-running the 
   assert.match(gate(), phrase(
     "It names a `dispositions-unchecked=` verdict too — no rule broke, but the check could not read where a deferral was filed, `gh` unreachable or an issue unreadable: run the check again for that fix-applier once `gh` answers (an issue that does not exist is unreadable too, and no re-run answers that one: the check's stderr names it, and the record's issue number needs correcting); the tick offers no fix-applier for it.",
   ));
+});
+
+// The two record rules a fix-applier meets first, stated in each of the three
+// places that describe the record: the checker's own header comment, step 2,
+// and the fix-applier prompt block in run-team. The block is also pinned whole
+// by the dispatch-block golden fixture; these pins name the rule that was lost.
+const headerRecord = () => between(stripSlashGutter(CHECK), "The record:", "Rules — each broken one", "dispositions-check.mjs header");
+const headerDeferRule = () =>
+  bullet(stripSlashGutter(CHECK), "- An in-scope `survived` finding deferred passes only with `reason` one", "`remedy-outside-diff` passes only when", "dispositions-check.mjs header");
+const fixApplierRecord = () =>
+  between(stripQuoteGutter(SKILL), "**Before you report, write every ruling to", "Then report to the controller the pushed SHA", "run-team/SKILL.md");
+
+const REFUTED_ENTRY =
+  "A `refuted` entry carries `scope`, `claimKind` and `disposition` like every other entry, and a non-empty `reason` holding the evidence that reverses it; a missing or blank `reason` is a mismatch.";
+const VERIFIED_CORRECT =
+  "`disposition` has no `dismiss`: an in-scope `survived` finding verified correct, needing no change, is deferred with `reason` `false-rationale` and filed on the closed suggestion-band record";
+
+test("a refuted entry needs scope, claimKind, disposition and a non-empty reason, in the header, step 2 and the fix-applier block", () => {
+  for (const [where, slice] of [["header", headerRecord], ["step 2", recordStep], ["fix-applier block", fixApplierRecord]]) {
+    assert.match(slice(), phrase(REFUTED_ENTRY), `${where} no longer states what a refuted entry needs`);
+  }
+});
+
+test("the header's schema line says a refuted entry requires a non-empty reason", () => {
+  assert.match(headerRecord(), phrase("required, non-empty, on a `refuted` entry"), "the header's reason field annotation no longer says a refuted entry requires a non-empty reason");
+});
+
+test("a finding verified correct is deferred false-rationale onto the closed suggestion-band record, in the header, step 2 and the fix-applier block", () => {
+  for (const [where, slice] of [["header", headerDeferRule], ["step 2", recordStep], ["fix-applier block", fixApplierRecord]]) {
+    assert.match(slice(), phrase(VERIFIED_CORRECT), `${where} no longer says how a verified-correct finding is recorded`);
+  }
 });

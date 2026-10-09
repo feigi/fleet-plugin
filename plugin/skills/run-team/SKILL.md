@@ -2495,13 +2495,16 @@ all.
 > `dispositions-check.mjs` before it dispatches any finisher. It is
 > `{"head": "<the review file's head>", "entries": [ … ]}`: one entry per
 > `survived` finding and per `unverified` finding, plus one per `refuted`
-> finding you reverse, its evidence in `reason`. Each entry carries `bucket`
+> finding you reverse. Each entry carries `bucket`
 > (`survived|unverified|refuted`), `index` (its position in that bucket of the
 > review file), `scope` (`in|out`), `claimKind` (`behavior|shape`) and
 > `disposition` (`apply|defer`), and where they apply `reason`, `issue` (the
 > number you filed it to or commented on), `verdictPath` (an in-scope
 > suggestion's refuter verdict file) and `remedyFiles` (the files its remedy
-> names). A finding with no `line`, or on a line the PR's diff touched —
+> names). A `refuted` entry carries `scope`, `claimKind` and `disposition`
+> like every other entry, and a non-empty `reason` holding the evidence that
+> reverses it; a missing or blank `reason` is a mismatch. A finding with no
+> `line`, or on a line the PR's diff touched —
 > `git diff` from its merge-base with `origin/main` to the review's head — is
 > in scope whatever its `scope` says. An in-scope `survived` finding you defer
 > carries `reason` `false-rationale`, `mutual-exclusion`, `remedy-worse` or
@@ -2509,7 +2512,10 @@ all.
 > diff does not touch, and for a `critical` or `important` finding it sends the
 > PR to a human instead of passing. Any
 > other reason, none, or a `survived` or `unverified` finding with no entry is
-> a mismatch, and the PR gets no finisher.
+> a mismatch, and the PR gets no finisher. `disposition` has no `dismiss`: an
+> in-scope `survived` finding verified correct, needing no change, is deferred
+> with `reason` `false-rationale` and filed on the closed suggestion-band
+> record.
 >
 > Then report to the controller the pushed SHA, your apply/defer split, and
 > the deferral issue numbers — a `filed: #N <subject>` line for every issue
