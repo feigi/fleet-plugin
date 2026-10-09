@@ -1649,10 +1649,10 @@ function bindFailure(server, port) {
 // when the connection is refused (nothing holds the port), an EADDRINUSE
 // error when it connects or times out, and any other error as itself,
 // marked `heldCheck` — a fault of its own, like EACCES on a bind, which the
-// loop reports as this check's rather than the bind's. A timeout counts as
-// held because a live holder whose accept backlog is full drops the SYN
-// rather than refusing it. The window between this check and the bind is a
-// race the loop accepts, like its others.
+// loop reports as this check's rather than the bind's, whatever code the
+// error carries. A timeout counts as held because a live holder whose accept
+// backlog is full drops the SYN rather than refusing it. The window between
+// this check and the bind is a race the loop accepts, like its others.
 function heldFailure(port) {
   return new Promise((resolve) => {
     const socket = connect({ host: COCKPIT_HOST, port });
@@ -1943,10 +1943,11 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
     // their own, and scanning past them would bury each one under an
     // exhausted-range message at the end that names the wrong problem. A bind
     // error dies with its own text; a held-check error dies naming the check,
-    // which a raw connect message does not.
-    if (failure.code !== "EADDRINUSE") {
-      die(failure.heldCheck ? `cannot check whether port ${candidate} is held: ${failure.message}` : failure.message);
-    }
+    // which a raw connect message does not, and does so whatever code the
+    // connect error carries: only a bare EADDRINUSE from the bind itself, or
+    // the held signal heldFailure() resolves, means the port is taken.
+    if (failure.heldCheck) die(`cannot check whether port ${candidate} is held: ${failure.message}`);
+    if (failure.code !== "EADDRINUSE") die(failure.message);
     if (!scannable) die(`port ${candidate} in use — pass --port <n>`);
     const holder = await probeCockpitWorkspace(candidate);
     if (holder === instance.workspace) {

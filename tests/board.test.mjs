@@ -3272,6 +3272,22 @@ test("CLI: a pre-bind connect that fails with anything but a refusal is fatal, n
   assert.ok(!existsSync(join(cwd, ".fleet")), "the launch created a state directory after a connect fault");
 });
 
+// The code a connect error carries does not decide whose fault it is: one
+// that says EADDRINUSE — a connect that cannot get a local port — is still
+// the check's own failure, not the held-port answer the check resolves for a
+// connect that succeeds or times out.
+test("CLI: a pre-bind connect error carrying EADDRINUSE dies naming the check, not as a held port", async () => {
+  const port = await unheldPort();
+  const { r, cwd } = serveWithConnect(
+    `const s = new net.Socket(); setImmediate(() => s.emit("error", Object.assign(new Error("connect EADDRINUSE 127.0.0.1:${port}"), { code: "EADDRINUSE" }))); return s;`,
+    port,
+  );
+  assert.equal(r.status, 2, `a connect fault must refuse: ${r.stderr}`);
+  assert.match(r.stderr, new RegExp(`cannot check whether port ${port} is held: connect EADDRINUSE 127\\.0\\.0\\.1:${port}`), `the refusal must name the held-check and carry the stubbed error: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /in use/, `a connect fault is not a held port: ${r.stderr}`);
+  assert.ok(!existsSync(join(cwd, ".fleet")), "the launch created a state directory after a connect fault");
+});
+
 // The other side of that wording: a bind that fails with a fault of its own
 // — EACCES here, past a connect that was refused — dies with the bind's text
 // as it came, never attributed to the held-check that let it through.
