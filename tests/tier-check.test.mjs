@@ -47,16 +47,16 @@ function agentMd(model) {
 // dispatch writes `task`). `field` names the key the dispatch-time model is
 // written under: omp 18.8.6 writes `resolvedModel` (measured 2026-10-09) and
 // no `resolvedModelIdentity`.
-function ompTranscript(resolvedModelIdentity, thinkingLevel, { withTurn = true, agent, field = "resolvedModelIdentity" } = {}) {
+function ompTranscript(model, thinkingLevel, { withTurn = true, agent, field = "resolvedModelIdentity" } = {}) {
   const lines = [
     { type: "session", version: 3, id: "s1", timestamp: "2026-09-09T15:11:49.444Z", cwd: "/tmp/x" },
     { type: "thinking_level_change", id: "t1", parentId: null, timestamp: "2026-09-09T15:11:49.494Z", thinkingLevel, configured: null },
-    { type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-09T15:11:49.495Z", task: "fixture", [field]: resolvedModelIdentity, ...(agent ? { agent } : {}) },
+    { type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-09T15:11:49.495Z", task: "fixture", [field]: model, ...(agent ? { agent } : {}) },
   ];
   if (withTurn) {
     lines.push({
       type: "message", id: "m1", parentId: "i1", timestamp: "2026-09-09T15:12:00.000Z",
-      message: { role: "assistant", content: [{ type: "text", text: "ok" }], model: resolvedModelIdentity, usage: { input: 2, output: 201, cacheRead: 0, cacheWrite: 100, cost: { total: 0.01 } } },
+      message: { role: "assistant", content: [{ type: "text", text: "ok" }], model, usage: { input: 2, output: 201, cacheRead: 0, cacheWrite: 100, cost: { total: 0.01 } } },
     });
   }
   return lines.map((l) => JSON.stringify(l)).join("\n") + "\n";

@@ -144,6 +144,13 @@ test("foldOmpTranscript: session_init.resolvedModel folds as the dispatch-time i
   assert.equal(folded.resolvedModelIdentity, "anthropic/claude-opus-5:high");
 });
 
+test("foldOmpTranscript: a non-string session_init.resolvedModel never folds into resolvedModelIdentity", () => {
+  for (const bad of [42, { id: "anthropic/claude-opus-5" }, ["anthropic/claude-opus-5"], true]) {
+    const lines = [sessionEvt("/x"), thinkingEvt("high"), sessionInitResolvedModelEvt({ resolvedModel: bad })];
+    assert.equal(foldOmpTranscript(lines.join("\n"), "/fake/path.jsonl").resolvedModelIdentity, null, JSON.stringify(bad));
+  }
+});
+
 test("foldOmpTranscript: resolvedModelIdentity wins over resolvedModel when session_init carries both", () => {
   const lines = [sessionEvt("/x"), thinkingEvt("high"), sessionInitResolvedModelEvt({ resolvedModel: "anthropic/claude-sonnet-5:high", resolvedModelIdentity: "anthropic/claude-opus-5" })];
   assert.equal(foldOmpTranscript(lines.join("\n"), "/fake/path.jsonl").resolvedModelIdentity, "anthropic/claude-opus-5");
