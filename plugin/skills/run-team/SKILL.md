@@ -1847,11 +1847,7 @@ while :; do                                   # one tick
       echo "WATCHER DEGRADED: core REST budget=$rl — CI polling paused, silence is NOT green"
       budget_out=1
     fi
-  else
-    if [ -n "$budget_out" ]; then
-      echo "WATCHER RECOVERED: core budget=$rl — CI polling resumed"
-      budget_out=
-    fi
+  else                                        # budget RECOVERED waits for the per-pass gate below
     prs=$(gh pr list --state open --limit "$pr_cap" --json number --jq '.[].number' 2>/dev/null) || prs=ERR
     if [ "$prs" = ERR ]; then
       if [ -z "$list_out" ]; then             # global latch: this cause is account-level too
@@ -1863,7 +1859,8 @@ while :; do                                   # one tick
         echo "WATCHER RECOVERED: open-PR list readable again — CI polling resumed"
         list_out=
       fi
-      if [ "$(printf '%s\n' "$prs" | grep -c .)" -ge "$pr_cap" ]; then
+      count=$(printf '%s\n' "$prs" | grep -c .) || : # grep -c exits 1 on zero matches; set -e must not take it
+      if [ "$count" -ge "$pr_cap" ]; then
         if [ -z "$cap_out" ]; then            # global latch: a full page may have been cut there
           echo "WATCHER DEGRADED: open-PR list hit its --limit $pr_cap — PRs past it are NOT watched, silence on them is NOT green"
           cap_out=1
@@ -1872,21 +1869,36 @@ while :; do                                   # one tick
         echo "WATCHER RECOVERED: open-PR list under its --limit $pr_cap — every open PR watched again"
         cap_out=
       fi
-      for pr in $(printf '%s\n' "$prs"); do   # inline $(...): `for pr in $prs` is ONE iteration under zsh
-        st=$(~/.fleet/bin/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
-        if ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
-          case " $blind " in *" $pr "*) ;; *) # latch keyed BY PR: this cause is per-PR
-            echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
-            blind="$blind $pr" ;;
-          esac
-          continue                            # inner continue — still reaches the tick sleep
+      # gh pr list is GraphQL, so $rl still holds. The pass is budgeted at 4 core
+      # REST units per listed PR on top of the 200 floor — an allowance, not a
+      # count: one ci-state.mjs call makes several REST reads (more for a PR whose
+      # head dropped required jobs). A shortfall pauses this tick's pass.
+      if [ "$rl" -lt $((200 + 4 * count)) ]; then
+        if [ -z "$budget_out" ]; then
+          echo "WATCHER DEGRADED: core REST budget=$rl < $((200 + 4 * count)) needed for $count PRs — CI polling paused, silence is NOT green"
+          budget_out=1
         fi
-        case " $blind " in *" $pr "*)
-          echo "WATCHER RECOVERED: ci-state reading #$pr again — CI polling resumed"
-          keep=; for b in $(printf '%s\n' "$blind"); do [ "$b" = "$pr" ] || keep="$keep $b"; done; blind=$keep ;;
-        esac
-        : # your normal handling of $st for this PR
-      done
+      else
+        if [ -n "$budget_out" ]; then
+          echo "WATCHER RECOVERED: core budget=$rl — CI polling resumed"
+          budget_out=
+        fi
+        for pr in $(printf '%s\n' "$prs"); do # inline $(...): `for pr in $prs` is ONE iteration under zsh
+          st=$(~/.fleet/bin/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
+          if ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
+            case " $blind " in *" $pr "*) ;; *) # latch keyed BY PR: this cause is per-PR
+              echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
+              blind="$blind $pr" ;;
+            esac
+            continue                          # inner continue — still reaches the tick sleep
+          fi
+          case " $blind " in *" $pr "*)
+            echo "WATCHER RECOVERED: ci-state reading #$pr again — CI polling resumed"
+            keep=; for b in $(printf '%s\n' "$blind"); do [ "$b" = "$pr" ] || keep="$keep $b"; done; blind=$keep ;;
+          esac
+          : # your normal handling of $st for this PR
+        done
+      fi
     fi
   fi
   sleep 120                                   # the block's only pacing, once per tick
@@ -1953,6 +1965,23 @@ and treat a full page as its own degraded cause — the "no silent caps" rule
 enforce. It latches globally like the list failure but does not pause polling:
 the PRs it did return are real, so the pass still watches them, and the
 DEGRADED line names the rest as unwatched until a pass comes back under the cap.
+
+**The budget is gated twice, and only the second gate announces recovery.** The
+tick-top floor (`200`) covers the probes themselves. Once the open-PR list is
+read, the pass gate reserves `200 + 4 × count` core REST units — an allowance of
+4 per listed PR on top of the floor, so the reserve grows with the list instead
+of staying a flat 200 that a long list drains mid-pass. It is an allowance, not
+a count: one `ci-state.mjs` call makes several REST reads, more for a PR whose
+head dropped required jobs. A shortfall at either gate pauses the **whole** pass
+through the one budget latch and never polls a prefix of the list: a prefix runs
+in list order, so the same tail PRs would go unread every tick with no line at
+all (never polled, so nothing marks them blind), while the PRs that were polled
+would run dry mid-pass and each emit a blind line. The DEGRADED line from the
+pass gate names the amount it needed and the count it needed it for, so a
+healthy-looking `budget=999` is not read as an outage with no cause. Only the
+pass gate emits the budget RECOVERED line: announcing recovery at the floor
+would report resumption on a tick whose pass gate then pauses it again — a
+DEGRADED/RECOVERED pair every tick.
 
 **Judge `ci-state` on its payload, never its exit code** — the same rule as
 `merge-gate.mjs` applies on the merge path, applied to the watcher. `not-green` is an

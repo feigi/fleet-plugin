@@ -342,6 +342,59 @@ test("the budget latch clears once on recovery, not once per tick", () => {
   assert.equal(count(out, "WATCHER RECOVERED"), 1, `expected exactly one RECOVERED, got:\n${out}`);
 });
 
+// The pre-tick floor of 200 says nothing about the pass that follows it: every
+// listed PR costs its own ci-state read, so the budget the tick needs scales
+// with the list. The gate after the list reserves 200 + 4 per listed PR; one
+// unit short of that must pause polling through the same one-shot budget latch,
+// and do no per-PR work at all — MODE "empty" makes every ci-state call that
+// does run print a blind line, so a zero count of those is a zero count of reads.
+const BUDGET = "core REST budget=";
+const BLIND = "no usable ci-state reading";
+
+test("a budget under 200 + 4 per listed PR pauses the pass once, before any per-PR read", () => {
+  const out = run({ RL: "219", MODE: "empty", PRS: openPrs(5) }, 3);
+  assert.equal(count(out, BUDGET), 1, `expected one budget DEGRADED across three ticks, got:\n${out}`);
+  assert.equal(count(out, "WATCHER RECOVERED"), 0, `a sustained shortfall flapped the budget latch:\n${out}`);
+  assert.equal(count(out, BLIND), 0, `the per-PR pass ran on a budget that cannot pay for it:\n${out}`);
+  assert.equal(count(out, "SLEEP"), 3, `every tick must reach the tail sleep, got:\n${out}`);
+});
+
+test("a budget at 200 + 4 per listed PR polls every listed PR and says nothing about the budget", () => {
+  const out = run({ RL: "220", MODE: "empty", PRS: openPrs(5) }, 1);
+  assert.equal(count(out, BUDGET), 0, `a budget that covers the pass was reported short:\n${out}`);
+  assert.equal(count(out, BLIND), 5, `expected every listed PR polled, got:\n${out}`);
+});
+
+test("the reserve scales 4 per listed PR at every list size, not at one", () => {
+  // One boundary at five PRs fits any floor-and-slope pair that crosses 220 there;
+  // a second and third size, one of them past any small cap, fix both numbers.
+  for (const [n, rl, paused] of [[1, 203, true], [1, 204, false], [20, 279, true], [20, 280, false], [60, 439, true], [60, 440, false]]) {
+    const out = run({ RL: String(rl), MODE: "empty", PRS: openPrs(n) }, 1);
+    assert.equal(count(out, BUDGET), paused ? 1 : 0, `n=${n} rl=${rl}:\n${out}`);
+    assert.equal(count(out, BLIND), paused ? 0 : n, `n=${n} rl=${rl}:\n${out}`);
+  }
+});
+
+test("the pass gate's DEGRADED line names the amount it needed and the list it needed it for", () => {
+  const out = run({ RL: "219", MODE: "empty", PRS: openPrs(5) }, 1);
+  assert.ok(out.includes("core REST budget=219 < 220 needed for 5 PRs"), `the line does not say what the pass needed:\n${out}`);
+});
+
+test("the per-PR budget latch recovers once, on the tick the budget covers the pass again", () => {
+  const seq = join(DIR, "seq-rl-per-pr");
+  writeFileSync(seq, "219\n219\n220\n220\n");
+  const out = run({ RLSEQ: seq, MODE: "empty", PRS: openPrs(5) }, 4);
+  assert.equal(count(out, BUDGET), 1, `expected one budget DEGRADED, got:\n${out}`);
+  assert.equal(count(out, "WATCHER RECOVERED: core budget="), 1, `expected exactly one budget RECOVERED, got:\n${out}`);
+  assert.equal(count(out, BLIND), 5, `expected the pass to resume on recovery and each PR to latch once, got:\n${out}`);
+});
+
+test("an empty open-PR list needs only the 200 floor and survives set -eu", () => {
+  const out = run({ RL: "200", PRS: "" }, 2, "sh", { strict: true });
+  assert.equal(count(out, "SLEEP"), 2, `set -eu: an empty open-PR list died before tick 2:\n${out}`);
+  assert.equal(count(out, "WATCHER"), 0, `an empty list at the floor was reported degraded:\n${out}`);
+});
+
 test("the per-PR loop splits per PR under zsh too, not once over the whole blob", () => {
   // zsh word-splits a command substitution's RESULT but not a bare parameter
   // expansion, so `for pr in $prs` runs ONE iteration there with every number
