@@ -57,10 +57,19 @@ test("a production diff runs everything, less `tests` when the diff has none", (
 // --- so these values are mutually exclusive and cannot race `docsOnly`.
 // #218: `comments` is part of the size-tier floor, so this row carries it. This
 // single `.js` file whose whole substance is prose scores `docs: 0`, because
-// `classify()` calls docs only a prose extension and leaves a `.js` file in the
-// `src` residue — one shape of the diffs #218 measured in production (four of them, below).
+// `classify()` calls docs only a prose extension or a README/CHANGELOG-style
+// name and leaves a `.js` file in the `src` residue — one shape of the diffs
+// #218 measured in production (four of them, below).
 test("a single-file source diff trims to correctness + silent-failure + comments", () => {
   assert.deepEqual(dimensionKeys([f("scripts/review-core.mjs", 3, 2)]), [
+    "correctness",
+    "silent-failure",
+    "comments",
+  ]);
+  // Shell under `.github/` is the ticket's other named case. It is classify()'s
+  // `src` residue like a `.sh` anywhere else, so it reaches silent-failure as
+  // source rather than through the config floor.
+  assert.deepEqual(dimensionKeys([f(".github/scripts/release.sh", 4, 2)]), [
     "correctness",
     "silent-failure",
     "comments",
@@ -96,14 +105,6 @@ test("the diffs #218 measured in production all keep comments — none of them h
 // what the silent-failure hunter is for, and it is where this fleet got bitten.
 test("a single-file config diff keeps the silent-failure floor", () => {
   assert.deepEqual(dimensionKeys([f(".github/workflows/ci.yml", 2, 1)]), [
-    "correctness",
-    "silent-failure",
-    "comments",
-  ]);
-  // Shell under `.github/` is the ticket's other named case. It is classify()'s
-  // `src` residue like a `.sh` anywhere else, so it reaches silent-failure as
-  // source rather than through the config floor.
-  assert.deepEqual(dimensionKeys([f(".github/scripts/release.sh", 4, 2)]), [
     "correctness",
     "silent-failure",
     "comments",
