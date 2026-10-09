@@ -937,8 +937,13 @@ EOF
   fi
   wt_lk_top=${wt_lk_top%?x}
   if [ -L "$1" ]; then
-    if ! wt_lk_admin=$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null && echo x) ||
-        ! wt_lk_back=$(cat "${wt_lk_admin%?x}/gitdir" 2>/dev/null && echo x); then
+    if ! wt_lk_admin=$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null && echo x); then
+      wt_lk_err=$(git -C "$1" rev-parse --absolute-git-dir 2>&1 >/dev/null) || :
+      wt_lk_err=$(printf '%s' "$wt_lk_err" | tr '\n' ' ') || wt_lk_err=
+      wt_why="$1 is a symbolic link through which git could not report its admin dir, so which worktree it stands for is unknown${wt_lk_err:+: $wt_lk_err}"
+      return 1
+    fi
+    if ! wt_lk_back=$(cat "${wt_lk_admin%?x}/gitdir" 2>/dev/null && echo x); then
       wt_why="$1 is a symbolic link whose admin dir's gitdir back-pointer could not be read, so which worktree it stands for is unknown"
       return 1
     fi

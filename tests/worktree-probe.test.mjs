@@ -401,18 +401,45 @@ test("wt_linkage refuses a .git git cannot resolve, with git's own words", (t) =
   assert.match(p.out, /^why=cannot read the git repository at .* — its \.git linkage .* does not resolve: \S/m);
 });
 
+test("wt_linkage refuses a symlink whose admin dir's gitdir back-pointer cannot be read, naming the read", (t) => {
+  if (isRoot) return t.skip("root reads every file");
+  const r = repo(t);
+  const wt = linked(r, "feat");
+  renameSync(wt, `${wt}-real`);
+  symlinkSync(`${wt}-real`, wt);
+  assert.equal(probe(r.w, LINKAGE_PROBE, wt).out, "rc=0\n", "the link stands for its own renamed directory");
+  chmodSync(join(r.w, ".git", "worktrees", "feat", "gitdir"), 0o000);
+  const p = probe(r.w, LINKAGE_PROBE, wt);
+  assert.equal(p.out, `rc=1\nwhy=${wt} is a symbolic link whose admin dir's gitdir back-pointer could not be read, so which worktree it stands for is unknown\n`, p.err);
+});
+
+test("wt_linkage refuses a symlink through which git cannot report the admin dir, naming the lookup with git's own words", (t) => {
+  const r = repo(t);
+  const wt = linked(r, "feat");
+  const plain = linked(r, "plain");
+  renameSync(wt, `${wt}-real`);
+  symlinkSync(`${wt}-real`, wt);
+  const lookup = "symbolic link through which git could not report its admin dir, so which worktree it stands for is unknown";
+  const silent = revParseShim(t, "--absolute-git-dir", "exit 1");
+  assert.equal(probe(r.w, `PATH="$2:$PATH"\n${LINKAGE_PROBE}`, wt, silent).out, `rc=1\nwhy=${wt} is a ${lookup}\n`);
+  // Asked only of a link: a plain worktree directory never reaches the lookup.
+  assert.equal(probe(r.w, `PATH="$2:$PATH"\n${LINKAGE_PROBE}`, plain, silent).out, "rc=0\n");
+  const worded = revParseShim(t, "--absolute-git-dir", `printf 'fatal: first\\nhint: second\\n' >&2; exit 1`);
+  assert.equal(probe(r.w, `PATH="$2:$PATH"\n${LINKAGE_PROBE}`, wt, worded).out, `rc=1\nwhy=${wt} is a ${lookup}: fatal: first hint: second\n`);
+});
+
 // --- wt_registry_root
 
 const REGISTRY_ROOT = `if wt_registry_root; then echo rc=0; else echo "rc=$?"; fi
 printf 'root=%s\\nwhy=%s\\n' "$wt_root" "$wt_why"`;
 
-/** A `git` ahead of the real one on PATH that runs `onCommonDir` (a /bin/sh snippet) for `rev-parse --git-common-dir` and passes everything else through. */
-function commonDirShim(t, onCommonDir) {
+/** A `git` ahead of the real one on PATH that runs `onOption` (a /bin/sh snippet) for a `rev-parse` carrying `option` and passes everything else through. */
+function revParseShim(t, option, onOption) {
   const bin = mkdtempSync(join(tmpdir(), "wt-probe-shim-"));
   t.after(() => rmSync(bin, { recursive: true, force: true }));
   const realGit = execFileSync("/bin/sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
   writeFileSync(join(bin, "git"),
-    `#!/bin/sh\ncase "$*" in rev-parse*--git-common-dir*)\n${onCommonDir}\n;; esac\nexec '${realGit}' "$@"\n`,
+    `#!/bin/sh\ncase "$*" in *rev-parse*${option}*)\n${onOption}\n;; esac\nexec '${realGit}' "$@"\n`,
     { mode: 0o755 });
   return bin;
 }
@@ -434,21 +461,21 @@ test("wt_registry_root refuses outside a repository with git's own words on the 
 
 test("wt_registry_root refuses with the bare reason when git fails without a word", (t) => {
   const r = repo(t);
-  const bin = commonDirShim(t, "exit 1");
+  const bin = revParseShim(t, "--git-common-dir", "exit 1");
   const p = probe(r.w, `PATH="$1:$PATH"\n${REGISTRY_ROOT}`, bin);
   assert.equal(p.out, "rc=1\nroot=\nwhy=cannot resolve the git common directory\n");
 });
 
 test("wt_registry_root flattens a multi-line message from git onto the reason's one line", (t) => {
   const r = repo(t);
-  const bin = commonDirShim(t, `printf 'fatal: first\\nhint: second\\n' >&2; exit 1`);
+  const bin = revParseShim(t, "--git-common-dir", `printf 'fatal: first\\nhint: second\\n' >&2; exit 1`);
   const p = probe(r.w, `PATH="$1:$PATH"\n${REGISTRY_ROOT}`, bin);
   assert.equal(p.out, "rc=1\nroot=\nwhy=cannot resolve the git common directory: fatal: first hint: second\n");
 });
 
 test("wt_registry_root keeps a warning git prints at exit 0 out of the path it answers", (t) => {
   const r = repo(t);
-  const bin = commonDirShim(t, `echo "warning: noise on stderr" >&2`);
+  const bin = revParseShim(t, "--git-common-dir", `echo "warning: noise on stderr" >&2`);
   const p = probe(r.w, `PATH="$1:$PATH"\n${REGISTRY_ROOT}`, bin);
   assert.equal(p.out, `rc=0\nroot=${r.w}/.git/worktrees\nwhy=\n`);
 });
