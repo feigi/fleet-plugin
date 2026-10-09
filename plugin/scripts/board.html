@@ -263,6 +263,14 @@ function renderSpend(sp) {
 }
 
 function render(m) {
+  // A ticket whose column is none of COLUMNS matches no column's filter below
+  // and would vanish from the board with nothing said. Throwing before any
+  // write at all — the title, heading and attention strip included, not only
+  // the columns — lets poll()'s catch banner it while the whole board stays
+  // on the previous tick, never new header over old columns.
+  for (const t of m.tickets || []) {
+    if (!COLUMNS.includes(t.column)) throw new Error(`ticket #${t.issue} has unknown column ${JSON.stringify(t.column)}`);
+  }
   interval = m.interval || 15;
   repoUrl = m.repoUrl || null;
   // Every render, never once at startup: a board whose repo read fails on a
