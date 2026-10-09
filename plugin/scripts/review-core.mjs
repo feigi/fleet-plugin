@@ -32,7 +32,7 @@
 // review-eval.mjs's import of it failed. A suite sweep keeps a
 // shipped `.mjs` from importing a relative module under any other extension.
 
-import { posix } from "node:path";
+import { isAbsolute, posix } from "node:path";
 import { isDigits } from "./arg.mjs";
 
 // --- Schemas ----------------------------------------------------------
@@ -734,6 +734,14 @@ export async function runReview(host, args) {
 
   const scratchRefusal = runnerScratchRefusal(scratch);
   if (scratchRefusal) throw new Error(`review-pr: ${scratchRefusal}`);
+
+  // `runnerScratchRefusal` passes any non-string by contract, so a truthy
+  // number or array — or a relative path — would otherwise be interpolated
+  // into the snapshot prompt's paths. Refused, never coerced. Below the
+  // suffix check so a relative `pr<N>` still hears that it is partitioned.
+  if (typeof scratch !== "string" || !isAbsolute(scratch)) {
+    throw new Error(`review-runner: args.scratch must be an absolute path, got ${JSON.stringify(scratch)}`);
+  }
 
   const explicitDimensions = resolveDimensions(A.dimensions, DEFAULT_DIMENSIONS);
 

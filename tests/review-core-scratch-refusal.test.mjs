@@ -45,6 +45,22 @@ for (const [scratch, reason] of refused) {
   });
 }
 
+// A scratch that is present but not an absolute string — a number, a relative
+// path, an array — is refused before any dispatch, naming the value: every one
+// of them would otherwise be interpolated into the snapshot prompt's paths.
+// The absolute and omitted cases it must still accept are in the loop below.
+for (const scratch of [3, "42", ["a"]]) {
+  test(`scratch ${JSON.stringify(scratch)} is refused before any dispatch as not an absolute path`, async () => {
+    const { host, calls } = scriptedHost({ snapshot: [SNAP], "review:correctness": [review([])] });
+    await assert.rejects(runReview({ ...host, pipeline, parallel }, { ...ARGS, pr: PR, scratch }), (err) => {
+      assert.match(err.message, /args\.scratch must be an absolute path/, `refused for the wrong reason: ${err.message}`);
+      assert.ok(err.message.includes(JSON.stringify(scratch)), `the refusal does not name the scratch it was given: ${err.message}`);
+      return true;
+    });
+    assert.deepEqual(calls, {}, `a non-absolute scratch still dispatched: ${JSON.stringify(calls)}`);
+  });
+}
+
 // What the guard must ACCEPT: a pr-looking name that is not exactly `pr<digits>`,
 // a `pr<N>` that is not the last component — including behind a `.` segment,
 // which collapses away without changing the last component — a `..` inside a
