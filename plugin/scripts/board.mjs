@@ -1647,11 +1647,12 @@ function bindFailure(server, port) {
 // it. Linux refuses that bind outright; this check gives both the same answer.
 // Resolves in bindFailure()'s vocabulary so the loop reads one shape: null
 // when the connection is refused (nothing holds the port), an EADDRINUSE
-// error when it connects or times out, and any other error as itself — a
-// fault of its own, like EACCES on a bind. A timeout counts as held because
-// a live holder whose accept backlog is full drops the SYN rather than
-// refusing it. The window between this check and the bind is a race the
-// loop accepts, like its others.
+// error when it connects or times out, and any other error as itself,
+// marked `heldCheck` — a fault of its own, like EACCES on a bind, which the
+// loop reports as this check's rather than the bind's. A timeout counts as
+// held because a live holder whose accept backlog is full drops the SYN
+// rather than refusing it. The window between this check and the bind is a
+// race the loop accepts, like its others.
 function heldFailure(port) {
   return new Promise((resolve) => {
     const socket = connect({ host: COCKPIT_HOST, port });
@@ -1661,7 +1662,7 @@ function heldFailure(port) {
     };
     socket.setTimeout(PROBE_TIMEOUT_MS, held);
     socket.once("connect", held);
-    socket.once("error", (e) => resolve(e.code === "ECONNREFUSED" ? null : e));
+    socket.once("error", (e) => resolve(e.code === "ECONNREFUSED" ? null : Object.assign(e, { heldCheck: true })));
   });
 }
 
@@ -1940,8 +1941,12 @@ export async function serve({ ledgerFile, port, interval, open, spendDir } = {})
     // on a privileged port, EADDRNOTAVAIL on an unusable address, a pre-bind
     // connect that fails with anything but ECONNREFUSED: those are faults of
     // their own, and scanning past them would bury each one under an
-    // exhausted-range message at the end that names the wrong problem.
-    if (failure.code !== "EADDRINUSE") die(failure.message);
+    // exhausted-range message at the end that names the wrong problem. A bind
+    // error dies with its own text; a held-check error dies naming the check,
+    // which a raw connect message does not.
+    if (failure.code !== "EADDRINUSE") {
+      die(failure.heldCheck ? `cannot check whether port ${candidate} is held: ${failure.message}` : failure.message);
+    }
     if (!scannable) die(`port ${candidate} in use — pass --port <n>`);
     const holder = await probeCockpitWorkspace(candidate);
     if (holder === instance.workspace) {
