@@ -28,15 +28,18 @@
 //                    "scope": "in" | "out",
 //                    "claimKind": "behavior" | "shape",
 //                    "disposition": "apply" | "defer",
-//                    "reason": "<string>",          optional
+//                    "reason": "<string>",          required, non-empty, on a `refuted` entry; else optional
 //                    "issue": <number>,             optional: filed or commented to
 //                    "verdictPath": "<path>",       optional: an in-scope suggestion's refuter verdict
 //                    "remedyFiles": ["<path>", …]   optional: files the remedy names
 //                  }, … ] }
 //
 // One entry per `survived` finding and per `unverified` finding, plus one per
-// `refuted` finding the fix-applier reverses, its evidence in `reason`. A
-// position is stable because a review round's file never changes.
+// `refuted` finding the fix-applier reverses. A `refuted` entry carries
+// `scope`, `claimKind` and `disposition` like every other entry, and a
+// non-empty `reason` holding the evidence that reverses it; a missing or blank
+// `reason` is a mismatch. A position is stable because a review round's file
+// never changes.
 //
 // Rules — each broken one is reported as `<bucket>[<index>]: <rule>`:
 //   - Coverage: a `survived` or `unverified` finding with no entry was
@@ -53,6 +56,9 @@
 //     `file`) is in scope. Otherwise the declared `scope` stands.
 //   - An in-scope `survived` finding deferred passes only with `reason` one
 //     of ALLOWED_DEFER. Any other reason, or none, is a mismatch.
+//     `disposition` has no `dismiss`: an in-scope `survived` finding verified
+//     correct, needing no change, is deferred with `reason` `false-rationale`
+//     and filed on the closed suggestion-band record.
 //   - `remedy-outside-diff` passes only when `remedyFiles` names at least one
 //     file absent from the file list of `git diff <merge-base>...<head>`
 //     (renames and deletions listed on both sides, so a file the PR deleted
