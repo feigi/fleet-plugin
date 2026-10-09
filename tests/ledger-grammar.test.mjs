@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, escapeText, unescapeText, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -150,10 +150,19 @@ test("premisesOf: an Exclusion row's premises in row order, null for any other r
   assert.equal(premisesOf("#7 excludedx · behind-pr:#880"), null);
   assert.deepEqual(premisesOf("#7 excluded"), []);
   assert.deepEqual(premisesOf("#7 excluded · conflicts with something"), []);
+  assert.deepEqual(premisesOf("#7 excluded · xbehind-pr:#5"), [], "a premise token embedded in a longer word is not a premise");
   assert.deepEqual(
     premisesOf("#7 excluded · behind-issue:#12, behind-pr:implementer/1715-impl-1715; behind-pr:880"),
     [{ kind: "issue", target: "12" }, { kind: "pr", target: "implementer/1715-impl-1715" }, { kind: "pr", target: "880" }],
   );
+});
+
+test("escapeText/unescapeText round-trip a literal backslash and a newline, and keep one entry on one line", () => {
+  const entry = "a\\nb\n\\\\ ## Filed\\";
+  assert.equal(unescapeText(escapeText(entry)), entry);
+  assert.equal(escapeText(entry).includes("\n"), false);
+  assert.equal(escapeText("a\\b"), "a\\\\b");
+  assert.equal(unescapeText("a\\\\nb"), "a\\nb", "an escaped backslash before n stays a backslash and an n");
 });
 
 // "n = 1 + the number of `merge-bot-` entries" — settled ones included, since

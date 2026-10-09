@@ -689,7 +689,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
       }
     }
     const premises = premisesOf(text);
-    if (premises !== null && keyNum !== null) {
+    if (premises !== null) {
       // An `excluded` row claims its ticket only while its
       // premise still holds. Lifted here only when EVERY premise is a
       // verifiable, now-closed `behind-pr:#M` — the same rule a
