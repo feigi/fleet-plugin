@@ -266,7 +266,7 @@ function prove(o, wt, logs) {
     // a runner may print its skips before its count.
     const numbers = o.countLine.match(/[0-9]+/g) ?? [];
     if (numbers.length !== 1 || BigInt(numbers[0]) !== BigInt(o.testCount)) {
-      throw notProven(`the count line '${o.countLine}' does not carry the test count ${n} as its one number (it carries ${numbers.length ? numbers.join(", ") : "none"}) — trim it to the number of tests that ran; ${where}`);
+      throw notProven(`the count line '${o.countLine}' does not carry the test count ${o.testCount} as its one number (it carries ${numbers.length ? numbers.join(", ") : "none"}) — trim it to the number of tests that ran; ${where}`);
     }
     if (!readFileSync(testLog, "utf8").includes(o.countLine)) {
       throw notProven(`vacuous: the Test entrypoint's output does not contain the count line '${o.countLine}' — no evidence any test ran; ${where}`);

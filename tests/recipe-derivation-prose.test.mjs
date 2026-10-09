@@ -84,10 +84,12 @@ test("the deriver is told never to write the cache itself, and to prove through 
 
 // recipe-prove.mjs refuses a count line carrying any number but the claim; the
 // deriver is the one choosing the literal, so it is told which number and how
-// to trim to it.
+// to trim to it — and that a runner whose count includes its skips has no such
+// number, so its example must not be one and it goes to the mutation proof.
 test("the deriver is told the count is the tests that ran, and to trim the count line to that one number", () => {
   assert.match(DERIVER, phrase("The number is the tests that ran — never the skipped, the failed, or a total that includes skips."));
-  assert.match(DERIVER, phrase("Trim the literal to the text around that one number, so it carries no other: `Tests run: 5,`"));
+  assert.match(DERIVER, phrase("A runner whose count includes its skipped tests (Maven Surefire's `Tests run:`, node's `# tests`) prints no number that is the tests that ran: prove it with the mutation proof instead."));
+  assert.match(DERIVER, phrase("Trim the literal to the text around that one number, so it carries no other: `5 passed` off pytest's `5 passed, 2 skipped in 0.31s`."));
   assert.match(DERIVER, phrase("A literal carrying any other number is refused."));
   assert.match(PROVER, /as its one number/, "recipe-prove.mjs no longer refuses a count line the way the deriver is told it does");
 });
