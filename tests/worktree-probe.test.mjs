@@ -548,7 +548,6 @@ test("wt_counts refuses a registry replaced by a searchable file", (t) => {
 function fleetLinked(r, name, ...flags) {
   const wt = join(r.w, ".worktrees", name);
   git(r.w, "worktree", "add", "-q", ...flags, "-b", name, wt, "main");
-  writeFileSync(join(wt, "untracked.txt"), "work that exists nowhere else\n");
   return wt;
 }
 
@@ -610,6 +609,44 @@ for (const slashes of ["/", "//"]) {
     assert.ok(p.out.includes(`why=worktree pointer ${wt}/.git names admin dir ${admin}, which is missing from the worktree registry`), p.out);
   });
 }
+
+test("wt_counts refuses a live .worktrees pointer whose admin dir exists but cannot be listed, never reads it as empty or fine", (t) => {
+  if (isRoot) return t.skip("root lists every directory");
+  const r = repo(t);
+  const held = fleetLinked(r, "1-held");
+  fleetLinked(r, "2-other");
+  const third = fleetLinked(r, "3-x");
+  // An admin dir whose name starts with a dot is skipped by the registry count and still listed by git, so the counts can agree over the fault below.
+  renameSync(pointed(third), join(r.w, ".git", "worktrees", ".x"));
+  const admin = pointed(held);
+  chmodSync(admin, 0o000);
+  const p = probe(r.w, COUNTS);
+  chmodSync(admin, 0o755);
+  assert.match(p.out, /^registered=2 linked=2$/m, `fixture: the counts agree, so only the pointer can refuse: ${p.out}`);
+  assert.match(p.out, /^rc=1$/m, p.out);
+  assert.ok(p.out.includes(`why=worktree pointer ${held}/.git names admin dir ${admin}, which could not be listed`), p.out);
+});
+
+test("wt_counts fails closed when `[` cannot evaluate -ef (rc 2 or more) on a pointer's repo, and names that fault", (t) => {
+  // As for wt_holds_cwd above: no input makes a real `[` answer 2 for `-ef`, so
+  // an alias names a stand-in before the library is read.
+  const r = repo(t);
+  const wt = fleetLinked(r, "1-held");
+  rmSync(join(r.w, ".git", "worktrees"), { recursive: true, force: true });
+  const run = (stub) =>
+    spawnSync("/bin/sh", ["-c", `${stub ? `wt_stub() { case "$2" in -ef) return 2 ;; esac; command [ "$@"; }\nalias [=wt_stub\n` : ""}. "$0" || exit 99
+${stub ? "unalias [\n" : ""}${COUNTS}
+printf 'why=%s\\n' "$wt_why"`, LIB], { cwd: r.w, env: ENV, encoding: "utf8", timeout: 30_000 });
+  const control = run(false);
+  assert.match(control.stdout, /^rc=1$/m, control.stdout);
+  assert.ok(control.stdout.includes("which is missing from the worktree registry"), `control: without the stand-in the pointer is refused as lost: ${control.stdout}`);
+  const p = run(true);
+  assert.match(p.stdout, /^rc=1$/m, p.stdout);
+  assert.ok(
+    p.stdout.includes(`why=could not compare the repo ${wt}/.git points into with ${r.w}/.git (test -ef exited 2), so whether it names this registry is unknown`),
+    `refused with the compare named in place of a skip: ${p.stdout}${p.stderr}`,
+  );
+});
 
 test("wt_counts refuses an unlisted .worktrees directory or pointer it cannot read or parse", (t) => {
   if (isRoot) return t.skip("root reads every file");

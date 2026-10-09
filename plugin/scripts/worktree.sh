@@ -777,8 +777,8 @@ wt_count_pair() {
 # worktree of this repo and is skipped. A pointer is read the way git reads it
 # (git 2.50.1): `gitdir: <path>` on its first line, a trailing CR dropped, a
 # relative path resolved against the worktree directory. An unlisted
-# directory or pointer that cannot be read is a refusal: what it names is
-# unknown, and unknown is never "registered".
+# directory, pointer or named admin dir that cannot be read is a refusal: what
+# it names is unknown, and unknown is never "registered".
 #
 # Ceilings, left open on purpose. A `.worktrees` directory that cannot be
 # listed is skipped, not refused: every worktree in it that git still lists is
@@ -857,7 +857,12 @@ worktree $wt_cp_wt
       wt_why="worktree pointer $wt_cp_ptr names admin dir $wt_cp_admin, which is missing from the worktree registry $wt_root — git lists no worktree there, so no absence it reports can be trusted; inspect the directory and, once its work is saved, remove it by hand"
       return 1
     fi
-    if wt_cp_ls=$(ls -A "$wt_cp_admin" 2>/dev/null) && [ -z "$wt_cp_ls" ]; then
+    # `ls`'s STATUS, not just its output: an admin dir that cannot be listed is
+    # not an empty one, and `2>/dev/null` alone reads both as "nothing to say".
+    if ! wt_cp_ls=$(ls -A "$wt_cp_admin" 2>/dev/null); then
+      wt_why="worktree pointer $wt_cp_ptr names admin dir $wt_cp_admin, which could not be listed, and git does not list its worktree, so whether it is registered is unknown"
+      return 1
+    elif [ -z "$wt_cp_ls" ]; then
       wt_why="worktree pointer $wt_cp_ptr names admin dir $wt_cp_admin, an empty directory git does not list — git lists no worktree there, so no absence it reports can be trusted; inspect the directory and, once its work is saved, remove it by hand"
       return 1
     fi
@@ -878,14 +883,14 @@ worktree $wt_cp_wt
 #    admin dir.
 # 1: refused — `$wt_why` names the cause: the common directory or the
 #    registry could not be read, the listing could not be counted, the
-#    counts still disagree, named by the DIRECTION observed, or a
-#    `.worktrees/*` pointer names an admin dir the registry does not hold
-#    (`wt_count_pointers`). FEWER listed than
-#    registered is git dropping an entry it could not read — the fault this
-#    check exists to catch. MORE listed than registered is the reverse, the
-#    registry read missing entries, which under a parallel fleet is a
-#    sibling's `git worktree add` landing between the two reads. One message
-#    cannot serve both: they send the reader to opposite places.
+#    counts still disagree, or a `.worktrees/*` pointer names an admin dir the
+#    registry does not hold (`wt_count_pointers`). A standing disagreement is
+#    named by the DIRECTION observed. FEWER listed than registered is git
+#    dropping an entry it could not read — the fault this check exists to
+#    catch. MORE listed than registered is the reverse, the registry read
+#    missing entries, which under a parallel fleet is a sibling's `git
+#    worktree add` landing between the two reads. One message cannot serve
+#    both: they send the reader to opposite places.
 # 2: the listing itself could not be read — `$wt_why` is `wt_listing`'s cause,
 #    flattened to one line, and `$wt_err` holds it as read.
 #

@@ -692,10 +692,11 @@ fi
 # `wt_counts` establishes the listing is complete before its absences are
 # trusted — the registry entries on disk counted against the linked worktrees
 # git listed, recounted before refusing, the direction of a standing
-# disagreement named — and leaves that listing in `$wt_list` for the filter
-# below. Every refusal is this probe's unknown, never a `die`: probes 1 and 2
-# may already have established a verdict. A listing git could not produce at
-# all is named as one, with git's own cause.
+# disagreement named, and every unlisted `.worktrees/*` pointer checked to
+# name an admin dir the registry still holds — and leaves that listing in
+# `$wt_list` for the filter below. Every refusal is this probe's unknown,
+# never a `die`: probes 1 and 2 may already have established a verdict. A
+# listing git could not produce at all is named as one, with git's own cause.
 if wt_counts; then :; else
   case $? in
     2) add_unknown "local" "could not read the worktree list for #$n: $wt_why" ;;

@@ -627,7 +627,10 @@ wt_reg_state() {
 #   (a) COUNT. The `gitdir`/admin-dir/registry-file faults DROP the entry, so
 #   fewer linked worktrees are listed than are registered under
 #   `<git-common-dir>/worktrees/`. worktree.sh's `wt_counts` answers that,
-#   with its recount and the measurements behind both.
+#   with its recount and the measurements behind both. It also answers the
+#   registry or an entry removed OUTRIGHT, which drops both counts in step and
+#   so agrees: the `.git` pointer of the worktree it orphans still names the
+#   missing admin dir, and `wt_counts` refuses on that.
 #
 #   (b) NULL HEAD. The `HEAD` faults keep the entry, so the counts AGREE and
 #   (a) sees nothing: git lists it with the null object id and no `branch`
@@ -819,7 +822,8 @@ for b in $gone_branches; do
   fi
 
   # The listing is read per branch, through worktree.sh's `wt_counts`, which
-  # counts the registry, reads the listing, checks the two agree, and leaves
+  # counts the registry, reads the listing, checks the two agree and that no
+  # `.worktrees/*` pointer names an admin dir the registry lacks, and leaves
   # that listing in `$wt_list` for the lookup below — so the lookup scans the
   # very listing the counts validated.
   #
