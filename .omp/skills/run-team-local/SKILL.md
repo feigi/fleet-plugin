@@ -50,10 +50,12 @@ the run's artifacts are committed:
    failures on at least 80% of them, gets one `ready-for-human` issue titled
    `Withdraw exploration cell <cell>: <failures>/<verdicts> floor failures`,
    its body the verdict table. One open issue per cell: an open issue whose
-   title starts with `Withdraw exploration cell <cell>:` is that cell's —
-   left as it is when its title is the new one, otherwise commented with the
-   new verdict table and retitled to the new tally. Withdrawing the cell is
-   the maintainer's PR, not yours.
+   title starts with `Withdraw exploration cell <cell>:` (case aside) is that
+   cell's — left as it is when its title is the new one, otherwise commented
+   with the new verdict table and retitled to the new tally. Where several are
+   open, the one already at the new tally is kept, else the lowest-numbered is
+   retitled, and the rest are named in the duty's output and left as they are.
+   Withdrawing the cell is the maintainer's PR, not yours.
    A definition no commit adds (a shallow clone, an uncommitted or renamed
    file) cannot be judged: the duty reports the cells it could judge, then
    fails naming the definition, so the router re-fit does not run.

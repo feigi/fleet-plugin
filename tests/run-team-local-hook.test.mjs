@@ -300,7 +300,7 @@ test("close-out --dry-run: a cell at ten verdicts and eight floor failures would
   assert.match(r.stdout, /stopping rule: task-high 3\/3 floor failures since 2026-09-01 — continues/);
   const lists = calls(f, "issue list");
   assert.equal(lists.length, 1, "only the stopping cell is looked up");
-  assert.deepEqual(lists[0].slice(2, 6), ["--state", "open", "--search", `"Withdraw exploration cell smol-high:" in:title`]);
+  assert.deepEqual(lists[0].slice(2), ["--state", "open", "--search", `"Withdraw exploration cell smol-high:" in:title`, "--json", "number,title", "--limit", "100"]);
   assert.deepEqual(writes(f), [], "a dry run writes nothing");
 });
 
@@ -327,6 +327,39 @@ test("close-out: the cell's open withdrawal issue at another tally gets the verd
   assert.deepEqual(f.ghCalls().map((c) => c.slice(0, 2).join(" ")).filter((c) => c === "issue comment" || c === "issue edit"), ["issue comment", "issue edit"]);
 });
 
+test("close-out: with several open withdrawal issues for the cell and none at the new tally, the lowest-numbered one is retitled and commented, however the list orders them, and the others are named", () => {
+  const older = { number: 90, title: "Withdraw exploration cell smol-high: 6/8 floor failures" };
+  const newer = { number: 95, title: STALE.title };
+  const f = fixture({ rows: floorFailing(), gh: { issues: [newer, older] } });
+  const r = f.run("close-out");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue #90 retitled from "${escape(older.title)}", verdict table commented$`, "m"));
+  assert.match(r.stdout, /stopping rule: smol-high 8\/10 floor failures since 2026-09-01 — more open withdrawal issues for the cell, left as they are: #95$/m);
+  assert.deepEqual(calls(f, "issue create"), []);
+  assert.deepEqual(calls(f, "issue comment").map((c) => c[2]), ["90"]);
+  assert.deepEqual(calls(f, "issue edit"), [["issue", "edit", "90", "--title", TITLE]]);
+});
+
+test("close-out: the cell's open issue already at the new tally is the one kept, though an older issue at another tally is also open, and that one is named", () => {
+  const older = { number: 70, title: "Withdraw exploration cell smol-high: 6/8 floor failures" };
+  const exact = { number: 77, title: TITLE };
+  const f = fixture({ rows: floorFailing(), gh: { issues: [exact, older] } });
+  const r = f.run("close-out");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue already open, #${exact.number}$`, "m"));
+  assert.match(r.stdout, /stopping rule: smol-high 8\/10 floor failures since 2026-09-01 — more open withdrawal issues for the cell, left as they are: #70$/m);
+  assert.deepEqual(writes(f), []);
+});
+
+test("close-out: a withdrawal issue whose title differs from the prefix only in case is still the cell's, and is retitled", () => {
+  const lower = { number: 71, title: STALE.title.toLowerCase() };
+  const f = fixture({ rows: floorFailing(), gh: { issues: [lower] } });
+  const r = f.run("close-out");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(calls(f, "issue create"), []);
+  assert.deepEqual(calls(f, "issue edit"), [["issue", "edit", "71", "--title", TITLE]]);
+});
+
 test("close-out --dry-run: the cell's open withdrawal issue at another tally would be retitled and commented, and nothing is written", () => {
   const f = fixture({ rows: floorFailing(), gh: { issues: [STALE] } });
   const r = f.run("close-out", ["--dry-run"]);
@@ -338,7 +371,8 @@ test("close-out --dry-run: the cell's open withdrawal issue at another tally wou
 test("close-out: another cell's withdrawal issue, or a title that only contains the cell's prefix, does not dedupe, and the issue is filed", () => {
   const other = { number: 79, title: "Withdraw exploration cell task-high: 3/3 floor failures" };
   const quoted = { number: 80, title: "Re: Withdraw exploration cell smol-high: 7/9 floor failures" };
-  const f = fixture({ rows: floorFailing(), gh: { issues: [other, quoted] } });
+  const longer = { number: 81, title: "Withdraw exploration cell smol-high2: 7/9 floor failures" };
+  const f = fixture({ rows: floorFailing(), gh: { issues: [other, quoted, longer] } });
   const r = f.run("close-out");
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /stopping rule: smol-high 8\/10 floor failures since 2026-09-01 — filed https:\/\/github\.com\/o\/r\/issues\/901/);
