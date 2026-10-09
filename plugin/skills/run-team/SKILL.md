@@ -349,16 +349,27 @@ phase, or in any later one, asks the maintainer which tickets to take.
    collision and sequence checks, and a killed member's ticket through a new
    member under a new name. An exclusion that expires with the run that wrote
    it (`deferred-to-session-end` and its like) must be restated if it still
-   holds. No ledger is exit 0, nothing to rotate. It refuses — exit 2,
-   nothing moved — when the stamped archive name already exists, and while
-   the heartbeat mark beside the ledger is still beating, naming the last
-   beat and when it would count as stalled; a stalled mark, a recorded
-   `--stop`, or no mark at all lets it rotate. **The guard proves "not
-   beating", never "dead":** a previous controller that is alive but busy
-   outside its heartbeat hold for longer than its recorded interval reads as
-   stalled, and its ledger is rotated out from under it. Run the rotation
-   before this run's own first tick or beat, either of which writes the mark
-   the guard reads. Older archives, hand-named ones included, are left alone.
+   holds. No ledger is exit 0, nothing to rotate. **The guard is the
+   controller record**, `controller` in `.fleet/heartbeat.json`: the omp
+   process the previous run's rotation found above itself, and that
+   process's start time. Rotate judges it once, before anything moves. A
+   recorded controller that is still alive, still the same process (its
+   start time matches), and not an ancestor of this run refuses — exit 2,
+   nothing moved — **whatever its heartbeat mark says**, because a
+   controller can stop beating and keep dispatching. A dead one, a pid
+   reused by another process, or this session's own earlier run lets it
+   rotate. With no record the heartbeat mark decides, as the only guard
+   there is: still beating refuses, naming the last beat and when it would
+   count as stalled; a stalled mark, a recorded `--stop`, or no mark at all
+   lets it rotate — and that fallback proves "not beating", never "dead". It
+   also refuses, nothing moved, when the stamped archive name already exists
+   or when the process table cannot be read. Its last act, ledger or none, is
+   to replace the record with this run's own — the nearest `omp` process
+   above it, its start time, and as `prior` the verdict it reached on the
+   record it found (`dead`, `ancestor` or `none`) — or to remove the key when
+   no `omp` process is above it. Run the rotation before this run's own first
+   tick or beat, either of which writes the mark the fallback reads. Older
+   archives, hand-named ones included, are left alone.
 
    **Derive the Recipe — the Recipe derivation step — before the fold-in below
    and before the first claim.** Every claim runs this repository's Install
@@ -3754,8 +3765,10 @@ live count from it, so nobody states one. Write neither by hand:
 - **`ledger.mjs rotate`** — phase 0's first ledger write, every run: moves
   the file as-is to `ledger.<UTC YYYY-MM-DDTHHMMSSZ>.md` beside it under the
   same `<file>.lock`, and the next write starts the empty skeleton. Refused
-  while the heartbeat mark is still beating or when the archive name already
-  exists; no ledger is exit 0. Phase 0 states the guard's limit.
+  while the recorded controller is alive and not this run's ancestor — or,
+  with no record, while the heartbeat mark is still beating — or when the
+  archive name already exists; no ledger is exit 0. Then it records this
+  run's controller in `.fleet/heartbeat.json`. Phase 0 states the guard.
 
 `row` refuses a malformed member token anywhere in its text — one whose outcome
 is outside the vocabulary above, e.g. `merge-bot-1=dispatched` — at exit 2,
