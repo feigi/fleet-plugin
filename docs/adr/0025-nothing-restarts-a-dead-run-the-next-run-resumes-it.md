@@ -46,9 +46,10 @@ Measured before ruling (omp 18.8.5, Node 26, macOS):
   member's ticket comes back as "new member, new name, the SAME ticket"
   holds within a run (the Member-killed row and its transcript-mtime check),
   not across runs.
-- **A process-liveness predicate exists.** `ledger.mjs` `isDead(pid)` —
-  `process.kill(pid, 0)`, only ESRCH is dead. Its lock accepts that a reused
-  pid reads live until a 10 s timeout.
+- **A process-liveness predicate exists.** `proc.mjs` `isDead(pid)`, shared
+  by the ledger lock and the controller record — `process.kill(pid, 0)`, only
+  ESRCH is dead. The lock accepts that a reused pid reads live until a 10 s
+  timeout.
 - **Only the process tree names the controller.** A script runs as omp →
   `fleet-run` (node, `spawnSync`) → script, with no shell between: omp's bash
   tool runs inside omp's own process, so `$PPID` there is omp's parent, the

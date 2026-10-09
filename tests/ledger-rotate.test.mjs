@@ -354,3 +354,42 @@ test("rotate refuses, moving nothing, when the process table cannot be read", (t
   assert.deepEqual(f.archives(), []);
   assert.equal(f.raw(), before);
 });
+
+test("rotate with no record names its own unreadable process table, not a record that does not exist", (t) => {
+  const f = fixture(t, { mark: STALE });
+  const r = f.cli(["rotate"], { FLEET_PROC_TABLE: "" });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /cannot read the process table.*this run's own controller cannot be determined/);
+  assert.doesNotMatch(r.stderr, /recorded in/);
+  assert.equal(readFileSync(f.file, "utf8"), LEDGER);
+  assert.deepEqual(f.archives(), []);
+});
+
+test("rotate refuses, moving nothing, on a process table of the wrong shape rather than crashing", (t) => {
+  const f = fixture(t, { table: null });
+  const r = f.cli(["rotate"]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /refusing to rotate .*cannot read the process table/);
+  assert.doesNotMatch(r.stderr, /TypeError/);
+  assert.equal(readFileSync(f.file, "utf8"), LEDGER);
+  assert.deepEqual(f.archives(), []);
+});
+
+test("rotate refuses, moving nothing, when the heartbeat file exists but cannot be read — a live controller's record is not 'no record'", (t) => {
+  const pid = liveForeign(t);
+  const table = { ...OMP_CHAIN, [pid]: { ppid: 1, argv: ["sleep", "300"], lstart: "foreign-start" } };
+  for (const [label, damage] of [
+    ["truncated JSON", (path) => writeFileSync(path, '{"quiet":0,"controller":{"pid":1')],
+    ["not an object", (path) => writeFileSync(path, "[]")],
+    ["a directory", (path) => { rmSync(path); mkdirSync(path); }],
+  ]) {
+    const f = fixture(t, { mark: STALE, table, controller: { pid, lstart: "foreign-start", prior: "none" } });
+    const beatFile = join(f.dir, "heartbeat.json");
+    damage(beatFile);
+    const r = f.cli(["rotate"]);
+    assert.equal(r.status, 2, `${label}: rotated under a record it could not read: ${r.stderr}`);
+    assert.match(r.stderr, /refusing to rotate .*cannot be read or parsed/);
+    assert.equal(readFileSync(f.file, "utf8"), LEDGER, `${label}: a refusal must not touch the ledger`);
+    assert.deepEqual(f.archives(), []);
+  }
+});

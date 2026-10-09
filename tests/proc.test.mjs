@@ -86,6 +86,32 @@ test("ps: an unrunnable ps is unreadable, never an empty tree or a gone process"
   }
 });
 
+// A `ps` that runs and fails is a `ps` that did not answer — not a gone
+// process and not an empty tree. Only exit 1 with nothing on either stream is
+// `ps` selecting no process.
+function stubPs(t, status, { stdout = "", stderr = "" } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "proc-stubps-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const echo = (text, fd) => (text === "" ? "" : `echo '${text}'${fd}\n`);
+  writeFileSync(join(dir, "ps"), `#!/bin/sh\n${echo(stdout, "")}${echo(stderr, " >&2")}exit ${status}\n`, { mode: 0o755 });
+  return processSource({ ...process.env, PATH: dir });
+}
+
+test("ps: exit 1 with nothing printed is a gone process; any other answer is unreadable", (t) => {
+  assert.equal(stubPs(t, 1).startTime(1), null);
+  assert.throws(() => stubPs(t, 2).startTime(1), ProcUnreadable);
+  assert.throws(() => stubPs(t, 1, { stderr: "ps: boom" }).startTime(1), ProcUnreadable);
+  assert.throws(() => stubPs(t, 1, { stdout: "x" }).startTime(1), ProcUnreadable);
+  assert.throws(() => stubPs(t, 0).startTime(1), ProcUnreadable);
+  assert.equal(stubPs(t, 0, { stdout: "Mon Jan  1 00:00:00 2024" }).startTime(1), "Mon Jan  1 00:00:00 2024");
+});
+
+test("ps: a failing process listing is unreadable, never an empty tree", (t) => {
+  assert.throws(() => stubPs(t, 1).parentOf(1), ProcUnreadable);
+  assert.throws(() => stubPs(t, 2, { stderr: "ps: boom" }).parentOf(1), ProcUnreadable);
+  assert.deepEqual(stubPs(t, 0, { stdout: "  1     0 /sbin/init" }).parentOf(1), { ppid: 0, argv: ["/sbin/init"] });
+});
+
 function tableFile(t, table) {
   const dir = mkdtempSync(join(tmpdir(), "proc-table-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -104,6 +130,12 @@ test("FLEET_PROC_TABLE replaces ps whole; an unreadable table is unreadable", (t
   assert.throws(() => processSource({ FLEET_PROC_TABLE: join(tmpdir(), "no-such-proc-table.json") }), ProcUnreadable);
 });
 
+test("FLEET_PROC_TABLE of any other shape is unreadable, never a crash or an empty table", (t) => {
+  for (const table of ["null", "5", "[]", '"x"', '{"1":7}', '{"1":{"argv":["a"]}}', '{"1":{"ppid":"x","argv":["a"]}}', '{"1":{"ppid":1}}', '{"1":{"ppid":1,"argv":"bun omp"}}', '{"1":{"ppid":1,"argv":[5]}}', '{"1":{"ppid":1,"argv":["a"],"lstart":5}}']) {
+    assert.throws(() => processSource({ FLEET_PROC_TABLE: tableFile(t, table) }), ProcUnreadable, table);
+  }
+});
+
 test("ancestry stops on a cycle rather than looping", (t) => {
   const source = processSource({ FLEET_PROC_TABLE: tableFile(t, { 10: { ppid: 20, argv: ["a"] }, 20: { ppid: 10, argv: ["b"] } }) });
   assert.deepEqual(ancestry(source, 10).map((e) => e.pid), [10, 20]);
@@ -118,6 +150,11 @@ test("controllerOf: the nearest omp; none is null", (t) => {
   assert.deepEqual(controllerOf(source, ancestry(source, 10)), { pid: 20, lstart: "b" });
   assert.deepEqual(controllerOf(source, ancestry(source, 30)), { pid: 30, lstart: "c" });
   assert.equal(controllerOf(source, ancestry(source, 10).slice(0, 1)), null);
+});
+
+test("controllerOf: an omp whose start time the source cannot give is no record", (t) => {
+  const source = processSource({ FLEET_PROC_TABLE: tableFile(t, { 10: { ppid: 20, argv: ["sh"], lstart: "a" }, 20: { ppid: 1, argv: ["bun", "/b/omp"] } }) });
+  assert.equal(controllerOf(source, ancestry(source, 10)), null);
 });
 
 test("judgeController: none, dead, reused, ancestor, alive", (t) => {

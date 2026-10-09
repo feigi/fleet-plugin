@@ -1513,6 +1513,10 @@ function runCheck() {
 // stalled mark, a recorded stop, or no mark at all allows the rotation, and
 // that fallback proves "not beating", never "dead".
 //
+// A heartbeat file that exists but cannot be read or parsed gets neither
+// verdict: a record it may hold cannot be known, so rotate refuses rather
+// than read the fault as "no record".
+//
 // Its last act, whether or not there was a ledger to move, replaces the
 // record with this run's own, carrying the verdict as `prior` — the next
 // step reads `prior`, because the new record always names this run's own
@@ -1523,7 +1527,14 @@ function runCheck() {
 // nothing moved rather than after the move.
 function runRotate() {
   const beatFile = stateFileIn(dirname(file));
-  const { beat, ticked, controller } = readState(beatFile, NAME);
+  const state = readState(beatFile, NAME);
+  const { beat, ticked, controller } = state;
+  // A file that exists and could not be used holds no record we can know of:
+  // reading it as "no record" would let a live controller's ledger be moved
+  // by exactly the fault that hid its record.
+  if (state.degraded) {
+    die(`refusing to rotate ${file}: ${beatFile} exists but cannot be read or parsed, so a controller record in it cannot be judged — repair or remove it`);
+  }
   let prior, ours;
   try {
     const source = processSource();
@@ -1532,7 +1543,7 @@ function runRotate() {
     ours = controllerOf(source, chain);
   } catch (e) {
     if (!(e instanceof ProcUnreadable)) throw e;
-    die(`refusing to rotate ${file}: ${e.message} — the controller recorded in ${beatFile} cannot be judged`);
+    die(`refusing to rotate ${file}: ${e.message} — ${controller === null ? "this run's own controller cannot be determined" : `the controller recorded in ${beatFile} cannot be judged`}`);
   }
   if (prior === "alive") {
     die(`refusing to rotate ${file}: the controller that owns it is alive — controller pid ${controller.pid} (started ${controller.lstart}) recorded in ${beatFile} is alive and not an ancestor of this run, whatever its heartbeat mark says; one controller per checkout — end that omp session, or start the run from inside it`);
@@ -1566,7 +1577,7 @@ function runRotate() {
   // since.
   const record = ours === null ? undefined : { ...ours, prior };
   if (!writeState(beatFile, NAME, readState(beatFile, NAME), { controller: record })) {
-    die(`${archive === null ? "found no ledger" : `rotated ${file} -> ${archive}`} but could not record this run's controller in ${beatFile} — the next run will judge the previous record again`);
+    die(`${archive === null ? "found no ledger" : `rotated ${file} -> ${archive}`} but could not record this run's controller in ${beatFile} — the next run judges whatever record that file still holds, and none if it cannot be read`);
   }
   console.log(JSON.stringify({ rotated: archive !== null, archive }));
 }

@@ -43,6 +43,8 @@ function tableSource(path) {
   } catch (e) {
     throw new ProcUnreadable(`cannot read the process table ${path}: ${e.message}`);
   }
+  const bad = tableProblem(table);
+  if (bad !== null) throw new ProcUnreadable(`cannot read the process table ${path}: ${bad}`);
   const entry = (pid) => (Object.hasOwn(table, String(pid)) ? table[String(pid)] : null);
   return {
     parentOf: (pid) => {
@@ -51,6 +53,20 @@ function tableSource(path) {
     },
     startTime: (pid) => entry(pid)?.lstart ?? null,
   };
+}
+
+// Why `table` is not the shape processSource() documents, or null when it is:
+// a plain object whose every entry names an integer parent, an argv of
+// strings, and — when it names one at all — a start time that is a string.
+function tableProblem(table) {
+  if (table === null || typeof table !== "object" || Array.isArray(table)) return "it is not a JSON object keyed by pid";
+  for (const [pid, e] of Object.entries(table)) {
+    if (e === null || typeof e !== "object" || Array.isArray(e)) return `pid ${pid} is not an object`;
+    if (!Number.isInteger(e.ppid)) return `pid ${pid} has no integer ppid`;
+    if (!Array.isArray(e.argv) || !e.argv.every((a) => typeof a === "string")) return `pid ${pid} has no argv array of strings`;
+    if (e.lstart !== undefined && typeof e.lstart !== "string") return `pid ${pid} has an lstart that is not a string`;
+  }
+  return null;
 }
 
 function psSource(env) {
@@ -93,7 +109,7 @@ function psSource(env) {
 function parsePs(text) {
   const parents = new Map();
   for (const line of text.split("\n")) {
-    const m = /^\s*(\d+)\s+(\d+)\s?(.*)$/.exec(line);
+    const m = /^\s*(\d+)\s+(\d+)(.*)$/.exec(line);
     if (m) parents.set(Number(m[1]), { ppid: Number(m[2]), argv: m[3].trim().split(/\s+/) });
   }
   return parents;

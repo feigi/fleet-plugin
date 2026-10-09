@@ -35,7 +35,12 @@
 //            Removed, not left stale, by a rotate that finds no omp ancestor.
 //
 // One writer per key. A key two scripts wrote would need locking to be
-// correct, and none of them is in a position to hold one.
+// correct, and none of them is in a position to hold one. That holds per key,
+// not per write: a writer carries every key it does not own from the view it
+// read, so a read that lands before another script's write and a write that
+// lands after it put the older value back. The windows are the gap between a
+// script's own read and its own write, and the next write of that key
+// corrects it, but until then a stale `controller` can be judged by a rotate.
 
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -74,6 +79,12 @@ export function statePath(name) {
   }
 }
 
+// A plain JSON object: not null, not an array, not a scalar.
+const isRecord = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+// A recorded `prior` is one of these; anything else degrades to "none".
+const PRIORS = ["dead", "ancestor", "none"];
+
 // An unreadable or corrupt state file is NOT fatal, and the direction of the
 // failure is the argument: a missing streak reads as quiet=0, which is the BASE
 // interval — more frequent level checks, never fewer. Dying instead would stop
@@ -82,7 +93,9 @@ export function statePath(name) {
 // Absent is the ONLY silent case, because it is the only one that is not a
 // fault: a fresh run legitimately has no file yet. An unreadable file and a
 // corrupt one are both announced — each discards real state, and silence about
-// a degraded read is the failure class this whole ticket exists to close.
+// a degraded read is the failure class this whole ticket exists to close. Both
+// come back flagged `degraded`, for the one caller that must not read them as
+// a file with nothing in it.
 export function readState(path, name) {
   // `beat: null` is the absent MARK, and it is not the same value as a mark
   // whose fields are zero: nothing has been seen beating, so there is nothing
@@ -90,6 +103,10 @@ export function readState(path, name) {
   // epoch and read as decades overdue on a run that has simply not started
   // one — the cry-wolf direction this key must never fail in.
   const fresh = { quiet: 0, elapsed: 0, digest: "", beat: null, ticked: null, controller: null, rest: {} };
+  // The same state, flagged: the file EXISTS and could not be used. A caller
+  // that acts on the absence of a record — ledger.mjs rotate — must tell this
+  // from `fresh`, which is a run that has simply not written one yet.
+  const degraded = { ...fresh, degraded: true };
   let raw;
   try {
     raw = readFileSync(path, "utf8");
@@ -104,6 +121,7 @@ export function readState(path, name) {
     // whole ticket exists to close.
     if (e.code !== "ENOENT") {
       console.error(`${name}: WARNING could not read ${path} (${e.message}) — restarting at the base interval`);
+      return degraded;
     }
     return fresh;
   }
@@ -112,11 +130,11 @@ export function readState(path, name) {
     parsed = JSON.parse(raw);
   } catch (e) {
     console.error(`${name}: WARNING ${path} is not JSON (${e.message}) — restarting at the base interval`);
-    return fresh;
+    return degraded;
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (!isRecord(parsed)) {
     console.error(`${name}: WARNING ${path} is not an object — restarting at the base interval`);
-    return fresh;
+    return degraded;
   }
   // Per-field validation, not all-or-nothing: a file carrying a good `quiet`
   // and a junk `elapsed` keeps the streak instead of losing both to one key.
@@ -144,7 +162,7 @@ export function readState(path, name) {
   // a stop AT ALL while the mark is still fresh; it is announced, correctly,
   // once the silence itself earns a verdict.
   const mark = (v) => {
-    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    if (!isRecord(v)) return null;
     const at = num(v.at), interval = num(v.interval);
     if (at === 0 || interval === 0) return null;
     return { at, interval, stopped: typeof v.stopped === "string" ? v.stopped : "" };
@@ -153,7 +171,7 @@ export function readState(path, name) {
   // occurrence — so it is a mark of one field, valid or absent, same "never
   // zero" rule as `mark` above for the same cry-wolf reason.
   const tick = (v) => {
-    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    if (!isRecord(v)) return null;
     const at = num(v.at);
     return at === 0 ? null : { at };
   };
@@ -163,9 +181,8 @@ export function readState(path, name) {
   // no process could ever answer for it. `prior` degrades like `stopped`
   // does: a junk verdict proves nothing, so it reads as "none", and the
   // record around it still names a controller to judge.
-  const PRIORS = ["dead", "ancestor", "none"];
   const ctl = (v) => {
-    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    if (!isRecord(v)) return null;
     if (!Number.isInteger(v.pid) || v.pid < 1 || v.pid > 0x7fffffff) return null;
     if (typeof v.lstart !== "string" || v.lstart === "") return null;
     return { pid: v.pid, lstart: v.lstart, prior: PRIORS.includes(v.prior) ? v.prior : "none" };
