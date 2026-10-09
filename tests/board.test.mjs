@@ -3234,10 +3234,11 @@ test("CLI: serve binds 127.0.0.1 alone — 127.0.0.1 answers and [::1] refuses",
 // The replacement's answer reaches the assertion through board's own output
 // — the EPERM text below, the "in use" line — so a stub that never landed
 // reads as a failure of the row, not as a pass.
-function serveWithConnect(stubBody, port) {
+function serveWithConnect(stubBody, port, extraPreload = "") {
   const preload = `import { createRequire, syncBuiltinESMExports } from "node:module";
 const net = createRequire(process.cwd() + "/")("node:net");
 net.connect = () => { ${stubBody} };
+${extraPreload}
 syncBuiltinESMExports();`;
   const opts = serveOpts();
   const r = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(preload)}`, ...serveArgs(["--port", String(port), "--interval", "3600"])], { ...opts, timeout: 10000 });
@@ -3256,7 +3257,8 @@ async function unheldPort() {
 // ECONNREFUSED is the one connect error that means "free". Any other —
 // EPERM from a sandbox that denies loopback connects, say — is a fault of
 // the launch's own, and binding anyway would answer a question the check
-// could not ask. It dies with the error as it came, and starts nothing.
+// could not ask. It dies naming the check, with the error's own text after
+// it, and starts nothing.
 test("CLI: a pre-bind connect that fails with anything but a refusal is fatal, not read as a free port", async () => {
   const port = await unheldPort();
   const { r, cwd } = serveWithConnect(
@@ -3264,10 +3266,42 @@ test("CLI: a pre-bind connect that fails with anything but a refusal is fatal, n
     port,
   );
   assert.equal(r.status, 2, `a connect fault must refuse, not bind: ${r.stderr}`);
-  assert.match(r.stderr, new RegExp(`connect EPERM 127\\.0\\.0\\.1:${port}`), `the stubbed error never reached the launch: ${r.stderr}`);
+  assert.match(r.stderr, new RegExp(`cannot check whether port ${port} is held: connect EPERM 127\\.0\\.0\\.1:${port}`), `the refusal must name the held-check and carry the stubbed error: ${r.stderr}`);
   assert.doesNotMatch(r.stderr, /in use/, `a connect fault is not a held port: ${r.stderr}`);
   assert.doesNotMatch(r.stderr, /cockpit on http/, `the launch bound after a connect fault: ${r.stderr}`);
   assert.ok(!existsSync(join(cwd, ".fleet")), "the launch created a state directory after a connect fault");
+});
+
+// The code a connect error carries does not decide whose fault it is: one
+// that says EADDRINUSE — a connect that cannot get a local port — is still
+// the check's own failure, not the held-port answer the check resolves for a
+// connect that succeeds or times out.
+test("CLI: a pre-bind connect error carrying EADDRINUSE dies naming the check, not as a held port", async () => {
+  const port = await unheldPort();
+  const { r, cwd } = serveWithConnect(
+    `const s = new net.Socket(); setImmediate(() => s.emit("error", Object.assign(new Error("connect EADDRINUSE 127.0.0.1:${port}"), { code: "EADDRINUSE" }))); return s;`,
+    port,
+  );
+  assert.equal(r.status, 2, `a connect fault must refuse: ${r.stderr}`);
+  assert.match(r.stderr, new RegExp(`cannot check whether port ${port} is held: connect EADDRINUSE 127\\.0\\.0\\.1:${port}`), `the refusal must name the held-check and carry the stubbed error: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /in use/, `a connect fault is not a held port: ${r.stderr}`);
+  assert.ok(!existsSync(join(cwd, ".fleet")), "the launch created a state directory after a connect fault");
+});
+
+// The other side of that wording: a bind that fails with a fault of its own
+// — EACCES here, past a connect that was refused — dies with the bind's text
+// as it came, never attributed to the held-check that let it through.
+test("CLI: a bind fault after a refused pre-bind connect dies with the bind's own message", async () => {
+  const port = await unheldPort();
+  const { r } = serveWithConnect(
+    `const s = new net.Socket(); setImmediate(() => s.emit("error", Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:${port}"), { code: "ECONNREFUSED" }))); return s;`,
+    port,
+    `net.Server.prototype.listen = function () { setImmediate(() => this.emit("error", Object.assign(new Error("listen EACCES: permission denied 127.0.0.1:${port}"), { code: "EACCES" }))); return this; };`,
+  );
+  assert.equal(r.status, 2, `a bind fault must refuse: ${r.stderr}`);
+  assert.match(r.stderr, new RegExp(`listen EACCES: permission denied 127\\.0\\.0\\.1:${port}`), `the stubbed bind error never reached the launch: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /cannot check whether port/, `a bind fault was reported as the held-check's: ${r.stderr}`);
+  assert.doesNotMatch(r.stderr, /in use/, `a bind fault is not a held port: ${r.stderr}`);
 });
 
 // A holder whose accept backlog is full drops the SYN instead of refusing
