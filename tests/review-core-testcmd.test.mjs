@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "./support/strip-comments.mjs";
 import { between } from "./support/prose-pin.mjs";
-import { resolveTestCmd, SNAPSHOT_SCHEMA } from "../plugin/scripts/review-core.mjs";
+import { resolveTestCmd, SNAPSHOT_SCHEMA, TEST_RUN_SCHEMA } from "../plugin/scripts/review-core.mjs";
 
 // The review host used to default `testCmd` to a literal string naming THIS
 // repo's own test path — silent green everywhere else, since `worktree` is a
@@ -278,6 +278,22 @@ test("the test-run prompt holds the run in the foreground under a deadline, and 
     /omit every count and say what happened in \\`error\\`\. Never\s+write 0 for a count the log does not state/,
     "the prompt no longer forbids writing 0 for a count the log does not state",
   );
+});
+
+// #2879: with no field of its own, vitest's `N expected fail` token could only
+// be folded into `fail`, so a tree carrying one deliberate `it.fails` read as a
+// failing suite. The field is optional like every other count: a runner that
+// prints no such token reports none.
+test("the test-run prompt routes an expected fail into its own optional field, never into fail", () => {
+  const prompt = testRunPrompt();
+  assert.match(prompt, /\\`fail\\`,\s+\\`expectedFail\\`, \\`cancelled\\`/, "the prompt no longer asks for the expected-fail count");
+  assert.match(
+    prompt,
+    /\(vitest's \\`expected fail\\`\) goes in \\`expectedFail\\`, never in\s+\\`fail\\`/,
+    "the prompt no longer keeps an expected fail out of `fail`",
+  );
+  assert.equal(TEST_RUN_SCHEMA.properties.expectedFail?.type, "integer", "the test-run schema has no integer `expectedFail` field");
+  assert.equal(TEST_RUN_SCHEMA.required, undefined, "a required count would force a 0 the log never stated");
 });
 
 // #143's second correction. The rationale once asserted, present tense and as
