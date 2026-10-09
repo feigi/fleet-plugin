@@ -22,8 +22,13 @@ ADR 0014, ADR 0021).
 
 ```
 omp plugin install @feigi/fleet-ctl
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-bootstrap
 ~/.fleet/bin/fleet-run tier-roles.mjs --check
 ```
+
+`fleet-bootstrap` places the Resolver, `~/.fleet/bin/fleet-run`, and is
+idempotent; re-run it after updating with `omp plugin install
+@feigi/fleet-ctl@latest`.
 
 Working on the plugin itself (this checkout): link the package instead, so
 agent and command edits take effect without a reinstall —
@@ -45,8 +50,8 @@ The plugin also ships an omp extension, `member-write-guard`, which refuses a
 fleet member's write into the main checkout
 ([ADR 0020](docs/adr/0020-member-write-boundary-is-enforced-by-a-shipped-omp-extension.md)).
 An existing install picks up a new release with `omp plugin install
-@feigi/fleet-ctl@latest` followed by a session restart; extensions load only at
-session start.
+@feigi/fleet-ctl@latest`, a `fleet-bootstrap` re-run (above), and a session
+restart; extensions load only at session start.
 
 ## Quickstart
 

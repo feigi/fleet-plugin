@@ -24,8 +24,10 @@ const EXTERNAL = readRoot("docs/research/external-assumptions.md");
 
 // A Node-consumer assumption: a lockfile or `node_modules` named as the
 // consumer's install state, or a Node package-manager / runner invocation
-// named as how a consumer is installed or checked.
-const NODE_CONSUMER = /npm ci|node_modules|package-lock|pnpm-lock|yarn\.lock|npm install|npx (?:vitest|tsc)/;
+// named as how a consumer is installed or checked. omp's own plugin install
+// dir, `~/.omp/plugins/node_modules`, is where the fleet itself is installed,
+// not a consumer's install state, so it is not a hit.
+const NODE_CONSUMER = /npm ci|(?<!\.omp\/plugins\/)node_modules|package-lock|pnpm-lock|yarn\.lock|npm install|npx (?:vitest|tsc)/;
 
 const markdownUnder = (dir) =>
   readdirSync(join(PLUGIN, dir), { recursive: true })
@@ -36,6 +38,15 @@ test("the sweep's own pattern matches each Node-consumer form it exists to catch
   for (const sample of ["npm ci", "its node_modules still on disk", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "run npm install", "npx tsc --noEmit", "npx vitest run"]) {
     assert.match(sample, NODE_CONSUMER, `the pattern no longer matches "${sample}"`);
   }
+});
+
+test("the sweep's own pattern passes omp's plugin install dir, which is the fleet's install, not a consumer's", () => {
+  assert.doesNotMatch("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-bootstrap", NODE_CONSUMER);
+  assert.match("~/.omp/plugins/node_modules beside the consumer's node_modules", NODE_CONSUMER);
+  // The exemption is only omp's install dir: another slash-preceded
+  // `node_modules` is still a consumer's.
+  assert.match("/app/node_modules", NODE_CONSUMER);
+  assert.match("~/.other/plugins/node_modules", NODE_CONSUMER);
 });
 
 test("no runbook, command, agent definition or requirement doc names a Node-consumer install state or tool", () => {
