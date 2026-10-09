@@ -296,6 +296,9 @@ test("a test command whose glob matches no tracked file refuses as a stale Recip
     ["(node --test gone/*.test.mjs)", "gone/*.test.mjs"],
     ["node --test gone/*.test.mjs|cat", "gone/*.test.mjs"],
     ["node --test -x;gone*", "gone*"],
+    // A quoted word between an option and the pattern is not that option's
+    // value, so the pattern after it is probed like any other.
+    ['node --test --grep "x" gone*', "gone*"],
   ]) {
     cache(dir, recipe(head, { test: cmd }));
     const r = derive(dir);
@@ -366,6 +369,14 @@ test("a test command whose glob matches a tracked file, or that the tree cannot 
     "node --test tests/unit/*.test.mjs > gone/*.log",
     "node --test tests/unit/*.test.mjs 2> gone/*.log",
     "node --test tests/unit/*.test.mjs >|gone/*.log",
+    "node --test tests/unit/*.test.mjs >gone/*.log",
+    "node --test tests/unit/*.test.mjs 2>gone/*.log",
+    "node --test tests/unit/*.test.mjs <gone/*.log",
+    "node --test tests/unit/*.test.mjs >>gone/*.log",
+    // The word before a redirection carries quoting or an expansion, so it is
+    // accepted whole; what follows it is still the redirection's target.
+    "node --test tests/unit/*.test.mjs 'x'> gone/*.log",
+    "node --test tests/unit/*.test.mjs $X> gone/*.log",
     // A word carrying quoting or an expansion is not split at its operators,
     // which may be quoted.
     "node --test tests/unit/*.test.mjs 'x';gone/*.js",
