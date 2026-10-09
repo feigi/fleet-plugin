@@ -344,6 +344,8 @@ function writeCache(cache, recipe, repo) {
       throw noVerdict(e.message);
     }
     if (!probe.ok) {
+      // A git that exited 0 failed on a spawn error alone, which `err` names.
+      if (probe.status === 0) throw noVerdict(`git started but does not run: \`git --version\` failed: ${probe.err}`);
       const exit = probe.status === null ? "did not exit 0" : `exited ${probe.status}`;
       const stderrNote = probe.err ? `: ${probe.err}` : " and wrote nothing to stderr";
       throw noVerdict(`git started but does not run: \`git --version\` ${exit}${stderrNote}`);
