@@ -22,8 +22,12 @@ ADR 0014, ADR 0021).
 
 ```
 omp plugin install @feigi/fleet-ctl
+~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-bootstrap
 ~/.fleet/bin/fleet-run tier-roles.mjs --check
 ```
+
+`fleet-bootstrap` places the Resolver, `~/.fleet/bin/fleet-run`, once; re-run
+it after updating with `omp plugin install @feigi/fleet-ctl@latest`.
 
 Working on the plugin itself (this checkout): link the package instead, so
 agent and command edits take effect without a reinstall —
