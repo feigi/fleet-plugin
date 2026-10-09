@@ -388,9 +388,12 @@ net_git() {
   # reap.sh's registry recount (worktree.sh's `wt_counts`) reads the very
   # corruption this detached run erases:
   # with the entry gone, the registry count drops to match the listing's
-  # linked count, in lockstep, and the guard a stray `git worktree add`
-  # mid-run is built to catch sees no mismatch to refuse on — both branches
-  # in that fixture's pass were wrongly reaped. A bare foreground fetch
+  # linked count, in lockstep, and the COUNT comparison a stray `git worktree
+  # add` mid-run is built to catch sees no mismatch to refuse on — both
+  # branches in that fixture's pass were wrongly reaped. (The pointer
+  # cross-check `wt_counts` now ends in refuses that state for a worktree
+  # under `.worktrees/`, on its own `.git` file, which this run does not
+  # touch.) A bare foreground fetch
   # usually wins this race (the detached child has not run yet by the time
   # the caller reads the registry); this function's own extra fork/wait
   # overhead was measured to flip the outcome reliably. `maintenance.auto`

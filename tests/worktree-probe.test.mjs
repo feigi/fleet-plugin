@@ -544,6 +544,179 @@ test("wt_counts refuses a registry replaced by a searchable file", (t) => {
   assert.match(p.out, /^why=worktree registry .* could not be read$/m);
 });
 
+/** A linked worktree in the fleet's own layout, `<checkout>/.worktrees/<name>`, on a new branch `<name>`. */
+function fleetLinked(r, name, ...flags) {
+  const wt = join(r.w, ".worktrees", name);
+  git(r.w, "worktree", "add", "-q", ...flags, "-b", name, wt, "main");
+  return wt;
+}
+
+/** The admin dir `wt`'s `.git` pointer names, a relative one prefixed with `wt/` unnormalised, as the probe spells it. */
+function pointed(wt) {
+  const to = readFileSync(join(wt, ".git"), "utf8").trim().replace(/^gitdir: /, "");
+  return to.startsWith("/") ? to : `${wt}/${to}`;
+}
+
+test("wt_counts refuses a live .worktrees pointer once the whole registry is removed", (t) => {
+  const r = repo(t);
+  const wt = fleetLinked(r, "1-held");
+  rmSync(join(r.w, ".git", "worktrees"), { recursive: true, force: true });
+  const p = probe(r.w, COUNTS);
+  assert.match(p.out, /^rc=1$/m, p.out);
+  assert.ok(p.out.includes(`why=worktree pointer ${wt}/.git names admin dir ${pointed(wt)}, which is missing from the worktree registry ${r.w}/.git/worktrees`), p.out);
+});
+
+for (const flags of [[], ["--relative-paths"]]) {
+  test(`wt_counts refuses a live .worktrees pointer whose admin entry alone is removed${flags.length ? ", spelled relative" : ""}`, (t) => {
+    const r = repo(t);
+    fleetLinked(r, "2-other");
+    let wt;
+    try {
+      wt = fleetLinked(r, "1-held", ...flags);
+    } catch {
+      return t.skip("this git cannot write relative worktree paths");
+    }
+    if (flags.length && readFileSync(join(wt, ".git"), "utf8").startsWith("gitdir: /")) return t.skip("this git wrote an absolute path");
+    const admin = pointed(wt);
+    rmSync(admin, { recursive: true, force: true });
+    const p = probe(r.w, COUNTS);
+    assert.match(p.out, /^rc=1$/m, p.out);
+    assert.match(p.out, /^registered=1 linked=1$/m, "the counts agree — the pointer is what refuses");
+    assert.ok(p.out.includes(`why=worktree pointer ${wt}/.git names admin dir ${admin}, which is missing from the worktree registry`), p.out);
+  });
+}
+
+test("wt_counts refuses a live .worktrees pointer whose admin entry was emptied, which git ignores like a removed one", (t) => {
+  const r = repo(t);
+  const wt = fleetLinked(r, "1-held");
+  const admin = pointed(wt);
+  rmSync(admin, { recursive: true, force: true });
+  mkdirSync(admin);
+  const p = probe(r.w, COUNTS);
+  assert.match(p.out, /^rc=1$/m, p.out);
+  assert.ok(p.out.includes(`why=worktree pointer ${wt}/.git names admin dir ${admin}, an empty directory git does not list`), p.out);
+});
+
+for (const slashes of ["/", "//"]) {
+  test(`wt_counts strips a trailing ${JSON.stringify(slashes)} off a pointer's admin dir before reading which registry it names`, (t) => {
+    const r = repo(t);
+    const wt = fleetLinked(r, "1-held");
+    const admin = pointed(wt);
+    rmSync(admin, { recursive: true, force: true });
+    writeFileSync(join(wt, ".git"), `gitdir: ${admin}${slashes}\n`);
+    const p = probe(r.w, COUNTS);
+    assert.match(p.out, /^rc=1$/m, p.out);
+    assert.ok(p.out.includes(`why=worktree pointer ${wt}/.git names admin dir ${admin}, which is missing from the worktree registry`), p.out);
+  });
+}
+
+test("wt_counts refuses a live .worktrees pointer whose admin dir exists but cannot be listed, never reads it as empty or fine", (t) => {
+  if (isRoot) return t.skip("root lists every directory");
+  const r = repo(t);
+  const held = fleetLinked(r, "1-held");
+  fleetLinked(r, "2-other");
+  const third = fleetLinked(r, "3-x");
+  // An admin dir whose name starts with a dot is skipped by the registry count and still listed by git, so the counts can agree over the fault below.
+  renameSync(pointed(third), join(r.w, ".git", "worktrees", ".x"));
+  const admin = pointed(held);
+  chmodSync(admin, 0o000);
+  const p = probe(r.w, COUNTS);
+  chmodSync(admin, 0o755);
+  assert.match(p.out, /^registered=2 linked=2$/m, `fixture: the counts agree, so only the pointer can refuse: ${p.out}`);
+  assert.match(p.out, /^rc=1$/m, p.out);
+  assert.ok(p.out.includes(`why=worktree pointer ${held}/.git names admin dir ${admin}, which could not be listed`), p.out);
+});
+
+test("wt_counts fails closed when `[` cannot evaluate -ef (rc 2 or more) on a pointer's repo, and names that fault", (t) => {
+  // As for wt_holds_cwd above: no input makes a real `[` answer 2 for `-ef`, so
+  // an alias names a stand-in before the library is read.
+  const r = repo(t);
+  const wt = fleetLinked(r, "1-held");
+  rmSync(join(r.w, ".git", "worktrees"), { recursive: true, force: true });
+  const run = (stub) =>
+    spawnSync("/bin/sh", ["-c", `${stub ? `wt_stub() { case "$2" in -ef) return 2 ;; esac; command [ "$@"; }\nalias [=wt_stub\n` : ""}. "$0" || exit 99
+${stub ? "unalias [\n" : ""}${COUNTS}
+printf 'why=%s\\n' "$wt_why"`, LIB], { cwd: r.w, env: ENV, encoding: "utf8", timeout: 30_000 });
+  const control = run(false);
+  assert.match(control.stdout, /^rc=1$/m, control.stdout);
+  assert.ok(control.stdout.includes("which is missing from the worktree registry"), `control: without the stand-in the pointer is refused as lost: ${control.stdout}`);
+  const p = run(true);
+  assert.match(p.stdout, /^rc=1$/m, p.stdout);
+  assert.ok(
+    p.stdout.includes(`why=could not compare the repo ${wt}/.git points into with ${r.w}/.git (test -ef exited 2), so whether it names this registry is unknown`),
+    `refused with the compare named in place of a skip: ${p.stdout}${p.stderr}`,
+  );
+});
+
+test("wt_counts refuses an unlisted .worktrees directory or pointer it cannot read or parse", (t) => {
+  if (isRoot) return t.skip("root reads every file");
+  const r = repo(t);
+  const wt = fleetLinked(r, "1-held");
+  rmSync(pointed(wt), { recursive: true, force: true });
+  const dotgit = join(wt, ".git");
+  chmodSync(dotgit, 0o000);
+  let p = probe(r.w, COUNTS);
+  chmodSync(dotgit, 0o644);
+  assert.match(p.out, /^rc=1$/m, p.out);
+  assert.ok(p.out.includes(`why=worktree pointer ${dotgit} could not be read`), p.out);
+
+  chmodSync(wt, 0o000);
+  p = probe(r.w, COUNTS);
+  chmodSync(wt, 0o755);
+  assert.match(p.out, /^rc=1$/m, p.out);
+  assert.ok(p.out.includes(`why=worktree directory ${wt} is not in git's listing and could not be searched`), p.out);
+
+  writeFileSync(dotgit, "not a pointer\n");
+  p = probe(r.w, COUNTS);
+  assert.match(p.out, /^rc=1$/m, p.out);
+  assert.ok(p.out.includes(`why=worktree pointer ${dotgit} names no admin dir`), p.out);
+});
+
+test("wt_counts agrees over .worktrees entries that are not this registry's lost worktrees", (t) => {
+  if (isRoot) return t.skip("root reads every file");
+  const r = repo(t);
+  const held = fleetLinked(r, "1-held");
+  let relative;
+  try {
+    relative = fleetLinked(r, "2-relative", "--relative-paths");
+  } catch {
+    relative = fleetLinked(r, "2-relative");
+  }
+  const wts = join(r.w, ".worktrees");
+  // A directory with no `.git` at all, and one whose `.git` is a directory: neither is a linked worktree.
+  mkdirSync(join(wts, "3-stray"));
+  execFileSync("git", ["init", "-q", join(wts, "4-clone")], { env: ENV });
+  // A pointer into ANOTHER repo's registry, at an entry that repo does not hold: not this registry's to answer for.
+  const foreign = join(r.root, "foreign");
+  execFileSync("git", ["init", "-q", foreign], { env: ENV });
+  mkdirSync(join(foreign, ".git", "worktrees"));
+  mkdirSync(join(wts, "5-foreign"));
+  writeFileSync(join(wts, "5-foreign", ".git"), `gitdir: ${foreign}/.git/worktrees/5-foreign\n`);
+  // Unlisted copies whose pointers name admin dirs the registry still holds, in endings git accepts (git 2.50.1): CRLF, and no newline at all.
+  mkdirSync(join(wts, "6-copy"));
+  writeFileSync(join(wts, "6-copy", ".git"), `gitdir: ${pointed(held)}\r\n`);
+  mkdirSync(join(wts, "7-copy"));
+  writeFileSync(join(wts, "7-copy", ".git"), `gitdir: ../../.git/worktrees/2-relative`);
+  for (const copy of ["6-copy", "7-copy"]) {
+    assert.equal(git(join(wts, copy), "rev-parse", "--path-format=absolute", "--git-common-dir"), join(r.w, ".git"), `fixture: git reads ${copy}'s pointer`);
+  }
+  // A worktree git still LISTS, its pointer redirected at an entry the registry does not hold: the listing holds its branch.
+  writeFileSync(join(held, ".git"), `gitdir: ${r.w}/.git/worktrees/nope\n`);
+  // A plain file standing where a worktree would.
+  writeFileSync(join(wts, "8-file"), "not a worktree\n");
+  // A pointer into THIS repo's common dir but at an entry outside `worktrees` (where a submodule's own admin dir lives): not this registry's to hold, so not a lost registration.
+  mkdirSync(join(wts, "9-module"));
+  writeFileSync(join(wts, "9-module", ".git"), `gitdir: ${r.w}/.git/modules/x\n`);
+  assert.equal(probe(r.w, COUNTS).out, "rc=0\nregistered=2 linked=2\nwhy=\n");
+  // From inside a member's worktree, the cwd every member runs these scripts from.
+  assert.equal(probe(relative, COUNTS).out, "rc=0\nregistered=2 linked=2\nwhy=\n");
+  // And a `.worktrees` that cannot be listed is left to the callers' per-worktree guards.
+  chmodSync(wts, 0o000);
+  const p = probe(r.w, COUNTS);
+  chmodSync(wts, 0o755);
+  assert.equal(p.out, "rc=0\nregistered=2 linked=2\nwhy=\n");
+});
+
 // --- wt_outcome
 
 test("wt_outcome measures each landing shape of a refused `git worktree remove`, and restores $wt_list", (t) => {

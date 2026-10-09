@@ -294,9 +294,10 @@ git rev-parse --verify "$base_rev" >/dev/null || die "$base does not resolve"
 # disk against the linked worktrees git listed, recounts before refusing, and
 # names the direction a standing disagreement runs. Each refusal is this
 # script's precondition `die`; a listing git could not produce at all names
-# git's own cause. Absent entirely is fine and answers nothing: zero registry
-# entries against the main worktree alone is a match, so the release goes
-# through. The listing it validated is the `$wt_list` every lookup below scans.
+# git's own cause. Absent entirely is fine and answers nothing while no
+# `.worktrees/*` pointer names an entry in it: zero registry entries against
+# the main worktree alone is a match, so the release goes through. The listing
+# it validated is the `$wt_list` every lookup below scans.
 if wt_counts; then :; else
   case $? in
     2) die "could not read the worktree list for #$issue: $wt_why" ;;

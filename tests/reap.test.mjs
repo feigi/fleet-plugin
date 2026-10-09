@@ -4679,6 +4679,37 @@ for (const f of UNSAFE_REGISTRY) {
   });
 }
 
+// The registry removed OUTRIGHT under the held worktree — whole, or its own
+// entry — rather than corrupted in place. Both counts drop in step and agree,
+// and git's own `branch -D` refusal reads the same admin state, so only the
+// worktree's `.git` pointer still names what was lost. The held worktree sits
+// at `.worktrees/<N>-<slug>`, the depth claim-ticket.sh creates fleet
+// worktrees at.
+for (const shape of ["registry", "entry"]) {
+  test(`a registration removed outright under a live worktree keeps the whole pass: ${shape}`, (t) => {
+    const w = repo(t);
+    const wt = mergedGoneBranchWithWorktree(w, "feature/held", "held work", join(w, ".worktrees", "1-held"));
+    writeFileSync(join(wt, "untracked.txt"), "work that exists nowhere else\n");
+    mergedGoneBranch(w, "feature/free", "free work");
+    const admin = adminEntry(w, wt);
+    rmSync(shape === "registry" ? join(w, ".git", "worktrees") : admin, { recursive: true, force: true });
+    assert.doesNotMatch(git(w, "worktree", "list", "--porcelain"), /feature\/held/, "fixture: git no longer lists the held worktree");
+
+    const { json, stderr } = runReap(w, ["--apply"]);
+
+    assert.ok(json, `a payload, not a bare failure: ${stderr}`);
+    assert.deepEqual(json.reaped, []);
+    for (const b of ["feature/free", "feature/held"]) {
+      assert.equal(branchExists(w, b), true, `${b} survives`);
+      const k = keptFor(json, b);
+      assert.equal(k.length, 1, `${b} is kept exactly once: ${JSON.stringify(json.kept)}`);
+      assert.match(k[0].reason, /worktree registry inconsistent — worktree pointer \S*\/\.worktrees\/1-held\/\.git names admin dir \S*, which is missing from the worktree registry/);
+      assert.match(k[0].reason, /kept until a pass that reads a consistent registry/);
+    }
+    assert.equal(readFileSync(join(wt, "untracked.txt"), "utf8"), "work that exists nowhere else\n");
+  });
+}
+
 // The control rows: no fault, and the three faults #2078 measured git itself
 // still answering safely — the listing keeps the held entry's `branch` line,
 // so the counts agree, no HEAD is null, and the registry guard must not fire.

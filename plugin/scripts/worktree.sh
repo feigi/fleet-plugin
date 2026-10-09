@@ -50,6 +50,8 @@
 # only thing any caller needs: this is a path the reader cannot hand back to the
 # filesystem byte for byte.
 wt_nl=$(printf '\001')
+# A carriage return, which git drops from the end of a `.git` pointer.
+wt_cret=$(printf '\r')
 
 # Does $1 carry the byte `wt_listing` substituted for a newline?
 #
@@ -664,9 +666,11 @@ wt_registry_root() {
 # listing — measured. So count instead: one registry entry on disk per linked
 # worktree, against what git reported.
 #
-# Absent entirely answers nothing: a repo whose worktrees were removed and
+# Absent entirely answers nothing here: a repo whose worktrees were removed and
 # pruned (or never existed) has no `worktrees` dir, and zero entries against
-# the main worktree alone is a match. Present but unreadable is a refusal, and
+# the main worktree alone is a match. A registry or entry removed OUTRIGHT
+# under a live worktree drops both counts in step, so they agree over it too;
+# `wt_count_pointers` is what refuses that. Present but unreadable is a refusal, and
 # not redundant with the count: unreadable, the glob below expands to nothing,
 # and zero-on-disk would AGREE with the empty listing git returns for the same
 # reason. `-d` joins `-r` and `-x` there because a registry replaced by a
@@ -744,6 +748,128 @@ wt_count_pair() {
   wt_count_linked || return 1
 }
 
+# Is any fleet worktree standing with its registration removed under it? 0
+# when none is; 1 with `$wt_why` naming the first `.worktrees/*` pointer git
+# does not list that names an admin dir the registry does not hold, or that
+# could not be read. Reads `$wt_list` for the main checkout and the listed
+# paths, and `$wt_root` for the registry, both as `wt_count_pair` left them.
+#
+# The counts cannot see this: git lists a linked worktree only from its admin
+# dir, so a registry `rm -rf`'d whole, or one entry removed, drops the entry
+# from the registry count AND the listing in step. They agree, the worktree's
+# branch reads as held by nothing, and `git branch -D` deletes it too — git's
+# own "used by worktree" refusal reads the same admin state (measured, git
+# 2.50.1, for both shapes and for an entry emptied to a bare directory, which
+# the registry count skips and git ignores). Nothing in the registry names the
+# orphan any more, so the cross-check reads the other end of the link: the
+# `.git` file in each `.worktrees/*` directory, the layout claim-ticket.sh
+# creates every fleet worktree in.
+#
+# A directory git LISTS is skipped first: its admin dir exists, since that is
+# where git read it from, so its branch is already held in the listing, and
+# whatever else is wrong with it is the caller's per-worktree guards' to
+# answer. Its path is matched byte for byte against the listing's, under the
+# main checkout path the listing itself spells. Of the rest, only a pointer
+# into THIS registry is answered for: its admin dir's parent is named
+# `worktrees` and sits in the same directory (`-ef`) as `$wt_root`'s. Anything
+# else under `.worktrees/` — a directory with no `.git`, a `.git` DIRECTORY (a
+# clone, not a linked worktree), a pointer into another repo — is not a linked
+# worktree of this repo and is skipped. A pointer is read the way git reads it
+# (git 2.50.1): `gitdir: <path>` on its first line, a trailing CR dropped, a
+# relative path resolved against the worktree directory. An unlisted
+# directory, pointer or named admin dir that cannot be read is a refusal: what
+# it names is unknown, and unknown is never "registered".
+#
+# Ceilings, left open on purpose. A `.worktrees` directory that cannot be
+# listed is skipped, not refused: every worktree in it that git still lists is
+# answered by the caller's own guards, each with its own remedy, and an
+# unlisted one behind it needs that fault and a removed registry entry at once.
+# And only `.worktrees/*` itself is read, the depth claim-ticket.sh creates
+# worktrees at: one nested deeper (`.worktrees/feature/x`) is not, since
+# reaching it means walking every directory under `.worktrees/` that holds no
+# `.git` — operators' scratch trees included — on every count.
+# shellcheck disable=SC2034
+wt_count_pointers() {
+  wt_cp_main=${wt_list%%"
+"*}
+  case $wt_cp_main in
+    "worktree "?*) wt_cp_main=${wt_cp_main#worktree } ;;
+    *)
+      wt_why="git's listing does not open with the main checkout's path"
+      return 1
+      ;;
+  esac
+  if nl_path "$wt_cp_main"; then
+    wt_why="the main checkout's path carries a newline, so its .worktrees directory cannot be named"
+    return 1
+  fi
+  wt_cp_dir=$wt_cp_main/.worktrees
+  [ -d "$wt_cp_dir" ] && [ -r "$wt_cp_dir" ] && [ -x "$wt_cp_dir" ] || return 0
+  for wt_cp_wt in "$wt_cp_dir"/*; do
+    [ -d "$wt_cp_wt" ] || continue
+    case "
+$wt_list
+" in
+      *"
+worktree $wt_cp_wt
+"*) continue ;;
+    esac
+    [ -x "$wt_cp_wt" ] || {
+      wt_why="worktree directory $wt_cp_wt is not in git's listing and could not be searched, so whether it has lost its registration is unknown"
+      return 1
+    }
+    wt_cp_ptr=$wt_cp_wt/.git
+    [ -f "$wt_cp_ptr" ] || continue
+    wt_cp_line=
+    # `|| :` because a last line with no newline fails `read` with the line read.
+    if ! [ -r "$wt_cp_ptr" ] || ! { IFS= read -r wt_cp_line || :; } 2>/dev/null <"$wt_cp_ptr"; then
+      wt_why="worktree pointer $wt_cp_ptr could not be read, and git does not list its worktree, so whether its admin dir is registered is unknown"
+      return 1
+    fi
+    wt_cp_line=${wt_cp_line%"$wt_cret"}
+    case $wt_cp_line in
+      "gitdir: "?*) wt_cp_admin=${wt_cp_line#gitdir: } ;;
+      *)
+        wt_why="worktree pointer $wt_cp_ptr names no admin dir (no gitdir: line), and git does not list its worktree, so whether it is registered is unknown"
+        return 1
+        ;;
+    esac
+    case $wt_cp_admin in
+      /*) ;;
+      *) wt_cp_admin=$wt_cp_wt/$wt_cp_admin ;;
+    esac
+    while :; do
+      case $wt_cp_admin in
+        ?*/) wt_cp_admin=${wt_cp_admin%/} ;;
+        *) break ;;
+      esac
+    done
+    wt_cp_reg=${wt_cp_admin%/*}
+    [ "${wt_cp_reg##*/}" = worktrees ] || continue
+    # shellcheck disable=SC3013,SC2319 # -ef as in wt_linkage; the else's $? is the `[ -ef ]` test's own rc, read before anything else runs, to fail closed on rc>=2
+    if [ "${wt_cp_reg%/*}/" -ef "${wt_root%/*}/" ]; then :; else
+      wt_cp_rc=$?
+      [ "$wt_cp_rc" -ge 2 ] || continue
+      wt_why="could not compare the repo $wt_cp_ptr points into with ${wt_root%/*} (test -ef exited $wt_cp_rc), so whether it names this registry is unknown"
+      return 1
+    fi
+    if ! [ -d "$wt_cp_admin" ]; then
+      wt_why="worktree pointer $wt_cp_ptr names admin dir $wt_cp_admin, which is missing from the worktree registry $wt_root — git lists no worktree there, so no absence it reports can be trusted; inspect the directory and, once its work is saved, remove it by hand"
+      return 1
+    fi
+    # `ls`'s STATUS, not just its output: an admin dir that cannot be listed is
+    # not an empty one, and `2>/dev/null` alone reads both as "nothing to say".
+    if ! wt_cp_ls=$(ls -A "$wt_cp_admin" 2>/dev/null); then
+      wt_why="worktree pointer $wt_cp_ptr names admin dir $wt_cp_admin, which could not be listed, and git does not list its worktree, so whether it is registered is unknown"
+      return 1
+    elif [ -z "$wt_cp_ls" ]; then
+      wt_why="worktree pointer $wt_cp_ptr names admin dir $wt_cp_admin, an empty directory git does not list — git lists no worktree there, so no absence it reports can be trusted; inspect the directory and, once its work is saved, remove it by hand"
+      return 1
+    fi
+  done
+  return 0
+}
+
 # Is the listing COMPLETE — does git list exactly as many linked worktrees as
 # the registry holds entries? A listing that silently dropped an entry hands
 # every lookup over it "no worktree" for a branch a live worktree holds, at
@@ -753,15 +879,18 @@ wt_count_pair() {
 # the caller's lookups then scan the very listing the counts validated. Sets
 # `$wt_registered`, `$wt_linked` and `$wt_root`.
 #
-# 0: the counts agree.
+# 0: the counts agree, and every fleet worktree's pointer names a registered
+#    admin dir.
 # 1: refused — `$wt_why` names the cause: the common directory or the
-#    registry could not be read, the listing could not be counted, or the
-#    counts still disagree, named by the DIRECTION observed. FEWER listed than
-#    registered is git dropping an entry it could not read — the fault this
-#    check exists to catch. MORE listed than registered is the reverse, the
-#    registry read missing entries, which under a parallel fleet is a
-#    sibling's `git worktree add` landing between the two reads. One message
-#    cannot serve both: they send the reader to opposite places.
+#    registry could not be read, the listing could not be counted, the
+#    counts still disagree, or a `.worktrees/*` pointer names an admin dir the
+#    registry does not hold (`wt_count_pointers`). A standing disagreement is
+#    named by the DIRECTION observed. FEWER listed than registered is git
+#    dropping an entry it could not read — the fault this check exists to
+#    catch. MORE listed than registered is the reverse, the registry read
+#    missing entries, which under a parallel fleet is a sibling's `git
+#    worktree add` landing between the two reads. One message cannot serve
+#    both: they send the reader to opposite places.
 # 2: the listing itself could not be read — `$wt_why` is `wt_listing`'s cause,
 #    flattened to one line, and `$wt_err` holds it as read.
 #
@@ -805,7 +934,7 @@ wt_counts() {
     wt_why="git listed $wt_linked worktrees but only $wt_registered registry entries were counted in $wt_root — the registry read missed entries git can see, so no absence it reports can be trusted"
     return 1
   fi
-  return 0
+  wt_count_pointers
 }
 
 # Does $1's `.git` linkage answer for $1 itself? 0 when it does; 1 with
