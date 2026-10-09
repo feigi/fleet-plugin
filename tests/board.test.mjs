@@ -1797,6 +1797,26 @@ test("two session dirs whose transcripts share a basename each get their own ski
   assert.equal(errs.filter((e) => e.includes(dirB)).length, 1, "dir B's own path must appear, got " + JSON.stringify(errs));
 });
 
+// #1653: two of the skip routes carry the transcript's own path inside
+// e.message — Node's errno text (`..., open '<path>'`) and member-record's
+// wrong-shape refusal (`...: <path>`) — so `skipping ${file}: ${e.message}`
+// printed it twice. A dangling symlink is a deterministic ENOENT at read
+// (the transcript scan filters on the `.jsonl` suffix, not file type).
+test("a skip line names its transcript's path exactly once, on the errno and the refusal route", () => {
+  const dir = tempDir("spend-once-");
+  const dangling = join(dir, "agent-d.jsonl");
+  const wrongShape = join(dir, "agent-w.jsonl");
+  symlinkSync(join(dir, "nowhere.jsonl"), dangling);
+  writeFileSync(wrongShape, '{"foo":1}\n');
+  const errs = withStderr(() => { gatherSpend({ dir }); });
+  assert.equal(errs.length, 2, "expected one skip line per transcript, got " + JSON.stringify(errs));
+  for (const file of [dangling, wrongShape]) {
+    const lines = errs.filter((e) => e.includes(file));
+    assert.equal(lines.length, 1, `expected one skip line for ${file}, got ` + JSON.stringify(errs));
+    assert.equal(lines[0].split(file).length - 1, 1, `${file} must appear exactly once, got ` + JSON.stringify(lines[0]));
+  }
+});
+
 test("#916: a damaged mid-file line reaches the MODEL as a count, not stderr alone", () => {
   // #916: a damaged mid-file line has no STDERR line at all — readOmpSpend
   // never warns per damaged line, only per whole-unreadable transcript — so

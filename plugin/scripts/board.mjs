@@ -983,7 +983,14 @@ function readOmpSpend(dir, sinceMs) {
       toolTables.push(tools);
     } catch (e) {
       skipped++;
-      warnOnce("skips", file, `skipping ${file}: ${e.message}`);
+      // The prefix already names `file`; Node's errno text (`..., open
+      // '<file>'`) and member-record's shape refusal (`...: <file>`) end in
+      // it too, so that tail is dropped. Any other wording prints whole.
+      let why = String(e.message);
+      for (const tail of [` '${file}'`, `: ${file}`]) {
+        if (why.endsWith(tail)) { why = why.slice(0, -tail.length); break; }
+      }
+      warnOnce("skips", file, `skipping ${file}: ${why}`);
     }
   }
   return { agents, toolTables, skipped, damaged };
