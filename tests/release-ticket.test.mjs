@@ -263,13 +263,19 @@ for (const shape of ["registry", "entry"]) {
 }
 
 test("a `git worktree remove` that failed partway leaves a pointer that refuses every later release, naming the remedy", (t) => {
-  if (EUID0) return t.skip(NO_DENIAL);
-  // The state git itself leaves: `worktree remove` deletes the registration
-  // BEFORE the directory, and a subdirectory at mode 555 fails the directory
-  // delete (rc 255, measured on git 2.50.1), so the registration is gone and
-  // the `.git` pointer is still standing. wt_counts refuses on the pointer,
+  // The state a `git worktree remove` that failed partway leaves: git deletes
+  // the registration BEFORE the directory, so when the directory delete fails
+  // (rc 255 measured on git 2.50.1, for a subdirectory it may not unlink from)
+  // the registration is gone and the directory -- `.git` pointer, tracked and
+  // untracked files -- is still standing. wt_counts refuses on the pointer,
   // and it does so for the whole repo: a sibling's release is refused too,
   // not only the claim whose removal failed.
+  //
+  // Built directly rather than by provoking the failure. Which entry a failed
+  // recursive delete reaches first is the filesystem's readdir order, so a
+  // chmod 555 subdirectory left the pointer standing on macOS and took it away
+  // on the Linux runner (git 2.55) -- and it denies nothing under euid 0. So
+  // no EUID0 skip either: nothing here relies on a permission denial.
   const r = repo(t);
   mkdirSync(join(r.w, "sub"));
   writeFileSync(join(r.w, "sub", "tracked.txt"), "tracked\n");
@@ -278,10 +284,10 @@ test("a `git worktree remove` that failed partway leaves a pointer that refuses 
   git(r.w, "push", "-q", "origin", "main");
   const c = claim(r.w, 9, "release-ticket");
   const other = claim(r.w, 10, "other-member");
-  chmodSync(join(c.wt, "sub"), 0o555);
-  const removal = spawnSync("git", ["worktree", "remove", c.wt], { cwd: r.w, env: ENV, encoding: "utf8" });
-  assert.notEqual(removal.status, 0, `fixture: the removal must really fail partway: ${removal.stderr}`);
+  writeFileSync(join(c.wt, "sub", "untracked.txt"), "work that exists nowhere else\n");
+  rmSync(join(r.w, ".git", "worktrees", "9-release-ticket"), { recursive: true, force: true });
   assert.ok(existsSync(join(c.wt, ".git")), "fixture: the pointer survives the failed removal");
+  assert.ok(existsSync(join(c.wt, "sub", "tracked.txt")), "fixture: the directory is left partly populated");
   assert.ok(!git(r.w, "worktree", "list", "--porcelain").includes(`worktree ${c.wt}\n`), "fixture: the registration is gone");
 
   for (const [who, claimed] of [["the claim whose removal failed", c], ["a sibling", other]]) {
