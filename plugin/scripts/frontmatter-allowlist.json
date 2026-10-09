@@ -1,5 +1,5 @@
 {
-  "_comment": "The allow-list data. One allow-list per artefact kind (agents, skills, commands) for omp's documented keys (`omp://task-agent-discovery.md`, `omp://skills.md`). Enforced by frontmatter-check.mjs: unknown keys are rejected, required keys are enforced, and `forbidden` catches a key that reads as configuration but silently reroutes a member's tier, tree, or dispatch.",
+  "_comment": "The allow-list data. One allow-list per artefact kind (agents, skills, commands) for omp's documented keys (`omp://task-agent-discovery.md`, `omp://skills.md`). Enforced by frontmatter-check.mjs: unknown keys are rejected, required keys are enforced, and `forbidden` catches a key that reads as configuration but is either silently ignored by omp or silently reroutes a member's tier, tree, or dispatch.",
 
   "agents": {
     "required": ["name", "description", "model"],

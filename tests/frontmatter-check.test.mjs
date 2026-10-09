@@ -333,7 +333,7 @@ test("CLI: the real shipped allow-list rejects maxTurns as a Claude Code-only ke
   assert.equal(r.stdout.trim(), `agents/x.agent.md:5: maxTurns — ${CLAUDE_CODE_ONLY_REASON}`);
 });
 
-test("checkFields: the real shipped allow-list forbids every Claude Code-only agent key, and allows none of them", () => {
+test("checkFields: the real shipped allow-list forbids the six listed Claude Code-only agent keys, and allows none of them", () => {
   const { allowlist } = parseAllowlist(readFileSync(REAL_ALLOWLIST_PATH, "utf8"));
   for (const key of ["disallowedTools", "skills", "maxTurns", "background", "color", "memory"]) {
     assert.ok(!allowlist.agents.allowed.includes(key), `${key} is not in agents.allowed`);

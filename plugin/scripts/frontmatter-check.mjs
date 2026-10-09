@@ -8,9 +8,10 @@
 // Contract: three key sets (agents, skills, commands), enforced in BOTH
 // directions — an unknown key is a violation (half a contract leaves an
 // undocumented addition silent) and a missing REQUIRED key is a
-// violation — plus a third class, FORBIDDEN: a key that IS documented but
-// silently re-routes a member's tier, tree, or dispatch rather than merely
-// doing nothing. `frontmatter-allowlist.json` carries the data;
+// violation — plus a third class, FORBIDDEN: a key that reads as
+// configuration yet is either one omp silently ignores (a Claude Code key
+// omp does not read) or one that silently re-routes a member's tier, tree,
+// or dispatch. `frontmatter-allowlist.json` carries the data;
 // this file carries no key names of its own.
 //
 // Failure contract: exit 1 per violation, each printed as
