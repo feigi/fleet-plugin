@@ -23,31 +23,47 @@ import { makeDie, defineFlags } from "./arg.mjs";
 const NAME = "diff-stats";
 
 // Classification is by path — the cheapest signal that separates "prose" from
-// "code" — and priority-ordered because a test file is also a .ts file: test
-// wins over src, docs and config are named explicitly, src is the residue.
-export const isTest = (p) => /(\.|_)(test|spec)\.[cm]?[jt]sx?$/i.test(p) || /(^|\/)(__tests__|tests?|e2e|__mocks__)\//i.test(p);
-export const isDocs = (p) => /\.(md|mdx|markdown|txt|rst|adoc)$/i.test(p) || /(^|\/)docs?\//i.test(p) || /(^|\/)(README|CHANGELOG|LICENSE|CONTRIBUTING)(\.|$)/i.test(p);
+// "code" — and subtractive: test, docs and config are named by language-neutral
+// patterns, and whatever none of them claims is `src`. There is no list of
+// runnable-code extensions, so a .java, .go or .py file is `src` exactly as a .ts
+// one is.
+//
+// A test directory segment outranks everything, so a fixture under `tests/` is a
+// test whatever its extension. A test NAME is checked only after docs and config,
+// so a test-shaped name never moves a docs or config file: `docker-compose.test.yml`
+// stays config and `docs/test_plan.md` stays docs, and the review keeps the
+// dimensions it had.
+export const isTestDir = (p) => /(^|\/)(__tests__|tests?|e2e|__mocks__)\//i.test(p);
+
+// A test name is a `_test`/`.test`/`_spec`/`.spec` suffix or `test_` prefix on the
+// basename, or a CamelCase `Test`/`Tests` suffix — case-sensitive and after a
+// letter or digit, so `latest.go` and `Contest.java` stay source. The CamelCase
+// suffix is a naming heuristic: it also claims a production component named like
+// `ABTest.tsx`, which is the accepted cost of recognising `FooTest.java` without
+// naming a language.
+export const isTestName = (p) =>
+  /[._](test|spec)\.[^/.]+$/i.test(p) ||
+  /(^|\/)test_[^/]*$/i.test(p) ||
+  /[A-Za-z0-9]Tests?\.[^/.]+$/.test(p);
+
+// Only a prose or config extension, or a conventional name, makes a file docs or
+// config — which those already do anywhere, so neither `docs/` nor `.github/` has
+// a rule of its own. A docs-site generator or a composite-action script under them
+// stays `src`, and the src-gated dimensions (types, silent-failure, simplify) still
+// run on it. `*.config.*` is config by naming convention, whatever the extension:
+// that keeps `vite.config.ts` config without a list of JS extensions, and it also
+// claims a non-JS module named like `app.config.py`.
+export const isDocs = (p) => /\.(md|mdx|markdown|txt|rst|adoc)$/i.test(p) || /(^|\/)(README|CHANGELOG|LICENSE|CONTRIBUTING)(\.|$)/i.test(p);
 export const isConfig = (p) =>
   /\.(ya?ml|toml|ini|cfg|conf|json|json5|lock|env)$/i.test(p) ||
-  /(^|\/)\.github\//i.test(p) ||
-  /\.config\.[cm]?[jt]s$/i.test(p) ||
-  /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|\.[a-z]+rc)$/i.test(p);
-
-// A runnable-code extension (.js/.cjs/.mjs/.ts/.tsx/.jsx/…), and the naming
-// convention that marks a code file as config regardless of where it sits.
-const isCodeExt = (p) => /\.[cm]?[jt]sx?$/i.test(p);
-const isConfigName = (p) => /\.config\.[cm]?[jt]sx?$/i.test(p);
+  /\.config\.[^/.]+$/i.test(p) ||
+  /(^|\/)\.[a-z]+rc$/i.test(p);
 
 export function classify(p) {
-  if (isTest(p)) return "test";
-  // A code file is `src` even under docs/ or .github/. Path-based docs/config
-  // rules must not swallow executable code — a docs-site generator or a
-  // composite-action script — or the src-gated dimensions (types, silent-failure,
-  // simplify) silently never run on real code. Exception: `*.config.{js,ts,…}` is
-  // config by naming convention.
-  if (isCodeExt(p) && !isConfigName(p)) return "src";
+  if (isTestDir(p)) return "test";
   if (isDocs(p)) return "docs";
   if (isConfig(p)) return "config";
+  if (isTestName(p)) return "test";
   return "src";
 }
 

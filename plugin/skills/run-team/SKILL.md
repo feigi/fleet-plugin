@@ -2014,7 +2014,7 @@ correctness+comments; and any `single-file` or `small` profile trims to
 correctness+silent-failure+comments, keeping tests only when a test file is in
 the diff. `comments` is on that floor
 unconditionally — it used to need a docs FILE, and `classify()` scores
-any code extension `src` before it checks docs, so five production PRs whose whole
+only a prose extension or a README/CHANGELOG-style name docs, so five production PRs whose whole
 substance was prose inside a `.js`/`.mjs`/`.sh` comment scored `docs: 0` and ran
 without the one specialist that fit them, `dimensionsUnrun` empty every time.
 That floor holds **regardless of `hasSrc`** — a one-file `.yml` or

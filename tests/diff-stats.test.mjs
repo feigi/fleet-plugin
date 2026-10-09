@@ -19,7 +19,7 @@ import { writeExecStub } from "./support/exec-stub.mjs";
 const SCRIPT = join(import.meta.dirname, "..", "plugin", "scripts", "diff-stats.mjs");
 const CLI = readFileSync(SCRIPT, "utf8");
 
-test("classifier priority: test > code-ext > docs/config-dir", () => {
+test("classifier priority: test directory > docs/config > test name > src residue", () => {
   // src is the residue
   assert.equal(classify("src/a.ts"), "src");
   assert.equal(classify("scripts/review-core.mjs"), "src");
@@ -29,7 +29,7 @@ test("classifier priority: test > code-ext > docs/config-dir", () => {
   // prose
   assert.equal(classify("README.md"), "docs");
   assert.equal(classify("docs/guide.md"), "docs");
-  // config by extension / location / naming convention
+  // config by extension / naming convention
   assert.equal(classify(".github/workflows/ci.yml"), "config");
   assert.equal(classify("package.json"), "config");
   assert.equal(classify("vite.config.ts"), "config");
@@ -39,6 +39,52 @@ test("classifier priority: test > code-ext > docs/config-dir", () => {
   assert.equal(classify("docs/examples/deploy.ts"), "src");
   assert.equal(classify(".github/scripts/action.mjs"), "src");
   assert.equal(classify("packages/x/docs/gen.mjs"), "src");
+});
+
+// No runnable-code extension list: a path no docs/config/test rule claims is
+// `src` whatever its language, and test names are recognised for any extension.
+test("classifier is language-neutral: non-JS source and test files", () => {
+  assert.equal(classify("src/main/java/X.java"), "src");
+  assert.equal(classify("pkg/x.go"), "src");
+  assert.equal(classify("src/test/java/XTest.java"), "test");
+  assert.equal(classify("tests/test_x.py"), "test");
+  assert.equal(classify("Cargo.lock"), "config");
+  // test by name alone, outside any test directory
+  assert.equal(classify("pkg/x_test.go"), "test");
+  assert.equal(classify("app/test_x.py"), "test");
+  assert.equal(classify("com/acme/FooTest.java"), "test");
+  assert.equal(classify("lib/foo_spec.rb"), "test");
+  // a script under docs/ or .github/ is code, like its .js equivalent
+  assert.equal(classify("docs/gen.py"), "src");
+  assert.equal(classify(".github/scripts/check.py"), "src");
+  // a test directory is test whatever the extension inside it
+  assert.equal(classify("e2e/login.ts"), "test");
+  assert.equal(classify("web/e2e/login.py"), "test");
+  assert.equal(classify("src/__mocks__/api.ts"), "test");
+  assert.equal(classify("tests/fixtures/x.json"), "test");
+});
+
+// The test-name rules must not claim a source file whose name merely contains
+// "test": the CamelCase `Test` suffix is case-sensitive and needs a word before
+// it, and `test_` must start the basename.
+test("classifier: a name containing 'test' is not a test name", () => {
+  assert.equal(classify("pkg/latest.go"), "src");
+  assert.equal(classify("src/Contest.java"), "src");
+  assert.equal(classify("app/attest_x.py"), "src");
+  assert.equal(classify("app/testing.py"), "src");
+  // the CamelCase suffix needs a letter or digit before it, in either number
+  assert.equal(classify("src/Test.java"), "src");
+  assert.equal(classify("com/acme/FooTests.cs"), "test");
+});
+
+// A test-shaped name must not move a docs or config file: the name rules run
+// after docs and config, so these keep the dimensions they had.
+test("classifier: a test-shaped name on a docs or config extension stays docs/config", () => {
+  assert.equal(classify("docker-compose.test.yml"), "config");
+  assert.equal(classify("config/appsettings.test.json"), "config");
+  assert.equal(classify("projects/app/tsconfig.spec.json"), "config");
+  assert.equal(classify("docs/test_plan.md"), "docs");
+  assert.equal(classify("api/openapi.spec.yaml"), "config");
 });
 
 test("computeStats: profile ladder", () => {
@@ -106,7 +152,10 @@ test("classify: extensionless files fall to src (fail-open residue)", () => {
   assert.equal(classify("Dockerfile"), "src");
   assert.equal(classify("Makefile"), "src");
   assert.equal(classify("bin/deploy"), "src");
-  assert.equal(classify("foo.config.mjs"), "config"); // config-by-name still wins
+  // config-by-name wins whatever the extension, JS or not
+  assert.equal(classify("foo.config.mjs"), "config");
+  assert.equal(classify("jest.config.py"), "config");
+  assert.equal(classify("app.config.rb"), "config");
 });
 
 test("computeStats: loc tolerates a file missing additions/deletions", () => {
