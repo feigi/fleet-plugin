@@ -33,7 +33,16 @@ layer underneath the [Implementer](implementer.md) role.
    `thinking_level_change.thinkingLevel`, never the frontmatter — and
    compares it to the Declared tier; a mismatch holds the next Pull
    (`HOLD (tier mismatch impl-<N>)`) until a corrected redispatch
-   clears it.
+   clears it. omp's `retry.fallbackChains` does not prevent such a
+   mismatch: it substitutes only on an in-request failure of a primary
+   that was actually selected (omp's own `models.md`: role selection
+   "uses the first available match, not a per-request retry chain"),
+   never when a route degrades to the session default at selection.
+   Mid-run, on omp 18.4.4 a `modelRoles`
+   edit did not reach a plugin agent registered at session start, while
+   a `task.agentModelOverrides` edit reached it on its next dispatch
+   (omp 18.8.6's own `settings.md` says both apply to subsequent subagent
+   launches).
 5. **Record the outcome.** When the controller rules an implementer
    PR's review it appends one row for that PR to
    `docs/metrics/tier-outcomes.tsv` (`tier-outcomes.mjs append`).

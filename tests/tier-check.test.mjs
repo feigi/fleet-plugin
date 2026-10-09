@@ -44,17 +44,19 @@ function agentMd(model) {
 // assistant turn — is what makes the fixtures below realistic: a member
 // still working carries it with no assistant line at all. `agent` is the
 // same line's record of the definition the dispatch named (a generic
-// dispatch writes `task`).
-function ompTranscript(resolvedModelIdentity, thinkingLevel, { withTurn = true, agent } = {}) {
+// dispatch writes `task`). `field` names the key the dispatch-time model is
+// written under: omp 18.8.6 writes `resolvedModel` (measured 2026-10-09) and
+// no `resolvedModelIdentity`.
+function ompTranscript(model, thinkingLevel, { withTurn = true, agent, field = "resolvedModelIdentity" } = {}) {
   const lines = [
     { type: "session", version: 3, id: "s1", timestamp: "2026-09-09T15:11:49.444Z", cwd: "/tmp/x" },
     { type: "thinking_level_change", id: "t1", parentId: null, timestamp: "2026-09-09T15:11:49.494Z", thinkingLevel, configured: null },
-    { type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-09T15:11:49.495Z", task: "fixture", resolvedModelIdentity, ...(agent ? { agent } : {}) },
+    { type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-09T15:11:49.495Z", task: "fixture", [field]: model, ...(agent ? { agent } : {}) },
   ];
   if (withTurn) {
     lines.push({
       type: "message", id: "m1", parentId: "i1", timestamp: "2026-09-09T15:12:00.000Z",
-      message: { role: "assistant", content: [{ type: "text", text: "ok" }], model: resolvedModelIdentity, usage: { input: 2, output: 201, cacheRead: 0, cacheWrite: 100, cost: { total: 0.01 } } },
+      message: { role: "assistant", content: [{ type: "text", text: "ok" }], model, usage: { input: 2, output: 201, cacheRead: 0, cacheWrite: 100, cost: { total: 0.01 } } },
     });
   }
   return lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
@@ -499,6 +501,7 @@ function implWorld({
   ticket = 7, member = `impl-${ticket}`, row = `${member} · class=routine`,
   definitions = { "fleet-implementer-slow-high": "@slow:high" },
   agent = "fleet-implementer-slow-high", model = "anthropic/claude-opus-5", level = "high",
+  field, withTurn,
 } = {}) {
   const d = dir();
   mkdirSync(join(d, "agents"));
@@ -506,7 +509,7 @@ function implWorld({
   const ledger = join(d, "ledger.md");
   ledgerCli(ledger, "row", String(ticket), row);
   mkdirSync(join(d, "session"));
-  writeFileSync(join(d, "session", `${member}.jsonl`), ompTranscript(model, level, { agent }));
+  writeFileSync(join(d, "session", `${member}.jsonl`), ompTranscript(model, level, { agent, field, withTurn }));
   writeFileSync(join(d, "batch.json"), JSON.stringify([{ member, session: "session" }]));
   const read = () => JSON.parse(ledgerCli(ledger, "read"));
   return {
@@ -542,6 +545,24 @@ test("implementer mismatch: exit 1 settles the member tier-mismatch on the ledge
   const again = w.check();
   assert.equal(again.status, 1, again.stdout + again.stderr);
   assert.equal(w.row(), row, "a re-run on an unchanged mismatch changed the row");
+});
+
+// omp 18.8.6 writes the dispatch-time model as `session_init.resolvedModel`
+// (level suffix included) and no `resolvedModelIdentity` at all. A check run
+// straight after a background dispatch sees no assistant turn yet, so that
+// field is the only model on record.
+test("implementer: session_init.resolvedModel alone, before any assistant turn, resolves the member — a match writes tier-ok", () => {
+  const w = implWorld({ model: "anthropic/claude-opus-5:high", field: "resolvedModel", withTurn: false });
+  const r = w.check();
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(w.row(), "#7 impl-7 · class=routine · tier-ok=impl-7:fleet-implementer-slow-high");
+});
+
+test("implementer: session_init.resolvedModel off the route (the session default) is a mismatch naming that model, never `resolved null`", () => {
+  const w = implWorld({ model: "anthropic/claude-sonnet-5", field: "resolvedModel", withTurn: false });
+  const r = w.check();
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stderr, /impl-7: declared @slow:high\/high resolved anthropic\/claude-sonnet-5\/high/);
 });
 
 test("implementer: the expected definition follows the row's tier= — none is the policy cell, any other <cell> its own", () => {

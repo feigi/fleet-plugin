@@ -133,6 +133,29 @@ test("foldOmpTranscript: resolvedModelIdentity is null, never guessed, when sess
   assert.equal(foldOmpTranscript(lines.join("\n"), "/fake/path.jsonl").resolvedModelIdentity, null);
 });
 
+// omp 18.8.6 writes the dispatch-time model under `resolvedModel` (level
+// suffix included) and no `resolvedModelIdentity` (measured 2026-10-09).
+const sessionInitResolvedModelEvt = (fields) => evt({ type: "session_init", id: "i1", parentId: "t1", timestamp: "2026-09-08T15:11:49.495Z", task: "Implement ticket 580", agent: "fleet-implementer-slow-high", ...fields });
+
+test("foldOmpTranscript: session_init.resolvedModel folds as the dispatch-time identity when resolvedModelIdentity is absent, before any assistant turn", () => {
+  const lines = [sessionEvt("/x"), thinkingEvt("high"), sessionInitResolvedModelEvt({ resolvedModel: "anthropic/claude-opus-5:high" })];
+  const folded = foldOmpTranscript(lines.join("\n"), "/fake/path.jsonl");
+  assert.equal(folded.model, null, "a member with no assistant turn yet must not fold a model from nowhere");
+  assert.equal(folded.resolvedModelIdentity, "anthropic/claude-opus-5:high");
+});
+
+test("foldOmpTranscript: a non-string session_init.resolvedModel never folds into resolvedModelIdentity", () => {
+  for (const bad of [42, { id: "anthropic/claude-opus-5" }, ["anthropic/claude-opus-5"], true]) {
+    const lines = [sessionEvt("/x"), thinkingEvt("high"), sessionInitResolvedModelEvt({ resolvedModel: bad })];
+    assert.equal(foldOmpTranscript(lines.join("\n"), "/fake/path.jsonl").resolvedModelIdentity, null, JSON.stringify(bad));
+  }
+});
+
+test("foldOmpTranscript: resolvedModelIdentity wins over resolvedModel when session_init carries both", () => {
+  const lines = [sessionEvt("/x"), thinkingEvt("high"), sessionInitResolvedModelEvt({ resolvedModel: "anthropic/claude-sonnet-5:high", resolvedModelIdentity: "anthropic/claude-opus-5" })];
+  assert.equal(foldOmpTranscript(lines.join("\n"), "/fake/path.jsonl").resolvedModelIdentity, "anthropic/claude-opus-5");
+});
+
 test("foldOmpTranscript: a malformed line away from the tail is counted, not silently dropped (#1717 review)", () => {
   // The tool-attribution stream (#1717) turned the pre-existing silent
   // per-line drop into a real hazard: losing a middle line can desync a

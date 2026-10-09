@@ -111,12 +111,13 @@ export function declaredPairFor(frontmatter) {
 // reported as `null` (a `null` reaching `formatMismatch` would print
 // `resolved .../null`, a lie about a field nobody asked was absent).
 //
-// The transcript-derived model prefers `resolvedModelIdentity`
-// (`session_init`, written at DISPATCH) over the assistant turn's own
-// `model`: the identity exists before the member's first turn, where the
-// per-turn model does not, so preferring it is what makes this check usable
-// immediately after a background dispatch rather than only once a member has
-// already produced output.
+// The transcript-derived model prefers the fold's `resolvedModelIdentity`
+// (`session_init`'s `resolvedModelIdentity`, or its `resolvedModel` where
+// the line carries no identity — both written at DISPATCH) over the
+// assistant turn's own `model`: the identity exists before the member's
+// first turn, where the per-turn model does not, so preferring it is what
+// makes this check usable immediately after a background dispatch rather
+// than only once a member has already produced output.
 export function resolveActual({ transcriptText, resolvedModel, resolvedThinkingLevel }) {
   if (resolvedModel && resolvedThinkingLevel) {
     return { model: resolvedModel, level: resolvedThinkingLevel, viaJobRecord: true };
