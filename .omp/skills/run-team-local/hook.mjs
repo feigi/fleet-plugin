@@ -208,11 +208,23 @@ function stopping(repo, agentsDir, dryRun) {
       say(`stopping rule: ${tally} — continues`);
       continue;
     }
-    const title = `Withdraw exploration cell ${c.cell}: ${c.failures}/${c.verdicts.length} floor failures`;
-    const open = ghJson(repo, ["issue", "list", "--state", "open", "--search", `"${title}" in:title`, "--json", "number,title", "--limit", "100"]);
-    const dup = open.find((i) => i.title === title);
-    if (dup) {
+    // One open issue per cell: the tally in its title moves at every close-out,
+    // so the match is on the cell's prefix, and the title is the idempotency
+    // key — written last, after the comment carrying the new verdict table.
+    const prefix = `Withdraw exploration cell ${c.cell}:`;
+    const title = `${prefix} ${c.failures}/${c.verdicts.length} floor failures`;
+    const open = ghJson(repo, ["issue", "list", "--state", "open", "--search", `"${prefix}" in:title`, "--json", "number,title", "--limit", "100"])
+      .filter((i) => i.title.startsWith(prefix))
+      .sort((a, b) => a.number - b.number);
+    const dup = open.find((i) => i.title === title) ?? open[0];
+    if (dup?.title === title) {
       say(`stopping rule: ${tally} — withdrawal issue already open, #${dup.number}`);
+    } else if (dup && dryRun) {
+      say(`stopping rule: ${tally} — would retitle withdrawal issue #${dup.number} from "${dup.title}" to "${title}" and comment the verdict table`);
+    } else if (dup) {
+      gh(repo, ["issue", "comment", String(dup.number), "--body", withdrawalBody(c)]);
+      gh(repo, ["issue", "edit", String(dup.number), "--title", title]);
+      say(`stopping rule: ${tally} — withdrawal issue #${dup.number} retitled from "${dup.title}", verdict table commented`);
     } else if (dryRun) {
       say(`stopping rule: ${tally} — would file "${title}" (ready-for-human)`);
     } else {

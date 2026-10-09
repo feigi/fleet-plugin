@@ -49,8 +49,11 @@ the run's artifacts are committed:
    with at least 10 verdicts since its definition was last added, and floor
    failures on at least 80% of them, gets one `ready-for-human` issue titled
    `Withdraw exploration cell <cell>: <failures>/<verdicts> floor failures`,
-   its body the verdict table — skipped when an open issue already carries
-   that exact title. Withdrawing the cell is the maintainer's PR, not yours.
+   its body the verdict table. One open issue per cell: an open issue whose
+   title starts with `Withdraw exploration cell <cell>:` is that cell's —
+   left as it is when its title is the new one, otherwise commented with the
+   new verdict table and retitled to the new tally. Withdrawing the cell is
+   the maintainer's PR, not yours.
    A definition no commit adds (a shallow clone, an uncommitted or renamed
    file) cannot be judged: the duty reports the cells it could judge, then
    fails naming the definition, so the router re-fit does not run.

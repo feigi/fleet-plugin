@@ -82,7 +82,7 @@ const agentMd = (cell) => {
 
 // Answers `pr list` (pr-cost's merged-state read, or the open re-fit PR read),
 // `issue list` (raw text instead of JSON when the fixture has `issuesRaw`),
-// and the two writes, from GH_FIXTURE; logs each argv to GH_LOG.
+// and the writes, from GH_FIXTURE; logs each argv to GH_LOG.
 const GH_STUB = `#!/usr/bin/env node
 const fs = require("node:fs");
 const args = process.argv.slice(2);
@@ -94,6 +94,8 @@ const cmd = args.slice(0, 2).join(" ");
 if (cmd === "pr list") out(json === "number,headRefName" ? fx.openPrs : fx.prs);
 else if (cmd === "issue list") { if (fx.issuesRaw !== undefined) process.stdout.write(fx.issuesRaw); else out(fx.issues); }
 else if (cmd === "issue create") console.log("https://github.com/o/r/issues/901");
+else if (cmd === "issue edit") console.log("https://github.com/o/r/issues/" + args[2]);
+else if (cmd === "issue comment") console.log("https://github.com/o/r/issues/" + args[2] + "#issuecomment-1");
 else if (cmd === "pr create") console.log("https://github.com/o/r/pull/902");
 else { process.stderr.write("gh stub: unexpected " + args.join(" ")); process.exit(9); }
 `;
@@ -287,6 +289,8 @@ function floorFailing() {
   return rows;
 }
 const TITLE = "Withdraw exploration cell smol-high: 8/10 floor failures";
+const STALE = { number: 78, title: "Withdraw exploration cell smol-high: 7/9 floor failures" };
+const writes = (f) => ["issue create", "issue edit", "issue comment"].flatMap((cmd) => calls(f, cmd));
 
 test("close-out --dry-run: a cell at ten verdicts and eight floor failures would file its withdrawal issue; a cell under the rule continues", () => {
   const f = fixture({ rows: floorFailing() });
@@ -296,24 +300,50 @@ test("close-out --dry-run: a cell at ten verdicts and eight floor failures would
   assert.match(r.stdout, /stopping rule: task-high 3\/3 floor failures since 2026-09-01 — continues/);
   const lists = calls(f, "issue list");
   assert.equal(lists.length, 1, "only the stopping cell is looked up");
-  assert.deepEqual(lists[0].slice(2, 6), ["--state", "open", "--search", `"${TITLE}" in:title`]);
-  assert.deepEqual(calls(f, "issue create"), [], "a dry run files nothing");
+  assert.deepEqual(lists[0].slice(2, 6), ["--state", "open", "--search", `"Withdraw exploration cell smol-high:" in:title`]);
+  assert.deepEqual(writes(f), [], "a dry run writes nothing");
 });
 
-test("close-out: an open issue with the same title dedupes the withdrawal; an open one with other counts does not, and the issue is filed", () => {
-  const decoy = { number: 78, title: "Withdraw exploration cell smol-high: 7/9 floor failures" };
+test("close-out: an open withdrawal issue with the same title is left as it is, even beside one of the cell's older tallies", () => {
   const open = { number: 77, title: TITLE };
-  const dup = fixture({ rows: floorFailing(), gh: { issues: [decoy, open] } });
-  const d = dup.run("close-out");
-  assert.equal(d.status, 0, d.stderr);
-  assert.match(d.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue already open, #${open.number}$`, "m"));
-  assert.deepEqual(calls(dup, "issue create"), []);
+  const f = fixture({ rows: floorFailing(), gh: { issues: [STALE, open] } });
+  const r = f.run("close-out");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue already open, #${open.number}$`, "m"));
+  assert.deepEqual(writes(f), []);
+});
 
-  const fresh = fixture({ rows: floorFailing(), gh: { issues: [decoy] } });
-  const r = fresh.run("close-out");
+test("close-out: the cell's open withdrawal issue at another tally gets the verdict table as a comment, then the new title; no second issue is filed", () => {
+  const f = fixture({ rows: floorFailing(), gh: { issues: [STALE] } });
+  const r = f.run("close-out");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — withdrawal issue #78 retitled from "${escape(STALE.title)}", verdict table commented$`, "m"));
+  assert.deepEqual(calls(f, "issue create"), []);
+  const [comment] = calls(f, "issue comment");
+  assert.deepEqual(comment.slice(0, 4), ["issue", "comment", "78", "--body"]);
+  assert.ok(comment[4].split("\n").includes("| #100 | #5100 | 2026-10-03 | yes | yes | fail |"), comment[4]);
+  assert.deepEqual(calls(f, "issue edit"), [["issue", "edit", "78", "--title", TITLE]]);
+  // The title is the idempotency key, so it is written after the comment.
+  assert.deepEqual(f.ghCalls().map((c) => c.slice(0, 2).join(" ")).filter((c) => c === "issue comment" || c === "issue edit"), ["issue comment", "issue edit"]);
+});
+
+test("close-out --dry-run: the cell's open withdrawal issue at another tally would be retitled and commented, and nothing is written", () => {
+  const f = fixture({ rows: floorFailing(), gh: { issues: [STALE] } });
+  const r = f.run("close-out", ["--dry-run"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, new RegExp(`stopping rule: smol-high 8/10 floor failures since 2026-09-01 — would retitle withdrawal issue #78 from "${escape(STALE.title)}" to "${escape(TITLE)}" and comment the verdict table$`, "m"));
+  assert.deepEqual(writes(f), []);
+});
+
+test("close-out: another cell's withdrawal issue, or a title that only contains the cell's prefix, does not dedupe, and the issue is filed", () => {
+  const other = { number: 79, title: "Withdraw exploration cell task-high: 3/3 floor failures" };
+  const quoted = { number: 80, title: "Re: Withdraw exploration cell smol-high: 7/9 floor failures" };
+  const f = fixture({ rows: floorFailing(), gh: { issues: [other, quoted] } });
+  const r = f.run("close-out");
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /stopping rule: smol-high 8\/10 floor failures since 2026-09-01 — filed https:\/\/github\.com\/o\/r\/issues\/901/);
-  const [create] = calls(fresh, "issue create");
+  assert.deepEqual([...calls(f, "issue edit"), ...calls(f, "issue comment")], []);
+  const [create] = calls(f, "issue create");
   const flag = (name) => create[create.indexOf(name) + 1];
   assert.equal(flag("--title"), TITLE);
   assert.equal(flag("--label"), "ready-for-human");
