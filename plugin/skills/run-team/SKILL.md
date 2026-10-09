@@ -369,7 +369,9 @@ phase, or in any later one, asks the maintainer which tickets to take.
    install` and `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at
    origin/main`. **Both exit
    0 → the cache is present and valid: use it as it stands and derive
-   nothing.** Either exits 1 (a refusal about the cache) → derive it. Either
+   nothing.** Either exits 1 (a refusal about the cache) → derive it; a refusal
+   naming `--at` says `origin/main` does not resolve, which is no cache fault —
+   fetch it and check again, since deriving would not help. Either
    exits 3 → the reader could not run a tool it needs, so the cache's state is
    unknown: fix that environment fault and check again; deriving would not
    help. This step is yours: one derivation

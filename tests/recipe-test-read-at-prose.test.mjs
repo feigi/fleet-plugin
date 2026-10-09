@@ -17,11 +17,13 @@ const SKILLS = {
 };
 
 // A Test entrypoint read, written out (`derive-testcmd.sh <repo> test`) or
-// elided after a sibling read (`` `… . test` ``). The repository argument may
-// be a placeholder with spaces in it (`<main checkout>`). Matched across a
-// line wrap, since a read may be reflowed over two lines.
-const TEST_READ = /(?:derive-testcmd\.sh|`…)\s+(?:<[^>]*>|\S+)\s+test\b/g;
-const AT_ORIGIN_MAIN = /^\s+--at\s+origin\/main\b/;
+// elided after a sibling read (`` `… . test` ``). Flags may precede the
+// repository argument, which may be a placeholder with spaces in it
+// (`<main checkout>`), a quoted path, or a `$(…)` substitution. Matched across a
+// line wrap, since a read may be reflowed over two lines. The pin ends at a
+// token boundary, so `--at origin/main-old` is a different ref.
+const TEST_READ = /(?:derive-testcmd\.sh|`…)(?:\s+--?[\w-]+)*\s+(?:<[^>]*>|"[^"]*"|\$\([^)]*\)|\S+)\s+test\b/g;
+const AT_ORIGIN_MAIN = /^\s+--at\s+origin\/main(?![\w/-]|\.\w)/;
 
 function testReads(text) {
   return [...text.matchAll(TEST_READ)].map((m) => ({
@@ -47,6 +49,20 @@ test("the Test entrypoint read scanner flags a read with no --at origin/main", (
   assert.deepEqual(
     reads.map((r) => r.atOriginMain),
     [false, false, false],
+  );
+});
+
+test("the Test entrypoint read scanner finds flagged, quoted and substituted repository arguments and holds the pin to origin/main exactly", () => {
+  const reads = testReads(
+    '`derive-testcmd.sh --json . test --at origin/main` `derive-testcmd.sh "<a b>" test --at origin/main` ' +
+      "`derive-testcmd.sh $(git rev-parse --show-toplevel) test --at origin/main` " +
+      "`derive-testcmd.sh . test --at origin/main-old` `derive-testcmd.sh . test --at origin/main.bak` " +
+      "`derive-testcmd.sh . test --at origin/main`.",
+  );
+  assert.deepEqual(
+    reads.map((r) => r.atOriginMain),
+    [true, true, true, false, false, true],
+    "flagged, quoted and substituted reads are found, and a ref that merely starts with origin/main is not origin/main",
   );
 });
 
