@@ -256,6 +256,12 @@ test("bullet takes a bare-marker anchor as a list-item line", () => {
   assert.equal(bullet("-  \n  **A** body\n\n  - deep child\n- b\nEND", "-  \n  **A**", "END", "the fixture"), "-  \n  **A** body\n\n  - deep child");
 });
 
+// Every marker character reads as a list-item line, not only `-` and `1.`.
+test("bullet takes a `*` or `+` anchor as a list-item line", () => {
+  assert.equal(bullet("* **A** body\n* b\nEND", "* **A**", "END", "the fixture"), "* **A** body");
+  assert.equal(bullet("+ **A** body\n+ b\nEND", "+ **A**", "END", "the fixture"), "+ **A** body");
+});
+
 // #2077: a restatement need not be a list item to escape the item. A paragraph
 // after a blank line, or a heading, quote, fence or rule, written shallower than
 // the item's content ends the item in markdown, so it ends the slice too —
