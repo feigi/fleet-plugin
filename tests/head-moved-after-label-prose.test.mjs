@@ -14,16 +14,27 @@
 //
 // THE CEILING: these are presence pins on prose. They prove the rules are
 // stated where their reader reaches them; they cannot prove a merge bot obeys
-// them, and nothing here runs `gh`.
+// them, and nothing here runs `gh`. The record filter is the one exception
+// below: it runs the fenced block's `-q` program through `jq`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { between, phrase } from "./support/prose-pin.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
 const DOC = readFileSync(join(REPO, "commands", "run-merge-bot.md"), "utf8");
 const RUN_TEAM = readFileSync(join(REPO, "skills", "run-team", "SKILL.md"), "utf8");
+const REVIEW_AND_FIX = readFileSync(join(REPO, "commands", "review-and-fix.md"), "utf8");
+
+// The record filter goes through jq. Without it every filter case would fail
+// with a spawn error, which reads as a real red but proves nothing.
+try {
+  execFileSync("jq", ["--version"], { stdio: "ignore" });
+} catch {
+  throw new Error("jq is required to run the record filter; install it before running this suite");
+}
 
 // Bounded at both ends. Unbounded to EOF, `ready-to-merge`, `head` and
 // `finisher` each occur freely through the per-PR sequence and the watcher
@@ -53,11 +64,133 @@ test("the labelled head names why no upstream guard covers this window", () => {
   );
 });
 
-test("the timeline read is the mechanism, keyed on the three events that move a head", () => {
+// #2945: the labelled head is the head its labeller RECORDED. Before it, the
+// bot derived it from the timeline — the `beforeCommit` of the first
+// force-push, refused when one of its commits carried a committer date after
+// the label. A committer date is when the commit was made, not when it was
+// pushed, so a commit made before the label, pushed after it and force-pushed
+// over passed that guard and the rebase was carried as an audit that never
+// covered it. The record is the only reading of the audited head, so the bot
+// reads it first, before anything can move the head.
+test("the labelled head is the labeller's recorded head, read first, before anything can move the head", () => {
   const s = labelledHead();
+  assert.match(s, phrase("**The labelled head is the head its labeller recorded.**"));
+  assert.match(s, phrase("posts a PR comment whose whole body is `ready-to-merge-head: <sha>`, naming the head it audited, immediately before the label"));
+  assert.match(s, phrase("Read the newest one before `gh pr update-branch` and before anything else that can move the head"));
+});
+
+// Why no timeline read can stand in for the record — the reason a later reader
+// needs before restoring the committer-date guard as a "cheaper" derivation.
+test("the record is stated as the only reading, with why commit dates cannot replace it", () => {
+  assert.match(
+    labelledHead(),
+    phrase("A commit's dates are when it was made, not when it was pushed, so a commit made before the label and pushed after it carries no date after the label"),
+  );
+});
+
+// The retired derivation must not survive beside the record: two answers to
+// "which head was labelled" is the drift this section exists to prevent.
+test("the committer-date guard and the beforeCommit derivation are gone", () => {
+  const s = labelledHead();
+  assert.doesNotMatch(s, /%ct/);
+  assert.doesNotMatch(s, /beforeCommit/);
+});
+
+// The shipped filter, run. A presence pin cannot tell a filter that reads the
+// newest record from one that reads the oldest, or one that a quoted record
+// inside a longer comment satisfies, so the fenced block's own `-q` program
+// goes through `jq` against comment lists shaped like `gh pr view --json
+// comments`. ACCEPT and REFUSE both: a filter that never answers passes every
+// refuse case.
+const recordFilter = () => {
+  const block = /```bash\n(gh pr view <pr> --json comments[\s\S]*?)```/.exec(labelledHead());
+  assert.ok(block, "no fenced `gh pr view <pr> --json comments` block reads the record");
+  const q = /-q '([\s\S]*?)'\n/.exec(block[1]);
+  assert.ok(q, "the record block carries no single-quoted -q program");
+  return q[1];
+};
+const readRecord = (comments) =>
+  execFileSync("jq", ["-r", recordFilter()], { input: JSON.stringify({ comments }), encoding: "utf8" }).trimEnd();
+const A = "a".repeat(40);
+const B = "b".repeat(40);
+
+test("the record filter reads the newest record's SHA", () => {
+  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}` }]), A);
+  // Newest by createdAt, not by array position.
+  assert.equal(
+    readRecord([
+      { createdAt: "2026-10-02T00:00:00Z", body: `ready-to-merge-head: ${B}` },
+      { createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}` },
+    ]),
+    B,
+  );
+  // A trailing newline, CRLF or blank lines are still the whole body.
+  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}\n` }]), A);
+  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}\r\n\n` }]), A);
+});
+
+test("the record filter reads nothing from a comment that is not exactly a record", () => {
+  assert.equal(readRecord([]), "");
+  // Each anchor is pinned by a fixture only IT rejects. One fixture carrying
+  // both a prefix and a suffix is rejected by either anchor alone, so deleting
+  // `\A` or `\z` left every case green. A prefix with nothing after the SHA is
+  // what `\A` refuses; a suffix with nothing before the keyword is what `\z`
+  // refuses; the multi-line cases put the stray text on its own line. Measured
+  // on jq 1.7.1, `^` and `$` are string anchors too (`"x\nready"|test("^ready")`
+  // is false), so spelling the anchors `^`/`$` is no weaker and no fixture can
+  // tell the two spellings apart; deleting either anchor is what this catches.
+  const record = (body) => readRecord([{ createdAt: "2026-10-01T00:00:00Z", body }]);
+  assert.equal(record(`see: ready-to-merge-head: ${A}`), "");
+  assert.equal(record(`the bot read\nready-to-merge-head: ${A}`), "");
+  assert.equal(record(`ready-to-merge-head: ${A} trailing`), "");
+  assert.equal(record(`ready-to-merge-head: ${A}\nhere`), "");
+  assert.equal(record(`ready-to-merge-head: ${A}a`), "");
+  assert.equal(record(`ready-to-merge-head: ${A}\nready-to-merge-head: ${B}`), "");
+  assert.equal(record(`the bot read\nready-to-merge-head: ${A}\nhere`), "");
+  assert.equal(record(` ready-to-merge-head: ${A}`), "");
+  assert.equal(record(`ready-to-merge-head: ${"A".repeat(40)}`), "");
+  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A.slice(0, 12)}` }]), "");
+  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: "ready-to-merge-head: <sha>" }]), "");
+  // A non-record comment newer than the record does not hide it.
+  assert.equal(
+    readRecord([
+      { createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}` },
+      { createdAt: "2026-10-02T00:00:00Z", body: "LGTM" },
+    ]),
+    A,
+  );
+});
+
+test("without a record the timeline is the fallback, keyed on the three events that move a head", () => {
+  const s = labelledHead();
+  assert.match(s, phrase("**No record — a hand-added label, or one applied before its labeller recorded a head — falls back to the timeline, which can refuse a moved head but never name the labelled one.**"));
   assert.match(s, /issues\/<pr>\/timeline\?per_page=100/);
   assert.match(s, /\.event == "labeled" and \.label\.name == "ready-to-merge"/);
   assert.match(s, /\.event == "committed" or \.event == "head_ref_force_pushed"/);
+});
+
+// The research note's row 43 cites the two reads by line range. Moving the
+// record block ahead of the timeline block left its old range pointing at the
+// wrong command with nothing red, so this resolves each range it cites against
+// the shipped doc: every range must hold one of the two commands, and both
+// must be cited. The line numbers are the row's; the commands are what the
+// ranges are checked for, so an edit above either block reds here until the
+// row is re-cited.
+test("the research note's row for the labelled-head reads cites ranges that hold them", () => {
+  const note = readFileSync(join(import.meta.dirname, "..", "docs", "research", "external-assumptions", "prose.md"), "utf8");
+  const row = note.split("\n").find((l) => l.startsWith("| 43 |"));
+  assert.ok(row, "prose.md has no row 43");
+  const lines = DOC.split("\n");
+  const cited = [...row.matchAll(/run-merge-bot\.md:(\d+)-(\d+)/g)].map(([, a, b]) => lines.slice(a - 1, b).join("\n"));
+  assert.equal(cited.length, 2, "row 43 cites the record read and the timeline fallback, one range each");
+  assert.ok(cited.some((t) => t.includes("gh pr view <pr> --json comments")), "no cited range holds the record read");
+  assert.ok(cited.some((t) => t.includes("issues/<pr>/timeline?per_page=100")), "no cited range holds the timeline fallback");
+  for (const t of cited) {
+    assert.ok(
+      t.includes("gh pr view <pr> --json comments") || t.includes("issues/<pr>/timeline?per_page=100"),
+      `a cited range holds neither read: ${t.slice(0, 60)}`,
+    );
+  }
 });
 
 test("the read's ordering constraint rides in the same sentence as its reason", () => {
@@ -70,7 +203,7 @@ test("the read's ordering constraint rides in the same sentence as its reason", 
   // command it governs reds this.
   assert.match(
     labelledHead(),
-    phrase("Read the timeline before `gh pr update-branch` and before anything else that can move the head"),
+    phrase("Read it before `gh pr update-branch` too"),
   );
   assert.match(
     labelledHead(),
@@ -98,31 +231,21 @@ test("a commit AFTER the last label line is what the refusal keys on", () => {
   assert.match(
     labelledHead(),
     phrase(
-      "A `committed` or `head_ref_force_pushed` line after the last `labeled ready-to-merge` means the head moved after the audit. **With no `head_ref_force_pushed` among those lines, refuse:**",
+      "A `committed` or `head_ref_force_pushed` line after the last `labeled ready-to-merge` means the head moved after the audit. **With no record, refuse:**",
     ),
   );
 });
 
-// The carry half (ADR 0024): a force-push is handed to the gate, not refused
-// on sight, and the gate's verdict is what refuses. Each pin is one span with
-// its verdict, for the reason the refusal pin above gives.
-test("a force-push after the label is handed to the gate, with the labelled head as --pre", () => {
+// The carry half (ADR 0024): a moved head is handed to the gate against the
+// RECORDED head, not refused on sight, and the gate's verdict is what refuses.
+// Each pin is one span with its verdict, for the reason the refusal pin above
+// gives.
+test("a recorded head that is not the current head is handed to the gate, with the record as --pre", () => {
   const s = labelledHead();
-  assert.match(s, phrase("**A `head_ref_force_pushed` after the label is not refused on sight — it may be a rebase-carry, and the merge gate decides.**"));
-  assert.match(s, /\.\.\. on HeadRefForcePushedEvent \{ createdAt beforeCommit \{ oid \} \}/);
-  assert.match(s, phrase("**The labelled head is the `beforeCommit` of the first `force-pushed` line after the last `labeled` line**"));
-  assert.match(s, phrase("run step 3's gate now, before step 1, with `--pre <labelled head>` and no `--post`. **`rebaseCarry` null → refuse as above.**"));
-});
-
-// The one move the timeline cannot show: a plain push the force-push then
-// orphaned. Without this check the bot would hand the gate an unaudited head
-// as `--pre`, and the proof would certify the carry of THAT head.
-test("the derived labelled head is refused when it carries a commit dated after the label", () => {
-  const s = labelledHead();
-  assert.match(s, phrase("unless a plain push landed between the label and that force-push, which leaves no line at all once the force-push orphans it"));
-  assert.match(s, phrase("git log --format='%ct %H' origin/main..<labelled head>"));
-  assert.match(s, phrase("a commit whose first field is later than the label's (the number on its `labeled` line), a non-zero exit (the object is not here), or `unknown` in place of the SHA → refuse as above"));
-  assert.match(s, phrase("step 1's `pre` must read `rebaseCarry.accepted` (any other head is a push since the proof — refuse as above)"));
+  assert.match(s, phrase("**A recorded head that is not the current head is not refused on sight — it may be a rebase-carry, and the merge gate decides.**"));
+  assert.match(s, phrase("anything a push adds, drops or edits does not, whenever it was pushed and however its commits are dated"));
+  assert.match(s, phrase("run step 3's gate now, before step 1, with `--pre <labelled head>` and no `--post`. **`rebaseCarry` null → refuse:**"));
+  assert.match(s, phrase("step 1's `pre` must read `rebaseCarry.accepted` (any other head is a push since the proof — refuse with `head-moved-after-label-#<pr>`)"));
 });
 
 test("the refusal names its token, leaves the label alone, and sends a fresh finisher", () => {
@@ -137,12 +260,16 @@ test("the refusal names its token, leaves the label alone, and sends a fresh fin
 // with its verdict, because a bare "this is the normal case" with the outcome
 // deleted is what leaves a reader guessing.
 test("the normal path — label applied, head unchanged — is stated as proceeding untouched", () => {
+  const s = labelledHead();
   assert.match(
-    labelledHead(),
+    s,
     phrase(
-      "Nothing after that label line is the normal case, and it proceeds untouched** — label applied, head unchanged, merge goes ahead exactly as it did before this gate existed",
+      "**A recorded head that is the current head (`gh pr view <pr> --json headRefOid -q .headRefOid`) is the normal case, and it proceeds untouched** — label applied, head unchanged, merge goes ahead exactly as it did before this gate existed",
     ),
   );
+  // The record-less fallback keeps its own accept half: a hand-added label on
+  // an unmoved head merges, as it always did.
+  assert.match(s, phrase("**Nothing after that label line is the normal case, and it proceeds untouched.**"));
 });
 
 // Step 3's comparison has an operand, and this section is the only place that
@@ -168,7 +295,7 @@ test("the pre-rebase head is recorded here, since step 3 compares against it and
 test("the gate declares what it does not cover, and how an abandoned pass's rebase is judged", () => {
   const s = labelledHead();
   assert.match(s, phrase("a hand-added `ready-to-merge` with no finisher behind it reads clean here"));
-  assert.match(s, phrase("**earlier, abandoned pass of this command** is judged like any other force-push: carried when its net change is the labelled head's, refused when it is not"));
+  assert.match(s, phrase("**earlier, abandoned pass of this command** is judged like any other moved head: with a record, carried when its net change is the labelled head's, refused when it is not; without one, refused"));
 });
 
 test("step 3 re-derives the head at the merge instant, against pre, the rebase's post, or a proven carry", () => {
@@ -236,6 +363,39 @@ test("the recovery removes the label before approving, and says why messaging th
   assert.match(s, phrase("removing the artifact the merge bot gates on is the reliable stop"));
   assert.match(s, phrase("a label has been observed holding until after an abort message arrived"));
   assert.match(s, phrase("dispatch a **fresh** finisher against the new head"));
+});
+
+// #2945, the writing half: the record is only as good as every path that adds
+// `ready-to-merge` writing it — the fleet finisher (its duty list and the
+// verbatim block it is handed) and `review-and-fix` step 6 standalone. Each
+// must post the record BEFORE the label, so a merge bot
+// dispatched the moment the label appears finds the record already there, and
+// must name the head it audited, not whatever the branch tip reads.
+const recordBeforeLabel = (slice, where, head) => {
+  const record = slice.indexOf(`gh pr comment <`);
+  const label = slice.indexOf("--add-label ready-to-merge");
+  assert.ok(record !== -1, `${where} posts no record before labelling`);
+  assert.ok(label !== -1, `${where} no longer adds the label`);
+  assert.ok(record < label, `${where} labels before it records the head`);
+  assert.match(slice, phrase(`--body "ready-to-merge-head: ${head}"`), `${where} records something other than the audited head`);
+};
+
+test("every writer of ready-to-merge records the audited head before the label", () => {
+  recordBeforeLabel(
+    between(RUN_TEAM, "- **(b) Add the label:**", "4. Report you the label", "finisher duty 3(b)"),
+    "finisher duty 3(b)",
+    "<your dispatch pin>",
+  );
+  recordBeforeLabel(
+    between(RUN_TEAM, "**Duty 3 is two steps, and only the second one labels.**", "**Once the label is on, take it off", "finisher duty-3 verbatim block"),
+    "the finisher's verbatim duty-3 block",
+    "<your dispatch pin>",
+  );
+  recordBeforeLabel(
+    between(REVIEW_AND_FIX, "6. Diff-check green", "**Bind green to the *run*", "review-and-fix.md step 6"),
+    "review-and-fix.md step 6",
+    "<prHead>",
+  );
 });
 
 // Cross-file, same hazard #447 recorded: run-team's failure table is the

@@ -2698,9 +2698,12 @@ a minute apart showed *different* mutants, so a member's report and any single
      wearing one release label beside them passes unchanged. A repo that
      defines none of the three does not gate on one — `gh label list` settles
      that, and it is no licence to skip the read where they exist.
-   - **(b) Add the label:** `gh pr edit <pr> --add-label ready-to-merge`. (a)
-     passing labels nothing — it is the precondition, and this command is the
-     duty. Two finishers in one run stopped at (a) and reported
+   - **(b) Add the label:** record the head you audited first —
+     `gh pr comment <pr> --body "ready-to-merge-head: <your dispatch pin>"`,
+     the full SHA, which the merge bot reads as the head the label was applied
+     to — then `gh pr edit <pr> --add-label ready-to-merge`. (a)
+     passing labels nothing — it is the precondition, and these commands are
+     the duty. Two finishers in one run stopped at (a) and reported
      `labelled` on PRs that sat out of the merge queue.
 4. Report you the label (its post-add read-back: `gh pr view <pr> --json labels`
    run after 3(b), output as printed), the deferral issue numbers — a
@@ -2788,8 +2791,9 @@ whole duty and reported `labelled` on a PR that never got the label:
 > `patch`/`minor`/`major`. Zero or more than one halts you before the label:
 > name which you found. A repo whose `gh label list` defines none of the three
 > does not gate on one.
-> (b) `gh pr edit <M> --add-label ready-to-merge`. Step (a) passing labels
-> nothing; this command is the duty.
+> (b) `gh pr comment <M> --body "ready-to-merge-head: <your dispatch pin>"`
+> (the full SHA), then `gh pr edit <M> --add-label ready-to-merge`. Step (a)
+> passing labels nothing; these commands are the duty.
 > Then run `gh pr view <M> --json labels` once more and put its output in your
 > report: that read-back is what tells the controller the label is on.
 

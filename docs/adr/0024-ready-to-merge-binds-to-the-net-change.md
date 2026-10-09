@@ -3,6 +3,13 @@
 **Status:** Accepted. Ruled 2026-10-07 by the maintainer in a run-team session
 ("one review per PR is enough — a clean rebase carries the verdict"), recorded
 on #2887. Amends ADR 0012 (Decision 3) and `docs/requirements.md` §3.4.
+Amended by #2945: Decision 4's labelled head is no longer the first
+force-push's `beforeCommit` guarded by committer date — a committer date is
+when a commit was made, not when it was pushed, so a commit made before the
+label and pushed after it passed. The labeller posts a PR comment whose whole
+body is `ready-to-merge-head: <sha>` immediately before the label, and that
+recorded head is `--pre`; a label with no record has no carry, and any head
+move after it is refused.
 
 ## Context
 

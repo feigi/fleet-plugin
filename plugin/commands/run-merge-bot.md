@@ -50,9 +50,23 @@ Obeying a fired signal blindly stalls the queue on a non-conflict; ignoring one 
 
 ## The labelled head
 
-`ready-to-merge` is a finisher's verdict on one tree, and it does not expire when that tree does. **A GitHub label does not follow the branch** — one merged PR's timeline is the record, and the query below is what reads it: `labeled ready-to-merge`, then commits and a `head_ref_force_pushed`, then `merged`, with no `unlabeled` anywhere between. The label stayed put while the head moved out from under it. Every other guard in this chain — the finisher's dispatch pin, the halt on a moved head, the worktree audit — runs *before* the label exists, so none of them is watching this window. You are the last gate, and **re-deriving the head is a requirement here, not bot discretion**: merge only a head that still carries the audit the label stands for.
+`ready-to-merge` is a finisher's verdict on one tree, and it does not expire when that tree does. **A GitHub label does not follow the branch** — one merged PR's timeline shows it, read with the timeline query below: `labeled ready-to-merge`, then commits and a `head_ref_force_pushed`, then `merged`, with no `unlabeled` anywhere between. The label stayed put while the head moved out from under it. Every other guard in this chain — the finisher's dispatch pin, the halt on a moved head, the worktree audit — runs *before* the label exists, so none of them is watching this window. You are the last gate, and **re-deriving the head is a requirement here, not bot discretion**: merge only a head that still carries the audit the label stands for.
 
-**Read the timeline before `gh pr update-branch` and before anything else that can move the head.** Your own rebase lands commits after the label by construction, so once you have rebased this read can no longer tell your commits from someone else's:
+**The labelled head is the head its labeller recorded.** Whoever adds `ready-to-merge` — a finisher, or `review-and-fix` run standalone — posts a PR comment whose whole body is `ready-to-merge-head: <sha>`, naming the head it audited, immediately before the label. Read the newest one before `gh pr update-branch` and before anything else that can move the head:
+
+```bash
+gh pr view <pr> --json comments \
+  -q '[.comments[] | {createdAt, sha: (.body | capture("\\Aready-to-merge-head: (?<sha>[0-9a-f]{40})\\s*\\z").sha)}]
+      | sort_by(.createdAt) | last | .sha // ""'
+```
+
+Nothing else names that head. A commit's dates are when it was made, not when it was pushed, so a commit made before the label and pushed after it carries no date after the label; and a plain push that a force-push then orphans leaves no line on the PR's timeline at all.
+
+**A recorded head that is the current head (`gh pr view <pr> --json headRefOid -q .headRefOid`) is the normal case, and it proceeds untouched** — label applied, head unchanged, merge goes ahead exactly as it did before this gate existed.
+
+**A recorded head that is not the current head is not refused on sight — it may be a rebase-carry, and the merge gate decides.** The label binds to the change the finisher audited, not to one SHA: a rewrite that leaves the PR's net change byte-identical — a conflict-free rebase onto a newer `main` — keeps it, and anything a push adds, drops or edits does not, whenever it was pushed and however its commits are dated. So, in the main checkout after a plain `git fetch origin`, run step 3's gate now, before step 1, with `--pre <labelled head>` and no `--post`. **`rebaseCarry` null → refuse:** report `head-moved-after-label-#<pr>` and stop on that PR. Leave the label where it is — you audited nothing and removing another member's verdict is not yours to do. What clears it is a **fresh** finisher against the new head; the first audit does not transfer, because it verified a different tree. Non-null → the current head carries the labelled head's change: `--pre` stays the labelled head on every later gate run, step 1's `pre` must read `rebaseCarry.accepted` (any other head is a push since the proof — refuse with `head-moved-after-label-#<pr>`), and your report names the carry as `rebase-carry-#<pr>` with both SHAs.
+
+**No record — a hand-added label, or one applied before its labeller recorded a head — falls back to the timeline, which can refuse a moved head but never name the labelled one.** Read it before `gh pr update-branch` too: your own rebase lands commits after the label by construction, so once you have rebased this read can no longer tell your commits from someone else's:
 
 ```bash
 gh api "repos/{owner}/{repo}/issues/<pr>/timeline?per_page=100" --paginate \
@@ -61,29 +75,11 @@ gh api "repos/{owner}/{repo}/issues/<pr>/timeline?per_page=100" --paginate \
       | .event + " " + (.sha // .label.name // "")'
 ```
 
-A `committed` or `head_ref_force_pushed` line after the last `labeled ready-to-merge` means the head moved after the audit. **With no `head_ref_force_pushed` among those lines, refuse:** report `head-moved-after-label-#<pr>` and stop on that PR — without a force-push the timeline names no head the label was applied to, so no carry can be proven. Leave the label where it is — you audited nothing and removing another member's verdict is not yours to do. What clears it is a **fresh** finisher against the new head; the first audit does not transfer, because it verified a different tree.
+A `committed` or `head_ref_force_pushed` line after the last `labeled ready-to-merge` means the head moved after the audit. **With no record, refuse:** report `head-moved-after-label-#<pr>` and stop on that PR, the label left where it is — nothing names a head the label was applied to, so no carry can be proven. **Nothing after that label line is the normal case, and it proceeds untouched.**
 
-**A `head_ref_force_pushed` after the label is not refused on sight — it may be a rebase-carry, and the merge gate decides.** The label binds to the change the finisher audited, not to one SHA: a rewrite that leaves the PR's net change byte-identical — a conflict-free rebase onto a newer `main` — keeps it. The REST line names only the head the force-push produced; the head it replaced is GraphQL's `beforeCommit`:
+Record the head before you rebase — `gh pr view <pr> --json headRefOid -q .headRefOid` — because step 3 hands it to the merge gate as `--pre` and nothing later can reconstruct it. Where step 1 runs, that is its `pre`; on an already-current PR it is simply the head you merge. After a carry, `--pre` is the labelled head instead.
 
-```bash
-gh api graphql -F owner='{owner}' -F repo='{repo}' -F pr=<pr> -f query='
-  query($owner: String!, $repo: String!, $pr: Int!) {
-    repository(owner: $owner, name: $repo) { pullRequest(number: $pr) {
-      timelineItems(last: 100, itemTypes: [LABELED_EVENT, HEAD_REF_FORCE_PUSHED_EVENT]) { nodes {
-        __typename
-        ... on LabeledEvent { createdAt label { name } }
-        ... on HeadRefForcePushedEvent { createdAt beforeCommit { oid } } } } } } }' \
-  -q '.data.repository.pullRequest.timelineItems.nodes[]
-      | select(.__typename == "HeadRefForcePushedEvent" or .label.name == "ready-to-merge")
-      | "\(.createdAt | fromdateiso8601) " + (if .__typename == "LabeledEvent" then "labeled"
-          else "force-pushed \(.beforeCommit.oid // "unknown")" end)'
-```
-
-**The labelled head is the `beforeCommit` of the first `force-pushed` line after the last `labeled` line** — unless a plain push landed between the label and that force-push, which leaves no line at all once the force-push orphans it. So, in the main checkout after a plain `git fetch origin`, read `git log --format='%ct %H' origin/main..<labelled head>`: a commit whose first field is later than the label's (the number on its `labeled` line), a non-zero exit (the object is not here), or `unknown` in place of the SHA → refuse as above. Otherwise run step 3's gate now, before step 1, with `--pre <labelled head>` and no `--post`. **`rebaseCarry` null → refuse as above.** Non-null → the current head carries the labelled head's change: `--pre` stays the labelled head on every later gate run, step 1's `pre` must read `rebaseCarry.accepted` (any other head is a push since the proof — refuse as above), and your report names the carry as `rebase-carry-#<pr>` with both SHAs.
-
-**Nothing after that label line is the normal case, and it proceeds untouched** — label applied, head unchanged, merge goes ahead exactly as it did before this gate existed. Record the head before you rebase — `gh pr view <pr> --json headRefOid -q .headRefOid` — because step 3 hands it to the merge gate as `--pre` and nothing later can reconstruct it. Where step 1 runs, that is its `pre`; on an already-current PR it is simply the head you merge. After a force-push, `--pre` is the labelled head derived above instead.
-
-What this gate deliberately does not answer. It does not ask *who* audited — a hand-added `ready-to-merge` with no finisher behind it reads clean here, and the reviewer-only rule in `run-team/SKILL.md` is what owns that — nor who force-pushed. A head rebased after the label by an **earlier, abandoned pass of this command** is judged like any other force-push: carried when its net change is the labelled head's, refused when it is not.
+What this gate deliberately does not answer. It does not ask *who* audited — a hand-added `ready-to-merge` with no finisher behind it reads clean here, and the reviewer-only rule in `run-team/SKILL.md` is what owns that — nor who posted the record or who force-pushed. A head rebased after the label by an **earlier, abandoned pass of this command** is judged like any other moved head: with a record, carried when its net change is the labelled head's, refused when it is not; without one, refused.
 
 ## Per-PR sequence
 
