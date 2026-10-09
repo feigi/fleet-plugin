@@ -457,9 +457,9 @@ function testRunReason(run) {
   if (typeof run.tests !== "number")
     return `\`${cmd}\` produced no counts — the shared test run crashed, hit its deadline, or printed no summary${run.error ? ` (${run.error})` : ""} — a failed run, not a pass`;
   if (!run.tests) return `\`${cmd}\` produced 0 tests — a failed run, not a pass`;
-  if (run.pass === 0 && !run.fail && !run.expectedFail) return `\`${cmd}\` passed nothing and failed nothing — every test skipped, not a pass`;
   // An expected fail ran: the runner executed it and it failed as declared.
   const executed = run.pass + (run.fail ?? 0) + (run.expectedFail ?? 0);
+  if (run.pass === 0 && executed === 0) return `\`${cmd}\` passed nothing and failed nothing — every test skipped, not a pass`;
   if (typeof run.pass === "number" && executed * 2 < run.tests)
     return `\`${cmd}\` passed ${run.pass} and failed ${run.fail ?? 0} of the ${run.tests} tests it collected — most of what it collected never ran`;
   if (typeof run.exitCode !== "number")

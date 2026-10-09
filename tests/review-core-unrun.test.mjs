@@ -261,7 +261,7 @@ test("a run with failing tests and a finding from ONE dimension is NOT unrun", (
 // failed by design, so it is nothing for the review to file. The `tests: 4`
 // fixture clears the half floor ONLY through its expected fails (1 pass of 4
 // collected), and the `pass: 0` fixture clears the all-skipped clause only
-// through them — so dropping `expectedFail` from either clause reads that
+// through them — so dropping `expectedFail` from the executed sum reads each
 // fixture unrun.
 test("a run whose only non-pass is an expected fail is NOT unrun, and its expected fails count as executed", () => {
   for (const run of [
@@ -271,6 +271,14 @@ test("a run whose only non-pass is an expected fail is NOT unrun, and its expect
   ]) {
     assert.equal(unrunReason(run, []), null, `a run whose non-passes are all expected fails (${JSON.stringify(run)}) must stay clean`);
   }
+});
+
+// The expected fails weigh one each against the half floor: 2 passes and 2
+// expected fails of 10 collected is 4 executed and unrun, 3 and 2 is exactly
+// half and clean — a weight other than one moves one of the two.
+test("an expected fail counts once toward the half floor", () => {
+  assert.match(unrunReason({ command: "vitest run", exitCode: 0, tests: 10, pass: 2, fail: 0, expectedFail: 2 }, []) ?? "", /most of what it collected never ran/);
+  assert.equal(unrunReason({ command: "vitest run", exitCode: 0, tests: 10, pass: 3, fail: 0, expectedFail: 2 }, []), null);
 });
 
 // The other half: an expected fail is never failing, so it neither hides a
