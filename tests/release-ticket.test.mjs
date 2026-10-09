@@ -207,24 +207,59 @@ function relocate(w, wt, dest) {
 
 /**
  * Leave an Orphaned worktree directory: the claim's directory on disk with its
- * registration cleared and its branch untouched.
+ * registration cleared, its `.git` pointer gone, and its branch untouched.
  *
  * Built by taking the directory out of git's reach, pruning, and putting it
- * back — rather than by deleting the registry entry by hand, so the repo is
- * left in a state git itself produced and any listed-vs-registered count stays
- * balanced. Production reaches the same state through a `git worktree remove`
- * that cleared the registration before failing to delete the directory; the
+ * back — rather than by deleting the registry entry by hand, so the registry
+ * is left in a state git itself produced and any listed-vs-registered count
+ * stays balanced. Production clears a registration this way through a `git
+ * worktree remove` that cleared it before failing to delete the directory; the
  * end-to-end case below drives that route instead of this one.
+ *
+ * The pointer is removed last: a directory whose `.git` still names the
+ * cleared admin dir is refused earlier, by worktree.sh's `wt_counts`, before
+ * this script's orphan probe is reached — "a live worktree whose registration
+ * was removed under it ..." below pins that shape.
  */
 function orphan(r, c) {
   const aside = `${c.wt}.aside`;
   renameSync(c.wt, aside);
   git(r.w, "worktree", "prune");
   renameSync(aside, c.wt);
+  rmSync(join(c.wt, ".git"));
   assert.ok(
     !git(r.w, "worktree", "list", "--porcelain").includes(c.wt),
     "fixture: the registration must really be gone, or this is just a stray",
   );
+}
+
+// The registry removed outright under a live claim — whole, or the claim's own
+// entry — with its `.git` pointer still standing. Both counts drop in step, so
+// they agree, and git's own `branch -D` refusal reads the same admin state; the
+// pointer is what worktree.sh's `wt_counts` refuses on.
+for (const shape of ["registry", "entry"]) {
+  test(`a live worktree whose registration was removed under it is refused, never released: ${shape}`, (t) => {
+    const r = repo(t);
+    const c = claim(r.w, 9, "release-ticket");
+    // A sibling claim only where its entry survives: with the whole registry gone it is lost too, and could be the pointer named first.
+    const other = shape === "entry" ? claim(r.w, 10, "other-member") : null;
+    writeFileSync(join(c.wt, "untracked.txt"), "work that exists nowhere else\n");
+    const admin = join(r.w, ".git", "worktrees", "9-release-ticket");
+    assert.ok(existsSync(join(admin, "gitdir")), "fixture: the claim's admin entry");
+    rmSync(shape === "registry" ? join(r.w, ".git", "worktrees") : admin, { recursive: true, force: true });
+
+    for (const apply of [false, true]) {
+      const { code, json, stderr } = release(r, c, { apply });
+      assert.equal(code, 2, `refused, not released: ${stderr}`);
+      assert.equal(json, null);
+      assert.match(stderr, /worktree pointer \S*\/\.worktrees\/9-release-ticket\/\.git names admin dir \S*\/\.git\/worktrees\/9-release-ticket, /);
+      assert.match(stderr, /which is missing from the worktree registry/);
+    }
+    assert.equal(readFileSync(join(c.wt, "untracked.txt"), "utf8"), "work that exists nowhere else\n");
+    assert.deepEqual(artefacts(r, c), { dir: true, worktree: false, branch: true }, "the branch survives");
+    assert.deepEqual(r.calls(), [], "and the tracker is never asked");
+    if (other) assert.equal(artefacts(r, other).worktree, true, "fixture: the sibling's entry was left alone");
+  });
 }
 
 /** What claim-ticket.sh leaves behind: a worktree on a fresh branch off origin/main. */
