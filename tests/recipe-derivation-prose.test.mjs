@@ -94,6 +94,15 @@ test("the deriver is told the count is the tests that ran, and to trim the count
   assert.match(PROVER, /as its one number/, "recipe-prove.mjs no longer refuses a count line the way the deriver is told it does");
 });
 
+// The cache reader probes an unquoted pattern from the repository root; a
+// program that resolves it under its own directory option needs it quoted, and
+// the reader's refusal says the same.
+test("the deriver is told to quote a pattern a program resolves under its own directory option", () => {
+  assert.match(DERIVER, phrase("Quote a pattern that a program resolves under its own directory option, e.g. `git -C web ls-files -- '*.test.ts'`: the reader accepts a quoted pattern unchecked."));
+  const reader = read("scripts/derive-testcmd.sh");
+  assert.match(reader, /a pattern that a program resolves under its own directory option, such as git -C, must be quoted/, "derive-testcmd.sh's refusal no longer says what the deriver is told");
+});
+
 test("every flag the deriver's procedure passes is one recipe-prove.mjs accepts", () => {
   // The invocations are the indented command blocks naming recipe-prove.mjs;
   // flags elsewhere in the definition (its `git` reads) are not the proof's.

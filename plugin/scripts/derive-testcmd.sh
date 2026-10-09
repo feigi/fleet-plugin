@@ -377,7 +377,11 @@ esac
 # redirection is the program's own to read, or selects no test, and is
 # accepted unprobed too. The scan stops at a `cd` or `pushd`, past which a
 # pattern no longer resolves from <repo>, and at a word that is not split but
-# ends in an operator then `cd` or `pushd`. A word right after an option
+# ends in an operator then `cd` or `pushd`. A program's own directory option,
+# such as `git -C`, does not stop it: whether that option moves where the
+# program resolves a pattern is the program's to say, so a Recipe must quote a
+# pattern that a program resolves under its own directory option, as in
+# `git -C web ls-files -- '*.test.ts'`. A word right after an option
 # written without `=`, with no operator between them, is accepted unless it
 # has a `/` or a `.`: it may be that option's value, which names no path. A
 # pattern under a path git ignores names generated output, such as a build
@@ -483,7 +487,7 @@ if [ "$field" = test ]; then
       git -C "$repo" check-ignore -q --no-index -- "$piece" 2>"$errf" || ignored=$?
       case $ignored in
         0) ;;
-        1) die "the Recipe cache at $cache is invalid: its test command's pattern '$piece' matches no file tracked in $where — a Test entrypoint that selects no tests passes having run nothing, so the Recipe is stale, not a finding; $derive" ;;
+        1) die "the Recipe cache at $cache is invalid: its test command's pattern '$piece' matches no file tracked in $where — a Test entrypoint that selects no tests passes having run nothing, so the Recipe is stale, not a finding; a pattern that a program resolves under its own directory option, such as git -C, must be quoted; $derive" ;;
         *) die "cannot ask git whether $repo ignores its test command's pattern '$piece' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
       esac
     done

@@ -45,8 +45,12 @@ from the repository root by `sh -c`:
   where an appended test file or test name lands as an argument to the test
   runner. The cache reader refuses a command whose first word does not
   resolve from the repository root (a builtin, a `PATH` entry, or an
-  executable path), one ending in `;`, `&` or a newline, and one containing a
-  word that starts with `#`.
+  executable path), one ending in `;`, `&` or a newline, one containing a
+  word that starts with `#`, and one with an unquoted pattern that matches no
+  file tracked from the repository root. Quote a pattern that a program
+  resolves under its own directory option, e.g.
+  `git -C web ls-files -- '*.test.ts'`: the reader accepts a quoted pattern
+  unchecked.
 
 ## 2. Prove it — this procedure exactly
 
