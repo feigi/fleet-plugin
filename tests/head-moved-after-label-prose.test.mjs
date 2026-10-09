@@ -124,14 +124,31 @@ test("the record filter reads the newest record's SHA", () => {
     ]),
     B,
   );
-  // A trailing newline is still the whole body.
+  // A trailing newline, CRLF or blank lines are still the whole body.
   assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}\n` }]), A);
+  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A}\r\n\n` }]), A);
 });
 
 test("the record filter reads nothing from a comment that is not exactly a record", () => {
   assert.equal(readRecord([]), "");
-  // Quoted inside a longer comment — a review discussing the record is not one.
-  assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `the bot read\nready-to-merge-head: ${A}\nhere` }]), "");
+  // Each anchor is pinned by a fixture only IT rejects. One fixture carrying
+  // both a prefix and a suffix is rejected by either anchor alone, so deleting
+  // `\A` or `\z` left every case green. A prefix with nothing after the SHA is
+  // what `\A` refuses; a suffix with nothing before the keyword is what `\z`
+  // refuses; the multi-line cases put the stray text on its own line. Measured
+  // on jq 1.7.1, `^` and `$` are string anchors too (`"x\nready"|test("^ready")`
+  // is false), so spelling the anchors `^`/`$` is no weaker and no fixture can
+  // tell the two spellings apart; deleting either anchor is what this catches.
+  const record = (body) => readRecord([{ createdAt: "2026-10-01T00:00:00Z", body }]);
+  assert.equal(record(`see: ready-to-merge-head: ${A}`), "");
+  assert.equal(record(`the bot read\nready-to-merge-head: ${A}`), "");
+  assert.equal(record(`ready-to-merge-head: ${A} trailing`), "");
+  assert.equal(record(`ready-to-merge-head: ${A}\nhere`), "");
+  assert.equal(record(`ready-to-merge-head: ${A}a`), "");
+  assert.equal(record(`ready-to-merge-head: ${A}\nready-to-merge-head: ${B}`), "");
+  assert.equal(record(`the bot read\nready-to-merge-head: ${A}\nhere`), "");
+  assert.equal(record(` ready-to-merge-head: ${A}`), "");
+  assert.equal(record(`ready-to-merge-head: ${"A".repeat(40)}`), "");
   assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: `ready-to-merge-head: ${A.slice(0, 12)}` }]), "");
   assert.equal(readRecord([{ createdAt: "2026-10-01T00:00:00Z", body: "ready-to-merge-head: <sha>" }]), "");
   // A non-record comment newer than the record does not hide it.
@@ -150,6 +167,30 @@ test("without a record the timeline is the fallback, keyed on the three events t
   assert.match(s, /issues\/<pr>\/timeline\?per_page=100/);
   assert.match(s, /\.event == "labeled" and \.label\.name == "ready-to-merge"/);
   assert.match(s, /\.event == "committed" or \.event == "head_ref_force_pushed"/);
+});
+
+// The research note's row 43 cites the two reads by line range. Moving the
+// record block ahead of the timeline block left its old range pointing at the
+// wrong command with nothing red, so this resolves each range it cites against
+// the shipped doc: every range must hold one of the two commands, and both
+// must be cited. The line numbers are the row's; the commands are what the
+// ranges are checked for, so an edit above either block reds here until the
+// row is re-cited.
+test("the research note's row for the labelled-head reads cites ranges that hold them", () => {
+  const note = readFileSync(join(import.meta.dirname, "..", "docs", "research", "external-assumptions", "prose.md"), "utf8");
+  const row = note.split("\n").find((l) => l.startsWith("| 43 |"));
+  assert.ok(row, "prose.md has no row 43");
+  const lines = DOC.split("\n");
+  const cited = [...row.matchAll(/run-merge-bot\.md:(\d+)-(\d+)/g)].map(([, a, b]) => lines.slice(a - 1, b).join("\n"));
+  assert.equal(cited.length, 2, "row 43 cites the record read and the timeline fallback, one range each");
+  assert.ok(cited.some((t) => t.includes("gh pr view <pr> --json comments")), "no cited range holds the record read");
+  assert.ok(cited.some((t) => t.includes("issues/<pr>/timeline?per_page=100")), "no cited range holds the timeline fallback");
+  for (const t of cited) {
+    assert.ok(
+      t.includes("gh pr view <pr> --json comments") || t.includes("issues/<pr>/timeline?per_page=100"),
+      `a cited range holds neither read: ${t.slice(0, 60)}`,
+    );
+  }
 });
 
 test("the read's ordering constraint rides in the same sentence as its reason", () => {
