@@ -1280,8 +1280,9 @@ function main() {
   const prev = readState(path, NAME);
   const digest = createHash("sha256").update(lines.join("\n")).digest("hex");
   const acts = actionable(rows);
-  // `ticked`, fleet-tick's own liveness key: written on
-  // every invocation unconditionally — this tick running IS the occurrence.
+  // `ticked`, fleet-tick's own liveness key: written on every tick that gets
+  // past its refusals — a refused tick (exit 2) writes none; this tick
+  // reaching here IS the occurrence.
   writeState(path, NAME, prev, { quiet: acts ? 0 : prev.quiet + 1, digest, ticked: { at: Date.now() } });
 
   // Fold only when BOTH hold: nothing to act on, and nothing new to say. A
