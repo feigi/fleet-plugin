@@ -312,22 +312,18 @@ removed=""
 # a substitution that failed would contribute an empty string and splice
 # `{"branch":,…}` — malformed JSON — with nothing to notice it.
 #
-# Five interpolations converge on this function: the branch name, `dirty
-# worktree $wt`, `ignored files present in $wt: $ignored`, `cherry probe
-# failed …: $cherry` (arbitrary git stderr) — the first four via `keep`, whose
-# own `jfield "$1"` / `jfield "$2"` every `keep` call carrying one of them
-# reaches — and the `reaped` accumulator, which calls `jfield`
-# directly and never routes through `keep` at all. The branch name is the
-# demonstrated trigger — `git branch 'has"quote'` is a legal refname — and raw
-# it emitted a payload no parser accepts at exit 0, while the branch was
-# correctly kept. The stderr lines stay raw: they are prose for an
-# operator, not JSON.
-#
-# A sixth joined the five above later: grep's own stderr, `$gq_err`,
-# surfaced through `gp_why "$gq_err"` in `keep`'s message at the cherry
-# checks and the registry re-reads —
-# arbitrary text on the same footing as `$cherry`, routed through the same
-# jfield/jstr escaping the paragraph above already covers.
+# Arbitrary text reaches this function by many routes, and what follows names
+# the kinds of it, not every caller: branch names; worktree paths; git's own
+# stderr, surfaced through `gp_why` with no argument, which reads `$gp_err`;
+# grep's own stderr, through `gp_why "$gq_err"`; the error text of `git
+# worktree remove`, `git update-ref` and `git config --remove-section`; and
+# scan output such as `$cherry` and the `$ignored` listing. Most of it arrives
+# inside a `keep` message, through `keep`'s own `jfield "$1"` / `jfield "$2"`;
+# the `reaped`, `removed` and `warnings` accumulators call `jfield` directly
+# and never route through `keep` at all. The branch name is the demonstrated
+# trigger — `git branch 'has"quote'` is a legal refname — and raw it emitted a
+# payload no parser accepts at exit 0, while the branch was correctly kept.
+# The stderr lines stay raw: they are prose for an operator, not JSON.
 jfield() {
   if jf=$(jstr "$1"); then
     printf '"%s"' "$jf"
