@@ -943,9 +943,12 @@ test("fit refuses at exit 2 a ruling of an input ticket whose run_date is not YY
   assert.equal(cli(["fit", ...p.fitArgs, "--guard", p.guard]).status, 0);
 });
 
-test("fit does not refuse a ruling whose run_date is not YYYY-MM-DD on a ticket whose last in-range row is neither an exploration row nor a rule row", (t) => {
+test("fit does not refuse a ruling whose run_date is not YYYY-MM-DD on a ticket whose last in-range row is neither an exploration row nor a rule row, though fit --due does", (t) => {
   const features = [exploring({ ticket: "1" }), featureRow({ ticket: "3", exploration_draw: "", sizing_src: "" })];
   const p = fitWorld(t, { features, members: [], verdicts: [ruled(1, 11), ruled(3, 13, { run_date: "10/01/2026" })] });
+  const due = cli(["fit", ...p.fitArgs, "--guard", p.guard, "--due"]);
+  assert.equal(due.status, 2, due.stderr);
+  assert.match(due.stderr, /ticket #3 \(PR #13\): run_date is '10\/01\/2026', expected YYYY-MM-DD/);
   const r = cli(["fit", ...p.fitArgs, "--guard", p.guard]);
   assert.equal(r.status, 0, r.stderr);
 });
