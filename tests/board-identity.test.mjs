@@ -395,6 +395,39 @@ test("a malformed ticket that makes card() throw leaves every column on the prev
   assert.equal(count(board.children[2]), "1", "REVIEW must also stay on the previous tick, consistent with POOL");
 });
 
+// #1863: a ticket whose column is none of COLUMNS matched no column's filter
+// and vanished from the board with nothing said anywhere. render() must throw
+// naming the column and the ticket — poll()'s catch banners it — and, like a
+// card() throw, leave every column on the previous tick.
+test("a ticket whose column is not a known column makes render throw, leaving every column on the previous tick", () => {
+  const { document, render } = renderHarness();
+  const board = document.getElementById("board");
+  render({ ...baseModel(), tickets: [
+    { issue: 1, column: "POOL" }, { issue: 2, column: "REVIEW" },
+  ] });
+  const count = (col) => col.children[0].children[0].textContent;
+  assert.equal(count(board.children[0]), "1", "POOL");
+  assert.equal(count(board.children[2]), "1", "REVIEW");
+
+  assert.throws(() => render({ ...baseModel(), tickets: [
+    { issue: 1, column: "POOL" }, { issue: 3, column: "POOL" }, { issue: 99, column: "BOGUS" },
+  ] }), (e) => /BOGUS/.test(e.message) && /#99\b/.test(e.message),
+  "a ticket in an unknown column must surface as a thrown error naming the column and ticket, not drop silently");
+
+  assert.equal(count(board.children[0]), "1",
+    "POOL must NOT have updated to this tick's count of 2 — the throw must come before any column is written");
+  assert.equal(count(board.children[2]), "1", "REVIEW must also stay on the previous tick, consistent with POOL");
+
+  // What the check must ACCEPT: every known column, and a tick with no tickets.
+  render({ ...baseModel(), tickets: [
+    { issue: 5, column: "POOL" }, { issue: 6, column: "IMPLEMENTING" }, { issue: 7, column: "REVIEW" },
+    { issue: 8, column: "READY" }, { issue: 9, column: "MERGED" },
+  ] });
+  board.children.forEach((col, i) => assert.equal(count(col), "1", `column ${i} must hold its one ticket`));
+  render({ ...baseModel(), tickets: undefined });
+  board.children.forEach((col, i) => assert.equal(count(col), "0", `column ${i} must be empty`));
+});
+
 // #1584 adds a second reader of the model's repo IDENTITY (`acme/one`) beside
 // the long-standing reader of its repo URL. A card's PR link must keep
 // resolving against the URL — the field that carries the host, so links work

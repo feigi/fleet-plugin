@@ -299,6 +299,13 @@ function render(m) {
   // (poll()'s own catch below still banners the failure).
   const board = document.getElementById("board");
   const q = m.queue || {};
+  // A ticket whose column is none of COLUMNS matches no column's filter below
+  // and would vanish from the board with nothing said. Throwing here,
+  // before any column is built, lets poll()'s catch banner it while every
+  // column stays on the previous tick.
+  for (const t of m.tickets || []) {
+    if (!COLUMNS.includes(t.column)) throw new Error(`ticket #${t.issue} has unknown column ${JSON.stringify(t.column)}`);
+  }
   const next = COLUMNS.map((name) => {
     const inCol = (m.tickets || []).filter((t) => t.column === name);
     const h = el("h2", null, name + " ");
