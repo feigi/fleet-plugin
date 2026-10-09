@@ -43,8 +43,9 @@ Measured before ruling (omp 18.8.5, Node 26, macOS):
   rotation carries no rows forward, the candidate scan excludes `in-progress`,
   and `inflight.sh` treats a worktree or remote branch as taken — so such a
   claim is held by nobody, forever. The runbook's promise that a killed
-  member's ticket "comes back via a new member" holds within a run (the
-  Member-killed row and its transcript-mtime check), not across runs.
+  member's ticket comes back as "new member, new name, the SAME ticket"
+  holds within a run (the Member-killed row and its transcript-mtime check),
+  not across runs.
 - **A process-liveness predicate exists.** `ledger.mjs` `isDead(pid)` —
   `process.kill(pid, 0)`, only ESRCH is dead. Its lock accepts that a reused
   pid reads live until a 10 s timeout.
@@ -80,7 +81,7 @@ Measured before ruling (omp 18.8.5, Node 26, macOS):
    **dead** when the shared `isDead` predicate says so or its start time no
    longer matches; the start time closes the pid-reuse gap the ledger lock
    tolerates, because a lock lives seconds and this record lives days.
-4. **Only the record gates an action.**
+4. **Where a record exists, only it gates an action.**
    - *Rotation* refuses while the recorded controller is alive, its start
      time matches, and it is not an ancestor of the caller, whatever the
      mark says — so the same session's next run rotates, and another
@@ -95,12 +96,18 @@ Measured before ruling (omp 18.8.5, Node 26, macOS):
    - On `ancestor` (the same session's earlier run) its claims are left
      alone: their members may still be live, and the Member-killed
      transcript-mtime check covers them.
-   - The Liveness mark's verdict (`assessBeat`) decides nothing; it feeds
-     the Stall report alone.
+   - While a record exists, the Liveness mark's verdict (`assessBeat`)
+     decides nothing; it feeds the Stall report alone. With no record,
+     rotation keeps the mark-based check (Decision 6).
 5. **The Stall report names which kind of stall it sees.** Alive with a
    matching start time: not beating, controller alive (pid N). Dead or
    mismatched: stalled, controller gone; the next run resumes its claims.
-   No record: today's wording.
+   No record: today's wording. The report a run's first tick prints is the
+   previous run's stall, and by then rotation has replaced the record with
+   this run's own live one, so that report reads `prior`, never the record
+   itself: `dead` is stalled, controller gone, and this run resumes its
+   claims; `ancestor` is controller alive; `none` is today's wording. Later
+   ticks read the record.
 6. **No record proves nothing.** On the first run after this ships, or when
    the last run found no omp ancestor, rotation keeps the mark-based check
    and judges `none`; a step that finds no record at all — this run found no
@@ -116,6 +123,13 @@ Measured before ruling (omp 18.8.5, Node 26, macOS):
 - A controller killed between its rotation and its record write leaves the
   record it found in place; the next run judges that one again, finds it
   dead, and resumes what both runs stranded.
+- A controller session resumed with `omp --resume` is a new omp process, so
+  its pid is not the one the record names. Its run begins at phase 0 like any
+  other (Decision 1), which judges the old record `dead` and replaces it. A
+  resumed session that carries on its loop without phase 0 leaves the record
+  naming a dead process, and another session's run would judge it `dead` and
+  resume claims whose members are still live; the record-only rule no longer
+  has the mark's protection for such a session.
 - An omp installed some other way than bun (npm global, a compiled binary)
   may not match the ancestor rule; it then degrades to Decision 6 rather than
   misidentifying a controller. Unmeasured.
