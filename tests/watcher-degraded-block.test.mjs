@@ -365,6 +365,21 @@ test("a budget at 200 + 4 per listed PR polls every listed PR and says nothing a
   assert.equal(count(out, BLIND), 5, `expected every listed PR polled, got:\n${out}`);
 });
 
+test("the reserve scales 4 per listed PR at every list size, not at one", () => {
+  // One boundary at five PRs fits any floor-and-slope pair that crosses 220 there;
+  // a second and third size, one of them past any small cap, fix both numbers.
+  for (const [n, rl, paused] of [[1, 203, true], [1, 204, false], [20, 279, true], [20, 280, false], [60, 439, true], [60, 440, false]]) {
+    const out = run({ RL: String(rl), MODE: "empty", PRS: openPrs(n) }, 1);
+    assert.equal(count(out, BUDGET), paused ? 1 : 0, `n=${n} rl=${rl}:\n${out}`);
+    assert.equal(count(out, BLIND), paused ? 0 : n, `n=${n} rl=${rl}:\n${out}`);
+  }
+});
+
+test("the pass gate's DEGRADED line names the amount it needed and the list it needed it for", () => {
+  const out = run({ RL: "219", MODE: "empty", PRS: openPrs(5) }, 1);
+  assert.ok(out.includes("core REST budget=219 < 220 needed for 5 PRs"), `the line does not say what the pass needed:\n${out}`);
+});
+
 test("the per-PR budget latch recovers once, on the tick the budget covers the pass again", () => {
   const seq = join(DIR, "seq-rl-per-pr");
   writeFileSync(seq, "219\n219\n220\n220\n");

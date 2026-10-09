@@ -1869,12 +1869,13 @@ while :; do                                   # one tick
         echo "WATCHER RECOVERED: open-PR list under its --limit $pr_cap — every open PR watched again"
         cap_out=
       fi
-      # gh pr list is GraphQL, so $rl still holds. Each ci-state.mjs call was
-      # measured at about 4 core REST units, so the pass needs 4 per listed PR
-      # on top of the 200 floor; a shortfall pauses this tick's pass.
+      # gh pr list is GraphQL, so $rl still holds. The pass is budgeted at 4 core
+      # REST units per listed PR on top of the 200 floor — an allowance, not a
+      # count: one ci-state.mjs call makes several REST reads (more for a PR whose
+      # head dropped required jobs). A shortfall pauses this tick's pass.
       if [ "$rl" -lt $((200 + 4 * count)) ]; then
         if [ -z "$budget_out" ]; then
-          echo "WATCHER DEGRADED: core REST budget=$rl — CI polling paused, silence is NOT green"
+          echo "WATCHER DEGRADED: core REST budget=$rl < $((200 + 4 * count)) needed for $count PRs — CI polling paused, silence is NOT green"
           budget_out=1
         fi
       else
@@ -1964,6 +1965,23 @@ and treat a full page as its own degraded cause — the "no silent caps" rule
 enforce. It latches globally like the list failure but does not pause polling:
 the PRs it did return are real, so the pass still watches them, and the
 DEGRADED line names the rest as unwatched until a pass comes back under the cap.
+
+**The budget is gated twice, and only the second gate announces recovery.** The
+tick-top floor (`200`) covers the probes themselves. Once the open-PR list is
+read, the pass gate reserves `200 + 4 × count` core REST units — an allowance of
+4 per listed PR on top of the floor, so the reserve grows with the list instead
+of staying a flat 200 that a long list drains mid-pass. It is an allowance, not
+a count: one `ci-state.mjs` call makes several REST reads, more for a PR whose
+head dropped required jobs. A shortfall at either gate pauses the **whole** pass
+through the one budget latch and never polls a prefix of the list: a prefix runs
+in list order, so the same tail PRs would go unread every tick with no line at
+all (never polled, so nothing marks them blind), while the PRs that were polled
+would run dry mid-pass and each emit a blind line. The DEGRADED line from the
+pass gate names the amount it needed and the count it needed it for, so a
+healthy-looking `budget=999` is not read as an outage with no cause. Only the
+pass gate emits the budget RECOVERED line: announcing recovery at the floor
+would report resumption on a tick whose pass gate then pauses it again — a
+DEGRADED/RECOVERED pair every tick.
 
 **Judge `ci-state` on its payload, never its exit code** — the same rule as
 `merge-gate.mjs` applies on the merge path, applied to the watcher. `not-green` is an
