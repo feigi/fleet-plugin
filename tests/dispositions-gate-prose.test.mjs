@@ -18,7 +18,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { between, paragraph, phrase, stripQuoteGutter, stripSlashGutter } from "./support/prose-pin.mjs";
+import { between, bullet, paragraph, phrase, stripQuoteGutter, stripSlashGutter } from "./support/prose-pin.mjs";
 import { ALLOWED_DEFER } from "../plugin/scripts/dispositions-check.mjs";
 
 const REPO = join(import.meta.dirname, "..", "plugin");
@@ -180,7 +180,7 @@ test("the gate refuses a finisher on an unchecked verdict, which re-running the 
 // by the dispatch-block golden fixture; these pins name the rule that was lost.
 const headerRecord = () => between(stripSlashGutter(CHECK), "The record:", "Rules — each broken one", "dispositions-check.mjs header");
 const headerDeferRule = () =>
-  between(stripSlashGutter(CHECK), "An in-scope `survived` finding deferred passes only with `reason` one", "`remedy-outside-diff` passes only when", "dispositions-check.mjs header");
+  bullet(stripSlashGutter(CHECK), "- An in-scope `survived` finding deferred passes only with `reason` one", "`remedy-outside-diff` passes only when", "dispositions-check.mjs header");
 const fixApplierRecord = () =>
   between(stripQuoteGutter(SKILL), "**Before you report, write every ruling to", "Then report to the controller the pushed SHA", "run-team/SKILL.md");
 
@@ -193,6 +193,10 @@ test("a refuted entry needs scope, claimKind, disposition and a non-empty reason
   for (const [where, slice] of [["header", headerRecord], ["step 2", recordStep], ["fix-applier block", fixApplierRecord]]) {
     assert.match(slice(), phrase(REFUTED_ENTRY), `${where} no longer states what a refuted entry needs`);
   }
+});
+
+test("the header's schema line says a refuted entry requires a non-empty reason", () => {
+  assert.match(headerRecord(), phrase("required, non-empty, on a `refuted` entry"), "the header's reason field annotation no longer says a refuted entry requires a non-empty reason");
 });
 
 test("a finding verified correct is deferred false-rationale onto the closed suggestion-band record, in the header, step 2 and the fix-applier block", () => {
