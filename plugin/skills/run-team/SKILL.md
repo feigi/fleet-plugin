@@ -1847,11 +1847,7 @@ while :; do                                   # one tick
       echo "WATCHER DEGRADED: core REST budget=$rl — CI polling paused, silence is NOT green"
       budget_out=1
     fi
-  else
-    if [ -n "$budget_out" ]; then
-      echo "WATCHER RECOVERED: core budget=$rl — CI polling resumed"
-      budget_out=
-    fi
+  else                                        # budget RECOVERED waits for the per-pass gate below
     prs=$(gh pr list --state open --limit "$pr_cap" --json number --jq '.[].number' 2>/dev/null) || prs=ERR
     if [ "$prs" = ERR ]; then
       if [ -z "$list_out" ]; then             # global latch: this cause is account-level too
@@ -1863,7 +1859,8 @@ while :; do                                   # one tick
         echo "WATCHER RECOVERED: open-PR list readable again — CI polling resumed"
         list_out=
       fi
-      if [ "$(printf '%s\n' "$prs" | grep -c .)" -ge "$pr_cap" ]; then
+      count=$(printf '%s\n' "$prs" | grep -c .) || : # grep -c exits 1 on zero matches; set -e must not take it
+      if [ "$count" -ge "$pr_cap" ]; then
         if [ -z "$cap_out" ]; then            # global latch: a full page may have been cut there
           echo "WATCHER DEGRADED: open-PR list hit its --limit $pr_cap — PRs past it are NOT watched, silence on them is NOT green"
           cap_out=1
@@ -1872,21 +1869,35 @@ while :; do                                   # one tick
         echo "WATCHER RECOVERED: open-PR list under its --limit $pr_cap — every open PR watched again"
         cap_out=
       fi
-      for pr in $(printf '%s\n' "$prs"); do   # inline $(...): `for pr in $prs` is ONE iteration under zsh
-        st=$(~/.fleet/bin/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
-        if ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
-          case " $blind " in *" $pr "*) ;; *) # latch keyed BY PR: this cause is per-PR
-            echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
-            blind="$blind $pr" ;;
-          esac
-          continue                            # inner continue — still reaches the tick sleep
+      # gh pr list is GraphQL, so $rl still holds. Each ci-state.mjs call was
+      # measured at about 4 core REST units, so the pass needs 4 per listed PR
+      # on top of the 200 floor; a shortfall pauses this tick's pass.
+      if [ "$rl" -lt $((200 + 4 * count)) ]; then
+        if [ -z "$budget_out" ]; then
+          echo "WATCHER DEGRADED: core REST budget=$rl — CI polling paused, silence is NOT green"
+          budget_out=1
         fi
-        case " $blind " in *" $pr "*)
-          echo "WATCHER RECOVERED: ci-state reading #$pr again — CI polling resumed"
-          keep=; for b in $(printf '%s\n' "$blind"); do [ "$b" = "$pr" ] || keep="$keep $b"; done; blind=$keep ;;
-        esac
-        : # your normal handling of $st for this PR
-      done
+      else
+        if [ -n "$budget_out" ]; then
+          echo "WATCHER RECOVERED: core budget=$rl — CI polling resumed"
+          budget_out=
+        fi
+        for pr in $(printf '%s\n' "$prs"); do # inline $(...): `for pr in $prs` is ONE iteration under zsh
+          st=$(~/.fleet/bin/fleet-run ci-state.mjs --pr "$pr" 2>/dev/null) || : # not-green exits non-zero; the payload is the verdict
+          if ! printf '%s' "$st" | jq -e '.verdict and .verdict != "rate-limited"' >/dev/null 2>&1; then
+            case " $blind " in *" $pr "*) ;; *) # latch keyed BY PR: this cause is per-PR
+              echo "WATCHER DEGRADED: no usable ci-state reading for #$pr — silence is NOT green"
+              blind="$blind $pr" ;;
+            esac
+            continue                          # inner continue — still reaches the tick sleep
+          fi
+          case " $blind " in *" $pr "*)
+            echo "WATCHER RECOVERED: ci-state reading #$pr again — CI polling resumed"
+            keep=; for b in $(printf '%s\n' "$blind"); do [ "$b" = "$pr" ] || keep="$keep $b"; done; blind=$keep ;;
+          esac
+          : # your normal handling of $st for this PR
+        done
+      fi
     fi
   fi
   sleep 120                                   # the block's only pacing, once per tick
