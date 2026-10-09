@@ -1801,19 +1801,30 @@ test("two session dirs whose transcripts share a basename each get their own ski
 // e.message — Node's errno text (`..., open '<path>'`) and member-record's
 // wrong-shape refusal (`...: <path>`) — so `skipping ${file}: ${e.message}`
 // printed it twice. A dangling symlink is a deterministic ENOENT at read
-// (the transcript scan filters on the `.jsonl` suffix, not file type).
-test("a skip line names its transcript's path exactly once, on the errno and the refusal route", () => {
+// (the transcript scan filters on the `.jsonl` suffix, not file type). A
+// third route, EISDIR, carries no path in its message and must print whole.
+test("a skip line names its transcript's path exactly once and keeps its cause, on the errno, refusal and path-free routes", () => {
   const dir = tempDir("spend-once-");
   const dangling = join(dir, "agent-d.jsonl");
   const wrongShape = join(dir, "agent-w.jsonl");
+  const isDir = join(dir, "agent-e.jsonl");
   symlinkSync(join(dir, "nowhere.jsonl"), dangling);
   writeFileSync(wrongShape, '{"foo":1}\n');
+  mkdirSync(isDir); // EISDIR: its message carries no path, so it prints whole
   const errs = withStderr(() => { gatherSpend({ dir }); });
-  assert.equal(errs.length, 2, "expected one skip line per transcript, got " + JSON.stringify(errs));
-  for (const file of [dangling, wrongShape]) {
+  assert.equal(errs.length, 3, "expected one skip line per transcript, got " + JSON.stringify(errs));
+  // The cause is not pinned word for word: a reason must follow the prefix,
+  // and the two filesystem routes must still carry their errno code, so a
+  // line that lost its reason (or an over-strip of the path-free message)
+  // goes red.
+  for (const [file, cause] of [[dangling, /ENOENT/], [wrongShape, /\S/], [isDir, /EISDIR/]]) {
     const lines = errs.filter((e) => e.includes(file));
     assert.equal(lines.length, 1, `expected one skip line for ${file}, got ` + JSON.stringify(errs));
     assert.equal(lines[0].split(file).length - 1, 1, `${file} must appear exactly once, got ` + JSON.stringify(lines[0]));
+    const prefix = `skipping ${file}: `;
+    const at = lines[0].indexOf(prefix);
+    assert.ok(at >= 0, `line must carry its prefix, got ${JSON.stringify(lines[0])}`);
+    assert.match(lines[0].slice(at + prefix.length), cause, `line must keep its cause, got ${JSON.stringify(lines[0])}`);
   }
 });
 

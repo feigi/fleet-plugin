@@ -983,7 +983,7 @@ function readOmpSpend(dir, sinceMs) {
       toolTables.push(tools);
     } catch (e) {
       skipped++;
-      // The prefix already names `file`; Node's errno text (`..., open
+      // The prefix already names `file`; Node's errno text (`..., open|stat
       // '<file>'`) and member-record's shape refusal (`...: <file>`) end in
       // it too, so that tail is dropped. Any other wording prints whole.
       let why = String(e.message);
