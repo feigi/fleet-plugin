@@ -270,6 +270,8 @@ test("wt_linkage resolves a relative back-pointer against its admin dir — acce
 
 // `wt_linkage` with and without a listing read first, for each spelling of $1.
 const LINKAGE_LISTED = `wt_listing || exit 3\n${LINKAGE_PROBE}`;
+// `wt_linkage` behind a `git` shim that `revParseShim` put first on PATH.
+const LINKAGE_SHIMMED = `PATH="$2:$PATH"\n${LINKAGE_PROBE}`;
 // Trailing slashes and `/.` components, each of which follows a link where the
 // bare path would not.
 const TRAILING = (p) => [`${p}/`, `${p}//`, `${p}///`, `${p}/.`, `${p}/./`, `${p}/.//.`];
@@ -421,11 +423,11 @@ test("wt_linkage refuses a symlink through which git cannot report the admin dir
   symlinkSync(`${wt}-real`, wt);
   const lookup = "symbolic link through which git could not report its admin dir, so which worktree it stands for is unknown";
   const silent = revParseShim(t, "--absolute-git-dir", "exit 1");
-  assert.equal(probe(r.w, `PATH="$2:$PATH"\n${LINKAGE_PROBE}`, wt, silent).out, `rc=1\nwhy=${wt} is a ${lookup}\n`);
+  assert.equal(probe(r.w, LINKAGE_SHIMMED, wt, silent).out, `rc=1\nwhy=${wt} is a ${lookup}\n`);
   // Asked only of a link: a plain worktree directory never reaches the lookup.
-  assert.equal(probe(r.w, `PATH="$2:$PATH"\n${LINKAGE_PROBE}`, plain, silent).out, "rc=0\n");
+  assert.equal(probe(r.w, LINKAGE_SHIMMED, plain, silent).out, "rc=0\n");
   const worded = revParseShim(t, "--absolute-git-dir", `printf 'fatal: first\\nhint: second\\n' >&2; exit 1`);
-  assert.equal(probe(r.w, `PATH="$2:$PATH"\n${LINKAGE_PROBE}`, wt, worded).out, `rc=1\nwhy=${wt} is a ${lookup}: fatal: first hint: second\n`);
+  assert.equal(probe(r.w, LINKAGE_SHIMMED, wt, worded).out, `rc=1\nwhy=${wt} is a ${lookup}: fatal: first hint: second\n`);
 });
 
 // --- wt_registry_root
