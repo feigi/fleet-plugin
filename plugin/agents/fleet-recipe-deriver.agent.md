@@ -65,14 +65,20 @@ and revise.
 **Then prove it, with ONE of:**
 
 - **The count proof** — when the runner prints how many tests it ran. Copy
-  that summary line's text, as printed, into `--count-line`, and the number it
-  carries into `--test-count`:
+  text off that summary line, as printed, into `--count-line`, and the number
+  of tests that ran into `--test-count`:
 
       ~/.fleet/bin/fleet-run recipe-prove.mjs <repo> --install '<install>' --test '<test>' \
         --count-line '<literal text of the count line>' --test-count <n>
 
-  Copy only text that is the same on every run — the count, not a duration.
-  A count of 0 is a failed proof, never a pass.
+  The number is the tests that ran — never the skipped, the failed, or a
+  total that includes skips. A runner whose count includes its skipped tests
+  (Maven Surefire's `Tests run:`, node's `# tests`) prints no number that is
+  the tests that ran: prove it with the mutation proof instead. Trim the
+  literal to the text around that one number, so it carries no other:
+  `5 passed` off pytest's `5 passed, 2 skipped in 0.31s`. A literal carrying
+  any other number is refused. Copy only text that is the same on every run —
+  the count, not a duration. A count of 0 is a failed proof, never a pass.
 - **The mutation proof** — when the runner prints no count, or prints one
   you cannot pin. It needs the unmutated run green. Choose one test and write
   a shell command that breaks it deliberately: change an expected value in

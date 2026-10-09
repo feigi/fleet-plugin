@@ -200,6 +200,41 @@ test("the claimed count must be the number on the count line, not any number", (
   assert.equal(existsSync(cachePath(dir)), false);
 });
 
+// The claimed count must be the line's ONE number: on a summary line carrying
+// several, a run of zero tests can still carry the claim elsewhere — a runner's
+// line with every test skipped, or one that ran ten times the claim — and a
+// line whose FIRST number is the claim still carries others behind it.
+for (const [summary, countLine, claim] of [
+  ["Tests run: 0, Failures: 0, Errors: 0, Skipped: 3", "Tests run: 0, Failures: 0, Errors: 0, Skipped: 3", "3"],
+  ["Tests run: 0, Failures: 0, Errors: 0, Skipped: 0", "Tests run: 0,", "5"],
+  ["Tests run: 50, Failures: 0, Errors: 0, Skipped: 5", "Tests run: 50, Failures: 0, Errors: 0, Skipped: 5", "5"],
+  ["Tests run: 50, Failures: 0, Errors: 0, Skipped: 0", "Tests run: 50,", "5"],
+  ["Tests run: 5, Failures: 0, Errors: 0, Skipped: 2", "Tests run: 5, Failures: 0, Errors: 0, Skipped: 2", "5"],
+  ["Tests:       1 skipped, 3 passed, 4 total", "Tests:       1 skipped, 3 passed, 4 total", "3"],
+]) {
+  test(`a count line '${countLine}' does not prove ${claim} tests ran`, () => {
+    const { dir } = repo(MAVEN_FILES);
+    const r = prove(dir, ["--install", "true", "--test", `echo '${summary}'`, "--count-line", countLine, "--test-count", claim]);
+    assert.equal(r.status, 1, r.err);
+    assert.match(r.err, new RegExp(`NOT PROVEN — the count line '${countLine}' does not carry the test count ${claim} as its one number`));
+    assert.equal(existsSync(cachePath(dir)), false);
+  });
+}
+
+// The rule is the line's one number, never its first: a literal trimmed to
+// the count of tests that ran is proven wherever that count sits in the line.
+for (const [summary, countLine, claim] of [
+  ["5 passed, 2 skipped in 0.31s", "5 passed", 5],
+  ["Tests:       1 skipped, 3 passed, 4 total", "3 passed", 3],
+]) {
+  test(`a count line trimmed to its one number, '${countLine}' out of '${summary}', is proven`, () => {
+    const { dir } = repo(MAVEN_FILES);
+    const r = prove(dir, ["--install", "true", "--test", `echo '${summary}'`, "--count-line", countLine, "--test-count", String(claim)]);
+    assert.equal(r.status, 0, r.err);
+    assert.equal(JSON.parse(readFileSync(cachePath(dir), "utf8")).testCount, claim);
+  });
+}
+
 test("an Install step that changes a tracked file is not proven", () => {
   const { dir } = repo(MAVEN_FILES);
   const r = prove(dir, ["--install", "echo '<!-- -->' >> pom.xml", ...MAVEN_PROOF.slice(2)]);
