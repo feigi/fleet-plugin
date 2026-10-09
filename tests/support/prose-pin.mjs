@@ -278,7 +278,7 @@ export function bullet(text, from, to, what) {
   const lineStart = text.lastIndexOf("\n", at - 1) + 1;
   const lineEnd = text.indexOf("\n", at);
   const itemLine = text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd);
-  const content = contentColumn(itemLine);
+  const content = contentColumn(itemLine, from, what);
   const lazyFrom = columnOf(itemLine.match(/^[ \t]*/)[0]) + 4;
   let kept = slice.indexOf("\n", from.trimEnd().length);
   let blankBefore = false;
@@ -309,11 +309,10 @@ function columnOf(whitespace) {
 
 // Where a list item's text starts: past the marker and its gap, or one column
 // past the marker when the gap is over 4 (the rest is an indented code block).
-// A line with no marker has no content column of its own, so anything deeper
-// than its indent counts as its child.
-function contentColumn(line) {
+// A line with no marker has no item to bound, so it throws.
+function contentColumn(line, from, what) {
   const item = line.match(/^([ \t]*(?:[-*+]|\d+[.)]))([ \t]+)/);
-  if (!item) return columnOf(line.match(/^[ \t]*/)[0]) + 1;
+  assert.ok(item, `${what}: anchor is not on a list-item line: "${from}" — update this test`);
   const marker = columnOf(item[1]);
   const gap = columnOf(item[1] + item[2]) - marker;
   return gap > 4 ? marker + 1 : marker + gap;
