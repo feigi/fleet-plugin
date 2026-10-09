@@ -297,7 +297,14 @@ function createdPrNumbers(text) {
 // `resolvedModelIdentity` (measured `anthropic/claude-opus-5` (61),
 // `anthropic/claude-sonnet-5` (103), `anthropic/claude-haiku-4-5` (68)
 // across real `~/.omp/agent/sessions/**` — always provider-prefixed, never a
-// bare alias). `model` itself is left untouched by this addition: board.mjs
+// bare alias). Current omp writes the same dispatch-time fact under
+// `resolvedModel` instead (measured 2026-10-09 on omp 18.8.6: of the 300
+// most recently written transcripts, the 299 with a `session_init` line all
+// carried `resolvedModel`, e.g. `anthropic/claude-opus-5-5:high` with its
+// level suffix, and none carried `resolvedModelIdentity`), so the fold takes
+// `resolvedModel` when `resolvedModelIdentity` is absent and
+// `resolvedModelIdentity` when a line carries both.
+// `model` itself is left untouched by this addition: board.mjs
 // and member-outcomes.mjs read `model` for cost/spend attribution, where the
 // per-turn value (which can in principle change mid-run) is the fact they
 // want, not the dispatch-time identity.
@@ -375,6 +382,7 @@ export function foldOmpTranscript(jsonlText, filePath) {
     if (d.type === "session_init") {
       if (typeof d.task === "string") task = d.task;
       if (typeof d.resolvedModelIdentity === "string") resolvedModelIdentity = d.resolvedModelIdentity;
+      else if (typeof d.resolvedModel === "string") resolvedModelIdentity = d.resolvedModel;
       if (typeof d.agent === "string") agent = d.agent;
     }
     const m = d.message;
