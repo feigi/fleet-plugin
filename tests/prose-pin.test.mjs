@@ -238,6 +238,30 @@ test("bullet throws rather than widening when either anchor is gone", () => {
   assert.throws(() => bullet("- **Edge A**\n- b\n", "- **Edge A**", "END", "the fixture"), /no longer contains "END" after "- \*\*Edge A\*\*"/);
 });
 
+// The item's content column is read off the anchor's own line, so an anchor
+// on a line with no list marker has no item to bound: a wrapped line of an
+// item, or a plain paragraph.
+test("bullet throws when the anchor is not on a list-item line", () => {
+  for (const text of ["- a\n  **A** wrapped\n- b\nEND", "intro\n\n**A** paragraph\nEND"]) {
+    assert.throws(() => bullet(text, "**A**", "END", "the fixture"), /the fixture: anchor is not on a list-item line: "\*\*A\*\*" — update this test/, text);
+  }
+});
+
+// A marker with nothing after it on its own line is still a list-item line: its
+// content starts on the next line, one column past the marker, so the indented
+// line under it is the item's own and the next sibling marker ends it.
+test("bullet takes a bare-marker anchor as a list-item line", () => {
+  assert.equal(bullet("-\n  **A** body\n- b\nEND", "-\n  **A**", "END", "the fixture"), "-\n  **A** body");
+  assert.equal(bullet("1.\n   **A** body\n2. b\nEND", "1.\n   **A**", "END", "the fixture"), "1.\n   **A** body");
+  assert.equal(bullet("-  \n  **A** body\n\n  - deep child\n- b\nEND", "-  \n  **A**", "END", "the fixture"), "-  \n  **A** body\n\n  - deep child");
+});
+
+// Every marker character reads as a list-item line, not only `-` and `1.`.
+test("bullet takes a `*` or `+` anchor as a list-item line", () => {
+  assert.equal(bullet("* **A** body\n* b\nEND", "* **A**", "END", "the fixture"), "* **A** body");
+  assert.equal(bullet("+ **A** body\n+ b\nEND", "+ **A**", "END", "the fixture"), "+ **A** body");
+});
+
 // #2077: a restatement need not be a list item to escape the item. A paragraph
 // after a blank line, or a heading, quote, fence or rule, written shallower than
 // the item's content ends the item in markdown, so it ends the slice too —
@@ -270,6 +294,10 @@ test("bullet keeps the item's own paragraphs, blocks and lazy continuation lines
   assert.equal(bullet("-     **Item** code\n\n  own paragraph\n- next\nEND", "**Item**", "END", "the fixture"), "**Item** code\n\n  own paragraph");
   // A tab-indented child of a space-indented item is still its child.
   assert.equal(bullet("- **Edge A** body\n\t- tab child\n- sibling\nEND", "- **Edge A**", "END", "the fixture"), "- **Edge A** body\n\t- tab child");
+  // A blank line, then a nested item at or past the content column: the
+  // item's own child, not the end of it.
+  assert.equal(bullet("- **A** body\n\n  - deep child\nEND", "- **A**", "END", "fixture"), "- **A** body\n\n  - deep child\n");
+  assert.equal(bullet("- **A** body\n\n   - deeper child\nEND", "- **A**", "END", "fixture"), "- **A** body\n\n   - deeper child\n");
 });
 
 // #2077: the item line is the one `from`'s first non-whitespace character sits
