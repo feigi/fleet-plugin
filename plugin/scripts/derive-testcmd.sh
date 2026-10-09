@@ -368,11 +368,17 @@ esac
 # `tests 0` and exits 0. The suite moved and the Recipe did not, so it is
 # stale, refused like a binary that is gone. Tracked, not present on disk: a
 # fresh worktree holds only what is tracked. Only a word the shell globs as
-# written, from <repo>, can be settled without running the command: a word
-# carrying quoting or an expansion, an option, an `=` assignment or value, or a
-# path outside <repo> is the program's own to read and is accepted unprobed,
-# and the scan stops at a `cd`, past which a pattern no longer resolves from
-# <repo>. So is a word right after an option written without `=`, unless it
+# written, from <repo>, can be settled without running the command. A word
+# carrying quoting or an expansion is accepted unprobed, whole, since an
+# operator in it may be quoted; any other word is split at each `;`, `&`, `|`,
+# `(` and `)`, operators to the shell whether or not whitespace surrounds
+# them, and each piece is judged as a word of its own. An option, an `=`
+# assignment or value, a path outside <repo>, or the target of a `<` or `>`
+# redirection is the program's own to read, or selects no test, and is
+# accepted unprobed too. The scan stops at a `cd` or `pushd`, past which a
+# pattern no longer resolves from <repo>, and at a word that is not split but
+# ends in an operator then `cd` or `pushd`. A word right after an option
+# written without `=`, with no operator between them, is accepted unless it
 # has a `/` or a `.`: it may be that option's value, which names no path. A
 # pattern under a path git ignores names generated output, such as a build
 # the Install step produces, which is never tracked, so it is accepted too,
@@ -422,44 +428,65 @@ if [ "$field" = test ]; then
   prev=
   # shellcheck disable=SC2086 # field splitting is the point: scanning every word
   for word in $value; do
-    before=$prev
-    prev=$word
     case $word in
-      cd|pushd|*[\(\;\&\|]cd|*[\(\;\&\|]pushd) break ;;
-      -*|*=*|/*|*..*|*[\'\"\\\$\`\(\)\{\}\<\>\|\&\;\~]*) continue ;;
-      *'*'*|*'?'*|*'['*']'*) ;;
-      *) continue ;;
+      *[\'\"\\\$\`\{\}\~]*)
+        case $word in *[\(\;\&\|]cd|*[\(\;\&\|]pushd) break ;; esac
+        prev=$word
+        continue ;;
     esac
-    case $before in
-      -*=*) ;;
-      -*) case $word in */*|*.*) ;; *) continue ;; esac ;;
-    esac
-    # The second pathspec is the directories the word matches: the shell hands
-    # `tests/*` the directory `tests/unit`, which ls-files lists only as the
-    # prefix of the files beneath it.
-    tracked=$(git -C "$repo" ls-files -- ":(glob)$word" ":(glob)${word%/}/**" 2>"$errf") || {
-      listed=$?
-      die "cannot list the files tracked in $where to check its test command's pattern '$word' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)"
-    }
-    [ -z "$tracked" ] || continue
-    lead=${word%%[*?[]*}
+    before=$prev
+    rest=$word
+    first=1
     while :; do
-      case $lead in */*) lead=${lead%/*} ;; *) break ;; esac
-      opq=0
-      opaque "$lead" || opq=$?
-      case $opq in
-        0) continue 2 ;;
-        1) ;;
-        *) die "cannot ask git whether '$lead' is a symlink or a submodule in $where, to check its test command's pattern '$word' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)" ;;
+      if [ -z "$first" ]; then
+        case $rest in
+          *[\;\&\|\(\)]*) rest=${rest#*[\;\&\|\(\)]} ;;
+          *) break ;;
+        esac
+        before=
+      fi
+      first=
+      piece=${rest%%[\;\&\|\(\)]*}
+      follows=$prev
+      prev=$piece
+      case $follows in *[\<\>]) continue ;; esac
+      case $piece in
+        cd|pushd) break 2 ;;
+        -*|*=*|/*|*..*|*[\<\>]*) continue ;;
+        *'*'*|*'?'*|*'['*']'*) ;;
+        *) continue ;;
+      esac
+      case $before in
+        -*=*) ;;
+        -*) case $piece in */*|*.*) ;; *) continue ;; esac ;;
+      esac
+      # The second pathspec is the directories the piece matches: the shell
+      # hands `tests/*` the directory `tests/unit`, which ls-files lists only as
+      # the prefix of the files beneath it.
+      tracked=$(git -C "$repo" ls-files -- ":(glob)$piece" ":(glob)${piece%/}/**" 2>"$errf") || {
+        listed=$?
+        die "cannot list the files tracked in $where to check its test command's pattern '$piece' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)"
+      }
+      [ -z "$tracked" ] || continue
+      lead=${piece%%[*?[]*}
+      while :; do
+        case $lead in */*) lead=${lead%/*} ;; *) break ;; esac
+        opq=0
+        opaque "$lead" || opq=$?
+        case $opq in
+          0) continue 2 ;;
+          1) ;;
+          *) die "cannot ask git whether '$lead' is a symlink or a submodule in $where, to check its test command's pattern '$piece' (git ls-files exit $listed): $(cat "$errf" 2>/dev/null)" ;;
+        esac
+      done
+      ignored=0
+      git -C "$repo" check-ignore -q --no-index -- "$piece" 2>"$errf" || ignored=$?
+      case $ignored in
+        0) ;;
+        1) die "the Recipe cache at $cache is invalid: its test command's pattern '$piece' matches no file tracked in $where — a Test entrypoint that selects no tests passes having run nothing, so the Recipe is stale, not a finding; $derive" ;;
+        *) die "cannot ask git whether $repo ignores its test command's pattern '$piece' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
       esac
     done
-    ignored=0
-    git -C "$repo" check-ignore -q --no-index -- "$word" 2>"$errf" || ignored=$?
-    case $ignored in
-      0) ;;
-      1) die "the Recipe cache at $cache is invalid: its test command's pattern '$word' matches no file tracked in $where — a Test entrypoint that selects no tests passes having run nothing, so the Recipe is stale, not a finding; $derive" ;;
-      *) die "cannot ask git whether $repo ignores its test command's pattern '$word' (git check-ignore exit $ignored): $(cat "$errf" 2>/dev/null)" ;;
-    esac
   done
   set +f
 fi
