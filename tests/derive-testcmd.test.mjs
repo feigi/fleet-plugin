@@ -289,6 +289,13 @@ test("a test command whose glob matches no tracked file refuses as a stale Recip
     ["node --test tests/*.test.mjs gone/*.test.mjs", "gone/*.test.mjs"],
     ["true && node --test t?sts/[!a].test.mjs", "t?sts/[!a].test.mjs"],
     ["node --test gone/*/", "gone/*/"],
+    // A shell operator glued to the pattern is still an operator, so the
+    // pattern beside it is a word of its own, probed like any other — and the
+    // piece after an operator is no option's value.
+    ["node --test nope/*.js;echo", "nope/*.js"],
+    ["(node --test gone/*.test.mjs)", "gone/*.test.mjs"],
+    ["node --test gone/*.test.mjs|cat", "gone/*.test.mjs"],
+    ["node --test -x;gone*", "gone*"],
   ]) {
     cache(dir, recipe(head, { test: cmd }));
     const r = derive(dir);
@@ -344,6 +351,8 @@ test("a test command whose glob matches a tracked file, or that the tree cannot 
     "true;cd tests/unit && node --test *.test.mjs",
     "true&&cd tests/unit&&node --test *.test.mjs",
     "true|cd tests/unit && node --test *.test.mjs",
+    "true&cd tests/unit && node --test *.test.mjs",
+    "echo 'x';cd tests/unit && node --test *.test.mjs",
     "(cd tests/unit && node --test *.test.mjs )",
     "true;pushd tests/unit && node --test *.test.mjs",
     // Led by `true`, not `pushd`: pushd is a bash builtin, absent from dash
@@ -352,6 +361,19 @@ test("a test command whose glob matches a tracked file, or that the tree cannot 
     "true && pushd tests/unit && node --test *.test.mjs",
     "node --test ../shared/*.test.mjs",
     "node --test /opt/suite/*.test.mjs",
+    // A redirection's target is a file the command writes or reads, not a
+    // test it selects.
+    "node --test tests/unit/*.test.mjs > gone/*.log",
+    "node --test tests/unit/*.test.mjs 2> gone/*.log",
+    "node --test tests/unit/*.test.mjs >|gone/*.log",
+    // A word carrying quoting or an expansion is not split at its operators,
+    // which may be quoted.
+    "node --test tests/unit/*.test.mjs 'x';gone/*.js",
+    "node --test tests/unit/*.test.mjs $X;gone/*.js",
+    "node --test tests/unit/*.test.mjs `x`;gone/*.js",
+    "node --test tests/unit/*.test.mjs {x};gone/*.js",
+    "node --test tests/unit/*.test.mjs ~;gone/*.js",
+    "node --test tests/unit/*.test.mjs x\\;gone/*.js",
   ]) {
     cache(dir, recipe(head, { test: cmd }));
     const r = derive(dir);
