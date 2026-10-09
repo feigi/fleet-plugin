@@ -305,6 +305,9 @@ test("board.html's <script> still declares render in the shape this file lifts",
   assert.ok(SCRIPT_SRC, "board.html no longer has a lift-able <script> body — update this test");
 });
 
+// A column's header count, read off the node `render` keeps for it.
+const count = (col) => col.children[0].children[0].textContent;
+
 function renderHarness() {
   const document = fakeDocument();
   const render = new Function("document", `${SCRIPT_SRC}\nreturn render;`)(document);
@@ -356,7 +359,6 @@ test("render keeps each column's node across ticks and rewrites only what it hol
     "a column rebuilt as a new node loses its scroll position on every poll"));
 
   const [pool, , review] = board.children;
-  const count = (col) => col.children[0].children[0].textContent;
   const issues = (col) => col.children.slice(1).map((c) => c.children[0].children[0].textContent);
   assert.equal(count(pool), "1");
   assert.deepEqual(issues(pool), ["#4"], "a column must hold this tick's cards, not last tick's as well");
@@ -377,7 +379,6 @@ test("a malformed ticket that makes card() throw leaves every column on the prev
   render({ ...baseModel(), tickets: [
     { issue: 1, column: "POOL" }, { issue: 2, column: "REVIEW" },
   ] });
-  const count = (col) => col.children[0].children[0].textContent;
   assert.equal(count(board.children[0]), "1", "POOL");
   assert.equal(count(board.children[2]), "1", "REVIEW");
 
@@ -397,26 +398,36 @@ test("a malformed ticket that makes card() throw leaves every column on the prev
 
 // #1863: a ticket whose column is none of COLUMNS matched no column's filter
 // and vanished from the board with nothing said anywhere. render() must throw
-// naming the column and the ticket — poll()'s catch banners it — and, like a
-// card() throw, leave every column on the previous tick.
-test("a ticket whose column is not a known column makes render throw, leaving every column on the previous tick", () => {
+// naming the column and the ticket — poll()'s catch banners it — and leave the
+// WHOLE board on the previous tick: the title, heading and attention strip as
+// well as every column, never a new header over old columns.
+test("a ticket whose column is not a known column makes render throw, leaving the whole board on the previous tick", () => {
   const { document, render } = renderHarness();
   const board = document.getElementById("board");
-  render({ ...baseModel(), tickets: [
+  const heading = document.getElementById("heading");
+  const attention = document.getElementById("attention");
+  render({ ...baseModel(), repo: "acme/one", attention: [{ issue: 1, flags: ["stale"] }], tickets: [
     { issue: 1, column: "POOL" }, { issue: 2, column: "REVIEW" },
   ] });
-  const count = (col) => col.children[0].children[0].textContent;
   assert.equal(count(board.children[0]), "1", "POOL");
   assert.equal(count(board.children[2]), "1", "REVIEW");
 
-  assert.throws(() => render({ ...baseModel(), tickets: [
-    { issue: 1, column: "POOL" }, { issue: 3, column: "POOL" }, { issue: 99, column: "BOGUS" },
-  ] }), (e) => /BOGUS/.test(e.message) && /#99\b/.test(e.message),
-  "a ticket in an unknown column must surface as a thrown error naming the column and ticket, not drop silently");
+  // Not one literal: a guard that tests only for "BOGUS", exempts an absent
+  // or empty column, or folds case ("pool") would pass a single-value test.
+  for (const bad of [undefined, null, "", "pool", "BOGUS"]) {
+    assert.throws(() => render({ ...baseModel(), repo: "acme/two",
+      attention: [{ issue: 7, flags: ["stale"] }, { issue: 8, flags: ["stall"] }],
+      tickets: [{ issue: 1, column: "POOL" }, { issue: 3, column: "POOL" }, { issue: 99, column: bad }],
+    }), (e) => e.message.includes(`unknown column ${JSON.stringify(bad)}`) && /#99\b/.test(e.message),
+    `a ticket in the unknown column ${JSON.stringify(bad)} must surface as a thrown error naming the column and ticket, not drop silently`);
 
-  assert.equal(count(board.children[0]), "1",
-    "POOL must NOT have updated to this tick's count of 2 — the throw must come before any column is written");
-  assert.equal(count(board.children[2]), "1", "REVIEW must also stay on the previous tick, consistent with POOL");
+    assert.equal(count(board.children[0]), "1",
+      "POOL must NOT have updated to this tick's count of 2 — the throw must come before any column is written");
+    assert.equal(count(board.children[2]), "1", "REVIEW must also stay on the previous tick, consistent with POOL");
+    assert.equal(document.title, "fleet cockpit — acme/one", "the tab title must stay on the previous tick");
+    assert.equal(heading.textContent, "🛰 fleet cockpit — acme/one", "the heading must stay on the previous tick");
+    assert.equal(attention.children.length, 1, "the attention strip must stay on the previous tick");
+  }
 
   // What the check must ACCEPT: every known column, and a tick with no tickets.
   render({ ...baseModel(), tickets: [
@@ -426,6 +437,27 @@ test("a ticket whose column is not a known column makes render throw, leaving ev
   board.children.forEach((col, i) => assert.equal(count(col), "1", `column ${i} must hold its one ticket`));
   render({ ...baseModel(), tickets: undefined });
   board.children.forEach((col, i) => assert.equal(count(col), "0", `column ${i} must be empty`));
+});
+
+// The other half of #1863's promise: the throw must reach the operator. Driven
+// through poll() itself — fetch and setTimeout are the only globals it reads
+// beyond `document`, so a stub of each lets the lifted script run it for real.
+test("poll banners a render throw for an unknown column, naming the column and the ticket", async () => {
+  const document = fakeDocument();
+  const body = { ...baseModel(), tickets: [{ issue: 99, column: "BOGUS" }] };
+  const timers = [];
+  const poll = new Function("document", "fetch", "setTimeout",
+    `${SCRIPT_SRC}\nreturn poll;`)(
+    document,
+    async () => ({ ok: true, json: async () => body }),
+    (fn, ms) => timers.push(ms));
+  await poll();
+  const banner = document.getElementById("stale-banner");
+  assert.equal(banner.style.display, "block", "a render throw must show the banner, not vanish");
+  assert.match(banner.textContent, /board render failed/);
+  assert.match(banner.textContent, /BOGUS/, "the banner must name the column");
+  assert.match(banner.textContent, /#99\b/, "the banner must name the ticket");
+  assert.equal(timers.length, 1, "poll must keep polling after a render throw");
 });
 
 // #1584 adds a second reader of the model's repo IDENTITY (`acme/one`) beside
