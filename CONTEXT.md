@@ -199,6 +199,17 @@ second sign-off scoped to one file and one landing source (ADR 0023). The
 post-rebase counterpart of the **No-undo audit**.
 _Avoid_: lost work, reverted lines, regression
 
+**Rebase-carry**:
+A PR head that moved after `ready-to-merge` and still carries the labelled
+head's net change: its diff against its own merge base with `origin/main` is
+byte-identical to the labelled head's, except for each hunk header's line
+numbers and function context and a text file's blob ids, and the labelled head
+merges onto the moved head's own merge base into exactly the moved head's tree.
+`merge-gate.mjs` proves it from git objects in the
+main checkout and accepts the head with the label kept, naming both SHAs in
+`rebaseCarry`; any head it cannot prove is `head-moved-after-label` (ADR 0024).
+_Avoid_: clean rebase, patch-equivalent, same patch
+
 ### Triage
 
 **Review deferral**:

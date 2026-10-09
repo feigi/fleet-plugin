@@ -98,9 +98,31 @@ test("a commit AFTER the last label line is what the refusal keys on", () => {
   assert.match(
     labelledHead(),
     phrase(
-      "A `committed` or `head_ref_force_pushed` line after the last `labeled ready-to-merge` means the head moved after the audit. **Refuse:",
+      "A `committed` or `head_ref_force_pushed` line after the last `labeled ready-to-merge` means the head moved after the audit. **With no `head_ref_force_pushed` among those lines, refuse:**",
     ),
   );
+});
+
+// The carry half (ADR 0024): a force-push is handed to the gate, not refused
+// on sight, and the gate's verdict is what refuses. Each pin is one span with
+// its verdict, for the reason the refusal pin above gives.
+test("a force-push after the label is handed to the gate, with the labelled head as --pre", () => {
+  const s = labelledHead();
+  assert.match(s, phrase("**A `head_ref_force_pushed` after the label is not refused on sight — it may be a rebase-carry, and the merge gate decides.**"));
+  assert.match(s, /\.\.\. on HeadRefForcePushedEvent \{ createdAt beforeCommit \{ oid \} \}/);
+  assert.match(s, phrase("**The labelled head is the `beforeCommit` of the first `force-pushed` line after the last `labeled` line**"));
+  assert.match(s, phrase("run step 3's gate now, before step 1, with `--pre <labelled head>` and no `--post`. **`rebaseCarry` null → refuse as above.**"));
+});
+
+// The one move the timeline cannot show: a plain push the force-push then
+// orphaned. Without this check the bot would hand the gate an unaudited head
+// as `--pre`, and the proof would certify the carry of THAT head.
+test("the derived labelled head is refused when it carries a commit dated after the label", () => {
+  const s = labelledHead();
+  assert.match(s, phrase("unless a plain push landed between the label and that force-push, which leaves no line at all once the force-push orphans it"));
+  assert.match(s, phrase("git log --format='%ct %H' origin/main..<labelled head>"));
+  assert.match(s, phrase("a commit whose first field is later than the label's (the number on its `labeled` line), a non-zero exit (the object is not here), or `unknown` in place of the SHA → refuse as above"));
+  assert.match(s, phrase("step 1's `pre` must read `rebaseCarry.accepted` (any other head is a push since the proof — refuse as above)"));
 });
 
 test("the refusal names its token, leaves the label alone, and sends a fresh finisher", () => {
@@ -139,22 +161,24 @@ test("the pre-rebase head is recorded here, since step 3 compares against it and
 
 // The other ACCEPT-side half: the two things the gate deliberately does NOT
 // answer. A hand-added label reads clean here (run-team owns reviewer-only),
-// and a head rebased by an abandoned earlier pass refuses on purpose rather
-// than as a false positive. Both are the sentences a later reader would delete
-// as hedging, and deleting either turns a stated limit into a silent one.
-test("the gate declares what it does not cover, and which refusal is intended", () => {
+// and a head rebased by an abandoned earlier pass gets no exemption either
+// way — it is carried or refused on its net change like any force-push. Both
+// are the sentences a later reader would delete as hedging, and deleting
+// either turns a stated limit into a silent one.
+test("the gate declares what it does not cover, and how an abandoned pass's rebase is judged", () => {
   const s = labelledHead();
   assert.match(s, phrase("a hand-added `ready-to-merge` with no finisher behind it reads clean here"));
-  assert.match(s, phrase("earlier, abandoned pass of this command** refuses too"));
+  assert.match(s, phrase("**earlier, abandoned pass of this command** is judged like any other force-push: carried when its net change is the labelled head's, refused when it is not"));
 });
 
-test("step 3 re-derives the head at the merge instant, against pre or the rebase's post", () => {
+test("step 3 re-derives the head at the merge instant, against pre, the rebase's post, or a proven carry", () => {
   // The gate compares the PR head against `--pre`/`--post`, so the operands
   // have to be the labelled head and the bot's own rebase — any other source
   // for `--pre` certifies whatever head the bot read last.
   const s = step3();
   assert.match(s, phrase("`--pre` is the head you recorded at **The labelled head**; `--post` is the head step 1's rebase produced"));
-  assert.match(s, phrase("**`head-moved-after-label`** — the PR head is neither `pre` nor `post`"));
+  assert.match(s, phrase("**`head-moved-after-label`** — the PR head is neither `pre` nor `post`, nor a head whose net change the gate proved identical to `pre`'s"));
+  assert.match(s, phrase("A carry is proven only for the head `gh pr view` read; a different head at `ci-state`'s own read is still this row."));
 });
 
 test("step 3 says why no CI gate above it can see a push that landed during the wait", () => {
@@ -223,11 +247,23 @@ const failureTable = () =>
 test("the failure table carries the head-moved outcome and its response", () => {
   const s = failureTable();
   assert.match(s, phrase("Merge bot finds the head moved after `ready-to-merge` was applied"));
-  assert.match(s, phrase("`head-moved-after-label-#<pr>`, PR stays queued, label untouched"));
+  assert.match(s, phrase("a proven rebase-carry keeps the label — the bot proceeds and reports `rebase-carry-#<pr>`"));
+  assert.match(s, phrase("Any other move is `head-moved-after-label-#<pr>`, PR stays queued, label untouched"));
 });
 
-test("the report vocabulary includes head-moved-after-label", () => {
+test("the report vocabulary includes head-moved-after-label and rebase-carry", () => {
   // Bounded to the Report line itself: the token survives elsewhere in the doc,
   // so a whole-file match would mask its removal from the vocabulary list.
   assert.match(DOC, /^Report merged [^\n]*head-moved-after-label-#X/m);
+  assert.match(DOC, /^Report merged [^\n]*rebase-carry-#X/m);
+});
+
+// §3.4 is HARD, so the rule it states is the one the bot must follow; a
+// requirement still binding the label to one SHA would contradict the gate.
+test("requirements §3.4 binds the label to the net change and names the carry", () => {
+  const REQ = readFileSync(join(import.meta.dirname, "..", "docs", "requirements.md"), "utf8");
+  const s = between(REQ, "### 3.4 `ready-to-merge` — HARD", "### 3.5", "requirements.md");
+  assert.match(s, phrase("Binds to the head's net change at application time, not to one SHA"));
+  assert.match(s, phrase("a proven rebase-carry"));
+  assert.match(s, phrase("Any other push after (a review fix, a conflict resolution, an edited commit) makes bot halt with `head-moved-after-label-#<pr>`"));
 });

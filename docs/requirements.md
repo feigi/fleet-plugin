@@ -164,7 +164,7 @@ Admitted: open, labelled `ready-for-agent`, no excluded labels (§2.4), unassign
 ### 3.4 `ready-to-merge` — HARD
 - Applied by reviewer (finisher or `review-and-fix` runner) once diff-check is green, deferrals are filed, exactly one release label present; never by implementer on own work.
 - `required_approving_review_count: 0` means this label *is* the approval.
-- Binds to head SHA at application time. Any push after (including rebase) makes bot halt with `head-moved-after-label-#<pr>`; bot leaves the label in place — re-review, then re-apply (remove and add) to bind it to the new head.
+- Binds to the head's net change at application time, not to one SHA ([ADR 0024](adr/0024-ready-to-merge-binds-to-the-net-change.md)): a proven rebase-carry — a moved head whose net change against `main` is byte-identical to the labelled head's — keeps the label, and the bot reports `rebase-carry-#<pr>` with both SHAs. Any other push after (a review fix, a conflict resolution, an edited commit) makes bot halt with `head-moved-after-label-#<pr>`; bot leaves the label in place — re-review, then re-apply (remove and add) to bind it to the new head.
 - A red PR with the label sits until the 15-minute grace ends and is reported, not merged.
 - Removing the label is the safe abort; bot re-reads labels immediately before `gh pr merge`.
 

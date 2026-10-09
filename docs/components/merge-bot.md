@@ -79,6 +79,12 @@ flowchart TD
   would remove lines `main` gained after the PR's work began unless the
   PR body acknowledges them
   ([ADR 0023](../adr/0023-main-gain-check-is-a-merge-gate-row.md)).
+- **The label binds to the net change, not to one SHA.** A head that
+  moved after `ready-to-merge` passes the gate's head row only as a
+  proven rebase-carry — its net change byte-identical to the labelled
+  head's — and the bot reports it with both SHAs; any other moved head
+  still needs a fresh finisher
+  ([ADR 0024](../adr/0024-ready-to-merge-binds-to-the-net-change.md)).
 - **GitHub's native merge queue is rejected.** Its `merge_group` event
   has no workflow in this repo, and a behind PR would enter the queue
   with a red `rebase-check` by design — the fleet's own label+hold-rule

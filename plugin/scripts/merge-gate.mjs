@@ -9,9 +9,11 @@
 // then answers the conjunction. All four run on every call, whatever the
 // earlier ones said — except main-gain.mjs, which needs the head and body gh
 // read and the main checkout, and is skipped when either could not be had — so
-// the JSON line carries every field that was read. It never merges, labels,
-// rebases or waits: the merge bot runs it once before any wait and once
-// immediately before `gh pr merge`, and merges only on that second exit 0.
+// the JSON line carries every field that was read. A head gh reads outside
+// {pre, post} adds one more read, the rebase-carry proof below, in the main
+// checkout. It never merges, labels, rebases or waits: the merge bot runs it
+// once before any wait and once immediately before `gh pr merge`, and merges
+// only on that second exit 0.
 //
 // `--pre` is the labelled head, `--post` the head the bot's own
 // `gh pr update-branch --rebase` produced; omitted, it is `--pre` (the
@@ -22,7 +24,9 @@
 // guesses it.
 //
 // Stdout: exactly one JSON line, `{pr, verdict, reason, head, pre, post,
-// behind, instruments, mainGain, ci}`, `mainGain` echoing main-gain.mjs's own
+// rebaseCarry, behind, instruments, mainGain, ci}`, `rebaseCarry` naming the
+// labelled head and the head accepted as carrying it (`{labelled, accepted}`),
+// or null when no carry was proven, `mainGain` echoing main-gain.mjs's own
 // payload — hits, acknowledged removals and unchecked files — or null when
 // it did not run or printed no JSON object; an unusable payload is still
 // echoed. Stderr: the children's own diagnostics, passed straight through
@@ -43,7 +47,8 @@
 //
 //   label `ready-to-merge` absent            1  label-pulled
 //   reviewDecision CHANGES_REQUESTED         1  changes-requested
-//   PR head not in {pre, post}               1  head-moved-after-label
+//   PR head not in {pre, post} and not a     1  head-moved-after-label
+//     proven rebase-carry of pre
 //   main-gain.mjs exit 1                     1  main-gain-removed:<first path>
 //   ci-state exit 1 (not-green)              1  ci:<first entry of ci.reasons>
 //   ci.behind > 0                            1  behind:<n>
@@ -63,6 +68,13 @@
 //
 // An instrument change is 2, not 1: a changed instrument says nothing about
 // the PR, and the response is stop-and-report like every other 2.
+//
+// A rebase-carry is a head outside {pre, post} whose net change is the
+// labelled head's and whose tree is exactly that change merged onto the moved
+// head's own base: the label binds to the change it audited, not to one SHA,
+// so a conflict-free rebase keeps it. Anything the proof cannot establish —
+// a missing object, an unresolvable base, a git failure, a merge conflict — is
+// no carry, and the head row blocks exactly as it does for any other moved head.
 
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -111,6 +123,89 @@ function sha(name, value) {
 const pre = sha("pre", preArg);
 const post = postArg === null ? null : sha("post", postArg);
 const heads = new Set([pre, post ?? pre]);
+
+// --- rebase-carry proof ----------------------------------------------------
+// Same net change: `git diff-tree` of each head against its own merge base
+// with `origin/main`, in the main checkout, compared byte for byte after
+// dropping only what a conflict-free rebase moves without changing the
+// change — the line numbers and function context of each hunk header, and a
+// text file's pre/post blob ids (the file around the hunks moved with
+// `main`). Kept: every added, removed and context line, every mode, new-file,
+// deleted-file and `\ No newline` line, symlink targets and submodule
+// pointers (both are content lines), and a binary file's whole block, whose
+// `index` line carries both full blob ids: its patch can be a delta against
+// the other side, and two different pairs of blobs can share one delta in
+// both directions. `--no-renames` turns a rename into the deletion and
+// addition it is, so no similarity score decides anything.
+//
+// Not `git patch-id`: it drops whitespace. Measured with git 2.50.1, two
+// branches adding `new` and `  new` to the same file gave one
+// `patch-id --stable`, so an indentation change would read as a carry.
+//
+// latin1 decodes every byte to its own code unit, so two different invalid
+// UTF-8 sequences can never decode to the same replacement character and
+// compare equal.
+//
+// The text comparison alone cannot place a hunk: its header's line numbers and
+// function context are dropped, so the same edit made somewhere else in the
+// file reads as the same change. It is therefore the first of two proofs, and
+// the second is the exact one: a three-way merge of the labelled head into the
+// moved head's own merge base, with the labelled head's merge base as the
+// common ancestor, must produce the moved head's tree. A clean rebase is
+// precisely that merge; an edit relocated, added or dropped anywhere else
+// yields a different tree, and a merge that conflicts yields none.
+//
+// Read-only: cat-file, merge-base, diff-tree and rev-parse write nothing,
+// and merge-tree writes no ref, index or worktree — only the unreachable tree
+// and blob objects of the merge it computes, as main-gain.mjs's does.
+const GIT = gitEnv({ LC_ALL: "C" });
+
+function gitRead(root, args) {
+  const r = spawnSync("git", args, { cwd: root, encoding: "latin1", env: GIT, stdio: ["ignore", "pipe", "inherit"], maxBuffer: 1 << 30 });
+  return r.error || r.signal || r.status !== 0 ? null : r.stdout;
+}
+
+function netChange(root, head) {
+  if (gitRead(root, ["cat-file", "-e", `${head}^{commit}`]) === null) return null;
+  const bases = gitRead(root, ["merge-base", "--all", "origin/main", head]);
+  const base = bases === null ? [] : bases.split("\n").filter(Boolean);
+  if (base.length !== 1) return null;
+  const diff = gitRead(root, [
+    "diff-tree", "-r", "-p", "--binary", "--full-index", "--no-renames", "--no-ext-diff", "--no-textconv",
+    "--no-color", "-U3", "--src-prefix=a/", "--dst-prefix=b/", base[0], head,
+  ]);
+  if (diff === null || diff === "") return null;
+  // One block per file, each starting at its `diff --git` line. No content
+  // line can start that way — every one carries a ` `, `+`, `-` or `\` prefix,
+  // and a binary patch line has no space in it.
+  const blocks = diff.split(/^(?=diff --git )/m);
+  const text = blocks
+    .map((block) => {
+      const lines = block.split("\n");
+      if (lines.includes("GIT binary patch")) return block;
+      return lines
+        .map((l) => {
+          const index = /^index [0-9a-f]+\.\.[0-9a-f]+((?: [0-7]+)?)$/.exec(l);
+          if (index) return `index${index[1]}`;
+          return /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(l) ? "@@" : l;
+        })
+        .join("\n");
+    })
+    .join("");
+  return { base: base[0], text };
+}
+
+function proveCarry(root, prView) {
+  if (root === null || prView === null || heads.has(prView.headRefOid)) return null;
+  const labelled = netChange(root, pre);
+  if (labelled === null) return null;
+  const moved = netChange(root, prView.headRefOid);
+  if (moved === null || moved.text !== labelled.text) return null;
+  const merged = gitRead(root, ["merge-tree", "--write-tree", `--merge-base=${labelled.base}`, moved.base, pre]);
+  const tree = gitRead(root, ["rev-parse", "--verify", `${prView.headRefOid}^{tree}`]);
+  if (merged === null || tree === null || merged.split("\n")[0] !== tree.trim()) return null;
+  return { labelled: pre, accepted: prView.headRefOid };
+}
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
@@ -248,20 +343,23 @@ function readCi() {
 }
 
 // --- the conjunction ------------------------------------------------------
-function decide(instruments, prView, mainGain, ciRead) {
+function decide(instruments, prView, mainGain, ciRead, rebaseCarry) {
   const blocked = (reason) => ({ verdict: "blocked", reason });
   const unknown = (reason) => ({ verdict: "unknown", reason });
   const { validated, usable } = ciRead;
+  // The carried head joins the accepted set; nothing else does. A third head
+  // at ci-state's read is still not one of them.
+  const accepted = rebaseCarry === null ? heads : new Set([...heads, rebaseCarry.accepted]);
   if (prView !== null) {
     if (!prView.labels.some((l) => l.name === "ready-to-merge")) return blocked("label-pulled");
     if (prView.reviewDecision === "CHANGES_REQUESTED") return blocked("changes-requested");
-    if (!heads.has(prView.headRefOid)) return blocked("head-moved-after-label");
+    if (!accepted.has(prView.headRefOid)) return blocked("head-moved-after-label");
   }
   // ci-state reads the head a second time, a few seconds after gh pr view
   // above, and binds its run to THAT read. A push in between would have its
   // own CI judged here while the label's audit belongs to the tree before it,
   // so the same row applies to ci-state's reading too.
-  if (usable && !heads.has(validated.prHead)) return blocked("head-moved-after-label");
+  if (usable && !accepted.has(validated.prHead)) return blocked("head-moved-after-label");
   if (mainGain.usable && mainGain.exit === 1) return blocked(`main-gain-removed:${mainGain.payload.hits[0].path}`);
   if (usable && ciRead.notGreen) return blocked(`ci:${validated.reasons[0]}`);
   if (usable && validated.behind > 0) return blocked(`behind:${validated.behind}`);
@@ -283,8 +381,9 @@ try {
   const instruments = readInstruments();
   const prView = readPr();
   const mainGain = readMainGain(instruments.root, prView);
+  const rebaseCarry = proveCarry(instruments.root, prView);
   const ciRead = readCi();
-  const { verdict, reason } = decide(instruments, prView, mainGain, ciRead);
+  const { verdict, reason } = decide(instruments, prView, mainGain, ciRead, rebaseCarry);
   const line = `${JSON.stringify({
     pr,
     verdict,
@@ -292,6 +391,7 @@ try {
     head: prView?.headRefOid ?? null,
     pre,
     post,
+    rebaseCarry,
     behind: ciRead.usable ? ciRead.ci.behind : null,
     instruments: instruments.digest,
     mainGain: mainGain.payload,
