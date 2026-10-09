@@ -854,11 +854,11 @@ worktree $wt_cp_wt
       return 1
     fi
     if ! [ -d "$wt_cp_admin" ]; then
-      wt_why="worktree pointer $wt_cp_ptr names admin dir $wt_cp_admin, which is missing from the worktree registry $wt_root — git lists no worktree there, so no absence it reports can be trusted"
+      wt_why="worktree pointer $wt_cp_ptr names admin dir $wt_cp_admin, which is missing from the worktree registry $wt_root — git lists no worktree there, so no absence it reports can be trusted; inspect the directory and, once its work is saved, remove it by hand"
       return 1
     fi
     if wt_cp_ls=$(ls -A "$wt_cp_admin" 2>/dev/null) && [ -z "$wt_cp_ls" ]; then
-      wt_why="worktree pointer $wt_cp_ptr names admin dir $wt_cp_admin, an empty directory git does not list — git lists no worktree there, so no absence it reports can be trusted"
+      wt_why="worktree pointer $wt_cp_ptr names admin dir $wt_cp_admin, an empty directory git does not list — git lists no worktree there, so no absence it reports can be trusted; inspect the directory and, once its work is saved, remove it by hand"
       return 1
     fi
   done

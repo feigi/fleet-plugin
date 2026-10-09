@@ -598,6 +598,19 @@ test("wt_counts refuses a live .worktrees pointer whose admin entry was emptied,
   assert.ok(p.out.includes(`why=worktree pointer ${wt}/.git names admin dir ${admin}, an empty directory git does not list`), p.out);
 });
 
+for (const slashes of ["/", "//"]) {
+  test(`wt_counts strips a trailing ${JSON.stringify(slashes)} off a pointer's admin dir before reading which registry it names`, (t) => {
+    const r = repo(t);
+    const wt = fleetLinked(r, "1-held");
+    const admin = pointed(wt);
+    rmSync(admin, { recursive: true, force: true });
+    writeFileSync(join(wt, ".git"), `gitdir: ${admin}${slashes}\n`);
+    const p = probe(r.w, COUNTS);
+    assert.match(p.out, /^rc=1$/m, p.out);
+    assert.ok(p.out.includes(`why=worktree pointer ${wt}/.git names admin dir ${admin}, which is missing from the worktree registry`), p.out);
+  });
+}
+
 test("wt_counts refuses an unlisted .worktrees directory or pointer it cannot read or parse", (t) => {
   if (isRoot) return t.skip("root reads every file");
   const r = repo(t);
@@ -654,6 +667,9 @@ test("wt_counts agrees over .worktrees entries that are not this registry's lost
   writeFileSync(join(held, ".git"), `gitdir: ${r.w}/.git/worktrees/nope\n`);
   // A plain file standing where a worktree would.
   writeFileSync(join(wts, "8-file"), "not a worktree\n");
+  // A pointer into THIS repo's common dir but at an entry outside `worktrees` (where a submodule's own admin dir lives): not this registry's to hold, so not a lost registration.
+  mkdirSync(join(wts, "9-module"));
+  writeFileSync(join(wts, "9-module", ".git"), `gitdir: ${r.w}/.git/modules/x\n`);
   assert.equal(probe(r.w, COUNTS).out, "rc=0\nregistered=2 linked=2\nwhy=\n");
   // From inside a member's worktree, the cwd every member runs these scripts from.
   assert.equal(probe(relative, COUNTS).out, "rc=0\nregistered=2 linked=2\nwhy=\n");
