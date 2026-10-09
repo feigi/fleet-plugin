@@ -44,7 +44,7 @@ const HERE = fileURLToPath(new URL("../plugin/scripts", import.meta.url));
 // MODULE_NOT_FOUND at startup, so add a row whenever any of these gains one.
 const COPIED = ["shortlist.mjs", "candidates.mjs", "ledger.mjs", "ledger-grammar.mjs", "arg.mjs", "fleet-dir.mjs", "git-env.mjs", "is-cli.mjs",
   // ledger.mjs reads a fix-applier's conflict hold off fleet-tick.mjs's deriveRun (#2299).
-  "fleet-tick.mjs", "fleet-state.mjs", "main-checkout.mjs"];
+  "fleet-tick.mjs", "fleet-state.mjs", "main-checkout.mjs", "proc.mjs"];
 
 const GH_STUB = `#!/bin/sh
 case "$1 $2" in
