@@ -40,6 +40,10 @@
 // here demands a paragraph per row; the roster is the grep's output, and the
 // paragraphs are pinned only through the commands they carry.
 //
+// The parseArgs derivation and its unrecognised-import tripwire read only the
+// `.mjs` files directly in `scripts/`: a `.cjs` or `.js` script, or one in a
+// subdirectory, is outside both.
+//
 // `review-core.mjs` is the site this grep cannot see at all, by the
 // header's own argument, and its copy of the digits rule is already executed by
 // `shared-refusal.test.mjs`. Left there rather than re-pinned here.
@@ -435,10 +439,10 @@ test("no roster row is silent: every row the roster grep returns names the stray
 // the grep rows: a row filter sees only the closing row of a multi-line import
 // (`} from "./arg.mjs";`), and takes a trailing comment that mentions makeDie
 // for a binding.
-const binds = (file, symbol, from = "./arg.mjs") => {
-  const src = readFileSync(join(ROOT, file), "utf8").replace(/\/\/.*$/gm, "");
-  return new RegExp(`import\\b[^;{]*\\{[^}]*\\b${escapeRe(symbol)}\\b[^}]*\\}\\s*from\\s*["']${escapeRe(from)}["']`).test(src);
-};
+const stripLineComments = (src) => src.replace(/\/\/.*$/gm, "");
+const bindsIn = (src, symbol, from = "./arg.mjs") =>
+  new RegExp(`import\\b[^;{]*\\{[^}]*\\b${escapeRe(symbol)}\\b[^}]*\\}\\s*from\\s*["']${escapeRe(from)}["']`).test(stripLineComments(src));
+const binds = (file, symbol, from) => bindsIn(readFileSync(join(ROOT, file), "utf8"), symbol, from);
 
 // A dropped importer whose own guard answers a stray-only probe first — the
 // stray flag is never named, so that probe cannot credit the script with an
@@ -500,6 +504,23 @@ test("every arg.mjs importer the makeDie filter drops is a module, or a script t
   );
 });
 
+// #2866. The derivation below reads parseArgs off a named import from
+// "node:util" only, so a script importing it any other way — a namespace or
+// default import, a bare "util" specifier — drops out of it and passes
+// unnamed. Fail closed instead: a script whose code still says parseArgs, yet
+// binds it through no named node:util import and binds none of the arg.mjs
+// factories, is refused as an unrecognised import shape. The other way to hold
+// the name is to declare it, as recipe-prove.mjs's own parseArgs(argv) does,
+// and a script declaring its own while naming no util specifier at all imports
+// nothing there is to name.
+const reachesArgIn = (src) => ["makeArg", "makeHas", "defineFlags"].some((s) => bindsIn(src, s));
+const declaresOwnParseArgs = (code) =>
+  /\b(?:function\s*\*?\s*parseArgs\s*\(|(?:const|let|var)\s+parseArgs\s*=)/.test(code) && !/["'](?:node:)?util["']/.test(code);
+const unrecognisedParseArgs = (src) => {
+  const code = stripLineComments(src);
+  return /\bparseArgs\b/.test(code) && !bindsIn(code, "parseArgs", "node:util") && !reachesArgIn(code) && !declaresOwnParseArgs(code);
+};
+
 // #2849. The header's paragraph on the scripts outside arg()/has() once named
 // fleet-tick.mjs as "the one script" there, while fleet-heartbeat.mjs parsed
 // with node:util's parseArgs in exactly the same shape. Derived, not listed:
@@ -510,8 +531,10 @@ test("every arg.mjs importer the makeDie filter drops is a module, or a script t
 // it here.
 test("every script parsing with node:util's parseArgs outside arg()/has() is named where the header says so", () => {
   const scripts = readdirSync(join(ROOT, "scripts")).filter((f) => f.endsWith(".mjs")).map((f) => `scripts/${f}`);
-  const reachesArg = (file) => ["makeArg", "makeHas", "defineFlags"].some((s) => binds(file, s));
-  const outside = scripts.filter((file) => binds(file, "parseArgs", "node:util") && !reachesArg(file));
+  const source = (file) => readFileSync(join(ROOT, file), "utf8");
+  const unrecognised = scripts.filter((file) => unrecognisedParseArgs(source(file)));
+  assert.deepEqual(unrecognised, [], "a script says parseArgs but binds it through no named import from node:util and binds no arg.mjs factory — an unrecognised import shape the derivation below cannot read, so it would pass unnamed");
+  const outside = scripts.filter((file) => binds(file, "parseArgs", "node:util") && !reachesArgIn(source(file)));
   assert.ok(binds("scripts/candidates.mjs", "parseArgs", "node:util"), "candidates.mjs no longer binds node:util's parseArgs — the accept case below proves nothing");
   assert.ok(!outside.includes("scripts/candidates.mjs"), "candidates.mjs binds makeArg/makeHas, so arg()'s refusals reach it — it is not outside arg()/has()");
   assert.ok(outside.length > 0, "no script parses with node:util's parseArgs outside arg()/has() — the derivation found nothing to check");
@@ -520,6 +543,25 @@ test("every script parsing with node:util's parseArgs outside arg()/has() is nam
   assert.equal(here.length, 1, "arg.mjs's header should carry exactly one paragraph about the scripts outside arg()/has()");
   const unnamed = outside.filter((file) => !namesScript(here[0], file));
   assert.deepEqual(unnamed, [], "a script parses its flags with node:util's parseArgs and binds none of makeArg/makeHas/defineFlags, yet the header's paragraph on scripts outside arg()/has() does not name it");
+});
+
+test("a parseArgs import in a shape the derivation does not read is flagged, never passed unnamed", () => {
+  const flagged = {
+    namespace: 'import * as util from "node:util";\nutil.parseArgs({ options: {} });\n',
+    default: 'import util from "node:util";\nconst { values } = util.parseArgs({ options: {} });\n',
+    "named, bare specifier": 'import { parseArgs } from "util";\nparseArgs({ options: {} });\n',
+    "own declaration beside a util import": 'import * as util from "node:util";\nfunction parseArgs(argv) {\n  return util.parseArgs({ args: argv });\n}\n',
+  };
+  for (const [shape, src] of Object.entries(flagged)) assert.ok(unrecognisedParseArgs(src), `a ${shape} import of parseArgs passed the tripwire`);
+  const accepted = {
+    named: 'import { parseArgs } from "node:util";\nparseArgs({ options: {} });\n',
+    "named, aliased": 'import { parseArgs as parse } from "node:util";\nparse({ options: {} });\n',
+    "named, multi-line": 'import {\n  parseArgs,\n} from "node:util";\nparseArgs({ options: {} });\n',
+    "an arg.mjs factory": 'import * as util from "node:util";\nimport { makeArg } from "./arg.mjs";\nutil.parseArgs({ options: {} });\n',
+    "own declaration": 'import { isDigits } from "./arg.mjs";\nfunction parseArgs(argv) {\n  return argv;\n}\nparseArgs(process.argv);\n',
+    "a comment only": 'import util from "node:util";\n// util.parseArgs would refuse this\n',
+  };
+  for (const [shape, src] of Object.entries(accepted)) assert.ok(!unrecognisedParseArgs(src), `a script binding parseArgs through ${shape} was refused as an unrecognised import shape`);
 });
 
 test("candidates.mjs refuses --limit under arg()'s generated wording", () => {
