@@ -18,8 +18,9 @@ finished work. The ledger exists so it never has to.
    onto its row and appends it to `## Dispatched`; `settle` rewrites it
    to `<member>=<outcome>` in both places. `dispatch` also prints the
    agent definition the `task` call names (`agent`), so it survives a
-   compaction that drops the prose naming it (#2208). Token grammar and
-   that definition mapping live in
+   compaction that drops the prose naming it (#2208). The ledger's
+   grammar — its section headers, a row's Exclusion premises and PR, its
+   member tokens — and that definition mapping live in
    [`ledger-grammar.mjs`](../../plugin/scripts/ledger-grammar.mjs),
    shared by every reader.
 3. **Derive.** This one file lets

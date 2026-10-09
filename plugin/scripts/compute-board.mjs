@@ -25,7 +25,7 @@
 // fleet-tick.mjs's I/O and main() never run here, main() being guarded on
 // argv[1].
 import { assessBeat, isStalled, stallReport } from "./fleet-state.mjs";
-import { parseToken, rowPr, HALT_CAUSES } from "./ledger-grammar.mjs";
+import { parseToken, rowPr, premisesOf, HALT_CAUSES } from "./ledger-grammar.mjs";
 import { REVIEWED, latestFinisherAttempts } from "./fleet-tick.mjs";
 
 // A ledger row is freeform, controller-authored text. Two example shapes:
@@ -95,11 +95,9 @@ import { REVIEWED, latestFinisherAttempts } from "./fleet-tick.mjs";
 // it to agree with.
 //
 // `#N excluded · behind-pr:#M` / `behind-issue:#M` is an Exclusion — pool
-// supply, not a claim — spelled exactly as shortlist.mjs and fleet-tick.mjs
-// spell it. `#M` is an issue or PR number, or the branch name recorded before
-// that PR existed.
-const EXCLUDED_ROW = /^#[0-9]+[ \t]+excluded(?=[ \t]|$)([\s\S]*)$/;
-const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
+// supply, not a claim — read through ledger-grammar.mjs's premisesOf(), the
+// reading shortlist.mjs and fleet-tick.mjs use too.
+//
 // Captures the matched kind, so parseRow tells a Workflow from a runner by
 // that capture instead of a second scan; see the review notes above for
 // what each kind means and how `=failed` settles it.
@@ -135,7 +133,7 @@ export function parseRow(row) {
   for (const t of ["KILLED", "BLOCKED", "SHA-OFF-BRANCH"]) {
     if (new RegExp(`\\b${t}\\b`).test(row)) causes.push(t.toLowerCase());
   }
-  const ex = EXCLUDED_ROW.exec(row);
+  const excluded = premisesOf(row);
 
   // `live` holds live entries in row order, each one of two kinds: a
   // ledger-grammar member (`kind: "member"`, its parsed token as `token`) or
@@ -217,7 +215,7 @@ export function parseRow(row) {
   // module's extra gate exists so an ordinary unclaimed ticket never
   // borrows its own number as a phantom PR. An Exclusion is supply and
   // never takes a PR, whatever text it carries.
-  if (!anyImpl && !ex) {
+  if (!anyImpl && excluded === null) {
     const own = rowPr(row);
     if (own !== null) pr = own;
     else if ((prMember || review || reviewed) && row.split(/\s/)[0] === issueM[0]) pr = Number(issueM[1]);
@@ -228,7 +226,7 @@ export function parseRow(row) {
   }
   return {
     issue: Number(issueM[1]),
-    excluded: ex ? [...ex[1].matchAll(PREMISE)].map(([, kind, target]) => ({ kind, target })) : null,
+    excluded,
     impl: lastImpl?.name ?? null,
     implOutcome,
     finisherOutcome: lastFinisher ? (finisherOutcomes.get(lastFinisher.name) ?? null) : null,

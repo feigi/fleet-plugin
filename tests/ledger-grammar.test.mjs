@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseMember, parseToken, memberTokens, rowPr, nextMergeBot, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell } from "../plugin/scripts/ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, rowPr, premisesOf, nextMergeBot, expectedDefinition, agentDefinition, MEMBER_FAMILIES, CELL, CELL_DEF, drawCell } from "../plugin/scripts/ledger-grammar.mjs";
 
 // Every outcome word the spec names, per family, verbatim — the must-ACCEPT
 // half. A parser that refused everything would pass every refusal below.
@@ -142,6 +142,18 @@ test("rowPr: an impl row is its first settled =PR#M token's PR; any other row it
   assert.equal(rowPr("#40 PR #44 · PR#45"), 44);
   assert.equal(rowPr("#40 fix-pr-44 · APR#44"), null, "a mention inside a longer word is none");
   assert.equal(rowPr("#350 review=wf:x"), null);
+});
+
+test("premisesOf: an Exclusion row's premises in row order, null for any other row", () => {
+  assert.equal(premisesOf("#7 impl-7=PR#9"), null);
+  assert.equal(premisesOf("#7 impl-7 · excluded · behind-pr:#880"), null, "excluded must be the text's first word");
+  assert.equal(premisesOf("#7 excludedx · behind-pr:#880"), null);
+  assert.deepEqual(premisesOf("#7 excluded"), []);
+  assert.deepEqual(premisesOf("#7 excluded · conflicts with something"), []);
+  assert.deepEqual(
+    premisesOf("#7 excluded · behind-issue:#12, behind-pr:implementer/1715-impl-1715; behind-pr:880"),
+    [{ kind: "issue", target: "12" }, { kind: "pr", target: "implementer/1715-impl-1715" }, { kind: "pr", target: "880" }],
+  );
 });
 
 // "n = 1 + the number of `merge-bot-` entries" — settled ones included, since

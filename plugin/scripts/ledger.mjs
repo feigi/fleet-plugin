@@ -35,7 +35,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition, CELL, tierValues, rowPr } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition, CELL, tierValues, rowPr, ROWS, DISPATCHED, FILED, RULED, DRAIN, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
 import { stateFileIn, readState, assessBeat, stallsAt } from "./fleet-state.mjs";
 
@@ -224,34 +224,6 @@ if (requireFileIdx !== -1) argv.splice(requireFileIdx, 1);
 
 const [cmd, ...rest] = argv;
 if (!cmd) die("usage: ledger.mjs [--file <path>] [--require-file] row|filed|ruled|check|read|dispatch|settle|drain|rotate [args]");
-
-const ROWS = "## Rows";
-const DISPATCHED = "## Dispatched";
-const FILED = "## Filed";
-const RULED = "## Ruled";
-const DRAIN = "## Drain";
-
-// What a section header looks like on disk, defined once because a second
-// copy drifts: the parser slices sections with it, and the readability flag
-// below is set from it. Anchored to a real line start (or string start), not
-// a bare substring search — otherwise an escaped entry that merely CONTAINS
-// the text "## Filed" (never a physical line, just a run of characters inside
-// a one-line entry) is found by indexOf() before the genuine header and the
-// whole section is sliced from the wrong offset.
-const headerRe = (name) => new RegExp(`(^|\\n)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\n|$)`);
-
-// One entry is always exactly one physical line on disk. Escape backslash
-// first, then newline, so a `\` in entry text can never be mistaken for the
-// start of an escape sequence introduced by this encoding. Without this, an
-// entry containing a real newline — or a line that happens to look like
-// `## Filed` or `- #<issue> ...` — gets misparsed on reload: real records
-// silently drop, or phantom ones get injected.
-function escapeText(s) {
-  return s.replace(/\\/g, "\\\\").replace(/\n/g, "\\n");
-}
-function unescapeText(s) {
-  return s.replace(/\\(\\|n)/g, (_, c) => (c === "n" ? "\n" : "\\"));
-}
 
 // A `--`-prefixed token in `check`'s free-text tail used to fold
 // straight into the duplicate-filing subject, so a misspelled flag searched

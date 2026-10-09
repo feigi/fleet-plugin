@@ -67,6 +67,7 @@ import { fileURLToPath } from "node:url";
 import { makeDie, writeAll, isDigits } from "./arg.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
+import { premisesOf } from "./ledger-grammar.mjs";
 
 const NAME = "shortlist";
 const die = makeDie(NAME);
@@ -194,17 +195,6 @@ function ledgerRows() {
     die("ledger.mjs read returned no rows[] of strings");
   }
   return data.rows;
-}
-
-// A ticket row is `#N <text>`; it is an exclusion when `excluded` is the text's
-// first word — `impl-N · … excluded …` is a row about something else. Answers
-// the premises the row names, possibly none, or null for any other row.
-const EXCLUDED_ROW = /^#[0-9]+[ \t]+excluded(?=[ \t]|$)([\s\S]*)$/;
-const PREMISE = /\bbehind-(pr|issue):#?([^\s,;]+)/g;
-function premisesOf(row) {
-  const m = EXCLUDED_ROW.exec(row);
-  if (!m) return null;
-  return [...m[1].matchAll(PREMISE)].map(([, kind, target]) => ({ kind, target }));
 }
 
 // gh takes a `-`-led argument as a flag, and `gh issue view` takes a number.
