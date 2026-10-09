@@ -1,7 +1,10 @@
 # 0023 — The main-gain check is a merge-gate row, acknowledged in the PR body
 
 **Status:** Accepted. Ruled on #2333 in a grilling session; filed as spec #2743.
-Amends ADR 0012 (Decision 3).
+Amends ADR 0012 (Decision 3). Amended by #2904: R also misses a branch
+rewritten into fresh commits (`git reset --soft` + commit, or an
+author-resetting squash); see the `plugin/scripts/main-gain.mjs` header
+(lines 23-28).
 
 ## Context
 
