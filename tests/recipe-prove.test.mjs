@@ -779,6 +779,8 @@ const onlyOn = (call, act) => gitStub(`*"${call}"`, act);
 // The reader's own line, which the cache writer quotes: a shell that reports a
 // killed git writes its own notice ahead of it, so the quote may start there.
 const noAnswer = (status) => new RegExp(`^(?:recipe-prove: )?derive-testcmd: git did not answer whether .* is a git repository \\(exit ${status}\\), so the Recipe cache was not read(?: — .*)? — the Recipe cache reader could not run a tool it needs, so its refusal is no verdict on what was proven$`, "m");
+// The reader's PATH holds no `head` or `tr`, so a stub that needs them names them whole.
+const toolAt = (tool) => execFileSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim();
 const GIT_THAT_CANNOT_RUN = [
   { name: "exits 126 and writes nothing", body: "exit 126", reason: noAnswer(126) },
   { name: "exits 127 and writes to stderr", body: "echo boom >&2; exit 127", reason: noAnswer(127) },
@@ -806,6 +808,12 @@ const GIT_THAT_CANNOT_RUN = [
     body: `case "$*" in --version) kill -9 $$ ;; esac; exit 128`,
     reason: /^recipe-prove: git started but does not run: `git --version` did not exit 0: git was killed by SIGKILL — the Recipe cache reader runs git, so its refusal is no verdict on what was proven$/m,
   },
+  {
+    name: "exits git's own 128 on rev-parse and exits 0 on `--version` after outgrowing the spawn buffer",
+    body: `case "$*" in --version) trap '' TERM; '${toolAt("head")}' -c 2000000 /dev/zero | '${toolAt("tr")}' '\\0' x; exit 0;; esac; exit 128`,
+    reason: /^recipe-prove: git started but does not run: `git --version` failed: git exited 0 after an error \(ENOBUFS: its output outgrew the spawn buffer\) — the Recipe cache reader runs git, so its refusal is no verdict on what was proven$/m,
+    absent: /`git --version` exited 0/,
+  },
 ];
 for (const c of GIT_THAT_CANNOT_RUN) {
   test(`a git that starts but ${c.name} before the cache is read back is no verdict, never NOT PROVEN — and the prior cache is restored`, () => {
@@ -822,6 +830,7 @@ for (const c of GIT_THAT_CANNOT_RUN) {
     assert.match(r.err, /^recipe-prove: /);
     assert.match(r.err, c.reason);
     assert.doesNotMatch(r.err, /NOT PROVEN/);
+    if (c.absent) assert.doesNotMatch(r.err, c.absent);
     assert.doesNotMatch(r.err, /not a git repository/);
     assert.equal(readFileSync(cachePath(dir), "utf8"), "prior bytes", "a cache the reader never settled is rolled back");
     if (c.name.startsWith("passes --version")) {
