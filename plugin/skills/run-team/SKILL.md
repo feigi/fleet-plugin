@@ -366,9 +366,12 @@ phase, or in any later one, asks the maintainer which tickets to take.
    review reads the Test entrypoint, all out of the **Recipe cache**
    (`.fleet/recipe.json` beside the common git dir); no script infers either
    command. Check it first: `~/.fleet/bin/fleet-run derive-testcmd.sh .
-   install` and `~/.fleet/bin/fleet-run derive-testcmd.sh . test`. **Both exit
+   install` and `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at
+   origin/main`. **Both exit
    0 → the cache is present and valid: use it as it stands and derive
-   nothing.** Either exits 1 (a refusal about the cache) → derive it. Either
+   nothing.** Either exits 1 (a refusal about the cache) → derive it; a refusal
+   naming `--at` says `origin/main` does not resolve, which is no cache fault —
+   fetch it and check again, since deriving would not help. Either
    exits 3 → the reader could not run a tool it needs, so the cache's state is
    unknown: fix that environment fault and check again; deriving would not
    help. This step is yours: one derivation
@@ -389,7 +392,8 @@ phase, or in any later one, asks the maintainer which tickets to take.
    runner's own non-zero count, or a deliberate mutation of one test that
    turns the run red. Only a proof writes the cache, with `derivedAt` (the
    `origin/main` commit it ran against) and the proof itself. **`RECIPE
-   PROVEN`** → re-run both `derive-testcmd.sh` reads; their output is the
+   PROVEN`** → re-run both reads above (`derive-testcmd.sh . install` and
+   `derive-testcmd.sh . test --at origin/main`); their output is the
    Recipe this run uses. **`RECIPE NOT PROVEN`** → stall, below.
 
    **Mid-run, a cache that stops running is re-derived once, then the run
@@ -797,7 +801,8 @@ read them off `git branch -r` or `git worktree list`: human branches on origin
 free text, so a pair copied from one claims under that shape at exit 0.
 
 **The Install step comes from the Recipe cache — never pass or infer one.** The
-claim reads it, and the Test entrypoint, through `derive-testcmd.sh`, runs the
+claim reads it through `derive-testcmd.sh . install`, and the Test entrypoint
+through `derive-testcmd.sh . test --at origin/main`, runs the
 Install step in the fresh worktree and refuses if it left any file changed: an
 install that rewrites the tree in a throwaway worktree corrupts it for everyone.
 No cache is phase 0's Recipe derivation step not having run; an invalid one is
@@ -824,7 +829,7 @@ unless the repository tracks its own, and a member told to run one
 stalls on a missing script (observed with a rebase-resolver in a
 prior-run worktree). There, tell the member the runner is absent and to
 run docker-free suites directly — the Recipe's Test entrypoint
-(`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test` prints
+(`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test --at origin/main` prints
 it) only when it brings up no shared stack to collide on, else that
 repo's own stack-free command.
 
@@ -2241,7 +2246,7 @@ reads gates and never injects a fault.
 
 **Where `testCmd` comes from:** the repository's Test entrypoint, out of the
 Recipe cache phase 0's Recipe derivation step proved —
-`~/.fleet/bin/fleet-run derive-testcmd.sh . test` prints it — and the one you
+`~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main` prints it — and the one you
 hand specialists per **Give specialists a stack-free test command** above. Pass
 the same string to the review, to the fix-applier, and to the finisher — whose
 duty-2 mutation

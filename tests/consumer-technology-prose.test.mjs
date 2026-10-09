@@ -108,12 +108,12 @@ test("review-and-fix's git archive bullet runs the Install step in the copy, rea
 
 test("run-team: a tree with no runner gets the Recipe's Test entrypoint only when it brings up no shared stack", () => {
   const p = paragraph(RUN_TEAM, "**A reused worktree may lack the runner.**", "run-team/SKILL.md reused-worktree runner paragraph", "**A reused worktree may also be");
-  assert.match(p, phrase("the Recipe's Test entrypoint (`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test` prints it) only when it brings up no shared stack to collide on, else that repo's own stack-free command."));
+  assert.match(p, phrase("the Recipe's Test entrypoint (`~/.fleet/bin/fleet-run derive-testcmd.sh <main checkout> test --at origin/main` prints it) only when it brings up no shared stack to collide on, else that repo's own stack-free command."));
 });
 
 test("run-team: testCmd comes from the Recipe cache and names no repository's own command", () => {
   const p = paragraph(RUN_TEAM, "**Where `testCmd` comes from:**", "run-team/SKILL.md testCmd source paragraph", "**Where `<branch>` comes from:** the PR's");
-  assert.match(p, phrase("the repository's Test entrypoint, out of the Recipe cache phase 0's Recipe derivation step proved — `~/.fleet/bin/fleet-run derive-testcmd.sh . test` prints it — and the one you hand specialists"));
+  assert.match(p, phrase("the repository's Test entrypoint, out of the Recipe cache phase 0's Recipe derivation step proved — `~/.fleet/bin/fleet-run derive-testcmd.sh . test --at origin/main` prints it — and the one you hand specialists"));
   assert.doesNotMatch(p, /node --test/, "the testCmd source paragraph names this repository's own test command again");
 });
 
