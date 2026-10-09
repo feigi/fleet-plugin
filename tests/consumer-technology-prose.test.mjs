@@ -43,6 +43,10 @@ test("the sweep's own pattern matches each Node-consumer form it exists to catch
 test("the sweep's own pattern passes omp's plugin install dir, which is the fleet's install, not a consumer's", () => {
   assert.doesNotMatch("~/.omp/plugins/node_modules/@feigi/fleet-ctl/scripts/fleet-bootstrap", NODE_CONSUMER);
   assert.match("~/.omp/plugins/node_modules beside the consumer's node_modules", NODE_CONSUMER);
+  // The exemption is only omp's install dir: another slash-preceded
+  // `node_modules` is still a consumer's.
+  assert.match("/app/node_modules", NODE_CONSUMER);
+  assert.match("~/.other/plugins/node_modules", NODE_CONSUMER);
 });
 
 test("no runbook, command, agent definition or requirement doc names a Node-consumer install state or tool", () => {
