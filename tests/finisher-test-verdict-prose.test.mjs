@@ -86,12 +86,13 @@ test("testCmd is never wrapped in an external timeout, and a long suite runs in 
 });
 
 // The other half: what the rule must ACCEPT. A completed run that exits 1 is
-// a plain failure the finisher reports as one whatever `cancelled` says, and
-// `tests 0` keeps its own bucket.
+// not a killed run whatever `cancelled` says, and `tests 0` keeps its own
+// bucket. #2881: nor is that exit 1 a killed mutant on its own — the kill rule
+// the block quotes (pinned in kill-rule-prose.test.mjs) scores it.
 test("a completed run that exits 1 and a zero-test run keep their own verdicts", () => {
   const s = sentenceWith(/A completed run that exits 1/, "completed red run");
-  assert.match(s, /A completed run that exits 1 is a plain failure, not a killed run, whatever its `cancelled` count/);
-  assert.match(s, /exit 0 with `tests 0` stays FAILED/);
+  assert.match(s, /A completed run that exits 1 is not a killed run either, whatever its `cancelled` count, and not a killed mutant on its exit status alone/);
+  assert.match(sentenceWith(/Exit 0 with `tests 0`/, "zero-test run"), /Exit 0 with `tests 0` stays FAILED/);
 });
 
 // The block reaches a finisher only because the controller is told to hand it

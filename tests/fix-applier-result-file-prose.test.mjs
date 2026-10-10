@@ -68,7 +68,8 @@ test("every top-level field the jq recipes read is a field the review returns", 
 
 test("the crash populations are told apart off refutersDispatched in the recipes, never off severity", () => {
   const recipes = (section().match(/^jq .*$/gm) ?? []).join("\n");
-  assert.match(recipes, /select\(\.refutersDispatched > 0\)/);
+  assert.match(recipes, /select\(\.refutersDispatched > \(\.refutersInconclusive \/\/ 0\)\)/);
+  assert.match(recipes, /select\(\.refutersDispatched > 0 and \.refutersDispatched == \.refutersInconclusive\)/);
   assert.match(recipes, /select\(\.refutersDispatched == 0\)/);
 });
 
