@@ -252,6 +252,18 @@ test("reviewers: a conflict past the treadmill cap escalates instead — never a
   assert.deepEqual(both.map((r) => r.action), ["IDLE OK", "CONFLICT PR#41", "ESCALATE conflict PR#40"]);
 });
 
+test("reviewers: a conflict line still prints with the reviewer side at cap, and sits after the unlabelled rows", () => {
+  const full = rowsOf(state({ fixLive: 6, fixDue: [1], reviewDue: [2], conflicts: [40], conflictEscalate: [41] }), "reviewers");
+  assert.deepEqual(full.map((r) => r.action), ["AT CAP", "CONFLICT PR#40", "ESCALATE conflict PR#41"], "a full reviewer side holds no conflict line");
+  const ordered = rowsOf(state({
+    conflicts: [42], conflictEscalate: [43],
+    unlabelled: [{ pr: 40, labelled: ["finisher-pr-40", "finisher-pr-40-b"] }, { pr: 41, labelled: ["finisher-pr-41"] }],
+  }), "reviewers");
+  assert.deepEqual(ordered.map((r) => r.action), [
+    "DISPATCH finisher PR#41", "ESCALATE unlabelled PR#40", "CONFLICT PR#42", "ESCALATE conflict PR#43",
+  ]);
+});
+
 test("reviewers: no conflict, no conflict line", () => {
   assert.deepEqual(rowsOf(state(), "reviewers").map((r) => r.action), ["IDLE OK"]);
 });
@@ -1161,6 +1173,12 @@ test("deriveRun: a conflict hold is read in either spelling and on a PR-keyed ro
   assert.deepEqual([prose.fixDue, prose.mergeHeld], [[], 0]);
 });
 
+test("deriveRun: a conflict hold's hash is optional and the token is read whole, never by prefix", () => {
+  assert.deepEqual(run({ rows: [HOLD_ROW(40, "conflict-hold:40")] }, [pr(40)]).fixDue, [40]);
+  assert.deepEqual(run({ rows: [HOLD_ROW(40, "conflict-hold-40")] }, [pr(40)]).fixDue, [40]);
+  assert.deepEqual(run({ rows: [HOLD_ROW(40, "conflict-hold:#40x")] }, [pr(40)]).fixDue, [], "trailing text makes it prose, not a hold");
+});
+
 // GitHub's `mergeable` off the open list, read every tick: a tracked PR it
 // reads CONFLICTING, with no hold yet and nobody working it, is a hold the
 // controller records.
@@ -1222,6 +1240,9 @@ test("deriveRun: a queued CONFLICTING PR is left to a live merge bot, and record
 test("deriveRun: CONFLICTING again after two landed conflict fix-appliers escalates instead of recording a third hold", () => {
   const twice = "conflict-hold:#40 · fix-pr-40=applied:def5678 · conflict-hold:#40 · fix-pr-40-b=no-op";
   assert.deepEqual(conflictsOf([TRACKED(40, twice)], [conflicting(40)]), [[], [40]]);
+  const twiceAt = (n) => `conflict-hold:#${n} · fix-pr-${n}=applied:def5678 · conflict-hold:#${n} · fix-pr-${n}-b=no-op`;
+  assert.deepEqual(conflictsOf([TRACKED(44, twiceAt(44)), TRACKED(40, twiceAt(40))], [conflicting(44), conflicting(40)]), [[], [40, 44]],
+    "ascending whatever order the rows arrive in");
   assert.deepEqual(conflictsOf([TRACKED(40, "conflict-hold:#40 · fix-pr-40=applied:def5678")], [conflicting(40)]), [[40], []], "one landed is not the cap");
   // It clears once GitHub stops reading CONFLICTING, or the PR leaves the list.
   assert.deepEqual(conflictsOf([TRACKED(40, twice)], [pr(40)]), [[], []]);
@@ -1239,6 +1260,8 @@ test("deriveRun: the hold the CONFLICT line names, appended to the row, is a con
   const token = /"<text> · (conflict-hold:#40 [^"]*)"/.exec(line.detail)[1];
   const r = run({ rows: [TRACKED(40, token)] }, [conflicting(40)]);
   assert.deepEqual([r.conflictHeld, r.fixDue, r.conflicts], [[40], [40], []]);
+  const held = run({ rows: [TRACKED(44, "conflict-hold:#44"), TRACKED(40, "conflict-hold:#40")] }, [conflicting(44), conflicting(40)]);
+  assert.deepEqual(held.conflictHeld, [40, 44], "ascending whatever order the rows arrive in");
 });
 
 test("deriveRun: the merge bot is live while its ## Dispatched entry is unsettled", () => {
@@ -2035,7 +2058,7 @@ test("CLI: a gh row missing headRefOid refuses rather than reading every past-pi
   assert.match(r.stderr, /headRefOid/);
 });
 
-test("CLI: a gh row missing mergeable refuses rather than reading every conflict as absent", () => {
+test("CLI: a gh row with no mergeable, or one outside GitHub's enum, refuses rather than reading every conflict as absent", () => {
   const { mergeable, ...unknown } = pr(1);
   const r = runCli([], { prs: [unknown], shortlist: shortlistText([]) });
   assert.equal(r.status, 2);
@@ -2044,6 +2067,15 @@ test("CLI: a gh row missing mergeable refuses rather than reading every conflict
   const wrong = runCli([], { prs: [{ ...pr(1), mergeable: null }], shortlist: shortlistText([]) });
   assert.equal(wrong.status, 2);
   assert.match(wrong.stderr, /mergeable/);
+  for (const drifted of ["conflicting", "", "DIRTY"]) {
+    const r = runCli([], { prs: [{ ...pr(1), mergeable: drifted }], shortlist: shortlistText([]) });
+    assert.equal(r.status, 2, JSON.stringify(drifted));
+    assert.match(r.stderr, /mergeable one of MERGEABLE, CONFLICTING, UNKNOWN/);
+  }
+  for (const known of ["MERGEABLE", "CONFLICTING", "UNKNOWN"]) {
+    const r = runCli([], { prs: [{ ...pr(1), mergeable: known }], shortlist: shortlistText([]) });
+    assert.equal(r.status, 0, `${known}: ${r.stderr}`);
+  }
 });
 
 test("CLI: a tracked PR GitHub reads CONFLICTING prints CONFLICT on the reviewers role, off the one gh pr list it already makes", (t) => {

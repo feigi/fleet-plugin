@@ -16,8 +16,9 @@ an operator looked at the PR by hand and remembered the recovery recipe.
 
 1. **Instruments over operator recall.** `fleet-tick.mjs` adds `mergeable` to
    the `gh pr list --json` it already makes every tick, with no extra `gh`
-   call. A row without a string `mergeable` refuses the tick, the same way a
-   missing `headRefOid` does. `ci-state.mjs` is unchanged: there is one
+   call. A row whose `mergeable` is not one of GitHub's `MERGEABLE`,
+   `CONFLICTING` or `UNKNOWN` refuses the tick, the same way a missing
+   `headRefOid` does. `ci-state.mjs` is unchanged: there is one
    mergeability reading, not two.
 2. **A conflict is `mergeable=CONFLICTING`, nothing else.** `UNKNOWN` is read
    again next tick. A PR that is merely behind is not a reason to rebase: the
@@ -43,7 +44,10 @@ an operator looked at the PR by hand and remembered the recovery recipe.
 5. **Treadmill cap.** A PR with two landed conflict fix-appliers that reads
    `CONFLICTING` again prints `ESCALATE conflict PR#<M>` instead: the
    controller comments and flags the PR for a human, writes no hold and
-   dispatches no fix-applier. It keeps no new state. Like `ESCALATE
+   dispatches no fix-applier. The count is the PR's lifetime total of landed
+   conflict fix-appliers, whoever wrote the hold each one answered, and is
+   never reset: two landings on unrelated conflicts long apart also escalate
+   the next one. It keeps no new state. Like `ESCALATE
    unlabelled`, it is not actionable, repeats while the condition holds (the
    quiet line folds the repeats) and clears when the PR stops reading
    `CONFLICTING`, closes or merges.
