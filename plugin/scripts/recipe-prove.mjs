@@ -24,8 +24,12 @@
 //      - the count proof: `--count-line` is a literal the run's own output
 //        must contain (text off the runner's summary line, read off a
 //        previous run), carrying `--test-count`, a positive integer no larger
-//        than Number.MAX_SAFE_INTEGER, as its one number. `tests 0` is a
-//        failed proof however honestly the runner reports it.
+//        than Number.MAX_SAFE_INTEGER, as its one number. Where the literal
+//        starts or ends on a digit, the output must have no digit beside it
+//        there: `3 passed` is not found in `13 passed`. Only a digit bounds
+//        the number — a `,`, `_` or `.` inside one is not a digit, so
+//        `234 passed` is found in `1,234 passed`. `tests 0` is a failed proof
+//        however honestly the runner reports it.
 //      - the mutation proof: the unmutated run must be green; `--mutate` is a
 //        shell command that must change a tracked file (the deliberate
 //        failing mutation of one test, or of the code one test covers) — run
@@ -273,7 +277,14 @@ function prove(o, wt, logs) {
     if (numbers.length !== 1 || BigInt(numbers[0]) !== BigInt(o.testCount)) {
       throw notProven(`the count line '${o.countLine}' does not carry the test count ${o.testCount} as its one number (it carries ${numbers.length ? numbers.join(", ") : "none"}) — trim it to the number of tests that ran; ${where}`);
     }
-    if (!readFileSync(testLog, "utf8").includes(o.countLine)) {
+    // The literal's number must be the log's number, not the tail or head of a
+    // longer one: where the literal starts or ends on a digit, no digit may
+    // stand beside the match there — `3 passed` is not found in `13 passed`.
+    // A non-digit edge already bounds the number, so a digit beside it is fine.
+    const literal = o.countLine.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const before = /^[0-9]/.test(o.countLine) ? "(?<![0-9])" : "";
+    const after = /[0-9]$/.test(o.countLine) ? "(?![0-9])" : "";
+    if (!new RegExp(before + literal + after).test(readFileSync(testLog, "utf8"))) {
       throw notProven(`vacuous: the Test entrypoint's output does not contain the count line '${o.countLine}' — no evidence any test ran; ${where}`);
     }
     proof.testCount = n;

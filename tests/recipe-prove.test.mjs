@@ -223,15 +223,45 @@ for (const [summary, countLine, claim] of [
 
 // The rule is the line's one number, never its first: a literal trimmed to
 // the count of tests that ran is proven wherever that count sits in the line.
+// In the log the number's edge is what bounds the literal: one standing whole
+// is proven, and one whose edge is a non-digit is proven with a digit beside
+// that edge — the next count on a summary line, a duration before it.
 for (const [summary, countLine, claim] of [
   ["5 passed, 2 skipped in 0.31s", "5 passed", 5],
   ["Tests:       1 skipped, 3 passed, 4 total", "3 passed", 3],
+  ["Tests: 3 passed", "3 passed", 3],
+  ["Tests:       1 skipped, 3 passed, 4 total", ", 3 passed, ", 3],
+  ["Time: 12s, 3 passed", "s, 3 passed", 3],
+  ["Tests: 3 passed (0.2s)", "3 passed (", 3],
+  ["Tests: 31 passed", "Tests: 31", 31],
+  ["a 13 b 3", "3", 3],
 ]) {
-  test(`a count line trimmed to its one number, '${countLine}' out of '${summary}', is proven`, () => {
+  test(`a count line '${countLine}' out of '${summary}' is proven`, () => {
     const { dir } = repo(MAVEN_FILES);
     const r = prove(dir, ["--install", "true", "--test", `echo '${summary}'`, "--count-line", countLine, "--test-count", String(claim)]);
     assert.equal(r.status, 0, r.err);
     assert.equal(JSON.parse(readFileSync(cachePath(dir), "utf8")).testCount, claim);
+  });
+}
+
+// A literal is found in the log only as written: where it starts or ends on a
+// digit, no digit stands beside it there (`3 passed` inside `13 passed` is a
+// run of 13, `Tests: 3` inside `Tests: 31 passed` a run of 31, and a literal
+// that is one whole number is found only where it stands whole), and a regex
+// metacharacter in it stands for itself, never for another character.
+for (const [summary, countLine, claim] of [
+  ["Tests: 13 passed", "3 passed", "3"],
+  ["Tests: 31 passed", "Tests: 3", "3"],
+  ["a 13 b", "3", "3"],
+  ["Tests: 3 passed", "3.passed", "3"],
+  ["Tests: 3passed", "3\\passed", "3"],
+]) {
+  test(`a count line '${countLine}' is not found in '${summary}'`, () => {
+    const { dir } = repo(MAVEN_FILES);
+    const r = prove(dir, ["--install", "true", "--test", `echo '${summary}'`, "--count-line", countLine, "--test-count", claim]);
+    assert.equal(r.status, 1, r.err);
+    assert.ok(r.err.includes(`NOT PROVEN — vacuous: the Test entrypoint's output does not contain the count line '${countLine}'`), r.err);
+    assert.equal(existsSync(cachePath(dir)), false);
   });
 }
 
