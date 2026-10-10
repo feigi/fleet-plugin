@@ -12,10 +12,11 @@
 // apart.
 //
 // Rows stay freeform text. Only a token whose name part is a member name is
-// claimed here; everything else a row carries (`class=routine`, `ports=`,
-// `ci=`, `held-behind:#M`, `conflict-hold:#<pr>`, the
-// `review=`/`reviewed=` pair, the `→ PR#M` arrow) is not a member and is left
-// alone.
+// claimed as a member here; everything else a row carries (`class=routine`,
+// `ports=`, `ci=`, `held-behind:#M`, `conflict-hold:#<pr>`, the
+// `review=`/`reviewed=` pair, the `→ PR#M` arrow) is not a member. The
+// review pair has a grammar of its own below, REVIEW and REVIEWED, which
+// `ledger.mjs row` checks a write against before it lands.
 
 import { createHash } from "node:crypto";
 
@@ -103,6 +104,197 @@ export function rowPr(text) {
   }
   const m = PR_MENTION.exec(text);
   return m ? Number(m[1]) : null;
+}
+
+// A row's key number and its PR: the PR every PR-bound token on the row
+// speaks for. That PR is rowPr() above: on a row carrying an `impl-` token,
+// its settled `impl-<N>=PR#<n>` token's PR, never a prose `PR#` mention; on
+// any other row, its first `PR#<n>` mention. A row with none is keyed by the
+// PR's own number when it is about a PR at all (a PR this run's implementers
+// did not open) — ledger.mjs's memberRowIndex() fallback specifically, which
+// gates on the member being PR-bound before it ever reaches this fallback.
+// fleet-tick.mjs's deriveRun applies the same row-key fallback to every row's
+// own bookkeeping unconditionally, signal or not; only memberRowIndex()'s
+// caller already knows it holds a PR-bound member. Ticket and PR numbers share
+// GitHub's one number space, so a ticket's key never names an open PR.
+export function rowNums(text) {
+  const key = text.split(/\s/)[0];
+  const keyNum = /^#[0-9]+$/.test(key) ? Number(key.slice(1)) : null;
+  return { keyNum, pr: rowPr(text) ?? keyNum };
+}
+
+// A PR's review is not a member, so it carries its own pair of row tokens.
+// The launch is `review=wf:<runId>` | `review=member:<name>` |
+// `review=fallback:<name>`, settled dead as `…=failed`; the capture groups are
+// the kind, the runId or runner name, and the `=failed` suffix. A launch's
+// identity comes out of this one regex, `=failed` aside: a workflow's is its
+// runId, a runner's is its name whichever of member or fallback launched it,
+// since both are the one hub member of that name. The first runner on PR <n>
+// is `review-pr-<n>`, every later one the next letter the PR's rows do not
+// carry yet (`-b`, `-c`, …). The
+// result is `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, `<run>`
+// the name of the review's own run root under `<scratch>/pr<n>/` (`run-` and
+// the eight characters `mktemp` chose), where its result file `review.json`
+// sits.
+export const REVIEW = /^review=(?<kind>wf|member|fallback):(?<name>[^=\s]+)(?<failed>=failed)?$/;
+export const REVIEWED = /^reviewed=([0-9a-fA-F]{7,40}):(\d+)\/(\d+)\/(\d+):(run-[A-Za-z0-9]{8})$/;
+
+// Every PR's token stream: every row that maps to it under rowNums(), in
+// ledger row order, its tokens run end to end — the order fleet-tick.mjs's
+// fold reads a PR's review record in. A row naming no PR and keyed by no
+// number is a stream of its own, under its key.
+function streams(rows) {
+  const out = new Map();
+  for (const text of rows) {
+    const id = rowNums(text).pr ?? text.split(/\s/)[0];
+    if (!out.has(id)) out.set(id, []);
+    out.get(id).push(...text.split(/\s+/).filter(Boolean));
+  }
+  return out;
+}
+
+const isOpen = (launch) => !launch.failed && !launch.answered;
+
+// One stream's review record, read in order. A `reviewed=` answers the
+// nearest earlier launch that is neither answered yet nor settled `=failed`;
+// one with no such launch is `unpaired`. A launch is open while unanswered
+// and not failed: `crowded` holds each launch that appeared while an earlier
+// one was open, with that open one; `repeated` each launch whose identity an
+// earlier launch already took. A token outside REVIEW/REVIEWED is
+// `unparseable` and plays no part in the pairing.
+function readReviews(tokens) {
+  const launches = [];
+  const out = { unpaired: [], repeated: [], crowded: [], unparseable: [] };
+  for (const tok of tokens) {
+    if (tok.startsWith("review=")) {
+      const m = REVIEW.exec(tok);
+      if (!m) {
+        out.unparseable.push(tok);
+        continue;
+      }
+      const { kind, name, failed } = m.groups;
+      const launch = { id: `review=${kind}:${name}`, kind, name, failed: failed !== undefined, answered: false };
+      launch.key = kind === "wf" ? launch.id : `runner:${name}`;
+      if (launches.some((l) => l.key === launch.key)) out.repeated.push(launch.id);
+      const open = launches.find(isOpen);
+      if (open) out.crowded.push({ id: launch.id, open: open.id });
+      launches.push(launch);
+    } else if (tok.startsWith("reviewed=")) {
+      if (!REVIEWED.test(tok)) {
+        out.unparseable.push(tok);
+        continue;
+      }
+      const answers = launches.findLast(isOpen);
+      if (answers) answers.answered = true;
+      else out.unpaired.push(tok);
+    }
+  }
+  out.launches = launches;
+  out.open = launches.filter(isOpen).map((l) => l.id);
+  return out;
+}
+
+// The entries of `after` that `before` does not account for, counting
+// duplicates: what a write added.
+function added(before, after) {
+  const left = new Map();
+  for (const x of before) left.set(x, (left.get(x) ?? 0) + 1);
+  return after.filter((x) => {
+    const n = left.get(x) ?? 0;
+    if (n === 0) return true;
+    left.set(x, n - 1);
+    return false;
+  });
+}
+
+// The runner name a new launch on PR <pr> takes: `review-pr-<pr>`, else the
+// first letter from `b` that no runner launch on the PR's rows already uses —
+// member or fallback, `=failed` or not. null for a stream keyed by no PR
+// number, or with every letter taken.
+function nextReviewer(launches, pr) {
+  if (typeof pr !== "number") return null;
+  const used = new Set(launches.filter((l) => l.kind !== "wf").map((l) => l.name));
+  const base = `review-pr-${pr}`;
+  if (!used.has(base)) return base;
+  for (let c = "b".charCodeAt(0); c <= "z".charCodeAt(0); c++) {
+    const name = `${base}-${String.fromCharCode(c)}`;
+    if (!used.has(name)) return name;
+  }
+  return null;
+}
+
+const OPEN_WAYS_OUT = "wait for its reviewed=, or, once Member-killed confirms its runner dead, settle it =failed in the same rewrite as the new launch";
+
+/**
+ * Why `ledger.mjs row` must not write `line` over `oldLine` (null for a new
+ * row), `before` and `after` the ledger's rows on either side of the write —
+ * or null when it may. Only a violation the write ADDS is a reason: each
+ * rule's offending entries are listed before the write and after it, and the
+ * after list must hold nothing the before list lacks, duplicates counted. Where
+ * an entry sits plays no part, since `row` rewrites the whole line, so a bad
+ * token already on the ledger and carried forward or moved never blocks a
+ * write. Entries are token texts, except a launch's, which is its identity
+ * with `=failed` aside, so settling a launch in place adds nothing. The rules:
+ * - unique members: a member name appears at most once on the line, whatever
+ *   its outcome;
+ * - unparseable review tokens: a `review=`/`reviewed=` matches REVIEW/REVIEWED;
+ * - paired results: every `reviewed=` answers a launch (readReviews above);
+ * - unique launches: a launch identity — a workflow's runId, a runner's name
+ *   whatever its kind — appears at most once in its PR's stream;
+ * - one open launch per PR: no launch appears while an earlier one is open;
+ * - an open launch is never removed: every launch open before the write is in
+ *   its PR's stream after it, `=failed` allowed, on any of the PR's rows.
+ */
+export function rowWriteRefusal(before, after, oldLine, line) {
+  const names = (text) => (text === null ? [] : memberTokens(text).map((t) => t.name));
+  const dupes = (list) => list.filter((n, i) => list.indexOf(n) !== i);
+  const member = added(dupes(names(oldLine)), dupes(names(line)))[0];
+  if (member !== undefined) {
+    return `member '${member}' appears more than once on this line — unique members: one token per member, live or settled`;
+  }
+  const was = streams(before);
+  const now = streams(after);
+  const where = (id) => (typeof id === "number" ? `PR #${id}` : `row ${id}`);
+  const read = (map, id) => readReviews(map.get(id) ?? []);
+  for (const [id, tokens] of now) {
+    const a = readReviews(tokens);
+    const b = read(was, id);
+    const bad = added(b.unparseable, a.unparseable)[0];
+    if (bad !== undefined) {
+      return `'${bad}' on ${where(id)} is not review=wf:<runId> | member:<name> | fallback:<name> (optionally =failed) `
+        + "or reviewed=<head>:<survived>/<refuted>/<unverified>:<run> — unparseable review token";
+    }
+    const unpaired = added(b.unpaired, a.unpaired)[0];
+    if (unpaired !== undefined) {
+      return `'${unpaired}' on ${where(id)} answers no open launch — paired results: every reviewed= follows a review= `
+        + "launch that no earlier reviewed= answered and that is not settled =failed; write a reviewed= only off a review result file";
+    }
+    const repeated = added(b.repeated, a.repeated)[0];
+    if (repeated !== undefined) {
+      const next = nextReviewer(a.launches, id);
+      return `launch '${repeated}' is already on ${where(id)}'s rows — unique launches: every launch takes an identity the PR has not used`
+        + (next === null ? "" : `; the next free reviewer name is ${next}`);
+    }
+    const crowded = added(b.crowded.map((c) => c.id), a.crowded.map((c) => c.id))[0];
+    if (crowded !== undefined) {
+      const { open } = a.crowded.find((c) => c.id === crowded);
+      // The stream names the later launch as the crowded one, but the write may
+      // have added the earlier one — then the new launch is the offender and
+      // the open one is the launch the ledger already held.
+      const fresh = added(b.launches.map((l) => l.id), a.launches.map((l) => l.id));
+      const [offender, holder] = fresh.includes(open) && !fresh.includes(crowded) ? [open, crowded] : [crowded, open];
+      return `launch '${offender}' on ${where(id)} while launch '${holder}' is open — one open launch per PR: ${OPEN_WAYS_OUT}`;
+    }
+  }
+  for (const [id, tokens] of was) {
+    const kept = new Set(read(now, id).launches.map((l) => l.id));
+    const dropped = readReviews(tokens).open.find((l) => !kept.has(l));
+    if (dropped !== undefined) {
+      return `this write removes open launch '${dropped}' from ${where(id)}'s rows — an open launch is never removed, `
+        + `only settled =failed where it stands: ${OPEN_WAYS_OUT}`;
+    }
+  }
+  return null;
 }
 
 // A ticket row is `#N <text>`; it is an Exclusion when `excluded` is the

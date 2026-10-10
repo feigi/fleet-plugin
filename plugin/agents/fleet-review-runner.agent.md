@@ -1,6 +1,6 @@
 ---
 name: fleet-review-runner
-description: A `/skill:run-team` review runner on omp — dispatched by the controller as review-pr-<pr#> with pr, branch, worktree, testCmd and scratch (the scratch root); runs runReviewOnOmp to completion in its own eval cell, writes <scratch>/pr<pr>/<run>/review.json in the review's own run root, and reports the digest, the path and the reviewed= token naming that run. Never invoked directly.
+description: A `/skill:run-team` review runner on omp — dispatched by the controller as review-pr-<pr#> (the PR's first runner; a later one takes the next free letter, review-pr-<pr#>-b, -c, …) with pr, branch, worktree, testCmd and scratch (the scratch root); runs runReviewOnOmp to completion in its own eval cell, writes <scratch>/pr<pr>/<run>/review.json in the review's own run root, and reports the digest, the path and the reviewed= token naming that run. Never invoked directly.
 model: "@smol:low"
 spawns: fleet-review-snapshot, fleet-review-test-run, fleet-review-correctness, fleet-review-silent-failure, fleet-review-tests, fleet-review-comments, fleet-review-types, fleet-review-simplify, fleet-review-verifier
 ---
@@ -63,15 +63,15 @@ redid the whole snapshot/fan-out sequence from scratch.
 3. **Report what the cell returned, and nothing else.** Your final message is
    your report. Never paste, count or summarize findings yourself: they are in
    the file, for the fix-applier, and the controller reads only the digest.
-   - `status: "completed"` → first line `review-pr-<pr>: completed <path>`,
+   - `status: "completed"` → first line `<your name>: completed <path>` — the
+     member name you were dispatched as, `review-pr-<pr>` or a later letter —
      then the returned `path`, `ledger`, `attempts`, `errors` and `digest`,
      verbatim, as JSON. `errors` is non-empty when the first attempt failed
      and the retry completed — report it anyway.
-   - `status: "failed"` → first line `review-pr-<pr>: failed`, then both
-     `errors` verbatim and `fallback`: the name (`review-pr-<pr>-b`) the
-     controller gives the hand-dispatched fallback reviewer. Do not run the
-     cell again — the one retry already happened inside it.
+   - `status: "failed"` → first line `<your name>: failed`, then both
+     `errors` verbatim. Do not run the cell again — the one retry already
+     happened inside it.
    - **The cell threw** (an argument refused before any review ran, the
      Resolver failing, the result file failing to write) → first line
-     `review-pr-<pr>: failed`, then the error text verbatim. Do not run the
+     `<your name>: failed`, then the error text verbatim. Do not run the
      cell again.

@@ -2130,7 +2130,12 @@ a `task` member named `review-pr-<pr#>`, agent `fleet-review-runner`, its prompt
 Write the `review=` token with `ledger.mjs row`, which **replaces the whole
 line**, so carry every other field. The tick counts in-flight reviews off the
 ledger and nowhere else, so a review you launched and never recorded is one it
-names again.
+names again. `row` reads the PR's review record across every row that maps to
+the PR, in ledger order, and refuses a write that adds a `reviewed=` with no
+open launch before it, a launch identity the PR already used, a second launch
+while one is open, the removal of an open launch, a member name twice on the
+line, or an unparseable `review=`/`reviewed=` (the ledger's token grammar,
+below). A bad token the ledger already holds is carried, never re-judged.
 
 **It is the only path on which `selectDimensions` sizes the fan-out to the
 diff and the verify budget follows severity.** Hand-dispatched (the fallback
@@ -2266,12 +2271,13 @@ is a failure event, not a clean review.** The review throws on missing
 failure surfaces mid-loop, where "react, never block" makes it easy to log and
 carry on — leaving a PR that *reads* as reviewed and is not. **Retry once, then
 fall back — and whoever holds the review call is who retries:**
-The `review-pr-<pr#>` runner already retried once inside its cell and reports `failed` with both errors; hand-dispatch the fallback reviewer below as `review-pr-<pr#>-b`, the name that report gives.
+The `review-pr-<pr#>` runner already retried once inside its cell and reports `failed` with both errors; hand-dispatch the fallback reviewer below under the next letter the PR's rows do not carry yet — `review-pr-<pr#>-b` after a first runner.
 Either way, settle the dead review by appending `=failed` to its `review=`
-token, then append `review=fallback:review-pr-<pr#>[-b]` after it, both in one
-`ledger.mjs row` rewrite — the tick takes the last `review=` token on a row as
-the one in flight, so that order is what keeps the fallback counted against the
-cap. A runner member that is killed rather than failed follows **Failure
+token, then append `review=fallback:<that name>` after it, both in one
+`ledger.mjs row` rewrite — `row` refuses a new launch while the dead one still
+reads open, and the tick takes the last `review=` token on a row as the one in
+flight, so that order is what keeps the fallback counted against the cap. A
+runner member that is killed rather than failed follows **Failure
 handling** (fresh name, inherited state stated).
 
 **Then dispatch a fix-applier** — on `DISPATCH fix-pr PR#<M>`, which the tick
@@ -3160,7 +3166,7 @@ decides the rest — two resolve automatically, every other one escalates:
 | Cause | Resolution |
 |---|---|
 | `live-editor` | **Automatic.** Ask the live member **by name** for its report, wait for it, then dispatch `finisher-pr-<M>-b` at the current head. If the head moved in the meantime, resolve it as `past-pin` instead. |
-| `past-pin` | **Automatic, through the tick: re-review.** The head carries commits no reviewer read. The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's tokens as any review's, and its result reaches a fresh finisher through the same gate. |
+| `past-pin` | **Automatic, through the tick: re-review.** The head carries commits no reviewer read. The tick prints `DISPATCH review PR#<M>` for a PR whose latest finisher is `halted:past-pin` and whose latest `reviewed=<head>` is not its current head, until a review of it is running or has returned; record that review's tokens as any review's, its runner under the next letter the PR's rows do not carry yet (`review-pr-<M>-b`, or `-c` where a fallback already took `-b`) — `row` refuses a second `review-pr-<M>` and names the free one — and its result reaches a fresh finisher through the same gate. |
 | `rebase` | **Escalate** — comment and flag, nothing more. Read the report's `git cherry <pin> HEAD origin/main`: only `-` lines is a clean rebase, and a `+` line is a conflict resolution that changed content or a commit past the pin. No automatic rule until a live halt shows the case recurring. |
 | `unreadable`, `missing`, `absent`, `other` | **Escalate** — comment and flag, no automatic retry. |
 
@@ -3169,7 +3175,9 @@ review has **returned**, its `reviewed=` token holds the PR out of `review-due=`
 and settling that review `=failed` re-queues nothing — that path covers only a
 review that died before returning. A head that moved past `reviewed=` with no
 such halt — a fix-applier's push — stays not due: duty 2 verifies what it
-applied.
+applied. **A rebase never gets a `reviewed=`:** the earlier review still
+counts, because dispositions verdicts are tied to its head. Never write a
+`reviewed=` you did not read off a review result file.
 
 **Resolving a finisher that died.** A finisher settled `failed` or `killed` left
 its PR without `ready-to-merge`, and nothing else notices: the PR is out of the
@@ -3248,9 +3256,9 @@ preference. "Unavailable" is the review unit not being there to dispatch at
 all; "failed" is the failure event above, surviving its one retry. A review that
 is present and failing is not absent, and reading this line as absence-only
 leaves the likeliest failure with no sanctioned path at all. One named member
-per PR — `review-pr-<pr#>`, or `review-pr-<pr#>-b` where a runner already held
-that name — never its implementer, recorded as
-`review=fallback:review-pr-<pr#>[-b]` on the PR's row. It runs off your turn
+per PR — `review-pr-<pr#>` while no reviewer on the PR has held that name,
+else the next letter its rows do not carry yet (`-b`, `-c`, …) — never its
+implementer, recorded as `review=fallback:<that name>` on the PR's row. It runs off your turn
 like the review it replaces. Give it the PR number and tell it to read
 `$(~/.fleet/bin/fleet-run --root)/commands/review-and-fix.md` — the resolved file
 path, not a slash invocation; command availability inside a member is not
@@ -3917,7 +3925,8 @@ reaches it anyway, and neither replaces the other.
 
 Settle outcome and liveness are different facts, not the same table with two
 spellings. Recovery is a fresh member, fresh name (`impl-<N>-b`,
-`fix-pr-<M>-b`, `review-pr-<M>-b`) whose prompt states what it inherits.
+`fix-pr-<M>-b`, and for a reviewer the next letter PR M's rows do not carry
+yet) whose prompt states what it inherits.
 
 `hub cancel` leaves a peer hard-aborted and unmessageable, but a `failed` job's peer can stay `idle` and answer normally. No distinct truncated state exists.
 
@@ -4007,7 +4016,9 @@ any other, never a section of its own.
 
 A PR's review is not a member, so it carries its own pair of row tokens,
 written with `row` (**Reviewers**): `review=wf:<runId>` |
-`review=member:review-pr-<n>` | `review=fallback:review-pr-<n>[-b]` at launch,
+`review=member:<name>` | `review=fallback:<name>` at launch, `<name>` being
+`review-pr-<n>` for the PR's first runner and the next letter its rows do not
+carry yet (`review-pr-<n>-b`, `-c`, …) for every later one,
 settled dead as `…=failed`, then `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`
 when the result lands, `<run>` the review's `run-XXXXXXXX` run root under
 `<scratch>/pr<n>/`, which holds its `review.json`. A row with `review=` and no `reviewed=` is a review in
@@ -4023,6 +4034,21 @@ naming that PR's latest finisher attempt: the tick reads a missing label as a
 finisher's miss only after the last attempt a `label-off=` names, so without
 it your own removal reads as one. `row` refuses a `label-off=` naming no
 `finisher-pr` member that `## Dispatched` or some row already carries.
+
+`row` holds a PR's review record to these rules, read across every row that
+maps to the PR — its settled `impl-<N>=PR#<M>` token, else its first `PR#`
+mention, else its key — in ledger order. Every `reviewed=` answers the nearest
+earlier launch that is neither answered nor `=failed`. A launch identity (a
+workflow's runId, or a runner's name whichever of member or fallback launched
+it, `=failed` aside) appears once. No launch appears
+while an earlier one is open — unanswered and not `=failed`. A launch open
+before the write is still on one of the PR's rows after it, `=failed` allowed.
+A member name appears once on the line, whatever its outcome. Every
+`review=`/`reviewed=` parses. A write that adds a violation is refused, exit 2,
+nothing written; one already on the ledger and carried forward is not. A
+second launch refused for an open one waits for that one's `reviewed=`, or —
+once the Member-killed row confirms its runner dead — settles it `=failed` in
+the same rewrite as the new launch.
 
 Plus two append-only lists:
 

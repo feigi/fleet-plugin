@@ -98,7 +98,7 @@ function fixture(t) {
   // The review's own run root, as review-core.mjs's snapshot step makes it
   // and the latest `reviewed=` names it.
   const run = "run-Rv40Aa01";
-  okLedger("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${head}:2/1/1:${run}`);
+  okLedger("row", "10", `impl-10=PR#40 → PR#40 · review=member:review-pr-40 reviewed=${head}:2/1/1:${run}`);
   okLedger("dispatch", "40", "fix-pr-40");
   okLedger("settle", "fix-pr-40", `applied:${head.slice(0, 7)}`);
 
@@ -392,7 +392,7 @@ test("with two review files present, a fix-applier is judged against the one the
   const review2 = { ...f.review, counts: { survived: 1, refuted: 0, unverified: 0, crashed: 0 }, survived: [f.review.survived[0]], refuted: [], unverified: [] };
   mkdirSync(join(f.scratch, "pr40", round2));
   writeFileSync(join(f.scratch, "pr40", round2, "review.json"), JSON.stringify(review2));
-  f.okLedger("row", "10", `${f.row().slice(4)} · review=member:review-pr-40 · reviewed=${f.head}:1/0/0:${round2}`);
+  f.okLedger("row", "10", `${f.row().slice(4)} · review=member:review-pr-40-b · reviewed=${f.head}:1/0/0:${round2}`);
   retry(f);
   // The round-1 record, copied to the retry: it answers round 1's findings,
   // which round 2 does not hold.
@@ -420,7 +420,7 @@ test("a record written against an earlier review run is a mismatch even at the s
   const round2 = "run-Rv40Bb02";
   mkdirSync(join(f.scratch, "pr40", round2));
   writeFileSync(join(f.scratch, "pr40", round2, "review.json"), JSON.stringify(f.review));
-  f.okLedger("row", "10", `${f.row().slice(4)} · review=member:review-pr-40 · reviewed=${f.head}:2/1/1:${round2}`);
+  f.okLedger("row", "10", `${f.row().slice(4)} · review=member:review-pr-40-b · reviewed=${f.head}:2/1/1:${round2}`);
   const stale = f.check();
   mismatch(stale, /the record answers run "run-Rv40Aa01", not the review's run-Rv40Bb02/);
   assert.equal(stale.json.token, `dispositions-mismatch=fix-pr-40:${round2}`);
@@ -540,7 +540,7 @@ function seedOwnLedger(f) {
     const r = spawnSync(process.execPath, [LEDGER, "--file", ledger, ...args], { encoding: "utf8", env: cleanEnv() });
     assert.equal(r.status, 0, r.stderr);
   };
-  run("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${f.head}:2/1/1:${f.run}`);
+  run("row", "10", `impl-10=PR#40 → PR#40 · review=member:review-pr-40 reviewed=${f.head}:2/1/1:${f.run}`);
   run("dispatch", "40", "fix-pr-40");
   run("settle", "fix-pr-40", `applied:${f.head.slice(0, 7)}`);
   return ledger;

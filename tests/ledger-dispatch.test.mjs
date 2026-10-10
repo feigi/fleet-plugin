@@ -260,7 +260,7 @@ test("dispatch names a review fix-applier null, including after a hold a fix-app
 
   // A hold a fix-applier settled `applied:`/`no-op` after is cleared: the
   // row's next fix-applier works a review's survivors.
-  ok("row", "80", "impl-80=PR#81 · conflict-hold:#81 · fix-pr-81=applied:def5678 · reviewed=abc1234:1/0/0:run-abc1234r");
+  ok("row", "80", "impl-80=PR#81 · conflict-hold:#81 · fix-pr-81=applied:def5678 · review=member:review-pr-81 reviewed=abc1234:1/0/0:run-abc1234r");
   assert.equal(ok("dispatch", "81", "fix-pr-81-b").agent, null);
   ok("row", "90", "impl-90=PR#91 · conflict-hold:#91 · fix-pr-91=no-op");
   assert.equal(ok("dispatch", "91", "fix-pr-91-b").agent, null);
@@ -305,7 +305,7 @@ test("dispatch reads a fix-applier's conflict hold off the PR's merged state, ag
 
   // The hold on the ticket row, cleared by a settle on the PR's own row.
   ok("row", "30", "impl-30=PR#31 · conflict-hold:#31");
-  ok("row", "31", "fix-pr-31=applied:abc1234 · reviewed=def5678:2/0/0:run-def5678r");
+  ok("row", "31", "fix-pr-31=applied:abc1234 · review=member:review-pr-31 reviewed=def5678:2/0/0:run-def5678r");
   agrees("31", "fix-pr-31-b", null);
 });
 
@@ -416,7 +416,7 @@ test("row still writes well-formed member tokens and non-member keys", (t) => {
   ok("dispatch", "merge-bot");
   const rows = [
     ["7", "impl-7 · class=routine · ports=16007"],
-    ["8", "impl-8=PR#9 · fix-pr-9=applied:73b356de · review=wf:r1=failed reviewed=abc1234:1/0/0:run-abc1234r · ci=123:1:success"],
+    ["8", "impl-8=PR#9 · fix-pr-9=applied:73b356de · review=wf:r1=failed review=wf:r2 reviewed=abc1234:1/0/0:run-abc1234r · ci=123:1:success"],
     ["10", "held-behind:#9 · merge-bot-1=done · review=member:review-pr-10"],
     ["11", "impl-11 · tier=task-high · tier-ok=impl-11:fleet-implementer-task-high"],
     ["12", "impl-12=bailed · tier-mismatch=impl-12:fleet-implementer · impl-12: dispatched task, expected fleet-implementer"],
@@ -519,7 +519,7 @@ test("settle impl-N=PR#M folds the PR-keyed row a pre-settle dispatch created in
 // the PR's review-fix `fix-pr-<M>` already settled earlier on the same row.
 test("a conflict hold written by row is cleared by a later dispatch + settle, in the order the tick reads", (t) => {
   const { ok, read } = fixture(t);
-  const before = "impl-10=PR#40 · reviewed=abc1234:1/0/0:run-abc1234r · fix-pr-40=applied:73b356de";
+  const before = "impl-10=PR#40 · review=member:review-pr-40 reviewed=abc1234:1/0/0:run-abc1234r · fix-pr-40=applied:73b356de";
   ok("row", "10", before);
   ok("row", "10", `${before} · conflict-hold:#40`);
   const tick = () => {
@@ -541,7 +541,7 @@ test("a conflict hold written by row is cleared by a later dispatch + settle, in
 // their fix-applier a review one, off the same tick state.
 test("a review's survivors outlive a conflict fix-applier's settle: the next fix-applier is a review one", (t) => {
   const { ok, read } = fixture(t);
-  ok("row", "20", "impl-20=PR#21 · reviewed=abc1234:2/0/0:run-abc1234r · conflict-hold:#21");
+  ok("row", "20", "impl-20=PR#21 · review=member:review-pr-21 reviewed=abc1234:2/0/0:run-abc1234r · conflict-hold:#21");
   const tick = () => {
     const l = read();
     return deriveRun({ rows: l.rows, dispatched: l.dispatched, drain: null },
@@ -562,10 +562,10 @@ test("the fold takes the PR row's settled tokens in order, under the two-argumen
   // The PR's row comes first here, and a third row follows the ticket's.
   ok("dispatch", "1311", "fix-pr-1311");
   ok("settle", "fix-pr-1311", "applied:73b356de");
-  ok("row", "1311", "fix-pr-1311=applied:73b356de · review=wf:r1=failed reviewed=abc1234:1/0/0:run-abc1234r · ci=9:1:success");
+  ok("row", "1311", "fix-pr-1311=applied:73b356de · review=wf:r1=failed review=wf:r2 reviewed=abc1234:1/0/0:run-abc1234r · ci=9:1:success");
   ok("row", "1310", "impl-1310 · class=routine");
   ok("dispatch", "1320", "impl-1320");
-  const folded = "#1310 impl-1310=PR#1311 · class=routine · fix-pr-1311=applied:73b356de · review=wf:r1=failed reviewed=abc1234:1/0/0:run-abc1234r · ci=9:1:success";
+  const folded = "#1310 impl-1310=PR#1311 · class=routine · fix-pr-1311=applied:73b356de · review=wf:r1=failed review=wf:r2 reviewed=abc1234:1/0/0:run-abc1234r · ci=9:1:success";
   assert.deepEqual(ok("settle", "impl-1310", "PR#1311"), {
     member: "impl-1310", outcome: "PR#1311", ticket: "#1310", line: folded, changed: true,
   });
@@ -752,7 +752,7 @@ const GATE_RUN = "run-Gate0001";
 const OTHER_RUN = "run-Other002";
 const ROUND2_RUN = "run-Round2bb";
 const gateRow = (counts, ...tokens) =>
-  ["impl-10=PR#40 → PR#40", `reviewed=${GATE_HEAD.slice(0, 7)}:${counts}:${GATE_RUN}`, "fix-pr-40=applied:def5678", ...tokens].join(" · ");
+  ["impl-10=PR#40 → PR#40", `review=member:review-pr-40 reviewed=${GATE_HEAD.slice(0, 7)}:${counts}:${GATE_RUN}`, "fix-pr-40=applied:def5678", ...tokens].join(" · ");
 
 test("a finisher is refused on a dispositions mismatch and recorded on a dispositions ok", (t) => {
   const { ok, read, refused } = fixture(t);
@@ -778,11 +778,11 @@ test("a finisher is refused as unchecked while no verdict answers the latest rev
   // An ok answering another review's run satisfies nothing, wherever it sits on the row.
   ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${OTHER_RUN}`));
   refused(["dispatch", "40", "finisher-pr-40"], unchecked);
-  ok("row", "10", `impl-10=PR#40 → PR#40 · dispositions-ok=fix-pr-40:${OTHER_RUN} · reviewed=${GATE_HEAD}:1/0/0:${GATE_RUN}`);
+  ok("row", "10", `impl-10=PR#40 → PR#40 · dispositions-ok=fix-pr-40:${OTHER_RUN} · review=member:review-pr-40 reviewed=${GATE_HEAD}:1/0/0:${GATE_RUN}`);
   refused(["dispatch", "40", "finisher-pr-40"], unchecked);
   // An earlier review's ok, answered before a later review returned, does not
   // carry over to the later one.
-  ok("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${OTHER_HEAD}:1/0/0:${OTHER_RUN} · dispositions-ok=fix-pr-40:${OTHER_RUN} · reviewed=${GATE_HEAD}:1/0/0:${GATE_RUN}`);
+  ok("row", "10", `impl-10=PR#40 → PR#40 · review=member:review-pr-40 reviewed=${OTHER_HEAD}:1/0/0:${OTHER_RUN} · dispositions-ok=fix-pr-40:${OTHER_RUN} · review=member:review-pr-40-b reviewed=${GATE_HEAD}:1/0/0:${GATE_RUN}`);
   refused(["dispatch", "40", "finisher-pr-40"], unchecked);
   // Another PR's fix-applier's verdict is no answer for this PR.
   ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-41:${GATE_RUN}`));
@@ -800,7 +800,7 @@ test("a finisher is refused as unchecked on a dispositions-unchecked verdict ans
 
 test("a PR whose latest review counts no survived and no unverified finding dispatches a finisher with no verdict", (t) => {
   const { ok, read } = fixture(t);
-  ok("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${GATE_HEAD}:0/3/0:${GATE_RUN}`);
+  ok("row", "10", `impl-10=PR#40 → PR#40 · review=member:review-pr-40 reviewed=${GATE_HEAD}:0/3/0:${GATE_RUN}`);
   assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
   // A PR never reviewed is outside the gate as well: no review file, no record.
   ok("row", "11", "impl-11=PR#41 → PR#41");
@@ -813,11 +813,11 @@ test("a PR whose latest review counts no survived and no unverified finding disp
 // with an ok verdict is what opens this gate.
 test("a PR whose latest review counts only unverified findings dispatches a finisher once a no-op fix-applier's verdict is ok", (t) => {
   const { ok, read, refused } = fixture(t);
-  ok("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${GATE_HEAD.slice(0, 7)}:0/2/6:${GATE_RUN}`);
+  ok("row", "10", `impl-10=PR#40 → PR#40 · review=member:review-pr-40 reviewed=${GATE_HEAD.slice(0, 7)}:0/2/6:${GATE_RUN}`);
   refused(["dispatch", "40", "finisher-pr-40"], /dispositions unchecked/);
   ok("dispatch", "40", "fix-pr-40");
   ok("settle", "fix-pr-40", "no-op");
-  ok("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${GATE_HEAD.slice(0, 7)}:0/2/6:${GATE_RUN} · fix-pr-40=no-op · dispositions-ok=fix-pr-40:${GATE_RUN}`);
+  ok("row", "10", `impl-10=PR#40 → PR#40 · review=member:review-pr-40 reviewed=${GATE_HEAD.slice(0, 7)}:0/2/6:${GATE_RUN} · fix-pr-40=no-op · dispositions-ok=fix-pr-40:${GATE_RUN}`);
   assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
   assert.deepEqual(read().dispatched, ["fix-pr-40=no-op", "finisher-pr-40"]);
 });
@@ -861,7 +861,7 @@ test("a mismatch is retried by the next fix-applier suffix: ok from it ends the 
     refused(["dispatch", "40", "finisher-pr-40-b"], /finisher-pr-40-b: dispositions escalate — fix-pr-40-b deferred/);
   }
   // A new review (a new head) starts the gate over: the old escalate answers nothing.
-  ok("row", "10", `impl-10=PR#40 → PR#40 · reviewed=${GATE_HEAD}:1/0/0:${GATE_RUN} · ${escalated[1]} · review=wf:x reviewed=${OTHER_HEAD}:1/0/0:${OTHER_RUN}`);
+  ok("row", "10", `impl-10=PR#40 → PR#40 · review=member:review-pr-40 reviewed=${GATE_HEAD}:1/0/0:${GATE_RUN} · ${escalated[1]} · review=wf:x reviewed=${OTHER_HEAD}:1/0/0:${OTHER_RUN}`);
   refused(["dispatch", "40", "finisher-pr-40-b"], /dispositions unchecked/);
 });
 
@@ -870,7 +870,7 @@ test("a later fix-applier that writes no verdict neither satisfies nor resets th
   // A conflict-hold fix-applier after the review one: no review file, no token.
   ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`, "conflict-hold:#40", "fix-pr-40-b=no-op"));
   assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
-  ok("row", "11", ["impl-11=PR#41 → PR#41", `reviewed=${GATE_HEAD}:1/0/0:${GATE_RUN}`, "fix-pr-41=applied:def5678",
+  ok("row", "11", ["impl-11=PR#41 → PR#41", `review=member:review-pr-41 reviewed=${GATE_HEAD}:1/0/0:${GATE_RUN}`, "fix-pr-41=applied:def5678",
     `dispositions-mismatch=fix-pr-41:${GATE_RUN}`, "conflict-hold:#41", "fix-pr-41-b=no-op"].join(" · "));
   refused(["dispatch", "41", "finisher-pr-41"], /finisher-pr-41: dispositions mismatch — fix-pr-41's/);
 });
@@ -959,10 +959,10 @@ test("only a fix-applier's well-formed verdict answers the gate: another family'
 // answered round 1's findings only.
 test("a finisher is refused after a same-head re-review whose run no verdict answers, even with round 1's ok on the row", (t) => {
   const { ok, read, refused } = fixture(t);
-  ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`, `reviewed=${GATE_HEAD.slice(0, 7)}:2/0/0:${ROUND2_RUN}`));
+  ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`, `review=member:review-pr-40-b reviewed=${GATE_HEAD.slice(0, 7)}:2/0/0:${ROUND2_RUN}`));
   refused(["dispatch", "40", "finisher-pr-40"], new RegExp(`finisher-pr-40: dispositions unchecked — .* latest review, ${ROUND2_RUN} at ${GATE_HEAD.slice(0, 7)};`));
   // Control: before the re-review returned, round 1's ok opened the gate.
-  ok("row", "11", ["impl-11=PR#41 → PR#41", `reviewed=${GATE_HEAD.slice(0, 7)}:1/0/0:${GATE_RUN}`, "fix-pr-41=applied:def5678",
+  ok("row", "11", ["impl-11=PR#41 → PR#41", `review=member:review-pr-41 reviewed=${GATE_HEAD.slice(0, 7)}:1/0/0:${GATE_RUN}`, "fix-pr-41=applied:def5678",
     `dispositions-ok=fix-pr-41:${GATE_RUN}`].join(" · "));
   assert.equal(ok("dispatch", "41", "finisher-pr-41").agent, "fleet-finisher");
   assert.deepEqual(read().dispatched, ["finisher-pr-41"]);
@@ -972,13 +972,13 @@ test("a finisher is refused while a fix-applier on the PR is live, even with an 
   const { ok, read, refused } = fixture(t);
   // A re-review at the same head: fix-pr-40 answered the first round, and
   // fix-pr-40-b, answering the second, is still working.
-  ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`, `reviewed=${GATE_HEAD.slice(0, 7)}:3/0/2:${ROUND2_RUN}`, "fix-pr-40-b"));
+  ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`, `review=member:review-pr-40-b reviewed=${GATE_HEAD.slice(0, 7)}:3/0/2:${ROUND2_RUN}`, "fix-pr-40-b"));
   refused(["dispatch", "40", "finisher-pr-40"], /finisher-pr-40: fix-pr-40-b still live on PR #40 — a fix-applier answering review run-Round2bb has not settled, .*settle it, run dispositions-check\.mjs for it/);
   // A PR outside the verdict gate is still held while its fix-applier works.
-  ok("row", "11", `impl-11=PR#41 → PR#41 · reviewed=${GATE_HEAD}:0/1/0:${GATE_RUN} · fix-pr-41`);
+  ok("row", "11", `impl-11=PR#41 → PR#41 · review=member:review-pr-41 reviewed=${GATE_HEAD}:0/1/0:${GATE_RUN} · fix-pr-41`);
   refused(["dispatch", "41", "finisher-pr-41"], /finisher-pr-41: fix-pr-41 still live on PR #41/);
   // Settled with its own verdict written, the -b's answer is the current one.
-  ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`, `reviewed=${GATE_HEAD.slice(0, 7)}:3/0/2:${ROUND2_RUN}`,
+  ok("row", "10", gateRow("1/0/0", `dispositions-ok=fix-pr-40:${GATE_RUN}`, `review=member:review-pr-40-b reviewed=${GATE_HEAD.slice(0, 7)}:3/0/2:${ROUND2_RUN}`,
     "fix-pr-40-b=applied:fedcba9", `dispositions-ok=fix-pr-40-b:${ROUND2_RUN}`));
   assert.equal(ok("dispatch", "40", "finisher-pr-40").agent, "fleet-finisher");
   assert.deepEqual(read().dispatched, ["finisher-pr-40"]);

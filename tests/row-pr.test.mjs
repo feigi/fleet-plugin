@@ -12,8 +12,7 @@ import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { rowPr } from "../plugin/scripts/ledger-grammar.mjs";
-import { rowNums } from "../plugin/scripts/fleet-tick.mjs";
+import { rowPr, rowNums } from "../plugin/scripts/ledger-grammar.mjs";
 import { parseRow } from "../plugin/scripts/compute-board.mjs";
 import { unrecordedReviewedPrs } from "../plugin/scripts/tier-outcomes.mjs";
 
@@ -59,7 +58,7 @@ function ledger(t) {
 for (const { row, own, keyed, board } of FIXTURES) {
   test(`every reader names one PR for: ${row}`, (t) => {
     assert.equal(rowPr(row), own, "ledger-grammar rowPr");
-    assert.deepEqual(rowNums(row), { keyNum: Number(row.split(" ")[0].slice(1)), pr: keyed }, "fleet-tick rowNums");
+    assert.deepEqual(rowNums(row), { keyNum: Number(row.split(" ")[0].slice(1)), pr: keyed }, "ledger-grammar rowNums");
     assert.deepEqual(unrecordedReviewedPrs({ rows: [`${row} reviewed=abc1234:0/0/0:run-abc1234r`] }, []), [keyed], "tier-outcomes");
     assert.equal(parseRow(row).pr, board, "compute-board parseRow");
     // `ledger.mjs dispatch <pr> fix-pr-<pr>` lands on the row the tick folds

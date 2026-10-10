@@ -25,8 +25,8 @@
 // fleet-tick.mjs's I/O and main() never run here, main() being guarded on
 // argv[1].
 import { assessBeat, isStalled, stallReport, NO_OWNER } from "./fleet-state.mjs";
-import { parseToken, rowPr, premisesOf, HALT_CAUSES } from "./ledger-grammar.mjs";
-import { REVIEWED, latestFinisherAttempts } from "./fleet-tick.mjs";
+import { parseToken, rowPr, premisesOf, HALT_CAUSES, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
+import { latestFinisherAttempts } from "./fleet-tick.mjs";
 
 // A ledger row is freeform, controller-authored text. Two example shapes:
 //   #<n> impl-<n>=PR#<m> → PR#<m> → MERGED 73b356de
@@ -98,10 +98,9 @@ import { REVIEWED, latestFinisherAttempts } from "./fleet-tick.mjs";
 // supply, not a claim — read through ledger-grammar.mjs's premisesOf(), the
 // reading shortlist.mjs and fleet-tick.mjs use too.
 //
-// Captures the matched kind, so parseRow tells a Workflow from a runner by
-// that capture instead of a second scan; see the review notes above for
-// what each kind means and how `=failed` settles it.
-const REVIEW = /^review=(wf|member|fallback):([^=\s]+?)(=failed)?$/;
+// ledger-grammar.mjs's REVIEW captures the matched kind, so parseRow tells a
+// Workflow from a runner by that capture instead of a second scan; see the
+// review notes above for what each kind means and how `=failed` settles it.
 
 // Which of two well-formed impl tokens is the later attempt for THIS
 // row's ticket. A token whose number matches the row's own ticket always
@@ -184,7 +183,7 @@ export function parseRow(row) {
     }
     if (tok.startsWith("review=")) {
       review = true;
-      const [, kind, name, failed] = REVIEW.exec(tok) ?? [];
+      const { kind, name, failed } = REVIEW.exec(tok)?.groups ?? {};
       if (!failed) reviewLive = true;
       if (kind === "member" || kind === "fallback") {
         if (failed) settled.add(name);
