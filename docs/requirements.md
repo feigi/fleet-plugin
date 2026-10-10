@@ -195,12 +195,14 @@ so one pass names every failure.
 | `label:ready-for-agent`, `label:in-progress`, `label:ready-to-merge` | `gh label list --search <label> --json name --jq '.[].name'` (§2.4) | a line equal to the label |
 | `allow-merge-commit` | `gh api "repos/{owner}/{repo}" --jq '.allow_merge_commit'` (§2.6) | prints `true` |
 | `ruleset` | `gh api "repos/{owner}/{repo}/rulesets" --jq '.[].name'` (§2.6) | prints a ruleset name |
-| `ci-workflow` | `grep -l '^name: *CI *$' .github/workflows/*.y*ml` (§2.7) | exit 0; a miss is a WARN and passes |
+| `ci-workflow` | `grep -lE` for a top-level `name: CI` in `.github/workflows/*.y*ml`, quoted or not, with an optional trailing ` # comment` — the way `ci-state.mjs` reads a name (§2.7) | exit 0; a miss is a WARN and passes |
 | `resolver` | `~/.fleet/bin/fleet-run --root` (§1.3) | exit 0 |
 
 Exit 0: passed, warnings included. Exit 1: a check failed; the last line is
 `PREFLIGHT FAILED: <names>`, and the run stops before the shortlist. Exit 2:
-the script could not run (no repository, `.fleet/` not writable).
+the script could not run (an argument given, no repository), or every check
+passed and `.fleet/preflight.json` could not be written, the check lines
+printed first.
 
 A pass writes `.fleet/preflight.json`, keyed to a hash of the check set. A
 later run with the same check set prints `PREFLIGHT SKIPPED` and makes no `gh`

@@ -32,14 +32,14 @@
 //                   `PREFLIGHT OK`, `PREFLIGHT SKIPPED` or
 //                   `PREFLIGHT FAILED: <names>`.
 //                   Exit 0 passed or skipped, 1 a row failed, 2 could not run
-//                   (an argument given, no repository, the marker not
-//                   writable).
+//                   (an argument given, no repository) or could not write the
+//                   marker after every row passed, the row lines printed first.
 //
 // Zero deps: node builtins and sibling scripts only.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isCLI } from "./is-cli.mjs";
 import { makeDie } from "./arg.mjs";
@@ -53,6 +53,12 @@ const NAME = "preflight";
 const die = makeDie(NAME);
 
 const label = (l) => ({ name: `label:${l}`, argv: ["gh", "label", "list", "--search", l, "--json", "name", "--jq", ".[].name"], want: l });
+
+// A workflow file whose top-level `name:` is CI, matched the way ci-state.mjs
+// reads a workflow's name: either quote style, and a trailing ` # comment` is
+// not part of the name. A plain `^name: *CI *$` would WARN for a repo
+// `--workflow CI` resolves without trouble.
+const CI_NAMED = String.raw`grep -lE "^name:[[:space:]]*[\"']?CI[\"']?([[:space:]]+#.*)?[[:space:]]*\$" .github/workflows/*.y*ml`;
 
 // A leading `~/` in an argv element is the user's home, expanded at run time
 // and hashed as written, so the hash does not change with the box.
@@ -73,37 +79,43 @@ export const CHECKS = [
   label("ready-to-merge"),
   { name: "allow-merge-commit", argv: ["gh", "api", "repos/{owner}/{repo}", "--jq", ".allow_merge_commit"], want: "true" },
   { name: "ruleset", argv: ["gh", "api", "repos/{owner}/{repo}/rulesets", "--jq", ".[].name"], want: NONEMPTY },
-  { name: "ci-workflow", argv: ["sh", "-c", "grep -l '^name: *CI *$' .github/workflows/*.y*ml"], warn: true },
+  { name: "ci-workflow", argv: ["sh", "-c", CI_NAMED], warn: true },
   { name: "resolver", argv: ["~/.fleet/bin/fleet-run", "--root"] },
 ];
 
 /** sha256 over every row's name, argv, want and warn, in table order. */
 export function checkSetHash(checks) {
-  const rows = checks.map(({ name, argv, want, warn }) => [name, argv, want ?? null, warn === true]);
+  const rows = checks.map(({ name, argv, want, warn }) => [name, argv, want, warn === true]);
   return createHash("sha256").update(JSON.stringify(rows)).digest("hex");
 }
 
 const wanted = (want) => (want === NONEMPTY ? "a non-blank line" : `a line "${want}"`);
 
 // One row: null when it passed, else why it did not.
-function probe({ argv, want }, cwd, env) {
-  const [cmd, ...args] = argv.map((a) => (a.startsWith("~/") ? join(env.HOME ?? "", a.slice(2)) : a));
-  const r = spawnSync(cmd, args, { cwd, env, encoding: "utf8", timeout: PROBE_TIMEOUT_MS });
+function probe({ argv, want }, cwd, env, timeoutMs) {
   const shown = argv.join(" ");
+  if (argv.some((a) => a.startsWith("~/")) && !env.HOME) return `${shown} did not run: HOME is not set`;
+  const [cmd, ...args] = argv.map((a) => (a.startsWith("~/") ? join(env.HOME, a.slice(2)) : a));
+  const r = spawnSync(cmd, args, { cwd, env, encoding: "utf8", timeout: timeoutMs });
+  // ENOENT and EACCES mean it never started; ETIMEDOUT and ENOBUFS mean it ran
+  // and was killed, so a hung `gh` is not reported as a missing binary.
+  if (r.error?.code === "ETIMEDOUT") return `${shown} timed out after ${timeoutMs}ms`;
+  if (r.error?.code === "ENOBUFS") return `${shown} output exceeded maxBuffer`;
   if (r.error) return `${shown} did not run: ${r.error.code ?? r.error.message}`;
   if (r.status !== 0) {
-    const last = String(r.stderr ?? "").trim().split("\n").at(-1);
+    const last = r.stderr.trim().split("\n").at(-1);
     return `${shown} ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`}${last ? `: ${last}` : ""}`;
   }
   if (want === undefined) return null;
-  const lines = String(r.stdout).split("\n").map((l) => l.trim());
-  const hit = want === NONEMPTY ? lines.some(Boolean) : lines.includes(want);
-  return hit ? null : `${shown} printed ${lines.some(Boolean) ? JSON.stringify(lines.filter(Boolean).join(" ")) : "nothing"}, want ${wanted(want)}`;
+  const lines = r.stdout.split("\n").map((l) => l.trim());
+  const said = lines.filter(Boolean);
+  const hit = want === NONEMPTY ? said.length > 0 : lines.includes(want);
+  return hit ? null : `${shown} printed ${said.length ? JSON.stringify(said.join(" ")) : "nothing"}, want ${wanted(want)}`;
 }
 
 function readMarker(path) {
   try {
-    return JSON.parse(readFileSync(path, "utf8"))?.checks ?? null;
+    return JSON.parse(readFileSync(path, "utf8"))?.checks;
   } catch {
     return null;
   }
@@ -112,34 +124,41 @@ function readMarker(path) {
 /**
  * Run `checks` from the main checkout `cwd` belongs to, unless the marker
  * records this exact check set as passed. Writes the marker when no row
- * failed. Throws FleetDirUnresolvable when `cwd` is in no repository, and an
- * Error naming the path when the marker cannot be written.
+ * failed. Throws FleetDirUnresolvable when `cwd` is in no repository.
  *
- * Returns `{ skipped, marker, results: [{name, warn, ok, why}], failed }`.
+ * Returns `{ skipped, marker, results: [{name, warn, ok, why}], failed,
+ * writeError }`; `writeError` is null, or says why the marker could not be
+ * written — the rows have run by then, so they come back with it.
  */
-export function runPreflight({ checks = CHECKS, cwd = process.cwd(), env = process.env } = {}) {
+export function runPreflight({ checks = CHECKS, cwd = process.cwd(), env = process.env, timeoutMs = PROBE_TIMEOUT_MS } = {}) {
   const marker = fleetFile(MARKER_FILE, { cwd });
   const workspace = dirname(dirname(marker));
   const hash = checkSetHash(checks);
-  if (readMarker(marker) === hash) return { skipped: true, marker, results: [], failed: [] };
+  if (readMarker(marker) === hash) return { skipped: true, marker, results: [], failed: [], writeError: null };
 
   const childEnv = gitEnv({}, env);
   const results = checks.map((c) => {
-    const why = probe(c, workspace, childEnv);
+    const why = probe(c, workspace, childEnv, timeoutMs);
     return { name: c.name, warn: c.warn === true, ok: why === null, why };
   });
   const failed = results.filter((r) => !r.ok && !r.warn).map((r) => r.name);
+  let writeError = null;
   if (failed.length === 0) {
+    const tmp = `${marker}.${process.pid}.tmp`;
     try {
       mkdirSync(dirname(marker), { recursive: true });
-      const tmp = `${marker}.${process.pid}.tmp`;
       writeFileSync(tmp, `${JSON.stringify({ checks: hash, passed: new Date().toISOString() })}\n`);
-      renameSync(tmp, marker);
+      try {
+        renameSync(tmp, marker);
+      } catch (e) {
+        rmSync(tmp, { force: true });
+        throw e;
+      }
     } catch (e) {
-      throw new Error(`cannot write ${marker}: ${e?.code ?? e?.message}`);
+      writeError = `cannot write ${marker}: ${e?.code ?? e?.message}`;
     }
   }
-  return { skipped: false, marker, results, failed };
+  return { skipped: false, marker, results, failed, writeError };
 }
 
 function main() {
@@ -162,6 +181,7 @@ function main() {
     process.exitCode = 1;
     return;
   }
+  if (r.writeError) die(r.writeError);
   console.log(`PREFLIGHT OK (${r.marker})`);
 }
 

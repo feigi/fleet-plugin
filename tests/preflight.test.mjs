@@ -10,12 +10,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./support/temp-dir.mjs";
 import { writeExecStub } from "./support/exec-stub.mjs";
 import { CHECKS, MARKER_FILE, checkSetHash, runPreflight } from "../plugin/scripts/preflight.mjs";
+import { gitEnv } from "../plugin/scripts/git-env.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../plugin/scripts/preflight.mjs", import.meta.url));
 const LABELS = ["ready-for-agent", "in-progress", "ready-to-merge"];
@@ -65,9 +66,7 @@ esac
   mkdirSync(join(home, ".fleet", "bin"), { recursive: true });
   writeExecStub(join(home, ".fleet", "bin", "fleet-run"), "#!/bin/sh\n[ \"$1\" = --root ] && echo /install/root\n");
 
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home };
-  delete env.GIT_DIR;
-  delete env.GIT_WORK_TREE;
+  const env = gitEnv({ PATH: `${bin}:${process.env.PATH}`, HOME: home }, process.env);
   return { ws, env, log, marker: join(ws, ".fleet", MARKER_FILE) };
 }
 
@@ -79,7 +78,8 @@ test("a repo every check passes against exits 0, names each check, and writes th
   const f = fixture();
   const r = cli(f);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  for (const { name } of CHECKS) assert.match(r.stdout, new RegExp(`^ok ${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
+  const lines = r.stdout.split("\n");
+  for (const { name } of CHECKS) assert.ok(lines.includes(`ok ${name}`), `ok ${name}`);
   assert.match(r.stdout, /^PREFLIGHT OK/m);
   assert.equal(JSON.parse(readFileSync(f.marker, "utf8")).checks, checkSetHash(CHECKS));
 });
@@ -193,4 +193,90 @@ test("any argument is refused with exit 2 before any check runs", () => {
   const r = cli(f, f.ws, ["--bogus"]);
   assert.equal(r.status, 2);
   assert.equal(ghCalls(f), 0);
+});
+
+test("a marker that cannot be written exits 2 naming the path, after printing every row and leaving no temp file", () => {
+  const f = fixture({ ci: null });
+  mkdirSync(f.marker, { recursive: true });
+  writeFileSync(join(f.marker, "occupied"), "");
+  const r = cli(f);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /cannot write .*preflight\.json/);
+  assert.match(r.stdout, /^ok binary:node$/m);
+  assert.match(r.stdout, /^WARN ci-workflow: /m);
+  assert.doesNotMatch(r.stdout, /^PREFLIGHT OK/m);
+  assert.deepEqual(readdirSync(join(f.ws, ".fleet")).filter((n) => n.endsWith(".tmp")), []);
+});
+
+test("a ~/ argv element with HOME unset is reported as not run, never resolved against the repository", () => {
+  const f = fixture();
+  const checks = [{ name: "resolver", argv: ["~/.fleet/bin/fleet-run", "--root"] }];
+  assert.deepEqual(runPreflight({ cwd: f.ws, env: f.env, checks }).failed, [], "control: with HOME set the row passes");
+
+  // A second repository, so the control's marker does not skip this run. It
+  // holds an executable at the path a `~` expanded to "" would name.
+  const g = fixture();
+  const { HOME, ...noHome } = g.env;
+  mkdirSync(join(g.ws, ".fleet", "bin"), { recursive: true });
+  writeExecStub(join(g.ws, ".fleet", "bin", "fleet-run"), "#!/bin/sh\nexit 0\n");
+  const r = runPreflight({ cwd: g.ws, env: noHome, checks });
+  assert.deepEqual(r.failed, ["resolver"]);
+  assert.match(r.results[0].why, /HOME is not set/);
+});
+
+test("the ci-workflow row reads a workflow's name the way ci-state does", () => {
+  const row = CHECKS.filter((c) => c.name === "ci-workflow");
+  const okOf = (ci) => {
+    const f = fixture({ ci });
+    return runPreflight({ cwd: f.ws, env: f.env, checks: row }).results[0].ok;
+  };
+  for (const ci of ["name: CI\n", 'name: "CI"\n', "name: 'CI'\n", "name: CI # main pipeline\n", "name:CI\n"]) {
+    assert.equal(okOf(ci), true, JSON.stringify(ci));
+  }
+  for (const ci of ["name: Build\n", "name: CI Build\n", "name: CI#1\n", null]) {
+    assert.equal(okOf(ci), false, JSON.stringify(ci));
+  }
+});
+
+test("a value is matched whole after trimming, and the probe's environment carries no ambient git variables", () => {
+  const row = (want) => [{ name: "v", argv: ["gh", "api", "repos/{owner}/{repo}", "--jq", ".allow_merge_commit"], want }];
+  const run = (allowMerge, want, env) => {
+    const f = fixture({ allowMerge });
+    return runPreflight({ cwd: f.ws, env: env?.(f) ?? f.env, checks: row(want) });
+  };
+  assert.deepEqual(run("xtrue", "true").failed, ["v"], "a substring is not a line");
+  assert.deepEqual(run("  true  ", "true").failed, [], "padding is trimmed");
+
+  const f = fixture();
+  const probe = [{ name: "git-dir", argv: ["sh", "-c", 'echo "${GIT_DIR:-unset}"'], want: "unset" }];
+  assert.deepEqual(runPreflight({ cwd: f.ws, env: { ...f.env, GIT_DIR: join(f.ws, ".git") }, checks: probe }).failed, []);
+});
+
+test("a changed name or want changes the hash", () => {
+  const base = [{ name: "c", argv: ["true"], want: "x" }];
+  assert.notEqual(checkSetHash(base), checkSetHash([{ name: "d", argv: ["true"], want: "x" }]));
+  assert.notEqual(checkSetHash(base), checkSetHash([{ name: "c", argv: ["true"], want: "y" }]));
+  assert.notEqual(checkSetHash(base), checkSetHash([{ name: "c", argv: ["true"] }]));
+});
+
+test("run from a linked worktree, every probe's cwd is the main checkout", () => {
+  const f = fixture();
+  const wt = join(f.ws, ".worktrees", "1-x");
+  git(f.ws, "worktree", "add", "-q", "-b", "x", wt);
+  const r = runPreflight({ cwd: wt, env: f.env, checks: [{ name: "cwd", argv: ["pwd"], want: f.ws }] });
+  assert.deepEqual(r.failed, [], JSON.stringify(r.results));
+});
+
+test("a binary that is not installed is reported as not run; a probe that hangs as timed out", () => {
+  const f = fixture();
+  const run = (checks, extra = {}) => runPreflight({ cwd: f.ws, env: f.env, checks, ...extra });
+
+  const gone = run([{ name: "gone", argv: ["no-such-binary-for-preflight"] }]);
+  assert.deepEqual(gone.failed, ["gone"]);
+  assert.match(gone.results[0].why, /did not run: ENOENT/);
+
+  const hung = run([{ name: "hung", argv: ["sleep", "5"] }], { timeoutMs: 300 });
+  assert.deepEqual(hung.failed, ["hung"]);
+  assert.match(hung.results[0].why, /timed out after 300ms/);
+  assert.doesNotMatch(hung.results[0].why, /did not run/);
 });

@@ -265,7 +265,16 @@ The assertion naming the live Install root, its install kind and recorded versio
 and the Resolver's own drift against the installed copy — with a NOTICE when the
 root is a linked checkout, since then every answer came from the dev tree.
 Refuses loudly; writes nothing.
-_Avoid_: doctor, healthcheck, preflight
+_Avoid_: doctor, healthcheck
+
+**Pre-flight**:
+The check set run-team runs at the start of phase 0 (`preflight.mjs`) — what this
+machine and the consumer repository must have before anything is shortlisted or
+dispatched: the binaries, `gh` auth, `origin/main`, the ignore rules, the labels,
+the repository settings, the Resolver. A pass is remembered in `.fleet/preflight.json`,
+keyed to a hash of the check set. It checks the machine and the repository, never
+the install — that is the Provenance check.
+_Avoid_: doctor, healthcheck
 
 **Dev link**:
 `omp plugin link <checkout>/plugin` — the working checkout registered as the

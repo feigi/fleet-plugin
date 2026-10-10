@@ -295,8 +295,9 @@ phase, or in any later one, asks the maintainer which tickets to take.
    ruleset, the Resolver — and prints one `ok`, `WARN` or `FAIL` line per
    check, each naming its check. **Exit 1 stops the run:** no shortlist, no
    dispatch. Report every `FAIL` line to the maintainer by its check's name;
-   the run starts again once they are fixed. Exit 2 means it could not run
-   at all, and stops the run the same way. `WARN ci-workflow` stops nothing:
+   the run starts again once they are fixed. Exit 2 means it could not run at
+   all, or every check passed and the marker could not be written, and stops
+   the run the same way. `WARN ci-workflow` stops nothing:
    a repo with no workflow named CI still runs, its workflow named per call
    with `--workflow` or declared absent with `--declare-no-ci`. A pass writes
    `.fleet/preflight.json`, keyed to a hash of the check set, and every later
