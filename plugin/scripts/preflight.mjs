@@ -27,12 +27,13 @@
 // checks again. A failed run writes no marker. A marker that cannot be read
 // is treated as absent. Deleting the file makes the next run check again.
 //
-// CLI (no flags):
+// CLI (no arguments):
 //   preflight.mjs   one `ok|WARN|FAIL <name>[: why]` line per row, then
 //                   `PREFLIGHT OK`, `PREFLIGHT SKIPPED` or
 //                   `PREFLIGHT FAILED: <names>`.
 //                   Exit 0 passed or skipped, 1 a row failed, 2 could not run
-//                   (a flag given, no repository, the marker not writable).
+//                   (an argument given, no repository, the marker not
+//                   writable).
 //
 // Zero deps: node builtins and sibling scripts only.
 
@@ -41,7 +42,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isCLI } from "./is-cli.mjs";
-import { makeDie, defineFlags } from "./arg.mjs";
+import { makeDie } from "./arg.mjs";
 import { fleetFile } from "./fleet-dir.mjs";
 import { gitEnv } from "./git-env.mjs";
 
@@ -142,9 +143,9 @@ export function runPreflight({ checks = CHECKS, cwd = process.cwd(), env = proce
 }
 
 function main() {
-  const { sweep, stray } = defineFlags(die, { flags: {} });
-  sweep();
-  stray();
+  // No flags at all, so not defineFlags: its unknown-flag refusal lists the
+  // accepted flags, and this script has none to list.
+  if (process.argv.length > 2) die(`takes no arguments, got: ${process.argv.slice(2).join(" ")}`);
   let r;
   try {
     r = runPreflight();

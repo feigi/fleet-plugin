@@ -188,7 +188,7 @@ test("an unreadable marker is no marker: the checks run", () => {
   assert.match(r.stdout, /^PREFLIGHT OK/m);
 });
 
-test("an unknown flag is refused with exit 2 before any check runs", () => {
+test("any argument is refused with exit 2 before any check runs", () => {
   const f = fixture();
   const r = cli(f, f.ws, ["--bogus"]);
   assert.equal(r.status, 2);
