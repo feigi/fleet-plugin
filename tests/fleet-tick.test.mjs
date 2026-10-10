@@ -16,7 +16,7 @@ const state = (over = {}) => ({
   implCap: 2, reviewerCap: 6, maxReviews: 6,
   implLive: 0, draining: null, tierMismatch: [], tierUnchecked: [], implNames: [],
   heads: [], supply: 0, shortlistStatus: "ok", refresh: null,
-  reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [], unlabelled: [],
+  reviewsLive: 0, fixLive: 0, fixDue: [], reviewDue: [], unlabelled: [], conflicts: [], conflictEscalate: [],
   mergeBotLive: 0, mergeQueue: 0, mergeHeld: 0, mergeConflictHeld: 0,
   mainCheckout: { state: "clean" },
   ...over,
@@ -226,6 +226,34 @@ test("reviewers: a second labelled finisher in one stretch escalates instead —
     { pr: 40, labelled: ["finisher-pr-40", "finisher-pr-40-b"] }, { pr: 41, labelled: ["finisher-pr-41"] },
   ] }), "reviewers");
   assert.deepEqual(both.map((r) => r.action), ["DISPATCH fix-pr PR#7", "DISPATCH finisher PR#41", "ESCALATE unlabelled PR#40"]);
+});
+
+// A tracked PR GitHub reads CONFLICTING, with no hold and nobody on it: the
+// controller records the hold itself, so the line carries the exact step.
+test("reviewers: a CONFLICT line names the hold to record for each PR, actionable, beside the reviewer row", () => {
+  const rs = rowsOf(state({ conflicts: [40, 44] }), "reviewers");
+  assert.deepEqual(rs.map((r) => r.action), ["IDLE OK", "CONFLICT PR#40 PR#44"]);
+  assert.equal(rs[0].acts, false);
+  assert.equal(rs[1].acts, true);
+  assert.match(rs[1].detail, /ledger\.mjs read, then .*ledger\.mjs row <key> "<text> · conflict-hold:#40 \(conflict: mergeable=CONFLICTING\)"/);
+  assert.match(rs[1].detail, /ledger\.mjs row <key> "<text> · conflict-hold:#44 \(conflict: mergeable=CONFLICTING\)"/);
+  assert.equal(actionable(reconcile(state({ conflicts: [40] }))), true, "it counts as a change for the quiet line");
+  const busy = rowsOf(state({ fixDue: [7], conflicts: [40] }), "reviewers");
+  assert.deepEqual(busy.map((r) => r.action), ["DISPATCH fix-pr PR#7", "CONFLICT PR#40"]);
+});
+
+test("reviewers: a conflict past the treadmill cap escalates instead — never actionable, no hold to record", () => {
+  const rs = rowsOf(state({ conflictEscalate: [40] }), "reviewers");
+  assert.deepEqual(rs.map((r) => r.action), ["IDLE OK", "ESCALATE conflict PR#40"]);
+  assert.equal(rs[1].acts, false);
+  assert.doesNotMatch(rs[1].detail, /conflict-hold:/);
+  assert.equal(actionable(reconcile(state({ conflictEscalate: [40] }))), false);
+  const both = rowsOf(state({ conflicts: [41], conflictEscalate: [40] }), "reviewers");
+  assert.deepEqual(both.map((r) => r.action), ["IDLE OK", "CONFLICT PR#41", "ESCALATE conflict PR#40"]);
+});
+
+test("reviewers: no conflict, no conflict line", () => {
+  assert.deepEqual(rowsOf(state(), "reviewers").map((r) => r.action), ["IDLE OK"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -441,16 +469,34 @@ test("main checkout: clean holds nothing", () => {
     ["PULL #412", "DISPATCH fix-pr PR#346", "DISPATCH review PR#350", "DISPATCH merge-bot"]);
 });
 
+// A CONFLICT line only writes a record; the fix-applier it leads to obeys
+// every hold through the reviewers row.
+test("main checkout: a conflict line still prints under the hold and under a drain — it records, never dispatches", () => {
+  for (const mainCheckout of [{ state: "dirty", changed: ["x"] }, { state: "unknown", cause: "read", why: "boom" }, { state: "absent", baseline: "/x" }]) {
+    const hold = row(state({ mainCheckout }), "implementers").action;
+    const acts = mainCheckout.state === "absent";
+    assert.deepEqual(summary(state({ ...BUSY, refresh: null, conflicts: [40], conflictEscalate: [41], mainCheckout })), [
+      ["implementers", hold, acts],
+      ["reviewers", hold, acts],
+      ["reviewers", "CONFLICT PR#40", true],
+      ["reviewers", "ESCALATE conflict PR#41", false],
+      ["merge-bot", hold, acts],
+    ], mainCheckout.state);
+  }
+  const drained = rowsOf(state({ ...BUSY, refresh: null, draining: "x", conflicts: [40] }), "reviewers");
+  assert.deepEqual(drained.map((r) => r.action), ["DISPATCH fix-pr PR#346", "DISPATCH review PR#350", "CONFLICT PR#40"]);
+});
+
 // ---------------------------------------------------------------------------
 // Reading the run: deriveRun() over `ledger.mjs read`'s payload and the open
 // PR list. Rows are spelled the way ledger.mjs dispatch/settle write them.
 
 const HEAD_A = "abc1234" + "0".repeat(33);
 const HEAD_B = "def5678" + "0".repeat(33);
-const pr = (number, labels = [], closes = [number + 1000], headRefOid = HEAD_B) => ({
+const pr = (number, labels = [], closes = [number + 1000], headRefOid = HEAD_B, mergeable = "MERGEABLE") => ({
   number, labels: labels.map((name) => ({ name })),
   closingIssuesReferences: closes.map((n) => ({ number: n })),
-  headRefOid,
+  headRefOid, mergeable,
 });
 const run = (ledger, prs = [], closed, finished) => deriveRun({ rows: [], dispatched: [], drain: null, ...ledger }, prs, closed, finished);
 
@@ -1115,6 +1161,86 @@ test("deriveRun: a conflict hold is read in either spelling and on a PR-keyed ro
   assert.deepEqual([prose.fixDue, prose.mergeHeld], [[], 0]);
 });
 
+// GitHub's `mergeable` off the open list, read every tick: a tracked PR it
+// reads CONFLICTING, with no hold yet and nobody working it, is a hold the
+// controller records.
+const conflicting = (n, labels = []) => pr(n, labels, [n + 1000], HEAD_B, "CONFLICTING");
+const TRACKED = (n, tail = "") => `#${n - 30} impl-${n - 30}=PR#${n} → PR#${n} · reviewed=abc1234:0/0/0${tail ? ` · ${tail}` : ""}`;
+const conflictsOf = (rows, prs, dispatched = []) => {
+  const r = run({ rows, dispatched }, prs);
+  return [r.conflicts, r.conflictEscalate];
+};
+
+test("deriveRun: a tracked open PR GitHub reads CONFLICTING is a conflict to record — no other mergeable value is", () => {
+  assert.deepEqual(conflictsOf([TRACKED(40)], [conflicting(40)]), [[40], []]);
+  for (const mergeable of ["UNKNOWN", "BEHIND", "MERGEABLE", "conflicting", ""]) {
+    assert.deepEqual(conflictsOf([TRACKED(40)], [pr(40, [], [1040], HEAD_B, mergeable)]), [[], []], mergeable);
+  }
+  // Ascending whatever order the rows arrive in.
+  assert.deepEqual(conflictsOf([TRACKED(44), TRACKED(40)], [conflicting(44), conflicting(40)]), [[40, 44], []]);
+});
+
+test("deriveRun: a CONFLICTING PR the ledger does not track is no conflict to record — a human's or a chore PR", () => {
+  assert.deepEqual(conflictsOf([], [conflicting(40)]), [[], []]);
+  assert.deepEqual(conflictsOf(["#9 impl-9"], [conflicting(40)]), [[], []]);
+});
+
+test("deriveRun: a CONFLICTING PR already on an unresolved conflict hold is not recorded twice — the hold is the record", () => {
+  const r = run({ rows: [TRACKED(40, "conflict-hold:#40")] }, [conflicting(40)]);
+  assert.deepEqual([r.conflicts, r.conflictEscalate, r.fixDue], [[], [], [40]]);
+  // Cleared by a landed fix-applier and CONFLICTING again: a fresh conflict.
+  assert.deepEqual(conflictsOf([TRACKED(40, "conflict-hold:#40 · fix-pr-40=applied:def5678")], [conflicting(40)]), [[40], []]);
+});
+
+test("deriveRun: a live fix-applier, finisher or implementer on the PR holds the conflict line off; a settled one does not", () => {
+  for (const [tail, dispatched] of [
+    ["fix-pr-40", ["fix-pr-40"]],
+    ["finisher-pr-40", ["finisher-pr-40"]],
+    ["impl-10-b", ["impl-10-b"]],
+  ]) {
+    assert.deepEqual(conflictsOf([TRACKED(40, tail)], [conflicting(40)], dispatched), [[], []], tail);
+  }
+  for (const tail of ["fix-pr-40=failed", "finisher-pr-40=failed", "impl-10-b=bailed"]) {
+    assert.deepEqual(conflictsOf([TRACKED(40, tail)], [conflicting(40)]), [[40], []], tail);
+  }
+  // Another PR's member is no one working this PR.
+  assert.deepEqual(conflictsOf([TRACKED(40), TRACKED(41, "fix-pr-41")], [conflicting(40), pr(41)], ["fix-pr-41"]), [[40], []]);
+});
+
+test("deriveRun: a review in flight does not hold the conflict line off", () => {
+  assert.deepEqual(conflictsOf([TRACKED(40, "review=wf:x")], [conflicting(40)]), [[40], []]);
+  assert.deepEqual(conflictsOf(["#10 impl-10=PR#40 → PR#40 · review=wf:x"], [conflicting(40)]), [[40], []], "never reviewed yet");
+});
+
+test("deriveRun: a queued CONFLICTING PR is left to a live merge bot, and recorded when none is live", () => {
+  const queued = [conflicting(40, ["ready-to-merge"])];
+  assert.deepEqual(conflictsOf([TRACKED(40)], queued, ["merge-bot-1"]), [[], []]);
+  assert.deepEqual(conflictsOf([TRACKED(40)], queued, ["merge-bot-1=done"]), [[40], []]);
+  assert.deepEqual(conflictsOf([TRACKED(40)], [conflicting(40)], ["merge-bot-1"]), [[40], []], "an unqueued PR is not the bot's");
+});
+
+test("deriveRun: CONFLICTING again after two landed conflict fix-appliers escalates instead of recording a third hold", () => {
+  const twice = "conflict-hold:#40 · fix-pr-40=applied:def5678 · conflict-hold:#40 · fix-pr-40-b=no-op";
+  assert.deepEqual(conflictsOf([TRACKED(40, twice)], [conflicting(40)]), [[], [40]]);
+  assert.deepEqual(conflictsOf([TRACKED(40, "conflict-hold:#40 · fix-pr-40=applied:def5678")], [conflicting(40)]), [[40], []], "one landed is not the cap");
+  // It clears once GitHub stops reading CONFLICTING, or the PR leaves the list.
+  assert.deepEqual(conflictsOf([TRACKED(40, twice)], [pr(40)]), [[], []]);
+  assert.deepEqual(conflictsOf([TRACKED(40, twice)], []), [[], []]);
+  // The same guards: a live member on it, or a hold already standing.
+  assert.deepEqual(conflictsOf([TRACKED(40, `${twice} · fix-pr-40-c`)], [conflicting(40)], ["fix-pr-40-c"]), [[], []]);
+  assert.deepEqual(conflictsOf([TRACKED(40, `${twice} · conflict-hold:#40`)], [conflicting(40)]), [[], []]);
+  // A review fix-applier's landing is no conflict fix-applier's.
+  const reviewFix = run({ rows: [`#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:2/0/0 · fix-pr-40=applied:def5678 · conflict-hold:#40 · fix-pr-40-b=no-op`] }, [conflicting(40)]);
+  assert.deepEqual([reviewFix.conflicts, reviewFix.conflictEscalate], [[40], []]);
+});
+
+test("deriveRun: the hold the CONFLICT line names, appended to the row, is a conflict hold the fold reads", () => {
+  const [line] = rowsOf(state({ conflicts: [40] }), "reviewers").filter((r) => r.action.startsWith("CONFLICT"));
+  const token = /"<text> · (conflict-hold:#40 [^"]*)"/.exec(line.detail)[1];
+  const r = run({ rows: [TRACKED(40, token)] }, [conflicting(40)]);
+  assert.deepEqual([r.conflictHeld, r.fixDue, r.conflicts], [[40], [40], []]);
+});
+
 test("deriveRun: the merge bot is live while its ## Dispatched entry is unsettled", () => {
   assert.equal(run({ dispatched: ["merge-bot-1"] }).mergeBotLive, 1);
   assert.equal(run({ dispatched: ["merge-bot-1=done"] }).mergeBotLive, 0);
@@ -1370,7 +1496,7 @@ test("CLI: every synchronous spawn in this file goes through spawnBounded (#2320
 const GH_STUB = `#!/bin/sh
 [ -n "$GH_HANG" ] && [ "$1 $2" = "$GH_HANG" ] && sleep "$GH_HANG_S" </dev/null >/dev/null 2>&1
 case "$1 $2" in
-  "pr list") [ -n "$PR_FAIL" ] && { echo "boom" >&2; exit 1; }; cat "$FIXTURE_PRS" ;;
+  "pr list") [ -n "$PR_LIST_LOG" ] && echo "$*" >> "$PR_LIST_LOG"; [ -n "$PR_FAIL" ] && { echo "boom" >&2; exit 1; }; cat "$FIXTURE_PRS" ;;
   "issue view")
     echo "$3" >> "$ISSUE_VIEW_LOG"
     [ -n "$ISSUE_VIEW_FAIL" ] && { echo "gh: issue view failed" >&2; exit 1; }
@@ -1907,6 +2033,34 @@ test("CLI: a gh row missing headRefOid refuses rather than reading every past-pi
   assert.equal(r.status, 2);
   assert.equal(r.stdout.trim(), "");
   assert.match(r.stderr, /headRefOid/);
+});
+
+test("CLI: a gh row missing mergeable refuses rather than reading every conflict as absent", () => {
+  const { mergeable, ...unknown } = pr(1);
+  const r = runCli([], { prs: [unknown], shortlist: shortlistText([]) });
+  assert.equal(r.status, 2);
+  assert.equal(r.stdout.trim(), "");
+  assert.match(r.stderr, /mergeable/);
+  const wrong = runCli([], { prs: [{ ...pr(1), mergeable: null }], shortlist: shortlistText([]) });
+  assert.equal(wrong.status, 2);
+  assert.match(wrong.stderr, /mergeable/);
+});
+
+test("CLI: a tracked PR GitHub reads CONFLICTING prints CONFLICT on the reviewers role, off the one gh pr list it already makes", (t) => {
+  const logDir = mkdtempSync(join(tmpdir(), "fleet-tick-prlist-"));
+  t.after(() => rmSync(logDir, { recursive: true, force: true }));
+  const log = join(logDir, "pr-list.log");
+  const r = runCli([], {
+    ledger: { rows: ["#10 impl-10=PR#40 → PR#40 · reviewed=abc1234:0/0/0"] },
+    shortlist: shortlistText([]), prs: [pr(40, [], [10], HEAD_B, "CONFLICTING"), pr(41, [], [], HEAD_B, "UNKNOWN")],
+    env: { PR_LIST_LOG: log },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^reviewers {4}0\/6 → CONFLICT PR#40 +\(.* — .*ledger\.mjs row <key> "<text> · conflict-hold:#40 \(conflict: mergeable=CONFLICTING\)".*\)$/m);
+  assert.doesNotMatch(r.stdout, /PR#41/);
+  const calls = readFileSync(log, "utf8").trim().split("\n");
+  assert.equal(calls.length, 1, "no extra gh call");
+  assert.match(calls[0], /--json \S*\bmergeable\b/);
 });
 
 test("CLI: a past-pin halt prints DISPATCH review for its PR (#2083)", () => {

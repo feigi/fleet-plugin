@@ -1771,15 +1771,22 @@ function runDispatch() {
   const held = member.family === "fix-pr" && tickFold("definition").conflictHeld.includes(member.number);
 
   // A finisher labels its PR `ready-to-merge`, so it is recorded only once
-  // the PR's current dispositions verdict is ok — read off the tick's own
-  // per-PR fold, the same latest `reviewed=` head the tick reads — and no
-  // fix-applier on the PR is still live. A PR whose latest review counts no
-  // survived and no unverified finding had nothing for a fix-applier to rule
-  // on, and one never reviewed has no review file: neither is gated on a
-  // verdict. Refused here, before anything is written, so the check cannot
-  // be skipped by forgetting to run it.
+  // the PR sits on no conflict hold a fix-applier has yet to clear — a PR
+  // known to conflict cannot merge, and a finisher would race the fix-applier
+  // rebasing it — and once its current dispositions verdict is ok — both read
+  // off the tick's own per-PR fold, the verdict at the same latest `reviewed=`
+  // head the tick reads — and no fix-applier on the PR is still live. A PR
+  // whose latest review counts no survived and no unverified finding had
+  // nothing for a fix-applier to rule on, and one never reviewed has no
+  // review file: neither is gated on a verdict. Refused here, before anything
+  // is written, so the check cannot be skipped by forgetting to run it.
   if (member.family === "finisher-pr") {
-    const review = tickFold("dispositions verdict").reviewed.find((r) => r.pr === member.number);
+    const fold = tickFold("conflict hold and dispositions verdict");
+    if (fold.conflictHeld.includes(member.number)) {
+      die(`${member.name}: PR #${member.number} is on a conflict hold no fix-applier has cleared — dispatch fix-pr-${member.number}[-<x>] `
+        + `and let it settle applied:/no-op, then dispatch the finisher again — not dispatching ${member.name}`);
+    }
+    const review = fold.reviewed.find((r) => r.pr === member.number);
     const refusal = dispositionsRefusal(member.number, review);
     if (refusal !== null) die(`${member.name}: ${refusal} — not dispatching ${member.name}`);
   }

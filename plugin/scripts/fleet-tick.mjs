@@ -90,17 +90,23 @@ function mainCheckoutHoldReason(mainCheckout) {
   if (state === "clean") return null;
   return MAIN_CHECKOUT_HOLD[state] ?? "main checkout unknown";
 }
+// The rows that only ask the controller to write a record — never to dispatch
+// — pass through it unchanged: the fix-applier a conflict hold leads to obeys
+// the hold through its own role's row.
 function mainCheckoutHold(s, rows) {
   const why = mainCheckoutHoldReason(s.mainCheckout);
   if (why === null) return rows;
   const acts = s.mainCheckout?.state === "absent";
   const held = [];
   for (const r of rows) {
-    if (held.some((h) => h.role === r.role)) continue;
-    held.push({ ...r, action: `HOLD (${why})`, acts });
+    if (UNHELD.has(r)) held.push(r);
+    else if (!held.some((h) => h.role === r.role && !UNHELD.has(h))) held.push({ ...r, action: `HOLD (${why})`, acts });
   }
   return held;
 }
+// Rows mainCheckoutHold() leaves standing. A set rather than a field, so
+// a row's shape stays the one formatLines() prints.
+const UNHELD = new WeakSet();
 
 // `acts` is on the row, set where the ACTION is chosen: the heartbeat backs off
 // on "nothing to act on" and never on "output unchanged", and the
@@ -220,13 +226,30 @@ function reviewers(s) {
     unlabelledRows.push(row(`ESCALATE unlabelled ${prs(stuck.map((u) => u.pr))}`,
       { extra: `${names(stuck)} settled labelled since the last label-off; still no ready-to-merge` }));
   }
+  // An open PR the run tracks that GitHub reads CONFLICTING, with no hold on
+  // record and nobody working it: the controller writes the hold the merge
+  // bot would, and the tick turns it into `DISPATCH fix-pr` from then on.
+  // Past two landed conflict fix-appliers it is a treadmill, handed to a human
+  // instead — no hold, no fix-applier. Neither row takes a reviewer slot, and
+  // neither stands aside for IDLE OK: that row is the one a hold replaces.
+  const conflictRows = [];
+  if (s.conflicts.length) {
+    const record = s.conflicts.map((n) => `~/.fleet/bin/fleet-run ledger.mjs row <key> "<text> · conflict-hold:#${n} (conflict: mergeable=CONFLICTING)" on the row naming PR#${n}`);
+    conflictRows.push(row(`CONFLICT ${prs(s.conflicts)}`,
+      { acts: true, extra: `GitHub reads CONFLICTING; ~/.fleet/bin/fleet-run ledger.mjs read, then ${record.join("; ")}` }));
+  }
+  if (s.conflictEscalate.length) {
+    conflictRows.push(row(`ESCALATE conflict ${prs(s.conflictEscalate)}`,
+      { extra: "GitHub reads CONFLICTING again after two conflict fix-appliers landed; comment on the PR and flag it for a human — no hold, no fix-applier" }));
+  }
+  for (const r of conflictRows) UNHELD.add(r);
   if (!rows.length) {
     const owed = s.fixDue.length + s.reviewDue.length;
     if (owed && free <= 0) rows.push(row("AT CAP"));
     else if (s.reviewDue.length) rows.push(row(`HOLD (max-reviews ${s.maxReviews} in flight)`));
     else if (!unlabelledRows.length) rows.push(row("IDLE OK"));
   }
-  rows.push(...unlabelledRows);
+  rows.push(...unlabelledRows, ...conflictRows);
   return { rows, left: { unreviewed: s.reviewDue.length - reviews.length, free } };
 }
 
@@ -582,10 +605,13 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
     // unverified count. `dispositions`: every dispositions verdict a fix-pr
     // member of this PR carries, whatever head it answers — the gate picks
     // by head and retry suffix, never by where a token sits.
+    // `workers`: every fix-applier and finisher bound to this PR, and every
+    // implementer on a row resolving to it — one still unsettled holds the
+    // CONFLICT line off, since it may be pushing to the branch right now.
     const st = (pr !== null && byPr.get(pr)) || {
       inFlight: false, reviewedAny: false, survived: 0, unverified: 0, reviewFixed: false,
       fixMembers: new Set(), fixLanded: new Set(), conflictLanded: new Set(), held: [],
-      conflictOpen: false, reviewedHead: null, pastPinHalt: false, dispositions: [],
+      conflictOpen: false, reviewedHead: null, pastPinHalt: false, dispositions: [], workers: new Set(),
     };
     // The finisher-pr token currently deciding `pastPinHalt`, picked by
     // retry suffix ("" < "b" < "c" …) the same way compute-board.mjs's
@@ -599,6 +625,7 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
       const t = parseToken(tok);
       if (t) {
         note(t, where, pr);
+        if ((t.bound === "pr" && t.number === pr) || t.family === "impl") st.workers.add(t.name);
         // A settled `failed`/`killed` fix-applier leaves review findings or a
         // conflict unfixed and no successor dispatched — the PR stays fix-due
         // for a `-b` replacement. Only a live attempt, or one that actually
@@ -734,6 +761,18 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
   const heldBehind = (st) => (st?.held ?? []).some((n) => open.has(n));
   const conflictHeld = (st) => st !== undefined && st.conflictOpen;
   const fixRunning = (st) => [...st.fixMembers].some((n) => members.get(n).outcome === null);
+  // An open PR the ledger tracks that GitHub reads CONFLICTING — no other
+  // `mergeable` value: UNKNOWN is read again next tick, and a PR merely behind
+  // is the merge bot's server-side update — with no hold on record yet and
+  // nobody on it who may be pushing. A queued one is the merge bot's while one
+  // is live: its own rebase fallback records the hold. A review in flight is no
+  // reason to wait, since fixDue already waits for it to return.
+  const working = (st) => [...st.workers].some((n) => members.get(n).outcome === null);
+  const mergeBotLive = live("merge-bot");
+  const conflicting = prs.filter((p) => p.mergeable === "CONFLICTING" && byPr.has(p.number)
+    && !conflictHeld(state(p.number)) && !working(state(p.number)) && !(isQueued(p) && mergeBotLive > 0));
+  // Two conflict fix-appliers landed and it conflicts again: a treadmill.
+  const treadmill = (p) => state(p.number).conflictLanded.size >= 2;
   // The latest review's dispositions verdict is a mismatch no later fix-applier
   // has answered: the verdict is the highest-suffixed one, and no fix-applier
   // with a higher suffix has landed. A landed one is awaiting its own check, so
@@ -806,10 +845,15 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
       new Set(prs.filter((p) => !isQueued(p)).map((p) => p.number))),
     // Every PR, open or not, on a conflict hold no fix-applier has cleared —
     // the one reading of a hold: `ledger.mjs dispatch` names a
-    // fix-applier's definition off this list, so it answers the same per-PR
-    // fold this tick holds the merge on, split rows and a settle made
-    // anywhere included, rather than re-deriving it from one row's text.
+    // fix-applier's definition and refuses a finisher off this list, so it
+    // answers the same per-PR fold this tick holds the merge on, split rows
+    // and a settle made anywhere included, rather than re-deriving it from
+    // one row's text.
     conflictHeld: [...byPr.entries()].filter(([, st]) => conflictHeld(st)).map(([n]) => n).sort(asc),
+    // Each `conflicting` PR: a hold for the controller to record, or — past
+    // two landed conflict fix-appliers — a PR for a human.
+    conflicts: conflicting.filter((p) => !treadmill(p)).map((p) => p.number).sort(asc),
+    conflictEscalate: conflicting.filter(treadmill).map((p) => p.number).sort(asc),
     // Every PR, open or not, with a returned review: its latest `reviewed=`
     // head and counts, the dispositions verdict currently answering that
     // head, and every fix-applier on the PR still unsettled (`fixLive`) — a
@@ -993,7 +1037,7 @@ function openPrs() {
   let out;
   try {
     out = execFileSync("gh", ["pr", "list", "--state", "open", "--limit", String(PR_LIMIT),
-      "--json", "number,labels,closingIssuesReferences,headRefOid"], { encoding: "utf8", timeout: GH_TIMEOUT_MS });
+      "--json", "number,labels,closingIssuesReferences,headRefOid,mergeable"], { encoding: "utf8", timeout: GH_TIMEOUT_MS });
   } catch (e) {
     // Never interpolates e.stderr or e.message: execFileSync already forwarded
     // the child's stderr to ours, and Node builds e.message out of it, so
@@ -1008,11 +1052,12 @@ function openPrs() {
   }
   // closingIssuesReferences is checked, not defaulted: absent, it would read as
   // an empty list and drop every open PR from review work. headRefOid likewise
-  // — absent, a `halted:past-pin` PR would read as moved forever.
+  // — absent, a `halted:past-pin` PR would read as moved forever — and
+  // mergeable: absent, no PR would ever read CONFLICTING.
   if (!Array.isArray(prs) || prs.some((p) => !p || typeof p.number !== "number"
     || !Array.isArray(p.labels) || !Array.isArray(p.closingIssuesReferences)
-    || typeof p.headRefOid !== "string")) {
-    die("gh pr list did not return {number,labels,closingIssuesReferences,headRefOid} rows");
+    || typeof p.headRefOid !== "string" || typeof p.mergeable !== "string")) {
+    die("gh pr list did not return {number,labels,closingIssuesReferences,headRefOid,mergeable} rows");
   }
   if (prs.length === PR_LIMIT) {
     die(`exactly ${PR_LIMIT} open PRs — the list is capped and may be truncated. Raise PR_LIMIT; a backlog that silently drops PRs is not a reconcile.`);
