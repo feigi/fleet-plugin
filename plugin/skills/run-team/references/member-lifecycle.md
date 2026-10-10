@@ -4,7 +4,7 @@ Why member name load-bearing, why every member single-use, how a member's job ou
 
 ## Every member is named
 
-The name is the ledger token and the hub address (`hub send <name>`, `agent://<name>`); omit it and the ledger cannot match the member. Names follow unit of work: `impl-<issue#>`, `fix-pr-<pr#>` (default path's applier), `review-pr-<pr#>` (hand-dispatch fallback's reviewer), `finisher-pr-<pr#>` (Phase 3's finisher), `merge-bot-<n>` (one merge pass; `ledger.mjs dispatch merge-bot` numbers it from the ledger's `## Dispatched` list — a per-run counter, never a PR).
+The name is the ledger token and the hub address (`hub send <name>`, `agent://<name>`); omit it and the ledger cannot match the member. Names follow unit of work: `impl-<issue#>`, `fix-pr-<pr#>` (default path's applier), `review-pr-<pr#>` (the PR's first reviewer; every later one on the PR — failed-runner fallback, review-and-fix self-apply, past-pin re-review — takes the next letter its ledger rows do not carry yet, `review-pr-<pr#>-b`, `-c`, …), `finisher-pr-<pr#>` (Phase 3's finisher), `merge-bot-<n>` (one merge pass; `ledger.mjs dispatch merge-bot` numbers it from the ledger's `## Dispatched` list — a per-run counter, never a PR).
 
 ## A depth-2 member cannot dispatch further
 
@@ -58,7 +58,7 @@ A member's settle outcome and its liveness are different facts, not the same tab
 
 Two axes — job outcome (`completed`/`failed`/`cancelled`) crossed with peer liveness (`running`/`idle`/`parked`). `hub cancel` → `cancelled`, the peer hard-aborted and unmessageable, `history://` still readable. A **`failed` job's peer can stay `idle` and resumable**. No distinct truncated state exists.
 
-Recovery = fresh member, fresh name (`impl-<N>-b`, `fix-pr-<M>-b`, `review-pr-<M>-b`), whose prompt states what it inherits:
+Recovery = fresh member, fresh name (`impl-<N>-b`, `fix-pr-<M>-b`, and for a reviewer the next letter PR M's rows do not carry yet — `review-pr-<M>-b`, or `-c` where `-b` is taken), whose prompt states what it inherits:
 
 - committed-and-pushed vs committed-only vs **uncommitted in the worktree**
 - uncommitted work exists nowhere else — no `git clean`, `git checkout .`,

@@ -68,9 +68,8 @@ redid the whole snapshot/fan-out sequence from scratch.
      verbatim, as JSON. `errors` is non-empty when the first attempt failed
      and the retry completed — report it anyway.
    - `status: "failed"` → first line `review-pr-<pr>: failed`, then both
-     `errors` verbatim and `fallback`: the name (`review-pr-<pr>-b`) the
-     controller gives the hand-dispatched fallback reviewer. Do not run the
-     cell again — the one retry already happened inside it.
+     `errors` verbatim. Do not run the cell again — the one retry already
+     happened inside it.
    - **The cell threw** (an argument refused before any review ran, the
      Resolver failing, the result file failing to write) → first line
      `review-pr-<pr>: failed`, then the error text verbatim. Do not run the

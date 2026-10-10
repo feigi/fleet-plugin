@@ -255,11 +255,11 @@ test("two malformed results in a row report failed and write no file", async () 
   const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run);
   assert.equal(calls.length, 2);
   assert.equal(out.status, "failed");
-  assert.equal(out.fallback, "review-pr-7-b");
+  assert.equal("fallback" in out, false, "the result names no fallback reviewer: the controller takes the next free name off the PR's rows");
   assert.deepEqual(filesUnder(dir), [], "a malformed result left a partial file behind");
 });
 
-test("a second failure reports failed with BOTH errors, names the -b fallback, and writes no file", async () => {
+test("a second failure reports failed with BOTH errors, names no fallback, and writes no file", async () => {
   const dir = scratch();
   const { run, calls } = scriptedRun([new Error("first: spend limit"), null]);
   const out = await runReviewToFile({ pr: 7, scratch: dir, worktree: "/wt" }, run);
@@ -268,7 +268,7 @@ test("a second failure reports failed with BOTH errors, names the -b fallback, a
   assert.equal(out.errors.length, 2);
   assert.match(out.errors[0], /first: spend limit/);
   assert.match(out.errors[1], /empty/);
-  assert.equal(out.fallback, "review-pr-7-b");
+  assert.equal("fallback" in out, false, "the result names no fallback reviewer: the controller takes the next free name off the PR's rows");
   assert.deepEqual(filesUnder(dir), [], "a failed review left a result file a controller would read as a review");
 });
 

@@ -156,8 +156,8 @@ import { makeDie, defineFlags } from "./arg.mjs";
 import { isCLI } from "./is-cli.mjs";
 import { gitEnv } from "./git-env.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, memberTokens } from "./ledger-grammar.mjs";
-import { deriveRun, dispositionsToken, LedgerError, rowNums } from "./fleet-tick.mjs";
+import { parseMember, memberTokens, rowNums } from "./ledger-grammar.mjs";
+import { deriveRun, dispositionsToken, LedgerError } from "./fleet-tick.mjs";
 import { VERDICT_SCHEMA } from "./review-core.mjs";
 
 const NAME = "dispositions-check";

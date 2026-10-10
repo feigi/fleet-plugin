@@ -152,11 +152,11 @@ export async function runReviewOnOmp(args) {
 // than that names a file that is gone.
 //
 // Failure is a throw or an empty return. The holder of the review call retries
-// once; a second failure returns `failed` with both errors and the fallback
-// reviewer's name (`review-pr-<pr>-b`), and writes no file, so nothing reads a
-// half-review as a review. A dispatch mistake — a pr that is not a PR number, a
-// scratch that is not absolute (eval's cwd is the MAIN CHECKOUT, so a relative
-// one would put the file there), a scratch that already ends in `pr<N>`
+// once; a second failure returns `failed` with both errors, and writes no
+// file, so nothing reads a half-review as a review. A dispatch mistake — a pr
+// that is not a PR number, a scratch that is not absolute (eval's cwd is the
+// MAIN CHECKOUT, so a relative one would put the file there), a scratch that
+// already ends in `pr<N>`
 // — throws before any run: it is not a review failure, and retrying or falling
 // back would only repeat it. So does a write fault other than a file already
 // at the path: the review ran, the environment could not keep it. `run` is the
@@ -236,7 +236,7 @@ export async function runReviewToFile(args, run = runReviewOnOmp) {
       digest: digestOf(result),
     };
   }
-  return { status: "failed", errors, fallback: `review-pr-${pr}-b` };
+  return { status: "failed", errors };
 }
 
 // The run root a result's `snapshot` sits in — `<scratch>/pr<pr>/run-` and

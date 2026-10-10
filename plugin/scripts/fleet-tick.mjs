@@ -61,7 +61,7 @@
 // the ledger; main() does the I/O. Split so the guard table and the reading are
 // both unit-testable without a network.
 
-import { parseMember, parseToken, rowPr, premisesOf } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, premisesOf, rowNums, REVIEW, REVIEWED } from "./ledger-grammar.mjs";
 
 // Every role's TARGET is its configured cap. Availability of work belongs in
 // the ACTION, not the target: a reviewer target that shrank to the backlog
@@ -369,13 +369,6 @@ export function actionable(rows) {
 
 export class LedgerError extends Error {}
 
-// `review=wf:<runId>` | `review=member:review-pr-<n>` |
-// `review=fallback:review-pr-<n>[-b]`, settled dead as `…=failed`; the result
-// is `reviewed=<head>:<survived>/<refuted>/<unverified>:<run>`, `<run>` the
-// name of the review's own run root under `<scratch>/pr<n>/` (`run-` and the
-// eight characters `mktemp` chose), where its result file `review.json` sits.
-const REVIEW = /^review=(?:wf|member|fallback):[^=\s]+(=failed)?$/;
-export const REVIEWED = /^reviewed=([0-9a-fA-F]{7,40}):(\d+)\/(\d+)\/(\d+):(run-[A-Za-z0-9]{8})$/;
 // The `reviewed=` shape before it named a run: it names no result file, so
 // nothing can tell which review a dispositions verdict answered. Only a ledger
 // written before the plugin update and read after it can hold one.
@@ -447,24 +440,6 @@ export function labelOffMember(tok) {
   if (!tok.startsWith("label-off=")) return undefined;
   const m = parseMember(tok.slice("label-off=".length));
   return m !== null && m.family === "finisher-pr" ? m : null;
-}
-
-// A row's key number and its PR: the PR every PR-bound token on the row
-// speaks for. That PR is ledger-grammar.mjs's rowPr(): on a row carrying an
-// `impl-` token, its settled `impl-<N>=PR#<n>` token's PR, never a prose
-// `PR#` mention; on any other row, its first `PR#<n>` mention. A row with
-// none is keyed by the PR's own number when it is about a PR at all (a PR
-// this run's implementers did not open) — this is ledger.mjs's
-// memberRowIndex() fallback specifically, which gates on the member being
-// PR-bound before it ever reaches this fallback. deriveRun below applies the
-// same row-key fallback to every row's own bookkeeping unconditionally,
-// signal or not; only memberRowIndex()'s caller already knows it holds a
-// PR-bound member. Ticket and PR numbers share GitHub's one number
-// space, so a ticket's key never names an open PR.
-export function rowNums(text) {
-  const key = text.split(/\s/)[0];
-  const keyNum = /^#[0-9]+$/.test(key) ? Number(key.slice(1)) : null;
-  return { keyNum, pr: rowPr(text) ?? keyNum };
 }
 
 // PRs whose finisher attempts are read off the ledger while the open list shows
@@ -691,8 +666,8 @@ export function deriveRun({ rows, dispatched, drain }, prs, closed = new Set(), 
       if (tok.startsWith("review=")) {
         const m = REVIEW.exec(tok);
         if (!m) throw new LedgerError(`${where}: '${tok}' is not review=wf:<runId> | member:review-pr-<n> | fallback:review-pr-<n>, optionally =failed`);
-        st.inFlight = !m[1];
-        if (!m[1]) st.reviewedAny = true;
+        st.inFlight = !m[3];
+        if (!m[3]) st.reviewedAny = true;
       } else if (tok.startsWith("reviewed=")) {
         const m = REVIEWED.exec(tok);
         if (!m && REVIEWED_RUNLESS.test(tok)) {

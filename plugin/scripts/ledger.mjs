@@ -35,7 +35,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
 import { makeDie, isFlagLike, hasEqualsForm, isDigits } from "./arg.mjs";
 import { fleetFile, FleetDirUnresolvable } from "./fleet-dir.mjs";
-import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition, CELL, tierValues, rowPr, ROWS, DISPATCHED, FILED, RULED, DRAIN, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
+import { parseMember, parseToken, memberTokens, nextMergeBot, agentDefinition, CELL, tierValues, rowPr, rowWriteRefusal, ROWS, DISPATCHED, FILED, RULED, DRAIN, headerRe, escapeText, unescapeText } from "./ledger-grammar.mjs";
 import { deriveRun, LedgerError, labelOffMember } from "./fleet-tick.mjs";
 import { stateFileIn, readState, writeState, assessBeat, stallsAt } from "./fleet-state.mjs";
 import { isDead, processSource, ancestry, controllerOf, judgeController, ProcUnreadable } from "./proc.mjs";
@@ -808,11 +808,15 @@ if (cmd === "read") {
   }
   const i = data.rows.findIndex((r) => r.split(/\s/)[0] === key);
   const created = i === -1;
-  if (created) {
-    data.rows.push(line);
-  } else {
-    data.rows[i] = line;
-  }
+  const after = created ? [...data.rows, line] : data.rows.with(i, line);
+  // A PR's review record is read off its rows — every row mapping to it, in
+  // ledger order — so a write that adds a result no launch accounts for, a
+  // second launch while one is open, or drops an open launch makes the tick
+  // re-ignite or lose a review. Refused here, before anything is written;
+  // what the ledger already held is carried, never re-judged. Local only.
+  const refusal = rowWriteRefusal(data.rows, after, created ? null : data.rows[i], line);
+  if (refusal !== null) die(`row ${key}: ${refusal}`);
+  data.rows = after;
   // Logged only after save() returns — a failed write must not claim a row
   // was recorded when it never made it to disk.
   save(data);
