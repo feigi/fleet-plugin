@@ -25,8 +25,9 @@
 //             it once recorded only that someone was dispatched. Live
 //             implementers, live reviewer units (in-flight `review=` plus
 //             unsettled `fix-pr-`), the merge bot (`## Dispatched`), merge
-//             holds (`held-behind:#M`, and merge-bot's own
-//             `conflict-hold:#<pr>`), tier mismatches and the drain marker
+//             holds (`held-behind:#M`, and `conflict-hold:#<pr>`, written by
+//             the merge bot or by the controller off a `CONFLICT` line),
+//             tier mismatches and the drain marker
 //             all come off it. A missing ledger is a fresh run: zero rows.
 //   shortlist `.fleet/shortlist.json`, shortlist.mjs's output, resolved against
 //             the git common dir as ledger.mjs resolves the ledger. Its
@@ -35,8 +36,9 @@
 //             `scanned` is the supply. Missing or unparsable is depth 0 and a
 //             refresh, never a refusal: the depth only ever bounds PULLs
 //             downward.
-//   gh        The open PRs, by label and by whether they close an issue — the
-//             merge queue, and which PRs are owed a review. Also, for each ticket
+//   gh        The open PRs, by label, by whether they close an issue and by
+//             GitHub's `mergeable` — the merge queue, which PRs are owed a
+//             review, and which conflict. Also, for each ticket
 //             holding the implementer row on a tier mismatch, whether its issue
 //             is CLOSED (`gh issue view`): a closed ticket's mismatch
 //             holds nothing. And, for each in-flight `review=` token whose PR
@@ -369,11 +371,11 @@ export class LedgerError extends Error {}
 const REVIEW = /^review=(?:wf|member|fallback):[^=\s]+(=failed)?$/;
 export const REVIEWED = /^reviewed=([0-9a-f]{7,40}):(\d+)\/(\d+)\/(\d+)$/i;
 const HELD = /^held-behind[:-]#?(\d+)$/;
-// Merge-bot's durable record that its local-rebase fallback hit a
-// conflict it would not force — written onto the held PR's own row at the
-// point run-merge-bot.md says to report and halt, and spelled like
-// `held-behind` so the two read alike. Distinct from an Exclusion, which
-// gates a ticket's claim; this gates a reviewed PR's merge.
+// The durable record that a PR conflicts — written onto the held PR's own
+// row by the merge bot, when its local-rebase fallback hits a conflict it would
+// not force, or by the controller off this tick's `CONFLICT` line — and
+// spelled like `held-behind` so the two read alike. Distinct from an
+// Exclusion, which gates a ticket's claim; this gates a PR's merge.
 const CONFLICT_HOLD = /^conflict-hold[:-]#?(\d+)$/;
 // tier-check.mjs's verdict on an implementer, `tier-ok=<member>:<def>`
 // or `tier-mismatch=<member>:<def>` — or `tier-unverifiable=<member>:no-transcript`

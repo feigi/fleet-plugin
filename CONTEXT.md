@@ -371,11 +371,12 @@ fresh name.
 _Avoid_: wave, batch, cycle, round
 
 **Conflict hold**:
-A reviewed, queued PR a Pass would not merge because its rebase conflicted and the
-merge bot will not force a resolution — recorded by that bot as `conflict-hold:#<pr>` on
-the PR's own row, and cleared only when a fix-applier dispatched after it settles as
-landed. Merge-time, never claim-time: distinct from an Exclusion, and from a
-`held-behind` hold, which waits on a lower PR rather than on a fix.
+Any open PR the run tracks that GitHub reports CONFLICTING, or that a Pass would not
+merge because its rebase conflicted and the merge bot will not force a resolution —
+recorded as `conflict-hold:#<pr>` on the PR's own row by the merge bot, or by the
+controller on the tick's `CONFLICT` line, and cleared only when a fix-applier
+dispatched after it settles as landed. Merge-time, never claim-time: distinct from an
+Exclusion, and from a `held-behind` hold, which waits on a lower PR rather than on a fix.
 _Avoid_: exclusion, held-behind, blocked
 
 **Exploration Pull**:
