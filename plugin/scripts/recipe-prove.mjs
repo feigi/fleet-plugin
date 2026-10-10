@@ -26,8 +26,10 @@
 //        previous run), carrying `--test-count`, a positive integer no larger
 //        than Number.MAX_SAFE_INTEGER, as its one number. Where the literal
 //        starts or ends on a digit, the output must have no digit beside it
-//        there: `3 passed` is not found in `13 passed`. `tests 0` is a
-//        failed proof however honestly the runner reports it.
+//        there: `3 passed` is not found in `13 passed`. Only a digit bounds
+//        the number — a `,`, `_` or `.` inside one is not a digit, so
+//        `234 passed` is found in `1,234 passed`. `tests 0` is a failed proof
+//        however honestly the runner reports it.
 //      - the mutation proof: the unmutated run must be green; `--mutate` is a
 //        shell command that must change a tracked file (the deliberate
 //        failing mutation of one test, or of the code one test covers) — run
