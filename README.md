@@ -188,7 +188,7 @@ re-triggers when no event would otherwise fire
 
 - [`docs/requirements.md`](docs/requirements.md) — trying it on your own
   repo: what the repo, the machine, and the team's process must satisfy,
-  with a copy-paste pre-flight.
+  and the pre-flight checks run-team runs at the start of a run.
 - [`CONTEXT.md`](CONTEXT.md) — glossary: the vocabulary (claims, worktrees,
   releases, the merge gate, dispatch, tiers) this repo's artefacts share.
 - [`docs/components/`](docs/components/README.md) — one page per
