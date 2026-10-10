@@ -23,9 +23,9 @@
 //   3. Real tests must be shown to have executed, by at least one of:
 //      - the count proof: `--count-line` is a literal the run's own output
 //        must contain (text off the runner's summary line, read off a
-//        previous run), carrying `--test-count`, a positive integer, as its
-//        one number. `tests 0` is a failed proof however honestly the runner
-//        reports it.
+//        previous run), carrying `--test-count`, a positive integer no larger
+//        than Number.MAX_SAFE_INTEGER, as its one number. `tests 0` is a
+//        failed proof however honestly the runner reports it.
 //      - the mutation proof: the unmutated run must be green; `--mutate` is a
 //        shell command that must change a tracked file (the deliberate
 //        failing mutation of one test, or of the code one test covers) — run
@@ -144,6 +144,11 @@ function parseArgs(argv) {
   if (("--count-line" in a) !== ("--test-count" in a)) throw cannot("--count-line and --test-count go together");
   if ("--test-count" in a && !isDigits(a["--test-count"])) {
     throw cannot(`--test-count must be a whole number, got '${a["--test-count"]}'`);
+  }
+  // Past Number.MAX_SAFE_INTEGER the cache can store a count other than the
+  // one claimed, or none at all, while the line's exact match still holds.
+  if ("--test-count" in a && !Number.isSafeInteger(Number(a["--test-count"]))) {
+    throw cannot(`--test-count must be at most ${Number.MAX_SAFE_INTEGER}, got '${a["--test-count"]}'`);
   }
   if (("--mutate" in a) !== ("--mutation" in a)) throw cannot("--mutate and --mutation go together");
   return {

@@ -442,6 +442,37 @@ test("a proof that cannot be attempted exits 2, distinct from a Recipe that is n
     "a refusal at the argument boundary creates no worktree");
 });
 
+// A count past Number.MAX_SAFE_INTEGER cannot be stored as the number it
+// names. Each fixture's run prints the count line the claim names, so the
+// bound alone turns it into a usage error (exit 2) — without it the proof
+// either goes through or is refused later by the cache reader.
+for (const [name, claim] of [
+  ["2^53, one past the largest safe integer", "9007199254740992"],
+  ["2^53 written with a leading zero", "09007199254740992"],
+  ["a 20-digit number, finite but unsafe", "99999999999999999999"],
+  ["a 400-digit number", "9".repeat(400)],
+]) {
+  test(`a --test-count of ${name} cannot be attempted and writes no cache`, () => {
+    const { dir } = repo(MAVEN_FILES);
+    const r = prove(dir, ["--install", "true", "--test", `echo 'Tests run: ${claim},'`, "--count-line", `Tests run: ${claim},`, "--test-count", claim]);
+    assert.equal(r.status, 2, r.err);
+    assert.match(r.err, new RegExp(`--test-count .*'${claim}'`));
+    assert.equal(existsSync(cachePath(dir)), false);
+  });
+}
+
+for (const [name, claim] of [
+  ["Number.MAX_SAFE_INTEGER", "9007199254740991"],
+  ["Number.MAX_SAFE_INTEGER written with leading zeros", "0009007199254740991"],
+]) {
+  test(`a --test-count of ${name} is proven and stored exactly`, () => {
+    const { dir } = repo(MAVEN_FILES);
+    const r = prove(dir, ["--install", "true", "--test", `echo 'Tests run: ${claim},'`, "--count-line", `Tests run: ${claim},`, "--test-count", claim]);
+    assert.equal(r.status, 0, r.err);
+    assert.equal(JSON.parse(readFileSync(cachePath(dir), "utf8")).testCount, Number.MAX_SAFE_INTEGER);
+  });
+}
+
 // The number of worktrees the repository at `dir` has registered, the main checkout included.
 const worktrees = (dir) => git(dir, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).length;
 
