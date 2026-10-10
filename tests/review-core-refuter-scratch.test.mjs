@@ -70,7 +70,7 @@ const TEMPLATE_END = "{ label: `verify:";
 // `environmentNote` is bound for the same reason as the workflow's copy: a
 // render that stops binding it throws a ReferenceError rather than dropping a
 // paragraph silently.
-const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote"];
+const SCOPE = ["pr", "f", "snap", "stats", "d", "i", "fi", "readRules", "usableDiff", "environmentNote", "testCmd", "KILL_RULES"];
 
 function refuterTemplate() {
   const start = CODE.indexOf(TEMPLATE_START);
@@ -102,6 +102,8 @@ const render = () =>
     () => "READ RULES",
     () => null,
     () => "TEST ENVIRONMENT",
+    "node --test",
+    "KILL RULES",
   );
 
 // The first rule. ONE contiguous regex rather than two assertions. Both gaps
