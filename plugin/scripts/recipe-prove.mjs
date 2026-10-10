@@ -145,6 +145,11 @@ function parseArgs(argv) {
   if ("--test-count" in a && !isDigits(a["--test-count"])) {
     throw cannot(`--test-count must be a whole number, got '${a["--test-count"]}'`);
   }
+  // Past Number.MAX_SAFE_INTEGER the cache can store a count other than the
+  // one claimed, or none at all, while the line's exact match still holds.
+  if ("--test-count" in a && !Number.isSafeInteger(Number(a["--test-count"]))) {
+    throw cannot(`--test-count must be at most ${Number.MAX_SAFE_INTEGER}, got '${a["--test-count"]}'`);
+  }
   if (("--mutate" in a) !== ("--mutation" in a)) throw cannot("--mutate and --mutation go together");
   return {
     repo,
