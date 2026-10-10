@@ -315,12 +315,30 @@ are different subjects — one member can be idle while the run beats, and the
 run can be dead while a member's process still exists.
 _Avoid_: liveness (bare), heartbeat state, pulse
 
+**Controller record**:
+The proof of a run's death that the Liveness mark cannot give — `controller`
+in the heartbeat's shared state file, written only by the ledger rotation at
+phase 0: the omp process that owns the run, its start time, when it was
+written, and as `prior` the verdict the rotation reached on the record it
+replaced (dead, ancestor or none). Dead means the process is gone or its
+start time no longer matches. Where a record exists, only it gates an
+action; no record proves nothing.
+_Avoid_: pid file, lock, owner
+
+**Stranded claim**:
+A Claim a dead run left without a PR: its label and worktree outlive the run,
+and nothing else holds it. Phase 0 resumes it under a new member when the
+record's `prior` is dead and its worktree is in this checkout, and reports it
+otherwise. A Claim with an open PR is not stranded — the fold-in owns it.
+_Avoid_: orphan, abandoned ticket
+
 **Stall report**:
 What a reader says about a stale or stopped Liveness mark — when the beat was
 last seen, how overdue it is against the interval that mark recorded, how many
 tickets are still claimed and in flight, and whether the pool still has
-supply. Detection only: naming a stall neither releases the stranded claims
-nor restarts anything.
+supply — led by whose stall it is off the Controller record: controller alive,
+controller gone, or unknown with no record. Naming a stall acts on nothing;
+Stranded claims come back through phase 0, never through the report.
 _Avoid_: dead-run warning, stale banner
 
 ### Loop
