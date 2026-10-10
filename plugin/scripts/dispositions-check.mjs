@@ -85,7 +85,8 @@
 //     run root, `<scratch>/pr<N>/fix-XXXXXXXX/<finding>/`, holding a JSON
 //     object that validates against the refuter verdict schema
 //     `{refuted, reason}`. No `verdictPath`, a path outside that root, a file
-//     missing, or one failing the schema is a mismatch. `refuted: true` puts
+//     missing, or one failing the schema — or abstaining, `inconclusive:
+//     true` — is a mismatch. `refuted: true` puts
 //     the finding on filing row 4, where applying it is a mismatch too;
 //     `refuted: false` on row 5.
 //   - Filing: every deferral names in `issue` the issue it was filed to, and
@@ -98,6 +99,7 @@
 //            reason other than false-rationale
 //       2    survived, in scope, deferred false-rationale        closed suggestion-band record
 //       3    unverified, its refuters dispatched and crashed     open, needs-triage
+//            or abstained
 //       4    in-scope suggestion, its refuter refuted it         closed suggestion-band record
 //       5    in-scope suggestion, its refuter let it survive     applied, or deferred as row 1
 //       6    out-of-scope suggestion alleging wrong behavior     open, needs-triage
@@ -181,7 +183,7 @@ const ENUMS = { scope: ["in", "out"], claimKind: ["behavior", "shape"], disposit
 export const FILING_ROWS = Object.freeze({
   1: { finding: "an in-scope survived finding deferred for an allowed reason other than false-rationale", open: "ready-for-agent" },
   2: { finding: "an in-scope survived finding deferred false-rationale", record: true },
-  3: { finding: "an unverified finding whose refuters crashed", open: "needs-triage" },
+  3: { finding: "an unverified finding whose refuters crashed or abstained", open: "needs-triage" },
   4: { finding: "an in-scope suggestion its refuter refuted", record: true },
   5: { finding: "an in-scope suggestion its refuter let survive", open: "ready-for-agent" },
   6: { finding: "an out-of-scope suggestion alleging wrong behavior", open: "needs-triage" },
@@ -224,8 +226,13 @@ function describeIssue({ state, title, labels }) {
   return `${state.toLowerCase()}, titled ${JSON.stringify(title)}, labelled ${labels.length === 0 ? "nothing" : labels.join(", ")}`;
 }
 
+const ABSTAINED = "is inconclusive — its refuter abstained, so it decided nothing about the finding";
+
 // Why `value` is not a refuter verdict, or null when it is: the shape
-// VERDICT_SCHEMA declares, checked key by key.
+// VERDICT_SCHEMA declares, checked key by key. An abstaining verdict
+// (`inconclusive: true`) is refused on top: the in-scope suggestion refuter
+// this reads is never offered an abstain, and one that abstained anyway
+// decided nothing a filing row can be keyed on.
 export function verdictProblem(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return "is not a JSON object";
   for (const key of VERDICT_SCHEMA.required) {
@@ -236,6 +243,7 @@ export function verdictProblem(value) {
     if (declared === undefined) return `carries ${key}, which a refuter verdict does not`;
     if (typeof v !== declared.type) return `has a ${key} that is not a ${declared.type}`;
   }
+  if (value.inconclusive === true) return ABSTAINED;
   return null;
 }
 
@@ -672,7 +680,9 @@ function verdictReader(scratch, pr) {
       return { problem: `cannot be read as JSON — ${e.message}` };
     }
     const why = verdictProblem(value);
-    return why === null ? { refuted: value.refuted } : { problem: `fails the refuter verdict schema — it ${why}` };
+    if (why === null) return { refuted: value.refuted };
+    // An abstention validates against the schema; it is refused as evidence, not as a malformed file.
+    return { problem: why === ABSTAINED ? why : `fails the refuter verdict schema — it ${why}` };
   };
 }
 

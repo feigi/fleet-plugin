@@ -2198,11 +2198,13 @@ the environment, and this field carries which line of the cut failed. The
 fix-applier reads it before acting on any count from the shared test run; you
 read it so a degraded review never passes for a clean one.
 `unverified` is *not* "checked and cleared" — a `suggestion` skips the pass by
-policy, and a finding whose refuters all crashed lands there too. Both go to the
-fix-applier with the rest, in the file; never rule on them yourself.
-**`refutersDispatched`, carried on every finding, is what tells those two
-apart** — zero is the policy skip, above zero with no surviving vote is the
-crash — so the population is read off that field rather than off severity,
+policy, and a finding whose refuters all crashed or abstained lands there too.
+All go to the fix-applier with the rest, in the file; never rule on them yourself.
+**`refutersDispatched`, carried on every finding, is what tells the skip
+apart** — zero is the policy skip, above zero with no deciding vote is a
+refuter pass that decided nothing — and `refutersInconclusive` splits that
+one: the refuters it counts abstained, every other one dispatched crashed. So
+the population is read off those fields rather than off severity,
 which records only how much a finding would matter if true. `resume` is
 non-null exactly when a specialist or a refuter pair crashed again after the
 review's own in-run retry, and **resume beats handing a crash-heavy review
@@ -2406,14 +2408,18 @@ all.
 > its zero counts only after the same command finds a line known to match.**
 >
 > **Apply `survived` findings. A finding in `unverified` whose refuters ran and
-> crashed always defers** — and which of the two it is, you read off
-> `refutersDispatched`, never off severity and never off an empty vote list:
-> above zero with nothing surviving means every refuter dispatched against it
-> died, and at `critical` that is every one of them. Severity records how much a
+> crashed or abstained always defers** — and which it is, you read off
+> `refutersDispatched` and `refutersInconclusive`, never off severity and never
+> off an empty vote list: `refutersDispatched` above zero with nothing decided
+> means every refuter dispatched against it died or abstained, and
+> `refutersInconclusive` counts the ones that abstained. Severity records how much a
 > finding would matter if true, never whether anything looked. Say *in the
-> deferral* that its refuters crashed rather than that it went unchecked — the
-> review re-dispatched each crash once already and reports what died again, so
-> a deferral that names the crash can still be re-verified. **A `suggestion` is also in `unverified`,
+> deferral* which it was rather than that it went unchecked. Name a crash as
+> crashed refuters — the review re-dispatched each crash once already and
+> reports what died again, so a deferral that names the crash can still be
+> re-verified. An abstention is not a crash: cite the inconclusive runs each
+> abstaining refuter named in its `reason`, and never describe its refuters as
+> crashed. **A `suggestion` is also in `unverified`,
 > for a different reason — `refutersDispatched` of zero, the 0-refuter budget
 > the review gives that band by policy — and the rule below, not this one,
 > covers it.**
@@ -2445,7 +2451,43 @@ all.
 > > empty still enables color, so it is not a control. State your search scope
 > > AND what your pattern would have missed. A grep over one ref does not
 > > support a claim about history; a pattern built from the token a diff removed
-> > does not support a claim that the category is empty. A failure injection with
+> > does not support a claim that the category is empty.
+> >
+> > When your check scores a mutant killed or a test red, run only in your own
+> > copy of the tree, and these rules decide it and nothing else:
+> >
+> > **Valid red:** a run that completed — the command returned on its own, with no
+> > signal and no timeout, deadline or kill having fired — in which the test the
+> > claim names is reported failing. An exit ≠ 0 with no failing test is not red,
+> > and a different test failing is not red for this claim. A red in the full
+> > suite only triggers a narrowed run; it is never evidence on its own.
+> >
+> > **Narrowed run:** the Test entrypoint with arguments appended, `<testCmd>
+> > <args>`. That appended arguments reach the Test entrypoint is all that is
+> > promised about them, so a narrowed run counts only if it reports `tests` > 0
+> > and its output names the claimed test. If no narrowing can be proven, run the
+> > full `<testCmd>` and read the named test's own result from its output.
+> >
+> > **Kill:** the mutant produced a valid red in a narrowed run, and the same
+> > narrowed command, in the same tree with the mutant reverted, ran a valid green
+> > with the named test passing — completed, exit 0, `tests` > 0, `cancelled` 0. A
+> > completed exit ≠ 0 with the named test not failing is not a kill, and no kill
+> > stands without that green run on the unmutated tree. The result is
+> > inconclusive, never a kill, when the red does not reproduce in the narrowed
+> > run, when the unmutated tree is red too, or when no usable run exists.
+> >
+> > **Evidence line:** every kill and every valid red you claim carries one line
+> > in the claim's own free-text field: `red: <cmd> → exit N, fail K incl <test>;
+> > baseline: <cmd> → exit 0, <test> pass`. A failing-test finding filed off the
+> > review's shared run carries the `red:` half alone.
+> >
+> > This refuter has no abstain: a run that could not decide — neither a valid red
+> > nor a valid green — is no kill and no refutation, so name the runs in
+> > `reason`, each with its evidence line, and leave `refuted` true, so the
+> > suggestion defers on the record instead of applying on a check that decided
+> > nothing.
+> >
+> > A failure injection with
 > > no positive control has produced NO result, never a negative one. Before you
 > > read an injected fault — an env var, an argv word, a mutant — as having had
 > > no effect, prove the injection reached the child: one run whose output
@@ -2536,11 +2578,42 @@ all.
 > claim, never your patch.
 >
 > **A test you ADD must kill its own mutant** — break what it pins, confirm it and
-> only it goes red, restore. **Then a change it should *not* catch, staying
-> green** — else you proved it fails, not that it discriminates: a pin asserting
-> whole-file text clears "it and only it goes red" and still reddens on any edit
-> (measured). A green suite says nothing about a new test: one pin this run
-> survived the exact mutation it was named for.
+> only it goes red and that the red is a kill by the rules below, restore. **Then
+> a change it should *not* catch, staying green** — else you proved it fails, not
+> that it discriminates: a pin asserting whole-file text clears "it and only it
+> goes red" and still reddens on any edit (measured). A green suite says nothing
+> about a new test: one pin this run survived the exact mutation it was named for.
+>
+> **Valid red:** a run that completed — the command returned on its own, with
+> no signal and no timeout, deadline or kill having fired — in which the test
+> the claim names is reported failing. An exit ≠ 0 with no failing test is not
+> red, and a different test failing is not red for this claim. A red in the full
+> suite only triggers a narrowed run; it is never evidence on its own.
+>
+> **Narrowed run:** the Test entrypoint with arguments appended,
+> `<testCmd> <args>`. That appended arguments reach the Test entrypoint is all
+> that is promised about them, so a narrowed run counts only if it reports
+> `tests` > 0 and its output names the claimed test. If no narrowing can be
+> proven, run the full `<testCmd>` and read the named test's own result from its
+> output.
+>
+> **Kill:** the mutant produced a valid red in a narrowed run, and the same
+> narrowed command, in the same tree with the mutant reverted, ran a valid green
+> with the named test passing — completed, exit 0, `tests` > 0, `cancelled` 0. A
+> completed exit ≠ 0 with the named test not failing is not a kill, and no kill
+> stands without that green run on the unmutated tree. The result is
+> inconclusive, never a kill, when the red does not reproduce in the narrowed
+> run, when the unmutated tree is red too, or when no usable run exists.
+>
+> **Evidence line:** every kill and every valid red you claim carries one line
+> in the claim's own free-text field:
+> `red: <cmd> → exit N, fail K incl <test>; baseline: <cmd> → exit 0, <test> pass`.
+> A failing-test finding filed off the review's shared run carries the `red:`
+> half alone.
+>
+> An inconclusive result proves nothing about the test: do not report the test
+> as proven, and measure again in a clean state. Put each kill's evidence line in
+> your report, beside the test result.
 >
 > **A mutation that never landed is not a green — it is a cell that did not
 > run.** Same rule for any fault you inject to see what breaks: prove the
@@ -2796,7 +2869,7 @@ a minute apart showed *different* mutants, so a member's report and any single
    **Whatever you verify by RUNNING, run in a tree nobody else owns.**
    Independently re-running the ticket's acceptance mutation — loosen the
    regex, delete the guard clause, flip the per-entry reset, run `<testCmd>`,
-   watch it redden, discard — is the half of this duty reading a diff cannot
+   confirm a kill by the test-run verdict rule below, discard — is the half of this duty reading a diff cannot
    do, and it stays. But it **writes**, and the PR's worktree belongs to
    another member. Measured once: a finisher was inside that worktree at the
    instant the fix-applier announced one more clause to land, and neither
@@ -2924,11 +2997,43 @@ it reached, so reading that summary alone reads a partial suite as a whole one:
 > `other` and the exit code plus the summary line as evidence; label nothing.
 > The same holds for the mutation gate: a killed run is not a mutant that
 > reddened, and the files it cancelled are not failures — only a run that
-> completed can kill a mutant. A completed run that exits 1 is a plain failure,
-> not a killed run, whatever its `cancelled` count, and exit 0 with `tests 0`
-> stays FAILED.
+> completed can kill a mutant. A completed run that exits 1 is not a killed run
+> either, whatever its `cancelled` count, and not a killed mutant on its exit
+> status alone: the acceptance mutation scores a kill only by the rules below.
+> Exit 0 with `tests 0` stays FAILED.
 > Do not wrap `<testCmd>` in an external `timeout`. Run a long suite in one
 > `eval` cell with `timeout: 0`, as the review runner does, and wait for it.
+>
+> **Valid red:** a run that completed — the command returned on its own, with
+> no signal and no timeout, deadline or kill having fired — in which the test
+> the claim names is reported failing. An exit ≠ 0 with no failing test is not
+> red, and a different test failing is not red for this claim. A red in the full
+> suite only triggers a narrowed run; it is never evidence on its own.
+>
+> **Narrowed run:** the Test entrypoint with arguments appended,
+> `<testCmd> <args>`. That appended arguments reach the Test entrypoint is all
+> that is promised about them, so a narrowed run counts only if it reports
+> `tests` > 0 and its output names the claimed test. If no narrowing can be
+> proven, run the full `<testCmd>` and read the named test's own result from its
+> output.
+>
+> **Kill:** the mutant produced a valid red in a narrowed run, and the same
+> narrowed command, in the same tree with the mutant reverted, ran a valid green
+> with the named test passing — completed, exit 0, `tests` > 0, `cancelled` 0. A
+> completed exit ≠ 0 with the named test not failing is not a kill, and no kill
+> stands without that green run on the unmutated tree. The result is
+> inconclusive, never a kill, when the red does not reproduce in the narrowed
+> run, when the unmutated tree is red too, or when no usable run exists.
+>
+> **Evidence line:** every kill and every valid red you claim carries one line
+> in the claim's own free-text field:
+> `red: <cmd> → exit N, fail K incl <test>; baseline: <cmd> → exit 0, <test> pass`.
+> A failing-test finding filed off the review's shared run carries the `red:`
+> half alone.
+>
+> An inconclusive acceptance mutation is neither a kill nor a pass: halt with
+> cause `other`, with both runs — the mutant's and the unmutated tree's — as
+> evidence; label nothing. A kill's evidence line goes in your report.
 
 **Give the finisher duty 3 verbatim as well, as its two steps.** The finisher's
 agent definition carries no duty text, so this brief is the whole of duty 3 it

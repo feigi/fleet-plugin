@@ -1314,6 +1314,20 @@ test("verdictProblem holds a refuter verdict to its schema", () => {
   ]) assert.equal(verdictProblem(value), problem, JSON.stringify(value));
 });
 
+// #2881 gave the review's refuter an abstain flag in the shared schema. The
+// fix-applier's in-scope suggestion refuter has no abstain channel in the
+// disposition record, so a verdict file that abstains is no evidence a
+// refuter decided the finding — refused, as an unknown key was before the flag
+// existed — while one that says `inconclusive: false` decided it as usual.
+test("a suggestion's verdict file that abstains is no refuter evidence; one that decided still is", () => {
+  assert.equal(verdictProblem({ refuted: false, reason: "r", inconclusive: false }), null);
+  assert.equal(
+    verdictProblem({ refuted: false, reason: "r", inconclusive: true }),
+    "is inconclusive — its refuter abstained, so it decided nothing about the finding",
+  );
+  assert.equal(verdictProblem({ refuted: false, reason: "r", inconclusive: "yes" }), "has a inconclusive that is not a boolean");
+});
+
 // The CLI against the stubbed tracker.
 
 test("a confirmed defect deferred for an allowed reason and filed needs-triage is a mismatch naming row 1; relabelled ready-for-agent it is ok", (t) => {
@@ -1454,6 +1468,7 @@ test("an in-scope suggestion with no verdictPath, a missing file, one outside th
     [f.writeVerdict("{not json", "3"), /cannot be read as JSON/],
     [f.writeVerdict({ refuted: "yes", reason: "r" }, "4"), /fails the refuter verdict schema — it has a refuted that is not a boolean/],
     [f.writeVerdict({ refuted: true }, "5"), /fails the refuter verdict schema — it has no reason/],
+    [f.writeVerdict({ refuted: true, reason: "r", inconclusive: true }, "7"), /verdictPath "[^"]*" is inconclusive — its refuter abstained/],
   ]) {
     const r = deferWith(path);
     mismatch(r, noEvidence);

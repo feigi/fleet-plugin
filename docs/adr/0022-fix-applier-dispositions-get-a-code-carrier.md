@@ -21,6 +21,11 @@ review head — `dispositions-<verdict>=fix-pr-<M>[-x]:<run>`, `<run>` being the
 verdict answers only the review run it names, a re-review at the same head
 included; read Decision 8's `<head>` and the Consequences entry for #2405's
 `dispositions-*=fix-pr-<M>:<head>` as `<run>`.
+Amended by #2881: a refuter may abstain (`inconclusive: true`),
+so Decision 5's `refutersDispatched > 0` row holds a finding whose refuters
+crashed or abstained, and its "(refuters crashed)" reads that way; an
+in-scope suggestion's verdict file that abstains is a mismatch, like one
+failing the schema.
 
 ## Context
 

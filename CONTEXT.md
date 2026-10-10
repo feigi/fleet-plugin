@@ -116,6 +116,27 @@ the proof. Read by scripts, written only by the agent that proved it; absent mea
 "derive", never "infer". Invalid when a command fails to run, not when tests fail.
 _Avoid_: declaration file, fleet.json, lockfile
 
+**Valid green**:
+A test run that completed — the command returned on its own, with no signal and no
+timeout, deadline or kill having fired — with exit 0, `tests` above 0 and `cancelled` 0.
+A summary line alone is not one; neither is a run cut short.
+_Avoid_: green, passing run
+
+**Valid red**:
+A test run that completed, in which the test the claim names is reported failing.
+An exit ≠ 0 with no failing test is not red, and neither is a different test
+failing. A red in the full suite only triggers a narrowed run — the Test entrypoint
+with arguments appended, counted only when it reports `tests` above 0 and names the
+test — and is never evidence on its own.
+_Avoid_: red, failing run, non-zero exit
+
+**Kill**:
+A mutant producing a Valid red in a narrowed run, plus a Valid green with the named
+test passing on the same narrowed command in the same tree with the mutant reverted.
+Anything short of both — the red not reproducing, the unmutated tree red too, no
+usable run — is inconclusive, never a kill.
+_Avoid_: reddened, caught, exit 1
+
 ### Release outcome
 
 The state of a claim's worktree after a release attempt. Named states, because the

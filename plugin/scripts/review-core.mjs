@@ -79,6 +79,11 @@ export const VERDICT_SCHEMA = {
     refuted: { type: "boolean" },
     reason: { type: "string" },
     counter_evidence: { type: "string", description: "Command + output, if any." },
+    inconclusive: {
+      type: "boolean",
+      description:
+        "True only when your own check could produce neither a valid red nor a valid green: you abstain, and `reason` names the runs. Left out of the tally, never counted as a crash.",
+    },
   },
 };
 
@@ -133,6 +138,24 @@ export const TEST_RUN_SCHEMA = {
   },
 };
 
+// --- Test verdict rules -------------------------------------------------
+// The one statement of what a red and a kill are. Every site that scores a
+// mutant killed, or files a failing test, carries these paragraphs word for
+// word — the prompts below interpolate them, and the Markdown sites (the
+// `tests` and verifier agent definitions, run-team's fix-applier and finisher
+// briefs) quote them — so a reword lands everywhere or reds a pin. An exit
+// status is never a kill on its own: a runner can exit 1 with nothing failing,
+// and a load-sensitive test can fail once in a full suite and pass on rerun.
+export const VALID_RED_RULE =
+  "**Valid red:** a run that completed — the command returned on its own, with no signal and no timeout, deadline or kill having fired — in which the test the claim names is reported failing. An exit ≠ 0 with no failing test is not red, and a different test failing is not red for this claim. A red in the full suite only triggers a narrowed run; it is never evidence on its own.";
+export const NARROWED_RUN_RULE =
+  "**Narrowed run:** the Test entrypoint with arguments appended, `<testCmd> <args>`. That appended arguments reach the Test entrypoint is all that is promised about them, so a narrowed run counts only if it reports `tests` > 0 and its output names the claimed test. If no narrowing can be proven, run the full `<testCmd>` and read the named test's own result from its output.";
+export const KILL_RULE =
+  "**Kill:** the mutant produced a valid red in a narrowed run, and the same narrowed command, in the same tree with the mutant reverted, ran a valid green with the named test passing — completed, exit 0, `tests` > 0, `cancelled` 0. A completed exit ≠ 0 with the named test not failing is not a kill, and no kill stands without that green run on the unmutated tree. The result is inconclusive, never a kill, when the red does not reproduce in the narrowed run, when the unmutated tree is red too, or when no usable run exists.";
+export const EVIDENCE_LINE_RULE =
+  "**Evidence line:** every kill and every valid red you claim carries one line in the claim's own free-text field: `red: <cmd> → exit N, fail K incl <test>; baseline: <cmd> → exit 0, <test> pass`. A failing-test finding filed off the review's shared run carries the `red:` half alone.";
+const KILL_RULES = [VALID_RED_RULE, NARROWED_RUN_RULE, KILL_RULE, EVIDENCE_LINE_RULE].join("\n\n");
+
 // --- Dimension catalog --------------------------------------------------
 // No dimension carries a `model`/`effort` field —
 // dispatch tier lives ONLY in each fleet-owned agent definition's own
@@ -153,8 +176,11 @@ export const DEFAULT_DIMENSIONS = [
   {
     key: "tests",
     agentType: "fleet-review-tests",
-    prompt:
-      "whether each test DISCRIMINATES: apply the mutation it should catch, confirm that test goes red, revert, then apply one it should NOT catch and confirm green. Vary the syntactic form — a guard catching `// whole-line` may let `code; // trailing` through",
+    prompt: `whether each test DISCRIMINATES: apply the mutation it should catch and confirm a kill, revert, then apply one it should NOT catch and confirm the named test stays green. Vary the syntactic form — a guard catching \`// whole-line\` may let \`code; // trailing\` through. \`<testCmd>\` is the \`command\` your Tests paragraph names, run only in your own copy of the snapshot. A kill is scored by these rules and nothing else:
+
+${KILL_RULES}
+
+An inconclusive result is no evidence either way: file no finding above \`suggestion\` on it, and name the gap — both runs — in \`scope_searched\`.`,
   },
   {
     key: "comments",
@@ -525,7 +551,8 @@ export function sharedRunNote(run, owner, key) {
     `Tests: this review ran its test command ONCE, from the snapshot's root, before
 dispatching you. Do NOT run that full command yourself — every dimension reads
 this one run. Targeted probes and mutations in your own copy of the snapshot are
-still yours to run.
+still yours to run, and so is the full command in your own copy of the snapshot,
+against your own mutant or to reproduce a failure, when no narrowed run can be proven.
   command: ${run.command}
   counts:  ${countsOf(run) || "none — the run produced no counts"}
   exit:    ${run.exitCode ?? "(not reported)"}
@@ -541,10 +568,20 @@ unrun for it — do not run the full command yourself to replace it.`);
       key === owner
         ? `It has ${failingDesc(run)}, and filing them is YOUR job in this review:
 file at least one finding about them, naming each failing test from the log. A
-failure you cannot separate from the environment is still filed — say so in the
-finding, so it is reproduced in the worktree before anyone acts on it. If none is
-filed, or this review's refuters reject every finding filed, every dimension of
-this review is reported unrun.`
+failing test is filed off this run only on a valid red: rerun it first in a
+narrowed run in your own copy of the snapshot, where \`<testCmd>\` is the
+command above, and when that run does not show it failing, file no finding
+above \`suggestion\` on it and name both runs. A failure you cannot separate
+from the environment is still filed — say so in the finding, so it is
+reproduced in the worktree before anyone acts on it. If none is filed, or this
+review's refuters reject every finding filed, every dimension of this review
+is reported unrun. A red is read by these rules and nothing else:
+
+${VALID_RED_RULE}
+
+${NARROWED_RUN_RULE}
+
+${EVIDENCE_LINE_RULE}`
         : `It has ${failingDesc(run)}, and the ${owner} dimension files the finding
 about them. Do not file a duplicate — cite a failure as evidence only where it
 bears on your own lens.`,
@@ -570,13 +607,19 @@ export function cwdAuditFrom(text) {
   return m ? { state: m[1], line: m[0].trim() } : { state: "missing", line: null };
 }
 
+// An abstaining vote (`inconclusive: true`) is left out of the tally exactly
+// as a crashed (`null`) one is, so a run that could not decide never breaks a
+// tie toward `refuted`. It stays in `votes`, since its `reason` names the runs
+// the fix-applier cites, and `refutersInconclusive` counts it — the one field
+// that tells an all-abstained finding from an all-crashed one.
 export function verdictFor(dispatched, votes) {
   const live = votes.filter(Boolean);
-  const refuted = live.filter((v) => v.refuted).length;
+  const decided = live.filter((v) => v.inconclusive !== true);
+  const refuted = decided.filter((v) => v.refuted).length;
   let verdict;
-  if (live.length === 0) verdict = "unverified";
-  else verdict = refuted * 2 >= live.length ? "refuted" : "survived";
-  return { verdict, votes: live, refutersDispatched: dispatched };
+  if (decided.length === 0) verdict = "unverified";
+  else verdict = refuted * 2 >= decided.length ? "refuted" : "survived";
+  return { verdict, votes: live, refutersDispatched: dispatched, refutersInconclusive: live.length - decided.length };
 }
 
 // One in-run re-dispatch for a crashed dispatch, before the result is
@@ -597,12 +640,14 @@ export function retryCrashed(dispatch, crashed) {
 // omp has no cached-replay mechanism: a fresh
 // review re-dispatches every agent() live rather than only the crashed
 // legs, and the one re-dispatch this run gets was already spent in-run
-// — a crashed finding is reported and deferred, never resumed.
+// — a crashed finding is reported and deferred, never resumed. Crashed
+// means a `null` refuter: an `unverified` finding whose dispatched refuters
+// all abstained is no crash, and stays out of this bucket.
 export function resumeFor(unverified) {
-  const crashed = unverified.filter((f) => f.refutersDispatched > 0);
+  const crashed = unverified.filter((f) => f.refutersDispatched > (f.refutersInconclusive ?? 0));
   if (!crashed.length) return { crashed, resume: null };
   const claim =
-    "Findings in `unverified` with `refutersDispatched` above zero and no surviving vote had every refuter die, and die again on the in-run retry — nothing looked at them. ";
+    "Findings in `unverified` with `refutersDispatched` above `refutersInconclusive` lost a refuter to a crash — a pair whose every vote died was re-dispatched once in-run and died again — and no refuter that ran decided them. ";
   const verb =
     "Defer them as crashed — reported, not acted on: omp's eval has no cached-replay mechanism, so a fresh review re-dispatches every agent() live rather than only the crashed legs, and the in-run retry was this review's one re-dispatch. Re-run nothing for them.";
   return { crashed, resume: claim + verb };
@@ -1051,15 +1096,17 @@ to name.`,
         (review && review.findings ? review.findings : []).map((f, fi) => () => {
           const n = verifiersForRun(f.severity);
           if (n === 0) return Promise.resolve({ ...f, dimension: d.key, ...verdictFor(0, []) });
-          // A pair whose EVERY vote died (or whose dispatch threw) is
-          // re-dispatched once, as a pair, before `verdictFor` reads it — one
-          // live vote means the pair did not crash and is ruled on that vote.
+          // A pair in which no refuter decided and at least one died (or whose
+          // dispatch threw) is re-dispatched once, as a pair, before
+          // `verdictFor` reads it — one deciding vote means the pair did not
+          // crash and is ruled on that vote, and a pair that ALL abstained ran
+          // and could not decide, so a second dispatch would only repeat it.
           return retryCrashed(
             () =>
               parallel(
                 Array.from({ length: n }, (_, i) => () =>
                   agent(
-                    `Try to REFUTE this finding from PR #${pr}. Default to refuted=true if uncertain.
+                    `Try to REFUTE this finding from PR #${pr}. Default to refuted=true if uncertain in your reasoning — a run that could not decide is not that uncertainty, and the abstain rule below covers it.
 
   claim:    ${f.claim}
   where:    ${f.file || "?"}:${f.line || "?"}
@@ -1081,6 +1128,17 @@ from a run of zero tests. For an uncolored baseline use \`env -u FORCE_COLOR\`;
 search scope AND what your pattern would have missed. A grep over one ref
 does not support a claim about history; a pattern built from the token a diff
 removed does not support a claim that the category is empty.
+
+When your check scores a mutant killed or a test red, \`<testCmd>\` is
+\`${testCmd}\`, run only in your own copy of the snapshot, and these rules
+decide it and nothing else:
+
+${KILL_RULES}
+
+Abstain when your own check could produce neither a valid red nor a valid
+green: set \`inconclusive\` to true and name the runs in \`reason\`, each with
+its evidence line. \`refuted\` is still required, and the tally ignores it on
+an abstaining vote — an undecided run never defaults to refuted=true.
 
 Chain the directory change into the command, \`cd "$D" && git …\`, never
 \`cd "$D"; git …\`, so a failed \`cd\` cannot leave a \`git\` command running in the
@@ -1133,7 +1191,11 @@ how three reviews from one cell left four files modified in that checkout.`,
                   ),
                 ),
               ),
-            (votes) => !(votes && votes.some(Boolean)),
+            // Retry unless a refuter decided or every one abstained.
+            (votes) =>
+              !votes ||
+              !votes.length ||
+              (!votes.some((v) => v && v.inconclusive !== true) && !votes.every((v) => v && v.inconclusive === true)),
           ).then(
             (votes) => ({ ...f, dimension: d.key, ...verdictFor(n, votes) }),
             // A rejection here means retryCrashed's OWN final attempt
@@ -1183,8 +1245,9 @@ how three reviews from one cell left four files modified in that checkout.`,
   // Refuted findings are RETURNED, not dropped. A refutation is itself a claim,
   // and the controller has reversed a refutation on new evidence before.
   // `unverified` are findings the adversarial pass did not settle — a suggestion
-  // that skipped it by policy, or one whose refuters all crashed — surfaced
-  // separately so the caller never mistakes "not checked" for "survived".
+  // that skipped it by policy, or one whose refuters crashed or abstained and
+  // decided nothing — surfaced separately so the caller never mistakes "not
+  // checked" for "survived".
   // `dimensionsRun` names what was DISPATCHED after the size trim: a trimmed
   // fan-out must say so, never read as full coverage. It is not a coverage claim
   // on its own and never was — a specialist can be dispatched and die, or the
