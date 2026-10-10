@@ -282,19 +282,24 @@ test("the heartbeat block gives the command for a deliberate stop", () => {
   assert.match(s, /Skipping it is not fatal/);
 });
 
-test("the heartbeat block says a stall line is the PREVIOUS run and names what is stranded", () => {
+test("the heartbeat block says whose stall a line is and names what is stranded", () => {
   // Both halves are load-bearing and neither is obvious. Read as this run's
-  // own state, the line is a controller reporting itself dead — the shape
-  // that gets a healthy run abandoned. And a stall whose stranded tickets go
-  // unmentioned is read as an obituary rather than as work: those tickets
-  // keep the claim label the candidate scan excludes, so nothing else in the
-  // run will ever surface them again.
+  // own death, the first tick's line is a controller reporting itself dead —
+  // the shape that gets a healthy run abandoned. And a stall whose stranded
+  // tickets go unmentioned is read as an obituary rather than as work: those
+  // tickets keep the claim label the candidate scan excludes, so nothing else
+  // in the run will ever surface them again.
   const s = heartbeatBlock();
-  assert.match(s, /is the PREVIOUS run, never this one/);
+  assert.match(s, phrase("Your first tick's line is the PREVIOUS run's stall, read off the `prior` rotate recorded; any later line is judged off the record itself"));
   assert.match(s, /in-progress/);
   assert.match(s, /EXCLUDES that label/);
-  // Detection only — the ruling this ticket's whole scope rests on. Prose
-  // that left this open invites a controller to invent a restart, which is
-  // the question ADR 0008 ruled on and #1724 owns.
+  // One entry per wording fleet-state.mjs's stallReport() can lead with, each
+  // saying what follows from it: a gone controller's claims come back, a live
+  // one's do not, and no record decides nothing.
+  assert.match(s, phrase("`heartbeat STALLED, controller gone` — the run that stranded them is dead. Its claims without a PR come back through phase 0's stranded-claim step"));
+  assert.match(s, phrase("`heartbeat not beating, controller alive (pid N)`, or `(this session's earlier run)` — a controller that stopped beating and kept going. Nothing died, so nothing is resumed"));
+  assert.match(s, phrase("`heartbeat STALLED` alone — no record says whether that controller lives. The line is detection only."));
+  // Nothing restarts a dead run — the next run's phase 0 resumes it. Prose
+  // that left this open invites a controller to invent a restart.
   assert.match(s, /nothing restarts the run that stranded them/);
 });

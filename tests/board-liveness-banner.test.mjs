@@ -14,7 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { tempDir } from "./support/temp-dir.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -120,4 +120,58 @@ test("a mark written by the real heartbeat reaches the real board (#1597)", () =
   assert.equal(model.liveness.supply, null);
   assert.match(model.liveness.text, /unknown ticket\(s\) claimed and in flight/);
   assert.match(model.liveness.text, /pool supply unknown/);
+});
+
+// The cockpit judges the controller record at any build that finds a stall,
+// and words it through the same stallReport() fleet-tick prints. The process tree comes
+// from a FLEET_PROC_TABLE fixture whose walk starts at this runner, the build's
+// parent — never `ps`, which would find the omp session running this suite.
+test("the real board names whether a stalled run's recorded controller is alive or gone", () => {
+  const repo = tempDir("board-liveness-owner-");
+  assert.equal(spawnSync("git", ["init", "-q", repo], { encoding: "utf8" }).status, 0);
+  const bin = tempDir("board-liveness-owner-bin-");
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  const table = join(bin, "proc-table.json");
+  writeFileSync(table, JSON.stringify({
+    [process.pid]: { ppid: 2_000_000_001, argv: [process.execPath, "--test"], lstart: "runner-start" },
+    2_000_000_001: { ppid: 1, argv: ["bun", "/home/u/.bun/bin/omp"], lstart: "omp-start" },
+  }));
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, FLEET_PROC_TABLE: table };
+  mkdirSync(join(repo, ".fleet"), { recursive: true });
+  const beatAt = Date.now() - 90 * 60_000;
+  const build = (controller) => {
+    writeFileSync(join(repo, ".fleet", "heartbeat.json"), JSON.stringify({
+      quiet: 0, elapsed: 0, digest: "", beat: { at: beatAt, interval: 1200, stopped: "" },
+      controller: { ...controller, at: beatAt - 60_000 },
+    }));
+    const r = spawnSync(process.execPath, [BOARD, "build"], { cwd: repo, encoding: "utf8", env });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout).liveness.text;
+  };
+  assert.match(build({ pid: process.pid, lstart: "runner-start", prior: "dead" }),
+    new RegExp(`^heartbeat not beating, controller alive \\(pid ${process.pid}\\): `));
+  const gone = spawnSync(process.execPath, ["-e", ""]).pid;
+  assert.match(build({ pid: gone, lstart: "whatever", prior: "ancestor" }),
+    /^heartbeat STALLED, controller gone: .*; the next run resumes its claims without a PR, and its open PRs return through the fold-in$/);
+});
+
+// A healthy beat never reads the process table: the controller is judged only
+// once the mark is stalled. The table points at a file that is not there, so a
+// judge call would warn on stderr.
+test("the real board does not judge the controller of a healthy run", () => {
+  const repo = tempDir("board-liveness-healthy-");
+  assert.equal(spawnSync("git", ["init", "-q", repo], { encoding: "utf8" }).status, 0);
+  const bin = tempDir("board-liveness-healthy-bin-");
+  writeExecStub(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, FLEET_PROC_TABLE: join(bin, "no-such-proc-table.json") };
+  mkdirSync(join(repo, ".fleet"), { recursive: true });
+  const now = Date.now();
+  writeFileSync(join(repo, ".fleet", "heartbeat.json"), JSON.stringify({
+    quiet: 0, elapsed: 0, digest: "", beat: { at: now, interval: 1200, stopped: "" },
+    controller: { pid: process.pid, lstart: "x", prior: "dead", at: now - 60_000 },
+  }));
+  const r = spawnSync(process.execPath, [BOARD, "build"], { cwd: repo, encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /WARNING/);
+  assert.equal(JSON.parse(r.stdout).liveness, null);
 });

@@ -346,8 +346,12 @@ phase, or in any later one, asks the maintainer which tickets to take.
    left behind can no longer hold this run's tick. What an unclean end left in
    flight comes back through the ordinary per-run path: open PRs through the
    fold-in below, `behind-pr:`/`behind-issue:` exclusions through phase 1's
-   collision and sequence checks, and a killed member's ticket through a new
-   member under a new name. An exclusion that expires with the run that wrote
+   collision and sequence checks, and a claim a dead run left without a PR
+   through the stranded-claim step below — resumed by a new member under a
+   new name when its worktree is in this checkout, reported to the
+   maintainer otherwise. A claim this session's own earlier run left stays
+   with it: its member may still be live, and the Member-killed row's check
+   covers it. An exclusion that expires with the run that wrote
    it (`deferred-to-session-end` and its like) must be restated if it still
    holds. **The guard is the
    controller record**, `controller` in `.fleet/heartbeat.json`: the omp
@@ -369,8 +373,9 @@ phase, or in any later one, asks the maintainer which tickets to take.
    `.fleet/heartbeat.json` exists but cannot be read or parsed — a record
    nobody could judge is never taken for no record. Its last act, ledger or none, is
    to replace the record with this run's own — the nearest `omp` process
-   above it, its start time, and as `prior` the verdict it reached on the
-   record it found (`dead`, `ancestor` or `none`) — or to remove the key when
+   above it, its start time, as `prior` the verdict it reached on the
+   record it found (`dead`, `ancestor` or `none`), and as `at` when it wrote
+   it — or to remove the key when
    no `omp` process is above it. That write can fail, and then exit 2 follows
    a move: `rotated <file> -> <archive>` on stderr, then the refusal that the
    record could not be written. Run the rotation before this run's own first
@@ -443,6 +448,42 @@ phase, or in any later one, asks the maintainer which tickets to take.
    being wrong. Reviewing them next run is also what stops one pinning
    `fleet-tick`'s backlog forever: unreviewable AND uncounted is the state
    that strands it.
+
+   **Resume the claims a dead run left without a PR — after the fold-in,
+   before shortlisting.** A claim's label and worktree exist before its first
+   push, and rotation carries no row forward, the candidate scan excludes
+   `in-progress`, and the in-flight check reads the worktree as taken — so a
+   claim the previous run left without a PR is held by nobody until this step
+   names it. `~/.fleet/bin/fleet-run stranded.mjs` lists and classifies; you
+   dispatch. It reads the `prior` rotate just recorded, never the record
+   itself, which names this run's own live controller, and prints
+   `{prior, claims: [{n, t, action, worktree, branch, why}]}`:
+
+   - `prior: dead` — every open `in-progress` issue with no open PR (one with
+     an open PR is the fold-in's): `resume` when exactly one worktree for it
+     sits under this checkout's `.worktrees/`, `report` otherwise.
+   - `prior: ancestor` — this session's own earlier run: nothing is listed.
+     Its members may still be live, and the Member-killed row's check covers
+     them.
+   - `prior: none` — no record proves the previous run dead (no record yet, or
+     no `omp` process found above the rotation): every claim is `report`, and
+     nothing is resumed.
+
+   A `resume` follows the Member-killed row across the run boundary: a new
+   member under a new name — `impl-<N>-b`, or one letter past the highest
+   `impl-<N>-<x>` in the archive that rotate printed the path of — on the same
+   ticket, in the printed worktree and branch, its prompt the phase 2 prompt
+   off a fresh read of the issue plus what it inherits (`git -C <worktree> log
+   --oneline origin/main..HEAD`, `git -C <worktree> status --short`, and the
+   files under `<scratch>/impl-<N>/`). Record it the ordinary way —
+   `ledger.mjs row <N>
+   "impl-<N>-b"`, then `ledger.mjs dispatch <N> impl-<N>-b`, then the `task`
+   call naming the `agent` it printed, then the tier check — and never
+   `claim-ticket.sh`: the claim already stands. A `report` goes to the
+   maintainer as `#<N> — <why>` and nothing else: no dispatch, no label change,
+   no release. Exit 2 is a list that did not answer — a `gh` or `git`
+   failure, a list at its cap, or a worktree whose presence cannot be told —
+   and is never nothing stranded.
 
 1. **Build the Shortlist** — `~/.fleet/bin/fleet-run shortlist.mjs`, then read
    `.fleet/shortlist.json`. The script runs the cheap filters and nothing else
@@ -1802,16 +1843,30 @@ Skipping it is not fatal — the next reader still reports the stop, it just
 reports that the beat stopped *without a recorded reason*, which is all it can
 honestly say about a death that named nothing.
 
-**A `heartbeat STALLED` line is the PREVIOUS run, never this one.** `fleet-tick`
+**A stall line names whose stall it is.** `fleet-tick`
 prints it before its own rows when the mark it finds is overdue against the
 interval that mark recorded, and the cockpit shows the same line while it is
 up. It names when the beat was last seen, how overdue that is, how many
 tickets are still claimed and in flight, and how much supply the last read found
 — because the claimed ones keep the `in-progress` label, the candidate scan
 EXCLUDES that label, and those tickets are therefore invisible to your own
-shortlist and to the maintainer's. Read the line, decide what to do about the
-stranded tickets, and carry on; nothing in the fleet releases, relabels or
-reaps them for you, and nothing restarts the run that stranded them.
+shortlist and to the maintainer's. Its opening words come off the controller
+record. Your first tick's line is the PREVIOUS run's stall, read off the
+`prior` rotate recorded; any later line is judged off the record itself:
+
+- `heartbeat STALLED, controller gone` — the run that stranded them is dead.
+  Its claims without a PR come back through phase 0's stranded-claim step —
+  this run's on your first tick, the next run's otherwise — and its open PRs
+  through the fold-in.
+- `heartbeat not beating, controller alive (pid N)`, or `(this session's
+  earlier run)` — a controller that stopped beating and kept going. Nothing
+  died, so nothing is resumed; on a later tick of your own, that controller
+  is you, and the fix is to beat.
+- `heartbeat STALLED` alone — no record says whether that controller lives.
+  The line is detection only.
+
+Read the line and carry on; nothing in the fleet releases, relabels or
+reaps the stranded tickets for you, and nothing restarts the run that stranded them.
 
 **Own the CI waits.** Members are turn-based and cannot hold across a ten-minute
 run — they rebase, push, stop. Arm a second persistent Monitor over open PRs'

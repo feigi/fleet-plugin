@@ -47,7 +47,10 @@ import { mergedReadPrs } from "./compute-board.mjs";
 // file's own resolveCockpitInstance(), not from statePath(): the workspace is
 // already resolved once per launch here, with the `canonicalise` opt-in only
 // this caller takes, and a second resolution could answer differently.
-import { readState, stateFileIn } from "./fleet-state.mjs";
+// It also reads the controller record beside the mark, and the process table
+// through stallOwner(), to name whose stall a stopped beat is; the record's
+// writer is `ledger.mjs rotate`, and the cockpit never writes it either.
+import { readState, stateFileIn, assessBeat, isStalled, stallOwner } from "./fleet-state.mjs";
 import { fileURLToPath } from "node:url";
 import { isCLI } from "./is-cli.mjs";
 import { dirname, join, basename } from "node:path";
@@ -1223,9 +1226,14 @@ export async function gather({ ledgerFile, prevFile, stateFile = null, scriptDir
   const priorState = stateFile ? readState(stateFile, NAME) : null;
   const beat = priorState?.beat ?? null;
   const ticked = priorState?.ticked ?? null;
-  return { ledger, issues, prs, merged, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, poolOk,
+  // Whose stall it is, off the controller record in the same file — judged
+  // here because it reads the process table, and only when the mark is
+  // stalled, so a healthy board reads none. computeBoard() words it.
+  const now = Date.now();
+  const stallOwnerOf = isStalled(assessBeat({ beat, ticked, now })) ? stallOwner(priorState, NAME) : null;
+  return { ledger, issues, prs, merged, ci, prev, repo, repoUrl, workspace, port, spend, beat, ticked, stallOwner: stallOwnerOf, poolOk,
     poolCapped, prsCapped,
-    now: Date.now(), interval: interval ?? argInterval() ?? 15 };
+    now, interval: interval ?? argInterval() ?? 15 };
 }
 
 async function main() {

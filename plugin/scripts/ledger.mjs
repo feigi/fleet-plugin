@@ -1520,11 +1520,13 @@ function runCheck() {
 // Its last act, whether or not there was a ledger to move, replaces the
 // record with this run's own, carrying the verdict as `prior` — the next
 // step reads `prior`, because the new record always names this run's own
-// live ancestor. No omp ancestor removes the key: an older run's record left
-// in place would be judged again, as dead, by a run that cannot know whether
-// the run after it is still live. This run's own record is computed before
-// anything moves too, so a process table that cannot be read refuses with
-// nothing moved rather than after the move.
+// live ancestor — and the time of this write as `at`, so a reader can tell a
+// mark the previous run left from one written since. No omp ancestor removes
+// the key: an older run's record left in place would be judged again, as
+// dead, by a run that cannot know whether the run after it is still live.
+// This run's own record is computed before anything moves too, so a process
+// table that cannot be read refuses with nothing moved rather than after the
+// move.
 function runRotate() {
   const beatFile = stateFileIn(dirname(file));
   const state = readState(beatFile, NAME);
@@ -1575,7 +1577,7 @@ function runRotate() {
   // Re-read rather than reuse the read above: the heartbeat file has other
   // writers, and a patch built from an older view would undo what they wrote
   // since.
-  const record = ours === null ? undefined : { ...ours, prior };
+  const record = ours === null ? undefined : { ...ours, prior, at: Date.now() };
   if (!writeState(beatFile, NAME, readState(beatFile, NAME), { controller: record })) {
     die(`${archive === null ? "found no ledger" : `rotated ${file} -> ${archive}`} but could not record this run's controller in ${beatFile} — the next run judges whatever record that file still holds, and none if it cannot be read`);
   }
