@@ -29,7 +29,7 @@ const CHECK = readFileSync(join(REPO, "scripts", "dispositions-check.mjs"), "utf
 // Step 2's record paragraph: one line, bounded by step 3's opener.
 const recordStep = () =>
   between(REVIEW_AND_FIX, "**Write every ruling to `<scratch>/dispositions-<pr>.json`", "\n3. **Run `testCmd`", "review-and-fix.md");
-const gate = () => paragraph(SKILL, "That `dispatch` refuses a finisher", "run-team/SKILL.md", "**An unanswered question from the member");
+const gate = () => paragraph(SKILL, "That `dispatch` refuses a finisher", "run-team/SKILL.md", "**It refuses a finisher, too, while the PR sits on a conflict hold");
 
 test("step 2 names the record's file, beside the review file, and that the check judges it before any finisher", () => {
   assert.match(recordStep(), phrase(
